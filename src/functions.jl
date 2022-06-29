@@ -40,12 +40,13 @@ function ol_DB(args)
         "KV1" => "/scratch/Axiverse_Learning/KV1/",
         "KV25" => "/scratch/Axiverse_Learning/KV25/", 
         "vacua_test" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse/vacua_test_data/", 
-        "vacua_new" => "/scratch/users/mehta2/vacua_db/"
+        "vacua_new" => "/scratch/users/mehta2/vacua_db/",
+        "pwd" => "./"
         )
     try
         ol_db[string(args)]
     catch y
-        ol_db["home_Large"]
+        ol_db["pwd"]
     end
 end
 
@@ -165,34 +166,34 @@ function h11lst(h11min=0,h11max=100)
     return h11list
 end
 
-function pygmo_dir(h11,tri,cy=1)
+function geom_dir(h11,tri,cy=1)
     if localARGS()!=string("inKC")
         if localARGS()==string("home_Large")||localARGS()==string("KV1")
             if h11 >= 238
-                if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"),"/pygmo"))
-                    string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"),"/pygmo")
+                if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0")))
+                    string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"))
                 else
-                    mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"),"/pygmo"))
+                    mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0")))
                 end
             else
-                if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/pygmo"))
-                    string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/pygmo")
+                if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
+                    string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"))
                 else
-                    mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/pygmo"))
+                    mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
                 end
             end
         else
-            if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"),"/pygmo"))
-                    string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"),"/pygmo")
+            if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0")))
+                    string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"))
             else
-                mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"),"/pygmo"))
+                mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0")))
             end
         end
     else
-        if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/pygmo"))
-            string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/pygmo")
+        if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
+            string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"))
         else
-            mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/pygmo"))
+            mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
         end
     end
 end
@@ -264,9 +265,9 @@ end
 ###################
 
 function cyax_file(h11,tri, cy=1)
-    return string(pygmo_dir(h11,tri,cy),"/cyax.h5")
+    return string(geom_dir(h11,tri,cy),"/cyax.h5")
 end
 
-function cyax_file(h11,tri, cy=1)
-    return string(pygmo_dir(h11,tri,cy),"/cyax.h5")
+function minfile(h11,tri, cy=1)
+    return string(geom_dir(h11,tri,cy),"/minima.h5")
 end
