@@ -1,4 +1,3 @@
-module cytools_wrapper
 #############################################################################
 ####### !!!!!! If this file stops the package compiling !!!!!! ##############
 ### !! First go into singularity / docker image and run julia !! ############
@@ -10,7 +9,14 @@ module cytools_wrapper
 ##### !! now the package should recompile !! ################################
 #############################################################################
 
+
+module cytools_wrapper
+
+using ..filestructure: cyax_file, present_dir
+
 using PyCall
+using HDF5
+using LinearAlgebra
 
 """
     __init__()
@@ -57,10 +63,10 @@ fetch_polytopes(h11,limit; lattice="N",as_list=false,favorable=false) = py"f_pol
 
 poly(points; backend=nothing) = py"poly($points, backend=$backend)"
 
-function cy_axiverse_top(h11,n)
+function topologies(h11,n)
     h11list_temp = []
     #Generate list of $n polytopes at $h11
-    poly_test = py"f_polytopes(h11=$h11,lattice='N',limit=4*$n, as_list=True, favorable=True)"
+    poly_test = fetch_polytopes(h11,4*n, lattice="N",as_list=true, favorable=true)
     #Locator for points of polytope for saving
     points = [p.points() for p in poly_test]
     #If number of polytopes < $n, generate more triangulations per polytope, 
@@ -143,7 +149,7 @@ function cy_axiverse_top(h11,n)
 
 end
 
-function cy_axiverse_geom(h11,cy,tri,cy_i=1)
+function geometries(h11,cy,tri,cy_i=1)
     if h11!=0
         glsm = zeros(Int,h11,h11+4)
         basis = zeros(Int,h11)
@@ -203,18 +209,42 @@ function cy_axiverse_geom(h11,cy,tri,cy_i=1)
         L = vcat(L1,L2)
     #     La = [hcat(@.(sign(L[i,:,1])), log10.(abs.(L[i,:,1])).+L[i,:,2]) for i=1:size(L,1)]
 
-        h5open(cyax_file(h11,tri,cy_i), "r+") do file
-            file["cytools/geometric/h21",deflate=9] = h21
-            file["cytools/geometric/glsm",deflate=9] = Int.(glsm)
-            file["cytools/geometric/basis",deflate=9] = Int.(basis)
-            file["cytools/geometric/tip",deflate=9] = Float64.(tip)
-            file["cytools/geometric/CY_volume",deflate=9] = Float64.(V)
-            file["cytools/geometric/divisor_volumes",deflate=9] = Float64.(tau)
-            file["cytools/geometric/Kinv",deflate=9] = Float64.(Kinv)
-
-            f1b = create_group(file, "cytools/potential")
-            f1b["L",deflate=9] = L
-            f1b["Q",deflate=9] = Int.(q)
+        h5open(cyax_file(h11,tri,cy_i), isfile(cyax_file(h11,tri,cy_i)) ? "r+" : "cw") do file
+            if haskey(file, "cytools/geometric/h21")
+                test_h21::HDF5.Dataset = file["cytools/geometric/h21"]
+                test_glsm::HDF5.Dataset = file["cytools/geometric/glsm"]
+                test_basis::HDF5.Dataset = file["cytools/geometric/basis"]
+                test_tip::HDF5.Dataset = file["cytools/geometric/tip"]
+                test_CY_volume::HDF5.Dataset = file["cytools/geometric/CY_volume"]
+                test_divisor_volumes::HDF5.Dataset = file["cytools/geometric/divisor_volumes"]
+                test_Kinv::HDF5.Dataset = file["cytools/geometric/Kinv"]
+                
+                test_21 .= h21
+                test_glsm .= Int.(glsm)
+                test_basis .= Int.(basis)
+                test_tip .= Float64.(tip)
+                test_CY_volume .= Float64.(V)
+                test_divisor_volumes .= Float64.(tau)
+                test_Kinv .= Float64.(Kinv)
+            else
+                file["cytools/geometric/h21",deflate=9] = h21
+                file["cytools/geometric/glsm",deflate=9] = Int.(glsm)
+                file["cytools/geometric/basis",deflate=9] = Int.(basis)
+                file["cytools/geometric/tip",deflate=9] = Float64.(tip)
+                file["cytools/geometric/CY_volume",deflate=9] = Float64(V)
+                file["cytools/geometric/divisor_volumes",deflate=9] = Float64.(tau)
+                file["cytools/geometric/Kinv",deflate=9] = Float64.(Kinv)
+            end
+            if haskey(file, "cytools/potential")
+                test_L::HDF5.Dataset = file["cytools/potential/L"]
+                test_Q::HDF5.Dataset = file["cytools/potential/Q"]
+                test_L .= L
+                test_Q .= Int.(q)
+            else
+                f1b = create_group(file, "cytools/potential")
+                f1b["L",deflate=9] = L
+                f1b["Q",deflate=9] = Int.(q)
+            end
         end
         return [h11,tri,cy_i]
 #     return size(L),size(L1),size(L2), size(Kinv), size(q), maximum(L1[end,:,2]), maximum(L2[end,:,2])

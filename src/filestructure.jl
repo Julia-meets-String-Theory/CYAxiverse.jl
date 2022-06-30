@@ -1,8 +1,8 @@
 module filestructure
-
 #######################
 ### Test functions ####
 ########################
+using HDF5
 
 function greet_CYAxiverse()
     println("Hello CYAxiverse")
@@ -196,17 +196,6 @@ function geom_dir(h11,tri,cy=1)
             mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
         end
     end
-end
-
-#################
-### Constant ####
-#################
-
-function constants()
-    mplanck_r::ArbFloat = ArbFloat(2.435e18)
-    hubble::ArbFloat = ArbFloat(2.13*0.7*1e-33)
-    log2pi::ArbFloat = ArbFloat(log10(2*pi))
-    return mplanck_r,hubble,log2pi
 end
 
 ###################################

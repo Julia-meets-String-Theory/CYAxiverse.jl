@@ -1,5 +1,6 @@
 module read
-
+using HDF5
+using ..filestructure: cyax_file, minfile
 ###########################
 ##### Read CYTools data ###
 ###########################
@@ -94,7 +95,7 @@ end
 
 
 
-function PQ_spectrum(h11::Int,tri::Int,cy::Int=1)
+function pq_spectrum(h11::Int,tri::Int,cy::Int=1)
     Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64} = 
     h5open(cyax_file(h11,tri,cy), "r") do file
         read(file, "spectrum/Heigvals/log10"),
@@ -105,7 +106,7 @@ function PQ_spectrum(h11::Int,tri::Int,cy::Int=1)
     return Dict(zip(keys,vals))
 end
 
-function HP_spectrum(h11::Int,tri::Int,cy::Int=1)
+function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
     Hsign::Vector{Int64}, Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64},
     quartdiagsign::Vector{Int64},quartdiaglog::Vector{Float64},
     quart22_index,quart22_log10::Vector{Float64},quart31_index,
