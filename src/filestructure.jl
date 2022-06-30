@@ -1,8 +1,4 @@
-#################
-### Settings ####
-#################
-LinearAlgebra.BLAS.set_num_threads(1)
-setprecision(ArbFloat,digits=5_000)
+module filestructure
 
 #######################
 ### Test functions ####
@@ -159,12 +155,16 @@ function paths_cy()
     end
     return paths_cy,pathinds_cy
 end
+#######################
+### Misc functions ####
+#######################
 
 function h11lst(h11min=0,h11max=100)
     pathinds_cy = paths_cy()[2]
     h11list = pathinds_cy[:,h11min .< pathinds_cy[1,:].<= h11max]
     return h11list
 end
+
 
 function geom_dir(h11,tri,cy=1)
     if localARGS()!=string("inKC")
@@ -197,6 +197,7 @@ function geom_dir(h11,tri,cy=1)
         end
     end
 end
+
 #################
 ### Constant ####
 #################
@@ -271,3 +272,7 @@ end
 function minfile(h11,tri, cy=1)
     return string(geom_dir(h11,tri,cy),"/minima.h5")
 end
+
+
+
+end 
