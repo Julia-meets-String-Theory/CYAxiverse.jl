@@ -150,7 +150,12 @@ function topologies(h11,n)
 end
 
 function geometries(h11,cy,tri,cy_i=1)
-    if h11!=0
+    if h11!=0 
+        h5open(cyax_file(h11,tri,cy_i), isfile(cyax_file(h11,tri,cy_i)) ? "r+" : "cw") do file
+            if haskey(file, "cytools/geometric/h21")
+                return [h11,tri,cy_i]
+            end
+        end
         glsm = zeros(Int,h11,h11+4)
         basis = zeros(Int,h11)
         tip = zeros(Float64,h11)
@@ -211,21 +216,6 @@ function geometries(h11,cy,tri,cy_i=1)
 
         h5open(cyax_file(h11,tri,cy_i), isfile(cyax_file(h11,tri,cy_i)) ? "r+" : "cw") do file
             if haskey(file, "cytools/geometric/h21")
-                test_h21::HDF5.Dataset = file["cytools/geometric/h21"]
-                test_glsm::HDF5.Dataset = file["cytools/geometric/glsm"]
-                test_basis::HDF5.Dataset = file["cytools/geometric/basis"]
-                test_tip::HDF5.Dataset = file["cytools/geometric/tip"]
-                test_CY_volume::HDF5.Dataset = file["cytools/geometric/CY_volume"]
-                test_divisor_volumes::HDF5.Dataset = file["cytools/geometric/divisor_volumes"]
-                test_Kinv::HDF5.Dataset = file["cytools/geometric/Kinv"]
-                
-                test_21 .= h21
-                test_glsm .= Int.(glsm)
-                test_basis .= Int.(basis)
-                test_tip .= Float64.(tip)
-                test_CY_volume .= Float64.(V)
-                test_divisor_volumes .= Float64.(tau)
-                test_Kinv .= Float64.(Kinv)
             else
                 file["cytools/geometric/h21",deflate=9] = h21
                 file["cytools/geometric/glsm",deflate=9] = Int.(glsm)
@@ -236,10 +226,6 @@ function geometries(h11,cy,tri,cy_i=1)
                 file["cytools/geometric/Kinv",deflate=9] = Float64.(Kinv)
             end
             if haskey(file, "cytools/potential")
-                test_L::HDF5.Dataset = file["cytools/potential/L"]
-                test_Q::HDF5.Dataset = file["cytools/potential/Q"]
-                test_L .= L
-                test_Q .= Int.(q)
             else
                 f1b = create_group(file, "cytools/potential")
                 f1b["L",deflate=9] = L
