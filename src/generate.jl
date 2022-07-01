@@ -5,6 +5,10 @@ using LinearAlgebra
 using ArbNumerics, Tullio, LoopVectorization, Nemo
 using GenericLinearAlgebra
 using Distributions
+using Nemo
+
+using ..filestructure: cyax_file, minfile, present_dir
+using ..read: potential
 
 #################
 ### Constant ####
@@ -60,8 +64,10 @@ end
 #### Computing Spectra #######
 ##############################
 
-function hp_spectrum(h11::Int,K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec=5_000)
+function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec=5_000)
+    @assert size(Q,2) == size(L,2) && size(Q,1) == size(K,1)
     setprecision(ArbFloat,digits=prec)
+    h11::Int = size(K,1)
     Lh::Vector{ArbFloat}, Qtest::Matrix{ArbFloat} = L[:,1] .* ArbFloat(10.) .^L[:,2], ArbFloat.(Q)
     #Compute Hessian (in lattice basis)
     grad2::Matrix{ArbFloat} = zeros(ArbFloat,(h11,h11))
@@ -146,25 +152,26 @@ function hp_spectrum(h11::Int,K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{
     qindqdiag::Vector{Vector{Int64}} = [[x,x,x,x]::Vector{Int64} for x=1:h11]
     
     fpert::Vector{Float64} = @.(Hvals+log10(constants()[1])- (0.5*quartdiaglog*log10(exp(1))))
-#     return Hvals .+ Float64(log10(constants()[1])) .+ Float64(constants()[end]) .+9,
-#     fpert .- Float64(constants()[end]),quartdiagsign,quartdiaglog .* log10(exp(1)) .+ 4*Float64(constants()[end])
-    return quartdiaglog .*log10(exp(1)) .+ 4*Float64(constants()[end]), quartdiagsign, 
-    fK .+ Float64(log10(constants()[1])) .- Float64(constants()[end]), fpert .- Float64(constants()[end]), 
-    quart31log .*log10(exp(1)) .+ 4*Float64(constants()[end]), quart31sign, Array(hcat(qindq31...) .-1), 
-    quart22log .*log10(exp(1)) .+ 4*Float64(constants()[end]), quart22sign, Array(hcat(qindq22...) .-1), 
-    Hvals .+ Float64(log10(constants()[1])) .+9 .+ Float64(constants()[end]), Hsign
+    
+    vals =  Hsign, Hvals .+ Float64(log10(constants()[1])) .+9 .+ Float64(constants()[end]), 
+    fK .+ Float64(log10(constants()[1])) .- Float64(constants()[end]), fpert .- Float64(constants()[end]), quartdiagsign, quartdiaglog .*log10(exp(1)) .+ 4*Float64(constants()[end]), Array(hcat(qindq31...) .-1), quart31sign, 
+    quart31log .*log10(exp(1)) .+ 4*Float64(constants()[end]), quart22sign, 
+    quart22log .*log10(exp(1)) .+ 4*Float64(constants()[end]), Array(hcat(qindq22...) .-1)
+
+    keys = ["msign","m", "fK", "fpert","λselfsign", "λself","λ31_i","λ31sign","λ31", "λ22_i","λ22sign","λ22"]
+    return 
 #     GC.gc()
 end
 
 
 function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
-        test_data = cyax_potential_read(h11,tri,cy);
-        L::Matrix{Float64}, Q::Matrix{Int}, K = test_data["L"],test_data["Q"],test_data["K"]
+        pot_data = potential(h11,tri,cy);
+        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
         quartdiaglog::Vector{Float64}, quartdiagsign::Vector{Int}, fK::Vector{Float64}, fpert::Vector{Float64}, 
         quart31log::Vector{Float64}, quart31sign::Vector{Int}, 
         qindq31::Array{Int}, quart22log::Vector{Float64}, quart22sign::Vector{Int}, 
-        qindq22::Array{Int}, Hvals::Vector{Float64}, Hsign::Vector{Int} = quart_large_out(h11,K,L[1:h11+4,:],Q[1:h11+4,:])
+        qindq22::Array{Int}, Hvals::Vector{Float64}, Hsign::Vector{Int} = hp_spectrum(h11,K,L[1:h11+4,:],Q[1:h11+4,:])
         Lfull::Vector{ArbFloat} = ArbFloat.(L[:,1]) .* ArbFloat(10.) .^ ArbFloat.(L[:,2])
         vacua::Int, θparallel::Matrix{Rational}, Qtilde::Matrix{Int} = vacua_out(h11,Q,Lfull)
         h5open(cyax_file(h11,tri,1), "r+") do file
@@ -209,11 +216,10 @@ function project_out(v::Vector{Float64})
     return idd-proj
 end
 
-function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
-    h11 = size(K,1)
-    fK = log10.(sqrt.(eigen(K).values))
+function pq_spectrum(h11::Int,K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
+    h11::Int = size(K,1)
+    fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
-#     multH(M,N) = @tullio fastmath=false grad=false R[c,i] := M[c,j] * N[j,i]
     LQtest = hcat(L,Q);
     Lfull::Vector{Float64} = log10.(abs.(LQtest[:,1])) .+  LQtest[:,2]
     LQsorted = LQtest[sortperm(Lfull, rev=true), :]
@@ -255,9 +261,16 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         LinearAlgebra.mul!(QKs1,QKs, T)
         QKs = copy(QKs1)
     end
-    return hcat(fK .+ Float64(log10(constants()[1])) .- Float64(constants()[end]),
-        0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()[1])), 
-        mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()[1])))
+    vals = [mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()[1])), fK .+ Float64(log10(constants()[1])) .- Float64(constants()[end]),
+    0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()[1]))]
+    keys = ["m", "fK", "fpert"]
+
+    return Dict(zip(keys,vals))
 end
+
+function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
+    if h11!=0
+        test_data = potential(h11,tri,cy);
+        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = test_data["L"],test_data["Q"],test_data["K"]
 
 end

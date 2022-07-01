@@ -151,7 +151,7 @@ end
 
 function geometries(h11,cy,tri,cy_i=1)
     if h11!=0 
-        h5open(cyax_file(h11,tri,cy_i), isfile(cyax_file(h11,tri,cy_i)) ? "r+" : "cw") do file
+        h5open(cyax_file(h11,tri,cy_i), "r") do file
             if haskey(file, "cytools/geometric/h21")
                 return [h11,tri,cy_i]
             end
@@ -176,13 +176,10 @@ function geometries(h11,cy,tri,cy_i=1)
         #Kinv at tip -- save this or save K?
         Kinv = cy.compute_Kinv(tip)
         Kinv = Hermitian(1/2 * Kinv + Kinv')
-    #         K[t,:,:] = inv(Kinv[t,:,:])
-    #         K[t,:,:] = Hermitian(1/2 * K[t,:,:]+K[t,:,:]')
         #PTD volumes at tip
         tau = cy.compute_divisor_volumes(tip)
         #Generate list of Q matrices -- only $h11+4 directions
         qprime = cy.toric_effective_cone().rays()
-    #         q = [vcat(qprime[k],vcat([[qprime[k][i,:]-qprime[k][j,:] for j=i+1:size(qprime[k],1)] for i=1:size(qprime[k],1)-1])) for k=1:size(qprime,1)]
         q = zeros(Int,h11+4+binomial(h11+4,2),h11)
         L2 = zeros(Float64,binomial(h11+4,2),2)
         n=1
@@ -199,22 +196,15 @@ function geometries(h11,cy,tri,cy_i=1)
         #Use scalar potential eqn to generate \Lambda^4 (this produces a (h11+4,2) matrix 
         #where the components are in (mantissa, exponent)(base 10) format
         #L1 are basis instantons and L2 are cross terms
-    #     L1 = [vcat([[(8*pi/V[i]^2)*dot(qprime[i][j,:],tau[i]) -2*log10(exp(1))*pi*dot(qprime[i][j,:],tau[i])] for j=1:size(qprime[i],1)]...) for i=1:size(qprime,1)]
         L1 = zeros(h11+4,2)
         for j=1:size(qprime,1)
             L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
         end
-    #     L2 = [hcat([hcat([[(pi*dot(qprime[k][i,:],(Kinv[k] * qprime[k][j,:])) 
-    #                       + dot((qprime[k][i,:]+qprime[k][j,:]),tau[k]))*8*pi/V[k]^2 
-    #                       -2*log10(exp(1))*pi*(dot(qprime[k][i,:],tau[k])+ dot(qprime[k][j,:],tau[k]))]
-    #                      for j=i+1:size(qprime[k],1)]...) for i=1:size(qprime[k],1)-1]...) 
-    #           for k=1:size(qprime,1)]
         #concatenate L1 and L2
         L = zeros(Float64,h11+4+binomial(h11+4,2),2)
         L = vcat(L1,L2)
-    #     La = [hcat(@.(sign(L[i,:,1])), log10.(abs.(L[i,:,1])).+L[i,:,2]) for i=1:size(L,1)]
 
-        h5open(cyax_file(h11,tri,cy_i), isfile(cyax_file(h11,tri,cy_i)) ? "r+" : "cw") do file
+        h5open(cyax_file(h11,tri,cy_i), "r+") do file
             if haskey(file, "cytools/geometric/h21")
             else
                 file["cytools/geometric/h21",deflate=9] = h21
@@ -233,8 +223,6 @@ function geometries(h11,cy,tri,cy_i=1)
             end
         end
         return [h11,tri,cy_i]
-#     return size(L),size(L1),size(L2), size(Kinv), size(q), maximum(L1[end,:,2]), maximum(L2[end,:,2])
-#     return nothing
         GC.gc()
     end
     return [0,0,0]

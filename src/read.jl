@@ -109,16 +109,16 @@ end
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
     Hsign::Vector{Int64}, Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64},
     quartdiagsign::Vector{Int64},quartdiaglog::Vector{Float64},
-    quart22_index,quart22_log10::Vector{Float64},quart31_index,
+    quart22_index,quart22_sign::Vector{Int},quart22_log10::Vector{Float64},quart31_index,
+    quart31_sign::Vector{Int},
     quart31_log10::Vector{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
     read(file, "spectrum/Heigvals/sign"),read(file, "spectrum/Heigvals/log10"),
     read(file, "spectrum/decay/fK"), read(file, "spectrum/decay/fpert"),read(file, "spectrum/quartdiag/sign"),
-        read(file, "spectrum/quartdiag/log10"),read(file, "spectrum/quart22/index"),
-        read(file, "spectrum/quart22/log10"),read(file, "spectrum/quart31/index"),
-        read(file, "spectrum/quart31/log10")
+        read(file, "spectrum/quartdiag/log10"),read(file, "spectrum/quart31/index"),read(file, "spectrum/quart31/sign"),
+        read(file, "spectrum/quart31/log10"),read(file, "spectrum/quart22/index"),read(file, "spectrum/quart22/sign"),
+        read(file, "spectrum/quart22/log10")
     end
-    keys = ["msign","m", "fK", "fpert","λselfsign", "λself",
-    "λ22_i","λ22","λ13_i","λ31"]
+    keys = ["msign","m", "fK", "fpert","λselfsign", "λself","λ31_i","λ31sign","λ31", "λ22_i","λ22sign","λ22"]
     vals = [Hsign,Hvals, fK, fpert,quartdiagsign, quartdiaglog,
     quart22_index,quart22_log10 ,quart31_index,quart31_log10]
     return Dict(zip(keys,vals))
