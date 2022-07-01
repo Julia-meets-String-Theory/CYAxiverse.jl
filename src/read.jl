@@ -43,10 +43,8 @@ function potential(h11::Int,tri::Int,cy::Int=1)
         read(file, "cytools/potential/L"),read(file, "cytools/potential/Q"),
         read(file, "cytools/geometric/Kinv")
     end
-    L = L'
-    Q = Q'
     keys = ["L","Q","K"]
-    vals = [L', Q', Hermitian(inv(Kinv))]
+    vals = [L, Q, Hermitian(inv(Kinv))]
     return Dict(zip(keys,vals))
 end
 
@@ -54,7 +52,6 @@ function Q(h11::Int,tri::Int,cy::Int=1)
     Q::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
         read(file, "cytools/potential/Q")
     end
-    Q = Q'
     return Q
 end
 
@@ -66,14 +63,20 @@ function K(h11::Int,tri::Int,cy::Int=1)
     return Hermitian(K)
 end
 
-function L(h11::Int,tri::Int,cy::Int=1)
+function L_log(h11::Int,tri::Int,cy::Int=1)
     L::Matrix{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
         read(file, "cytools/potential/L")
     end
-    L = L'
+    return L
+end
+
+function L_arb(h11::Int,tri::Int,cy::Int=1)
+    L::Matrix{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
+        read(file, "cytools/potential/L")
+    end
     Ltemp::Vector{ArbFloat} = zeros(ArbFloat,size(L,2))
-    @inbounds for i=1:size(L,2)
-        Ltemp[i] = ArbFloat.(L[1,i]) .* ArbFloat(10.) .^ ArbFloat.(L[2,i])
+    @inbounds for i=1:size(L,1)
+        Ltemp[i] = ArbFloat.(L[i,1]) .* ArbFloat(10.) .^ ArbFloat.(L[i,2])
     end
     return Ltemp
 end
@@ -88,7 +91,7 @@ function vacua(h11::Int,tri::Int,cy::Int=1)
     read(file, "vacua/vacua"),read(file, "vacua/thetaparallel/numerator"),
         read(file, "vacua/thetaparallel/denominator"),read(file, "vacua/Qtilde")
     end
-    keys = ["vacua","θ||","Qtilde"]
+    keys = ["vacua","θ∥","Qtilde"]
     vals = [abs(vacua), θparallel_num .// θparallel_den, Qtilde]
     return Dict(zip(keys,vals))
 end

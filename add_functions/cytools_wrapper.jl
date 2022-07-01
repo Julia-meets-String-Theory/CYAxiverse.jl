@@ -218,7 +218,7 @@ function geometries(h11,cy,tri,cy_i=1)
             if haskey(file, "cytools/potential")
             else
                 f1b = create_group(file, "cytools/potential")
-                f1b["L",deflate=9] = L
+                f1b["L",deflate=9] = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2])
                 f1b["Q",deflate=9] = Int.(q)
             end
         end

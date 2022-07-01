@@ -159,7 +159,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     quart22log .*log10(exp(1)) .+ 4*Float64(constants()[end]), Array(hcat(qindq22...) .-1)
 
     keys = ["msign","m", "fK", "fpert","λselfsign", "λself","λ31_i","λ31sign","λ31", "λ22_i","λ22sign","λ22"]
-    return 
+    return Dict(zip(keys,vals))
 #     GC.gc()
 end
 
@@ -167,43 +167,46 @@ end
 function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
         pot_data = potential(h11,tri,cy);
-        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
-        quartdiaglog::Vector{Float64}, quartdiagsign::Vector{Int}, fK::Vector{Float64}, fpert::Vector{Float64}, 
-        quart31log::Vector{Float64}, quart31sign::Vector{Int}, 
-        qindq31::Array{Int}, quart22log::Vector{Float64}, quart22sign::Vector{Int}, 
-        qindq22::Array{Int}, Hvals::Vector{Float64}, Hsign::Vector{Int} = hp_spectrum(h11,K,L[1:h11+4,:],Q[1:h11+4,:])
-        Lfull::Vector{ArbFloat} = ArbFloat.(L[:,1]) .* ArbFloat(10.) .^ ArbFloat.(L[:,2])
-        vacua::Int, θparallel::Matrix{Rational}, Qtilde::Matrix{Int} = vacua_out(h11,Q,Lfull)
+        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]LQtest = hcat(L,Q);
+        Lfull::Vector{Float64} = LQtest[:,2]
+        LQsorted = LQtest[sortperm(Lfull, rev=true), :]
+        Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
+        Qtilde = Qsorted_test[1,:]
+        Qdtilde = zeros(size(Qsorted_test[1,:],1))
+        Ltilde = Lsorted_test[1,:]
+        Ldtilde = zeros(size(Lsorted_test[1,:],1))
+        for i=2:size(Qsorted_test,1)
+            S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
+            m = S(hcat(Qtilde,Qsorted_test[i,:]))
+            (d,bmat) = Nemo.nullspace(m)
+            if d == 0
+                Qtilde = hcat(Qtilde,Qsorted_test[i,:])
+                Ltilde = hcat(Ltilde,Lsorted_test[i,:])
+            end
+        end
+        spectrum_data = hp_spectrum(h11,K,Ltilde,Qtilde)
         h5open(cyax_file(h11,tri,1), "r+") do file
-            f3 = create_group(file, "vacua")
-            f3["vacua",deflate=9] = vacua
-            f3["Qtilde",deflate=9] = Qtilde
-            f3a = create_group(f3, "thparallel")
-            f3a["numerator",deflate=9] = numerator.(θparallel)
-            f3a["denominator",deflate=9] = denominator.(θparallel)
-
-
             f2 = create_group(file, "spectrum")
             f2a = create_group(f2, "quartdiag")
-            f2a["log10",deflate=9] = quartdiaglog
-            f2a["sign",deflate=9] = quartdiagsign
+            f2a["log10",deflate=9] = spectrum_data["λself"]
+            f2a["sign",deflate=9] = spectrum_data["λselfsign"]
             f2e = create_group(f2, "decay")
-            f2e["fpert",deflate=9] = fpert
-            f2e["fK",deflate=9] = fK
+            f2e["fpert",deflate=9] = spectrum_data["fpert"]
+            f2e["fK",deflate=9] = spectrum_data["fK"]
 
             f2b = create_group(f2, "quart31")
-            f2b["log10",deflate=9] = quart31log
-            f2b["sign",deflate=9] = quart31sign
-            f2b["index",deflate=9] = qindq31
+            f2b["log10",deflate=9] = spectrum_data["λ31"]
+            f2b["sign",deflate=9] = spectrum_data["λ31sign"]
+            f2b["index",deflate=9] = spectrum_data["λ31_i"]
 
             f2c = create_group(f2, "quart22")
-            f2c["log10",deflate=9] = quart22log
-            f2c["sign",deflate=9] = quart22sign
-            f2c["index",deflate=9] = qindq22
+            f2c["log10",deflate=9] = spectrum_data["λ22"]
+            f2c["sign",deflate=9] = spectrum_data["λ22sign"]
+            f2c["index",deflate=9] = spectrum_data["λ22_i"]
 
             f2d = create_group(f2, "Heigvals")
-            f2d["log10",deflate=9] = Hvals
-            f2d["sign",deflate=9] = Hsign
+            f2d["log10",deflate=9] = spectrum_data["m"]
+            f2d["sign",deflate=9] = spectrum_data["msign"]
         end
     end
     GC.gc()
@@ -216,18 +219,16 @@ function project_out(v::Vector{Float64})
     return idd-proj
 end
 
-function pq_spectrum(h11::Int,K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
+function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
     h11::Int = size(K,1)
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
     LQtest = hcat(L,Q);
     Lfull::Vector{Float64} = log10.(abs.(LQtest[:,1])) .+  LQtest[:,2]
     LQsorted = LQtest[sortperm(Lfull, rev=true), :]
-    Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    Qtilde = Qsorted_test[1,:]
-    Qdtilde = zeros(size(Qsorted_test[1,:],1))
+    Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
+    Qtilde::Matrix{Int} = Qsorted_test[1,:]
     Ltilde = Lsorted_test[1,:]
-    Ldtilde = zeros(size(Lsorted_test[1,:],1))
     for i=2:size(Qsorted_test,1)
         S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
         m = S(hcat(Qtilde,Qsorted_test[i,:]))
@@ -235,9 +236,6 @@ function pq_spectrum(h11::Int,K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{
         if d == 0
             Qtilde = hcat(Qtilde,Qsorted_test[i,:])
             Ltilde = hcat(Ltilde,Lsorted_test[i,:])
-        else
-            Qdtilde = hcat(Qdtilde,Qsorted_test[i,:])
-            Ldtilde = hcat(Ldtilde,Lsorted_test[i,:])
         end
     end
     QKs = zeros(h11,h11)
@@ -272,5 +270,20 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
         test_data = potential(h11,tri,cy);
         L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = test_data["L"],test_data["Q"],test_data["K"]
+        spectrum_data = pq_spectrum(K,L,Q)
+    end
+end
 
+function vacua_save(h11::Int,tri::Int,cy::Int=1)
+    L_arb::Vector{ArbFloat} = ArbFloat.(L[:,1]) .* ArbFloat(10.) .^ ArbFloat.(L[:,2])
+    vacua::Int, θparallel::Matrix{Rational}, Qtilde::Matrix{Int} = vacua(L_arb,Q)
+    h5open(cyax_file(h11,tri,cy), "r+") do file
+        f3 = create_group(file, "vacua")
+        f3["vacua",deflate=9] = vacua
+        f3["Qtilde",deflate=9] = Qtilde
+        f3a = create_group(f3, "thparallel")
+        f3a["numerator",deflate=9] = numerator.(θparallel)
+        f3a["denominator",deflate=9] = denominator.(θparallel)
+    end
+end
 end
