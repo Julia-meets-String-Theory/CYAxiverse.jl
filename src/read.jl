@@ -88,8 +88,8 @@ end
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
     vacua::Int, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
-    read(file, "vacua/vacua"),read(file, "vacua/thetaparallel/numerator"),
-        read(file, "vacua/thetaparallel/denominator"),read(file, "vacua/Qtilde")
+    read(file, "vacua/vacua"),read(file, "vacua/thparallel/numerator"),
+        read(file, "vacua/thparallel/denominator"),read(file, "vacua/Qtilde")
     end
     keys = ["vacua","θ∥","Qtilde"]
     vals = [abs(vacua), θparallel_num .// θparallel_den, Qtilde]

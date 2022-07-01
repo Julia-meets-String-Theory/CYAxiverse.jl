@@ -168,14 +168,13 @@ end
 function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
         pot_data = potential(h11,tri,cy);
-        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]LQtest = hcat(L,Q);
+        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
+        LQtest = hcat(L,Q);
         Lfull::Vector{Float64} = LQtest[:,2]
         LQsorted = LQtest[sortperm(Lfull, rev=true), :]
         Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
         Qtilde = Qsorted_test[1,:]
-        Qdtilde = zeros(size(Qsorted_test[1,:],1))
         Ltilde = Lsorted_test[1,:]
-        Ldtilde = zeros(size(Lsorted_test[1,:],1))
         for i=2:size(Qsorted_test,1)
             S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
             m = S(hcat(Qtilde,Qsorted_test[i,:]))
@@ -228,7 +227,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     Lfull::Vector{Float64} = LQtest[:,2]
     LQsorted = LQtest[sortperm(Lfull, rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    Qtilde::Matrix{Int} = Qsorted_test[1,:]
+    Qtilde = Qsorted_test[1,:]
     Ltilde = Lsorted_test[1,:]
     for i=2:size(Qsorted_test,1)
         S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
@@ -275,16 +274,46 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     end
 end
 
-function vacua_save(h11::Int,tri::Int,cy::Int=1)## Change to logspace
-    L_arb::Vector{ArbFloat} = ArbFloat.(L[:,1]) .* ArbFloat(10.) .^ ArbFloat.(L[:,2])
-    vacua::Int, θparallel::Matrix{Rational}, Qtilde::Matrix{Int} = vacua(L_arb,Q)
+function vacua(Q::Matrix{Int},L::Vector{ArbFloat})
+    h11::Int = size(Q,2)
+    S, T, U = snf_with_transform(matrix(Nemo.ZZ,Q))
+    Tparallel = inv(T)[:,1:h11]
+    Tparallel = convert(Matrix{Int},Tparallel)
+    θparalleltest = inv(transpose(Q) * Q) * transpose(Q) * Tparallel
+    LQtest = hcat(L,Q);
+    Lfull::Vector{Float64} = LQtest[:,2]
+    LQsorted = LQtest[sortperm(Lfull, rev=true), :]
+    Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
+    Qtilde::Matrix{Int} = Qsorted_test[1,:]
+    Qdtilde::Matrix{Int} = zeros(size(Qsorted_test[1,:]),1)
+    Ltilde = Lsorted_test[1,:]
+    for i=2:size(Qsorted_test,1)
+        S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
+        m = S(hcat(Qtilde,Qsorted_test[i,:]))
+        (d,bmat) = Nemo.nullspace(m)
+        if d == 0
+            Qtilde = hcat(Qtilde,Qsorted_test[i,:])
+        else
+            Qdtilde = hcat(Qdtilde,Qsorted_test[i,:])
+        end
+    end
+    vacua = round(abs(det(θparalleltest) / det(inv(Qtilde))))
+    thparallel = Rational.(round.(θparalleltest; digits=10))
+    keys = ["vacua","θ∥","Qtilde"]
+    vals = [abs(vacua), thparallel, Qtilde]
+    return Dict(zip(keys,vals))
+end
+
+
+function vacua_save(h11::Int,tri::Int,cy::Int=1)
+    vacua_data = vacua(Q,L)
     h5open(cyax_file(h11,tri,cy), "r+") do file
         f3 = create_group(file, "vacua")
-        f3["vacua",deflate=9] = vacua
-        f3["Qtilde",deflate=9] = Qtilde
+        f3["vacua",deflate=9] = vacua_data["vacua"]
+        f3["Qtilde",deflate=9] = vacua_data["Qtilde"]
         f3a = create_group(f3, "thparallel")
-        f3a["numerator",deflate=9] = numerator.(θparallel)
-        f3a["denominator",deflate=9] = denominator.(θparallel)
+        f3a["numerator",deflate=9] = numerator.(vacua_data["θ∥"])
+        f3a["denominator",deflate=9] = denominator.(vacua_data["θ∥"])
     end
 end
 end
