@@ -1,13 +1,3 @@
-using Pkg
-# if isfile("Project.toml")
-#     Pkg.activate(".")
-# else
-#     exit()
-# end
-
-Pkg.resolve()
-Pkg.instantiate()
-
 using Distributed
 using ClusterManagers
 try
@@ -19,7 +9,7 @@ catch e
 end
 # @everywhere newARGS = string("vacua_new")
 
-using CYAxiverse
+@everywhere using CYAxiverse
 
 lfile = CYAxiverse.filestructure.logfile()
 CYAxiverse.filestructure.logcreate(lfile)
