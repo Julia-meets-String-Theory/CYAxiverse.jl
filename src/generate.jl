@@ -268,8 +268,8 @@ end
 
 function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
-        test_data = potential(h11,tri,cy);
-        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = test_data["L"],test_data["Q"],test_data["K"]
+        pot_data = potential(h11,tri,cy);
+        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
         spectrum_data = pq_spectrum(K,L,Q)
     end
 end
@@ -306,7 +306,8 @@ end
 
 
 function vacua_save(h11::Int,tri::Int,cy::Int=1)
-    vacua_data = vacua(Q,L)
+    pot_data = potential(h11,tri,cy)
+    vacua_data = vacua(pot_data["Q"],pot_data["L"])
     h5open(cyax_file(h11,tri,cy), "r+") do file
         f3 = create_group(file, "vacua")
         f3["vacua",deflate=9] = vacua_data["vacua"]

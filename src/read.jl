@@ -1,5 +1,6 @@
 module read
 using HDF5
+using LinearAlgebra
 using ..filestructure: cyax_file, minfile
 ###########################
 ##### Read CYTools data ###
