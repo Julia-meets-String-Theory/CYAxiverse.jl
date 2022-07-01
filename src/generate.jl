@@ -57,7 +57,9 @@ function pseudo_Llog(h11::Int,tri::Int,cy::Int=1)
     L3 = vcat([[sign(rand(Uniform(-100. *h11,100. *h11))) -(4*(j-1))+log10(abs(rand(Uniform(-100. *h11,100. *h11))))]
      for j=h11+5:h11+4+binomial(h11+4,2)]...)
     L4 = @.(log10(abs(L3)))
-    return vcat(L1,L2,L3)
+    L = vcat(L1,L2,L3)
+    L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2])
+    return 
 end
 
 ##############################
@@ -115,8 +117,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
 #     GC.gc()
     
     #Generate quartics in logspace
-    signL::Vector{Int},L1::Vector{Float64}, logL2::Vector{Float64} = sign.(L[:,1]), L[:,1], L[:,2]
-    logL::Vector{Float64} = log.(abs.(L1)) .+ (logL2 .* log(10.))
+    signL::Vector{Int}, logL::Vector{Float64} = L[:,1], L[:,2]
     #Compute quartics
     qindq31::Vector{Vector{Int64}} = [[x,x,x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x!=y]
     qindq22::Vector{Vector{Int64}} = [[x,x,y,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>y]
@@ -224,7 +225,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
     LQtest = hcat(L,Q);
-    Lfull::Vector{Float64} = log10.(abs.(LQtest[:,1])) .+  LQtest[:,2]
+    Lfull::Vector{Float64} = LQtest[:,2]
     LQsorted = LQtest[sortperm(Lfull, rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
     Qtilde::Matrix{Int} = Qsorted_test[1,:]
@@ -246,7 +247,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     for i=1:h11
 #         println(size(QKs))
         fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
-        mapprox[i] = 0.5*(log10(abs(Ltilde[1,i]))+Ltilde[2,i]-fapprox[i])
+        mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
         proj = project_out(QKs[i,:])
         #this is the scipy.linalg.orth function written out
         u, s, vh = svd(proj,full=true)
@@ -274,7 +275,7 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     end
 end
 
-function vacua_save(h11::Int,tri::Int,cy::Int=1)
+function vacua_save(h11::Int,tri::Int,cy::Int=1)## Change to logspace
     L_arb::Vector{ArbFloat} = ArbFloat.(L[:,1]) .* ArbFloat(10.) .^ ArbFloat.(L[:,2])
     vacua::Int, θparallel::Matrix{Rational}, Qtilde::Matrix{Int} = vacua(L_arb,Q)
     h5open(cyax_file(h11,tri,cy), "r+") do file
