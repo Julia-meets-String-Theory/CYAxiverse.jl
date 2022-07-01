@@ -274,15 +274,14 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     end
 end
 
-function vacua(Q::Matrix{Int},L::Vector{ArbFloat})
+function vacua(Q::Matrix{Int},L::Matrix{Float64})
     h11::Int = size(Q,2)
     S, T, U = snf_with_transform(matrix(Nemo.ZZ,Q))
     Tparallel = inv(T)[:,1:h11]
     Tparallel = convert(Matrix{Int},Tparallel)
     θparalleltest = inv(transpose(Q) * Q) * transpose(Q) * Tparallel
     LQtest = hcat(L,Q);
-    Lfull::Vector{Float64} = LQtest[:,2]
-    LQsorted = LQtest[sortperm(Lfull, rev=true), :]
+    LQsorted = LQtest[sortperm(L[:,2], rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
     Qtilde::Matrix{Int} = Qsorted_test[1,:]
     Qdtilde::Matrix{Int} = zeros(size(Qsorted_test[1,:]),1)
