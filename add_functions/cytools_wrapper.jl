@@ -74,7 +74,7 @@ function topologies(h11,n)
     spt = size(poly_test,1)
     m = nothing;
     if spt < n && h11 > 3
-        m = mod(n,spt)
+        m = n ÷ spt
         tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
         cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
         tri_test = hcat(tri_test_m...)
@@ -134,11 +134,11 @@ function topologies(h11,n)
                 h5open(cyax_file(h11,tri,cy_i), "cw") do file
                     f1 = create_group(file, "cytools")
                     f1a = create_group(f1, "geometric")
-                    f1a["points",deflate=9] = Int.(points[n])
+                    f1a["points",deflate=9] = Int.(points[tri])
                     f1a["simplices",deflate=9] = Int.(simplices[n])
                 end
-                n+=1
                 push!(h11list_temp, [h11,cy[n],tri,cy_i])
+                n+=1
             end
         end
     end

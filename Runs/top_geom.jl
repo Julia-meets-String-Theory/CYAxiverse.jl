@@ -2,13 +2,13 @@ using Pkg
 Pkg.instantiate()
 
 using Distributed
-# try
-#     np = parse(Int32,ENV["SLURM_NPROCS"])
-#     addprocs(np)
-# catch e
-#     error("no workers!")
-#     exit()
-# end
+try
+    np = parse(Int32,ENV["SLURM_NPROCS"])
+    addprocs(np, exeflags="--project=$(Base.active_project())")
+catch e
+    error("no workers!")
+    exit()
+end
 # @everywhere newARGS = string("vacua_new")
 
 @everywhere using CYAxiverse
@@ -18,7 +18,7 @@ CYAxiverse.filestructure.logcreate(lfile)
 
 @everywhere function main_top(h11,n,l)
     try
-        test = CYAxiverse.generate.topologies(h11,n);
+        test = CYAxiverse.cytools_wrapper.topologies(h11,n);
         return test
     catch e
         open(l, "a") do outf
@@ -35,7 +35,7 @@ end
 
 @everywhere function main_geom(h11,cy,tri,cy_i,l)
     try
-        test = CYAxiverse.generate.geometries(h11,cy,tri,cy_i);
+        test = CYAxiverse.cytools_wrapper.geometries(h11,cy,tri,cy_i);
         return test
     catch e
         open(l, "a") do outf
@@ -51,6 +51,8 @@ end
 end
 
 
+
+
 ##############################
 #### Initialise functions ####
 ##############################
@@ -63,7 +65,7 @@ println(size(temp_top))
 temp_geom = hcat(temp_geom...)
 println(size(temp_geom))
 # println(temp_geom)
-
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string(size(temp_geom), "test runs have finished."))
 ### Clear memory ######
 temp_top = nothing
 temp_geom = nothing
@@ -74,7 +76,7 @@ GC.gc()
 ##############################
 h11_init = 4
 np = nworkers()
-h11_end = 200
+h11_end = 500
 log_files_top = [lfile for i=h11_init:h11_init+h11_end]
 n = [100 for _=h11_init:h11_init+h11_end]
 h11 = h11_init:h11_init+h11_end
