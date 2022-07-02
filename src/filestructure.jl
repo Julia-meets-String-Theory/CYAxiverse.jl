@@ -3,6 +3,7 @@ module filestructure
 ### Test functions ####
 ########################
 using HDF5
+using Dates
 
 function greet_CYAxiverse()
     println("Hello CYAxiverse")

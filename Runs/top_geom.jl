@@ -2,14 +2,13 @@ using Pkg
 Pkg.instantiate()
 
 using Distributed
-using ClusterManagers
-try
-    np = parse(Int32,ENV["SLURM_NPROCS"])
-    addprocs(np)
-catch e
-    error("no workers!")
-    exit()
-end
+# try
+#     np = parse(Int32,ENV["SLURM_NPROCS"])
+#     addprocs(np)
+# catch e
+#     error("no workers!")
+#     exit()
+# end
 # @everywhere newARGS = string("vacua_new")
 
 @everywhere using CYAxiverse
@@ -19,7 +18,7 @@ CYAxiverse.filestructure.logcreate(lfile)
 
 @everywhere function main_top(h11,n,l)
     try
-        test = CYAxiverse.generate.topology(h11,n);
+        test = CYAxiverse.generate.topologies(h11,n);
         return test
     catch e
         open(l, "a") do outf
@@ -36,7 +35,7 @@ end
 
 @everywhere function main_geom(h11,cy,tri,cy_i,l)
     try
-        test = CYAxiverse.generate.geometry(h11,cy,tri,cy_i);
+        test = CYAxiverse.generate.geometries(h11,cy,tri,cy_i);
         return test
     catch e
         open(l, "a") do outf
