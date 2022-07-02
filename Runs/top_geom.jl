@@ -55,8 +55,10 @@ end
 #### Initialise functions ####
 ##############################
 @time temp_top = main_top(4,10,lfile)
+# temp_top = hcat(temp_top...)
 println(size(temp_top))
 # println(temp_top)
+
 @time temp_geom = pmap(main_geom,temp_top[1,:],temp_top[2,:],temp_top[3,:],temp_top[4,:], [lfile for _=1:size(temp_top,2)])
 temp_geom = hcat(temp_geom...)
 println(size(temp_geom))
@@ -76,7 +78,7 @@ h11_end = 200
 log_files_top = [lfile for i=h11_init:h11_init+h11_end]
 n = [100 for _=h11_init:h11_init+h11_end]
 h11 = h11_init:h11_init+h11_end
-writeslurm(jobid,string("There are ", size(h11), "topologies to run."))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run."))
 # h11 = shuffle(h11)
 @time begin
     h11cylist = pmap(main_top,h11,n,log_files_top)
@@ -85,7 +87,7 @@ end
 h11cylist = hcat(h11cylist...)
 # h11cylist = h11cylist[:, shuffle(1:end)]
 GC.gc()
-writeslurm(jobid,string("There are ", size(h11cylist), "geometries to run."))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11cylist), "geometries to run."))
 ntasks_cy = size(h11cylist,2)
 log_files_geom = [lfile for _=1:ntasks_cy]
 @time begin
