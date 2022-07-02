@@ -223,24 +223,27 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     h11::Int = size(K,1)
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
-    LQtest = hcat(L,Q);
+    
+    LQtest::Matrix{Float64} = hcat(L,Q);
     Lfull::Vector{Float64} = LQtest[:,2]
-    LQsorted = LQtest[sortperm(Lfull, rev=true), :]
+    LQsorted::Matrix{Float64} = LQtest[sortperm(Lfull, rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    Qtilde = Qsorted_test[1,:]
-    Ltilde = Lsorted_test[1,:]
+    Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
+    Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
     for i=2:size(Qsorted_test,1)
-        S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
-        m = S(hcat(Qtilde,Qsorted_test[i,:]))
-        (d,bmat) = Nemo.nullspace(m)
+        S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
+        m::Nemo.fmpz_mat = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
+        (d::Int,_) = Nemo.nullspace(m)
         if d == 0
             Qtilde = hcat(Qtilde,Qsorted_test[i,:])
             Ltilde = hcat(Ltilde,Lsorted_test[i,:])
         end
     end
-    QKs = zeros(h11,h11)
-    fapprox = zeros(h11)
-    mapprox = zeros(h11)
+    Ltilde = Ltilde[:,2:end]
+    Qtilde = Qtilde[:,2:end]
+    QKs::Matrix{Float64} = zeros(Float64,h11,h11)
+    fapprox::Vector{Float64} = zeros(Float64,h11)
+    mapprox::Vector{Float64} = zeros(h11)
     LinearAlgebra.mul!(QKs, inv(Kls'), Qtilde')
     QKs = QKs'
     for i=1:h11
@@ -271,35 +274,50 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
         pot_data = potential(h11,tri,cy);
         L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
         spectrum_data = pq_spectrum(K,L,Q)
+        h5open(cyax_file(h11,tri,1), "r+") do file
+            f2 = create_group(file, "spectrum")
+            f2e = create_group(f2, "decay")
+            f2e["fpert",deflate=9] = spectrum_data["fpert"]
+            f2e["fK",deflate=9] = spectrum_data["fK"]
+
+            f2d = create_group(f2, "masses")
+            f2d["log10",deflate=9] = spectrum_data["m"]
+        end
     end
 end
 
-function vacua(Q::Matrix{Int},L::Matrix{Float64})
+function Base.convert(::Type{Matrix{Int}}, x::Nemo.fmpz_mat)
+    m,n = size(x)
+    mat = Int[x[i,j] for i = 1:m, j = 1:n]
+    return mat
+end
+Base.convert(::Type{Matrix}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
+
+function vacua(L::Matrix{Float64},Q::Matrix{Int})
     h11::Int = size(Q,2)
-    S, T, U = snf_with_transform(matrix(Nemo.ZZ,Q))
-    Tparallel = inv(T)[:,1:h11]
-    Tparallel = convert(Matrix{Int},Tparallel)
-    θparalleltest = inv(transpose(Q) * Q) * transpose(Q) * Tparallel
-    LQtest = hcat(L,Q);
-    LQsorted = LQtest[sortperm(L[:,2], rev=true), :]
+    _, T::Nemo.fmpz_mat, _ = snf_with_transform(matrix(Nemo.ZZ,Q))
+    Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
+    Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
+    θparalleltest::Matrix{Float32} = inv(transpose(Q) * Q) * transpose(Q) * Tparallel
+    LQtest::Matrix{Float64} = hcat(L,Q);
+    LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    Qtilde::Matrix{Int} = Qsorted_test[1,:]
-    Qdtilde::Matrix{Int} = zeros(size(Qsorted_test[1,:]),1)
-    Ltilde = Lsorted_test[1,:]
+    Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
+    Qdtilde = zeros(size(Qsorted_test[1,:],1))
     for i=2:size(Qsorted_test,1)
-        S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
-        m = S(hcat(Qtilde,Qsorted_test[i,:]))
-        (d,bmat) = Nemo.nullspace(m)
+        S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
+        m::Nemo.fmpz_mat = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
+        (d::Int,_) = Nemo.nullspace(m)
         if d == 0
             Qtilde = hcat(Qtilde,Qsorted_test[i,:])
         else
             Qdtilde = hcat(Qdtilde,Qsorted_test[i,:])
         end
     end
-    vacua = round(abs(det(θparalleltest) / det(inv(Qtilde))))
-    thparallel = Rational.(round.(θparalleltest; digits=10))
+    vacua::Int = round(abs(det(θparalleltest) / det(inv(Float64.(Qtilde[:,2:end])))))
+    thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=10))
     keys = ["vacua","θ∥","Qtilde"]
-    vals = [abs(vacua), thparallel, Qtilde]
+    vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
     return Dict(zip(keys,vals))
 end
 

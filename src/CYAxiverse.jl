@@ -1,9 +1,9 @@
 module CYAxiverse
 
-
-
-using Distributed
-
+if haskey(ENV,"newARGS")
+else
+    println("Please specify where to read/write data, currently using pwd!")
+end
 include("filestructure.jl")
 include("read.jl")
 include("generate.jl")

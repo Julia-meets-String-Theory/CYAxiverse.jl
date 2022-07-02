@@ -17,8 +17,8 @@ end
 Load key for data dir
 """
 function localARGS()
-    if @isdefined newARGS
-        newARGS
+    if haskey(ENV,"newARGS")
+        newARGS = ENV["newARGS"]
     else
         ARGS
     end
@@ -100,7 +100,6 @@ end
 Returns path of logfile in format data_dir()/logs/YYYY:MM:DD:T00:00:00.000log.out
 """
 function logfile()
-    mkpath(string(log_dir(),"logs"))
     log = string(Dates.DateTime(Dates.now()),"log.out")
     return joinpath(log_dir(), log)
 end
@@ -140,6 +139,7 @@ function np_path()
         end
     end
     if isfile(joinpath(data_dir(),"paths.h5")) || isfile(joinpath(data_dir(),"paths_cy.h5"))
+    else
         h5open(joinpath(data_dir(),"paths_cy.h5"), "cw") do f
             f["paths",deflate=9] = hcat(np_paths...)
             f["pathinds",deflate=9] = hcat(np_pathinds...)
