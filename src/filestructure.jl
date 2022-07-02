@@ -72,6 +72,17 @@ function plots_dir()
     end
     return pwd
 end
+"""
+    log_dir()
+Creates/reads log directory
+"""
+function log_dir()
+    if isdir(joinpath(present_dir(),"logs"))
+    else 
+        mkdir(joinpath(present_dir(),"logs"))
+    end
+    return joinpath(present_dir(),"logs")
+end
 
 """
     data_dir()
@@ -89,9 +100,9 @@ end
 Returns path of logfile in format data_dir()/logs/YYYY:MM:DD:T00:00:00.000log.out
 """
 function logfile()
-    mkpath(string(data_dir(),"logs"))
+    mkpath(string(log_dir(),"logs"))
     log = string(Dates.DateTime(Dates.now()),"log.out")
-    return joinpath(data_dir(), log)
+    return joinpath(log_dir(), log)
 end
 
 """
