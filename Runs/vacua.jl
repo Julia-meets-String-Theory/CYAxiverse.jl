@@ -44,7 +44,7 @@ h11list_temp = [4 4 5 7; 10 11 10 10; 1 1 1 1; lfile lfile lfile lfile]
     temp_spec = pmap(main_vac, h11list_temp[1,:],h11list_temp[2,:],h11list_temp[3,:], h11list_temp[4,:])
 end
 # println(temp_geom)
-CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string((size(h11list_temp,2)+1), "test runs have finished."))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string((size(h11list_temp,2)+1), "test runs have finished.\n"))
 ### Clear memory ######
 temp_spec = nothing
 GC.gc()
@@ -53,7 +53,7 @@ GC.gc()
 ############ Main ############
 ##############################
 @time h11list = CYAxiverse.filestructure.paths_cy()[2]
-CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11list), "systems to compute vacua in."))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11list), "systems to compute vacua in.\n"))
 # h11 = shuffle(h11)
 log_files_vac = [lfile for _=1:size(h11list,2)]
 @time begin

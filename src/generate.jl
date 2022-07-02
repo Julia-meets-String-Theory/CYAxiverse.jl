@@ -324,7 +324,7 @@ end
 
 function vacua_save(h11::Int,tri::Int,cy::Int=1)
     pot_data = potential(h11,tri,cy)
-    vacua_data = vacua(pot_data["Q"],pot_data["L"])
+    vacua_data = vacua(pot_data["L"],pot_data["Q"])
     h5open(cyax_file(h11,tri,cy), "r+") do file
         f3 = create_group(file, "vacua")
         f3["vacua",deflate=9] = vacua_data["vacua"]
