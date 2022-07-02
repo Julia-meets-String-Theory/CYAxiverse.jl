@@ -15,4 +15,10 @@ else
     println("This installation does not include CYTools!")
 end
 
+if haskey(ENV, "SLURM_JOB_ID")
+    include("slurm.jl")
+else
+    println("This installation does not include SLURM!")
+end
+
 end
