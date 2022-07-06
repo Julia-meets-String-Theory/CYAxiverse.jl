@@ -204,7 +204,7 @@ function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
             f2c["sign",deflate=9] = spectrum_data["λ22sign"]
             f2c["index",deflate=9] = spectrum_data["λ22_i"]
 
-            f2d = create_group(f2, "Heigvals")
+            f2d = create_group(f2, "masses")
             f2d["log10",deflate=9] = spectrum_data["m"]
             f2d["sign",deflate=9] = spectrum_data["msign"]
         end
@@ -271,22 +271,26 @@ end
 
 function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
-        h5open(cyax_file(h11,tri,cy), "r+") do file
+        file_open::Bool = 0
+        h5open(cyax_file(h11,tri,cy), "r") do file
             if haskey(file, "spectrum")
+                file_open = 1
                 return nothing
             end
         end
-        pot_data = potential(h11,tri,cy);
-        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
-        spectrum_data = pq_spectrum(K,L,Q)
-        h5open(cyax_file(h11,tri,1), "r+") do file
-            f2 = create_group(file, "spectrum")
-            f2e = create_group(f2, "decay")
-            f2e["fpert",deflate=9] = spectrum_data["fpert"]
-            f2e["fK",deflate=9] = spectrum_data["fK"]
+        if file_open == 0
+            pot_data = potential(h11,tri,cy);
+            L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
+            spectrum_data = pq_spectrum(K,L,Q)
+            h5open(cyax_file(h11,tri,1), "r+") do file
+                f2 = create_group(file, "spectrum")
+                f2e = create_group(f2, "decay")
+                f2e["fpert",deflate=9] = spectrum_data["fpert"]
+                f2e["fK",deflate=9] = spectrum_data["fK"]
 
-            f2d = create_group(f2, "masses")
-            f2d["log10",deflate=9] = spectrum_data["m"]
+                f2d = create_group(f2, "masses")
+                f2d["log10",deflate=9] = spectrum_data["m"]
+            end
         end
     end
 end
@@ -303,7 +307,7 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
     _, T::Nemo.fmpz_mat, _ = snf_with_transform(matrix(Nemo.ZZ,Q))
     Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
     Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
-    θparalleltest::Matrix{Float32} = inv(transpose(Q) * Q) * transpose(Q) * Tparallel
+    θparalleltest::Matrix{Float32} = inv(transpose(Float32.(Q)) * Float32.(Q)) * transpose(Float32.(Q)) * Float32.(Tparallel)
     LQtest::Matrix{Float64} = hcat(L,Q);
     LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
@@ -320,28 +324,42 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
         end
     end
     vacua::Int = round(abs(det(θparalleltest) / det(inv(Float64.(Qtilde[:,2:end])))))
-    thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=10))
-    keys = ["vacua","θ∥","Qtilde"]
-    vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
-    return Dict(zip(keys,vals))
+    if h11 <= 50
+        thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
+        keys = ["vacua","θ∥","Qtilde"]
+        vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
+        return Dict(zip(keys,vals))
+    else
+        keys = ["vacua","θ∥","Qtilde"]
+        vals = [abs(vacua), θparalleltest, Qtilde[:,2:end]]
+        return Dict(zip(keys,vals))
+    end
 end
 
 
 function vacua_save(h11::Int,tri::Int,cy::Int=1)
-    h5open(cyax_file(h11,tri,cy), "r+") do file
+    file_open::Bool = 0
+    h5open(cyax_file(h11,tri,cy), "r") do file
         if haskey(file, "vacua")
+            file_open = 1
             return nothing
         end
     end
-    pot_data = potential(h11,tri,cy)
-    vacua_data = vacua(pot_data["L"],pot_data["Q"])
-    h5open(cyax_file(h11,tri,cy), "r+") do file
-        f3 = create_group(file, "vacua")
-        f3["vacua",deflate=9] = vacua_data["vacua"]
-        f3["Qtilde",deflate=9] = vacua_data["Qtilde"]
-        f3a = create_group(f3, "thparallel")
-        f3a["numerator",deflate=9] = numerator.(vacua_data["θ∥"])
-        f3a["denominator",deflate=9] = denominator.(vacua_data["θ∥"])
+    if file_open == 0
+        pot_data = potential(h11,tri,cy)
+        vacua_data = vacua(pot_data["L"],pot_data["Q"])
+        h5open(cyax_file(h11,tri,cy), "r+") do file
+            f3 = create_group(file, "vacua")
+            f3["vacua",deflate=9] = vacua_data["vacua"]
+            f3["Qtilde",deflate=9] = vacua_data["Qtilde"]
+            if h11 <=50
+                f3a = create_group(f3, "thparallel")
+                f3a["numerator",deflate=9] = numerator.(vacua_data["θ∥"])
+                f3a["denominator",deflate=9] = denominator.(vacua_data["θ∥"])
+            else
+                f3["thparallel",deflate=9] = vacua_data["θ∥"]
+            end
+        end
     end
 end
 end

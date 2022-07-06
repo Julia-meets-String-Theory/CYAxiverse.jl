@@ -83,26 +83,41 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
 end
 
 
-#########################
+##############################
 ##### HDF5.read Vacua data ###
-#########################
+##############################
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
-    vacua::Int, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
-    HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel/numerator"),
-        HDF5.read(file, "vacua/thparallel/denominator"),HDF5.read(file, "vacua/Qtilde")
+    vacua::Int
+    θparallel_num::Matrix{Int}
+    θparallel_den::Matrix{Int}
+    Qtilde::Matrix{Int}
+    θparallel::Matrix{Float32}
+    if h11 <= 50
+        vacua, θparallel_num, θparallel_den, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
+            HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel/numerator"),HDF5.read(file, "vacua/thparallel/denominator"),HDF5.read(file, "vacua/Qtilde")
+        end
+        keys = ["vacua","θ∥","Qtilde"]
+        vals = [abs(vacua), θparallel_num .// θparallel_den, Qtilde]
+        return Dict(zip(keys,vals))
+    else
+        vacua, θparallel, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
+            HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel"),HDF5.read(file, "vacua/Qtilde")
+        end
+        keys = ["vacua","θ∥","Qtilde"]
+        vals = [abs(vacua), Rational.(round.(θparallel; digits=8)), Qtilde]
+        return Dict(zip(keys,vals))
     end
-    keys = ["vacua","θ∥","Qtilde"]
-    vals = [abs(vacua), θparallel_num .// θparallel_den, Qtilde]
-    return Dict(zip(keys,vals))
 end
 
-
+################################
+##### HDF5.read Spectra data ###
+################################
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int=1)
     Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64} = 
     h5open(cyax_file(h11,tri,cy), "r") do file
-        HDF5.read(file, "spectrum/Heigvals/log10"),
+        HDF5.read(file, "spectrum/masses/log10"),
         HDF5.read(file, "spectrum/decay/fK"), HDF5.read(file, "spectrum/decay/fpert")
     end
     keys = ["m", "fK", "fpert"]
@@ -116,7 +131,7 @@ function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
     quart22_index,quart22_sign::Vector{Int},quart22_log10::Vector{Float64},quart31_index,
     quart31_sign::Vector{Int},
     quart31_log10::Vector{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
-    HDF5.read(file, "spectrum/Heigvals/sign"),HDF5.read(file, "spectrum/Heigvals/log10"),
+    HDF5.read(file, "spectrum/masses/sign"),HDF5.read(file, "spectrum/masses/log10"),
     HDF5.read(file, "spectrum/decay/fK"), HDF5.read(file, "spectrum/decay/fpert"),HDF5.read(file, "spectrum/quartdiag/sign"),
         HDF5.read(file, "spectrum/quartdiag/log10"),HDF5.read(file, "spectrum/quart31/index"),HDF5.read(file, "spectrum/quart31/sign"),
         HDF5.read(file, "spectrum/quart31/log10"),HDF5.read(file, "spectrum/quart22/index"),HDF5.read(file, "spectrum/quart22/sign"),
