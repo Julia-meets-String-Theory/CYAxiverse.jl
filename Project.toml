@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [deps]
 ArbNumerics = "7e558dbc-694d-5a72-987c-6f4ebed21442"
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 ClusterManagers = "34f1f09b-3a8b-5176-ab39-66d58a4d544e"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
@@ -17,10 +18,13 @@ LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 MPIClusterManagers = "e7922434-ae4b-11e9-05c5-9780451d2c66"
 Nemo = "2edaba10-b0f1-5616-af89-8c11ac63239a"
+ProfileSVG = "132c30aa-f267-4189-9183-c8a63c7e05e6"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 SharedArrays = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
+SmithNormalForm = "ba71f38f-f508-439b-ac77-437f86a20aa1"
+TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 Tullio = "bc48ee85-29a4-5162-ae0b-a64e1601d4bc"
 
 [compat]
