@@ -65,7 +65,7 @@ println(size(temp_top))
 temp_geom = hcat(temp_geom...)
 println(size(temp_geom))
 # println(temp_geom)
-CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string(size(temp_geom), "test runs have finished."))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string(size(temp_geom), "test runs have finished.\n"))
 ### Clear memory ######
 temp_top = nothing
 temp_geom = nothing
@@ -80,7 +80,7 @@ h11_end = 500
 log_files_top = [lfile for i=h11_init:h11_init+h11_end]
 n = [100 for _=h11_init:h11_init+h11_end]
 h11 = h11_init:h11_init+h11_end
-CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run."))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))
 # h11 = shuffle(h11)
 @time begin
     h11cylist = pmap(main_top,h11,n,log_files_top)
@@ -89,7 +89,7 @@ end
 h11cylist = hcat(h11cylist...)
 # h11cylist = h11cylist[:, shuffle(1:end)]
 GC.gc()
-CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11cylist), "geometries to run."))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11cylist), "geometries to run.\n"))
 ntasks_cy = size(h11cylist,2)
 log_files_geom = [lfile for _=1:ntasks_cy]
 @time begin

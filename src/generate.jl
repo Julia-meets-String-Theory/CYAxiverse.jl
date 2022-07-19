@@ -5,9 +5,7 @@ using LinearAlgebra
 using ArbNumerics, Tullio, LoopVectorization, Nemo
 using GenericLinearAlgebra
 using Distributions
-using Nemo
 using TimerOutputs
-using SmithNormalForm
 
 using ..filestructure: cyax_file, minfile, present_dir
 using ..read: potential
@@ -306,11 +304,13 @@ Base.convert(::Type{Matrix}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
 
 function vacua(L::Matrix{Float64},Q::Matrix{Int})
     h11::Int = size(Q,2)
-    T::Nemo.fmpz_mat = snf_with_transform(matrix(Nemo.ZZ,Q))[2]
-    # println(size(T))
-    Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
-    Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
-    θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
+    if h11<=78
+        T::Nemo.fmpz_mat = snf_with_transform(matrix(Nemo.ZZ,Q))[2]
+        # println(size(T))
+        Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
+        Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
+        θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
+    end
     LQtest::Matrix{Float64} = hcat(L,Float64.(Q))
     LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
@@ -326,13 +326,19 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
             Qtilde = hcat(Qtilde,Qsorted_test[i,:])
         end
     end
-    vacua::Int = round(abs(det(θparalleltest) / det(inv(Qtilde[:,2:end]))))
     if h11 <= 50
+        vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde[:,2:end])))))
         thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
         keys = ["vacua","θ∥","Qtilde"]
         vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
         return Dict(zip(keys,vals))
+    elseif h11 > 78
+        vacua = Int(round(abs(1 / det(inv(Qtilde[:,2:end])))))
+        keys = ["vacua","Qtilde"]
+        vals = [abs(vacua), Qtilde[:,2:end]]
+        return Dict(zip(keys,vals))
     else
+        vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde[:,2:end])))))
         keys = ["vacua","θ∥","Qtilde"]
         vals = [abs(vacua), θparalleltest, Qtilde[:,2:end]]
         return Dict(zip(keys,vals))
@@ -342,14 +348,19 @@ end
 function vacua_profiler(L::Matrix{Float64},Q::Matrix{Int})
     reset_timer!()
     @timeit "h11" h11::Int = size(Q,2)
-    @timeit "Nemo matrix" Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
-    @timeit "SNF" T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
-    # @timeit "SNF" F = smith(Q)
-    # @timeit "T" T::Matrix{Int} = F.S
-    # @timeit "inv(T)" Tparallel::Matrix{Int} = round.(inv(T)[:,1:h11])
+    
+    ###### Nemo SNF #####
+    # @timeit "Nemo matrix" Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
+    # @timeit "SNF" T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
+    # @timeit "inv(T)" Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
+    # @timeit "convert T∥" Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
+
+    ###### wildart SNF #####
+    @timeit "SNF" F = smith(Q)
+    @timeit "T" T::Matrix{Int} = F.S
+    @timeit "inv(T)" Tparallel::Matrix{Int} = round.(inv(T)[:,1:h11])
     # println(size(T))
-    @timeit "inv(T)" Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
-    @timeit "convert T∥" Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
+    
     @timeit "θparallel" θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
     @timeit "zip LQ" LQtest::Matrix{Float64} = hcat(L,Q);
     @timeit "sort LQ" LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
@@ -364,18 +375,18 @@ function vacua_profiler(L::Matrix{Float64},Q::Matrix{Int})
         end
     end
     @timeit "vacua" vacua::Int = round(abs(det(θparalleltest) / det(inv(Float64.(Qtilde[:,2:end])))))
-    if h11 <= 50
-        @timeit "thparallel - Rational" thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
-        @timeit "make Dict" keys = ["vacua","θ∥","Qtilde"]
-        vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
-        print_timer()
-        return Dict(zip(keys,vals))
-    else
-        keys = ["vacua","θ∥","Qtilde"]
-        vals = [abs(vacua), θparalleltest, Qtilde[:,2:end]]
-        print_timer()
-        return Dict(zip(keys,vals))
-    end
+    # if h11 <= 50
+    #     @timeit "thparallel - Rational" thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
+    #     @timeit "make Dict" keys = ["vacua","θ∥","Qtilde"]
+    #     vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
+    #     print_timer()
+    #     return Dict(zip(keys,vals))
+    # else
+    keys = ["vacua","θ∥","Qtilde"]
+    vals = [abs(vacua), θparalleltest, Qtilde[:,2:end]]
+    print_timer()
+    return Dict(zip(keys,vals))
+    # end
 end
 
 function vacua_save(h11::Int,tri::Int,cy::Int=1)
@@ -397,7 +408,7 @@ function vacua_save(h11::Int,tri::Int,cy::Int=1)
                 f3a = create_group(f3, "thparallel")
                 f3a["numerator",deflate=9] = numerator.(vacua_data["θ∥"])
                 f3a["denominator",deflate=9] = denominator.(vacua_data["θ∥"])
-            else
+            elseif h11 <= 78
                 f3["thparallel",deflate=9] = vacua_data["θ∥"]
             end
         end

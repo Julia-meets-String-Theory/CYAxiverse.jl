@@ -31,7 +31,6 @@ end
             write(outf,string("vac-(",h11,",",tri,",",cy,")\n"))
         end
     end
-    GC.gc()
 end
 
 lfile = CYAxiverse.filestructure.logfile()

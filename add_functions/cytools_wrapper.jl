@@ -77,7 +77,7 @@ function topologies(h11,n)
         m = n ÷ spt
         tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
         cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
-        tri_test = hcat(tri_test_m...)
+        tri_test = vcat(tri_test_m...)
     else
         tri_test = [poly_test[i].triangulate() for i=1:n];
         points = points[1:n]
