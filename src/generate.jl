@@ -390,13 +390,6 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
         T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
         Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
         Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
-
-        ###### wildart SNF #####
-        # F = smith(Q)
-        # T::Matrix{Int} = F.S
-        # Tparallel::Matrix{Int} = round.(inv(T)[:,1:h11])
-        # println(size(T))
-        
         θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
     end
     LQtest::Matrix{Float64} = hcat(L,Q);
@@ -425,22 +418,16 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
     Qbar = Qbar[:,2:end]
     Ltilde = Ltilde[:,2:end]
     Lbar = Lbar[:,2:end]
-    println(size(Qbar), size(Lbar),size(Ltilde),size(Qtilde))
     Ltilde_min::Float64 = minimum(Ltilde[2,:])
-    println(Ltilde_min)
     Ldiff_limit::Float64 = log10(0.5)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min - Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min - Ldiff_limit)]
     α::Matrix{Float64} = round.(Qbar' * inv(Qtilde); digits=3)
-    println(size(Qbar), size(Lbar), size(α))
-    # println(α)
     for i=1:size(α,1)
         for j=1:size(α,2)
             if α[i,j] != 0.
                 Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j]; digits=3)
                 if Ldiff > Ldiff_limit
-                    println(α[i,j])
-                    println([Lbar[2,i]; Ltilde[2,j]])
                     Qtilde = hcat(Qtilde,Qbar[:,i])
                     Ltilde = hcat(Ltilde,Lbar[:,i])
                     break
