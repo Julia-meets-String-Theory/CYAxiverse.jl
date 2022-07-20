@@ -58,12 +58,12 @@ end
 ##############################
 @time temp_top = main_top(4,10,lfile)
 # temp_top = hcat(temp_top...)
-println(size(temp_top))
+# println(size(temp_top))
 # println(temp_top)
 
 @time temp_geom = pmap(main_geom,temp_top[1,:],temp_top[2,:],temp_top[3,:],temp_top[4,:], [lfile for _=1:size(temp_top,2)])
 temp_geom = hcat(temp_geom...)
-println(size(temp_geom))
+# println(size(temp_geom))
 # println(temp_geom)
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string(size(temp_geom), "test runs have finished.\n"))
 ### Clear memory ######

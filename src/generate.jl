@@ -304,7 +304,7 @@ Base.convert(::Type{Matrix}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
 
 function vacua(L::Matrix{Float64},Q::Matrix{Int})
     h11::Int = size(Q,2)
-    if h11<=78
+    if h11<=50
         T::Nemo.fmpz_mat = snf_with_transform(matrix(Nemo.ZZ,Q))[2]
         # println(size(T))
         Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
@@ -332,61 +332,12 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
         keys = ["vacua","θ∥","Qtilde"]
         vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
         return Dict(zip(keys,vals))
-    elseif h11 > 78
+    else
         vacua = Int(round(abs(1 / det(inv(Qtilde[:,2:end])))))
         keys = ["vacua","Qtilde"]
         vals = [abs(vacua), Qtilde[:,2:end]]
         return Dict(zip(keys,vals))
-    else
-        vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde[:,2:end])))))
-        keys = ["vacua","θ∥","Qtilde"]
-        vals = [abs(vacua), θparalleltest, Qtilde[:,2:end]]
-        return Dict(zip(keys,vals))
     end
-end
-
-function vacua_profiler(L::Matrix{Float64},Q::Matrix{Int})
-    reset_timer!()
-    @timeit "h11" h11::Int = size(Q,2)
-    
-    ###### Nemo SNF #####
-    # @timeit "Nemo matrix" Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
-    # @timeit "SNF" T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
-    # @timeit "inv(T)" Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
-    # @timeit "convert T∥" Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
-
-    ###### wildart SNF #####
-    @timeit "SNF" F = smith(Q)
-    @timeit "T" T::Matrix{Int} = F.S
-    @timeit "inv(T)" Tparallel::Matrix{Int} = round.(inv(T)[:,1:h11])
-    # println(size(T))
-    
-    @timeit "θparallel" θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
-    @timeit "zip LQ" LQtest::Matrix{Float64} = hcat(L,Q);
-    @timeit "sort LQ" LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
-    @timeit "unzip LQ" Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    @timeit "init Qtilde" Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
-    for i=2:size(Qsorted_test,1)
-        @timeit "Matrix.Space" S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
-        @timeit "lin. ind." m::Nemo.fmpz_mat = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
-        @timeit "NullSpace" d::Int = Nemo.nullspace(m)[1]
-        if d == 0
-            @timeit "Qtilde" Qtilde = hcat(Qtilde,Qsorted_test[i,:])
-        end
-    end
-    @timeit "vacua" vacua::Int = round(abs(det(θparalleltest) / det(inv(Float64.(Qtilde[:,2:end])))))
-    # if h11 <= 50
-    #     @timeit "thparallel - Rational" thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
-    #     @timeit "make Dict" keys = ["vacua","θ∥","Qtilde"]
-    #     vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
-    #     print_timer()
-    #     return Dict(zip(keys,vals))
-    # else
-    keys = ["vacua","θ∥","Qtilde"]
-    vals = [abs(vacua), θparalleltest, Qtilde[:,2:end]]
-    print_timer()
-    return Dict(zip(keys,vals))
-    # end
 end
 
 function vacua_save(h11::Int,tri::Int,cy::Int=1)
@@ -408,8 +359,6 @@ function vacua_save(h11::Int,tri::Int,cy::Int=1)
                 f3a = create_group(f3, "thparallel")
                 f3a["numerator",deflate=9] = numerator.(vacua_data["θ∥"])
                 f3a["denominator",deflate=9] = denominator.(vacua_data["θ∥"])
-            elseif h11 <= 78
-                f3["thparallel",deflate=9] = vacua_data["θ∥"]
             end
         end
     end
