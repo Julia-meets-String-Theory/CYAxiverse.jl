@@ -88,11 +88,11 @@ end
 ##############################
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
-    vacua::Int
-    θparallel_num::Matrix{Int}
-    θparallel_den::Matrix{Int}
-    Qtilde::Matrix{Int}
-    θparallel::Matrix{Float32}
+    vacua::Int = 0
+    θparallel_num::Matrix{Int} = zeros(Int,1,1)
+    θparallel_den::Matrix{Int} = zeros(Int,1,1)
+    Qtilde::Matrix{Int} = zeros(Int,1,1)
+    θparallel::Matrix{Float32} = zeros(Float32,1,1)
     if h11 <= 50
         vacua, θparallel_num, θparallel_den, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel/numerator"),HDF5.read(file, "vacua/thparallel/denominator"),HDF5.read(file, "vacua/Qtilde")

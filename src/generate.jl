@@ -302,6 +302,27 @@ function Base.convert(::Type{Matrix{Int}}, x::Nemo.fmpz_mat)
 end
 Base.convert(::Type{Matrix}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
 
+
+"""
+    vacua(L,Q)
+
+Compute the number of vacua given an instanton charge matrix `Q` and 2-column matrix of instanton scales `L` (in the form [sign; exponent])
+
+For small systems (Nax<=50) the algorithm computes the ratio of volumes of the fundamental domain of the leading potential and the full potential.
+
+For larger systems, the algorithm only computes the volume of the fundamental domain of the leading potential.
+#Examples
+```julia-repl
+julia> using CYAxiverse
+julia> h11,tri,cy = 10,20,1;
+julia> pot_data = CYAxiverse.read.potential(h11,tri,cy);
+julia> vacua_data = CYAxiverse.generate.vacua(pot_data["L"],pot_data["Q"])
+Dict{String, Any} with 3 entries:
+  "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
+  "vacua"  => 3
+  "Qtilde" => [0 0 … 1 0; 0 0 … 0 0; … ; 1 1 … 0 0; 0 0 … 0 0]
+```
+"""
 function vacua(L::Matrix{Float64},Q::Matrix{Int})
     h11::Int = size(Q,2)
     if h11<=50
@@ -326,19 +347,133 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
             Qtilde = hcat(Qtilde,Qsorted_test[i,:])
         end
     end
+    Qtilde = Qtilde[:,2:end]
+
     if h11 <= 50
-        vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde[:,2:end])))))
+        vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde)))))
         thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
         keys = ["vacua","θ∥","Qtilde"]
-        vals = [abs(vacua), thparallel, Qtilde[:,2:end]]
+        vals = [abs(vacua), thparallel, Qtilde]
         return Dict(zip(keys,vals))
     else
-        vacua = Int(round(abs(1 / det(inv(Qtilde[:,2:end])))))
+        vacua = Int(round(abs(1 / det(inv(Qtilde)))))
         keys = ["vacua","Qtilde"]
-        vals = [abs(vacua), Qtilde[:,2:end]]
+        vals = [abs(vacua), Qtilde]
         return Dict(zip(keys,vals))
     end
 end
+"""
+    vacua_TB(L,Q)
+
+Compute the number of vacua given an instanton charge matrix `Q` and 2-column matrix of instanton scales `L` (in the form [sign; exponent])
+
+For small systems (Nax<=50) the algorithm computes the ratio of volumes of the fundamental domain of the leading potential and the full potential.
+
+For larger systems, the algorithm only computes the volume of the fundamental domain of the leading potential.
+#Examples
+```julia-repl
+julia> using CYAxiverse
+julia> h11,tri,cy = 10,20,1;
+julia> pot_data = CYAxiverse.read.potential(h11,tri,cy);
+julia> vacua_data = CYAxiverse.generate.vacua_TB(pot_data["L"],pot_data["Q"])
+Dict{String, Any} with 3 entries:
+  "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
+  "vacua"  => 11552.0
+  "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
+```
+"""
+function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
+    h11::Int = size(Q,2)
+    if h11<=50
+        ###### Nemo SNF #####
+        Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
+        T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
+        Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
+        Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
+
+        ###### wildart SNF #####
+        # F = smith(Q)
+        # T::Matrix{Int} = F.S
+        # Tparallel::Matrix{Int} = round.(inv(T)[:,1:h11])
+        # println(size(T))
+        
+        θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
+    end
+    LQtest::Matrix{Float64} = hcat(L,Q);
+    LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
+    Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
+    Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
+    Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
+    S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
+    m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
+    d::Int = 1
+    Qbar::Matrix{Int} = zeros(Int,size(Qsorted_test[1,:],1),1)
+    Lbar::Matrix{Float64} = zeros(Float64,size(Lsorted_test[1,:],1),1)
+    for i=2:size(Qsorted_test,1)
+        S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
+        m = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
+        d = Nemo.nullspace(m)[1]
+        if d == 0
+            Qtilde = hcat(Qtilde,Qsorted_test[i,:])
+            Ltilde = hcat(Ltilde,Lsorted_test[i,:])
+    else
+        Qbar = hcat(Qbar,Qsorted_test[i,:])
+        Lbar = hcat(Lbar,Lsorted_test[i,:])
+        end
+    end
+    Qtilde = Qtilde[:,2:end]
+    Qbar = Qbar[:,2:end]
+    Ltilde = Ltilde[:,2:end]
+    Lbar = Lbar[:,2:end]
+    println(size(Qbar), size(Lbar),size(Ltilde),size(Qtilde))
+    Ltilde_min::Float64 = minimum(Ltilde[2,:])
+    println(Ltilde_min)
+    Ldiff_limit::Float64 = log10(0.5)
+    Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min - Ldiff_limit)]
+    Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min - Ldiff_limit)]
+    α::Matrix{Float64} = round.(Qbar' * inv(Qtilde); digits=3)
+    println(size(Qbar), size(Lbar), size(α))
+    # println(α)
+    for i=1:size(α,1)
+        for j=1:size(α,2)
+            if α[i,j] != 0.
+                Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j]; digits=3)
+                if Ldiff > Ldiff_limit
+                    println(α[i,j])
+                    println([Lbar[2,i]; Ltilde[2,j]])
+                    Qtilde = hcat(Qtilde,Qbar[:,i])
+                    Ltilde = hcat(Ltilde,Lbar[:,i])
+                    break
+                end
+            end
+        end
+    end
+    println(size(Qtilde))
+    if h11 <= 50
+        if size(Qtilde,1) == size(Qtilde,2)
+            vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde)))))
+        else
+            vacua = round(abs(det(θparalleltest) / (1/sqrt(det(Qtilde * Qtilde')))))
+        end
+        thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
+        keys = ["vacua","θ∥","Qtilde"]
+        vals = [abs(vacua), thparallel, Qtilde]
+        return Dict(zip(keys,vals))
+    else
+        if size(Qtilde,1) == size(Qtilde,2)
+            vacua = Int(round(abs(1 / det(inv(Qtilde)))))
+        else
+            vacua = round(abs(sqrt(det(Qtilde * Qtilde'))))
+        end
+        
+        keys = ["vacua","Qtilde"]
+        vals = [abs(vacua), Qtilde]
+        return Dict(zip(keys,vals))
+    end
+end
+
+
+
 
 function vacua_save(h11::Int,tri::Int,cy::Int=1)
     file_open::Bool = 0
