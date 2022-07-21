@@ -420,8 +420,8 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
     Lbar = Lbar[:,2:end]
     Ltilde_min::Float64 = minimum(Ltilde[2,:])
     Ldiff_limit::Float64 = log10(0.5)
-    Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min - Ldiff_limit)]
-    Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min - Ldiff_limit)]
+    Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
+    Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     α::Matrix{Float64} = round.(Qbar' * inv(Qtilde); digits=3)
     for i=1:size(α,1)
         for j=1:size(α,2)
