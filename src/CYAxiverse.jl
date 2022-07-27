@@ -8,6 +8,7 @@ include("filestructure.jl")
 include("read.jl")
 include("generate.jl")
 include("plotting.jl")
+include("minimizer.jl")
 include("../add_functions/profiling.jl")
 if haskey(ENV, "PYTHON")
     if ENV["PYTHON"] == "/opt/cytools/cytools-venv//bin/python3"

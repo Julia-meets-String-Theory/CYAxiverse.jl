@@ -701,7 +701,6 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
         thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
         keys = ["vacua","θ∥","Qtilde"]
         vals = [abs(vacua), thparallel, Qtilde]
-        print_timer()
         return Dict(zip(keys,vals))
     else
         if size(Qtilde,1) == size(Qtilde,2)
