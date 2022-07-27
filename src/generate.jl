@@ -14,11 +14,28 @@ using ..read: potential
 ### Constant ####
 #################
 
+"""
+    constants()
+
+Loads constants:\n
+- Reduced Planck Mass = 2.435 × 10^18
+- Hubble = 2.13 × 0.7 × 10^-33
+- log2pi = log10(2π)
+as `Dict{String,ArbFloat}`\n
+#Examples
+```julia-repl
+julia> const_data = CYAxiverse.generate.constants()
+Dict{String, ArbNumerics.ArbFloat{128}} with 3 entries:
+  "MPlanck" => 2435000000000000000.0
+  "log2π"   => 0.7981798683581150521959557408991
+  "Hubble"  => 1.490999999999999999287243983194e-33
+```
+"""
 function constants()
     mplanck_r::ArbFloat = ArbFloat(2.435e18)
     hubble::ArbFloat = ArbFloat(2.13*0.7*1e-33)
-    log2pi::ArbFloat = ArbFloat(log10(2*pi))
-    return mplanck_r,hubble,log2pi
+    log2pi::ArbFloat = ArbFloat(log10(2π))
+    return Dict("MPlanck" => mplanck_r, "Hubble" => hubble, "log2π" => log2pi)
 end
 
 
@@ -26,48 +43,278 @@ end
 ##### Pseudo-Geometric data ###
 ###############################
 
+"""
+    pseudo_Q(h11,tri,cy=1)
 
+Randomly generates an instanton charge matrix that takes the same form as those found in the KS Axiverse, namely `I(h11)` with 4 randomly filled rows and the cross-terms, i.e. an h11+4+C(h11+4,2) × h11 integer matrix.
+#Examples
+```julia-repl
+julia> CYAxiverse.generate.pseudo_Q(4,10,1)
+36×4 Matrix{Int64}:
+  1   0   0   0
+  0   1   0   0
+  0   0   1   0
+  0   0   0   1
+  1   4  -3   5
+ -5  -4  -2   4
+  4   5   3  -2
+ -5   2  -3  -3
+  ⋮
+ -9  -9  -5   6
+  0  -6   1   7
+  9   3   6   1
+```
+"""
 function pseudo_Q(h11::Int,tri::Int,cy::Int=1)
-    Q = vcat(Matrix{Float64}(I(h11)),rand(-5.:5.,4,h11))
+    Q = vcat(Matrix{Int}(I(h11)),rand(-5:5,4,h11))
     return vcat(Q,hcat([Q[i,:]-Q[j,:] for i=1:size(Q,1)-1 for j=i+1:size(Q,1)]...)')
 end
 
+"""
+    pseudo_K(h11,tri,cy=1)
+
+Randomly generates an h11 × h11 Hermitian matrix with positive definite eigenvalues
+#Examples
+```julia-repl
+julia> K = CYAxiverse.generate.pseudo_K(4,10,1)
+4×4 Hermitian{Float64, Matrix{Float64}}:
+ 2.64578  2.61012  0.91203  2.27339
+ 2.61012  3.89684  2.22451  1.93356
+ 0.91203  2.22451  2.94717  1.58126
+ 2.27339  1.93356  1.58126  4.85208
+
+julia> eigen(K).values
+4-element Vector{Float64}:
+ 0.17629073145135896
+ 1.8632009739875723
+ 2.7425362219513487
+ 9.559840749713599
+```
+"""
 function pseudo_K(h11::Int,tri::Int,cy::Int=1)
     K::Matrix{Float64} = rand(h11,h11)
     K = 4* 0.5 * (K+transpose(K)) + 2 .* I(h11)
+    while minimum(eigen(K).values) < 0.
+        K = rand(h11,h11)
+        K = 4* 0.5 * (K+transpose(K)) + 2 .* I(h11)
+    end
     return Hermitian(K)
 end
 
-function pseudo_L(h11::Int,tri::Int,cy::Int=1)
-    Llogprime::Vector{Float64} = sort(vcat([0,[-(4*(j-1)) for j=2:h11+4]...]),rev=true)
-    Lsignh11::Vector{Float64} = rand(Uniform(0,100),h11-1)
-    Lsign4::Vector{Float64} = rand(Uniform(-100,100),4)
-    Lsignprime::Vector{Float64} = vcat(1.,Lsignh11..., Lsign4...)
-    Llogcross::Vector{Float64} = [Llogprime[i] + Llogprime[j] for i=1:size(Llogprime,1)-1 for j=i+1:size(Llogprime,1)]
-    Lsigncross::Vector{Float64} = [Lsignprime[i] * Lsignprime[j] for i=1:size(Lsignprime,1)-1 for j=i+1:size(Lsignprime,1)]
-    Llogtemp::Vector{Float64} = vcat(Llogprime...,Llogcross...)
-    Lsigntemp::Vector{Float64} = vcat(Lsignprime...,Lsigncross...)
-    Ltemp::Vector{ArbFloat} = ArbFloat.(Lsigntemp) .* ArbFloat(10.) .^ ArbFloat.(Llogtemp)
-    return Ltemp
-end
+"""
+    pseudo_L(h11,tri,cy=1;log=true)
 
-function pseudo_Llog(h11::Int,tri::Int,cy::Int=1)
-    L1 = [1 1]
-    L2 = vcat([[1 -(4*(j-1))] for j=2:h11+4]...)
-    L3 = vcat([[sign(rand(Uniform(-100. *h11,100. *h11))) -(4*(j-1))+log10(abs(rand(Uniform(-100. *h11,100. *h11))))]
+Randomly generates a h11+4+C(h11+4,2)-length hierarchical list of instanton scales, similar to those found in the KS Axiverse.  Option for (sign,log10) or full precision.
+#Examples
+```julia-repl
+julia> CYAxiverse.generate.pseudo_L(4,10)
+36×2 Matrix{Float64}:
+  1.0     0.0
+  1.0    -4.0
+  1.0    -8.0
+  1.0   -12.0
+  1.0   -16.0
+  1.0   -20.0
+  1.0   -24.0
+  1.0   -28.0
+ -1.0   -29.4916
+  1.0   -33.8515
+  ⋮
+  1.0  -133.665
+ -1.0  -138.951
+
+julia> CYAxiverse.generate.pseudo_L(4,10,log=false)
+36-element Vector{ArbNumerics.ArbFloat}:
+  1.0
+  0.0001
+  1.0e-8
+  1.0e-12
+  1.0e-16
+  1.0e-20
+  1.0e-24
+  1.0e-28
+ -1.462574279422558833057690597964e-31
+ -2.381595397961591074099629406235e-34
+  ⋮
+  3.796809523142314798130344022481e-134
+ -3.173000613781491329619833894919e-138
+```
+"""
+function pseudo_L(h11::Int,tri::Int,cy::Int=1;log::Bool=true)
+    L1::Matrix{Float64} = [1. 0.]
+    L2::Matrix{Float64} = vcat([[1. -(4. *(j-1.))] for j=2.:h11+4.]...)
+    L3::Matrix{Float64} = vcat([[sign(rand(Uniform(-100. *h11,100. *h11))) -(4*(j-1))+log10(abs(rand(Uniform(-100. *h11,100. *h11))))]
      for j=h11+5:h11+4+binomial(h11+4,2)]...)
-    L4 = @.(log10(abs(L3)))
-    L = vcat(L1,L2,L3)
+    L4::Matrix{Float64} = @.(log10(abs(L3)))
+    L::Matrix{Float64} = vcat(L1,L2,L3)
     L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2])
-    return 
+    if log == 1
+        return L
+    else
+        Ltemp::Vector{ArbFloat} = ArbFloat.(L[:,1]) .* ArbFloat(10.) .^ ArbFloat.(L[:,2])
+        return Ltemp
+    end
 end
 
 ##############################
 #### Computing Spectra #######
 ##############################
 
+"""
+    gauss_sum(z)
+
+Computes the addition of 2 numbers in (natural) log-space using the definition [here](https://en.wikipedia.org/wiki/Gaussian_logarithm).
+#Examples
+```julia-repl
+julia> CYAxiverse.generate.gauss_sum(10.)
+10.000045398899218
+
+julia> CYAxiverse.generate.gauss_sum(1000.)
+1000.0
+```
+"""
+function gauss_sum(z::Float64)
+    log2 = log(2)
+    if abs(z)>600.
+        return 0.5*z +abs(0.5*z)
+    else
+        return log2 + 0.5*z + log(cosh(0.5*z))
+    end
+end
+"""
+    gauss_diff(z)
+
+Computes the difference of 2 numbers in (natural) log-space using the definition [here](https://en.wikipedia.org/wiki/Gaussian_logarithm).
+#Examples
+```julia-repl
+julia> CYAxiverse.generate.gauss_diff(10.)
+9.99995459903963
+
+julia> CYAxiverse.generate.gauss_diff(1000.)
+1000.0
+```
+"""
+function gauss_diff(z::Float64)
+    log2 = log(2)
+    if abs(z)>600.
+        return 0.5*z +abs(0.5*z)
+    else
+        return log2 + 0.5*z + log(abs(sinh(0.5*z)))
+    end
+end
+
+"""
+    gauss_log_split(sign, log)
+
+Algorithm to compute Gaussian logarithms, as detailed [here](https://en.wikipedia.org/wiki/Gaussian_logarithm).
+#Examples
+```julia-repl
+julia> CYAxiverse.generate.gauss_diff(10.)
+9.99995459903963
+
+julia> CYAxiverse.generate.gauss_diff(1000.)
+1000.0
+```
+"""
+function gauss_log_split(sb::Vector{Int},logb::Vector{Float64})
+    # loga = log(|A|); logb = log(|B|); sa = sign(A); sb = sign(B)
+    temp = hcat(sb,logb)
+    temp = temp[sortperm(temp[:,2]),:]
+    sb::Vector{Int} = temp[:,1]
+    logb::Vector{Float64} = temp[:,2]
+    i = 1
+    sa = sb[i]
+    loga = logb[i]
+    while i < size(sb,1)
+#         println(i)
+#         println([sa,sb[i+1],loga, logb[i+1]])
+        if (sa==0 && sb[i+1]==0) ## A == B == 0
+        elseif sa==0 ## A==0 --> B
+            sa = sb[i+1]
+            loga = logb[i+1]
+        elseif sb[i+1]==0 ## B==0 --> A
+        elseif (sa<0 && sb[i+1]>0) ## B-A
+            if loga<logb[i+1] ## |A|<|B|
+                sa = 1
+                loga = logb[i+1]+de(loga-logb[i+1])
+            elseif loga == logb[i+1]
+                sa = 0
+                loga = 0
+            else ## |A|>|B|
+                sa = -1
+                loga = logb[i+1]+de(loga-logb[i+1])
+            end
+        elseif (sa>0 && sb[i+1]<0) ## A-B
+            if loga>logb[i+1] ## |A|>|B|
+                sa =1
+                loga = loga+de(-loga+logb[i+1])
+            elseif loga == logb[i+1]
+                sa = 0
+                loga = 0
+            else ## |A|<|B|
+                sa = -1
+                loga = loga+de(-loga+logb[i+1])
+            end
+        elseif (sa<0 && sb[i+1]<0) ## -A-B
+            sa = -1
+            loga = loga+se(-loga+logb[i+1])
+        else ## A+B
+            sa = 1
+            loga = loga+se(-loga+logb[i+1])
+        end
+        i+=1
+    end
+    return Int(sa), Float64(loga)
+end
+
+function gauss_log(sb,logb)
+    if size(sb[sb .== 0.],1) == size(sb,1)
+        return 0,-Inf
+    elseif size(sb[sb .> 0.],1) == 0
+        test = -1
+#     elseif size(sb[sb .< 0.],1) == 0
+#         test = 1
+    else
+        test = 1
+    end
+    temp = hcat(sb,logb)
+    signed_mask::Vector{Bool} = temp[:,1] .== test
+    temp1 = temp[signed_mask,:]
+    temp1 = temp1[sortperm(temp1[:,2]),:]
+    sb::Vector{Int} = temp1[:,1]
+    logb::Vector{Float64} = temp1[:,2]
+    sa1::Int,loga1::Float64 = gauss_log_split(sb,logb)
+    if size(temp1,1) != size(temp,1)
+        signed_mask = Bool.(true .- signed_mask)
+        temp2 = temp[signed_mask,:]
+        temp2 = temp2[sortperm(temp2[:,2]),:]
+        sba::Vector{Int} = temp2[:,1]
+        logba::Vector{Float64} = temp2[:,2]
+        sa2::Int,loga2::Float64 = gauss_log_split(sba,logba)
+        sa3::Vector{Int} = vcat(sa1,sa2)
+        loga3::Vector{Float64} = vcat(loga1,loga2)
+        sa::Int,loga = gauss_log_split(sa3,loga3)
+        return Int(sa),Float64(loga)
+    else
+        return Int(sa1), Float64(loga1)
+    end
+end
+
+"""
+    hp_spectrum(K,L,Q; prec=5_000)
+
+Uses potential data generated by CYTools (or randomly generated) to compute axion spectra -- masses, quartic couplings and decay constants -- to high precision.
+#Examples
+```julia-repl
+julia> const_data = CYAxiverse.generate.constants()
+Dict{String, ArbNumerics.ArbFloat{128}} with 3 entries:
+  "MPlanck" => 2435000000000000000.0
+  "log2π"   => 0.7981798683581150521959557408991
+  "Hubble"  => 1.490999999999999999287243983194e-33
+```
+"""
 function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec=5_000)
-    @assert size(Q,2) == size(L,2) && size(Q,1) == size(K,1)
+    @assert size(Q,1) == size(L,1) && size(Q,2) == size(K,1)
     setprecision(ArbFloat,digits=prec)
     h11::Int = size(K,1)
     Lh::Vector{ArbFloat}, Qtest::Matrix{ArbFloat} = L[:,1] .* ArbFloat(10.) .^L[:,2], ArbFloat.(Q)
@@ -384,12 +631,19 @@ Dict{String, Any} with 3 entries:
 """
 function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
     h11::Int = size(Q,2)
-    if h11<=50
+    if h11 <= 50
         ###### Nemo SNF #####
         Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
         T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
         Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
         Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
+
+        ###### wildart SNF #####
+        # F = smith(Q)
+        # T::Matrix{Int} = F.S
+        # Tparallel::Matrix{Int} = round.(inv(T)[:,1:h11])
+        # println(size(T))
+        
         θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
     end
     LQtest::Matrix{Float64} = hcat(L,Q);
@@ -419,38 +673,41 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
     Ltilde = Ltilde[:,2:end]
     Lbar = Lbar[:,2:end]
     Ltilde_min::Float64 = minimum(Ltilde[2,:])
-    Ldiff_limit::Float64 = log10(0.5)
+    Ldiff_limit::Float64 = log10(0.01)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
-    α::Matrix{Float64} = round.(Qbar' * inv(Qtilde); digits=3)
+    α::Matrix{Float64} = round.(Qbar' * inv(Qtilde'))
     for i=1:size(α,1)
+        index=0
         for j=1:size(α,2)
             if α[i,j] != 0.
-                Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j]; digits=3)
-                if Ldiff > Ldiff_limit
-                    Qtilde = hcat(Qtilde,Qbar[:,i])
-                    Ltilde = hcat(Ltilde,Lbar[:,i])
-                    break
-                end
+                index = j
+            end
+        end
+        if index!=0
+            Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,index], digits=3)
+            if Ldiff > Ldiff_limit
+                Qtilde = hcat(Qtilde,Qbar[:,i])
+                Ltilde = hcat(Ltilde,Lbar[:,i]) 
             end
         end
     end
-    println(size(Qtilde))
     if h11 <= 50
         if size(Qtilde,1) == size(Qtilde,2)
             vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde)))))
         else
-            vacua = round(abs(det(θparalleltest) / (1/sqrt(det(Qtilde * Qtilde')))))
+            vacua = Int(round(abs(det(θparalleltest) / (1/sqrt(det(Qtilde * Qtilde'))))))
         end
         thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
         keys = ["vacua","θ∥","Qtilde"]
         vals = [abs(vacua), thparallel, Qtilde]
+        print_timer()
         return Dict(zip(keys,vals))
     else
         if size(Qtilde,1) == size(Qtilde,2)
             vacua = Int(round(abs(1 / det(inv(Qtilde)))))
         else
-            vacua = round(abs(sqrt(det(Qtilde * Qtilde'))))
+            vacua = Int(round(abs(sqrt(det(Qtilde * Qtilde')))))
         end
         
         keys = ["vacua","Qtilde"]
@@ -458,6 +715,7 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
         return Dict(zip(keys,vals))
     end
 end
+
 
 
 

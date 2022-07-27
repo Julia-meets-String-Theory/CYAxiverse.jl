@@ -14,7 +14,7 @@ using ..read: potential
 function vacua_profiler(L::Matrix{Float64},Q::Matrix{Int})
     reset_timer!()
     @timeit "h11" h11::Int = size(Q,2)
-    if h11<=50
+    if h11 < 50
         ###### Nemo SNF #####
         @timeit "Nemo matrix" Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
         @timeit "SNF" T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
@@ -59,26 +59,30 @@ function vacua_profiler(L::Matrix{Float64},Q::Matrix{Int})
     @timeit "Ltilde min" Ltilde_min::Float64 = minimum(Ltilde[2,:])
     println(Ltilde_min)
     @timeit "Ldiff limit" Ldiff_limit::Float64 = log10(0.01)
-    @timeit "Qbar reduce" Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min - Ldiff_limit)]
-    @timeit "Lbar reduce" Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min - Ldiff_limit)]
-    @timeit "alpha" α::Matrix{Float64} = round.(Qbar' * inv(Qtilde); digits=30)
-    println(size(Qbar), size(Lbar), size(α))
+    @timeit "Qbar reduce" Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
+    @timeit "Lbar reduce" Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
+    @timeit "alpha" α::Matrix{Float64} = round.(Qbar' * inv(Qtilde'))
+    println(size(Qbar), size(Lbar), size(α), Qbar[:,1], Lbar[1,2])
     # println(α)
+    # i=1
     for i=1:size(α,1)
+        index=0
         for j=1:size(α,2)
             if α[i,j] != 0.
-                Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j], digits=3)
-                if Ldiff > Ldiff_limit
-                    println([Lbar[2,i]; Ltilde[2,j]])
-                    @timeit "Qtilde 2nd pass" Qtilde = hcat(Qtilde,Qbar[:,i])
-                    @timeit "Ltilde 2nd pass" Ltilde = hcat(Ltilde,Lbar[:,i])
-                    break
-                end
+                index = j
+            end
+        end
+        if index!=0
+            Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,index], digits=3)
+            if Ldiff > Ldiff_limit
+                println([i index α[i,index] Ldiff Lbar[2,i] Ltilde[2,index]])
+                @timeit "Qtilde 2nd pass" Qtilde = hcat(Qtilde,Qbar[:,i])
+                @timeit "Ltilde 2nd pass" Ltilde = hcat(Ltilde,Lbar[:,i]) 
             end
         end
     end
     println(size(Qtilde))
-    if h11 <= 50
+    if h11 < 50
         if size(Qtilde,1) == size(Qtilde,2)
             @timeit "vacua square" vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde)))))
         else
