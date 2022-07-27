@@ -2,7 +2,7 @@
 # Pkg.instantiate()
 
 using Distributed
-using HDF5, ArbNumerics, Distributions, Optim, LineSearches
+using HDF5, ArbNumerics, Distributions, Optim, LineSearches, Random
 using MPIClusterManagers
 import MPI
 # MPI.initialize()
@@ -36,13 +36,13 @@ end
     algo_hz = Newton(alphaguess = LineSearches.InitialHagerZhang(α0=1.0), linesearch = LineSearches.HagerZhang())
     algo_LBFGS = LBFGS(linesearch = LineSearches.BackTracking())
     try
-        res = CYAxiverse.minimizer.minimizer_save(h11,tri,cy, Lfull, QV,x0,gradσ,vac_data["θ∥"],vac_data["Qtilde"],algo_LBFGS;prec=prec, run_num=run_num)
+        res = CYAxiverse.minimizer.minimize_save(h11,tri,cy, Lfull, QV,x0,gradσ,vac_data["θ∥"],vac_data["Qtilde"],algo_LBFGS;prec=prec, run_num=run_num)
         open(l, "a") do outf
-            write(outf,string("min-(",h11,",",tri,",",cy,")\n"))
+            write(outf,string("min-(",h11,",",tri,",",cy,",",run_num,")\n"))
         end
     catch e
         open(l, "a") do outf
-            write(outf,string(stacktrace(catch_backtrace()),"--(",h11,",",tri,",",cy,")\n"))
+            write(outf,string(stacktrace(catch_backtrace()),"--(",h11,",",tri,",",cy,",",run_num,")\n"))
         end
     end
 end
@@ -71,7 +71,7 @@ GC.gc()
 n=100#sample to minimize
 x0i = 50#number of optimizations per geometry
 split = round(Int,0.7*n)
-geomparams = hcat(vcat(sort(rand(10:40,split)),sort(rand(40:100,n-split))), rand(1:1000,n), ones(Int,n),)'
+geomparams = hcat(vcat(sort(rand(10:40,split)),sort(rand(40:100,n-split))), rand(1:100,n), ones(Int,n),)'
 geomparams = geomparams[:,sortperm(geomparams[1,:])]
 geomparams = [hcat([geomparams for _=1:x0i]...); vcat([ones(Int,n)*i for i=1:x0i]...)']
 geomparams = geomparams[:, shuffle(1:end)]
@@ -79,7 +79,7 @@ ntasks = size(geomparams,2)
 logfiles = [lfile for _=1:ntasks]
 
 @time h11list = CYAxiverse.filestructure.paths_cy()[2]
-CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.(jobid, "There are $ntasks random seeds to run on $n processors.\n"))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $np processors.\n")
 
 @time begin
     res = pmap(main,geomparams[1,:],geomparams[2,:],geomparams[3,:],logfiles,geomparams[4,:])

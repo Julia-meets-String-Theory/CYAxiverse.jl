@@ -87,7 +87,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
 end
 
 function minimize_save(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,θparalleltest::Matrix,Qtilde::Matrix,algo; prec::Int=5_000, run_num::Int=1)
-    min_data = minimiser(h11,tri,cy,LV,QV,x0,gradσ,θparalleltest,Qtilde,algo; prec)
+    min_data = minimize(h11,tri,cy,LV,QV,x0,gradσ,θparalleltest,Qtilde,algo, prec)
     if min_data == nothing
         return nothing
     else
