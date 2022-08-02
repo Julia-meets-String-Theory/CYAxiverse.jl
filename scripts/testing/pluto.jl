@@ -1,3 +1,3 @@
 using Pluto
 
-Pluto.run(port=8996)
+Pluto.run(host='0.0.0.0', port=8996)
