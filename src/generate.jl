@@ -673,10 +673,10 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
     Ltilde = Ltilde[:,2:end]
     Lbar = Lbar[:,2:end]
     Ltilde_min::Float64 = minimum(Ltilde[2,:])
-    Ldiff_limit::Float64 = log10(0.01)
+    Ldiff_limit::Float64 = log10(0.5)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
-    α::Matrix{Float64} = round.(Qbar' * inv(Qtilde'))
+    α::Matrix{Float64} = round.(Qbar' * inv(Qtilde');digits=5)
     for i=1:size(α,1)
         index=0
         for j=1:size(α,2)
@@ -694,9 +694,9 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
     end
     if h11 <= 50
         if size(Qtilde,1) == size(Qtilde,2)
-            vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde)))))
+            vacua = abs(det(θparalleltest) / det(inv(Qtilde)))
         else
-            vacua = Int(round(abs(det(θparalleltest) / (1/sqrt(det(Qtilde * Qtilde'))))))
+            vacua = abs(det(θparalleltest) / (1/sqrt(det(Qtilde * Qtilde'))))
         end
         thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
         keys = ["vacua","θ∥","Qtilde"]
@@ -704,9 +704,9 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
         return Dict(zip(keys,vals))
     else
         if size(Qtilde,1) == size(Qtilde,2)
-            vacua = Int(round(abs(1 / det(inv(Qtilde)))))
+            vacua = abs(1 / det(inv(Qtilde)))
         else
-            vacua = Int(round(abs(sqrt(det(Qtilde * Qtilde')))))
+            vacua = abs(sqrt(det(Qtilde * Qtilde')))
         end
         
         keys = ["vacua","Qtilde"]
@@ -714,10 +714,6 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
         return Dict(zip(keys,vals))
     end
 end
-
-
-
-
 
 function vacua_save(h11::Int,tri::Int,cy::Int=1)
     file_open::Bool = 0
@@ -732,6 +728,32 @@ function vacua_save(h11::Int,tri::Int,cy::Int=1)
         vacua_data = vacua(pot_data["L"],pot_data["Q"])
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua")
+            f3["vacua",deflate=9] = vacua_data["vacua"]
+            f3["Qtilde",deflate=9] = vacua_data["Qtilde"]
+            if h11 <=50
+                f3a = create_group(f3, "thparallel")
+                f3a["numerator",deflate=9] = numerator.(vacua_data["θ∥"])
+                f3a["denominator",deflate=9] = denominator.(vacua_data["θ∥"])
+            end
+        end
+    end
+end
+
+
+
+function vacua_save_TB(h11::Int,tri::Int,cy::Int=1)
+    file_open::Bool = 0
+    h5open(cyax_file(h11,tri,cy), "r") do file
+        if haskey(file, "vacua_TB")
+            file_open = 1
+            return nothing
+        end
+    end
+    if file_open == 0
+        pot_data = potential(h11,tri,cy)
+        vacua_data = vacua_TB(pot_data["L"],pot_data["Q"])
+        h5open(cyax_file(h11,tri,cy), "r+") do file
+            f3 = create_group(file, "vacua_TB")
             f3["vacua",deflate=9] = vacua_data["vacua"]
             f3["Qtilde",deflate=9] = vacua_data["Qtilde"]
             if h11 <=50

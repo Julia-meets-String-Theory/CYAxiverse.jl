@@ -88,7 +88,7 @@ end
 ##############################
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
-    vacua::Int = 0
+    vacua::Float64 = 0.
     θparallel_num::Matrix{Int} = zeros(Int,1,1)
     θparallel_den::Matrix{Int} = zeros(Int,1,1)
     Qtilde::Matrix{Int} = zeros(Int,1,1)
@@ -106,6 +106,29 @@ function vacua(h11::Int,tri::Int,cy::Int=1)
         end
         keys = ["vacua","θ∥","Qtilde"]
         vals = [abs(vacua), Rational.(round.(θparallel; digits=8)), Qtilde]
+        return Dict(zip(keys,vals))
+    end
+end
+
+function vacua_TB(h11::Int,tri::Int,cy::Int=1)
+    vacua::Float64 = 0
+    θparallel_num::Matrix{Int} = zeros(Int,1,1)
+    θparallel_den::Matrix{Int} = zeros(Int,1,1)
+    Qtilde::Matrix{Int} = zeros(Int,1,1)
+    θparallel::Matrix{Float32} = zeros(Float32,1,1)
+    if h11 <= 50
+        vacua, θparallel_num, θparallel_den, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
+            HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/thparallel/numerator"),HDF5.read(file, "vacua_TB/thparallel/denominator"),HDF5.read(file, "vacua_TB/Qtilde")
+        end
+        keys = ["vacua","θ∥","Qtilde"]
+        vals = [abs(vacua), θparallel_num .// θparallel_den, Qtilde]
+        return Dict(zip(keys,vals))
+    else
+        vacua, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
+            HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/Qtilde")
+        end
+        keys = ["vacua","Qtilde"]
+        vals = [abs(vacua), Qtilde]
         return Dict(zip(keys,vals))
     end
 end

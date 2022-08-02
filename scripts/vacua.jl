@@ -21,7 +21,7 @@ end
 
 @everywhere function main_vac(h11,tri,cy,l)
     try
-        test = CYAxiverse.generate.vacua_save(h11,tri,cy);
+        test = CYAxiverse.generate.vacua_save_TB(h11,tri,cy);
     catch e
         open(l, "a") do outf
             write(outf,string(stacktrace(catch_backtrace()),"--(",h11,",",tri,",",cy,")\n"))
