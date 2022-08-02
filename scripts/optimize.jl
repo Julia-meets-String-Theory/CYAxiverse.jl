@@ -67,7 +67,7 @@ GC.gc()
 ##############################
 ############ Main ############
 ##############################
-
+Random.seed!(1234567890)
 n=100#sample to minimize
 x0i = 50#number of optimizations per geometry
 split = round(Int,0.7*n)
