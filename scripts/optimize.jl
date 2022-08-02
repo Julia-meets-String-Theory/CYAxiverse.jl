@@ -19,6 +19,11 @@ end
 @everywhere using CYAxiverse
 
 @everywhere function main(h11::Int,tri::Int,cy::Int,l::String,run_num::Int=1)
+    if run_num == 1
+        if isfile(CYAxiverse.filestructure.minfile(h11,tri,cy))
+            rm(CYAxiverse.filestructure.minfile(h11,tri,cy))
+        end
+    end
     prec = 1_000
     pot_data = CYAxiverse.read.potential(h11,tri,cy)
     QV::Matrix, LV::Matrix{Float64} = ArbFloat.(pot_data["Q"]), pot_data["L"]
