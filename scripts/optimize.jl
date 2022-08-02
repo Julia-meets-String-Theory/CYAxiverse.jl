@@ -24,7 +24,7 @@ end
     QV::Matrix, LV::Matrix{Float64} = ArbFloat.(pot_data["Q"]), pot_data["L"]
     Lfull::Vector{ArbFloat} = ArbFloat.(LV[:,1]) .* ArbFloat(10.) .^ ArbFloat.(LV[:,2])
     gradσ = CYAxiverse.minimizer.grad_std(h11,tri,cy,Lfull,QV)
-    h5open(CYAxiverse.filestructure.minfile(h11,tri,cy),isfile(CYAxiverse.filestructure.minfile(h11,tri,cy)) ? "r+" : "cw") do file
+    h5open(CYAxiverse.filestructure.minfile(h11,tri,cy),isfile(CYAxiverse.filestructure.minfile(h11,tri,cy)) ? "r+" : "w") do file
         if haskey(file, "gradσ")
         else
             f0 = create_group(file, "gradσ")
@@ -36,7 +36,7 @@ end
     algo_hz = Newton(alphaguess = LineSearches.InitialHagerZhang(α0=1.0), linesearch = LineSearches.HagerZhang())
     algo_LBFGS = LBFGS(linesearch = LineSearches.BackTracking())
     try
-        res = CYAxiverse.minimizer.minimize_save(h11,tri,cy, Lfull, QV,x0,gradσ,vac_data["θ∥"],vac_data["Qtilde"],algo_LBFGS;prec=prec, run_num=run_num)
+        res = CYAxiverse.minimizer.minimize_save(h11,tri,cy, Lfull, QV,x0,gradσ,vac_data["θ∥"],vac_data["Qtilde"],algo_LBFGS; prec=prec, run_num=run_num)
         open(l, "a") do outf
             write(outf,string("min-(",h11,",",tri,",",cy,",",run_num,")\n"))
         end
@@ -74,12 +74,15 @@ split = round(Int,0.7*n)
 geomparams = hcat(vcat(sort(rand(10:40,split)),sort(rand(40:100,n-split))), rand(1:100,n), ones(Int,n),)'
 geomparams = geomparams[:,sortperm(geomparams[1,:])]
 geomparams = [hcat([geomparams for _=1:x0i]...); vcat([ones(Int,n)*i for i=1:x0i]...)']
-geomparams = geomparams[:, shuffle(1:end)]
+# geomparams = geomparams[:, shuffle(1:end)]
+geomparams = geomparams[:, sortperm(geomparams[2,:])]
+geomparams = geomparams[:, sortperm(geomparams[1,:])]
 ntasks = size(geomparams,2)
+size_procs = size(np)
 logfiles = [lfile for _=1:ntasks]
 
 @time h11list = CYAxiverse.filestructure.paths_cy()[2]
-CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $np processors.\n")
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
 
 @time begin
     res = pmap(main,geomparams[1,:],geomparams[2,:],geomparams[3,:],logfiles,geomparams[4,:])
