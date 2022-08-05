@@ -411,7 +411,26 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
 #     GC.gc()
 end
 
-
+function hp_spectrum(h11::Int,tri::Int,cy::Int=1; prec=5_000)
+    pot_data = potential(h11,tri,cy);
+    L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
+    LQtest = hcat(L,Q);
+    Lfull::Vector{Float64} = LQtest[:,2]
+    LQsorted = LQtest[sortperm(Lfull, rev=true), :]
+    Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
+    Qtilde = Qsorted_test[1,:]
+    Ltilde = Lsorted_test[1,:]
+    for i=2:size(Qsorted_test,1)
+        S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
+        m = S(hcat(Qtilde,Qsorted_test[i,:]))
+        (d,bmat) = Nemo.nullspace(m)
+        if d == 0
+            Qtilde = hcat(Qtilde,Qsorted_test[i,:])
+            Ltilde = hcat(Ltilde,Lsorted_test[i,:])
+        end
+    end
+    spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
+end
 function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
         pot_data = potential(h11,tri,cy);
@@ -431,8 +450,8 @@ function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
                 Ltilde = hcat(Ltilde,Lsorted_test[i,:])
             end
         end
-        spectrum_data = hp_spectrum(h11,K,Ltilde,Qtilde)
-        h5open(cyax_file(h11,tri,1), "r+") do file
+        spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
+        h5open(cyax_file(h11,tri,cy), "r+") do file
             f2 = create_group(file, "spectrum")
             f2a = create_group(f2, "quartdiag")
             f2a["log10",deflate=9] = spectrum_data["λself"]
@@ -514,6 +533,12 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     keys = ["m", "fK", "fpert"]
 
     return Dict(zip(keys,vals))
+end
+
+function pq_spectrum(h11::Int,tri::Int,cy::Int)
+    pot_data = potential(h11,tri,cy)
+    K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
+    pq_spectrum(K, L, Q)
 end
 
 function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
@@ -630,6 +655,7 @@ Dict{String, Any} with 3 entries:
 ```
 """
 function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
+    
     h11::Int = size(Q,2)
     if h11 <= 50
         ###### Nemo SNF #####
@@ -714,6 +740,32 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
         return Dict(zip(keys,vals))
     end
 end
+
+"""
+    vacua_TB(h11,tri,cy)
+
+Compute the number of vacua given a geometry from the KS database.
+
+For small systems (Nax<=50) the algorithm computes the ratio of volumes of the fundamental domain of the leading potential and the full potential.
+
+For larger systems, the algorithm only computes the volume of the fundamental domain of the leading potential.
+#Examples
+```julia-repl
+julia> using CYAxiverse
+julia> h11,tri,cy = 10,20,1;
+julia> vacua_data = CYAxiverse.generate.vacua_TB(h11,tri,cy)
+Dict{String, Any} with 3 entries:
+  "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
+  "vacua"  => 11552.0
+  "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
+```
+"""
+function vacua_TB(h11::Int,tri::Int,cy::Int)
+    pot_data = potential(h11,tri,cy)
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    vacua_TB(L,Q)
+end
+
 
 function vacua_save(h11::Int,tri::Int,cy::Int=1)
     file_open::Bool = 0
