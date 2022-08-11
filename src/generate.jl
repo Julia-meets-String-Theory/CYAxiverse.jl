@@ -399,12 +399,12 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     end
     qindqdiag::Vector{Vector{Int64}} = [[x,x,x,x]::Vector{Int64} for x=1:h11]
     
-    fpert::Vector{Float64} = @.(Hvals+log10(constants()[1])- (0.5*quartdiaglog*log10(exp(1))))
+    fpert::Vector{Float64} = @.(Hvals+log10(constants()["MPlanck"])- (0.5*quartdiaglog*log10(exp(1))))
     
-    vals =  Hsign, Hvals .+ Float64(log10(constants()[1])) .+9 .+ Float64(constants()[end]), 
-    fK .+ Float64(log10(constants()[1])) .- Float64(constants()[end]), fpert .- Float64(constants()[end]), quartdiagsign, quartdiaglog .*log10(exp(1)) .+ 4*Float64(constants()[end]), Array(hcat(qindq31...) .-1), quart31sign, 
-    quart31log .*log10(exp(1)) .+ 4*Float64(constants()[end]), quart22sign, 
-    quart22log .*log10(exp(1)) .+ 4*Float64(constants()[end]), Array(hcat(qindq22...) .-1)
+    vals =  Hsign, Hvals .+ Float64(log10(constants()["MPlanck"])) .+9 .+ Float64(constants()["log2π"]), 
+    fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]), fpert .- Float64(constants()["log2π"]), quartdiagsign, quartdiaglog .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), Array(hcat(qindq31...) .-1), quart31sign, 
+    quart31log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), quart22sign, 
+    quart22log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), Array(hcat(qindq22...) .-1)
 
     keys = ["msign","m", "fK", "fpert","λselfsign", "λself","λ31_i","λ31sign","λ31", "λ22_i","λ22sign","λ22"]
     return Dict(zip(keys,vals))
@@ -528,8 +528,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         LinearAlgebra.mul!(QKs1,QKs, T)
         QKs = copy(QKs1)
     end
-    vals = [mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()[1])), fK .+ Float64(log10(constants()[1])) .- Float64(constants()[end]),
-    0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()[1]))]
+    vals = [mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"]))]
     keys = ["m", "fK", "fpert"]
 
     return Dict(zip(keys,vals))
