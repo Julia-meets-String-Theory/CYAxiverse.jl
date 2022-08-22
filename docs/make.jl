@@ -14,5 +14,7 @@ makedocs(
 # Documenter can also automatically deploy documentation to gh-pages.
 # See "Hosting Documentation" and deploydocs() in the Documenter manual
 # for more information.
-deploydocs(
+deploydocs(;    
+    branch = "gh-pages",
+    latest = "dev",
     repo = "github.com/vmmhep/CYAxiverse.jl.git")
