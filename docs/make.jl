@@ -7,7 +7,7 @@ makedocs(
     authors = "Viraf M. Mehta",
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical = "https://vmmhep.github.io/CYAxiverse.jl/stable/")
+        canonical = "https://vmmhep.github.io/CYAxiverse.jl/stable/"),
     modules = [CYAxiverse]
 )
 
