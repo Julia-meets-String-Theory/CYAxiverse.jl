@@ -6,7 +6,6 @@ using ArbNumerics, Tullio, LoopVectorization, Nemo
 using GenericLinearAlgebra
 using Distributions
 using TimerOutputs
-using SmithNormalForm
 
 using ..filestructure: cyax_file, minfile, present_dir
 using ..read: potential
