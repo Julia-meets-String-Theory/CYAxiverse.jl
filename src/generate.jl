@@ -257,10 +257,10 @@ function gauss_log_split(sb::Vector{Int},logb::Vector{Float64})
             end
         elseif (sa<0 && sb[i+1]<0) ## -A-B
             sa = -1
-            loga = loga+gauss_sum(-loga+logb[i+1])
+            loga = loga + gauss_sum(-loga+logb[i+1])
         else ## A+B
             sa = 1
-            loga = loga+gauss_sum(-loga+logb[i+1])
+            loga = loga + gauss_sum(-loga+logb[i+1])
         end
         i+=1
     end
