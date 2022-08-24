@@ -170,14 +170,22 @@ function geometries(h11,cy,tri,cy_i=1)
         #Divisor basis for saving (allows for reproducibility)
         basis = cy.divisor_basis()
         #Find tip of SKC
-        tip = cy.toric_kahler_cone().tip_of_stretched_cone(1)
+        n,m = 1,0
+        tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
+        #PTD volumes at tip
+        tau = cy.compute_divisor_volumes(tip)
+        while minimum(tau) < 1.
+            n=round(1. / minimum(tau)) + m
+            tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
+            #PTD volumes at tip
+            tau = cy.compute_divisor_volumes(tip)
+            m+=0.5
+        end
         #Volume of CY3 at tip
         V = cy.compute_cy_volume(tip)
         #Kinv at tip -- save this or save K?
         Kinv = cy.compute_Kinv(tip)
         Kinv = Hermitian(1/2 * Kinv + Kinv')
-        #PTD volumes at tip
-        tau = cy.compute_divisor_volumes(tip)
         #Generate list of Q matrices -- only $h11+4 directions
         qprime = cy.toric_effective_cone().rays()
         q = zeros(Int,h11+4+binomial(h11+4,2),h11)
