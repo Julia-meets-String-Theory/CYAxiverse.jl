@@ -13,6 +13,7 @@
 module cytools_wrapper
 
 using ..filestructure: cyax_file, present_dir
+using ..read: topology
 
 using PyCall
 using HDF5
@@ -145,8 +146,37 @@ function topologies(h11,n)
     h11list = hcat(h11list_temp...)
     GC.gc()
     return h11list
-    
-
+end
+function cy_from_poly(h11)
+    h11list_temp = []
+    h11zero = lpad(h11,3,"0")
+    np_pathinds = Vector{Int}[]
+    for i in first(walkdir(present_dir()))[2]
+        if occursin(r"h11_$h11zero", i)
+            for j in first(walkdir(joinpath(present_dir(),i)))[2]
+                if occursin(r"np_*", j)
+                    for k in first(walkdir(joinpath(present_dir(),i,j)))[2]
+                        if occursin(r"cy_*", k)
+                            push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
+                        end
+                    end
+                end
+            end
+        end
+    end
+    h11list_inds = hcat(np_pathinds...)
+    for i=1:size(h11list_inds,2)
+        h11,tri,cy_i = h11list_inds[:,i]
+        top_data = topology(h11,tri,cy_i)
+        points, simplices = top_data["points"], top_data["simplices"]
+        p = poly(points)
+        t = p.triangulate(simplices=simplices)
+        cy = t.get_cy()
+        push!(h11list_temp,[h11,cy,tri,cy_i])
+    end
+    h11list = hcat(h11list_temp...)
+    GC.gc()
+    return h11list
 end
 
 function geometries(h11,cy,tri,cy_i=1)

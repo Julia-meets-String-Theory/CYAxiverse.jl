@@ -18,13 +18,21 @@ CYAxiverse.filestructure.logcreate(lfile)
 
 @everywhere function main_top(h11,n,l)
     try
-        test = CYAxiverse.cytools_wrapper.topologies(h11,n);
+        test = CYAxiverse.cytools_wrapper.cy_from_poly(h11);
         return test
-    catch e
+    catch e 
         open(l, "a") do outf
             write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
         end
-        return [0,0,0,0]
+        try
+            test = CYAxiverse.cytools_wrapper.topologies(h11,n);
+            return test
+        catch e
+            open(l, "a") do outf
+                write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
+            end
+            return [0,0,0,0]
+        end
     finally
         open(l, "a") do outf
             write(outf,string("top-(",h11,")\n"))
