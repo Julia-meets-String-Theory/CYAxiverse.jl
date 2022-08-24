@@ -231,4 +231,9 @@ function grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
     return ArbFloat.(std(grad_all, dims=2))
 end
 
+function grad_std(h11::Int, tri::Int, cy::Int)
+    pot_data = potential(h11,tri,cy)
+    QV::Matrix, LV::Matrix{Float64} = ArbFloat.(pot_data["Q"]), pot_data["L"]
+    Lfull::Vector{ArbFloat} = ArbFloat.(LV[:,1]) .* ArbFloat(10.) .^ ArbFloat.(LV[:,2])
+    grad_std(h11,tri,cy,Lfull,QV)
 end
