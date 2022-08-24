@@ -122,7 +122,6 @@ Saves in h5 file paths_cy.h5
 function np_path()
     np_paths = Vector{UInt8}[]
     np_pathinds = Vector{Int}[]
-    nptest = 0
     for i in first(walkdir(present_dir()))[2]
         if occursin(r"h11_*", i)
             for j in first(walkdir(joinpath(present_dir(),i)))[2]
