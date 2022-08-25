@@ -1,3 +1,8 @@
+"""
+    CYAxiverse.read
+Functions that access the database.
+
+"""
 module read
 using HDF5
 using LinearAlgebra

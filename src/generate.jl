@@ -1,3 +1,8 @@
+"""
+    CYAxiverse.generate
+This is where most of the functions are defined.
+
+"""
 module generate
 
 using HDF5

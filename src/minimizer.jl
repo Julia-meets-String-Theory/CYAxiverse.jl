@@ -1,3 +1,8 @@
+"""
+    CYAxiverse.minimizer
+Some minimization / optimization routines to find vacua and other such explorations.
+
+"""
 module minimizer
 
 using HDF5

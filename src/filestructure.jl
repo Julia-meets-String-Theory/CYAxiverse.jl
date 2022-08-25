@@ -1,3 +1,8 @@
+"""
+    CYAxiverse.filestructure
+This module sets up the structure of the database, identifying where to locate data / plot files etc
+
+"""
 module filestructure
 #######################
 ### Test functions ####

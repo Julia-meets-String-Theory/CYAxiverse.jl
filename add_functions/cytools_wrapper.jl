@@ -9,7 +9,11 @@
 ##### !! now the package should recompile !! ################################
 #############################################################################
 
+"""
+    CYAxiverse.cytools_wrapper
+Functions that wrap basic functionality of [CYTools](https://cytools.liammcallistergroup.com/) in order to pull polytopes from the [Kreuzer-Skarke Database](https://doi.org/10.4310/ATMP.2000.v4.n6.a2)
 
+"""
 module cytools_wrapper
 
 using ..filestructure: cyax_file, present_dir
