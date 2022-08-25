@@ -8,6 +8,7 @@ CurrentModule = CYAxiverse
 CYAxiverse.filestructure
 CYAxiverse.generate
 CYAxiverse.minimizer
+CYAxiverse.read
 ```
 ## Functions
 ```@autodocs
