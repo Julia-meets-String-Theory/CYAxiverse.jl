@@ -575,9 +575,13 @@ Base.convert(::Type{Matrix}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
 
 
 """
-    vacua(L,Q)
+    vacua(L,Q; threshold)
 
-Compute the number of vacua given an instanton charge matrix `Q` and 2-column matrix of instanton scales `L` (in the form [sign; exponent])
+Compute the number of vacua given an instanton charge matrix `Q` and 2-column matrix of instanton scales `L` (in the form [sign; exponent]) and a threshold for:
+
+``\\frac{\\Lambda_a}{|\\Lambda_j|}``
+
+_i.e._ is the instanton contribution large enough to affect the minima.
 
 For small systems (Nax<=50) the algorithm computes the ratio of volumes of the fundamental domain of the leading potential and the full potential.
 
@@ -594,32 +598,16 @@ Dict{String, Any} with 3 entries:
   "Qtilde" => [0 0 … 1 0; 0 0 … 0 0; … ; 1 1 … 0 0; 0 0 … 0 0]
 ```
 """
-function vacua(L::Matrix{Float64},Q::Matrix{Int})
+function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     h11::Int = size(Q,2)
-    if h11<=50
-        T::Nemo.fmpz_mat = snf_with_transform(matrix(Nemo.ZZ,Q))[2]
-        # println(size(T))
-        Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
-        Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
-        θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
+    if h11 <= 50
+        snf_data = vacua_SNF(Q)
+        Tparallel::Matrix{Int} = snf_data["T∥"]
+        θparalleltest::Matrix{Float64} = snf_data["θ∥"]
     end
-    LQtest::Matrix{Float64} = hcat(L,Float64.(Q))
-    LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
-    Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
-    S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
-    m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
-    d::Int = 1
-    for i=2:size(Qsorted_test,1)
-        S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
-        m = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
-        d = Nemo.nullspace(m)[1]
-        if d == 0
-            Qtilde = hcat(Qtilde,Qsorted_test[i,:])
-        end
-    end
-    Qtilde = Qtilde[:,2:end]
-
+    data = LQtildebar(L,Q; threshold=threshold)
+    Qtilde = data["Qtilde"]
+    
     if h11 <= 50
         vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde)))))
         thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
@@ -759,7 +747,7 @@ Dict{String, Any} with 3 entries:
   "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
 ```
 """
-function vacua_TB(L::Matrix{Float64},Q::Matrix{Int})
+function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     
     h11::Int = size(Q,2)
     if h11 <= 50
@@ -815,14 +803,14 @@ Dict{String, Any} with 3 entries:
   "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
 ```
 """
-function vacua_TB(h11::Int,tri::Int,cy::Int)
+function vacua_TB(h11::Int,tri::Int,cy::Int; threshold=0.5)
     pot_data = potential(h11,tri,cy)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
-    vacua_TB(L,Q)
+    vacua_TB(L, Q; threshold=threshold)
 end
 
 
-function vacua_save(h11::Int,tri::Int,cy::Int=1)
+function vacua_save(h11::Int,tri::Int,cy::Int=1; threshold=0.5)
     file_open::Bool = 0
     h5open(cyax_file(h11,tri,cy), "r") do file
         if haskey(file, "vacua")
@@ -832,7 +820,7 @@ function vacua_save(h11::Int,tri::Int,cy::Int=1)
     end
     if file_open == 0
         pot_data = potential(h11,tri,cy)
-        vacua_data = vacua(pot_data["L"],pot_data["Q"])
+        vacua_data = vacua(pot_data["L"],pot_data["Q"]; threshold=threshold)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua")
             f3["vacua",deflate=9] = vacua_data["vacua"]
@@ -848,7 +836,7 @@ end
 
 
 
-function vacua_save_TB(h11::Int,tri::Int,cy::Int=1)
+function vacua_save_TB(h11::Int,tri::Int,cy::Int=1; threshold=0.5)
     file_open::Bool = 0
     h5open(cyax_file(h11,tri,cy), "r") do file
         if haskey(file, "vacua_TB")
@@ -858,7 +846,7 @@ function vacua_save_TB(h11::Int,tri::Int,cy::Int=1)
     end
     if file_open == 0
         pot_data = potential(h11,tri,cy)
-        vacua_data = vacua_TB(pot_data["L"],pot_data["Q"])
+        vacua_data = vacua_TB(pot_data["L"],pot_data["Q"]; threshold=threshold)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua_TB")
             f3["vacua",deflate=9] = vacua_data["vacua"]
