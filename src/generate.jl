@@ -727,6 +727,7 @@ function vacua_JLM(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
 end
 
 function vacua_SNF(Q::Matrix{Int})
+    h11::Int = size(Q,2)
     ###### Nemo SNF #####
     Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
     T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
