@@ -639,9 +639,9 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
         if d == 0
             Qtilde = hcat(Qtilde,Qsorted_test[i,:])
             Ltilde = hcat(Ltilde,Lsorted_test[i,:])
-    else
-        Qbar = hcat(Qbar,Qsorted_test[i,:])
-        Lbar = hcat(Lbar,Lsorted_test[i,:])
+        else
+            Qbar = hcat(Qbar,Qsorted_test[i,:])
+            Lbar = hcat(Lbar,Lsorted_test[i,:])
         end
     end
     Qtilde = Qtilde[:,2:end]
@@ -652,7 +652,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
-    α::Matrix{Float64} = inv(Qtilde) * Qbar
+    α::Matrix{Float64} = Qbar' * inv(Qtilde') ##Is this the same as JLM's?
     for i=1:size(α,1)
         index=0
         for j=1:size(α,2)
@@ -671,7 +671,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
         end
     end
     keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
-    vals = [Qtilde', Qbar', Ltilde, Lbar, α']
+    vals = [Qtilde, Qbar, Ltilde, Lbar, α]
     return Dict(zip(keys,vals))
 end
 
