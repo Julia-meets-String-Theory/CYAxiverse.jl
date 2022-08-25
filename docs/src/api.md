@@ -9,6 +9,6 @@ CYAxiverse
 ```
 ## Functions
 ```@autodocs
-Modules = [CYAxiverse]
+Modules = [CYAxiverse.filestructure, CYAxiverse.generate, CYAxiverse.minimizer, CYAxiverse.read, CYAxiverse.cytools_wrapper]
 Pages = ["filestructure.jl", "generate.jl", "minimizer.jl", "read.jl", "../add_functions/cytools_wrapper.jl"]
 ```
