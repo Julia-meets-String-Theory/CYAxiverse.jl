@@ -10,16 +10,12 @@ module filestructure
 using HDF5
 using Dates
 
-function greet_CYAxiverse()
-    println("Hello CYAxiverse")
-end
-
 ###############################
 ### Initialising functions ####
 ###############################
 """
     localARGS()
-Load key for data dir
+Load key for data dir -- key should be in ol_DB
 """
 function localARGS()
     if haskey(ENV,"newARGS")
@@ -122,8 +118,8 @@ end
 
 """
     np_path()
-Walks through data_dir() and returns list of data paths and matrix of [h11; tri; cy].
-Saves in h5 file paths_cy.h5
+Walks through `data_dir()` and returns list of data paths and matrix of `[h11; tri; cy]`.
+Saves in h5 file `paths_cy.h5`
 """
 function np_path()
     np_paths = Vector{UInt8}[]
@@ -152,7 +148,10 @@ function np_path()
     end
     return hcat(np_paths...), hcat(np_pathinds...)
 end
-
+"""
+    paths_cy()
+Loads / generates `paths_cy.h5` which contains the explicit locations and also `[h11; tri; cy]` indices of the geometries already saved.
+"""
 function paths_cy()
     if isfile(joinpath(data_dir(),"paths.h5")) || isfile(joinpath(data_dir(),"paths_cy.h5"))
     else
@@ -175,14 +174,20 @@ end
 #######################
 ### Misc functions ####
 #######################
-
+"""
+    h11lst(min,max)
+Loads geometry indices between ``h^{1,1} \\in (\\mathrm{min},\\mathrm{max}]``
+"""
 function h11lst(h11min=0,h11max=100)
     pathinds_cy = paths_cy()[2]
     h11list = pathinds_cy[:,h11min .< pathinds_cy[1,:].<= h11max]
     return h11list
 end
 
-
+"""
+    geom_dir(h11,tri,cy)
+Defines file directories for data specified by geometry index.
+"""
 function geom_dir(h11,tri,cy=1)
     if localARGS()!=string("inKC")
         if localARGS()==string("home_Large")||localARGS()==string("KV1")
@@ -218,7 +223,12 @@ end
 ###################################
 ### Geometric Data Files (old) ####
 ###################################
-
+"""
+    Kfile(h11,tri,cy)
+Loads Kähler metric specified by geometry index.
+!!! warning
+    Deprecated
+"""
 function Kfile(h11,tri, cy=1)
     if localARGS()!=string("inKC")
         if localARGS()==string("home_Large")||localARGS()==string("KV1")
@@ -234,7 +244,12 @@ function Kfile(h11,tri, cy=1)
         string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/K.hdf5")
     end
 end
-
+"""
+    Qfile(h11,tri,cy)
+Loads instanton charge matrix specified by geometry index.
+!!! warning
+    Deprecated
+"""
 function Qfile(h11,tri, cy=1)
     if localARGS()!=string("inKC") 
         if localARGS()==string("home_Large")||localARGS()==string("KV1")
@@ -250,7 +265,12 @@ function Qfile(h11,tri, cy=1)
         string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/Q.hdf5")
     end
 end
-
+"""
+    Lfile(h11,tri,cy)
+Loads instanton energy scales specified by geometry index.
+!!! warning
+    Deprecated
+"""
 function Lfile(h11,tri, cy=1)
     if localARGS()!=string("inKC") 
         if localARGS()==string("home_Large")||localARGS()==string("KV1")
@@ -270,11 +290,17 @@ end
 ###################
 ### Data Files ####
 ###################
-
+"""
+    cyax_file(h11,tri,cy)
+Path to data file -- will contain all data that relates to geometry index.
+"""
 function cyax_file(h11,tri, cy=1)
     return string(geom_dir(h11,tri,cy),"/cyax.h5")
 end
-
+"""
+    minfile(h11,tri,cy)
+Path to file containing minimization data.
+"""
 function minfile(h11,tri, cy=1)
     return string(geom_dir(h11,tri,cy),"/minima.h5")
 end
