@@ -5,7 +5,10 @@ CurrentModule = CYAxiverse
 ```
 ## Module
 ```@docs
-CYAxiverse
+CYAxiverse.filestructure
+CYAxiverse.generate
+CYAxiverse.minimizer
+CYAxiverse.cytools_wrapper
 ```
 ## Functions
 ```@autodocs
