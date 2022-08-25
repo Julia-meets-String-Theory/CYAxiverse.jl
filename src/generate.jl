@@ -652,7 +652,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
-    α::Matrix{Float64} = Qbar' * inv(Qtilde') ##Is this the same as JLM's?
+    α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's?
     for i=1:size(α,1)
         index=0
         for j=1:size(α,2)
@@ -671,8 +671,14 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
         end
     end
     keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
-    vals = [Qtilde, Qbar, Ltilde, Lbar, α]
+    vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, Int.(round.(α))]
     return Dict(zip(keys,vals))
+end
+
+function LQtildebar(h11::Int, tri::Int, cy::Int; threshold=0.5)
+    pot_data = potential(h11,tri,cy)
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    return LQtildebar(L, Q; threshold=threshold)
 end
 
 """
@@ -702,14 +708,14 @@ function vacua_JLM(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Qbar = data["Qbar"]
     Ltilde = data["Ltilde"]
     Lbar = data["Lbar"]
-    α = data["α"]
+    α = data["α"]'
     α = hcat([α[:,i] for i=1:size(α,2) if size(α[:,i][α[:,i] .== 0],1)<(size(α,1)-1)]...)
     if size(Qtilde,1) == size(Qtilde,2)
         keys = ["vacua","Qtilde"]
         vals = [1, Qtilde]
         return Dict(zip(keys,vals))
     else
-        Qeff = vcat(I(h11), α[h11+1:end,:])
+        Qeff = vcat(I(size(α,1)), α[:,h11+1:end])
     end
     
 end
