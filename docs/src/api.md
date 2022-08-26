@@ -3,15 +3,48 @@
 ```@meta
 CurrentModule = CYAxiverse
 ```
-## Module
+## `CYAxiverse.filestructure`
 ```@docs
 CYAxiverse.filestructure
+```
+
+```@autodocs
+Modules = [CYAxiverse.filestructure]
+Pages = ["filestructure.jl"]
+```
+## `CYAxiverse.generate`
+```@docs
 CYAxiverse.generate
+```
+
+```@autodocs
+Modules = [CYAxiverse.generate]
+Pages = ["generate.jl"]
+```
+## `CYAxiverse.filestructure`
+```@docs
 CYAxiverse.minimizer
+```
+
+```@autodocs
+Modules = [CYAxiverse.minimizer]
+Pages = ["minimizer.jl"]
+```
+## `CYAxiverse.read`
+```@docs
 CYAxiverse.read
 ```
-## Functions
+
 ```@autodocs
-Modules = [CYAxiverse.filestructure, CYAxiverse.generate, CYAxiverse.minimizer, CYAxiverse.read]
-Pages = ["filestructure.jl", "generate.jl", "minimizer.jl", "read.jl", "../add_functions/cytools_wrapper.jl"]
+Modules = [CYAxiverse.read]
+Pages = ["read.jl"]
+```
+## `CYAxiverse.cytools_wrapper`
+```@docs
+../add_functions/CYAxiverse.cytools_wrapper
+```
+
+```@autodocs
+Modules = [CYAxiverse.cytools_wrapper]
+Pages = ["../add_functions/cytools_wrapper.jl"]
 ```
