@@ -21,7 +21,7 @@ CYAxiverse.generate
 Modules = [CYAxiverse.generate]
 Pages = ["generate.jl"]
 ```
-## `CYAxiverse.filestructure`
+## `CYAxiverse.minimizer`
 ```@docs
 CYAxiverse.minimizer
 ```
@@ -41,10 +41,10 @@ Pages = ["read.jl"]
 ```
 ## `CYAxiverse.cytools_wrapper`
 ```@docs
-../add_functions/CYAxiverse.cytools_wrapper
+add_functions/CYAxiverse.cytools_wrapper
 ```
 
 ```@autodocs
 Modules = [CYAxiverse.cytools_wrapper]
-Pages = ["../add_functions/cytools_wrapper.jl"]
+Pages = ["add_functions/cytools_wrapper.jl"]
 ```
