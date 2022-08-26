@@ -8,6 +8,9 @@ A [Julia](https://julialang.org) package to compute axion/ALP spectra from strin
 [Viraf M. Mehta](https://inspirehep.net/authors/1228975)
 
 ### Installation
+!!! note
+    Currently this package can run in a docker container with `CYTools` -- DockerFile will be uploaded here once written
+
 !!! warning
     This package is currently _not_ registered with the `julia` package manager and is still under development.  **Use at your own risk!**
 
