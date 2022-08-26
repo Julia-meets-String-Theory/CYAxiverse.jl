@@ -706,6 +706,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
     Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
     Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
+    αeff::Matrix{Int} = hcat(zeros(Int,size(Q,2),1))
     S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
     m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
     d::Int = 1
@@ -745,12 +746,18 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
             Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,index], digits=3)
             if Ldiff > Ldiff_limit
                 Qtilde = hcat(Qtilde,Qbar[:,i])
-                Ltilde = hcat(Ltilde,Lbar[:,i]) 
+                Ltilde = hcat(Ltilde,Lbar[:,i])
+                αeff = hcat(αeff,α[:,i])
             end
         end
     end
+    αeff = αeff[:,2:end]
+    αmask = hcat([sum(αeff[:,i] .== 0) < size(αeff,1) for i=1:size(αeff,2)]...)
+    αeff = hcat([αeff[:,i] for i=1:size(αeff,2) if sum(αeff[:,i] .==0) < size(αeff,1)]...)
+    Qeff = hcat(I(size(αeff,1)),αeff)
+    Leff = Ltilde[:,αmask]
     keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
-    vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, Int.(round.(α))]
+    vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, Int.(round.(α))']
     return Dict(zip(keys,vals))
 end
 
@@ -794,7 +801,8 @@ function vacua_JLM(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
         vals = [1, Qtilde]
         return Dict(zip(keys,vals))
     else
-        Qeff = vcat(I(size(α,1)), α[:,h11+1:end])
+        αeff = 
+        Qeff = hcat(I(size(α,1)), α[:,h11+1:end])
     end
     
 end
