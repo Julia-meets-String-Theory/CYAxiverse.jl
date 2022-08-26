@@ -788,7 +788,7 @@ function vacua_JLM(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Ltilde = data["Ltilde"]
     Lbar = data["Lbar"]
     α = data["α"]'
-    α = hcat([α[:,i] for i=1:size(α,2) if size(α[:,i][α[:,i] .== 0],1)<(size(α,1)-1)]...)
+    α = hcat([α[i,:] for i=1:size(α,1) if size(α[i,:][α[i,:] .== 0],1)<(size(α,2)-1)]...)
     if size(Qtilde,1) == size(Qtilde,2)
         keys = ["vacua","Qtilde"]
         vals = [1, Qtilde]
