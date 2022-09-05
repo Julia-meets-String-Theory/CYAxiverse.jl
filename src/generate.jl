@@ -732,7 +732,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
-    α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's?
+    α::Matrix{Float64} = (inv(Qtilde)' * Qbar)' ##Is this the same as JLM's?
     for i=1:size(α,1)
         index=0
         for j=1:size(α,2)
@@ -753,7 +753,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     end
     if αeff == hcat(zeros(Float64,size(Q,2),1))
         keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
-        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, Int.(round.(α))']
+        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, α']
         return Dict(zip(keys,vals))
     else
         αeff = αeff[:,2:end]
@@ -765,7 +765,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
         Qeff = Qeff[Qrowmask,Qcolmask]
         Leff = Ltilde[:,Qcolmask]
         keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
-        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, Int.(round.(α))', Qeff, Leff, Qrowmask, Qcolmask]
+        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, α', Qeff, Leff, Qrowmask, Qcolmask]
         return Dict(zip(keys,vals))
     end
 end
