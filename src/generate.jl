@@ -706,7 +706,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
     Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
     Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
-    αeff::Matrix{Int} = hcat(zeros(Int,size(Q,2),1))
+    αeff::Matrix{Float64} = hcat(zeros(Float64,size(Q,2),1))
     S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
     m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
     d::Int = 1
@@ -747,18 +747,27 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
             if Ldiff > Ldiff_limit
                 Qtilde = hcat(Qtilde,Qbar[:,i])
                 Ltilde = hcat(Ltilde,Lbar[:,i])
-                αeff = hcat(αeff,α[:,i])
+                αeff = hcat(αeff,α[i,:])
             end
         end
     end
-    αeff = αeff[:,2:end]
-    αmask = hcat([sum(αeff[:,i] .== 0) < size(αeff,1) for i=1:size(αeff,2)]...)
-    αeff = hcat([αeff[:,i] for i=1:size(αeff,2) if sum(αeff[:,i] .==0) < size(αeff,1)]...)
-    Qeff = hcat(I(size(αeff,1)),αeff)
-    Leff = Ltilde[:,αmask]
-    keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
-    vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, Int.(round.(α))']
-    return Dict(zip(keys,vals))
+    if αeff == hcat(zeros(Float64,size(Q,2),1))
+        keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
+        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, Int.(round.(α))']
+        return Dict(zip(keys,vals))
+    else
+        αeff = αeff[:,2:end]
+        
+        # αeff = hcat([αeff[:,i] for i=1:size(αeff,2) if sum(αeff[:,i] .==0) < size(αeff,1)]...)
+        Qeff = hcat(I(size(αeff,1)),αeff)
+        Qrowmask = [sum(i .==0) != size(Qeff,2)-1 for i in eachrow(Qeff)]
+        Qcolmask = vec(mapslices(col -> any(col .!= 0), Qeff[Qrowmask, :], dims = 1))
+        Qeff = Qeff[Qrowmask,Qcolmask]
+        Leff = Ltilde[:,Qcolmask]
+        keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
+        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, Int.(round.(α))', Qeff, Leff, Qrowmask, Qcolmask]
+        return Dict(zip(keys,vals))
+    end
 end
 
 function LQtildebar(h11::Int, tri::Int, cy::Int; threshold=0.5)
