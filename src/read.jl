@@ -23,17 +23,17 @@ end
 function geometry(h11::Int,tri::Int,cy::Int=1)
     h21::Int,
     glsm::Matrix{Int},basis::Vector{Int},
-    tip::Vector{Float64},CY_Volume::Float64,divisor_volumes::Vector{Float64},
+    tip::Vector{Float64}, tip_prefactor::Float64,CY_Volume::Float64,divisor_volumes::Vector{Float64},
     Kinv::Matrix{Float64}= h5open(cyax_file(h11,tri,cy), "r") do file
         HDF5.read(file, "cytools/geometric/h21"),HDF5.read(file, "cytools/geometric/glsm"),
-        HDF5.read(file, "cytools/geometric/basis"),HDF5.read(file, "cytools/geometric/tip"),
+        HDF5.read(file, "cytools/geometric/basis"),HDF5.read(file, "cytools/geometric/tip"),HDF5.read(file, "cytools/geometric/tip_prefactor"),
         HDF5.read(file, "cytools/geometric/CY_volume"),HDF5.read(file, "cytools/geometric/divisor_volumes"),
         HDF5.read(file, "cytools/geometric/Kinv")
     end
-    keys = ["h21","glsm_charges","basis","tip","CYvolume","τ_volumes","Kinv"]
+    keys = ["h21","glsm_charges","basis","tip","tip_prefactor", "CYvolume","τ_volumes","Kinv"]
     vals = [h21,
     glsm,basis,
-    tip,CY_Volume,divisor_volumes,
+    tip,tip_prefactor, CY_Volume,divisor_volumes,
     Kinv]
     return Dict(zip(keys,vals))
 end
