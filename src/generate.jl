@@ -706,7 +706,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
     Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
     Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
-    αeff::Matrix{Float64} = hcat(zeros(Float64,size(Q,2),1))
+    αeff::Matrix{Float64} = zeros(Float64,size(Qsorted_test[1,:],1),1)
     S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
     m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
     d::Int = 1
@@ -732,32 +732,42 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
-    α::Matrix{Float64} = (inv(Qtilde)' * Qbar)' ##Is this the same as JLM's?
+    α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's?
     for i=1:size(α,1)
         index=0
         for j=1:size(α,2)
             if abs(α[i,j]) > 1e-3
-                index = j
+                Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j], digits=3)
+                if Ldiff > Ldiff_limit
+                    Qtilde = hcat(Qtilde,Qbar[:,i])
+                    Ltilde = hcat(Ltilde,Lbar[:,i])
+                    # αeff = hcat(αeff,α[i,:])
+                else
+                    α[i,j] = 0
+                end
             else
                 α[i,j] = 0
             end
         end
-        if index!=0
-            Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,index], digits=3)
-            if Ldiff > Ldiff_limit
-                Qtilde = hcat(Qtilde,Qbar[:,i])
-                Ltilde = hcat(Ltilde,Lbar[:,i])
-                αeff = hcat(αeff,α[i,:])
-            end
+        if α[i,:] == zeros(size(α,2))
+        else
+            αeff = hcat(αeff,α[i,:])
         end
+        # if index!=0
+        #     Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,index], digits=3)
+        #     if Ldiff > Ldiff_limit
+        #         Qtilde = hcat(Qtilde,Qbar[:,i])
+        #         Ltilde = hcat(Ltilde,Lbar[:,i])
+        #         αeff = hcat(αeff,α[i,:])
+        #     end
+        # end
     end
-    if αeff == hcat(zeros(Float64,size(Q,2),1))
+    if αeff == zeros(Float64,size(Qsorted_test[1,:],1),1)
         keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
         vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, α']
         return Dict(zip(keys,vals))
     else
         αeff = αeff[:,2:end]
-        
         # αeff = hcat([αeff[:,i] for i=1:size(αeff,2) if sum(αeff[:,i] .==0) < size(αeff,1)]...)
         Qeff = hcat(I(size(αeff,1)),αeff)
         Qrowmask = [sum(i .==0) != size(Qeff,2)-1 for i in eachrow(Qeff)]
@@ -765,7 +775,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
         Qeff = Qeff[Qrowmask,Qcolmask]
         Leff = Ltilde[:,Qcolmask]
         keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
-        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, α', Qeff, Leff, Qrowmask, Qcolmask]
+        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, inv(Qtilde[:,1:size(Qtilde,1)]) * Qbar, Qeff, Leff, Qrowmask, Qcolmask]
         return Dict(zip(keys,vals))
     end
 end
