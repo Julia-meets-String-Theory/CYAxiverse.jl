@@ -206,22 +206,29 @@ function geometries(h11,cy,tri,cy_i=1)
         #Find tip of SKC
         n,m = 1,0
         tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
-        #PTD volumes at tip
-        tau = cy.compute_divisor_volumes(tip)
-        while minimum(tau) < 1.
-            n=round(1. / minimum(tau)) + m
-            tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
-            #PTD volumes at tip
-            tau = cy.compute_divisor_volumes(tip)
-            m+=0.5
-        end
-        #Volume of CY3 at tip
-        V = cy.compute_cy_volume(tip)
         #Kinv at tip -- save this or save K?
         Kinv = cy.compute_Kinv(tip)
         Kinv = Hermitian(1/2 * Kinv + Kinv')
         #Generate list of Q matrices -- only $h11+4 directions
         qprime = cy.toric_effective_cone().rays()
+        #PTD volumes at tip
+        tau = cy.compute_divisor_volumes(tip)
+        while minimum(tau) < 1. || maximum([log10.(abs.(1 / dot(Kinv[i,:], tau))) 
+            for i=1:h11]) < maximum([-2π * dot(tau, qprime[i,:]') 
+            for i=1:h11+4]) + log(10)
+            n=round(1. / minimum(tau)) + m
+            tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
+            #PTD volumes at tip
+            tau = cy.compute_divisor_volumes(tip)
+            #Kinv at tip -- save this or save K?
+            Kinv = cy.compute_Kinv(tip)
+            Kinv = Hermitian(1/2 * Kinv + Kinv')
+            m+=0.5
+        end
+        tip_prefactor = m
+        #Volume of CY3 at tip
+        V = cy.compute_cy_volume(tip)
+
         q = zeros(Int,h11+4+binomial(h11+4,2),h11)
         L2 = zeros(Float64,binomial(h11+4,2),2)
         n=1
@@ -253,6 +260,7 @@ function geometries(h11,cy,tri,cy_i=1)
                 file["cytools/geometric/glsm",deflate=9] = Int.(glsm)
                 file["cytools/geometric/basis",deflate=9] = Int.(basis)
                 file["cytools/geometric/tip",deflate=9] = Float64.(tip)
+                file["cytools/geometric/tip_prefactor",deflate=9] = tip_prefactor
                 file["cytools/geometric/CY_volume",deflate=9] = Float64(V)
                 file["cytools/geometric/divisor_volumes",deflate=9] = Float64.(tau)
                 file["cytools/geometric/Kinv",deflate=9] = Float64.(Kinv)
