@@ -78,11 +78,21 @@ function topologies(h11,n)
     #otherwise generate 1 triangulation per polytope upto $n
     spt = size(poly_test,1)
     m = nothing;
+    left_over = mod(n,spt)
     if spt < n && h11 > 3
         m = n ÷ spt
-        tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
-        cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
-        tri_test = vcat(tri_test_m...)
+        if left_over == 0
+            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
+            cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+            tri_test = vcat(tri_test_m...)
+        else
+            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
+            tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
+            cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+            cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
+            cy_num = vcat(cy_num1,cy_num)
+            tri_test = vcat(tri_test_m1...,tri_test_m...)
+        end
     else
         tri_test = [poly_test[i].triangulate() for i=1:n];
         points = points[1:n]
@@ -204,7 +214,7 @@ function geometries(h11,cy,tri,cy_i=1)
         #Divisor basis for saving (allows for reproducibility)
         basis = cy.divisor_basis()
         #Find tip of SKC
-        n,m = 1,0
+        n,m = 1,1
         tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
         #Kinv at tip -- save this or save K?
         Kinv = cy.compute_Kinv(tip)
@@ -213,19 +223,40 @@ function geometries(h11,cy,tri,cy_i=1)
         qprime = cy.toric_effective_cone().rays()
         #PTD volumes at tip
         tau = cy.compute_divisor_volumes(tip)
-        while minimum(tau) < 1. || maximum([log10.(abs.(1 / dot(Kinv[i,:], tau))) 
-            for i=1:h11]) < maximum([-2π * dot(tau, qprime[i,:]') 
-            for i=1:h11+4]) + log(10)
-            n=round(1. / minimum(tau)) + m
-            tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
+        while true
+            rhs_constraint = zeros(size(qprime,1))
+            lhs_constraint = zeros(size(qprime,1),size(qprime,1))
+            for i=1:size(qprime,1)
+                for j=1:size(qprime,1)
+                    if i>j
+                        lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
+                    end
+                end
+                rhs_constraint[i] = abs.(log.(abs.(dot(qprime[i,:],tau))) .+ (-2π * dot(tau, qprime[i,:])))
+            end
+            if LowerTriangular(lhs_constraint .< rhs_constraint) - I(h11+4) == LowerTriangular(zeros(h11+4, h11+4))
+                break
+            else
+                m+=1e-2
+                tip = m .* tip
+                #PTD volumes at tip
+                tau = cy.compute_divisor_volumes(tip)
+                #Kinv at tip -- save this or save K?
+                Kinv = cy.compute_Kinv(tip)
+                Kinv = Hermitian(1/2 * Kinv + Kinv') 
+            end
+        end
+        if (minimum(tau) > 1.)
+        else
+            n = 1. / minimum(tau)
+            tip = sqrt(n) .* tip
             #PTD volumes at tip
             tau = cy.compute_divisor_volumes(tip)
             #Kinv at tip -- save this or save K?
             Kinv = cy.compute_Kinv(tip)
             Kinv = Hermitian(1/2 * Kinv + Kinv')
-            m+=0.5
         end
-        tip_prefactor = m
+        tip_prefactor = [sqrt(n),m]
         #Volume of CY3 at tip
         V = cy.compute_cy_volume(tip)
 
@@ -260,7 +291,7 @@ function geometries(h11,cy,tri,cy_i=1)
                 file["cytools/geometric/glsm",deflate=9] = Int.(glsm)
                 file["cytools/geometric/basis",deflate=9] = Int.(basis)
                 file["cytools/geometric/tip",deflate=9] = Float64.(tip)
-                file["cytools/geometric/tip_prefactor",deflate=9] = tip_prefactor
+                file["cytools/geometric/tip_prefactor",deflate=9] = Float64.(tip_prefactor)
                 file["cytools/geometric/CY_volume",deflate=9] = Float64(V)
                 file["cytools/geometric/divisor_volumes",deflate=9] = Float64.(tau)
                 file["cytools/geometric/Kinv",deflate=9] = Float64.(Kinv)
