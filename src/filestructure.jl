@@ -40,6 +40,7 @@ function ol_DB(args)
         "vacua_test" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse/vacua_test_data/", 
         "vacua_new" => "/scratch/users/mehta2/vacua_db/",
         "vacua_0822" => "/scratch/users/mehta2/vacua_0822/",
+        "vacua_stretch" => "/scratch/users/mehta2/vacua_stretch/",
         "pwd" => "./"
         )
     try
