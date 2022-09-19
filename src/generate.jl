@@ -496,6 +496,12 @@ function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     end
     GC.gc()
 end
+function project_out(v::Vector{Int})
+    idd = Matrix{Int}(I(size(v,1)))
+    norm2 = dot(v,v)
+    proj = 1. / norm2 * (v * v')
+    return idd-proj
+end
 
 function project_out(v::Vector{Float64})
     idd = Matrix{Float64}(I(size(v,1)))
@@ -732,7 +738,8 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
-    α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's?
+    Leff = zeros(Float64,2,1)
+    α::Matrix{Rational} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's?
     for i=1:size(α,1)
         index=0
         for j=1:size(α,2)
@@ -741,6 +748,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
                 if Ldiff > Ldiff_limit
                     Qtilde = hcat(Qtilde,Qbar[:,i])
                     Ltilde = hcat(Ltilde,Lbar[:,i])
+                    # Leff = hcat(Leff,Ltilde[:,j])
                     # αeff = hcat(αeff,α[i,:])
                 else
                     α[i,j] = 0
@@ -750,8 +758,12 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
             end
         end
         if α[i,:] == zeros(size(α,2))
+            # if size(Leff,2) > 1
+            #     Leff = Leff[:,1:end-1]
+            # end
         else
             αeff = hcat(αeff,α[i,:])
+            Leff = hcat(Leff,Lbar[:,i])
         end
         # if index!=0
         #     Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,index], digits=3)
@@ -768,14 +780,17 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
         return Dict(zip(keys,vals))
     else
         αeff = αeff[:,2:end]
+        Leff = Leff[:,2:end]
+        Leff = hcat(Ltilde[:,1:size(Q,2)], Leff)
         # αeff = hcat([αeff[:,i] for i=1:size(αeff,2) if sum(αeff[:,i] .==0) < size(αeff,1)]...)
         Qeff = hcat(I(size(αeff,1)),αeff)
-        Qrowmask = [sum(i .==0) != size(Qeff,2)-1 for i in eachrow(Qeff)]
-        Qcolmask = vec(mapslices(col -> any(col .!= 0), Qeff[Qrowmask, :], dims = 1))
-        Qeff = Qeff[Qrowmask,Qcolmask]
-        Leff = Ltilde[:,Qcolmask]
+        Qrowmask = [sum(i .==0) < size(Qeff,2)-1 for i in eachrow(Qeff)]
+        Qcolmask = vec(mapslices(col -> any(col .!= 0), Qeff[Qrowmask,:], dims = 1))
+        # Qcolmask = [sum(i .==0) < size(Qeff,1) for i in eachcol(Qeff)]
+        # Qeff = Qeff[Qrowmask,Qcolmask]
+        Leff = Leff[:,Qcolmask]
         keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
-        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, inv(Qtilde[:,1:size(Qtilde,1)]) * Qbar, Qeff, Leff, Qrowmask, Qcolmask]
+        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, (inv(Matrix{Rational}(Qtilde[:,1:size(Qtilde,1)])) * Qbar), hcat(I(size(αeff,1)),αeff), Leff, Qrowmask, Qcolmask]
         return Dict(zip(keys,vals))
     end
 end
@@ -971,4 +986,44 @@ function vacua_save_TB(h11::Int,tri::Int,cy::Int=1; threshold=0.5)
         end
     end
 end
+
+
+"""
+    vacua_MK(L,Q; threshold=1e-2)
+Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) on ``\\mathcal{Q}`` to compute the locations of vacua.
+!!! note
+    Finding the lattice of minima when numerical minimisation is required has not yet been implemented.
+"""
+function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
+    LQtilde = LQtildebar(L, Q; threshold=threshold)
+    Qtilde = LQtilde["Qtilde"]
+    Ltilde = LQtilde["Ltilde"]
+    basis_vectors = zeros(size(Qtilde,1), size(Qtilde,1))
+    for (i,j)=enumerate(eachcol(Qtilde))
+        if sum(j .== 0) == size(Qtilde,1) - 1 &&
+        fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
+        mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
+        proj = project_out(QKs[i,:])
+        #this is the scipy.linalg.orth function written out
+        u, s, vh = svd(proj,full=true)
+        M, N = size(u,1), size(vh,2)
+        rcond = eps() * max(M, N)
+        tol = maximum(s) * rcond
+        num = Int.(round(sum(s[s .> tol])))
+        T = u[:, 1:num]
+        QKs1 = zeros(size(QKs,1), size(T,2))
+        LinearAlgebra.mul!(QKs1,QKs, T)
+        QKs = copy(QKs1)
+    end
+    vals = [mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"]))]
+    keys = ["m", "fK", "fpert"]
+
+    return Dict(zip(keys,vals))
+end
+
+# function pq_spectrum(h11::Int,tri::Int,cy::Int)
+#     pot_data = potential(h11,tri,cy)
+#     K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
+#     pq_spectrum(K, L, Q)
+# end
 end
