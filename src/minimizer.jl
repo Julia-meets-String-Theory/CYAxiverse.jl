@@ -291,6 +291,11 @@ function minimize_save(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vecto
 GC.gc()
 end
 
+"""
+    grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
+
+TBW
+"""
 function grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
     Arb0 = ArbFloat(0.)
     Arb1 = ArbFloat(1.)
@@ -310,6 +315,22 @@ function grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
     return ArbFloat.(std(grad_all, dims=2))
 end
 
+function grad_std(LV::Vector{Float64},QV::Matrix{Int})
+    function QX(x::Vector)
+        Qx = zeros(Float64,size(QV,1));
+        @tullio Qx[c] = QV[c,i] * x[i]
+        return Qx
+    end
+    grad(x) = vcat([dot(LV,QV[:,i] .* sin.(QX(x))) for i ∈ 1:h11]...)
+    n=100
+    grad_all = zeros(h11,n)
+    for j=1:n
+        x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
+        grad_all[:,j] = grad(x0)
+    end
+    return std(grad_all, dims=2)
+end
+
 function grad_std(h11::Int, tri::Int, cy::Int)
     pot_data = potential(h11,tri,cy)
     QV::Matrix, LV::Matrix{Float64} = ArbFloat.(pot_data["Q"]), pot_data["L"]
@@ -317,57 +338,98 @@ function grad_std(h11::Int, tri::Int, cy::Int)
     grad_std(h11,tri,cy,Lfull,QV)
 end
 
-function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
-	setprecision(ArbFloat,digits=5_000)
-    LQtildebar = LQtildebar(L, Q; threshold=threshold)
-	Ltilde = LQtildebar["Ltilde"][:,sortperm(LQtildebar["Ltilde"][2,:], rev=true)]
-    Qtilde = LQtildebar["Qtilde"]'[sortperm(Ltilde[2,:], rev=true), :]
-	Qtilde = Matrix{Int}(Qtilde')
-    basis_vectors = zeros(size(Qtilde,1), size(Qtilde,1))
-	idx = 1
-    while idx ≤ size(Qtilde,2)
-		Qsub = Qtilde[:,idx]
-		Lsub = Ltilde[:,idx]
-		while Ltilde[2, idx+1] - Ltilde[2, idx] ≥ threshold && dot(Qtilde[:,idx+1], Qtilde[:,idx]) != 0
-			Lsub = hcat(Lsub, Ltilde[:, idx+1])
-			Qsub = hcat(Qsub, Qtilde[:, idx+1])
-			idx += 1
-		end
-		if size(Qsub,2) == 1
-			basis_vectors[idx,:] = Qsub
-			idx += 1
-		else
-			Lsubdiff = Lsub[2,:] .- Lsub[2,1]
-			Lfull = Lsubdiff[1,:] .* 10. .^ Lsubdiff[2,:];
-			Qsubmask = [sum(i .== 0) < size(Qsub,1) for i in eachcol(Qsub)]
-			Qsub = Qsub[:,Qsubmask]
-			for run_number = 1:10_000
-				x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
-				res = CYAxiverse.minimizer.minimize(Lfull, Qsub, x0) ##need to write subsystem minimizer
-				res["Vmin_log"] = res["Vmin_log"] .+ Lsub[2,1]
-			end
-			xmin = hcat(res["xmin"]...)
-			for i in eachcol(xmin)
-				i[:] = @. ifelse(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i
-			end
-			xmin = xmin[:, [sum(i)!=0 for i in eachcol(xmin)]]
-			xmin = xmin[:,sortperm([sqrt(sum(abs2,i)) for i in eachcol(xmin)])]
-			lattice_vecs = lattice_minimize(xmin) ##need to write lattice minimizer
-			basis_vectors[idx-size(lattice_vecs,2):idx, :] = lattice_vecs
-		end
-        proj = project_out(Qtilde[i,:])
-        #this is the scipy.linalg.orth function written out
-        u, s, vh = svd(proj,full=true)
-        M, N = size(u,1), size(vh,2)
-        rcond = eps() * max(M, N)
-        tol = maximum(s) * rcond
-        num = Int.(round(sum(s[s .> tol])))
-        T = u[:, 1:num]
-        Qtilde_i = zeros(size(Qtilde, 1), size(T, 2))
-        LinearAlgebra.mul!(Qtilde_i, Qtilde, T)
-        Qtilde = copy(Qtilde_i)
+
+"""
+    minimize(LV::Vector{Float64},QV::Matrix{Int},x0::Vector{Float64})
+
+TBW
+"""
+function minimize(LV::Vector{Float64},QV::Matrix{Int},x0::Vector{Float64})
+    function QX(x::Vector)
+        Qx = zeros(Float64,size(QV,1));
+        @tullio Qx[c] = QV[c,i] * x[i]
+        return Qx
     end
-    return basis_vectors
+    function fitness(x::Vector)
+        V = dot(LV,(1 .- cos.(QX(x))))
+        return V
+    end
+    function grad!(gradient::Vector, x::Vector)
+        grad_temp = zeros(Float64, size(LV,1),size(x,1))
+        @tullio grad_temp[c,i] = QV[c,i] * sin.(QX(x)[c])
+        @tullio gradient[i] = LV[c] * grad_temp[c,i]
+    end
+    function hess(x::Vector)
+        grad2::Matrix{Float64} = zeros(Float64,(size(x,1),size(x,1)))
+        hind1::Vector{Vector{Int}} = [[x,y]::Vector{Int} for x=1:size(x,1),y=1:size(x,1) if x>=y]
+        grad2_temp::Vector{Float64} = zeros(Float64,size(hind1,1))
+        grad2_temp1::Matrix{Float64} = zeros(Float64,size(LV,1),size(hind1,1))
+        @tullio grad2_temp1[c,k] = @inbounds(begin
+        i,j = hind1[k]
+                QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
+        @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
+        @inbounds for i=1:size(hind1,1)
+            j,k = hind1[i]
+            grad2[j,k] = grad2_temp[i]
+        end
+        hessfull = Hermitian(grad2 + transpose(grad2) - Diagonal(grad2))
+    end
+    function hess!(hessian::Matrix, x::Vector)
+        grad2 = zeros(Float64,(size(x,1),size(x,1)))
+        hind1 = [[x,y]::Vector{Int} for x=1:size(x,1),y=1:size(x,1) if x>=y]
+        grad2_temp = zeros(Float64,size(hind1,1))
+        grad2_temp1 = zeros(Float64,size(LV,1),size(hind1,1))
+        @tullio grad2_temp1[c,k] = @inbounds(begin
+                i,j = hind1[k]
+                QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
+        @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
+        @inbounds for i=1:size(hind1,1)
+            j,k = hind1[i]
+            grad2[j,k] = grad2_temp[i]
+        end
+        hessian .= grad2 + transpose(grad2) - Diagonal(grad2)
+    end
+    grad(x) = vcat([dot(LV,QV[:,i] .* sin.(QX(x))) for i ∈ 1:size(x,1)]...)
+    gradσ = grad_std(LV,QV)
+    res = optimize(fitness,grad!,hess!,
+                x0, algo,
+                Optim.Options(x_tol =minimum(abs.(LV)),g_tol =minimum(threshold .* abs.(gradσ))))
+    Vmin = Optim.minimum(res)
+    xmin = Optim.minimizer(res)
+    GC.gc()
+    if Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) < log10(eps()) && sum(Float64.(log10.(abs.(grad(xmin)))) .< log10.(abs.(threshold .* gradσ))) == (h11 - size(gradσ[gradσ .== 0.],1))
+        hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) 
+        hess_sign = sign((minimum(eigen(hess(xmin)).values)))
+        sum_grad = sum(Float64.(log10.(abs.(grad(xmin)))))
+        Vmin_sign = Int(sign(Vmin))
+        Vmin_log = Float64(log10(abs(Vmin)))
+
+        keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradsum"]
+        vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, sum_grad]
+        return Dict(zip(keys,vals))
+        GC.gc()
+    end
 end
 
+"""
+    lattice_minimize(x0::Vector{Integer})
+
+TBW
+"""
+function lattice_minimize(v::Matrix{Float64}, x0::Vector{Integer})
+    function fitness(norm_vec::Vector{Integer})
+        small_norm = v[:,1] - sum(norm_vec[i] .* v[:,2:end])
+        return small_norm
+    end
+    res = optimize(fitness,
+                x0, algo)
+    Vmin = Optim.minimum(res)
+    nmin = Optim.minimizer(res)
+    GC.gc()
+
+    keys = ["V", "N_min"]
+    vals = [Vmin_sign, nmin]
+    return Dict(zip(keys,vals))
+    GC.gc()
+end
 end
