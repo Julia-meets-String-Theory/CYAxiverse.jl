@@ -995,15 +995,44 @@ Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.0
     Finding the lattice of minima when numerical minimisation is required has not yet been implemented.
 """
 function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
-    LQtilde = LQtildebar(L, Q; threshold=threshold)
-    Qtilde = LQtilde["Qtilde"]
-    Ltilde = LQtilde["Ltilde"]
+	setprecision(ArbFloat,digits=5_000)
+    LQtildebar = LQtildebar(L, Q; threshold=threshold)
+	Ltilde = LQtildebar["Ltilde"][:,sortperm(LQtildebar["Ltilde"][2,:], rev=true)]
+    Qtilde = LQtildebar["Qtilde"]'[sortperm(Ltilde[2,:], rev=true), :]
+	Qtilde = Matrix{Int}(Qtilde')
     basis_vectors = zeros(size(Qtilde,1), size(Qtilde,1))
-    for (i,j)=enumerate(eachcol(Qtilde))
-        if sum(j .== 0) == size(Qtilde,1) - 1 &&
-        fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
-        mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
-        proj = project_out(QKs[i,:])
+	idx = 1
+    while idx ≤ size(Qtilde,2)
+		Qsub = Qtilde[:,idx]
+		Lsub = Ltilde[:,idx]
+		while Ltilde[2, idx+1] - Ltilde[2, idx] ≥ threshold && dot(Qtilde[:,idx+1], Qtilde[:,idx]) != 0
+			Lsub = hcat(Lsub, Ltilde[:, idx+1])
+			Qsub = hcat(Qsub, Qtilde[:, idx+1])
+			idx += 1
+		end
+		if size(Qsub,2) == 1
+			basis_vectors[idx,:] = Qsub
+			idx += 1
+		else
+			Lsubdiff = Lsub[2,:] .- Lsub[2,1]
+			Lfull = Lsubdiff[1,:] .* 10. .^ Lsubdiff[2,:];
+			Qsubmask = [sum(i .== 0) < size(Qsub,1) for i in eachcol(Qsub)]
+			Qsub = Qsub[:,Qsubmask]
+			for run_number = 1:10_000
+				x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
+				res = CYAxiverse.minimizer.minimize(Lfull, Qsub, x0) ##need to write subsystem minimizer
+				res["Vmin_log"] = res["Vmin_log"] .+ Lsub[2,1]
+			end
+			xmin = hcat(res["xmin"]...)
+			for i in eachcol(xmin)
+				i[:] = @. ifelse(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i)
+			end
+			xmin = xmin[:, [sum(i)!=0 for i in eachcol(xmin)]]
+			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
+			lattice_vecs = CYAxiverse.minimizer.lattice_minimize(xmin) ##need to write lattice minimizer
+			basis_vectors[idx-size(lattice_vecs,2):idx, :] = lattice_vecs
+		end
+        proj = project_out(Qtilde[i,:])
         #this is the scipy.linalg.orth function written out
         u, s, vh = svd(proj,full=true)
         M, N = size(u,1), size(vh,2)
@@ -1011,14 +1040,11 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
         tol = maximum(s) * rcond
         num = Int.(round(sum(s[s .> tol])))
         T = u[:, 1:num]
-        QKs1 = zeros(size(QKs,1), size(T,2))
-        LinearAlgebra.mul!(QKs1,QKs, T)
-        QKs = copy(QKs1)
+        Qtilde_i = zeros(size(Qtilde, 1), size(T, 2))
+        LinearAlgebra.mul!(Qtilde_i, Qtilde, T)
+        Qtilde = copy(Qtilde_i)
     end
-    vals = [mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"]))]
-    keys = ["m", "fK", "fpert"]
-
-    return Dict(zip(keys,vals))
+    return basis_vectors
 end
 
 # function pq_spectrum(h11::Int,tri::Int,cy::Int)

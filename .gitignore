@@ -1,1 +1,3 @@
 /Manifest.toml
+.vscode/settings.json
+src/clipboard.jl
