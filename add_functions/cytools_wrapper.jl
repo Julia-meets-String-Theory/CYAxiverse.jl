@@ -81,17 +81,25 @@ function topologies(h11,n)
     left_over = mod(n,spt)
     if spt < n && h11 > 3
         m = n ÷ spt
-        if left_over == 0
-            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
-            cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
-            tri_test = vcat(tri_test_m...)
-        else
-            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
-            tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
-            cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
-            cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
-            cy_num = vcat(cy_num1,cy_num)
-            tri_test = vcat(tri_test_m1...,tri_test_m...)
+        try
+            h5open(cyax_file(h11,left_over,m+1), "r") do file
+                if haskey(file, "cytools/geometric/h21")
+                    return [0, 0, 0, 0]
+                end
+            end
+        catch
+            if left_over == 0
+                tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
+                cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+                tri_test = vcat(tri_test_m...)
+            else
+                tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
+                tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
+                cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+                cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
+                cy_num = vcat(cy_num1,cy_num)
+                tri_test = vcat(tri_test_m1...,tri_test_m...)
+            end
         end
     else
         tri_test = [poly_test[i].triangulate() for i=1:n];
