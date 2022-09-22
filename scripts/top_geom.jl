@@ -20,10 +20,7 @@ CYAxiverse.filestructure.logcreate(lfile)
     try
         test = CYAxiverse.cytools_wrapper.cy_from_poly(h11);
         return test
-    catch e 
-        open(l, "a") do outf
-            write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
-        end
+    catch
         try
             test = CYAxiverse.cytools_wrapper.topologies(h11,n);
             return test
