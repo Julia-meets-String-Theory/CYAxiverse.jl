@@ -186,7 +186,8 @@ function cy_from_poly(h11)
                                     end
                                 end
                             catch
-                            push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
+                                push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
+                            end
                         end
                     end
                 end
