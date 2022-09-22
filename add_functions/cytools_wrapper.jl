@@ -179,6 +179,13 @@ function cy_from_poly(h11)
                 if occursin(r"np_*", j)
                     for k in first(walkdir(joinpath(present_dir(),i,j)))[2]
                         if occursin(r"cy_*", k)
+                            try
+                                h5open(cyax_file(h11,j,k), "r") do file
+                                    if haskey(file, "cytools/geometric/h21")
+                                        push!(np_pathinds, [0, 0, 0, 0])
+                                    end
+                                end
+                            catch
                             push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
                         end
                     end
