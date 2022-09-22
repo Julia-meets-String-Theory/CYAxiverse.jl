@@ -57,9 +57,6 @@ begin
 	"""
 end
 
-# ╔═╡ 30651bd8-77d3-426d-8e41-3893159a0019
-
-
 # ╔═╡ 9071d014-a286-4f6f-bafc-648c1954d3d7
 begin
 	h11list = CYAxiverse.filestructure.paths_cy()[2]
@@ -81,7 +78,7 @@ begin
 end
 
 # ╔═╡ 8699f77c-4a59-4194-9f08-f878b65b93ba
-h11, tri, cy = 35, 10, 1
+h11, tri, cy = 50, 10, 1
 
 # ╔═╡ 281b0be2-86fd-4201-871a-7e362b5872d7
 # ╠═╡ disabled = true
@@ -161,9 +158,6 @@ lhs_constraint[[i for (i,item) in enumerate(eachrow(constraint)) if sum(item .==
 
 # ╔═╡ cd6bbbd5-321f-4868-b0e7-71b96965bef7
 constraint[[i for (i,item) in enumerate(eachrow(constraint)) if sum(item .== 0) != h11+4],[i for (i,item) in enumerate(eachcol(constraint)) if sum(item .== 0) != h11+4]]
-
-# ╔═╡ 6f9c2ba1-6536-44d2-938e-7adf68b93bc5
-
 
 # ╔═╡ a1dfa08c-1056-4e15-a040-4de1276f400c
 mod10(x) = (mod(x / 2π, 1) ≈ 1 || mod(x / 2π, 1) ≈ 0 ? 0 : x)
@@ -715,7 +709,9 @@ CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold=0.5)
 # ╠═d1f78454-3ba0-4569-a491-f52e737c7dc3
 # ╠═7c8e7502-94d8-4da6-a5e2-b950b33a62c2
 # ╟─3788df6d-c756-4b6a-8d75-8cd018ab2991
-# ╠═30651bd8-77d3-426d-8e41-3893159a0019
+# ╟─fbb69bcb-64c6-42c2-8ce1-666f397eb40e
+# ╠═b1362f7d-55e5-48d6-a695-f3bf59d8bf99
+# ╟─e556408b-25f7-4fae-ba0b-243242279ba8
 # ╟─9071d014-a286-4f6f-bafc-648c1954d3d7
 # ╟─4c1b071d-65ad-41ce-b7ab-9b11fcf15ce5
 # ╠═e1fdc533-efc0-4012-8464-3db601f66819
@@ -742,7 +738,6 @@ CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold=0.5)
 # ╠═999ffbe3-a67e-4d6a-86ed-30687afb2da5
 # ╠═eb2b9729-af3c-412e-8133-e07fbcdaee49
 # ╠═757b5ac0-5148-4980-ac09-d6e5e2930399
-# ╠═6f9c2ba1-6536-44d2-938e-7adf68b93bc5
 # ╠═b9733f0f-4869-4af5-9d65-2bb092e0bf54
 # ╠═14945e1d-39c5-4975-ae0d-67d057f024d0
 # ╠═2fb703ac-e71a-4574-9aa6-eadef19ba8e6
