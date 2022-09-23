@@ -719,7 +719,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Qbar::Matrix{Int} = zeros(Int,size(Qsorted_test[1,:],1),1)
     Lbar::Matrix{Float64} = zeros(Float64,size(Lsorted_test[1,:],1),1)
     for i=2:size(Qsorted_test,1)
-        S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
+        S = MatrixSpace(Nemo.ZZ, size(Qtilde)...)
         m = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
         d = Nemo.nullspace(m)[1]
         if d == 0
@@ -1029,7 +1029,7 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
 			end
 			xmin = xmin[:, [sum(i)!=0 for i in eachcol(xmin)]]
 			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
-			lattice_vecs = CYAxiverse.minimizer.lattice_minimize(xmin) ##need to write lattice minimizer
+			lattice_vecs = CYAxiverse.minimizer.minima_lattice(xmin) ##need to write lattice minimizer
 			basis_vectors[idx-size(lattice_vecs,2):idx, :] = lattice_vecs
 		end
         proj = project_out(Qtilde[i,:])
