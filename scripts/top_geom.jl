@@ -79,9 +79,9 @@ GC.gc()
 ##############################
 ############ Main ############
 ##############################
-h11_init = 4
+h11_init = 177
 np = nworkers()
-h11_end = 500
+h11_end = 341
 log_files_top = [lfile for i=h11_init:h11_init+h11_end]
 n = [1000 for _=h11_init:h11_init+h11_end]
 h11 = h11_init:h11_init+h11_end
