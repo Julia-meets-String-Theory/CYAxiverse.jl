@@ -15,15 +15,18 @@ macro bind(def, element)
 end
 
 # ╔═╡ 3788df6d-c756-4b6a-8d75-8cd018ab2991
+# ╠═╡ disabled = true
+#=╠═╡
 begin
 	import Pkg	
 	Pkg.activate("/scratch/users/mehta2/cyaxiverse/CYAxiverse")
 end
+  ╠═╡ =#
 
 # ╔═╡ d1f78454-3ba0-4569-a491-f52e737c7dc3
 begin
 	using Revise	
-	using PlutoUI, HDF5, ArbNumerics, LineSearches, Optim, CairoMakie, Distributions, LinearAlgebra, ProgressLogging
+	using PlutoUI, HDF5, ArbNumerics, LineSearches, Optim, CairoMakie, Distributions, LinearAlgebra, ProgressLogging, Nemo
 	using CYAxiverse
 end
 
@@ -57,9 +60,6 @@ begin
 	"""
 end
 
-# ╔═╡ 30651bd8-77d3-426d-8e41-3893159a0019
-
-
 # ╔═╡ 9071d014-a286-4f6f-bafc-648c1954d3d7
 begin
 	h11list = CYAxiverse.filestructure.paths_cy()[2]
@@ -67,6 +67,9 @@ begin
 	There are a total of $(size(h11list,2)) geometries in the database with $(minimum(Set(h11list[1,:]))) ≤ ``h^{1,1}`` ≤ $(maximum(Set(h11list[1,:])))
 	"""
 end
+
+# ╔═╡ 25e1eb34-0e4b-4bf2-ac1b-228545bb82a8
+h11list
 
 # ╔═╡ 4c1b071d-65ad-41ce-b7ab-9b11fcf15ce5
 @bind go PlutoUI.Button("Run another example")
@@ -260,6 +263,15 @@ begin
 	"""
 end
 
+# ╔═╡ df395e06-f130-4dd2-a95e-799a1d6b7d1f
+S = MatrixSpace(Nemo.ZZ, size(LQtilde["Qtilde"])...)
+
+# ╔═╡ f939d71c-86ce-4e12-9e18-b112743a130e
+m = S(LQtilde["Qtilde"])
+
+# ╔═╡ 0df48817-9fdf-4032-8419-49fd940c89e8
+Nemo.nullspace(m)
+
 # ╔═╡ 77dd1f33-15b4-4885-9152-34427bcd7c4f
 hcat(LQtilde["Ltilde"][:,1], LQtilde["Ltilde"][:,2])
 
@@ -267,7 +279,7 @@ hcat(LQtilde["Ltilde"][:,1], LQtilde["Ltilde"][:,2])
 LQtilde["Ltilde"][:,sortperm(LQtilde["Ltilde"][2,:], rev = true)]
 
 # ╔═╡ eb2b9729-af3c-412e-8133-e07fbcdaee49
-LQtilde["Qeff"][LQtilde["Qrowmask"],LQtilde["Qcolmask"]]
+hcat(LQtilde["Leff"][2,:],LQtilde["Qeff"][LQtilde["Qrowmask"],LQtilde["Qcolmask"]]')
 
 # ╔═╡ 757b5ac0-5148-4980-ac09-d6e5e2930399
 Matrix{Int}(LQtilde["Qtilde"]'[sortperm(LQtilde["Ltilde"][2,:], rev=true),:]')
@@ -712,17 +724,20 @@ CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold=0.5)
 # ╟─fee399f9-2668-41e0-a296-37b348a04769
 # ╟─90f44877-6310-49b1-9331-f8601918e4b3
 # ╟─2000a078-38f5-4c93-8627-ba6b4970aef6
-# ╠═d1f78454-3ba0-4569-a491-f52e737c7dc3
 # ╠═7c8e7502-94d8-4da6-a5e2-b950b33a62c2
-# ╟─3788df6d-c756-4b6a-8d75-8cd018ab2991
-# ╠═30651bd8-77d3-426d-8e41-3893159a0019
-# ╟─9071d014-a286-4f6f-bafc-648c1954d3d7
+# ╠═d1f78454-3ba0-4569-a491-f52e737c7dc3
+# ╠═3788df6d-c756-4b6a-8d75-8cd018ab2991
+# ╠═9071d014-a286-4f6f-bafc-648c1954d3d7
+# ╠═25e1eb34-0e4b-4bf2-ac1b-228545bb82a8
 # ╟─4c1b071d-65ad-41ce-b7ab-9b11fcf15ce5
 # ╠═e1fdc533-efc0-4012-8464-3db601f66819
 # ╠═8699f77c-4a59-4194-9f08-f878b65b93ba
 # ╠═281b0be2-86fd-4201-871a-7e362b5872d7
 # ╟─871778ce-735d-49ed-b6f5-ab68f127ad32
 # ╟─0b13b99a-9c7d-4117-90ba-e74baf49054d
+# ╠═df395e06-f130-4dd2-a95e-799a1d6b7d1f
+# ╠═f939d71c-86ce-4e12-9e18-b112743a130e
+# ╠═0df48817-9fdf-4032-8419-49fd940c89e8
 # ╠═4cfe15ea-1a7f-4af3-9602-6eac3732232a
 # ╠═0b261480-4109-41f9-ac4e-52d040b20efe
 # ╠═33fc2f88-c402-4394-83c9-10df2e7a6d96

@@ -435,23 +435,24 @@ end
 
 
 """
-minima_lattice(v::Matrix{Float64}, x0::Vector{Integer})
+minima_lattice(v::Matrix{Float64})
 
 TBW
 """
 function minima_lattice(v::Matrix{Float64})
-    function fitness(norm_vec::Vector{Integer})
-        small_norm = v[:,1] - sum(norm_vec[i] .* v[:,2:end])
-        return small_norm
+    lattice_vectors = zeros(size(v, 1), 1)
+    for col in eachcol(v)
+        if col == zeros(size(v, 1))
+        else
+            latt_temp = hcat(lattice_vectors, col)
+            if eigmin(latt_temp' * latt_temp) > eps()
+                lattice_vectors = latt_temp
+            end
+        end
     end
-    res = optimize(fitness,
-                x0, algo)
-    Vmin = Optim.minimum(res)
-    nmin = Optim.minimizer(res)
-    GC.gc()
 
-    keys = ["V", "N_min"]
-    vals = [Vmin_sign, nmin]
+    keys = ["lattice_vectors"]
+    vals = [lattice_vectors]
     return Dict(zip(keys,vals))
     GC.gc()
 end
