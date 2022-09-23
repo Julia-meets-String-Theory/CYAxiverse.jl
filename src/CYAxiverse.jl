@@ -16,9 +16,10 @@ include("plotting.jl")
 include("minimizer.jl")
 include("../add_functions/profiling.jl")
 if haskey(ENV, "PYTHON")
-    if ENV["PYTHON"] == "/opt/cytools/cytools-venv//bin/python3"
+    if occursin("cytools/cytools-venv//bin/python3",ENV["PYTHON"])
         include("../add_functions/cytools_wrapper.jl")
     end
+
 else
     println("This installation does not include CYTools!")
 end
