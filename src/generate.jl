@@ -507,7 +507,14 @@ function project_out(v::Vector{Float64})
     idd = Matrix{Float64}(I(size(v,1)))
     norm2 = dot(v,v)
     proj = 1. /norm2 * (v * v')
-    return idd-proj
+    for i in eachindex(proj)
+        proj[i] = proj[i] < eps() ? 0 : proj[i]
+    end
+    idd_proj = idd-proj
+    for i in eachindex(idd_proj)
+        idd_proj[i] = idd_proj[i] < eps() ? 0 : idd_proj[i]
+    end
+    idd_proj
 end
 """
     pq_spectrum(K,L,Q)
@@ -798,7 +805,7 @@ end
 function LQtildebar(h11::Int, tri::Int, cy::Int; threshold=0.5)
     pot_data = potential(h11,tri,cy)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
-    return LQtildebar(L, Q; threshold=threshold)
+    LQtildebar(L, Q; threshold=threshold)
 end
 
 """
@@ -996,9 +1003,9 @@ Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.0
 """
 function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
 	setprecision(ArbFloat,digits=5_000)
-    LQtildebar = LQtildebar(L, Q; threshold=threshold)
-	Ltilde = LQtildebar["Ltilde"][:,sortperm(LQtildebar["Ltilde"][2,:], rev=true)]
-    Qtilde = LQtildebar["Qtilde"]'[sortperm(Ltilde[2,:], rev=true), :]
+    LQtilde = LQtildebar(L, Q; threshold=threshold)
+	Ltilde = LQtilde["Ltilde"][:,sortperm(LQtilde["Ltilde"][2,:], rev=true)]
+    Qtilde = LQtilde["Qtilde"]'[sortperm(Ltilde[2,:], rev=true), :]
 	Qtilde = Matrix{Int}(Qtilde')
     basis_vectors = zeros(size(Qtilde,1), size(Qtilde,1))
 	idx = 1
@@ -1030,9 +1037,9 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
 			xmin = xmin[:, [sum(i)!=0 for i in eachcol(xmin)]]
 			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
 			lattice_vecs = CYAxiverse.minimizer.minima_lattice(xmin) ##need to write lattice minimizer
-			basis_vectors[idx-size(lattice_vecs,2):idx, :] = lattice_vecs
+			basis_vectors[idx-size(lattice_vecs["lattice_vectors"],2):idx, :] = lattice_vecs["lattice_vectors"]
 		end
-        proj = project_out(Qtilde[i,:])
+        proj = project_out(Qtilde[idx,:])
         #this is the scipy.linalg.orth function written out
         u, s, vh = svd(proj,full=true)
         M, N = size(u,1), size(vh,2)
@@ -1044,12 +1051,20 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
         LinearAlgebra.mul!(Qtilde_i, Qtilde, T)
         Qtilde = copy(Qtilde_i)
     end
-    return basis_vectors
+    keys = ["minima_lattice_vectors"]
+    vals = [basis_vectors]
+    return Dict(zip(keys,vals))
+end
+"""
+    vacua_MK(L,Q; threshold=1e-2)
+Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) on ``\\mathcal{Q}`` to compute the locations of vacua.
+!!! note
+    Finding the lattice of minima when numerical minimisation is required has not yet been implemented.
+"""
+function vacua_MK(h11::Int,tri::Int,cy::Int)
+    pot_data = potential(h11,tri,cy)
+    K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
+    vacua_MK(L, Q)
 end
 
-# function pq_spectrum(h11::Int,tri::Int,cy::Int)
-#     pot_data = potential(h11,tri,cy)
-#     K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
-#     pq_spectrum(K, L, Q)
-# end
 end
