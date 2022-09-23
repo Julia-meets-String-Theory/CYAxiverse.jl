@@ -412,11 +412,11 @@ function minimize(LV::Vector{Float64},QV::Matrix{Int},x0::Vector{Float64})
 end
 
 """
-    lattice_minimize(x0::Vector{Integer})
+minima_lattice(v::Matrix{Float64}, x0::Vector{Integer})
 
 TBW
 """
-function lattice_minimize(v::Matrix{Float64}, x0::Vector{Integer})
+function minima_lattice(v::Matrix{Float64}, x0::Vector{Integer})
     function fitness(norm_vec::Vector{Integer})
         small_norm = v[:,1] - sum(norm_vec[i] .* v[:,2:end])
         return small_norm
@@ -432,4 +432,29 @@ function lattice_minimize(v::Matrix{Float64}, x0::Vector{Integer})
     return Dict(zip(keys,vals))
     GC.gc()
 end
+
+
+"""
+minima_lattice(v::Matrix{Float64}, x0::Vector{Integer})
+
+TBW
+"""
+function minima_lattice(v::Matrix{Float64})
+    function fitness(norm_vec::Vector{Integer})
+        small_norm = v[:,1] - sum(norm_vec[i] .* v[:,2:end])
+        return small_norm
+    end
+    res = optimize(fitness,
+                x0, algo)
+    Vmin = Optim.minimum(res)
+    nmin = Optim.minimizer(res)
+    GC.gc()
+
+    keys = ["V", "N_min"]
+    vals = [Vmin_sign, nmin]
+    return Dict(zip(keys,vals))
+    GC.gc()
+end
+
+
 end
