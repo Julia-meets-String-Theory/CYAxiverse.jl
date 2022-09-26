@@ -429,21 +429,9 @@ end
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1; prec=5_000)
     pot_data = potential(h11,tri,cy);
     L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
-    LQtest = hcat(L,Q);
-    Lfull::Vector{Float64} = LQtest[:,2]
-    LQsorted = LQtest[sortperm(Lfull, rev=true), :]
-    Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    Qtilde = Qsorted_test[1,:]
-    Ltilde = Lsorted_test[1,:]
-    for i=2:size(Qsorted_test,1)
-        S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
-        m = S(hcat(Qtilde,Qsorted_test[i,:]))
-        (d,bmat) = Nemo.nullspace(m)
-        if d == 0
-            Qtilde = hcat(Qtilde,Qsorted_test[i,:])
-            Ltilde = hcat(Ltilde,Lsorted_test[i,:])
-        end
-    end
+    LQtilde = LQtildebar(h11,tri,cy)
+    Ltilde = Matrix{Float64}(LQtilde["Ltilde"]')
+    Qtilde = Matrix{Int}(LQtilde["Qtilde"]')
     spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
 end
 """
@@ -516,6 +504,18 @@ function project_out(v::Vector{Float64})
     end
     idd_proj
 end
+
+function orth_basis(vec::Vector{Float64})
+    proj = project_out(vec)
+    #this is the scipy.linalg.orth function written out
+    u, s, vh = svd(proj,full=true)
+    M, N = size(u,1), size(vh,2)
+    rcond = eps() * max(M, N)
+    tol = maximum(s) * rcond
+    num = Int.(round(sum(s[s .> tol])))
+    T = u[:, 1:num]
+end
+
 """
     pq_spectrum(K,L,Q)
 Uses a modified version of the algorithm outlined in the _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) to compute the masses and decay constants.
@@ -527,40 +527,18 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
     
-    LQtest::Matrix{Float64} = hcat(L,Q);
-    Lfull::Vector{Float64} = LQtest[:,2]
-    LQsorted::Matrix{Float64} = LQtest[sortperm(Lfull, rev=true), :]
-    Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
-    Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
-    for i=2:size(Qsorted_test,1)
-        S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
-        m::Nemo.fmpz_mat = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
-        (d::Int,_) = Nemo.nullspace(m)
-        if d == 0
-            Qtilde = hcat(Qtilde,Qsorted_test[i,:])
-            Ltilde = hcat(Ltilde,Lsorted_test[i,:])
-        end
-    end
-    Ltilde = Ltilde[:,2:end]
-    Qtilde = Qtilde[:,2:end]
+    LQtilde = LQtildebar(L, Q)
+    Ltilde = LQtilde["Ltilde"]
+    Qtilde = LQtilde["Qtilde"]
     QKs::Matrix{Float64} = zeros(Float64,h11,h11)
     fapprox::Vector{Float64} = zeros(Float64,h11)
     mapprox::Vector{Float64} = zeros(h11)
     LinearAlgebra.mul!(QKs, inv(Kls'), Qtilde')
-    QKs = QKs'
     for i=1:h11
-#         println(size(QKs))
         fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
         mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
-        proj = project_out(QKs[i,:])
-        #this is the scipy.linalg.orth function written out
-        u, s, vh = svd(proj,full=true)
-        M, N = size(u,1), size(vh,2)
-        rcond = eps() * max(M, N)
-        tol = maximum(s) * rcond
-        num = Int.(round(sum(s[s .> tol])))
-        T = u[:, 1:num]
+        T = orth_basis(QKs[i,:])
+        println(size(QKs), size(T))
         QKs1 = zeros(size(QKs,1), size(T,2))
         LinearAlgebra.mul!(QKs1,QKs, T)
         QKs = copy(QKs1)
@@ -1009,17 +987,22 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
 	Qtilde = Matrix{Int}(Qtilde')
     basis_vectors = zeros(size(Qtilde,1), size(Qtilde,1))
 	idx = 1
-    while idx ≤ size(Qtilde,2)
+    println("size Qtilde: ", size(Qtilde))
+    while idx ≤ size(Q,2)
+        println("start ", idx)
 		Qsub = Qtilde[:,idx]
 		Lsub = Ltilde[:,idx]
 		while Ltilde[2, idx+1] - Ltilde[2, idx] ≥ threshold && dot(Qtilde[:,idx+1], Qtilde[:,idx]) != 0
 			Lsub = hcat(Lsub, Ltilde[:, idx+1])
 			Qsub = hcat(Qsub, Qtilde[:, idx+1])
 			idx += 1
+            println("while ", idx)
 		end
 		if size(Qsub,2) == 1
-			basis_vectors[idx,:] = Qsub
+			basis_vectors[idx, :] = Qsub
 			idx += 1
+            println("if ", idx)
+
 		else
 			Lsubdiff = Lsub[2,:] .- Lsub[2,1]
 			Lfull = Lsubdiff[1,:] .* 10. .^ Lsubdiff[2,:];
@@ -1036,20 +1019,16 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
 			end
 			xmin = xmin[:, [sum(i)!=0 for i in eachcol(xmin)]]
 			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
+            xmin[xmin .< 10. * eps()] .= 0.
+            println(size(xmin))
 			lattice_vecs = CYAxiverse.minimizer.minima_lattice(xmin) ##need to write lattice minimizer
 			basis_vectors[idx-size(lattice_vecs["lattice_vectors"],2):idx, :] = lattice_vecs["lattice_vectors"]
 		end
-        proj = project_out(Qtilde[idx,:])
-        #this is the scipy.linalg.orth function written out
-        u, s, vh = svd(proj,full=true)
-        M, N = size(u,1), size(vh,2)
-        rcond = eps() * max(M, N)
-        tol = maximum(s) * rcond
-        num = Int.(round(sum(s[s .> tol])))
-        T = u[:, 1:num]
+        T = orth_basis(Qtilde[idx, :])
         Qtilde_i = zeros(size(Qtilde, 1), size(T, 2))
         LinearAlgebra.mul!(Qtilde_i, Qtilde, T)
         Qtilde = copy(Qtilde_i)
+        println("size(Qtilde): ", size(Qtilde))
     end
     keys = ["minima_lattice_vectors"]
     vals = [basis_vectors]

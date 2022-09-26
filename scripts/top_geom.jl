@@ -1,7 +1,20 @@
-using Pkg
-Pkg.instantiate()
+# using Pkg
+# Pkg.instantiate()
 
 using Distributed
+# using MPIClusterManagers
+# import MPI
+# # MPI.initialize()
+# manager = MPIClusterManagers.start_main_loop(MPI_TRANSPORT_ALL)
+# # addprocs(manager)
+# np = workers()
+# println(np)
+# if np!=0
+# else
+#     error("no workers!")
+#     exit()
+# end
+
 try
     np = parse(Int32,ENV["SLURM_NPROCS"])
     addprocs(np, exeflags="--project=$(Base.active_project())")
@@ -79,11 +92,11 @@ GC.gc()
 ##############################
 ############ Main ############
 ##############################
-h11_init = 177
+h11_init = 4
 np = nworkers()
 h11_end = 500
 log_files_top = [lfile for i=h11_init:h11_init+h11_end]
-n = [1000 for _=h11_init:h11_init+h11_end]
+n = [10 for _=h11_init:h11_init+h11_end]
 h11 = h11_init:h11_init+h11_end
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))
 # h11 = shuffle(h11)

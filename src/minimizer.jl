@@ -442,7 +442,7 @@ TBW
 function minima_lattice(v::Matrix{Float64})
     lattice_vectors = zeros(size(v, 1), 1)
     for col in eachcol(v)
-        if col == zeros(size(v, 1))
+        if sum(abs.(col)) < 1e-10
         else
             latt_temp = hcat(lattice_vectors, col)
             if eigmin(latt_temp' * latt_temp) > eps()
@@ -452,7 +452,7 @@ function minima_lattice(v::Matrix{Float64})
     end
 
     keys = ["lattice_vectors"]
-    vals = [lattice_vectors]
+    vals = [lattice_vectors[:, 2:end]]
     return Dict(zip(keys,vals))
     GC.gc()
 end

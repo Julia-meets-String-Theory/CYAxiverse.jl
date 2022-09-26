@@ -15,20 +15,20 @@ macro bind(def, element)
 end
 
 # ╔═╡ 3788df6d-c756-4b6a-8d75-8cd018ab2991
-# ╠═╡ disabled = true
-#=╠═╡
 begin
 	import Pkg	
 	Pkg.activate("/scratch/users/mehta2/cyaxiverse/CYAxiverse")
 end
-  ╠═╡ =#
 
 # ╔═╡ d1f78454-3ba0-4569-a491-f52e737c7dc3
 begin
 	using Revise	
-	using PlutoUI, HDF5, ArbNumerics, LineSearches, Optim, CairoMakie, Distributions, LinearAlgebra, ProgressLogging, Nemo
+	using HDF5, ArbNumerics, LineSearches, Optim, CairoMakie, Distributions, LinearAlgebra, ProgressLogging, Nemo
 	using CYAxiverse
 end
+
+# ╔═╡ 7fb60b52-1158-4bcb-b5e0-1e3ebd1ad52b
+using PlutoUI
 
 # ╔═╡ fee399f9-2668-41e0-a296-37b348a04769
 md"""
@@ -725,6 +725,7 @@ CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold=0.5)
 # ╟─90f44877-6310-49b1-9331-f8601918e4b3
 # ╟─2000a078-38f5-4c93-8627-ba6b4970aef6
 # ╠═7c8e7502-94d8-4da6-a5e2-b950b33a62c2
+# ╠═7fb60b52-1158-4bcb-b5e0-1e3ebd1ad52b
 # ╠═d1f78454-3ba0-4569-a491-f52e737c7dc3
 # ╠═3788df6d-c756-4b6a-8d75-8cd018ab2991
 # ╠═9071d014-a286-4f6f-bafc-648c1954d3d7
