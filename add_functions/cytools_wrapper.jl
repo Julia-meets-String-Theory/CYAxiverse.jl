@@ -41,7 +41,7 @@ function __init__()
     py"""
     from cytools import config
     import os
-    config.mosek_license = os.path.join("/usr/users/mehta2")
+    config.set_mosek_path(os.environ['HOME'])
     config.check_mosek_license()
     def test_config():
        return config.mosek_is_activated
@@ -51,6 +51,7 @@ function __init__()
     import numpy as np
     import scipy as sp
     from cytools import fetch_polytopes
+    from cytools import Polytope
     def f_polytopes(h11=None, h12=None, h13=None, h21=None, h22=None, h31=None,
                     chi=None, lattice=None, dim=4, n_points=None,
                     n_vertices=None, n_dual_points=None, n_facets=None,
@@ -70,6 +71,8 @@ poly(points; backend=nothing) = py"poly($points, backend=$backend)"
 
 function topologies(h11,n)
     h11list_temp = []
+    tri_test = []
+    tri_test_m = []
     #Generate list of $n polytopes at $h11
     poly_test = fetch_polytopes(h11,4*n, lattice="N",as_list=true, favorable=true)
     #Locator for points of polytope for saving
@@ -78,28 +81,23 @@ function topologies(h11,n)
     #otherwise generate 1 triangulation per polytope upto $n
     spt = size(poly_test,1)
     m = nothing;
-    left_over = mod(n,spt)
-    if spt < n && h11 > 3
+    if spt == 0
+        return [0, 0, 0, 0]
+    elseif spt < n && h11 > 3
+        left_over = mod(n, spt)
         m = n ÷ spt
-        try
-            h5open(cyax_file(h11,left_over,m+1), "r") do file
-                if haskey(file, "cytools/geometric/h21")
-                    return [0, 0, 0, 0]
-                end
-            end
-        catch
-            if left_over == 0
-                tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
-                cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
-                tri_test = vcat(tri_test_m...)
-            else
-                tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
-                tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
-                cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
-                cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
-                cy_num = vcat(cy_num1,cy_num)
-                tri_test = vcat(tri_test_m1...,tri_test_m...)
-            end
+        if left_over == 0
+            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
+            cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+            tri_test = vcat(tri_test_m...)
+        else
+            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
+            tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
+            tri_test_m = vcat(tri_test_m1, tri_test_m)
+            cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+            cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
+            cy_num = vcat(cy_num1,cy_num)
+            tri_test = vcat(tri_test_m1...,tri_test_m...)
         end
     else
         tri_test = [poly_test[i].triangulate() for i=1:n];
@@ -174,20 +172,12 @@ function cy_from_poly(h11)
     h11zero = lpad(h11,3,"0")
     np_pathinds = Vector{Int}[]
     for i in first(walkdir(present_dir()))[2]
-        if occursin(r"h11_$h11zero", i)
+        if occursin("h11_$h11zero", i)
             for j in first(walkdir(joinpath(present_dir(),i)))[2]
                 if occursin(r"np_*", j)
                     for k in first(walkdir(joinpath(present_dir(),i,j)))[2]
                         if occursin(r"cy_*", k)
-                            try
-                                h5open(cyax_file(h11,j,k), "r") do file
-                                    if haskey(file, "cytools/geometric/h21")
-                                        push!(np_pathinds, [0, 0, 0, 0])
-                                    end
-                                end
-                            catch
-                                push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
-                            end
+                            push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
                         end
                     end
                 end
@@ -210,119 +200,111 @@ function cy_from_poly(h11)
 end
 
 function geometries(h11,cy,tri,cy_i=1)
-    if h11!=0 
-        h5open(cyax_file(h11,tri,cy_i), "r") do file
-            if haskey(file, "cytools/geometric/h21")
-                return [h11,tri,cy_i]
+    glsm = zeros(Int,h11,h11+4)
+    basis = zeros(Int,h11)
+    tip = zeros(Float64,h11)
+    Kinv = zeros(Float64,h11,h11)
+    K = zeros(Float64,h11,h11)
+    tau = zeros(Float64,h11)
+    qprime = zeros(Int,h11+4,h11)
+    #Locator for h21s for saving
+    h21::Int = cy.h21()
+    #GLSM basis for saving
+    glsm = cy.glsm_charge_matrix(include_origin=false)
+    #Divisor basis for saving (allows for reproducibility)
+    basis = cy.divisor_basis()
+    #Find tip of SKC
+    n,m = 1,1
+    tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
+    #Kinv at tip -- save this or save K?
+    Kinv = cy.compute_Kinv(tip)
+    Kinv = Hermitian(1/2 * Kinv + Kinv')
+    #Generate list of Q matrices -- only $h11+4 directions
+    qprime = cy.toric_effective_cone().rays()
+    #PTD volumes at tip
+    tau = cy.compute_divisor_volumes(tip)[basis]
+    while true
+        rhs_constraint = zeros(size(qprime,1))
+        lhs_constraint = zeros(size(qprime,1),size(qprime,1))
+        for i=1:size(qprime,1)
+            for j=1:size(qprime,1)
+                if i>j
+                    lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
+                end
             end
+            rhs_constraint[i] = abs.(log.(abs.(dot(tau, qprime[i, :]))) .+ (-2π * dot(tau, qprime[i,:])))
         end
-        glsm = zeros(Int,h11,h11+4)
-        basis = zeros(Int,h11)
-        tip = zeros(Float64,h11)
-        Kinv = zeros(Float64,h11,h11)
-        K = zeros(Float64,h11,h11)
-        tau = zeros(Float64,h11)
-        qprime = zeros(Int,h11+4,h11)
-        #Locator for h21s for saving
-        h21::Int = cy.h21()
-        #GLSM basis for saving
-        glsm = cy.glsm_charge_matrix(include_origin=false)
-        #Divisor basis for saving (allows for reproducibility)
-        basis = cy.divisor_basis()
-        #Find tip of SKC
-        n,m = 1,1
-        tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
+        if LowerTriangular(lhs_constraint .< rhs_constraint) - I(h11+4) == LowerTriangular(zeros(h11+4, h11+4))
+            break
+        else
+            m+=1e-2
+            tip = m .* tip
+            #PTD volumes at tip
+            tau = cy.compute_divisor_volumes(tip)[basis]
+            #Kinv at tip -- save this or save K?
+            Kinv = cy.compute_Kinv(tip)
+            Kinv = Hermitian(1/2 * Kinv + Kinv') 
+        end
+    end
+    if (minimum(tau) > 1.)
+    else
+        n = 1. / minimum(tau)
+        tip = sqrt(n) .* tip
+        #PTD volumes at tip
+        tau = cy.compute_divisor_volumes(tip)[basis]
         #Kinv at tip -- save this or save K?
         Kinv = cy.compute_Kinv(tip)
         Kinv = Hermitian(1/2 * Kinv + Kinv')
-        #Generate list of Q matrices -- only $h11+4 directions
-        qprime = cy.toric_effective_cone().rays()
-        #PTD volumes at tip
-        tau = cy.compute_divisor_volumes(tip)
-        while true
-            rhs_constraint = zeros(size(qprime,1))
-            lhs_constraint = zeros(size(qprime,1),size(qprime,1))
-            for i=1:size(qprime,1)
-                for j=1:size(qprime,1)
-                    if i>j
-                        lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
-                    end
-                end
-                rhs_constraint[i] = abs.(log.(abs.(dot(qprime[i,:],tau))) .+ (-2π * dot(tau, qprime[i,:])))
-            end
-            if LowerTriangular(lhs_constraint .< rhs_constraint) - I(h11+4) == LowerTriangular(zeros(h11+4, h11+4))
-                break
-            else
-                m+=1e-2
-                tip = m .* tip
-                #PTD volumes at tip
-                tau = cy.compute_divisor_volumes(tip)
-                #Kinv at tip -- save this or save K?
-                Kinv = cy.compute_Kinv(tip)
-                Kinv = Hermitian(1/2 * Kinv + Kinv') 
-            end
-        end
-        if (minimum(tau) > 1.)
-        else
-            n = 1. / minimum(tau)
-            tip = sqrt(n) .* tip
-            #PTD volumes at tip
-            tau = cy.compute_divisor_volumes(tip)
-            #Kinv at tip -- save this or save K?
-            Kinv = cy.compute_Kinv(tip)
-            Kinv = Hermitian(1/2 * Kinv + Kinv')
-        end
-        tip_prefactor = [sqrt(n),m]
-        #Volume of CY3 at tip
-        V = cy.compute_cy_volume(tip)
-
-        q = zeros(Int,h11+4+binomial(h11+4,2),h11)
-        L2 = zeros(Float64,binomial(h11+4,2),2)
-        n=1
-        q[1:h11+4,:] = qprime
-        for i=1:size(qprime,1)-1
-            for j=i+1:size(qprime,1)
-                q[h11+4+n,:] = qprime[i,:]-qprime[j,:]
-                L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
-                      + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
-                      -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
-                n+=1
-            end
-        end
-        #Use scalar potential eqn to generate \Lambda^4 (this produces a (h11+4,2) matrix 
-        #where the components are in (mantissa, exponent)(base 10) format
-        #L1 are basis instantons and L2 are cross terms
-        L1 = zeros(h11+4,2)
-        for j=1:size(qprime,1)
-            L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
-        end
-        #concatenate L1 and L2
-        L = zeros(Float64,h11+4+binomial(h11+4,2),2)
-        L = vcat(L1,L2)
-
-        h5open(cyax_file(h11,tri,cy_i), "r+") do file
-            if haskey(file, "cytools/geometric/h21")
-            else
-                file["cytools/geometric/h21",deflate=9] = h21
-                file["cytools/geometric/glsm",deflate=9] = Int.(glsm)
-                file["cytools/geometric/basis",deflate=9] = Int.(basis)
-                file["cytools/geometric/tip",deflate=9] = Float64.(tip)
-                file["cytools/geometric/tip_prefactor",deflate=9] = Float64.(tip_prefactor)
-                file["cytools/geometric/CY_volume",deflate=9] = Float64(V)
-                file["cytools/geometric/divisor_volumes",deflate=9] = Float64.(tau)
-                file["cytools/geometric/Kinv",deflate=9] = Float64.(Kinv)
-            end
-            if haskey(file, "cytools/potential")
-            else
-                f1b = create_group(file, "cytools/potential")
-                f1b["L",deflate=9] = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2])
-                f1b["Q",deflate=9] = Int.(q)
-            end
-        end
-        return [h11,tri,cy_i]
-        GC.gc()
     end
-    return [0,0,0]
+    tip_prefactor = [sqrt(n),m]
+    #Volume of CY3 at tip
+    V = cy.compute_cy_volume(tip)
+
+    q = zeros(Int,h11+4+binomial(h11+4,2),h11)
+    L2 = zeros(Float64,binomial(h11+4,2),2)
+    n=1
+    q[1:h11+4,:] = qprime
+    for i=1:size(qprime,1)-1
+        for j=i+1:size(qprime,1)
+            q[h11+4+n,:] = qprime[i,:]-qprime[j,:]
+            L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
+                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
+                    -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
+            n+=1
+        end
+    end
+    #Use scalar potential eqn to generate \Lambda^4 (this produces a (h11+4,2) matrix 
+    #where the components are in (mantissa, exponent)(base 10) format
+    #L1 are basis instantons and L2 are cross terms
+    L1 = zeros(h11+4,2)
+    for j=1:size(qprime,1)
+        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
+    end
+    #concatenate L1 and L2
+    L = zeros(Float64,h11+4+binomial(h11+4,2),2)
+    L = vcat(L1,L2)
+
+    h5open(cyax_file(h11,tri,cy_i), "r+") do file
+        if haskey(file, "cytools/geometric/h21")
+        else
+            file["cytools/geometric/h21",deflate=9] = h21
+            file["cytools/geometric/glsm",deflate=9] = Int.(glsm)
+            file["cytools/geometric/basis",deflate=9] = Int.(basis)
+            file["cytools/geometric/tip",deflate=9] = Float64.(tip)
+            file["cytools/geometric/tip_prefactor",deflate=9] = Float64.(tip_prefactor)
+            file["cytools/geometric/CY_volume",deflate=9] = Float64(V)
+            file["cytools/geometric/divisor_volumes",deflate=9] = Float64.(tau)
+            file["cytools/geometric/Kinv",deflate=9] = Float64.(Kinv)
+        end
+        if haskey(file, "cytools/potential")
+        else
+            f1b = create_group(file, "cytools/potential")
+            f1b["L",deflate=9] = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2])
+            f1b["Q",deflate=9] = Int.(q)
+        end
+    end
+    return [h11,tri,cy_i]
+    GC.gc()
 end
 
 end
