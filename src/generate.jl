@@ -305,6 +305,10 @@ function gauss_log(sb,logb)
     end
 end
 
+function V(x; L, Q)
+    potential = dot(L, (1. - cos(Q * x)))
+end
+
 """
     hp_spectrum(K,L,Q; prec=5_000)
 
@@ -487,8 +491,14 @@ end
 function project_out(v::Vector{Int})
     idd = Matrix{Int}(I(size(v,1)))
     norm2 = dot(v,v)
-    proj = 1. / norm2 * (v * v')
-    return idd-proj
+    proj = 1 / norm2 * (v * v')
+    idd-proj
+end
+
+function project_out(projector::Matrix, v::Vector{Int})
+    norm2 = dot(projector * v, projector * v)
+    proj = 1. / norm2 * ((projector * v) * (v' * projector))
+    projector - proj
 end
 
 function project_out(v::Vector{Float64})
@@ -498,23 +508,58 @@ function project_out(v::Vector{Float64})
     for i in eachindex(proj)
         proj[i] = proj[i] < eps() ? 0 : proj[i]
     end
-    idd_proj = idd-proj
+    idd_proj = idd - proj
     for i in eachindex(idd_proj)
         idd_proj[i] = idd_proj[i] < eps() ? 0 : idd_proj[i]
     end
     idd_proj
 end
 
-function orth_basis(vec::Vector{Float64})
+function project_out(projector::Matrix, v::Vector{Float64})
+    norm2 = dot(projector * v, projector * v)
+    proj = 1. / norm2 * ((projector * v) * (v' * projector))
+    for i in eachindex(proj)
+        proj[i] = proj[i] < eps() ? 0 : proj[i]
+    end
+    idd_proj = projector - proj
+    for i in eachindex(idd_proj)
+        idd_proj[i] = idd_proj[i] < eps() ? 0 : idd_proj[i]
+    end
+    idd_proj
+end
+
+function project_out(orth_basis::Matrix)
+    projector = I(size(orth_basis, 1))
+    for i in 1:size(orth_basis, 2)
+        P = orth_basis[:, i] * orth_basis[:, i]'
+        projector -= P
+    end
+    projector
+end
+
+function orth_basis(vec::Vector)
     proj = project_out(vec)
     #this is the scipy.linalg.orth function written out
     u, s, vh = svd(proj,full=true)
     M, N = size(u,1), size(vh,2)
     rcond = eps() * max(M, N)
     tol = maximum(s) * rcond
-    num = Int.(round(sum(s[s .> tol])))
+    num = Int.(round(sum(s .> tol)))
     T = u[:, 1:num]
 end
+
+"""
+    orth_basis(Q)
+Takes a set of vectors (columns of `Q`) and constructs orthonormal basis
+"""
+function orth_basis(Q::Matrix)
+   #this is the scipy.linalg.orth function written out
+   u, s, vh = svd(Q, full=true)
+   M, N = size(u,1), size(vh,2)
+   tol = maximum(s) * eps()
+   num = Int.(round(sum(s .> tol)))
+   T = u[:, 1:num]
+end 
 
 """
     pq_spectrum(K,L,Q)
@@ -724,7 +769,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     Leff = zeros(Float64,2,1)
-    α::Matrix{Rational} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's?
+    α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's?
     for i=1:size(α,1)
         index=0
         for j=1:size(α,2)
@@ -761,7 +806,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     end
     if αeff == zeros(Float64,size(Qsorted_test[1,:],1),1)
         keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
-        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, α']
+        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, (inv(Matrix{Rational}(Qtilde[:,1:size(Qtilde,1)])) * Qbar)]
         return Dict(zip(keys,vals))
     else
         αeff = αeff[:,2:end]
@@ -984,17 +1029,17 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
     LQtilde = LQtildebar(L, Q; threshold=threshold)
 	Ltilde = LQtilde["Ltilde"][:,sortperm(LQtilde["Ltilde"][2,:], rev=true)]
     Qtilde = LQtilde["Qtilde"]'[sortperm(Ltilde[2,:], rev=true), :]
-	Qtilde = Matrix{Int}(Qtilde')
-    basis_vectors = zeros(size(Qtilde,1), size(Qtilde,1))
+	Qtilde = Matrix{Int}(Qtilde)
+    basis_vectors = zeros(size(Qtilde,2), size(Qtilde,2))
 	idx = 1
     println("size Qtilde: ", size(Qtilde))
     while idx ≤ size(Q,2)
         println("start ", idx)
-		Qsub = Qtilde[:,idx]
-		Lsub = Ltilde[:,idx]
-		while Ltilde[2, idx+1] - Ltilde[2, idx] ≥ threshold && dot(Qtilde[:,idx+1], Qtilde[:,idx]) != 0
+		Qsub = Qtilde[idx, :]
+		Lsub = Ltilde[:, idx]
+		while Ltilde[2, idx+1] - Ltilde[2, idx] ≥ threshold && dot(Qtilde[idx+1, :], Qtilde[idx, :]) != 0
 			Lsub = hcat(Lsub, Ltilde[:, idx+1])
-			Qsub = hcat(Qsub, Qtilde[:, idx+1])
+			Qsub = hcat(Qsub, Qtilde[idx+1, :])
 			idx += 1
             println("while ", idx)
 		end
@@ -1017,7 +1062,7 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
 			for i in eachcol(xmin)
 				i[:] = @. ifelse(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i)
 			end
-			xmin = xmin[:, [sum(i)!=0 for i in eachcol(xmin)]]
+			xmin = xmin[:, [sum(i)/size(i,1) > eps() for i in eachcol(xmin)]]
 			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
             xmin[xmin .< 10. * eps()] .= 0.
             println(size(xmin))
@@ -1044,6 +1089,27 @@ function vacua_MK(h11::Int,tri::Int,cy::Int)
     pot_data = potential(h11,tri,cy)
     K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
     vacua_MK(L, Q)
+end
+
+"""
+    vacua_MK(L,Q; threshold=1e-2)
+New implementation of MK's algorithm -- testing!
+"""
+function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
+	setprecision(ArbFloat,digits=5_000)
+    LQtilde = LQtildebar(L, Q; threshold=threshold)
+	Lhat = LQtilde["Ltilde"][:, sortperm(LQtilde["Ltilde"][2,:], rev=true)]
+    Qhat = LQtilde["Qtilde"][:, sortperm(Lhat[2,:], rev=true)]
+	Qhat = Matrix{Int}(Qhat)
+    if size(Qhat, 1) == size(Qhat, 2)
+        return det(Qhat)
+    else
+        projector = zeros(size(Qhat, 1), size(Qhat, 1))
+        for (i,col) in enumerate(eachcol(Qhat))
+            projector = project_out(Qhat[:, 1])
+        end
+
+    end
 end
 
 end
