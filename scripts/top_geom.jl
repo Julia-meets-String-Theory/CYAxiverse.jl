@@ -31,17 +31,27 @@ CYAxiverse.filestructure.logcreate(lfile)
 
 @everywhere function main_top(h11,n,l)
     try
-        test = CYAxiverse.cytools_wrapper.cy_from_poly(h11);
-        return test
-    catch
-        try
-            test = CYAxiverse.cytools_wrapper.topologies(h11,n);
-            return test
-        catch e
-            open(l, "a") do outf
-                write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
+        h5open(cyax_file(h11,n,1), "r") do file
+            if haskey(file, "cytools/geometric/h21")
+                return [0, 0, 0, 0]
+            else
+                error()
             end
-            return [0,0,0,0]
+        end
+    catch e
+        try
+            test = CYAxiverse.cytools_wrapper.cy_from_poly(h11);
+            return test
+        catch
+            try
+                test = CYAxiverse.cytools_wrapper.topologies(h11,n);
+                return test
+            catch e
+                open(l, "a") do outf
+                    write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
+                end
+                return [0,0,0,0]
+            end
         end
     finally
         open(l, "a") do outf
@@ -92,7 +102,7 @@ GC.gc()
 ##############################
 ############ Main ############
 ##############################
-h11_init = 4
+h11_init = 375
 np = nworkers()
 h11_end = 500
 log_files_top = [lfile for i=h11_init:h11_init+h11_end]
@@ -104,7 +114,7 @@ CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11
     h11cylist = pmap(main_top,h11,n,log_files_top)
 end
 # h11cylist = main_top(10,1000,lfile)
-h11cylist = hcat(h11cylist...)
+h11cylist = hcat(h11cylist...)[:, hcat(h11cylist...)[1,:] .!= 0]
 # h11cylist = h11cylist[:, shuffle(1:end)]
 GC.gc()
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11cylist), "geometries to run.\n"))
