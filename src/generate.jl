@@ -736,7 +736,7 @@ Dict{String, Matrix{Float64}}(
  )
 ```
 """
-function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
+function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 1e-2)
     LQtest::Matrix{Float64} = hcat(L,Q);
     LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
@@ -1033,7 +1033,7 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
     basis_vectors = zeros(size(Qtilde,2), size(Qtilde,2))
 	idx = 1
     println("size Qtilde: ", size(Qtilde))
-    while idx ≤ size(Q,2)
+    while idx < size(Q,2)
         println("start ", idx)
 		Qsub = Qtilde[idx, :]
 		Lsub = Ltilde[:, idx]
@@ -1096,20 +1096,44 @@ end
 New implementation of MK's algorithm -- testing!
 """
 function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
-	setprecision(ArbFloat,digits=5_000)
     LQtilde = LQtildebar(L, Q; threshold=threshold)
 	Lhat = LQtilde["Ltilde"][:, sortperm(LQtilde["Ltilde"][2,:], rev=true)]
     Qhat = LQtilde["Qtilde"][:, sortperm(Lhat[2,:], rev=true)]
-	Qhat = Matrix{Int}(Qhat)
     if size(Qhat, 1) == size(Qhat, 2)
-        return det(Qhat)
+        Qinv = inv(Qhat)
+        Qinv = @. ifelse(abs(Qinv) < eps(), zero(Qinv), Qinv)
+        return Qinv, abs(det(Qhat))
     else
-        projector = zeros(size(Qhat, 1), size(Qhat, 1))
-        for (i,col) in enumerate(eachcol(Qhat))
-            projector = project_out(Qhat[:, 1])
+        θmin = []
+        vac = 0
+        idx = 1
+        while idx < size(Qhat,1)
+            Qsub = Qhat[:, idx]
+            Lsub = Lhat[:, idx]
+            while Lhat[2, idx+1] - Lhat[2, idx] ≥ threshold && dot(Qhat[:, idx+1], Qhat[:, idx]) != 0
+                Lsub = hcat(Lsub, Lhat[:, idx+1])
+                Qsub = hcat(Qsub, Qhat[:, idx+1])
+                idx += 1
+            end
+            if size(Qsub, 2) == 1
+                vac += 1
+                push!(θmin, [0])
+            else
+                num_θmin, num_vac = subspace_minimiser(Lsub, Qsub)
+                vac += num_vac
+                push!(θmin, num_θmin)
+                Qsub = orth_basis(Qsub)
+            end
+            Qhat = project_out(Qsub) * Qhat
+            Qhat = @. ifelse(abs(Qhat) < eps(), zero(Qhat), Qhat)
         end
-
     end
+end
+
+function vacua_full(h11::Int, tri::Int, cy::Int)
+    pot_data = potential(h11, tri, cy)
+    L, Q = pot_data["L"], pot_data["Q"]
+    vacua_full(L, Q; threshold = 1e-2)
 end
 
 end
