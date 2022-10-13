@@ -316,6 +316,7 @@ function grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
 end
 
 function grad_std(LV::Vector{Float64},QV::Matrix{Int})
+    h11 = size(QV, 2)
     function QX(x::Vector)
         Qx = zeros(Float64,size(QV,1));
         @tullio Qx[c] = QV[c,i] * x[i]
@@ -345,6 +346,7 @@ end
 TBW
 """
 function minimize(LV::Vector{Float64},QV::Matrix{Int},x0::Vector{Float64})
+    threshold = 1e-2
     function QX(x::Vector)
         Qx = zeros(Float64,size(QV,1));
         @tullio Qx[c] = QV[c,i] * x[i]
