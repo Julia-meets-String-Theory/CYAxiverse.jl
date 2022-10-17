@@ -14,6 +14,7 @@ using TimerOutputs
 
 using ..filestructure: cyax_file, minfile, present_dir
 using ..read: potential
+using ..minimizer: minimize
 
 #################
 ### Constant ####
@@ -742,7 +743,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 1e-2
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
     Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
     Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
-    αeff::Matrix{Float64} = zeros(Float64,size(Qsorted_test[1,:],1),1)
+    
     S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
     m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
     d::Int = 1
@@ -760,16 +761,60 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 1e-2
             Lbar = hcat(Lbar,Lsorted_test[i,:])
         end
     end
-    Qtilde = Qtilde[:,2:end]
+    Qtilde = Int.(Qtilde[:,2:end])
     Qbar = Qbar[:,2:end]
     Ltilde = Ltilde[:,2:end]
     Lbar = Lbar[:,2:end]
     Ltilde_min::Float64 = minimum(Ltilde[2,:])
     Ldiff_limit::Float64 = log10(threshold)
-    Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
+    Qbar = Int.(Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)])
     Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
+    
+    keys = ["Qtilde", "Qbar", "Ltilde", "Lbar"]
+    vals = [Qtilde, Qbar, Ltilde, Lbar]
+    return Dict(zip(keys,vals))
+end
+
+function LQtildebar(h11::Int, tri::Int, cy::Int; threshold=0.5)
+    pot_data = potential(h11,tri,cy)
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    LQtildebar(L, Q; threshold=threshold)
+end
+
+"""
+    vacua_id_basis(L,Q; threshold)
+
+Compute the number of vacua given an instanton charge matrix `Q` and 2-column matrix of instanton scales `L` (in the form [sign; exponent])  and a threshold for:
+
+``\\frac{\\Lambda_a}{|\\Lambda_j|}``
+
+_i.e._ is the instanton contribution large enough to affect the minima.  This function uses JLM's method outlined in [TO APPEAR].\n
+#Examples
+```julia-repl
+julia> using CYAxiverse
+julia> h11,tri,cy = 10,20,1;
+julia> pot_data = CYAxiverse.read.potential(h11,tri,cy);
+julia> vacua_data = CYAxiverse.generate.vacua_id_basis(pot_data["L"],pot_data["Q"]; threshold=0.01)
+Dict{String, Any} with 3 entries:
+  "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
+  "vacua"  => 11552.0
+  "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
+```
+"""
+function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
+    if @isdefined h11
+    else
+        h11::Int = size(Q,2)
+    end
+    data = LQtildebar(L,Q; threshold=threshold)
+    Ldiff_limit::Float64 = log10(threshold)
     Leff = zeros(Float64,2,1)
-    α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's?
+    αeff::Matrix{Float64} = zeros(Float64,size(Q[1,:],1),1)
+    Qtilde = data["Qtilde"]
+    Qbar = data["Qbar"]
+    Ltilde = data["Ltilde"]
+    Lbar = data["Lbar"]
+    α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's? YES
     for i=1:size(α,1)
         index=0
         for j=1:size(α,2)
@@ -788,88 +833,63 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 1e-2
             end
         end
         if α[i,:] == zeros(size(α,2))
-            # if size(Leff,2) > 1
-            #     Leff = Leff[:,1:end-1]
-            # end
         else
             αeff = hcat(αeff,α[i,:])
             Leff = hcat(Leff,Lbar[:,i])
         end
-        # if index!=0
-        #     Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,index], digits=3)
-        #     if Ldiff > Ldiff_limit
-        #         Qtilde = hcat(Qtilde,Qbar[:,i])
-        #         Ltilde = hcat(Ltilde,Lbar[:,i])
-        #         αeff = hcat(αeff,α[i,:])
-        #     end
-        # end
     end
-    if αeff == zeros(Float64,size(Qsorted_test[1,:],1),1)
-        keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α"]
-        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, (inv(Matrix{Rational}(Qtilde[:,1:size(Qtilde,1)])) * Qbar)]
+    if αeff == zeros(Float64,size(Q[1,:],1),1)
+        Qinv = inv(Qtilde)
+        Qinv = @. ifelse(abs(Qinv) < 10. * eps(), zero(Qinv), Qinv)
+        keys = ["θ̃∥", "vac"]
+        vals = [Qinv, abs(det(Qtilde))]
         return Dict(zip(keys,vals))
     else
         αeff = αeff[:,2:end]
         Leff = Leff[:,2:end]
         Leff = hcat(Ltilde[:,1:size(Q,2)], Leff)
-        # αeff = hcat([αeff[:,i] for i=1:size(αeff,2) if sum(αeff[:,i] .==0) < size(αeff,1)]...)
         Qeff = hcat(I(size(αeff,1)),αeff)
         Qrowmask = [sum(i .==0) < size(Qeff,2)-1 for i in eachrow(Qeff)]
         Qcolmask = vec(mapslices(col -> any(col .!= 0), Qeff[Qrowmask,:], dims = 1))
-        # Qcolmask = [sum(i .==0) < size(Qeff,1) for i in eachcol(Qeff)]
-        # Qeff = Qeff[Qrowmask,Qcolmask]
+        Qeff = Qeff[Qrowmask,Qcolmask]
         Leff = Leff[:,Qcolmask]
-        keys = ["Qtilde", "Qbar", "Ltilde", "Lbar", "α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
-        vals = [Int.(Qtilde), Int.(Qbar), Ltilde, Lbar, (inv(Matrix{Rational}(Qtilde[:,1:size(Qtilde,1)])) * Qbar), hcat(I(size(αeff,1)),αeff), Leff, Qrowmask, Qcolmask]
+        keys = ["α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
+        vals = [(inv(Matrix{Rational}(Qtilde[:,1:size(Qtilde,1)])) * Qbar), hcat(I(size(αeff,1)),αeff), Leff, Qrowmask, Qcolmask]
         return Dict(zip(keys,vals))
     end
 end
 
-function LQtildebar(h11::Int, tri::Int, cy::Int; threshold=0.5)
+function vacua_id_basis(h11::Int, tri::Int, cy::Int; threshold=0.5)
     pot_data = potential(h11,tri,cy)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
-    LQtildebar(L, Q; threshold=threshold)
+    vacua_id_basis(L, Q; threshold=threshold)
 end
-
 """
-    vacua_JLM(L,Q; threshold)
-
-Compute the number of vacua given an instanton charge matrix `Q` and 2-column matrix of instanton scales `L` (in the form [sign; exponent])  and a threshold for:
-
-``\\frac{\\Lambda_a}{|\\Lambda_j|}``
-
-_i.e._ is the instanton contribution large enough to affect the minima.  This function uses JLM's method outlined in [TO APPEAR].\n
-#Examples
-```julia-repl
-julia> using CYAxiverse
-julia> h11,tri,cy = 10,20,1;
-julia> pot_data = CYAxiverse.read.potential(h11,tri,cy);
-julia> vacua_data = CYAxiverse.generate.vacua_JLM(pot_data["L"],pot_data["Q"]; threshold=0.01)
-Dict{String, Any} with 3 entries:
-  "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
-  "vacua"  => 11552.0
-  "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
-```
+    vacua_id(L, Q; threshold)
 """
-function vacua_JLM(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
-    h11::Int = size(Q,2)
-    data = LQtildebar(L,Q; threshold=threshold)
-    Qtilde = data["Qtilde"]
-    Qbar = data["Qbar"]
-    Ltilde = data["Ltilde"]
-    Lbar = data["Lbar"]
-    α = data["α"]'
-    α = hcat([α[i,:] for i=1:size(α,1) if size(α[i,:][α[i,:] .== 0],1)<(size(α,2)-1)]...)
-    if size(Qtilde,1) == size(Qtilde,2)
-        keys = ["vacua","Qtilde"]
-        vals = [1, Qtilde]
-        return Dict(zip(keys,vals))
+function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold=0.5)
+    if @isdefined h11
     else
-        αeff = 
-        Qeff = hcat(I(size(α,1)), α[:,h11+1:end])
+        h11::Int = size(Q,2)
     end
-    
+    id_basis = vacua_id_basis(L, Q; threshold)
+    if haskey(id_basis, "Qeff")
+        Qeff = Matrix{Int}(id_basis["Qeff"][id_basis["Qrowmask"], id_basis["Qcolmask"]])
+        Leff = id_basis["Leff"]
+        println(size(Qeff))
+        Lsubdiff = Leff[2,:] .- Leff[2,1]
+        Lfull = Leff[1,:] .* 10. .^ Lsubdiff;
+        
+        for run_number = 1:10_000
+            x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
+            res = minimize(Lfull, Qeff, x0) ##need to write subsystem minimizer
+            res["logV"] = res["logV"] .+ Lsub[2,1]
+            res["xmin"] = res["xmin"] ./ 2π
+        end
+    end
 end
+
+
 
 function vacua_SNF(Q::Matrix{Int})
     h11::Int = size(Q,2)
@@ -1101,7 +1121,7 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-
     Qhat = LQtilde["Qtilde"][:, sortperm(Lhat[2,:], rev=true)]
     if size(Qhat, 1) == size(Qhat, 2)
         Qinv = inv(Qhat)
-        Qinv = @. ifelse(abs(Qinv) < eps(), zero(Qinv), Qinv)
+        Qinv = @. ifelse(abs(Qinv) < 10. * eps(), zero(Qinv), Qinv)
         return Qinv, abs(det(Qhat))
     else
         θmin = []
