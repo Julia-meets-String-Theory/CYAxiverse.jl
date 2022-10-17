@@ -315,21 +315,27 @@ function grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
     return ArbFloat.(std(grad_all, dims=2))
 end
 
-function grad_std(LV::Vector{Float64},QV::Matrix{Int})
-    h11 = size(QV, 2)
-    function QX(x::Vector)
-        Qx = zeros(Float64,size(QV,1));
-        @tullio Qx[c] = QV[c,i] * x[i]
-        return Qx
+"""
+    grad_std(LV::Vector,QV::Matrix)
+
+TBW
+"""
+function grad_std(LV::Vector,QV::Matrix)
+    if @isdefined h11 
+    else 
+        h11 = size(QV, 1)
     end
-    grad(x) = vcat([dot(LV,QV[:,i] .* sin.(QX(x))) for i ∈ 1:h11]...)
+    function grad(x::Vector)
+        grad_temp = LV' .* (QV .* sin.(x' * QV))
+        sum(grad_temp, dims = 2)
+    end
     n=100
     grad_all = zeros(h11,n)
     for j=1:n
-        x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
+        x0 = rand(Uniform(0,2π),h11) .* rand(h11)
         grad_all[:,j] = grad(x0)
     end
-    return std(grad_all, dims=2)
+    return mean(grad_all, dims=2) .- 2. .* std(grad_all, dims=2)
 end
 
 function grad_std(h11::Int, tri::Int, cy::Int)
@@ -341,78 +347,67 @@ end
 
 
 """
-    minimize(LV::Vector{Float64},QV::Matrix{Int},x0::Vector{Float64})
+    minimize(LV::Vector,QV::Matrix,x0::Vector)
 
 TBW
 """
-function minimize(LV::Vector{Float64},QV::Matrix{Int},x0::Vector{Float64})
+function minimize(LV::Vector,QV::Matrix,x0::Vector)
+	if @isdefined h11
+	else
+		h11 = size(QV, 1)
+	end
+    @assert size(QV, 2) == size(LV, 1)
     threshold = 1e-2
-    function QX(x::Vector)
-        Qx = zeros(Float64,size(QV,1));
-        @tullio Qx[c] = QV[c,i] * x[i]
-        return Qx
-    end
     function fitness(x::Vector)
-        V = dot(LV,(1 .- cos.(QX(x))))
-        return V
+        sum(LV .* (1. .- cos.(x' * QV)))
     end
     function grad!(gradient::Vector, x::Vector)
-        grad_temp = zeros(Float64, size(LV,1),size(x,1))
-        @tullio grad_temp[c,i] = QV[c,i] * sin.(QX(x)[c])
-        @tullio gradient[i] = LV[c] * grad_temp[c,i]
-    end
-    function hess(x::Vector)
-        grad2::Matrix{Float64} = zeros(Float64,(size(x,1),size(x,1)))
-        hind1::Vector{Vector{Int}} = [[x,y]::Vector{Int} for x=1:size(x,1),y=1:size(x,1) if x>=y]
-        grad2_temp::Vector{Float64} = zeros(Float64,size(hind1,1))
-        grad2_temp1::Matrix{Float64} = zeros(Float64,size(LV,1),size(hind1,1))
-        @tullio grad2_temp1[c,k] = @inbounds(begin
-        i,j = hind1[k]
-                QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
-        @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
-            j,k = hind1[i]
-            grad2[j,k] = grad2_temp[i]
-        end
-        hessfull = Hermitian(grad2 + transpose(grad2) - Diagonal(grad2))
+        grad_temp = LV' .* (QV .* sin.(x' * QV))
+        gradient .= sum(grad_temp, dims = 2)
     end
     function hess!(hessian::Matrix, x::Vector)
-        grad2 = zeros(Float64,(size(x,1),size(x,1)))
-        hind1 = [[x,y]::Vector{Int} for x=1:size(x,1),y=1:size(x,1) if x>=y]
-        grad2_temp = zeros(Float64,size(hind1,1))
-        grad2_temp1 = zeros(Float64,size(LV,1),size(hind1,1))
-        @tullio grad2_temp1[c,k] = @inbounds(begin
-                i,j = hind1[k]
-                QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
-        @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
-            j,k = hind1[i]
-            grad2[j,k] = grad2_temp[i]
+        hessian = zeros(size(x, 1), size(x, 1))
+        for (i, _) in enumerate(eachrow(QV)), (j, _) in enumerate(eachrow(QV))
+            if i>=j
+                hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
+            end
         end
-        hessian .= grad2 + transpose(grad2) - Diagonal(grad2)
+        hessian .= hessian + hessian' - Diagonal(hessian)
     end
-    grad(x) = vcat([dot(LV,QV[:,i] .* sin.(QX(x))) for i ∈ 1:size(x,1)]...)
+    function hess(x::Vector)
+        hessian = zeros(size(x, 1), size(x, 1))
+        for (i, _) in enumerate(eachrow(QV)), (j, _) in enumerate(eachrow(QV))
+            if i>=j
+                hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
+            end
+        end
+		hessian + hessian' - Diagonal(hessian)
+    end
+    function grad(x::Vector)
+        grad_temp = LV' .* (QV .* sin.(x' * QV))
+        sum(grad_temp, dims = 2)
+    end
     gradσ = grad_std(LV,QV)
-    res = optimize(fitness,grad!,hess!,
-                x0, algo,
-                Optim.Options(x_tol =minimum(abs.(LV)),g_tol =minimum(threshold .* abs.(gradσ))))
+    x_tol = minimum(abs.(LV))
+    g_tol = eps() / threshold
+	algo_LBFGS = LBFGS(linesearch = LineSearches.BackTracking());
+    res = Optim.optimize(fitness, grad!, hess!, x0, Optim.Options(x_tol = x_tol, g_tol = g_tol))
     Vmin = Optim.minimum(res)
     xmin = Optim.minimizer(res)
     GC.gc()
-    if Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) > log10(eps()) && sum(Float64.(log10.(abs.(grad(xmin)))) .< log10.(abs.(threshold .* gradσ))) == (h11 - size(gradσ[gradσ .== 0.],1))
+    if log10(abs(minimum(eigen(hess(xmin)).values))) > log10(eps()) && maximum(log10.(abs.(grad(xmin)))) < log10(eps() / threshold)
         hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) 
         hess_sign = sign((minimum(eigen(hess(xmin)).values)))
-        sum_grad = sum(Float64.(log10.(abs.(grad(xmin)))))
+        sum_grad = log10.(abs.(grad(xmin)))
         Vmin_sign = Int(sign(Vmin))
         Vmin_log = Float64(log10(abs(Vmin)))
-
-        keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradsum"]
+		xmin = @.ifelse(abs(xmin) < eps() / threshold, zero(xmin), xmin)
+        keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradlog"]
         vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, sum_grad]
         return Dict(zip(keys,vals))
         GC.gc()
     end
 end
-
 """
 minima_lattice(v::Matrix{Float64}, x0::Vector{Integer})
 
