@@ -22,9 +22,14 @@ catch e
     error("no workers!")
     exit()
 end
+
+if haskey(ENV, "SLURM_TASK_ID")
+    split = parse(Int32, ENV["SLURM_TASK_ID"])
+end
 # @everywhere newARGS = string("vacua_new")
 
 @everywhere using CYAxiverse
+@everywhere using Random
 
 lfile = CYAxiverse.filestructure.logfile()
 CYAxiverse.filestructure.logcreate(lfile)
@@ -104,12 +109,22 @@ GC.gc()
 ##############################
 h11_init = 4
 np = nworkers()
-h11_end = 500
+h11_end = 440
 log_files_top = [lfile for i=h11_init:h11_init+h11_end]
 n = [10_000 for _=h11_init:h11_init+h11_end]
 h11 = h11_init:h11_init+h11_end
+
+if @isdefined split
+    if split == 11
+        h11 = 461:492
+    else
+        Random.seed!(9876543210)
+        h11 = shuffle(h11)
+        tasks = length(h11) ÷ split
+        h11 = sort(h11[(split - 1) * tasks + 1: split * tasks])
+    end
+end
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))
-# h11 = shuffle(h11)
 @time begin
     h11cylist = pmap(main_top,h11,n,log_files_top)
 end
