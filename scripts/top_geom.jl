@@ -113,13 +113,13 @@ h11_end = 440
 h11 = h11_init:h11_init+h11_end
 
 if @isdefined split
-    if split == 11
+    if split == ENV["MAX_JOB"]
         h11 = 461:492
     else
         Random.seed!(9876543210)
         h11 = shuffle(h11)
         tasks = length(h11) ÷ split
-        h11 = sort(h11[(split - 1) * tasks + 1: split * tasks])
+        h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
         n = [10_000 for _=1:length(h11)]
         log_files_top = [lfile for _=1:length(h11)]
     end
