@@ -14,7 +14,7 @@ using TimerOutputs
 
 using ..filestructure: cyax_file, minfile, present_dir
 using ..read: potential
-using ..minimizer: minimize
+using ..minimizer: minimize, subspace_minimize
 
 #################
 ### Constant ####
@@ -551,7 +551,7 @@ end
 
 """
     orth_basis(Q)
-Takes a set of vectors (columns of `Q`) and constructs orthonormal basis
+Takes a set of vectors (columns of `Q`) and constructs an orthonormal basis
 """
 function orth_basis(Q::Matrix)
    #this is the scipy.linalg.orth function written out
@@ -816,7 +816,6 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Lbar = data["Lbar"]
     α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's? YES
     for i=1:size(α,1)
-        index=0
         for j=1:size(α,2)
             if abs(α[i,j]) > 1e-3
                 Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j], digits=3)
@@ -851,8 +850,6 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
         Qeff = hcat(I(size(αeff,1)),αeff)
         Qrowmask = [sum(i .==0) < size(Qeff,2)-1 for i in eachrow(Qeff)]
         Qcolmask = vec(mapslices(col -> any(col .!= 0), Qeff[Qrowmask,:], dims = 1))
-        Qeff = Qeff[Qrowmask,Qcolmask]
-        Leff = Leff[:,Qcolmask]
         keys = ["α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
         vals = [(inv(Matrix{Rational}(Qtilde[:,1:size(Qtilde,1)])) * Qbar), hcat(I(size(αeff,1)),αeff), Leff, Qrowmask, Qcolmask]
         return Dict(zip(keys,vals))
@@ -874,18 +871,35 @@ function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold=0.5)
     end
     id_basis = vacua_id_basis(L, Q; threshold)
     if haskey(id_basis, "Qeff")
-        Qeff = Matrix{Int}(id_basis["Qeff"][id_basis["Qrowmask"], id_basis["Qcolmask"]])
-        Leff = id_basis["Leff"]
-        println(size(Qeff))
-        Lsubdiff = Leff[2,:] .- Leff[2,1]
-        Lfull = Leff[1,:] .* 10. .^ Lsubdiff;
-        
-        for run_number = 1:10_000
-            x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
-            res = minimize(Lfull, Qeff, x0) ##need to write subsystem minimizer
-            res["logV"] = res["logV"] .+ Lsub[2,1]
-            res["xmin"] = res["xmin"] ./ 2π
+        Qeff = Matrix(id_basis["Qeff"])
+        xmin = []
+        vac = 0
+        for (i,row) in enumerate(eachrow(Qeff))
+            if sum(iszero.(row)) == (size(row, 1)) - 1
+                push!(xmin, zero(Float64))
+                vac += 1
+            else
+                Leff = id_basis["Leff"][:, @.(!iszero(row))]
+                Lsubdiff = Leff[2,:] .- Leff[2,1]
+                Lfull = Leff[1,:] .* 10. .^ Lsubdiff;
+                res = subspace_minimize(Lfull, row)
+                i = 1
+                while i < size(res, 2)
+                    if all(res[:,i+1] .- res[:,i] .< eps() / threshold) 
+                        res[:,i] = zero(res[:,i])
+                    end
+                    i += 1
+                end
+                res = unique(res)
+                if typeof(res) <: Vector
+                    res = reshape(res, length(res), 1)
+                end
+                vac += size(res, 2)
+                
+            end
         end
+    else
+        return id_basis
     end
 end
 

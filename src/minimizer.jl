@@ -394,40 +394,36 @@ function minimize(LV::Vector,QV::Matrix,x0::Vector)
     res = Optim.optimize(fitness, grad!, hess!, x0, Optim.Options(x_tol = x_tol, g_tol = g_tol))
     Vmin = Optim.minimum(res)
     xmin = Optim.minimizer(res)
-    GC.gc()
+    # GC.gc()
     if log10(abs(minimum(eigen(hess(xmin)).values))) > log10(eps()) && maximum(log10.(abs.(grad(xmin)))) < log10(eps() / threshold)
         hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) 
         hess_sign = sign((minimum(eigen(hess(xmin)).values)))
-        sum_grad = log10.(abs.(grad(xmin)))
+        grad_log = log10.(abs.(grad(xmin)))
         Vmin_sign = Int(sign(Vmin))
         Vmin_log = Float64(log10(abs(Vmin)))
 		xmin = @.ifelse(abs(xmin) < eps() / threshold, zero(xmin), xmin)
+        xmin = @.ifelse(one(xmin) - mod(xmin / 2π, 1) < eps() / threshold || mod(xmin / 2π, 1) < eps() / threshold, zero(xmin), mod(xmin / 2π, 1))
         keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradlog"]
-        vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, sum_grad]
+        vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, grad_log]
         return Dict(zip(keys,vals))
-        GC.gc()
+        # GC.gc()
     end
 end
 """
-minima_lattice(v::Matrix{Float64}, x0::Vector{Integer})
-
-TBW
+    subspace_minimize(L::Vector, Q::Matrix; runs=10_000)
+Minimizes the subspace with `runs` iterations
 """
-function minima_lattice(v::Matrix{Float64}, x0::Vector{Integer})
-    function fitness(norm_vec::Vector{Integer})
-        small_norm = v[:,1] - sum(norm_vec[i] .* v[:,2:end])
-        return small_norm
-    end
-    res = optimize(fitness,
-                x0, algo)
-    Vmin = Optim.minimum(res)
-    nmin = Optim.minimizer(res)
-    GC.gc()
-
-    keys = ["V", "N_min"]
-    vals = [Vmin_sign, nmin]
-    return Dict(zip(keys,vals))
-    GC.gc()
+function subspace_minimize(L::Vector, Q::Matrix; runs=10_000)
+    xmin = []
+	for _ in 1:runs
+		x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
+		test_min = minimize(L, Q, x0)
+		if test_min === nothing
+		else
+			push!(xmin, test_min["xmin"])
+		end
+	end
+	unique(xmin)
 end
 
 

@@ -22,9 +22,9 @@ catch e
     error("no workers!")
     exit()
 end
-
-if haskey(ENV, "SLURM_TASK_ID")
-    split = parse(Int32, ENV["SLURM_TASK_ID"])
+split = nothing
+if haskey(ENV, "SLURM_ARRAY_TASK_ID")
+    split = parse(Int32, ENV["SLURM_ARRAY_TASK_ID"])
 end
 # @everywhere newARGS = string("vacua_new")
 
@@ -112,9 +112,14 @@ np = nworkers()
 h11_end = 440
 h11 = h11_init:h11_init+h11_end
 
-if @isdefined split
+if split === nothing
+    log_files_top = [lfile for i=h11_init:h11_init+h11_end]
+    n = [10_000 for _=h11_init:h11_init+h11_end]
+else
     if split == ENV["MAX_JOB"]
         h11 = 461:492
+        n = [10_000 for _=1:length(h11)]
+        log_files_top = [lfile for _=1:length(h11)]
     else
         Random.seed!(9876543210)
         h11 = shuffle(h11)
@@ -123,9 +128,6 @@ if @isdefined split
         n = [10_000 for _=1:length(h11)]
         log_files_top = [lfile for _=1:length(h11)]
     end
-else
-    log_files_top = [lfile for i=h11_init:h11_init+h11_end]
-    n = [10_000 for _=h11_init:h11_init+h11_end]
 end
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))
 @time begin
