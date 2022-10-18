@@ -110,8 +110,6 @@ GC.gc()
 h11_init = 4
 np = nworkers()
 h11_end = 440
-log_files_top = [lfile for i=h11_init:h11_init+h11_end]
-n = [10_000 for _=h11_init:h11_init+h11_end]
 h11 = h11_init:h11_init+h11_end
 
 if @isdefined split
@@ -122,7 +120,12 @@ if @isdefined split
         h11 = shuffle(h11)
         tasks = length(h11) ÷ split
         h11 = sort(h11[(split - 1) * tasks + 1: split * tasks])
+        n = [10_000 for _=1:length(h11)]
+        log_files_top = [lfile for _=1:length(h11)]
     end
+else
+    log_files_top = [lfile for i=h11_init:h11_init+h11_end]
+    n = [10_000 for _=h11_init:h11_init+h11_end]
 end
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))
 @time begin
