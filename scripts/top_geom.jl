@@ -111,33 +111,39 @@ h11_init = 4
 np = nworkers()
 h11_end = 440
 h11 = h11_init:h11_init+h11_end
+max_split = parse(Int32, ENV["MAX_JOB"])
 
 if split === nothing
     log_files_top = [lfile for i=h11_init:h11_init+h11_end]
-    n = [10_000 for _=h11_init:h11_init+h11_end]
+    n = [100 for _=h11_init:h11_init+h11_end]
 else
-    if split == ENV["MAX_JOB"]
+    if split == max_split
         h11 = 461:492
         n = [10_000 for _=1:length(h11)]
         log_files_top = [lfile for _=1:length(h11)]
     else
         Random.seed!(9876543210)
         h11 = shuffle(h11)
-        tasks = length(h11) ÷ split
+        tasks = length(h11) ÷ max_split
         h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
         n = [10_000 for _=1:length(h11)]
         log_files_top = [lfile for _=1:length(h11)]
     end
 end
+
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("These are ", h11, "\n"))
 @time begin
     h11cylist = pmap(main_top,h11,n,log_files_top)
 end
-# h11cylist = main_top(10,1000,lfile)
+
 h11cylist = hcat(h11cylist...)[:, hcat(h11cylist...)[1,:] .!= 0]
 # h11cylist = h11cylist[:, shuffle(1:end)]
+
 GC.gc()
+
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11cylist), "geometries to run.\n"))
+
 ntasks_cy = size(h11cylist,2)
 log_files_geom = [lfile for _=1:ntasks_cy]
 @time begin
