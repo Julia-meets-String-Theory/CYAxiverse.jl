@@ -17,7 +17,7 @@ end
 
 @everywhere using CYAxiverse
 
-
+@everywhere using HDF5
 @everywhere function main_Qsquare(h11,tri,cy,l)
     try
         id_basis = CYAxiverse.generate.vacua_id_basis(h11, tri, cy; threshold = 1e-2)
@@ -30,6 +30,7 @@ end
         open(l, "a") do outf
             write(outf,string(stacktrace(catch_backtrace()),"--(",h11,",",tri,",",cy,")\n"))
         end
+        return [0, 0, h11, tri]
     finally
         open(l, "a") do outf
             write(outf,string("spec-(",h11,",",tri,",",cy,")\n"))
@@ -85,6 +86,6 @@ log_files_spec = [lfile for _=1:size(h11list,2)]
 end
 @time main_sortQ(hcat(res...))
 
-GC.gc()
+
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("All workers are done!"))
 
