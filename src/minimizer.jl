@@ -351,7 +351,7 @@ end
 
 TBW
 """
-function minimize(LV::Vector,QV::Matrix,x0::Vector)
+function minimize(LV::Vector, QV, x0::Vector)
 	if @isdefined h11
 	else
 		h11 = size(QV, 1)
@@ -413,7 +413,7 @@ end
     subspace_minimize(L::Vector, Q::Matrix; runs=10_000)
 Minimizes the subspace with `runs` iterations
 """
-function subspace_minimize(L::Vector, Q::Matrix; runs=10_000)
+function subspace_minimize(L, Q; runs=10_000)
     xmin = []
 	for _ in 1:runs
 		x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
