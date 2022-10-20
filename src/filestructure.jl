@@ -131,9 +131,11 @@ function np_path()
                 if occursin(r"np_*", j)
                     for k in first(walkdir(joinpath(present_dir(),i,j)))[2]
                         if occursin(r"cy_*", k)
-                            push!(np_paths,transcode(UInt8,joinpath(i,j,k)))
-                            push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
+                            if isfile(joinpath(present_dir(),i,j,k,"cyax.h5"))
+                                push!(np_paths,transcode(UInt8,joinpath(i,j,k)))
+                                push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
 #                                 println([parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
+                            end
                         end
                     end
                 end
