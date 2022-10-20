@@ -737,7 +737,7 @@ Dict{String, Matrix{Float64}}(
  )
 ```
 """
-function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 1e-2)
+function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 0.5)
     LQtest::Matrix{Float64} = hcat(L,Q);
     LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
     Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
@@ -809,49 +809,48 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     data = LQtildebar(L,Q; threshold=threshold)
     Ldiff_limit::Float64 = log10(threshold)
     Leff = zeros(Float64,2,1)
-    αeff::Matrix{Float64} = zeros(Float64,size(Q[1,:],1),1)
-    Qtilde = data["Qtilde"]
-    Qbar = data["Qbar"]
+    αeff::Matrix{Rational} = zeros(size(@view(Q[1,:]),1),1)
+    Qtilde = Matrix{Rational}(data["Qtilde"])
+    Qbar = Matrix{Int}(data["Qbar"])
     Ltilde = data["Ltilde"]
     Lbar = data["Lbar"]
-    α::Matrix{Float64} = (inv(Qtilde) * Qbar)' ##Is this the same as JLM's? YES
+    Qinv = inv(Qtilde)
+    α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
     for i=1:size(α,1)
         for j=1:size(α,2)
             if abs(α[i,j]) > 1e-3
                 Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j], digits=3)
                 if Ldiff > Ldiff_limit
-                    Qtilde = hcat(Qtilde,Qbar[:,i])
-                    Ltilde = hcat(Ltilde,Lbar[:,i])
+                    Qtilde = hcat(Qtilde,@view(Qbar[:,i]))
+                    Ltilde = hcat(Ltilde, @view(Lbar[:,i]))
                     # Leff = hcat(Leff,Ltilde[:,j])
                     # αeff = hcat(αeff,α[i,:])
                 else
-                    α[i,j] = 0
+                    α[i,j] = zero(Rational)
                 end
             else
-                α[i,j] = 0
+                α[i,j] = zero(Rational)
             end
         end
         if α[i,:] == zeros(size(α,2))
         else
-            αeff = hcat(αeff,α[i,:])
-            Leff = hcat(Leff,Lbar[:,i])
+            αeff = hcat(αeff,@view(α[i,:]))
+            Leff = hcat(Leff,@view(Lbar[:,i]))
         end
     end
-    if αeff == zeros(Float64,size(Q[1,:],1),1)
-        Qinv = inv(Qtilde)
-        Qinv = @. ifelse(abs(Qinv) < 10. * eps(), zero(Qinv), Qinv)
+    if αeff == zeros(Float64,size(@view(Q[1,:]),1),1)
         keys = ["θ̃∥", "vac"]
         vals = [Qinv, abs(det(Qtilde))]
         return Dict(zip(keys,vals))
     else
-        αeff = αeff[:,2:end]
-        Leff = Leff[:,2:end]
-        Leff = hcat(Ltilde[:,1:size(Q,2)], Leff)
-        Qeff = hcat(I(size(αeff,1)),αeff)
-        Qrowmask = [sum(i .==0) < size(Qeff,2)-1 for i in eachrow(Qeff)]
-        Qcolmask = vec(mapslices(col -> any(col .!= 0), Qeff[Qrowmask,:], dims = 1))
-        keys = ["α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
-        vals = [(inv(Matrix{Rational}(Qtilde[:,1:size(Qtilde,1)])) * Qbar), hcat(I(size(αeff,1)),αeff), Leff, Qrowmask, Qcolmask]
+        αeff = @view(αeff[:,2:end])
+        Leff = @view(Leff[:,2:end])
+        Leff = hcat(@view(Ltilde[:,1:size(Q,2)]), Leff)
+        Qeff = hcat((1//1 * I(size(αeff,1))),αeff)
+        Qrowmask = [sum(i .== zero(i[1])) < size(Qeff,2)-1 for i in eachrow(Qeff)]
+        Qcolmask = [any(col .!= zero(col[1])) for col in eachcol(Qeff[Qrowmask,:])]
+        keys = ["Qtilde_inv", "α", "Qeff","Leff", "Qrowmask", "Qcolmask"]
+        vals = [inv(Matrix{Rational}(@view(Qtilde[:,1:size(Qtilde,1)]))), (inv(Matrix{Rational}(@view(Qtilde[:,1:size(Qtilde,1)]))) * Qbar), Qeff, Leff, Qrowmask, Qcolmask]
         return Dict(zip(keys,vals))
     end
 end
@@ -873,36 +872,49 @@ function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold=0.5)
     if haskey(id_basis, "Qeff")
         Qeff = Matrix(id_basis["Qeff"])
         xmin = []
-        vac = 0
         for (i,row) in enumerate(eachrow(Qeff))
             if sum(iszero.(row)) == (size(row, 1)) - 1
-                push!(xmin, zero(Float64))
-                vac += 1
+                push!(xmin, zeros(Float64, h11))
+            elseif maximum(denominator.(row)) == 1
+                push!(xmin, zeros(Float64, h11))
             else
                 Leff = id_basis["Leff"][:, @.(!iszero(row))]
-                Lsubdiff = Leff[2,:] .- Leff[2,1]
+                Lsubdiff = @view(Leff[2,:]) .- @view(Leff[2,1])
                 Lfull = Leff[1,:] .* 10. .^ Lsubdiff;
-                res = subspace_minimize(Lfull, row)
-                i = 1
-                while i < size(res, 2)
-                    if all(res[:,i+1] .- res[:,i] .< eps() / threshold) 
-                        res[:,i] = zero(res[:,i])
-                    end
-                    i += 1
-                end
-                res = unique(res)
+                res = subspace_minimize(Lfull, Matrix(row[row .!= 0]'))
                 if typeof(res) <: Vector
                     res = reshape(res, length(res), 1)
                 end
-                vac += size(res, 2)
-                
+                subspace_min = zeros(h11, size(res, 1))
+                subspace_min[i, :] = hcat(@view(res[:, 1])...)
+                subspace_min = subspace_min' * id_basis["Qtilde_inv"]
+                push!(xmin, Matrix(subspace_min'))
             end
         end
+        keys = ["θ̃∥", "vac"]
+        xmin = hcat(xmin...)
+        xmin = sort(xmin, dims = 2)
+        min_num = 1
+        while min_num < size(xmin, 2)
+            if all(abs.(@view(xmin[:, min_num+1]) .- @view(xmin[:, min_num])) .< 1e-10) 
+                xmin[:, min_num] = zero(@view(xmin[:, min_num]))
+            end
+            min_num += 1
+        end
+        xmin = unique(xmin, dims = 2)
+        vac = size(xmin, 2)
+        vals = [xmin, vac]
+        return Dict(zip(keys, vals))
     else
         return id_basis
     end
 end
 
+function vacua_id(h11::Int, tri::Int, cy::Int; threshold=0.5)
+    pot_data = potential(h11,tri,cy)
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    vacua_id(L, Q; threshold=threshold)
+end
 
 
 function vacua_SNF(Q::Matrix{Int})
