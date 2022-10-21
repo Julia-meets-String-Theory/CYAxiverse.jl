@@ -482,9 +482,9 @@ LQtilde["Qrowmask"]
 
 # ╔═╡ 7801297e-c52e-48e0-92d6-d58839afe7e3
 begin
-	xtest = [ArbFloat.(min_data[i]["±x"] .* 10. .^ min_data[i]["logx"]) for i=1:size(min_data,1)];
+	xtest = [ArbFloat.(min_data[i]["±x"] .* 10. .^ min_data[i]["logx"]) for i in eachindex(min_data)];
 	xmin_test = [[LQtilde["Ltilde"][1,i] < 0. ? ArbFloat(π) : ArbFloat(0.) for i=1:size(LQtilde["Qtilde"],1)] for _ in xtest]
-	for i=1:size(xtest,1)
+	for i in eachindex(xtest)
 		for (j,k) in enumerate((1:size(LQtilde["Qtilde"],1))[LQtilde["Qrowmask"]])
 			xmin_test[i][k] = xtest[i][j]
 		end
