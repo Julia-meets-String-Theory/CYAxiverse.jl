@@ -118,11 +118,47 @@ function logcreate(l::String)
 end
 
 """
-    np_path()
+    np_path_generate(h11)
+Walks through `data_dir()` and returns list of data paths and matrix of `[h11; tri; cy]` -- at specific h11.
+Saves in h5 file `paths_cy.h5`
+"""
+function np_path_generate(h11::Int; geometric_data::Bool = false)
+    np_paths = Vector{UInt8}[]
+    h11zero = lpad(h11,3,"0")
+    np_pathinds = Vector{Int}[]
+    for i in first(walkdir(present_dir()))[2]
+        if occursin("h11_$h11zero", i)
+            for j in first(walkdir(joinpath(present_dir(),i)))[2]
+                if occursin(r"np_*", j)
+                    for k in first(walkdir(joinpath(present_dir(),i,j)))[2]
+                        if occursin(r"cy_*", k)
+                            if isfile(joinpath(present_dir(), i, j, k, "cyax.h5"))
+                                h11, tri, cy = parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))
+                                if geometric_data
+                                    if isgeometry(h11, tri, cy)
+                                        push!(np_paths,transcode(UInt8,joinpath(i,j,k)))
+                                        push!(np_pathinds,[h11, tri, cy])
+                                    end
+                                else
+                                    push!(np_paths,transcode(UInt8,joinpath(i,j,k)))
+                                    push!(np_pathinds,[h11, tri, cy])
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    hcat(np_paths...), hcat(np_pathinds...)
+end
+
+"""
+    np_path_generate()
 Walks through `data_dir()` and returns list of data paths and matrix of `[h11; tri; cy]`.
 Saves in h5 file `paths_cy.h5`
 """
-function np_path()
+function np_path_generate(; geometric_data::Bool = false)
     np_paths = Vector{UInt8}[]
     np_pathinds = Vector{Int}[]
     for i in first(walkdir(present_dir()))[2]
@@ -132,9 +168,16 @@ function np_path()
                     for k in first(walkdir(joinpath(present_dir(),i,j)))[2]
                         if occursin(r"cy_*", k)
                             if isfile(joinpath(present_dir(),i,j,k,"cyax.h5"))
-                                push!(np_paths,transcode(UInt8,joinpath(i,j,k)))
-                                push!(np_pathinds,[parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
-#                                 println([parse(Int,SubString(i,5,7)),parse(Int,SubString(j,4,10)),parse(Int,SubString(k,4,10))])
+                                h11, tri, cy = parse(Int,SubString(i,5,7)), parse(Int,SubString(j,4,10)), parse(Int,SubString(k,4,10))
+                                if geometric_data
+                                    if isgeometry(h11, tri, cy)
+                                        push!(np_paths,transcode(UInt8,joinpath(i,j,k)))
+                                        push!(np_pathinds,[h11, tri, cy])
+                                    end
+                                else
+                                    push!(np_paths,transcode(UInt8,joinpath(i,j,k)))
+                                    push!(np_pathinds,[h11, tri, cy])
+                                end
                             end
                         end
                     end
@@ -142,14 +185,25 @@ function np_path()
             end
         end
     end
+    hcat(np_paths...), hcat(np_pathinds...)
+end
+
+
+"""
+    np_path()
+
+Saves list of data paths and matrix of `[h11; tri; cy]` in h5 file `paths_cy.h5`
+"""
+function np_path()
+    np_paths, np_pathinds = np_path_generate()
     if isfile(joinpath(data_dir(),"paths.h5")) || isfile(joinpath(data_dir(),"paths_cy.h5"))
     else
         h5open(joinpath(data_dir(),"paths_cy.h5"), "cw") do f
-            f["paths",deflate=9] = hcat(np_paths...)
-            f["pathinds",deflate=9] = hcat(np_pathinds...)
+            f["paths",deflate=9] = np_paths
+            f["pathinds",deflate=9] = np_pathinds
         end
     end
-    return hcat(np_paths...), hcat(np_pathinds...)
+    np_paths, np_pathinds
 end
 """
     paths_cy()
@@ -158,7 +212,7 @@ Loads / generates `paths_cy.h5` which contains the explicit locations and also `
 function paths_cy()
     if isfile(joinpath(data_dir(),"paths.h5")) || isfile(joinpath(data_dir(),"paths_cy.h5"))
     else
-        np_path()
+        return np_path()
     end
     if localARGS()==string("in_KC") 
         paths_cy,pathinds_cy =  h5open(joinpath(data_dir(),"paths.h5"), "r") do f
@@ -170,7 +224,7 @@ function paths_cy()
             end;
     end
     if typeof(paths_cy) == Matrix{UInt8}
-        paths_cy = [transcode(String,paths_cy[:,i]) for i in 1:size(paths_cy,2)]
+        paths_cy = [transcode(String, col) for col in eachcol(paths_cy)]
     end
     return paths_cy,pathinds_cy
 end
@@ -183,8 +237,47 @@ Loads geometry indices between ``h^{1,1} \\in (\\mathrm{min},\\mathrm{max}]``
 """
 function h11lst(h11min=0,h11max=100)
     pathinds_cy = paths_cy()[2]
-    h11list = pathinds_cy[:,h11min .< pathinds_cy[1,:].<= h11max]
+    h11list = @view(pathinds_cy[:,h11min .< @view(pathinds_cy[1,:]).<= h11max])
     return h11list
+end
+
+"""
+    h11lst(h11list::Vector)
+
+TBW
+"""
+function h11lst(h11list::Vector; geometric_data::Bool = false)
+    file_list = []
+    h11_count = []
+    for h11 in h11list
+        h11_file_list = np_path_generate(h11; geometric_data = geometric_data)[2]
+        push!(file_list, h11_file_list)
+        push!(h11_count, length(h11_file_list))
+    end
+    file_list, h11_count = hcat(file_list...), hcat(h11_count)
+    if geometric_data
+        for col in eachcol(file_list)
+            if isfile(cyax_file(col...))
+                col = zero(col)
+            end
+        end
+        return file_list[:, @view(file_list[1, :]) .!= 0]
+    end
+end
+
+"""
+    isgeometry(h11, tri, cy)
+
+Check if geometric quantities have been computed
+"""
+function isgeometry(h11, tri, cy)
+    h5open(cyax_file(h11, tri, cy), "r") do file
+        if haskey(file, "cytools/geometric/h21")
+            return true
+        else
+            return false
+        end
+    end
 end
 
 """

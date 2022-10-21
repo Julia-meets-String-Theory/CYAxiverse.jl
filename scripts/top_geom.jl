@@ -36,31 +36,21 @@ CYAxiverse.filestructure.logcreate(lfile)
 
 @everywhere function main_top(h11,n,l)
     try
-        h5open(cyax_file(h11,n,1), "r") do file
-            if haskey(file, "cytools/geometric/h21")
-                return [0, 0, 0, 0]
-            else
-                error()
-            end
-        end
-    catch e
+        test = CYAxiverse.cytools_wrapper.cy_from_poly(h11);
+        return test
+    catch
         try
-            test = CYAxiverse.cytools_wrapper.cy_from_poly(h11);
+            test = CYAxiverse.cytools_wrapper.topologies(h11,n);
             return test
-        catch
-            try
-                test = CYAxiverse.cytools_wrapper.topologies(h11,n);
-                return test
-            catch e
-                open(l, "a") do outf
-                    write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
-                end
-                return [0,0,0,0]
+        catch e
+            open(l, "a") do outf
+                write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
             end
-        end
-    finally
-        open(l, "a") do outf
-            write(outf,string("top-(",h11,")\n"))
+            return [0,0,0,0]
+        finally
+            open(l, "a") do outf
+                write(outf,string("top-(",h11,")\n"))
+            end
         end
     end
     
@@ -113,22 +103,30 @@ h11_end = 440
 h11 = h11_init:h11_init+h11_end
 max_split = parse(Int32, ENV["MAX_JOB"])
 
-if split === nothing
-    log_files_top = [lfile for i=h11_init:h11_init+h11_end]
-    n = [100 for _=h11_init:h11_init+h11_end]
-else
-    if split == max_split
-        h11 = 461:492
-        n = [10_000 for _=1:length(h11)]
-        log_files_top = [lfile for _=1:length(h11)]
+function h11list_generate(h11::Vector; ngeometries::Int = 10, split = nothing, max_split = 0)
+    log_files_top = []
+    n = []
+    if split === nothing
+        log_files_top = [lfile for _ in h11]
+        n = [ngeometries for _ in h11]
     else
-        Random.seed!(9876543210)
-        h11 = shuffle(h11)
-        tasks = length(h11) ÷ max_split
-        h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
-        n = [10_000 for _=1:length(h11)]
-        log_files_top = [lfile for _=1:length(h11)]
+        if split == max_split
+            h11 = [462, 491]
+            n = [ngeometries * 1_000 for _ in h11]
+            log_files_top = [lfile for _ in h11]
+            
+        else
+            Random.seed!(9876543210)
+            h11 = shuffle(h11)
+            tasks = length(h11) ÷ max_split
+            h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
+            n = [ngeometries * 1_000 for _ in h11]
+            log_files_top = [lfile for _ in h11]
+        end
     end
+    keys = ["h11", "log_files", "ngeometries"]
+    vals = [h11, log_files_top, n]
+    return Dict(zip(keys, vals))
 end
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))

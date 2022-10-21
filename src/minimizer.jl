@@ -44,7 +44,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
         i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -59,7 +59,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
                 i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -92,7 +92,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
 end
 
 function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,algo,prec)
-    setprecision(ArbFloat,digits=prec)
+    setprecision(ArbFloat; digits=prec)
     Arb0 = ArbFloat(0.)
     Arb1 = ArbFloat(1.)
     Arb2π = ArbFloat(2π)
@@ -366,8 +366,7 @@ function minimize(LV::Vector, QV, x0::Vector)
         gradient .= sum(grad_temp, dims = 2)
     end
     function hess!(hessian::Matrix, x::Vector)
-        hessian = zeros(size(x, 1), size(x, 1))
-        for (i, _) in enumerate(eachrow(QV)), (j, _) in enumerate(eachrow(QV))
+        for i in axes(QV, 1), j in axes(QV, 1)
             if i>=j
                 hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
             end
@@ -376,7 +375,7 @@ function minimize(LV::Vector, QV, x0::Vector)
     end
     function hess(x::Vector)
         hessian = zeros(size(x, 1), size(x, 1))
-        for (i, _) in enumerate(eachrow(QV)), (j, _) in enumerate(eachrow(QV))
+        for i in axes(QV, 1), j in axes(QV, 1)
             if i>=j
                 hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
             end

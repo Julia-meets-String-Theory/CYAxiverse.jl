@@ -335,7 +335,7 @@ Dict{String, Any} with 12 entries:
 """
 function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec=5_000)
     @assert size(Q,1) == size(L,1) && size(Q,2) == size(K,1)
-    setprecision(ArbFloat,digits=prec)
+    setprecision(ArbFloat; digits=prec)
     h11::Int = size(K,1)
     Lh::Vector{ArbFloat}, Qtest::Matrix{ArbFloat} = L[:,1] .* ArbFloat(10.) .^L[:,2], ArbFloat.(Q)
     #Compute Hessian (in lattice basis)
@@ -353,7 +353,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     i,j = hind1[k]
             Qtest[c,i] * Qtest[c,j] end) grad=false fastmath=false
     @tullio grad2_temp[k] = grad2_temp1[c,k] * Lh[c]
-    @inbounds for i=1:size(hind1,1)
+    @inbounds for i in eachindex(hind1)
         j,k = hind1[i]
         grad2[j,k] = grad2_temp[i]
     end
@@ -400,13 +400,13 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     quart31sign::Vector{Int} = zeros(Int,size(qindq31,1))
     quart22sign::Vector{Int} = zeros(Int,size(qindq22,1))
     quartdiagsign::Vector{Int} = zeros(Int,h11)
-    @inbounds for k=1:size(qindq31,1)
+    @inbounds for k in eachindex(qindq31)
         i,_,_,j = qindq31[k]
         quart31sign1[:,k] = signL .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,j]
         quart31log1[:,k] = logL .+ (logQMs[:,i] + logQMs[:,i] .+ logQMs[:,i] + logQMs[:,j])
         quart31sign[k],quart31log[k] = gauss_log(quart31sign1[:,k],quart31log1[:,k])
     end
-    @inbounds for k=1:size(qindq22,1)
+    @inbounds for k in eachindex(qindq22)
         i,_,_,j = qindq22[k]
         quart22sign1[:,k] = signL .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,j] .* signQMs[:,j]
         quart22log1[:,k] = logL .+ (logQMs[:,i] + logQMs[:,i] .+ logQMs[:,j] + logQMs[:,j])
@@ -455,7 +455,7 @@ function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
         Ltilde = Lsorted_test[1,:]
         for i=2:size(Qsorted_test,1)
             S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
-            m = S(hcat(Qtilde,Qsorted_test[i,:]))
+            m = S(hcat(Qtilde, @view(Qsorted_test[i,:])))
             (d,bmat) = Nemo.nullspace(m)
             if d == 0
                 Qtilde = hcat(Qtilde,Qsorted_test[i,:])
@@ -751,24 +751,24 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 0.5)
     Lbar::Matrix{Float64} = zeros(Float64,size(Lsorted_test[1,:],1),1)
     for i=2:size(Qsorted_test,1)
         S = MatrixSpace(Nemo.ZZ, size(Qtilde)...)
-        m = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
+        m = S(hcat(@view(Qtilde[:,2:end]),@view(Qsorted_test[i,:])))
         d = Nemo.nullspace(m)[1]
         if d == 0
-            Qtilde = hcat(Qtilde,Qsorted_test[i,:])
-            Ltilde = hcat(Ltilde,Lsorted_test[i,:])
+            Qtilde = hcat(Qtilde,@view(Qsorted_test[i,:]))
+            Ltilde = hcat(Ltilde,@view(Lsorted_test[i,:]))
         else
-            Qbar = hcat(Qbar,Qsorted_test[i,:])
-            Lbar = hcat(Lbar,Lsorted_test[i,:])
+            Qbar = hcat(Qbar, @view(Qsorted_test[i,:]))
+            Lbar = hcat(Lbar, @view(Lsorted_test[i,:]))
         end
     end
-    Qtilde = Int.(Qtilde[:,2:end])
-    Qbar = Qbar[:,2:end]
-    Ltilde = Ltilde[:,2:end]
-    Lbar = Lbar[:,2:end]
-    Ltilde_min::Float64 = minimum(Ltilde[2,:])
+    Qtilde = Int.(@view(Qtilde[:,2:end]))
+    Qbar = @view(Qbar[:,2:end])
+    Ltilde = @view(Ltilde[:,2:end])
+    Lbar = @view(Lbar[:,2:end])
+    Ltilde_min::Float64 = minimum(@view(Ltilde[2,:]))
     Ldiff_limit::Float64 = log10(threshold)
-    Qbar = Int.(Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)])
-    Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
+    Qbar = Int.(@view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)]))
+    Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     
     keys = ["Qtilde", "Qbar", "Ltilde", "Lbar"]
     vals = [Qtilde, Qbar, Ltilde, Lbar]
@@ -816,8 +816,8 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     Lbar = data["Lbar"]
     Qinv = inv(Qtilde)
     α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
-    for i=1:size(α,1)
-        for j=1:size(α,2)
+    for i in axes(α,1)
+        for j in axes(α,2)
             if abs(α[i,j]) > 1e-3
                 Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j], digits=3)
                 if Ldiff > Ldiff_limit
@@ -840,7 +840,7 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     end
     if αeff == zeros(Float64,size(@view(Q[1,:]),1),1)
         keys = ["θ̃∥", "vac"]
-        vals = [Qinv, abs(det(Qtilde))]
+        vals = [unique(Qinv, dims=2), abs(det(Qtilde))]
         return Dict(zip(keys,vals))
     else
         αeff = @view(αeff[:,2:end])
@@ -1071,7 +1071,7 @@ Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.0
     Finding the lattice of minima when numerical minimisation is required has not yet been implemented.
 """
 function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
-	setprecision(ArbFloat,digits=5_000)
+	setprecision(ArbFloat; digits=5_000)
     LQtilde = LQtildebar(L, Q; threshold=threshold)
 	Ltilde = LQtilde["Ltilde"][:,sortperm(LQtilde["Ltilde"][2,:], rev=true)]
     Qtilde = LQtilde["Qtilde"]'[sortperm(Ltilde[2,:], rev=true), :]
@@ -1125,6 +1125,7 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
     vals = [basis_vectors]
     return Dict(zip(keys,vals))
 end
+
 """
     vacua_MK(L,Q; threshold=1e-2)
 Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) on ``\\mathcal{Q}`` to compute the locations of vacua.
