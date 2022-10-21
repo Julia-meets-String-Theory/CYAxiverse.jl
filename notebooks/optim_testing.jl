@@ -351,7 +351,7 @@ function minimize(LV::Vector,QV::Matrix,x0::Vector; algo, threshold = 1e-2)
         i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -366,7 +366,7 @@ function minimize(LV::Vector,QV::Matrix,x0::Vector; algo, threshold = 1e-2)
                 i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
