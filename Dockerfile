@@ -104,5 +104,6 @@ WORKDIR /home/$USERNAME/mounted_volume
 # Start jupyter lab by default
 USER $USERNAME
 ENV JULIA_REVISE_POLL=1
+EXPOSE 8996
 CMD julia --project="/opt/CYAxiverse.jl/" /opt/CYAxiverse.jl/scripts/testing/pluto_docker.jl
 # CMD jupyter lab --ip 0.0.0.0 --port $PORT --no-browser $ALLOW_ROOT
