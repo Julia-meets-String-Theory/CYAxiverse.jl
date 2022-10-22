@@ -25,6 +25,13 @@ RUN apt-get -yqq install autoconf build-essential nano cmake libgmp-dev libcgal-
 RUN ln -s /usr/lib/${AARCH}-linux-gnu/libflint-arb.so /usr/lib/${AARCH}-linux-gnu/libarb.so
 RUN ln -s /usr/include/flint/* /usr/include/
 
+### Install MPI -- uncomment below to install openmpi-4.1.1
+# WORKDIR /opt/mpi
+# RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.1.tar.gz
+# RUN gunzip -c openmpi-4.1.1.tar.gz | tar xf -
+# RUN cd openmpi-4.1.1 && ./configure --prefix="$PWD/openmpi" && make && make all install && ldconfig && rm ../openmpi-4.1.1.tar.gz
+
+
 # Set up non-root user
 RUN groupadd -r -g $USERID $USERNAME && useradd -r -s /bin/bash -u $USERID -g $USERNAME -m $USERNAME\
     || echo "Skipping user creation"
@@ -43,14 +50,15 @@ RUN ln -s $PWD/julia-1.7.1/bin/julia $VIRTUAL_ENV/bin/julia
 RUN rm julia-1.7.1-linux-x86_64.tar.gz
 
 
+
 # Install pip packages
 ENV CVXOPT_SUITESPARSE_INC_DIR=/usr/include/suitesparse
 RUN pip3 install --upgrade pip
-RUN pip3 install numpy scipy jupyterlab cvxopt gekko pymongo ortools tqdm cython qpsolvers osqp
+RUN pip3 install numpy scipy jupyterlab cvxopt gekko pymongo ortools tqdm cython
 RUN pip3 install python-flint matplotlib h5py
 RUN pip3 install scikit-sparse cysignals gmpy2==2.1.0a4
 RUN pip3 install pplpy
-RUN pip3 install julia
+RUN pip3 install julia 
 RUN pip3 install -f https://download.mosek.com/stable/wheel/index.html Mosek
 ENV MOSEKLM_LICENSE_FILE=/home/$USERNAME/mounted_volume/mosek/mosek.lic
 
@@ -75,9 +83,10 @@ WORKDIR /opt/CYAxiverse.jl/
 ENV PYTHON="$VIRTUAL_ENV/bin/python3"
 RUN julia --project="." add_CYAxiverse.jl
 
+
 # Create CGAL code for different dimensions and compile
 WORKDIR /opt/cytools/external/cgal
-RUN for i in $(seq 2 5); do sed "27s/.*/typedef CGAL::Epick_d<CGAL::Dimension_tag<${i}> >    K;/" cgal-triangulate.cpp > "cgal-triangulate-${i}d.cpp"; done;
+RUN for i in $(seq 1 6); do sed "26s/.*/const int D = ${i};/" triangulate.cpp > "triangulate-${i}d.cpp"; done; rm triangulate.cpp
 
 # Fix CGAL headers so that Eigen3 is imported correctly
 RUN sed -i -e 's/Eigen\/Core/eigen3\/Eigen\/Core/g' /usr/include/CGAL/Dimension.h
@@ -89,8 +98,7 @@ RUN sed -i -e 's/find_package/find_package( Eigen3 3.3 REQUIRED )\nfind_package/
 RUN cmake . -DCMAKE_BUILD_TYPE=Release
 # Must be single-threaded or it crashes on macOS
 RUN make -j 1
-RUN for i in $(seq 2 5); do ln -s "/opt/cytools/external/cgal/cgal-triangulate-${i}d" "/usr/local/bin/cgal-triangulate-${i}d"; done
-RUN ln -s "/opt/cytools/external/cgal/cgal-triangulate" "/usr/local/bin/cgal-triangulate"
+RUN for i in $(seq 1 6); do ln -s "/opt/cytools/external/cgal/triangulate-${i}d" "/usr/local/bin/cgal-triangulate-${i}d"; done
 
 # Set variables so that numpy is limited to one thread
 ENV MKL_NUM_THREADS=1
@@ -101,7 +109,6 @@ ENV OPENBLAS_NUM_THREADS=1
 # Set entry path
 WORKDIR /home/$USERNAME/mounted_volume
 
-# Start jupyter lab by default
+# Start julia repl by default
 USER $USERNAME
 CMD julia --project=/opt/CYAxiverse/
-# CMD jupyter lab --ip 0.0.0.0 --port $PORT --no-browser $ALLOW_ROOT
