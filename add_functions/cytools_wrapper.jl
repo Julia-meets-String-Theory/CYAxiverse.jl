@@ -71,7 +71,7 @@ poly(points; backend=nothing) = py"poly($points, backend=$backend)"
 
 
 
-function topologies(h11,n)
+function topologies_generate(h11,n)
     h11list_temp = []
     tri_test = []
     tri_test_m = []
@@ -90,20 +90,21 @@ function topologies(h11,n)
         m = n ÷ spt
         if left_over == 0
             tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
-            cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+            # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
             tri_test = vcat(tri_test_m...)
         else
             tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
             tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
             tri_test_m = vcat(tri_test_m1, tri_test_m)
-            cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
-            cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
-            cy_num = vcat(cy_num1,cy_num)
+            # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+            # cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
+            # cy_num = vcat(cy_num1,cy_num)
             tri_test = vcat(tri_test_m1...,tri_test_m...)
         end
     else
+        tri_test_m = nothing
         tri_test = [poly_test[i].triangulate() for i=1:n];
-        points = points[1:n]
+        points = @view(points[1:n])
     end
     simplices = []
     cy = []
@@ -113,13 +114,21 @@ function topologies(h11,n)
         #Generate list of CY3s
         push!(cy,tri_test[t].get_cy())
     end
-        #Create dir for saving -- structure is h11_{$h11}.zfill(3)/np_{$tri}.zfill(7)/cy_{$cy}.zfill(3)/data
+    keys = ["m", "poly_tri", "poly_retri", "points", "simplices", "cy"]
+    vals = [m, tri_test, tri_test_m, points, simplices, cy]
+
+    return Dict(zip(keys,vals))
+end
+function topologies(h11, n)
+    top_data = topologies_generate(h11, n)
+    m, tri_test, tri_test_m, points, simplices, cy = top_data["m"], top_data["poly_tri"], top_data["poly_retri"], top_data["points"], top_data["simplices"], top_data["cy"]
+    #Create dir for saving -- structure is h11_{$h11}.zfill(3)/np_{$tri}.zfill(7)/cy_{$cy}.zfill(3)/data
     if isdir(string(present_dir(),"h11_",lpad(h11,3,"0")))
     else
         mkdir(string(present_dir(),"h11_",lpad(h11,3,"0")))
     end
-    if m==nothing
-        for tri=1:size(tri_test,1)
+    if m === nothing
+        for tri in eachindex(tri_test)
             if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
             else
                 mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
@@ -140,9 +149,9 @@ function topologies(h11,n)
             push!(h11list_temp, [h11,cy[tri],tri,1])
         end
     else
-        n = 1
-        for tri=1:size(tri_test_m,1)
-            for cy_i=1:size(tri_test_m[tri],1)
+        t = 1
+        for tri in eachindex(tri_test_m)
+            for cy_i in eachindex(tri_test_m[tri])
                 if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
                 else
                     mkdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
@@ -158,10 +167,10 @@ function topologies(h11,n)
                     f1 = create_group(file, "cytools")
                     f1a = create_group(f1, "geometric")
                     f1a["points",deflate=9] = Int.(points[tri])
-                    f1a["simplices",deflate=9] = Int.(simplices[n])
+                    f1a["simplices",deflate=9] = Int.(simplices[t])
                 end
-                push!(h11list_temp, [h11,cy[n],tri,cy_i])
-                n+=1
+                push!(h11list_temp, [h11,cy[t],tri,cy_i])
+                t+=1
             end
         end
     end
@@ -169,6 +178,7 @@ function topologies(h11,n)
     GC.gc()
     return h11list
 end
+
 function cy_from_poly(h11)
     h11list_temp = []
     h11list_inds = np_path_generate(h11)
@@ -186,7 +196,7 @@ function cy_from_poly(h11)
     return h11list
 end
 
-function geometries(h11,cy,tri,cy_i=1)
+function geometries_generate(h11,cy,tri,cy_i=1)
     glsm = zeros(Int,h11,h11+4)
     basis = zeros(Int,h11)
     tip = zeros(Float64,h11)
@@ -270,24 +280,30 @@ function geometries(h11,cy,tri,cy_i=1)
     #concatenate L1 and L2
     L = zeros(Float64,h11+4+binomial(h11+4,2),2)
     L = vcat(L1,L2)
+    keys = ["h21", "glsm", "basis", "tip", "tip_prefactor", "CY_volume", "PTD_volumes", "Kinv", "L", "Q"]
+    vals = [h21, Int.(glsm), Int.(basis), Float64.(tip), Float64.(tip_prefactor), Float64(V), Float64.(tau), Float64(Kinv), hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Int.(q)]
+    return Dict(zip(keys, vals))
+end
 
+function geometries(h11,cy,tri,cy_i=1)
+    geom_data = geometries_generate(h11, cy, tri, cy_i)
     h5open(cyax_file(h11,tri,cy_i), "r+") do file
         if haskey(file, "cytools/geometric/h21")
         else
-            file["cytools/geometric/h21",deflate=9] = h21
-            file["cytools/geometric/glsm",deflate=9] = Int.(glsm)
-            file["cytools/geometric/basis",deflate=9] = Int.(basis)
-            file["cytools/geometric/tip",deflate=9] = Float64.(tip)
-            file["cytools/geometric/tip_prefactor",deflate=9] = Float64.(tip_prefactor)
-            file["cytools/geometric/CY_volume",deflate=9] = Float64(V)
-            file["cytools/geometric/divisor_volumes",deflate=9] = Float64.(tau)
-            file["cytools/geometric/Kinv",deflate=9] = Float64.(Kinv)
+            file["cytools/geometric/h21",deflate=9] = geom_data["h21"]
+            file["cytools/geometric/glsm",deflate=9] = geom_data["glsm"]
+            file["cytools/geometric/basis",deflate=9] = geom_data["basis"]
+            file["cytools/geometric/tip",deflate=9] = geom_data["tip"]
+            file["cytools/geometric/tip_prefactor",deflate=9] = geom_data["tip_prefactor"]
+            file["cytools/geometric/CY_volume",deflate=9] = geom_data["CY_volume"]
+            file["cytools/geometric/divisor_volumes",deflate=9] = geom_data["PTD_volumes"]
+            file["cytools/geometric/Kinv",deflate=9] = geom_data["Kinv"]
         end
         if haskey(file, "cytools/potential")
         else
             f1b = create_group(file, "cytools/potential")
-            f1b["L",deflate=9] = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2])
-            f1b["Q",deflate=9] = Int.(q)
+            f1b["L",deflate=9] = geom_data["L"]
+            f1b["Q",deflate=9] = geom_data["Q"]
         end
     end
     GC.gc()
