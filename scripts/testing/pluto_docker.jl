@@ -1,4 +1,5 @@
-import("/opt/CYAxiverse.jl/scripts/testing/init.jl")
+using Pkg
+Pkg.instantiate()
 using Revise
 using Pluto
 # cd("/scratch/users/mehta2/vacua_db")
