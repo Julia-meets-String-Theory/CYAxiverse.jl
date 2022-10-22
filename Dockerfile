@@ -73,7 +73,7 @@ WORKDIR /opt/
 RUN git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
 WORKDIR /opt/CYAxiverse.jl/
 ENV PYTHON="$VIRTUAL_ENV/bin/python3"
-RUN julia --project="." add_CYAxiverse.jl
+RUN julia --project="/opt/CYAxiverse.jl/" add_CYAxiverse.jl
 
 # Create CGAL code for different dimensions and compile
 WORKDIR /opt/cytools/external/cgal
@@ -103,5 +103,6 @@ WORKDIR /home/$USERNAME/mounted_volume
 
 # Start jupyter lab by default
 USER $USERNAME
-CMD julia --project=/opt/CYAxiverse/
+ENV JULIA_REVISE_POLL=1
+CMD julia --project="/opt/CYAxiverse.jl/" /opt/CYAxiverse.jl/scripts/testing/pluto_docker.jl
 # CMD jupyter lab --ip 0.0.0.0 --port $PORT --no-browser $ALLOW_ROOT
