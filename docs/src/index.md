@@ -16,35 +16,44 @@ To build this docker container, follow these instructions (currently only approp
 - install the appropriate [Docker Desktop](https://docs.docker.com/desktop/) for your system
 - in a terminal, create a new directory for `CYTools` and `CYAxiverse` e.g.
 ```
-    mkdir ~/CYTools_repo/ && mkdir ~/CYAxiverse_repo/
+mkdir ~/cyaxiverse/ && mkdir ~/cyaxiverse/CYTools_repo/ && mkdir ~/cyaxiverse/CYAxiverse_repo/
 ```
 - clone the `CYTools` repository
 ```
-    git clone https://github.com/LiamMcAllisterGroup/cytools.git
+git clone https://github.com/LiamMcAllisterGroup/cytools.git
 ```
-- clone^* this repository (currently `dev` branch is up-to-date)
+- clone[^clone_repo] this repository (currently `dev` branch is up-to-date)
+
+[^clone_repo]: one can also `git pull` the repository -- this would enable the `CYAxiverse.jl` package to be updated (while under development) with specific directory binding
 ```
-    cd ~/CYAxiverse_repo && git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
+cd ~/cyaxiverse/CYAxiverse_repo && git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
 ```
 - replace the default `Dockerfile` in your `CYTools` directory with the `Dockerfile` in **this** repository and move `add_CYAxiverse.jl` there too
 ```
-    mv ~/CYTools_repo/cytools/Dockerfile ~/Dockerfile_CYTools && cp ~/CYAxiverse_repo/CYAxiverse.jl/Dockerfile ~/CYTools_repo/cytools/ && cp ~/CYAxiverse_repo/CYAxiverse.jl/add_CYAxiverse.jl ~/CYTools_repo/cytools/
+mv cyaxiverse/cytools/Dockerfile ~/Dockerfile_CYTools && cp ~/cyaxiverse/CYAxiverse_repo/CYAxiverse.jl/Dockerfile cyaxiverse/cytools/ && cp ~/cyaxiverse/CYAxiverse_repo/CYAxiverse.jl/add_CYAxiverse.jl cyaxiverse/cytools/
 ```
-- run the following command from your `CYTools` directory _e.g._ `~/CYTools_repo/cytools/` :
+- run the following command from your `CYTools` directory _e.g._ `cyaxiverse/cytools/` :
 ```
-    docker build --no-cache --force-rm -t CYAxiverse:uid-$UID --build-arg USERNAME=cytools --build-arg USERID=$UID --build-arg ARCH=amd64 \\
-    --build-arg AARCH=x86_64 --build-arg VIRTUAL_ENV=/home/cytools/cytools-venv/ --build-arg ALLOW_ROOT_ARG=" " --build-arg PORT_ARG=$(($UID+2875)) .
+docker build --no-cache --force-rm -t CYAxiverse:uid-$UID --build-arg USERNAME=cytools --build-arg USERID=$UID --build-arg ARCH=amd64 \
+--build-arg AARCH=x86_64 --build-arg VIRTUAL_ENV=/home/cytools/cytools-venv/ --build-arg ALLOW_ROOT_ARG=" " --build-arg PORT_ARG=$(($UID+2875)) .
 ```
 !!! note 
-    This takes ~550 seconds on a 
-    MacBook Pro (13-inch, 2017, Two Thunderbolt 3 ports)
-    Processor   2,3 GHz Dual-Core Intel Core i5
-        Memory      16 GB 2133 MHz LPDDR3
-- you can now run your docker image with
+    This takes ~550 seconds on a
+    ``` 
+    MacBook Pro (13-inch, 2017, Two Thunderbolt 3 ports)\n
+    Processor   2,3 GHz Dual-Core Intel Core i5\n
+    Memory      16 GB 2133 MHz LPDDR3
+    ```
+- create a `dir` for your data _e.g._
 ```
-    docker container run -p 8994:8996 CYAxiverse
+mkdir ~/CYAxiverse_data
+- you can now run your docker image with[^bind_cyaxiverse]
+
+[^bind_cyaxiverse]: in order to keep `CYAxiverse.jl` up-to-date (while under development), one should bind your local `CYAxiverse` version with the `CYAxiverse.jl` directory in the Docker container, _e.g._ with the `--mount type=bind,source=~/cyaxiverse/CYAxiverse_repo/CYAxiverse.jl,target=/opt/CYAxiverse,readonly`
 ```
-    and then opening a browser and going to [`http://localhost:8994`](http://localhost:8994).
+docker container run -it --mount type=bind,source="$(pwd)"/target,target=/app -p 8994:8996 CYAxiverse
+```
+and then opening a browser and going to [`http://localhost:8994`](http://localhost:8994).
 
 Good luck!
 
