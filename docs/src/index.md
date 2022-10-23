@@ -87,6 +87,7 @@ mkdir ~/cyaxiverse/CYAxiverse_database
      docker container run -it --mount type=bind,source=$HOME/cyaxiverse/CYAxiverse_database,target=/database\
      --mount type=bind,source=$HOME/cyaxiverse/CYAxiverse_repo/CYAxiverse.jl,target=/opt/CYAxiverse.jl\
      -p 8994:8996 cyaxiverse:uid-$UID
+     ```
   Enabling this ensures the `CYAxiverse.jl` version compiled in the Docker container matches the one most recently `fetch`ed from the repository.
 
 ```
