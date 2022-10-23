@@ -13,40 +13,40 @@ A [Julia](https://julialang.org) package to compute axion/ALP spectra from strin
 
 To build this docker container, follow these instructions (currently only appropriate for UNIX-based systems):
     
-    - install the appropriate [Docker Desktop](https://docs.docker.com/desktop/) for your system
-    - in a terminal, create a new directory for `CYTools` and `CYAxiverse` e.g.
-        ```bash
-            mkdir ~/CYTools_repo/ && mkdir ~/CYAxiverse_repo/
-        ```
-    - clone the `CYTools` repository
-        ```bash
-            git clone https://github.com/LiamMcAllisterGroup/cytools.git
-        ```
-    - clone* this repository (currently `dev` branch is up-to-date)
-        ```bash
-            cd ~/CYAxiverse_repo && git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
-        ```
-    - replace the default `Dockerfile` in your `CYTools` directory with the `Dockerfile` in **this** repository and move `add_CYAxiverse.jl` there too
-        ```bash
-            mv ~/CYTools_repo/cytools/Dockerfile ~/Dockerfile_CYTools && cp ~/CYAxiverse_repo/CYAxiverse.jl/Dockerfile ~/CYTools_repo/cytools/ && cp ~/CYAxiverse_repo/CYAxiverse.jl/add_CYAxiverse.jl ~/CYTools_repo/cytools/
-        ```
-    - run the following command from your `CYTools` directory _e.g._ `~/CYTools_repo/cytools/` :
-        ```bash
-            docker build --no-cache --force-rm -t CYAxiverse:uid-$UID --build-arg USERNAME=cytools --build-arg USERID=$UID --build-arg ARCH=amd64 \\
-            --build-arg AARCH=x86_64 --build-arg VIRTUAL_ENV=/home/cytools/cytools-venv/ --build-arg ALLOW_ROOT_ARG=" " --build-arg PORT_ARG=$(($UID+2875)) .
-        ```
-        !!! note 
-            This takes ~550 seconds on a 
-            MacBook Pro (13-inch, 2017, Two Thunderbolt 3 ports)
-            Processor   2,3 GHz Dual-Core Intel Core i5
-            Memory      16 GB 2133 MHz LPDDR3
-    - you can now run your docker image with
-        ```bash
-            docker container run -p 8994:8996 CYAxiverse
-        ```
-        and then opening a browser and going to `http://localhost:8994`.
+- install the appropriate [Docker Desktop](https://docs.docker.com/desktop/) for your system
+- in a terminal, create a new directory for `CYTools` and `CYAxiverse` e.g.
+```
+    mkdir ~/CYTools_repo/ && mkdir ~/CYAxiverse_repo/
+```
+- clone the `CYTools` repository
+```
+    git clone https://github.com/LiamMcAllisterGroup/cytools.git
+```
+- clone^* this repository (currently `dev` branch is up-to-date)
+```
+    cd ~/CYAxiverse_repo && git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
+```
+- replace the default `Dockerfile` in your `CYTools` directory with the `Dockerfile` in **this** repository and move `add_CYAxiverse.jl` there too
+```
+    mv ~/CYTools_repo/cytools/Dockerfile ~/Dockerfile_CYTools && cp ~/CYAxiverse_repo/CYAxiverse.jl/Dockerfile ~/CYTools_repo/cytools/ && cp ~/CYAxiverse_repo/CYAxiverse.jl/add_CYAxiverse.jl ~/CYTools_repo/cytools/
+```
+- run the following command from your `CYTools` directory _e.g._ `~/CYTools_repo/cytools/` :
+```
+    docker build --no-cache --force-rm -t CYAxiverse:uid-$UID --build-arg USERNAME=cytools --build-arg USERID=$UID --build-arg ARCH=amd64 \\
+    --build-arg AARCH=x86_64 --build-arg VIRTUAL_ENV=/home/cytools/cytools-venv/ --build-arg ALLOW_ROOT_ARG=" " --build-arg PORT_ARG=$(($UID+2875)) .
+```
+!!! note 
+    This takes ~550 seconds on a 
+    MacBook Pro (13-inch, 2017, Two Thunderbolt 3 ports)
+    Processor   2,3 GHz Dual-Core Intel Core i5
+        Memory      16 GB 2133 MHz LPDDR3
+- you can now run your docker image with
+```
+    docker container run -p 8994:8996 CYAxiverse
+```
+    and then opening a browser and going to [`http://localhost:8994`](http://localhost:8994).
 
-    Good luck!
+Good luck!
 
 !!! warning
     This package is currently _not_ registered with the `julia` package manager and is still under development.  **Use at your own risk!**
