@@ -22,7 +22,8 @@ mkdir ~/cyaxiverse/ \
 ```
 - clone the `CYTools` repository
 ```
-git clone https://github.com/LiamMcAllisterGroup/cytools.git
+cd ~/cyaxiverse/CYTools_repo/ \ 
+&& git clone https://github.com/LiamMcAllisterGroup/cytools.git
 ```
 - clone[^1] this repository (currently `dev` branch is up-to-date)
 
