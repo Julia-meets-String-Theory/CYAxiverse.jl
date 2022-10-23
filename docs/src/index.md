@@ -4,10 +4,10 @@ A [Julia](https://julialang.org) package to compute axion/ALP spectra from strin
 
 ---
 
-### Authors
+## Authors
 [Viraf M. Mehta](https://inspirehep.net/authors/1228975)
 
-### Installation
+## Installation
 !!! info
     This package runs in a docker container with `CYTools`.  In time, the installation process will be automated.
 
@@ -72,5 +72,5 @@ Good luck!
 !!! warning
     This package is currently _not_ registered with the `julia` package manager and is still under development.  **Use at your own risk!**
 
-### Acknowledgements
+## Acknowledgements
 This project was born after publication of [Superradiance in String Theory](https://iopscience.iop.org/article/10.1088/1475-7516/2021/07/033) and I am grateful to my collaborators for their input while this code was evolving.
