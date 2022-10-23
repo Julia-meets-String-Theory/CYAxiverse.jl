@@ -72,7 +72,6 @@ poly(points; backend=nothing) = py"poly($points, backend=$backend)"
 
 
 function topologies_generate(h11,n)
-    h11list_temp = []
     tri_test = []
     tri_test_m = []
     #Generate list of $n polytopes at $h11
@@ -119,10 +118,21 @@ function topologies_generate(h11,n)
 
     return Dict(zip(keys,vals))
 end
-function topologies(h11, n)
+
+"""
+    topologies(h11::Int, n::Int)
+
+This function generates and saves the topological data, _i.e._ `points` and `simplices` of the polytope, in a HDF5 file with path
+`$(data_dir)/h11_XXX/np_YYYYYYY/cy_ZZZZZZZ/cyax.h5`
+
+Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
+
+"""
+function topologies(h11::Int, n::Int)
+    h11list_temp = []
     top_data = topologies_generate(h11, n)
     m, tri_test, tri_test_m, points, simplices, cy = top_data["m"], top_data["poly_tri"], top_data["poly_retri"], top_data["points"], top_data["simplices"], top_data["cy"]
-    #Create dir for saving -- structure is h11_{$h11}.zfill(3)/np_{$tri}.zfill(7)/cy_{$cy}.zfill(3)/data
+    #Create dir for saving -- structure is h11_{$h11}.zfill(3)/np_{$tri}.zfill(7)/cy_{$cy}.zfill(7)/data
     if isdir(string(present_dir(),"h11_",lpad(h11,3,"0")))
     else
         mkdir(string(present_dir(),"h11_",lpad(h11,3,"0")))
@@ -179,6 +189,13 @@ function topologies(h11, n)
     return h11list
 end
 
+"""
+    cy_from_poly(h11)
+
+Generates triangulations from already computed `points` and `simplices` of polytopes.
+
+Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
+"""
 function cy_from_poly(h11)
     h11list_temp = []
     h11list_inds = np_path_generate(h11)
