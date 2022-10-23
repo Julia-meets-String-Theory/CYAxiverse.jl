@@ -105,6 +105,6 @@ WORKDIR /home/$USERNAME/mounted_volume
 USER $USERNAME
 ENV JULIA_REVISE_POLL=1
 EXPOSE 8996
-ENV newARGS="data"
+ENV newARGS="docker"
 CMD julia --project="/opt/CYAxiverse.jl/" /opt/CYAxiverse.jl/scripts/testing/pluto_docker.jl
 # CMD jupyter lab --ip 0.0.0.0 --port $PORT --no-browser $ALLOW_ROOT
