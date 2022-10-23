@@ -22,9 +22,9 @@ mkdir ~/cyaxiverse/ && mkdir ~/cyaxiverse/CYTools_repo/ && mkdir ~/cyaxiverse/CY
 ```
 git clone https://github.com/LiamMcAllisterGroup/cytools.git
 ```
-- clone[^clone_repo] this repository (currently `dev` branch is up-to-date)
+- clone[^1] this repository (currently `dev` branch is up-to-date)
 
-[^clone_repo]: one can also `git pull` the repository -- this would enable the `CYAxiverse.jl` package to be updated (while under development) with specific directory binding
+[^1]: one can also `git pull` the repository -- this would enable the `CYAxiverse.jl` package to be updated (while under development) with specific directory binding
 ```
 cd ~/cyaxiverse/CYAxiverse_repo && git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
 ```
@@ -47,9 +47,10 @@ docker build --no-cache --force-rm -t CYAxiverse:uid-$UID --build-arg USERNAME=c
 - create a `dir` for your data _e.g._
 ```
 mkdir ~/CYAxiverse_data
-- you can now run your docker image with[^bind_cyaxiverse]
+```
+- you can now run your docker image with[^2]
 
-[^bind_cyaxiverse]: in order to keep `CYAxiverse.jl` up-to-date (while under development), one should bind your local `CYAxiverse` version with the `CYAxiverse.jl` directory in the Docker container, _e.g._ with the `--mount type=bind,source=~/cyaxiverse/CYAxiverse_repo/CYAxiverse.jl,target=/opt/CYAxiverse,readonly`
+[^2]: in order to keep `CYAxiverse.jl` up-to-date (while under development), one should bind your local `CYAxiverse` version with the `CYAxiverse.jl` directory in the Docker container, _e.g._ with the `--mount type=bind,source=~/cyaxiverse/CYAxiverse_repo/CYAxiverse.jl,target=/opt/CYAxiverse,readonly`
 ```
 docker container run -it --mount type=bind,source="$(pwd)"/target,target=/app -p 8994:8996 CYAxiverse
 ```
