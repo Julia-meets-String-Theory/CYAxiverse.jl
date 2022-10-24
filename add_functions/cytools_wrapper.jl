@@ -107,7 +107,7 @@ function topologies_generate(h11,n)
     end
     simplices = []
     cy = []
-    for t=1:size(tri_test,1)
+    for t in eachindex(tri_test)
         #Locator for simplices of triangulations for saving
         push!(simplices,tri_test[t].simplices())
         #Generate list of CY3s
@@ -240,8 +240,8 @@ function geometries_generate(h11,cy,tri,cy_i=1)
     while true
         rhs_constraint = zeros(size(qprime,1))
         lhs_constraint = zeros(size(qprime,1),size(qprime,1))
-        for i=1:size(qprime,1)
-            for j=1:size(qprime,1)
+        for i in axes(qprime,1)
+            for j in axes(qprime,1)
                 if i>j
                     lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
                 end
@@ -291,7 +291,7 @@ function geometries_generate(h11,cy,tri,cy_i=1)
     #where the components are in (mantissa, exponent)(base 10) format
     #L1 are basis instantons and L2 are cross terms
     L1 = zeros(h11+4,2)
-    for j=1:size(qprime,1)
+    for j in axes(qprime,1)
         L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
     end
     #concatenate L1 and L2

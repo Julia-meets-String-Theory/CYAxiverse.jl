@@ -26,7 +26,7 @@ using ..minimizer: minimize, subspace_minimize
 Loads constants:\n
 - Reduced Planck Mass = 2.435 × 10^18
 - Hubble = 2.13 × 0.7 × 10^-33
-- log2pi = log10(2π)
+- log2π = log10(2π)
 as `Dict{String,ArbFloat}`\n
 #Examples
 ```julia-repl
@@ -38,8 +38,8 @@ Dict{String, ArbNumerics.ArbFloat{128}} with 3 entries:
 ```
 """
 function constants()
-    mplanck_r::ArbFloat = ArbFloat(2.435e18)
-    hubble::ArbFloat = ArbFloat(2.13*0.7*1e-33)
+    mplanck_r::ArbFloat = ArbFloat("2.435e18")
+    hubble::ArbFloat = ArbFloat("2.13")*ArbFloat("0.7")*ArbFloat("1e-33")
     log2pi::ArbFloat = ArbFloat(log10(2π))
     return Dict("MPlanck" => mplanck_r, "Hubble" => hubble, "log2π" => log2pi)
 end
@@ -453,13 +453,13 @@ function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
         Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
         Qtilde = Qsorted_test[1,:]
         Ltilde = Lsorted_test[1,:]
-        for i=2:size(Qsorted_test,1)
+        for i=2:axes(Qsorted_test,1)[end]
             S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
             m = S(hcat(Qtilde, @view(Qsorted_test[i,:])))
             (d,bmat) = Nemo.nullspace(m)
             if d == 0
-                Qtilde = hcat(Qtilde,Qsorted_test[i,:])
-                Ltilde = hcat(Ltilde,Lsorted_test[i,:])
+                Qtilde = hcat(Qtilde, @view(Qsorted_test[i,:]))
+                Ltilde = hcat(Ltilde, @view(Lsorted_test[i,:]))
             end
         end
         spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
@@ -749,7 +749,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 0.5)
     d::Int = 1
     Qbar::Matrix{Int} = zeros(Int,size(Qsorted_test[1,:],1),1)
     Lbar::Matrix{Float64} = zeros(Float64,size(Lsorted_test[1,:],1),1)
-    for i=2:size(Qsorted_test,1)
+    for i=2:axes(Qsorted_test,1)[end]
         S = MatrixSpace(Nemo.ZZ, size(Qtilde)...)
         m = S(hcat(@view(Qtilde[:,2:end]),@view(Qsorted_test[i,:])))
         d = Nemo.nullspace(m)[1]

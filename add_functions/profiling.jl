@@ -38,7 +38,7 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
     d::Int = 1
     @timeit "init Qbar" Qbar::Matrix{Int} = zeros(Int,size(Qsorted_test[1,:],1),1)
     @timeit "init Lbar" Lbar::Matrix{Float64} = zeros(Float64,size(Lsorted_test[1,:],1),1)
-    for i=2:size(Qsorted_test,1)
+    for i=2:axes(Qsorted_test,1)[end]
         @timeit "Matrix.Space" S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
         @timeit "lin. ind." m = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
         @timeit "NullSpace" d = Nemo.nullspace(m)[1]
@@ -64,9 +64,9 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
     println(size(Qbar), size(Lbar), size(α), Qbar[:,1], Lbar[1,2])
     # println(α)
     # i=1
-    for i=1:size(α,1)
+    for i in axes(α,1)
         index=0
-        for j=1:size(α,2)
+        for j in axes(α,2)
             if α[i,j] != 0.
                 index = j
             end
@@ -108,7 +108,7 @@ end
 
 
 function minimiser(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,θparalleltest::Matrix,Qtilde::Matrix,algo,prec)
-    setprecision(ArbFloat,digits=prec)
+    setprecision(ArbFloat; digits=prec)
     Arb0 = ArbFloat(0.)
     Arb1 = ArbFloat(1.)
     Arb2π = ArbFloat(2π)
@@ -136,7 +136,7 @@ function minimiser(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gr
         i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -151,7 +151,7 @@ function minimiser(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gr
                 i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end

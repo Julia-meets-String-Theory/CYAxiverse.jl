@@ -36,7 +36,7 @@ function geometry(h11::Int,tri::Int,cy::Int=1)
             tip_prefactor = HDF5.read(file, "cytools/geometric/tip_prefactor")
         end
     end
-    if tip_prefactor != nothing
+    if tip_prefactor !== nothing
         keys = ["h21","glsm_charges","basis","tip","tip_prefactor", "CYvolume","τ_volumes","Kinv"]
         vals = [h21,
         glsm,basis,
@@ -97,7 +97,7 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
         HDF5.read(file, "cytools/potential/L")
     end
     Ltemp::Vector{ArbFloat} = zeros(ArbFloat,size(L,2))
-    @inbounds for i=1:size(L,1)
+    @inbounds for i in axes(L,1)
         Ltemp[i] = ArbFloat.(L[i,1]) .* ArbFloat(10.) .^ ArbFloat.(L[i,2])
     end
     return Ltemp
