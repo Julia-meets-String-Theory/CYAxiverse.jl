@@ -92,7 +92,7 @@ mkdir $CYAXIVERSE_DATA
     ```
     --mount type=bind,source="$CYAXIVERSE_REPO/CYAxiverse.jl",target=/opt/CYAxiverse.jl,readonly
     ```
-     option included, _i.e._
+     option included, _i.e._ 
      ```
      docker container run -it --mount type=bind,source=$CYAXIVERSE_DATA,target=/database\
      --mount type=bind,source=$CYAXIVERSE_REPO/CYAxiverse.jl,target=/opt/CYAxiverse.jl\
