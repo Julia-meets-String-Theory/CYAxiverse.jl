@@ -4,10 +4,10 @@ A [Julia](https://julialang.org) package to compute axion/ALP spectra from strin
 
 ---
 
-## Authors
+## Authors ✒️
 [Viraf M. Mehta](https://inspirehep.net/authors/1228975)
 
-## Installation
+## Installation 💾 
 !!! info
     This package runs in a docker container with `CYTools`.  In time, the installation process will be automated.
 
@@ -30,10 +30,10 @@ mkdir $CYTOOLS_REPO &&
 mkdir $CYAXIVERSE_REPO
 ```
 !!! tip
-    Change the first line of this code to the `/path/where/cyaxiverse/will/live` and it should propagate through
+   Change `$HOME → /root/path/where/cyaxiverse/will/live` in the first line and it should propagate through
 
 !!! warning
-    Trailing `/` will break this, be careful.
+    A trailing `/` will break this, be careful.
 
 - clone the `CYTools` repository
 ```
@@ -59,7 +59,7 @@ git clone https://github.com/LiamMcAllisterGroup/cytools.git
 cd $CYAXIVERSE_REPO && 
 git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
 ```
-- replace the default `Dockerfile` in your `CYTools` directory with the `Dockerfile` in **this** repository and move `add_CYAxiverse.jl` there too
+- replace the default `Dockerfile` in your `CYTools` directory with the `Dockerfile` in `$CYAXIVERSE_REPO` and move `add_CYAxiverse.jl` there too, _e.g._
 ```
 mv $CYTOOLS_REPO/cytools/Dockerfile $CYAXIVERSE_ROOT/Dockerfile_CYTools && 
 cp $CYAXIVERSE_REPO/CYAxiverse.jl/Dockerfile $CYTOOLS_REPO/cytools/ && 
@@ -98,7 +98,7 @@ mkdir $CYAXIVERSE_DATA
      --mount type=bind,source=$CYAXIVERSE_REPO/CYAxiverse.jl,target=/opt/CYAxiverse.jl\
      -p 8994:8996 cyaxiverse:uid-$UID
      ```
-  Enabling this ensures the `CYAxiverse.jl` version compiled in the Docker container matches the one most recently `fetch`ed from the repository.
+    Enabling this ensures the `CYAxiverse.jl` version compiled in the Docker container matches the one most recently `pull`ed from the repository.
 
 ```
 docker container run -it --mount type=bind,source=$CYAXIVERSE_DATA,target=/database\
@@ -106,10 +106,10 @@ docker container run -it --mount type=bind,source=$CYAXIVERSE_DATA,target=/datab
 ```
 If this is the first run, `julia` will precompile the required packages for `CYAxiverse.jl` which, at the moment, takes about 5 minutes.  Then, opening a browser and going to [`http://localhost:8994`](http://localhost:8994), you will be presented with the [`Pluto`](https://github.com/fonsp/Pluto.jl/wiki) notebook interface.  You can save your new notebook in `/opt/CYAxiverse/notebooks`.
 
-Enjoy!
+Enjoy! 💻
 
 !!! warning
     This package is currently _not_ registered with the `julia` package manager and is still under development.  **Use at your own risk!**
 
-## Acknowledgements
-This project was born after publication of [Superradiance in String Theory](https://iopscience.iop.org/article/10.1088/1475-7516/2021/07/033) and I am grateful to my collaborators for their input while this code was evolving.
+## Acknowledgements 🙏
+This project was born after publication of [Superradiance in String Theory](https://iopscience.iop.org/article/10.1088/1475-7516/2021/07/033) and I am grateful to my collaborators for their input while this code was evolving.  Huge thanks also to the authors of [CYTools](https://cy.tools/) for their ongoing hard work and to [Mona Dentler](https://inspirehep.net/authors/1635411) for constant help throughout the development of this package.
