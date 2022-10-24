@@ -120,7 +120,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
         i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -135,7 +135,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
                 i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -194,7 +194,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
         i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -209,7 +209,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
                 i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in eachindex(hind1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -240,7 +240,7 @@ end
 
 function minimize_save(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,θparalleltest::Matrix,Qtilde::Matrix,algo; prec::Int=5_000, run_num::Int=1)
     min_data = minimize(h11,tri,cy,LV,QV,x0,gradσ,θparalleltest,Qtilde,algo, prec)
-    if min_data == nothing
+    if min_data === nothing
         return nothing
     else
         h5open(CYAxiverse.filestructure.minfile(h11,tri,cy),isfile(CYAxiverse.filestructure.minfile(h11,tri,cy)) ? "r+" : "w") do file
@@ -268,7 +268,7 @@ end
 
 function minimize_save(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,Qtilde::Matrix,algo; prec::Int=5_000, run_num::Int=1)
     min_data = minimize(h11,tri,cy,LV,QV,x0,gradσ,Qtilde,algo, prec)
-    if min_data == nothing
+    if min_data === nothing
         return nothing
     else
         h5open(CYAxiverse.filestructure.minfile(h11,tri,cy),isfile(CYAxiverse.filestructure.minfile(h11,tri,cy)) ? "r+" : "w") do file
