@@ -351,13 +351,14 @@ end
 
 TBW
 """
-function minimize(LV::Vector, QV, x0::Vector)
+function minimize(LV::Vector, QV, x0::Vector; phase::Vector=zero(x0))
 	if @isdefined h11
 	else
 		h11 = size(QV, 1)
 	end
     @assert size(QV, 2) == size(LV, 1)
     threshold = 1e-2
+    x0 = x0 + phase
     function fitness(x::Vector)
         sum(LV .* (1. .- cos.(x' * QV)))
     end
@@ -412,10 +413,12 @@ end
     subspace_minimize(L::Vector, Q::Matrix; runs=10_000)
 Minimizes the subspace with `runs` iterations
 """
-function subspace_minimize(L, Q; runs=10_000)
+function subspace_minimize(L, Q; runs=10_000, phase)
     xmin = []
 	for _ in 1:runs
 		x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
+        # x0 = x0 .+ phase
+        println(x0)
 		test_min = minimize(L, Q, x0)
 		if test_min === nothing
 		else
