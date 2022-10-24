@@ -490,30 +490,27 @@ function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     GC.gc()
 end
 function project_out(v::Vector{Int})
-    idd = Matrix{Int}(I(size(v,1)))
-    norm2 = dot(v,v)
-    proj = 1 / norm2 * (v * v')
-    idd-proj
+    idd = Matrix{Rational}(I(size(v,1)))
+    norm2::Int = dot(v,v)
+    proj = 1 // norm2 * (v * v')
+    idd_proj = idd - proj
+    # @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj)
 end
 
 function project_out(projector::Matrix, v::Vector{Int})
     norm2 = dot(projector * v, projector * v)
     proj = 1. / norm2 * ((projector * v) * (v' * projector))
-    projector - proj
+    projector = projector - proj
+    @.(ifelse(abs(projector) < eps(), zero(projector), projector))
 end
 
 function project_out(v::Vector{Float64})
     idd = Matrix{Float64}(I(size(v,1)))
     norm2 = dot(v,v)
     proj = 1. /norm2 * (v * v')
-    for i in eachindex(proj)
-        proj[i] = proj[i] < eps() ? 0 : proj[i]
-    end
+    proj = @.(ifelse(abs(proj) < eps(), zero(proj), proj))
     idd_proj = idd - proj
-    for i in eachindex(idd_proj)
-        idd_proj[i] = idd_proj[i] < eps() ? 0 : idd_proj[i]
-    end
-    idd_proj
+    @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj))
 end
 
 function project_out(projector::Matrix, v::Vector{Float64})
@@ -523,21 +520,28 @@ function project_out(projector::Matrix, v::Vector{Float64})
         proj[i] = proj[i] < eps() ? 0 : proj[i]
     end
     idd_proj = projector - proj
-    for i in eachindex(idd_proj)
-        idd_proj[i] = idd_proj[i] < eps() ? 0 : idd_proj[i]
-    end
-    idd_proj
+    @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj))
 end
 
+"""
+    project_out(orth_basis::Matrix)
+
+TBW
+"""
 function project_out(orth_basis::Matrix)
     projector = I(size(orth_basis, 1))
     for i in 1:size(orth_basis, 2)
-        P = orth_basis[:, i] * orth_basis[:, i]'
+        P = @view(orth_basis[:, i]) * @view(orth_basis[:, i])'
         projector -= P
     end
-    projector
+    @.(ifelse(abs(projector) < 1e-10, zero(projector), projector))
 end
 
+"""
+    orth_basis(vec::Vector)
+
+TBW
+"""
 function orth_basis(vec::Vector)
     proj = project_out(vec)
     #this is the scipy.linalg.orth function written out
@@ -547,6 +551,7 @@ function orth_basis(vec::Vector)
     tol = maximum(s) * rcond
     num = Int.(round(sum(s .> tol)))
     T = u[:, 1:num]
+    @.(ifelse(abs(T) < tol, zero(T), T))
 end
 
 """
@@ -557,9 +562,11 @@ function orth_basis(Q::Matrix)
    #this is the scipy.linalg.orth function written out
    u, s, vh = svd(Q, full=true)
    M, N = size(u,1), size(vh,2)
-   tol = maximum(s) * eps()
+   rcond = eps() * max(M, N)
+   tol = maximum(s) * rcond
    num = Int.(round(sum(s .> tol)))
    T = u[:, 1:num]
+   @.(ifelse(abs(T) < tol, zero(T), T))
 end 
 
 """
@@ -659,7 +666,7 @@ Dict{String, Any} with 3 entries:
   "Qtilde" => [0 0 … 1 0; 0 0 … 0 0; … ; 1 1 … 0 0; 0 0 … 0 0]
 ```
 """
-function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
+function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     h11::Int = size(Q,2)
     if h11 <= 50
         snf_data = vacua_SNF(Q)
@@ -691,7 +698,7 @@ Compute the linearly independent leading instantons that generate the axion pote
 ```julia-repl
 julia> h11,tri,cy = 8, 108, 1;
 julia> pot_data = CYAxiverse.read.potential(h11,tri,cy);
-julia> vacua_data = CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold=0.5)
+julia> vacua_data = CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold::Float64=0.5)
 Dict{String, Matrix{Float64}}(
 "Ltilde" => 2×9 Matrix{Float64}:
    1.0       1.0       1.0       1.0     …     1.0       1.0       1.0       1.0
@@ -775,20 +782,21 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64 = 0.5)
     return Dict(zip(keys,vals))
 end
 
-function LQtildebar(h11::Int, tri::Int, cy::Int; threshold=0.5)
+function LQtildebar(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
     LQtildebar(L, Q; threshold=threshold)
 end
 
 """
-    vacua_id_basis(L,Q; threshold)
+    vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
 
 Compute the number of vacua given an instanton charge matrix `Q` and 2-column matrix of instanton scales `L` (in the form [sign; exponent])  and a threshold for:
 
-``\\frac{\\Lambda_a}{|\\Lambda_j|}``
+``\frac{Lambda_a}{|Lambda_j|}``
 
-_i.e._ is the instanton contribution large enough to affect the minima.  This function uses JLM's method outlined in [TO APPEAR].\n
+_i.e._ is the instanton contribution large enough to affect the minima.  This function uses JLM's method outlined in [TO APPEAR].
+
 #Examples
 ```julia-repl
 julia> using CYAxiverse
@@ -801,7 +809,7 @@ Dict{String, Any} with 3 entries:
   "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
 ```
 """
-function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
+function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     if @isdefined h11
     else
         h11::Int = size(Q,2)
@@ -826,10 +834,10 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
                     # Leff = hcat(Leff,Ltilde[:,j])
                     # αeff = hcat(αeff,α[i,:])
                 else
-                    α[i,j] = zero(Rational)
+                    α[i,j] = zeros(Rational, 1)
                 end
             else
-                α[i,j] = zero(Rational)
+                α[i,j] = zeros(Rational, 1)
             end
         end
         if α[i,:] == zeros(size(α,2))
@@ -855,15 +863,17 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
     end
 end
 
-function vacua_id_basis(h11::Int, tri::Int, cy::Int; threshold=0.5)
+function vacua_id_basis(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
     vacua_id_basis(L, Q; threshold=threshold)
 end
 """
-    vacua_id(L, Q; threshold)
+    vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector=zero(Q[1, :]))
+
+TBW
 """
-function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold=0.5)
+function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector=zero(Q[1, :]))
     if @isdefined h11
     else
         h11::Int = size(Q,2)
@@ -881,7 +891,7 @@ function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold=0.5)
                 Leff = id_basis["Leff"][:, @.(!iszero(row))]
                 Lsubdiff = @view(Leff[2,:]) .- @view(Leff[2,1])
                 Lfull = Leff[1,:] .* 10. .^ Lsubdiff;
-                res = subspace_minimize(Lfull, Matrix(row[row .!= 0]'))
+                res = subspace_minimize(Lfull, Matrix(row[row .!= 0]'); phase=phase[i])
                 if typeof(res) <: Vector
                     res = reshape(res, length(res), 1)
                 end
@@ -910,10 +920,15 @@ function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold=0.5)
     end
 end
 
-function vacua_id(h11::Int, tri::Int, cy::Int; threshold=0.5)
+"""
+    vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64, phase::Vector)
+
+TBW
+"""
+function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector=zeros(h11))
     pot_data = potential(h11,tri,cy)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
-    vacua_id(L, Q; threshold=threshold)
+    vacua_id(L, Q; threshold=threshold, phase=phase)
 end
 
 
@@ -950,7 +965,7 @@ Dict{String, Any} with 3 entries:
   "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
 ```
 """
-function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold=0.5)
+function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     
     h11::Int = size(Q,2)
     if h11 <= 50
@@ -1006,14 +1021,14 @@ Dict{String, Any} with 3 entries:
   "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
 ```
 """
-function vacua_TB(h11::Int,tri::Int,cy::Int; threshold=0.5)
+function vacua_TB(h11::Int,tri::Int,cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
     vacua_TB(L, Q; threshold=threshold)
 end
 
 
-function vacua_save(h11::Int,tri::Int,cy::Int=1; threshold=0.5)
+function vacua_save(h11::Int,tri::Int,cy::Int=1; threshold::Float64=0.5)
     file_open::Bool = 0
     h5open(cyax_file(h11,tri,cy), "r") do file
         if haskey(file, "vacua")
@@ -1039,7 +1054,7 @@ end
 
 
 
-function vacua_save_TB(h11::Int,tri::Int,cy::Int=1; threshold=0.5)
+function vacua_save_TB(h11::Int,tri::Int,cy::Int=1; threshold::Float64=0.5)
     file_open::Bool = 0
     h5open(cyax_file(h11,tri,cy), "r") do file
         if haskey(file, "vacua_TB")
@@ -1139,17 +1154,52 @@ function vacua_MK(h11::Int,tri::Int,cy::Int)
 end
 
 """
-    vacua_MK(L,Q; threshold=1e-2)
+    vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
 New implementation of MK's algorithm -- testing!
 """
-function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-2)
+function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(size(Q,2)))
+    println(threshold)
     LQtilde = LQtildebar(L, Q; threshold=threshold)
-	Lhat = LQtilde["Ltilde"][:, sortperm(LQtilde["Ltilde"][2,:], rev=true)]
-    Qhat = LQtilde["Qtilde"][:, sortperm(Lhat[2,:], rev=true)]
+    Qtilde = LQtilde["Qtilde"]
+    Ltilde = LQtilde["Ltilde"]
+    Lhat = hcat(Ltilde, LQtilde["Lbar"])
+    Qhat = hcat(Qtilde, LQtilde["Qbar"])
+    Qcol = Qhat[:, 1]
+    for i in 2:axes(Qhat, 2)[end]
+        if dot(Qcol, Qhat[:, i]) == zero(Qhat[1, 1])
+            Qcol = Qhat[:, i]
+        else
+            for j in axes(Qhat,2)
+                Ldiff::Float64 = round(Lbar[2,i] - Ltilde[2,j], digits=3)
+                if Ldiff > Ldiff_limit
+                    Qtilde = hcat(Qtilde,@view(Qbar[:,i]))
+                    Ltilde = hcat(Ltilde, @view(Lbar[:,i]))
+                    # Leff = hcat(Leff,Ltilde[:,j])
+                    # αeff = hcat(αeff,α[i,:])
+                else
+                    α[i,j] = zeros(Rational, 1)
+                end
+            end
+            if α[i,:] == zeros(size(α,2))
+            else
+                αeff = hcat(αeff,@view(α[i,:]))
+                Leff = hcat(Leff,@view(Lbar[:,i]))
+            end
+            Qcol = Qhat[:, i]
+        end
+    end
+	Lhat = Lhat[:, sortperm(Lhat[2,:], rev=true)]
+    Qhat = Qhat[:, sortperm(Lhat[2,:], rev=true)]
     if size(Qhat, 1) == size(Qhat, 2)
         Qinv = inv(Qhat)
-        Qinv = @. ifelse(abs(Qinv) < 10. * eps(), zero(Qinv), Qinv)
-        return Qinv, abs(det(Qhat))
+        Qinv::Matrix{Rational} = @.(ifelse(abs(Qinv) < 10. * eps(), zero(Qinv), round(Qinv; digits=4)))
+        println(size(Qinv))
+        for col in axes(Qinv, 2)
+            if sum(Qinv[:, col] .== zero(Qinv[:, col][1])) == size(Qinv, 1)-1
+                Qinv[:, col] = zero(Qinv[:, col])
+            end
+        end
+        return unique(mod.(Qinv, 1), dims=2), abs(det(Qhat)), phase
     else
         θmin = []
         vac = 0
@@ -1165,22 +1215,30 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64 = 1e-
             if size(Qsub, 2) == 1
                 vac += 1
                 push!(θmin, [0])
+                Qhat = project_out(Qsub) * Qhat
+                Qhat = @. ifelse(abs(Qhat) < eps(), zero(Qhat), Qhat)
             else
-                num_θmin, num_vac = subspace_minimiser(Lsub, Qsub)
+                Lsub = Lsub[:, @.(!iszero(Qsub))]
+                Lsubdiff = @view(Lsub[2,:]) .- @view(Lsub[2,1])
+                Lfull = Lsub[1,:] .* 10. .^ Lsubdiff;
+                num_θmin, num_vac = subspace_minimize(Lfull, Qsub; phase=phase)
                 vac += num_vac
                 push!(θmin, num_θmin)
                 Qsub = orth_basis(Qsub)
+                Qhat = project_out(Qsub) * Qhat
+                Qhat = @.(ifelse(abs(Qhat) < eps(), zero(Qhat), Qhat))
+                phase = I(size(phase,1)) .- project_out(Qsub)
+                phase = @.(ifelse(abs(phase) < eps(), zero(phase), phase))
             end
-            Qhat = project_out(Qsub) * Qhat
-            Qhat = @. ifelse(abs(Qhat) < eps(), zero(Qhat), Qhat)
         end
+        return θmin, vac, phase
     end
 end
 
-function vacua_full(h11::Int, tri::Int, cy::Int)
+function vacua_full(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector{Float64}=zeros(h11))
     pot_data = potential(h11, tri, cy)
     L, Q = pot_data["L"], pot_data["Q"]
-    vacua_full(L, Q; threshold = 1e-2)
+    vacua_full(L, Q; threshold=threshold, phase=phase)
 end
 
 end
