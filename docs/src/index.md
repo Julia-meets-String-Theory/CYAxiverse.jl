@@ -30,7 +30,7 @@ mkdir $CYTOOLS_REPO &&
 mkdir $CYAXIVERSE_REPO
 ```
 !!! tip
-   Change `$HOME → /root/path/where/cyaxiverse/will/live` in the first line and it should propagate through
+    Change `$HOME → /root/path/where/cyaxiverse/will/live` in the first line and it should propagate through
 
 !!! warning
     A trailing `/` will break this, be careful.
