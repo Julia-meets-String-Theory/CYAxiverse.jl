@@ -92,12 +92,12 @@ mkdir $CYAXIVERSE_DATA
     ```
     --mount type=bind,source="$CYAXIVERSE_REPO/CYAxiverse.jl",target=/opt/CYAxiverse.jl,readonly
     ```
-     option included, _i.e._ 
-     ```
-     docker container run -it --mount type=bind,source=$CYAXIVERSE_DATA,target=/database\
-     --mount type=bind,source=$CYAXIVERSE_REPO/CYAxiverse.jl,target=/opt/CYAxiverse.jl\
-     -p 8994:8996 cyaxiverse:uid-$UID
-     ```
+    option included, _i.e._ 
+    ```
+    docker container run -it --mount type=bind,source=$CYAXIVERSE_DATA,target=/database\
+    --mount type=bind,source=$CYAXIVERSE_REPO/CYAxiverse.jl,target=/opt/CYAxiverse.jl\
+    -p 8994:8996 cyaxiverse:uid-$UID
+    ```
     Enabling this ensures the `CYAxiverse.jl` version compiled in the Docker container matches the one most recently `pull`ed from the repository.
 
 ```
@@ -106,7 +106,7 @@ docker container run -it --mount type=bind,source=$CYAXIVERSE_DATA,target=/datab
 ```
 If this is the first run, `julia` will precompile the required packages for `CYAxiverse.jl` which, at the moment, takes about 5 minutes.  Then, opening a browser and going to [`http://localhost:8994`](http://localhost:8994), you will be presented with the [`Pluto`](https://github.com/fonsp/Pluto.jl/wiki) notebook interface.  You can save your new notebook in `/opt/CYAxiverse/notebooks`.
 
-Enjoy! 💻
+Enjoy! ![:deploy_parrot:](https://emoji.slack-edge.com/T7DMEKZMH/deployparrot/ef6c902688cec864.gif)
 
 !!! warning
     This package is currently _not_ registered with the `julia` package manager and is still under development.  **Use at your own risk!**
