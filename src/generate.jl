@@ -436,7 +436,7 @@ function hp_spectrum(h11::Int,tri::Int,cy::Int=1; prec=5_000)
     L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
     LQtilde = LQtildebar(h11,tri,cy)
     Ltilde = Matrix{Float64}(LQtilde["L\tiil̃"]')
-    Qtilde = Matrix{Int}(LQtilde["Q̃"]')
+    Qtilde = Matrix{Int}(LQtilde["Qtilde"]')
     spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
 end
 """
@@ -586,7 +586,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     
     LQtilde = LQtildebar(L, Q)
     Ltilde = LQtilde["L\tiil̃"]
-    Qtilde = LQtilde["Q̃"]
+    Qtilde = LQtilde["Qtilde"]
     QKs::Matrix{Float64} = zeros(Float64,h11,h11)
     fapprox::Vector{Float64} = zeros(Float64,h11)
     mapprox::Vector{Float64} = zeros(h11)
@@ -667,7 +667,7 @@ julia> vacua_data = CYAxiverse.generate.vacua(pot_data["L"],pot_data["Q"])
 Dict{String, Any} with 3 entries:
   "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
   "vacua"  => 3
-  "Q̃" => [0 0 … 1 0; 0 0 … 0 0; … ; 1 1 … 0 0; 0 0 … 0 0]
+  "Qtilde" => [0 0 … 1 0; 0 0 … 0 0; … ; 1 1 … 0 0; 0 0 … 0 0]
 ```
 """
 function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
@@ -678,17 +678,17 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
         θparalleltest::Matrix{Float64} = snf_data["θ∥"]
     end
     data = LQtildebar(L,Q; threshold=threshold)
-    Qtilde = data["Q̃"]
+    Qtilde = data["Qtilde"]
     
     if h11 <= 50
         vacua = Int(round(abs(det(θparalleltest) / det(inv(Qtilde)))))
         thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
-        keys = ["vacua","θ∥","Q̃"]
+        keys = ["vacua","θ∥","Qtilde"]
         vals = [abs(vacua), thparallel, Qtilde]
         return Dict(zip(keys,vals))
     else
         vacua = Int(round(abs(1 / det(inv(Qtilde)))))
-        keys = ["vacua","Q̃"]
+        keys = ["vacua","Qtilde"]
         vals = [abs(vacua), Qtilde]
         return Dict(zip(keys,vals))
     end
@@ -708,11 +708,11 @@ Dict{String, Matrix{Float64}}(
    1.0       1.0       1.0       1.0     …     1.0       1.0       1.0       1.0
  -46.5338  -49.2362  -57.3519  -92.6082     -136.097  -163.303  -179.634  -163.303
 
-"L̄" => 2×12 Matrix{Float64}:
+"Lbar" => 2×12 Matrix{Float64}:
    1.0      1.0        1.0       1.0    …    -1.0      -1.0       1.0       1.0
  -90.414  -98.5299  -101.232  -133.787     -177.681  -177.681  -179.978  -179.978
 
-"Q̄" => 8×12 Matrix{Float64}:
+"Qbar" => 8×12 Matrix{Float64}:
   0.0   0.0   0.0   2.0   2.0   2.0  1.0   0.0   0.0   0.0   0.0   0.0
   0.0   0.0   0.0   0.0   0.0   0.0  0.0   0.0   0.0   0.0   0.0   0.0
   0.0   0.0   0.0  -1.0  -1.0  -1.0  0.0  -1.0   1.0   0.0   1.0   0.0
@@ -736,7 +736,7 @@ Dict{String, Matrix{Float64}}(
   0.0  -1.0   0.0  0.0   1.0  0.0  0.0  0.0
   0.0  -1.0   0.0  0.0   0.0  1.0  0.0  0.0
 
-"Q̃" => 8×9 Matrix{Float64}:
+"Qtilde" => 8×9 Matrix{Float64}:
  0.0  0.0  0.0   2.0  0.0  0.0  0.0  0.0   0.0
  0.0  0.0  0.0   0.0  0.0  0.0  0.0  1.0   0.0
  0.0  0.0  0.0  -1.0  1.0  0.0  0.0  0.0  -1.0
@@ -772,16 +772,17 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
             Lbar = hcat(Lbar, @view(Lsorted_test[i,:]))
         end
     end
-    Qtilde = Rational.(@view(Qtilde[:,2:end]))
-    Qbar = @view(Qbar[:,2:end])
+    Qtilde = Matrix{Rational}(@view(Qtilde[:,2:end]))
+    Qbar = Matrix{Int}(@view(Qbar[:,2:end]))
     Ltilde = @view(Ltilde[:,2:end])
     Lbar = @view(Lbar[:,2:end])
     Ltilde_min::Float64 = minimum(@view(Ltilde[2,:]))
     Ldiff_limit::Float64 = log10(threshold)
-    Qbar = Int.(@view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)]))
+    Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
-    Qinv::Matrix{Rational{Int}} = inv(Qtilde)
-    Qhat = copy(Qtilde)
+    Qinv = inv(Qtilde)
+    Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
+    Qhat::Matrix{Int} = copy(Qtilde)
     Lhat = copy(Ltilde)
     αeff::Matrix{Rational} = zeros(size(@view(Q[1,:]),1),1)
     α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
@@ -804,15 +805,9 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
             αeff = hcat(αeff,@view(α[i,:]))
         end
     end
-    if size(Qhat, 1) != size(Qhat, 2)
-        keys = ["Q̂", "Q̄", "L̂", "L̄", "α"]
-        vals = [Qhat, Qbar, Lhat, Lbar, αeff]
-        return Dict(zip(keys,vals))
-    else
-        keys = ["Q̃", "Q̄", "L̃", "L̄", "α"]
-        vals = [Qtilde, Qbar, Ltilde, Lbar, αeff]
-        return Dict(zip(keys,vals))
-    end
+    keys = ["Qhat", "Qbar", "Lhat", "Lbar", "α"]
+    vals = [Qhat, Qbar, Lhat, Lbar, αeff]
+    return Dict(zip(keys,vals))
 end
 
 """
@@ -844,7 +839,7 @@ julia> vacua_data = CYAxiverse.generate.vacua_id_basis(pot_data["L"],pot_data["Q
 Dict{String, Any} with 3 entries:
   "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
   "vacua"  => 11552.0
-  "Q̃" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
+  "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
 ```
 """
 function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
@@ -853,11 +848,11 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.
         h11::Int = size(Q,2)
     end
     data = LQtildebar(L,Q; threshold=threshold)
-    Leff = ifelse(haskey(data, "Q̂"), data["L̂"], zeros(2, 1))
-    αeff::Matrix{Rational} = zeros(size(@view(Q[1,:]),1),1)
-    Qtilde = ifelse(haskey(data, "Q̃"), Matrix{Rational}(data["Q̃"]), Matrix{Rational}(data["Q̂"][:, 1:h11]))
-    Qbar = Matrix{Int}(data["Q̄"])
-    Qinv = inv(Qtilde)
+    Leff = data["Lhat"]
+    Qtilde = Matrix{Rational}(data["Qhat"][:, 1:h11])
+    Qbar = Matrix{Int}(data["Qbar"])
+    Qinv = Matrix{Rational}(inv(Qtilde))
+    Qinv = @.(ifelse(abs(Qinv) < 1e-5, zero(Rational), Rational(Qinv)))
     αeff = data["α"]
     if αeff == zeros(Float64,size(@view(Q[1,:]),1),1)
         keys = ["θ̃∥", "vac"]
@@ -987,7 +982,7 @@ julia> vacua_data = CYAxiverse.generate.vacua_TB(pot_data["L"],pot_data["Q"])
 Dict{String, Any} with 3 entries:
   "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
   "vacua"  => 11552.0
-  "Q̃" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
+  "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
 ```
 """
 function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
@@ -999,10 +994,10 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
         θparalleltest::Matrix{Float64} = snf_data["θ∥"]
     end
     data = LQtildebar(L,Q; threshold=threshold)
-    Qtilde = data["Q̃"]
-    Qbar = data["Q̄"]
-    Ltilde = data["L̃"]
-    Lbar = data["L̄"]
+    Qtilde = data["Qtilde"]
+    Qbar = data["Qbar"]
+    Ltilde = data["Ltilde"]
+    Lbar = data["Lbar"]
     α = data["α"]
     if h11 <= 50
         if size(Qtilde,1) == size(Qtilde,2)
@@ -1011,7 +1006,7 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
             vacua = abs(det(θparalleltest) / (1/sqrt(det(Qtilde * Qtilde'))))
         end
         thparallel::Matrix{Rational} = Rational.(round.(θparalleltest; digits=5))
-        keys = ["vacua","θ∥","Q̃"]
+        keys = ["vacua","θ∥","Qtilde"]
         vals = [abs(vacua), thparallel, Qtilde]
         return Dict(zip(keys,vals))
     else
@@ -1021,7 +1016,7 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
             vacua = abs(sqrt(det(Qtilde * Qtilde')))
         end
         
-        keys = ["vacua","Q̃"]
+        keys = ["vacua","Qtilde"]
         vals = [abs(vacua), Qtilde]
         return Dict(zip(keys,vals))
     end
@@ -1043,7 +1038,7 @@ julia> vacua_data = CYAxiverse.generate.vacua_TB(h11,tri,cy)
 Dict{String, Any} with 3 entries:
   "θ∥"     => Rational[1//1 0//1 … 0//1 0//1; 0//1 1//1 … 0//1 0//1; … ; 0//1 0//1 … 1//1 0//1; 0//1 0//1 … 0//1 1//1]
   "vacua"  => 11552.0
-  "Q̃" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
+  "Qtilde" => [0 0 … 0 1; 0 0 … 0 0; … ; 1 1 … -1 -1; 0 0 … 0 0]
 ```
 """
 function vacua_TB(h11::Int,tri::Int,cy::Int; threshold::Float64=0.5)
@@ -1067,7 +1062,7 @@ function vacua_save(h11::Int,tri::Int,cy::Int=1; threshold::Float64=0.5)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua")
             f3["vacua",deflate=9] = vacua_data["vacua"]
-            f3["Q̃",deflate=9] = vacua_data["Q̃"]
+            f3["Qtilde",deflate=9] = vacua_data["Qtilde"]
             if h11 <=50
                 f3a = create_group(f3, "thparallel")
                 f3a["numerator",deflate=9] = numerator.(vacua_data["θ∥"])
@@ -1093,7 +1088,7 @@ function vacua_save_TB(h11::Int,tri::Int,cy::Int=1; threshold::Float64=0.5)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua_TB")
             f3["vacua",deflate=9] = vacua_data["vacua"]
-            f3["Q̃",deflate=9] = vacua_data["Q̃"]
+            f3["Qtilde",deflate=9] = vacua_data["Qtilde"]
             if h11 <=50
                 f3a = create_group(f3, "thparallel")
                 f3a["numerator",deflate=9] = numerator.(vacua_data["θ∥"])
@@ -1113,8 +1108,8 @@ Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.0
 function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold = 1e-2)
 	setprecision(ArbFloat; digits=5_000)
     LQtilde = LQtildebar(L, Q; threshold=threshold)
-	Ltilde = LQtilde["L\tiil̃"][:,sortperm(LQtilde["L\il̃"][2,:], rev=true)]
-    Qtilde = LQtilde["Q̃"]'[sortperm(Ltilde[2,:], rev=true), :]
+	Ltilde = LQtilde["Ltilde"][:,sortperm(LQtilde["Ltilde"][2,:], rev=true)]
+    Qtilde = LQtilde["Qtilde"]'[sortperm(Ltilde[2,:], rev=true), :]
 	Qtilde = Matrix{Int}(Qtilde)
     basis_vectors = zeros(size(Qtilde,2), size(Qtilde,2))
 	idx = 1
@@ -1188,33 +1183,11 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
         h11::Int = size(Q, 2)
     end
     LQtilde = LQtildebar(L, Q; threshold=threshold)
-    Qhat = Matrix{Int}(LQtilde["Q̃"])
-    Lhat = LQtilde["L\il̃"]
-    Qbar = Matrix{Int}(LQtilde["Q̄"])
-    Lbar = LQtilde["L̄"]
-    Ldiff_limit = log10(threshold)
-    Qinv = Matrix{Rational}(inv(Qhat))
-    α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
-    for i in axes(α,1)
-        for j in axes(α,2)
-            if abs(α[i,j]) > 1e-3
-                Ldiff::Float64 = round(Lbar[2,i] - Lhat[2,j], digits=3)
-                if Ldiff > Ldiff_limit
-                else
-                    α[i,j] = zero(Rational)
-                end
-            else
-                α[i,j] = zero(Rational)
-            end
-        end
-        if α[i,:] == zeros(size(α,2))
-        else
-            Qhat = hcat(Qhat, @view(Qbar[:,i]))
-            Lhat = hcat(Lhat, @view(Lbar[:,i]))
-        end
-    end
+    Qhat = Matrix{Int}(LQtilde["Qhat"])
+    Lhat = LQtilde["Lhat"]
     if size(Qhat, 1) == size(Qhat, 2)
-        Qinv::Matrix{Rational} = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
+        Qinv = Matrix{Rational}(inv(Qhat))
+        Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
         for col in axes(Qinv, 2)
             if sum(Qinv[:, col] .== zero(Qinv[:, col][1])) == size(Qinv, 1)-1
                 Qinv[:, col] = zero(Qinv[:, col])
