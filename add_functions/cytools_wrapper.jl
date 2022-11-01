@@ -16,7 +16,7 @@ Functions that wrap basic functionality of [CYTools](https://cytools.liammcallis
 """
 module cytools_wrapper
 
-using ..filestructure: cyax_file, present_dir, np_path_generate
+using ..filestructure: data_dir, cyax_file, present_dir, np_path_generate
 using ..read: topology
 
 using PyCall
@@ -123,7 +123,7 @@ end
     topologies(h11::Int, n::Int)
 
 This function generates and saves the topological data, _i.e._ `points` and `simplices` of the polytope, in a HDF5 file with path
-`$(data_dir)/h11_XXX/np_YYYYYYY/cy_ZZZZZZZ/cyax.h5`
+`DATA_DIR/h11_XXX/np_YYYYYYY/cy_ZZZZZZZ/cyax.h5`
 
 Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 
