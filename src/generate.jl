@@ -496,6 +496,13 @@ function project_out(v::Vector{Int})
     idd - proj
 end
 
+"""
+    project_out(v::Vector)
+
+Takes the direction to be projected out as input and returns a projector of the form
+
+``\\Pi\\bigl(\\vec{v}\\bigr) = \\mathbb{1}_{h^{1,1}} - \\frac{\\bigl|\\vec{v}\\bigr\\rangle\\bigl\\langle\\vec{v}\\bigr|}{||\\vec{v}||^2}``
+"""
 function project_out(v::Vector{Rational{Int64}})
     idd = Matrix{Rational}(I(size(v,1)))
     norm2 = dot(v,v)
@@ -544,7 +551,7 @@ end
 """
     orth_basis(vec::Vector)
 
-TBW
+Uses the projector defined in [`project_out(v)`](@ref) to construct an orthonormal basis (same method as [scipy.linalg.orth](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.orth.html))
 """
 function orth_basis(vec::Vector)
     proj = project_out(vec)
@@ -780,7 +787,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
-    Qinv = inv(Qtilde)
+    Qinv::Matrix{Rational} = inv(Qtilde)
     Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
     Qhat::Matrix{Int} = copy(Qtilde)
     Lhat = copy(Ltilde)
@@ -1211,7 +1218,7 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
             if size(Qsub, 2) == 1 && sum(Qsub .== 0) == size(Qsub, 1)-1
                 push!(θmin, zeros(Float64, h11))
                 Qhat = project_out(Qsub) * Qhat
-                Qhat = @.(ifelse(abs(Qhat) < 1e-10, zero(Qhat), Qhat))
+                Qhat = @.(ifelse(abs(Qhat) < 1e-5, zero(Qhat), Qhat))
             else
                 # Lsub = Lsub[:, @.(!iszero(Qsub))]
                 Lsubdiff = @view(Lsub[2,:]) .- Lsub[2,1]
@@ -1249,10 +1256,70 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
     end
 end
 
+"""
+    vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+
+Uses `LQtildebar` function to make Q̂.  If Q̂ is square, returns number of vacua as `|det(Q̂)|`
+otherwise returns number of vacua as `√|det(Q̂'Q̂)|`.
+"""
+function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+    data = LQtildebar(h11, tri, cy; threshold=threshold)
+    if size(data["Qhat"], 1) == size(data["Qhat"], 2)
+        vac = Int(abs(det(data["Qhat"])))
+        return (vac = vac, issquare = 1)
+    else
+        vac = Int(floor(sqrt(abs(det(data["Qhat"] * data["Qhat"]')))))
+        return (vac = vac, issquare = 0)
+    end
+end
+
+function vacua_estimate_save(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+    vac_data = vacua_estimate(h11, tri, cy; threshold=threshold)
+    h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "cw") do f
+        f["square", deflate=9] = vac_data.issquare
+        f["vacua_estimate", deflate=9] = vac_data.vac
+    end
+end
+
 function vacua_full(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector{Float64}=zeros(h11))
     pot_data = potential(h11, tri, cy)
     L, Q = pot_data["L"], pot_data["Q"]
     vacua_full(L, Q; threshold=threshold, phase=phase)
 end
 
+"""
+    vacua_no_optim(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)))
+
+TBW
+"""
+function vacua_no_optim(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)))
+    if @isdefined h11
+    else
+        h11::Int = size(Q, 2)
+    end
+    LQtilde = LQtildebar(L, Q; threshold=threshold)
+    Qhat = Matrix{Int}(LQtilde["Qhat"])
+    Lhat = LQtilde["Lhat"]
+    if size(Qhat, 1) == size(Qhat, 2)
+        Qinv = Matrix{Rational}(inv(Qhat))
+        Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), Rational(round(Qinv; digits=4))))
+        for col in axes(Qinv, 2)
+            if sum(Qinv[:, col] .== zero(Qinv[:, col][1])) == size(Qinv, 1)-1
+                Qinv[:, col] = zero(Qinv[:, col])
+            end
+        end
+        return unique(mod.(Qinv, 1), dims=2), abs(det(Qhat)), phase
+    else
+        Lhat = Lhat[:, sortperm(Lhat[2,:], rev=true)]
+        Qhat = Qhat[:, sortperm(Lhat[2,:], rev=true)]
+        Ω = Matrix{Int}(@view(Qhat[:, 1:h11]))
+        Ωinv = Matrix{Rational}(inv(Ω))
+        Ωinv = @.(ifelse(abs(Ωinv) < 1e-10, zero(Ωinv), Rational(round(Ωinv; digits=4))))
+        Ωhat = (Ωinv * Qhat)'
+        for col in eachcol(Ωhat)
+        end
+    end
+
+
+end
 end
