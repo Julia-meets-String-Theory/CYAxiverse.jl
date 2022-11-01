@@ -6,7 +6,7 @@ Functions that access the database.
 module read
 using HDF5
 using LinearAlgebra
-using ..filestructure: cyax_file, minfile
+using ..filestructure: cyax_file, minfile, geom_dir
 ###########################
 ##### Read CYTools data ###
 ###########################
@@ -107,6 +107,15 @@ end
 ##############################
 ##### HDF5.read Vacua data ###
 ##############################
+
+function qshape(h11::Int,tri::Int,cy::Int=1)
+    square, vacua = h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "r") do file
+        HDF5.read(file, "square"),HDF5.read(file, "vacua_estimate")
+    end
+    keys = ["issquare", "vacua_estimate"]
+    vals = [square, vacua]
+    Dict(zip(keys,vals))
+end
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
     vacua::Float64 = 0.
