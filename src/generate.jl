@@ -704,54 +704,62 @@ end
 """
     LQtildebar(L,Q; threshold)
 
-Compute the linearly independent leading instantons that generate the axion potential, including any subleading instantons that are within `threshold` of their basis instanton.\n
+Compute the linearly independent leading instantons that generate the axion potential, including any subleading instantons that are within `threshold` of their basis instanton.  Also returns `α` which is a vector of zeros if `Qhat` is square, or is a matrix with additional non-zero columns if `Qhat` is not square.\n
 #Examples
 ```julia-repl
-julia> h11,tri,cy = 8, 10, 1;
+julia> h11,tri,cy = 12, 7, 1;
 julia> pot_data = CYAxiverse.read.potential(h11,tri,cy);
-julia> vacua_data = CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold::Float64=0.5)
-Dict{String, Matrix{Float64}}(
-"L\tilil̃" => 2×9 Matrix{Float64}:
-   1.0       1.0       1.0       1.0     …     1.0       1.0       1.0       1.0
- -46.5338  -49.2362  -57.3519  -92.6082     -136.097  -163.303  -179.634  -163.303
+julia> vacua_data = CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold=1e-2)
+Dict{String, Matrix}(
+"Lbar" => 2×51 Matrix{Float64}:
+    1.0       1.0       1.0      -1.0    …      1.0      -1.0       1.0       1.0
+ -101.342  -110.839  -156.784  -271.595     -1113.02  -1118.28  -1118.47  -1144.78
 
-"Lbar" => 2×12 Matrix{Float64}:
-   1.0      1.0        1.0       1.0    …    -1.0      -1.0       1.0       1.0
- -90.414  -98.5299  -101.232  -133.787     -177.681  -177.681  -179.978  -179.978
+"Qhat" => 12×13 Matrix{Int64}:
+ 0   0  0  0  0  0  -1   0  0  0  0  0  1
+ 0  -2  0  0  0  0   1   0  0  0  0  0  0
+ 0   0  0  0  1  0  -1   2  0  0  0  0  0
+ 0   1  0  0  0  0  -1   2  0  1  0  0  0
+ 0   1  0  0  0  0   1  -2  0  0  0  0  0
+ 0   1  0  0  0  0  -1   0  1  0  0  0  0
+ 0   0  0  0  0  0   0   1  0  0  0  1  0
+ 0  -1  0  1  0  0   0   1  0  0  0  0  0
+ 0   1  0  0  0  1   0  -1  0  0  0  0  0
+ 0   1  1  0  0  0  -1   1  0  0  0  0  0
+ 1   0  0  0  0  0  -1   1  0  0  0  0  0
+ 0   1  0  0  0  0   0   0  0  0  1  0  0
 
-"Qbar" => 8×12 Matrix{Float64}:
-  0.0   0.0   0.0   2.0   2.0   2.0  1.0   0.0   0.0   0.0   0.0   0.0
-  0.0   0.0   0.0   0.0   0.0   0.0  0.0   0.0   0.0   0.0   0.0   0.0
-  0.0   0.0   0.0  -1.0  -1.0  -1.0  0.0  -1.0   1.0   0.0   1.0   0.0
-  0.0   0.0   0.0  -1.0  -1.0  -1.0  0.0   1.0   0.0   1.0   0.0   1.0
-  0.0   0.0   0.0   0.0   0.0   0.0  0.0   1.0   0.0   0.0   0.0   0.0
-  1.0   1.0   0.0   0.0   1.0   1.0  0.0   0.0  -1.0  -1.0   0.0   0.0
- -1.0   0.0   1.0   1.0   0.0   1.0  0.0   0.0   0.0   0.0  -1.0  -1.0
-  0.0  -1.0  -1.0  -1.0  -1.0  -2.0  0.0   0.0   0.0   0.0   0.0   0.0
+"Lhat" => 2×13 Matrix{Float64}:
+   1.0       1.0       1.0        1.0    …     1.0       1.0        1.0       1.0
+ -31.7319  -77.6752  -87.1719  -249.058     -693.394  -872.027  -1143.42  -1144.78
 
-"α" => 12×8 Matrix{Float64}:
-  1.0  -1.0   0.0  0.0   0.0  0.0  0.0  0.0
-  1.0   0.0  -1.0  0.0   0.0  0.0  0.0  0.0
-  0.0   1.0  -1.0  0.0   0.0  0.0  0.0  0.0
- -1.0   0.0   0.0  1.0   0.0  0.0  0.0  0.0
-  0.0  -1.0   0.0  1.0   0.0  0.0  0.0  0.0
-  0.0   0.0  -1.0  1.0   0.0  0.0  0.0  0.0
-  0.0   0.0   0.0  0.0   0.0  0.0  0.0  0.0
-  0.0   0.0   0.0  0.0  -1.0  1.0  1.0  0.0
- -1.0   0.0   0.0  0.0   1.0  0.0  0.0  0.0
- -1.0   0.0   0.0  0.0   0.0  1.0  0.0  0.0
-  0.0  -1.0   0.0  0.0   1.0  0.0  0.0  0.0
-  0.0  -1.0   0.0  0.0   0.0  1.0  0.0  0.0
+"Qbar" => 12×51 Matrix{Int64}:
+  0   0   0   0   0   0   0   0   0   0   0  …   0   0   0   0   1   0   0   0   0  1
+ -2   0  -2   0   0   0   2   2  -2   0   0      0   0  -2   0  -1   0   0   0   0  0
+  0   0   0   0   1   0   0   1   0   0   1      1   0   0   0   1  -2   0   0   1  0
+  1   0   1   0   0   0  -1  -1   1   0   0     -1   1   1   0   2  -1   0   0   0  0
+  1   0   1   0   0   0  -1  -1   1   0   0      0   0   1   0  -1   2   0   0   0  0
+  1   0   1   0   0   0  -1  -1   1   0   0  …   0   0   1   0   1   0   0   0   0  0
+  0   0   0   0   0   0   0   0   0   0   0      0   0   0   0   0  -1   0   0   0  0
+ -1   0  -1   1   0   0   2   1  -1   1   0      0   0  -1   0   0  -1   1   0   0  0
+  1   0   1   0   0   1  -1  -1   0   0   0      0  -1   1   0   0   1   0   1   0  0
+  1   1   0   0   0   0  -1  -1   1  -1  -1      0   0   1   1   1  -1   0   0   0  0
+ -1  -1   0  -1  -1  -1   0   0   0   0   0  …   0   0   0   0   1  -1   0   0   0  0
+  1   0   1   0   0   0  -1  -1   1   0   0      0   0   0  -1   0   0  -1  -1  -1  0
 
-"Qtilde" => 8×9 Matrix{Float64}:
- 0.0  0.0  0.0   2.0  0.0  0.0  0.0  0.0   0.0
- 0.0  0.0  0.0   0.0  0.0  0.0  0.0  1.0   0.0
- 0.0  0.0  0.0  -1.0  1.0  0.0  0.0  0.0  -1.0
- 0.0  0.0  0.0  -1.0  0.0  1.0  0.0  0.0   1.0
- 0.0  0.0  0.0   0.0  0.0  0.0  1.0  0.0   1.0
- 1.0  0.0  0.0   1.0  0.0  0.0  0.0  0.0   0.0
- 0.0  1.0  0.0   1.0  0.0  0.0  0.0  0.0   0.0
- 0.0  0.0  1.0  -1.0  0.0  0.0  0.0  0.0   0.0
+"α" => 12×2 Matrix{Rational}:
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  0//1
+ 0//1  3//4
  )
 ```
 """
@@ -1194,7 +1202,7 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
     Lhat = LQtilde["Lhat"]
     if size(Qhat, 1) == size(Qhat, 2)
         Qinv = Matrix{Rational}(inv(Qhat))
-        Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), Rational(round(Qinv; digits=4))))
+        Qinv = @.(ifelse(abs(Qinv) < 1e-5, zero(Qinv), Rational(round(Qinv; digits=4))))
         for col in axes(Qinv, 2)
             if sum(Qinv[:, col] .== zero(Qinv[:, col][1])) == size(Qinv, 1)-1
                 Qinv[:, col] = zero(Qinv[:, col])
