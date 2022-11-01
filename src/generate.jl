@@ -1192,7 +1192,7 @@ end
     vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)))
 New implementation of MK's algorithm -- testing!
 """
-function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)))
+function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)), runs = 100_000)
     if @isdefined h11
     else
         h11::Int = size(Q, 2)
@@ -1234,11 +1234,11 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
                 if size(Qsub, 2) == 1
                     Qsub = reshape(Qsub, h11,1)
                 end
-                println(size(phase))
-                println(size(phase[phase .!= 0]))
-                xmin = subspace_minimize(Lfull, Qsub; runs = 100_000, phase=phase)
+                println("size(phase): ", size(phase))
+                println("size(phase) without zeros: ", size(phase[phase .!= 0]))
+                xmin = subspace_minimize(Lfull, Qsub; runs = runs, phase=phase)
                 xmin = hcat(xmin...)
-                println(size(xmin))
+                println("number of minima found with $runs random initialisations: ", size(xmin))
                 xmin = sort(xmin, dims = 2)
                 min_num = 1
                 while min_num < size(xmin, 2)
