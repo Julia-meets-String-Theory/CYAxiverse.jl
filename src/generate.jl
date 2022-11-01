@@ -707,7 +707,7 @@ end
 Compute the linearly independent leading instantons that generate the axion potential, including any subleading instantons that are within `threshold` of their basis instanton.\n
 #Examples
 ```julia-repl
-julia> h11,tri,cy = 8, 108, 1;
+julia> h11,tri,cy = 8, 10, 1;
 julia> pot_data = CYAxiverse.read.potential(h11,tri,cy);
 julia> vacua_data = CYAxiverse.generate.LQtildebar(pot_data["L"],pot_data["Q"]; threshold::Float64=0.5)
 Dict{String, Matrix{Float64}}(
@@ -1194,7 +1194,7 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
     Lhat = LQtilde["Lhat"]
     if size(Qhat, 1) == size(Qhat, 2)
         Qinv = Matrix{Rational}(inv(Qhat))
-        Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
+        Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), Rational(round(Qinv; digits=4))))
         for col in axes(Qinv, 2)
             if sum(Qinv[:, col] .== zero(Qinv[:, col][1])) == size(Qinv, 1)-1
                 Qinv[:, col] = zero(Qinv[:, col])
