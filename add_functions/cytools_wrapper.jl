@@ -298,7 +298,7 @@ function geometries_generate(h11,cy,tri,cy_i=1)
     L = zeros(Float64,h11+4+binomial(h11+4,2),2)
     L = vcat(L1,L2)
     keys = ["h21", "glsm", "basis", "tip", "tip_prefactor", "CY_volume", "PTD_volumes", "Kinv", "L", "Q"]
-    vals = [h21, Int.(glsm), Int.(basis), Float64.(tip), Float64.(tip_prefactor), Float64(V), Float64.(tau), Float64(Kinv), hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Int.(q)]
+    vals = [h21, Int.(glsm), Int.(basis), Float64.(tip), Float64.(tip_prefactor), Float64(V), Float64.(tau), Float64.(Kinv), hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Int.(q)]
     return Dict(zip(keys, vals))
 end
 
