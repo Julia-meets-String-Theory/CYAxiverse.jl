@@ -895,6 +895,8 @@ end
 TBW
 """
 function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector=zero(Q[1, :]))
+    # TODO: #3 @vmmhep
+    # TODO: #4 add phases @vmmhep
     if @isdefined h11
     else
         h11::Int = size(Q,2)
@@ -1188,11 +1190,66 @@ function vacua_MK(h11::Int,tri::Int,cy::Int)
     vacua_MK(L, Q)
 end
 
+function simple_rationals(min, max)
+    if max < 1  # J ⊂ (0, 1)
+        return 1/(simple_rationals(1 / max, 1 / min))
+    elseif 1 < min  # J ⊂ (1, ∞):
+        q = ceil(min) - 1  # largest q satisfying q < left
+        return q + simple_rationals(abs(min - q), abs(min - q))
+    else  #  left <= 1 <= right, so 1 ∈ J
+        return 1/1
+    end
+end
+
+"""
+    vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5)
+
+TBW
+"""
+function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5)
+    # TODO: #5 fix phases
+    if @isdefined h11
+    else
+        h11::Int = size(Q, 2)
+    end
+    LQtilde = LQtildebar(L, Q; threshold=threshold)
+    Qhat = Matrix{Int}(LQtilde["Qhat"])
+    Lhat = LQtilde["Lhat"]
+    if size(Qhat, 1) == size(Qhat, 2)
+        # Lhat = Lhat[:, sortperm(Lhat[2,:], rev=true)]
+        Qhat = Qhat[:, sortperm(Lhat[2,:], rev=true)]
+        δlist = [0]
+        idx = 1
+        while idx < size(Qhat, 2)
+            Qsub = Qhat[:, idx]
+            θmin_list = []
+            if Lhat[2, idx+1] - Lhat[2, idx] ≥ threshold && dot(Qhat[:, idx+1], Qhat[:, idx]) != 0
+                return "Sorry, there are degeneracies.  Please try another example."
+            else
+                min_list = []
+                θmin(n::Int) = [(π*n+δ)/norm(Qsub) for δ in δlist]
+                m = 1
+                while 0 ≤ θmin(m) < 2π
+                    push!(min_list, θmin(m))
+                    m+=1
+                end
+                min_list = hcat(min_list...)
+                push!(θmin_list, min_list)
+            end
+            projector = I(h11) - project_out(Qsub)
+            idx +=1
+            δlist = norm(Qhat[:, idx] * projector) .* min_list
+        end
+        θmin_list
+    end
+end
 """
     vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)))
 New implementation of MK's algorithm -- testing!
 """
 function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)), runs = 100_000)
+    # TODO: #3 @vmmhep
+    # TODO: #4 add phases @vmmhep
     if @isdefined h11
     else
         h11::Int = size(Q, 2)
@@ -1202,7 +1259,7 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
     Lhat = LQtilde["Lhat"]
     if size(Qhat, 1) == size(Qhat, 2)
         Qinv = Matrix{Rational}(inv(Qhat))
-        Qinv = @.(ifelse(abs(Qinv) < 1e-5, zero(Qinv), Rational(round(Qinv; digits=4))))
+        Qinv = @.(ifelse(abs(Qinv) < 1e-5, zero(Qinv), simple_rationals(round(Qinv; digits=4) - 1e-4, round(Qinv; digits=4) + 1e-4)))
         for col in axes(Qinv, 2)
             if sum(Qinv[:, col] .== zero(Qinv[:, col][1])) == size(Qinv, 1)-1
                 Qinv[:, col] = zero(Qinv[:, col])
@@ -1235,6 +1292,7 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
                     Qsub = reshape(Qsub, h11,1)
                 end
                 println("size(phase): ", size(phase))
+                println("phases: ", phase)
                 println("size(phase) without zeros: ", size(phase[phase .!= 0]))
                 xmin = subspace_minimize(Lfull, Qsub; runs = runs, phase=phase)
                 xmin = hcat(xmin...)
@@ -1253,8 +1311,8 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
                 Qsub = orth_basis(Qsub)
                 Qhat = project_out(Qsub) * Qhat
                 Qhat = @.(ifelse(abs(Qhat) < 1e-10, zero(Qhat), Qhat))
-                phase::Array{Rational} = I(size(phase,1)) .- project_out(Qsub)
-                phase = @.(ifelse(abs(phase) < 1e-10, zero(phase), phase))
+                # phase::Array{Rational} = I(size(phase,1)) .- project_out(Qsub)
+                # phase = @.(ifelse(abs(phase) < 1e-10, zero(phase), phase))
             end
             idx += 1
         end
@@ -1262,6 +1320,12 @@ function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, 
         vac = size(θmin, 2)
         return θmin, vac, phase
     end
+end
+
+function vacua_full(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector{Float64}=zeros(h11))
+    pot_data = potential(h11, tri, cy)
+    L, Q = pot_data["L"], pot_data["Q"]
+    vacua_full(L, Q; threshold=threshold, phase=phase)
 end
 
 """
@@ -1287,12 +1351,6 @@ function vacua_estimate_save(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5
         f["square", deflate=9] = vac_data.issquare
         f["vacua_estimate", deflate=9] = vac_data.vac
     end
-end
-
-function vacua_full(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector{Float64}=zeros(h11))
-    pot_data = potential(h11, tri, cy)
-    L, Q = pot_data["L"], pot_data["Q"]
-    vacua_full(L, Q; threshold=threshold, phase=phase)
 end
 
 """
