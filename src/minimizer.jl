@@ -409,11 +409,24 @@ function minimize(LV::Vector, QV, x0::Vector)
         # GC.gc()
     end
 end
-"""
-    subspace_minimize(L::Vector, Q::Matrix; runs=10_000)
-Minimizes the subspace with `runs` iterations
-"""
-function subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)))
+
+function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1))
+    xmin = []
+    Random.seed!(9876543210)
+	for _ in 1:runs, col in eachcol(phase)
+		x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
+        x0 = x0 + col
+		test_min = minimize(L, Q, x0)
+		if test_min === nothing
+		else
+			push!(xmin, test_min["xmin"])
+		end
+	end
+    push!(xmin, zeros(size(Q,1)))
+	unique(xmin)
+end
+
+function subspace_minimize(L, Q; runs=10_000, phase::Number=0)
     xmin = []
     Random.seed!(9876543210)
 	for _ in 1:runs
@@ -425,6 +438,26 @@ function subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))..
 			push!(xmin, test_min["xmin"])
 		end
 	end
+    push!(xmin, zeros(size(Q,1)))
+	unique(xmin)
+end
+"""
+    subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)))
+Minimizes the subspace with `runs` iterations
+"""
+function subspace_minimize(L, Q; runs=10_000, phase::Vector=zeros(max(collect(size(Q))...)))
+    xmin = []
+    Random.seed!(9876543210)
+	for _ in 1:runs
+		x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
+        x0 = x0 + phase
+		test_min = minimize(L, Q, x0)
+		if test_min === nothing
+		else
+			push!(xmin, test_min["xmin"])
+		end
+	end
+    push!(xmin, zeros(size(Q,1)))
 	unique(xmin)
 end
 
