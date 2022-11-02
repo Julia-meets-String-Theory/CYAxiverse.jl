@@ -895,7 +895,6 @@ end
 TBW
 """
 function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector=zero(Q[1, :]))
-    # TODO: #3 @vmmhep
     # TODO: #4 add phases @vmmhep
     if @isdefined h11
     else
@@ -1204,7 +1203,7 @@ end
 """
     vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5)
 
-TBW
+This applies the projection method to square Q̂ to verify procedure
 """
 function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5)
     # TODO: #5 fix phases
@@ -1216,39 +1215,68 @@ function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=
     Qhat = Matrix{Int}(LQtilde["Qhat"])
     Lhat = LQtilde["Lhat"]
     if size(Qhat, 1) == size(Qhat, 2)
-        # Lhat = Lhat[:, sortperm(Lhat[2,:], rev=true)]
         Qhat = Qhat[:, sortperm(Lhat[2,:], rev=true)]
+        LQtilde["Qhat"] = copy(Qhat)
+        Lhat = Lhat[:, sortperm(Lhat[2,:], rev=true)]
         δlist = [0]
         idx = 1
-        while idx < size(Qhat, 2)
+        θmin_list = []
+        projector = zeros(h11, h11)
+        while idx ≤ size(Qhat, 2)
+            # TODO: #7 check if projected Qhat is required at each iteration
+            println("COLUMN", idx, ":")
+            Qhat = (I(h11) - projector) * Qhat
+            Qhat = @.(ifelse(abs(Qhat) < 1e-10, 0., Qhat))
             Qsub = Qhat[:, idx]
-            θmin_list = []
-            if Lhat[2, idx+1] - Lhat[2, idx] ≥ threshold && dot(Qhat[:, idx+1], Qhat[:, idx]) != 0
+            println("Qsub: ", Qsub)
+            if Lhat[2, idx == size(Qhat,2) ? idx : idx+1] - Lhat[2, idx] ≥ threshold && dot(Qhat[:, idx == size(Qhat,2) ? idx : idx+1], Qhat[:, idx]) != 0
                 return "Sorry, there are degeneracies.  Please try another example."
             else
                 min_list = []
-                θmin(n::Int) = [(π*n+δ)/norm(Qsub) for δ in δlist]
-                m = 1
-                while 0 ≤ θmin(m) < 2π
+                θmin(n::Int) = [(2π*n+δ)/norm(Qsub) for δ in δlist]
+                # TODO: #10 check gradient / hessian
+                # TODO: #9 Lambdas have different signs
+                grad(θ::Float64, δ::Float64) = sin(dot(LQtilde["Qhat"][:, idx],Qsub) * θ + δ)
+                m = 0
+                while all(i -> 0 ≤ i < 2π , θmin(m))
                     push!(min_list, θmin(m))
                     m+=1
                 end
-                min_list = hcat(min_list...)
+                # min_list = hcat(min_list...)
                 push!(θmin_list, min_list)
+                println(zip(hcat(δlist...), hcat(min_list...)))
+                grad_list = [grad(θ, δ) for (δ,θ) in zip(hcat(δlist...), hcat(min_list...))]
+                println("gradients: ", grad_list)
+                println("size(gradients[gradients .== 0]): ", grad_list[grad_list .== 0.])
             end
             projector = I(h11) - project_out(Qsub)
             idx +=1
-            δlist = norm(Qhat[:, idx] * projector) .* min_list
+            if idx < size(Q, 2)
+                δlist = norm(projector * Qhat[:, idx]) .* hcat(min_list...)
+            end
+            println("phases: ", δlist)
+            println("size(phases): ", size(δlist))
+            println("projector: ", projector)
+            println("projector[projector .!= 0]: ", projector[projector .!=0])
+            println("size(projector): ", size(projector))
         end
-        θmin_list
+        θmin_list, abs(det(Qhat)), Qhat
     end
 end
+
+function vacua_projector(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+    pot_data = potential(h11, tri, cy)
+    L, Q = pot_data["L"], pot_data["Q"]
+    vacua_projector(L, Q; threshold=threshold)
+end
+
+
 """
     vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)))
 New implementation of MK's algorithm -- testing!
 """
 function vacua_full(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)), runs = 100_000)
-    # TODO: #3 @vmmhep
+    # TODO: #6 projections of square Qhat
     # TODO: #4 add phases @vmmhep
     if @isdefined h11
     else
