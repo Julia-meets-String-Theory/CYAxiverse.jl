@@ -1218,10 +1218,12 @@ function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=
         Qhat = Qhat[:, sortperm(Lhat[2,:], rev=true)]
         LQtilde["Qhat"] = copy(Qhat)
         Lhat = Lhat[:, sortperm(Lhat[2,:], rev=true)]
-        δlist = [0]
+        δlist = [0.]
         idx = 1
         θmin_list = []
+        Qsub_list = []
         projector = zeros(h11, h11)
+        grad(Q::Vector, θ::Float64, δ::Float64) = sin(norm(Q) * θ - δ)
         while idx ≤ size(Qhat, 2)
             # TODO: #7 check if projected Qhat is required at each iteration
             println("COLUMN", idx, ":")
@@ -1233,34 +1235,36 @@ function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=
                 return "Sorry, there are degeneracies.  Please try another example."
             else
                 min_list = []
-                θmin(n::Int) = [(2π*n+δ)/norm(Qsub) for δ in δlist]
+                θmin(n::Int) = [(2π*n-δ)/norm(Qsub) for δ in hcat(δlist...)]
                 # TODO: #10 check gradient / hessian
                 # TODO: #9 Lambdas have different signs
-                grad(θ::Float64, δ::Float64) = sin(dot(LQtilde["Qhat"][:, idx],Qsub) * θ + δ)
                 m = 0
-                while all(i -> 0 ≤ i < 2π , θmin(m))
+                while all(i -> i < 2π , θmin(m))
                     push!(min_list, θmin(m))
                     m+=1
+                    println("θmin: ", θmin(m))
                 end
                 # min_list = hcat(min_list...)
                 push!(θmin_list, min_list)
-                println(zip(hcat(δlist...), hcat(min_list...)))
-                grad_list = [grad(θ, δ) for (δ,θ) in zip(hcat(δlist...), hcat(min_list...))]
-                println("gradients: ", grad_list)
-                println("size(gradients[gradients .== 0]): ", grad_list[grad_list .== 0.])
+                println(zip(δlist, min_list...))
+                # grad_list = [grad(Qsub, θ, δ) for (δ,θ) in zip(hcat(δlist...), hcat(min_list...))]
+                # println("gradients: ", grad_list)
+                # println("size(gradients[gradients .== 0]): ", grad_list[grad_list .== 0.])
             end
             projector = I(h11) - project_out(Qsub)
-            idx +=1
             if idx < size(Q, 2)
-                δlist = norm(projector * Qhat[:, idx]) .* hcat(min_list...)
+                δlist = norm(projector * Qhat[:, idx+1]) .* hcat(min_list...)
             end
+            push!(Qsub_list, Qsub)
+            # TODO: #11 construct θ_min
+            idx +=1
             println("phases: ", δlist)
             println("size(phases): ", size(δlist))
             println("projector: ", projector)
             println("projector[projector .!= 0]: ", projector[projector .!=0])
             println("size(projector): ", size(projector))
         end
-        θmin_list, abs(det(Qhat)), Qhat
+        (θmin = θmin_list, vacua_estimate = abs(det(LQtilde["Qhat"])), Qhat = LQtilde["Qhat"])
     end
 end
 
