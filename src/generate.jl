@@ -1205,7 +1205,7 @@ end
 
 This applies the projection method to square Q̂ to verify procedure
 """
-function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5)
+function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector = [[0.]])
     # TODO: #5 fix phases
     if @isdefined h11
     else
@@ -1218,10 +1218,10 @@ function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=
         Qhat = Qhat[:, sortperm(Lhat[2,:], rev=true)]
         LQtilde["Qhat"] = copy(Qhat)
         Lhat = Lhat[:, sortperm(Lhat[2,:], rev=true)]
-        δlist = [0.]
         idx = 1
         θmin_list = []
         Qsub_list = []
+        projectedQ_list = []
         projector = zeros(h11, h11)
         grad(Q::Vector, θ::Float64, δ::Float64) = sin(norm(Q) * θ - δ)
         while idx ≤ size(Qhat, 2)
@@ -1235,27 +1235,35 @@ function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=
                 return "Sorry, there are degeneracies.  Please try another example."
             else
                 min_list = []
-                θmin(n::Int) = [(2π*n-δ)/norm(Qsub) for δ in hcat(δlist...)]
+                θmin(n::Int) = [(2π*n-δ)/norm(Qsub) for δ in hcat(phase[idx]...)]
                 # TODO: #10 check gradient / hessian
-                # TODO: #9 Lambdas have different signs
+                # TODO: #9 Lambdas have different signså
                 m = 0
-                while all(i -> i < 2π , θmin(m))
+                esub = Qsub ./ norm(Qsub)
+                limit = ifelse(any(0. .< abs.(Qsub) .< 1.), 2π/minimum(abs.(esub[esub .!= 0.])), 2π)
+                println("limit: ", limit)
+                while all(i -> i < limit, θmin(m))
+                    # TODO: #12 Check condition on periodicity
                     push!(min_list, θmin(m))
                     m+=1
                     println("θmin: ", θmin(m))
                 end
                 # min_list = hcat(min_list...)
                 push!(θmin_list, min_list)
-                println(zip(δlist, min_list...))
+                println(zip(phase, min_list...))
                 # grad_list = [grad(Qsub, θ, δ) for (δ,θ) in zip(hcat(δlist...), hcat(min_list...))]
                 # println("gradients: ", grad_list)
                 # println("size(gradients[gradients .== 0]): ", grad_list[grad_list .== 0.])
             end
             projector = I(h11) - project_out(Qsub)
+            # TODO: #14 Check products of projectors are projectors
+            push!(projectedQ_list, hcat([norm(col) for col in eachcol(projector * Qhat)]...))
             if idx < size(Q, 2)
-                δlist = norm(projector * Qhat[:, idx+1]) .* hcat(min_list...)
+                phase = reshape(norm(projector * Qhat[:, idx+1]) .* hcat(min_list...), size(min_list))
+                # TODO: #13 Phase is sum of all previous phases
             end
             push!(Qsub_list, Qsub)
+            println("projectedQ: ", projectedQ_list[idx])
             # TODO: #11 construct θ_min
             idx +=1
             println("phases: ", δlist)
@@ -1272,6 +1280,97 @@ function vacua_projector(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11, tri, cy)
     L, Q = pot_data["L"], pot_data["Q"]
     vacua_projector(L, Q; threshold=threshold)
+end
+
+function vacuaΩ(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector=[[0.]])
+    # TODO: #5 fix phases
+    if @isdefined h11
+    else
+        h11::Int = size(Q, 2)
+    end
+    LQtilde = LQtildebar(L, Q; threshold=threshold)
+    Qhat = Matrix{Int}(LQtilde["Qhat"])
+    Lhat = LQtilde["Lhat"]
+    if size(Qhat, 1) == size(Qhat, 2)
+        Qhat = Qhat[:, sortperm(Lhat[2,:], rev=true)]
+        LQtilde["Qhat"] = copy(Qhat)
+        Lhat = Lhat[:, sortperm(Lhat[2,:], rev=true)]
+        idx = 1
+        θmin_list = []
+        Qsub_list = []
+        projectedQ_list = []
+        projector = zeros(h11, h11)
+        while idx ≤ size(Qhat, 2)
+            # TODO: #7 check if projected Qhat is required at each iteration
+            println("COLUMN", idx, ":")
+            Qhat = (I(h11) - projector) * Qhat
+            Qhat = @.(ifelse(abs(Qhat) < 1e-10, 0., Qhat))
+            if Lhat[2, idx == size(Qhat,2) ? idx : idx+1] - Lhat[2, idx] ≥ threshold && dot(Qhat[:, idx == size(Qhat,2) ? idx : idx+1], Qhat[:, idx]) != 0
+                return "Sorry, there are degeneracies.  Please try another example."
+            else
+                Qsub = Qhat[:, idx]
+                push!(Qsub_list, [norm(col) for col in eachcol(Qhat)])
+                println("Qsub: ", Qsub)
+                min_list = []
+                δ(θmin::Float64) = sum(norm(projector * Qsub))
+                # TODO: introduce δ
+                θmin(n::Int) = [(2π*n-δ)/norm(Qsub) for δ in hcat(phase...)]
+                # TODO: #10 check gradient / hessian
+                # TODO: #9 Lambdas have different signså
+                m = 0
+                esub = Qsub ./ norm(Qsub)
+                limit = ifelse(any(0. .< abs.(Qsub) .< 1.), 2π/minimum(abs.(esub[esub .!= 0.])), 2π)
+                println("limit: ", limit)
+                while all(i -> i < limit, θmin(m))
+                    # TODO: #12 Check condition on periodicity
+                    push!(min_list, θmin(m))
+                    m+=1
+                    println("θmin: ", θmin(m))
+                end
+                # min_list = hcat(min_list...)
+                push!(θmin_list, min_list)
+                println(zip(phase, min_list...))
+                # grad_list = [grad(Qsub, θ, δ) for (δ,θ) in zip(hcat(phase...), hcat(min_list...))]
+                # println("gradients: ", grad_list)
+                # println("size(gradients[gradients .== 0]): ", grad_list[grad_list .== 0.])
+            end
+            projector = I(h11) - project_out(Qsub)
+            # TODO: #14 Check products of projectors are projectors
+            push!(projectedQ_list, hcat([norm(col) for col in eachcol(projector * Qhat)]...))
+            if idx < size(Q, 2)
+                phase = reshape(norm(projector * Qhat[:, idx+1]) .* hcat(min_list...), size(min_list))
+                # TODO: #13 Phase is sum of all previous phases
+            end
+            push!(Qsub_list, Qsub)
+            println("projectedQ: ", projectedQ_list[idx])
+            # TODO: #11 construct θ_min
+            idx +=1
+            println("phases: ", phase[idx])
+            println("size(phases): ", size(phase[idx]))
+            println("projector: ", projector)
+            println("projector[projector .!= 0]: ", projector[projector .!=0])
+            println("size(projector): ", size(projector))
+        end
+        (θmin = θmin_list, vacua_estimate = abs(det(LQtilde["Qhat"])), Qhat = LQtilde["Qhat"])
+    end
+end
+
+function vacuaΠ(L, Q; threshold=0.5, phase=zeros(size(Q,2)))
+    if @isdefined h11
+    else
+        h11::Int = size(Q, 2)
+    end
+    LQtilde = LQtildebar(L, Q; threshold=threshold)
+    Ω = Matrix{Int}(LQtilde["Qhat"])
+    Lhat = LQtilde["Lhat"]
+    Ωperp = deepcopy(Ω)
+    Ωparallel = deepcopy(Ω)
+    for (i, col) in enumerate(eachcol(Ω))
+        # TODO: #15 Π function
+        Π = proj_out(col)
+        Ωperp[:, i+1:end] = (identity(h11) - Π) * Ωperp[:, i+1:end]
+        Ωparallel[:, i+1:end] = Π * Ωparallel[:, i+1:end]
+    end
 end
 
 
