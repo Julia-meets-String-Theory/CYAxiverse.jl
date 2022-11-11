@@ -493,7 +493,7 @@ function project_out(v::Vector{Int})
     idd = Matrix{Rational}(I(size(v,1)))
     norm2::Int = dot(v,v)
     proj = 1 // norm2 * (v * v')
-    idd - proj
+    (Π = @.(ifelse(abs(proj) < eps(), zero(proj), proj)), Πperp = idd - proj)
 end
 
 """
@@ -507,7 +507,8 @@ function project_out(v::Vector{Rational{Int64}})
     idd = Matrix{Rational}(I(size(v,1)))
     norm2 = dot(v,v)
     proj = 1 // norm2 * (v * v')
-    (Π = proj, Πperp = idd - proj)
+    # TODO: #16 Need to remove floating point errors
+    (Π = @.(ifelse(abs(proj) < eps(), zero(proj), proj)), Πperp = idd - proj)
 end
 
 function project_out(projector::Matrix, v::Vector{Int})
@@ -1360,13 +1361,15 @@ end
 TBW
 """
 function omega(Ω::Matrix{Int})
-    Ωperp = deepcopy(Ω)
-    Ωparallel = deepcopy(Ω)
+    Ωperp = Matrix{Rational}(deepcopy(Ω))
+    Ωparallel = zeros(size(Ω))
     for (i, col) in enumerate(eachcol(Ω))
         # TODO: #15 Π function
-        Ωperp[:, i+1:end] = project_out(col).Πperp * Ωperp[:, i+1:end]
-        Ωparallel[:, i+1:end] = project_out(col).Π * Ωparallel[:, i+1:end]
+        Ωperp[:, i+1:end] = project_out(Vector(col)).Πperp * Ωperp[:, i+1:end]
+        Ωperp = @.(ifelse(abs(Ωperp) < 1e-4, zero(Ωperp), Ωperp))
+        Ωparallel[i, :] = mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=2)
     end
+    Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-4, zero(Ωparallel), Ωparallel))
     (perp = Ωperp, parallel = Ωparallel)
 end
 
@@ -1381,9 +1384,14 @@ function vacuaΠ(L, Q; threshold=0.5, phase=zeros(size(Q,2)))
         h11::Int = size(Q, 2)
     end
     LQtilde = LQtildebar(L, Q; threshold=threshold)
-    Ω = Matrix{Int}(LQtilde["Qhat"])
-    Lhat = LQtilde["Lhat"]
-    Ω = omega(Ω)
+    if size(LQtilde["Qhat"], 1) == size(LQtilde["Qhat"], 2)
+        Qhat = LQtilde["Qhat"][:, sortperm(LQtilde["Lhat"][2,:], rev=true)]
+        Lhat = LQtilde["Lhat"][:, sortperm(LQtilde["Lhat"][2,:], rev=true)]
+        Ω = Matrix{Int}(Qhat)
+        Ω = omega(Ω)
+    else
+        "Ω is not square"
+    end
 end
 
 function vacuaΠ(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase=zeros(h11))
