@@ -1,5 +1,5 @@
-# using Pkg
-# Pkg.instantiate()
+using Pkg
+Pkg.instantiate()
 
 using Distributed
 import MPI
