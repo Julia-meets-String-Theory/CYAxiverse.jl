@@ -507,7 +507,7 @@ function project_out(v::Vector{Rational{Int64}})
     idd = Matrix{Rational}(I(size(v,1)))
     norm2 = dot(v,v)
     proj = 1 // norm2 * (v * v')
-    idd - proj
+    (Π = proj, Πperp = idd - proj)
 end
 
 function project_out(projector::Matrix, v::Vector{Int})
@@ -523,7 +523,7 @@ function project_out(v::Vector{Float64})
     proj = 1. /norm2 * (v * v')
     proj = @.(ifelse(abs(proj) < eps(), zero(proj), proj))
     idd_proj = idd - proj
-    @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj))
+    (Π = proj, Πperp =  @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj)))
 end
 
 function project_out(projector::Matrix, v::Vector{Float64})
@@ -1354,7 +1354,27 @@ function vacuaΩ(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, pha
         (θmin = θmin_list, vacua_estimate = abs(det(LQtilde["Qhat"])), Qhat = LQtilde["Qhat"])
     end
 end
+"""
+    Omega(Ω::Matrix{Int})
 
+TBW
+"""
+function omega(Ω::Matrix{Int})
+    Ωperp = deepcopy(Ω)
+    Ωparallel = deepcopy(Ω)
+    for (i, col) in enumerate(eachcol(Ω))
+        # TODO: #15 Π function
+        Ωperp[:, i+1:end] = project_out(col).Πperp * Ωperp[:, i+1:end]
+        Ωparallel[:, i+1:end] = project_out(col).Π * Ωparallel[:, i+1:end]
+    end
+    (perp = Ωperp, parallel = Ωparallel)
+end
+
+"""
+    vacuaΠ(L, Q; threshold=0.5, phase=zeros(size(Q,2)))
+
+TBW
+"""
 function vacuaΠ(L, Q; threshold=0.5, phase=zeros(size(Q,2)))
     if @isdefined h11
     else
@@ -1363,14 +1383,13 @@ function vacuaΠ(L, Q; threshold=0.5, phase=zeros(size(Q,2)))
     LQtilde = LQtildebar(L, Q; threshold=threshold)
     Ω = Matrix{Int}(LQtilde["Qhat"])
     Lhat = LQtilde["Lhat"]
-    Ωperp = deepcopy(Ω)
-    Ωparallel = deepcopy(Ω)
-    for (i, col) in enumerate(eachcol(Ω))
-        # TODO: #15 Π function
-        Π = proj_out(col)
-        Ωperp[:, i+1:end] = (identity(h11) - Π) * Ωperp[:, i+1:end]
-        Ωparallel[:, i+1:end] = Π * Ωparallel[:, i+1:end]
-    end
+    Ω = omega(Ω)
+end
+
+function vacuaΠ(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase=zeros(h11))
+    pot_data = potential(h11, tri, cy)
+    L, Q = pot_data["L"], pot_data["Q"]
+    vacuaΠ(L, Q; threshold=threshold, phase=phase)
 end
 
 
