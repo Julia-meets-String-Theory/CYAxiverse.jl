@@ -12,7 +12,7 @@ using GenericLinearAlgebra
 using Distributions
 using TimerOutputs
 
-using ..filestructure: cyax_file, minfile, present_dir
+using ..filestructure: cyax_file, minfile, present_dir, geom_dir
 using ..read: potential
 using ..minimizer: minimize, subspace_minimize
 
@@ -796,10 +796,10 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
-    Qinv::Matrix{Rational} = inv(Qtilde)
+    Qinv = (inv(Qtilde))
     Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
-    Qhat::Matrix{Int} = copy(Qtilde)
-    Lhat = copy(Ltilde)
+    Qhat::Matrix{Int} = deepcopy(Qtilde)
+    Lhat = deepcopy(Ltilde)
     αeff::Matrix{Rational} = zeros(size(@view(Q[1,:]),1),1)
     α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
     for i in axes(α,1)
