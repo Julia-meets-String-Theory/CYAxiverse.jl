@@ -1,5 +1,5 @@
-using Pkg
-Pkg.instantiate()
+# using Pkg
+# Pkg.instantiate()
 
 using Distributed
 import MPI
@@ -83,9 +83,9 @@ h11list_temp = [4 4 5 7; 10 1 5 7; 1 1 1 1; lfile lfile lfile lfile]
     temp_vac = pmap(main_Qshape, h11list_temp[1,:],h11list_temp[2,:],h11list_temp[3,:], h11list_temp[4,:])
 end
 
-@time begin
-    main_sortQ(h11list_temp[1:3,:])
-end
+# @time begin
+#     main_sortQ(h11list_temp[1:3,:])
+# end
 # println(temp_geom)
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string((size(h11list_temp,2)+1), "test runs have finished.\n"))
 ### Clear memory ######
@@ -103,9 +103,9 @@ log_files_spec = [lfile for _=1:size(h11list,2)]
     res = pmap(main_Qshape,h11list[1,:],h11list[2,:],h11list[3,:],log_files_spec)
 end
 
-@time begin
-    main_sortQ(h11list)
-end
+# @time begin
+#     main_sortQ(h11list)
+# end
 
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("All workers are done!"))
