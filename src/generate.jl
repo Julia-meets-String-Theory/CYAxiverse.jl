@@ -588,12 +588,13 @@ Uses a modified version of the algorithm outlined in the _PQ Axiverse_ [paper](h
     The off-diagonal elements of the quartic self-interaction tensor are not yet included in this computation
 """
 function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
+    # TODO: #17 Include threshold
     h11::Int = size(K,1)
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
     
     LQtilde = LQtildebar(L, Q)
-    Ltilde = LQtilde["L\tiil̃"]
+    Ltilde = LQtilde["Ltilde"]
     Qtilde = LQtilde["Qtilde"]
     QKs::Matrix{Float64} = zeros(Float64,h11,h11)
     fapprox::Vector{Float64} = zeros(Float64,h11)
@@ -1367,12 +1368,20 @@ function omega(Ω::Matrix{Int})
         # TODO: #15 Π function
         Ωperp[:, i+1:end] = project_out(Vector(col)).Πperp * Ωperp[:, i+1:end]
         Ωperp = @.(ifelse(abs(Ωperp) < 1e-4, zero(Ωperp), Ωperp))
-        Ωparallel[i, :] = mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=2)
+        Ωparallel[:, i] = mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=2)
     end
     Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-4, zero(Ωparallel), Ωparallel))
     (perp = Ωperp, parallel = Ωparallel)
 end
+"""
+    θmin(Ωparallel, Ωperp, Ω)
 
+TBW
+"""
+function θmin(Ωparallel, Ωperp, Ω; phase=zeros(size(Ω,1)), n::Vector=zeros(size(Ω,1)))
+    min1 = (2π * n[1] - phase[1]) / Ωperp[:, 1]
+    ei = [Ωperp[:, i] / norm(Ωperp[:, i]) for (i,_) in enumerate(eachcol(Ωperp))]
+end
 """
     vacuaΠ(L, Q; threshold=0.5, phase=zeros(size(Q,2)))
 
@@ -1495,7 +1504,7 @@ otherwise returns number of vacua as `√|det(Q̂'Q̂)|`.
 function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     data = LQtildebar(h11, tri, cy; threshold=threshold)
     if size(data["Qhat"], 1) == size(data["Qhat"], 2)
-        vac = Int(abs(det(data["Qhat"])))
+        vac = Int(round(abs(det(data["Qhat"]))))
         return (vac = vac, issquare = 1)
     else
         vac = Int(floor(sqrt(abs(det(data["Qhat"] * data["Qhat"]')))))
