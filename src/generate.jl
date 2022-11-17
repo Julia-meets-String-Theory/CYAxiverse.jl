@@ -704,6 +704,93 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
 end
 
 """
+    LQtilde(Q, L)
+
+TBW
+"""
+function LQtilde(Q, L)
+    if @isdefined h11
+    else
+        h11 = size(Q, 2)
+    end
+    Q = Matrix{Int}(Q[:, sortperm(L[2,:], rev=true)])
+	L = L[:, sortperm(L[2,:], rev=true)]
+	Qbar = zeros(Int, size(Q,1),1)
+	Qtilde = zeros(Int, size(Q,1),1)
+    Lbar = zeros(Int, size(L,1),1)
+	Ltilde = zeros(Int, size(L,1),1)
+	for idx in axes(Q, 2)
+		if rank(hcat(Qtilde, Q[:, idx])) > rank(Qtilde)
+			Qtilde = hcat(Qtilde, Q[:, idx])
+            Ltilde = hcat(Ltilde, L[:, idx])
+			if rank(Qtilde) == h11
+				break
+			end
+		else
+			Qbar = hcat(Qbar, Q[:, idx])
+            Lbar = hcat(Lbar, L[:, idx])
+		end
+	end
+    if size(Qtilde, 2) + size(Qbar, 2) != size(Q, 2)
+        Qbar = hcat(Qbar[:, 2:end], Q[:, size(Qtilde,2)+size(Qbar,2)-1:end])
+        Lbar = hcat(Lbar[:, 2:end], L[:, size(Qtilde,2)+size(Qbar,2):end])
+    end
+	(Qtilde = Qtilde[:, 2:end], Qbar = Qbar, Lbar = Lbar, Ltilde = Ltilde[:, 2:end])
+end
+
+function LQtilde(h11::Int, tri::Int, cy::Int)
+	Q = Matrix{Int}(potential(h11, tri, cy)["Q"]')
+	L = Matrix{Float64}(potential(h11, tri, cy)["L"]')
+	LQtilde(Q, L)
+end	
+
+"""
+    αmatrix(LQtilde::NamedTuple; threshold::Float64=0.5)
+
+TBW
+"""
+function αmatrix(LQ::NamedTuple; threshold::Float64=0.5)
+    Qhat = Matrix{Rational}(LQ.Qtilde)
+    Qbar = Matrix{Int}(LQ.Qbar)
+    Lhat = LQ.Ltilde
+    Lbar = LQ.Lbar
+    Ltilde_min::Float64 = minimum(@view(Lhat[2,:]))
+    Ldiff_limit::Float64 = log10(threshold)
+    Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
+    Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
+    Qinv = (inv(Qhat))
+    Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
+    # Qhat::Matrix{Int} = deepcopy(Qtilde)
+    # Lhat = deepcopy(Ltilde)
+    αeff::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
+    α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
+    for i in axes(α,1)
+        for j in axes(α,2)
+            if abs(α[i,j]) > 1e-3
+                Ldiff::Float64 = round(Lbar[2,i] - Lhat[2,j], digits=3)
+                if Ldiff > Ldiff_limit
+                else
+                    α[i,j] = zero(Rational)
+                end
+            else
+                α[i,j] = zero(Rational)
+            end
+        end
+        if α[i,:] == zeros(size(α,2))
+        else
+            Qhat = hcat(Qhat, @view(Qbar[:,i]))
+            Lhat = hcat(Lhat, @view(Lbar[:,i]))
+            αeff = hcat(αeff,@view(α[i,:]))
+        end
+    end
+    (Qhat = Matrix{Int}(Qhat), Qbar = Matrix{Int}(Qbar), Lhat = Matrix{Float64}(Lhat), Lbar = Matrix{Float64}(Lbar), α = Matrix{Rational}(αeff))
+end
+
+function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5)
+    αmatrix(LQtilde(h11, tri, cy); threshold)
+end
+
+"""
     LQtildebar(L,Q; threshold)
 
 Compute the linearly independent leading instantons that generate the axion potential, including any subleading instantons that are within `threshold` of their basis instanton.  Also returns `α` which is a vector of zeros if `Qhat` is square, or is a matrix with additional non-zero columns if `Qhat` is not square.\n
@@ -766,9 +853,8 @@ Dict{String, Matrix}(
 ```
 """
 function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
-    LQtest::Matrix{Float64} = hcat(L,Q);
-    LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
-    Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
+    Qsorted_test = Matrix{Int}(Q[sortperm(L[:, 2], rev=true), :])
+    Lsorted_test = Matrix{Float64}(L[sortperm(L[:, 2], rev=true), :])
     Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
     Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
     
@@ -1502,12 +1588,12 @@ Uses `LQtildebar` function to make Q̂.  If Q̂ is square, returns number of vac
 otherwise returns number of vacua as `√|det(Q̂'Q̂)|`.
 """
 function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
-    data = LQtildebar(h11, tri, cy; threshold=threshold)
-    if size(data["Qhat"], 1) == size(data["Qhat"], 2)
-        vac = Int(round(abs(det(data["Qhat"]))))
+    data = αmatrix(h11, tri, cy; threshold=threshold)
+    if size(data.Qhat, 1) == size(data.Qhat, 2)
+        vac = Int(round(abs(det(data.Qhat))))
         return (vac = vac, issquare = 1)
     else
-        vac = Int(floor(sqrt(abs(det(data["Qhat"] * data["Qhat"]')))))
+        vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
         return (vac = vac, issquare = 0)
     end
 end
