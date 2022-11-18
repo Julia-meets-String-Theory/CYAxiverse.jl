@@ -1594,7 +1594,7 @@ function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
         return (vac = vac, issquare = 1)
     else
         vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
-        return (vac = vac, issquare = 0)
+        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - h11)
     end
 end
 
@@ -1603,6 +1603,9 @@ function vacua_estimate_save(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5
     h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "cw") do f
         f["square", deflate=9] = vac_data.issquare
         f["vacua_estimate", deflate=9] = vac_data.vac
+        if vac_data.issquare == 0
+            f["extra_rows", deflate=9] = vac_data.extrarows
+        end
     end
 end
 
