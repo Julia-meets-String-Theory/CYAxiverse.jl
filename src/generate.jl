@@ -15,6 +15,7 @@ using TimerOutputs
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir
 using ..read: potential
 using ..minimizer: minimize, subspace_minimize
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis
 
 #################
 ### Constant ####
@@ -493,7 +494,7 @@ function project_out(v::Vector{Int})
     idd = Matrix{Rational}(I(size(v,1)))
     norm2::Int = dot(v,v)
     proj = 1 // norm2 * (v * v')
-    (Π = @.(ifelse(abs(proj) < eps(), zero(proj), proj)), Πperp = idd - proj)
+    Projector(@.(ifelse(abs(proj) < eps(), zero(proj), proj)), idd - proj)
 end
 
 """
@@ -508,7 +509,7 @@ function project_out(v::Vector{Rational{Int64}})
     norm2 = dot(v,v)
     proj = 1 // norm2 * (v * v')
     # TODO: #16 Need to remove floating point errors
-    (Π = @.(ifelse(abs(proj) < eps(), zero(proj), proj)), Πperp = idd - proj)
+    Projector(@.(ifelse(abs(proj) < eps(), zero(proj), proj)), idd - proj)
 end
 
 function project_out(projector::Matrix, v::Vector{Int})
@@ -524,7 +525,7 @@ function project_out(v::Vector{Float64})
     proj = 1. /norm2 * (v * v')
     proj = @.(ifelse(abs(proj) < eps(), zero(proj), proj))
     idd_proj = idd - proj
-    (Π = proj, Πperp =  @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj)))
+    Projector(proj, @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj)))
 end
 
 function project_out(projector::Matrix, v::Vector{Float64})
@@ -735,7 +736,7 @@ function LQtilde(Q, L)
         Qbar = hcat(Qbar[:, 2:end], Q[:, size(Qtilde,2)+size(Qbar,2)-1:end])
         Lbar = hcat(Lbar[:, 2:end], L[:, size(Qtilde,2)+size(Qbar,2):end])
     end
-	(Qtilde = Qtilde[:, 2:end], Qbar = Qbar, Lbar = Lbar, Ltilde = Ltilde[:, 2:end])
+    LQLinearlyIndependent(Qtilde[:, 2:end], Qbar, Lbar, Ltilde[:, 2:end])
 end
 
 function LQtilde(h11::Int, tri::Int, cy::Int)
@@ -744,12 +745,18 @@ function LQtilde(h11::Int, tri::Int, cy::Int)
 	LQtilde(Q, L)
 end	
 
+function LQtilde(geom_idx::GeometryIndex)
+	Q = Matrix{Int}(potential(geom_idx)["Q"]')
+	L = Matrix{Float64}(potential(geom_idx)["L"]')
+	LQtilde(Q, L)
+end	
+
 """
     αmatrix(LQtilde::NamedTuple; threshold::Float64=0.5)
 
 TBW
 """
-function αmatrix(LQ::NamedTuple; threshold::Float64=0.5)
+function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Qhat = Matrix{Rational}(LQ.Qtilde)
     Qbar = Matrix{Int}(LQ.Qbar)
     Lhat = LQ.Ltilde
@@ -783,13 +790,16 @@ function αmatrix(LQ::NamedTuple; threshold::Float64=0.5)
             αeff = hcat(αeff,@view(α[i,:]))
         end
     end
-    (Qhat = Matrix{Int}(Qhat), Qbar = Matrix{Int}(Qbar), Lhat = Matrix{Float64}(Lhat), Lbar = Matrix{Float64}(Lbar), α = Matrix{Rational}(αeff))
+    CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff))
 end
 
 function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5)
     αmatrix(LQtilde(h11, tri, cy); threshold)
 end
 
+function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
+    αmatrix(LQtilde(geom_idx); threshold)
+end
 """
     LQtildebar(L,Q; threshold)
 
@@ -1595,6 +1605,17 @@ function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     else
         vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
         return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - h11)
+    end
+end
+
+function vacua_estimate(geom_idx::GeometryIndex; threshold::Float64=0.5)
+    data = αmatrix(geom_idx; threshold=threshold)
+    if size(data.Qhat, 1) == size(data.Qhat, 2)
+        vac = Int(round(abs(det(data.Qhat))))
+        return (vac = vac, issquare = 1)
+    else
+        vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
+        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - geom_idx.h11)
     end
 end
 
