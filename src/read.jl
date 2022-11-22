@@ -7,6 +7,7 @@ module read
 using HDF5
 using LinearAlgebra
 using ..filestructure: cyax_file, minfile, geom_dir
+using ..structs: GeometryIndex
 ###########################
 ##### Read CYTools data ###
 ###########################
@@ -59,6 +60,18 @@ end
 ##### Read Geometric data ###
 #############################
 
+function potential(geom_idx::GeometryIndex)
+    L::Matrix{Float64}, Q::Matrix{Int},
+    Kinv::Matrix{Float64}= h5open(cyax_file(geom_idx), "r") do file
+        HDF5.read(file, "cytools/potential/L"),HDF5.read(file, "cytools/potential/Q"),
+        HDF5.read(file, "cytools/geometric/Kinv")
+    end
+    keys = ["L","Q","K"]
+    vals = [L, Q, Hermitian(inv(Kinv))]
+    return Dict(zip(keys,vals))
+end
+
+
 function potential(h11::Int,tri::Int,cy::Int=1)
     L::Matrix{Float64}, Q::Matrix{Int},
     Kinv::Matrix{Float64}= h5open(cyax_file(h11,tri,cy), "r") do file
@@ -109,12 +122,15 @@ end
 ##############################
 
 function qshape(h11::Int,tri::Int,cy::Int=1)
-    square, vacua = h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "r") do file
-        HDF5.read(file, "square"),HDF5.read(file, "vacua_estimate")
+    square, vacua, extrarows = 0, 0, 0
+    h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "r") do file
+        square = HDF5.read(file, "square")
+        vacua = HDF5.read(file, "vacua_estimate")
+        if haskey(file, "extra_rows")
+            extrarows = HDF5.read(file, "extra_rows")
+        end
     end
-    keys = ["issquare", "vacua_estimate"]
-    vals = [square, vacua]
-    Dict(zip(keys,vals))
+    (issquare = square, vacua_det = vacua, lengthα = extrarows)
 end
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
