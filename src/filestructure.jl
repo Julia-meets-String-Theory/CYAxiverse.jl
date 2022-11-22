@@ -4,6 +4,7 @@ This module sets up the structure of the database, identifying where to locate d
 
 """
 module filestructure
+using ..structs: GeometryIndex
 #######################
 ### Test functions ####
 ########################
@@ -318,6 +319,11 @@ function geom_dir(h11,tri,cy=1)
     end
 end
 
+
+function geom_dir(geom_idx::GeometryIndex)
+    h11, tri, cy = geom_idx.h11, geom_idx.tri, geom_idx.cy
+    geom_dir(h11, tri, cy)
+end
 ###################################
 ### Geometric Data Files (old) ####
 ###################################
@@ -395,6 +401,10 @@ Path to data file -- will contain all data that relates to geometry index.
 function cyax_file(h11,tri, cy=1)
     return string(geom_dir(h11,tri,cy),"/cyax.h5")
 end
+
+function cyax_file(geom_idx::GeometryIndex)
+    return string(geom_dir(geom_idx),"/cyax.h5")
+end
 """
     minfile(h11,tri,cy)
 Path to file containing minimization data.
@@ -403,6 +413,9 @@ function minfile(h11,tri, cy=1)
     return string(geom_dir(h11,tri,cy),"/minima.h5")
 end
 
+function minfile(geom_idx::GeometryIndex)
+    return string(geom_dir(geom_idx),"/minima.h5")
+end
 
 
 end 
