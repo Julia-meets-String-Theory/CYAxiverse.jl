@@ -9,6 +9,8 @@ if haskey(ENV,"newARGS")
 else
     println("Please specify where to read/write data, currently using pwd!")
 end
+include("structs.jl")
+
 include("filestructure.jl")
 include("read.jl")
 include("minimizer.jl")
