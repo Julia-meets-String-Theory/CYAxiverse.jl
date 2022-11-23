@@ -509,14 +509,14 @@ function project_out(v::Vector{Rational{Int64}})
     norm2 = dot(v,v)
     proj = 1 // norm2 * (v * v')
     # TODO: #16 Need to remove floating point errors
-    Projector(@.(ifelse(abs(proj) < eps(), zero(proj), proj)), idd - proj)
+    Projector(@.(ifelse(abs(proj) < 1e-5, zero(proj), proj)), idd - proj)
 end
 
 function project_out(projector::Matrix, v::Vector{Int})
     norm2 = dot(projector * v, projector * v)
     proj = 1. / norm2 * ((projector * v) * (v' * projector))
     projector = projector - proj
-    @.(ifelse(abs(projector) < eps(), zero(projector), projector))
+    @.(ifelse(abs(projector) < 1e-5, zero(projector), projector))
 end
 
 function project_out(v::Vector{Float64})
@@ -525,7 +525,7 @@ function project_out(v::Vector{Float64})
     proj = 1. /norm2 * (v * v')
     proj = @.(ifelse(abs(proj) < eps(), zero(proj), proj))
     idd_proj = idd - proj
-    Projector(proj, @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj)))
+    Projector(proj, @.(ifelse(abs(idd_proj) < 1e-5, zero(idd_proj), idd_proj)))
 end
 
 function project_out(projector::Matrix, v::Vector{Float64})
@@ -533,7 +533,7 @@ function project_out(projector::Matrix, v::Vector{Float64})
     proj = 1. / norm2 * ((projector * v) * (v' * projector))
     proj = @.(ifelse(abs(proj) < eps(), zero(proj), proj))
     idd_proj = projector - proj
-    @.(ifelse(abs(idd_proj) < eps(), zero(idd_proj), idd_proj))
+    @.(ifelse(abs(idd_proj) < 1e-5, zero(idd_proj), idd_proj))
 end
 
 """
@@ -746,8 +746,8 @@ function LQtilde(h11::Int, tri::Int, cy::Int)
 end	
 
 function LQtilde(geom_idx::GeometryIndex)
-	Q = Matrix{Int}(potential(geom_idx)["Q"]')
-	L = Matrix{Float64}(potential(geom_idx)["L"]')
+	Q = Matrix{Int}(potential(geom_idx).Q')
+	L = Matrix{Float64}(potential(geom_idx).L')
 	LQtilde(Q, L)
 end	
 
