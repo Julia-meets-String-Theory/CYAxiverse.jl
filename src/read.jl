@@ -7,7 +7,7 @@ module read
 using HDF5
 using LinearAlgebra
 using ..filestructure: cyax_file, minfile, geom_dir
-using ..structs: GeometryIndex
+using ..structs: GeometryIndex, AxionPotential
 ###########################
 ##### Read CYTools data ###
 ###########################
@@ -66,9 +66,7 @@ function potential(geom_idx::GeometryIndex)
         HDF5.read(file, "cytools/potential/L"),HDF5.read(file, "cytools/potential/Q"),
         HDF5.read(file, "cytools/geometric/Kinv")
     end
-    keys = ["L","Q","K"]
-    vals = [L, Q, Hermitian(inv(Kinv))]
-    return Dict(zip(keys,vals))
+    AxionPotential(L, Q, Hermitian(inv(Kinv)))
 end
 
 

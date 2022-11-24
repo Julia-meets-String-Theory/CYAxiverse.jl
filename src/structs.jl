@@ -1,9 +1,15 @@
 module structs
 
-struct GeometryIndex{T<:Integer}
+Base.@kwdef struct GeometryIndex{T<:Integer}
     h11::T
     tri::T
-    cy::T
+    cy::T=1
+end
+
+struct AxionPotential
+    L::Matrix{Float64}
+    Q::Matrix{Int}
+    K::Matrix{Float64}
 end
 
 struct LQLinearlyIndependent
@@ -13,10 +19,16 @@ struct LQLinearlyIndependent
     Ltilde::Matrix{Float64}
 end
 
-struct Projector{T<:Matrix{Real}}
-    Π::T
-    Πperp::T
+struct Projector
+    Π::Matrix{Rational}
+    Πperp::Matrix{Rational}
 end
+
+struct ProjectedQ{T<:Real}
+    Ωperp::Matrix{T}
+    Ωparallel::Matrix{T}
+end
+
 
 struct CanonicalQBasis
     Qhat::Matrix{Int}
