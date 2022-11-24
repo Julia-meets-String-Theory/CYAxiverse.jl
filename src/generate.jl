@@ -15,7 +15,7 @@ using TimerOutputs
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir
 using ..read: potential
 using ..minimizer: minimize, subspace_minimize
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential
 
 #################
 ### Constant ####
@@ -1467,7 +1467,7 @@ function omega(Ω::Matrix{Int})
         Ωparallel[:, i] = mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=2)
     end
     Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-4, zero(Ωparallel), Ωparallel))
-    (perp = Ωperp, parallel = Ωparallel)
+    ProjectedQ(Ωperp, Ωparallel)
 end
 """
     θmin(Ωparallel, Ωperp, Ω)
