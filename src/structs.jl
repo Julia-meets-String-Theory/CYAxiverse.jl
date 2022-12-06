@@ -1,9 +1,13 @@
 module structs
+"""
+    GeometryIndex{T<:Integer}
 
+Identifies geometry by `h11, polytope, frst`
+"""
 Base.@kwdef struct GeometryIndex{T<:Integer}
     h11::T
-    tri::T
-    cy::T=1
+    polytope::T
+    frst::T=1
 end
 
 struct AxionPotential
