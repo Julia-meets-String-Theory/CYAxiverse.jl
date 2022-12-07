@@ -70,7 +70,7 @@ RUN python3 setup.py install
 
 # Copy CYAxiverse.jl package
 WORKDIR /opt/
-RUN git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
+RUN git clone -b vmm https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git
 WORKDIR /opt/CYAxiverse.jl/
 ENV PYTHON="$VIRTUAL_ENV/bin/python3"
 RUN julia --project="/opt/CYAxiverse.jl/" add_CYAxiverse.jl
