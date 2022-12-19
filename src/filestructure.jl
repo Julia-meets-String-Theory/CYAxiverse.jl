@@ -321,7 +321,7 @@ end
 
 
 function geom_dir(geom_idx::GeometryIndex)
-    h11, tri, cy = geom_idx.h11, geom_idx.tri, geom_idx.cy
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
     geom_dir(h11, tri, cy)
 end
 ###################################
