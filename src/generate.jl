@@ -15,7 +15,7 @@ using TimerOutputs
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir
 using ..read: potential
 using ..minimizer: minimize, subspace_minimize
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree
 
 #################
 ### Constant ####
@@ -710,6 +710,7 @@ end
 TBW
 """
 function LQtilde(Q, L)
+    @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
     if @isdefined h11
     else
         h11 = size(Q, 2)
@@ -1255,7 +1256,7 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold = 1e-2)
 			end
 			xmin = hcat(res["xmin"]...)
 			for i in eachcol(xmin)
-				i[:] = @. ifelse(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i)
+				i[:] = @.(ifelse(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i))
 			end
 			xmin = xmin[:, [sum(i)/size(i,1) > eps() for i in eachcol(xmin)]]
 			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
@@ -1453,30 +1454,61 @@ function vacuaΩ(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, pha
     end
 end
 """
-    Omega(Ω::Matrix{Int})
+    omega(Ω::Matrix{Int})
 
 TBW
 """
 function omega(Ω::Matrix{Int})
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
     Ωperp = Matrix{Rational}(deepcopy(Ω))
-    Ωparallel = zeros(size(Ω))
+    Ωparallel = []
     for (i, col) in enumerate(eachcol(Ω))
         # TODO: #15 Π function
         Ωperp[:, i+1:end] = project_out(Vector(col)).Πperp * Ωperp[:, i+1:end]
         Ωperp = @.(ifelse(abs(Ωperp) < 1e-4, zero(Ωperp), Ωperp))
-        Ωparallel[:, i] = mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=2)
+        if i < h11
+            push!(Ωparallel, vcat(mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=1)', zeros(Float64, i)))
+        end
     end
+    #TODO #49: check construction
+    Ωparallel = hcat(Ωparallel...)
     Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-4, zero(Ωparallel), Ωparallel))
     ProjectedQ(Ωperp, Ωparallel)
 end
 """
-    θmin(Ωparallel, Ωperp, Ω)
+    θmin(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)), n::Vector=zeros(size(Ω.Ωperp, 2)))
 
 TBW
 """
-function θmin(Ωparallel, Ωperp, Ω; phase=zeros(size(Ω,1)), n::Vector=zeros(size(Ω,1)))
-    min1 = (2π * n[1] - phase[1]) / Ωperp[:, 1]
-    ei = [Ωperp[:, i] / norm(Ωperp[:, i]) for (i,_) in enumerate(eachcol(Ωperp))]
+function θmin(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)), n::Vector=zeros(size(Ω.Ωperp, 2)))
+    min = zeros(size(Ω.Ωperp, 2))
+    for i ∈ axes(Ω.Ωperp, 2)
+        n = 0
+        while 0 ≤ min[i] < 2π
+            min = 2π * n - phase[i] / norm(Ωperp[:, i])
+            n+=1
+        end
+        ei = hcat([Ωperp[:, i] / norm(Ωperp[:, i]) for i in axes(Ωperp, 1)]...)
+    end
+end
+
+
+"""
+    θmin_tree(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)))
+
+TBW
+"""
+function θmin_tree(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)))
+    tree = MyTree(0)
+    for i ∈ axes(Ω.Ωperp, 2)
+        min = tree.data - phase[i] / norm(Ω.Ωperp[:, i])
+        phase[i+1] = min * Ω.Ωparallel
+        tree = MyTree(min, tree)
+    end
+    ei = hcat([ΩpΩ.Ωperperp[:, i] / norm(Ω.Ωperp[:, i]) for i in axes(Ωperp, 1)]...)
 end
 """
     vacuaΠ(L, Q; threshold=0.5, phase=zeros(size(Q,2)))
