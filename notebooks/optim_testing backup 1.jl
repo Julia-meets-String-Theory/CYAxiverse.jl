@@ -333,7 +333,7 @@ function minimize(LV::Vector,QV::Matrix,x0::Vector; algo, threshold = 1e-2)
         i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in axes(hind1,1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -348,7 +348,7 @@ function minimize(LV::Vector,QV::Matrix,x0::Vector; algo, threshold = 1e-2)
                 i,j = hind1[k]
                 QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
         @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i=1:size(hind1,1)
+        @inbounds for i in axes(hind1,1)
             j,k = hind1[i]
             grad2[j,k] = grad2_temp[i]
         end
@@ -464,9 +464,9 @@ LQtilde["Qrowmask"]
 
 # ╔═╡ 7801297e-c52e-48e0-92d6-d58839afe7e3
 begin
-	xtest = [ArbFloat.(min_data[i]["±x"] .* 10. .^ min_data[i]["logx"]) for i=1:size(min_data,1)];
-	xmin_test = [[LQtilde["Ltilde"][1,i] < 0. ? ArbFloat(π) : ArbFloat(0.) for i=1:size(LQtilde["Qtilde"],1)] for _ in xtest]
-	for i=1:size(xtest,1)
+	xtest = [ArbFloat.(min_data[i]["±x"] .* 10. .^ min_data[i]["logx"]) for i in axes(min_data,1)];
+	xmin_test = [[LQtilde["Ltilde"][1,i] < 0. ? ArbFloat(π) : ArbFloat(0.) for i in axes(LQtilde["Qtilde"],1)] for _ in xtest]
+	for i in axes(xtest,1)
 		for (j,k) in enumerate((1:size(LQtilde["Qtilde"],1))[LQtilde["Qrowmask"]])
 			xmin_test[i][k] = xtest[i][j]
 		end
