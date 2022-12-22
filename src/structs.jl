@@ -1,4 +1,8 @@
 module structs
+using AbstractTrees
+using SparseArrays
+using AbstractTrees: isroot, parent
+
 """
     GeometryIndex{T<:Integer}
 
@@ -29,8 +33,8 @@ struct Projector
 end
 
 struct ProjectedQ
-    Ωperp::Matrix
-    Ωparallel::Matrix
+    Ωperp::SparseMatrixCSC
+    Ωparallel::SparseMatrixCSC
 end
 
 
@@ -47,8 +51,7 @@ end
 #######################
 ### from: https://discourse.julialang.org/t/help-design-a-node-for-a-tree/67444/10 ###
 
-using AbstractTrees
-using AbstractTrees: isroot, parent
+
 
 ######
 # Tree
