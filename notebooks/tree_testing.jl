@@ -11,7 +11,7 @@ using Pkg;
 Pkg.activate("/scratch/users/mehta2/cyaxiverse/CYAxiverse");
 
 # ╔═╡ 0227789b-1548-4d6a-ad2f-ef017530849b
-using PlutoUI, HDF5, ArbNumerics, LineSearches, Optim, CairoMakie, Distributions, LinearAlgebra, ProgressLogging, Revise, Random
+using PlutoUI, HDF5, ArbNumerics, LineSearches, Optim, CairoMakie, Distributions, LinearAlgebra, ProgressLogging, Revise, Random, SparseArrays, LeftChildRightSiblingTrees
 
 
 # ╔═╡ ce668813-d11a-4dc0-8f0b-3c3dcdd039f3
@@ -59,11 +59,32 @@ begin
 	"""
 end
 
-# ╔═╡ 9650af2a-fa29-489f-a16d-942bb667b9a9
-t = CYAxiverse.structs.MyTree(0)
-
 # ╔═╡ c6e264b3-5ea2-4028-a26f-c40ab4dbf2b1
-ts = [CYAxiverse.structs.MyTree(i, t) for i in 1:3]
+begin
+	min0 = Node(0.)
+	min1 = addsibling(min0, 2π/3)
+	min2 = addsibling(min1, 4π/3)
+	min00 = addchild(min0, 0.)
+	min01 = addsibling(min00, 2π/5 - min1.data)
+	min10 = addchild(min1, 0.)
+	min11 = addsibling(min10, 2π/8)
+	min20 = addchild(min2, 0.)
+	min21 = addsibling(min20, 2π/6)
+end
+
+# ╔═╡ d5c0150a-916b-47c4-aa80-86d2a0c6bd73
+:a[1:10]
+
+# ╔═╡ 55b5c42f-714e-44c8-964d-d2d605f43211
+function showtree(node, indent=0)
+   println("\t"^indent, node.data)
+   for child in node
+	   showtree(child, indent + 1)
+   end
+end
+
+# ╔═╡ 8402ea92-3e90-4709-be8c-9edd99504cf0
+LeftChildRightSiblingTrees.showedges(min0)
 
 # ╔═╡ b7c5dd3d-b9f8-4470-a2b1-58bf290ee170
 collect(CYAxiverse.structs.ParentTrack(t))
@@ -81,7 +102,13 @@ lqhat = CYAxiverse.generate.:αmatrix(CYAxiverse.structs.GeometryIndex(h11=10,po
 
 
 # ╔═╡ 4e282b9f-9c58-4d46-a2a7-ab6ed21c87e0
-CYAxiverse.generate.omega(lqhat.Qhat)
+CYAxiverse.generate.omega(lqhat.Qhat).Ωparallel
+
+# ╔═╡ e3ceb403-cb73-4195-a717-ad7f7f2d14a9
+begin
+	Ωperp = CYAxiverse.generate.omega(lqhat.Qhat).Ωperp
+	[max(2π / norm(Ωperp[:,i]), 2π) for i in axes(Ωperp, 2)]
+end
 
 # ╔═╡ 04222ee1-0f18-4b41-9900-b19ef9f32e57
 @time begin
@@ -107,14 +134,17 @@ sqrt(2//25)
 # ╠═ce668813-d11a-4dc0-8f0b-3c3dcdd039f3
 # ╟─668b0b78-a680-4e84-be29-f64471c7163c
 # ╠═87be2229-742b-4299-8061-69a1a7398940
-# ╠═9650af2a-fa29-489f-a16d-942bb667b9a9
 # ╠═c6e264b3-5ea2-4028-a26f-c40ab4dbf2b1
+# ╠═d5c0150a-916b-47c4-aa80-86d2a0c6bd73
+# ╠═55b5c42f-714e-44c8-964d-d2d605f43211
+# ╠═8402ea92-3e90-4709-be8c-9edd99504cf0
 # ╠═b7c5dd3d-b9f8-4470-a2b1-58bf290ee170
 # ╠═b15c87a6-c028-4ad6-83bc-23ac7840c260
 # ╠═47473bda-1619-499a-96ba-cb44e9b28a55
 # ╠═2edfe043-9a4a-4e64-a776-4d329ff05b91
 # ╠═9620b336-cbd8-4e64-b3f0-2790bd7fbcb2
 # ╠═4e282b9f-9c58-4d46-a2a7-ab6ed21c87e0
+# ╠═e3ceb403-cb73-4195-a717-ad7f7f2d14a9
 # ╠═04222ee1-0f18-4b41-9900-b19ef9f32e57
 # ╠═a6c45afe-c9a6-421b-8414-731e6ba0971b
 # ╠═09b8c30c-3393-4d32-b89b-c2bd01d57ee1
