@@ -7,7 +7,7 @@ module generate
 
 using HDF5
 using LinearAlgebra
-using ArbNumerics, Tullio, LoopVectorization, Nemo
+using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays
 using GenericLinearAlgebra
 using Distributions
 using TimerOutputs
@@ -1470,13 +1470,13 @@ function omega(Ω::Matrix{Int})
         Ωperp[:, i+1:end] = project_out(Vector(col)).Πperp * Ωperp[:, i+1:end]
         Ωperp = @.(ifelse(abs(Ωperp) < 1e-4, zero(Ωperp), Ωperp))
         if i < h11
-            push!(Ωparallel, vcat(mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=1)', zeros(Float64, i)))
+            push!(Ωparallel, vcat(zeros(Float64, i), mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=1)'))
         end
     end
     #TODO #49: check construction
-    Ωparallel = hcat(Ωparallel...)
+    Ωparallel = hcat(zeros(h11), Ωparallel...)
     Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-4, zero(Ωparallel), Ωparallel))
-    ProjectedQ(Ωperp, Ωparallel)
+    ProjectedQ(sparse(Ωperp), sparse(Ωparallel))
 end
 """
     θmin(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)), n::Vector=zeros(size(Ω.Ωperp, 2)))
