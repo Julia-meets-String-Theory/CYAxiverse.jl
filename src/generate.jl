@@ -490,12 +490,7 @@ function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     end
     GC.gc()
 end
-function project_out(v::Vector{Int})
-    idd = Matrix{Rational}(I(size(v,1)))
-    norm2::Int = dot(v,v)
-    proj = 1 // norm2 * (v * v')
-    Projector(@.(ifelse(abs(proj) < eps(), zero(proj), proj)), idd - proj)
-end
+
 
 """
     project_out(v::Vector)
@@ -504,12 +499,13 @@ Takes the direction to be projected out as input and returns a projector of the 
 
 ``\\Pi\\bigl(\\vec{v}\\bigr) = \\mathbb{1}_{h^{1,1}} - \\frac{\\bigl|\\vec{v}\\bigr\\rangle\\bigl\\langle\\vec{v}\\bigr|}{||\\vec{v}||^2}``
 """
-function project_out(v::Vector{Rational{Int64}})
+function project_out(v::Vector{T} where T<:Union{Rational{Int64}, Integer})
     idd = Matrix{Rational}(I(size(v,1)))
     norm2 = dot(v,v)
     proj = 1 // norm2 * (v * v')
+    proj = @.(ifelse(abs(proj) < 1e-5, zero(proj), proj))
     # TODO: #16 Need to remove floating point errors
-    Projector(@.(ifelse(abs(proj) < 1e-5, zero(proj), proj)), idd - proj)
+    Projector(proj, idd - proj)
 end
 
 function project_out(projector::Matrix, v::Vector{Int})
@@ -523,7 +519,7 @@ function project_out(v::Vector{Float64})
     idd = Matrix{Float64}(I(size(v,1)))
     norm2 = dot(v,v)
     proj = 1. /norm2 * (v * v')
-    proj = @.(ifelse(abs(proj) < eps(), zero(proj), proj))
+    proj = @.(ifelse(abs(proj) < 1e-5, zero(proj), proj))
     idd_proj = idd - proj
     Projector(proj, @.(ifelse(abs(idd_proj) < 1e-5, zero(idd_proj), idd_proj)))
 end
@@ -741,14 +737,16 @@ function LQtilde(Q, L)
 end
 
 function LQtilde(h11::Int, tri::Int, cy::Int)
-	Q = Matrix{Int}(potential(h11, tri, cy)["Q"]')
-	L = Matrix{Float64}(potential(h11, tri, cy)["L"]')
+    pot_data = potential(h11, tri, cy)
+	Q = Matrix{Int}(pot_data["Q"]')
+	L = Matrix{Float64}(pot_data["L"]')
 	LQtilde(Q, L)
 end	
 
 function LQtilde(geom_idx::GeometryIndex)
-	Q = Matrix{Int}(potential(geom_idx).Q')
-	L = Matrix{Float64}(potential(geom_idx).L')
+    pot_data = potential(geom_idx)
+	Q = Matrix{Int}(pot_data.Q')
+	L = Matrix{Float64}(pot_data.L')
 	LQtilde(Q, L)
 end	
 
@@ -790,6 +788,7 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
             Lhat = hcat(Lhat, @view(Lbar[:,i]))
             αeff = hcat(αeff,@view(α[i,:]))
         end
+        αeff = hcat(I(h11), αeff)
     end
     CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff))
 end
@@ -1468,16 +1467,121 @@ function omega(Ω::Matrix{Int})
     for (i, col) in enumerate(eachcol(Ω))
         # TODO: #15 Π function
         Ωperp[:, i+1:end] = project_out(Vector(col)).Πperp * Ωperp[:, i+1:end]
-        Ωperp = @.(ifelse(abs(Ωperp) < 1e-4, zero(Ωperp), Ωperp))
+        Ωperp = @.(ifelse(abs(Ωperp) < 1e-5, zero(Ωperp), Ωperp))
         if i < h11
             push!(Ωparallel, vcat(zeros(Float64, i), mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=1)'))
         end
     end
     #TODO #49: check construction
     Ωparallel = hcat(zeros(h11), Ωparallel...)
-    Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-4, zero(Ωparallel), Ωparallel))
+    Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-5, zero(Ωparallel), Ωparallel))
     ProjectedQ(sparse(Ωperp), sparse(Ωparallel))
 end
+
+function omega(geom_idx::GeometryIndex)
+    h11 = geom_idx.h11
+    omega(αmatrix(geom_idx).Qhat)
+end
+
+"""
+    norm2(Ω::Union{AbstractMatrix, SparseArrays.AbstractSparseMatrix}; column = true, average = false, product = true)
+
+TBW
+"""
+function norm2(Ω::Union{AbstractMatrix, SparseArrays.AbstractSparseMatrix}; column = true, average = false, product = true)
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
+    norm2Ω = zeros(Float64, h11)
+	for i in ifelse(column == true, axes(Ω, 2), axes(Ω, 1))
+		norm2Ω[i] = ifelse(column == true, norm(Ω[:, i])^2, norm(Ω[i, :])^2)
+	end
+	if product == true && average == false
+        return prod(norm2Ω; dims = 1)
+    elseif product == false && average == true
+        return sum(norm2Ω; dims = 1) / length(norm2Ω)
+    elseif product == false && average == false
+        return norm2Ω
+    else
+        return throw(ArgumentError("average and product kwargs cannot both be $average"))
+    end
+end
+
+
+function norm2(Ω::ProjectedQ; column = true, average = false, product = true)
+    Ω = Ω.Ωperp
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
+    norm2Ω = zeros(Float64, h11)
+	for i in ifelse(column == true, axes(Ω, 2), axes(Ω, 1))
+		norm2Ω[i] = ifelse(column == true, norm(Ω[:, i])^2, norm(Ω[i, :])^2)
+	end
+	if product == true && average == false
+        return prod(norm2Ω; dims = 1)
+    elseif product == false && average == true
+        return sum(norm2Ω; dims = 1) / length(norm2Ω)
+    elseif product == false && average == false
+        return norm2Ω
+    else
+        return throw(ArgumentError("average and product kwargs cannot both be $average"))
+    end
+end
+
+function norm2(geom_idx::GeometryIndex; column = true, average = false, product = true)
+    h11 = geom_idx.h11
+    norm2(omega(geom_idx); column = column, average = average, product = product)
+end
+"""
+    norm2minus1(Ω::Union{AbstractMatrix, SparseArrays.AbstractSparseMatrix}; col = true)
+
+TBW
+"""
+function norm2minus1(Ω::Union{AbstractMatrix, SparseArrays.AbstractSparseMatrix}; column = true, average = false, product = true)
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
+    norm2Ω = zeros(Float64, h11)
+	for i in ifelse(column == true, axes(Ω, 2), axes(Ω, 1))
+		norm2Ω[i] = ifelse(column == true, norm(Ω[:, i])^2 - 1, norm(Ω[i, :])^2 - 1)
+	end
+    norm2Ω = norm2Ω[norm2Ω .!= 0.]
+	if product == true && average == false
+        return prod(norm2Ω; dims = 1)
+    elseif product == false && average == true
+        return sum(norm2Ω; dims = 1) / length(norm2Ω)
+    elseif product == false && average == false
+        return norm2Ω
+    else
+        return throw(ArgumentError("average and product kwargs cannot both be $average"))
+    end
+end
+
+function norm2minus1(Ω::ProjectedQ; column = true, average = false, product = true)
+    Ω = Ω.Ωperp
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
+    norm2Ω = zeros(Float64, h11)
+	for i in ifelse(column == true, axes(Ω, 2), axes(Ω, 1))
+		norm2Ω[i] = ifelse(column == true, norm(Ω[:, i])^2 - 1, norm(Ω[i, :])^2 - 1)
+	end
+    norm2Ω = norm2Ω[norm2Ω .!= 0.]
+	if product == true && average == false
+        return prod(norm2Ω; dims = 1)
+    elseif product == false && average == true
+        return sum(norm2Ω; dims = 1) / length(norm2Ω)
+    elseif product == false && average == false
+        return norm2Ω
+    else
+        return throw(ArgumentError("average and product kwargs cannot both be $average"))
+    end
+end
+
 """
     θmin(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)), n::Vector=zeros(size(Ω.Ωperp, 2)))
 
