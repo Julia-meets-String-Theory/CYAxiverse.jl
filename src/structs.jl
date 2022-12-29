@@ -59,15 +59,16 @@ end
 
 struct MyTree{D}
     data::D
-    parent::Union{Nothing,MyTree{D}}
+    parent_min::Union{Nothing,MyTree{D}}
+    parent_phase::Union{Nothing,MyTree{D}}
     subtrees::Vector{MyTree{D}}
 
     function MyTree{D}(d::D, ::Nothing, v::AbstractVector{MyTree{D}}) where D
         new{D}(d, nothing, v)
     end
-    function MyTree{D}(d::D, parent::MyTree{D}, v::AbstractVector{MyTree{D}}) where D
-        ret = new{D}(d, parent, v)
-        push!(parent.subtrees, ret)
+    function MyTree{D}(d::D, parent_min::MyTree{D}, v::AbstractVector{MyTree{D}}) where D
+        ret = new{D}(d, parent_min, v)
+        push!(parent_min.subtrees, ret)
         ret
     end
 end
@@ -75,7 +76,7 @@ MyTree(d::T, parent=nothing, v=MyTree{T}[]) where T = MyTree{T}(d, parent, v)
 Base.eltype(::Type{MyTree{T}}) where T = T 
 
 AbstractTrees.children(t::MyTree) = t.subtrees
-AbstractTrees.parent(t::MyTree) = t.parent
+AbstractTrees.parent(t::MyTree) = t.parent_min
 AbstractTrees.isroot(t::MyTree) = parent(t) === nothing
 
 Base.show(io::IO, t::MyTree) = print(io, "MyTree{D}(", t.data, ')')
@@ -108,7 +109,7 @@ function Base.iterate(_::ParentTrack, (parents, toProcess))
     # get our return value and remove ourselves
     c = map(x -> x.data, parents)
     pop!(parents)
-    if !isempty(toProcess) && last(toProcess).parent != el.parent
+    if !isempty(toProcess) && last(toProcess).parent_min != el.parent_min
         pop!(parents) # pop the parent
     end
     return c, (parents, toProcess)
