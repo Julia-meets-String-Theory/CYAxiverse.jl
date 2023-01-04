@@ -13,6 +13,7 @@ using ..structs: LQLinearlyIndependent, GeometryIndex, AxionPotential, Canonical
 
 
 function LQtilde(Q, L)
+    reset_timer!()
     @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
     if @isdefined h11
     else
@@ -44,6 +45,7 @@ function LQtilde(Q, L)
 end
 
 function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
+    reset_timer!()
     @timeit "Qhat init" Qhat = Matrix{Rational}(LQ.Qtilde)
     if @isdefined h11
     else
@@ -86,6 +88,7 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
 end
 
 function project_out(v::Vector{T} where T<:Union{Rational{Int64}, Integer})
+    reset_timer!()
     @timeit "I init" idd = Matrix{Rational}(I(size(v,1)))
     @timeit "norm2" norm2 = dot(v,v)
     @timeit "projector init" proj = 1 // norm2 * (v * v')
@@ -95,7 +98,7 @@ function project_out(v::Vector{T} where T<:Union{Rational{Int64}, Integer})
 end
 
 function project_out(v::Vector{Float64})
-    reset_timer!
+    reset_timer!()
     @timeit "I init" idd = Matrix{Float64}(I(size(v,1)))
     @timeit "norm2 float" norm2 = dot(v,v)
     @timeit "projector init" proj = 1. /norm2 * (v * v')
@@ -105,7 +108,7 @@ function project_out(v::Vector{Float64})
 end
 
 function omega(Ω::Matrix{Int})
-    reset_timer!
+    reset_timer!()
     if @isdefined h11
     else
         h11 = size(Ω, 2)
@@ -129,7 +132,7 @@ function omega(Ω::Matrix{Int})
 end
 
 function vacua(L::Matrix{Float64},Q::Matrix{Int})
-    reset_timer!
+    reset_timer!()
     @timeit "h11" h11::Int = size(Q,2)
     if h11 < 50
         ###### Nemo SNF #####
