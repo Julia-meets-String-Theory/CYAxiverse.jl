@@ -15,7 +15,7 @@ using TimerOutputs
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir
 using ..read: potential
 using ..minimizer: minimize, subspace_minimize
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum
 
 #################
 ### Constant ####
@@ -418,7 +418,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         quartiilog1[:,k] = logL .+ (logQMs[:,k] + logQMs[:,k] .+ logQMs[:,k] + logQMs[:,k])
         quartdiagsign[k],quartdiaglog[k] = gauss_log(quartiisign1[:,k],quartiilog1[:,k])
     end
-    qindqdiag::Vector{Vector{Int64}} = [[x,x,x,x]::Vector{Int64} for x=1:h11]
+    # qindqdiag::Vector{Vector{Int64}} = [[x,x,x,x]::Vector{Int64} for x=1:h11]
     
     fpert::Vector{Float64} = @.(Hvals+log10(constants()["MPlanck"])- (0.5*quartdiaglog*log10(exp(1))))
     
@@ -436,9 +436,9 @@ function hp_spectrum(h11::Int,tri::Int,cy::Int=1; prec=5_000)
     pot_data = potential(h11,tri,cy);
     L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
     LQtilde = LQtildebar(h11,tri,cy)
-    Ltilde = Matrix{Float64}(LQtilde["L\tiil̃"]')
-    Qtilde = Matrix{Int}(LQtilde["Qtilde"]')
-    spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
+    Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
+    Qtilde = Matrix{Int}(LQtilde["Qhat"]')
+    hp_spectrum(K, Ltilde, Qtilde)
 end
 """
     hp_spectrum_save(h11,tri,cy)
@@ -554,7 +554,7 @@ Uses the projector defined in [`project_out(v)`](@ref) to construct an orthonorm
 function orth_basis(vec::Vector)
     proj = project_out(vec)
     #this is the scipy.linalg.orth function written out
-    u, s, vh = svd(proj,full=true)
+    u, s, vh = svd(proj.Πperp,full=true)
     M, N = size(u,1), size(vh,2)
     rcond = eps() * max(M, N)
     tol = maximum(s) * rcond
@@ -590,26 +590,23 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
     
-    LQtilde = LQtildebar(L, Q)
-    Ltilde = LQtilde["Ltilde"]
-    Qtilde = LQtilde["Qtilde"]
+    LQtild = LQtilde(Q', L')
+    Ltilde = LQtild.Ltilde
+    Qtilde = LQtild.Qtilde
     QKs::Matrix{Float64} = zeros(Float64,h11,h11)
     fapprox::Vector{Float64} = zeros(Float64,h11)
     mapprox::Vector{Float64} = zeros(h11)
-    LinearAlgebra.mul!(QKs, inv(Kls'), Qtilde')
+    LinearAlgebra.mul!(QKs, inv(Kls'), Matrix(Qtilde'))
     for i=1:h11
         fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
         mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
         T = orth_basis(QKs[i,:])
-        println(size(QKs), size(T))
+        # println(size(QKs), size(T))
         QKs1 = zeros(size(QKs,1), size(T,2))
         LinearAlgebra.mul!(QKs1,QKs, T)
         QKs = copy(QKs1)
     end
-    vals = [mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"]))]
-    keys = ["m", "fK", "fpert"]
-
-    return Dict(zip(keys,vals))
+    AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]))
 end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int)
@@ -617,6 +614,28 @@ function pq_spectrum(h11::Int,tri::Int,cy::Int)
     K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
     pq_spectrum(K, L, Q)
 end
+
+function pq_spectrum(geom_idx::GeometryIndex)
+    pot_data = potential(geom_idx)
+    pq_spectrum(pot_data.K, pot_data.L, pot_data.Q)
+end
+
+
+"""
+	spectra_generator(h11_min, h11_max, h11list)
+Generates multiple axion spectra for a given set of geometries identified in `h11list` between `h11_min` and `h11_max`.
+
+⚠️ Will generate **all** geometries with `potential` data generated between `h11_min` and `h11_max` so will be slow if this is a lot! ⚠️
+"""
+function pq_spectra_generator(h11_min::Int, h11_max::Int, h11list::Matrix{Int})
+	spectra = []
+	for col in eachcol(h11list[:, h11_min .≤ h11list[1, :] .≤ h11_max])
+		geom_idx = GeometryIndex(col...)
+		push!(spectra, (geom_idx, pq_spectrum(geom_idx)))
+	end
+	spectra
+end
+
 
 function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
@@ -757,6 +776,10 @@ TBW
 """
 function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Qhat = Matrix{Rational}(LQ.Qtilde)
+    if @isdefined h11
+    else
+        h11 = size(Qhat, 2)
+    end
     Qbar = Matrix{Int}(LQ.Qbar)
     Lhat = LQ.Ltilde
     Lbar = LQ.Lbar
@@ -794,12 +817,33 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
 end
 
 function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5)
-    αmatrix(LQtilde(h11, tri, cy); threshold)
+    αmatrix(LQtilde(h11, tri, cy); threshold = threshold)
 end
 
 function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
-    αmatrix(LQtilde(geom_idx); threshold)
+    αmatrix(LQtilde(geom_idx); threshold = threshold)
 end
+
+"""
+    ωnorm2(LQ::CanonicalQBasis)
+
+TBW
+"""
+function ωnorm2(LQ::CanonicalQBasis)
+	Qhat = LQ.Qhat
+	ωnorm = zeros(size(Qhat, 2))
+	for i in axes(Qhat, 2)
+		if length(Qhat[:, i][Qhat[:, i] .== 0]) < size(Qhat, 2) - 1
+			ωnorm[i] = norm(Qhat[:, i])^2
+		end
+	end
+	sum(ωnorm) / size(Qhat, 2)
+end
+
+function ωnorm2(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
+    ωnorm2(αmatrix(LQtilde(geom_idx); threshold = threshold))
+end
+
 """
     LQtildebar(L,Q; threshold)
 
