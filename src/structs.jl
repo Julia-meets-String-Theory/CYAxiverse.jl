@@ -1,6 +1,7 @@
 module structs
 using AbstractTrees
 using SparseArrays
+using LinearAlgebra
 using AbstractTrees: isroot, parent
 
 """
@@ -17,8 +18,27 @@ end
 struct AxionPotential
     L::Matrix{Float64}
     Q::Matrix{Int}
-    K::Matrix{Float64}
+    K::Hermitian{Float64, Matrix{Float64}}
 end
+
+struct AxionSpectrum
+    m::Vector{Float64}
+    f::Vector{Float64}
+    fK::Vector{Float64}
+end
+
+Base.@kwdef struct IndexedAxionSpectrum{T<:Float64}
+    h11::Int
+    polytope::Int
+    frst::Int
+    m::Vector{T}
+    f::Vector{T}
+    fK::Vector{T}
+    function IndexedAxionSpectrum(geom_idx::GeometryIndex, spectrum::AxionSpectrum)
+        IndexedAxionSpectrum(geom_idx.h11, geom_idx.polytope, geom_idx.frst, spectrum.m, spectrum.f, spectrum.fK)
+    end
+end
+
 
 struct LQLinearlyIndependent
     Qtilde::Matrix{Int}
@@ -27,9 +47,9 @@ struct LQLinearlyIndependent
     Ltilde::Matrix{Float64}
 end
 
-struct Projector
-    Π::Matrix{Rational}
-    Πperp::Matrix{Rational}
+struct Projector{T<:Union{Rational, Float64, Integer}}
+    Π::Matrix{T}
+    Πperp::Matrix{T}
 end
 
 struct ProjectedQ
