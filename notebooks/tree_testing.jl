@@ -115,19 +115,14 @@ begin
 	Ωperp = Ω.Ωperp
 end
 
+# ╔═╡ b348b3fc-c20e-41c7-ac21-8244afbae687
+length(lqhat.Qhat[:, 1][lqhat.Qhat[:, 1] .== 0]) < size(lqhat.Qhat, 2) - 1
+
 # ╔═╡ 36610454-1c4b-4ffb-8d4c-8c4d5160ce96
-Ωperp
-
-# ╔═╡ ed3c16c0-4632-4695-8c39-0325631002dd
-lcm(denominator.([1//4, 1//6, 1//8]))
-
-# ╔═╡ 1572e225-6922-4231-9f1f-e5d54f2f8560
 @time begin
-	geom_idx = CYAxiverse.structs.GeometryIndex(h11 = 10, polytope = 10, frst = 1)
-	@profile CYAxiverse.generate.norm2(geom_idx)
-	Profile.print()
+	geom_idx = CYAxiverse.structs.GeometryIndex(h11 =38, polytope = 1, frst = 1)
+	CYAxiverse.generate.ωnorm2(geom_idx; threshold = 0.01), CYAxiverse.read.qshape(geom_idx).issquare == 1 ? det(CYAxiverse.generate.:αmatrix(geom_idx; threshold = 0.01).Qhat) : sqrt(abs(det(CYAxiverse.generate.:αmatrix(geom_idx; threshold = 0.01).Qhat * CYAxiverse.generate.:αmatrix(geom_idx; threshold = 0.01).Qhat')))
 end
-	
 
 # ╔═╡ 9620b336-cbd8-4e64-b3f0-2790bd7fbcb2
 @time begin
@@ -136,6 +131,22 @@ end
 	L = Matrix{Float64}(pot_data.L')
 	CYAxiverse.profiling.omega(CYAxiverse.profiling.:αmatrix(CYAxiverse.profiling.LQtilde(Q, L); threshold = 1e-2).Qhat)
 end
+
+# ╔═╡ f77d9639-3b73-4fe5-9da2-71045d8a846e
+CYAxiverse.read.qshape(geom_idx).issquare
+
+# ╔═╡ bc29db56-e456-42a1-8017-8f1fde24048b
+CYAxiverse.read.qshape(116,4, 1)
+
+# ╔═╡ ed3c16c0-4632-4695-8c39-0325631002dd
+geom_idx
+
+# ╔═╡ 1572e225-6922-4231-9f1f-e5d54f2f8560
+@time begin
+	@profile CYAxiverse.generate.norm2(geom_idx)
+	Profile.print()
+end
+	
 
 # ╔═╡ 598478a3-cc79-4c40-9003-f7ca00db49a2
 @time begin
@@ -178,7 +189,10 @@ norm([1//5, -1//5]), sqrt(2)/5
 # ╠═9620b336-cbd8-4e64-b3f0-2790bd7fbcb2
 # ╠═4e282b9f-9c58-4d46-a2a7-ab6ed21c87e0
 # ╠═e3ceb403-cb73-4195-a717-ad7f7f2d14a9
+# ╠═b348b3fc-c20e-41c7-ac21-8244afbae687
 # ╠═36610454-1c4b-4ffb-8d4c-8c4d5160ce96
+# ╠═f77d9639-3b73-4fe5-9da2-71045d8a846e
+# ╠═bc29db56-e456-42a1-8017-8f1fde24048b
 # ╠═ed3c16c0-4632-4695-8c39-0325631002dd
 # ╠═1572e225-6922-4231-9f1f-e5d54f2f8560
 # ╠═598478a3-cc79-4c40-9003-f7ca00db49a2
