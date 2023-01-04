@@ -120,15 +120,23 @@ end
 ##############################
 
 function qshape(h11::Int,tri::Int,cy::Int=1)
-    square, vacua, extrarows = 0, 0, 0
+    square, vacua, extrarows, ωnorm2 = 0, 0, 0, 0
     h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "r") do file
         square = HDF5.read(file, "square")
         vacua = HDF5.read(file, "vacua_estimate")
         if haskey(file, "extra_rows")
             extrarows = HDF5.read(file, "extra_rows")
         end
+        if haskey(file, "ωnorm2_estimate")
+            ωnorm2 =  HDF5.read(file, "ωnorm2_estimate")
+        end
     end
-    (issquare = square, vacua_det = vacua, lengthα = extrarows)
+    (issquare = square, vacua_det = vacua, lengthα = extrarows, ωnorm2 = ωnorm2)
+end
+
+function qshape(geom_idx::GeometryIndex)
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
+    qshape(h11, tri, cy)
 end
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
