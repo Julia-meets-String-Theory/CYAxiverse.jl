@@ -25,11 +25,23 @@ end
     if Qshape.issquare == 1
     else
         data = CYAxiverse.generate.vacua_estimate(h11, tri, cy; threshold = 1e-2)
-        h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "r+") do f
+        h5open(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"), "r+") do f
             f["extra_rows"] = data.extrarows
         end
     end
 end
+
+@everywhere function column_estimate(h11, tri, cy, l)
+    geom_idx = CYAxiverse.structs.GeometryIndex(h11 = h11, polytope = tri, frst = cy)
+    ωnorm = round(CYAxiverse.generate.ωnorm2(geom_idx; threshold = 0.01))
+    h5open(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"), "r+") do f
+        if haskey(f, "ωnorm2_estimate")
+        else
+            f["ωnorm2_estimate"] = ωnorm
+        end
+    end
+end
+
 
 @everywhere function main_Qshape(h11, tri, cy, l)
     threshold = 1e-2
@@ -89,10 +101,10 @@ CYAxiverse.filestructure.logcreate(lfile)
 ##############################
 #### Initialise functions ####
 ##############################
-@time temp_spec = extra_rows(4,10,1,lfile)
+@time temp_spec = column_estimate(4,10,1,lfile)
 h11list_temp = [4 4 5 7; 10 1 5 7; 1 1 1 1; lfile lfile lfile lfile]
 @time begin
-    temp_vac = pmap(extra_rows, h11list_temp[1,:],h11list_temp[2,:],h11list_temp[3,:], h11list_temp[4,:])
+    temp_vac = pmap(column_estimate, h11list_temp[1,:],h11list_temp[2,:],h11list_temp[3,:], h11list_temp[4,:])
 end
 
 # @time begin
@@ -112,7 +124,7 @@ CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11
 # h11 = shuffle(h11)
 log_files_spec = [lfile for _=1:size(h11list,2)]
 @time begin
-    res = pmap(extra_rows, h11list[1,:], h11list[2,:], h11list[3,:], log_files_spec)
+    res = pmap(column_estimate, h11list[1,:], h11list[2,:], h11list[3,:], log_files_spec)
 end
 
 # @time begin
