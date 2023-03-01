@@ -106,7 +106,7 @@ if haskey(ENV, "MAX_JOB")
     max_split = parse(Int32, ENV["MAX_JOB"])
 end
 
-function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, split = nothing, max_split = 0)
+function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 100, split = nothing, max_split = 0)
     log_files_top = []
     n = []
     if split === nothing
@@ -115,7 +115,7 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
     else
         if split == max_split
             h11 = [462, 491]
-            n = [ngeometries * 1_000 for _ in h11]
+            n = [ngeometries for _ in h11]
             log_files_top = [lfile for _ in h11]
             
         else
@@ -123,7 +123,7 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
             h11 = shuffle(h11)
             tasks = length(h11) ÷ max_split
             h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
-            n = [ngeometries * 1_000 for _ in h11]
+            n = [ngeometries for _ in h11]
             log_files_top = [lfile for _ in h11]
         end
     end
