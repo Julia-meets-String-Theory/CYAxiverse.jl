@@ -55,6 +55,27 @@ CYAxiverse.filestructure.logcreate(lfile)
     end
     
 end
+@everywhere function main_top_fair(h11,n,l)
+    try
+        test = CYAxiverse.cytools_wrapper.cy_from_poly(h11);
+        return test
+    catch
+        try
+            test = CYAxiverse.cytools_wrapper.topologies(h11,n; fast=false);
+            return test
+        catch e
+            open(l, "a") do outf
+                write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
+            end
+            return [0,0,0,0]
+        finally
+            open(l, "a") do outf
+                write(outf,string("top-(",h11,")\n"))
+            end
+        end
+    end
+    
+end
 
 @everywhere function main_geom(h11,cy,tri,cy_i,l)
     try
