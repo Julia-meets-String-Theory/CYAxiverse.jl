@@ -71,7 +71,7 @@ poly(points; backend=nothing) = py"poly($points, backend=$backend)"
 
 
 
-function topologies_generate(h11,n)
+function topologies_generate_fast(h11,n)
     tri_test = []
     tri_test_m = []
     #Generate list of $n polytopes at $h11
@@ -119,6 +119,54 @@ function topologies_generate(h11,n)
     return Dict(zip(keys,vals))
 end
 
+
+function topologies_generate_fair(h11,n)
+    tri_test = []
+    tri_test_m = []
+    #Generate list of $n polytopes at $h11
+    poly_test = fetch_polytopes(h11,4*n, lattice="N", as_list=true, favorable=true)
+    #Locator for points of polytope for saving
+    points = [p.points() for p in poly_test]
+    #If number of polytopes < $n, generate more triangulations per polytope, 
+    #otherwise generate 1 triangulation per polytope upto $n
+    spt = size(poly_test,1)
+    m = nothing;
+    if spt == 0
+        return [0, 0, 0, 0]
+    elseif spt < n && h11 > 3
+        left_over = mod(n, spt)
+        m = n ÷ spt
+        if left_over == 0
+            tri_test_m = [poly_test[i].random_triangulations_fair(N=m, as_list=true, progress_bar=false) for i=1:spt];
+            # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+            tri_test = vcat(tri_test_m...)
+        else
+            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
+            tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
+            tri_test_m = vcat(tri_test_m1, tri_test_m)
+            # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
+            # cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
+            # cy_num = vcat(cy_num1,cy_num)
+            tri_test = vcat(tri_test_m1...,tri_test_m...)
+        end
+    else
+        tri_test_m = nothing
+        tri_test = [poly_test[i].triangulate() for i=1:n];
+        points = @view(points[1:n])
+    end
+    simplices = []
+    cy = []
+    for t in eachindex(tri_test)
+        #Locator for simplices of triangulations for saving
+        push!(simplices,tri_test[t].simplices())
+        #Generate list of CY3s
+        push!(cy,tri_test[t].get_cy())
+    end
+    keys = ["m", "poly_tri", "poly_retri", "points", "simplices", "cy"]
+    vals = [m, tri_test, tri_test_m, points, simplices, cy]
+
+    return Dict(zip(keys,vals))
+end
 """
     topologies(h11::Int, n::Int)
 
@@ -128,9 +176,13 @@ This function generates and saves the topological data, _i.e._ `points` and `sim
 Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 
 """
-function topologies(h11::Int, n::Int)
+function topologies(h11::Int, n::Int; fast = true)
     h11list_temp = []
-    top_data = topologies_generate(h11, n)
+    if fast
+        top_data = topologies_generate_fast(h11, n)
+    else
+        top_data = topologies_generate_fair(h11,n)
+    end
     m, tri_test, tri_test_m, points, simplices, cy = top_data["m"], top_data["poly_tri"], top_data["poly_retri"], top_data["points"], top_data["simplices"], top_data["cy"]
     #Create dir for saving -- structure is h11_{$h11}.zfill(3)/np_{$tri}.zfill(7)/cy_{$cy}.zfill(7)/data
     if isdir(string(present_dir(),"h11_",lpad(h11,3,"0")))
