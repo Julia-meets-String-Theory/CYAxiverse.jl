@@ -812,8 +812,10 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
             αeff = hcat(αeff,@view(α[i,:]))
         end
     end
-    αeff = hcat(I(h11), αeff[:, 2:end])
-    CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff))
+    αeff = hcat(1//1 * I(h11), αeff[:, 2:end])
+    αrowmask = [sum(i .== zero(i[1])) < size(αeff,2)-1 for i in eachrow(αeff)]
+    αcolmask = [any(col .!= zero(col[1])) for col in eachcol(αeff[αrowmask,:])]
+    CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
 end
 
 function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.01)
