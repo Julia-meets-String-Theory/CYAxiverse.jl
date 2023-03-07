@@ -120,7 +120,7 @@ GC.gc()
 ##############################
 h11_init = 4
 np = nworkers()
-h11_end = 492
+h11_end = 450 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
 h11 = collect(h11_init:h11_init+h11_end)
 max_split = 0
 if haskey(ENV, "MAX_JOB")
