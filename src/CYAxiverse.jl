@@ -18,8 +18,8 @@ include("generate.jl")
 include("plotting.jl")
 
 include("../add_functions/profiling.jl")
-if haskey(ENV, "PYTHON")
-    if occursin("cytools/cytools-venv//bin/python3",ENV["PYTHON"])
+if haskey(ENV, "SINGULARITY_CONTAINER")
+    if occursin("CYTools",ENV["SINGULARITY_CONTAINER"])
         include("../add_functions/cytools_wrapper.jl")
     end
 
