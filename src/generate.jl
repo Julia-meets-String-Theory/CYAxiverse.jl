@@ -811,16 +811,16 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
             Lhat = hcat(Lhat, @view(Lbar[:,i]))
             αeff = hcat(αeff,@view(α[i,:]))
         end
-        αeff = hcat(I(h11), αeff)
     end
+    αeff = hcat(I(h11), αeff[:, 2:end])
     CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff))
 end
 
-function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5)
+function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.01)
     αmatrix(LQtilde(h11, tri, cy); threshold = threshold)
 end
 
-function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
+function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.01)
     αmatrix(LQtilde(geom_idx); threshold = threshold)
 end
 
@@ -963,7 +963,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
         end
     end
     keys = ["Qhat", "Qbar", "Lhat", "Lbar", "α"]
-    vals = [Qhat, Qbar, Lhat, Lbar, αeff]
+    vals = [Qhat, Qbar, Lhat, Lbar, αeff[:,2:end]]
     return Dict(zip(keys,vals))
 end
 
