@@ -120,7 +120,7 @@ GC.gc()
 ##############################
 h11_init = 4
 np = nworkers()
-h11_end = 500
+h11_end = 492
 h11 = collect(h11_init:h11_init+h11_end)
 max_split = 0
 if haskey(ENV, "MAX_JOB")
