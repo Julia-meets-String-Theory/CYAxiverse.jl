@@ -64,6 +64,8 @@ struct CanonicalQBasis
     Lhat ::Matrix{Float64}
     Lbar ::Matrix{Float64}
     α::Matrix{Rational}
+    αrowmask::Vector{Bool}
+    αcolmask::Vector{Bool}
 end
 
 #######################
