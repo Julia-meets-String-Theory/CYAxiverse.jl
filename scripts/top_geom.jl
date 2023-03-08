@@ -100,7 +100,7 @@ end
 ##############################
 #### Initialise functions ####
 ##############################
-@time temp_top = main_top(4,10,lfile)
+@time temp_top = main_top(split,10,lfile)
 # temp_top = hcat(temp_top...)
 # println(size(temp_top))
 # println(temp_top)
