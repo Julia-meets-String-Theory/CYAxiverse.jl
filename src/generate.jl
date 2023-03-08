@@ -15,7 +15,7 @@ using TimerOutputs
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir
 using ..read: potential
 using ..minimizer: minimize, subspace_minimize
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα
 
 #################
 ### Constant ####
@@ -801,6 +801,10 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
                 else
                     α[i,j] = zero(Rational)
                 end
+                if abs(1 - abs(α[i,j])) > 1e-3
+                else
+                    α[i,j] = sign(α[i,j]) * one(α[i,j])
+                end
             else
                 α[i,j] = zero(Rational)
             end
@@ -813,16 +817,20 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
         end
     end
     αeff = hcat(1//1 * I(h11), αeff[:, 2:end])
-    αrowmask = [sum(i .== zero(i[1])) < size(αeff,2)-1 for i in eachrow(αeff)]
-    αcolmask = [any(col .!= zero(col[1])) for col in eachcol(αeff[αrowmask,:])]
-    CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
+    if size(αeff,2) > h11
+        αrowmask = [sum(i .== zero(i[1])) < size(αeff,2)-1 for i in eachrow(αeff)]
+        αcolmask = [any(col .!= zero(col[1])) for col in eachcol(αeff[αrowmask,:])]
+        Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
+    else
+        CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar))
+    end
 end
 
-function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.01)
+function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5)
     αmatrix(LQtilde(h11, tri, cy); threshold = threshold)
 end
 
-function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.01)
+function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
     αmatrix(LQtilde(geom_idx); threshold = threshold)
 end
 
