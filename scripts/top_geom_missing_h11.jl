@@ -117,15 +117,28 @@ GC.gc()
 ##############################
 #### Find incomplete h11s ####
 ##############################
-
-h11_list = CYAxiverse.filestructure.np_path_generate(; geometric_data= true)[2]
-
+function h11_list(h11 ;geometric_data = true)
+    try
+        h11list = CYAxiverse.filestructure.np_path_generate(h11; geometric_data= geometric_data)[2]
+        if size(h11list, 1) !=0
+            return h11list
+        else
+            return [h11, 0, 0]
+        end
+    catch e
+        open(l, "a") do outf
+            write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
+        end
+        return [h11, 0, 0]
+    end
+end
 h11_full = vcat(collect(4:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 377, 386, 387, 399, 404, 416, 433, 462, 491])
+
 h11 = []
 for poly in h11_full
-    if poly ∈ h11_list
-    else
-        push!(h11, poly)
+    temp_h11 = h11_list(h11)
+    if temp_h11[2] == 0
+        push!(h11, poly)    
     end
 end
 
