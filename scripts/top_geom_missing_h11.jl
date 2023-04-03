@@ -100,7 +100,11 @@ end
 ##############################
 #### Initialise functions ####
 ##############################
-@time temp_top = main_top(split,10,lfile)
+if split == nothing
+    @time temp_top = main_top(Random.rand(4:10),10,lfile)
+else 
+    @time temp_top = main_top(max(Random.rand(4:10),split),10,lfile)
+end
 # temp_top = hcat(temp_top...)
 # println(size(temp_top))
 # println(temp_top)
@@ -133,25 +137,33 @@ function h11_list(h11 ;geometric_data = true)
     end
 end
 h11_full = vcat(collect(4:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 377, 386, 387, 399, 404, 416, 433, 462, 491])
-
-h11 = []
-for poly in h11_full
-    temp_h11 = h11_list(h11)
-    if temp_h11[2] == 0
-        push!(h11, poly)    
+function h11_missing(h11list::Vector)
+    h11 = []
+    for poly in h11_full
+        temp_h11 = h11_list(h11)
+        if temp_h11[2] == 0
+            push!(h11, poly)    
+        end
     end
+    h11
 end
+h11 = [223, 226, 228, 235, 249, 250, 252, 253, 254, 255, 256, 257, 258]
 
 ##############################
 ############ Main ############
 ##############################
 np = nworkers()
 max_split = 0
+n_split = 1
 if haskey(ENV, "MAX_JOB")
     max_split = parse(Int32, ENV["MAX_JOB"])
 end
+if haskey(ENV, "SLURM_ARRAY_TASK_COUNT")
+    n_split = parse(Int32, ENV["SLURM_ARRAY_TASK_COUNT"])
+end
 
-function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, split = nothing, max_split = 0)
+
+function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, split = nothing, max_split = 0, n_split = 1)
     log_files_top = []
     n = []
     if split === nothing
@@ -166,7 +178,7 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
         else
             Random.seed!(9876543210)
             h11 = shuffle(h11)
-            tasks = length(h11) ÷ max_split
+            tasks = length(h11) ÷ n_split
             h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
             n = [ngeometries for _ in h11]
             log_files_top = [lfile for _ in h11]
@@ -175,7 +187,7 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
     (h11 = h11, log_files = log_files_top, ngeometries = n)
 end
 
-run_vars = h11list_generate(h11, lfile; ngeometries=1_000, split=split, max_split = max_split)
+run_vars = h11list_generate(h11, lfile; ngeometries=1_000, split=split, max_split = max_split, n_split = n_split)
 
 h11 = run_vars.h11
 n = run_vars.ngeometries
