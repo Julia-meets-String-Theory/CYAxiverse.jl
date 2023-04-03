@@ -75,6 +75,10 @@ struct Canonicalα
     αcolmask::Vector{Bool}
 end
 
+struct ReducedPotential
+    αeff::Matrix{Rational}
+    Lreduced::Matrix{Float64}
+end
 #######################
 # ParentTrackIterator #
 #######################
