@@ -100,7 +100,11 @@ end
 ##############################
 #### Initialise functions ####
 ##############################
-@time temp_top = main_top(split,10,lfile)
+if split == nothing
+    @time temp_top = main_top_fair(Random.rand(4:10),10,lfile)
+else 
+    @time temp_top = main_top(max(Random.rand(4:10),split),10,lfile)
+end
 # temp_top = hcat(temp_top...)
 # println(size(temp_top))
 # println(temp_top)
@@ -120,14 +124,19 @@ GC.gc()
 ##############################
 h11_init = 4
 np = nworkers()
-h11_end = 450 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
+h11_end = 96 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
 h11 = collect(h11_init:h11_init+h11_end)
 max_split = 0
+n_split = 1
 if haskey(ENV, "MAX_JOB")
     max_split = parse(Int32, ENV["MAX_JOB"])
 end
+if haskey(ENV, "SLURM_ARRAY_TASK_COUNT")
+    n_split = parse(Int32, ENV["SLURM_ARRAY_TASK_COUNT"])
+end
 
-function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, split = nothing, max_split = 0)
+
+function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, split = nothing, max_split = 0, n_split = 1)
     log_files_top = []
     n = []
     if split === nothing
@@ -142,7 +151,7 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
         else
             Random.seed!(9876543210)
             h11 = shuffle(h11)
-            tasks = length(h11) ÷ max_split
+            tasks = length(h11) ÷ n_split
             h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
             n = [ngeometries for _ in h11]
             log_files_top = [lfile for _ in h11]
@@ -151,7 +160,7 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
     (h11 = h11, log_files = log_files_top, ngeometries = n)
 end
 
-run_vars = h11list_generate(h11, lfile; ngeometries=1_000, split=split, max_split = max_split)
+run_vars = h11list_generate(h11, lfile; ngeometries=100, split=split, max_split = max_split, n_split = n_split)
 
 h11 = run_vars.h11
 n = run_vars.ngeometries
@@ -160,7 +169,7 @@ log_files_top = run_vars.log_files
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("These are ", h11, "\n"))
 @time begin
-    h11cylist = pmap(main_top,h11,n,log_files_top)
+    h11cylist = pmap(main_top_fair,h11,n,log_files_top)
 end
 
 h11cylist = hcat(h11cylist...)[:, hcat(h11cylist...)[1,:] .!= 0]
