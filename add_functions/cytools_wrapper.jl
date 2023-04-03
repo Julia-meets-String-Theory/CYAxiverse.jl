@@ -75,7 +75,7 @@ function topologies_generate_fast(h11,n)
     tri_test = []
     tri_test_m = []
     #Generate list of $n polytopes at $h11
-    poly_test = fetch_polytopes(h11,4*n, lattice="N", as_list=true, favorable=true)
+    poly_test = fetch_polytopes(h11,8*n, lattice="N", as_list=true, favorable=true)
     #Locator for points of polytope for saving
     points = [p.points() for p in poly_test]
     #If number of polytopes < $n, generate more triangulations per polytope, 
@@ -141,9 +141,9 @@ function topologies_generate_fair(h11,n)
             # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
             tri_test = vcat(tri_test_m...)
         else
-            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
-            tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
-            tri_test_m = vcat(tri_test_m1, tri_test_m)
+            tri_test_m = [poly_test[i].random_triangulations_fair(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
+            tri_test_m1 = [poly_test[i].random_triangulations_fair(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
+            # tri_test_m = vcat(tri_test_m1, tri_test_m)
             # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
             # cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
             # cy_num = vcat(cy_num1,cy_num)
