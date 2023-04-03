@@ -163,7 +163,8 @@ function pseudo_L(h11::Int,tri::Int,cy::Int=1;log::Bool=true)
     end
 end
 
-function potential(L::Matrix{Float64}, Q::Matrix, x)
+function V(L::Matrix{Float64}, Q::Matrix, x)
+    @assert size(L, 2) == 2
     Λ = L[:, 1] .* 10. .^ L[:, 2]
     sum(Λ' * (1. .- cos.(Q' * x)))
 end
