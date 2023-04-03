@@ -7,7 +7,7 @@ module generate
 
 using HDF5
 using LinearAlgebra
-using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays
+using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays, NormalForms
 using GenericLinearAlgebra
 using Distributions
 using TimerOutputs
@@ -163,6 +163,10 @@ function pseudo_L(h11::Int,tri::Int,cy::Int=1;log::Bool=true)
     end
 end
 
+function potential(L::Matrix{Float64}, Q::Matrix, x)
+    Λ = L[:, 1] .* 10. .^ L[:, 2]
+    sum(Λ' * (1. .- cos.(Q' * x)))
+end
 ##############################
 #### Computing Spectra #######
 ##############################
@@ -724,6 +728,7 @@ end
 
 TBW
 """
+Λ
 function LQtilde(Q, L)
     @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
     if @isdefined h11
@@ -788,7 +793,7 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     Qinv = (inv(Qhat))
-    Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
+    Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), Rational(Qinv)))
     # Qhat::Matrix{Int} = deepcopy(Qtilde)
     # Lhat = deepcopy(Ltilde)
     αeff::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
@@ -816,9 +821,10 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
             αeff = hcat(αeff,@view(α[i,:]))
         end
     end
-    αeff = hcat(1//1 * I(h11), αeff[:, 2:end])
-    if size(αeff,2) > h11
-        αrowmask = [sum(i .== zero(i[1])) < size(αeff,2)-1 for i in eachrow(αeff)]
+    αeff_temp = hcat(1//1 * I(h11), αeff[:, 2:end])
+    if size(αeff_temp,2) > h11
+        αeff = αeff[:, 2:end]
+        αrowmask = [sum(row .== zero(row[1])) < size(αeff,2) for row in eachrow(αeff)]
         αcolmask = [any(col .!= zero(col[1])) for col in eachcol(αeff[αrowmask,:])]
         Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
     else
