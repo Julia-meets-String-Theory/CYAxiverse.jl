@@ -409,22 +409,17 @@ function minimize(LV::Vector, QV, x0::Vector)
         # GC.gc()
     # end
 end
-
 """
-    id_minimize(LV::Vector,QV::Matrix,x0::Vector)
+    id_minimize(LV::Vector, QV::Matrix; ftol = eps(), iterations = 1_000)
 
 This function takes the instanton charge matrix and their corresponding scales and finds the corresponding minima using the `id_basis` method.
     !!! warning
     Currently cannot locate local minima -- eigs(hess).values returned as negative in `nlsolve`...
 
 """
-function id_minimize(LV::Vector, QV; ftol = eps(), iterations = 1_000)
-	if @isdefined h11
-	else
-		h11 = size(QV, 1)
-	end
+function id_minimize(LV::Vector, QV::Matrix; ftol = eps(), iterations = 1_000)
     @assert size(QV, 2) == size(LV, 1)
-    threshold = 1e-2
+
     
     function grad(x::Vector)
 		grad_temp = LV' .* (QV .* sin.(x' * QV))
@@ -448,7 +443,52 @@ function id_minimize(LV::Vector, QV; ftol = eps(), iterations = 1_000)
     xmin = res.zero
     # res, eigen(hess(xmin)).values
     if res.f_converged || res.x_converged
-        # if sign(minimum(eigen(hess(xmin)).values)) > eps() && minimum(abs.(grad(xmin))) ≤ ftol
+        if (sign(minimum(eigen(hess(xmin)).values)) ≥ 0. || abs(minimum(eigen(hess(xmin)).values)) ≤ 1e-10) && minimum(abs.(grad(xmin))) ≤ ftol
+            hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) 
+            hess_sign = sign((minimum(eigen(hess(xmin)).values)))
+            grad_log = log10.(abs.(grad(xmin)))
+            xmin = @.ifelse(abs(xmin) < ftol, zero(xmin), xmin)
+            # xmin = @.ifelse(one(xmin) - mod(xmin / 2π, 1) < ftol || mod(xmin / 2π, 1) < ftol, zero(xmin), mod(xmin / 2π, 1)) ### this line removes some vacua!! (for rationals)
+            keys = ["xinit", "xmin", "Heigs", "Hsign", "gradlog"]
+            vals = [x0, xmin, hess_eigs, hess_sign, grad_log]
+            return Dict(zip(keys,vals))
+        end
+    end
+end
+
+"""
+    id_minimize(LV::Vector, QV::Vector; ftol = eps(), iterations = 1_000)
+
+This function takes the instanton charge matrix and their corresponding scales and finds the corresponding minima using the `id_basis` method.
+    !!! warning
+    Currently cannot locate local minima -- eigs(hess).values returned as negative in `nlsolve`...
+
+"""
+function id_minimize(LV::Vector, QV::Vector; ftol = eps(), iterations = 1_000)
+    @assert size(QV, 2) == size(LV, 1) "The number of columns of Q should be equal to the number of rows of Λ"
+    function grad(x::Vector)
+		grad_temp = LV' .* (QV .* sin.(x' * QV))
+        sum(grad_temp, dims = 2)
+	end
+	function hess(x::Vector)
+		hessian = zeros(size(x,1), size(x,1))
+		for i in axes(QV, 1), j in axes(QV, 1)
+			if i>=j
+				hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
+			end
+		end
+		hessian = hessian + hessian' - Diagonal(hessian)
+	end
+    if maximum(denominator.(QV)) == 1
+    else
+        QV = NormalForms.snf((maximum(denominator.(QV)) .* Matrix{Rational}(QV)')).S'
+    end
+    x0 = rand(Uniform(0,2π),size(QV,1)) .* rand(size(QV,1))
+    res = nlsolve(grad, hess, x0; ftol = ftol, iterations = iterations)
+    xmin = res.zero
+    # res, eigen(hess(xmin)).values
+    # if res.f_converged || res.x_converged
+    if sign(minimum(eigen(hess(xmin)).values)) ≥ 0. #&& minimum(abs.(grad(xmin))) ≤ ftol
         hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) 
         hess_sign = sign((minimum(eigen(hess(xmin)).values)))
         grad_log = log10.(abs.(grad(xmin)))
@@ -457,10 +497,26 @@ function id_minimize(LV::Vector, QV; ftol = eps(), iterations = 1_000)
         keys = ["xinit", "xmin", "Heigs", "Hsign", "gradlog"]
         vals = [x0, xmin, hess_eigs, hess_sign, grad_log]
         return Dict(zip(keys,vals))
-        # end
     end
+    # end
 end
 
+"""
+    id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000))
+
+TBW
+"""
+function id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000)
+    if @isdefined h11
+	else
+		h11 = size(QV, 1)
+	end
+    @assert size(QV, 2) == size(LV, 1) "The number of rows of Λ should be equal to the number of columns of Q -- perhaps you need to transpose?"
+    if maximum(denominator.(QV)) == 1 && size(QV, 1) == 1
+
+    end
+
+end
 function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1))
     xmin = []
     Random.seed!(9876543210)
