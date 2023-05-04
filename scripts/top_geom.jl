@@ -100,7 +100,7 @@ end
 ##############################
 #### Initialise functions ####
 ##############################
-if split == nothing
+if split === nothing
     @time temp_top = main_top_fair(Random.rand(4:10),10,lfile)
 else 
     @time temp_top = main_top(max(Random.rand(4:10),split),10,lfile)
@@ -118,7 +118,7 @@ CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string(size(temp_geom), "test
 temp_top = nothing
 temp_geom = nothing
 GC.gc()
-
+# all_h11 = vcat(collect(4:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 376, 377, 386, 387, 399, 404, 416, 433, 462, 491])
 ##############################
 ############ Main ############
 ##############################
