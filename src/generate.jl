@@ -7,7 +7,7 @@ module generate
 
 using HDF5
 using LinearAlgebra
-using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays, NormalForms
+using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays, NormalForms, IntervalArithmetic, StaticArrays
 using GenericLinearAlgebra
 using Distributions
 using TimerOutputs
@@ -163,11 +163,44 @@ function pseudo_L(h11::Int,tri::Int,cy::Int=1;log::Bool=true)
     end
 end
 
-function V(L::Matrix{Float64}, Q::Matrix, x)
+function V(x, L::Matrix{Float64}, Q::Matrix)
     @assert size(L, 2) == 2
     Λ = L[:, 1] .* 10. .^ L[:, 2]
     sum(Λ' * (1. .- cos.(Q' * x)))
 end
+function jacobian(x, L::Matrix{Float64}, Q::Matrix)
+    Λ = L[:, 1] .* 10. .^ L[:, 2]
+    if size(Q, 1) == 1
+        grad_temp = Λ' .* (Q .* sin.(x' * Q))
+        grad = sum(grad_temp, dims = 2)
+    else
+        grad_temp = Λ' .* (Q .* sin.(sum(x .* Q, dims=1)))
+        grad = sum(grad_temp, dims = 2)
+        SVector{size(grad, 1)}(grad)
+    end
+end
+
+function hessian(x, L::Matrix{Float64}, Q::Matrix)
+    Λ = L[:, 1] .* 10. .^ L[:, 2]
+    hessian = zeros(Interval, size(Q, 1), size(Q, 1))
+    if size(Q, 1) == 1
+        for i in axes(Q, 1), j in axes(Q, 1)
+            if i>=j
+                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(x' * Q)))
+            end
+        end
+        hessian = hessian + hessian' - Diagonal(hessian)
+    else
+        for i in axes(Q, 1), j in axes(Q, 1)
+            if i>=j
+                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(sum(x .* Q, dims=1))))
+            end
+        end
+        hessian = hessian + hessian' - Diagonal(hessian)
+        SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
+    end
+end
+
 ##############################
 #### Computing Spectra #######
 ##############################
