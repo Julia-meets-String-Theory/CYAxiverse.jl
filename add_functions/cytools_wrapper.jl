@@ -19,9 +19,14 @@ module cytools_wrapper
 using ..filestructure: data_dir, cyax_file, present_dir, np_path_generate
 using ..read: topology
 
+using Pkg
+ENV["PYTHON"] = "/home/cytools/cytools-venv//bin/python"
+Pkg.build("PyCall")
+
 using PyCall
 using HDF5
 using LinearAlgebra
+
 
 """
     __init__()
@@ -332,7 +337,7 @@ function geometries_generate(h11,cy,tri,cy_i=1)
     q[1:h11+4,:] = qprime
     for i=1:size(qprime,1)-1
         for j=i+1:size(qprime,1)
-            q[h11+4+n,:] = qprime[i,:]-qprime[j,:]
+            q[h11+4+n,:] = qprime[j,:]-qprime[i,:]
             L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
                     + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
                     -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
