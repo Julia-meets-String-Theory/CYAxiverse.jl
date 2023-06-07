@@ -6,8 +6,8 @@ Functions that access the database.
 module read
 using HDF5
 using LinearAlgebra
-using ..filestructure: cyax_file, minfile, geom_dir
-using ..structs: GeometryIndex, AxionPotential
+using ..filestructure: cyax_file, minfile, geom_dir_read
+using ..structs: GeometryIndex, AxionPotential, Min_JLM_1D, Min_JLM_ND
 ###########################
 ##### Read CYTools data ###
 ###########################
@@ -121,7 +121,7 @@ end
 
 function qshape(h11::Int,tri::Int,cy::Int=1)
     square, vacua, extrarows, ωnorm2 = 0, 0, 0, 0
-    h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "r") do file
+    h5open(joinpath(geom_dir_read(h11,tri,cy),"qshape.h5"), "r") do file
         square = HDF5.read(file, "square")
         vacua = HDF5.read(file, "vacua_estimate")
         if haskey(file, "extra_rows")
@@ -182,6 +182,26 @@ function vacua_TB(h11::Int,tri::Int,cy::Int=1)
         keys = ["vacua","Qtilde"]
         vals = [abs(vacua), Qtilde]
         return Dict(zip(keys,vals))
+    end
+end
+
+function vacua_jlm(geom_idx::GeometryIndex)
+    Nvac = 0
+    min_coords = zeros(1,1)
+    extra_rows = 0
+    h5open(minfile(geom_idx), "r") do file
+        Nvac = HDF5.read(file, "Nvac")
+        if haskey(file, "extra_rows")
+            min_coords = HDF5.read(file, "vac_coords")
+            extra_rows = HDF5.read(file, "extra_rows")
+        end
+    end
+    if extra_rows == 0
+        return Nvac
+    elseif extra_rows == 1
+        return Min_JLM_1D(Nvac, vec(min_coords), extra_rows)
+    else
+        return Min_JLM_ND(Nvac, min_coords, extra_rows)
     end
 end
 
