@@ -1,0 +1,13 @@
+ENV["newARGS"] = string("vacua_0323")
+using CYAxiverse
+@time CYAxiverse.generate.jlm_vacua_db(1000)
+@time CYAxiverse.generate.jlm_vacua_db(10000)
+@time vac_data = CYAxiverse.generate.jlm_vacua_db()
+vac_square = hcat([vcat(item[1:4]...) for item in vac_data.square]...)
+vac_1D = hcat([vcat(item[1:4]...) for item in vac_data.one_dim]...)
+vac_ND = hcat([vcat(item[1:4]..., item[end]...) for item in vac_data.n_dim]...)
+all_vacua = hcat(vac_square, vac_1D, vac_ND[1:4, :])
+no_vacua = hcat([vcat(item...) for item in vac_data.err]...)
+println(size(all_vacua))
+println(size(no_vacua))
+@time CYAxiverse.plotting.vacua_db_jlm(vac_data)
