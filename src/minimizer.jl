@@ -15,6 +15,7 @@ using Optim, LineSearches, Dates, HDF5, NLsolve
 
 using ..filestructure: cyax_file, minfile, present_dir
 using ..read: potential
+using ..structs: GeometryIndex
 
 function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,θparalleltest::Matrix,Qtilde::Matrix,algo,prec)
     setprecision(ArbFloat,digits=prec)
@@ -517,6 +518,10 @@ function id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000)
     end
 
 end
+"""
+    subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)))
+Minimizes the subspace with `runs` iterations
+"""
 function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1))
     xmin = []
     Random.seed!(9876543210)
@@ -548,26 +553,6 @@ end
 #     push!(xmin, zeros(size(Q,1)))
 # 	unique(xmin)
 # end
-"""
-    subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)))
-Minimizes the subspace with `runs` iterations
-"""
-function subspace_minimize(L, Q; runs=10_000, phase::Vector=zeros(max(collect(size(Q))...)))
-    xmin = []
-    Random.seed!(9876543210)
-	for _ in 1:runs
-		x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
-        x0 = x0 + phase
-		test_min = minimize(L, Q, x0)
-		if test_min === nothing
-		else
-			push!(xmin, test_min["xmin"])
-		end
-	end
-    push!(xmin, zeros(size(Q,1)))
-	unique(xmin)
-end
-
 
 """
 minima_lattice(v::Matrix{Float64})
@@ -591,6 +576,7 @@ function minima_lattice(v::Matrix{Float64})
     return Dict(zip(keys,vals))
     GC.gc()
 end
+
 
 
 end
