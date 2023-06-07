@@ -1213,7 +1213,7 @@ function vacua_SNF(Q::Matrix{Integer})
     else
         Tparallel = convert(Matrix{BigInt},Tparallel1)
         θparalleltest = Matrix{Rational{BigInt}}(inv(transpose(Rational.(Q)) * Rational.(Q)) * transpose(Rational.(Q)) * Tparallel)
-        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(BigInt, θparalleltest), Rational{BigInt}(θparalleltest)))
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
     end
     # keys = ["T∥", "θ∥"]
     # vals = [Tparallel,θparalleltest]
