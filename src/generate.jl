@@ -12,10 +12,11 @@ using GenericLinearAlgebra
 using Distributions
 using TimerOutputs
 
-using ..filestructure: cyax_file, minfile, present_dir, geom_dir
-using ..read: potential
+using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
+using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα
+using ..jlm_python: one_dim_axion_solver, multi_axion_solver
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα, RationalQSNF, Solver1D, SolverND, Min_JLM_1D, Min_JLM_ND
 
 #################
 ### Constant ####
@@ -201,6 +202,25 @@ function hessian(x, L::Matrix{Float64}, Q::Matrix)
     end
 end
 
+function hessian_norm(x, Q::Matrix)
+    hessian = zeros(Interval, size(Q, 1), size(Q, 1))
+    if size(Q, 1) == 1
+        for i in axes(Q, 1), j in axes(Q, 1)
+            if i>=j
+                hessian[i, j] = sum(@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(x' * Q))
+            end
+        end
+        hessian = hessian + hessian' - Diagonal(hessian)
+    else
+        for i in axes(Q, 1), j in axes(Q, 1)
+            if i>=j
+                hessian[i, j] = sum(@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(sum(x .* Q, dims=1)))
+            end
+        end
+        hessian = hessian + hessian' - Diagonal(hessian)
+        SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
+    end
+end
 ##############################
 #### Computing Spectra #######
 ##############################
@@ -462,8 +482,8 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     
     vals =  Hsign, Hvals .+ Float64(log10(constants()["MPlanck"])) .+9 .+ Float64(constants()["log2π"]), 
     fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]), fpert .- Float64(constants()["log2π"]), quartdiagsign, quartdiaglog .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), Array(hcat(qindq31...) .-1), quart31sign, 
-    quart31log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), quart22sign, 
-    quart22log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), Array(hcat(qindq22...) .-1)
+    quart31log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), Array(hcat(qindq22...) .-1), quart22sign, 
+    quart22log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"])
 
     keys = ["msign","m", "fK", "fpert","λselfsign", "λself","λ31_i","λ31sign","λ31", "λ22_i","λ22sign","λ22"]
     return Dict(zip(keys,vals))
@@ -706,7 +726,13 @@ function Base.convert(::Type{Matrix{Int}}, x::Nemo.fmpz_mat)
     mat = Int[x[i,j] for i = 1:m, j = 1:n]
     return mat
 end
-Base.convert(::Type{Matrix}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
+function Base.convert(::Type{Matrix{BigInt}}, x::Nemo.fmpz_mat)
+    m,n = size(x)
+    mat = BigInt[x[i,j] for i = 1:m, j = 1:n]
+    return mat
+end
+# Base.convert(::Type{Matrix{Int}}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
+# Base.convert(::Type{Matrix{BigInt}}, x::Nemo.fmpz_mat) = convert(Matrix{BigInt}, x)
 
 
 """
@@ -737,8 +763,8 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     h11::Int = size(Q,2)
     if h11 <= 50
         snf_data = vacua_SNF(Q)
-        Tparallel::Matrix{Int} = snf_data["T∥"]
-        θparalleltest::Matrix{Float64} = snf_data["θ∥"]
+        Tparallel::Matrix{Int} = snf_data.Tparallel
+        θparalleltest::Matrix{Float64} = snf_data.θparallel
     end
     data = LQtildebar(L,Q; threshold=threshold)
     Qtilde = data["Qtilde"]
@@ -826,12 +852,14 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
-    Qinv = (inv(Qhat))
-    Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), Rational(Qinv)))
-    # Qhat::Matrix{Int} = deepcopy(Qtilde)
-    # Lhat = deepcopy(Ltilde)
+    Qinv = inv(Qhat)
+    Qinv = @.(ifelse(abs(Qinv) < 1e-4, zero(Rational), Rational(Qinv)))
     αeff::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
+    αfull::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
     α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
+    α = @.(ifelse(abs(α) < 1e-4, zero(Rational), Rational(α)))
+    α = @.ifelse(mod(α, 1) < 1e-3, round(α), α)
+    α1::Matrix{Rational} = deepcopy(α)
     for i in axes(α,1)
         for j in axes(α,2)
             if abs(α[i,j]) > 1e-3
@@ -843,9 +871,11 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
                 if abs(1 - abs(α[i,j])) > 1e-3
                 else
                     α[i,j] = sign(α[i,j]) * one(α[i,j])
+                    α1[i,j] = sign(α1[i,j]) * one(α1[i,j])
                 end
             else
                 α[i,j] = zero(Rational)
+                α1[i,j] = zero(Rational)
             end
         end
         if α[i,:] == zeros(size(α,2))
@@ -853,14 +883,23 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
             Qhat = hcat(Qhat, @view(Qbar[:,i]))
             Lhat = hcat(Lhat, @view(Lbar[:,i]))
             αeff = hcat(αeff,@view(α[i,:]))
+            αfull = hcat(αfull,@view(α1[i,:]))
         end
     end
     αeff_temp = hcat(1//1 * I(h11), αeff[:, 2:end])
     if size(αeff_temp,2) > h11
         αeff = αeff[:, 2:end]
-        αrowmask = [sum(row .== zero(row[1])) < size(αeff,2) for row in eachrow(αeff)]
-        αcolmask = [any(col .!= zero(col[1])) for col in eachcol(αeff[αrowmask,:])]
-        Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
+        αfull = αfull[:, 2:end]
+        αrowmask = [(L - Lhat[2, h11+1]) < -Ldiff_limit for L in Lhat[2, 1:h11]]
+        ####################################################
+        ### These lines break things #######################
+        #### Don't know why ################################
+        # αrowmask1 = [sum(row .== zero(row[1])) < size(αeff,2) for row in eachrow(αeff)]
+        # αrowmask = αrowmask .+ αrowmask1
+        # αrowmask = @.Bool(ifelse(αrowmask > 1, 1, 0))
+        ####################################################
+        αcolmask = [sum(col .== zero(col[1])) < size(αeff[αrowmask,:],1) for col in eachcol(αeff[αrowmask,:])]
+        Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Matrix{Rational}(αfull), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
     else
         CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar))
     end
@@ -1160,18 +1199,25 @@ function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Ve
 end
 
 
-function vacua_SNF(Q::Matrix{Int})
+function vacua_SNF(Q::Matrix{Integer})
     h11::Int = size(Q,2)
     ###### Nemo SNF #####
     Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
     T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
-    Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
-    Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
-
-    θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
-    keys = ["T∥", "θ∥"]
-    vals = [Tparallel,θparalleltest]
-    return Dict(zip(keys,vals))
+    Tparallel1::Nemo.fmpz_mat = inv(T)[:, 1:h11]
+    Tparallel::Matrix{Rational} = zeros(1,1)
+    if maximum(abs.(Tparallel1)) < 2^60
+        Tparallel = convert(Matrix{Int},Tparallel1)
+        θparalleltest = Matrix{Rational}(inv(transpose(Rational.(Q)) * Rational.(Q)) * transpose(Rational.(Q)) * Tparallel)
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
+    else
+        Tparallel = convert(Matrix{BigInt},Tparallel1)
+        θparalleltest = Matrix{Rational{BigInt}}(inv(transpose(Rational.(Q)) * Rational.(Q)) * transpose(Rational.(Q)) * Tparallel)
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(BigInt, θparalleltest), Rational{BigInt}(θparalleltest)))
+    end
+    # keys = ["T∥", "θ∥"]
+    # vals = [Tparallel,θparalleltest]
+    return RationalQSNF(Tparallel,θparalleltest)
 end
 """
     vacua_TB(L,Q)
@@ -1198,8 +1244,8 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     h11::Int = size(Q,2)
     if h11 <= 50
         snf_data = vacua_SNF(Q)
-        Tparallel::Matrix{Int} = snf_data["T∥"]
-        θparalleltest::Matrix{Float64} = snf_data["θ∥"]
+        Tparallel::Matrix{Int} = snf_data.Tparallel
+        θparalleltest::Matrix{Float64} = snf_data.θparallel
     end
     data = LQtildebar(L,Q; threshold=threshold)
     Qtilde = data["Qtilde"]
@@ -1851,7 +1897,7 @@ end
 
 function vacua_estimate_save(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     vac_data = vacua_estimate(h11, tri, cy; threshold=threshold)
-    h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "cw") do f
+    h5open(joinpath(geom_dir_read(h11,tri,cy),"qshape.h5"), "cw") do f
         f["square", deflate=9] = vac_data.issquare
         f["vacua_estimate", deflate=9] = vac_data.vac
         if vac_data.issquare == 0
@@ -1892,7 +1938,124 @@ function vacua_no_optim(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0
         for col in eachcol(Ωhat)
         end
     end
-
-
 end
+
+
+"""
+    phase(h11, α::Canonicalα)
+
+TBW
+"""
+function phase(h11, α::Canonicalα)
+    phase_vector = []
+	for (i, item) in enumerate(α.Lhat[1, 1:h11])
+		if α.:αrowmask[i] == false && item == -1
+			push!(phase_vector, π)
+		else
+			push!(phase_vector, 0)
+		end
+	end
+	phase_vector::Vector = vec([phase_vector' * α.:α_complete]...)
+end
+
+"""
+    jlm_minimize(geom_idx::GeometryIndex)
+
+If the effective instanton charge matrix, `Q`, is not square, this function will compute the number of vacua in the potential using the methods outlined in `arXiv: 2306.XXXXX`.
+"""
+function jlm_minimize(geom_idx::GeometryIndex)
+    αtest = αmatrix(geom_idx; threshold=0.01)
+    if typeof(αtest)<:Canonicalα
+        Qtilde = LQtilde(geom_idx).Qtilde
+        det_Q_tilde = abs(round(det(Qtilde)))
+        n_axions = size(αtest.α[αtest.αrowmask, αtest.αcolmask], 1)
+        Q_reduced = hcat(1//1 * I(n_axions), αtest.α_complete[αtest.αrowmask, αtest.αcolmask])'
+        Q_reduced_temp = hcat(1//1 * I(n_axions), αtest.α[αtest.αrowmask, αtest.αcolmask])'
+        for (i,row) in enumerate(eachrow(Q_reduced[n_axions+1:end, :]))
+            if sum(abs.(row) .== 0) == (size(row, 1) - 1)
+                Q_reduced_temp[n_axions+i, :] .= 0
+            end
+        end
+        Qrowmask = [any(row .!= 0) for row in eachrow(Q_reduced_temp)]
+        Q_reduced_temp = Q_reduced_temp[Qrowmask, :]
+        if size(Q_reduced_temp, 1) == size(Q_reduced_temp, 2)
+            return det_Q_tilde
+        else
+            phase_vector = phase(geom_idx.h11, αtest)
+            L_reduced = Matrix(hcat(αtest.Lhat[:, 1:geom_idx.h11][:, αtest.αrowmask], αtest.Lhat[:, geom_idx.h11+1:end][:, αtest.αcolmask])')
+            # L_reduced = L_reduced[Qrowmask, :]
+            flag_int = ifelse(maximum(denominator.(Matrix(Q_reduced))) == 1, 1, 0)
+            αrescaled = Matrix{Integer}(det_Q_tilde .* Matrix(Q_reduced))
+            θparallel = vacua_SNF(αrescaled).:θparallel .* Rational(det_Q_tilde)
+            basis_inverse = []
+            if abs(maximum(denominator.(θparallel)) * maximum(numerator.(abs.(θparallel)))) > 2^60
+                θparallel::Matrix{Rational{BigInt}} = θparallel
+                basis_inverse = ifelse(size(inv(θparallel)) == (1,1), Rational{BigInt}(inv(θparallel)[1,1]), Matrix{Rational{BigInt}}(inv(θparallel)))
+            else
+                basis_inverse = ifelse(size(inv(θparallel)) == (1,1), Rational(inv(θparallel)[1,1]), Matrix{Rational}(inv(θparallel)))
+            end
+            vol_basis = Rational(det(θparallel))
+            if size(Q_reduced, 2) == 1
+                to_solve1D = Solver1D(10π, Float64.(vec(Q_reduced)), L_reduced[:, 2], L_reduced[:, 1], det_Q_tilde, phase_vector, flag_int, basis_inverse, vol_basis)
+                return one_dim_axion_solver(to_solve1D)
+                # return to_solve1D
+            else
+                to_solveND = SolverND(100_000, Float64.(Matrix(Q_reduced)), L_reduced[:, 2], L_reduced[:, 1], det_Q_tilde, phase_vector, flag_int, basis_inverse, vol_basis)
+                return multi_axion_solver(to_solveND)
+                # return to_solveND
+            end
+        end
+    else
+        return Int(abs(round(det(αtest.Qhat))))
+    end
+end
+
+function jlm_minimize_save(geom_idx::GeometryIndex)
+    min_data = jlm_minimize(geom_idx)
+    if isfile(minfile(geom_idx))
+        rm(minfile(geom_idx))
+    end
+    if typeof(min_data) <: Int
+        h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "w") do file
+            file["Nvac", deflate=9] = min_data
+        end
+    elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
+        h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "w") do file
+            file["Nvac", deflate = 9] = min_data.N_min
+            file["vac_coords", deflate = 9] = min_data.min_coords
+            file["extra_rows", deflate = 9] = min_data.extra_rows
+        end
+    end
+    return
+end
+
+function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
+	vac_square = []
+	vac_1D = []
+	vac_ND = []
+    no_vac = []
+    geom_list = []
+    if h11 === nothing
+        geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, 1:n])]
+    else
+        geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, paths_cy()[2][1, :] .== h11])]
+    end
+	for geom_idx in geom_list
+		# println(geom_idx)
+		if isfile(minfile(geom_idx))
+			vac_test = vacua_jlm(geom_idx)
+			if typeof(vac_test) <: Number
+				push!(vac_square, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test])
+			elseif typeof(vac_test) == Min_JLM_1D
+				push!(vac_1D, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows])
+			elseif typeof(vac_test) == Min_JLM_ND
+				push!(vac_ND, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows])
+			end
+        else
+            push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst])
+		end
+	end
+	return (square = vac_square, one_dim = vac_1D, n_dim = vac_ND, err = no_vac)
+end
+
 end
