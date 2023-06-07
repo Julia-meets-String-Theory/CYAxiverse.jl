@@ -71,6 +71,7 @@ struct Canonicalα
     Lhat ::Matrix{Float64}
     Lbar ::Matrix{Float64}
     α::Matrix{Rational}
+    α_complete::Matrix{Rational}
     αrowmask::Vector{Bool}
     αcolmask::Vector{Bool}
 end
@@ -78,6 +79,47 @@ end
 struct ReducedPotential
     αeff::Matrix{Rational}
     Lreduced::Matrix{Float64}
+end
+
+struct Solver1D
+    search_domain
+    Q::Vector
+    Llog::Vector
+    Lsign::Vector
+    det_QTilde
+    phases::Vector
+    Z
+    inv_symmetries
+    det_Sym
+end
+struct RationalQSNF
+    Tparallel::Matrix{Rational}
+    θparallel::Matrix{Rational}
+end
+
+struct SolverND
+    samples
+    Q::Matrix
+    Llog::Vector
+    Lsign::Vector
+    det_QTilde
+    phases::Vector
+    Z
+    inv_symmetries
+    det_Sym
+end
+
+struct Min_JLM_ND
+    N_min::Integer
+    min_coords::Matrix{Float64}
+    extra_rows::Integer
+end
+
+
+struct Min_JLM_1D
+    N_min::Integer
+    min_coords::Vector{Float64}
+    extra_rows::Integer
 end
 #######################
 # ParentTrackIterator #
