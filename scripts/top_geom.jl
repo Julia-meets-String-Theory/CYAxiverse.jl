@@ -122,7 +122,7 @@ GC.gc()
 ##############################
 ############ Main ############
 ##############################
-h11_init = 4
+h11_init = 1
 np = nworkers()
 h11_end = 96 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
 h11 = collect(h11_init:h11_init+h11_end)
@@ -153,7 +153,19 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
             h11 = shuffle(h11)
             tasks = length(h11) ÷ n_split
             h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
-            n = [ngeometries for _ in h11]
+            n = zeros(Int, 1)
+            for t in h11
+                if t == 1
+                    n = vcat(n..., minimum(ngeometries, 5))
+                elseif t == 2
+                    n = vcat(n..., minimum(ngeometries, 36))
+                elseif t == 3
+                    n = vcat(n..., minimum(ngeometries, 243))
+                elseif t ∉ [1, 2, 3]
+                    n = vcat(n..., ngeometries)
+                end
+            end
+            n = n[2:end]
             log_files_top = [lfile for _ in h11]
         end
     end
