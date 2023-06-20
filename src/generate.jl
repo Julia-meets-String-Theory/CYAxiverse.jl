@@ -1967,7 +1967,7 @@ function jlm_minimize(geom_idx::GeometryIndex)
     αtest = αmatrix(geom_idx; threshold=0.01)
     if typeof(αtest)<:Canonicalα
         Qtilde = LQtilde(geom_idx).Qtilde
-        det_Q_tilde = abs(round(det(Qtilde)))
+        det_Q_tilde = Int(abs(round(det(Qtilde))))
         n_axions = size(αtest.α[αtest.αrowmask, αtest.αcolmask], 1)
         Q_reduced = hcat(1//1 * I(n_axions), αtest.α_complete[αtest.αrowmask, αtest.αcolmask])'
         Q_reduced_temp = hcat(1//1 * I(n_axions), αtest.α[αtest.αrowmask, αtest.αcolmask])'
