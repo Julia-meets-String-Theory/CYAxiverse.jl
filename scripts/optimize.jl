@@ -45,7 +45,7 @@ end
         try
             res = CYAxiverse.generate.jlm_minimize_save(geom_idx)
             open(l, "a") do outf
-                write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
+                write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
             end
         catch e
             open(l, "a") do outf
