@@ -68,7 +68,7 @@ function __init__()
     def poly(points, backend=None):
         return Polytope(points,backend)
     """
-    
+
     py"""
     import cytools
     def version():
@@ -294,7 +294,11 @@ function geometries_generate(h11,cy,tri,cy_i=1)
     n,m = 1,1
     tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
     #Kinv at tip -- save this or save K?
-    Kinv = cy.compute_inverse_kahler_metric(tip)
+    if cytools_version() < "0.8.0"
+        Kinv = cy.compute_Kinv(tip)
+    else
+        Kinv = cy.compute_inverse_kahler_metric(tip)
+    end
     Kinv = Hermitian(1/2 * Kinv + Kinv')
     #Generate list of Q matrices -- only $h11+4 directions
     qprime = cy.toric_effective_cone().rays()
