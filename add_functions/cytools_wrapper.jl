@@ -129,7 +129,7 @@ function topologies_generate_fair(h11,n)
     tri_test = []
     tri_test_m = []
     #Generate list of $n polytopes at $h11
-    poly_test = fetch_polytopes(h11,4*n, lattice="N", as_list=true, favorable=true)
+    poly_test = fetch_polytopes(h11,8*n, lattice="N", as_list=true, favorable=true)
     #Locator for points of polytope for saving
     points = [p.points() for p in poly_test]
     #If number of polytopes < $n, generate more triangulations per polytope, 
