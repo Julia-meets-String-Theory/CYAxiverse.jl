@@ -68,13 +68,19 @@ function __init__()
     def poly(points, backend=None):
         return Polytope(points,backend)
     """
+    
+    py"""
+    import cytools
+    def version():
+        return cytools.version
+    """
 end
 
 fetch_polytopes(h11,limit; lattice="N",as_list=false,favorable=false) = py"f_polytopes(h11=$h11,limit=$limit, lattice=$lattice, as_list=$as_list, favorable=$favorable)"
 
 poly(points; backend=nothing) = py"poly($points, backend=$backend)"
 
-
+cytools_version() = py"version()"
 
 function topologies_generate_fast(h11,n)
     tri_test = []
@@ -288,7 +294,7 @@ function geometries_generate(h11,cy,tri,cy_i=1)
     n,m = 1,1
     tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
     #Kinv at tip -- save this or save K?
-    Kinv = cy.compute_Kinv(tip)
+    Kinv = cy.compute_inverse_kahler_metric(tip)
     Kinv = Hermitian(1/2 * Kinv + Kinv')
     #Generate list of Q matrices -- only $h11+4 directions
     qprime = cy.toric_effective_cone().rays()
