@@ -19,10 +19,6 @@ module cytools_wrapper
 using ..filestructure: data_dir, cyax_file, present_dir, np_path_generate
 using ..read: topology
 
-using Pkg
-ENV["PYTHON"] = "/home/cytools/cytools-venv//bin/python"
-Pkg.build("PyCall")
-
 using PyCall
 using HDF5
 using LinearAlgebra
