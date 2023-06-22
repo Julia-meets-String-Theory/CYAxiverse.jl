@@ -15,7 +15,7 @@ using TimerOutputs
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
-using ..jlm_python: one_dim_axion_solver, multi_axion_solver
+
 using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα, RationalQSNF, Solver1D, SolverND, Min_JLM_1D, Min_JLM_ND
 
 #################
@@ -1867,44 +1867,6 @@ function vacua_full(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::
     vacua_full(L, Q; threshold=threshold, phase=phase)
 end
 
-"""
-    vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
-
-Uses `LQtildebar` function to make Q̂.  If Q̂ is square, returns number of vacua as `|det(Q̂)|`
-otherwise returns number of vacua as `√|det(Q̂'Q̂)|`.
-"""
-function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
-    data = αmatrix(h11, tri, cy; threshold=threshold)
-    if size(data.Qhat, 1) == size(data.Qhat, 2)
-        vac = Int(round(abs(det(data.Qhat))))
-        return (vac = vac, issquare = 1)
-    else
-        vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
-        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - h11)
-    end
-end
-
-function vacua_estimate(geom_idx::GeometryIndex; threshold::Float64=0.5)
-    data = αmatrix(geom_idx; threshold=threshold)
-    if size(data.Qhat, 1) == size(data.Qhat, 2)
-        vac = Int(round(abs(det(data.Qhat))))
-        return (vac = vac, issquare = 1)
-    else
-        vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
-        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - geom_idx.h11)
-    end
-end
-
-function vacua_estimate_save(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
-    vac_data = vacua_estimate(h11, tri, cy; threshold=threshold)
-    h5open(joinpath(geom_dir_read(h11,tri,cy),"qshape.h5"), "cw") do f
-        f["square", deflate=9] = vac_data.issquare
-        f["vacua_estimate", deflate=9] = vac_data.vac
-        if vac_data.issquare == 0
-            f["extra_rows", deflate=9] = vac_data.extrarows
-        end
-    end
-end
 
 """
     vacua_no_optim(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)))
@@ -1958,76 +1920,7 @@ function phase(h11, α::Canonicalα)
 	phase_vector::Vector = vec([phase_vector' * α.:α_complete]...)
 end
 
-"""
-    jlm_minimize(geom_idx::GeometryIndex)
 
-If the effective instanton charge matrix, `Q`, is not square, this function will compute the number of vacua in the potential using the methods outlined in `arXiv: 2306.XXXXX`.
-"""
-function jlm_minimize(geom_idx::GeometryIndex)
-    αtest = αmatrix(geom_idx; threshold=0.01)
-    if typeof(αtest)<:Canonicalα
-        Qtilde = LQtilde(geom_idx).Qtilde
-        det_Q_tilde = Int(abs(round(det(Qtilde))))
-        n_axions = size(αtest.α[αtest.αrowmask, αtest.αcolmask], 1)
-        Q_reduced = hcat(1//1 * I(n_axions), αtest.α_complete[αtest.αrowmask, αtest.αcolmask])'
-        Q_reduced_temp = hcat(1//1 * I(n_axions), αtest.α[αtest.αrowmask, αtest.αcolmask])'
-        for (i,row) in enumerate(eachrow(Q_reduced[n_axions+1:end, :]))
-            if sum(abs.(row) .== 0) == (size(row, 1) - 1)
-                Q_reduced_temp[n_axions+i, :] .= 0
-            end
-        end
-        Qrowmask = [any(row .!= 0) for row in eachrow(Q_reduced_temp)]
-        Q_reduced_temp = Q_reduced_temp[Qrowmask, :]
-        if size(Q_reduced_temp, 1) == size(Q_reduced_temp, 2)
-            return det_Q_tilde
-        else
-            phase_vector = phase(geom_idx.h11, αtest)
-            L_reduced = Matrix(hcat(αtest.Lhat[:, 1:geom_idx.h11][:, αtest.αrowmask], αtest.Lhat[:, geom_idx.h11+1:end][:, αtest.αcolmask])')
-            # L_reduced = L_reduced[Qrowmask, :]
-            flag_int = ifelse(maximum(denominator.(Matrix(Q_reduced))) == 1, 1, 0)
-            αrescaled = Matrix{Integer}(det_Q_tilde .* Matrix(Q_reduced))
-            θparallel = vacua_SNF(αrescaled).:θparallel .* Rational(det_Q_tilde)
-            basis_inverse = []
-            if abs(maximum(denominator.(θparallel)) * maximum(numerator.(abs.(θparallel)))) > 2^60
-                θparallel::Matrix{Rational{BigInt}} = θparallel
-                basis_inverse = ifelse(size(inv(θparallel)) == (1,1), Rational{BigInt}(inv(θparallel)[1,1]), Matrix{Rational{BigInt}}(inv(θparallel)))
-            else
-                basis_inverse = ifelse(size(inv(θparallel)) == (1,1), Rational(inv(θparallel)[1,1]), Matrix{Rational}(inv(θparallel)))
-            end
-            vol_basis = Rational(det(θparallel))
-            if size(Q_reduced, 2) == 1
-                to_solve1D = Solver1D(10π, Float64.(vec(Q_reduced)), L_reduced[:, 2], L_reduced[:, 1], det_Q_tilde, phase_vector, flag_int, basis_inverse, vol_basis)
-                return one_dim_axion_solver(to_solve1D)
-                # return to_solve1D
-            else
-                to_solveND = SolverND(100_000, Float64.(Matrix(Q_reduced)), L_reduced[:, 2], L_reduced[:, 1], det_Q_tilde, phase_vector, flag_int, basis_inverse, vol_basis)
-                return multi_axion_solver(to_solveND)
-                # return to_solveND
-            end
-        end
-    else
-        return Int(abs(round(det(αtest.Qhat))))
-    end
-end
-
-function jlm_minimize_save(geom_idx::GeometryIndex)
-    min_data = jlm_minimize(geom_idx)
-    if isfile(minfile(geom_idx))
-        rm(minfile(geom_idx))
-    end
-    if typeof(min_data) <: Int
-        h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "w") do file
-            file["Nvac", deflate=9] = min_data
-        end
-    elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
-        h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "w") do file
-            file["Nvac", deflate = 9] = min_data.N_min
-            file["vac_coords", deflate = 9] = min_data.min_coords
-            file["extra_rows", deflate = 9] = min_data.extra_rows
-        end
-    end
-    return
-end
 
 function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
 	vac_square = []
@@ -2056,6 +1949,44 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
 		end
 	end
 	return (square = vac_square, one_dim = vac_1D, n_dim = vac_ND, err = no_vac)
+end
+
+"""
+    vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+
+Uses `LQtildebar` function to make Q̂.  If Q̂ is square, returns number of vacua as `|det(Q̂)|`
+otherwise returns number of vacua as `√|det(Q̂'Q̂)|`.
+"""
+function vacua_estimate(geom_idx::GeometryIndex; threshold::Float64=0.5)
+    data = αmatrix(geom_idx; threshold=threshold)
+    if size(data.Qhat, 1) == size(data.Qhat, 2)
+        vac = Int(round(abs(det(data.Qhat))))
+        return (vac = vac, issquare = 1)
+    else
+        vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
+        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - geom_idx.h11)
+    end
+end
+
+function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+    geom_idx = GeometryIndex(h11, tri, cy)
+    vacua_estimate(geom_idx; threshold)
+end
+
+function vacua_estimate_save(geom_idx::GeometryIndex; threshold::Float64=0.5)
+    vac_data = vacua_estimate(geom_idx; threshold=threshold)
+    h5open(joinpath(geom_dir_read(geom_idx),"qshape.h5"), "cw") do f
+        f["square", deflate=9] = vac_data.issquare
+        f["vacua_estimate", deflate=9] = vac_data.vac
+        if vac_data.issquare == 0
+            f["extra_rows", deflate=9] = vac_data.extrarows
+        end
+    end
+end
+
+function vacua_estimate_save(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+    geom_idx = GeometryIndex(h11, tri, cy)
+    vacua_estimate_save(geom_idx; threshold)
 end
 
 end
