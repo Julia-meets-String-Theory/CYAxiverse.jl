@@ -43,12 +43,16 @@ end
 end
 
 
-@everywhere function main_Qshape(h11, tri, cy, l)
+@everywhere function main_Qshape(geom_idx::CYAxiverse.structs.GeometryIndex, l)
     threshold = 1e-2
-    if isfile(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"))
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
+    if isfile(joinpath(CYAxiverse.filestructure.geom_dir(geom_idx),"qshape.h5"))
+        rm(joinpath(CYAxiverse.filestructure.geom_dir(geom_idx),"qshape.h5"))
+        main_Qshape(geom_idx, l)
     else
+        if isfile(CYAxiverse.filestructure.minfile(geom_idx))
         try
-            CYAxiverse.generate.vacua_estimate_save(h11, tri, cy; threshold=threshold)
+            CYAxiverse.generate.vacua_estimate_save(geom_idx; threshold=threshold)
         catch e
             open(l, "a") do outf
                 write(outf,string(stacktrace(catch_backtrace()),"--(",h11,",",tri,",",cy,")\n"))
