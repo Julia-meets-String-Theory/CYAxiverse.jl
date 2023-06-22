@@ -14,6 +14,7 @@ include("structs.jl")
 include("filestructure.jl")
 include("read.jl")
 include("minimizer.jl")
+include("generate.jl")
 
 include("../add_functions/profiling.jl")
 if haskey(ENV, "SINGULARITY_CONTAINER")
@@ -25,9 +26,9 @@ else
     println("This installation does not include CYTools!")
     include("init_python.jl")
     include("../jlm_python/jlm_python.jl")
+    include("jlm_minimizer.jl")
 end
 
-include("generate.jl")
 include("plotting.jl")
 
 if haskey(ENV, "SLURM_JOB_ID")
