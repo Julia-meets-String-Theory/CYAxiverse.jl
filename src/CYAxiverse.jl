@@ -9,22 +9,21 @@ if haskey(ENV,"newARGS")
 else
     println("Please specify where to read/write data, currently using pwd!")
 end
-include("structs.jl")
 
+include("structs.jl")
 include("filestructure.jl")
 include("read.jl")
 include("minimizer.jl")
 include("generate.jl")
 
 include("../add_functions/profiling.jl")
+include("init_python.jl")
 if haskey(ENV, "SINGULARITY_CONTAINER")
     if occursin("CYTools",ENV["SINGULARITY_CONTAINER"])
         include("../add_functions/cytools_wrapper.jl")
     end
-
 else
     println("This installation does not include CYTools!")
-    include("init_python.jl")
     include("../jlm_python/jlm_python.jl")
     include("jlm_minimizer.jl")
 end
