@@ -1,4 +1,5 @@
 using Pkg
+
 if haskey(ENV, "PYTHON")
     if ENV["PYTHON"] == "/home/cytools/cytools-venv//bin/python"
         using PyCall
@@ -10,7 +11,7 @@ if haskey(ENV, "PYTHON")
         if PyCall.current_python() != ENV["PYTHON"]
             Pkg.build("PyCall")
         end
-    else
-        error("Please set ENV['PYTHON'] with your PYTHONPATH")
     end
+else
+    error("Please set PYTHON with your PYTHONPATH")
 end
