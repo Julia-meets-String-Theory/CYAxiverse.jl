@@ -19,7 +19,7 @@ RUN apt-get -yqq install autoconf build-essential nano cmake libgmp-dev libcgal-
                          libmpc-dev libsuitesparse-dev libppl-dev libeigen3-dev\
                          libc6 libcdd0d libgmp10 libgmpxx4ldbl libstdc++6 palp\
                          libflint-dev libflint-arb-dev python3 python3-pip curl\
-                         wget libmath-libm-perl python3-venv normaliz libqsopt-ex2
+                         wget libmath-libm-perl python3-venv normaliz libqsopt-ex2 git
 
 # Make a soft link to the arb library and flint headers so that python-flint can install
 RUN ln -s /usr/lib/${AARCH}-linux-gnu/libflint-arb.so /usr/lib/${AARCH}-linux-gnu/libarb.so
@@ -52,6 +52,7 @@ WORKDIR /opt/cytools/
 COPY ./requirements.txt /opt/cytools/requirements.txt
 RUN pip3 install -r requirements.txt
 RUN pip3 install python-flint==0.3.0
+RUN pip3 install julia
 RUN pip3 install -f https://download.mosek.com/stable/wheel/index.html Mosek
 ENV MOSEKLM_LICENSE_FILE=/home/$USERNAME/mounted_volume/mosek/mosek.lic
 
@@ -111,7 +112,7 @@ WORKDIR /home/$USERNAME/mounted_volume
 
 # Start jupyter lab by default
 USER $USERNAME
-USER $USERNAME
+
 ENV JULIA_REVISE_POLL=1
 EXPOSE 8996
 ENV newARGS="docker"
