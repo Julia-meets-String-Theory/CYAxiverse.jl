@@ -5,7 +5,7 @@ Here we define functions related to JLM's python minimization methods
 """
 module jlm_minimizer
 using HDF5
-using LinearAlgebra
+using LinearAlgebra, Distributions
 using GenericLinearAlgebra
 
 using ..jlm_python: one_dim_axion_solver, multi_axion_solver
@@ -69,7 +69,7 @@ function minimize(geom_idx::GeometryIndex; random_phase=false)
 end
 
 function minimize_save(geom_idx::GeometryIndex; random_phase=false)
-    min_data = jlm_minimize(geom_idx; random_phase=random_phase)
+    min_data = minimize(geom_idx; random_phase=random_phase)
     if isfile(minfile(geom_idx))
         rm(minfile(geom_idx))
     end
