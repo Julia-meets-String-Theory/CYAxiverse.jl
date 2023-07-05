@@ -1930,6 +1930,8 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
     geom_list = []
     if h11 === nothing
         geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, 1:n])]
+    elseif h11 !== nothing && n != size(paths_cy()[2], 2)
+        geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, paths_cy()[2][1, :] .== h11][:, 1:n])]
     else
         geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, paths_cy()[2][1, :] .== h11])]
     end
