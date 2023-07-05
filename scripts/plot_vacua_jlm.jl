@@ -33,7 +33,7 @@ end
     pmap(main, n100_temp, h11_temp)
 end
 @time begin
-    vac_data = pmap(main, n100_temp, collect(4:40))
+    vac_data = pmap(main, [100 for _ in 4:40], collect(4:40))
 end
 vac_square = hcat(vcat([item.square for item in vac_data]...)...)
 vac_1D = Int.(hcat(vcat([item.one_dim for item in vac_data]...)...)[1:4, :])
