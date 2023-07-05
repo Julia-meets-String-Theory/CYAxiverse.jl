@@ -25,7 +25,7 @@ ENV["newARGS"] = string("vacua_0323")
 end
 
 @everywhere function optim_with_phases(geom_idx::CYAxiverse.structs.GeometryIndex, random_phase)
-    CYAxiverse.jlm_minimizer.minimize_save(geom_idx, random_phase)
+    CYAxiverse.jlm_minimizer.minimize_save(geom_idx; random_phase = random_phase)
 end
 h11_temp = [4, 5, 6]
 n10_temp = [10 for _ in 1:size(h11_temp, 1)]
@@ -66,6 +66,7 @@ println(size(no_vacua))
 GC.gc()
 @time large_vac = hcat([CYAxiverse.structs.GeometryIndex(item[1:3]...) for item in eachcol(all_vacua) if item[4] > 100])
 println(size(large_vac))
+println(large_vac)
 random_phases = [true for _ in eachcol(large_vac)]
 @time begin
     pmap(optim_with_phases, large_vac, random_phases)
