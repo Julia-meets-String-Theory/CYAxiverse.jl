@@ -87,7 +87,8 @@ geom_params = shuffle!(geom_params)
 ##################################
 ##### Missing geoms ##############
 ##################################
-geom_params = geom_params[end-6_000:end, :]
+# geom_params = geom_params[end-6_000:end, :]
+##################################
 ntasks = size(geom_params,1)
 size_procs = size(np)
 logfiles = [lfile for _=1:ntasks]
