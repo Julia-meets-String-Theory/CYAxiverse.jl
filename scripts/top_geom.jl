@@ -181,7 +181,7 @@ log_files_top = run_vars.log_files
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11), "topologies to run.\n"))
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("These are ", h11, "\n"))
 @time begin
-    h11cylist = pmap(main_top_fair,h11,n,log_files_top)
+    h11cylist = pmap(main_top,h11,n,log_files_top)
 end
 
 h11cylist = hcat(h11cylist...)[:, hcat(h11cylist...)[1,:] .!= 0]
