@@ -4,6 +4,9 @@ Here we define functions related to JLM's python minimization methods
 
 """
 module jlm_minimizer
+using HDF5
+using LinearAlgebra
+using GenericLinearAlgebra
 
 using ..jlm_python: one_dim_axion_solver, multi_axion_solver
 using ..generate: αmatrix, LQtilde, phase, vacua_SNF
@@ -15,7 +18,7 @@ using ..structs: GeometryIndex, Canonicalα, Solver1D, SolverND
 
 If the effective instanton charge matrix, `Q`, is not square, this function will compute the number of vacua in the potential using the methods outlined in `arXiv: 2306.XXXXX`.
 """
-function minimize(geom_idx::GeometryIndex)
+function minimize(geom_idx::GeometryIndex; random_phase=false)
     αtest = αmatrix(geom_idx; threshold=0.01)
     if typeof(αtest)<:Canonicalα
         Qtilde = LQtilde(geom_idx).Qtilde
@@ -34,6 +37,9 @@ function minimize(geom_idx::GeometryIndex)
             return det_Q_tilde
         else
             phase_vector = phase(geom_idx.h11, αtest)
+            if random_phase
+                phase_vector = mod.(phase_vector .+ rand(Uniform(0, 2π), size(phase_vector, 1)), 2π)
+            end
             L_reduced = Matrix(hcat(αtest.Lhat[:, 1:geom_idx.h11][:, αtest.αrowmask], αtest.Lhat[:, geom_idx.h11+1:end][:, αtest.αcolmask])')
             # L_reduced = L_reduced[Qrowmask, :]
             flag_int = ifelse(maximum(denominator.(Matrix(Q_reduced))) == 1, 1, 0)
@@ -62,8 +68,8 @@ function minimize(geom_idx::GeometryIndex)
     end
 end
 
-function minimize_save(geom_idx::GeometryIndex)
-    min_data = jlm_minimize(geom_idx)
+function minimize_save(geom_idx::GeometryIndex; random_phase=false)
+    min_data = jlm_minimize(geom_idx; random_phase=random_phase)
     if isfile(minfile(geom_idx))
         rm(minfile(geom_idx))
     end
