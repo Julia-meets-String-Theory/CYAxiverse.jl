@@ -37,7 +37,7 @@ end
     pmap(main, n100_temp, h11_temp)
 end
 @time begin
-    vac_data = pmap(main, n100_temp, collect(4:40))
+    vac_data = pmap(main, [100 for _ in 4:40], collect(4:40))
 end
 vac_square = hcat(vcat([item.square for item in vac_data]...)...)
 vac_1D = Int.(hcat(vcat([item.one_dim for item in vac_data]...)...)[1:4, :])
@@ -47,7 +47,7 @@ vac_ND = hcat([item for item in eachcol(vac_ND) if item[4] !=0]...)
 all_vacua = hcat(vac_square, vac_1D, vac_ND)
 println(size(all_vacua))
 println(size(no_vacua))
-
+GC.gc()
 h11list = vcat(collect(4:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 376, 377, 386, 387, 399, 404, 416, 433, 462, 491])
 n_full = size(CYAxiverse.filestructure.paths_cy()[2], 2)
 n_list = [n_full for _ in 1:size(h11list, 1)]
@@ -63,6 +63,7 @@ all_vacua = hcat(vac_square, vac_1D, vac_ND)
 
 println(size(all_vacua))
 println(size(no_vacua))
+GC.gc()
 @time large_vac = hcat([CYAxiverse.structs.GeometryIndex(item[1:3]...) for item in eachcol(all_vacua) if item[4] > 100])
 println(size(large_vac))
 random_phases = [true for _ in eachcol(large_vac)]
