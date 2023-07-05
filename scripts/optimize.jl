@@ -31,7 +31,7 @@ end
         if Nvac == 0
             rm(CYAxiverse.filestructure.minfile(geom_idx))
             try
-                res = CYAxiverse.generate.jlm_minimize_save(geom_idx)
+                res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
                 open(l, "a") do outf
                     write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
                 end
@@ -43,7 +43,7 @@ end
         end
     else
         try
-            res = CYAxiverse.generate.jlm_minimize_save(geom_idx)
+            res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
             open(l, "a") do outf
                 write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
             end
@@ -83,6 +83,11 @@ h11list = CYAxiverse.filestructure.paths_cy()[2]
 h11list = h11list[:, h11list[1, :] .!= 491]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
 geom_params = shuffle!(geom_params)
+
+##################################
+##### Missing geoms ##############
+##################################
+geom_params = geom_params[:, end-6_000:end]
 ntasks = size(geom_params,1)
 size_procs = size(np)
 logfiles = [lfile for _=1:ntasks]
@@ -90,7 +95,7 @@ logfiles = [lfile for _=1:ntasks]
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
 
 @time begin
-    res = pmap(main,geom_params, logfiles)
+    res = pmap(main, geom_params, logfiles)
 end
 
 GC.gc()

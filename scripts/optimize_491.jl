@@ -31,7 +31,7 @@ end
         if Nvac == 0
             rm(CYAxiverse.filestructure.minfile(geom_idx))
             try
-                res = CYAxiverse.generate.jlm_minimize_save(geom_idx)
+                res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
                 open(l, "a") do outf
                     write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
                 end
@@ -43,7 +43,7 @@ end
         end
     else
         try
-            res = CYAxiverse.generate.jlm_minimize_save(geom_idx)
+            res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
             open(l, "a") do outf
                 write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
             end
