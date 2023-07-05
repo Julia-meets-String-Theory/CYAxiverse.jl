@@ -5,7 +5,7 @@ module plotting
 
 using ..filestructure: plots_dir, count_geometries, paths_cy
 using ..generate: jlm_vacua_db
-using CairoMakie
+using CairoMakie, ColorSchemes
 
 
 """
@@ -59,12 +59,20 @@ function vacua_db_jlm_box(vacua_db::NamedTuple)
     size_inches = (16, 12)
 	size_pt = 72 .* size_inches
     f = Figure(resolution = size_pt, fontsize=22)
-    kwargs = (; xticklabelfont = "Utopia", yticklabelfont = "Utopia", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true)
-    ax1 = Axis(f[1, 1]; xticks = [4, 50, 100, 200, 300, 400, 491], xminorticks = IntervalsBetween(5), kwargs...)
+    kwargs = (; xticklabelfont = "Utopia", yticklabelfont = "Utopia", xlabel =L"$h^{1,1}$", ylabel =  L"$N_{\!\!\mathrm{vacua}}$", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true)
+    ax1 = Axis(f[1, 1]; xticks = [4, 50, 100, 200, 300, 400, 491], kwargs...)
     CairoMakie.boxplot!(ax1, vacua_full[1, :], vacua_full[end, :], marker = :xcross, markersize = 10)
-    Label(f[1:end, 0], L"$N_\mathrm{vacua}$", rotation = π/2)
-    Label(f[end+1, 1:end], L"$h^{1,1}$")
     save(joinpath(plots_dir(), "N_vac_KS_box.pdf"), f, pt_per_unit = 1)
 end
 
+function vacua_db_jlm_box(square::Matrix, one_dim::Matrix, n_dim::Matrix)
+	vacua_full = sortslices(hcat(square, one_dim, n_dim[1:4, :]), dims = 2, by=x->x[2])
+    size_inches = (16, 12)
+	size_pt = 72 .* size_inches
+    f = Figure(resolution = size_pt, fontsize=22)
+    kwargs = (; xticklabelfont = "Utopia", yticklabelfont = "Utopia", xlabel =L"$h^{1,1}$", ylabel =  L"$N_{\!\!\mathrm{vacua}}$", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true)
+    ax1 = Axis(f[1, 1]; xticks = [4, 50, 100, 200, 300, 400, 491], kwargs...)
+    CairoMakie.boxplot!(ax1, vacua_full[1, :], vacua_full[end, :], marker = :xcross, markersize = 10, colormap = :bam10, color = vacua_full[1, :])
+    save(joinpath(plots_dir(), "N_vac_KS_box.pdf"), f, pt_per_unit = 1)
+end
 end
