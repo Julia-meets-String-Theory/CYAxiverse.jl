@@ -10,16 +10,16 @@ using GenericLinearAlgebra
 
 using ..jlm_python: one_dim_axion_solver, multi_axion_solver
 using ..generate: αmatrix, LQtilde, phase, vacua_SNF
-
-using ..structs: GeometryIndex, Canonicalα, Solver1D, SolverND
+using ..filestructure: minfile, paths_cy
+using ..structs: GeometryIndex, Canonicalα, Solver1D, SolverND, Min_JLM_1D, Min_JLM_ND
 
 """
     jlm_minimize(geom_idx::GeometryIndex)
 
 If the effective instanton charge matrix, `Q`, is not square, this function will compute the number of vacua in the potential using the methods outlined in `arXiv: 2306.XXXXX`.
 """
-function minimize(geom_idx::GeometryIndex; random_phase=false)
-    αtest = αmatrix(geom_idx; threshold=0.01)
+function minimize(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01)
+    αtest = αmatrix(geom_idx; threshold=threshold)
     if typeof(αtest)<:Canonicalα
         Qtilde = LQtilde(geom_idx).Qtilde
         det_Q_tilde = Int(abs(round(det(Qtilde))))
@@ -68,8 +68,8 @@ function minimize(geom_idx::GeometryIndex; random_phase=false)
     end
 end
 
-function minimize_save(geom_idx::GeometryIndex; random_phase=false)
-    min_data = minimize(geom_idx; random_phase=random_phase)
+function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01)
+    min_data = minimize(geom_idx; random_phase=random_phase, threshold = threshold)
     if isfile(minfile(geom_idx))
         rm(minfile(geom_idx))
     end
