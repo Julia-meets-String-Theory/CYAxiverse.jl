@@ -1947,7 +1947,7 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
 				push!(vac_ND, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows])
 			end
         else
-            push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst])
+            push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, 0])
 		end
 	end
 	return (square = vac_square, one_dim = vac_1D, n_dim = vac_ND, err = no_vac)
