@@ -64,7 +64,17 @@ all_vacua = hcat(vac_square, vac_1D, vac_ND)
 println(size(all_vacua))
 println(size(no_vacua))
 GC.gc()
-@time large_vac = hcat([CYAxiverse.structs.GeometryIndex(item[1:3]...) for item in eachcol(all_vacua) if item[4] > 100])
+@time begin
+    large_vac = []
+    for item in eachcol(hcat(no_vacua, vac_1D, vac_ND))
+        if item[4] > 20
+            push!(large_vac, CYAxiverse.structs.GeometryIndex(item[1:3]...))
+        elseif item[4] == 0
+            push!(large_vac, CYAxiverse.structs.GeometryIndex(item[1:3]...))
+        end
+    end
+    large_vac = hcat(large_vac...)
+end
 println(size(large_vac))
 println(large_vac)
 random_phases = [true for _ in eachcol(large_vac)]
