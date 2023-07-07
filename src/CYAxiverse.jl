@@ -5,6 +5,7 @@ A Julia package for computing axion/ALP spectra and statistics using geometric d
 """
 module CYAxiverse
 
+include("init_python.jl")
 if haskey(ENV,"newARGS")
 else
     println("Please specify where to read/write data, currently using pwd!")
@@ -17,7 +18,6 @@ include("minimizer.jl")
 include("generate.jl")
 
 include("../add_functions/profiling.jl")
-include("init_python.jl")
 if haskey(ENV, "SINGULARITY_CONTAINER")
     if occursin("CYTools",ENV["SINGULARITY_CONTAINER"])
         include("../add_functions/cytools_wrapper.jl")
