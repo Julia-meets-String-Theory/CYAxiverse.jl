@@ -56,12 +56,14 @@ end
 vac_square = hcat(vcat([item.square for item in vac_data]...)...)
 vac_1D = Int.(hcat(vcat([item.one_dim for item in vac_data]...)...)[1:4, :])
 vac_ND = Int.(hcat(vcat([item.n_dim for item in vac_data]...)...)[1:4, :])
-no_vacua = hcat(vcat([item.err for item in vac_data]...)..., [item for item in eachcol(vac_ND) if item[4] == 0]...)
+err_vacua = hcat(vcat([item.err for item in vac_data]...)...), 
+no_vacua = hcat([item for item in eachcol(vac_ND) if item[4] == 0]...)
 vac_ND = hcat([item for item in eachcol(vac_ND) if item[4] !=0]...)
 all_vacua = hcat(vac_square, vac_1D, vac_ND)
 large_vacua = all_vacua[:, all_vacua[4, :] .> 100]
 println(size(all_vacua))
+println(size(err_vacua))
 println(size(no_vacua))
 println(size(large_vacua))
 GC.gc()
-@time CYAxiverse.plotting.vacua_db_jlm_box(vac_square[:, vac_square[4, :] .< 100], vac_1D[:, vac_1D[4, :] .< 100], vac_ND[:, vac_ND[4, :] .< 100])
+@time CYAxiverse.plotting.vacua_db_jlm_box(vac_square, vac_1D, vac_ND)
