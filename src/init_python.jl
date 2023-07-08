@@ -2,7 +2,7 @@ using Pkg
 
 if haskey(ENV, "PYTHON")
     println("Your current PYTHON is $(ENV["PYTHON"])")
-    if ENV["PYTHON"] == "/home/cytools/cytools-venv//bin/python3"
+    if occursin("cytools", ENV["PYTHON"])
         try 
             using PyCall
             if PyCall.current_python() != ENV["PYTHON"]
@@ -13,7 +13,7 @@ if haskey(ENV, "PYTHON")
             Pkg.build("PyCall")
             println("PyCall.jl has been built using $(ENV["PYTHON"])")
         end
-    elseif ENV["PYTHON"] == "/scratch/users/mehta2/cyaxiverse_python/bin/python"
+    else
         try 
             using PyCall
             if PyCall.current_python() != ENV["PYTHON"]
