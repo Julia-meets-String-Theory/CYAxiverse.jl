@@ -67,6 +67,7 @@ function vacua_db_jlm_box(square::Matrix, one_dim::Matrix, n_dim::Matrix)
     for item in sort(collect(Set(vacua_full[1, :])))
         CairoMakie.boxplot!(ax1, vacua_full[1, vacua_full[1, :] .== item], vacua_full[end, vacua_full[1, :] .== item], orientation = :horizontal, marker = :xcross, markersize = 10, whiskerwidth = 0.75, width = 0.9)
     end
+    ylims!(ax1, 1, 494)
     save(joinpath(plots_dir(), "N_vac_KS_box.pdf"), f, pt_per_unit = 1)
 end
 
