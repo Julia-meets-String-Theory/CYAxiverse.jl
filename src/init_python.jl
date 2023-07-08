@@ -2,7 +2,7 @@ using Pkg
 
 if haskey(ENV, "PYTHON")
     println("Your current PYTHON is $(ENV["PYTHON"])")
-    if ENV["PYTHON"] == "/home/cytools/cytools-venv//bin/python"
+    if ENV["PYTHON"] == "/home/cytools/cytools-venv//bin/python3"
         try 
             using PyCall
             if PyCall.current_python() != ENV["PYTHON"]
