@@ -58,17 +58,45 @@ TBW
 """
 function vacua_db_jlm_box(square::Matrix, one_dim::Matrix, n_dim::Matrix)
 	vacua_full = sortslices(hcat(square, one_dim, n_dim[1:4, :]), dims = 2, by=x->x[2])
+    h11list = collect(Set(vacua_full[1, :]))
+    max_h11 = min(400, maximum(h11list))
+    min_h11 = minimum(h11list)
     size_inches = (36, 48)
 	size_pt = 72 .* size_inches
-    colors = resample_cmap(:twilight, size(collect(Set(vacua_full[1,:])), 1))
+    colors = resample_cmap(:twilight, size(sort(h11list), 1))
     f = Figure(resolution = size_pt, fontsize=48)
-    kwargs = (; xticklabelfont = "STIX", yticklabelfont = "STIX", ylabel =L"$h^{1,1}$", xlabel =  L"$\mathcal{N}_{\!\!\mathrm{vac}}$", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true, xlabelsize = 60, ylabelsize = 60, yminorticks = IntervalsBetween(5), palette = (; patchcolor = colors))
-    ax1 = Axis(f[1, 1]; xticks = [4, 50, 100, 200, 300, 400, 491], kwargs...)
-    for item in sort(collect(Set(vacua_full[1, :])))
-        CairoMakie.boxplot!(ax1, vacua_full[1, vacua_full[1, :] .== item], vacua_full[end, vacua_full[1, :] .== item], orientation = :horizontal, marker = :xcross, markersize = 10, whiskerwidth = 0.75, width = 0.9)
+    kwargs1 = (; xticklabelfont = "STIX", yticklabelfont = "STIX", ylabel =L"$h^{1,1}$", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true, xlabelsize = 60, ylabelsize = 60, yminorticks = IntervalsBetween(5), palette = (; patchcolor = colors[1:size(h11list[h11list .<= floor(max_h11 / 4)], 1)]))
+    kwargs2 = (; xticklabelfont = "STIX", yticklabelfont = "STIX", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true, xlabelsize = 60, ylabelsize = 60, yminorticks = IntervalsBetween(5), palette = (; patchcolor = colors[size(h11list[h11list .<= floor(max_h11 / 4)], 1)+1:size(h11list[h11list .<= floor(max_h11 / 2)], 1)]))
+    kwargs3 = (; xticklabelfont = "STIX", yticklabelfont = "STIX", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true, xlabelsize = 60, ylabelsize = 60, yminorticks = IntervalsBetween(5), palette = (; patchcolor = colors[size(h11list[h11list .<= floor(max_h11 / 2)], 1)+1:size(h11list[h11list .<= floor(3*max_h11 / 4)], 1)]))
+    kwargs4 = (; xticklabelfont = "STIX", yticklabelfont = "STIX", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true, xlabelsize = 60, ylabelsize = 60, yminorticks = IntervalsBetween(5), palette = (; patchcolor = colors[size(h11list[h11list .<= floor(3*max_h11 / 4)], 1)+1 : end]))
+    ax1 = Axis(f[1, 1]; yticks = [4, 50, 100], kwargs1...)
+    ax2 = Axis(f[1, 2]; yticks = [100, 150, 200], kwargs2...)
+    ax3 = Axis(f[1, 3]; yticks = [200, 250, 300], kwargs3...)
+    ax4 = Axis(f[1, 4]; yticks = [300, 350, 400, 491], kwargs4...)
+    for item in sort(h11list[h11list .<= floor(max_h11 / 4)])
+        CairoMakie.boxplot!(ax1, vacua_full[1, vacua_full[1, :] .== item], vacua_full[end, vacua_full[1, :] .== item], marker = :xcross, markersize = 10, whiskerwidth = 0.75, width = 0.9, orientation = :horizontal)
     end
-    ylims!(ax1, 1, 494)
+    for item in sort(h11list[floor(max_h11 / 4) .< h11list .<= floor(max_h11 / 2)])
+    	CairoMakie.boxplot!(ax2, vacua_full[1, vacua_full[1, :] .== item], vacua_full[end, vacua_full[1, :] .== item], marker = :xcross, markersize = 10, whiskerwidth = 0.75, width = 0.9, orientation = :horizontal)
+	end
+    for item in sort(h11list[floor(max_h11 / 2) .< h11list .<= floor(3*max_h11 / 4)])
+        CairoMakie.boxplot!(ax3, vacua_full[1, vacua_full[1, :] .== item], vacua_full[end, vacua_full[1, :] .== item], marker = :xcross, markersize = 10, whiskerwidth = 0.75, width = 0.9, orientation = :horizontal)
+    end
+    for item in sort(h11list[floor(3*max_h11 / 4) .< h11list])
+        CairoMakie.boxplot!(ax4, vacua_full[1, vacua_full[1, :] .== item], vacua_full[end, vacua_full[1, :] .== item], marker = :xcross, markersize = 10, whiskerwidth = 0.75, width = 0.9, orientation = :horizontal)
+    end
+    Colorbar(f[1:end, 0], limits=(4, maximum(h11list)), colormap = :twilight, ticklabelfont = "STIX", ticks = [4, collect(50:50:400)..., 491], nsteps = size(h11list, 1), label=L"$h^{1,1}$", flipaxis=false)
+	Label(f[end+1, :],  L"$\mathcal{N}_{\!\!\mathrm{vac}}$")
+	# Label(f[:, 0], L"$h^{1,1}$", rotation = π/2)
+	for ax in [ax1, ax2, ax3, ax4]
+		hideydecorations!(ax)
+	end
+    # ylims!(ax1, 1, maximum(h11list[h11list .<= floor(max_h11 / 4)])+3)
+    # ylims!(ax2, minimum(h11list[floor(max_h11 / 4) .< h11list .<= floor(max_h11 / 2)]) - 3, maximum(h11list[floor(max_h11 / 4) .< h11list .<= floor(max_h11 / 2)])+3)
+    # ylims!(ax3, minimum(h11list[floor(max_h11 / 2) .< h11list .<= floor(3*max_h11 / 4)]) - 3, maximum(h11list[floor(max_h11 / 2) .< h11list .<= floor(3*max_h11 / 4)])+3)
+    # ylims!(ax4, minimum(h11list[floor(3*max_h11 / 4) .< h11list]) - 3, maximum(h11list[floor(3*max_h11 / 4) .< h11list])+3)
     save(joinpath(plots_dir(), "N_vac_KS_box.pdf"), f, pt_per_unit = 1)
+    # f
 end
 
 function vacua_db_jlm_box(vacua_db::NamedTuple)
