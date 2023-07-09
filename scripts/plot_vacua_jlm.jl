@@ -56,7 +56,7 @@ end
 vac_square = hcat(vcat([item.square for item in vac_data]...)...)
 vac_1D = Int.(hcat(vcat([item.one_dim for item in vac_data]...)...)[1:4, :])
 vac_ND = Int.(hcat(vcat([item.n_dim for item in vac_data]...)...)[1:4, :])
-err_vacua = hcat(vcat([item.err for item in vac_data]...)...), 
+err_vacua = Int.(hcat(vcat([item.err for item in vac_data]...)...))
 no_vacua = hcat([item for item in eachcol(vac_ND) if item[4] == 0]...)
 vac_ND = hcat([item for item in eachcol(vac_ND) if item[4] !=0]...)
 all_vacua = hcat(vac_square, vac_1D, vac_ND)
