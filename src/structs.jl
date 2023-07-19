@@ -113,6 +113,12 @@ struct Min_JLM_ND
     N_min::Integer
     min_coords::Matrix{Float64}
     extra_rows::Integer
+    det_QTilde::Integer
+end
+
+struct Min_JLM_Square
+    N_min::Integer
+    det_QTilde::Integer
 end
 
 
@@ -120,6 +126,7 @@ struct Min_JLM_1D
     N_min::Integer
     min_coords::Vector{Float64}
     extra_rows::Integer
+    det_QTilde::Integer
 end
 #######################
 # ParentTrackIterator #
