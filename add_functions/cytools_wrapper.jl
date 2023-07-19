@@ -272,7 +272,7 @@ function cy_from_poly(h11)
     return h11list
 end
 
-function geometries_generate(h11,cy,tri,cy_i=1)
+function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     glsm = zeros(Int,h11,h11+4)
     basis = zeros(Int,h11)
     tip = zeros(Float64,h11)
@@ -297,7 +297,13 @@ function geometries_generate(h11,cy,tri,cy_i=1)
     end
     Kinv = Hermitian(1/2 * Kinv + Kinv')
     #Generate list of Q matrices -- only $h11+4 directions
-    qprime = cy.toric_effective_cone().rays()
+    if rational_Q
+        min_points = Int(round(h11^2))
+        qprime = zeros(Rational, min_points + 1,h11)
+        qprime = cy.toric_effective_cone().find_lattice_points(min_points = min_points)
+    else
+        qprime = cy.toric_effective_cone().rays()
+    end
     #PTD volumes at tip
     tau = cy.compute_divisor_volumes(tip)[basis]
     while true
@@ -311,7 +317,7 @@ function geometries_generate(h11,cy,tri,cy_i=1)
             end
             rhs_constraint[i] = abs.(log.(abs.(dot(tau, qprime[i, :]))) .+ (-2π * dot(tau, qprime[i,:])))
         end
-        if LowerTriangular(lhs_constraint .< rhs_constraint) - I(h11+4) == LowerTriangular(zeros(h11+4, h11+4))
+        if LowerTriangular(lhs_constraint .< rhs_constraint) - I(size(qprime,1)) == LowerTriangular(zeros(size(qprime,1), size(qprime,1)))
             break
         else
             m+=1e-2
@@ -319,7 +325,11 @@ function geometries_generate(h11,cy,tri,cy_i=1)
             #PTD volumes at tip
             tau = cy.compute_divisor_volumes(tip)[basis]
             #Kinv at tip -- save this or save K?
-            Kinv = cy.compute_Kinv(tip)
+            if cytools_version() < "0.8.0"
+                Kinv = cy.compute_Kinv(tip)
+            else
+                Kinv = cy.compute_inverse_kahler_metric(tip)
+            end
             Kinv = Hermitian(1/2 * Kinv + Kinv') 
         end
     end
@@ -330,38 +340,42 @@ function geometries_generate(h11,cy,tri,cy_i=1)
         #PTD volumes at tip
         tau = cy.compute_divisor_volumes(tip)[basis]
         #Kinv at tip -- save this or save K?
-        Kinv = cy.compute_Kinv(tip)
+        if cytools_version() < "0.8.0"
+            Kinv = cy.compute_Kinv(tip)
+        else
+            Kinv = cy.compute_inverse_kahler_metric(tip)
+        end
         Kinv = Hermitian(1/2 * Kinv + Kinv')
     end
     tip_prefactor = [sqrt(n),m]
     #Volume of CY3 at tip
     V = cy.compute_cy_volume(tip)
 
-    q = zeros(Int,h11+4+binomial(h11+4,2),h11)
-    L2 = zeros(Float64,binomial(h11+4,2),2)
+    q = zeros(size(qprime,1)+binomial(size(qprime,1),2),h11)
+    L2 = zeros(Float64,binomial(size(qprime,1),2),2)
     n=1
-    q[1:h11+4,:] = qprime
+    q[1:size(qprime,1),:] = qprime
     for i=1:size(qprime,1)-1
         for j=i+1:size(qprime,1)
-            q[h11+4+n,:] = qprime[j,:]-qprime[i,:]
+            q[size(qprime,1)+n,:] = qprime[j,:]-qprime[i,:]
             L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
                     + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
                     -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
             n+=1
         end
     end
-    #Use scalar potential eqn to generate \Lambda^4 (this produces a (h11+4,2) matrix 
+    #Use scalar potential eqn to generate \Lambda^4 (this produces a (size(qprime,1),2) matrix 
     #where the components are in (mantissa, exponent)(base 10) format
     #L1 are basis instantons and L2 are cross terms
-    L1 = zeros(h11+4,2)
+    L1 = zeros(size(qprime,1),2)
     for j in axes(qprime,1)
         L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
     end
     #concatenate L1 and L2
-    L = zeros(Float64,h11+4+binomial(h11+4,2),2)
+    L = zeros(Float64,size(qprime,1)+binomial(size(qprime,1),2),2)
     L = vcat(L1,L2)
     keys = ["h21", "glsm", "basis", "tip", "tip_prefactor", "CY_volume", "PTD_volumes", "Kinv", "L", "Q"]
-    vals = [h21, Int.(glsm), Int.(basis), Float64.(tip), Float64.(tip_prefactor), Float64(V), Float64.(tau), Float64.(Kinv), hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Int.(q)]
+    vals = [h21, Int.(glsm), Int.(basis), Float64.(tip), Float64.(tip_prefactor), Float64(V), Float64.(tau), Float64.(Kinv), hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), q]
     return Dict(zip(keys, vals))
 end
 
