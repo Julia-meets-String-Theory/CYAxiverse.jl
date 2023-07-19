@@ -97,6 +97,12 @@ struct RationalQSNF
     θparallel::Matrix{Rational}
 end
 
+struct BasisSNF
+    volume::Number
+    basis::Matrix
+    id_coords::Matrix
+end
+
 struct SolverND
     samples
     Q::Matrix
