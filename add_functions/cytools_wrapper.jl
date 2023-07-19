@@ -257,7 +257,7 @@ Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 """
 function cy_from_poly(h11)
     h11list_temp = []
-    h11list_inds = np_path_generate(h11)
+    h11list_inds = np_path_generate(h11)[2]
     for col in eachcol(h11list_inds)
         h11,tri,cy_i = col
         top_data = topology(h11,tri,cy_i)
