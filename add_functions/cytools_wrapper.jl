@@ -53,6 +53,7 @@ function __init__()
     import scipy as sp
     from cytools import fetch_polytopes
     from cytools import Polytope
+    from cytools import Cone
     def f_polytopes(h11=None, h12=None, h13=None, h21=None, h22=None, h31=None,
                     chi=None, lattice=None, dim=4, n_points=None,
                     n_vertices=None, n_dual_points=None, n_facets=None,
@@ -63,6 +64,9 @@ function __init__()
 
     def poly(points, backend=None):
         return Polytope(points,backend)
+    
+    def cone(rays, hyperplanes = None, check = True)
+        return Cone(rays, hyperplanes, check)
     """
 
     py"""
@@ -75,6 +79,8 @@ end
 fetch_polytopes(h11,limit; lattice="N",as_list=false,favorable=false) = py"f_polytopes(h11=$h11,limit=$limit, lattice=$lattice, as_list=$as_list, favorable=$favorable)"
 
 poly(points; backend=nothing) = py"poly($points, backend=$backend)"
+
+cone(rays; hyperplanes=nothing, check=true) = py"cone(rays=$rays, hyperplanes=$hyperplanes, check=$check)"
 
 cytools_version() = py"version()"
 
