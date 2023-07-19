@@ -101,7 +101,7 @@ function __init__()
             N_unique = Theta_unique_final.shape[0]
             Total_min_theory = np.abs((det_QTilde/det_Sym) * N_unique)
 
-        return Total_min_theory, Theta_unique_final
+        return Total_min_theory, Theta_unique_final, det_QTilde
 
 
     ############################
@@ -248,7 +248,7 @@ function __init__()
             N_unique = Theta_unique_final.shape[0]
             Total_min_theory = np.abs((det_QTilde/det_Sym) * N_unique)
     
-        return Total_min_theory, Theta_unique_final
+        return Total_min_theory, Theta_unique_final, det_QTilde
         """
 end
 
@@ -262,13 +262,13 @@ function one_dim_axion_solver(T::Solver1D)
     Z = T.Z
     inv_symmetries = T.inv_symmetries
     det_Sym = T.det_Sym
-    Total_min_theory, Theta_unique_final = py"one_dim_axion_solver($search_domain, $Q, $Llog, $Lsign, $det_QTilde, $phases, $Z, $inv_symmetries, $det_Sym)"
-    Min_JLM_1D(Total_min_theory, Theta_unique_final, 1)
+    Total_min_theory, Theta_unique_final, det_QTilde = py"one_dim_axion_solver($search_domain, $Q, $Llog, $Lsign, $det_QTilde, $phases, $Z, $inv_symmetries, $det_Sym)"
+    Min_JLM_1D(Total_min_theory, Theta_unique_final, 1, Int(det_QTilde))
 end
 
 function one_dim_axion_solver(search_domain, Q, Llog, Lsign, det_QTilde, phases, Z, inv_symmetries, det_Sym)
     Total_min_theory, Theta_unique_final = py"one_dim_axion_solver($search_domain, $Q, $Llog, $Lsign, $det_QTilde, $phases, $Z, $inv_symmetries, $det_Sym)"
-    Min_JLM_1D(Total_min_theory, Theta_unique_final, 1)
+    Min_JLM_1D(Total_min_theory, Theta_unique_final, 1, Int(det_QTilde))
 end
 
 function multi_axion_solver(T::SolverND)
@@ -282,12 +282,12 @@ function multi_axion_solver(T::SolverND)
     inv_symmetries = T.inv_symmetries
     det_Sym = T.det_Sym
     Total_min_theory, Theta_unique_final = py"multi_axion_solver($samples, $Q, $Llog, $Lsign, $det_QTilde, $phases, $Z, $inv_symmetries, $det_Sym)"
-    Min_JLM_ND(Total_min_theory, Theta_unique_final, size(Q, 1) - size(Q, 2))
+    Min_JLM_ND(Total_min_theory, Theta_unique_final, size(Q, 1) - size(Q, 2), Int(det_QTilde))
 end
 
 function multi_axion_solver(samples, Q, Llog, Lsign, det_QTilde, phases, Z, inv_symmetries, det_Sym)
     Total_min_theory, Theta_unique_final = py"multi_axion_solver($samples, $Q, $Llog, $Lsign, $det_QTilde, $phases, $Z, $inv_symmetries, $det_Sym)"
-    Min_JLM_ND(Total_min_theory, Theta_unique_final, size(Q, 1) - size(Q, 2))
+    Min_JLM_ND(Total_min_theory, Theta_unique_final, size(Q, 1) - size(Q, 2), Int(det_QTilde))
 end
 
 end
