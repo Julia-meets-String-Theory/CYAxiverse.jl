@@ -35,16 +35,13 @@ function ol_DB(args)
         "KU_Fair" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_KU_Fair_Large/",
         "inKC" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_Scaled/", 
         "home_Large" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse/", 
-        "KU1" => "/scratch/Axiverse_Learning/KU1/", 
-        "KV1" => "/scratch/Axiverse_Learning/KV1/",
-        "KV25" => "/scratch/Axiverse_Learning/KV25/", 
         "vacua_test" => "/scratch/users/mehta2/vacua_testing/", 
         "vacua_stretchtest" => "/scratch/users/mehta2/vacua_stretchtesting/", 
         "vacua_new" => "/scratch/users/mehta2/vacua_db/",
         "vacua_0323" => "/scratch/users/mehta2/vacua_0323/",
         "vacua_0822" => "/scratch/users/mehta2/vacua_0822/",
         "vacua_stretch" => "/scratch/users/mehta2/vacua_stretch/",
-        "docker" => "/database/",
+        "docker" => "/scratch/database/",
         "pwd" => string(pwd(), "/")
         )
     try
