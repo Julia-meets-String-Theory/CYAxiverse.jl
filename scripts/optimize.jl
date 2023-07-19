@@ -26,10 +26,11 @@ end
     if isfile(CYAxiverse.filestructure.minfile(geom_idx))
         Nvac = 0
         h5open(CYAxiverse.filestructure.minfile(geom_idx), "r") do file
-            Nvac = HDF5.read(file, "Nvac")
+            if haskey(file, "Nvac")
+                Nvac = HDF5.read(file, "Nvac")
+            end
         end
         if Nvac == 0
-            rm(CYAxiverse.filestructure.minfile(geom_idx))
             try
                 res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
                 open(l, "a") do outf
@@ -80,7 +81,8 @@ GC.gc()
 ##############################
 Random.seed!(1234567890)
 h11list = CYAxiverse.filestructure.paths_cy()[2]
-h11list = h11list[:, h11list[1, :] .!= 491]
+# h11list = h11list[:, h11list[1, :] .!= 491]
+h11list = h11list[:, h11list[1, :] .== 225 .|| h11list[1, :] .== 249 .|| h11list[1, :] .== 252 .|| h11list[1, :] .== 254]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
 geom_params = shuffle!(geom_params)
 
