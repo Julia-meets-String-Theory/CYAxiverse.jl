@@ -1198,6 +1198,34 @@ function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Ve
     vacua_id(L, Q; threshold=threshold, phase=phase)
 end
 
+"""
+    basis_SNF(rays::Matrix{Int})
+
+This function is useful for checking if the identity matrix is contained within the charge matrix, _i.e._ that the fundamental domain is the unit cube
+"""
+function basis_SNF(rays::Matrix{Int})
+    h11::Int = size(rays,2)
+    ###### Nemo SNF #####
+    Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,rays)
+    T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
+    Tparallel1::Nemo.fmpz_mat = inv(T)[:, 1:h11]
+    Tparallel::Matrix{Rational} = zeros(1,1)
+    if maximum(abs.(Tparallel1)) < 2^60
+        Tparallel = convert(Matrix{Int},Tparallel1)
+        θparalleltest = Matrix{Rational}(inv(transpose(Rational.(rays)) * Rational.(rays)) * transpose(Rational.(rays)) * Tparallel)
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
+		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
+    else
+        Tparallel = convert(Matrix{BigInt},Tparallel1)
+        θparalleltest = Matrix{Rational{BigInt}}(inv(transpose(Rational.(rays)) * Rational.(rays)) * transpose(Rational.(rays)) * Tparallel)
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
+		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
+    end
+	vol_basis = abs(det(θparalleltest))
+    # keys = ["T∥", "θ∥"]
+    # vals = [Tparallel,θparalleltest]
+    return vol_basis, θparalleltest, θparalleltestinv
+end
 
 function vacua_SNF(Q::Matrix{Integer})
     h11::Int = size(Q,2)
