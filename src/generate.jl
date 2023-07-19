@@ -1395,7 +1395,7 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold = 1e-2)
 			end
 			xmin = hcat(res["xmin"]...)
 			for i in eachcol(xmin)
-				i[:] = @.(ifelse(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i))
+				i[:] = @.(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i)
 			end
 			xmin = xmin[:, [sum(i)/size(i,1) > eps() for i in eachcol(xmin)]]
 			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
@@ -1928,6 +1928,7 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
 	vac_ND = []
     no_vac = []
     geom_list = []
+    detQtilde = []
     if h11 === nothing
         geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, 1:n])]
     elseif h11 !== nothing && n != size(paths_cy()[2], 2)
@@ -1939,8 +1940,8 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
 		# println(geom_idx)
 		if isfile(minfile(geom_idx))
 			vac_test = vacua_jlm(geom_idx)
-			if typeof(vac_test) <: Number
-				push!(vac_square, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test])
+			if typeof(vac_test) <: Vector
+				push!(vac_square, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test...])
 			elseif typeof(vac_test) == Min_JLM_1D
 				push!(vac_1D, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows])
 			elseif typeof(vac_test) == Min_JLM_ND
@@ -1949,6 +1950,9 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
         else
             push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, 0])
 		end
+        # Qtilde = LQtilde(geom_idx).Qtilde
+        # det_Q_tilde = Int(abs(round(det(Qtilde))))
+        # push!(detQtilde, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, det_Q_tilde])
 	end
 	return (square = vac_square, one_dim = vac_1D, n_dim = vac_ND, err = no_vac)
 end
@@ -1977,11 +1981,15 @@ end
 
 function vacua_estimate_save(geom_idx::GeometryIndex; threshold::Float64=0.5)
     vac_data = vacua_estimate(geom_idx; threshold=threshold)
-    h5open(joinpath(geom_dir_read(geom_idx),"qshape.h5"), "cw") do f
-        f["square", deflate=9] = vac_data.issquare
-        f["vacua_estimate", deflate=9] = vac_data.vac
-        if vac_data.issquare == 0
-            f["extra_rows", deflate=9] = vac_data.extrarows
+    if isfile(minfile(geom_idx))
+        h5open(joinpath(minfile(geom_idx)), "r+") do f
+            f["issquare", deflate=9] = vac_data.issquare
+            f["det_QTilde", deflate=9] = vac_data.vac
+        end
+    else
+        h5open(joinpath(minfile(geom_idx)), "cw") do f
+            f["issquare", deflate=9] = vac_data.issquare
+            f["det_QTilde", deflate=9] = vac_data.vac
         end
     end
 end
