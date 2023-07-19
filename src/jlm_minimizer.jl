@@ -75,7 +75,7 @@ function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 
     end
     if typeof(min_data) <: Min_JLM_Square
         h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
-            file["Nvac", deflate=9] = min_data.Nvac
+            file["Nvac", deflate=9] = min_data.N_min
             file["det_QTilde", deflate=9] = min_data.det_QTilde
             file["issquare", deflate=9] = 1
         end
