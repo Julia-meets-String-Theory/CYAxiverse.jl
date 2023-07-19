@@ -16,7 +16,7 @@ using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
 
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, BasisSNF
 
 #################
 ### Constant ####
@@ -1199,11 +1199,11 @@ function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Ve
 end
 
 """
-    basis_SNF(rays::Matrix{Int})
+    basis_snf(rays::Matrix{Int})
 
 This function is useful for checking if the identity matrix is contained within the charge matrix, _i.e._ that the fundamental domain is the unit cube
 """
-function basis_SNF(rays::Matrix{Int})
+function basis_snf(rays::Matrix{Int})
     h11::Int = size(rays,2)
     ###### Nemo SNF #####
     Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,rays)
@@ -1222,9 +1222,7 @@ function basis_SNF(rays::Matrix{Int})
 		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
     end
 	vol_basis = abs(det(θparalleltest))
-    # keys = ["T∥", "θ∥"]
-    # vals = [Tparallel,θparalleltest]
-    return vol_basis, θparalleltest, θparalleltestinv
+    return BasisSNF(vol_basis, θparalleltest, θparalleltestinv)
 end
 
 function vacua_SNF(Q::Matrix{Integer})
