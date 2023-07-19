@@ -65,7 +65,7 @@ function __init__()
     def poly(points, backend=None):
         return Polytope(points,backend)
     
-    def cone(rays, hyperplanes = None, check = True):
+    def cone(rays, hyperplanes=None, check=True):
         return Cone(rays, hyperplanes, check)
     """
 
