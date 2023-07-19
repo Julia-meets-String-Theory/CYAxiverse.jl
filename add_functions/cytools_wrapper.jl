@@ -80,7 +80,7 @@ fetch_polytopes(h11,limit; lattice="N",as_list=false,favorable=false) = py"f_pol
 
 poly(points; backend=nothing) = py"poly($points, backend=$backend)"
 
-cone(rays; hyperplanes=nothing, check=true) = py"cone(rays=$rays, hyperplanes=$hyperplanes, check=$check)"
+cone(rays; hyperplanes=nothing, check=true) = py"cone($rays, hyperplanes=$hyperplanes, check=$check)"
 
 cytools_version() = py"version()"
 
