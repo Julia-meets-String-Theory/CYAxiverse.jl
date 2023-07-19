@@ -124,7 +124,7 @@ GC.gc()
 ##############################
 h11_init = 1
 np = nworkers()
-h11_end = 96 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
+h11_end = 3 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
 h11 = collect(h11_init:h11_init+h11_end)
 max_split = 0
 n_split = 1
