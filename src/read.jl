@@ -7,7 +7,7 @@ module read
 using HDF5
 using LinearAlgebra
 using ..filestructure: cyax_file, minfile, geom_dir_read
-using ..structs: GeometryIndex, AxionPotential, Min_JLM_1D, Min_JLM_ND
+using ..structs: GeometryIndex, AxionPotential, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square
 ###########################
 ##### Read CYTools data ###
 ###########################
@@ -189,19 +189,23 @@ function vacua_jlm(geom_idx::GeometryIndex)
     Nvac = 0
     min_coords = zeros(1,1)
     extra_rows = 0
+    det_Qtilde = 0
     h5open(minfile(geom_idx), "r") do file
         Nvac = HDF5.read(file, "Nvac")
         if haskey(file, "extra_rows")
             min_coords = HDF5.read(file, "vac_coords")
             extra_rows = HDF5.read(file, "extra_rows")
         end
+        if haskey(file, "det_QTilde")
+            det_Qtilde = HDF5.read(file, "det_QTilde")
+        end
     end
     if extra_rows == 0
-        return Nvac
+        return Min_JLM_Square(Nvac, det_Qtilde)
     elseif extra_rows == 1
-        return Min_JLM_1D(Nvac, vec(min_coords), extra_rows)
+        return Min_JLM_1D(Nvac, vec(min_coords), extra_rows, det_Qtilde)
     else
-        return Min_JLM_ND(Nvac, min_coords, extra_rows)
+        return Min_JLM_ND(Nvac, min_coords, extra_rows, det_Qtilde)
     end
 end
 
