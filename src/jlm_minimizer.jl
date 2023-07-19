@@ -11,7 +11,7 @@ using GenericLinearAlgebra
 using ..jlm_python: one_dim_axion_solver, multi_axion_solver
 using ..generate: αmatrix, LQtilde, phase, vacua_SNF
 using ..filestructure: minfile, paths_cy
-using ..structs: GeometryIndex, Canonicalα, Solver1D, SolverND, Min_JLM_1D, Min_JLM_ND
+using ..structs: GeometryIndex, Canonicalα, Solver1D, SolverND, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square
 
 """
     jlm_minimize(geom_idx::GeometryIndex)
@@ -34,7 +34,7 @@ function minimize(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01)
         Qrowmask = [any(row .!= 0) for row in eachrow(Q_reduced_temp)]
         Q_reduced_temp = Q_reduced_temp[Qrowmask, :]
         if size(Q_reduced_temp, 1) == size(Q_reduced_temp, 2)
-            return det_Q_tilde
+            return Min_JLM_Square(det_Q_tilde, Int(floor(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
         else
             phase_vector = phase(geom_idx.h11, αtest)
             if random_phase
@@ -64,7 +64,7 @@ function minimize(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01)
             end
         end
     else
-        return Int(abs(round(det(αtest.Qhat))))
+        return Min_JLM_Square(Int(abs(round(det(αtest.Qhat)))), Int(floor(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
     end
 end
 
@@ -73,15 +73,19 @@ function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 
     if isfile(minfile(geom_idx))
         rm(minfile(geom_idx))
     end
-    if typeof(min_data) <: Int
+    if typeof(min_data) <: Min_JLM_Square
         h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
-            file["Nvac", deflate=9] = min_data
+            file["Nvac", deflate=9] = min_data.Nvac
+            file["det_QTilde", deflate=9] = min_data.det_QTilde
+            file["issquare", deflate=9] = 1
         end
     elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
         h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
             file["Nvac", deflate = 9] = min_data.N_min
             file["vac_coords", deflate = 9] = min_data.min_coords
             file["extra_rows", deflate = 9] = min_data.extra_rows
+            file["det_QTilde", deflate = 9] = min_data.det_QTilde
+            file["issquare", deflate=9] = 0
         end
     end
     return
