@@ -492,7 +492,7 @@ end
 
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1; prec=5_000)
     pot_data = potential(h11,tri,cy);
-    L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
+    L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data.L,pot_data.Q,pot_data.K
     LQtilde = LQtildebar(h11,tri,cy)
     Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
     Qtilde = Matrix{Int}(LQtilde["Qhat"]')
@@ -505,7 +505,7 @@ end
 function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
         pot_data = potential(h11,tri,cy);
-        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
+        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data.L,pot_data.Q,pot_data.K
         LQtest = hcat(L,Q);
         Lfull::Vector{Float64} = LQtest[:,2]
         LQsorted = LQtest[sortperm(Lfull, rev=true), :]
@@ -669,7 +669,7 @@ end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int)
     pot_data = potential(h11,tri,cy)
-    K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
+    K,L,Q = pot_data.K, pot_data.L, pot_data.Q
     pq_spectrum(K, L, Q)
 end
 
@@ -706,7 +706,7 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
         end
         if file_open == 0
             pot_data = potential(h11,tri,cy);
-            L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
+            L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data.L,pot_data.Q,pot_data.K
             spectrum_data = pq_spectrum(K,L,Q)
             h5open(cyax_file(h11,tri,1), "r+") do file
                 f2 = create_group(file, "spectrum")
@@ -822,8 +822,8 @@ end
 
 function LQtilde(h11::Int, tri::Int, cy::Int)
     pot_data = potential(h11, tri, cy)
-	Q = Matrix{Int}(pot_data["Q"]')
-	L = Matrix{Float64}(pot_data["L"]')
+	Q = Matrix{Int}(pot_data.Q')
+	L = Matrix{Float64}(pot_data.L')
 	LQtilde(Q, L)
 end	
 
@@ -1063,7 +1063,7 @@ TBW
 """
 function LQtildebar(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
-    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     LQtildebar(L, Q; threshold=threshold)
 end
 
@@ -1117,7 +1117,7 @@ end
 
 function vacua_id_basis(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
-    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     vacua_id_basis(L, Q; threshold=threshold)
 end
 """
@@ -1194,7 +1194,7 @@ TBW
 """
 function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector=zeros(h11))
     pot_data = potential(h11,tri,cy)
-    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     vacua_id(L, Q; threshold=threshold, phase=phase)
 end
 
@@ -1323,7 +1323,7 @@ Dict{String, Any} with 3 entries:
 """
 function vacua_TB(h11::Int,tri::Int,cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
-    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     vacua_TB(L, Q; threshold=threshold)
 end
 
@@ -1338,7 +1338,7 @@ function vacua_save(h11::Int,tri::Int,cy::Int=1; threshold::Float64=0.5)
     end
     if file_open == 0
         pot_data = potential(h11,tri,cy)
-        vacua_data = vacua(pot_data["L"],pot_data["Q"]; threshold=threshold)
+        vacua_data = vacua(pot_data.L,pot_data.Q; threshold=threshold)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua")
             f3["vacua",deflate=9] = vacua_data["vacua"]
@@ -1364,7 +1364,7 @@ function vacua_save_TB(h11::Int,tri::Int,cy::Int=1; threshold::Float64=0.5)
     end
     if file_open == 0
         pot_data = potential(h11,tri,cy)
-        vacua_data = vacua_TB(pot_data["L"],pot_data["Q"]; threshold=threshold)
+        vacua_data = vacua_TB(pot_data.L,pot_data.Q; threshold=threshold)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua_TB")
             f3["vacua",deflate=9] = vacua_data["vacua"]
@@ -1449,7 +1449,7 @@ Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.0
 """
 function vacua_MK(h11::Int,tri::Int,cy::Int)
     pot_data = potential(h11,tri,cy)
-    K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
+    K,L,Q = pot_data.K, pot_data.L, pot_data.Q
     vacua_MK(L, Q)
 end
 
@@ -1542,7 +1542,7 @@ end
 
 function vacua_projector(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11, tri, cy)
-    L, Q = pot_data["L"], pot_data["Q"]
+    L, Q = pot_data.L, pot_data.Q
     vacua_projector(L, Q; threshold=threshold)
 end
 
@@ -1803,7 +1803,7 @@ end
 
 function vacuaΠ(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase=zeros(h11))
     pot_data = potential(h11, tri, cy)
-    L, Q = pot_data["L"], pot_data["Q"]
+    L, Q = pot_data.L, pot_data.Q
     vacuaΠ(L, Q; threshold=threshold, phase=phase)
 end
 
@@ -1889,7 +1889,7 @@ end
 
 function vacua_full(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector{Float64}=zeros(h11))
     pot_data = potential(h11, tri, cy)
-    L, Q = pot_data["L"], pot_data["Q"]
+    L, Q = pot_data.L, pot_data.Q
     vacua_full(L, Q; threshold=threshold, phase=phase)
 end
 
