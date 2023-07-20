@@ -14,7 +14,7 @@ using Distributed
 #     error("no workers!")
 #     exit()
 # end
-
+np = 0
 try
     np = parse(Int32,ENV["SLURM_NPROCS"])
     addprocs(np, exeflags="--project=$(Base.active_project())")
@@ -89,7 +89,7 @@ geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11li
 # geom_params = geom_params[end-6_000:end, :]
 ##################################
 ntasks = size(geom_params,1)
-size_procs = size(np)
+size_procs = np
 logfiles = [lfile for _=1:ntasks]
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
