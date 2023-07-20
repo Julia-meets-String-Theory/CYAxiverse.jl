@@ -101,7 +101,7 @@ geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11li
 # geom_params = geom_params[end-6_000:end, :]
 ##################################
 ntasks = size(geom_params,1)
-size_procs = np
+size_procs = size(workers())
 logfiles = [lfile for _=1:ntasks]
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
