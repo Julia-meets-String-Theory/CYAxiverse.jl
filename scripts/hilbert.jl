@@ -39,7 +39,7 @@ end
         Qtest = CYAxiverse.read.potential(geom_idx).Q[1:geom_idx.h11+4, :]
         hilbert_test = CYAxiverse.cytools_wrapper.hilbert_basis(Qtest)'
         Qtest = Qtest'
-        if Qtest ⊆ hilbert_test
+        if hilbert_test ⊆ Qtest
         else
             CYAxiverse.cytools_wrapper.hilbert_save(Qtest)
             open(l, "a") do outf
