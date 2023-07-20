@@ -14,7 +14,6 @@ using Distributed
 #     error("no workers!")
 #     exit()
 # end
-np = 0
 try
     np = parse(Int32,ENV["SLURM_NPROCS"])
     addprocs(np, exeflags="--project=$(Base.active_project())")
@@ -33,15 +32,28 @@ end
 @everywhere using HDF5
 @everywhere using Random
 
+@everywhere function is_subset_of(list1::Vector, list2::Vector)
+    # Convert each vector in the lists to Set for efficient membership checking
+    set_list1 = Set(list1)
+    set_list2 = Set(list2)
+
+    # Check if every vector in list1 is also present in list2
+    for vector in set_list1
+        if !(vector in set_list2)
+            return false
+        end
+    end
+    return true
+end
 
 @everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
     try
         Qtest = CYAxiverse.read.potential(geom_idx).Q[1:geom_idx.h11+4, :]
         hilbert_test = CYAxiverse.cytools_wrapper.hilbert_basis(Qtest)'
         Qtest = Qtest'
-        if hilbert_test ⊆ Qtest
+        if is_subset_of(collect(eachcol(hilbert_test)), collect(eachcol(Qtest)))
         else
-            CYAxiverse.cytools_wrapper.hilbert_save(geom_idx, Qtest)
+            CYAxiverse.cytools_wrapper.hilbert_save(geom_idx, hilbert_test)
             open(l, "a") do outf
                 write(outf,string("(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
             end
