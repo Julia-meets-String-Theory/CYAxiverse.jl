@@ -2,17 +2,29 @@
 # Pkg.instantiate()
 
 using Distributed
-import MPI
-using MPIClusterManagers
-# MPI.initialize()
-manager = MPIClusterManagers.start_main_loop(MPI_TRANSPORT_ALL)
-# addprocs(manager)
-np = workers()
-println(np)
-if np!=0
-else
+# using MPIClusterManagers
+# import MPI
+# # MPI.initialize()
+# manager = MPIClusterManagers.start_main_loop(MPI_TRANSPORT_ALL)
+# # addprocs(manager)
+# np = workers()
+# println(np)
+# if np!=0
+# else
+#     error("no workers!")
+#     exit()
+# end
+
+try
+    np = parse(Int32,ENV["SLURM_NPROCS"])
+    addprocs(np, exeflags="--project=$(Base.active_project())")
+catch e
     error("no workers!")
     exit()
+end
+split = nothing
+if haskey(ENV, "SLURM_ARRAY_TASK_ID")
+    split = parse(Int32, ENV["SLURM_ARRAY_TASK_ID"])
 end
 
 @everywhere using CYAxiverse
