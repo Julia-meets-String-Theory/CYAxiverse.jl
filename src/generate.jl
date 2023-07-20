@@ -16,7 +16,7 @@ using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
 
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, BasisSNF
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
 #################
 ### Constant ####
@@ -1966,12 +1966,12 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
 		# println(geom_idx)
 		if isfile(minfile(geom_idx))
 			vac_test = vacua_jlm(geom_idx)
-			if typeof(vac_test) <: Vector
-				push!(vac_square, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test...])
+			if typeof(vac_test) <: Min_JLM_Square
+				push!(vac_square, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.det_QTilde])
 			elseif typeof(vac_test) == Min_JLM_1D
-				push!(vac_1D, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows])
+				push!(vac_1D, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows, vac_test.det_QTilde])
 			elseif typeof(vac_test) == Min_JLM_ND
-				push!(vac_ND, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows])
+				push!(vac_ND, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows, vac_test.det_QTilde])
 			end
         else
             push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, 0])
