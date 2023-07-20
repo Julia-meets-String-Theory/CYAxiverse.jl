@@ -14,6 +14,7 @@ using Distributed
 #     error("no workers!")
 #     exit()
 # end
+
 try
     np = parse(Int32,ENV["SLURM_NPROCS"])
     addprocs(np, exeflags="--project=$(Base.active_project())")
@@ -25,12 +26,13 @@ split = nothing
 if haskey(ENV, "SLURM_ARRAY_TASK_ID")
     split = parse(Int32, ENV["SLURM_ARRAY_TASK_ID"])
 end
+# @everywhere newARGS = string("vacua_new")
 
 @everywhere using CYAxiverse
-@everywhere using LinearAlgebra
-
-@everywhere using HDF5
 @everywhere using Random
+
+lfile = CYAxiverse.filestructure.logfile()
+CYAxiverse.filestructure.logcreate(lfile)
 
 @everywhere function is_subset_of(list1::Vector, list2::Vector)
     # Convert each vector in the lists to Set for efficient membership checking
@@ -65,8 +67,7 @@ end
     end
 end
 
-lfile = CYAxiverse.filestructure.logfile()
-CYAxiverse.filestructure.logcreate(lfile)
+
 
 ##############################
 #### Initialise functions ####
@@ -85,13 +86,15 @@ CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string((size(h11list_temp,2)+
 temp_vac = nothing
 GC.gc()
 
+# all_h11 = vcat(collect(1:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 376, 377, 386, 387, 399, 404, 416, 433, 462, 491])
 ##############################
 ############ Main ############
 ##############################
 Random.seed!(1234567890)
+np = nworkers()
 h11list = CYAxiverse.filestructure.paths_cy()[2]
 # h11list = h11list[:, h11list[1, :] .!= 491]
-# h11list = h11list[:, h11list[1, :] .== 225 .|| h11list[1, :] .== 249 .|| h11list[1, :] .== 252 .|| h11list[1, :] .== 254]
+# h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
 # geom_params = shuffle!(geom_params)
 
@@ -101,7 +104,7 @@ geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11li
 # geom_params = geom_params[end-6_000:end, :]
 ##################################
 ntasks = size(geom_params,1)
-size_procs = size(workers())
+size_procs = np
 logfiles = [lfile for _=1:ntasks]
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
