@@ -41,7 +41,7 @@ end
         Qtest = Qtest'
         if hilbert_test ⊆ Qtest
         else
-            CYAxiverse.cytools_wrapper.hilbert_save(Qtest)
+            CYAxiverse.cytools_wrapper.hilbert_save(geom_idx, Qtest)
             open(l, "a") do outf
                 write(outf,string("(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
             end
