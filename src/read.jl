@@ -54,7 +54,15 @@ function geometry(h11::Int,tri::Int,cy::Int=1)
     end
 
 end
-
+function hilbert_basis(geom_idx::GeometryIndex)
+    basis = zeros(geom_idx.h11, geom_idx.h11)
+    h5open(cyax_file(geom_idx), "r") do file
+        if haskey(file, "cytools/geometric/tip_prefactor")
+            basis = HDF5.read(file, "cytools/geometric/hilbert_basis")
+        end
+    end
+    basis
+end
 
 #############################
 ##### Read Geometric data ###
