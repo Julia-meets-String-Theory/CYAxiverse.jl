@@ -71,14 +71,8 @@ end
 
 
 function potential(h11::Int,tri::Int,cy::Int=1)
-    L::Matrix{Float64}, Q::Matrix{Int},
-    Kinv::Matrix{Float64}= h5open(cyax_file(h11,tri,cy), "r") do file
-        HDF5.read(file, "cytools/potential/L"),HDF5.read(file, "cytools/potential/Q"),
-        HDF5.read(file, "cytools/geometric/Kinv")
-    end
-    keys = ["L","Q","K"]
-    vals = [L, Q, Hermitian(inv(Kinv))]
-    return Dict(zip(keys,vals))
+    geom_idx = GeometryIndex(h11, tri, cy)
+    potential(geom_idx)
 end
 
 function Q(h11::Int,tri::Int,cy::Int=1)
