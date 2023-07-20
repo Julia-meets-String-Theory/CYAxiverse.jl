@@ -89,10 +89,9 @@ function hilbert_basis(rays::Matrix)
 	cone(Matrix{Integer}(rays)).hilbert_basis()
 end
 
-function hilbert_save(geom_idx::GeometryIndex, rays::Matrix)
-    basis = hilbert_basis(rays)
+function hilbert_save(geom_idx::GeometryIndex, basis::Matrix)
     h5open(cyax_file(geom_idx), "r+") do file
-        file["cytools/geometric/hilbert",deflate=9] = basis
+        file["cytools/geometric/hilbert_basis",deflate=9] = basis
     end
 end
 
