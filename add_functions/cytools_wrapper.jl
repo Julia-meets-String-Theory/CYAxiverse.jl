@@ -84,6 +84,18 @@ cone(rays; hyperplanes=nothing, check=true) = py"cone($rays, hyperplanes=$hyperp
 
 cytools_version() = py"version()"
 
+function hilbert_basis(rays::Matrix)
+	cone(Matrix{Integer}(rays)).hilbert_basis()
+end
+
+function hilbert_save(rays::Matrix)
+    basis = hilbert_basis(rays)
+    h5open(cyax_file(h11,tri,cy_i), "r+") do file
+        file["cytools/geometric/hilbert",deflate=9] = basis
+    end
+end
+
+
 function topologies_generate_fast(h11,n)
     tri_test = []
     tri_test_m = []
