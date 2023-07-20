@@ -18,6 +18,7 @@ module cytools_wrapper
 
 using ..filestructure: data_dir, cyax_file, present_dir, np_path_generate
 using ..read: topology
+using ..structs: GeometryIndex
 
 using PyCall
 using HDF5
@@ -88,7 +89,7 @@ function hilbert_basis(rays::Matrix)
 	cone(Matrix{Integer}(rays)).hilbert_basis()
 end
 
-function hilbert_save(geom_idx::CYAxiverse.structs.GeometryIndex, rays::Matrix)
+function hilbert_save(geom_idx::GeometryIndex, rays::Matrix)
     basis = hilbert_basis(rays)
     h5open(cyax_file(geom_idx), "r+") do file
         file["cytools/geometric/hilbert",deflate=9] = basis
