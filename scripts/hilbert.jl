@@ -50,13 +50,22 @@ end
 
 @everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
     try
-        Qtest = CYAxiverse.read.potential(geom_idx).Q[1:geom_idx.h11+4, :]
-        hilbert_test = CYAxiverse.cytools_wrapper.hilbert_basis(Qtest)
-        if is_subset_of(collect(eachcol(hilbert_test')), collect(eachcol(Qtest')))
+        hilbert_exists = false
+        h5open(cyax_file(geom_idx), "r") do file
+            if haskey(file, "cytools/geometric/hilbert_basis")
+                hilbert_exists = true
+            end
+        end
+        if hilbert_exists
         else
-            CYAxiverse.cytools_wrapper.hilbert_save(geom_idx, Matrix(hilbert_test))
-            open(l, "a") do outf
-                write(outf,string("(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
+            Qtest = CYAxiverse.read.potential(geom_idx).Q[1:geom_idx.h11+4, :]
+            hilbert_test = CYAxiverse.cytools_wrapper.hilbert_basis(Qtest)
+            if is_subset_of(collect(eachcol(hilbert_test')), collect(eachcol(Qtest')))
+            else
+                CYAxiverse.cytools_wrapper.hilbert_save(geom_idx, Matrix(hilbert_test))
+                open(l, "a") do outf
+                    write(outf,string("(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
+                end
             end
         end
     catch e
