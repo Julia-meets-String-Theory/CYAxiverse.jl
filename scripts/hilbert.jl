@@ -51,7 +51,7 @@ end
 @everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
     try
         hilbert_exists = false
-        h5open(cyax_file(geom_idx), "r") do file
+        h5open(CYAxiverse.filestructure.cyax_file(geom_idx), "r") do file
             hilbert_exists = haskey(file, "cytools/geometric/hilbert_basis") ? true : false
         end
         if hilbert_exists
