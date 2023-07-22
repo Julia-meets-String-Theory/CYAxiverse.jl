@@ -29,7 +29,7 @@ end
 # @everywhere newARGS = string("vacua_new")
 
 @everywhere using CYAxiverse
-@everywhere using Random
+@everywhere using Random, HDF5
 
 lfile = CYAxiverse.filestructure.logfile()
 CYAxiverse.filestructure.logcreate(lfile)
