@@ -20,7 +20,12 @@ function topology(h11::Int,tri::Int,cy::Int=1)
     vals = [poly_points, simplices]
     return Dict(zip(keys,vals))
 end
-        
+
+function topology(geom_idx::GeometryIndex)
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
+    topology(h11, tri, cy)
+end
+
 function geometry(h11::Int,tri::Int,cy::Int=1)
     tip_prefactor = nothing
     h21::Int,
@@ -54,6 +59,12 @@ function geometry(h11::Int,tri::Int,cy::Int=1)
     end
 
 end
+
+function geometry(geom_idx::GeometryIndex)
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
+    geometry(h11, tri, cy)
+end
+
 function hilbert_basis(geom_idx::GeometryIndex)
     basis = zeros(geom_idx.h11, geom_idx.h11)
     h5open(cyax_file(geom_idx), "r") do file
