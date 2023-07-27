@@ -39,7 +39,7 @@ end
     try
         glsm = CYAxiverse.read.geometry(geom_idx)["glsm_charges"]
         qprime = CYAxiverse.read.potential(geom_idx).Q[1:h11, :]
-        if is_subset_of(collect(eachrow(glsm)), collect(eachrow(qprime)))
+        if is_subset_of(collect(eachcol(glsm)), collect(eachrow(qprime)))
         else
             open(l, "a") do outf
                 write(outf,string("vac-(",h11,",",tri,",",cy,")\n"))
