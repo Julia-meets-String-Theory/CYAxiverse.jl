@@ -59,7 +59,7 @@ CYAxiverse.filestructure.logcreate(lfile)
 #### Initialise functions ####
 ##############################
 geom_idx = CYAxiverse.structs.GeometryIndex(4, 10, 1)
-@time temp_vac = main_Qshape(geom_idx,lfile)
+@time temp_vac = main(geom_idx,lfile)
 h11list_temp = [4 4 5 7; 10 11 10 10; 1 1 1 1]
 h11list_temp = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list_temp)]
 log_file_temp = [lfile for _ = 1:size(h11list_temp, 1)]
