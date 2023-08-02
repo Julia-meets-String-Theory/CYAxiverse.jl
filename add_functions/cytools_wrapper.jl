@@ -279,7 +279,7 @@ function cy_from_poly(h11)
     for col in eachcol(h11list_inds)
         h11,tri,cy_i = col
         top_data = topology(h11,tri,cy_i)
-        points, simplices = top_data["points"], top_data["simplices"]
+        points, simplices = top_data.points, top_data.simplices
         p = poly(points)
         t = p.triangulate(simplices=simplices)
         cy = t.get_cy()
