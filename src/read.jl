@@ -26,6 +26,7 @@ end
 
 function geometry(h11::Int,tri::Int,cy::Int=1)
     tip_prefactor = nothing
+    hilbert_basis = nothing
     h21::Int,
     glsm::Matrix{Int},basis::Vector{Int},
     tip::Vector{Float64}, CY_Volume::Float64,divisor_volumes::Vector{Float64},
@@ -38,16 +39,18 @@ function geometry(h11::Int,tri::Int,cy::Int=1)
     h5open(cyax_file(h11,tri,cy), "r") do file
         if haskey(file, "cytools/geometric/tip_prefactor")
             tip_prefactor = HDF5.read(file, "cytools/geometric/tip_prefactor")
+        if haskey(file, "cytools/geometric/hilbert_basis")
+            hilbert_basis = HDF5.read(file, "cytools/geometric/hilbert_basis")
         end
     end
-    if tip_prefactor !== nothing
+    if tip_prefactor !== nothing && hilbert_basis !== nothing
         # keys = ["h21","glsm_charges","basis","tip","tip_prefactor", "CYvolume","τ_volumes","Kinv"]
         # vals = [h21,
         # glsm,basis,
         # tip,tip_prefactor, CY_Volume,divisor_volumes,
         # Kinv]
         # return Dict(zip(keys,vals))
-        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv)
+        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
     else
         # keys = ["h21","glsm_charges","basis","tip", "CYvolume","τ_volumes","Kinv"]
         # vals = [h21,
@@ -55,8 +58,9 @@ function geometry(h11::Int,tri::Int,cy::Int=1)
         # tip, CY_Volume,divisor_volumes,
         # Kinv]
         # return Dict(zip(keys,vals))
-        tip_prefactor = [1. , 1.]
-        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv)
+        tip_prefactor = ones(Float64, 2)
+        hilbert_basis = zeros(geom_idx.h11, geom_idx.h11)
+        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
     end
 
 end
@@ -69,7 +73,7 @@ end
 function hilbert_basis(geom_idx::GeometryIndex)
     basis = zeros(geom_idx.h11, geom_idx.h11)
     h5open(cyax_file(geom_idx), "r") do file
-        if haskey(file, "cytools/geometric/tip_prefactor")
+        if haskey(file, "cytools/geometric/hilbert_basis")
             basis = HDF5.read(file, "cytools/geometric/hilbert_basis")
         end
     end
