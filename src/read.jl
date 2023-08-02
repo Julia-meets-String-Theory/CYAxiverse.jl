@@ -39,6 +39,7 @@ function geometry(h11::Int,tri::Int,cy::Int=1)
     h5open(cyax_file(h11,tri,cy), "r") do file
         if haskey(file, "cytools/geometric/tip_prefactor")
             tip_prefactor = HDF5.read(file, "cytools/geometric/tip_prefactor")
+        end
         if haskey(file, "cytools/geometric/hilbert_basis")
             hilbert_basis = HDF5.read(file, "cytools/geometric/hilbert_basis")
         end
