@@ -7,7 +7,7 @@ module read
 using HDF5
 using LinearAlgebra
 using ..filestructure: cyax_file, minfile, geom_dir_read
-using ..structs: GeometryIndex, AxionPotential, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square
+using ..structs: GeometryIndex, TopologicalData, GeometricData, AxionPotential, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square
 ###########################
 ##### Read CYTools data ###
 ###########################
@@ -16,9 +16,7 @@ function topology(h11::Int,tri::Int,cy::Int=1)
     poly_points::Matrix{Int}, simplices::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
     HDF5.read(file, "cytools/geometric/points"),HDF5.read(file, "cytools/geometric/simplices")
     end
-    keys = ["points","simplices"]
-    vals = [poly_points, simplices]
-    return Dict(zip(keys,vals))
+    return TopologicalData(poly_points, simplices)
 end
 
 function topology(geom_idx::GeometryIndex)
@@ -43,19 +41,22 @@ function geometry(h11::Int,tri::Int,cy::Int=1)
         end
     end
     if tip_prefactor !== nothing
-        keys = ["h21","glsm_charges","basis","tip","tip_prefactor", "CYvolume","τ_volumes","Kinv"]
-        vals = [h21,
-        glsm,basis,
-        tip,tip_prefactor, CY_Volume,divisor_volumes,
-        Kinv]
-        return Dict(zip(keys,vals))
+        # keys = ["h21","glsm_charges","basis","tip","tip_prefactor", "CYvolume","τ_volumes","Kinv"]
+        # vals = [h21,
+        # glsm,basis,
+        # tip,tip_prefactor, CY_Volume,divisor_volumes,
+        # Kinv]
+        # return Dict(zip(keys,vals))
+        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv)
     else
-        keys = ["h21","glsm_charges","basis","tip", "CYvolume","τ_volumes","Kinv"]
-        vals = [h21,
-        glsm,basis,
-        tip, CY_Volume,divisor_volumes,
-        Kinv]
-        return Dict(zip(keys,vals))
+        # keys = ["h21","glsm_charges","basis","tip", "CYvolume","τ_volumes","Kinv"]
+        # vals = [h21,
+        # glsm,basis,
+        # tip, CY_Volume,divisor_volumes,
+        # Kinv]
+        # return Dict(zip(keys,vals))
+        tip_prefactor = [1. , 1.]
+        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv)
     end
 
 end
