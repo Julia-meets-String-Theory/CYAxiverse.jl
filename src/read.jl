@@ -60,7 +60,7 @@ function geometry(h11::Int,tri::Int,cy::Int=1)
         # Kinv]
         # return Dict(zip(keys,vals))
         tip_prefactor = ones(Float64, 2)
-        hilbert_basis = zeros(geom_idx.h11, geom_idx.h11)
+        hilbert_basis = zeros(h11, h11)
         return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
     end
 
