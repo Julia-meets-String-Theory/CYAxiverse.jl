@@ -484,7 +484,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
     #concatenate L1 and L2
     L = zeros(Float64,size(qprime,1)+binomial(size(qprime,1),2),2)
     L = vcat(L1,L2)
-	return (basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CYvolume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
+	return (basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CY_volume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
 end
 
 function geometries(h11,cy,tri,cy_i=1)
@@ -521,9 +521,9 @@ function geometries_hilbert(geom_idx::GeometryIndex)
             f1a = create_group(f1, "geometric")
             f1a["tip",deflate=9] = geom_data.tip
             f1a["tip_prefactor",deflate=9] = geom_data.tip_prefactor
-            f1a["CY_volume",deflate=9] = geom_data["CY_volume"]
-            f1a["divisor_volumes",deflate=9] = geom_data["PTD_volumes"]
-            f1a["Kinv",deflate=9] = geom_data["Kinv"]
+            f1a["CY_volume",deflate=9] = geom_data.CY_volume
+            f1a["divisor_volumes",deflate=9] = geom_data.PTD_volumes
+            f1a["Kinv",deflate=9] = geom_data.Kinv
         end
         if haskey(file, "cytools/hilbert/potential")
         else
