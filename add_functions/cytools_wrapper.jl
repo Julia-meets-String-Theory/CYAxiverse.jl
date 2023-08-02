@@ -291,7 +291,7 @@ function cy_from_poly(h11)
 end
 
 function cy_from_poly(geom_idx::GeometryIndex)
-    top_data = topology(h11,tri,cy_i)
+    top_data = topology(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
     points, simplices = top_data.points, top_data.simplices
     p = poly(points)
     t = p.triangulate(simplices=simplices)
