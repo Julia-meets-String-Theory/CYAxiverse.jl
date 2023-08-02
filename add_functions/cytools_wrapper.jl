@@ -17,7 +17,7 @@ Functions that wrap basic functionality of [CYTools](https://cytools.liammcallis
 module cytools_wrapper
 
 using ..filestructure: data_dir, cyax_file, present_dir, np_path_generate
-using ..read: topology
+using ..read: topology, geometry, potential
 using ..structs: GeometryIndex
 
 using PyCall
@@ -405,6 +405,88 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     return Dict(zip(keys, vals))
 end
 
+function geometries_generate_hilbert(geom_idx::GeometryIndex)
+	cy = cy_from_poly(geom_idx).cy
+	geom_data = geometry(geom_idx)
+	pot_data = potential(geom_idx)
+    basis = geom_data.basis
+    tip = geom_data.tip
+    Kinv = geom_data.kinv
+	K = pot_data.K
+    tau = geom_data.τ_volumes
+    qprime = geom_data.hilbert_basis
+    n,m = 1,1
+    while true
+        rhs_constraint = zeros(size(qprime,1))
+        lhs_constraint = zeros(size(qprime,1),size(qprime,1))
+        for i in axes(qprime,1)
+            for j in axes(qprime,1)
+                if i>j
+                    lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
+                end
+            end
+            rhs_constraint[i] = abs.(log.(abs.(dot(tau, qprime[i, :]))) .+ (-2π * dot(tau, qprime[i,:])))
+        end
+        if LowerTriangular(lhs_constraint .< rhs_constraint) - I(size(qprime,1)) == LowerTriangular(zeros(size(qprime,1), size(qprime,1)))
+            break
+        else
+            m+=1e-2
+            tip = m .* tip
+            #PTD volumes at tip
+            tau = cy.compute_divisor_volumes(tip)[basis]
+            #Kinv at tip -- save this or save K?
+            if cytools_version() < "0.8.0"
+                Kinv = cy.compute_Kinv(tip)
+            else
+                Kinv = cy.compute_inverse_kahler_metric(tip)
+            end
+            Kinv = Hermitian(1/2 * Kinv + Kinv') 
+        end
+    end
+    if (minimum(tau) > 1.)
+    else
+        n = 1. / minimum(tau)
+        tip = sqrt(n) .* tip
+        #PTD volumes at tip
+        tau = cy.compute_divisor_volumes(tip)[basis]
+        #Kinv at tip -- save this or save K?
+        if cytools_version() < "0.8.0"
+            Kinv = cy.compute_Kinv(tip)
+        else
+            Kinv = cy.compute_inverse_kahler_metric(tip)
+        end
+        Kinv = Hermitian(1/2 * Kinv + Kinv')
+    end
+    tip_prefactor = [sqrt(n),m]
+    #Volume of CY3 at tip
+    V = cy.compute_cy_volume(tip)
+
+    q = zeros(size(qprime,1)+binomial(size(qprime,1),2),geom_idx.h11)
+    L2 = zeros(Float64,binomial(size(qprime,1),2),2)
+    n=1
+    q[1:size(qprime,1),:] = qprime
+    for i=1:size(qprime,1)-1
+        for j=i+1:size(qprime,1)
+            q[size(qprime,1)+n,:] = qprime[j,:]-qprime[i,:]
+            L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
+                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
+                    -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
+            n+=1
+        end
+    end
+    #Use scalar potential eqn to generate \Lambda^4 (this produces a (size(qprime,1),2) matrix 
+    #where the components are in (mantissa, exponent)(base 10) format
+    #L1 are basis instantons and L2 are cross terms
+    L1 = zeros(size(qprime,1),2)
+    for j in axes(qprime,1)
+        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
+    end
+    #concatenate L1 and L2
+    L = zeros(Float64,size(qprime,1)+binomial(size(qprime,1),2),2)
+    L = vcat(L1,L2)
+	return (basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CYvolume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
+end
+
 function geometries(h11,cy,tri,cy_i=1)
     geom_data = geometries_generate(h11, cy, tri, cy_i)
     h5open(cyax_file(h11,tri,cy_i), "r+") do file
@@ -424,6 +506,30 @@ function geometries(h11,cy,tri,cy_i=1)
             f1b = create_group(file, "cytools/potential")
             f1b["L",deflate=9] = geom_data["L"]
             f1b["Q",deflate=9] = geom_data["Q"]
+        end
+    end
+    GC.gc()
+    # return [h11,tri,cy_i]
+end
+
+function geometries_hilbert(geom_idx::GeometryIndex)
+    geom_data = geometries_generate_hilbert(geom_idx)
+    h5open(cyax_file(geom_idx), "r+") do file
+        if haskey(file, "cytools/hilbert/geometric")
+        else
+            f1 = create_group(file, "cytools/hilbert/")
+            f1a = create_group(f1, "geometric")
+            f1a["tip",deflate=9] = geom_data.tip
+            f1a["tip_prefactor",deflate=9] = geom_data.tip_prefactor
+            f1a["CY_volume",deflate=9] = geom_data["CY_volume"]
+            f1a["divisor_volumes",deflate=9] = geom_data["PTD_volumes"]
+            f1a["Kinv",deflate=9] = geom_data["Kinv"]
+        end
+        if haskey(file, "cytools/hilbert/potential")
+        else
+            f1b = create_group(file, "cytools/hilbert/potential")
+            f1b["L",deflate=9] = geom_data.L
+            f1b["Q",deflate=9] = geom_data.Q
         end
     end
     GC.gc()
