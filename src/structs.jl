@@ -29,6 +29,7 @@ struct GeometricData
     basis::Vector{Int}
     tip::Vector{Float64}
     kinv::Matrix{Float64}
+    hilbert_basis::Matrix{Int}
 end
 
 struct AxionPotential
