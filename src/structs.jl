@@ -15,6 +15,22 @@ Base.@kwdef struct GeometryIndex{T<:Integer}
     frst::T=1
 end
 
+struct TopologicalData
+    points::Matrix{Int}
+    simplices::Matrix{Int}
+end
+
+struct GeometricData
+    tip_prefactor::Vector{Float64}
+    τ_volumes::Vector{Float64}
+    h21::Integer
+    cy_volume::Float64
+    glsm_charges::Matrix{Int}
+    basis::Vector{Int}
+    tip::Vector{Float64}
+    kinv::Matrix{Float64}
+end
+
 struct AxionPotential
     L::Matrix{Float64}
     Q::Matrix{Int}
