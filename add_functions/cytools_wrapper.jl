@@ -296,7 +296,7 @@ function cy_from_poly(geom_idx::GeometryIndex)
     p = poly(points)
     t = p.triangulate(simplices=simplices)
     cy = t.get_cy()
-    return (h11 = h11, cy = cy, tri = tri, cy_i = cy_i)
+    return (h11 = geom_idx.h11, cy = cy, tri = geom_idx.polytope, cy_i = geom_idx.frst)
 end
 function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     glsm = zeros(Int,h11,h11+4)
