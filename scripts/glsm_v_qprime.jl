@@ -38,7 +38,7 @@ end
     h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
     try
         glsm = CYAxiverse.read.geometry(geom_idx)["glsm_charges"]
-        qprime = CYAxiverse.read.potential(geom_idx).Q[1:h11, :]
+        qprime = CYAxiverse.read.potential(geom_idx).Q[1:h11+4, :]
         if is_subset_of(collect(eachcol(glsm)), collect(eachrow(qprime)))
         else
             open(l, "a") do outf
@@ -79,7 +79,7 @@ Random.seed!(1234567890)
 h11list = CYAxiverse.filestructure.paths_cy()[2]
 # h11list = h11list[:, h11list[1, :] .!= 491]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
-geom_params = shuffle!(geom_params)
+# geom_params = shuffle!(geom_params)
 
 ##################################
 ##### Missing geoms ##############
