@@ -86,7 +86,7 @@ geom_params = shuffle!(geom_params)
 # geom_params = geom_params[end-6_000:end, :]
 ##################################
 ntasks = size(geom_params,1)
-size_procs = size(np)
+size_procs = nworkers()
 logfiles = [lfile for _=1:ntasks]
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
