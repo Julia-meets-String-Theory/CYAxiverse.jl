@@ -788,7 +788,6 @@ end
 
 TBW
 """
-Λ
 function LQtilde(Q, L)
     @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
     if @isdefined h11
@@ -814,8 +813,8 @@ function LQtilde(Q, L)
 		end
 	end
     if size(Qtilde, 2) + size(Qbar, 2) != size(Q, 2)
+        Lbar = hcat(Lbar[:, 2:end], L[:, size(Qtilde,2)+size(Qbar,2)-1:end])
         Qbar = hcat(Qbar[:, 2:end], Q[:, size(Qtilde,2)+size(Qbar,2)-1:end])
-        Lbar = hcat(Lbar[:, 2:end], L[:, size(Qtilde,2)+size(Qbar,2):end])
     end
     LQLinearlyIndependent(Qtilde[:, 2:end], Qbar, Lbar, Ltilde[:, 2:end])
 end
@@ -843,7 +842,7 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Qhat = Matrix{Rational}(LQ.Qtilde)
     if @isdefined h11
     else
-        h11 = size(Qhat, 2)
+        h11 = size(Qhat, 1)
     end
     Qbar = Matrix{Int}(LQ.Qbar)
     Lhat = LQ.Ltilde
