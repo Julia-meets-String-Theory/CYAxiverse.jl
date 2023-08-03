@@ -793,7 +793,7 @@ function LQtilde(Q, L)
     @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
     if @isdefined h11
     else
-        h11 = size(Q, 2)
+        h11 = size(Q, 1)
     end
     Q = Matrix{Int}(Q[:, sortperm(L[2,:], rev=true)])
 	L = L[:, sortperm(L[2,:], rev=true)]
