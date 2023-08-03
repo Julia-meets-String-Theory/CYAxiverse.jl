@@ -58,12 +58,9 @@ end
         else
             Qtest = CYAxiverse.read.potential(geom_idx).Q[1:geom_idx.h11+4, :]
             hilbert_test = CYAxiverse.cytools_wrapper.hilbert_basis(Qtest)
-            if is_subset_of(collect(eachcol(hilbert_test')), collect(eachcol(Qtest')))
-            else
-                CYAxiverse.cytools_wrapper.hilbert_save(geom_idx, Matrix(hilbert_test))
-                open(l, "a") do outf
-                    write(outf,string("(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
-                end
+            CYAxiverse.cytools_wrapper.hilbert_save(geom_idx, Matrix(hilbert_test))
+            open(l, "a") do outf
+                write(outf,string("(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
             end
         end
     catch e
@@ -99,7 +96,7 @@ GC.gc()
 Random.seed!(1234567890)
 np = nworkers()
 h11list = CYAxiverse.filestructure.paths_cy()[2]
-# h11list = h11list[:, h11list[1, :] .== 491]
+h11list = h11list[:, h11list[1, :] .<= 53]
 # h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
 # geom_params = shuffle!(geom_params)
