@@ -522,7 +522,7 @@ function geometries_hilbert(geom_idx::GeometryIndex)
             f1a["tip",deflate=9] = geom_data.tip
             f1a["tip_prefactor",deflate=9] = geom_data.tip_prefactor
             f1a["CY_volume",deflate=9] = geom_data.CY_volume
-            f1a["divisor_volumes",deflate=9] = geom_data.PTD_volumes
+            f1a["divisor_volumes",deflate=9] = geom_data.τ_volumes
             f1a["Kinv",deflate=9] = geom_data.Kinv
         end
         if haskey(file, "cytools/hilbert/potential")
