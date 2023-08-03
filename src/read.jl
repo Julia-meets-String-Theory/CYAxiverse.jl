@@ -24,51 +24,86 @@ function topology(geom_idx::GeometryIndex)
     topology(h11, tri, cy)
 end
 
-function geometry(h11::Int,tri::Int,cy::Int=1)
+function geometry(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     tip_prefactor = nothing
     hilbert_basis = nothing
-    h21::Int,
-    glsm::Matrix{Int},basis::Vector{Int},
-    tip::Vector{Float64}, CY_Volume::Float64,divisor_volumes::Vector{Float64},
-    Kinv::Matrix{Float64}= h5open(cyax_file(h11,tri,cy), "r") do file
-        HDF5.read(file, "cytools/geometric/h21"),HDF5.read(file, "cytools/geometric/glsm"),
-        HDF5.read(file, "cytools/geometric/basis"),HDF5.read(file, "cytools/geometric/tip"),
-        HDF5.read(file, "cytools/geometric/CY_volume"),HDF5.read(file, "cytools/geometric/divisor_volumes"),
-        HDF5.read(file, "cytools/geometric/Kinv")
-    end
-    h5open(cyax_file(h11,tri,cy), "r") do file
-        if haskey(file, "cytools/geometric/tip_prefactor")
-            tip_prefactor = HDF5.read(file, "cytools/geometric/tip_prefactor")
+    if hilbert
+        h21::Int, glsm::Matrix{Int}, basis::Vector{Int}, tip::Vector{Float64}, CY_Volume::Float64,divisor_volumes::Vector{Float64}, Kinv::Matrix{Float64} = 
+        h5open(cyax_file(h11,tri,cy), "r") do file
+            HDF5.read(file, "cytools/geometric/h21"),HDF5.read(file, "cytools/geometric/glsm"),
+            HDF5.read(file, "cytools/geometric/basis"),HDF5.read(file, "cytools/hilbert/geometric/tip"),
+            HDF5.read(file, "cytools/hilbert/geometric/CY_volume"),HDF5.read(file, "cytools/hilbert/geometric/divisor_volumes"),
+            HDF5.read(file, "cytools/hilbert/geometric/Kinv")
         end
-        if haskey(file, "cytools/geometric/hilbert_basis")
-            hilbert_basis = HDF5.read(file, "cytools/geometric/hilbert_basis")
+        h5open(cyax_file(h11,tri,cy), "r") do file
+            if haskey(file, "cytools/geometric/tip_prefactor")
+                tip_prefactor = HDF5.read(file, "cytools/hilbert/geometric/tip_prefactor")
+            end
+            if haskey(file, "cytools/geometric/hilbert_basis")
+                hilbert_basis = HDF5.read(file, "cytools/geometric/hilbert_basis")
+            end
         end
-    end
-    if tip_prefactor !== nothing && hilbert_basis !== nothing
-        # keys = ["h21","glsm_charges","basis","tip","tip_prefactor", "CYvolume","τ_volumes","Kinv"]
-        # vals = [h21,
-        # glsm,basis,
-        # tip,tip_prefactor, CY_Volume,divisor_volumes,
-        # Kinv]
-        # return Dict(zip(keys,vals))
-        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
+        if tip_prefactor !== nothing && hilbert_basis !== nothing
+            # keys = ["h21","glsm_charges","basis","tip","tip_prefactor", "CYvolume","τ_volumes","Kinv"]
+            # vals = [h21,
+            # glsm,basis,
+            # tip,tip_prefactor, CY_Volume,divisor_volumes,
+            # Kinv]
+            # return Dict(zip(keys,vals))
+            return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
+        else
+            # keys = ["h21","glsm_charges","basis","tip", "CYvolume","τ_volumes","Kinv"]
+            # vals = [h21,
+            # glsm,basis,
+            # tip, CY_Volume,divisor_volumes,
+            # Kinv]
+            # return Dict(zip(keys,vals))
+            tip_prefactor = ones(Float64, 2)
+            hilbert_basis = zeros(h11, h11)
+            return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
+        end
     else
-        # keys = ["h21","glsm_charges","basis","tip", "CYvolume","τ_volumes","Kinv"]
-        # vals = [h21,
-        # glsm,basis,
-        # tip, CY_Volume,divisor_volumes,
-        # Kinv]
-        # return Dict(zip(keys,vals))
-        tip_prefactor = ones(Float64, 2)
-        hilbert_basis = zeros(h11, h11)
-        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
+        h21::Int, glsm::Matrix{Int},basis::Vector{Int}, tip::Vector{Float64}, CY_Volume::Float64,divisor_volumes::Vector{Float64}, Kinv::Matrix{Float64} = 
+        h5open(cyax_file(h11,tri,cy), "r") do file
+            HDF5.read(file, "cytools/geometric/h21"),HDF5.read(file, "cytools/geometric/glsm"),
+            HDF5.read(file, "cytools/geometric/basis"),HDF5.read(file, "cytools/geometric/tip"),
+            HDF5.read(file, "cytools/geometric/CY_volume"),HDF5.read(file, "cytools/geometric/divisor_volumes"),
+            HDF5.read(file, "cytools/geometric/Kinv")
+        end
+        h5open(cyax_file(h11,tri,cy), "r") do file
+            if haskey(file, "cytools/geometric/tip_prefactor")
+                tip_prefactor = HDF5.read(file, "cytools/geometric/tip_prefactor")
+            end
+            if haskey(file, "cytools/geometric/hilbert_basis")
+                hilbert_basis = HDF5.read(file, "cytools/geometric/hilbert_basis")
+            end
+        end
+        if tip_prefactor !== nothing && hilbert_basis !== nothing
+            # keys = ["h21","glsm_charges","basis","tip","tip_prefactor", "CYvolume","τ_volumes","Kinv"]
+            # vals = [h21,
+            # glsm,basis,
+            # tip,tip_prefactor, CY_Volume,divisor_volumes,
+            # Kinv]
+            # return Dict(zip(keys,vals))
+            return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
+        else
+            # keys = ["h21","glsm_charges","basis","tip", "CYvolume","τ_volumes","Kinv"]
+            # vals = [h21,
+            # glsm,basis,
+            # tip, CY_Volume,divisor_volumes,
+            # Kinv]
+            # return Dict(zip(keys,vals))
+            tip_prefactor = ones(Float64, 2)
+            hilbert_basis = zeros(h11, h11)
+            return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
+        end
     end
-
 end
 
-function geometry(geom_idx::GeometryIndex)
+
+function geometry(geom_idx::GeometryIndex; hilbert = false)
     h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
-    geometry(h11, tri, cy)
+    geometry(h11, tri, cy; hilbert = hilbert)
 end
 
 function hilbert_basis(geom_idx::GeometryIndex)
@@ -85,29 +120,38 @@ end
 ##### Read Geometric data ###
 #############################
 
-function potential(geom_idx::GeometryIndex)
-    L::Matrix{Float64}, Q::Matrix{Int},
-    Kinv::Matrix{Float64}= h5open(cyax_file(geom_idx), "r") do file
-        HDF5.read(file, "cytools/potential/L"),HDF5.read(file, "cytools/potential/Q"),
-        HDF5.read(file, "cytools/geometric/Kinv")
+function potential(geom_idx::GeometryIndex; hilbert = false)
+    if hilbert
+        L::Matrix{Float64}, Q::Matrix{Int}, Kinv::Matrix{Float64} = 
+        h5open(cyax_file(geom_idx), "r") do file
+            HDF5.read(file, "cytools/hilbert/potential/L"),HDF5.read(file, "cytools/hilbert/potential/Q"),
+            HDF5.read(file, "cytools/hilbert/geometric/Kinv")
+        end
+        AxionPotential(L, Q, Hermitian(inv(Kinv)))
+    else
+        L::Matrix{Float64}, Q::Matrix{Int},
+        Kinv::Matrix{Float64}= h5open(cyax_file(geom_idx), "r") do file
+            HDF5.read(file, "cytools/potential/L"),HDF5.read(file, "cytools/potential/Q"),
+            HDF5.read(file, "cytools/geometric/Kinv")
+        end
+        AxionPotential(L, Q, Hermitian(inv(Kinv)))
     end
-    AxionPotential(L, Q, Hermitian(inv(Kinv)))
 end
 
 
-function potential(h11::Int,tri::Int,cy::Int=1)
+function potential(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     geom_idx = GeometryIndex(h11, tri, cy)
     potential(geom_idx)
 end
 
-function Q(h11::Int,tri::Int,cy::Int=1)
+function Q(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     Q::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
         HDF5.read(file, "cytools/potential/Q")
     end
     return Q
 end
 
-function K(h11::Int,tri::Int,cy::Int=1)
+function K(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     K::Matrix{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
         HDF5.read(file, "cytools/potential/K")
     end
@@ -115,7 +159,7 @@ function K(h11::Int,tri::Int,cy::Int=1)
     return Hermitian(K)
 end
 
-function L_log(h11::Int,tri::Int,cy::Int=1)
+function L_log(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     L::Matrix{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
         HDF5.read(file, "cytools/potential/L")
     end
