@@ -913,6 +913,9 @@ function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
     αmatrix(LQtilde(geom_idx); threshold = threshold)
 end
 
+function αmatrix(Q, L; threshold::Float64 = 0.5)
+    αmatrix(LQtilde(Q, L); threshold = threshold)
+end
 """
     ωnorm2(LQ::CanonicalQBasis)
 
