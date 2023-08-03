@@ -27,8 +27,15 @@ end
 function geometry(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     tip_prefactor = nothing
     hilbert_basis = nothing
+    h21::Int = 0
+    glsm::Matrix{Int} = zeros(Int, h11, h11)
+    basis::Vector{Int} = zeros(Int, h11)
+    tip::Vector{Float64} = zeros(Float64, h11)
+    CY_Volume::Float64 = 0.
+    divisor_volumes::Vector{Float64} = zeros(Float64, h11)
+    Kinv::Matrix{Float64} = zeros(Float64, h11, h11)
     if hilbert
-        h21::Int, glsm::Matrix{Int}, basis::Vector{Int}, tip::Vector{Float64}, CY_Volume::Float64,divisor_volumes::Vector{Float64}, Kinv::Matrix{Float64} = 
+        h21, glsm, basis, tip, CY_Volume, divisor_volumes, Kinv = 
         h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "cytools/geometric/h21"),HDF5.read(file, "cytools/geometric/glsm"),
             HDF5.read(file, "cytools/geometric/basis"),HDF5.read(file, "cytools/hilbert/geometric/tip"),
@@ -63,7 +70,7 @@ function geometry(h11::Int,tri::Int,cy::Int=1; hilbert = false)
             return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
         end
     else
-        h21::Int, glsm::Matrix{Int},basis::Vector{Int}, tip::Vector{Float64}, CY_Volume::Float64,divisor_volumes::Vector{Float64}, Kinv::Matrix{Float64} = 
+        h21, glsm, basis, tip, CY_Volume, divisor_volumes, Kinv = 
         h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "cytools/geometric/h21"),HDF5.read(file, "cytools/geometric/glsm"),
             HDF5.read(file, "cytools/geometric/basis"),HDF5.read(file, "cytools/geometric/tip"),
@@ -121,16 +128,19 @@ end
 #############################
 
 function potential(geom_idx::GeometryIndex; hilbert = false)
+    L::Matrix{Float64} = zeros(Float64, 1, 1)
+    Q::Matrix{Int} = zeros(Int, 1, 1)
+    Kinv::Matrix{Float64} = zeros(Float64, geom_idx.h11, geom_idx.h11)
     if hilbert
-        L::Matrix{Float64}, Q::Matrix{Int}, Kinv::Matrix{Float64} = 
+        L, Q, Kinv = 
         h5open(cyax_file(geom_idx), "r") do file
             HDF5.read(file, "cytools/hilbert/potential/L"),HDF5.read(file, "cytools/hilbert/potential/Q"),
             HDF5.read(file, "cytools/hilbert/geometric/Kinv")
         end
         AxionPotential(L, Q, Hermitian(inv(Kinv)))
     else
-        L::Matrix{Float64}, Q::Matrix{Int},
-        Kinv::Matrix{Float64}= h5open(cyax_file(geom_idx), "r") do file
+        L, Q, Kinv = 
+        h5open(cyax_file(geom_idx), "r") do file
             HDF5.read(file, "cytools/potential/L"),HDF5.read(file, "cytools/potential/Q"),
             HDF5.read(file, "cytools/geometric/Kinv")
         end
