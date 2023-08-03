@@ -141,7 +141,7 @@ end
 
 function potential(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     geom_idx = GeometryIndex(h11, tri, cy)
-    potential(geom_idx)
+    potential(geom_idx; hilbert = hilbert)
 end
 
 function Q(h11::Int,tri::Int,cy::Int=1; hilbert = false)
