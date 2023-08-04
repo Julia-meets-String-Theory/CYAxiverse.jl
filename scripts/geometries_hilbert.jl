@@ -76,7 +76,7 @@ GC.gc()
 Random.seed!(1234567890)
 h11list = CYAxiverse.filestructure.paths_cy()[2]
 # h11list = h11list[:, h11list[1, :] .!= 491]
-h11list = h11list[:, h11list[1, :] .<= 55]
+h11list = h11list[:, h11list[1, :] .<= 53]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
 geom_params = shuffle!(geom_params)
 
