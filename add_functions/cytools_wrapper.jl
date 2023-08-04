@@ -515,22 +515,17 @@ end
 function geometries_hilbert(geom_idx::GeometryIndex)
     geom_data = geometries_generate_hilbert(geom_idx)
     h5open(cyax_file(geom_idx), "r+") do file
-        if haskey(file, "cytools/hilbert/geometric")
-        else
-            f1 = create_group(file, "cytools/hilbert/")
-            f1a = create_group(f1, "geometric")
-            f1a["tip",deflate=9] = geom_data.tip
-            f1a["tip_prefactor",deflate=9] = geom_data.tip_prefactor
-            f1a["CY_volume",deflate=9] = geom_data.CY_volume
-            f1a["divisor_volumes",deflate=9] = geom_data.τ_volumes
-            f1a["Kinv",deflate=9] = geom_data.Kinv
-        end
-        if haskey(file, "cytools/hilbert/potential")
-        else
-            f1b = create_group(file, "cytools/hilbert/potential")
-            f1b["L",deflate=9] = geom_data.L
-            f1b["Q",deflate=9] = geom_data.Q
-        end
+        f1 = create_group(file, "cytools/hilbert/")
+        f1a = create_group(f1, "geometric")
+        f1a["tip",deflate=9] = geom_data.tip
+        f1a["tip_prefactor",deflate=9] = geom_data.tip_prefactor
+        f1a["CY_volume",deflate=9] = geom_data.CY_volume
+        f1a["divisor_volumes",deflate=9] = geom_data.τ_volumes
+        f1a["Kinv",deflate=9] = geom_data.Kinv
+        
+        f1b = create_group(file, "cytools/hilbert/potential")
+        f1b["L",deflate=9] = geom_data.L
+        f1b["Q",deflate=9] = geom_data.Q
     end
     GC.gc()
     # return [h11,tri,cy_i]
