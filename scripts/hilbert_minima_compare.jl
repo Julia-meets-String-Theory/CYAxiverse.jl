@@ -81,7 +81,7 @@ size_procs = size(np)
 logfiles = [lfile for _=1:ntasks]
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
-open(l, "a") do outf
+open(lfile, "a") do outf
     write(outf,string("The problematic geometries are: \n"))
 end
 @time begin
