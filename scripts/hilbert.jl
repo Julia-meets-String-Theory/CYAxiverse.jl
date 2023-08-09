@@ -47,7 +47,21 @@ CYAxiverse.filestructure.logcreate(lfile)
     end
     return true
 end
-
+@everywhere function hilbert_potential(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
+    try
+        pot_data = CYAxiverse.read.potential(geom_idx; hilbert = true)
+        if pot_data.L[1, 1] == zero(pot_data.L[1, 1])
+            CYAxiverse.cytools_wrapper.geometries_hilbert(geom_idx)
+        end
+        open(l, "a") do outf
+            write(outf,string("(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
+        end
+    catch e
+        open(l, "a") do outf
+            write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
+        end
+    end
+end
 @everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
     try
         hilbert_exists = false
@@ -76,12 +90,12 @@ end
 #### Initialise functions ####
 ##############################
 geom_idx = CYAxiverse.structs.GeometryIndex(4, 10, 1)
-@time temp_vac = main(geom_idx,lfile)
+@time temp_vac = hilbert_potential(geom_idx,lfile)
 h11list_temp = [4 4 5 7; 10 11 10 10; 1 1 1 1]
 h11list_temp = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list_temp)]
 log_file_temp = [lfile for _ = 1:size(h11list_temp, 1)]
 @time begin
-    temp_vac = pmap(main, h11list_temp, log_file_temp)
+    temp_vac = pmap(hilbert_potential, h11list_temp, log_file_temp)
 end
 # println(temp_geom)
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string((size(h11list_temp,2)+1), "test runs have finished.\n"))
@@ -113,7 +127,7 @@ logfiles = [lfile for _=1:ntasks]
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
 
 @time begin
-    res = pmap(main, geom_params, logfiles)
+    res = pmap(hilbert_potential, geom_params, logfiles)
 end
 
 GC.gc()
