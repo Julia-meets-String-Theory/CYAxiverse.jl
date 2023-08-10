@@ -258,19 +258,32 @@ function vacua_TB(h11::Int,tri::Int,cy::Int=1)
     end
 end
 
-function vacua_jlm(geom_idx::GeometryIndex)
+function vacua_jlm(geom_idx::GeometryIndex; hilbert = false)
     Nvac = 0
     min_coords = zeros(1,1)
     extra_rows = 0
     det_Qtilde = 0
-    h5open(minfile(geom_idx), "r") do file
-        Nvac = HDF5.read(file, "Nvac")
-        if haskey(file, "extra_rows")
-            min_coords = HDF5.read(file, "vac_coords")
-            extra_rows = HDF5.read(file, "extra_rows")
+    if hilbert
+        h5open(minfile(geom_idx), "r") do file
+            Nvac = HDF5.read(file, "hilbert/Nvac")
+            if haskey(file, "hilbert/extra_rows")
+                min_coords = HDF5.read(file, "hilbert/vac_coords")
+                extra_rows = HDF5.read(file, "hilbert/extra_rows")
+            end
+            if haskey(file, "hilbert/det_QTilde")
+                det_Qtilde = HDF5.read(file, "hilbert/det_QTilde")
+            end
         end
-        if haskey(file, "det_QTilde")
-            det_Qtilde = HDF5.read(file, "det_QTilde")
+    else
+        h5open(minfile(geom_idx), "r") do file
+            Nvac = HDF5.read(file, "Nvac")
+            if haskey(file, "extra_rows")
+                min_coords = HDF5.read(file, "vac_coords")
+                extra_rows = HDF5.read(file, "extra_rows")
+            end
+            if haskey(file, "det_QTilde")
+                det_Qtilde = HDF5.read(file, "det_QTilde")
+            end
         end
     end
     if extra_rows == 0
