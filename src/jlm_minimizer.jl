@@ -18,10 +18,10 @@ using ..structs: GeometryIndex, Canonicalα, Solver1D, SolverND, Min_JLM_1D, Min
 
 If the effective instanton charge matrix, `Q`, is not square, this function will compute the number of vacua in the potential using the methods outlined in `arXiv: 2306.XXXXX`.
 """
-function minimize(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01)
-    αtest = αmatrix(geom_idx; threshold=threshold)
+function minimize(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01, hilbert = false)
+    αtest = αmatrix(geom_idx; threshold=threshold, hilbert = hilbert)
     if typeof(αtest)<:Canonicalα
-        Qtilde = LQtilde(geom_idx).Qtilde
+        Qtilde = LQtilde(geom_idx; hilbert = hilbert).Qtilde
         det_Q_tilde = Int(abs(round(det(Qtilde))))
         n_axions = size(αtest.α[αtest.αrowmask, αtest.αcolmask], 1)
         Q_reduced = hcat(1//1 * I(n_axions), αtest.α_complete[αtest.αrowmask, αtest.αcolmask])'
@@ -118,27 +118,82 @@ function minimize(Q::Matrix{Int}, L::Matrix{Float64}; random_phase=false, thresh
     end
 end
 
-function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01)
-    min_data = minimize(geom_idx; random_phase=random_phase, threshold = threshold)
-    if isfile(minfile(geom_idx))
-        rm(minfile(geom_idx))
-    end
-    if typeof(min_data) <: Min_JLM_Square
-        h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
-            file["Nvac", deflate=9] = min_data.N_min
-            file["det_QTilde", deflate=9] = min_data.det_QTilde
-            file["issquare", deflate=9] = 1
+function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01, hilbert = false)
+    min_data = minimize(geom_idx; random_phase=random_phase, threshold = threshold, hilbert = hilbert)
+    if hilbert
+        if typeof(min_data) <: Min_JLM_Square
+            h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
+                if haskey(file, "hilbert")
+                    delete_object(file, "hilbert/")
+                    f1 = create_group(file, "hilbert/")
+                    f1["Nvac", deflate=9] = min_data.N_min
+                    f1["det_QTilde", deflate=9] = min_data.det_QTilde
+                    f1["issquare", deflate=9] = 1
+                else
+                    f1 = create_group(file, "hilbert/")
+                    f1["Nvac", deflate=9] = min_data.N_min
+                    f1["det_QTilde", deflate=9] = min_data.det_QTilde
+                    f1["issquare", deflate=9] = 1
+                end
+            end
+        elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
+            h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
+                if haskey(file, "hilbert")
+                    delete_object(file, "hilbert/")
+                    f1 = create_group(file, "hilbert/")
+                    f1["Nvac", deflate = 9] = min_data.N_min
+                    f1["vac_coords", deflate = 9] = min_data.min_coords
+                    f1["extra_rows", deflate = 9] = min_data.extra_rows
+                    f1["det_QTilde", deflate = 9] = min_data.det_QTilde
+                    f1["issquare", deflate=9] = 0
+                else
+                    f1 = create_group(file, "hilbert/")
+                    f1["Nvac", deflate = 9] = min_data.N_min
+                    f1["vac_coords", deflate = 9] = min_data.min_coords
+                    f1["extra_rows", deflate = 9] = min_data.extra_rows
+                    f1["det_QTilde", deflate = 9] = min_data.det_QTilde
+                    f1["issquare", deflate=9] = 0
+                end
+            end
         end
-    elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
-        h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
-            file["Nvac", deflate = 9] = min_data.N_min
-            file["vac_coords", deflate = 9] = min_data.min_coords
-            file["extra_rows", deflate = 9] = min_data.extra_rows
-            file["det_QTilde", deflate = 9] = min_data.det_QTilde
-            file["issquare", deflate=9] = 0
+    else
+        if typeof(min_data) <: Min_JLM_Square
+            h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
+                if haskey(file, "Nvac")
+                    delete_object(file, "Nvac")
+                    delete_object(file, "det_QTilde")
+                    delete_object(file, "issquare")
+                    file["Nvac", deflate=9] = min_data.N_min
+                    file["det_QTilde", deflate=9] = min_data.det_QTilde
+                    file["issquare", deflate=9] = 1
+                else
+                    file["Nvac", deflate=9] = min_data.N_min
+                    file["det_QTilde", deflate=9] = min_data.det_QTilde
+                    file["issquare", deflate=9] = 1
+                end
+            end
+        elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
+            h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
+                if haskey(file, "Nvac")
+                    delete_object(file, "Nvac")
+                    delete_object(file, "det_QTilde")
+                    delete_object(file, "issquare")
+                    delete_object(file, "vac_coords")
+                    delete_object(file, "extra_rows")
+                    file["Nvac", deflate = 9] = min_data.N_min
+                    file["vac_coords", deflate = 9] = min_data.min_coords
+                    file["extra_rows", deflate = 9] = min_data.extra_rows
+                    file["det_QTilde", deflate = 9] = min_data.det_QTilde
+                    file["issquare", deflate=9] = 0
+                else
+                    file["Nvac", deflate = 9] = min_data.N_min
+                    file["vac_coords", deflate = 9] = min_data.min_coords
+                    file["extra_rows", deflate = 9] = min_data.extra_rows
+                    file["det_QTilde", deflate = 9] = min_data.det_QTilde
+                    file["issquare", deflate=9] = 0
+                end
+            end
         end
-    end
-    return
 end
 
 
