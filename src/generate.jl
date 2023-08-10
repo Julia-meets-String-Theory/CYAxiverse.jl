@@ -819,18 +819,31 @@ function LQtilde(Q, L)
     LQLinearlyIndependent(Qtilde[:, 2:end], Qbar, Lbar, Ltilde[:, 2:end])
 end
 
-function LQtilde(h11::Int, tri::Int, cy::Int)
-    pot_data = potential(h11, tri, cy)
-	Q = Matrix{Int}(pot_data.Q')
-	L = Matrix{Float64}(pot_data.L')
-	LQtilde(Q, L)
+function LQtilde(h11::Int, tri::Int, cy::Int; hilbert = false)
+    if hilbert
+        pot_data = potential(h11, tri, cy; hilbert = hilbert)
+        Q = Matrix{Int}(pot_data.Q')
+        L = Matrix{Float64}(pot_data.L')
+        return LQtilde(Q, L)    
+    else
+        pot_data = potential(h11, tri, cy; hilbert = hilbert)
+        Q = Matrix{Int}(pot_data.Q')
+        L = Matrix{Float64}(pot_data.L')
+        return LQtilde(Q, L)
+    end
 end	
 
-function LQtilde(geom_idx::GeometryIndex)
-    pot_data = potential(geom_idx)
-	Q = Matrix{Int}(pot_data.Q')
-	L = Matrix{Float64}(pot_data.L')
-	LQtilde(Q, L)
+function LQtilde(geom_idx::GeometryIndex; hilbert = false)
+    if hilbert
+        pot_data = potential(geom_idx; hilbert = hilbert)
+        Q = Matrix{Int}(pot_data.Q')
+        L = Matrix{Float64}(pot_data.L')
+        return LQtilde(Q, L)
+    else
+        pot_data = potential(geom_idx; hilbert = hilbert)
+        Q = Matrix{Int}(pot_data.Q')
+        L = Matrix{Float64}(pot_data.L')
+        return LQtilde(Q, L)
 end	
 
 """
@@ -904,12 +917,12 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     end
 end
 
-function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5)
-    αmatrix(LQtilde(h11, tri, cy); threshold = threshold)
+function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5, hilbert = false)
+    αmatrix(LQtilde(h11, tri, cy; hilbert = hilbert); threshold = threshold)
 end
 
-function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
-    αmatrix(LQtilde(geom_idx); threshold = threshold)
+function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5, hilbert = false)
+    αmatrix(LQtilde(geom_idx; hilbert = hilbert); threshold = threshold)
 end
 
 function αmatrix(Q, L; threshold::Float64 = 0.5)
