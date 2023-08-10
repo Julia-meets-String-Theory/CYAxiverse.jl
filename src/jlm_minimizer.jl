@@ -194,6 +194,7 @@ function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 
                 end
             end
         end
+    end
 end
 
 
