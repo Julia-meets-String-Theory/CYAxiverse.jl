@@ -27,10 +27,22 @@ end
         min_data = CYAxiverse.jlm_minimizer.minimize(geom_idx)
         pot_data = CYAxiverse.read.potential(geom_idx; hilbert = true)
         min_data_hilbert = CYAxiverse.jlm_minimizer.minimize(Matrix(pot_data.Q'), Matrix(pot_data.L'); threshold = 0.01)
-        if min_data == min_data_hilbert
+        if min_data.N_min == min_data_hilbert.N_min
         else
             open(l, "a") do outf
-                write(outf,string("(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")\n"))
+                write(outf,string("min-(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")-(", min_data.N_min, ", ", min_data_hilbert.N_min,")\n"))
+            end
+        end
+        if min_data.det_QTilde == min_data_hilbert.det_QTilde
+        else
+            open(l, "a") do outf
+                write(outf,string("det_QTilde-(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")-(", min_data.det_QTilde, ", ", min_data_hilbert.det_QTilde,")\n"))
+            end
+        end
+        if typeof(min_data) == typeof(min_data_hilbert)
+        else
+            open(l, "a") do outf
+                write(outf,string("type-(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")-(", typeof(min_data), ", ", typeof(min_data_hilbert), ")\n"))
             end
         end
     catch e
