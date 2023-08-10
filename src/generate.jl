@@ -844,6 +844,7 @@ function LQtilde(geom_idx::GeometryIndex; hilbert = false)
         Q = Matrix{Int}(pot_data.Q')
         L = Matrix{Float64}(pot_data.L')
         return LQtilde(Q, L)
+    end
 end	
 
 """
