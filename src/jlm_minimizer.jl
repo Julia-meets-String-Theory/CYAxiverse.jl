@@ -161,36 +161,54 @@ function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 
             h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
                 if haskey(file, "Nvac")
                     HDF5.delete_object(file, "Nvac")
-                    HDF5.delete_object(file, "det_QTilde")
-                    HDF5.delete_object(file, "issquare")
                     file["Nvac", deflate=9] = min_data.N_min
-                    file["det_QTilde", deflate=9] = min_data.det_QTilde
-                    file["issquare", deflate=9] = 1
                 else
                     file["Nvac", deflate=9] = min_data.N_min
-                    file["det_QTilde", deflate=9] = min_data.det_QTilde
+                end
+                if haskey(file, "issquare")
+                    HDF5.delete_object(file, "issquare")
                     file["issquare", deflate=9] = 1
+                else
+                    file["issquare", deflate=9] = 1
+                end
+                if haskey(file, "det_QTilde")
+                    HDF5.delete_object(file, "det_QTilde")
+                    file["det_QTilde", deflate=9] = min_data.det_QTilde
+                else
+                    file["det_QTilde", deflate=9] = min_data.det_QTilde
                 end
             end
         elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
             h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
                 if haskey(file, "Nvac")
                     HDF5.delete_object(file, "Nvac")
-                    HDF5.delete_object(file, "det_QTilde")
-                    HDF5.delete_object(file, "issquare")
-                    HDF5.delete_object(file, "vac_coords")
-                    HDF5.delete_object(file, "extra_rows")
                     file["Nvac", deflate = 9] = min_data.N_min
-                    file["vac_coords", deflate = 9] = min_data.min_coords
-                    file["extra_rows", deflate = 9] = min_data.extra_rows
-                    file["det_QTilde", deflate = 9] = min_data.det_QTilde
-                    file["issquare", deflate=9] = 0
                 else
                     file["Nvac", deflate = 9] = min_data.N_min
-                    file["vac_coords", deflate = 9] = min_data.min_coords
-                    file["extra_rows", deflate = 9] = min_data.extra_rows
-                    file["det_QTilde", deflate = 9] = min_data.det_QTilde
+                end
+                if haskey(file, "issquare")
+                    HDF5.delete_object(file, "issquare")
                     file["issquare", deflate=9] = 0
+                else
+                    file["issquare", deflate=9] = 0
+                end
+                if haskey(file, "vac_coords")
+                    HDF5.delete_object(file, "vac_coords")
+                    file["vac_coords", deflate=9] = min_data.min_coords
+                else
+                    file["vac_coords", deflate=9] = min_data.min_coords
+                end
+                if haskey(file, "extra_rows")
+                    HDF5.delete_object(file, "extra_rows")
+                    file["extra_rows", deflate=9] = min_data.extra_rows
+                else
+                    file["extra_rows", deflate=9] = min_data.extra_rows
+                end
+                if haskey(file, "det_QTilde")
+                    HDF5.delete_object(file, "det_QTilde")
+                    file["det_QTilde", deflate=9] = min_data.det_QTilde
+                else
+                    file["det_QTilde", deflate=9] = min_data.det_QTilde
                 end
             end
         end
