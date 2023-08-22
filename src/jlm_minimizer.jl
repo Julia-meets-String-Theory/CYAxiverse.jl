@@ -124,7 +124,7 @@ function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 
         if typeof(min_data) <: Min_JLM_Square
             h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
                 if haskey(file, "hilbert")
-                    delete_object(file, "hilbert/")
+                    HDF5.delete_object(file, "hilbert/")
                     f1 = create_group(file, "hilbert/")
                     f1["Nvac", deflate=9] = min_data.N_min
                     f1["det_QTilde", deflate=9] = min_data.det_QTilde
@@ -139,7 +139,7 @@ function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 
         elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
             h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
                 if haskey(file, "hilbert")
-                    delete_object(file, "hilbert/")
+                    HDF5.delete_object(file, "hilbert/")
                     f1 = create_group(file, "hilbert/")
                     f1["Nvac", deflate = 9] = min_data.N_min
                     f1["vac_coords", deflate = 9] = min_data.min_coords
@@ -160,9 +160,9 @@ function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 
         if typeof(min_data) <: Min_JLM_Square
             h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
                 if haskey(file, "Nvac")
-                    delete_object(file, "Nvac")
-                    delete_object(file, "det_QTilde")
-                    delete_object(file, "issquare")
+                    HDF5.delete_object(file, "Nvac")
+                    HDF5.delete_object(file, "det_QTilde")
+                    HDF5.delete_object(file, "issquare")
                     file["Nvac", deflate=9] = min_data.N_min
                     file["det_QTilde", deflate=9] = min_data.det_QTilde
                     file["issquare", deflate=9] = 1
@@ -175,11 +175,11 @@ function minimize_save(geom_idx::GeometryIndex; random_phase=false, threshold = 
         elseif typeof(min_data) <: Min_JLM_1D || typeof(min_data) <: Min_JLM_ND
             h5open(minfile(geom_idx),isfile(minfile(geom_idx)) ? "r+" : "cw") do file
                 if haskey(file, "Nvac")
-                    delete_object(file, "Nvac")
-                    delete_object(file, "det_QTilde")
-                    delete_object(file, "issquare")
-                    delete_object(file, "vac_coords")
-                    delete_object(file, "extra_rows")
+                    HDF5.delete_object(file, "Nvac")
+                    HDF5.delete_object(file, "det_QTilde")
+                    HDF5.delete_object(file, "issquare")
+                    HDF5.delete_object(file, "vac_coords")
+                    HDF5.delete_object(file, "extra_rows")
                     file["Nvac", deflate = 9] = min_data.N_min
                     file["vac_coords", deflate = 9] = min_data.min_coords
                     file["extra_rows", deflate = 9] = min_data.extra_rows
