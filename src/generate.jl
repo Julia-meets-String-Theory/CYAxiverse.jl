@@ -1970,7 +1970,6 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
 	vac_ND = []
     no_vac = []
     geom_list = []
-    detQtilde = []
     if h11 === nothing
         geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, 1:n])]
     elseif h11 !== nothing && n != size(paths_cy()[2], 2)
@@ -1981,14 +1980,18 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
 	for geom_idx in geom_list
 		# println(geom_idx)
 		if isfile(minfile(geom_idx))
-			vac_test = vacua_jlm(geom_idx)
-			if typeof(vac_test) <: Min_JLM_Square
-				push!(vac_square, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.det_QTilde])
-			elseif typeof(vac_test) == Min_JLM_1D
-				push!(vac_1D, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows, vac_test.det_QTilde])
-			elseif typeof(vac_test) == Min_JLM_ND
-				push!(vac_ND, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows, vac_test.det_QTilde])
-			end
+            try
+                vac_test = vacua_jlm(geom_idx)
+                if typeof(vac_test) <: Min_JLM_Square
+                    push!(vac_square, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.det_QTilde])
+                elseif typeof(vac_test) == Min_JLM_1D
+                    push!(vac_1D, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows, vac_test.det_QTilde])
+                elseif typeof(vac_test) == Min_JLM_ND
+                    push!(vac_ND, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows, vac_test.det_QTilde])
+                end
+            catch e
+                push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, 0])
+            end
         else
             push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, 0])
 		end
