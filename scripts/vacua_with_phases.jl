@@ -21,7 +21,11 @@ ENV["newARGS"] = string("vacua_0323")
 @everywhere using Random
 
 @everywhere function main(n, h11)
-	CYAxiverse.generate.jlm_vacua_db(; n=n, h11=h11)
+	try
+        CYAxiverse.generate.jlm_vacua_db(; n=n, h11=h11)
+    catch e
+        println(h11)
+    end
 end
 
 @everywhere function optim_with_phases(geom_idx::CYAxiverse.structs.GeometryIndex, random_phase)
@@ -39,7 +43,7 @@ end
 @time begin
     vac_data = pmap(main, [100 for _ in 4:40], collect(4:40))
 end
-vac_square = hcat(vcat([item.square for item in vac_data]...)...)
+vac_square = hcat(vcat([item.square for item in vac_data]...)...)[1:4, :]
 vac_1D = Int.(hcat(vcat([item.one_dim for item in vac_data]...)...)[1:4, :])
 vac_ND = Int.(hcat(vcat([item.n_dim for item in vac_data]...)...)[1:4, :])
 no_vacua = hcat(vcat([item.err for item in vac_data]...)..., [item for item in eachcol(vac_ND) if item[4] == 0]...)
@@ -48,13 +52,14 @@ all_vacua = hcat(vac_square, vac_1D, vac_ND)
 println(size(all_vacua))
 println(size(no_vacua))
 GC.gc()
-h11list = vcat(collect(4:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 376, 377, 386, 387, 399, 404, 416, 433, 462, 491])
+# h11list = vcat(collect(4:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 376, 377, 386, 387, 399, 404, 416, 433, 462, 491])
+h11list = sort(collect(Set(CYAxiverse.filestructure.paths_cy()[2][1, :])))
 n_full = size(CYAxiverse.filestructure.paths_cy()[2], 2)
 n_list = [n_full for _ in 1:size(h11list, 1)]
 @time begin
     vac_data = pmap(main, n_list, h11list)
 end
-vac_square = hcat(vcat([item.square for item in vac_data]...)...)
+vac_square = hcat(vcat([item.square for item in vac_data]...)...)[1:4, :]
 vac_1D = Int.(hcat(vcat([item.one_dim for item in vac_data]...)...)[1:4, :])
 vac_ND = Int.(hcat(vcat([item.n_dim for item in vac_data]...)...)[1:4, :])
 no_vacua = hcat(vcat([item.err for item in vac_data]...)..., [item for item in eachcol(vac_ND) if item[4] == 0]...)
@@ -67,7 +72,7 @@ GC.gc()
 @time begin
     large_vac = []
     for item in eachcol(hcat(no_vacua, vac_1D, vac_ND))
-        if item[4] > 20
+        if item[4] >= 10
             push!(large_vac, CYAxiverse.structs.GeometryIndex(item[1:3]...))
         elseif item[4] == 0
             push!(large_vac, CYAxiverse.structs.GeometryIndex(item[1:3]...))
