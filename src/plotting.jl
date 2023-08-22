@@ -30,17 +30,49 @@ function vacua_db_jlm(vac_data::NamedTuple)
     Colorbar(f[2,3], limits = (minimum(n_dim_vac[3, n_dim_vac[2, :] .!= 0]), maximum(n_dim_vac[3, n_dim_vac[2, :] .!= 0])), colormap = :thermal, label = L"$N$", ticklabelfont = "STIX")
     Label(f[1:end, 0], L"$N_\mathrm{vacua}$", rotation = π/2)
     Label(f[end+1, 1:end], L"$h^{1,1}$")
-    save(joinpath(plots_dir(), "N_vac_KS.pdf"), f, pt_per_unit = 1)
+    # save(joinpath(plots_dir(), "N_vac_KS.pdf"), f, pt_per_unit = 1)
+    f
+end
+"""
+    vacua_db_jlm(n)
+
+TBW
+"""
+function vacua_db_jlm_single(vac_data::Matrix)
+    size_inches = (60, 45)
+    size_pt = 72 .* size_inches
+    cmap = :bamako
+    f = Figure(resolution = size_pt, fontsize=96, figure_padding = (5, 10, 5, 50))
+    kwargs = (; xticklabelfont = "STIX", yticklabelfont = "STIX", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true)
+    ax1 = Axis(f[1, 1]; xticks = [1, 50, 100, 200, 300, 400, 491], yticks = [1, 10, 20, 30, 40, 54], xminorticks = IntervalsBetween(5), xlabel = L"$h^{1,1}$", ylabel = L"$N_\mathrm{vacua}$", kwargs...)
+    vac_data = sortslices(vac_data, dims=2, by=x->x[4])
+    all_vac = []
+    for h11 in sort(collect(Set(vac_data[1, :])))
+        for vac in sort(collect(Set(vac_data[4, :])))
+			push!(all_vac, [h11, vac, size(vac_data[:, vac_data[1, :] .== h11 .&& vac_data[4, :] .== vac], 2)])
+		end
+	end
+    xlims!(ax1, (-3, 494))
+    all_vac = hcat(all_vac...)
+    all_vac = all_vac[:, all_vac[3, :] .!= 0]
+    scatter!(ax1, all_vac[1, :], all_vac[2, :], colormap = cmap, color = all_vac[3, :], marker = :rect, markersize = 25)
+    Colorbar(f[1,2], colormap = cmap, limits = (minimum(all_vac[3, :]), maximum(all_vac[3, :])), labelpadding = 40, label = L"\text{No. of geometries}", ticks = [1, 200, 400, 600, 800, 1000], ticklabelfont = "STIX", size = 40)
+    save(joinpath(plots_dir(), "N_vac_KS_scatter.pdf"), f, pt_per_unit = 1)
+    f
 end
 
-function vacua_db_jlm(n=size(paths_cy()[2], 2))
-    vac_data = jlm_vacua_db(n)
+function vacua_db_jlm(n=size(paths_cy()[2], 2); one_axis = false)
+    vac_data = jlm_vacua_db(; n=n)
     vac_square = hcat([vcat(item[1:4]...) for item in vac_data.square]...)
 	vac_1D = hcat([vcat(item[1:4]...) for item in vac_data.one_dim]...)
 	vac_ND = hcat([vcat(item[1:4]..., item[end]...) for item in vac_data.n_dim]...)
 	all_vacua = hcat(vac_square, vac_1D, vac_ND[1:4, :])
     println(size(all_vacua))
-    vacua_db_jlm(vac_data)
+    if one_axis
+        vacua_db_jlm_single(all_vacua)
+    else
+        vacua_db_jlm(vac_data)
+    end
 end
 
 
