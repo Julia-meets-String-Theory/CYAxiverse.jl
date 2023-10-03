@@ -26,6 +26,8 @@ else
     println("This installation does not include CYTools!")
     include("../jlm_python/jlm_python.jl")
     include("jlm_minimizer.jl")
+    include("../scripts/testing/jlm_python.jl")
+    include("../scripts/testing/jlm_minimizer.jl")
 end
 
 include("plotting.jl")
