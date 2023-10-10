@@ -183,22 +183,22 @@ end
 
 function hessian(x, L::Matrix{Float64}, Q::Matrix)
     Λ = L[:, 1] .* 10. .^ L[:, 2]
-    hessian = zeros(Interval, size(Q, 1), size(Q, 1))
+    hessian = zeros(size(Q, 1), size(Q, 1))
     if size(Q, 1) == 1
         for i in axes(Q, 1), j in axes(Q, 1)
             if i>=j
-                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(x' * Q)))
+                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(x' * Q)[:, i]))
             end
         end
         hessian = hessian + hessian' - Diagonal(hessian)
     else
         for i in axes(Q, 1), j in axes(Q, 1)
             if i>=j
-                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(sum(x .* Q, dims=1))))
+                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(sum(x .* Q, dims=1))[:, i]))
             end
         end
-        hessian = hessian + hessian' - Diagonal(hessian)
-        SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
+        hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
+        # SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
     end
 end
 
@@ -396,7 +396,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     @assert size(Q,1) == size(L,1) && size(Q,2) == size(K,1)
     setprecision(ArbFloat; digits=prec)
     h11::Int = size(K,1)
-    Lh::Vector{ArbFloat}, Qtest::Matrix{ArbFloat} = L[:,1] .* ArbFloat(10.) .^L[:,2], ArbFloat.(Q)
+    Lh::Vector{ArbFloat}, Qtest = L[:,1] .* ArbFloat(10.) .^L[:,2], Q
     #Compute Hessian (in lattice basis)
     grad2::Matrix{ArbFloat} = zeros(ArbFloat,(h11,h11))
     hind1::Vector{Vector{Int64}} = [[x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>=y]
@@ -419,7 +419,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     hessfull = Hermitian(grad2 + transpose(grad2) - Diagonal(grad2))
     Lh = zeros(3)
     #Compute QM using generalised eigendecomposition (but keep fK)
-    Ktest = Hermitian(ArbFloat.(K))
+    Ktest = K
     fK::Vector{Float64} = Float64.(log10.(sqrt.(eigen(Ktest).values)))
     Vls::Vector{ArbFloat},Tls::Matrix{ArbFloat} = eigen(hessfull, Ktest)
     Hsign::Vector{Int64} = @.(sign(Vls))
@@ -492,36 +492,35 @@ end
 
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1; prec=5_000)
     pot_data = potential(h11,tri,cy);
-    L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data.L,pot_data.Q,pot_data.K
+    K::Hermitian{Float64, Matrix{Float64}} = pot_data.K
     LQtilde = LQtildebar(h11,tri,cy)
     Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
     Qtilde = Matrix{Int}(LQtilde["Qhat"]')
-    hp_spectrum(K, Ltilde, Qtilde)
+    hp_spectrum(K, Ltilde, Qtilde; prec = prec)
 end
+
+function hp_spectrum(geom_idx::GeometryIndex; prec=5_000)
+    pot_data = potential(geom_idx);
+    K::Hermitian{Float64, Matrix{Float64}} = pot_data.K
+    LQtilde = LQtildebar(geom_idx)
+    Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
+    Qtilde = Matrix{Int}(LQtilde["Qhat"]')
+    hp_spectrum(K, Ltilde, Qtilde; prec = prec)
+end
+
+
 """
     hp_spectrum_save(h11,tri,cy)
 
 """
-function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
+function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1; prec = 5_000)
     if h11!=0
         pot_data = potential(h11,tri,cy);
-        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data.L,pot_data.Q,pot_data.K
-        LQtest = hcat(L,Q);
-        Lfull::Vector{Float64} = LQtest[:,2]
-        LQsorted = LQtest[sortperm(Lfull, rev=true), :]
-        Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-        Qtilde = Qsorted_test[1,:]
-        Ltilde = Lsorted_test[1,:]
-        for i=2:axes(Qsorted_test,1)[end]
-            S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
-            m = S(hcat(Qtilde, @view(Qsorted_test[i,:])))
-            (d,bmat) = Nemo.nullspace(m)
-            if d == 0
-                Qtilde = hcat(Qtilde, @view(Qsorted_test[i,:]))
-                Ltilde = hcat(Ltilde, @view(Lsorted_test[i,:]))
-            end
-        end
-        spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
+        K::Hermitian{Float64, Matrix{Float64}} = pot_data.K
+        LQtilde = LQtildebar(h11,tri,cy)
+        Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
+        Qtilde = Matrix{Int}(LQtilde["Qhat"]')
+        spectrum_data = hp_spectrum(K,Ltilde,Qtilde; prec = prec)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f2 = create_group(file, "spectrum")
             f2a = create_group(f2, "quartdiag")
@@ -652,19 +651,22 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     Ltilde = LQtild.Ltilde
     Qtilde = LQtild.Qtilde
     QKs::Matrix{Float64} = zeros(Float64,h11,h11)
+    Qlt::Matrix{Float64} = UpperTriangular(zeros(Float64,h11,h11))
     fapprox::Vector{Float64} = zeros(Float64,h11)
     mapprox::Vector{Float64} = zeros(h11)
     LinearAlgebra.mul!(QKs, inv(Kls'), Matrix(Qtilde'))
     for i=1:h11
+        println(size(QKs[i, :]))
         fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
         mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
         T = orth_basis(QKs[i,:])
-        # println(size(QKs), size(T))
         QKs1 = zeros(size(QKs,1), size(T,2))
         LinearAlgebra.mul!(QKs1,QKs, T)
-        QKs = copy(QKs1)
+        println(size(QKs1))
+        # Qlt[i, :] .= QKs[i, :]
+        QKs = deepcopy(QKs1)
     end
-    AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]))
+    AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"])), Qlt
 end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int)
@@ -1079,6 +1081,12 @@ TBW
 """
 function LQtildebar(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
+    LQtildebar(L, Q; threshold=threshold)
+end
+
+function LQtildebar(geom_idx::GeometryIndex; threshold::Float64=0.5)
+    pot_data = potential(geom_idx)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     LQtildebar(L, Q; threshold=threshold)
 end
