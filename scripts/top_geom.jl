@@ -26,7 +26,7 @@ split = nothing
 if haskey(ENV, "SLURM_ARRAY_TASK_ID")
     split = parse(Int32, ENV["SLURM_ARRAY_TASK_ID"])
 end
-# @everywhere newARGS = string("vacua_new")
+@everywhere newARGS = string("pwd")
 
 @everywhere using CYAxiverse
 @everywhere using Random
@@ -122,9 +122,9 @@ GC.gc()
 ##############################
 ############ Main ############
 ##############################
-h11_init = 1
+h11_init = 490
 np = nworkers()
-h11_end = 3 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
+h11_end = 2 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
 h11 = collect(h11_init:h11_init+h11_end)
 max_split = 0
 n_split = 1
@@ -172,7 +172,7 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
     (h11 = h11, log_files = log_files_top, ngeometries = n)
 end
 
-run_vars = h11list_generate(h11, lfile; ngeometries=100, split=split, max_split = max_split, n_split = n_split)
+run_vars = h11list_generate(h11, lfile; ngeometries=1_000, split=split, max_split = max_split, n_split = n_split)
 
 h11 = run_vars.h11
 n = run_vars.ngeometries
