@@ -107,18 +107,19 @@ function topologies_generate_fast(h11,n)
     #otherwise generate 1 triangulation per polytope upto $n
     spt = size(poly_test,1)
     m = nothing;
+    std_dev = ifelse(h11 == 491, 1.2, 0.2)
     if spt == 0
         return [0, 0, 0, 0]
     elseif spt < n && h11 > 3
         left_over = mod(n, spt)
         m = n ÷ spt
         if left_over == 0
-            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=1:spt];
+            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false, c = std_dev) for i=1:spt];
             # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
             tri_test = vcat(tri_test_m...)
         else
-            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
-            tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
+            tri_test_m = [poly_test[i].random_triangulations_fast(N=m, as_list=true, progress_bar=false, c = std_dev) for i=left_over+1:spt];
+            tri_test_m1 = [poly_test[i].random_triangulations_fast(N=m+1, as_list=true, progress_bar=false, c = std_dev) for i=1:left_over];
             tri_test_m = vcat(tri_test_m1, tri_test_m)
             # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
             # cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
