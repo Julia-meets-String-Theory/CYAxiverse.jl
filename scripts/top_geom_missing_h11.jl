@@ -26,7 +26,7 @@ split = nothing
 if haskey(ENV, "SLURM_ARRAY_TASK_ID")
     split = parse(Int32, ENV["SLURM_ARRAY_TASK_ID"])
 end
-# @everywhere newARGS = string("vacua_new")
+@everywhere newARGS = string("pwd")
 
 @everywhere using CYAxiverse
 @everywhere using Random
@@ -100,7 +100,7 @@ end
 ##############################
 #### Initialise functions ####
 ##############################
-if split == nothing
+if split === nothing
     @time temp_top = main_top(Random.rand(4:10),10,lfile)
 else 
     @time temp_top = main_top(max(Random.rand(4:10),split),10,lfile)
