@@ -46,11 +46,14 @@ md"""
 html"""
 <style>
 	main {
-		margin: 0 auto;
-		max-width: 98%;
-    	padding-left: max(160px, 5%);
-    	padding-right: max(160px, 5%);
-	}
+    max-width: 70%;
+    align-self: flex-start;
+    margin-left: 70px;
+}
+
+pluto-helpbox {
+	width: clamp(300px,calc(100vw - 781px),600px)
+}
 </style>
 """
 
@@ -71,27 +74,6 @@ begin
 	"""
 end
 
-# ╔═╡ 1ef56dc0-dce2-4f76-9632-13209fc7a0ba
-typeof(CYAxiverse.read.vacua_jlm(CYAxiverse.structs.GeometryIndex(5,10,1))) <: CYAxiverse.structs.Min_JLM_1D
-
-# ╔═╡ eb3a354d-dedf-4b7d-ab14-d8474f217ad4
-CYAxiverse.generate.LQtildebar(9, 40, 1)
-
-# ╔═╡ b26c101b-0387-4d32-a5ed-bc0d48871dcf
-CYAxiverse.generate.LQtilde(9, 40, 1).Qtilde == CYAxiverse.generate.LQtildebar(9, 40, 1)["Qhat"]
-
-# ╔═╡ 52e925f4-7c98-45a6-ba17-02c7d58e3ef9
-@time begin
-	geom_idx = CYAxiverse.structs.GeometryIndex(8, 40, 1)
-	αtest = CYAxiverse.generate.:αmatrix(geom_idx)
-	pq_spec_test = CYAxiverse.generate.pq_spectrum(geom_idx)
-	hp_spec_test = CYAxiverse.generate.hp_spectrum(geom_idx)
-	hp_spec_test["m"], pq_spec_test[1].m
-end
-
-# ╔═╡ c6b70020-b7bd-438d-bc9f-c7df05249e71
-
-
 # ╔═╡ bfd0a313-a144-4883-abee-e74ac7f4a8e4
 @time begin
 	Ltest = [10. ^-i for i in 1:23]
@@ -108,50 +90,66 @@ end
 	Ktest = Hermitian(1/2 .* Ktest'*Ktest)
 end
 
-# ╔═╡ 92fdaa86-1c40-4a18-acb4-26756a98b31a
-log10.(sqrt.(eigen(CYAxiverse.generate.hessian(zeros(size(Qtest, 1)), hcat(Lsign, Ltest), Matrix(Qtest)), Ktest).values)) .+ Float64(log10(CYAxiverse.generate.constants()["MPlanck"])) .+9 .+ Float64(CYAxiverse.generate.constants()["log2π"])
-
-# ╔═╡ ef215872-d011-4432-bee3-8460c82f45e7
-@time CYAxiverse.generate.hp_spectrum(Ktest, hcat(Lsign, Ltest), Matrix{Int}(Qtest'); prec = 200)["m"], CYAxiverse.generate.pq_spectrum(Ktest, hcat(Lsign, Ltest), Matrix{Int}(Qtest'))[1].m
-
-# ╔═╡ 860209f4-1ae4-498b-ac75-c5fa94c2608c
-Vector(Qtest[1, :])
-
-# ╔═╡ 5d0447c8-3f1f-4c7c-ad13-13965251a5fd
-CYAxiverse.generate.orth_basis(Vector(Qtest[1, :])) * Qtest
-
 # ╔═╡ eb35a641-b828-42fe-b01e-ecd6ccc7212f
 CYAxiverse.generate.pq_spectrum(Ktest, hcat(Lsign, Ltest), Matrix{Int}(Qtest'))
 
-# ╔═╡ dac736b9-8bba-4603-af8c-b250112d5db1
-cholesky(Ktest).L
+# ╔═╡ 2b3a2af1-091b-47df-bc2f-082b00a4342b
+function pq_spectrum_square(α::CYAxiverse.structs.CanonicalQBasis)
+    Ltilde = α.Lhat
+    Qtilde = α.Qhat
+    QKs::Matrix{Float64} = zeros(Float64,h11,h11)
+    fapprox::Vector{Float64} = zeros(Float64,h11)
+    mapprox::Vector{Float64} = zeros(h11)
+    LinearAlgebra.mul!(QKs, inv(Kls'), Matrix(Qtilde'))
+    for i=1:h11
+        println(size(QKs[i, :]))
+        fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
+        mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
+        T = orth_basis(QKs[i,:])
+        QKs1 = zeros(size(QKs,1), size(T,2))
+        LinearAlgebra.mul!(QKs1,QKs, T)
+        println(size(QKs1))
+        # Qlt[i, :] .= QKs[i, :]
+        QKs = deepcopy(QKs1)
+    end
+	AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]))
+end
 
-# ╔═╡ ee17361e-dedd-42bd-b9e9-e84791bad7e5
-LowerTriangular(qr(Ktest).Q)
+# ╔═╡ 4476d3fe-db5b-4ed5-aaad-5915b2eb1605
+function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold = 0.5)
+    h11::Int = size(K,1)
+    fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
+    Kls = cholesky(K).L
+    LQ = CYAxiverse.generate.LQtilde(Q', L')
+	α = CYAxiverse.generate.:αmatrix(LQ; threshold = threshold)
+	if typeof(α)<:Canonicalα
+	else
+	    pq_spectrum_square(α)
+	end
+end
+
+# ╔═╡ 8ff2f070-1ae8-4c0f-b540-34e76fe0d685
+αtest = CYAxiverse.generate.:αmatrix(CYAxiverse.structs.GeometryIndex(10, 40, 1))
+
+# ╔═╡ 4e965d07-15dd-4840-b034-2a997a935567
+qr(Qtest[1,:]).Q, CYAxiverse.generate.orth_basis(Vector(Qtest[1, :]))
 
 # ╔═╡ Cell order:
 # ╟─fee399f9-2668-41e0-a296-37b348a04769
 # ╟─90f44877-6310-49b1-9331-f8601918e4b3
 # ╟─915e345e-7002-489c-8fec-8395381f0fe5
 # ╟─2000a078-38f5-4c93-8627-ba6b4970aef6
-# ╠═7c8e7502-94d8-4da6-a5e2-b950b33a62c2
+# ╟─7c8e7502-94d8-4da6-a5e2-b950b33a62c2
 # ╠═fbb69bcb-64c6-42c2-8ce1-666f397eb40e
 # ╠═e556408b-25f7-4fae-ba0b-243242279ba8
 # ╠═3788df6d-c756-4b6a-8d75-8cd018ab2991
 # ╠═b1362f7d-55e5-48d6-a695-f3bf59d8bf99
 # ╠═8778a5d2-5eae-426b-bc86-c62c9326c9fd
 # ╟─8c7bb44d-edb3-46b3-aeef-ac21d2ee16f5
-# ╠═1ef56dc0-dce2-4f76-9632-13209fc7a0ba
-# ╠═eb3a354d-dedf-4b7d-ab14-d8474f217ad4
-# ╠═b26c101b-0387-4d32-a5ed-bc0d48871dcf
-# ╠═52e925f4-7c98-45a6-ba17-02c7d58e3ef9
-# ╠═c6b70020-b7bd-438d-bc9f-c7df05249e71
 # ╠═bfd0a313-a144-4883-abee-e74ac7f4a8e4
 # ╠═b07db615-e3c0-4d60-ab3f-13f35b99f1c9
-# ╠═92fdaa86-1c40-4a18-acb4-26756a98b31a
-# ╠═ef215872-d011-4432-bee3-8460c82f45e7
-# ╠═860209f4-1ae4-498b-ac75-c5fa94c2608c
-# ╠═5d0447c8-3f1f-4c7c-ad13-13965251a5fd
 # ╠═eb35a641-b828-42fe-b01e-ecd6ccc7212f
-# ╠═dac736b9-8bba-4603-af8c-b250112d5db1
-# ╠═ee17361e-dedd-42bd-b9e9-e84791bad7e5
+# ╠═2b3a2af1-091b-47df-bc2f-082b00a4342b
+# ╠═4476d3fe-db5b-4ed5-aaad-5915b2eb1605
+# ╠═8ff2f070-1ae8-4c0f-b540-34e76fe0d685
+# ╠═4e965d07-15dd-4840-b034-2a997a935567
