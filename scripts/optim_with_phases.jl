@@ -1,3 +1,5 @@
+# using Pkg
+# Pkg.instantiate()
 
 using Distributed
 import MPI
@@ -12,7 +14,6 @@ else
     error("no workers!")
     exit()
 end
-ENV["newARGS"] = string("vacua_0323")
 
 @everywhere using CYAxiverse
 @everywhere using LinearAlgebra
@@ -20,27 +21,66 @@ ENV["newARGS"] = string("vacua_0323")
 @everywhere using HDF5
 @everywhere using Random
 
-@everywhere function main(n, h11)
-	try
-        CYAxiverse.generate.jlm_vacua_db(; n=n, h11=h11)
-    catch e
-        println(h11)
-    end
-end
 
-@everywhere function optim_with_phases(geom_idx::CYAxiverse.structs.GeometryIndex)
+@everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
     try
         CYAxiverse.jlm_minimizer.minimize_save(geom_idx; random_phase = true)
         open(l, "a") do outf
-            write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
+            write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
         end
     catch e
         open(l, "a") do outf
             write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
         end
     end
-    
 end
 
-h11list = CYAxiverse.filestructure.paths_cy()[2]
+lfile = CYAxiverse.filestructure.logfile()
+CYAxiverse.filestructure.logcreate(lfile)
 
+##############################
+#### Initialise functions ####
+##############################
+geom_idx = CYAxiverse.structs.GeometryIndex(4, 10, 1)
+@time temp_vac = main(geom_idx,lfile)
+h11list_temp = [4 4 5 7; 10 11 10 10; 1 1 1 1]
+h11list_temp = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list_temp)]
+log_file_temp = [lfile for _ = 1:size(h11list_temp, 1)]
+@time begin
+    temp_vac = pmap(main, h11list_temp, log_file_temp)
+end
+# println(temp_geom)
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string((size(h11list_temp,2)+1), "test runs have finished.\n"))
+### Clear memory ######
+temp_vac = nothing
+GC.gc()
+
+##############################
+############ Main ############
+##############################
+Random.seed!(1234567890)
+h11list = CYAxiverse.filestructure.paths_cy()[2]
+h11list = h11list[:, h11list[1, :] .!= 491]
+# h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
+geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
+geom_params = shuffle!(geom_params)
+
+##################################
+##### Missing geoms ##############
+##################################
+# geom_params = geom_params[end-6_000:end, :]
+##################################
+ntasks = size(geom_params,1)
+size_procs = size(np)
+logfiles = [lfile for _=1:ntasks]
+
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
+
+@time begin
+    res = pmap(main, geom_params, logfiles)
+end
+
+GC.gc()
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("All workers are done!"))
+
+exit()
