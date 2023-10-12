@@ -34,7 +34,7 @@ function minimize(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01,
         Qrowmask = [any(row .!= 0) for row in eachrow(Q_reduced_temp)]
         Q_reduced_temp = Q_reduced_temp[Qrowmask, :]
         if size(Q_reduced_temp, 1) == size(Q_reduced_temp, 2)
-            return Min_JLM_Square(det_Q_tilde, Int(floor(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
+            return Min_JLM_Square(det_Q_tilde, Int(round(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
         else
             phase_vector = phase(geom_idx.h11, αtest)
             if random_phase
@@ -64,7 +64,7 @@ function minimize(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01,
             end
         end
     else
-        return Min_JLM_Square(Int(abs(round(det(αtest.Qhat)))), Int(floor(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
+        return Min_JLM_Square(Int(abs(round(det(αtest.Qhat)))), Int(round(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
     end
 end
 
@@ -84,7 +84,7 @@ function minimize(Q::Matrix{Int}, L::Matrix{Float64}; random_phase=false, thresh
         Qrowmask = [any(row .!= 0) for row in eachrow(Q_reduced_temp)]
         Q_reduced_temp = Q_reduced_temp[Qrowmask, :]
         if size(Q_reduced_temp, 1) == size(Q_reduced_temp, 2)
-            return Min_JLM_Square(det_Q_tilde, Int(floor(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
+            return Min_JLM_Square(det_Q_tilde, Int(round(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
         else
             phase_vector = phase(size(Qtilde, 2), αtest)
             if random_phase
@@ -114,7 +114,7 @@ function minimize(Q::Matrix{Int}, L::Matrix{Float64}; random_phase=false, thresh
             end
         end
     else
-        return Min_JLM_Square(Int(abs(round(det(αtest.Qhat)))), Int(floor(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
+        return Min_JLM_Square(Int(abs(round(det(αtest.Qhat)))), Int(round(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
     end
 end
 
