@@ -203,22 +203,30 @@ function hessian(x, L::Matrix{Float64}, Q::Matrix)
 end
 
 function hessian_norm(x, Q::Matrix)
-    hessian = zeros(Interval, size(Q, 1), size(Q, 1))
+    hessian = zeros(size(Q, 1), size(Q, 1))
     if size(Q, 1) == 1
         for i in axes(Q, 1), j in axes(Q, 1)
             if i>=j
-                hessian[i, j] = sum(@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(x' * Q))
+                hessian[i, j] = (transpose(@view(Q[i, :])) * @view(Q[j, :])) * cos.(x' * Q)[i]
             end
         end
         hessian = hessian + hessian' - Diagonal(hessian)
-    else
+    elseif size(Q, 1) == size(Q, 2)
         for i in axes(Q, 1), j in axes(Q, 1)
             if i>=j
-                hessian[i, j] = sum(@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(sum(x .* Q, dims=1)))
+                hessian[i, j] = (transpose(@view(Q[i, :])) * @view(Q[j, :])) * cos.(x' * Q)[i]
             end
         end
-        hessian = hessian + hessian' - Diagonal(hessian)
-        SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
+        hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
+        # SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
+    else
+        hessian = zeros(size(Q, 1), size(Q, 1), zeros(Q, 2))
+        for i in axes(Q, 1), j in axes(Q, 1), k in axes(Q, 2)
+            if i>=j
+                hessian[i, j, k] = (transpose(@view(Q[i, :])) * @view(Q[j, :])) * cos.(x' * Q)[k]
+            end
+        end
+        hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
     end
 end
 ##############################
@@ -443,7 +451,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
 #     GC.gc()
     
     #Generate quartics in logspace
-    signL::Vector{Int}, logL::Vector{Float64} = L[:,1], L[:,2]
+    signL::Vector{Int}, logL::Vector{Float64} = L[:,1], log(10) .* L[:,2]
     #Compute quartics
     qindq31::Vector{Vector{Int64}} = [[x,x,x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x!=y]
     qindq22::Vector{Vector{Int64}} = [[x,x,y,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>y]
@@ -657,8 +665,8 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     LinearAlgebra.mul!(QKs, inv(Kls'), Matrix(Qtilde'))
     for i=1:h11
         println(size(QKs[i, :]))
-        fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
-        mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
+        fapprox[i] = log10(1 /(2π *dot(QKs[i,:],QKs[i,:])))
+        mapprox[i] = 0.5(Ltilde[2,i]-fapprox[i])
         T = orth_basis(QKs[i,:])
         QKs1 = zeros(size(QKs,1), size(T,2))
         LinearAlgebra.mul!(QKs1,QKs, T)
