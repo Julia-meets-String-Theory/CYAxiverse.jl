@@ -76,22 +76,26 @@ end
 
 # ╔═╡ bfd0a313-a144-4883-abee-e74ac7f4a8e4
 @time begin
-	Ltest = [10. ^-i for i in 1:23]
-	Lsign = ones(23)
-	Qtest = Int.(I(22))
-	Qtest = hcat(Qtest, zeros(22))
+	h11 = 15
+	Ltest = [10. ^-i for i in 0:h11]
+	Lsign = ones(h11+1)
+	Qtest = Int.(I(h11))
+	Qtest = hcat(Qtest, zeros(h11))
 	Qtest[1, end] = 1
 	size(Qtest), size(Ltest)
 end
 
+# ╔═╡ 1e3c5202-df60-47c5-84df-31fee243fe80
+Ltest
+
 # ╔═╡ b07db615-e3c0-4d60-ab3f-13f35b99f1c9
 @time begin
-	Ktest = rand(22,22)
-	Ktest = Hermitian(1/2 .* Ktest'*Ktest)
+	Ktest = rand(h11, h11)
+	Ktest = Hermitian(1/2 .* Ktest'*Ktest + 2I(h11))
 end
 
 # ╔═╡ eb35a641-b828-42fe-b01e-ecd6ccc7212f
-CYAxiverse.generate.pq_spectrum(Ktest, hcat(Lsign, Ltest), Matrix{Int}(Qtest'))
+CYAxiverse.generate.pq_spectrum(Ktest, hcat(Lsign, Ltest), Matrix{Int}(Qtest')), CYAxiverse.generate.hp_spectrum(Ktest, hcat(Lsign, Ltest), Matrix{Int}(Qtest'))
 
 # ╔═╡ 2b3a2af1-091b-47df-bc2f-082b00a4342b
 function pq_spectrum_square(α::CYAxiverse.structs.CanonicalQBasis)
@@ -134,6 +138,120 @@ end
 # ╔═╡ 4e965d07-15dd-4840-b034-2a997a935567
 qr(Qtest[1,:]).Q, CYAxiverse.generate.orth_basis(Vector(Qtest[1, :]))
 
+# ╔═╡ d98e8576-8bf0-4a59-ad29-80b4ddba366e
+@time begin
+	Random.seed!(1234567890)
+	Qtemp = rand(1:10, 10,10)
+	# Qtemp = Qtemp + transpose(Qtemp) - Diagonal(Qtemp)
+	eigen(CYAxiverse.generate.hessian(zeros(10), hcat(ones(10), [-i for i in 2:11]), Qtemp)).values
+end
+
+# ╔═╡ f915ce5a-56b9-4634-967c-b955c2246419
+eigen(Ltest[2:11] .* CYAxiverse.generate.hessian_norm(zeros(10), Qtemp)).values
+
+# ╔═╡ 8dd2c1c6-620d-431f-9ece-be204bbab7eb
+begin
+	Random.seed!(1234567890)
+	Qtemp1 = Matrix(hcat(I(h11), rand(-5:5, h11)))
+	Qtemp1
+end
+
+# ╔═╡ f35bfd5e-015f-49e8-a87d-e00320785fee
+@time begin
+	canK = cholesky(Ktest).L
+	test_hess = zeros(size(Qtemp1, 1), size(Qtemp1, 1))
+	for (i,q) in enumerate(eachcol(inv(canK)' * Qtemp1))
+		test_hess .+= Ltest[i] * (q*q') 
+		# * cos.(zeros(size(Qtemp1,1))' * (inv(canK)' * Qtemp1))[i]
+	end
+	# test_hess = Hermitian(test_hess + test_hess' - Diagonal(test_hess))
+end
+
+# ╔═╡ a6c24db6-367a-4a2a-9eed-47c00101a099
+inv(canK)' * Qtemp1
+
+# ╔═╡ 5daa448d-d9e7-4d43-b68e-b78996f32ac0
+Ltest
+
+# ╔═╡ 1841a90c-521a-43b3-8bb3-470a836ec142
+Qtemp1[:, 1]'
+
+# ╔═╡ d913add1-a56d-4896-a8b4-390552de90d6
+function testhess()
+	EVs = zeros(h11)
+	fs = zeros(h11)
+	NewQ = inv(canK)' * Qtemp1
+	for i in 1:h11
+		fs[i] = NewQ[:, i]' * NewQ[:, i]
+		EVs[i] = Ltest[i] * fs[i]
+		T = CYAxiverse.generate.orth_basis(NewQ[:, i])'
+		NewQ = T * NewQ
+	end
+	fs, EVs
+end
+
+# ╔═╡ 729c4d18-b776-4f59-bea6-ceb3b146bb89
+ones(h11)' * Qtemp1
+
+# ╔═╡ ad031cdc-9270-4ac8-a4e4-265be15b0033
+function hess_test(x::Vector, Q::Matrix)
+	hessian = zeros(size(Q,1), size(Q,1), size(Q, 2))
+	for i in axes(Q, 2), j in axes(Q, 2)
+		hessian[:, :, i] = (@view(Q[:, i]) * @view(Q[:, j])') * cos.(x' * Q)[i]
+	end
+	hessian
+	# Hermitian(hessian + hessian' - Diagonal(hessian))
+end	
+
+# ╔═╡ 819972ff-5978-408a-a6a2-635abee2bd9d
+md"""
+- add sum and \Lambda to `hess_test`
+"""
+
+# ╔═╡ 37997fdb-9bee-455f-98f4-cda269136c9f
+@time begin
+	hessian_fill = zeros(size(Qtemp1, 1), size(Qtemp1, 1))
+	hess = hess_test(zeros(h11), inv(canK)' * Qtemp1)
+	for i in axes(hess, 1), j in axes(hess, 2)
+		if i>=j
+			hessian_fill[i, j] = sum(Ltest .* hess[i, j, :])
+		end
+	end
+	# hessian_fill = Hermitian(hessian_fill + hessian_fill' - Diagonal(hessian_fill))
+end
+		
+
+# ╔═╡ 9f1a0942-405a-4e3d-8b3a-3848a7897b50
+sort(eigen(hessian_fill).values, by=x->abs(x)), sort(testhess()[2], by=x->abs(x)), sort(eigen(test_hess).values, by=x->abs(x))
+
+# ╔═╡ 2baf651e-37aa-40fc-b1e0-1808490aed33
+Ktest
+
+# ╔═╡ 1064a293-e54f-48de-b999-993d33d67990
+eigen(hessian_fill, Ktest[1:h11, 1:h11]).values
+
+# ╔═╡ 06ef508c-3ee1-488a-aff7-38bfef9d7dc6
+hess_test(zeros(h11), Qtemp1)
+
+# ╔═╡ 83f24e49-72b4-459c-9ee4-6d16bb57d834
+@time CYAxiverse.generate.hessian_norm(zeros(h11), Qtemp1) == hess_test(zeros(h11), Qtemp1)
+
+# ╔═╡ 33f63609-dbfe-42a7-b9cc-4054ea69bd85
+cholesky(Ktest[1:10, 1:10]).L
+
+# ╔═╡ f763a26a-87ba-4695-be58-5a3ad8710da5
+10^(1e-2)
+
+# ╔═╡ e9f9f4fe-b003-4ba6-92bb-ee050deeca15
+CYAxiverse.generate.hp_spectrum(10, 10, 1)["m"] .- CYAxiverse.generate.pq_spectrum(10, 10, 1)[1].m
+
+# ╔═╡ b8bd3634-e977-4e73-8005-4d73333fdcc4
+md"""
+- optimise `hessian_norm` function as above
+- check to see if multiplying by Λ as last step leaves eigenvalues unchanged
+- use `gauss_log` function to incorporate Λ
+"""
+
 # ╔═╡ Cell order:
 # ╟─fee399f9-2668-41e0-a296-37b348a04769
 # ╟─90f44877-6310-49b1-9331-f8601918e4b3
@@ -147,9 +265,31 @@ qr(Qtest[1,:]).Q, CYAxiverse.generate.orth_basis(Vector(Qtest[1, :]))
 # ╠═8778a5d2-5eae-426b-bc86-c62c9326c9fd
 # ╟─8c7bb44d-edb3-46b3-aeef-ac21d2ee16f5
 # ╠═bfd0a313-a144-4883-abee-e74ac7f4a8e4
+# ╠═1e3c5202-df60-47c5-84df-31fee243fe80
 # ╠═b07db615-e3c0-4d60-ab3f-13f35b99f1c9
 # ╠═eb35a641-b828-42fe-b01e-ecd6ccc7212f
 # ╠═2b3a2af1-091b-47df-bc2f-082b00a4342b
 # ╠═4476d3fe-db5b-4ed5-aaad-5915b2eb1605
 # ╠═8ff2f070-1ae8-4c0f-b540-34e76fe0d685
 # ╠═4e965d07-15dd-4840-b034-2a997a935567
+# ╠═d98e8576-8bf0-4a59-ad29-80b4ddba366e
+# ╠═f915ce5a-56b9-4634-967c-b955c2246419
+# ╠═8dd2c1c6-620d-431f-9ece-be204bbab7eb
+# ╠═a6c24db6-367a-4a2a-9eed-47c00101a099
+# ╠═f35bfd5e-015f-49e8-a87d-e00320785fee
+# ╠═5daa448d-d9e7-4d43-b68e-b78996f32ac0
+# ╠═1841a90c-521a-43b3-8bb3-470a836ec142
+# ╠═d913add1-a56d-4896-a8b4-390552de90d6
+# ╠═729c4d18-b776-4f59-bea6-ceb3b146bb89
+# ╠═ad031cdc-9270-4ac8-a4e4-265be15b0033
+# ╟─819972ff-5978-408a-a6a2-635abee2bd9d
+# ╠═37997fdb-9bee-455f-98f4-cda269136c9f
+# ╠═9f1a0942-405a-4e3d-8b3a-3848a7897b50
+# ╠═2baf651e-37aa-40fc-b1e0-1808490aed33
+# ╠═1064a293-e54f-48de-b999-993d33d67990
+# ╠═06ef508c-3ee1-488a-aff7-38bfef9d7dc6
+# ╠═83f24e49-72b4-459c-9ee4-6d16bb57d834
+# ╠═33f63609-dbfe-42a7-b9cc-4054ea69bd85
+# ╠═f763a26a-87ba-4695-be58-5a3ad8710da5
+# ╠═e9f9f4fe-b003-4ba6-92bb-ee050deeca15
+# ╟─b8bd3634-e977-4e73-8005-4d73333fdcc4
