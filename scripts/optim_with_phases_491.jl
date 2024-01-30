@@ -64,6 +64,9 @@ h11list = h11list[:, h11list[1, :] .== 491]
 # h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
 geom_params = shuffle!(geom_params)
+up_to = CYAxiverse.structs.GeometryIndex(491,1,363)
+up_to_idx = findall(x->x==up_to, geom_params)[1]+1
+geom_params = geom_params[up_to_idx:end]
 
 ##################################
 ##### Missing geoms ##############
