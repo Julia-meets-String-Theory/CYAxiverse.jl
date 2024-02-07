@@ -664,13 +664,13 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     mapprox::Vector{Float64} = zeros(h11)
     LinearAlgebra.mul!(QKs, inv(Kls'), Matrix(Qtilde'))
     for i=1:h11
-        println(size(QKs[i, :]))
+        # println(size(QKs[i, :]))
         fapprox[i] = log10(1 /(2π *dot(QKs[i,:],QKs[i,:])))
         mapprox[i] = 0.5(Ltilde[2,i]-fapprox[i])
         T = orth_basis(QKs[i,:])
         QKs1 = zeros(size(QKs,1), size(T,2))
         LinearAlgebra.mul!(QKs1,QKs, T)
-        println(size(QKs1))
+        # println(size(QKs1))
         # Qlt[i, :] .= QKs[i, :]
         QKs = deepcopy(QKs1)
     end
