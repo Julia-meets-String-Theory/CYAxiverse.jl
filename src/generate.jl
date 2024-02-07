@@ -674,7 +674,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         # Qlt[i, :] .= QKs[i, :]
         QKs = deepcopy(QKs1)
     end
-    AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"])), Qlt
+    AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]))
 end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int)
