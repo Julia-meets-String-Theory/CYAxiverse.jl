@@ -40,19 +40,25 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install julia 
 WORKDIR /opt/cytools/
-RUN wget https://julialang-s3.julialang.org/bin/linux/x64/1.7/julia-1.7.1-linux-x86_64.tar.gz
-RUN tar xf julia-1.7.1-linux-x86_64.tar.gz
-ENV PATH="$PWD/julia-1.7.1/bin:$PATH"
-RUN ln -s $PWD/julia-1.7.1/bin/julia $VIRTUAL_ENV/bin/julia
-RUN rm julia-1.7.1-linux-x86_64.tar.gz
+RUN wget https://julialang-s3.julialang.org/bin/linux/x64/1.8/julia-1.8.5-linux-x86_64.tar.gz
+RUN tar xf julia-1.8.5-linux-x86_64.tar.gz
+ENV PATH="$PWD/julia-1.8.5/bin:$PATH"
+RUN ln -s $PWD/julia-1.8.5/bin/julia $VIRTUAL_ENV/bin/julia
+RUN rm julia-1.8.5-linux-x86_64.tar.gz
+# RUN wget https://julialang-s3.julialang.org/bin/linux/x64/1.7/julia-1.7.1-linux-x86_64.tar.gz
+# RUN tar xf julia-1.7.1-linux-x86_64.tar.gz
+# ENV PATH="$PWD/julia-1.7.1/bin:$PATH"
+# RUN ln -s $PWD/julia-1.7.1/bin/julia $VIRTUAL_ENV/bin/julia
+# RUN rm julia-1.7.1-linux-x86_64.tar.gz
 
 # Install pip packages
+# Install pip packages
 ENV CVXOPT_SUITESPARSE_INC_DIR=/usr/include/suitesparse
-WORKDIR /opt/cytools/
-COPY ./requirements.txt /opt/cytools/requirements.txt
-RUN pip3 install -r requirements.txt
-RUN pip3 install python-flint==0.3.0
-RUN pip3 install julia
+RUN pip3 install pip==21.0.1
+RUN pip3 install numpy scipy jupyterlab cvxopt gekko pymongo ortools tqdm cython qpsolvers osqp
+RUN pip3 install python-flint matplotlib h5py
+RUN pip3 install scikit-sparse cysignals gmpy2
+RUN pip3 install pplpy
 RUN pip3 install -f https://download.mosek.com/stable/wheel/index.html Mosek
 ENV MOSEKLM_LICENSE_FILE=/home/$USERNAME/mounted_volume/mosek/mosek.lic
 
