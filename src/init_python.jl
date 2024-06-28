@@ -5,7 +5,7 @@ if haskey(ENV, "PYTHON")
     if occursin("cytools", ENV["PYTHON"])
         try 
             using PyCall
-            if PyCall.current_python() != ENV["PYTHON"]
+            if PyCall.python != ENV["PYTHON"]
                 Pkg.build("PyCall")
                 println("PyCall.jl has been built using $(ENV["PYTHON"])")
             end
@@ -16,7 +16,7 @@ if haskey(ENV, "PYTHON")
     else
         try 
             using PyCall
-            if PyCall.current_python() != ENV["PYTHON"]
+            if PyCall.python != ENV["PYTHON"]
                 Pkg.build("PyCall")
                 println("PyCall.jl has been built using $(ENV["PYTHON"])")
             end
