@@ -731,18 +731,18 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     end
 end
 
-function Base.convert(::Type{Matrix{Int}}, x::Nemo.fmpz_mat)
+function Base.convert(::Type{Matrix{Int}}, x::Nemo.ZZMatrix)
     m,n = size(x)
     mat = Int[x[i,j] for i = 1:m, j = 1:n]
     return mat
 end
-function Base.convert(::Type{Matrix{BigInt}}, x::Nemo.fmpz_mat)
+function Base.convert(::Type{Matrix{BigInt}}, x::Nemo.ZZMatrix)
     m,n = size(x)
     mat = BigInt[x[i,j] for i = 1:m, j = 1:n]
     return mat
 end
-# Base.convert(::Type{Matrix{Int}}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
-# Base.convert(::Type{Matrix{BigInt}}, x::Nemo.fmpz_mat) = convert(Matrix{BigInt}, x)
+# Base.convert(::Type{Matrix{Int}}, x::Nemo.ZZMatrix) = convert(Matrix{Int}, x)
+# Base.convert(::Type{Matrix{BigInt}}, x::Nemo.ZZMatrix) = convert(Matrix{BigInt}, x)
 
 
 """
@@ -1028,7 +1028,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
     Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
     
     S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
-    m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
+    m::Nemo.ZZMatrix = matrix(Nemo.ZZ,zeros(1,1))
     d::Int = 1
     Qbar::Matrix{Int} = zeros(Int,size(Qsorted_test[1,:],1),1)
     Lbar::Matrix{Float64} = zeros(Float64,size(Lsorted_test[1,:],1),1)
@@ -1238,17 +1238,17 @@ This function is useful for checking if the identity matrix is contained within 
 function basis_snf(rays::Matrix{Int})
     h11::Int = size(rays,2)
     ###### Nemo SNF #####
-    Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,rays)
-    T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
-    Tparallel1::Nemo.fmpz_mat = inv(T)[:, 1:h11]
+    Qtemp::Nemo.ZZMatrix = matrix(Nemo.ZZ,rays)
+    T::Nemo.ZZMatrix = snf_with_transform(Qtemp)[2]
+    Tparallel1::Nemo.ZZMatrix = inv(T)[:, 1:h11]
     Tparallel::Matrix{Rational} = zeros(1,1)
     if maximum(abs.(Tparallel1)) < 2^60
-        Tparallel = convert(Matrix{Int},Tparallel1)
+        Tparallel = Matrix{Int}(Tparallel1)
         θparalleltest = Matrix{Rational}(inv(transpose(Rational.(rays)) * Rational.(rays)) * transpose(Rational.(rays)) * Tparallel)
         θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
 		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
     else
-        Tparallel = convert(Matrix{BigInt},Tparallel1)
+        Tparallel = Matrix{BigInt}(Tparallel1)
         θparalleltest = Matrix{Rational{BigInt}}(inv(transpose(Rational.(rays)) * Rational.(rays)) * transpose(Rational.(rays)) * Tparallel)
         θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
 		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
@@ -1260,16 +1260,16 @@ end
 function vacua_SNF(Q::Matrix{Integer})
     h11::Int = size(Q,2)
     ###### Nemo SNF #####
-    Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
-    T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
-    Tparallel1::Nemo.fmpz_mat = inv(T)[:, 1:h11]
+    Qtemp::Nemo.ZZMatrix = matrix(Nemo.ZZ,Q)
+    T::Nemo.ZZMatrix = snf_with_transform(Qtemp)[2]
+    Tparallel1::Nemo.ZZMatrix = inv(T)[:, 1:h11]
     Tparallel::Matrix{Rational} = zeros(1,1)
     if maximum(abs.(Tparallel1)) < 2^60
-        Tparallel = convert(Matrix{Int},Tparallel1)
+        Tparallel = Matrix{Int}(Tparallel1)
         θparalleltest = Matrix{Rational}(inv(transpose(Rational.(Q)) * Rational.(Q)) * transpose(Rational.(Q)) * Tparallel)
         θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
     else
-        Tparallel = convert(Matrix{BigInt},Tparallel1)
+        Tparallel = Matrix{BigInt}(Tparallel1)
         θparalleltest = Matrix{Rational{BigInt}}(inv(transpose(Rational.(Q)) * Rational.(Q)) * transpose(Rational.(Q)) * Tparallel)
         θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
     end
