@@ -23,38 +23,19 @@ end
 
 
 @everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
-    if isfile(CYAxiverse.filestructure.minfile(geom_idx))
-        Nvac = 0
-        h5open(CYAxiverse.filestructure.minfile(geom_idx), "r") do file
-            if haskey(file, "Nvac")
-                Nvac = HDF5.read(file, "Nvac")
-            end
+    try
+        CYAxiverse.jlm_minimizer.minimize_save(geom_idx; threshold = 0.01)
+        CYAxiverse.jlm_minimizer.minimize_save(geom_idx; threshold = 0.01, hilbert = true)
+        open(l, "a") do outf
+            write(outf,string("(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")\n"))
         end
-        if Nvac == 0
-            try
-                res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
-                open(l, "a") do outf
-                    write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
-                end
-            catch e
-                open(l, "a") do outf
-                    write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
-                end
-            end
-        end
-    else
-        try
-            res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
-            open(l, "a") do outf
-                write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
-            end
-        catch e
-            open(l, "a") do outf
-                write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
-            end
+    catch e
+        open(l, "a") do outf
+            write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")\n"))
         end
     end
 end
+
 
 lfile = CYAxiverse.filestructure.logfile()
 CYAxiverse.filestructure.logcreate(lfile)
@@ -82,9 +63,9 @@ GC.gc()
 Random.seed!(1234567890)
 h11list = CYAxiverse.filestructure.paths_cy()[2]
 # h11list = h11list[:, h11list[1, :] .!= 491]
-h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
+h11list = h11list[:, h11list[1, :] .<= 53]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
-geom_params = shuffle!(geom_params)
+# geom_params = shuffle!(geom_params)
 
 ##################################
 ##### Missing geoms ##############
@@ -96,11 +77,12 @@ size_procs = size(np)
 logfiles = [lfile for _=1:ntasks]
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
-
+open(lfile, "a") do outf
+    write(outf,string("The problematic geometries are: \n"))
+end
 @time begin
     res = pmap(main, geom_params, logfiles)
 end
 
-GC.gc()
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("All workers are done!"))
 

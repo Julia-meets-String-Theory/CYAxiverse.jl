@@ -7,15 +7,16 @@ module generate
 
 using HDF5
 using LinearAlgebra
-using ArbNumerics, Tullio, LoopVectorization, Nemo
+using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays, NormalForms, IntervalArithmetic, StaticArrays
 using GenericLinearAlgebra
 using Distributions
 using TimerOutputs
 
-using ..filestructure: cyax_file, minfile, present_dir, geom_dir
-using ..read: potential
+using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
+using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential
+
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
 #################
 ### Constant ####
@@ -163,6 +164,71 @@ function pseudo_L(h11::Int,tri::Int,cy::Int=1;log::Bool=true)
     end
 end
 
+function V(x, L::Matrix{Float64}, Q::Matrix)
+    @assert size(L, 2) == 2
+    Λ = L[:, 1] .* 10. .^ L[:, 2]
+    sum(Λ' * (1. .- cos.(Q' * x)))
+end
+function jacobian(x, L::Matrix{Float64}, Q::Matrix)
+    Λ = L[:, 1] .* 10. .^ L[:, 2]
+    if size(Q, 1) == 1
+        grad_temp = Λ' .* (Q .* sin.(x' * Q))
+        grad = sum(grad_temp, dims = 2)
+    else
+        grad_temp = Λ' .* (Q .* sin.(sum(x .* Q, dims=1)))
+        grad = sum(grad_temp, dims = 2)
+        SVector{size(grad, 1)}(grad)
+    end
+end
+
+function hessian(x, L::Matrix{Float64}, Q::Matrix)
+    Λ = L[:, 1] .* 10. .^ L[:, 2]
+    hessian = zeros(size(Q, 1), size(Q, 1))
+    if size(Q, 1) == 1
+        for i in axes(Q, 1), j in axes(Q, 1)
+            if i>=j
+                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(x' * Q)[:, i]))
+            end
+        end
+        hessian = hessian + hessian' - Diagonal(hessian)
+    else
+        for i in axes(Q, 1), j in axes(Q, 1)
+            if i>=j
+                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(sum(x .* Q, dims=1))[:, i]))
+            end
+        end
+        hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
+        # SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
+    end
+end
+
+function hessian_norm(x, Q::Matrix)
+    hessian = zeros(size(Q, 1), size(Q, 1))
+    if size(Q, 1) == 1
+        for i in axes(Q, 1), j in axes(Q, 1)
+            if i>=j
+                hessian[i, j] = (transpose(@view(Q[i, :])) * @view(Q[j, :])) * cos.(x' * Q)[i]
+            end
+        end
+        hessian = hessian + hessian' - Diagonal(hessian)
+    elseif size(Q, 1) == size(Q, 2)
+        for i in axes(Q, 1), j in axes(Q, 1)
+            if i>=j
+                hessian[i, j] = (transpose(@view(Q[i, :])) * @view(Q[j, :])) * cos.(x' * Q)[i]
+            end
+        end
+        hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
+        # SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
+    else
+        hessian = zeros(size(Q, 1), size(Q, 1), zeros(Q, 2))
+        for i in axes(Q, 1), j in axes(Q, 1), k in axes(Q, 2)
+            if i>=j
+                hessian[i, j, k] = (transpose(@view(Q[i, :])) * @view(Q[j, :])) * cos.(x' * Q)[k]
+            end
+        end
+        hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
+    end
+end
 ##############################
 #### Computing Spectra #######
 ##############################
@@ -338,7 +404,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     @assert size(Q,1) == size(L,1) && size(Q,2) == size(K,1)
     setprecision(ArbFloat; digits=prec)
     h11::Int = size(K,1)
-    Lh::Vector{ArbFloat}, Qtest::Matrix{ArbFloat} = L[:,1] .* ArbFloat(10.) .^L[:,2], ArbFloat.(Q)
+    Lh::Vector{ArbFloat}, Qtest = L[:,1] .* ArbFloat(10.) .^L[:,2], Q
     #Compute Hessian (in lattice basis)
     grad2::Matrix{ArbFloat} = zeros(ArbFloat,(h11,h11))
     hind1::Vector{Vector{Int64}} = [[x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>=y]
@@ -361,7 +427,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     hessfull = Hermitian(grad2 + transpose(grad2) - Diagonal(grad2))
     Lh = zeros(3)
     #Compute QM using generalised eigendecomposition (but keep fK)
-    Ktest = Hermitian(ArbFloat.(K))
+    Ktest = K
     fK::Vector{Float64} = Float64.(log10.(sqrt.(eigen(Ktest).values)))
     Vls::Vector{ArbFloat},Tls::Matrix{ArbFloat} = eigen(hessfull, Ktest)
     Hsign::Vector{Int64} = @.(sign(Vls))
@@ -385,7 +451,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
 #     GC.gc()
     
     #Generate quartics in logspace
-    signL::Vector{Int}, logL::Vector{Float64} = L[:,1], L[:,2]
+    signL::Vector{Int}, logL::Vector{Float64} = L[:,1], log(10) .* L[:,2]
     #Compute quartics
     qindq31::Vector{Vector{Int64}} = [[x,x,x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x!=y]
     qindq22::Vector{Vector{Int64}} = [[x,x,y,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>y]
@@ -418,14 +484,14 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         quartiilog1[:,k] = logL .+ (logQMs[:,k] + logQMs[:,k] .+ logQMs[:,k] + logQMs[:,k])
         quartdiagsign[k],quartdiaglog[k] = gauss_log(quartiisign1[:,k],quartiilog1[:,k])
     end
-    qindqdiag::Vector{Vector{Int64}} = [[x,x,x,x]::Vector{Int64} for x=1:h11]
+    # qindqdiag::Vector{Vector{Int64}} = [[x,x,x,x]::Vector{Int64} for x=1:h11]
     
     fpert::Vector{Float64} = @.(Hvals+log10(constants()["MPlanck"])- (0.5*quartdiaglog*log10(exp(1))))
     
     vals =  Hsign, Hvals .+ Float64(log10(constants()["MPlanck"])) .+9 .+ Float64(constants()["log2π"]), 
     fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]), fpert .- Float64(constants()["log2π"]), quartdiagsign, quartdiaglog .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), Array(hcat(qindq31...) .-1), quart31sign, 
-    quart31log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), quart22sign, 
-    quart22log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), Array(hcat(qindq22...) .-1)
+    quart31log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"]), Array(hcat(qindq22...) .-1), quart22sign, 
+    quart22log .*log10(exp(1)) .+ 4*Float64(constants()["log2π"])
 
     keys = ["msign","m", "fK", "fpert","λselfsign", "λself","λ31_i","λ31sign","λ31", "λ22_i","λ22sign","λ22"]
     return Dict(zip(keys,vals))
@@ -434,36 +500,35 @@ end
 
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1; prec=5_000)
     pot_data = potential(h11,tri,cy);
-    L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
+    K::Hermitian{Float64, Matrix{Float64}} = pot_data.K
     LQtilde = LQtildebar(h11,tri,cy)
-    Ltilde = Matrix{Float64}(LQtilde["L\tiil̃"]')
-    Qtilde = Matrix{Int}(LQtilde["Qtilde"]')
-    spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
+    Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
+    Qtilde = Matrix{Int}(LQtilde["Qhat"]')
+    hp_spectrum(K, Ltilde, Qtilde; prec = prec)
 end
+
+function hp_spectrum(geom_idx::GeometryIndex; prec=5_000)
+    pot_data = potential(geom_idx);
+    K::Hermitian{Float64, Matrix{Float64}} = pot_data.K
+    LQtilde = LQtildebar(geom_idx)
+    Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
+    Qtilde = Matrix{Int}(LQtilde["Qhat"]')
+    hp_spectrum(K, Ltilde, Qtilde; prec = prec)
+end
+
+
 """
     hp_spectrum_save(h11,tri,cy)
 
 """
-function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
+function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1; prec = 5_000)
     if h11!=0
         pot_data = potential(h11,tri,cy);
-        L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
-        LQtest = hcat(L,Q);
-        Lfull::Vector{Float64} = LQtest[:,2]
-        LQsorted = LQtest[sortperm(Lfull, rev=true), :]
-        Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-        Qtilde = Qsorted_test[1,:]
-        Ltilde = Lsorted_test[1,:]
-        for i=2:axes(Qsorted_test,1)[end]
-            S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)+1))
-            m = S(hcat(Qtilde, @view(Qsorted_test[i,:])))
-            (d,bmat) = Nemo.nullspace(m)
-            if d == 0
-                Qtilde = hcat(Qtilde, @view(Qsorted_test[i,:]))
-                Ltilde = hcat(Ltilde, @view(Lsorted_test[i,:]))
-            end
-        end
-        spectrum_data = hp_spectrum(K,Ltilde,Qtilde)
+        K::Hermitian{Float64, Matrix{Float64}} = pot_data.K
+        LQtilde = LQtildebar(h11,tri,cy)
+        Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
+        Qtilde = Matrix{Int}(LQtilde["Qhat"]')
+        spectrum_data = hp_spectrum(K,Ltilde,Qtilde; prec = prec)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f2 = create_group(file, "spectrum")
             f2a = create_group(f2, "quartdiag")
@@ -490,12 +555,7 @@ function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     end
     GC.gc()
 end
-function project_out(v::Vector{Int})
-    idd = Matrix{Rational}(I(size(v,1)))
-    norm2::Int = dot(v,v)
-    proj = 1 // norm2 * (v * v')
-    Projector(@.(ifelse(abs(proj) < eps(), zero(proj), proj)), idd - proj)
-end
+
 
 """
     project_out(v::Vector)
@@ -504,12 +564,13 @@ Takes the direction to be projected out as input and returns a projector of the 
 
 ``\\Pi\\bigl(\\vec{v}\\bigr) = \\mathbb{1}_{h^{1,1}} - \\frac{\\bigl|\\vec{v}\\bigr\\rangle\\bigl\\langle\\vec{v}\\bigr|}{||\\vec{v}||^2}``
 """
-function project_out(v::Vector{Rational{Int64}})
+function project_out(v::Vector{T} where T<:Union{Rational{Int64}, Integer})
     idd = Matrix{Rational}(I(size(v,1)))
     norm2 = dot(v,v)
     proj = 1 // norm2 * (v * v')
+    proj = @.(ifelse(abs(proj) < 1e-5, zero(proj), proj))
     # TODO: #16 Need to remove floating point errors
-    Projector(@.(ifelse(abs(proj) < 1e-5, zero(proj), proj)), idd - proj)
+    Projector(proj, idd - proj)
 end
 
 function project_out(projector::Matrix, v::Vector{Int})
@@ -523,7 +584,7 @@ function project_out(v::Vector{Float64})
     idd = Matrix{Float64}(I(size(v,1)))
     norm2 = dot(v,v)
     proj = 1. /norm2 * (v * v')
-    proj = @.(ifelse(abs(proj) < eps(), zero(proj), proj))
+    proj = @.(ifelse(abs(proj) < 1e-5, zero(proj), proj))
     idd_proj = idd - proj
     Projector(proj, @.(ifelse(abs(idd_proj) < 1e-5, zero(idd_proj), idd_proj)))
 end
@@ -558,7 +619,7 @@ Uses the projector defined in [`project_out(v)`](@ref) to construct an orthonorm
 function orth_basis(vec::Vector)
     proj = project_out(vec)
     #this is the scipy.linalg.orth function written out
-    u, s, vh = svd(proj,full=true)
+    u, s, vh = svd(proj.Πperp,full=true)
     M, N = size(u,1), size(vh,2)
     rcond = eps() * max(M, N)
     tol = maximum(s) * rcond
@@ -594,33 +655,55 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
     
-    LQtilde = LQtildebar(L, Q)
-    Ltilde = LQtilde["Ltilde"]
-    Qtilde = LQtilde["Qtilde"]
+    LQtild = LQtilde(Q', L')
+    Ltilde = LQtild.Ltilde
+    Qtilde = LQtild.Qtilde
     QKs::Matrix{Float64} = zeros(Float64,h11,h11)
+    Qlt::Matrix{Float64} = UpperTriangular(zeros(Float64,h11,h11))
     fapprox::Vector{Float64} = zeros(Float64,h11)
     mapprox::Vector{Float64} = zeros(h11)
-    LinearAlgebra.mul!(QKs, inv(Kls'), Qtilde')
+    LinearAlgebra.mul!(QKs, inv(Kls'), Matrix(Qtilde'))
     for i=1:h11
-        fapprox[i] = log10(1/(2π*dot(QKs[i,:],QKs[i,:])))
-        mapprox[i] = 0.5*(Ltilde[2,i]-fapprox[i])
+        # println(size(QKs[i, :]))
+        fapprox[i] = log10(1 /(2π *dot(QKs[i,:],QKs[i,:])))
+        mapprox[i] = 0.5(Ltilde[2,i]-fapprox[i])
         T = orth_basis(QKs[i,:])
-        println(size(QKs), size(T))
         QKs1 = zeros(size(QKs,1), size(T,2))
         LinearAlgebra.mul!(QKs1,QKs, T)
-        QKs = copy(QKs1)
+        # println(size(QKs1))
+        # Qlt[i, :] .= QKs[i, :]
+        QKs = deepcopy(QKs1)
     end
-    vals = [mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"]))]
-    keys = ["m", "fK", "fpert"]
-
-    return Dict(zip(keys,vals))
+    AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]))
 end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int)
     pot_data = potential(h11,tri,cy)
-    K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
+    K,L,Q = pot_data.K, pot_data.L, pot_data.Q
     pq_spectrum(K, L, Q)
 end
+
+function pq_spectrum(geom_idx::GeometryIndex)
+    pot_data = potential(geom_idx)
+    pq_spectrum(pot_data.K, pot_data.L, pot_data.Q)
+end
+
+
+"""
+	spectra_generator(h11_min, h11_max, h11list)
+Generates multiple axion spectra for a given set of geometries identified in `h11list` between `h11_min` and `h11_max`.
+
+⚠️ Will generate **all** geometries with `potential` data generated between `h11_min` and `h11_max` so will be slow if this is a lot! ⚠️
+"""
+function pq_spectra_generator(h11_min::Int, h11_max::Int, h11list::Matrix{Int})
+	spectra = []
+	for col in eachcol(h11list[:, h11_min .≤ h11list[1, :] .≤ h11_max])
+		geom_idx = GeometryIndex(col...)
+		push!(spectra, (geom_idx, pq_spectrum(geom_idx)))
+	end
+	spectra
+end
+
 
 function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     if h11!=0
@@ -633,7 +716,7 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
         end
         if file_open == 0
             pot_data = potential(h11,tri,cy);
-            L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data["L"],pot_data["Q"],pot_data["K"]
+            L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data.L,pot_data.Q,pot_data.K
             spectrum_data = pq_spectrum(K,L,Q)
             h5open(cyax_file(h11,tri,1), "r+") do file
                 f2 = create_group(file, "spectrum")
@@ -648,12 +731,18 @@ function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
     end
 end
 
-function Base.convert(::Type{Matrix{Int}}, x::Nemo.fmpz_mat)
+function Base.convert(::Type{Matrix{Int}}, x::Nemo.ZZMatrix)
     m,n = size(x)
     mat = Int[x[i,j] for i = 1:m, j = 1:n]
     return mat
 end
-Base.convert(::Type{Matrix}, x::Nemo.fmpz_mat) = convert(Matrix{Int}, x)
+function Base.convert(::Type{Matrix{BigInt}}, x::Nemo.ZZMatrix)
+    m,n = size(x)
+    mat = BigInt[x[i,j] for i = 1:m, j = 1:n]
+    return mat
+end
+# Base.convert(::Type{Matrix{Int}}, x::Nemo.ZZMatrix) = convert(Matrix{Int}, x)
+# Base.convert(::Type{Matrix{BigInt}}, x::Nemo.ZZMatrix) = convert(Matrix{BigInt}, x)
 
 
 """
@@ -684,8 +773,8 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     h11::Int = size(Q,2)
     if h11 <= 50
         snf_data = vacua_SNF(Q)
-        Tparallel::Matrix{Int} = snf_data["T∥"]
-        θparalleltest::Matrix{Float64} = snf_data["θ∥"]
+        Tparallel::Matrix{Int} = snf_data.Tparallel
+        θparalleltest::Matrix{Float64} = snf_data.θparallel
     end
     data = LQtildebar(L,Q; threshold=threshold)
     Qtilde = data["Qtilde"]
@@ -710,9 +799,10 @@ end
 TBW
 """
 function LQtilde(Q, L)
+    @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
     if @isdefined h11
     else
-        h11 = size(Q, 2)
+        h11 = size(Q, 1)
     end
     Q = Matrix{Int}(Q[:, sortperm(L[2,:], rev=true)])
 	L = L[:, sortperm(L[2,:], rev=true)]
@@ -733,22 +823,38 @@ function LQtilde(Q, L)
 		end
 	end
     if size(Qtilde, 2) + size(Qbar, 2) != size(Q, 2)
+        Lbar = hcat(Lbar[:, 2:end], L[:, size(Qtilde,2)+size(Qbar,2)-1:end])
         Qbar = hcat(Qbar[:, 2:end], Q[:, size(Qtilde,2)+size(Qbar,2)-1:end])
-        Lbar = hcat(Lbar[:, 2:end], L[:, size(Qtilde,2)+size(Qbar,2):end])
     end
     LQLinearlyIndependent(Qtilde[:, 2:end], Qbar, Lbar, Ltilde[:, 2:end])
 end
 
-function LQtilde(h11::Int, tri::Int, cy::Int)
-	Q = Matrix{Int}(potential(h11, tri, cy)["Q"]')
-	L = Matrix{Float64}(potential(h11, tri, cy)["L"]')
-	LQtilde(Q, L)
+function LQtilde(h11::Int, tri::Int, cy::Int; hilbert = false)
+    if hilbert
+        pot_data = potential(h11, tri, cy; hilbert = hilbert)
+        Q = Matrix{Int}(pot_data.Q')
+        L = Matrix{Float64}(pot_data.L')
+        return LQtilde(Q, L)    
+    else
+        pot_data = potential(h11, tri, cy; hilbert = hilbert)
+        Q = Matrix{Int}(pot_data.Q')
+        L = Matrix{Float64}(pot_data.L')
+        return LQtilde(Q, L)
+    end
 end	
 
-function LQtilde(geom_idx::GeometryIndex)
-	Q = Matrix{Int}(potential(geom_idx).Q')
-	L = Matrix{Float64}(potential(geom_idx).L')
-	LQtilde(Q, L)
+function LQtilde(geom_idx::GeometryIndex; hilbert = false)
+    if hilbert
+        pot_data = potential(geom_idx; hilbert = hilbert)
+        Q = Matrix{Int}(pot_data.Q')
+        L = Matrix{Float64}(pot_data.L')
+        return LQtilde(Q, L)
+    else
+        pot_data = potential(geom_idx; hilbert = hilbert)
+        Q = Matrix{Int}(pot_data.Q')
+        L = Matrix{Float64}(pot_data.L')
+        return LQtilde(Q, L)
+    end
 end	
 
 """
@@ -758,6 +864,10 @@ TBW
 """
 function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Qhat = Matrix{Rational}(LQ.Qtilde)
+    if @isdefined h11
+    else
+        h11 = size(Qhat, 1)
+    end
     Qbar = Matrix{Int}(LQ.Qbar)
     Lhat = LQ.Ltilde
     Lbar = LQ.Lbar
@@ -765,12 +875,14 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Ldiff_limit::Float64 = log10(threshold)
     Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
-    Qinv = (inv(Qhat))
-    Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
-    # Qhat::Matrix{Int} = deepcopy(Qtilde)
-    # Lhat = deepcopy(Ltilde)
+    Qinv = inv(Qhat)
+    Qinv = @.(ifelse(abs(Qinv) < 1e-4, zero(Rational), Rational(Qinv)))
     αeff::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
+    αfull::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
     α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
+    α = @.(ifelse(abs(α) < 1e-4, zero(Rational), Rational(α)))
+    α = @.ifelse(mod(α, 1) < 1e-3, round(α), α)
+    α1::Matrix{Rational} = deepcopy(α)
     for i in axes(α,1)
         for j in axes(α,2)
             if abs(α[i,j]) > 1e-3
@@ -779,8 +891,14 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
                 else
                     α[i,j] = zero(Rational)
                 end
+                if abs(1 - abs(α[i,j])) > 1e-3
+                else
+                    α[i,j] = sign(α[i,j]) * one(α[i,j])
+                    α1[i,j] = sign(α1[i,j]) * one(α1[i,j])
+                end
             else
                 α[i,j] = zero(Rational)
+                α1[i,j] = zero(Rational)
             end
         end
         if α[i,:] == zeros(size(α,2))
@@ -788,18 +906,59 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
             Qhat = hcat(Qhat, @view(Qbar[:,i]))
             Lhat = hcat(Lhat, @view(Lbar[:,i]))
             αeff = hcat(αeff,@view(α[i,:]))
+            αfull = hcat(αfull,@view(α1[i,:]))
         end
     end
-    CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff))
+    αeff_temp = hcat(1//1 * I(h11), αeff[:, 2:end])
+    if size(αeff_temp,2) > h11
+        αeff = αeff[:, 2:end]
+        αfull = αfull[:, 2:end]
+        αrowmask = [(L - Lhat[2, h11+1]) < -Ldiff_limit for L in Lhat[2, 1:h11]]
+        ####################################################
+        ### These lines break things #######################
+        #### Don't know why ################################
+        # αrowmask1 = [sum(row .== zero(row[1])) < size(αeff,2) for row in eachrow(αeff)]
+        # αrowmask = αrowmask .+ αrowmask1
+        # αrowmask = @.Bool(ifelse(αrowmask > 1, 1, 0))
+        ####################################################
+        αcolmask = [sum(col .== zero(col[1])) < size(αeff[αrowmask,:],1) for col in eachcol(αeff[αrowmask,:])]
+        Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Matrix{Rational}(αfull), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
+    else
+        CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar))
+    end
 end
 
-function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5)
-    αmatrix(LQtilde(h11, tri, cy); threshold)
+function αmatrix(h11::Int, tri::Int, cy::Int; threshold::Float64 = 0.5, hilbert = false)
+    αmatrix(LQtilde(h11, tri, cy; hilbert = hilbert); threshold = threshold)
 end
 
-function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
-    αmatrix(LQtilde(geom_idx); threshold)
+function αmatrix(geom_idx::GeometryIndex; threshold::Float64 = 0.5, hilbert = false)
+    αmatrix(LQtilde(geom_idx; hilbert = hilbert); threshold = threshold)
 end
+
+function αmatrix(Q, L; threshold::Float64 = 0.5)
+    αmatrix(LQtilde(Q, L); threshold = threshold)
+end
+"""
+    ωnorm2(LQ::CanonicalQBasis)
+
+TBW
+"""
+function ωnorm2(LQ::CanonicalQBasis)
+	Qhat = LQ.Qhat
+	ωnorm = zeros(size(Qhat, 2))
+	for i in axes(Qhat, 2)
+		if length(Qhat[:, i][Qhat[:, i] .== 0]) < size(Qhat, 2) - 1
+			ωnorm[i] = norm(Qhat[:, i])^2
+		end
+	end
+	sum(ωnorm) / size(Qhat, 2)
+end
+
+function ωnorm2(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
+    ωnorm2(αmatrix(LQtilde(geom_idx); threshold = threshold))
+end
+
 """
     LQtildebar(L,Q; threshold)
 
@@ -869,7 +1028,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
     Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
     
     S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
-    m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
+    m::Nemo.ZZMatrix = matrix(Nemo.ZZ,zeros(1,1))
     d::Int = 1
     Qbar::Matrix{Int} = zeros(Int,size(Qsorted_test[1,:],1),1)
     Lbar::Matrix{Float64} = zeros(Float64,size(Lsorted_test[1,:],1),1)
@@ -919,7 +1078,7 @@ function LQtildebar(L::Matrix{Float64},Q::Matrix{Int}; threshold = 0.5)
         end
     end
     keys = ["Qhat", "Qbar", "Lhat", "Lbar", "α"]
-    vals = [Qhat, Qbar, Lhat, Lbar, αeff]
+    vals = [Qhat, Qbar, Lhat, Lbar, αeff[:,2:end]]
     return Dict(zip(keys,vals))
 end
 
@@ -930,7 +1089,13 @@ TBW
 """
 function LQtildebar(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
-    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
+    LQtildebar(L, Q; threshold=threshold)
+end
+
+function LQtildebar(geom_idx::GeometryIndex; threshold::Float64=0.5)
+    pot_data = potential(geom_idx)
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     LQtildebar(L, Q; threshold=threshold)
 end
 
@@ -984,7 +1149,7 @@ end
 
 function vacua_id_basis(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
-    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     vacua_id_basis(L, Q; threshold=threshold)
 end
 """
@@ -1061,23 +1226,56 @@ TBW
 """
 function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector=zeros(h11))
     pot_data = potential(h11,tri,cy)
-    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     vacua_id(L, Q; threshold=threshold, phase=phase)
 end
 
+"""
+    basis_snf(rays::Matrix{Int})
 
-function vacua_SNF(Q::Matrix{Int})
+This function is useful for checking if the identity matrix is contained within the charge matrix, _i.e._ that the fundamental domain is the unit cube
+"""
+function basis_snf(rays::Matrix{Int})
+    h11::Int = size(rays,2)
+    ###### Nemo SNF #####
+    Qtemp::Nemo.ZZMatrix = matrix(Nemo.ZZ,rays)
+    T::Nemo.ZZMatrix = snf_with_transform(Qtemp)[2]
+    Tparallel1::Nemo.ZZMatrix = inv(T)[:, 1:h11]
+    Tparallel::Matrix{Rational} = zeros(1,1)
+    if maximum(abs.(Tparallel1)) < 2^60
+        Tparallel = Matrix{Int}(Tparallel1)
+        θparalleltest = Matrix{Rational}(inv(transpose(Rational.(rays)) * Rational.(rays)) * transpose(Rational.(rays)) * Tparallel)
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
+		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
+    else
+        Tparallel = Matrix{BigInt}(Tparallel1)
+        θparalleltest = Matrix{Rational{BigInt}}(inv(transpose(Rational.(rays)) * Rational.(rays)) * transpose(Rational.(rays)) * Tparallel)
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
+		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
+    end
+	vol_basis = abs(det(θparalleltest))
+    return BasisSNF(vol_basis, θparalleltest, θparalleltestinv)
+end
+
+function vacua_SNF(Q::Matrix{Integer})
     h11::Int = size(Q,2)
     ###### Nemo SNF #####
-    Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
-    T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
-    Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
-    Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
-
-    θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
-    keys = ["T∥", "θ∥"]
-    vals = [Tparallel,θparalleltest]
-    return Dict(zip(keys,vals))
+    Qtemp::Nemo.ZZMatrix = matrix(Nemo.ZZ,Q)
+    T::Nemo.ZZMatrix = snf_with_transform(Qtemp)[2]
+    Tparallel1::Nemo.ZZMatrix = inv(T)[:, 1:h11]
+    Tparallel::Matrix{Rational} = zeros(1,1)
+    if maximum(abs.(Tparallel1)) < 2^60
+        Tparallel = Matrix{Int}(Tparallel1)
+        θparalleltest = Matrix{Rational}(inv(transpose(Rational.(Q)) * Rational.(Q)) * transpose(Rational.(Q)) * Tparallel)
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
+    else
+        Tparallel = Matrix{BigInt}(Tparallel1)
+        θparalleltest = Matrix{Rational{BigInt}}(inv(transpose(Rational.(Q)) * Rational.(Q)) * transpose(Rational.(Q)) * Tparallel)
+        θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
+    end
+    # keys = ["T∥", "θ∥"]
+    # vals = [Tparallel,θparalleltest]
+    return RationalQSNF(Tparallel,θparalleltest)
 end
 """
     vacua_TB(L,Q)
@@ -1104,8 +1302,8 @@ function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     h11::Int = size(Q,2)
     if h11 <= 50
         snf_data = vacua_SNF(Q)
-        Tparallel::Matrix{Int} = snf_data["T∥"]
-        θparalleltest::Matrix{Float64} = snf_data["θ∥"]
+        Tparallel::Matrix{Int} = snf_data.Tparallel
+        θparalleltest::Matrix{Float64} = snf_data.θparallel
     end
     data = LQtildebar(L,Q; threshold=threshold)
     Qtilde = data["Qtilde"]
@@ -1157,7 +1355,7 @@ Dict{String, Any} with 3 entries:
 """
 function vacua_TB(h11::Int,tri::Int,cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
-    Q::Matrix{Int}, L::Matrix{Float64} = pot_data["Q"], pot_data["L"] 
+    Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
     vacua_TB(L, Q; threshold=threshold)
 end
 
@@ -1172,7 +1370,7 @@ function vacua_save(h11::Int,tri::Int,cy::Int=1; threshold::Float64=0.5)
     end
     if file_open == 0
         pot_data = potential(h11,tri,cy)
-        vacua_data = vacua(pot_data["L"],pot_data["Q"]; threshold=threshold)
+        vacua_data = vacua(pot_data.L,pot_data.Q; threshold=threshold)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua")
             f3["vacua",deflate=9] = vacua_data["vacua"]
@@ -1198,7 +1396,7 @@ function vacua_save_TB(h11::Int,tri::Int,cy::Int=1; threshold::Float64=0.5)
     end
     if file_open == 0
         pot_data = potential(h11,tri,cy)
-        vacua_data = vacua_TB(pot_data["L"],pot_data["Q"]; threshold=threshold)
+        vacua_data = vacua_TB(pot_data.L,pot_data.Q; threshold=threshold)
         h5open(cyax_file(h11,tri,cy), "r+") do file
             f3 = create_group(file, "vacua_TB")
             f3["vacua",deflate=9] = vacua_data["vacua"]
@@ -1255,7 +1453,7 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold = 1e-2)
 			end
 			xmin = hcat(res["xmin"]...)
 			for i in eachcol(xmin)
-				i[:] = @. ifelse(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i)
+				i[:] = @.(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i)
 			end
 			xmin = xmin[:, [sum(i)/size(i,1) > eps() for i in eachcol(xmin)]]
 			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
@@ -1283,7 +1481,7 @@ Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.0
 """
 function vacua_MK(h11::Int,tri::Int,cy::Int)
     pot_data = potential(h11,tri,cy)
-    K,L,Q = pot_data["K"], pot_data["L"], pot_data["Q"]
+    K,L,Q = pot_data.K, pot_data.L, pot_data.Q
     vacua_MK(L, Q)
 end
 
@@ -1376,7 +1574,7 @@ end
 
 function vacua_projector(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11, tri, cy)
-    L, Q = pot_data["L"], pot_data["Q"]
+    L, Q = pot_data.L, pot_data.Q
     vacua_projector(L, Q; threshold=threshold)
 end
 
@@ -1453,30 +1651,166 @@ function vacuaΩ(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, pha
     end
 end
 """
-    Omega(Ω::Matrix{Int})
+    omega(Ω::Matrix{Int})
 
 TBW
 """
 function omega(Ω::Matrix{Int})
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
     Ωperp = Matrix{Rational}(deepcopy(Ω))
-    Ωparallel = zeros(size(Ω))
+    Ωparallel = []
     for (i, col) in enumerate(eachcol(Ω))
         # TODO: #15 Π function
         Ωperp[:, i+1:end] = project_out(Vector(col)).Πperp * Ωperp[:, i+1:end]
-        Ωperp = @.(ifelse(abs(Ωperp) < 1e-4, zero(Ωperp), Ωperp))
-        Ωparallel[:, i] = mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=2)
+        Ωperp = @.(ifelse(abs(Ωperp) < 1e-5, zero(Ωperp), Ωperp))
+        if i < h11
+            push!(Ωparallel, vcat(zeros(Float64, i), mapslices(norm, project_out(Vector(col)).Π * Ω[:, i+1:end]; dims=1)'))
+        end
     end
-    Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-4, zero(Ωparallel), Ωparallel))
-    ProjectedQ(Ωperp, Ωparallel)
+    #TODO #49: check construction
+    Ωparallel = hcat(zeros(h11), Ωparallel...)
+    Ωparallel = @.(ifelse(abs(Ωparallel) < 1e-5, zero(Ωparallel), Ωparallel))
+    ProjectedQ(sparse(Ωperp), sparse(Ωparallel))
 end
+
+function omega(geom_idx::GeometryIndex)
+    h11 = geom_idx.h11
+    omega(αmatrix(geom_idx).Qhat)
+end
+
 """
-    θmin(Ωparallel, Ωperp, Ω)
+    norm2(Ω::Union{AbstractMatrix, SparseArrays.AbstractSparseMatrix}; column = true, average = false, product = true)
 
 TBW
 """
-function θmin(Ωparallel, Ωperp, Ω; phase=zeros(size(Ω,1)), n::Vector=zeros(size(Ω,1)))
-    min1 = (2π * n[1] - phase[1]) / Ωperp[:, 1]
-    ei = [Ωperp[:, i] / norm(Ωperp[:, i]) for (i,_) in enumerate(eachcol(Ωperp))]
+function norm2(Ω::Union{AbstractMatrix, SparseArrays.AbstractSparseMatrix}; column = true, average = false, product = true)
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
+    norm2Ω = zeros(Float64, h11)
+	for i in ifelse(column == true, axes(Ω, 2), axes(Ω, 1))
+		norm2Ω[i] = ifelse(column == true, norm(Ω[:, i])^2, norm(Ω[i, :])^2)
+	end
+	if product == true && average == false
+        return prod(norm2Ω; dims = 1)
+    elseif product == false && average == true
+        return sum(norm2Ω; dims = 1) / length(norm2Ω)
+    elseif product == false && average == false
+        return norm2Ω
+    else
+        return throw(ArgumentError("average and product kwargs cannot both be $average"))
+    end
+end
+
+
+function norm2(Ω::ProjectedQ; column = true, average = false, product = true)
+    Ω = Ω.Ωperp
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
+    norm2Ω = zeros(Float64, h11)
+	for i in ifelse(column == true, axes(Ω, 2), axes(Ω, 1))
+		norm2Ω[i] = ifelse(column == true, norm(Ω[:, i])^2, norm(Ω[i, :])^2)
+	end
+	if product == true && average == false
+        return prod(norm2Ω; dims = 1)
+    elseif product == false && average == true
+        return sum(norm2Ω; dims = 1) / length(norm2Ω)
+    elseif product == false && average == false
+        return norm2Ω
+    else
+        return throw(ArgumentError("average and product kwargs cannot both be $average"))
+    end
+end
+
+function norm2(geom_idx::GeometryIndex; column = true, average = false, product = true)
+    h11 = geom_idx.h11
+    norm2(omega(geom_idx); column = column, average = average, product = product)
+end
+"""
+    norm2minus1(Ω::Union{AbstractMatrix, SparseArrays.AbstractSparseMatrix}; col = true)
+
+TBW
+"""
+function norm2minus1(Ω::Union{AbstractMatrix, SparseArrays.AbstractSparseMatrix}; column = true, average = false, product = true)
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
+    norm2Ω = zeros(Float64, h11)
+	for i in ifelse(column == true, axes(Ω, 2), axes(Ω, 1))
+		norm2Ω[i] = ifelse(column == true, norm(Ω[:, i])^2 - 1, norm(Ω[i, :])^2 - 1)
+	end
+    norm2Ω = norm2Ω[norm2Ω .!= 0.]
+	if product == true && average == false
+        return prod(norm2Ω; dims = 1)
+    elseif product == false && average == true
+        return sum(norm2Ω; dims = 1) / length(norm2Ω)
+    elseif product == false && average == false
+        return norm2Ω
+    else
+        return throw(ArgumentError("average and product kwargs cannot both be $average"))
+    end
+end
+
+function norm2minus1(Ω::ProjectedQ; column = true, average = false, product = true)
+    Ω = Ω.Ωperp
+    if @isdefined h11
+    else
+        h11 = size(Ω, 2)
+    end
+    norm2Ω = zeros(Float64, h11)
+	for i in ifelse(column == true, axes(Ω, 2), axes(Ω, 1))
+		norm2Ω[i] = ifelse(column == true, norm(Ω[:, i])^2 - 1, norm(Ω[i, :])^2 - 1)
+	end
+    norm2Ω = norm2Ω[norm2Ω .!= 0.]
+	if product == true && average == false
+        return prod(norm2Ω; dims = 1)
+    elseif product == false && average == true
+        return sum(norm2Ω; dims = 1) / length(norm2Ω)
+    elseif product == false && average == false
+        return norm2Ω
+    else
+        return throw(ArgumentError("average and product kwargs cannot both be $average"))
+    end
+end
+
+"""
+    θmin(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)), n::Vector=zeros(size(Ω.Ωperp, 2)))
+
+TBW
+"""
+function θmin(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)), n::Vector=zeros(size(Ω.Ωperp, 2)))
+    min = zeros(size(Ω.Ωperp, 2))
+    for i ∈ axes(Ω.Ωperp, 2)
+        n = 0
+        while 0 ≤ min[i] < 2π
+            min = 2π * n - phase[i] / norm(Ωperp[:, i])
+            n+=1
+        end
+        ei = hcat([Ωperp[:, i] / norm(Ωperp[:, i]) for i in axes(Ωperp, 1)]...)
+    end
+end
+
+
+"""
+    θmin_tree(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)))
+
+TBW
+"""
+function θmin_tree(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)))
+    tree = MyTree(0)
+    for i ∈ axes(Ω.Ωperp, 2)
+        min = tree.data - phase[i] / norm(Ω.Ωperp[:, i])
+        phase[i+1] = min * Ω.Ωparallel
+        tree = MyTree(min, tree)
+    end
+    ei = hcat([ΩpΩ.Ωperperp[:, i] / norm(Ω.Ωperp[:, i]) for i in axes(Ωperp, 1)]...)
 end
 """
     vacuaΠ(L, Q; threshold=0.5, phase=zeros(size(Q,2)))
@@ -1501,7 +1835,7 @@ end
 
 function vacuaΠ(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase=zeros(h11))
     pot_data = potential(h11, tri, cy)
-    L, Q = pot_data["L"], pot_data["Q"]
+    L, Q = pot_data.L, pot_data.Q
     vacuaΠ(L, Q; threshold=threshold, phase=phase)
 end
 
@@ -1587,48 +1921,10 @@ end
 
 function vacua_full(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector{Float64}=zeros(h11))
     pot_data = potential(h11, tri, cy)
-    L, Q = pot_data["L"], pot_data["Q"]
+    L, Q = pot_data.L, pot_data.Q
     vacua_full(L, Q; threshold=threshold, phase=phase)
 end
 
-"""
-    vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
-
-Uses `LQtildebar` function to make Q̂.  If Q̂ is square, returns number of vacua as `|det(Q̂)|`
-otherwise returns number of vacua as `√|det(Q̂'Q̂)|`.
-"""
-function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
-    data = αmatrix(h11, tri, cy; threshold=threshold)
-    if size(data.Qhat, 1) == size(data.Qhat, 2)
-        vac = Int(round(abs(det(data.Qhat))))
-        return (vac = vac, issquare = 1)
-    else
-        vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
-        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - h11)
-    end
-end
-
-function vacua_estimate(geom_idx::GeometryIndex; threshold::Float64=0.5)
-    data = αmatrix(geom_idx; threshold=threshold)
-    if size(data.Qhat, 1) == size(data.Qhat, 2)
-        vac = Int(round(abs(det(data.Qhat))))
-        return (vac = vac, issquare = 1)
-    else
-        vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
-        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - geom_idx.h11)
-    end
-end
-
-function vacua_estimate_save(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
-    vac_data = vacua_estimate(h11, tri, cy; threshold=threshold)
-    h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "cw") do f
-        f["square", deflate=9] = vac_data.issquare
-        f["vacua_estimate", deflate=9] = vac_data.vac
-        if vac_data.issquare == 0
-            f["extra_rows", deflate=9] = vac_data.extrarows
-        end
-    end
-end
 
 """
     vacua_no_optim(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector{Float64}=zeros(Float64, size(Q,2)))
@@ -1662,7 +1958,106 @@ function vacua_no_optim(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0
         for col in eachcol(Ωhat)
         end
     end
-
-
 end
+
+
+"""
+    phase(h11, α::Canonicalα)
+
+TBW
+"""
+function phase(h11, α::Canonicalα)
+    phase_vector = []
+	for (i, item) in enumerate(α.Lhat[1, 1:h11])
+		if α.:αrowmask[i] == false && item == -1
+			push!(phase_vector, π)
+		else
+			push!(phase_vector, 0)
+		end
+	end
+	phase_vector::Vector = vec([phase_vector' * α.:α_complete]...)
+end
+
+
+
+function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
+	vac_square = []
+	vac_1D = []
+	vac_ND = []
+    no_vac = []
+    geom_list = []
+    if h11 === nothing
+        geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, 1:n])]
+    elseif h11 !== nothing && n != size(paths_cy()[2], 2)
+        geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, paths_cy()[2][1, :] .== h11][:, 1:n])]
+    else
+        geom_list = [GeometryIndex(col...) for col in eachcol(paths_cy()[2][:, paths_cy()[2][1, :] .== h11])]
+    end
+	for geom_idx in geom_list
+		# println(geom_idx)
+		if isfile(minfile(geom_idx))
+            try
+                vac_test = vacua_jlm(geom_idx)
+                if typeof(vac_test) <: Min_JLM_Square
+                    push!(vac_square, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.det_QTilde])
+                elseif typeof(vac_test) == Min_JLM_1D
+                    push!(vac_1D, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows, vac_test.det_QTilde])
+                elseif typeof(vac_test) == Min_JLM_ND
+                    push!(vac_ND, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, vac_test.N_min, vac_test.min_coords, vac_test.extra_rows, vac_test.det_QTilde])
+                end
+            catch e
+                push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, 0])
+            end
+        else
+            push!(no_vac, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, 0])
+		end
+        # Qtilde = LQtilde(geom_idx).Qtilde
+        # det_Q_tilde = Int(abs(round(det(Qtilde))))
+        # push!(detQtilde, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, det_Q_tilde])
+	end
+	return (square = vac_square, one_dim = vac_1D, n_dim = vac_ND, err = no_vac)
+end
+
+"""
+    vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+
+Uses `LQtildebar` function to make Q̂.  If Q̂ is square, returns number of vacua as `|det(Q̂)|`
+otherwise returns number of vacua as `√|det(Q̂'Q̂)|`.
+"""
+function vacua_estimate(geom_idx::GeometryIndex; threshold::Float64=0.5)
+    data = αmatrix(geom_idx; threshold=threshold)
+    if size(data.Qhat, 1) == size(data.Qhat, 2)
+        vac = Int(round(abs(det(data.Qhat))))
+        return (vac = vac, issquare = 1)
+    else
+        vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
+        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - geom_idx.h11)
+    end
+end
+
+function vacua_estimate(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+    geom_idx = GeometryIndex(h11, tri, cy)
+    vacua_estimate(geom_idx; threshold)
+end
+
+function vacua_estimate_save(geom_idx::GeometryIndex; threshold::Float64=0.5)
+    vac_data = vacua_estimate(geom_idx; threshold=threshold)
+    if isfile(minfile(geom_idx))
+        h5open(joinpath(minfile(geom_idx)), "r+") do f
+            f["issquare", deflate=9] = vac_data.issquare
+            f["det_QTilde", deflate=9] = vac_data.vac
+        end
+    else
+        h5open(joinpath(minfile(geom_idx)), "cw") do f
+            f["issquare", deflate=9] = vac_data.issquare
+            f["det_QTilde", deflate=9] = vac_data.vac
+        end
+    end
+end
+
+function vacua_estimate_save(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
+    geom_idx = GeometryIndex(h11, tri, cy)
+    vacua_estimate_save(geom_idx; threshold)
+end
+
 end

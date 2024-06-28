@@ -101,7 +101,7 @@ end
 #### Initialise functions ####
 ##############################
 if split === nothing
-    @time temp_top = main_top_fair(Random.rand(4:10),10,lfile)
+    @time temp_top = main_top(Random.rand(4:10),10,lfile)
 else 
     @time temp_top = main_top(max(Random.rand(4:10),split),10,lfile)
 end
@@ -118,14 +118,41 @@ CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string(size(temp_geom), "test
 temp_top = nothing
 temp_geom = nothing
 GC.gc()
-# all_h11 = vcat(collect(4:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 376, 377, 386, 387, 399, 404, 416, 433, 462, 491])
+##############################
+#### Find incomplete h11s ####
+##############################
+function h11_list(h11 ;geometric_data = true)
+    try
+        h11list = CYAxiverse.filestructure.np_path_generate(h11; geometric_data= geometric_data)[2]
+        if size(h11list, 1) !=0
+            return h11list
+        else
+            return [h11, 0, 0]
+        end
+    catch e
+        open(l, "a") do outf
+            write(outf,string(stacktrace(catch_backtrace()),"\n (",h11,")"))
+        end
+        return [h11, 0, 0]
+    end
+end
+h11_full = vcat(collect(4:332), [334, 336, 337, 338, 339, 340, 341, 345, 346, 347, 348, 350, 355, 357, 358, 366, 369, 370, 375, 376, 377, 386, 387, 399, 404, 416, 433, 462, 491])
+function h11_missing(h11list::Vector)
+    h11 = []
+    for poly in h11_full
+        temp_h11 = h11_list(h11)
+        if temp_h11[2] == 0
+            push!(h11, poly)    
+        end
+    end
+    h11
+end
+h11 = [223, 225, 226, 228, 235, 249, 250, 252, 253, 254, 255, 256, 257, 258]
+
 ##############################
 ############ Main ############
 ##############################
-h11_init = 490
 np = nworkers()
-h11_end = 2 ##This should not be bigger than 450 to run full database as largest h11s are computed on a separate node automatically!
-h11 = collect(h11_init:h11_init+h11_end)
 max_split = 0
 n_split = 1
 if haskey(ENV, "MAX_JOB")
@@ -153,19 +180,7 @@ function h11list_generate(h11::Vector, lfile::String; ngeometries::Int = 10, spl
             h11 = shuffle(h11)
             tasks = length(h11) ÷ n_split
             h11 = sort(h11[(split - 1) * tasks + 1 : split * tasks])
-            n = zeros(Int, 1)
-            for t in h11
-                if t == 1
-                    n = vcat(n..., minimum(ngeometries, 5))
-                elseif t == 2
-                    n = vcat(n..., minimum(ngeometries, 36))
-                elseif t == 3
-                    n = vcat(n..., minimum(ngeometries, 243))
-                elseif t ∉ [1, 2, 3]
-                    n = vcat(n..., ngeometries)
-                end
-            end
-            n = n[2:end]
+            n = [ngeometries for _ in h11]
             log_files_top = [lfile for _ in h11]
         end
     end

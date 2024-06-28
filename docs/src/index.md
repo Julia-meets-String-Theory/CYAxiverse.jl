@@ -43,7 +43,7 @@ mkdir $CYAXIVERSE_REPO
 cd $CYTOOLS_REPO &&
 git clone https://github.com/LiamMcAllisterGroup/cytools.git
 ```
-- clone[^1] this repository (currently `dev` branch is up-to-date)
+- clone[^1] this repository (currently `vmm` branch is up-to-date)
 
 [^1]: 
     one can also `git pull` the repository -- this would enable the `CYAxiverse.jl` package to be updated (while under development) with specific directory binding.  Use this command instead:
@@ -51,16 +51,16 @@ git clone https://github.com/LiamMcAllisterGroup/cytools.git
     mkdir $CYAXIVERSE_REPO/CYAxiverse.jl &&
     cd $CYAXIVERSE_REPO/CYAxiverse.jl &&
     git init &&
-    git pull https://github.com/vmmhep/CYAxiverse.jl.git dev 
+    git pull https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git vmm 
     ```
     and then you can keep this up-to-date as improvements are pushed with 
     ```
-    git pull https://github.com/vmmhep/CYAxiverse.jl.git dev
+    git pull https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git vmm
     ```
 
 ```
 cd $CYAXIVERSE_REPO && 
-git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
+git clone -b vmm https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git
 ```
 - replace the default `Dockerfile` in your `CYTools` directory with the `Dockerfile` in `$CYAXIVERSE_REPO` and move `add_CYAxiverse.jl` there too, _e.g._
 ```

@@ -16,42 +16,38 @@ else
 end
 
 @everywhere using CYAxiverse
-@everywhere using LinearAlgebra
+@everywhere using LinearAlgebra, Random
 
 @everywhere using HDF5
-@everywhere using Random
+@everywhere function is_subset_of(list1, list2)
+    # Convert each vector in the lists to Set for efficient membership checking
+    set_list1 = Set(list1)
+    set_list2 = Set(list2)
 
+    # Check if every vector in list1 is also present in list2
+    for (i,vector) in enumerate(set_list1)
+        if !(vector in set_list2)
+            # return false, i
+			return false
+        end
+    end
 
-@everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
-    if isfile(CYAxiverse.filestructure.minfile(geom_idx))
-        Nvac = 0
-        h5open(CYAxiverse.filestructure.minfile(geom_idx), "r") do file
-            if haskey(file, "Nvac")
-                Nvac = HDF5.read(file, "Nvac")
+    return true
+end
+@everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex, l)
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
+    try
+        glsm = CYAxiverse.read.geometry(geom_idx)["glsm_charges"]
+        qprime = CYAxiverse.read.potential(geom_idx).Q[1:h11+4, :]
+        if is_subset_of(collect(eachcol(glsm)), collect(eachrow(qprime)))
+        else
+            open(l, "a") do outf
+                write(outf,string("vac-(",h11,",",tri,",",cy,")\n"))
             end
         end
-        if Nvac == 0
-            try
-                res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
-                open(l, "a") do outf
-                    write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
-                end
-            catch e
-                open(l, "a") do outf
-                    write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
-                end
-            end
-        end
-    else
-        try
-            res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
-            open(l, "a") do outf
-                write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
-            end
-        catch e
-            open(l, "a") do outf
-                write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
-            end
+    catch e
+        open(l, "a") do outf
+            write(outf,string(stacktrace(catch_backtrace()),"--(",h11,",",tri,",",cy,")\n"))
         end
     end
 end
@@ -82,9 +78,8 @@ GC.gc()
 Random.seed!(1234567890)
 h11list = CYAxiverse.filestructure.paths_cy()[2]
 # h11list = h11list[:, h11list[1, :] .!= 491]
-h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
-geom_params = shuffle!(geom_params)
+# geom_params = shuffle!(geom_params)
 
 ##################################
 ##### Missing geoms ##############

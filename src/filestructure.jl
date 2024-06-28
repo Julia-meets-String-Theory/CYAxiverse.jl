@@ -35,15 +35,13 @@ function ol_DB(args)
         "KU_Fair" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_KU_Fair_Large/",
         "inKC" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_Scaled/", 
         "home_Large" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse/", 
-        "KU1" => "/scratch/Axiverse_Learning/KU1/", 
-        "KV1" => "/scratch/Axiverse_Learning/KV1/",
-        "KV25" => "/scratch/Axiverse_Learning/KV25/", 
         "vacua_test" => "/scratch/users/mehta2/vacua_testing/", 
         "vacua_stretchtest" => "/scratch/users/mehta2/vacua_stretchtesting/", 
         "vacua_new" => "/scratch/users/mehta2/vacua_db/",
+        "vacua_0323" => "/scratch/users/mehta2/vacua_0323/",
         "vacua_0822" => "/scratch/users/mehta2/vacua_0822/",
         "vacua_stretch" => "/scratch/users/mehta2/vacua_stretch/",
-        "docker" => "/database/",
+        "docker" => "/scratch/database/",
         "pwd" => string(pwd(), "/")
         )
     try
@@ -269,6 +267,28 @@ function h11lst(h11list::Vector; geometric_data::Bool = false)
 end
 
 """
+    count_geometries(n=1000::Integer)
+
+Count the number of geometries per `h11` in the database.  Optionally returns `h11` values with less than `n` geometries.
+By default returns number of geometries per `h11`
+"""
+function count_geometries(n=nothing)
+	geom_count = []
+    h11list = paths_cy()[2]
+	for h11 in unique(h11list[1,:])
+		h11size = size(h11list[1,:][h11list[1,:] .== h11], 1)
+        if n === nothing
+            push!(geom_count, [h11,h11size])
+		elseif typeof(n)<: Number
+            if h11size < n
+			    push!(geom_count, [h11,h11size])
+            end
+		end
+	end
+    hcat(geom_count...)
+end
+
+"""
     isgeometry(h11, tri, cy)
 
 Check if geometric quantities have been computed
@@ -319,10 +339,38 @@ function geom_dir(h11,tri,cy=1)
     end
 end
 
+function geom_dir_read(h11,tri,cy=1)
+    if localARGS()!=string("inKC")
+        if localARGS()==string("home_Large")||localARGS()==string("KV1")
+            if h11 >= 238
+                if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0")))
+                    string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"))
+                end
+            else
+                if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
+                    string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"))
+                end
+            end
+        else
+            if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0")))
+                string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"),"/cy_",lpad(cy,7,"0"))
+            end
+        end
+    else
+        if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
+            string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0"))
+        end
+    end
+end
 
 function geom_dir(geom_idx::GeometryIndex)
-    h11, tri, cy = geom_idx.h11, geom_idx.tri, geom_idx.cy
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
     geom_dir(h11, tri, cy)
+end
+
+function geom_dir_read(geom_idx::GeometryIndex)
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
+    geom_dir_read(h11, tri, cy)
 end
 ###################################
 ### Geometric Data Files (old) ####
@@ -399,22 +447,22 @@ end
 Path to data file -- will contain all data that relates to geometry index.
 """
 function cyax_file(h11,tri, cy=1)
-    return string(geom_dir(h11,tri,cy),"/cyax.h5")
+    return string(geom_dir_read(h11,tri,cy),"/cyax.h5")
 end
 
 function cyax_file(geom_idx::GeometryIndex)
-    return string(geom_dir(geom_idx),"/cyax.h5")
+    return string(geom_dir_read(geom_idx),"/cyax.h5")
 end
 """
     minfile(h11,tri,cy)
 Path to file containing minimization data.
 """
 function minfile(h11,tri, cy=1)
-    return string(geom_dir(h11,tri,cy),"/minima.h5")
+    return string(geom_dir_read(h11,tri,cy),"/minima.h5")
 end
 
 function minfile(geom_idx::GeometryIndex)
-    return string(geom_dir(geom_idx),"/minima.h5")
+    return string(geom_dir_read(geom_idx),"/minima.h5")
 end
 
 

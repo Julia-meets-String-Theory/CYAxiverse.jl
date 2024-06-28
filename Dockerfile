@@ -18,8 +18,8 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
 RUN apt-get -yqq install autoconf build-essential nano cmake libgmp-dev libcgal-dev\
                          libmpc-dev libsuitesparse-dev libppl-dev libeigen3-dev\
                          libc6 libcdd0d libgmp10 libgmpxx4ldbl libstdc++6 palp\
-                         libflint-dev libflint-arb-dev python3 python3-pip\
-                         wget libmath-libm-perl python3-venv normaliz git
+                         libflint-dev libflint-arb-dev python3 python3-pip curl\
+                         wget libmath-libm-perl python3-venv normaliz libqsopt-ex2 git
 
 # Make a soft link to the arb library and flint headers so that python-flint can install
 RUN ln -s /usr/lib/${AARCH}-linux-gnu/libflint-arb.so /usr/lib/${AARCH}-linux-gnu/libarb.so
@@ -30,27 +30,35 @@ RUN groupadd -r -g $USERID $USERNAME && useradd -r -s /bin/bash -u $USERID -g $U
     || echo "Skipping user creation"
 USER $USERNAME
 
+# Install Rust since there are some Python packages that now depend on it
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+ENV PATH="/home/${USERNAME}/.cargo/bin:${PATH}"
+
 # Create python virtual environment for non-root user
 RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install julia 
 WORKDIR /opt/cytools/
-RUN wget https://julialang-s3.julialang.org/bin/linux/x64/1.7/julia-1.7.1-linux-x86_64.tar.gz
-RUN tar xf julia-1.7.1-linux-x86_64.tar.gz
-ENV PATH="$PWD/julia-1.7.1/bin:$PATH"
-RUN ln -s $PWD/julia-1.7.1/bin/julia $VIRTUAL_ENV/bin/julia
-RUN rm julia-1.7.1-linux-x86_64.tar.gz
-
+RUN wget https://julialang-s3.julialang.org/bin/linux/x64/1.8/julia-1.8.4-linux-x86_64.tar.gz
+RUN tar xf julia-1.8.4-linux-x86_64.tar.gz
+ENV PATH="$PWD/julia-1.8.4/bin:$PATH"
+RUN ln -s $PWD/julia-1.8.4/bin/julia $VIRTUAL_ENV/bin/julia
+RUN rm julia-1.8.4-linux-x86_64.tar.gz
+# RUN wget https://julialang-s3.julialang.org/bin/linux/x64/1.7/julia-1.7.1-linux-x86_64.tar.gz
+# RUN tar xf julia-1.7.1-linux-x86_64.tar.gz
+# ENV PATH="$PWD/julia-1.7.1/bin:$PATH"
+# RUN ln -s $PWD/julia-1.7.1/bin/julia $VIRTUAL_ENV/bin/julia
+# RUN rm julia-1.7.1-linux-x86_64.tar.gz
 
 # Install pip packages
+# Install pip packages
 ENV CVXOPT_SUITESPARSE_INC_DIR=/usr/include/suitesparse
-RUN pip3 install --upgrade pip
+RUN pip3 install pip==21.0.1
 RUN pip3 install numpy scipy jupyterlab cvxopt gekko pymongo ortools tqdm cython qpsolvers osqp
 RUN pip3 install python-flint matplotlib h5py
-RUN pip3 install scikit-sparse cysignals gmpy2==2.1.0a4
+RUN pip3 install scikit-sparse cysignals gmpy2
 RUN pip3 install pplpy
-RUN pip3 install julia
 RUN pip3 install -f https://download.mosek.com/stable/wheel/index.html Mosek
 ENV MOSEKLM_LICENSE_FILE=/home/$USERNAME/mounted_volume/mosek/mosek.lic
 
@@ -60,8 +68,15 @@ RUN sed -i -e 's/mosek.solsta.near_optimal/ /g' $VIRTUAL_ENV/lib/python3.9/site-
 
 # Install TOPCOM
 WORKDIR /opt/cytools/external/topcom-mod
-RUN wget https://github.com/LiamMcAllisterGroup/topcom/releases/download/v0.17.8%2Bds-2%2Bcytools-1/topcom_0.17.8+ds-2+cytools-1_${ARCH}.deb
-RUN dpkg -i topcom_0.17.8+ds-2+cytools-1_${ARCH}.deb
+RUN wget https://github.com/LiamMcAllisterGroup/topcom/releases/download/v1.1.2%2Bds-1%2Bcytools-1/topcom_1.1.2+ds-1+cytools-1_${ARCH}.deb
+RUN wget https://github.com/LiamMcAllisterGroup/topcom/releases/download/v1.1.2%2Bds-1%2Bcytools-1/libtopcom0_1.1.2+ds-1+cytools-1_${ARCH}.deb
+RUN wget https://github.com/LiamMcAllisterGroup/topcom/releases/download/v1.1.2%2Bds-1%2Bcytools-1/libtopcom-dev_1.1.2+ds-1+cytools-1_${ARCH}.deb
+RUN dpkg -i topcom_1.1.2+ds-1+cytools-1_${ARCH}.deb
+RUN dpkg -i libtopcom0_1.1.2+ds-1+cytools-1_${ARCH}.deb
+RUN dpkg -i libtopcom-dev_1.1.2+ds-1+cytools-1_${ARCH}.deb
+
+# Download file from github to keep track of the number of downloads
+RUN wget https://github.com/LiamMcAllisterGroup/cytools/releases/download/v1.0.0/download_counter.txt
 
 # Copy code and installer
 COPY . /opt/cytools/
@@ -70,7 +85,7 @@ RUN python3 setup.py install
 
 # Copy CYAxiverse.jl package
 WORKDIR /opt/
-RUN git clone -b dev https://github.com/vmmhep/CYAxiverse.jl.git
+RUN git clone -b vmm https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git
 WORKDIR /opt/CYAxiverse.jl/
 ENV PYTHON="$VIRTUAL_ENV/bin/python3"
 RUN julia --project="/opt/CYAxiverse.jl/" add_CYAxiverse.jl
@@ -103,6 +118,7 @@ WORKDIR /home/$USERNAME/mounted_volume
 
 # Start jupyter lab by default
 USER $USERNAME
+
 ENV JULIA_REVISE_POLL=1
 EXPOSE 8996
 ENV newARGS="docker"

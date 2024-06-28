@@ -5,27 +5,30 @@ A Julia package for computing axion/ALP spectra and statistics using geometric d
 """
 module CYAxiverse
 
+include("init_python.jl")
 if haskey(ENV,"newARGS")
 else
     println("Please specify where to read/write data, currently using pwd!")
 end
-include("structs.jl")
 
+include("structs.jl")
 include("filestructure.jl")
 include("read.jl")
 include("minimizer.jl")
 include("generate.jl")
-include("plotting.jl")
 
 include("../add_functions/profiling.jl")
-if haskey(ENV, "PYTHON")
-    if occursin("cytools/cytools-venv//bin/python3",ENV["PYTHON"])
+if occursin("cytools", ENV["PYTHON"])
         include("../add_functions/cytools_wrapper.jl")
-    end
-
 else
     println("This installation does not include CYTools!")
+    include("../jlm_python/jlm_python.jl")
+    include("jlm_minimizer.jl")
+    include("../scripts/testing/jlm_python.jl")
+    include("../scripts/testing/jlm_minimizer.jl")
 end
+
+include("plotting.jl")
 
 if haskey(ENV, "SLURM_JOB_ID")
     include("slurm.jl")

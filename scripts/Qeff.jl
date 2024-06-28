@@ -16,7 +16,7 @@ else
 end
 
 @everywhere using CYAxiverse
-@everywhere using LinearAlgebra
+@everywhere using LinearAlgebra, Random
 
 @everywhere using HDF5
 
@@ -25,33 +25,35 @@ end
     if Qshape.issquare == 1
     else
         data = CYAxiverse.generate.vacua_estimate(h11, tri, cy; threshold = 1e-2)
-        h5open(joinpath(geom_dir(h11,tri,cy),"qshape.h5"), "r+") do f
+        h5open(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"), "r+") do f
             f["extra_rows"] = data.extrarows
         end
     end
 end
 
-@everywhere function main_Qshape(h11, tri, cy, l)
+@everywhere function column_estimate(h11, tri, cy, l)
+    geom_idx = CYAxiverse.structs.GeometryIndex(h11 = h11, polytope = tri, frst = cy)
+    ωnorm = round(CYAxiverse.generate.ωnorm2(geom_idx; threshold = 0.01))
+    h5open(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"), "r+") do f
+        if haskey(f, "ωnorm2_estimate")
+        else
+            f["ωnorm2_estimate"] = ωnorm
+        end
+    end
+end
+
+@everywhere function main_Qshape(geom_idx::CYAxiverse.structs.GeometryIndex, l)
     threshold = 1e-2
-    if isfile(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"))
-    else
-        try
-            CYAxiverse.generate.vacua_estimate_save(h11, tri, cy; threshold=threshold)
-        catch e
-            open(l, "a") do outf
-                write(outf,string(stacktrace(catch_backtrace()),"--(",h11,",",tri,",",cy,")\n"))
-            end
-            if isfile(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"))
-                rm(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"))
-            end
-            h5open(joinpath(CYAxiverse.filestructure.geom_dir(h11,tri,cy),"qshape.h5"), "cw") do f
-                f["square", deflate=9] = 0
-                f["vacua_estimate", deflate=9] = 0
-            end
-        finally
-            open(l, "a") do outf
-                write(outf,string("vac-(",h11,",",tri,",",cy,")\n"))
-            end
+    h11, tri, cy = geom_idx.h11, geom_idx.polytope, geom_idx.frst
+    try
+        CYAxiverse.generate.vacua_estimate_save(geom_idx; threshold=threshold)
+    catch e
+        open(l, "a") do outf
+            write(outf,string(stacktrace(catch_backtrace()),"--(",h11,",",tri,",",cy,")\n"))
+        end
+    finally
+        open(l, "a") do outf
+            write(outf,string("vac-(",h11,",",tri,",",cy,")\n"))
         end
     end
 end
@@ -83,42 +85,51 @@ function main_sortQ(h11list::Matrix)
         end
     end
 end
+
 lfile = CYAxiverse.filestructure.logfile()
 CYAxiverse.filestructure.logcreate(lfile)
 
 ##############################
 #### Initialise functions ####
 ##############################
-@time temp_spec = extra_rows(4,10,1,lfile)
-h11list_temp = [4 4 5 7; 10 1 5 7; 1 1 1 1; lfile lfile lfile lfile]
+geom_idx = CYAxiverse.structs.GeometryIndex(4, 10, 1)
+@time temp_vac = main_Qshape(geom_idx,lfile)
+h11list_temp = [4 4 5 7; 10 11 10 10; 1 1 1 1]
+h11list_temp = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list_temp)]
+log_file_temp = [lfile for _ = 1:size(h11list_temp, 1)]
 @time begin
-    temp_vac = pmap(extra_rows, h11list_temp[1,:],h11list_temp[2,:],h11list_temp[3,:], h11list_temp[4,:])
+    temp_vac = pmap(main_Qshape, h11list_temp, log_file_temp)
 end
-
-# @time begin
-#     main_sortQ(h11list_temp[1:3,:])
-# end
 # println(temp_geom)
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string((size(h11list_temp,2)+1), "test runs have finished.\n"))
 ### Clear memory ######
-temp_spec = nothing
+temp_vac = nothing
 GC.gc()
 
 ##############################
 ############ Main ############
 ##############################
-@time h11list = CYAxiverse.filestructure.paths_cy()[2]
-CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("There are ", size(h11list), "Qeff shapes to compute.\n"))
-# h11 = shuffle(h11)
-log_files_spec = [lfile for _=1:size(h11list,2)]
+Random.seed!(1234567890)
+h11list = CYAxiverse.filestructure.paths_cy()[2]
+# h11list = h11list[:, h11list[1, :] .!= 491]
+geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
+geom_params = shuffle!(geom_params)
+
+##################################
+##### Missing geoms ##############
+##################################
+# geom_params = geom_params[end-6_000:end, :]
+##################################
+ntasks = size(geom_params,1)
+size_procs = size(np)
+logfiles = [lfile for _=1:ntasks]
+
+CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
+
 @time begin
-    res = pmap(extra_rows, h11list[1,:], h11list[2,:], h11list[3,:], log_files_spec)
+    res = pmap(main_Qshape, geom_params, logfiles)
 end
 
-# @time begin
-#     main_sortQ(h11list)
-# end
-
-
+GC.gc()
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("All workers are done!"))
 

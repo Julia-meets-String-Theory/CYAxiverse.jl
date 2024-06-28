@@ -23,38 +23,35 @@ end
 
 
 @everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
-    if isfile(CYAxiverse.filestructure.minfile(geom_idx))
-        Nvac = 0
-        h5open(CYAxiverse.filestructure.minfile(geom_idx), "r") do file
-            if haskey(file, "Nvac")
-                Nvac = HDF5.read(file, "Nvac")
+    try
+        min_data = CYAxiverse.jlm_minimizer.minimize(geom_idx)
+        pot_data = CYAxiverse.read.potential(geom_idx; hilbert = true)
+        min_data_hilbert = CYAxiverse.jlm_minimizer.minimize(Matrix(pot_data.Q'), Matrix(pot_data.L'); threshold = 0.01)
+        if min_data.N_min == min_data_hilbert.N_min
+        else
+            open(l, "a") do outf
+                write(outf,string("min-(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")-(", min_data.N_min, ", ", min_data_hilbert.N_min,")\n"))
             end
         end
-        if Nvac == 0
-            try
-                res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
-                open(l, "a") do outf
-                    write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
-                end
-            catch e
-                open(l, "a") do outf
-                    write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
-                end
+        if min_data.det_QTilde == min_data_hilbert.det_QTilde
+        else
+            open(l, "a") do outf
+                write(outf,string("det_QTilde-(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")-(", min_data.det_QTilde, ", ", min_data_hilbert.det_QTilde,")\n"))
             end
         end
-    else
-        try
-            res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
+        if typeof(min_data) == typeof(min_data_hilbert)
+        else
             open(l, "a") do outf
-                write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
+                write(outf,string("type-(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")-(", typeof(min_data), ", ", typeof(min_data_hilbert), ")\n"))
             end
-        catch e
-            open(l, "a") do outf
-                write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
-            end
+        end
+    catch e
+        open(l, "a") do outf
+            write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,", ",geom_idx.polytope,", ",geom_idx.frst,")\n"))
         end
     end
 end
+
 
 lfile = CYAxiverse.filestructure.logfile()
 CYAxiverse.filestructure.logcreate(lfile)
@@ -82,9 +79,9 @@ GC.gc()
 Random.seed!(1234567890)
 h11list = CYAxiverse.filestructure.paths_cy()[2]
 # h11list = h11list[:, h11list[1, :] .!= 491]
-h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
+h11list = h11list[:, h11list[1, :] .<= 53]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
-geom_params = shuffle!(geom_params)
+# geom_params = shuffle!(geom_params)
 
 ##################################
 ##### Missing geoms ##############
@@ -96,11 +93,12 @@ size_procs = size(np)
 logfiles = [lfile for _=1:ntasks]
 
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid, "There are $ntasks random seeds to run on $size_procs processors.\n")
-
+open(lfile, "a") do outf
+    write(outf,string("The problematic geometries are: \n"))
+end
 @time begin
     res = pmap(main, geom_params, logfiles)
 end
 
-GC.gc()
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("All workers are done!"))
 

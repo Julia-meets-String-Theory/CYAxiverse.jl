@@ -1,3 +1,6 @@
 /Manifest.toml
 .vscode/settings.json
 src/clipboard.jl
+jlm_python/multi_solver_phase_fraction.py
+jlm_python/one_dim_phase_fraction.py
+.DS_Store

@@ -23,35 +23,14 @@ end
 
 
 @everywhere function main(geom_idx::CYAxiverse.structs.GeometryIndex,l::String)
-    if isfile(CYAxiverse.filestructure.minfile(geom_idx))
-        Nvac = 0
-        h5open(CYAxiverse.filestructure.minfile(geom_idx), "r") do file
-            if haskey(file, "Nvac")
-                Nvac = HDF5.read(file, "Nvac")
-            end
+    try
+        CYAxiverse.jlm_minimizer.minimize_save(geom_idx; random_phase = true)
+        open(l, "a") do outf
+            write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
         end
-        if Nvac == 0
-            try
-                res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
-                open(l, "a") do outf
-                    write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,",\n"))
-                end
-            catch e
-                open(l, "a") do outf
-                    write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
-                end
-            end
-        end
-    else
-        try
-            res = CYAxiverse.jlm_minimizer.minimize_save(geom_idx)
-            open(l, "a") do outf
-                write(outf,string("min-(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,"),\n"))
-            end
-        catch e
-            open(l, "a") do outf
-                write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
-            end
+    catch e
+        open(l, "a") do outf
+            write(outf,string(stacktrace(catch_backtrace()),"--(",geom_idx.h11,",",geom_idx.polytope,",",geom_idx.frst,")\n"))
         end
     end
 end
@@ -81,10 +60,13 @@ GC.gc()
 ##############################
 Random.seed!(1234567890)
 h11list = CYAxiverse.filestructure.paths_cy()[2]
-# h11list = h11list[:, h11list[1, :] .!= 491]
-h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
+h11list = h11list[:, h11list[1, :] .!= 491]
+# h11list = h11list[:, h11list[1, :] .== 1 .|| h11list[1, :] .== 2 .|| h11list[1, :] .== 3]
 geom_params = [CYAxiverse.structs.GeometryIndex(col...) for col in eachcol(h11list)]
 geom_params = shuffle!(geom_params)
+up_to = CYAxiverse.structs.GeometryIndex(215,232,3)
+up_to_idx = findall(x->x==up_to, geom_params)[1]+1
+geom_params = geom_params[up_to_idx:end]
 
 ##################################
 ##### Missing geoms ##############
@@ -104,3 +86,4 @@ end
 GC.gc()
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("All workers are done!"))
 
+exit()
