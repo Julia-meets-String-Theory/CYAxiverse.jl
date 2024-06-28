@@ -18,10 +18,8 @@ include("minimizer.jl")
 include("generate.jl")
 
 include("../add_functions/profiling.jl")
-if haskey(ENV, "SINGULARITY_CONTAINER")
-    if occursin("CYTools",ENV["SINGULARITY_CONTAINER"])
+if occursin("cytools", ENV["PYTHON"])
         include("../add_functions/cytools_wrapper.jl")
-    end
 else
     println("This installation does not include CYTools!")
     include("../jlm_python/jlm_python.jl")
