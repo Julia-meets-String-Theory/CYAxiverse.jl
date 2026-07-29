@@ -133,7 +133,7 @@ end
 
 function vacua(L::Matrix{Float64},Q::Matrix{Int})
     reset_timer!()
-    @timeit "h11" h11::Int = size(Q,2)
+    @timeit "h11" h11 = size(Q,2)
     if h11 < 50
         ###### Nemo SNF #####
         @timeit "Nemo matrix" Qtemp = matrix(Nemo.ZZ,Q)
