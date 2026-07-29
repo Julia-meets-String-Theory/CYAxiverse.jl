@@ -97,8 +97,8 @@ end
 
 
 function topologies_generate_fast(h11,n)
-    tri_test = []
-    tri_test_m = []
+    tri_test    = Vector{PyObject}(undef, 0)
+    tri_test_m = Vector{PyObject}(undef, 0)
     #Generate list of $n polytopes at $h11
     poly_test = fetch_polytopes(h11,8*n, lattice="N", as_list=true, favorable=true)
     #Locator for points of polytope for saving
@@ -131,8 +131,8 @@ function topologies_generate_fast(h11,n)
         tri_test = [poly_test[i].triangulate() for i=1:n];
         points = @view(points[1:n])
     end
-    simplices = []
-    cy = []
+    simplices = Vector{PyObject}(undef, 0)
+    cy = Vector{PyObject}(undef, 0)
     for t in eachindex(tri_test)
         #Locator for simplices of triangulations for saving
         push!(simplices,tri_test[t].simplices())
@@ -147,8 +147,8 @@ end
 
 
 function topologies_generate_fair(h11,n)
-    tri_test = []
-    tri_test_m = []
+    tri_test = Vector{PyObject}(undef, 0)
+    tri_test_m = Vector{PyObject}(undef, 0)
     #Generate list of $n polytopes at $h11
     poly_test = fetch_polytopes(h11,8*n, lattice="N", as_list=true, favorable=true)
     #Locator for points of polytope for saving
@@ -180,8 +180,8 @@ function topologies_generate_fair(h11,n)
         tri_test = [poly_test[i].triangulate() for i=1:n];
         points = @view(points[1:n])
     end
-    simplices = []
-    cy = []
+    simplices = Vector{PyObject}(undef, 0)
+    cy = Vector{PyObject}(undef, 0)
     for t in eachindex(tri_test)
         #Locator for simplices of triangulations for saving
         push!(simplices,tri_test[t].simplices())
@@ -203,7 +203,7 @@ Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 
 """
 function topologies(h11::Int, n::Int; fast = true)
-    h11list_temp = []
+    h11list_temp = Vector{Vector{Int}}(undef, 0)
     if fast
         top_data = topologies_generate_fast(h11, n)
     else
@@ -275,7 +275,7 @@ Generates triangulations from already computed `points` and `simplices` of polyt
 Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 """
 function cy_from_poly(h11)
-    h11list_temp = []
+    h11list_temp = Vector{Vector{Int}}(undef, 0)
     h11list_inds = np_path_generate(h11)[2]
     for col in eachcol(h11list_inds)
         h11,tri,cy_i = col
