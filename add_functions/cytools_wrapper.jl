@@ -332,11 +332,16 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
         qprime = cy.toric_effective_cone().rays()
     end
     #PTD volumes at tip
-    tau = cy.compute_divisor_volumes(tip)[basis]
+    tau0 = cy.compute_divisor_volumes(tip)[basis]
     nq = size(qprime, 1)
     rhs_constraint = Vector{Float64}(undef, nq)
     lhs_constraint = Matrix{Float64}(undef, nq, nq)
     use_legacy_kinv = cytools_version() < "0.8.0"
+    Kinv0 = use_legacy_kinv ? cy.compute_Kinv(tip) :
+                            cy.compute_inverse_kahler_metric(tip)
+    Kinv0 = Hermitian(0.5 * Kinv0 + Kinv0')
+    tau  = copy(tau0)
+    Kinv = copy(Kinv0)
 
     while true
         fill!(lhs_constraint, 0.0)
@@ -344,7 +349,6 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
             qj      = @view qprime[j, :]
             Kinv_qj = Kinv * qj
             tau_qj  = dot(tau, qj)
-
             for i in j+1:nq
                 qi = @view qprime[i, :]
                 lhs_constraint[i,j] = abs(
@@ -360,12 +364,11 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
             lhs_constraint[i,j] >= rhs_constraint[i] && (converged = false; break)
         end
         converged && break
-        m += 1e-2
-        tip = m .* tip
-        tau = cy.compute_divisor_volumes(tip)[basis]
-        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) :
-                                cy.compute_inverse_kahler_metric(tip)
-        Kinv = Hermitian(0.5 * Kinv + Kinv')
+        m   += 1e-2
+        m2   = m^2
+        m4   = m2^2
+        tau  = m2 .* tau0
+        Kinv = m4 .* Kinv0
     end
     if (minimum(tau) > 1.)
     else
@@ -402,7 +405,6 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
         L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
     end
     #concatenate L1 and L2
-    L = zeros(Float64,size(qprime,1)+binomial(size(qprime,1),2),2)
     L = vcat(L1,L2)
     keys = ["h21", "glsm", "basis", "tip", "tip_prefactor", "CY_volume", "PTD_volumes", "Kinv", "L", "Q"]
     vals = [h21, Int.(glsm), Int.(basis), Float64.(tip), Float64.(tip_prefactor), Float64(V), Float64.(tau), Float64.(Kinv), hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), q]
@@ -412,17 +414,21 @@ end
 function geometries_generate_hilbert(geom_idx::GeometryIndex)
 	cy = cy_from_poly(geom_idx).cy
 	geom_data = geometry(geom_idx)
-	pot_data = potential(geom_idx)
     basis = geom_data.basis
     tip = geom_data.tip
     Kinv = geom_data.kinv
-	K = pot_data.K
-    tau = geom_data.τ_volumes
+    tau0 = geom_data.τ_volumes
     qprime = geom_data.hilbert_basis
     nq = size(qprime, 1)
     rhs_constraint = Vector{Float64}(undef, nq)
     lhs_constraint = Matrix{Float64}(undef, nq, nq)
     use_legacy_kinv = cytools_version() < "0.8.0"
+    n, m = 1.0, 1.0
+    Kinv0 = use_legacy_kinv ? cy.compute_Kinv(tip) :
+                            cy.compute_inverse_kahler_metric(tip)
+    Kinv0 = Hermitian(0.5 * Kinv0 + Kinv0')
+    tau  = copy(tau0)
+    Kinv = copy(Kinv0)
 
     while true
         fill!(lhs_constraint, 0.0)
@@ -430,7 +436,6 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
             qj      = @view qprime[j, :]
             Kinv_qj = Kinv * qj
             tau_qj  = dot(tau, qj)
-
             for i in j+1:nq
                 qi = @view qprime[i, :]
                 lhs_constraint[i,j] = abs(
@@ -446,12 +451,11 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
             lhs_constraint[i,j] >= rhs_constraint[i] && (converged = false; break)
         end
         converged && break
-        m += 1e-2
-        tip = m .* tip
-        tau = cy.compute_divisor_volumes(tip)[basis]
-        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) :
-                                cy.compute_inverse_kahler_metric(tip)
-        Kinv = Hermitian(0.5 * Kinv + Kinv')
+        m   += 1e-2
+        m2   = m^2
+        m4   = m2^2
+        tau  = m2 .* tau0
+        Kinv = m4 .* Kinv0
     end
     if (minimum(tau) > 1.)
     else
@@ -488,7 +492,6 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
         L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
     end
     #concatenate L1 and L2
-    L = zeros(Float64,size(qprime,1)+binomial(size(qprime,1),2),2)
     L = vcat(L1,L2)
 	return (basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CY_volume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
 end
