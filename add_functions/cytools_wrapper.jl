@@ -60,8 +60,13 @@ function __init__()
                     n_vertices=None, n_dual_points=None, n_facets=None,
                     limit=1000, timeout=60, as_list=False, backend=None,
                     dualize=False, favorable=None):
-        return fetch_polytopes(h11,h12,h13,h21,h22,h31,chi,lattice,dim,n_points,n_vertices,
-        n_dual_points,n_facets,limit,timeout,as_list,backend, dualize,favorable)
+        return fetch_polytopes(
+            h11=h11, h12=h12, h13=h13, h21=h21, h22=h22, h31=h31,
+            chi=chi, lattice=lattice, dim=dim, n_points=n_points,
+            n_vertices=n_vertices, n_dual_points=n_dual_points, n_facets=n_facets,
+            limit=limit, timeout=timeout, as_list=as_list, backend=backend,
+            dualize=dualize, favorable=favorable,
+            )
 
     def poly(points, backend=None):
         return Polytope(points,backend)
