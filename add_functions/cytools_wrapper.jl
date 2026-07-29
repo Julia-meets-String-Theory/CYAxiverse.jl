@@ -208,7 +208,7 @@ Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 
 """
 function topologies(h11::Int, n::Int; fast = true)
-    h11list_temp = Vector{Vector{Int}}(undef, 0)
+    h11list_temp = Vector{Vector{Any}}(undef, 0)
     if fast
         top_data = topologies_generate_fast(h11, n)
     else
@@ -280,7 +280,7 @@ Generates triangulations from already computed `points` and `simplices` of polyt
 Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 """
 function cy_from_poly(h11)
-    h11list_temp = Vector{Vector{Int}}(undef, 0)
+    h11list_temp = Vector{Vector{Any}}(undef, 0)
     h11list_inds = np_path_generate(h11)[2]
     for col in eachcol(h11list_inds)
         h11,tri,cy_i = col
