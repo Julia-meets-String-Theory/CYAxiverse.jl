@@ -299,7 +299,7 @@ function cy_from_poly(geom_idx::GeometryIndex)
     cy = t.get_cy()
     return (h11 = geom_idx.h11, cy = cy, tri = geom_idx.polytope, cy_i = geom_idx.frst)
 end
-function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
+function geometries_generate(h11,cy; rational_Q = false)
     #Locator for h21s for saving
     h21::Int = cy.h21()
     #GLSM basis for saving
@@ -480,7 +480,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
 end
 
 function geometries(h11,cy,tri,cy_i=1)
-    geom_data = geometries_generate(h11, cy, tri, cy_i)
+    geom_data = geometries_generate(h11, cy)
     h5open(cyax_file(h11,tri,cy_i), "r+") do file
         if haskey(file, "cytools/geometric/h21")
         else
