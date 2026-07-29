@@ -174,7 +174,7 @@ function topologies_generate_fair(h11,n)
         else
             tri_test_m = [poly_test[i].random_triangulations_fair(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
             tri_test_m1 = [poly_test[i].random_triangulations_fair(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
-            # tri_test_m = vcat(tri_test_m1, tri_test_m)
+            tri_test_m = vcat(tri_test_m1, tri_test_m)
             # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
             # cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
             # cy_num = vcat(cy_num1,cy_num)
@@ -383,7 +383,7 @@ function geometries_generate(h11,cy; rational_Q = false)
         for j=i+1:size(qprime,1)
             q[size(qprime,1)+n,:] = qprime[j,:]-qprime[i,:]
             L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
-                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
+                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2, 
                     -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
             n+=1
         end
@@ -393,7 +393,7 @@ function geometries_generate(h11,cy; rational_Q = false)
     #L1 are basis instantons and L2 are cross terms
     L1 = zeros(size(qprime,1),2)
     for j in axes(qprime,1)
-        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
+        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau), -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
     end
     #concatenate L1 and L2
     L = vcat(L1,L2)
@@ -467,7 +467,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
         for j=i+1:size(qprime,1)
             q[size(qprime,1)+n,:] = qprime[j,:]-qprime[i,:]
             L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
-                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
+                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2, 
                     -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
             n+=1
         end
@@ -477,7 +477,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
     #L1 are basis instantons and L2 are cross terms
     L1 = zeros(size(qprime,1),2)
     for j in axes(qprime,1)
-        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
+        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau), -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
     end
     #concatenate L1 and L2
     L = vcat(L1,L2)
