@@ -300,12 +300,6 @@ function cy_from_poly(geom_idx::GeometryIndex)
     return (h11 = geom_idx.h11, cy = cy, tri = geom_idx.polytope, cy_i = geom_idx.frst)
 end
 function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
-    glsm = zeros(Int,h11,h11+4)
-    basis = zeros(Int,h11)
-    tip = zeros(Float64,h11)
-    Kinv = zeros(Float64,h11,h11)
-    tau = zeros(Float64,h11)
-    qprime = zeros(Int,h11+4,h11)
     #Locator for h21s for saving
     h21::Int = cy.h21()
     #GLSM basis for saving
