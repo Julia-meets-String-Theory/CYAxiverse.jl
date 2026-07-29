@@ -304,7 +304,6 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     basis = zeros(Int,h11)
     tip = zeros(Float64,h11)
     Kinv = zeros(Float64,h11,h11)
-    K = zeros(Float64,h11,h11)
     tau = zeros(Float64,h11)
     qprime = zeros(Int,h11+4,h11)
     #Locator for h21s for saving
@@ -316,13 +315,6 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     #Find tip of SKC
     n,m = 1.0,1.0
     tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
-    #Kinv at tip -- save this or save K?
-    if cytools_version() < "0.8.0"
-        Kinv = cy.compute_Kinv(tip)
-    else
-        Kinv = cy.compute_inverse_kahler_metric(tip)
-    end
-    Kinv = Hermitian(1/2 * Kinv + Kinv')
     #Generate list of Q matrices -- only $h11+4 directions
     if rational_Q
         min_points = Int(round(h11^2))
