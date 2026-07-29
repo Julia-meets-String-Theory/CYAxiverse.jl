@@ -408,7 +408,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
 	geom_data = geometry(geom_idx)
     basis = geom_data.basis
     tip = geom_data.tip
-    Kinv = geom_data.kinv
+    Kinv0 = Hermitian(geom_data.kinv)
     tau0 = geom_data.τ_volumes
     qprime = geom_data.hilbert_basis
     nq = size(qprime, 1)
@@ -416,9 +416,6 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
     lhs_constraint = Matrix{Float64}(undef, nq, nq)
     use_legacy_kinv = cytools_version() < "0.8.0"
     n, m = 1.0, 1.0
-    Kinv0 = use_legacy_kinv ? cy.compute_Kinv(tip) :
-                            cy.compute_inverse_kahler_metric(tip)
-    Kinv0 = Hermitian(0.5 * Kinv0 + Kinv0')
     tau  = copy(tau0)
     Kinv = copy(Kinv0)
 
