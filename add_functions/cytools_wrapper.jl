@@ -333,32 +333,39 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     end
     #PTD volumes at tip
     tau = cy.compute_divisor_volumes(tip)[basis]
+    nq = size(qprime, 1)
+    rhs_constraint = Vector{Float64}(undef, nq)
+    lhs_constraint = Matrix{Float64}(undef, nq, nq)
+    use_legacy_kinv = cytools_version() < "0.8.0"
+
     while true
-        rhs_constraint = zeros(size(qprime,1))
-        lhs_constraint = zeros(size(qprime,1),size(qprime,1))
-        for i in axes(qprime,1)
-            for j in axes(qprime,1)
-                if i>j
-                    lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
-                end
+        fill!(lhs_constraint, 0.0)
+        @inbounds for j in 1:nq
+            qj      = @view qprime[j, :]
+            Kinv_qj = Kinv * qj
+            tau_qj  = dot(tau, qj)
+
+            for i in j+1:nq
+                qi = @view qprime[i, :]
+                lhs_constraint[i,j] = abs(
+                    log(abs(π * dot(qi, Kinv_qj)))
+                    - 2π * dot(tau, qi .+ qj)
+                )
             end
-            rhs_constraint[i] = abs.(log.(abs.(dot(tau, qprime[i, :]))) .+ (-2π * dot(tau, qprime[i,:])))
+            rhs_constraint[j] = abs(log(abs(tau_qj)) - 2π * tau_qj)
         end
-        if LowerTriangular(lhs_constraint .< rhs_constraint) - I(size(qprime,1)) == LowerTriangular(zeros(size(qprime,1), size(qprime,1)))
-            break
-        else
-            m+=1e-2
-            tip = m .* tip
-            #PTD volumes at tip
-            tau = cy.compute_divisor_volumes(tip)[basis]
-            #Kinv at tip -- save this or save K?
-            if cytools_version() < "0.8.0"
-                Kinv = cy.compute_Kinv(tip)
-            else
-                Kinv = cy.compute_inverse_kahler_metric(tip)
-            end
-            Kinv = Hermitian(1/2 * Kinv + Kinv') 
+
+        converged = true
+        @inbounds for i in 1:nq, j in 1:i-1
+            lhs_constraint[i,j] >= rhs_constraint[i] && (converged = false; break)
         end
+        converged && break
+        m += 1e-2
+        tip = m .* tip
+        tau = cy.compute_divisor_volumes(tip)[basis]
+        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) :
+                                cy.compute_inverse_kahler_metric(tip)
+        Kinv = Hermitian(0.5 * Kinv + Kinv')
     end
     if (minimum(tau) > 1.)
     else
@@ -416,30 +423,39 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
 	K = pot_data.K
     tau = geom_data.τ_volumes
     qprime = geom_data.hilbert_basis
-    n,m = 1.0,1.0
+    nq = size(qprime, 1)
+    rhs_constraint = Vector{Float64}(undef, nq)
+    lhs_constraint = Matrix{Float64}(undef, nq, nq)
     use_legacy_kinv = cytools_version() < "0.8.0"
+
     while true
-        rhs_constraint = zeros(size(qprime,1))
-        lhs_constraint = zeros(size(qprime,1),size(qprime,1))
-        for i in axes(qprime,1)
-            for j in axes(qprime,1)
-                if i>j
-                    lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
-                end
+        fill!(lhs_constraint, 0.0)
+        @inbounds for j in 1:nq
+            qj      = @view qprime[j, :]
+            Kinv_qj = Kinv * qj
+            tau_qj  = dot(tau, qj)
+
+            for i in j+1:nq
+                qi = @view qprime[i, :]
+                lhs_constraint[i,j] = abs(
+                    log(abs(π * dot(qi, Kinv_qj)))
+                    - 2π * dot(tau, qi .+ qj)
+                )
             end
-            rhs_constraint[i] = abs.(log.(abs.(dot(tau, qprime[i, :]))) .+ (-2π * dot(tau, qprime[i,:])))
+            rhs_constraint[j] = abs(log(abs(tau_qj)) - 2π * tau_qj)
         end
-        if LowerTriangular(lhs_constraint .< rhs_constraint) - I(size(qprime,1)) == LowerTriangular(zeros(size(qprime,1), size(qprime,1)))
-            break
-        else
-            m+=1e-2
-            tip = m .* tip
-            #PTD volumes at tip
-            tau = cy.compute_divisor_volumes(tip)[basis]
-            #Kinv at tip -- save this or save K?
-            Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
-            Kinv = Hermitian(1/2 * Kinv + Kinv') 
+
+        converged = true
+        @inbounds for i in 1:nq, j in 1:i-1
+            lhs_constraint[i,j] >= rhs_constraint[i] && (converged = false; break)
         end
+        converged && break
+        m += 1e-2
+        tip = m .* tip
+        tau = cy.compute_divisor_volumes(tip)[basis]
+        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) :
+                                cy.compute_inverse_kahler_metric(tip)
+        Kinv = Hermitian(0.5 * Kinv + Kinv')
     end
     if (minimum(tau) > 1.)
     else
