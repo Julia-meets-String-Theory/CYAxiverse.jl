@@ -374,11 +374,7 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
         #PTD volumes at tip
         tau = cy.compute_divisor_volumes(tip)[basis]
         #Kinv at tip -- save this or save K?
-        if cytools_version() < "0.8.0"
-            Kinv = cy.compute_Kinv(tip)
-        else
-            Kinv = cy.compute_inverse_kahler_metric(tip)
-        end
+        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
         Kinv = Hermitian(1/2 * Kinv + Kinv')
     end
     tip_prefactor = [sqrt(n),m]
