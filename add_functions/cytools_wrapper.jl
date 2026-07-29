@@ -106,7 +106,7 @@ function topologies_generate_fast(h11,n)
     #If number of polytopes < $n, generate more triangulations per polytope, 
     #otherwise generate 1 triangulation per polytope upto $n
     spt = size(poly_test,1)
-    m = nothing;
+    m = 0;
     std_dev = ifelse(h11 == 491, 1.2, 0.2)
     if spt == 0
         return [0, 0, 0, 0]
@@ -156,7 +156,7 @@ function topologies_generate_fair(h11,n)
     #If number of polytopes < $n, generate more triangulations per polytope, 
     #otherwise generate 1 triangulation per polytope upto $n
     spt = size(poly_test,1)
-    m = nothing;
+    m = 0;
     if spt == 0
         return [0, 0, 0, 0]
     elseif spt < n && h11 > 3
@@ -215,7 +215,7 @@ function topologies(h11::Int, n::Int; fast = true)
     else
         mkdir(string(present_dir(),"h11_",lpad(h11,3,"0")))
     end
-    if m === nothing
+    if m === 0
         for tri in eachindex(tri_test)
             if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
             else
