@@ -314,7 +314,7 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     #Divisor basis for saving (allows for reproducibility)
     basis = cy.divisor_basis()
     #Find tip of SKC
-    n,m = 1,1
+    n,m = 1.0,1.0
     tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
     #Kinv at tip -- save this or save K?
     if cytools_version() < "0.8.0"
@@ -416,7 +416,8 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
 	K = pot_data.K
     tau = geom_data.τ_volumes
     qprime = geom_data.hilbert_basis
-    n,m = 1,1
+    n,m = 1.0,1.0
+    use_legacy_kinv = cytools_version() < "0.8.0"
     while true
         rhs_constraint = zeros(size(qprime,1))
         lhs_constraint = zeros(size(qprime,1),size(qprime,1))
@@ -436,11 +437,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
             #PTD volumes at tip
             tau = cy.compute_divisor_volumes(tip)[basis]
             #Kinv at tip -- save this or save K?
-            if cytools_version() < "0.8.0"
-                Kinv = cy.compute_Kinv(tip)
-            else
-                Kinv = cy.compute_inverse_kahler_metric(tip)
-            end
+            Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
             Kinv = Hermitian(1/2 * Kinv + Kinv') 
         end
     end
@@ -451,11 +448,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
         #PTD volumes at tip
         tau = cy.compute_divisor_volumes(tip)[basis]
         #Kinv at tip -- save this or save K?
-        if cytools_version() < "0.8.0"
-            Kinv = cy.compute_Kinv(tip)
-        else
-            Kinv = cy.compute_inverse_kahler_metric(tip)
-        end
+        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
         Kinv = Hermitian(1/2 * Kinv + Kinv')
     end
     tip_prefactor = [sqrt(n),m]
