@@ -61,7 +61,7 @@ function geometry(geom_idx::GeometryIndex; hilbert = false)
 end
 
 function hilbert_basis(geom_idx::GeometryIndex)
-    basis = zeros(geom_idx.h11, geom_idx.h11)
+    basis = zeros(Int, geom_idx.h11, geom_idx.h11)
     h5open(cyax_file(geom_idx), "r") do file
         if haskey(file, "cytools/geometric/hilbert_basis")
             basis = HDF5.read(file, "cytools/geometric/hilbert_basis")
