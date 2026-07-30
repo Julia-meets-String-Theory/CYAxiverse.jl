@@ -25,32 +25,30 @@ function topology(geom_idx::GeometryIndex)
 end
 
 function geometry(h11::Int, tri::Int, cy::Int=1; hilbert=false)
-    # No pre-allocating zeros!
-    
     h5open(cyax_file(h11, tri, cy), "r") do file
         if hilbert
-            h21 = HDF5.read(file, "cytools/geometric/h21")::Int
-            glsm = HDF5.read(file, "cytools/geometric/glsm")::Matrix{Int}
-            basis = HDF5.read(file, "cytools/geometric/basis")::Vector{Int}
-            tip = HDF5.read(file, "cytools/hilbert/geometric/tip")::Vector{Float64}
-            CY_Volume = HDF5.read(file, "cytools/hilbert/geometric/CY_volume")::Float64
-            divisor_volumes = HDF5.read(file, "cytools/hilbert/geometric/divisor_volumes")::Vector{Float64}
-            Kinv = HDF5.read(file, "cytools/hilbert/geometric/Kinv")::Matrix{Float64}
-            
-            tip_prefactor = haskey(file, "cytools/geometric/tip_prefactor") ? HDF5.read(file, "cytools/hilbert/geometric/tip_prefactor")::Vector{Float64} : ones(Float64, 2)
+            h21::Int = HDF5.read(file, "cytools/geometric/h21")
+            glsm::Matrix{Int} = HDF5.read(file, "cytools/geometric/glsm")
+            basis::Vector{Int} = HDF5.read(file, "cytools/geometric/basis")
+            tip::Vector{Float64} = HDF5.read(file, "cytools/hilbert/geometric/tip")
+            CY_Volume::Float64 = HDF5.read(file, "cytools/hilbert/geometric/CY_volume")
+            divisor_volumes::Vector{Float64} = HDF5.read(file, "cytools/hilbert/geometric/divisor_volumes")
+            Kinv::Matrix{Float64} = HDF5.read(file, "cytools/hilbert/geometric/Kinv")
+
+            tip_prefactor::Vector{Float64} = haskey(file, "cytools/geometric/tip_prefactor") ? HDF5.read(file, "cytools/hilbert/geometric/tip_prefactor") : ones(Float64, 2)
         else
-            h21 = HDF5.read(file, "cytools/geometric/h21")::Int
-            glsm = HDF5.read(file, "cytools/geometric/glsm")::Matrix{Int}
-            basis = HDF5.read(file, "cytools/geometric/basis")::Vector{Int}
-            tip = HDF5.read(file, "cytools/geometric/tip")::Vector{Float64}
-            CY_Volume = HDF5.read(file, "cytools/geometric/CY_volume")::Float64
-            divisor_volumes = HDF5.read(file, "cytools/geometric/divisor_volumes")::Vector{Float64}
-            Kinv = HDF5.read(file, "cytools/geometric/Kinv")::Matrix{Float64}
-            
-            tip_prefactor = haskey(file, "cytools/geometric/tip_prefactor") ? HDF5.read(file, "cytools/geometric/tip_prefactor")::Vector{Float64} : ones(Float64, 2)
+            h21::Int = HDF5.read(file, "cytools/geometric/h21")
+            glsm::Matrix{Int} = HDF5.read(file, "cytools/geometric/glsm")
+            basis::Vector{Int} = HDF5.read(file, "cytools/geometric/basis")
+            tip::Vector{Float64} = HDF5.read(file, "cytools/geometric/tip")
+            CY_Volume::Float64 = HDF5.read(file, "cytools/geometric/CY_volume")
+            divisor_volumes::Vector{Float64} = HDF5.read(file, "cytools/geometric/divisor_volumes")
+            Kinv::Matrix{Float64} = HDF5.read(file, "cytools/geometric/Kinv")
+
+            tip_prefactor::Vector{Float64} = haskey(file, "cytools/geometric/tip_prefactor") ? HDF5.read(file, "cytools/geometric/tip_prefactor") : ones(Float64, 2)
         end
         
-        hilbert_basis = haskey(file, "cytools/geometric/hilbert_basis") ? HDF5.read(file, "cytools/geometric/hilbert_basis")::Matrix{Int} : zeros(Int, h11, h11)
+        hilbert_basis::Matrix{Int} = haskey(file, "cytools/geometric/hilbert_basis") ? HDF5.read(file, "cytools/geometric/hilbert_basis") : zeros(Int, h11, h11)
 
         return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
     end
@@ -77,11 +75,8 @@ end
 #############################
 
 function potential(geom_idx::GeometryIndex; hilbert = false)
-    L::Matrix{Float64} = zeros(Float64, 1, 1)
-    Q::Matrix{Int} = zeros(Int, 1, 1)
-    Kinv::Matrix{Float64} = zeros(Float64, geom_idx.h11, geom_idx.h11)
     if hilbert
-        L, Q, Kinv = 
+        L::Matrix{Float64}, Q::Matrix{Int}, Kinv::Matrix{Float64} = 
         h5open(cyax_file(geom_idx), "r") do file
             HDF5.read(file, "cytools/hilbert/potential/L"),HDF5.read(file, "cytools/hilbert/potential/Q"),
             HDF5.read(file, "cytools/hilbert/geometric/Kinv")
@@ -142,7 +137,6 @@ end
 ##############################
 
 function qshape(h11::Int,tri::Int,cy::Int=1)
-    square, vacua, extrarows, ωnorm2 = 0, 0, 0, 0
     h5open(joinpath(geom_dir_read(h11,tri,cy),"qshape.h5"), "r") do file
         square = HDF5.read(file, "square")
         vacua = HDF5.read(file, "vacua_estimate")
@@ -162,56 +156,34 @@ function qshape(geom_idx::GeometryIndex)
 end
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
-    vacua::Float64 = 0.
-    θparallel_num::Matrix{Int} = zeros(Int,1,1)
-    θparallel_den::Matrix{Int} = zeros(Int,1,1)
-    Qtilde::Matrix{Int} = zeros(Int,1,1)
-    θparallel::Matrix{Float32} = zeros(Float32,1,1)
     if h11 <= 50
-        vacua, θparallel_num, θparallel_den, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
+        vacua::Float64, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel/numerator"),HDF5.read(file, "vacua/thparallel/denominator"),HDF5.read(file, "vacua/Qtilde")
         end
-        keys = ["vacua","θ∥","Qtilde"]
-        vals = [abs(vacua), θparallel_num .// θparallel_den, Qtilde]
-        return Dict(zip(keys,vals))
+        return (vacua = abs(vacua), θ∥ = θparallel_num .// θparallel_den, Qtilde = Qtilde)
     else
-        vacua, θparallel, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
+        vacua::Float64, θparallel::Matrix{Float64}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel"),HDF5.read(file, "vacua/Qtilde")
         end
-        keys = ["vacua","θ∥","Qtilde"]
-        vals = [abs(vacua), Rational.(round.(θparallel; digits=8)), Qtilde]
-        return Dict(zip(keys,vals))
+        return (vacua = abs(vacua), θ∥ = Rational.(round.(θparallel; digits=8)), Qtilde = Qtilde)
     end
 end
 
 function vacua_TB(h11::Int,tri::Int,cy::Int=1)
-    vacua::Float64 = 0
-    θparallel_num::Matrix{Int} = zeros(Int,1,1)
-    θparallel_den::Matrix{Int} = zeros(Int,1,1)
-    Qtilde::Matrix{Int} = zeros(Int,1,1)
-    θparallel::Matrix{Float32} = zeros(Float32,1,1)
     if h11 <= 50
-        vacua, θparallel_num, θparallel_den, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
+        vacua::Float64, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/thparallel/numerator"),HDF5.read(file, "vacua_TB/thparallel/denominator"),HDF5.read(file, "vacua_TB/Qtilde")
         end
-        keys = ["vacua","θ∥","Qtilde"]
-        vals = [abs(vacua), θparallel_num .// θparallel_den, Qtilde]
-        return Dict(zip(keys,vals))
+        return (vacua = abs(vacua), θ∥ = θparallel_num .// θparallel_den, Qtilde = Qtilde)
     else
-        vacua, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
+        vacua::Float64, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/Qtilde")
         end
-        keys = ["vacua","Qtilde"]
-        vals = [abs(vacua), Qtilde]
-        return Dict(zip(keys,vals))
+        return (vacua = abs(vacua), θ∥ = θparallel_num .// θparallel_den, Qtilde = Qtilde)
     end
 end
 
 function vacua_jlm(geom_idx::GeometryIndex; hilbert = false)
-    Nvac = 0
-    min_coords = zeros(1,1)
-    extra_rows = 0
-    det_Qtilde = 0
     if hilbert
         h5open(minfile(geom_idx), "r") do file
             Nvac = HDF5.read(file, "hilbert/Nvac")
@@ -254,9 +226,7 @@ function pq_spectrum(h11::Int,tri::Int,cy::Int=1)
         HDF5.read(file, "spectrum/masses/log10"),
         HDF5.read(file, "spectrum/decay/fK"), HDF5.read(file, "spectrum/decay/fpert")
     end
-    keys = ["m", "fK", "fpert"]
-    vals = [Hvals, fK, fpert]
-    return Dict(zip(keys,vals))
+    return (m = Hvals, fK = fK, fpert = fpert)
 end
 
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
@@ -271,11 +241,6 @@ function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
         HDF5.read(file, "spectrum/quart31/log10"),HDF5.read(file, "spectrum/quart22/index"),HDF5.read(file, "spectrum/quart22/sign"),
         HDF5.read(file, "spectrum/quart22/log10")
     end
-    keys = ["msign","m", "fK", "fpert","λselfsign", "λself","λ31_i","λ31sign","λ31", "λ22_i","λ22sign","λ22"]
-    vals = [Hsign,Hvals, fK, fpert,quartdiagsign, quartdiaglog,
-    quart22_index,quart22_log10 ,quart31_index,quart31_log10]
-    return Dict(zip(keys,vals))
-end
-
+    return (m = Hvals, fK = fK, fpert = fpert, λself = quartdiaglog, λ31_i = quart31_index, λ31 = quart31_log10, λ22_i = quart22_index, λ22 = quart22_log10)
 end
 
