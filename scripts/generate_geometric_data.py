@@ -179,29 +179,40 @@ def run_batch(h11, n_polytopes, base_dir, n_cores=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate CYTools geometry data for Julia.")
-    parser.add_argument("--h11", type=int, default=4, help="Target h11 value.")
-    parser.add_argument("--n", type=int, default=1, help="Number of polytopes to process.")
+    parser.add_argument("--h11_min", type=int, default=4, help="Starting h11 value.")
+    parser.add_argument("--h11_max", type=int, default=4, help="Ending h11 value (inclusive).")
+    parser.add_argument("--n", type=int, default=1, help="Number of polytopes to process per h11.")
     parser.add_argument("--outdir", type=str, default=".", help="Base directory to save the data.")
     parser.add_argument("--cores", type=int, default=None, help="Number of CPU cores to use (default: all).")
     args = parser.parse_args()
     
+    # Sanity check: if a user passes only h11_min, make it a single-value run
+    if args.h11_max < args.h11_min:
+        args.h11_max = args.h11_min
+        
     os.makedirs(args.outdir, exist_ok=True)
-    print(f"Starting generation for h11={args.h11}, n={args.n}. Saving to: {args.outdir}")
+    print(f"Starting generation for h11 in range [{args.h11_min}, {args.h11_max}], n={args.n} each. Saving to: {args.outdir}")
     
     tracemalloc.start()
     start_time = time.perf_counter()
     
-    # Pass the cores argument to the batch runner
-    run_batch(h11=args.h11, n_polytopes=args.n, base_dir=args.outdir, n_cores=args.cores)
-    
+    # Loop over the range of h11 values
+    for h in range(args.h11_min, args.h11_max + 1):
+        print(f"\n>>> Processing h11 = {h} <<<")
+        run_batch(h11=h, n_polytopes=args.n, base_dir=args.outdir, n_cores=args.cores)
+        
     end_time = time.perf_counter()
     current_mem, peak_mem = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     
+    total_cys = (args.h11_max - args.h11_min + 1) * args.n
+    
     print("\n" + "="*30)
     print("      BENCHMARK RESULTS      ")
     print("="*30)
+    print(f"Total CYs:   {total_cys}")
     print(f"Total Time:  {end_time - start_time:.3f} seconds")
     print(f"Peak Memory: {peak_mem / (1024 * 1024):.2f} MB")
-    print(f"Time/CY:     {(end_time - start_time) / args.n:.3f} seconds")
+    if total_cys > 0:
+        print(f"Time/CY:     {(end_time - start_time) / total_cys:.3f} seconds")
     print("="*30)
