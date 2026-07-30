@@ -40,9 +40,9 @@ Dict{String, ArbNumerics.ArbFloat{128}} with 3 entries:
 ```
 """
 function constants()
-    mplanck_r::ArbFloat = ArbFloat("2.435e18")
-    hubble::ArbFloat = ArbFloat("2.13")*ArbFloat("0.7")*ArbFloat("1e-33")
-    log2pi::ArbFloat = ArbFloat(log10(2π))
+    mplanck_r = ArbFloat("2.435e18")
+    hubble = ArbFloat("2.13") * ArbFloat("0.7") * ArbFloat("1e-33")
+    log2pi = ArbFloat(log10(2π))
     return Dict("MPlanck" => mplanck_r, "Hubble" => hubble, "log2π" => log2pi)
 end
 
@@ -73,9 +73,18 @@ julia> CYAxiverse.generate.pseudo_Q(4,10,1)
   9   3   6   1
 ```
 """
-function pseudo_Q(h11::Int,tri::Int,cy::Int=1)
-    Q = vcat(Matrix{Int}(I(h11)),rand(-5:5,4,h11))
-    return vcat(Q,hcat([Q[i,:]-Q[j,:] for i=1:size(Q,1)-1 for j=i+1:size(Q,1)]...)')
+function pseudo_Q(h11::Int, tri::Int, cy::Int=1)
+    Q = vcat(Matrix{Int}(I(h11)), rand(-5:5, 4, h11))
+    nrows = size(Q, 1)
+    # Pre-allocate cross-terms to avoid intermediate vcat/hcat allocations
+    ncross = binomial(nrows, 2)
+    cross_terms = Matrix{Int}(undef, ncross, h11)
+    idx = 1
+    @inbounds for i in 1:nrows-1, j in i+1:nrows
+        @views cross_terms[idx, :] .= Q[i, :] .- Q[j, :]
+        idx += 1
+    end
+    return vcat(Q, cross_terms)
 end
 
 """
@@ -99,14 +108,17 @@ julia> eigen(K).values
  9.559840749713599
 ```
 """
-function pseudo_K(h11::Int,tri::Int,cy::Int=1)
-    K::Matrix{Float64} = rand(h11,h11)
-    K = 4* 0.5 * (K+transpose(K)) + 2 .* I(h11)
-    while minimum(eigen(K).values) < 0.
-        K = rand(h11,h11)
-        K = 4* 0.5 * (K+transpose(K)) + 2 .* I(h11)
+function pseudo_K(h11::Int, tri::Int, cy::Int=1)
+    K = Matrix{Float64}(undef, h11, h11)
+    while true
+        rand!(K)
+        K .= 2.0 .* (K .+ K') .+ 2.0 .* I(h11)
+        # Fast check for positive definiteness via Cholesky instead of full eigen decomposition
+        cholfact = cholesky(Hermitian(K); check = false)
+        if issuccess(cholfact)
+            return Hermitian(K)
+        end
     end
-    return Hermitian(K)
 end
 
 """
@@ -521,39 +533,40 @@ end
     hp_spectrum_save(h11,tri,cy)
 
 """
-function hp_spectrum_save(h11::Int,tri::Int,cy::Int=1; prec = 5_000)
-    if h11!=0
-        pot_data = potential(h11,tri,cy);
-        K::Hermitian{Float64, Matrix{Float64}} = pot_data.K
-        LQtilde = LQtildebar(h11,tri,cy)
-        Ltilde = Matrix{Float64}(LQtilde["Lhat"]')
-        Qtilde = Matrix{Int}(LQtilde["Qhat"]')
-        spectrum_data = hp_spectrum(K,Ltilde,Qtilde; prec = prec)
-        h5open(cyax_file(h11,tri,cy), "r+") do file
+function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000)
+    if h11 != 0
+        pot_data = potential(h11, tri, cy)
+        K = pot_data.K
+        LQtilde_data = LQtildebar(h11, tri, cy)
+        Ltilde = Matrix{Float64}(LQtilde_data["Lhat"]')
+        Qtilde = Matrix{Int}(LQtilde_data["Qhat"]')
+        spectrum_data = hp_spectrum(K, Ltilde, Qtilde; prec = prec)
+
+        h5open(cyax_file(h11, tri, cy), "r+") do file
             f2 = create_group(file, "spectrum")
             f2a = create_group(f2, "quartdiag")
-            f2a["log10",deflate=9] = spectrum_data["λself"]
-            f2a["sign",deflate=9] = spectrum_data["λselfsign"]
+            f2a["log10", deflate=9] = spectrum_data["λself"]
+            f2a["sign", deflate=9] = spectrum_data["λselfsign"]
             f2e = create_group(f2, "decay")
-            f2e["fpert",deflate=9] = spectrum_data["fpert"]
-            f2e["fK",deflate=9] = spectrum_data["fK"]
+            f2e["fpert", deflate=9] = spectrum_data["fpert"]
+            f2e["fK", deflate=9] = spectrum_data["fK"]
 
             f2b = create_group(f2, "quart31")
-            f2b["log10",deflate=9] = spectrum_data["λ31"]
-            f2b["sign",deflate=9] = spectrum_data["λ31sign"]
-            f2b["index",deflate=9] = spectrum_data["λ31_i"]
+            f2b["log10", deflate=9] = spectrum_data["λ31"]
+            f2b["sign", deflate=9] = spectrum_data["λ31sign"]
+            f2b["index", deflate=9] = spectrum_data["λ31_i"]
 
             f2c = create_group(f2, "quart22")
-            f2c["log10",deflate=9] = spectrum_data["λ22"]
-            f2c["sign",deflate=9] = spectrum_data["λ22sign"]
-            f2c["index",deflate=9] = spectrum_data["λ22_i"]
+            f2c["log10", deflate=9] = spectrum_data["λ22"]
+            f2c["sign", deflate=9] = spectrum_data["λ22sign"]
+            f2c["index", deflate=9] = spectrum_data["λ22_i"]
 
             f2d = create_group(f2, "masses")
-            f2d["log10",deflate=9] = spectrum_data["m"]
-            f2d["sign",deflate=9] = spectrum_data["msign"]
+            f2d["log10", deflate=9] = spectrum_data["m"]
+            f2d["sign", deflate=9] = spectrum_data["msign"]
         end
     end
-    GC.gc()
+
 end
 
 
@@ -798,35 +811,43 @@ end
 
 TBW
 """
-function LQtilde(Q, L)
+function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
     @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
-    if @isdefined h11
-    else
-        h11 = size(Q, 1)
+    h11 = size(Q, 1)
+    
+    # Sort indices upfront instead of copying/sorting arrays repeatedly
+    perm = sortperm(@view(L[2, :]), rev=true)
+    Qsorted = Q[:, perm]
+    Lsorted = L[:, perm]
+
+    ncols = size(Q, 2)
+    tilde_mask = fill(false, ncols)
+    
+    # Pre-allocate matrix with maximum rank capacity
+    Qtilde_builder = Matrix{Int}(undef, h11, h11)
+    current_rank = 0
+
+    @inbounds for idx in 1:ncols
+        col = @view(Qsorted[:, idx])
+        if current_rank < h11
+            Qtilde_builder[:, current_rank + 1] = col
+            new_rank = rank(@view(Qtilde_builder[:, 1:current_rank + 1]))
+            if new_rank > current_rank
+                current_rank = new_rank
+                tilde_mask[idx] = true
+                if current_rank == h11
+                    break
+                end
+            end
+        end
     end
-    Q = Matrix{Int}(Q[:, sortperm(L[2,:], rev=true)])
-	L = L[:, sortperm(L[2,:], rev=true)]
-	Qbar = zeros(Int, size(Q,1),1)
-	Qtilde = zeros(Int, size(Q,1),1)
-    Lbar = zeros(Int, size(L,1),1)
-	Ltilde = zeros(Int, size(L,1),1)
-	for idx in axes(Q, 2)
-		if rank(hcat(Qtilde, Q[:, idx])) > rank(Qtilde)
-			Qtilde = hcat(Qtilde, Q[:, idx])
-            Ltilde = hcat(Ltilde, L[:, idx])
-			if rank(Qtilde) == h11
-				break
-			end
-		else
-			Qbar = hcat(Qbar, Q[:, idx])
-            Lbar = hcat(Lbar, L[:, idx])
-		end
-	end
-    if size(Qtilde, 2) + size(Qbar, 2) != size(Q, 2)
-        Lbar = hcat(Lbar[:, 2:end], L[:, size(Qtilde,2)+size(Qbar,2)-1:end])
-        Qbar = hcat(Qbar[:, 2:end], Q[:, size(Qtilde,2)+size(Qbar,2)-1:end])
-    end
-    LQLinearlyIndependent(Qtilde[:, 2:end], Qbar, Lbar, Ltilde[:, 2:end])
+
+    Qtilde = Qsorted[:, tilde_mask]
+    Ltilde = Lsorted[:, tilde_mask]
+    Qbar = Qsorted[:, .!tilde_mask]
+    Lbar = Lsorted[:, .!tilde_mask]
+
+    return LQLinearlyIndependent(Qtilde, Qbar, Lbar, Ltilde)
 end
 
 function LQtilde(h11::Int, tri::Int, cy::Int; hilbert = false)
@@ -864,67 +885,55 @@ TBW
 """
 function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Qhat = Matrix{Rational}(LQ.Qtilde)
-    if @isdefined h11
-    else
-        h11 = size(Qhat, 1)
-    end
-    Qbar = Matrix{Int}(LQ.Qbar)
+    h11 = size(Qhat, 1)
+    Qbar = LQ.Qbar
     Lhat = LQ.Ltilde
     Lbar = LQ.Lbar
-    Ltilde_min::Float64 = minimum(@view(Lhat[2,:]))
-    Ldiff_limit::Float64 = log10(threshold)
-    Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
-    Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
+
+    Ltilde_min = minimum(@view(Lhat[2, :]))
+    Ldiff_limit = log10(threshold)
+
+    # Use views for filtering valid components
+    valid_cols = @view(Lbar[2, :]) .>= (Ltilde_min + Ldiff_limit)
+    Qbar_v = @view(Qbar[:, valid_cols])
+    Lbar_v = @view(Lbar[:, valid_cols])
+
     Qinv = inv(Qhat)
-    Qinv = @.(ifelse(abs(Qinv) < 1e-4, zero(Rational), Rational(Qinv)))
-    αeff::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
-    αfull::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
-    α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
-    α = @.(ifelse(abs(α) < 1e-4, zero(Rational), Rational(α)))
-    α = @.ifelse(mod(α, 1) < 1e-3, round(α), α)
-    α1::Matrix{Rational} = deepcopy(α)
-    for i in axes(α,1)
-        for j in axes(α,2)
-            if abs(α[i,j]) > 1e-3
-                Ldiff::Float64 = round(Lbar[2,i] - Lhat[2,j], digits=3)
-                if Ldiff > Ldiff_limit
+    @. Qinv = ifelse(abs(Qinv) < 1e-4, zero(Rational), Rational(Qinv))
+
+    α = (Qinv * Qbar_v)'
+    @. α = ifelse(abs(α) < 1e-4, zero(Rational), Rational(α))
+    @. α = ifelse(mod(α, 1) < 1e-3, round(α), α)
+
+    # Pre-allocate effective vectors efficiently
+    αeff_cols = Vector{Rational}[]
+    
+    @inbounds for i in axes(α, 1)
+        keep = false
+        for j in axes(α, 2)
+            if abs(α[i, j]) > 1e-3
+                Ldiff = round(Lbar_v[2, i] - Lhat[2, j], digits=3)
+                if Ldiff <= Ldiff_limit
+                    α[i, j] = zero(Rational)
                 else
-                    α[i,j] = zero(Rational)
-                end
-                if abs(1 - abs(α[i,j])) > 1e-3
-                else
-                    α[i,j] = sign(α[i,j]) * one(α[i,j])
-                    α1[i,j] = sign(α1[i,j]) * one(α1[i,j])
+                    keep = true
                 end
             else
-                α[i,j] = zero(Rational)
-                α1[i,j] = zero(Rational)
+                α[i, j] = zero(Rational)
             end
         end
-        if α[i,:] == zeros(size(α,2))
-        else
-            Qhat = hcat(Qhat, @view(Qbar[:,i]))
-            Lhat = hcat(Lhat, @view(Lbar[:,i]))
-            αeff = hcat(αeff,@view(α[i,:]))
-            αfull = hcat(αfull,@view(α1[i,:]))
+        if keep
+            push!(αeff_cols, α[i, :])
         end
     end
-    αeff_temp = hcat(1//1 * I(h11), αeff[:, 2:end])
-    if size(αeff_temp,2) > h11
-        αeff = αeff[:, 2:end]
-        αfull = αfull[:, 2:end]
-        αrowmask = [(L - Lhat[2, h11+1]) < -Ldiff_limit for L in Lhat[2, 1:h11]]
-        ####################################################
-        ### These lines break things #######################
-        #### Don't know why ################################
-        # αrowmask1 = [sum(row .== zero(row[1])) < size(αeff,2) for row in eachrow(αeff)]
-        # αrowmask = αrowmask .+ αrowmask1
-        # αrowmask = @.Bool(ifelse(αrowmask > 1, 1, 0))
-        ####################################################
-        αcolmask = [sum(col .== zero(col[1])) < size(αeff[αrowmask,:],1) for col in eachcol(αeff[αrowmask,:])]
-        Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Matrix{Rational}(αfull), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
+
+    if !isempty(αeff_cols)
+        αeff = hcat(αeff_cols...)
+        αrowmask = [(L - Lhat[2, h11+1]) < -Ldiff_limit for L in @view(Lhat[2, 1:h11])]
+        αcolmask = [any(!iszero, col) for col in eachcol(αeff[αrowmask, :])]
+        return Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
     else
-        CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar))
+        return CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar))
     end
 end
 
