@@ -36,4 +36,8 @@ else
     println("This installation does not include SLURM!")
 end
 
+export greet_CYAxiverse
+
+greet_CYAxiverse() = "Hello CYAxiverse!"
+
 end
