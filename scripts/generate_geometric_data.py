@@ -216,3 +216,5 @@ if __name__ == "__main__":
     if total_cys > 0:
         print(f"Time/CY:     {(end_time - start_time) / total_cys:.3f} seconds")
     print("="*30)
+
+# python generate_geometric_data.py --h11_min 4 --h11_max 20 --n 5 --outdir test_data --cores 8
