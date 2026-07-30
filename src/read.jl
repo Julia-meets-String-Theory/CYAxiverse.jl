@@ -126,8 +126,10 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
     end
     Ltemp::Vector{ArbFloat} = zeros(ArbFloat,size(L,2))
     @inbounds for i in axes(L,1)
-        Ltemp[i] = ArbFloat.(L[i,1]) .* ArbFloat(10.) .^ ArbFloat.(L[i,2])
-    end
+        mantissa = ArbFloat(L[i,1])
+        exponent = ArbFloat(10.) ^ ArbFloat(L[i,2])
+        Ltemp[i] = mantissa * exponent
+        end
     return Ltemp
 end
 
