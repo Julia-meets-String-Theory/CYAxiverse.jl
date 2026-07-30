@@ -139,6 +139,10 @@ end
 ##############################
 
 function qshape(h11::Int,tri::Int,cy::Int=1)
+    extrarows = 0
+    ωnorm2 = 0.0
+    square = 0
+    vacua = 0.0
     h5open(joinpath(geom_dir_read(h11,tri,cy),"qshape.h5"), "r") do file
         square = HDF5.read(file, "square")
         vacua = HDF5.read(file, "vacua_estimate")
@@ -181,11 +185,15 @@ function vacua_TB(h11::Int,tri::Int,cy::Int=1)
         vacua::Float64, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/Qtilde")
         end
-        return (vacua = abs(vacua), θ∥ = θparallel_num .// θparallel_den, Qtilde = Qtilde)
+        return (vacua = abs(vacua), Qtilde = Qtilde)
     end
 end
 
 function vacua_jlm(geom_idx::GeometryIndex; hilbert = false)
+    Nvac = 0
+    min_coords = zeros(1,1)
+    extra_rows = 0
+    det_Qtilde = 0.0
     if hilbert
         h5open(minfile(geom_idx), "r") do file
             Nvac = HDF5.read(file, "hilbert/Nvac")
