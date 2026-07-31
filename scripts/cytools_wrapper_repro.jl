@@ -11,17 +11,17 @@ function repro_l_layout()
 
     L1[1, :] = [
         (8 * pi / V^2) * dot(qprime[1, :], tau),
-        -2 * log10(exp(1)) * pi * dot(qprime[1, :], tau),
+        -2 * log10(ℯ) * pi * dot(qprime[1, :], tau),
     ]
     L1[2, :] = [
         (8 * pi / V^2) * dot(qprime[2, :], tau),
-        -2 * log10(exp(1)) * pi * dot(qprime[2, :], tau),
+        -2 * log10(ℯ) * pi * dot(qprime[2, :], tau),
     ]
 
     L2[1, :] = [
         (pi * dot(qprime[1, :], (Kinv * qprime[2, :])) +
          dot(qprime[1, :] + qprime[2, :], tau)) * 8 * pi / V^2,
-        -2 * log10(exp(1)) * pi * (dot(qprime[1, :], tau) + dot(qprime[2, :], tau)),
+        -2 * log10(ℯ) * pi * (dot(qprime[1, :], tau) + dot(qprime[2, :], tau)),
     ]
 
     L = vcat(L1, L2)
