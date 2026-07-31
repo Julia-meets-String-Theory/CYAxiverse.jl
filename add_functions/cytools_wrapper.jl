@@ -302,7 +302,7 @@ function cy_from_poly(geom_idx::GeometryIndex)
     p = poly(points)
     t = p.triangulate(simplices=simplices)
     cy = t.get_cy()
-    return (h11 = geom_idx.h11, cy = cy, tri = geom_idx.polytope, cy_i = geom_idx.frst)
+    return (; h11 = geom_idx.h11, cy = cy, tri = geom_idx.polytope, cy_i = geom_idx.frst)
 end
 function geometries_generate(h11,cy; rational_Q = false)
     #Locator for h21s for saving
@@ -481,7 +481,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
     end
     #concatenate L1 and L2
     L = vcat(L1,L2)
-	return (basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CY_volume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
+	return (; basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CY_volume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
 end
 
 function geometries(h11,cy,tri,cy_i=1)

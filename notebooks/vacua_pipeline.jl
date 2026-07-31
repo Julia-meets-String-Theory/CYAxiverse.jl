@@ -38,7 +38,7 @@ function compute_axion_notebook(h11::Int, np::Int, cy::Int, data_dir::String, th
     vac_est = CYAxiverse.generate.vacua_estimate(geom_idx; threshold=threshold)
     vac_locations = CYAxiverse.generate.vacua_id(pot_data.L, pot_data.Q; threshold=threshold)
 
-    return (geom=geom_idx, spec=spectrum, vac_est=vac_est, vac_loc=vac_locations)
+    return (; geom=geom_idx, spec=spectrum, vac_est=vac_est, vac_loc=vac_locations)
 end
 
 # ╔═╡ cell-run

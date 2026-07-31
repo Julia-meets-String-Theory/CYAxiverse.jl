@@ -2024,7 +2024,7 @@ function jlm_vacua_db(; n=size(paths_cy()[2], 2), h11 = nothing)
         # det_Q_tilde = Int(abs(round(det(Qtilde))))
         # push!(detQtilde, [geom_idx.h11, geom_idx.polytope, geom_idx.frst, det_Q_tilde])
 	end
-	return (square = vac_square, one_dim = vac_1D, n_dim = vac_ND, err = no_vac)
+	return (; square = vac_square, one_dim = vac_1D, n_dim = vac_ND, err = no_vac)
 end
 
 """
@@ -2037,10 +2037,10 @@ function vacua_estimate(geom_idx::GeometryIndex; threshold::Float64=0.5)
     data = αmatrix(geom_idx; threshold=threshold)
     if size(data.Qhat, 1) == size(data.Qhat, 2)
         vac = Int(round(abs(det(data.Qhat))))
-        return (vac = vac, issquare = 1)
+        return (; vac = vac, issquare = 1)
     else
         vac = Int(floor(sqrt(abs(det(data.Qhat * data.Qhat')))))
-        return (vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - geom_idx.h11)
+        return (; vac = vac, issquare = 0, extrarows = size(data.Qhat, 2) - geom_idx.h11)
     end
 end
 
