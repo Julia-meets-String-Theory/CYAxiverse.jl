@@ -166,12 +166,12 @@ function vacua(h11::Int,tri::Int,cy::Int=1)
         vacua::Float64, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel/numerator"),HDF5.read(file, "vacua/thparallel/denominator"),HDF5.read(file, "vacua/Qtilde")
         end
-        return (; vacua = abs(vacua), θ∥ = θparallel_num .//θparallel_den, Qtilde = Qtilde)
+        return (; vacua = abs(vacua), θ_parallel = θparallel_num .//θparallel_den, Qtilde = Qtilde)
     else
         vacua::Float64, θparallel::Matrix{Float64}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel"),HDF5.read(file, "vacua/Qtilde")
         end
-        return (; vacua = abs(vacua), θ∥ = Rational.(round.(θparallel; digits=8)), Qtilde = Qtilde)
+        return (; vacua = abs(vacua), θ_parallel = Rational.(round.(θparallel; digits=8)), Qtilde = Qtilde)
     end
 end
 
@@ -180,7 +180,7 @@ function vacua_TB(h11::Int,tri::Int,cy::Int=1)
         vacua::Float64, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/thparallel/numerator"),HDF5.read(file, "vacua_TB/thparallel/denominator"),HDF5.read(file, "vacua_TB/Qtilde")
         end
-        return (; vacua = abs(vacua), θ∥ = θparallel_num .// θparallel_den, Qtilde = Qtilde)
+        return (; vacua = abs(vacua), θ_parallel = θparallel_num .// θparallel_den, Qtilde = Qtilde)
     else
         vacua::Float64, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/Qtilde")
@@ -254,3 +254,4 @@ function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
     return (; m = Hvals, fK = fK, fpert = fpert, λself = quartdiaglog, λ31_i = quart31_index, λ31 = quart31_log10, λ22_i = quart22_index, λ22 = quart22_log10)
 end
 
+end
