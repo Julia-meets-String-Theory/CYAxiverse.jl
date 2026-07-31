@@ -27,30 +27,30 @@ end
 function geometry(h11::Int, tri::Int, cy::Int=1; hilbert=false)
     h5open(cyax_file(h11, tri, cy), "r") do file
         if hilbert
-            h21::Int = HDF5.read(file, "cytools/geometric/h21")
-            glsm::Matrix{Int} = HDF5.read(file, "cytools/geometric/glsm")
-            basis::Vector{Int} = HDF5.read(file, "cytools/geometric/basis")
-            tip::Vector{Float64} = HDF5.read(file, "cytools/hilbert/geometric/tip")
-            CY_Volume::Float64 = HDF5.read(file, "cytools/hilbert/geometric/CY_volume")
-            divisor_volumes::Vector{Float64} = HDF5.read(file, "cytools/hilbert/geometric/divisor_volumes")
-            Kinv::Matrix{Float64} = HDF5.read(file, "cytools/hilbert/geometric/Kinv")
+            h21 = HDF5.read(file, "cytools/geometric/h21")
+            glsm = HDF5.read(file, "cytools/geometric/glsm")
+            basis = HDF5.read(file, "cytools/geometric/basis")
+            tip = HDF5.read(file, "cytools/hilbert/geometric/tip")
+            CY_Volume = HDF5.read(file, "cytools/hilbert/geometric/CY_volume")
+            divisor_volumes = HDF5.read(file, "cytools/hilbert/geometric/divisor_volumes")
+            Kinv = HDF5.read(file, "cytools/hilbert/geometric/Kinv")
 
-            tip_prefactor::Vector{Float64} = haskey(file, "cytools/geometric/tip_prefactor") ? HDF5.read(file, "cytools/hilbert/geometric/tip_prefactor") : ones(Float64, 2)
+            tip_prefactor = haskey(file, "cytools/geometric/tip_prefactor") ? HDF5.read(file, "cytools/hilbert/geometric/tip_prefactor") : ones(Float64, 2)
         else
-            h21::Int = HDF5.read(file, "cytools/geometric/h21")
-            glsm::Matrix{Int} = HDF5.read(file, "cytools/geometric/glsm")
-            basis::Vector{Int} = HDF5.read(file, "cytools/geometric/basis")
-            tip::Vector{Float64} = HDF5.read(file, "cytools/geometric/tip")
-            CY_Volume::Float64 = HDF5.read(file, "cytools/geometric/CY_volume")
-            divisor_volumes::Vector{Float64} = HDF5.read(file, "cytools/geometric/divisor_volumes")
-            Kinv::Matrix{Float64} = HDF5.read(file, "cytools/geometric/Kinv")
+            h21 = HDF5.read(file, "cytools/geometric/h21")
+            glsm = HDF5.read(file, "cytools/geometric/glsm")
+            basis = HDF5.read(file, "cytools/geometric/basis")
+            tip = HDF5.read(file, "cytools/geometric/tip")
+            CY_Volume = HDF5.read(file, "cytools/geometric/CY_volume")
+            divisor_volumes = HDF5.read(file, "cytools/geometric/divisor_volumes")
+            Kinv = HDF5.read(file, "cytools/geometric/Kinv")
 
-            tip_prefactor::Vector{Float64} = haskey(file, "cytools/geometric/tip_prefactor") ? HDF5.read(file, "cytools/geometric/tip_prefactor") : ones(Float64, 2)
+            tip_prefactor = haskey(file, "cytools/geometric/tip_prefactor") ? HDF5.read(file, "cytools/geometric/tip_prefactor") : ones(Float64, 2)
         end
         
         hilbert_basis::Matrix{Int} = haskey(file, "cytools/geometric/hilbert_basis") ? HDF5.read(file, "cytools/geometric/hilbert_basis") : zeros(Int, h11, h11)
 
-        return GeometricData(tip_prefactor, divisor_volumes, h21, CY_Volume, glsm, basis, tip, Kinv, hilbert_basis)
+        return GeometricData(tip_prefactor::Vector{Float64}, divisor_volumes::Vector{Float64}, h21::Int, CY_Volume::Float64, glsm::Matrix{Int}, basis::Vector{Int}, tip::Vector{Float64}, Kinv::Matrix{Float64}, hilbert_basis)
     end
 end
 
@@ -163,29 +163,30 @@ end
 
 function vacua(h11::Int,tri::Int,cy::Int=1)
     if h11 <= 50
-        vacua::Float64, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
+        vacua, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel/numerator"),HDF5.read(file, "vacua/thparallel/denominator"),HDF5.read(file, "vacua/Qtilde")
         end
-        return (; vacua = abs(vacua), θ_parallel = θparallel_num .//θparallel_den, Qtilde = Qtilde)
+        θ_parallel = θparallel_num .//θparallel_den
     else
-        vacua::Float64, θparallel::Matrix{Float64}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
+        vacua, θparallel, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua/vacua"),HDF5.read(file, "vacua/thparallel"),HDF5.read(file, "vacua/Qtilde")
         end
-        return (; vacua = abs(vacua), θ_parallel = Rational.(round.(θparallel; digits=8)), Qtilde = Qtilde)
+        θ_parallel = Rational.(round.(θparallel; digits=8))
     end
+    return (; vacua = abs(vacua::Float64), θ_parallel = θ_parallel::Matrix{Rational}, Qtilde = Qtilde::Matrix{Int})
 end
 
 function vacua_TB(h11::Int,tri::Int,cy::Int=1)
     if h11 <= 50
-        vacua::Float64, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
+        vacua, θparallel_num::Matrix{Int}, θparallel_den::Matrix{Int}, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/thparallel/numerator"),HDF5.read(file, "vacua_TB/thparallel/denominator"),HDF5.read(file, "vacua_TB/Qtilde")
         end
-        return (; vacua = abs(vacua), θ_parallel = θparallel_num .// θparallel_den, Qtilde = Qtilde)
+        return (; vacua = abs(vacua::Float64), θ_parallel = Matrix{Rational}(θparallel_num .// θparallel_den), Qtilde = Qtilde::Matrix{Int})
     else
-        vacua::Float64, Qtilde::Matrix{Int} = h5open(cyax_file(h11,tri,cy), "r") do file
+        vacua, Qtilde = h5open(cyax_file(h11,tri,cy), "r") do file
             HDF5.read(file, "vacua_TB/vacua"),HDF5.read(file, "vacua_TB/Qtilde")
         end
-        return (; vacua = abs(vacua), Qtilde = Qtilde)
+        return (; vacua = abs(vacua::Float64), Qtilde = Qtilde::Matrix{Int})
     end
 end
 
