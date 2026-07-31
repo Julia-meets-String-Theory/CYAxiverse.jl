@@ -668,7 +668,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
     
-    LQtild = LQtilde(Q', L')
+    LQtild = LQtilde(Q, L)
     Ltilde = LQtild.Ltilde
     Qtilde = LQtild.Qtilde
     QKs::Matrix{Float64} = zeros(Float64,h11,h11)
