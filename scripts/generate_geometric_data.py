@@ -55,7 +55,7 @@ def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath):
         converged = True
         for i in range(nq):
             for j in range(i):
-                if lhs_constraint[i, j] >= rhs_constraint[i]:
+                if lhs_constraint[i, j] <= rhs_constraint[i]:
                     converged = False
                     break
             if not converged: break
@@ -122,12 +122,12 @@ def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath):
         f1a = f1.create_group("geometric")
         f1a.create_dataset("points", data=poly_points, compression="gzip", compression_opts=9)
         f1a.create_dataset("simplices", data=simplices, compression="gzip", compression_opts=9)
-        f1a.create_dataset("h21", data=h21, compression="gzip", compression_opts=9)
+        f1a.create_dataset("h21", data=h21)
         f1a.create_dataset("glsm", data=glsm, compression="gzip", compression_opts=9)
         f1a.create_dataset("basis", data=basis, compression="gzip", compression_opts=9)
         f1a.create_dataset("tip", data=tip, compression="gzip", compression_opts=9)
         f1a.create_dataset("tip_prefactor", data=tip_prefactor, compression="gzip", compression_opts=9)
-        f1a.create_dataset("CY_volume", data=V, compression="gzip", compression_opts=9)
+        f1a.create_dataset("CY_volume", data=V)
         f1a.create_dataset("divisor_volumes", data=tau, compression="gzip", compression_opts=9)
         f1a.create_dataset("Kinv", data=Kinv, compression="gzip", compression_opts=9)
         
