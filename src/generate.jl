@@ -644,6 +644,73 @@ function orth_basis(Q::Matrix)
    @.(ifelse(abs(T) < tol, zero(T), T))
 end 
 
+function pq_canonical_frame(Qleading::Matrix{Float64}, Ltilde::Matrix{Float64})
+    h11 = size(Qleading, 1)
+    P = zeros(Float64, h11, h11)
+    fapprox = zeros(Float64, h11)
+    mapprox = zeros(Float64, h11)
+    for i in 1:h11
+        direction = copy(@view Qleading[i, :])
+        for j in 1:i-1
+            direction .-= dot(direction, @view(P[:, j])) .* @view(P[:, j])
+        end
+        direction_norm = norm(direction)
+        @assert direction_norm > 0 "PQ-selected charges must be linearly independent"
+        fapprox[i] = log10(1 / (2π * direction_norm^2))
+        mapprox[i] = 0.5 * (Ltilde[2, i] - fapprox[i] - log10(2π))
+        P[:, i] .= direction ./ direction_norm
+    end
+    return fapprox, mapprox, P
+end
+
+function logsum_sorted!(logs::Vector{Float64}, n::Int)
+    n == 0 && return -Inf
+    sort!(@view(logs[1:n]))
+    total = logs[1]
+    @inbounds for i in 2:n
+        total += gauss_sum(logs[i] - total)
+    end
+    return total
+end
+
+function pq_contracted_log!(positive_logs::Vector{Float64}, negative_logs::Vector{Float64}, scale_sign::Vector{Int}, scale_log::AbstractVector{Float64}, Qpq::Matrix{Float64}, exponents::NTuple{4, Int})
+    npositive = 0
+    nnegative = 0
+    @inbounds for a in eachindex(scale_sign)
+        term_sign = scale_sign[a]
+        term_log = scale_log[a]
+        for mode in exponents
+            charge = Qpq[a, mode]
+            if charge == 0
+                term_sign = 0
+                break
+            end
+            term_sign *= charge > 0 ? 1 : -1
+            term_log += log(abs(charge))
+        end
+        if term_sign > 0
+            npositive += 1
+            positive_logs[npositive] = term_log
+        elseif term_sign < 0
+            nnegative += 1
+            negative_logs[nnegative] = term_log
+        end
+    end
+
+    positive_sum = logsum_sorted!(positive_logs, npositive)
+    negative_sum = logsum_sorted!(negative_logs, nnegative)
+    if npositive == 0
+        return nnegative == 0 ? 0 : -1, negative_sum, negative_sum
+    elseif nnegative == 0
+        return 1, positive_sum, positive_sum
+    elseif positive_sum > negative_sum
+        return 1, positive_sum + gauss_diff(negative_sum - positive_sum), positive_sum + gauss_sum(negative_sum - positive_sum)
+    elseif negative_sum > positive_sum
+        return -1, negative_sum + gauss_diff(positive_sum - negative_sum), negative_sum + gauss_sum(positive_sum - negative_sum)
+    end
+    return 0, 0.0, positive_sum + log(2)
+end
+
 """
     leading_hessian_mass_basis(K, L, Q; prec=1_000)
 
@@ -725,7 +792,7 @@ aligned with these component families and reports final-sum cancellation in
 the Float64 log-space contraction. Signs of `λ31` additionally depend on the
 arbitrary sign convention for individual mass eigenvectors.
 """
-function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000)
+function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000, quartic_diagnostics::Bool=false)
     # TODO: #17 Include threshold
     h11::Int = size(K,1)
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
@@ -734,38 +801,10 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     LQtild = LQtilde(Q, L)
     Ltilde = LQtild.Ltilde
     Qtilde = LQtild.Qtilde
-    QKs::Matrix{Float64} = zeros(Float64,h11,h11)
-    Qlt::Matrix{Float64} = UpperTriangular(zeros(Float64,h11,h11))
-    fapprox::Vector{Float64} = zeros(Float64,h11)
-    mapprox::Vector{Float64} = zeros(h11)
-    # Charge vectors are rows, so canonical normalization acts on the right.
-    # This convention matches hp_spectrum's Q * inv(Kls') transformation.
-    QKs = Matrix(Qtilde') / Kls'
-    for i=1:h11
-        # println(size(QKs[i, :]))
-        fapprox[i] = log10(1 /(2π *dot(QKs[i,:],QKs[i,:])))
-        mapprox[i] = 0.5(Ltilde[2,i]-fapprox[i]-log10(2π))
-        T = orth_basis(QKs[i,:])
-        QKs1 = zeros(size(QKs,1), size(T,2))
-        LinearAlgebra.mul!(QKs1,QKs, T)
-        # println(size(QKs1))
-        # Qlt[i, :] .= QKs[i, :]
-        QKs = deepcopy(QKs1)
-    end
-
-    # Construct the same successive PQ directions in canonical field space.
     # `Q * inv(Kls')` is the charge matrix in the canonically normalized basis.
     Qcanonical = Matrix(Q') / Kls'
     Qleading = Matrix(Qtilde') / Kls'
-    P = zeros(Float64, h11, h11)
-    for i in 1:h11
-        direction = copy(@view Qleading[i, :])
-        for j in 1:i-1
-            direction .-= dot(direction, @view(P[:, j])) .* @view(P[:, j])
-        end
-        direction ./= norm(direction)
-        P[:, i] .= direction
-    end
+    fapprox, mapprox, P = pq_canonical_frame(Qleading, Ltilde)
 
     # Match the mass ordering used in the returned PQ spectrum.
     order = sortperm(mapprox)
@@ -783,22 +822,8 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     Qpq = Qcanonical * quartic_basis
     scale_sign = Int.(sign.(@view L[1, :]))
     scale_log = log(10) .* @view(L[2, :])
-
-    function contracted_log(exponents::NTuple{4, Int})
-        signs = scale_sign .* sign.(@view(Qpq[:, exponents[1]])) .* sign.(@view(Qpq[:, exponents[2]])) .* sign.(@view(Qpq[:, exponents[3]])) .* sign.(@view(Qpq[:, exponents[4]]))
-        logs = scale_log .+ log.(abs.(@view(Qpq[:, exponents[1]]))) .+ log.(abs.(@view(Qpq[:, exponents[2]]))) .+ log.(abs.(@view(Qpq[:, exponents[3]]))) .+ log.(abs.(@view(Qpq[:, exponents[4]])))
-        result_sign, result_log = gauss_log(signs, logs)
-        nonzero = signs .!= 0
-        exact_zero = result_sign == 0
-        if !any(nonzero) || exact_zero
-            return result_sign, result_log, Inf, -Inf, false, true
-        end
-        absolute_sum_log = gauss_log(ones(Int, count(identity, nonzero)), logs[nonzero])[2]
-        orders_lost = max(0.0, (absolute_sum_log - result_log) / log(10))
-        digits_remaining = -log10(eps(Float64)) - orders_lost
-        return result_sign, result_log, orders_lost, digits_remaining,
-               digits_remaining >= 3, false
-    end
+    positive_logs = zeros(Float64, length(scale_sign))
+    negative_logs = zeros(Float64, length(scale_sign))
 
     qindq31 = [(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
     qindq22 = [(i, i, j, j) for i in 1:h11 for j in 1:i-1]
@@ -808,39 +833,42 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     quart31log = zeros(Float64, length(qindq31))
     quart22sign = zeros(Int, length(qindq22))
     quart22log = zeros(Float64, length(qindq22))
-    self_orders_lost = zeros(Float64, h11)
-    self_digits_remaining = zeros(Float64, h11)
-    self_reliable = falses(h11)
-    self_exact_zero = falses(h11)
-    three_one_orders_lost = zeros(Float64, length(qindq31))
-    three_one_digits_remaining = zeros(Float64, length(qindq31))
-    three_one_reliable = falses(length(qindq31))
-    three_one_exact_zero = falses(length(qindq31))
-    two_two_orders_lost = zeros(Float64, length(qindq22))
-    two_two_digits_remaining = zeros(Float64, length(qindq22))
-    two_two_reliable = falses(length(qindq22))
-    two_two_exact_zero = falses(length(qindq22))
 
     for i in 1:h11
-        quartdiagsign[i], quartdiaglog[i], self_orders_lost[i], self_digits_remaining[i], self_reliable[i], self_exact_zero[i] = contracted_log((i, i, i, i))
+        quartdiagsign[i], quartdiaglog[i], _ = pq_contracted_log!(positive_logs, negative_logs, scale_sign, scale_log, Qpq, (i, i, i, i))
     end
     for i in eachindex(qindq31)
-        quart31sign[i], quart31log[i], three_one_orders_lost[i], three_one_digits_remaining[i], three_one_reliable[i], three_one_exact_zero[i] = contracted_log(qindq31[i])
+        quart31sign[i], quart31log[i], _ = pq_contracted_log!(positive_logs, negative_logs, scale_sign, scale_log, Qpq, qindq31[i])
     end
     for i in eachindex(qindq22)
-        quart22sign[i], quart22log[i], two_two_orders_lost[i], two_two_digits_remaining[i], two_two_reliable[i], two_two_exact_zero[i] = contracted_log(qindq22[i])
+        quart22sign[i], quart22log[i], _ = pq_contracted_log!(positive_logs, negative_logs, scale_sign, scale_log, Qpq, qindq22[i])
     end
 
     log2π = Float64(constants()["log2π"])
-    quartic_diagnostics = QuarticDiagnostics(
-        QuarticComponentDiagnostics(self_orders_lost, self_digits_remaining, self_reliable, self_exact_zero),
-        QuarticComponentDiagnostics(three_one_orders_lost, three_one_digits_remaining, three_one_reliable, three_one_exact_zero),
-        QuarticComponentDiagnostics(two_two_orders_lost, two_two_digits_remaining, two_two_reliable, two_two_exact_zero),
-    )
+    diagnostics = nothing
+    if quartic_diagnostics
+        function component_diagnostics(exponents)
+            result_sign, result_log, absolute_sum_log = pq_contracted_log!(positive_logs, negative_logs, scale_sign, scale_log, Qpq, exponents)
+            if result_sign == 0
+                return Inf, -Inf, false, true
+            end
+            orders_lost = max(0.0, (absolute_sum_log - result_log) / log(10))
+            digits_remaining = -log10(eps(Float64)) - orders_lost
+            return orders_lost, digits_remaining, digits_remaining >= 3, false
+        end
+        self_diagnostics = [component_diagnostics((i, i, i, i)) for i in 1:h11]
+        three_one_diagnostics = [component_diagnostics(qindq31[i]) for i in eachindex(qindq31)]
+        two_two_diagnostics = [component_diagnostics(qindq22[i]) for i in eachindex(qindq22)]
+        diagnostics = QuarticDiagnostics(
+            QuarticComponentDiagnostics(getindex.(self_diagnostics, 1), getindex.(self_diagnostics, 2), BitVector(getindex.(self_diagnostics, 3)), BitVector(getindex.(self_diagnostics, 4))),
+            QuarticComponentDiagnostics(getindex.(three_one_diagnostics, 1), getindex.(three_one_diagnostics, 2), BitVector(getindex.(three_one_diagnostics, 3)), BitVector(getindex.(three_one_diagnostics, 4))),
+            QuarticComponentDiagnostics(getindex.(two_two_diagnostics, 1), getindex.(two_two_diagnostics, 2), BitVector(getindex.(two_two_diagnostics, 3)), BitVector(getindex.(two_two_diagnostics, 4))),
+        )
+    end
     AxionSpectrum(masses, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
     quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
-    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, quartic_diagnostics)
+    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics)
 end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int; kwargs...)
@@ -870,22 +898,8 @@ function pq_hp_alignment(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float
     Qtilde, Ltilde = LQtild.Qtilde, LQtild.Ltilde
 
     # Reproduce PQ's mass ordering and build its canonical orthonormal frame.
-    QKs = inv(Kls') * Matrix(Qtilde')
-    mapprox = zeros(Float64, h11)
-    for i in 1:h11
-        fapprox = log10(1 / (2π * dot(QKs[i, :], QKs[i, :])))
-        mapprox[i] = 0.5 * (Ltilde[2, i] - fapprox - log10(2π))
-        QKs = QKs * orth_basis(QKs[i, :])
-    end
     Qleading = Matrix(Qtilde') / Kls'
-    P = zeros(Float64, h11, h11)
-    for i in 1:h11
-        direction = copy(@view Qleading[i, :])
-        for j in 1:i-1
-            direction .-= dot(direction, @view(P[:, j])) .* @view(P[:, j])
-        end
-        P[:, i] .= direction ./ norm(direction)
-    end
+    _, mapprox, P = pq_canonical_frame(Qleading, Ltilde)
     P = P[:, sortperm(mapprox)]
 
     setprecision(ArbFloat; digits=prec)

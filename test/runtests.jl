@@ -49,7 +49,7 @@ end
     L = [1.0 1.0 0.0;
          -20.0 -30.0 -1000.0]
 
-    pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
+    pq = CYAxiverse.generate.pq_spectrum(K, L, Q; quartic_diagnostics=true)
     hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
 
     expected = sort([
@@ -65,6 +65,7 @@ end
     @test all(isapprox.(pq.quartic_diagnostics.self.orders_lost, zeros(2); atol=1e-12))
     @test all(pq.quartic_diagnostics.self.reliable)
     @test !any(pq.quartic_diagnostics.self.exact_zero)
+    @test CYAxiverse.generate.pq_spectrum(K, L, Q).quartic_diagnostics === nothing
 end
 
 @testset "PQ spectrum: non-diagonal kinetic matrix" begin

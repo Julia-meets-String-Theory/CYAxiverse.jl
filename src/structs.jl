@@ -65,7 +65,7 @@ struct AxionSpectrum
     λ22_i::Matrix{Int}
     λ22sign::Vector{Int}
     λ22::Vector{Float64}
-    quartic_diagnostics::QuarticDiagnostics
+    quartic_diagnostics::Union{Nothing, QuarticDiagnostics}
 end
 
 Base.@kwdef struct IndexedAxionSpectrum{T<:Float64}
