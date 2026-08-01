@@ -9,7 +9,55 @@ using Printf
 Computes axion spectra (masses, decay constants, quartic couplings) and vacua 
 statistics/locations for a specific geometry specified by (h11, np, cy) in data_dir.
 """
-function compute_axion_data(h11::Int, np::Int, cy::Int, data_dir::String; threshold::Float64=0.5)
+function save_axion_data(geom_idx, spectrum, vac_est, vac_id; threshold::Float64)
+    h5open(CYAxiverse.filestructure.cyax_file(geom_idx), "r+") do file
+        if haskey(file, "spectrum")
+            HDF5.delete_object(file, "spectrum")
+        end
+        spectrum_group = create_group(file, "spectrum")
+        masses_group = create_group(spectrum_group, "masses")
+        masses_group["log10", deflate=9] = spectrum["m"]
+        masses_group["sign", deflate=9] = spectrum["msign"]
+        decay_group = create_group(spectrum_group, "decay")
+        decay_group["fK", deflate=9] = spectrum["fK"]
+        decay_group["fpert", deflate=9] = spectrum["fpert"]
+        quartdiag_group = create_group(spectrum_group, "quartdiag")
+        quartdiag_group["log10", deflate=9] = spectrum["λself"]
+        quartdiag_group["sign", deflate=9] = spectrum["λselfsign"]
+        quart31_group = create_group(spectrum_group, "quart31")
+        quart31_group["index", deflate=9] = spectrum["λ31_i"]
+        quart31_group["log10", deflate=9] = spectrum["λ31"]
+        quart31_group["sign", deflate=9] = spectrum["λ31sign"]
+        quart22_group = create_group(spectrum_group, "quart22")
+        quart22_group["index", deflate=9] = spectrum["λ22_i"]
+        quart22_group["log10", deflate=9] = spectrum["λ22"]
+        quart22_group["sign", deflate=9] = spectrum["λ22sign"]
+
+        if haskey(file, "vacua_pipeline")
+            HDF5.delete_object(file, "vacua_pipeline")
+        end
+        vacua_group = create_group(file, "vacua_pipeline")
+        vacua_group["threshold", deflate=9] = threshold
+        vacua_group["estimate", deflate=9] = vac_est.vac
+        vacua_group["issquare", deflate=9] = vac_est.issquare
+        if hasproperty(vac_est, :extrarows)
+            vacua_group["extrarows", deflate=9] = vac_est.extrarows
+        end
+        if haskey(vac_id, "vac")
+            vacua_group["verified", deflate=9] = vac_id["vac"]
+        end
+        for (key, path) in (("θ̃min", "theta_min"), ("θ̃∥", "theta_parallel"))
+            if haskey(vac_id, key)
+                coordinates = vac_id[key]
+                coordinates_group = create_group(vacua_group, path)
+                coordinates_group["numerator", deflate=9] = Int.(numerator.(coordinates))
+                coordinates_group["denominator", deflate=9] = Int.(denominator.(coordinates))
+            end
+        end
+    end
+end
+
+function compute_axion_data(h11::Int, np::Int, cy::Int, data_dir::String; threshold::Float64=0.5, save::Bool=true)
     # Set the input search directory dynamically if provided
     if !isempty(data_dir) && isdir(data_dir)
         ENV["CYAXIVERSE_DATA_DIR"] = data_dir
@@ -23,11 +71,14 @@ function compute_axion_data(h11::Int, np::Int, cy::Int, data_dir::String; thresh
     geom_data = CYAxiverse.read.geometry(geom_idx)
     
     # 3. Calculate Axion Spectrum (High-Precision Masses, Decay Constants, Quartic Couplings)
-    spectrum = CYAxiverse.generate.hp_spectrum(pot_data.K, pot_data.L, pot_data.Q)
+    spectrum = CYAxiverse.generate.hp_spectrum(geom_idx)
     
     # 4. Calculate Vacua Statistics & Locations
     vac_est = CYAxiverse.generate.vacua_estimate(geom_idx; threshold=threshold)
     vac_id = CYAxiverse.generate.vacua_id(pot_data.L, pot_data.Q; threshold=threshold)
+    if save
+        save_axion_data(geom_idx, spectrum, vac_est, vac_id; threshold=threshold)
+    end
     
     return Dict(
         "geom_idx" => geom_idx,
