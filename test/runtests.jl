@@ -79,6 +79,10 @@ end
 
     @test all(isapprox.(pq.m, hp["m"]; atol=0.1))
     @test all(isapprox.(pq_corrected.m, hp["m"]; atol=1e-10))
+    @test pq_corrected.λselfsign == hp["λselfsign"]
+    @test all(isapprox.(pq_corrected.λself, hp["λself"]; atol=1e-10))
+    @test pq_corrected.λ22sign == hp["λ22sign"]
+    @test all(isapprox.(pq_corrected.λ22, hp["λ22"]; atol=1e-10))
 end
 
 @testset "PQ-seeded HP alignment" begin

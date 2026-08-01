@@ -645,6 +645,30 @@ function orth_basis(Q::Matrix)
 end 
 
 """
+    leading_hessian_mass_basis(K, L, Q; prec=1_000)
+
+Return the high-precision eigenspectrum and canonical eigenbasis of the Hessian
+formed from a PQ-selected leading instanton set. The returned basis is ordered
+by ascending mass and converted to Float64 only after diagonalization.
+"""
+function leading_hessian_mass_basis(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec::Int=1_000)
+    setprecision(ArbFloat; digits=prec)
+    T = typeof(ArbFloat(0))
+    h11 = size(K, 1)
+    scales::Vector{T} = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    H::Matrix{T} = zeros(T, h11, h11)
+    for a in eachindex(scales), i in 1:h11, j in 1:h11
+        H[i, j] += scales[a] * Q[i, a] * Q[j, a]
+    end
+    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
+    W = Hermitian(Kfactor.L \ H / Kfactor.L')
+    eigenvalues, eigenvectors = eigen(W)
+    masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
+    order = sortperm(masses)
+    return masses[order], Float64.(eigenvectors[:, order])
+end
+
+"""
     pq_spectrum(K,L,Q; mixing_correction=false, prec=1_000)
 Uses a modified version of the algorithm outlined in the _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) to compute the masses and decay constants.
 The quartics are evaluated in the PQ approximate mass basis using every
@@ -653,8 +677,9 @@ performed in logarithmic space to avoid overflow and underflow.
 
 Set `mixing_correction=true` to replace the hierarchical PQ mass estimates
 with a high-precision diagonalization of the Hessian formed from the same
-leading instantons selected by PQ. This corrects leading-Hessian mixing only;
-it does not change the PQ basis used for decay constants or quartics.
+leading instantons selected by PQ. This corrects leading-Hessian mixing and
+rotates the all-scale quartics into that corrected mass basis; decay constants
+remain in the PQ basis.
 """
 function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Bool=false, prec::Int=1_000)
     # TODO: #17 Include threshold
@@ -701,12 +726,13 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     # Match the mass ordering used in the returned PQ spectrum.
     order = sortperm(mapprox)
     masses = mapprox[order] .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
+    quartic_basis = P[:, order]
     if mixing_correction
-        # This is the exact eigenspectrum of PQ's own selected leading-Hessian,
+        # This is the exact eigensystem of PQ's own selected leading-Hessian,
         # not an all-instanton HP calculation.
-        masses = sort(hp_spectrum(K, Matrix(Ltilde'), Matrix(Qtilde'); prec=prec)["m"])
+        masses, quartic_basis = leading_hessian_mass_basis(K, Ltilde, Qtilde; prec=prec)
     end
-    Qpq = Qcanonical * P[:, order]
+    Qpq = Qcanonical * quartic_basis
     scale_sign = Int.(sign.(@view L[1, :]))
     scale_log = log(10) .* @view(L[2, :])
 
