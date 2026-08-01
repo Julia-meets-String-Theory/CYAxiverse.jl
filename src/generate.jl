@@ -1065,16 +1065,21 @@ function positive_inertia(factor::BunchKaufman)
 end
 
 """
-    pq_physical_mode_count(K, L, Q; threshold_log10=log10(H₀), prec=1_000)
+    pq_physical_mode_count(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
+                           confirm=true, max_prec=4_000)
 
 Count PQ leading-Hessian modes above `threshold_log10` using the inertia of
 the arbitrary-precision shifted Hessian. This avoids computing the complete
 eigensystem and is a building block for a future threshold-targeted physical
 sector solver. It does not return eigenvectors or quartics.
+
+With `confirm=true` (the default), the count must agree after increasing the
+working precision before it is returned. If it does not stabilize by
+`max_prec`, a warning is emitted and the latest count is returned as
+provisional. This keeps long scans running while flagging geometries that
+need a higher-precision follow-up.
 """
-function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000)
-    LQtild = LQtilde(Q, L)
-    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+function physical_mode_inertia_count(K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int)
     setprecision(ArbFloat; digits=prec)
     T = typeof(ArbFloat(0))
     h11 = size(K, 1)
@@ -1088,6 +1093,22 @@ function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matri
     mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
     threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
     positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold_eigenvalue * I)))
+end
+
+function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, confirm::Bool=true, max_prec::Int=4_000)
+    LQtild = LQtilde(Q, L)
+    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+    count_at_prec = physical_mode_inertia_count(K, Ltilde, Qtilde, threshold_log10, prec)
+    !confirm && return count_at_prec
+    working_prec = prec
+    while working_prec < max_prec
+        working_prec = min(2 * working_prec, max_prec)
+        confirmed_count = physical_mode_inertia_count(K, Ltilde, Qtilde, threshold_log10, working_prec)
+        confirmed_count == count_at_prec && return count_at_prec
+        count_at_prec = confirmed_count
+    end
+    @warn "physical-mode count did not stabilize by max_prec=$(max_prec); returning provisional count $(count_at_prec). Increase max_prec or inspect the threshold neighbourhood."
+    count_at_prec
 end
 
 """Load one geometry and delegate to [`pq_physical_mode_count(K, L, Q; kwargs...)`](@ref)."""
