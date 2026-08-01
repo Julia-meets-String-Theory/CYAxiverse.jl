@@ -1,4 +1,5 @@
 using CYAxiverse
+using LinearAlgebra
 using Test
 
 @testset "CYAxiverse.jl" begin
