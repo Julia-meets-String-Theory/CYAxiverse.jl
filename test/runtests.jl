@@ -80,6 +80,11 @@ end
     @test all(isapprox.(physical.m, expected; atol=1e-10))
     @test physical.λselfsign == hp["λselfsign"]
     @test all(isapprox.(physical.λself, hp["λself"]; atol=1e-10))
+    hybrid = CYAxiverse.generate.pq_hybrid_physical_spectrum(K, L, Q; prec=200)
+    @test hybrid.mode_indices == [0, 1]
+    @test all(isapprox.(hybrid.m, expected; atol=1e-10))
+    @test hybrid.λselfsign == hp["λselfsign"]
+    @test all(isapprox.(hybrid.λself, hp["λself"]; atol=1e-10))
     @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=200) == 2
     @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=100, max_prec=100, label="diagonal test") == 2
 end

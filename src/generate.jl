@@ -1047,6 +1047,107 @@ function pq_physical_spectrum(geom_idx::GeometryIndex; kwargs...)
     pq_physical_spectrum(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
 end
 
+function high_precision_orthonormalize!(basis::Matrix{T}) where {T}
+    for j in axes(basis, 2)
+        for i in 1:j-1
+            basis[:, j] .-= dot(@view(basis[:, i]), @view(basis[:, j])) .* @view(basis[:, i])
+        end
+        basis[:, j] ./= norm(@view(basis[:, j]))
+    end
+    basis
+end
+
+"""
+    pq_hybrid_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
+                                maxiter=100, residual_tolerance=1e-30)
+
+Compute only the PQ leading-Hessian modes above `threshold_log10` with a
+Float64-seeded, arbitrary-precision block subspace iteration. The physical
+mode count is obtained from high-precision inertia, then the corresponding
+largest eigenpairs are refined without a full arbitrary-precision
+eigendecomposition. Returned quartics include every instanton, as in
+[`pq_physical_spectrum`](@ref).
+
+The returned `PhysicalAxionSpectrum` has the same fields as the full
+high-precision reference routine. If the requested residual tolerance is not
+met by `maxiter`, a warning is emitted and the provisional result is returned;
+use `pq_physical_spectrum` to validate such a case.
+"""
+function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, label::AbstractString="matrix input")
+    LQtild = LQtilde(Q, L)
+    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+    physical_count = pq_physical_mode_count(K, L, Q; threshold_log10, prec, label)
+    physical_count == 0 && return PhysicalAxionSpectrum(Float64[], Int[], zeros(Float64, size(K, 1), 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
+
+    setprecision(ArbFloat; digits=prec)
+    T = typeof(ArbFloat(0))
+    h11 = size(K, 1)
+    leading_scales = T.(Ltilde[1, :]) .* (T(10) .^ T.(Ltilde[2, :]))
+    H = zeros(T, h11, h11)
+    for a in eachindex(leading_scales), i in 1:h11, j in 1:h11
+        H[i, j] += leading_scales[a] * Qtilde[i, a] * Qtilde[j, a]
+    end
+    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
+    W = Hermitian(Kfactor.L \ H / Kfactor.L')
+
+    _, float_vectors = eigen(leading_hessian_matrix_float64(K, Ltilde, Qtilde))
+    basis = high_precision_orthonormalize!(T.(float_vectors[:, end-physical_count+1:end]))
+    eigenvalues = zeros(T, physical_count)
+    eigenvectors = similar(basis)
+    residuals = fill(Inf, physical_count)
+    for _ in 1:maxiter
+        basis = high_precision_orthonormalize!(Matrix(W) * basis)
+        eigenvalues, coefficients = eigen(Hermitian(basis' * W * basis))
+        basis = basis * coefficients
+        residuals = [Float64(norm(W * @view(basis[:, i]) - eigenvalues[i] .* @view(basis[:, i])) / abs(eigenvalues[i])) for i in eachindex(eigenvalues)]
+        maximum(residuals) <= residual_tolerance && break
+    end
+    maximum(residuals) > residual_tolerance && @warn "hybrid physical spectrum did not reach residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Returning a provisional result."
+    masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
+    Qmass = (T.(Q') / Kfactor.L') * basis
+    quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
+    qindq22 = [(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
+    function signed_quartic(exponents::NTuple{4, Int})
+        value = zero(T)
+        for a in eachindex(quartic_scales)
+            value += quartic_scales[a] * Qmass[a, exponents[1]] * Qmass[a, exponents[2]] * Qmass[a, exponents[3]] * Qmass[a, exponents[4]]
+        end
+        value_sign = Int(sign(value))
+        value_sign, value_sign == 0 ? -Inf : Float64(log10(abs(value)))
+    end
+    self_sign = zeros(Int, physical_count); self_log = zeros(Float64, physical_count)
+    for i in 1:physical_count
+        self_sign[i], self_log[i] = signed_quartic((i, i, i, i))
+    end
+    three_one_sign = zeros(Int, length(qindq31)); three_one_log = zeros(Float64, length(qindq31))
+    for i in eachindex(qindq31)
+        three_one_sign[i], three_one_log[i] = signed_quartic(qindq31[i])
+    end
+    two_two_sign = zeros(Int, length(qindq22)); two_two_log = zeros(Float64, length(qindq22))
+    for i in eachindex(qindq22)
+        two_two_sign[i], two_two_log[i] = signed_quartic(qindq22[i])
+    end
+    log2π = Float64(constants()["log2π"])
+    PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis),
+        self_sign, self_log .+ 4 * log2π,
+        isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, three_one_sign, three_one_log .+ 4 * log2π,
+        isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, two_two_sign, two_two_log .+ 4 * log2π,
+        threshold_log10, prec)
+end
+
+"""Load one geometry and delegate to [`pq_hybrid_physical_spectrum(K, L, Q; kwargs...)`](@ref)."""
+function pq_hybrid_physical_spectrum(h11::Int, tri::Int, cy::Int; label::AbstractString="h11=$(h11), polytope=$(tri), frst=$(cy)", kwargs...)
+    pot_data = potential(h11, tri, cy)
+    pq_hybrid_physical_spectrum(pot_data.K, pot_data.L, pot_data.Q; label, kwargs...)
+end
+
+"""Load one indexed geometry and delegate to [`pq_hybrid_physical_spectrum(K, L, Q; kwargs...)`](@ref)."""
+function pq_hybrid_physical_spectrum(geom_idx::GeometryIndex; label::AbstractString="h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), frst=$(geom_idx.frst)", kwargs...)
+    pot_data = potential(geom_idx)
+    pq_hybrid_physical_spectrum(pot_data.K, pot_data.L, pot_data.Q; label, kwargs...)
+end
+
 function positive_inertia(factor::BunchKaufman)
     D, pivots = factor.D, factor.ipiv
     positive = 0
