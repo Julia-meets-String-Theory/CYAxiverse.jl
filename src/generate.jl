@@ -647,8 +647,9 @@ end
 """
     pq_spectrum(K,L,Q)
 Uses a modified version of the algorithm outlined in the _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) to compute the masses and decay constants.
-!!! note
-    The off-diagonal elements of the quartic self-interaction tensor are not yet included in this computation
+The quartics are evaluated in the PQ approximate mass basis using every
+instanton scale in `L`. As this is a Float64 calculation, signed sums are
+performed in logarithmic space to avoid overflow and underflow.
 """
 function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
     # TODO: #17 Include threshold
@@ -675,9 +676,59 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         # Qlt[i, :] .= QKs[i, :]
         QKs = deepcopy(QKs1)
     end
-    AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9 .+
+
+    # Construct the same successive PQ directions in canonical field space.
+    # `Q * inv(Kls')` is the charge matrix in the canonically normalized basis.
+    Qcanonical = Matrix(Q') / Kls'
+    Qleading = Matrix(Qtilde') / Kls'
+    P = zeros(Float64, h11, h11)
+    for i in 1:h11
+        direction = copy(@view Qleading[i, :])
+        for j in 1:i-1
+            direction .-= dot(direction, @view(P[:, j])) .* @view(P[:, j])
+        end
+        direction ./= norm(direction)
+        P[:, i] .= direction
+    end
+
+    # Match the mass ordering used in the returned PQ spectrum.
+    order = sortperm(mapprox)
+    Qpq = Qcanonical * P[:, order]
+    scale_sign = Int.(sign.(@view L[1, :]))
+    scale_log = log(10) .* @view(L[2, :])
+
+    function contracted_log(exponents::NTuple{4, Int})
+        signs = scale_sign .* sign.(@view(Qpq[:, exponents[1]])) .* sign.(@view(Qpq[:, exponents[2]])) .* sign.(@view(Qpq[:, exponents[3]])) .* sign.(@view(Qpq[:, exponents[4]]))
+        logs = scale_log .+ log.(abs.(@view(Qpq[:, exponents[1]]))) .+ log.(abs.(@view(Qpq[:, exponents[2]]))) .+ log.(abs.(@view(Qpq[:, exponents[3]]))) .+ log.(abs.(@view(Qpq[:, exponents[4]])))
+        gauss_log(signs, logs)
+    end
+
+    qindq31 = [(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
+    qindq22 = [(i, i, j, j) for i in 1:h11 for j in 1:i-1]
+    quartdiagsign = zeros(Int, h11)
+    quartdiaglog = zeros(Float64, h11)
+    quart31sign = zeros(Int, length(qindq31))
+    quart31log = zeros(Float64, length(qindq31))
+    quart22sign = zeros(Int, length(qindq22))
+    quart22log = zeros(Float64, length(qindq22))
+
+    for i in 1:h11
+        quartdiagsign[i], quartdiaglog[i] = contracted_log((i, i, i, i))
+    end
+    for i in eachindex(qindq31)
+        quart31sign[i], quart31log[i] = contracted_log(qindq31[i])
+    end
+    for i in eachindex(qindq22)
+        quart22sign[i], quart22log[i] = contracted_log(qindq22[i])
+    end
+
+    log2π = Float64(constants()["log2π"])
+    AxionSpectrum(mapprox[order] .+ 9 .+
     Float64(log10(constants()["MPlanck"])) .+
-    Float64(constants()["log2π"]), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]))
+    log2π, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
+    quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
+    isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
+    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π)
 end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int)
