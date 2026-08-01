@@ -86,6 +86,7 @@ end
     @test hybrid.λselfsign == hp["λselfsign"]
     @test all(isapprox.(hybrid.λself, hp["λself"]; atol=1e-10))
     @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=200) == 2
+    @test CYAxiverse.generate.pq_schur_admissible(K, L, Q; prec=200)
     @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=100, max_prec=100, label="diagonal test") == 2
 end
 

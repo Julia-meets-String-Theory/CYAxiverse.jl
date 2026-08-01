@@ -1226,6 +1226,56 @@ function pq_physical_mode_count(geom_idx::GeometryIndex; label::AbstractString="
 end
 
 """
+    pq_schur_admissible(K, L, Q; threshold_log10=log10(H₀), prec=1_000)
+
+Return whether a Float64-seeded physical/complement split is safe for a Schur
+solver at `threshold_log10`. The check is performed at arbitrary precision:
+after selecting the physical-count largest Float64 seed vectors, it verifies
+by inertia that the complementary high-precision block has no eigenvalue above
+the threshold. Only in that case is its Schur resolvent nonsingular throughout
+the requested physical sector.
+
+This is an opt-in diagnostic for a future Schur accelerator. It is not cheap:
+it needs a dense arbitrary-precision complement factorization, so it should
+not be enabled in a large default scan.
+"""
+function pq_schur_admissible(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, label::AbstractString="matrix input")
+    LQtild = LQtilde(Q, L)
+    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+    physical_count = pq_physical_mode_count(K, L, Q; threshold_log10, prec, label)
+    physical_count == 0 && return true
+    setprecision(ArbFloat; digits=prec)
+    T = typeof(ArbFloat(0))
+    h11 = size(K, 1)
+    physical_count == h11 && return true
+    scales = T.(Ltilde[1, :]) .* (T(10) .^ T.(Ltilde[2, :]))
+    H = zeros(T, h11, h11)
+    for a in eachindex(scales), i in 1:h11, j in 1:h11
+        H[i, j] += scales[a] * Qtilde[i, a] * Qtilde[j, a]
+    end
+    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
+    W = Hermitian(Kfactor.L \ H / Kfactor.L')
+    _, float_vectors = eigen(leading_hessian_matrix_float64(K, Ltilde, Qtilde))
+    complement = T.(float_vectors[:, 1:end-physical_count])
+    C = Hermitian(complement' * W * complement)
+    mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
+    threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
+    positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
+end
+
+"""Load one geometry and delegate to [`pq_schur_admissible(K, L, Q; kwargs...)`](@ref)."""
+function pq_schur_admissible(h11::Int, tri::Int, cy::Int; label::AbstractString="h11=$(h11), polytope=$(tri), frst=$(cy)", kwargs...)
+    pot_data = potential(h11, tri, cy)
+    pq_schur_admissible(pot_data.K, pot_data.L, pot_data.Q; label, kwargs...)
+end
+
+"""Load one indexed geometry and delegate to [`pq_schur_admissible(K, L, Q; kwargs...)`](@ref)."""
+function pq_schur_admissible(geom_idx::GeometryIndex; label::AbstractString="h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), frst=$(geom_idx.frst)", kwargs...)
+    pot_data = potential(geom_idx)
+    pq_schur_admissible(pot_data.K, pot_data.L, pot_data.Q; label, kwargs...)
+end
+
+"""
     pq_hp_alignment(K, L, Q; prec=1_000)
 
 Refines the full PQ mode subspace against the high-precision canonical Hessian
