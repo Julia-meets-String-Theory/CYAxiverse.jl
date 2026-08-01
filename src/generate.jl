@@ -1066,7 +1066,7 @@ end
 
 """
     pq_physical_mode_count(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
-                           confirm=true, max_prec=4_000)
+                           confirm=true, max_prec=4_000, label="matrix input")
 
 Count PQ leading-Hessian modes above `threshold_log10` using the inertia of
 the arbitrary-precision shifted Hessian. This avoids computing the complete
@@ -1077,7 +1077,8 @@ With `confirm=true` (the default), the count must agree after increasing the
 working precision before it is returned. If it does not stabilize by
 `max_prec`, a warning is emitted and the latest count is returned as
 provisional. This keeps long scans running while flagging geometries that
-need a higher-precision follow-up.
+need a higher-precision follow-up. `label` identifies the input in that
+warning; geometry-based overloads supply it automatically.
 """
 function physical_mode_inertia_count(K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int)
     setprecision(ArbFloat; digits=prec)
@@ -1095,7 +1096,7 @@ function physical_mode_inertia_count(K::Hermitian{Float64, Matrix{Float64}}, Lti
     positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold_eigenvalue * I)))
 end
 
-function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, confirm::Bool=true, max_prec::Int=4_000)
+function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, confirm::Bool=true, max_prec::Int=4_000, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     count_at_prec = physical_mode_inertia_count(K, Ltilde, Qtilde, threshold_log10, prec)
@@ -1107,20 +1108,20 @@ function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matri
         confirmed_count == count_at_prec && return count_at_prec
         count_at_prec = confirmed_count
     end
-    @warn "physical-mode count did not stabilize by max_prec=$(max_prec); returning provisional count $(count_at_prec). Increase max_prec or inspect the threshold neighbourhood."
+    @warn "physical-mode count did not stabilize by max_prec=$(max_prec) for geometry=$(label); returning provisional count $(count_at_prec). Increase max_prec or inspect the threshold neighbourhood."
     count_at_prec
 end
 
-"""Load one geometry and delegate to [`pq_physical_mode_count(K, L, Q; kwargs...)`](@ref)."""
-function pq_physical_mode_count(h11::Int, tri::Int, cy::Int; kwargs...)
+"""Load one geometry and delegate to [`pq_physical_mode_count(K, L, Q; kwargs...)`](@ref), supplying its identifier as the warning label."""
+function pq_physical_mode_count(h11::Int, tri::Int, cy::Int; label::AbstractString="h11=$(h11), polytope=$(tri), frst=$(cy)", kwargs...)
     pot_data = potential(h11, tri, cy)
-    pq_physical_mode_count(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
+    pq_physical_mode_count(pot_data.K, pot_data.L, pot_data.Q; label, kwargs...)
 end
 
-"""Load one indexed geometry and delegate to [`pq_physical_mode_count(K, L, Q; kwargs...)`](@ref)."""
-function pq_physical_mode_count(geom_idx::GeometryIndex; kwargs...)
+"""Load one indexed geometry and delegate to [`pq_physical_mode_count(K, L, Q; kwargs...)`](@ref), supplying its identifier as the warning label."""
+function pq_physical_mode_count(geom_idx::GeometryIndex; label::AbstractString="h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), frst=$(geom_idx.frst)", kwargs...)
     pot_data = potential(geom_idx)
-    pq_physical_mode_count(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
+    pq_physical_mode_count(pot_data.K, pot_data.L, pot_data.Q; label, kwargs...)
 end
 
 """

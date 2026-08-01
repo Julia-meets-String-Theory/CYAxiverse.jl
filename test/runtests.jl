@@ -81,6 +81,7 @@ end
     @test physical.λselfsign == hp["λselfsign"]
     @test all(isapprox.(physical.λself, hp["λself"]; atol=1e-10))
     @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=200) == 2
+    @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=100, max_prec=100, label="diagonal test") == 2
 end
 
 @testset "PQ spectrum: non-diagonal kinetic matrix" begin
