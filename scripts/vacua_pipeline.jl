@@ -71,7 +71,7 @@ function compute_axion_data(h11::Int, np::Int, cy::Int, data_dir::String; thresh
     geom_data = CYAxiverse.read.geometry(geom_idx)
     
     # 3. Calculate Axion Spectrum (High-Precision Masses, Decay Constants, Quartic Couplings)
-    spectrum = CYAxiverse.generate.hp_spectrum(geom_idx)
+    spectrum = CYAxiverse.generate.pq_spectrum(geom_idx)
     
     # 4. Calculate Vacua Statistics & Locations
     vac_est = CYAxiverse.generate.vacua_estimate(geom_idx; threshold=threshold)
