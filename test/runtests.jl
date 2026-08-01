@@ -64,6 +64,21 @@ end
     @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
 end
 
+@testset "PQ spectrum: non-diagonal kinetic matrix" begin
+    # A non-diagonal K catches the side on which the Cholesky inverse acts.
+    K = Hermitian([4.0 1.2;
+                   1.2 9.0])
+    Q = [3 0 0;
+         0 5 0]
+    L = [1.0 1.0 0.0;
+         -20.0 -30.0 -1000.0]
+
+    pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
+    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+
+    @test all(isapprox.(pq.m, hp["m"]; atol=0.1))
+end
+
 @testset "PQ-seeded HP alignment" begin
     K = Hermitian([4.0 0.0;
                    0.0 9.0])

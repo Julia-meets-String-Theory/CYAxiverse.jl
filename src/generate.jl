@@ -664,7 +664,9 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     Qlt::Matrix{Float64} = UpperTriangular(zeros(Float64,h11,h11))
     fapprox::Vector{Float64} = zeros(Float64,h11)
     mapprox::Vector{Float64} = zeros(h11)
-    LinearAlgebra.mul!(QKs, inv(Kls'), Matrix(Qtilde'))
+    # Charge vectors are rows, so canonical normalization acts on the right.
+    # This convention matches hp_spectrum's Q * inv(Kls') transformation.
+    QKs = Matrix(Qtilde') / Kls'
     for i=1:h11
         # println(size(QKs[i, :]))
         fapprox[i] = log10(1 /(2π *dot(QKs[i,:],QKs[i,:])))
