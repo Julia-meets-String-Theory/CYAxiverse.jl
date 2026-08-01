@@ -1047,6 +1047,61 @@ function pq_physical_spectrum(geom_idx::GeometryIndex; kwargs...)
     pq_physical_spectrum(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
 end
 
+function positive_inertia(factor::BunchKaufman)
+    D, pivots = factor.D, factor.ipiv
+    positive = 0
+    i = 1
+    while i <= length(pivots)
+        if pivots[i] > 0
+            positive += D[i, i] > 0
+            i += 1
+        else
+            block = Hermitian([D[i, i] D[i + 1, i]; D[i + 1, i] D[i + 1, i + 1]])
+            positive += count(eigen(block).values .> 0)
+            i += 2
+        end
+    end
+    positive
+end
+
+"""
+    pq_physical_mode_count(K, L, Q; threshold_log10=log10(H₀), prec=1_000)
+
+Count PQ leading-Hessian modes above `threshold_log10` using the inertia of
+the arbitrary-precision shifted Hessian. This avoids computing the complete
+eigensystem and is a building block for a future threshold-targeted physical
+sector solver. It does not return eigenvectors or quartics.
+"""
+function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000)
+    LQtild = LQtilde(Q, L)
+    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+    setprecision(ArbFloat; digits=prec)
+    T = typeof(ArbFloat(0))
+    h11 = size(K, 1)
+    scales = T.(Ltilde[1, :]) .* (T(10) .^ T.(Ltilde[2, :]))
+    H = zeros(T, h11, h11)
+    for a in eachindex(scales), i in 1:h11, j in 1:h11
+        H[i, j] += scales[a] * Qtilde[i, a] * Qtilde[j, a]
+    end
+    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
+    W = Hermitian(Kfactor.L \ H / Kfactor.L')
+    mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
+    threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
+    positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold_eigenvalue * I)))
+end
+
+"""Load one geometry and delegate to [`pq_physical_mode_count(K, L, Q; kwargs...)`](@ref)."""
+function pq_physical_mode_count(h11::Int, tri::Int, cy::Int; kwargs...)
+    pot_data = potential(h11, tri, cy)
+    pq_physical_mode_count(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
+end
+
+"""Load one indexed geometry and delegate to [`pq_physical_mode_count(K, L, Q; kwargs...)`](@ref)."""
+function pq_physical_mode_count(geom_idx::GeometryIndex; kwargs...)
+    pot_data = potential(geom_idx)
+    pq_physical_mode_count(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
+end
+
 """
     pq_hp_alignment(K, L, Q; prec=1_000)
 
