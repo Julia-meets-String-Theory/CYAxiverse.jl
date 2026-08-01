@@ -645,13 +645,18 @@ function orth_basis(Q::Matrix)
 end 
 
 """
-    pq_spectrum(K,L,Q)
+    pq_spectrum(K,L,Q; mixing_correction=false, prec=1_000)
 Uses a modified version of the algorithm outlined in the _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) to compute the masses and decay constants.
 The quartics are evaluated in the PQ approximate mass basis using every
 instanton scale in `L`. As this is a Float64 calculation, signed sums are
 performed in logarithmic space to avoid overflow and underflow.
+
+Set `mixing_correction=true` to replace the hierarchical PQ mass estimates
+with a high-precision diagonalization of the Hessian formed from the same
+leading instantons selected by PQ. This corrects leading-Hessian mixing only;
+it does not change the PQ basis used for decay constants or quartics.
 """
-function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
+function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Bool=false, prec::Int=1_000)
     # TODO: #17 Include threshold
     h11::Int = size(K,1)
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
@@ -695,6 +700,12 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
 
     # Match the mass ordering used in the returned PQ spectrum.
     order = sortperm(mapprox)
+    masses = mapprox[order] .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
+    if mixing_correction
+        # This is the exact eigenspectrum of PQ's own selected leading-Hessian,
+        # not an all-instanton HP calculation.
+        masses = hp_spectrum(K, Matrix(Ltilde'), Matrix(Qtilde'); prec=prec)["m"]
+    end
     Qpq = Qcanonical * P[:, order]
     scale_sign = Int.(sign.(@view L[1, :]))
     scale_log = log(10) .* @view(L[2, :])
@@ -725,23 +736,21 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     end
 
     log2π = Float64(constants()["log2π"])
-    AxionSpectrum(mapprox[order] .+ 9 .+
-    Float64(log10(constants()["MPlanck"])) .+
-    log2π, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
+    AxionSpectrum(masses, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
     quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π)
 end
 
-function pq_spectrum(h11::Int,tri::Int,cy::Int)
+function pq_spectrum(h11::Int,tri::Int,cy::Int; kwargs...)
     pot_data = potential(h11,tri,cy)
     K,L,Q = pot_data.K, pot_data.L, pot_data.Q
-    pq_spectrum(K, L, Q)
+    pq_spectrum(K, L, Q; kwargs...)
 end
 
-function pq_spectrum(geom_idx::GeometryIndex)
+function pq_spectrum(geom_idx::GeometryIndex; kwargs...)
     pot_data = potential(geom_idx)
-    pq_spectrum(pot_data.K, pot_data.L, pot_data.Q)
+    pq_spectrum(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
 end
 
 """

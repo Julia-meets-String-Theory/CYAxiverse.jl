@@ -74,9 +74,11 @@ end
          -20.0 -30.0 -1000.0]
 
     pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
+    pq_corrected = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=true, prec=200)
     hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
 
     @test all(isapprox.(pq.m, hp["m"]; atol=0.1))
+    @test all(isapprox.(pq_corrected.m, hp["m"]; atol=1e-10))
 end
 
 @testset "PQ-seeded HP alignment" begin
