@@ -742,6 +742,89 @@ function pq_spectrum(geom_idx::GeometryIndex)
     pq_spectrum(pot_data.K, pot_data.L, pot_data.Q)
 end
 
+"""
+    pq_hp_alignment(K, L, Q; prec=1_000)
+
+Refines the full PQ mode subspace against the high-precision canonical Hessian
+with a PQ-seeded Rayleigh--Ritz step. The result labels the refined modes by
+the PQ ordering: `permutation[i]` is the high-precision eigenmode assigned to
+PQ mode `i`, and the corresponding column has been sign-fixed for positive
+overlap with that PQ direction.
+"""
+function pq_hp_alignment(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec=1_000)
+    h11 = size(K, 1)
+    Kls = cholesky(K).L
+    LQtild = LQtilde(Q, L)
+    Qtilde, Ltilde = LQtild.Qtilde, LQtild.Ltilde
+
+    # Reproduce PQ's mass ordering and build its canonical orthonormal frame.
+    QKs = inv(Kls') * Matrix(Qtilde')
+    mapprox = zeros(Float64, h11)
+    for i in 1:h11
+        fapprox = log10(1 / (2π * dot(QKs[i, :], QKs[i, :])))
+        mapprox[i] = 0.5 * (Ltilde[2, i] - fapprox - log10(2π))
+        QKs = QKs * orth_basis(QKs[i, :])
+    end
+    Qleading = Matrix(Qtilde') / Kls'
+    P = zeros(Float64, h11, h11)
+    for i in 1:h11
+        direction = copy(@view Qleading[i, :])
+        for j in 1:i-1
+            direction .-= dot(direction, @view(P[:, j])) .* @view(P[:, j])
+        end
+        P[:, i] .= direction ./ norm(direction)
+    end
+    P = P[:, sortperm(mapprox)]
+
+    setprecision(ArbFloat; digits=prec)
+    T = typeof(ArbFloat(0))
+    scales::Vector{T} = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    H::Matrix{T} = zeros(T, h11, h11)
+    for a in eachindex(scales)
+        for i in 1:h11, j in 1:h11
+            H[i, j] += scales[a] * Q[i, a] * Q[j, a]
+        end
+    end
+    Ktest::Hermitian{T, Matrix{T}} = Hermitian(T.(Matrix(K)))
+    Kfactor = cholesky(Ktest)
+    hessfull = Hermitian(H)
+    W = Hermitian(Kfactor.L \ Matrix(hessfull) / Kfactor.L')
+
+    # Orthonormalize the Float64 PQ frame again at the requested precision.
+    Pseed = T.(P)
+    for i in 1:h11
+        for j in 1:i-1
+            Pseed[:, i] .-= dot(@view(Pseed[:, j]), @view(Pseed[:, i])) .* @view(Pseed[:, j])
+        end
+        Pseed[:, i] ./= sqrt(dot(@view(Pseed[:, i]), @view(Pseed[:, i])))
+    end
+
+    # A full-space Rayleigh--Ritz refinement is equivalent to diagonalizing W,
+    # but preserves an explicit connection to the PQ seed directions.
+    projected = Hermitian(Pseed' * W * Pseed)
+    eigenvalues, coefficients = eigen(projected)
+    refined = Pseed * coefficients
+    overlap = Float64.(Pseed' * refined)
+
+    # Greedy maximum-overlap assignment; process the least ambiguous PQ modes
+    # first so a clean one-to-one sign/permutation map is obtained.
+    permutation = zeros(Int, h11)
+    available = trues(h11)
+    confidence = [maximum(abs.(@view overlap[i, :])) for i in 1:h11]
+    for i in sortperm(confidence, rev=true)
+        candidates = findall(available)
+        j = candidates[argmax(abs.(@view overlap[i, candidates]))]
+        permutation[i] = j
+        available[j] = false
+    end
+    signs = [overlap[i, permutation[i]] < 0 ? -1 : 1 for i in 1:h11]
+    aligned_modes = refined[:, permutation] * Diagonal(ArbFloat.(signs))
+    aligned_overlap = [Float64(dot(@view(Pseed[:, i]), @view(aligned_modes[:, i]))) for i in 1:h11]
+    residuals = [Float64(norm(W * @view(aligned_modes[:, i]) - eigenvalues[permutation[i]] * @view(aligned_modes[:, i]))) for i in 1:h11]
+
+    return (; pq_basis=P, eigenvalues, permutation, signs, overlap, aligned_overlap, residuals)
+end
+
 
 """
 	spectra_generator(h11_min, h11_max, h11list)

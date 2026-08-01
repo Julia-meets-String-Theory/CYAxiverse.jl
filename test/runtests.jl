@@ -63,3 +63,18 @@ end
     @test pq.λselfsign == hp["λselfsign"]
     @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
 end
+
+@testset "PQ-seeded HP alignment" begin
+    K = Hermitian([4.0 0.0;
+                   0.0 9.0])
+    Q = [3 0 0;
+         0 5 0]
+    L = [1.0 1.0 0.0;
+         -20.0 -30.0 -1000.0]
+
+    alignment = CYAxiverse.generate.pq_hp_alignment(K, L, Q; prec=200)
+
+    @test alignment.permutation == [1, 2]
+    @test all(isapprox.(alignment.aligned_overlap, ones(2); atol=1e-12))
+    @test all(alignment.residuals .< 1e-100)
+end
