@@ -16,7 +16,7 @@ using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
 
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
 #################
 ### Constant ####
@@ -718,6 +718,28 @@ function pq_contracted_log!(positive_logs::Vector{Float64}, negative_logs::Vecto
     return 0, 0.0, positive_sum + log(2)
 end
 
+function leading_hessian_matrix_float64(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
+    h11 = size(K, 1)
+    scales = @view(L[1, :]) .* (10.0 .^ @view(L[2, :]))
+    H = zeros(Float64, h11, h11)
+    for a in eachindex(scales), i in 1:h11, j in 1:h11
+        H[i, j] += scales[a] * Q[i, a] * Q[j, a]
+    end
+    Kfactor = cholesky(K)
+    Hermitian(Kfactor.L \ H / Kfactor.L')
+end
+
+function mass_basis_accuracy(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}, basis::Matrix{Float64})
+    W = leading_hessian_matrix_float64(K, L, Q)
+    Wbasis = W * basis
+    eigenvalues = vec(sum(basis .* Wbasis; dims=1))
+    scale = opnorm(W, Inf)
+    eigenpair_residuals = [norm(@view(Wbasis[:, i]) .- eigenvalues[i] .* @view(basis[:, i])) / max(abs(eigenvalues[i]), eps(Float64) * scale) for i in axes(basis, 2)]
+    nearest_relative_gaps = [minimum(abs(eigenvalues[i] - eigenvalues[j]) / max(abs(eigenvalues[i]), abs(eigenvalues[j]), eps(Float64) * scale) for j in axes(basis, 2) if j != i; init=Inf) for i in axes(basis, 2)]
+    orthogonality_error = opnorm(basis' * basis - I, Inf)
+    MassBasisDiagnostics(eigenpair_residuals, nearest_relative_gaps, orthogonality_error)
+end
+
 """
     leading_hessian_mass_basis(K, L, Q; prec=1_000)
 
@@ -749,14 +771,7 @@ Float64 counterpart to [`leading_hessian_mass_basis`](@ref). It is suitable
 only for well-resolved leading-Hessian modes.
 """
 function leading_hessian_mass_basis_float64(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
-    h11 = size(K, 1)
-    scales = @view(L[1, :]) .* (10.0 .^ @view(L[2, :]))
-    H = zeros(Float64, h11, h11)
-    for a in eachindex(scales), i in 1:h11, j in 1:h11
-        H[i, j] += scales[a] * Q[i, a] * Q[j, a]
-    end
-    Kfactor = cholesky(K)
-    eigenvalues, eigenvectors = eigen(Hermitian(Kfactor.L \ H / Kfactor.L'))
+    eigenvalues, eigenvectors = eigen(leading_hessian_matrix_float64(K, L, Q))
     masses = 0.5 .* log10.(abs.(eigenvalues)) .+ 9 .+ log10(2.435e18) .+ log10(2π)
     order = sortperm(masses)
     return masses[order], eigenvectors[:, order]
@@ -764,7 +779,7 @@ end
 
 """
     pq_spectrum(K,L,Q; mixing_correction=:float64, prec=1_000,
-                quartic_diagnostics=false)
+                quartic_diagnostics=false, mass_basis_diagnostics=false)
 
 Compute a PQ-selected axion spectrum. The PQ procedure first selects the
 leading linearly independent instantons. Every returned quartic includes all
@@ -787,6 +802,11 @@ return an additional cancellation assessment for every quartic component.
 That assessment repeats the all-scale contraction and is therefore intended
 for validation rather than large production scans.
 
+`mass_basis_diagnostics=false` is likewise opt-in. In a leading-Hessian mass
+basis it evaluates Float64 eigenpair residuals, nearest relative eigenvalue
+gaps, and orthogonality error. It is unavailable for `mixing_correction=false`,
+whose sequential PQ directions are not Hessian eigenvectors.
+
 # Numerical interpretation
 
 The default is fast and is appropriate for masses and self-interactions in
@@ -806,7 +826,7 @@ families and reports final-sum cancellation in the Float64 log-space
 contraction. Signs of `λ31` additionally depend on the arbitrary sign
 convention for individual mass eigenvectors.
 """
-function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000, quartic_diagnostics::Bool=false)
+function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000, quartic_diagnostics::Bool=false, mass_basis_diagnostics::Bool=false)
     # TODO: #17 Include threshold
     h11::Int = size(K,1)
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
@@ -833,6 +853,10 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     elseif correction_mode === :float64
         masses, quartic_basis = leading_hessian_mass_basis_float64(K, Ltilde, Qtilde)
     end
+    if mass_basis_diagnostics && correction_mode === :none
+        throw(ArgumentError("mass_basis_diagnostics requires a leading-Hessian mass basis; set mixing_correction to :float64 or :high_precision"))
+    end
+    mass_diagnostics = mass_basis_diagnostics ? mass_basis_accuracy(K, Ltilde, Qtilde, quartic_basis) : nothing
     Qpq = Qcanonical * quartic_basis
     scale_sign = Int.(sign.(@view L[1, :]))
     scale_log = log(10) .* @view(L[2, :])
@@ -882,7 +906,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     AxionSpectrum(masses, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
     quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
-    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics)
+    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics, mass_diagnostics)
 end
 
 """

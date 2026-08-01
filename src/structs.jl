@@ -68,6 +68,20 @@ struct QuarticDiagnostics
 end
 
 """
+    MassBasisDiagnostics
+
+Float64 diagnostics for a PQ leading-Hessian mass basis. `eigenpair_residuals`
+are relative residuals, `nearest_relative_gaps` quantify the nearest spectral
+neighbour of each mode, and `orthogonality_error` is the infinity-norm error
+of the basis Gram matrix from the identity.
+"""
+struct MassBasisDiagnostics
+    eigenpair_residuals::Vector{Float64}
+    nearest_relative_gaps::Vector{Float64}
+    orthogonality_error::Float64
+end
+
+"""
     AxionSpectrum
 
 PQ-spectrum result. `m` is expressed in the basis selected by
@@ -76,6 +90,9 @@ The signed base-10 logarithms `λself`, `λ31`, and `λ22` are accompanied by
 their signs and zero-based index matrices. `quartic_diagnostics` is `nothing`
 by default and is a [`QuarticDiagnostics`](@ref) only when explicitly
 requested.
+`mass_basis_diagnostics` is `nothing` by default and is a
+[`MassBasisDiagnostics`](@ref) when requested for a leading-Hessian mass
+basis.
 """
 struct AxionSpectrum
     m::Vector{Float64}
@@ -90,6 +107,7 @@ struct AxionSpectrum
     λ22sign::Vector{Int}
     λ22::Vector{Float64}
     quartic_diagnostics::Union{Nothing, QuarticDiagnostics}
+    mass_basis_diagnostics::Union{Nothing, MassBasisDiagnostics}
 end
 
 Base.@kwdef struct IndexedAxionSpectrum{T<:Float64}
