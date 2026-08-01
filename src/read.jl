@@ -255,4 +255,27 @@ function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
     return (; m = Hvals, fK = fK, fpert = fpert, λself = quartdiaglog, λ31_i = quart31_index, λ31 = quart31_log10, λ22_i = quart22_index, λ22 = quart22_log10)
 end
 
+"""
+    pipeline_vacua(h11, tri, cy=1)
+
+Read the vacua estimate and coordinates written by `scripts/vacua_pipeline.jl`.
+"""
+function pipeline_vacua(h11::Int, tri::Int, cy::Int=1)
+    h5open(cyax_file(h11, tri, cy), "r") do file
+        group = file["vacua_pipeline"]
+        threshold = HDF5.read(group, "threshold")
+        estimate = HDF5.read(group, "estimate")
+        issquare = HDF5.read(group, "issquare")
+        extrarows = haskey(group, "extrarows") ? HDF5.read(group, "extrarows") : nothing
+        verified = haskey(group, "verified") ? HDF5.read(group, "verified") : nothing
+        theta_min = haskey(group, "theta_min") ? HDF5.read(group, "theta_min/numerator") .// HDF5.read(group, "theta_min/denominator") : nothing
+        theta_parallel = haskey(group, "theta_parallel") ? HDF5.read(group, "theta_parallel/numerator") .// HDF5.read(group, "theta_parallel/denominator") : nothing
+        return (; threshold, estimate, issquare, extrarows, verified, theta_min, theta_parallel)
+    end
+end
+
+function pipeline_vacua(geom_idx::GeometryIndex)
+    pipeline_vacua(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
+end
+
 end
