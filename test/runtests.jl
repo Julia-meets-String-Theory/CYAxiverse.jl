@@ -59,7 +59,7 @@ end
 
     @test all(isapprox.(pq.m, expected; atol=1e-10))
     @test all(isapprox.(hp["m"], expected; atol=1e-10))
-    @test all(isapprox.(pq.m, hp["m"]; atol=1e-10))
+    @test all(isapprox.(pq.m, hp["m"]; atol=1e-6))
     @test pq.λselfsign == hp["λselfsign"]
     @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
 end
@@ -73,11 +73,14 @@ end
     L = [1.0 1.0 0.0;
          -20.0 -30.0 -1000.0]
 
+    pq_legacy = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=false)
     pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
     pq_corrected = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=true, prec=200)
     hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
 
-    @test all(isapprox.(pq.m, hp["m"]; atol=0.1))
+    @test all(isapprox.(pq_legacy.m, hp["m"]; atol=0.1))
+    @test all(isapprox.(pq.m, hp["m"]; atol=1e-6))
+    @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
     @test all(isapprox.(pq_corrected.m, hp["m"]; atol=1e-10))
     @test pq_corrected.λselfsign == hp["λselfsign"]
     @test all(isapprox.(pq_corrected.λself, hp["λself"]; atol=1e-10))
