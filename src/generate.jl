@@ -437,6 +437,9 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         grad2[j,k] = grad2_temp[i]
     end
     hessfull = Hermitian(grad2 + transpose(grad2) - Diagonal(grad2))
+    # Keep the high-precision instanton scales for the fourth-derivative
+    # contractions below. Taking logs term-by-term loses cancellation.
+    Lquart = copy(Lh)
     Lh = zeros(3)
     #Compute QM using generalised eigendecomposition (but keep fK)
     Ktest = Hermitian(ArbFloat.(Matrix(K)))
@@ -450,54 +453,36 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     QMs::Matrix{ArbFloat} = similar(Qtest)
     multH(M,N) = @tullio fastmath=false grad=false R[c,i] := M[c,j] * N[j,i]
     QMs = multH(Qtest,Tls)
-    signQMs::Matrix{Int64} = @.(Int(sign(QMs)))
-    logQMs::Matrix{Float64} = @.(Float64(log(abs(QMs))))
-    
-    #Clear memory
-    Vls = zeros(ArbFloat,1)
-    Tls = zeros(ArbFloat,1,1)
-    QMs = zeros(ArbFloat,1,1)
-    Qtest = zeros(ArbFloat,1,1)
-    hessfull = zeros(ArbFloat,1,1)
-    grad2_temp1 = zeros(ArbFloat,1,1)
-    grad2_temp = zeros(ArbFloat,1)
-    grad2 = zeros(ArbFloat,1,1)
-    Ktest = zeros(ArbFloat,1,1)
-#     GC.gc()
-    
-    #Generate quartics in logspace
-    signL::Vector{Int}, logL::Vector{Float64} = L[:,1], log(10) .* L[:,2]
-    #Compute quartics
+    # Compute each signed contraction before converting it to logarithmic
+    # output. This preserves the precision requested by `prec` in the
+    # presence of strongly cancelling instanton contributions.
     qindq31::Vector{Vector{Int64}} = [[x,x,x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x!=y]
     qindq22::Vector{Vector{Int64}} = [[x,x,y,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>y]
-    quart31log1::Matrix{Float64} = zeros(Float64,size(logL,1),size(qindq31,1))
-    quart22log1::Matrix{Float64} = zeros(Float64,size(logL,1),size(qindq22,1))
-    quartiilog1::Matrix{Float64} = zeros(Float64,size(logL,1),h11)
-    quart31sign1::Matrix{Float64} = zeros(Int64,size(logL,1),size(qindq31,1))
-    quart22sign1::Matrix{Float64} = zeros(Int64,size(logL,1),size(qindq22,1))
-    quartiisign1::Matrix{Float64} = zeros(Int64,size(logL,1),h11)
     quart31log::Vector{Float64} = zeros(Float64,size(qindq31,1))
     quart22log::Vector{Float64} = zeros(Float64,size(qindq22,1))
     quartdiaglog::Vector{Float64} = zeros(Float64,h11)
     quart31sign::Vector{Int} = zeros(Int,size(qindq31,1))
     quart22sign::Vector{Int} = zeros(Int,size(qindq22,1))
     quartdiagsign::Vector{Int} = zeros(Int,h11)
+
+    function signed_log(value::ArbFloat)
+        value_sign = Int(sign(value))
+        return value_sign, value_sign == 0 ? -Inf : Float64(log(abs(value)))
+    end
+
     @inbounds for k in eachindex(qindq31)
         i,_,_,j = qindq31[k]
-        quart31sign1[:,k] = signL .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,j]
-        quart31log1[:,k] = logL .+ (logQMs[:,i] + logQMs[:,i] .+ logQMs[:,i] + logQMs[:,j])
-        quart31sign[k],quart31log[k] = gauss_log(quart31sign1[:,k],quart31log1[:,k])
+        value = sum(Lquart[a] * QMs[a,i]^3 * QMs[a,j] for a in eachindex(Lquart))
+        quart31sign[k], quart31log[k] = signed_log(value)
     end
     @inbounds for k in eachindex(qindq22)
         i,_,_,j = qindq22[k]
-        quart22sign1[:,k] = signL .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,j] .* signQMs[:,j]
-        quart22log1[:,k] = logL .+ (logQMs[:,i] + logQMs[:,i] .+ logQMs[:,j] + logQMs[:,j])
-        quart22sign[k],quart22log[k] = gauss_log(quart22sign1[:,k],quart22log1[:,k])
+        value = sum(Lquart[a] * QMs[a,i]^2 * QMs[a,j]^2 for a in eachindex(Lquart))
+        quart22sign[k], quart22log[k] = signed_log(value)
     end
     @inbounds for k=1:h11
-        quartiisign1[:,k] = signL .* signQMs[:,k] .* signQMs[:,k] .* signQMs[:,k] .* signQMs[:,k]
-        quartiilog1[:,k] = logL .+ (logQMs[:,k] + logQMs[:,k] .+ logQMs[:,k] + logQMs[:,k])
-        quartdiagsign[k],quartdiaglog[k] = gauss_log(quartiisign1[:,k],quartiilog1[:,k])
+        value = sum(Lquart[a] * QMs[a,k]^4 for a in eachindex(Lquart))
+        quartdiagsign[k], quartdiaglog[k] = signed_log(value)
     end
     # qindqdiag::Vector{Vector{Int64}} = [[x,x,x,x]::Vector{Int64} for x=1:h11]
     
