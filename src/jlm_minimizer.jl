@@ -9,9 +9,9 @@ using LinearAlgebra, Distributions
 using GenericLinearAlgebra
 
 using ..jlm_python: one_dim_axion_solver, multi_axion_solver
-using ..generate: αmatrix, LQtilde, phase, vacua_SNF
-using ..filestructure: minfile, paths_cy
-using ..structs: GeometryIndex, Canonicalα, Solver1D, SolverND, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square
+using CYAxiverse.generate: αmatrix, LQtilde, phase, vacua_SNF
+using CYAxiverse.filestructure: minfile, paths_cy
+using CYAxiverse.structs: GeometryIndex, Canonicalα, Solver1D, SolverND, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square
 
 """
     jlm_minimize(geom_idx::GeometryIndex)

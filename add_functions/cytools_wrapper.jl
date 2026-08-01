@@ -16,9 +16,9 @@ Functions that wrap basic functionality of [CYTools](https://cytools.liammcallis
 """
 module cytools_wrapper
 
-using ..filestructure: data_dir, cyax_file, present_dir, np_path_generate
-using ..read: topology, geometry, potential
-using ..structs: GeometryIndex
+using CYAxiverse.filestructure: data_dir, cyax_file, present_dir, np_path_generate
+using CYAxiverse.read: topology, geometry, potential
+using CYAxiverse.structs: GeometryIndex
 
 using PyCall
 using HDF5

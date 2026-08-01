@@ -4,7 +4,7 @@ Here we wrap Joan's optimization code to use -- to be rewritten in `julia` when 
 """
 module jlm_python
 using PyCall
-using ..structs: Solver1D, SolverND, Min_JLM_ND, Min_JLM_1D
+using CYAxiverse.structs: Solver1D, SolverND, Min_JLM_ND, Min_JLM_1D
 function __init__()
     py"""
     import numpy as np
