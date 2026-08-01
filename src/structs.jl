@@ -38,7 +38,15 @@ struct AxionPotential
     K::Hermitian{Float64, Matrix{Float64}}
 end
 
-"""Float64 cancellation diagnostics for one family of quartic components."""
+"""
+    QuarticComponentDiagnostics
+
+Float64 cancellation diagnostics for one family of signed quartic components.
+`orders_lost` estimates cancellation in orders of magnitude,
+`digits_remaining` estimates the remaining decimal digits, `reliable` marks
+components with at least three estimated decimal digits, and `exact_zero`
+marks a zero result from the Float64 contraction.
+"""
 struct QuarticComponentDiagnostics
     orders_lost::Vector{Float64}
     digits_remaining::Vector{Float64}
@@ -46,13 +54,29 @@ struct QuarticComponentDiagnostics
     exact_zero::BitVector
 end
 
-"""Cancellation diagnostics aligned with `λself`, `λ31`, and `λ22`."""
+"""
+    QuarticDiagnostics
+
+Cancellation diagnostics aligned respectively with `λself`, `λ31`, and
+`λ22`. Produced only when `pq_spectrum(...; quartic_diagnostics=true)` is
+requested.
+"""
 struct QuarticDiagnostics
     self::QuarticComponentDiagnostics
     three_one::QuarticComponentDiagnostics
     two_two::QuarticComponentDiagnostics
 end
 
+"""
+    AxionSpectrum
+
+PQ-spectrum result. `m` is expressed in the basis selected by
+`mixing_correction`; `f` and `fK` retain their PQ/kinetic-basis definitions.
+The signed base-10 logarithms `λself`, `λ31`, and `λ22` are accompanied by
+their signs and zero-based index matrices. `quartic_diagnostics` is `nothing`
+by default and is a [`QuarticDiagnostics`](@ref) only when explicitly
+requested.
+"""
 struct AxionSpectrum
     m::Vector{Float64}
     f::Vector{Float64}

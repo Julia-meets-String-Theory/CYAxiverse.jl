@@ -21,6 +21,12 @@ CYAxiverse.generate
 Modules = [CYAxiverse.generate]
 Pages = ["generate.jl"]
 ```
+
+## `CYAxiverse.structs`
+```@autodocs
+Modules = [CYAxiverse.structs]
+Pages = ["structs.jl"]
+```
 ## `CYAxiverse.minimizer`
 ```@docs
 CYAxiverse.minimizer
