@@ -60,4 +60,6 @@ end
     @test all(isapprox.(pq.m, expected; atol=1e-10))
     @test all(isapprox.(hp["m"], expected; atol=1e-10))
     @test all(isapprox.(pq.m, hp["m"]; atol=1e-10))
+    @test pq.λselfsign == hp["λselfsign"]
+    @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
 end
