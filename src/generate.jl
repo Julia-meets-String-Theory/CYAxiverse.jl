@@ -1095,25 +1095,34 @@ end
 """
     pq_hybrid_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
                                 maxiter=100, residual_tolerance=1e-30,
-                                schur_acceleration=true)
+                                schur_acceleration=true, oversampling=8,
+                                quartics=true)
 
 Compute only the PQ leading-Hessian modes above `threshold_log10` with a
-Float64-seeded, arbitrary-precision block subspace iteration. The physical
+sequential-PQ-seeded, arbitrary-precision block subspace iteration. The physical
 mode count is obtained from high-precision inertia, then the corresponding
 largest eigenpairs are refined without a full arbitrary-precision
 eigendecomposition. Returned quartics include every instanton, as in
 [`pq_physical_spectrum`](@ref).
 
 With `schur_acceleration=true` (the default), the solver first checks whether
-the Float64-seeded complement lies wholly below the physical threshold. If so,
+the sequential-PQ-seeded complement lies wholly below the physical threshold. If so,
 it uses a Schur refinement; otherwise it uses block subspace iteration.
+
+Set `quartics=false` to return only physical masses, mode indices, and
+eigenvectors. This avoids the rapidly growing physical-sector quartic output
+for large numbers of retained modes.
+
+When the block-subspace fallback is used, `oversampling` adds a small number
+of sub-threshold vectors to the iteration and discards them at the end. This
+improves convergence when the spectral gap at the physical threshold is small.
 
 The returned `PhysicalAxionSpectrum` has the same fields as the full
 high-precision reference routine. If the requested residual tolerance is not
 met by `maxiter`, a warning is emitted and the provisional result is returned;
 use `pq_physical_spectrum` to validate such a case.
 """
-function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, label::AbstractString="matrix input")
+function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     physical_count = pq_physical_mode_count(K, L, Q; threshold_log10, prec, label)
@@ -1130,31 +1139,39 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     Kfactor = cholesky(Hermitian(T.(Matrix(K))))
     W = Hermitian(Kfactor.L \ H / Kfactor.L')
 
-    _, float_vectors = eigen(leading_hessian_matrix_float64(K, Ltilde, Qtilde))
+    Kls = cholesky(K).L
+    Qleading = Matrix(Qtilde') / Kls'
+    _, pq_masses, pq_basis = pq_canonical_frame(Qleading, Ltilde)
+    seed_basis = pq_basis[:, sortperm(pq_masses)]
     schur_safe = false
     if schur_acceleration && physical_count < h11
-        complement = T.(float_vectors[:, 1:end-physical_count])
+        complement = T.(seed_basis[:, 1:end-physical_count])
         C = Hermitian(complement' * W * complement)
         mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
         threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
         schur_safe = positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
     end
     if schur_safe
-        eigenvalues, basis, residuals = schur_physical_basis(W, float_vectors, physical_count; maxiter, residual_tolerance)
+        eigenvalues, basis, residuals = schur_physical_basis(W, seed_basis, physical_count; maxiter, residual_tolerance)
     else
-        basis = high_precision_orthonormalize!(T.(float_vectors[:, end-physical_count+1:end]))
+        subspace_count = min(h11, physical_count + max(oversampling, 0))
+        basis = high_precision_orthonormalize!(T.(seed_basis[:, end-subspace_count+1:end]))
         eigenvalues = zeros(T, physical_count)
         residuals = fill(Inf, physical_count)
         for _ in 1:maxiter
             basis = high_precision_orthonormalize!(Matrix(W) * basis)
-            eigenvalues, coefficients = eigen(Hermitian(basis' * W * basis))
+            ritz_values, coefficients = eigen(Hermitian(basis' * W * basis))
             basis = basis * coefficients
-            residuals = [Float64(norm(W * @view(basis[:, i]) - eigenvalues[i] .* @view(basis[:, i])) / abs(eigenvalues[i])) for i in eachindex(eigenvalues)]
+            eigenvalues = ritz_values[end-physical_count+1:end]
+            physical_basis = @view basis[:, end-physical_count+1:end]
+            residuals = [Float64(norm(W * @view(physical_basis[:, i]) - eigenvalues[i] .* @view(physical_basis[:, i])) / abs(eigenvalues[i])) for i in eachindex(eigenvalues)]
             maximum(residuals) <= residual_tolerance && break
         end
+        basis = Matrix(@view basis[:, end-physical_count+1:end])
     end
     maximum(residuals) > residual_tolerance && @warn "hybrid physical spectrum did not reach residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Returning a provisional result."
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
+    !quartics && return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
     Qmass = (T.(Q') / Kfactor.L') * basis
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
     qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
