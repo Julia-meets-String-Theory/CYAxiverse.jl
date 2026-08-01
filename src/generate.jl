@@ -16,7 +16,7 @@ using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
 
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonHierarchyDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, PhysicalAxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonHierarchyDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
 #################
 ### Constant ####
@@ -963,6 +963,88 @@ end
 function pq_spectrum(geom_idx::GeometryIndex; kwargs...)
     pot_data = potential(geom_idx)
     pq_spectrum(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
+end
+
+"""
+    pq_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000)
+
+Compute a high-precision PQ leading-Hessian spectrum and retain only modes
+whose base-10 mass logarithm is at least `threshold_log10`; by default this is
+the package Hubble scale. Every instanton is retained in the quartic
+contractions, but quartics are returned only for the retained physical modes.
+
+This is a conservative reference implementation for the physical sector. It
+diagonalizes the full leading Hessian at arbitrary precision and is not the
+future threshold-targeted hybrid solver.
+"""
+function pq_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000)
+    LQtild = LQtilde(Q, L)
+    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+    setprecision(ArbFloat; digits=prec)
+    T = typeof(ArbFloat(0))
+    h11 = size(K, 1)
+    leading_scales = T.(Ltilde[1, :]) .* (T(10) .^ T.(Ltilde[2, :]))
+    H = zeros(T, h11, h11)
+    for a in eachindex(leading_scales), i in 1:h11, j in 1:h11
+        H[i, j] += leading_scales[a] * Qtilde[i, a] * Qtilde[j, a]
+    end
+    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
+    eigenvalues, eigenvectors = eigen(Hermitian(Kfactor.L \ H / Kfactor.L'))
+    masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
+    order = sortperm(masses)
+    masses = masses[order]
+    eigenvectors = eigenvectors[:, order]
+    retained = findall(masses .>= threshold_log10)
+    physical_masses = masses[retained]
+    Qmass = (T.(Q') / Kfactor.L') * eigenvectors[:, retained]
+    quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    physical_count = length(retained)
+    qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
+    qindq22 = [(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
+
+    function signed_quartic(exponents::NTuple{4, Int})
+        value = zero(T)
+        for a in eachindex(quartic_scales)
+            value += quartic_scales[a] * Qmass[a, exponents[1]] * Qmass[a, exponents[2]] * Qmass[a, exponents[3]] * Qmass[a, exponents[4]]
+        end
+        value_sign = Int(sign(value))
+        return value_sign, value_sign == 0 ? -Inf : Float64(log10(abs(value)))
+    end
+
+    self_sign = zeros(Int, physical_count)
+    self_log = zeros(Float64, physical_count)
+    for i in 1:physical_count
+        self_sign[i], self_log[i] = signed_quartic((i, i, i, i))
+    end
+    three_one_sign = zeros(Int, length(qindq31))
+    three_one_log = zeros(Float64, length(qindq31))
+    for i in eachindex(qindq31)
+        three_one_sign[i], three_one_log[i] = signed_quartic(qindq31[i])
+    end
+    two_two_sign = zeros(Int, length(qindq22))
+    two_two_log = zeros(Float64, length(qindq22))
+    for i in eachindex(qindq22)
+        two_two_sign[i], two_two_log[i] = signed_quartic(qindq22[i])
+    end
+
+    log2π = Float64(constants()["log2π"])
+    PhysicalAxionSpectrum(physical_masses, retained .- 1, Float64.(eigenvectors[:, retained]),
+        self_sign, self_log .+ 4 * log2π,
+        isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, three_one_sign, three_one_log .+ 4 * log2π,
+        isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, two_two_sign, two_two_log .+ 4 * log2π,
+        threshold_log10, prec)
+end
+
+"""Load one geometry and delegate to [`pq_physical_spectrum(K, L, Q; kwargs...)`](@ref)."""
+function pq_physical_spectrum(h11::Int, tri::Int, cy::Int; kwargs...)
+    pot_data = potential(h11, tri, cy)
+    pq_physical_spectrum(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
+end
+
+"""Load one indexed geometry and delegate to [`pq_physical_spectrum(K, L, Q; kwargs...)`](@ref)."""
+function pq_physical_spectrum(geom_idx::GeometryIndex; kwargs...)
+    pot_data = potential(geom_idx)
+    pq_physical_spectrum(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
 end
 
 """

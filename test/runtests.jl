@@ -74,6 +74,12 @@ end
     @test CYAxiverse.generate.pq_spectrum(K, L, Q).quartic_diagnostics === nothing
     @test CYAxiverse.generate.pq_spectrum(K, L, Q).mass_basis_diagnostics === nothing
     @test CYAxiverse.generate.pq_spectrum(K, L, Q).instanton_hierarchy === nothing
+
+    physical = CYAxiverse.generate.pq_physical_spectrum(K, L, Q; prec=200)
+    @test physical.mode_indices == [0, 1]
+    @test all(isapprox.(physical.m, expected; atol=1e-10))
+    @test physical.λselfsign == hp["λselfsign"]
+    @test all(isapprox.(physical.λself, hp["λself"]; atol=1e-10))
 end
 
 @testset "PQ spectrum: non-diagonal kinetic matrix" begin

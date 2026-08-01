@@ -97,6 +97,31 @@ struct InstantonHierarchyDiagnostics
 end
 
 """
+    PhysicalAxionSpectrum
+
+High-precision PQ leading-Hessian result restricted to modes above a physical
+mass threshold. `mode_indices` are zero-based indices in the complete sorted
+leading-Hessian spectrum; `eigenvectors` are the corresponding canonical-field
+eigenvectors. Quartics include every instanton but only retained physical-mode
+indices.
+"""
+struct PhysicalAxionSpectrum
+    m::Vector{Float64}
+    mode_indices::Vector{Int}
+    eigenvectors::Matrix{Float64}
+    λselfsign::Vector{Int}
+    λself::Vector{Float64}
+    λ31_i::Matrix{Int}
+    λ31sign::Vector{Int}
+    λ31::Vector{Float64}
+    λ22_i::Matrix{Int}
+    λ22sign::Vector{Int}
+    λ22::Vector{Float64}
+    threshold_log10::Float64
+    prec::Int
+end
+
+"""
     AxionSpectrum
 
 PQ-spectrum result. `m` is expressed in the basis selected by
