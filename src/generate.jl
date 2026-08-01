@@ -1057,9 +1057,45 @@ function high_precision_orthonormalize!(basis::Matrix{T}) where {T}
     basis
 end
 
+function schur_physical_basis(W::Hermitian{T, Matrix{T}}, float_basis::Matrix{Float64}, physical_count::Int; maxiter::Int, residual_tolerance::Float64) where {T}
+    h11 = size(W, 1)
+    B = T.(float_basis[:, end-physical_count+1:end])
+    U = T.(float_basis[:, 1:end-physical_count])
+    A = Hermitian(B' * W * B)
+    coupling = B' * W * U
+    C = Hermitian(U' * W * U)
+    eigenvalues = eigen(A).values
+    basis = similar(B)
+    residuals = fill(Inf, physical_count)
+    for _ in 1:maxiter
+        next_values = similar(eigenvalues)
+        coefficients = similar(B, physical_count, physical_count)
+        available = collect(1:physical_count)
+        for i in eachindex(eigenvalues)
+            S = Hermitian(Matrix(A) - coupling * ((Matrix(C) - eigenvalues[i] * I) \ coupling'))
+            values, vectors = eigen(S)
+            local_index = argmin(abs.(values[available] .- eigenvalues[i]))
+            j = available[local_index]
+            deleteat!(available, local_index)
+            next_values[i] = values[j]
+            coefficients[:, i] .= vectors[:, j]
+        end
+        eigenvalues = next_values
+        for i in eachindex(eigenvalues)
+            y = -(Matrix(C) - eigenvalues[i] * I) \ (coupling' * @view(coefficients[:, i]))
+            basis[:, i] .= B * @view(coefficients[:, i]) + U * y
+            basis[:, i] ./= norm(@view(basis[:, i]))
+        end
+        residuals = [Float64(norm(W * @view(basis[:, i]) - eigenvalues[i] .* @view(basis[:, i])) / abs(eigenvalues[i])) for i in eachindex(eigenvalues)]
+        maximum(residuals) <= residual_tolerance && return eigenvalues, basis, residuals
+    end
+    eigenvalues, basis, residuals
+end
+
 """
     pq_hybrid_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
-                                maxiter=100, residual_tolerance=1e-30)
+                                maxiter=100, residual_tolerance=1e-30,
+                                schur_acceleration=true)
 
 Compute only the PQ leading-Hessian modes above `threshold_log10` with a
 Float64-seeded, arbitrary-precision block subspace iteration. The physical
@@ -1068,12 +1104,16 @@ largest eigenpairs are refined without a full arbitrary-precision
 eigendecomposition. Returned quartics include every instanton, as in
 [`pq_physical_spectrum`](@ref).
 
+With `schur_acceleration=true` (the default), the solver first checks whether
+the Float64-seeded complement lies wholly below the physical threshold. If so,
+it uses a Schur refinement; otherwise it uses block subspace iteration.
+
 The returned `PhysicalAxionSpectrum` has the same fields as the full
 high-precision reference routine. If the requested residual tolerance is not
 met by `maxiter`, a warning is emitted and the provisional result is returned;
 use `pq_physical_spectrum` to validate such a case.
 """
-function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, label::AbstractString="matrix input")
+function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     physical_count = pq_physical_mode_count(K, L, Q; threshold_log10, prec, label)
@@ -1091,16 +1131,27 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     W = Hermitian(Kfactor.L \ H / Kfactor.L')
 
     _, float_vectors = eigen(leading_hessian_matrix_float64(K, Ltilde, Qtilde))
-    basis = high_precision_orthonormalize!(T.(float_vectors[:, end-physical_count+1:end]))
-    eigenvalues = zeros(T, physical_count)
-    eigenvectors = similar(basis)
-    residuals = fill(Inf, physical_count)
-    for _ in 1:maxiter
-        basis = high_precision_orthonormalize!(Matrix(W) * basis)
-        eigenvalues, coefficients = eigen(Hermitian(basis' * W * basis))
-        basis = basis * coefficients
-        residuals = [Float64(norm(W * @view(basis[:, i]) - eigenvalues[i] .* @view(basis[:, i])) / abs(eigenvalues[i])) for i in eachindex(eigenvalues)]
-        maximum(residuals) <= residual_tolerance && break
+    schur_safe = false
+    if schur_acceleration && physical_count < h11
+        complement = T.(float_vectors[:, 1:end-physical_count])
+        C = Hermitian(complement' * W * complement)
+        mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
+        threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
+        schur_safe = positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
+    end
+    if schur_safe
+        eigenvalues, basis, residuals = schur_physical_basis(W, float_vectors, physical_count; maxiter, residual_tolerance)
+    else
+        basis = high_precision_orthonormalize!(T.(float_vectors[:, end-physical_count+1:end]))
+        eigenvalues = zeros(T, physical_count)
+        residuals = fill(Inf, physical_count)
+        for _ in 1:maxiter
+            basis = high_precision_orthonormalize!(Matrix(W) * basis)
+            eigenvalues, coefficients = eigen(Hermitian(basis' * W * basis))
+            basis = basis * coefficients
+            residuals = [Float64(norm(W * @view(basis[:, i]) - eigenvalues[i] .* @view(basis[:, i])) / abs(eigenvalues[i])) for i in eachindex(eigenvalues)]
+            maximum(residuals) <= residual_tolerance && break
+        end
     end
     maximum(residuals) > residual_tolerance && @warn "hybrid physical spectrum did not reach residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Returning a provisional result."
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
