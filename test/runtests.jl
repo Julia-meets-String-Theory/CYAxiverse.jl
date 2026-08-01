@@ -32,3 +32,26 @@ end
     @test isapprox(hp["m"][1], expected_mass; atol=1e-10)
     @test hp["msign"][1] == 1
 end
+@testset "PQ and HP spectrum: diagonal two-axion comparison" begin
+    # The leading instantons act on separate axions, so the PQ construction is
+    # exact. The third, zero-sign instanton only satisfies N > h11 and makes
+    # no contribution to the potential.
+    K = Hermitian([4.0 0.0;
+                   0.0 9.0])
+    Q = [3 0 0;
+         0 5 0]
+    L = [1.0 1.0 0.0;
+         -20.0 -30.0 -1000.0]
+
+    pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
+    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+
+    expected = sort([
+        0.5 * (-20.0 + log10(3^2 / 4.0)),
+        0.5 * (-30.0 + log10(5^2 / 9.0)),
+    ] .+ log10(2.435e18) .+ 9.0 .+ log10(2π))
+
+    @test all(isapprox.(pq.m, expected; atol=1e-10))
+    @test all(isapprox.(hp["m"], expected; atol=1e-10))
+    @test all(isapprox.(pq.m, hp["m"]; atol=1e-10))
+end
