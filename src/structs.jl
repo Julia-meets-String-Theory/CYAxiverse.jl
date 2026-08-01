@@ -42,14 +42,6 @@ struct AxionSpectrum
     m::Vector{Float64}
     f::Vector{Float64}
     fK::Vector{Float64}
-    λselfsign::Vector{Int}
-    λself::Vector{Float64}
-    λ31_i::Matrix{Int}
-    λ31sign::Vector{Int}
-    λ31::Vector{Float64}
-    λ22_i::Matrix{Int}
-    λ22sign::Vector{Int}
-    λ22::Vector{Float64}
 end
 
 Base.@kwdef struct IndexedAxionSpectrum{T<:Float64}

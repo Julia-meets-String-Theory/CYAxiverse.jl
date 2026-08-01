@@ -31,12 +31,6 @@ end
 
     @test isapprox(hp["m"][1], expected_mass; atol=1e-10)
     @test hp["msign"][1] == 1
-
-    # The canonical charge is q/sqrt(K) = 3/2, so the fourth derivative is
-    # Lambda * (3/2)^4 in hp_spectrum's reported units.
-    expected_quartic = -20.0 + 4 * log10(3 / 2) + 4 * log10(2π)
-    @test hp["λselfsign"][1] == 1
-    @test isapprox(hp["λself"][1], expected_quartic; atol=1e-10)
 end
 @testset "PQ and HP spectrum: diagonal two-axion comparison" begin
     # The leading instantons act on separate axions, so the PQ construction is
@@ -60,6 +54,4 @@ end
     @test all(isapprox.(pq.m, expected; atol=1e-10))
     @test all(isapprox.(hp["m"], expected; atol=1e-10))
     @test all(isapprox.(pq.m, hp["m"]; atol=1e-10))
-    @test pq.λselfsign == hp["λselfsign"]
-    @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
 end

@@ -437,9 +437,6 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         grad2[j,k] = grad2_temp[i]
     end
     hessfull = Hermitian(grad2 + transpose(grad2) - Diagonal(grad2))
-    # Keep the high-precision instanton scales for the fourth-derivative
-    # contractions below. Taking logs term-by-term loses cancellation.
-    Lquart = copy(Lh)
     Lh = zeros(3)
     #Compute QM using generalised eigendecomposition (but keep fK)
     Ktest = Hermitian(ArbFloat.(Matrix(K)))
@@ -453,36 +450,54 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     QMs::Matrix{ArbFloat} = similar(Qtest)
     multH(M,N) = @tullio fastmath=false grad=false R[c,i] := M[c,j] * N[j,i]
     QMs = multH(Qtest,Tls)
-    # Compute each signed contraction before converting it to logarithmic
-    # output. This preserves the precision requested by `prec` in the
-    # presence of strongly cancelling instanton contributions.
+    signQMs::Matrix{Int64} = @.(Int(sign(QMs)))
+    logQMs::Matrix{Float64} = @.(Float64(log(abs(QMs))))
+    
+    #Clear memory
+    Vls = zeros(ArbFloat,1)
+    Tls = zeros(ArbFloat,1,1)
+    QMs = zeros(ArbFloat,1,1)
+    Qtest = zeros(ArbFloat,1,1)
+    hessfull = zeros(ArbFloat,1,1)
+    grad2_temp1 = zeros(ArbFloat,1,1)
+    grad2_temp = zeros(ArbFloat,1)
+    grad2 = zeros(ArbFloat,1,1)
+    Ktest = zeros(ArbFloat,1,1)
+#     GC.gc()
+    
+    #Generate quartics in logspace
+    signL::Vector{Int}, logL::Vector{Float64} = L[:,1], log(10) .* L[:,2]
+    #Compute quartics
     qindq31::Vector{Vector{Int64}} = [[x,x,x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x!=y]
     qindq22::Vector{Vector{Int64}} = [[x,x,y,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>y]
+    quart31log1::Matrix{Float64} = zeros(Float64,size(logL,1),size(qindq31,1))
+    quart22log1::Matrix{Float64} = zeros(Float64,size(logL,1),size(qindq22,1))
+    quartiilog1::Matrix{Float64} = zeros(Float64,size(logL,1),h11)
+    quart31sign1::Matrix{Float64} = zeros(Int64,size(logL,1),size(qindq31,1))
+    quart22sign1::Matrix{Float64} = zeros(Int64,size(logL,1),size(qindq22,1))
+    quartiisign1::Matrix{Float64} = zeros(Int64,size(logL,1),h11)
     quart31log::Vector{Float64} = zeros(Float64,size(qindq31,1))
     quart22log::Vector{Float64} = zeros(Float64,size(qindq22,1))
     quartdiaglog::Vector{Float64} = zeros(Float64,h11)
     quart31sign::Vector{Int} = zeros(Int,size(qindq31,1))
     quart22sign::Vector{Int} = zeros(Int,size(qindq22,1))
     quartdiagsign::Vector{Int} = zeros(Int,h11)
-
-    function signed_log(value::ArbFloat)
-        value_sign = Int(sign(value))
-        return value_sign, value_sign == 0 ? -Inf : Float64(log(abs(value)))
-    end
-
     @inbounds for k in eachindex(qindq31)
         i,_,_,j = qindq31[k]
-        value = sum(Lquart[a] * QMs[a,i]^3 * QMs[a,j] for a in eachindex(Lquart))
-        quart31sign[k], quart31log[k] = signed_log(value)
+        quart31sign1[:,k] = signL .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,j]
+        quart31log1[:,k] = logL .+ (logQMs[:,i] + logQMs[:,i] .+ logQMs[:,i] + logQMs[:,j])
+        quart31sign[k],quart31log[k] = gauss_log(quart31sign1[:,k],quart31log1[:,k])
     end
     @inbounds for k in eachindex(qindq22)
         i,_,_,j = qindq22[k]
-        value = sum(Lquart[a] * QMs[a,i]^2 * QMs[a,j]^2 for a in eachindex(Lquart))
-        quart22sign[k], quart22log[k] = signed_log(value)
+        quart22sign1[:,k] = signL .* signQMs[:,i] .* signQMs[:,i] .* signQMs[:,j] .* signQMs[:,j]
+        quart22log1[:,k] = logL .+ (logQMs[:,i] + logQMs[:,i] .+ logQMs[:,j] + logQMs[:,j])
+        quart22sign[k],quart22log[k] = gauss_log(quart22sign1[:,k],quart22log1[:,k])
     end
     @inbounds for k=1:h11
-        value = sum(Lquart[a] * QMs[a,k]^4 for a in eachindex(Lquart))
-        quartdiagsign[k], quartdiaglog[k] = signed_log(value)
+        quartiisign1[:,k] = signL .* signQMs[:,k] .* signQMs[:,k] .* signQMs[:,k] .* signQMs[:,k]
+        quartiilog1[:,k] = logL .+ (logQMs[:,k] + logQMs[:,k] .+ logQMs[:,k] + logQMs[:,k])
+        quartdiagsign[k],quartdiaglog[k] = gauss_log(quartiisign1[:,k],quartiilog1[:,k])
     end
     # qindqdiag::Vector{Vector{Int64}} = [[x,x,x,x]::Vector{Int64} for x=1:h11]
     
@@ -647,9 +662,8 @@ end
 """
     pq_spectrum(K,L,Q)
 Uses a modified version of the algorithm outlined in the _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) to compute the masses and decay constants.
-The quartics are evaluated in the PQ approximate mass basis using every
-instanton scale in `L`. As this is a Float64 calculation, signed sums are
-performed in logarithmic space to avoid overflow and underflow.
+!!! note
+    The off-diagonal elements of the quartic self-interaction tensor are not yet included in this computation
 """
 function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int})
     # TODO: #17 Include threshold
@@ -676,59 +690,9 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         # Qlt[i, :] .= QKs[i, :]
         QKs = deepcopy(QKs1)
     end
-
-    # Construct the same successive PQ directions in canonical field space.
-    # `Q * inv(Kls')` is the charge matrix in the canonically normalized basis.
-    Qcanonical = Matrix(Q') / Kls'
-    Qleading = Matrix(Qtilde') / Kls'
-    P = zeros(Float64, h11, h11)
-    for i in 1:h11
-        direction = copy(@view Qleading[i, :])
-        for j in 1:i-1
-            direction .-= dot(direction, @view(P[:, j])) .* @view(P[:, j])
-        end
-        direction ./= norm(direction)
-        P[:, i] .= direction
-    end
-
-    # Match the mass ordering used in the returned PQ spectrum.
-    order = sortperm(mapprox)
-    Qpq = Qcanonical * P[:, order]
-    scale_sign = Int.(sign.(@view L[1, :]))
-    scale_log = log(10) .* @view(L[2, :])
-
-    function contracted_log(exponents::NTuple{4, Int})
-        signs = scale_sign .* sign.(@view(Qpq[:, exponents[1]])) .* sign.(@view(Qpq[:, exponents[2]])) .* sign.(@view(Qpq[:, exponents[3]])) .* sign.(@view(Qpq[:, exponents[4]]))
-        logs = scale_log .+ log.(abs.(@view(Qpq[:, exponents[1]]))) .+ log.(abs.(@view(Qpq[:, exponents[2]]))) .+ log.(abs.(@view(Qpq[:, exponents[3]]))) .+ log.(abs.(@view(Qpq[:, exponents[4]])))
-        gauss_log(signs, logs)
-    end
-
-    qindq31 = [(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
-    qindq22 = [(i, i, j, j) for i in 1:h11 for j in 1:i-1]
-    quartdiagsign = zeros(Int, h11)
-    quartdiaglog = zeros(Float64, h11)
-    quart31sign = zeros(Int, length(qindq31))
-    quart31log = zeros(Float64, length(qindq31))
-    quart22sign = zeros(Int, length(qindq22))
-    quart22log = zeros(Float64, length(qindq22))
-
-    for i in 1:h11
-        quartdiagsign[i], quartdiaglog[i] = contracted_log((i, i, i, i))
-    end
-    for i in eachindex(qindq31)
-        quart31sign[i], quart31log[i] = contracted_log(qindq31[i])
-    end
-    for i in eachindex(qindq22)
-        quart22sign[i], quart22log[i] = contracted_log(qindq22[i])
-    end
-
-    log2π = Float64(constants()["log2π"])
-    AxionSpectrum(mapprox[order] .+ 9 .+
+    AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9 .+
     Float64(log10(constants()["MPlanck"])) .+
-    log2π, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
-    quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
-    isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
-    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π)
+    Float64(constants()["log2π"]), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]))
 end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int)
