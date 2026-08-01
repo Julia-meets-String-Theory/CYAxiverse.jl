@@ -690,18 +690,38 @@ end
 
 """
     pq_spectrum(K,L,Q; mixing_correction=:float64, prec=1_000)
-Uses a modified version of the algorithm outlined in the _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.04503) (Appendix A) to compute the masses and decay constants.
-The quartics are evaluated in the PQ approximate mass basis using every
-instanton scale in `L`. As this is a Float64 calculation, signed sums are
-performed in logarithmic space to avoid overflow and underflow.
 
-By default, `mixing_correction=:float64` diagonalizes the leading Hessian in
-Float64, which is appropriate for its resolved sector. Set
-`mixing_correction=true` (or `:high_precision`) for high-precision
-diagonalization, or `mixing_correction=false` for the original hierarchical
-PQ mass estimate and PQ-basis quartics. Either correction option rotates the
-all-scale quartics into its selected mass basis; decay constants remain in the
-PQ basis.
+Compute a PQ-selected axion spectrum. The PQ procedure first selects the
+leading linearly independent instantons. Every returned quartic includes all
+instanton scales in `L`, while the requested `mixing_correction` determines
+the field basis used for masses and quartics.
+
+# Basis and precision modes
+
+| `mixing_correction` | `m` basis | quartic basis |
+|:--|:--|:--|
+| `:float64` (default) | Float64 eigensystem of the PQ-selected leading Hessian | same Float64 leading-Hessian mass basis |
+| `true` or `:high_precision` | arbitrary-precision eigensystem of the PQ-selected leading Hessian | same high-precision leading-Hessian mass basis, converted to Float64 for the final log-space contraction |
+| `false` | original sequential PQ mass estimate | original sequential PQ basis |
+
+`f` and `fK` always retain their original PQ/kinetic-basis definitions; they
+are not rotated by a mixing correction.
+
+# Numerical interpretation
+
+The default is fast and is appropriate for masses and self-interactions in
+the Float64-resolved sector. It does not make light eigenvectors below the
+relative Float64 resolution floor reliable. A mass being resolved also does
+not automatically certify every mixed quartic: a `λ31` or `λ22` component can
+lose precision through cancellation among instanton contributions. Use
+`:high_precision` when such components need controlled accuracy.
+
+# Return value
+
+Returns an `AxionSpectrum` with masses `m`, decay quantities `f` and `fK`, and
+signed base-10 logarithms for `λself`, `λ31`, and `λ22`. The `λ31_i` and
+`λ22_i` matrices give zero-based mode indices. Signs of `λ31` additionally
+depend on the arbitrary sign convention for individual mass eigenvectors.
 """
 function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000)
     # TODO: #17 Include threshold
