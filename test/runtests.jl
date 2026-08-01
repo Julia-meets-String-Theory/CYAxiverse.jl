@@ -62,6 +62,9 @@ end
     @test all(isapprox.(pq.m, hp["m"]; atol=1e-6))
     @test pq.λselfsign == hp["λselfsign"]
     @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
+    @test all(isapprox.(pq.quartic_diagnostics.self.orders_lost, zeros(2); atol=1e-12))
+    @test all(pq.quartic_diagnostics.self.reliable)
+    @test !any(pq.quartic_diagnostics.self.exact_zero)
 end
 
 @testset "PQ spectrum: non-diagonal kinetic matrix" begin

@@ -16,7 +16,7 @@ using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
 
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
 #################
 ### Constant ####
@@ -720,8 +720,10 @@ lose precision through cancellation among instanton contributions. Use
 
 Returns an `AxionSpectrum` with masses `m`, decay quantities `f` and `fK`, and
 signed base-10 logarithms for `λself`, `λ31`, and `λ22`. The `λ31_i` and
-`λ22_i` matrices give zero-based mode indices. Signs of `λ31` additionally
-depend on the arbitrary sign convention for individual mass eigenvectors.
+`λ22_i` matrices give zero-based mode indices. `quartic_diagnostics` is
+aligned with these component families and reports final-sum cancellation in
+the Float64 log-space contraction. Signs of `λ31` additionally depend on the
+arbitrary sign convention for individual mass eigenvectors.
 """
 function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000)
     # TODO: #17 Include threshold
@@ -785,7 +787,17 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     function contracted_log(exponents::NTuple{4, Int})
         signs = scale_sign .* sign.(@view(Qpq[:, exponents[1]])) .* sign.(@view(Qpq[:, exponents[2]])) .* sign.(@view(Qpq[:, exponents[3]])) .* sign.(@view(Qpq[:, exponents[4]]))
         logs = scale_log .+ log.(abs.(@view(Qpq[:, exponents[1]]))) .+ log.(abs.(@view(Qpq[:, exponents[2]]))) .+ log.(abs.(@view(Qpq[:, exponents[3]]))) .+ log.(abs.(@view(Qpq[:, exponents[4]])))
-        gauss_log(signs, logs)
+        result_sign, result_log = gauss_log(signs, logs)
+        nonzero = signs .!= 0
+        exact_zero = result_sign == 0
+        if !any(nonzero) || exact_zero
+            return result_sign, result_log, Inf, -Inf, false, true
+        end
+        absolute_sum_log = gauss_log(ones(Int, count(identity, nonzero)), logs[nonzero])[2]
+        orders_lost = max(0.0, (absolute_sum_log - result_log) / log(10))
+        digits_remaining = -log10(eps(Float64)) - orders_lost
+        return result_sign, result_log, orders_lost, digits_remaining,
+               digits_remaining >= 3, false
     end
 
     qindq31 = [(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
@@ -796,22 +808,39 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     quart31log = zeros(Float64, length(qindq31))
     quart22sign = zeros(Int, length(qindq22))
     quart22log = zeros(Float64, length(qindq22))
+    self_orders_lost = zeros(Float64, h11)
+    self_digits_remaining = zeros(Float64, h11)
+    self_reliable = falses(h11)
+    self_exact_zero = falses(h11)
+    three_one_orders_lost = zeros(Float64, length(qindq31))
+    three_one_digits_remaining = zeros(Float64, length(qindq31))
+    three_one_reliable = falses(length(qindq31))
+    three_one_exact_zero = falses(length(qindq31))
+    two_two_orders_lost = zeros(Float64, length(qindq22))
+    two_two_digits_remaining = zeros(Float64, length(qindq22))
+    two_two_reliable = falses(length(qindq22))
+    two_two_exact_zero = falses(length(qindq22))
 
     for i in 1:h11
-        quartdiagsign[i], quartdiaglog[i] = contracted_log((i, i, i, i))
+        quartdiagsign[i], quartdiaglog[i], self_orders_lost[i], self_digits_remaining[i], self_reliable[i], self_exact_zero[i] = contracted_log((i, i, i, i))
     end
     for i in eachindex(qindq31)
-        quart31sign[i], quart31log[i] = contracted_log(qindq31[i])
+        quart31sign[i], quart31log[i], three_one_orders_lost[i], three_one_digits_remaining[i], three_one_reliable[i], three_one_exact_zero[i] = contracted_log(qindq31[i])
     end
     for i in eachindex(qindq22)
-        quart22sign[i], quart22log[i] = contracted_log(qindq22[i])
+        quart22sign[i], quart22log[i], two_two_orders_lost[i], two_two_digits_remaining[i], two_two_reliable[i], two_two_exact_zero[i] = contracted_log(qindq22[i])
     end
 
     log2π = Float64(constants()["log2π"])
+    quartic_diagnostics = QuarticDiagnostics(
+        QuarticComponentDiagnostics(self_orders_lost, self_digits_remaining, self_reliable, self_exact_zero),
+        QuarticComponentDiagnostics(three_one_orders_lost, three_one_digits_remaining, three_one_reliable, three_one_exact_zero),
+        QuarticComponentDiagnostics(two_two_orders_lost, two_two_digits_remaining, two_two_reliable, two_two_exact_zero),
+    )
     AxionSpectrum(masses, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
     quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
-    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π)
+    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, quartic_diagnostics)
 end
 
 function pq_spectrum(h11::Int,tri::Int,cy::Int; kwargs...)

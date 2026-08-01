@@ -38,6 +38,21 @@ struct AxionPotential
     K::Hermitian{Float64, Matrix{Float64}}
 end
 
+"""Float64 cancellation diagnostics for one family of quartic components."""
+struct QuarticComponentDiagnostics
+    orders_lost::Vector{Float64}
+    digits_remaining::Vector{Float64}
+    reliable::BitVector
+    exact_zero::BitVector
+end
+
+"""Cancellation diagnostics aligned with `λself`, `λ31`, and `λ22`."""
+struct QuarticDiagnostics
+    self::QuarticComponentDiagnostics
+    three_one::QuarticComponentDiagnostics
+    two_two::QuarticComponentDiagnostics
+end
+
 struct AxionSpectrum
     m::Vector{Float64}
     f::Vector{Float64}
@@ -50,6 +65,7 @@ struct AxionSpectrum
     λ22_i::Matrix{Int}
     λ22sign::Vector{Int}
     λ22::Vector{Float64}
+    quartic_diagnostics::QuarticDiagnostics
 end
 
 Base.@kwdef struct IndexedAxionSpectrum{T<:Float64}
