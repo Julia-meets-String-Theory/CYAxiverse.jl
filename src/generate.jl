@@ -682,7 +682,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     for i=1:h11
         # println(size(QKs[i, :]))
         fapprox[i] = log10(1 /(2π *dot(QKs[i,:],QKs[i,:])))
-        mapprox[i] = 0.5(Ltilde[2,i]-fapprox[i])
+        mapprox[i] = 0.5(Ltilde[2,i]-fapprox[i]-log10(2π))
         T = orth_basis(QKs[i,:])
         QKs1 = zeros(size(QKs,1), size(T,2))
         LinearAlgebra.mul!(QKs1,QKs, T)
