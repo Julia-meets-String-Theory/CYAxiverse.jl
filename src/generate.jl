@@ -704,7 +704,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     if mixing_correction
         # This is the exact eigenspectrum of PQ's own selected leading-Hessian,
         # not an all-instanton HP calculation.
-        masses = hp_spectrum(K, Matrix(Ltilde'), Matrix(Qtilde'); prec=prec)["m"]
+        masses = sort(hp_spectrum(K, Matrix(Ltilde'), Matrix(Qtilde'); prec=prec)["m"])
     end
     Qpq = Qcanonical * P[:, order]
     scale_sign = Int.(sign.(@view L[1, :]))
