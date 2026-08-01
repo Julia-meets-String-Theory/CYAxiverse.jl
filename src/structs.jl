@@ -82,6 +82,21 @@ struct MassBasisDiagnostics
 end
 
 """
+    InstantonHierarchyDiagnostics
+
+Cheap physics-informed diagnostics of the instanton scale hierarchy.
+`leading_log_gap` is the gap between the two largest entries of `L[2, :]`,
+and `log_scale_span` is its full range. `heuristic_strong_hierarchy` uses the
+provisional thresholds documented by `pq_spectrum`; it is a screening flag,
+not a numerical accuracy certificate.
+"""
+struct InstantonHierarchyDiagnostics
+    leading_log_gap::Float64
+    log_scale_span::Float64
+    heuristic_strong_hierarchy::Bool
+end
+
+"""
     AxionSpectrum
 
 PQ-spectrum result. `m` is expressed in the basis selected by
@@ -93,6 +108,9 @@ requested.
 `mass_basis_diagnostics` is `nothing` by default and is a
 [`MassBasisDiagnostics`](@ref) when requested for a leading-Hessian mass
 basis.
+`instanton_hierarchy` is `nothing` by default and is an
+[`InstantonHierarchyDiagnostics`](@ref) when explicitly requested. It is not
+a substitute for numerical mass-basis diagnostics.
 """
 struct AxionSpectrum
     m::Vector{Float64}
@@ -108,6 +126,7 @@ struct AxionSpectrum
     λ22::Vector{Float64}
     quartic_diagnostics::Union{Nothing, QuarticDiagnostics}
     mass_basis_diagnostics::Union{Nothing, MassBasisDiagnostics}
+    instanton_hierarchy::Union{Nothing, InstantonHierarchyDiagnostics}
 end
 
 Base.@kwdef struct IndexedAxionSpectrum{T<:Float64}

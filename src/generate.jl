@@ -16,7 +16,7 @@ using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize
 
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonHierarchyDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
 #################
 ### Constant ####
@@ -741,6 +741,35 @@ function mass_basis_accuracy(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{F
 end
 
 """
+    instanton_hierarchy_diagnostics(L)
+
+Return the leading instanton-scale gap and full scale span from `L[2, :]`.
+The `heuristic_strong_hierarchy` flag requires a leading gap of at least 30
+and a span of at least 1,000 in these log-scale units. Those provisional
+thresholds summarize the h11=10 screening study and are only a cheap
+physics-informed sanity check; use mass-basis diagnostics for certification.
+"""
+function instanton_hierarchy_diagnostics(L::Matrix{Float64})
+    scales = @view L[2, :]
+    largest = -Inf
+    second_largest = -Inf
+    smallest = Inf
+    @inbounds for scale in scales
+        smallest = min(smallest, scale)
+        if scale > largest
+            second_largest = largest
+            largest = scale
+        elseif scale > second_largest
+            second_largest = scale
+        end
+    end
+    leading_log_gap = largest - second_largest
+    log_scale_span = largest - smallest
+    InstantonHierarchyDiagnostics(leading_log_gap, log_scale_span,
+        leading_log_gap >= 30 && log_scale_span >= 1_000)
+end
+
+"""
     leading_hessian_mass_basis(K, L, Q; prec=1_000)
 
 Return the high-precision eigenspectrum and canonical eigenbasis of the Hessian
@@ -779,7 +808,8 @@ end
 
 """
     pq_spectrum(K,L,Q; mixing_correction=:float64, prec=1_000,
-                quartic_diagnostics=false, mass_basis_diagnostics=false)
+                quartic_diagnostics=false, mass_basis_diagnostics=false,
+                hierarchy_diagnostics=false)
 
 Compute a PQ-selected axion spectrum. The PQ procedure first selects the
 leading linearly independent instantons. Every returned quartic includes all
@@ -807,6 +837,14 @@ basis it evaluates Float64 eigenpair residuals, nearest relative eigenvalue
 gaps, and orthogonality error. It is unavailable for `mixing_correction=false`,
 whose sequential PQ directions are not Hessian eigenvectors.
 
+`hierarchy_diagnostics=false` keeps this additional linear-time scan out of
+the default path. When requested, `instanton_hierarchy` reports a
+physics-informed sanity check. Its provisional `heuristic_strong_hierarchy`
+flag requires a leading instanton-scale gap of at least 30 and a full
+log-scale span of at least 1,000. These values were empirically useful at
+h11=10 only; they do not certify numerical accuracy and must be revalidated
+at other dimensions.
+
 # Numerical interpretation
 
 The default is fast and is appropriate for masses and self-interactions in
@@ -826,7 +864,7 @@ families and reports final-sum cancellation in the Float64 log-space
 contraction. Signs of `λ31` additionally depend on the arbitrary sign
 convention for individual mass eigenvectors.
 """
-function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000, quartic_diagnostics::Bool=false, mass_basis_diagnostics::Bool=false)
+function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000, quartic_diagnostics::Bool=false, mass_basis_diagnostics::Bool=false, hierarchy_diagnostics::Bool=false)
     # TODO: #17 Include threshold
     h11::Int = size(K,1)
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
@@ -857,6 +895,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         throw(ArgumentError("mass_basis_diagnostics requires a leading-Hessian mass basis; set mixing_correction to :float64 or :high_precision"))
     end
     mass_diagnostics = mass_basis_diagnostics ? mass_basis_accuracy(K, Ltilde, Qtilde, quartic_basis) : nothing
+    hierarchy = hierarchy_diagnostics ? instanton_hierarchy_diagnostics(L) : nothing
     Qpq = Qcanonical * quartic_basis
     scale_sign = Int.(sign.(@view L[1, :]))
     scale_log = log(10) .* @view(L[2, :])
@@ -906,7 +945,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     AxionSpectrum(masses, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
     quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
-    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics, mass_diagnostics)
+    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics, mass_diagnostics, hierarchy)
 end
 
 """
