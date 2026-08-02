@@ -17,6 +17,93 @@ include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
     end
 end
 
+@testset "Paper reproduction benchmarks" begin
+    n5 = CYAxiverse.paper_benchmarks.n5_potential()
+    @test size(n5.Q) == (5, 8)
+    @test n5.qdotτ == [6, 6.25, 24, 26, 31.875, 32, 36.125, 162.125]
+    n5_selected = CYAxiverse.generate.LQtilde(n5.Q, n5.L)
+    @test size(n5_selected.Qtilde) == (5, 5)
+    @test rank(n5_selected.Qtilde) == 5
+    @test n5_selected.Qtilde == n5.Q[:, 1:5]
+
+    kc = CYAxiverse.paper_benchmarks.n5_critical_scale()
+    @test isapprox(CYAxiverse.paper_benchmarks.n5_reduced_ratio(kc), 1 / 4; atol=1e-14)
+    @test CYAxiverse.paper_benchmarks.n5_reduced_critical_points(kc - 1e-4).minima == 2
+    @test CYAxiverse.paper_benchmarks.n5_reduced_critical_points(kc + 1e-4).minima == 1
+    @test CYAxiverse.paper_benchmarks.n5_reduced_critical_points(kc).hessian_sign[2] == 0
+
+    for (k, expected_critical, expected_minima) in
+            ((kc - 1e-4, 4, 2), (kc + 1e-4, 2, 1))
+        ratio = CYAxiverse.paper_benchmarks.n5_reduced_ratio(k)
+        solved = CYAxiverse.minimizer.critical_points(
+            [1.0 1.0; 0.0 log10(ratio)], [1 2]; starts=64)
+        @test solved.critical_count == expected_critical
+        @test solved.minima_count == expected_minima
+        @test maximum(solved.residuals) <= 1e-10
+    end
+
+    n8 = CYAxiverse.paper_benchmarks.n8_potential()
+    @test size(n8.Q) == (8, 12)
+    @test n8.Q[:, 7] == [0, 1, -1, -1, 1, 1, 0, 0]
+    @test n8.qdotτ == [14, 14.5, 14.5, 15.5, 15.5, 15.5, 15.5, 16, 17, 17, 25, 45]
+    n8_selected = CYAxiverse.generate.LQtilde(n8.Q, n8.L)
+    @test size(n8_selected.Qtilde) == (8, 8)
+    @test rank(n8_selected.Qtilde) == 8
+    @test abs(round(Int, det(n8_selected.Qtilde))) == 1
+
+    # The hierarchy-preconditioned production entry point must agree with the
+    # generic solver on a square, unimodular potential.
+    square = CYAxiverse.generate.reduced_critical_points(
+        [1.0 1.0 0.0; 0.0 -1.0 -100.0], [1 0 0; 0 1 0]; starts=32)
+    @test square.critical_count == 4
+    @test square.minima_count == 1
+
+    # Section 4.2 reports five minima below the N=8 catastrophe and one above
+    # it. Two thousand deterministic starts are sufficient to recover both
+    # sides with the Table 1 truncation.
+    for (k, expected_minima) in ((0.66, 5), (0.68, 1))
+        potential = CYAxiverse.paper_benchmarks.n8_potential(k=k)
+        solved = CYAxiverse.generate.reduced_critical_points(
+            potential.L, potential.Q; starts=2048,
+            residual_tolerance=1e-9, merge_tolerance=1e-6,
+            max_iterations=300)
+        @test solved.minima_count == expected_minima
+    end
+
+    catastrophe = CYAxiverse.paper_benchmarks.n8_degenerate_point(
+        [0.0, 0.00499839, 0.99500161, 0.75995156,
+         0.75004523, 0.24995477, 0.0, 0.75495317])
+    @test catastrophe.converged
+    @test isapprox(catastrophe.k, 0.6745063700; atol=1e-9)
+    @test catastrophe.gradient_residual < 1e-10
+    @test catastrophe.null_residual < 1e-10
+    @test abs(catastrophe.eigenvalues[1]) < 1e-9
+    @test catastrophe.eigenvalues[2] > 0
+
+    # Inflation uses the paper's equation-(25) truncation by default.  The
+    # equation-(19) reconstruction remains available as an explicit diagnostic.
+    theta_glsm = Matrix{Float64}(n8_selected.Qtilde') \ catastrophe.theta
+    truncated = CYAxiverse.paper_benchmarks.n8_potential_derivatives(theta_glsm, catastrophe.k)
+    full = CYAxiverse.paper_benchmarks.n8_potential_derivatives(theta_glsm, catastrophe.k; full=true)
+    @test length(truncated.amplitudes) == 12
+    @test length(full.amplitudes) == 78
+    @test norm(truncated.gradient, Inf) / maximum(abs, truncated.amplitudes) < 1e-10
+
+    initial = CYAxiverse.paper_benchmarks.n8_inflation_initial_condition(
+        catastrophe.k + 1e-7)
+    @test !initial.follow_hilltop
+    @test isapprox(initial.theta_critical, theta_glsm; atol=1e-12)
+
+    geometry = CYAxiverse.paper_benchmarks.n8_geometry()
+    @test geometry.h11 == 8
+    @test geometry.h21 == 28
+    @test geometry.volume == 126
+    @test geometry.divisor_volumes == [45, 17, 17, 14.5, 14.5, 15.5, 15.5, 25]
+    expected_kinetic_eigenvalues = sort([8.20e-4, 6.35e-4, 5.97e-4, 3.13e-4,
+                                         1.24e-4, 9.15e-5, 8.30e-5, 5.84e-5])
+    @test all(isapprox.(eigvals(geometry.kinetic), expected_kinetic_eigenvalues; rtol=6e-3))
+end
+
 @testset "HP spectrum: one-axion analytic mass" begin
     # V = 10^-20 * (1 - cos(3θ)); second instanton is exactly absent.
     K = Hermitian(reshape([4.0], 1, 1))

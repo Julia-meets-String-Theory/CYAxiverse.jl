@@ -28,27 +28,147 @@ class PrefactorCriterionNotMet(RuntimeError):
     """The current FRST's tip cannot satisfy the potential-control criterion."""
 
 
-def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath, max_m, report):
+class NoPhysicalKaehlerPoint(RuntimeError):
+    """No sampled point has positive volumes on effective-divisor cone rays."""
+
+
+def sample_stretched_kaehler_points(kahler_cone, reference_tip, rng, attempts, report):
+    """Yield randomized points in the same stretched Kähler region.
+
+    The canonical SKC tip is the norm-minimizing point in ``H t >= 1``.  At
+    high h11 it need not lie in the useful angular region.  Each later point
+    is the Euclidean projection of a random target onto that same polyhedron,
+    so it remains inside the Kähler cone with every curve-wall distance >= 1.
+    """
+    yield np.asarray(reference_tip, dtype=float)
+    if attempts <= 1:
+        return
+    try:
+        from qpsolvers import available_solvers, solve_qp
+    except ImportError as exc:
+        raise RuntimeError(
+            "Angular Kähler-point sampling requires qpsolvers (a CYTools "
+            "dependency). Reinstall CYTools with its solver extras."
+        ) from exc
+
+    hyperplanes = np.asarray(kahler_cone.hyperplanes(), dtype=float)
+    if hyperplanes.ndim != 2 or hyperplanes.shape[1] != reference_tip.size:
+        raise RuntimeError("Unexpected toric Kähler-cone hyperplane representation.")
+    if not available_solvers:
+        raise RuntimeError("qpsolvers found no installed quadratic-program solver.")
+    solvers = (["mosek"] if "mosek" in available_solvers else []) + [
+        name for name in sorted(available_solvers) if name != "mosek"
+    ]
+    identity = np.eye(reference_tip.size)
+    target_norm = max(float(np.linalg.norm(reference_tip)), 1.0)
+
+    for number in range(2, attempts + 1):
+        direction = rng.normal(size=reference_tip.size)
+        direction /= max(float(np.linalg.norm(direction)), np.finfo(float).tiny)
+        # A logarithmic range makes this explore angles rather than merely a
+        # tiny neighborhood of the norm-minimizing reference tip.
+        target = target_norm * (2.0 ** rng.uniform(-1.0, 4.0)) * direction
+        report(f"projecting randomized Kähler point {number}/{attempts}")
+        point = None
+        solver_used = None
+        for solver in solvers:
+            try:
+                point = solve_qp(
+                    identity,
+                    -target,
+                    G=-hyperplanes,
+                    h=-np.ones(hyperplanes.shape[0]),
+                    solver=solver,
+                    verbose=False,
+                )
+            except Exception:
+                point = None
+            if point is not None:
+                solver_used = solver
+                break
+        if point is None:
+            report(
+                "randomized Kähler projection failed with all available "
+                f"solvers ({', '.join(solvers)}); skipping candidate"
+            )
+            continue
+        point = np.asarray(point, dtype=float)
+        if np.all(np.isfinite(point)) and np.min(hyperplanes @ point) >= 1.0 - 1e-6:
+            report(f"randomized Kähler projection succeeded with {solver_used}")
+            yield point
+        else:
+            report("randomized Kähler projection was infeasible; skipping candidate")
+
+
+def generate_and_save_geometry(
+    h11,
+    cy,
+    poly_points,
+    simplices,
+    filepath,
+    max_m,
+    max_kaehler_attempts,
+    min_divisor_volume,
+    rng,
+    report,
+):
     """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
     report("computing Hodge, GLSM, and divisor-basis data")
     h21 = int(cy.h21())
     glsm = np.asarray(cy.glsm_charge_matrix(include_origin=False), dtype=int)
     basis = np.asarray(cy.divisor_basis(), dtype=int)
 
-    n_val, m_val = 1.0, 1.0
     report("finding the stretched Kähler-cone tip (this can be slow without Mosek)")
-    tip = np.asarray(
-        cy.toric_kahler_cone().tip_of_stretched_cone(math.sqrt(n_val)), dtype=float
+    kahler_cone = cy.toric_kahler_cone()
+    reference_tip = np.asarray(
+        kahler_cone.tip_of_stretched_cone(1.0), dtype=float
     )
     report("computing effective-cone rays")
     qprime = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
     nq = qprime.shape[0]
 
+    # Eq. (20) of arXiv:2309.01831 concerns effective four-cycles on the CY.
+    # Do *not* require every ambient toric divisor returned by CYTools to be
+    # positive: at large h11 that list can include divisors with trivial or
+    # redundant restriction to the hypersurface.  The toric effective-cone
+    # rays are the relevant generators, and qprime and tau_basis share the
+    # divisor-basis convention below.
+    report("searching angular Kähler directions with positive effective-divisor volumes")
+    kaehler_point = None
+    divisor_scale = None
+    for kaehler_attempt, candidate in enumerate(
+        sample_stretched_kaehler_points(
+            kahler_cone, reference_tip, rng, max_kaehler_attempts, report
+        ),
+        start=1,
+    ):
+        candidate_tau = np.asarray(
+            cy.compute_divisor_volumes(candidate, in_basis=True), dtype=float
+        )
+        effective_volumes = qprime @ candidate_tau
+        minimum_volume = float(np.min(effective_volumes))
+        if not np.isfinite(minimum_volume) or minimum_volume <= 0.0:
+            report(
+                f"rejected Kähler point {kaehler_attempt}/{max_kaehler_attempts}: "
+                f"minimum effective-divisor volume {minimum_volume:.3e}"
+            )
+            continue
+        divisor_scale = max(1.0, math.sqrt(min_divisor_volume / minimum_volume))
+        kaehler_point = divisor_scale * candidate
+        report(
+            f"accepted Kähler point {kaehler_attempt}/{max_kaehler_attempts}; "
+            f"four-cycle scale={divisor_scale:.3e}"
+        )
+        break
+    if kaehler_point is None:
+        raise NoPhysicalKaehlerPoint(
+            f"No positive-effective-divisor Kähler point among {max_kaehler_attempts} "
+            "stretched-cone samples."
+        )
+
     report("computing divisor volumes and inverse Kähler metric")
-    div_vols = np.asarray(cy.compute_divisor_volumes(tip), dtype=float)
-    python_basis = basis - 1
-    tau0 = div_vols[python_basis]
-    kinv0_raw = np.asarray(cy.compute_inverse_kahler_metric(tip), dtype=float)
+    tau0 = np.asarray(cy.compute_divisor_volumes(kaehler_point, in_basis=True), dtype=float)
+    kinv0_raw = np.asarray(cy.compute_inverse_kahler_metric(kaehler_point), dtype=float)
     kinv0 = 0.5 * (kinv0_raw + kinv0_raw.T)
     tau, kinv = tau0.copy(), kinv0.copy()
 
@@ -61,6 +181,11 @@ def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath, max_m,
     lower_i, lower_j = np.tril_indices(nq, k=-1)
     bilinear0 = (qprime @ kinv0) @ qprime.T
     tauq0 = qprime @ tau0
+    if np.min(tauq0) <= 0.0:
+        raise NoPhysicalKaehlerPoint(
+            "The positive prime-divisor point has non-positive effective-ray "
+            "volumes in the selected divisor basis."
+        )
     def prefactor_is_valid(candidate_m):
         """Evaluate the original pairwise criterion at one candidate value."""
         candidate_m2 = candidate_m**2
@@ -116,16 +241,11 @@ def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath, max_m,
     tau = m2 * tau0
     kinv = m2**2 * kinv0
 
-    if np.min(tau) <= 1.0:
-        n_val = 1.0 / np.min(tau)
-        tip = math.sqrt(n_val) * tip
-        div_vols = np.asarray(cy.compute_divisor_volumes(tip), dtype=float)
-        tau = div_vols[python_basis]
-        kinv_raw = np.asarray(cy.compute_inverse_kahler_metric(tip), dtype=float)
-        kinv = 0.5 * (kinv_raw + kinv_raw.T)
-
+    # Store a self-consistent physical point: tau, Kinv and the CY volume are
+    # all evaluated at the same final J = m * kaehler_point.
+    tip = m_val * kaehler_point
     volume = float(cy.compute_cy_volume(tip))
-    tip_prefactor = np.asarray([math.sqrt(n_val), m_val], dtype=float)
+    tip_prefactor = np.asarray([divisor_scale, m_val], dtype=float)
 
     report(f"building potential data from {nq} effective-cone rays")
     num_cross = nq * (nq - 1) // 2
@@ -200,6 +320,8 @@ def process_polytope(task):
         max_tip_attempts,
         overwrite,
         max_m,
+        max_kaehler_attempts,
+        min_divisor_volume,
         verbose,
     ) = task
     try:
@@ -279,11 +401,14 @@ def process_polytope(task):
                     simplices,
                     filepath,
                     max_m,
+                    max_kaehler_attempts,
+                    min_divisor_volume,
+                    np.random.default_rng(seed + attempted - 1),
                     report,
                 )
-            except PrefactorCriterionNotMet:
+            except (PrefactorCriterionNotMet, NoPhysicalKaehlerPoint) as exc:
                 rejected += 1
-                report("rejected FRST: its tip fails the prefactor criterion")
+                report(f"rejected FRST: {exc}")
                 continue
             accepted += 1
             saved += 1
@@ -311,6 +436,8 @@ def plan_tasks(
     max_tip_attempts,
     overwrite,
     max_m,
+    max_kaehler_attempts,
+    min_divisor_volume,
     verbose,
 ):
     """Fetch at most n polytopes and spread n requested geometries over them."""
@@ -338,6 +465,8 @@ def plan_tasks(
             max_tip_attempts,
             overwrite,
             max_m,
+            max_kaehler_attempts,
+            min_divisor_volume,
             verbose,
         )
         for polytope_index, (poly, count) in enumerate(zip(polytopes, counts), start=1)
@@ -354,6 +483,8 @@ def run_batch(
     max_tip_attempts,
     overwrite,
     max_m,
+    max_kaehler_attempts,
+    min_divisor_volume,
     verbose,
 ):
     tasks = plan_tasks(
@@ -365,6 +496,8 @@ def run_batch(
         max_tip_attempts,
         overwrite,
         max_m,
+        max_kaehler_attempts,
+        min_divisor_volume,
         verbose,
     )
     if not tasks:
@@ -414,6 +547,18 @@ def main():
         default=1_000_000.0,
         help="Maximum stretched-cone prefactor before reporting a non-convergence.",
     )
+    parser.add_argument(
+        "--max-kaehler-attempts",
+        type=int,
+        default=100,
+        help="Angular Kähler points tested per FRST (including the canonical tip).",
+    )
+    parser.add_argument(
+        "--min-divisor-volume",
+        type=float,
+        default=1.0,
+        help="Required lower bound for every effective-divisor cone ray volume.",
+    )
     parser.add_argument("--overwrite", action="store_true", help="Replace existing cyax.h5 files.")
     parser.add_argument(
         "--verbose",
@@ -426,6 +571,10 @@ def main():
         parser.error("--n must be positive")
     if args.max_tip_attempts < 1:
         parser.error("--max-tip-attempts must be positive")
+    if args.max_kaehler_attempts < 1:
+        parser.error("--max-kaehler-attempts must be positive")
+    if args.min_divisor_volume <= 0.0:
+        parser.error("--min-divisor-volume must be positive")
     if args.h11_max < args.h11_min:
         args.h11_max = args.h11_min
     os.makedirs(args.outdir, exist_ok=True)
@@ -443,6 +592,8 @@ def main():
             args.max_tip_attempts,
             args.overwrite,
             args.max_m,
+            args.max_kaehler_attempts,
+            args.min_divisor_volume,
             args.verbose,
         )
     print(f"\nSaved {total_saved} geometry file(s).")

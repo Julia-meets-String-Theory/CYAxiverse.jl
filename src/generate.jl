@@ -14,7 +14,7 @@ using TimerOutputs
 
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
-using ..minimizer: minimize, subspace_minimize
+using ..minimizer: minimize, subspace_minimize, critical_points
 
 using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, PhysicalAxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonHierarchyDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
@@ -1620,6 +1620,24 @@ function LQtilde(geom_idx::GeometryIndex; hilbert = false)
         return LQtilde(Q, L)
     end
 end	
+
+"""
+    reduced_critical_points(L, Q; kwargs...)
+
+Deterministically find and classify critical points in the leading-charge
+coordinates used in the axion-minima papers. Each stationarity equation is
+scaled by its corresponding leading instanton amplitude, avoiding loss of the
+hierarchically suppressed directions.
+"""
+function reduced_critical_points(L::AbstractMatrix{Float64}, Q::AbstractMatrix{Int}; kwargs...)
+    selected = LQtilde(Q, L)
+    Lordered = hcat(selected.Ltilde, selected.Lbar)
+    Qordered = hcat(selected.Qtilde, selected.Qbar)
+    leading_logs = @view selected.Ltilde[2, :]
+    equation_scales = 10.0 .^ (leading_logs .- maximum(leading_logs))
+    critical_points(Lordered, Qordered;
+        coordinate_basis=selected.Qtilde, equation_scales=equation_scales, kwargs...)
+end
 
 """
     αmatrix(LQtilde::NamedTuple; threshold::Float64=0.5)
