@@ -1,2 +1,3 @@
 [deps]
+CYAxiverse = "e5e45d93-5055-4eab-878b-2e484be3f951"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"

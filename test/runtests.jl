@@ -31,6 +31,12 @@ end
 
     @test isapprox(hp["m"][1], expected_mass; atol=1e-10)
     @test hp["msign"][1] == 1
+
+    # The canonical charge is q/sqrt(K) = 3/2, so the fourth derivative is
+    # Lambda * (3/2)^4 in hp_spectrum's reported units.
+    expected_quartic = -20.0 + 4 * log10(3 / 2) + 4 * log10(2π)
+    @test hp["λselfsign"][1] == 1
+    @test isapprox(hp["λself"][1], expected_quartic; atol=1e-10)
 end
 @testset "PQ and HP spectrum: diagonal two-axion comparison" begin
     # The leading instantons act on separate axions, so the PQ construction is
@@ -43,7 +49,23 @@ end
     L = [1.0 1.0 0.0;
          -20.0 -30.0 -1000.0]
 
-    pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
+    selected = CYAxiverse.generate.LQtilde(Q, L)
+    @test size(selected.Qtilde) == (2, 2)
+    @test rank(selected.Qtilde) == 2
+    @test selected.Qtilde == Q[:, 1:2]
+    @test selected.Ltilde == L[:, 1:2]
+
+    # The candidate scan itself reuses its workspaces, including for dependent
+    # columns encountered before the basis is complete.
+    Qsorted = Q[:, [1, 3, 2]]
+    mask = falses(3)
+    span = zeros(2, 2)
+    residual = zeros(2)
+    CYAxiverse.generate.leading_independent_mask!(mask, Qsorted, span, residual)
+    @test mask == Bool[true, false, true]
+    @test @allocated(CYAxiverse.generate.leading_independent_mask!(mask, Qsorted, span, residual)) == 0
+
+    pq = CYAxiverse.generate.pq_spectrum(K, L, Q; quartic_diagnostics=true, mass_basis_diagnostics=true, hierarchy_diagnostics=true)
     hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
 
     expected = sort([
@@ -53,5 +75,75 @@ end
 
     @test all(isapprox.(pq.m, expected; atol=1e-10))
     @test all(isapprox.(hp["m"], expected; atol=1e-10))
-    @test all(isapprox.(pq.m, hp["m"]; atol=1e-10))
+    @test all(isapprox.(pq.m, hp["m"]; atol=1e-6))
+    @test pq.λselfsign == hp["λselfsign"]
+    @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
+    @test all(isapprox.(pq.quartic_diagnostics.self.orders_lost, zeros(2); atol=1e-12))
+    @test all(pq.quartic_diagnostics.self.reliable)
+    @test !any(pq.quartic_diagnostics.self.exact_zero)
+    @test maximum(pq.mass_basis_diagnostics.eigenpair_residuals) < 1e-12
+    @test pq.mass_basis_diagnostics.orthogonality_error < 1e-12
+    @test minimum(pq.mass_basis_diagnostics.nearest_relative_gaps) > 0.9
+    @test pq.instanton_hierarchy.leading_log_gap == 10.0
+    @test pq.instanton_hierarchy.log_scale_span == 980.0
+    @test !pq.instanton_hierarchy.heuristic_strong_hierarchy
+    @test CYAxiverse.generate.pq_spectrum(K, L, Q).quartic_diagnostics === nothing
+    @test CYAxiverse.generate.pq_spectrum(K, L, Q).mass_basis_diagnostics === nothing
+    @test CYAxiverse.generate.pq_spectrum(K, L, Q).instanton_hierarchy === nothing
+
+    physical = CYAxiverse.generate.pq_physical_spectrum(K, L, Q; prec=200)
+    @test physical.mode_indices == [0, 1]
+    @test all(isapprox.(physical.m, expected; atol=1e-10))
+    @test physical.λselfsign == hp["λselfsign"]
+    @test all(isapprox.(physical.λself, hp["λself"]; atol=1e-10))
+    hybrid = CYAxiverse.generate.pq_hybrid_physical_spectrum(K, L, Q; prec=200)
+    @test hybrid.mode_indices == [0, 1]
+    @test all(isapprox.(hybrid.m, expected; atol=1e-10))
+    @test hybrid.λselfsign == hp["λselfsign"]
+    @test all(isapprox.(hybrid.λself, hp["λself"]; atol=1e-10))
+    hybrid_masses_only = CYAxiverse.generate.pq_hybrid_physical_spectrum(K, L, Q; prec=200, quartics=false)
+    @test all(isapprox.(hybrid_masses_only.m, expected; atol=1e-10))
+    @test isempty(hybrid_masses_only.λself)
+    @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=200) == 2
+    @test CYAxiverse.generate.pq_schur_admissible(K, L, Q; prec=200)
+    @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=100, max_prec=100, label="diagonal test") == 2
+end
+
+@testset "PQ spectrum: non-diagonal kinetic matrix" begin
+    # A non-diagonal K catches the side on which the Cholesky inverse acts.
+    K = Hermitian([4.0 1.2;
+                   1.2 9.0])
+    Q = [3 0 0;
+         0 5 0]
+    L = [1.0 1.0 0.0;
+         -20.0 -30.0 -1000.0]
+
+    pq_legacy = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=false)
+    pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
+    pq_corrected = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=true, prec=200)
+    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+
+    @test all(isapprox.(pq_legacy.m, hp["m"]; atol=0.1))
+    @test all(isapprox.(pq.m, hp["m"]; atol=1e-6))
+    @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
+    @test all(isapprox.(pq_corrected.m, hp["m"]; atol=1e-10))
+    @test pq_corrected.λselfsign == hp["λselfsign"]
+    @test all(isapprox.(pq_corrected.λself, hp["λself"]; atol=1e-10))
+    @test pq_corrected.λ22sign == hp["λ22sign"]
+    @test all(isapprox.(pq_corrected.λ22, hp["λ22"]; atol=1e-10))
+end
+
+@testset "PQ-seeded HP alignment" begin
+    K = Hermitian([4.0 0.0;
+                   0.0 9.0])
+    Q = [3 0 0;
+         0 5 0]
+    L = [1.0 1.0 0.0;
+         -20.0 -30.0 -1000.0]
+
+    alignment = CYAxiverse.generate.pq_hp_alignment(K, L, Q; prec=200)
+
+    @test alignment.permutation == [1, 2]
+    @test all(isapprox.(alignment.aligned_overlap, ones(2); atol=1e-12))
+    @test all(alignment.residuals .< 1e-100)
 end
