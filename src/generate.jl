@@ -1499,10 +1499,56 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     end
 end
 
+function leading_independent_mask!(tilde_mask::AbstractVector{Bool}, Qsorted::AbstractMatrix{Int}, orthogonal_span::AbstractMatrix{Float64}, residual::AbstractVector{Float64})
+    h11, ncols = size(Qsorted)
+    fill!(tilde_mask, false)
+    fill!(orthogonal_span, 0.0)
+    current_rank = 0
+
+    @inbounds for idx in 1:ncols
+        original_norm_squared = 0.0
+        for i in 1:h11
+            value = Float64(Qsorted[i, idx])
+            residual[i] = value
+            original_norm_squared += value * value
+        end
+
+        # A second modified Gram--Schmidt pass keeps the residual reliable when
+        # the already-selected charge vectors are poorly conditioned.
+        for _ in 1:2, j in 1:current_rank
+            projection = 0.0
+            for i in 1:h11
+                projection += orthogonal_span[i, j] * residual[i]
+            end
+            for i in 1:h11
+                residual[i] -= projection * orthogonal_span[i, j]
+            end
+        end
+
+        residual_norm_squared = 0.0
+        for i in 1:h11
+            residual_norm_squared += residual[i] * residual[i]
+        end
+        if residual_norm_squared > eps(Float64) * original_norm_squared
+            current_rank += 1
+            inverse_norm = inv(sqrt(residual_norm_squared))
+            for i in 1:h11
+                orthogonal_span[i, current_rank] = residual[i] * inverse_norm
+            end
+            tilde_mask[idx] = true
+            current_rank == h11 && break
+        end
+    end
+    current_rank
+end
+
 """
     LQtilde(Q, L)
 
-TBW
+Order instantons by decreasing `L[2, :]`, select the first `h11` linearly
+independent charge columns, and return the selected (`tilde`) and remaining
+(`bar`) potential data. Selection uses a preallocated, reorthogonalized
+Gram--Schmidt workspace, so scanning candidates does not allocate per column.
 """
 function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
     @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
@@ -1520,27 +1566,8 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
     # trigger a dense decomposition for every candidate and do not scale to
     # the large instanton sets at high h11.
     orthogonal_span = zeros(Float64, h11, h11)
-    current_rank = 0
-
-    @inbounds for idx in 1:ncols
-        col = @view(Qsorted[:, idx])
-        if current_rank < h11
-            residual = Float64.(col)
-            original_norm = norm(residual)
-            for j in 1:current_rank
-                residual .-= dot(@view(orthogonal_span[:, j]), residual) .* @view(orthogonal_span[:, j])
-            end
-            residual_norm = norm(residual)
-            if residual_norm > sqrt(eps(Float64)) * original_norm
-                current_rank += 1
-                orthogonal_span[:, current_rank] .= residual ./ residual_norm
-                tilde_mask[idx] = true
-                if current_rank == h11
-                    break
-                end
-            end
-        end
-    end
+    residual = zeros(Float64, h11)
+    leading_independent_mask!(tilde_mask, Qsorted, orthogonal_span, residual)
 
     Qtilde = Qsorted[:, tilde_mask]
     Ltilde = Lsorted[:, tilde_mask]

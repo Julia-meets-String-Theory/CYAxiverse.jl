@@ -55,6 +55,16 @@ end
     @test selected.Qtilde == Q[:, 1:2]
     @test selected.Ltilde == L[:, 1:2]
 
+    # The candidate scan itself reuses its workspaces, including for dependent
+    # columns encountered before the basis is complete.
+    Qsorted = Q[:, [1, 3, 2]]
+    mask = falses(3)
+    span = zeros(2, 2)
+    residual = zeros(2)
+    CYAxiverse.generate.leading_independent_mask!(mask, Qsorted, span, residual)
+    @test mask == Bool[true, false, true]
+    @test @allocated(CYAxiverse.generate.leading_independent_mask!(mask, Qsorted, span, residual)) == 0
+
     pq = CYAxiverse.generate.pq_spectrum(K, L, Q; quartic_diagnostics=true, mass_basis_diagnostics=true, hierarchy_diagnostics=true)
     hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
 
