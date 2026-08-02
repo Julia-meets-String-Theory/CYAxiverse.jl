@@ -729,6 +729,31 @@ function leading_hessian_matrix_float64(K::Hermitian{Float64, Matrix{Float64}}, 
     Hermitian(Kfactor.L \ H / Kfactor.L')
 end
 
+"""Construct the PQ leading Hessian in canonical fields at arbitrary precision.
+
+Only nonzero entries of each instanton charge vector are accumulated. This is
+mathematically identical to a dense rank-one update but is essential for the
+sparse charge matrices encountered at large h11.
+"""
+function high_precision_leading_hessian(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec::Int=1_000)
+    setprecision(ArbFloat; digits=prec)
+    T = typeof(ArbFloat(0))
+    h11 = size(K, 1)
+    scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    H = zeros(T, h11, h11)
+    for a in eachindex(scales)
+        support = Int[]
+        for i in axes(Q, 1)
+            Q[i, a] != 0 && push!(support, i)
+        end
+        for j in support, i in support
+            H[i, j] += scales[a] * Q[i, a] * Q[j, a]
+        end
+    end
+    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
+    Hermitian(Kfactor.L \ H / Kfactor.L'), Kfactor
+end
+
 function mass_basis_accuracy(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}, basis::Matrix{Float64})
     W = leading_hessian_matrix_float64(K, L, Q)
     Wbasis = W * basis
@@ -777,16 +802,7 @@ formed from a PQ-selected leading instanton set. The returned basis is ordered
 by ascending mass and converted to Float64 only after diagonalization.
 """
 function leading_hessian_mass_basis(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec::Int=1_000)
-    setprecision(ArbFloat; digits=prec)
-    T = typeof(ArbFloat(0))
-    h11 = size(K, 1)
-    scales::Vector{T} = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
-    H::Matrix{T} = zeros(T, h11, h11)
-    for a in eachindex(scales), i in 1:h11, j in 1:h11
-        H[i, j] += scales[a] * Q[i, a] * Q[j, a]
-    end
-    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
-    W = Hermitian(Kfactor.L \ H / Kfactor.L')
+    W, _ = high_precision_leading_hessian(K, L, Q; prec)
     eigenvalues, eigenvectors = eigen(W)
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
     order = sortperm(masses)
@@ -980,16 +996,10 @@ future threshold-targeted hybrid solver.
 function pq_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000)
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
-    setprecision(ArbFloat; digits=prec)
-    T = typeof(ArbFloat(0))
+    W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
+    T = eltype(W)
     h11 = size(K, 1)
-    leading_scales = T.(Ltilde[1, :]) .* (T(10) .^ T.(Ltilde[2, :]))
-    H = zeros(T, h11, h11)
-    for a in eachindex(leading_scales), i in 1:h11, j in 1:h11
-        H[i, j] += leading_scales[a] * Qtilde[i, a] * Qtilde[j, a]
-    end
-    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
-    eigenvalues, eigenvectors = eigen(Hermitian(Kfactor.L \ H / Kfactor.L'))
+    eigenvalues, eigenvectors = eigen(W)
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
     order = sortperm(masses)
     masses = masses[order]
@@ -1128,16 +1138,9 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     physical_count = pq_physical_mode_count(K, L, Q; threshold_log10, prec, label)
     physical_count == 0 && return PhysicalAxionSpectrum(Float64[], Int[], zeros(Float64, size(K, 1), 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
 
-    setprecision(ArbFloat; digits=prec)
-    T = typeof(ArbFloat(0))
+    W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
+    T = eltype(W)
     h11 = size(K, 1)
-    leading_scales = T.(Ltilde[1, :]) .* (T(10) .^ T.(Ltilde[2, :]))
-    H = zeros(T, h11, h11)
-    for a in eachindex(leading_scales), i in 1:h11, j in 1:h11
-        H[i, j] += leading_scales[a] * Qtilde[i, a] * Qtilde[j, a]
-    end
-    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
-    W = Hermitian(Kfactor.L \ H / Kfactor.L')
 
     Kls = cholesky(K).L
     Qleading = Matrix(Qtilde') / Kls'
@@ -1250,16 +1253,8 @@ need a higher-precision follow-up. `label` identifies the input in that
 warning; geometry-based overloads supply it automatically.
 """
 function physical_mode_inertia_count(K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int)
-    setprecision(ArbFloat; digits=prec)
-    T = typeof(ArbFloat(0))
-    h11 = size(K, 1)
-    scales = T.(Ltilde[1, :]) .* (T(10) .^ T.(Ltilde[2, :]))
-    H = zeros(T, h11, h11)
-    for a in eachindex(scales), i in 1:h11, j in 1:h11
-        H[i, j] += scales[a] * Qtilde[i, a] * Qtilde[j, a]
-    end
-    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
-    W = Hermitian(Kfactor.L \ H / Kfactor.L')
+    W, _ = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
+    T = eltype(W)
     mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
     threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
     positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold_eigenvalue * I)))
@@ -1316,13 +1311,7 @@ function pq_schur_admissible(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{F
     T = typeof(ArbFloat(0))
     h11 = size(K, 1)
     physical_count == h11 && return true
-    scales = T.(Ltilde[1, :]) .* (T(10) .^ T.(Ltilde[2, :]))
-    H = zeros(T, h11, h11)
-    for a in eachindex(scales), i in 1:h11, j in 1:h11
-        H[i, j] += scales[a] * Qtilde[i, a] * Qtilde[j, a]
-    end
-    Kfactor = cholesky(Hermitian(T.(Matrix(K))))
-    W = Hermitian(Kfactor.L \ H / Kfactor.L')
+    W, _ = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
     _, float_vectors = eigen(leading_hessian_matrix_float64(K, Ltilde, Qtilde))
     complement = T.(float_vectors[:, 1:end-physical_count])
     C = Hermitian(complement' * W * complement)
@@ -1367,19 +1356,8 @@ function pq_hp_alignment(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float
     _, mapprox, P = pq_canonical_frame(Qleading, Ltilde)
     P = P[:, sortperm(mapprox)]
 
-    setprecision(ArbFloat; digits=prec)
-    T = typeof(ArbFloat(0))
-    scales::Vector{T} = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
-    H::Matrix{T} = zeros(T, h11, h11)
-    for a in eachindex(scales)
-        for i in 1:h11, j in 1:h11
-            H[i, j] += scales[a] * Q[i, a] * Q[j, a]
-        end
-    end
-    Ktest::Hermitian{T, Matrix{T}} = Hermitian(T.(Matrix(K)))
-    Kfactor = cholesky(Ktest)
-    hessfull = Hermitian(H)
-    W = Hermitian(Kfactor.L \ Matrix(hessfull) / Kfactor.L')
+    W, _ = high_precision_leading_hessian(K, L, Q; prec)
+    T = eltype(W)
 
     # Orthonormalize the Float64 PQ frame again at the requested precision.
     Pseed = T.(P)
@@ -1538,17 +1516,24 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
     ncols = size(Q, 2)
     tilde_mask = fill(false, ncols)
     
-    # Pre-allocate matrix with maximum rank capacity
-    Qtilde_builder = Matrix{Int}(undef, h11, h11)
+    # Maintain an orthonormal span while scanning. Repeated calls to `rank`
+    # trigger a dense decomposition for every candidate and do not scale to
+    # the large instanton sets at high h11.
+    orthogonal_span = zeros(Float64, h11, h11)
     current_rank = 0
 
     @inbounds for idx in 1:ncols
         col = @view(Qsorted[:, idx])
         if current_rank < h11
-            Qtilde_builder[:, current_rank + 1] = col
-            new_rank = rank(@view(Qtilde_builder[:, 1:current_rank + 1]))
-            if new_rank > current_rank
-                current_rank = new_rank
+            residual = Float64.(col)
+            original_norm = norm(residual)
+            for j in 1:current_rank
+                residual .-= dot(@view(orthogonal_span[:, j]), residual) .* @view(orthogonal_span[:, j])
+            end
+            residual_norm = norm(residual)
+            if residual_norm > sqrt(eps(Float64)) * original_norm
+                current_rank += 1
+                orthogonal_span[:, current_rank] .= residual ./ residual_norm
                 tilde_mask[idx] = true
                 if current_rank == h11
                     break

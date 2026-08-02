@@ -49,6 +49,12 @@ end
     L = [1.0 1.0 0.0;
          -20.0 -30.0 -1000.0]
 
+    selected = CYAxiverse.generate.LQtilde(Q, L)
+    @test size(selected.Qtilde) == (2, 2)
+    @test rank(selected.Qtilde) == 2
+    @test selected.Qtilde == Q[:, 1:2]
+    @test selected.Ltilde == L[:, 1:2]
+
     pq = CYAxiverse.generate.pq_spectrum(K, L, Q; quartic_diagnostics=true, mass_basis_diagnostics=true, hierarchy_diagnostics=true)
     hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
 
