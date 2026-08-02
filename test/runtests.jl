@@ -1,5 +1,6 @@
 using CYAxiverse
 using LinearAlgebra
+using SparseArrays
 using Test
 
 include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
@@ -69,6 +70,41 @@ end
             max_iterations=300)
         @test solved.minima_count == expected_minima
     end
+    scan = CYAxiverse.paper_benchmarks.n8_minima_scan(starts=2048)
+    @test Tuple(result.minima_count for result in scan) == (5, 1)
+
+    reduced_problem = CYAxiverse.jlm_reduced.prepare(n8.Q, n8.L)
+    @test reduced_problem.Q_reduced isa SparseArrays.AbstractSparseMatrix
+    @test reduced_problem.extra_rows == size(reduced_problem.Q_reduced, 1) - size(reduced_problem.Q_reduced, 2)
+
+    square_jlm = CYAxiverse.jlm_reduced.minimize(
+        [1 0 0; 0 1 0], [1.0 1.0 0.0; 0.0 -1.0 -100.0])
+    @test square_jlm.N_min == 1
+    @test square_jlm.det_QTilde == 1
+    scaled_square_jlm = CYAxiverse.jlm_reduced.minimize(
+        [2 0 1; 0 2 0], [1.0 1.0 1.0; 0.0 -10.0 -1.0])
+    @test scaled_square_jlm.N_min == 4
+    @test scaled_square_jlm.det_QTilde == 4
+
+    lattice_selected = CYAxiverse.generate.LQtilde(
+        [2 0 1; 0 2 1], [1.0 1.0 1.0; 0.0 -1.0 -10.0])
+    lattice_offsets = CYAxiverse.generate.leading_lattice_offsets(lattice_selected)
+    @test size(lattice_offsets) == (2, 4)
+    @test all(maximum(abs.(mod.(lattice_selected.Qtilde' * lattice_offsets, 1.0)); dims=1) .< 1e-12)
+    lattice_branches = CYAxiverse.generate.leading_critical_branches(lattice_selected)
+    @test lattice_branches.det_Qtilde == 4
+    @test lattice_branches.branch_count == 16
+    @test lattice_branches.leading_minima_count == 4
+    @test count(==(0), lattice_branches.leading_negative_modes) == 4
+    @test count(==(1), lattice_branches.leading_negative_modes) == 8
+    @test count(==(2), lattice_branches.leading_negative_modes) == 4
+
+    signed_selected = CYAxiverse.generate.LQtilde(
+        [1 0 1; 0 1 1], [-1.0 1.0 1.0; 0.0 -1.0 -10.0])
+    signed_branches = CYAxiverse.generate.leading_critical_branches(signed_selected)
+    @test signed_branches.branch_count == 4
+    @test signed_branches.leading_minima_count == 1
+    @test sort(signed_branches.leading_negative_modes) == [0, 1, 1, 2]
 
     catastrophe = CYAxiverse.paper_benchmarks.n8_degenerate_point(
         [0.0, 0.00499839, 0.99500161, 0.75995156,
@@ -93,6 +129,12 @@ end
         catastrophe.k + 1e-7)
     @test !initial.follow_hilltop
     @test isapprox(initial.theta_critical, theta_glsm; atol=1e-12)
+
+    local_form = CYAxiverse.paper_benchmarks.n8_local_hilltop_coefficients()
+    @test isapprox(local_form.beta1, 3.71e3; rtol=2e-3)
+    @test isapprox(local_form.c4, 2.3724e10; rtol=2e-4)
+    analytic_efolds = CYAxiverse.paper_benchmarks.n8_hilltop_efolds(1e-7)
+    @test isapprox(analytic_efolds.efolds, 6.819e3; rtol=2e-3)
 
     geometry = CYAxiverse.paper_benchmarks.n8_geometry()
     @test geometry.h11 == 8

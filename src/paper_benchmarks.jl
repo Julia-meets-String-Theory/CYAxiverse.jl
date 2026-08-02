@@ -10,7 +10,7 @@ module paper_benchmarks
 using LinearAlgebra
 using NLsolve
 using Optim
-using ..generate: LQtilde
+using ..generate: LQtilde, reduced_critical_points
 
 const _LOG10E = log10(exp(1.0))
 
@@ -325,6 +325,99 @@ function n8_inflation_initial_condition(k::Real; displacement::Real=1e-8,
     theta = candidates[argmax(downhill)]
     (; theta, theta_critical, direction, displacement=Float64(displacement),
        k=Float64(k), kc=catastrophe.k, hilltop, follow_hilltop)
+end
+
+"""
+    n8_local_hilltop_coefficients(; branch=:a, k_step=1e-7)
+
+Extract the canonical local normal form
+`V/V0 = 1 - beta1*(k-kc)*x^2/2 - c4*x^4/4 + ...` at the N=8 cusp.
+The quartic coefficient includes the tree-level relaxation of the seven heavy
+directions, `Vxxxx_eff = Vxxxx - 3 Vxxy Hyy^-1 Vyxx`.
+"""
+function n8_local_hilltop_coefficients(; branch::Symbol=:a,
+        k_step::Real=1e-7)
+    k_step > 0 || throw(ArgumentError("k_step must be positive"))
+    initial = n8_inflation_initial_condition(
+        n8_degenerate_point(branch === :a ?
+            [0.0, 0.00499839, 0.99500161, 0.75995156,
+             0.75004523, 0.24995477, 0.0, 0.75495317] :
+            [0.0, 0.00499839, 0.99500161, 0.75004523,
+             0.75995156, 0.24004844, 0.0, 0.24504683]).k;
+        branch=branch)
+    kc = initial.kc
+    theta = initial.theta_critical
+    kinetic = Matrix(n8_kinetic_matrix(kc))
+    factor = cholesky(Hermitian(kinetic)).L
+    to_theta = inv(factor')
+    soft = factor' * initial.direction
+    soft ./= norm(soft)
+    transverse = nullspace(reshape(soft, 1, :))
+
+    function canonical_data(k)
+        derivatives = n8_potential_derivatives(theta, k)
+        hessian = to_theta' * derivatives.hessian * to_theta
+        (; derivatives, hessian)
+    end
+    center = canonical_data(kc)
+    plus_hilltop = n8_hilltop(kc + k_step; branch=branch)
+    plus_value = n8_potential_derivatives(plus_hilltop.theta, kc + k_step).value
+    beta_plus = -plus_hilltop.eigenvalues[1] / plus_value
+    # Below the cusp the root solve can select either of the two newly born
+    # flanking saddles.  The unique k > kc hilltop gives an unambiguous
+    # one-sided derivative, while beta(kc)=0 by the augmented solve.
+    beta1 = beta_plus / Float64(k_step)
+
+    potential = n8_potential(k=kc)
+    qcanonical = factor \ Matrix{Float64}(potential.Q)
+    amplitudes = vec(potential.L[1, :]) .* 10.0 .^ vec(potential.L[2, :])
+    arguments = 2π .* (Matrix{Float64}(potential.Q)' * theta)
+    qsoft = qcanonical' * soft
+    third_xx = -(2π)^3 .* qcanonical *
+        (amplitudes .* sin.(arguments) .* qsoft.^2)
+    fourth_xxxx = -(2π)^4 * sum(amplitudes .* cos.(arguments) .* qsoft.^4)
+    heavy_hessian = transverse' * center.hessian * transverse
+    heavy_cubic = transverse' * third_xx
+    fourth_effective = fourth_xxxx -
+        3 * dot(heavy_cubic, heavy_hessian \ heavy_cubic)
+    c4 = -fourth_effective / (6 * center.derivatives.value)
+    (; kc, beta1, c4, potential=center.derivatives.value,
+       fourth_straight=fourth_xxxx,
+       fourth_effective, k_step=Float64(k_step))
+end
+
+"""Equation-(13) local hilltop estimate for the N=8 benchmark."""
+function n8_hilltop_efolds(delta_k::Real; displacement::Real=1e-8,
+        branch::Symbol=:a, k_step::Real=1e-7)
+    delta_k > 0 || throw(ArgumentError("delta_k must be positive"))
+    displacement > 0 || throw(ArgumentError("displacement must be positive"))
+    coefficients = n8_local_hilltop_coefficients(branch=branch, k_step=k_step)
+    beta = coefficients.beta1 * Float64(delta_k)
+    efolds = log1p(beta / (coefficients.c4 * Float64(displacement)^2)) / (2 * beta)
+    (; efolds, beta, coefficients, displacement=Float64(displacement),
+       delta_k=Float64(delta_k))
+end
+
+"""
+    n8_minima_scan(; scales=(0.66, 0.68), starts=2048)
+
+Reproduce the 2023-paper N=8 minima-count checkpoint using the same
+hierarchy-preconditioned reduced critical-point solver as the production
+pipeline.  Returns one result per volume scale; the expected counts are five
+below and one above the catastrophe.
+"""
+function n8_minima_scan(; scales=(0.66, 0.68), starts::Int=2048,
+        residual_tolerance::Real=1e-9, merge_tolerance::Real=1e-6)
+    starts > 0 || throw(ArgumentError("starts must be positive"))
+    map(scales) do k
+        potential = n8_potential(k=k)
+        solved = reduced_critical_points(
+            potential.L, potential.Q; starts=starts,
+            residual_tolerance=residual_tolerance,
+            merge_tolerance=merge_tolerance, max_iterations=300)
+        (; k=Float64(k), critical_count=solved.critical_count,
+           minima_count=solved.minima_count, result=solved)
+    end
 end
 
 function _n8_flow_state(theta, k, kinetic, kinetic_inverse)

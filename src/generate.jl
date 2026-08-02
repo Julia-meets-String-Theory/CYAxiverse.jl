@@ -1634,9 +1634,110 @@ function reduced_critical_points(L::AbstractMatrix{Float64}, Q::AbstractMatrix{I
     Lordered = hcat(selected.Ltilde, selected.Lbar)
     Qordered = hcat(selected.Qtilde, selected.Qbar)
     leading_logs = @view selected.Ltilde[2, :]
-    equation_scales = 10.0 .^ (leading_logs .- maximum(leading_logs))
+    equation_scales = 10.0 .^ clamp.(leading_logs .- maximum(leading_logs),
+        log10(floatmin(Float64)), 0.0)
     critical_points(Lordered, Qordered;
         coordinate_basis=selected.Qtilde, equation_scales=equation_scales, kwargs...)
+end
+
+function _torus_distance(a::AbstractVector{<:Real}, b::AbstractVector{<:Real})
+    maximum(min.(abs.(a .- b), 1 .- abs.(a .- b)))
+end
+
+function _contains_torus_point(points::AbstractMatrix{<:Real}, θ::AbstractVector{<:Real},
+        count::Int; tol::Float64)
+    for i in 1:count
+        _torus_distance(@view(points[:, i]), θ) <= tol && return true
+    end
+    false
+end
+
+"""
+    leading_lattice_offsets(selected; tolerance=1e-8)
+
+Enumerate the finite quotient-lattice offsets solving
+`Qtilde' * θ = 0 mod 1` for the leading selected charge matrix.  The returned
+matrix has one axion-space offset per column and `abs(det(Qtilde))` columns for
+full-rank square `Qtilde`.
+"""
+function leading_lattice_offsets(selected::LQLinearlyIndependent; tolerance::Float64=1e-8)
+    h11 = size(selected.Qtilde, 1)
+    size(selected.Qtilde, 2) == h11 ||
+        throw(ArgumentError("Qtilde must be square to enumerate leading lattice offsets"))
+
+    det_qtilde = abs(round(Int, det(selected.Qtilde)))
+    det_qtilde > 0 || throw(ArgumentError("Qtilde must be nonsingular"))
+
+    inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
+    offsets = zeros(Float64, h11, det_qtilde)
+    offsets[:, 1] .= 0.0
+    count = 1
+    cursor = 1
+    while cursor <= count
+        base = @view offsets[:, cursor]
+        for i in 1:h11
+            θ = mod.(base .+ @view(inverse_transpose[:, i]), 1.0)
+            if !_contains_torus_point(offsets, θ, count; tol=tolerance)
+                count += 1
+                count <= det_qtilde ||
+                    error("lattice enumeration exceeded abs(det(Qtilde))")
+                offsets[:, count] .= θ
+            end
+        end
+        cursor += 1
+    end
+    count == det_qtilde ||
+        @warn "lattice enumeration did not reach abs(det(Qtilde))" found=count expected=det_qtilde
+    offsets[:, 1:count]
+end
+
+"""
+    leading_critical_branches(selected; tolerance=1e-8, max_branches=1_000_000)
+
+Enumerate the leading half-integer critical branches
+`Qtilde' * θ ∈ {0, 1/2}^h11 mod 1`, including the quotient-lattice copies from
+`abs(det(Qtilde))`.  This gives a cheap deterministic prefilter for vacua and
+inflation scans when the leading instantons are strongly hierarchical.  The
+returned coordinates are in the original axion torus, one branch per column.
+
+The `leading_negative_modes` entry is the Hessian inertia of the leading
+selected potential only; downstream callers should still evaluate the full
+potential/Hessian on any retained branches.
+"""
+function leading_critical_branches(selected::LQLinearlyIndependent;
+        tolerance::Float64=1e-8, max_branches::Int=1_000_000)
+    h11 = size(selected.Qtilde, 1)
+    offsets = leading_lattice_offsets(selected; tolerance=tolerance)
+    det_qtilde = size(offsets, 2)
+    branch_count = det_qtilde * 2^h11
+    branch_count <= max_branches ||
+        throw(ArgumentError("leading branch enumeration would create $branch_count branches; increase max_branches explicitly if intended"))
+
+    inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
+    coordinates = zeros(Float64, h11, branch_count)
+    leading_negative_modes = Vector{Int}(undef, branch_count)
+    signs = @view selected.Ltilde[1, :]
+    branch_cursor = 0
+    for mask in 0:(2^h11 - 1)
+        half_phase = [((mask >> (i - 1)) & 1) == 1 ? 0.5 : 0.0 for i in 1:h11]
+        base = inverse_transpose * half_phase
+        negative_modes = count(i -> signs[i] * (half_phase[i] == 0.0 ? 1.0 : -1.0) < 0.0, 1:h11)
+        for j in axes(offsets, 2)
+            branch_cursor += 1
+            coordinates[:, branch_cursor] .= mod.(@view(offsets[:, j]) .+ base, 1.0)
+            leading_negative_modes[branch_cursor] = negative_modes
+        end
+    end
+
+    (; coordinates,
+       leading_negative_modes,
+       branch_count=branch_cursor,
+       leading_minima_count=count(==(0), leading_negative_modes),
+       det_Qtilde=det_qtilde)
+end
+
+function leading_critical_branches(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64}; kwargs...)
+    leading_critical_branches(LQtilde(Q, L); kwargs...)
 end
 
 """
@@ -1668,6 +1769,7 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
 
     # Pre-allocate effective vectors efficiently
     αeff_cols = Vector{Rational}[]
+    αeff_indices = Int[]
     
     @inbounds for i in axes(α, 1)
         keep = false
@@ -1685,14 +1787,18 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
         end
         if keep
             push!(αeff_cols, α[i, :])
+            push!(αeff_indices, i)
         end
     end
 
     if !isempty(αeff_cols)
         αeff = hcat(αeff_cols...)
-        αrowmask = [(L - Lhat[2, h11+1]) < -Ldiff_limit for L in @view(Lhat[2, 1:h11])]
+        Qbar_eff = Qbar_v[:, αeff_indices]
+        Lbar_eff = Lbar_v[:, αeff_indices]
+        perturbation_anchor = Lbar_v[2, first(αeff_indices)]
+        αrowmask = [(L - perturbation_anchor) < -Ldiff_limit for L in @view(Lhat[2, 1:h11])]
         αcolmask = [any(!iszero, col) for col in eachcol(αeff[αrowmask, :])]
-        return Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
+        return Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar_eff), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar_eff), Matrix{Rational}(αeff), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
     else
         return CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar))
     end
