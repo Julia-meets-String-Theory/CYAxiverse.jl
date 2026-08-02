@@ -1135,10 +1135,16 @@ use `pq_physical_spectrum` to validate such a case.
 function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
-    physical_count = pq_physical_mode_count(K, L, Q; threshold_log10, prec, label)
+    W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
+    physical_count = physical_mode_inertia_count(W, threshold_log10)
+    physical_count = confirm_physical_mode_count(
+        physical_count, K, Ltilde, Qtilde, threshold_log10, prec, 4_000, label)
+    # Confirmation raises ArbFloat's default precision. Restore the requested
+    # working precision before allocating refinement temporaries; `W` and its
+    # factor retain the precision with which they were constructed.
+    setprecision(ArbFloat; digits=prec)
     physical_count == 0 && return PhysicalAxionSpectrum(Float64[], Int[], zeros(Float64, size(K, 1), 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
 
-    W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
     T = eltype(W)
     h11 = size(K, 1)
 
@@ -1252,19 +1258,19 @@ provisional. This keeps long scans running while flagging geometries that
 need a higher-precision follow-up. `label` identifies the input in that
 warning; geometry-based overloads supply it automatically.
 """
-function physical_mode_inertia_count(K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int)
-    W, _ = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
+function physical_mode_inertia_count(W::Hermitian, threshold_log10::Float64)
     T = eltype(W)
     mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
     threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
     positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold_eigenvalue * I)))
 end
 
-function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, confirm::Bool=true, max_prec::Int=4_000, label::AbstractString="matrix input")
-    LQtild = LQtilde(Q, L)
-    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
-    count_at_prec = physical_mode_inertia_count(K, Ltilde, Qtilde, threshold_log10, prec)
-    !confirm && return count_at_prec
+function physical_mode_inertia_count(K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int)
+    W, _ = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
+    physical_mode_inertia_count(W, threshold_log10)
+end
+
+function confirm_physical_mode_count(count_at_prec::Int, K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int, max_prec::Int, label::AbstractString)
     working_prec = prec
     while working_prec < max_prec
         working_prec = min(2 * working_prec, max_prec)
@@ -1274,6 +1280,14 @@ function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matri
     end
     @warn "physical-mode count did not stabilize by max_prec=$(max_prec) for geometry=$(label); returning provisional count $(count_at_prec). Increase max_prec or inspect the threshold neighbourhood."
     count_at_prec
+end
+
+function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, confirm::Bool=true, max_prec::Int=4_000, label::AbstractString="matrix input")
+    LQtild = LQtilde(Q, L)
+    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+    count_at_prec = physical_mode_inertia_count(K, Ltilde, Qtilde, threshold_log10, prec)
+    !confirm && return count_at_prec
+    confirm_physical_mode_count(count_at_prec, K, Ltilde, Qtilde, threshold_log10, prec, max_prec, label)
 end
 
 """Load one geometry and delegate to [`pq_physical_mode_count(K, L, Q; kwargs...)`](@ref), supplying its identifier as the warning label."""

@@ -10,9 +10,9 @@ makedocs(
         canonical = "https://vmmhep.github.io/CYAxiverse.jl/stable/"),
     modules = [CYAxiverse],
     pages = [
-        "Home" => "index.md"
-        "User guide" => "userguide.md"
-        "Examples" => "examples.md"
+        "Home" => "index.md",
+        "User guide" => "userguide.md",
+        "Examples" => "examples.md",
         "API" => "api.md"
     ]
 )
@@ -20,10 +20,14 @@ makedocs(
 # Documenter can also automatically deploy documentation to gh-pages.
 # See "Hosting Documentation" and deploydocs() in the Documenter manual
 # for more information.
-deploydocs(branch = "gh-pages",
-    repo = "github.com/vmmhep/CYAxiverse.jl.git",
-    devbranch = "dev",
-    target ="build",
-    deps = nothing,
-    make = nothing,
-    push_preview =true)
+if get(ENV, "CI", "false") == "true"
+    deploydocs(
+        branch = "gh-pages",
+        repo = "github.com/vmmhep/CYAxiverse.jl.git",
+        devbranch = "dev",
+        target = "build",
+        deps = nothing,
+        make = nothing,
+        push_preview = true,
+    )
+end
