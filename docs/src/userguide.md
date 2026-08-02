@@ -32,6 +32,11 @@ Set `quartics=false` for large mass-only scans. When quartics are requested,
 every input instanton contributes to their contraction even though only the
 physical mass eigenvectors are returned.
 
+`pq_spectrum` returns `m` together with the aligned Hessian-eigenvalue signs in
+`msign`. Its sequential PQ decay quantity is `f`; the legacy spectrum HDF5
+schema stores this array under `decay/fpert` for compatibility with existing
+readers.
+
 ### Large-geometry scaling checkpoint
 
 The mass-only hybrid solver was validated on ten geometries each at

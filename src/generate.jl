@@ -797,16 +797,16 @@ end
 """
     leading_hessian_mass_basis(K, L, Q; prec=1_000)
 
-Return the high-precision eigenspectrum and canonical eigenbasis of the Hessian
-formed from a PQ-selected leading instanton set. The returned basis is ordered
-by ascending mass and converted to Float64 only after diagonalization.
+Return the high-precision masses, eigenvalue signs, and canonical eigenbasis of
+the Hessian formed from a PQ-selected leading instanton set. Results are
+ordered by ascending mass and converted to Float64 only after diagonalization.
 """
 function leading_hessian_mass_basis(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec::Int=1_000)
     W, _ = high_precision_leading_hessian(K, L, Q; prec)
     eigenvalues, eigenvectors = eigen(W)
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
     order = sortperm(masses)
-    return masses[order], Float64.(eigenvectors[:, order])
+    return masses[order], Int.(sign.(eigenvalues[order])), Float64.(eigenvectors[:, order])
 end
 
 """
@@ -819,7 +819,7 @@ function leading_hessian_mass_basis_float64(K::Hermitian{Float64, Matrix{Float64
     eigenvalues, eigenvectors = eigen(leading_hessian_matrix_float64(K, L, Q))
     masses = 0.5 .* log10.(abs.(eigenvalues)) .+ 9 .+ log10(2.435e18) .+ log10(2π)
     order = sortperm(masses)
-    return masses[order], eigenvectors[:, order]
+    return masses[order], Int.(sign.(eigenvalues[order])), eigenvectors[:, order]
 end
 
 """
@@ -872,8 +872,9 @@ lose precision through cancellation among instanton contributions. Use
 
 # Return value
 
-Returns an `AxionSpectrum` with masses `m`, decay quantities `f` and `fK`, and
-signed base-10 logarithms for `λself`, `λ31`, and `λ22`. The `λ31_i` and
+Returns an `AxionSpectrum` with masses `m`, aligned Hessian signs `msign`,
+decay quantities `f` and `fK`, and signed base-10 logarithms for `λself`,
+`λ31`, and `λ22`. The `λ31_i` and
 `λ22_i` matrices give zero-based mode indices. `quartic_diagnostics` is
 `nothing` by default; when requested, it is aligned with these component
 families and reports final-sum cancellation in the Float64 log-space
@@ -897,15 +898,16 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     # Match the mass ordering used in the returned PQ spectrum.
     order = sortperm(mapprox)
     masses = mapprox[order] .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
+    mass_signs = Int.(sign.(@view Ltilde[1, order]))
     quartic_basis = P[:, order]
     correction_mode = mixing_correction === true ? :high_precision : mixing_correction === false ? :none : mixing_correction
     @assert correction_mode in (:none, :float64, :high_precision) "mixing_correction must be false, true, :float64, or :high_precision"
     if correction_mode === :high_precision
         # This is the exact eigensystem of PQ's own selected leading-Hessian,
         # not an all-instanton HP calculation.
-        masses, quartic_basis = leading_hessian_mass_basis(K, Ltilde, Qtilde; prec=prec)
+        masses, mass_signs, quartic_basis = leading_hessian_mass_basis(K, Ltilde, Qtilde; prec=prec)
     elseif correction_mode === :float64
-        masses, quartic_basis = leading_hessian_mass_basis_float64(K, Ltilde, Qtilde)
+        masses, mass_signs, quartic_basis = leading_hessian_mass_basis_float64(K, Ltilde, Qtilde)
     end
     if mass_basis_diagnostics && correction_mode === :none
         throw(ArgumentError("mass_basis_diagnostics requires a leading-Hessian mass basis; set mixing_correction to :float64 or :high_precision"))
@@ -958,7 +960,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
             QuarticComponentDiagnostics(getindex.(two_two_diagnostics, 1), getindex.(two_two_diagnostics, 2), BitVector(getindex.(two_two_diagnostics, 3)), BitVector(getindex.(two_two_diagnostics, 4))),
         )
     end
-    AxionSpectrum(masses, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
+    AxionSpectrum(masses, mass_signs, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
     quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics, mass_diagnostics, hierarchy)

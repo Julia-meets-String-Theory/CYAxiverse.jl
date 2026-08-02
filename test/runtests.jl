@@ -2,6 +2,8 @@ using CYAxiverse
 using LinearAlgebra
 using Test
 
+include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
+
 @testset "CYAxiverse.jl" begin
     @testset "core" begin
         @test CYAxiverse.greet_CYAxiverse() == "Hello CYAxiverse!"
@@ -74,7 +76,9 @@ end
     ] .+ log10(2.435e18) .+ 9.0 .+ log10(2π))
 
     @test all(isapprox.(pq.m, expected; atol=1e-10))
+    @test pq.msign == [1, 1]
     @test all(isapprox.(hp["m"], expected; atol=1e-10))
+    @test pq.msign == hp["msign"]
     @test all(isapprox.(pq.m, hp["m"]; atol=1e-6))
     @test pq.λselfsign == hp["λselfsign"]
     @test all(isapprox.(pq.λself, hp["λself"]; atol=1e-10))
@@ -107,6 +111,17 @@ end
     @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=200) == 2
     @test CYAxiverse.generate.pq_schur_admissible(K, L, Q; prec=200)
     @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=100, max_prec=100, label="diagonal test") == 2
+end
+
+@testset "PQ spectrum: mass-sign propagation" begin
+    K = Hermitian(reshape([4.0], 1, 1))
+    Q = reshape(Int[3, 6], 1, 2)
+    L = [-1.0 0.0;
+         -20.0 -1000.0]
+
+    @test CYAxiverse.generate.pq_spectrum(K, L, Q).msign == [-1]
+    @test CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=:high_precision, prec=200).msign == [-1]
+    @test CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=false).msign == [-1]
 end
 
 @testset "PQ spectrum: non-diagonal kinetic matrix" begin
@@ -146,4 +161,53 @@ end
     @test alignment.permutation == [1, 2]
     @test all(isapprox.(alignment.aligned_overlap, ones(2); atol=1e-12))
     @test all(alignment.residuals .< 1e-100)
+end
+
+@testset "PQ vacua-pipeline spectrum persistence" begin
+    K = Hermitian([4.0 0.0;
+                   0.0 9.0])
+    Q = [3 0 0;
+         0 5 0]
+    L = [1.0 1.0 0.0;
+         -20.0 -30.0 -1000.0]
+    spectrum = CYAxiverse.generate.pq_spectrum(K, L, Q)
+    geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+    vac_est = (vac=3.0, issquare=1, extrarows=0)
+    vac_id = Dict{String, Any}(
+        "vac" => 3,
+        "θ̃∥" => Rational{Int}[1//1 0//1; 0//1 1//1],
+    )
+
+    previous_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+    try
+        mktempdir() do data_dir
+            ENV["CYAXIVERSE_DATA_DIR"] = data_dir
+            mkpath(joinpath(data_dir, "h11_002", "np_0000001", "cy_0000001"))
+            path = CYAxiverse.filestructure.cyax_file(geom_idx)
+            h5open(path, "w") do _ end
+
+            save_axion_data(geom_idx, spectrum, vac_est, vac_id; threshold=0.5)
+
+            h5open(path, "r") do file
+                @test HDF5.read(file, "spectrum/masses/log10") == spectrum.m
+                @test HDF5.read(file, "spectrum/masses/sign") == spectrum.msign
+                @test HDF5.read(file, "spectrum/decay/fK") == spectrum.fK
+                @test HDF5.read(file, "spectrum/decay/fpert") == spectrum.f
+                @test HDF5.read(file, "spectrum/quartdiag/log10") == spectrum.λself
+                @test HDF5.read(file, "spectrum/quartdiag/sign") == spectrum.λselfsign
+            end
+
+            saved_vacua = CYAxiverse.read.pipeline_vacua(geom_idx)
+            @test saved_vacua.threshold == 0.5
+            @test saved_vacua.estimate == 3.0
+            @test saved_vacua.verified == 3
+            @test saved_vacua.theta_parallel == vac_id["θ̃∥"]
+        end
+    finally
+        if previous_data_dir === nothing
+            pop!(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        else
+            ENV["CYAXIVERSE_DATA_DIR"] = previous_data_dir
+        end
+    end
 end

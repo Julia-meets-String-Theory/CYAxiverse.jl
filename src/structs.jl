@@ -126,6 +126,8 @@ end
 
 PQ-spectrum result. `m` is expressed in the basis selected by
 `mixing_correction`; `f` and `fK` retain their PQ/kinetic-basis definitions.
+`msign` contains the signs of the Hessian eigenvalues (or leading instanton
+coefficients for the sequential PQ estimate) aligned with `m`.
 The signed base-10 logarithms `λself`, `λ31`, and `λ22` are accompanied by
 their signs and zero-based index matrices. `quartic_diagnostics` is `nothing`
 by default and is a [`QuarticDiagnostics`](@ref) only when explicitly
@@ -139,6 +141,7 @@ a substitute for numerical mass-basis diagnostics.
 """
 struct AxionSpectrum
     m::Vector{Float64}
+    msign::Vector{Int}
     f::Vector{Float64}
     fK::Vector{Float64}
     λselfsign::Vector{Int}
