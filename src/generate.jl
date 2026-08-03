@@ -1104,11 +1104,58 @@ function schur_physical_basis(W::Hermitian{T, Matrix{T}}, float_basis::Matrix{Fl
     eigenvalues, basis, residuals
 end
 
+function select_quartic_backend(Q::Matrix{Int}, backend::Symbol)
+    backend in (:auto, :dense, :sparse) || throw(ArgumentError("quartic_backend must be :auto, :dense, or :sparse"))
+    backend !== :auto && return backend
+    entries = length(Q)
+    density = entries == 0 ? 0.0 : count(value -> !iszero(value), Q) / entries
+    entries >= 100_000 && density <= 0.10 ? :sparse : :dense
+end
+
+function quartic_charge_basis(Q::Matrix{Int}, Kfactor, basis::Matrix{T}, backend::Symbol) where {T}
+    transformed_basis = transpose(Kfactor.L) \ basis
+    backend === :sparse ? sparse(transpose(Q)) * transformed_basis : T.(transpose(Q)) * transformed_basis
+end
+
+function diagonal_quartics(Q::Matrix{Int}, L::Matrix{Float64}, Kfactor, basis::Matrix{T}, backend::Symbol) where {T}
+    transformed_basis = transpose(Kfactor.L) \ basis
+    physical_count = size(basis, 2)
+    values = zeros(T, physical_count)
+    quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    if backend === :sparse
+        sparse_Q = sparse(Q)
+        charges = zeros(T, physical_count)
+        for instanton in axes(Q, 2)
+            fill!(charges, zero(T))
+            for pointer in nzrange(sparse_Q, instanton)
+                row = sparse_Q.rowval[pointer]
+                charge = T(sparse_Q.nzval[pointer])
+                for mode in 1:physical_count
+                    charges[mode] += charge * transformed_basis[row, mode]
+                end
+            end
+            scale = quartic_scales[instanton]
+            for mode in 1:physical_count
+                values[mode] += scale * charges[mode]^4
+            end
+        end
+    else
+        charge_basis = T.(transpose(Q)) * transformed_basis
+        for instanton in axes(Q, 2), mode in 1:physical_count
+            values[mode] += quartic_scales[instanton] * charge_basis[instanton, mode]^4
+        end
+    end
+    signs = Int.(sign.(values))
+    logs = [signs[mode] == 0 ? -Inf : Float64(log10(abs(values[mode]))) for mode in 1:physical_count]
+    signs, logs
+end
+
 """
     pq_hybrid_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
                                 maxiter=100, residual_tolerance=1e-30,
                                 schur_acceleration=true, oversampling=8,
-                                quartics=true, mixed_quartics=true)
+                                quartics=true, mixed_quartics=true,
+                                quartic_backend=:auto)
 
 Compute only the PQ leading-Hessian modes above `threshold_log10` with a
 sequential-PQ-seeded, arbitrary-precision block subspace iteration. The physical
@@ -1129,6 +1176,10 @@ Set `mixed_quartics=false` with `quartics=true` to compute only diagonal
 `lambda_iiii` self-couplings. This is the compact production mode for large
 ensemble scans.
 
+`quartic_backend=:auto` selects the dense implementation for small or dense
+charge matrices and the sparse implementation for large sparse matrices. Use
+`:dense` or `:sparse` to override the dispatch for benchmarking.
+
 When the block-subspace fallback is used, `oversampling` adds a small number
 of sub-threshold vectors to the iteration and discards them at the end. This
 improves convergence when the spectral gap at the physical threshold is small.
@@ -1138,7 +1189,7 @@ high-precision reference routine. If the requested residual tolerance is not
 met by `maxiter`, a warning is emitted and the provisional result is returned;
 use `pq_physical_spectrum` to validate such a case.
 """
-function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true, label::AbstractString="matrix input")
+function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true, quartic_backend::Symbol=:auto, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
@@ -1187,7 +1238,16 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     maximum(residuals) > residual_tolerance && @warn "hybrid physical spectrum did not reach residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Returning a provisional result."
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
     !quartics && return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
-    Qmass = (T.(Q') / Kfactor.L') * basis
+    selected_backend = select_quartic_backend(Q, quartic_backend)
+    log2π = Float64(constants()["log2π"])
+    if !mixed_quartics
+        self_sign, self_log = diagonal_quartics(Q, L, Kfactor, basis, selected_backend)
+        return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis),
+            self_sign, self_log .+ 4 * log2π,
+            zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+            threshold_log10, prec)
+    end
+    Qmass = quartic_charge_basis(Q, Kfactor, basis, selected_backend)
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
     qindq31 = mixed_quartics ? [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j] : Tuple{Int,Int,Int,Int}[]
     qindq22 = mixed_quartics ? [(i, i, j, j) for i in 1:physical_count for j in 1:i-1] : Tuple{Int,Int,Int,Int}[]
@@ -1211,7 +1271,6 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     for i in eachindex(qindq22)
         two_two_sign[i], two_two_log[i] = signed_quartic(qindq22[i])
     end
-    log2π = Float64(constants()["log2π"])
     PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis),
         self_sign, self_log .+ 4 * log2π,
         isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, three_one_sign, three_one_log .+ 4 * log2π,

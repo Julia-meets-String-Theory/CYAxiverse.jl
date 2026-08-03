@@ -50,6 +50,13 @@ The quartic batch mode computes only diagonal self-couplings and derives
 eigenvectors are not persisted. Existing output is skipped unless `--force` is
 given, and per-geometry failures are recorded without stopping the batch.
 
+The hybrid solver accepts `quartic_backend=:auto` (the default). It retains
+the dense path for small or dense charge matrices and switches to sparse charge
+transforms for large sparse matrices. Use `quartic_backend=:dense` or
+`:sparse` to force a backend while benchmarking. With `quartics=true` and
+`mixed_quartics=false`, diagonal contractions stream over instantons and do
+not allocate the full physical-mode charge matrix.
+
 `pq_spectrum` returns `m` together with the aligned Hessian-eigenvalue signs in
 `msign`. Its sequential PQ decay quantity is `f`; the legacy spectrum HDF5
 schema stores this array under `decay/fpert` for compatibility with existing

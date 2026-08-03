@@ -2,6 +2,7 @@ using CYAxiverse
 using LinearAlgebra
 using SparseArrays
 using Test
+using HDF5
 
 include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
@@ -15,6 +16,42 @@ include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
     if get(ENV, "CYAXIVERSE_TEST_CYTOOLS", "0") == "1"
         @testset "cytools wrapper regression repro" begin
             include(joinpath(@__DIR__, "..", "scripts", "cytools_wrapper_repro.jl"))
+        end
+    end
+end
+
+@testset "Geometry-level LQtilde orientation" begin
+    # Geometry files store Q as (h11, instantons) and L as (2, instantons).
+    # This fixture prevents the old Python/Julia transpose convention from
+    # reappearing in the GeometryIndex overload.
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            Q = Int[1 0 1; 0 1 1]
+            L = Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+            potential["Q"] = Q
+            potential["L"] = L
+            geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+        end
+
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+            from_geometry = CYAxiverse.generate.LQtilde(geom_idx)
+            from_matrices = CYAxiverse.generate.LQtilde(
+                Int[1 0 1; 0 1 1], Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0])
+            @test from_geometry.Qtilde == from_matrices.Qtilde
+            @test from_geometry.Ltilde == from_matrices.Ltilde
+            @test from_geometry.Qbar == from_matrices.Qbar
+            @test from_geometry.Lbar == from_matrices.Lbar
+        finally
+            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 end
@@ -258,6 +295,18 @@ end
     @test all(isapprox.(hybrid.m, expected; atol=1e-10))
     @test hybrid.λselfsign == hp["λselfsign"]
     @test all(isapprox.(hybrid.λself, hp["λself"]; atol=1e-10))
+    hybrid_sparse = CYAxiverse.generate.pq_hybrid_physical_spectrum(
+        K, L, Q; prec=200, quartics=true, mixed_quartics=false,
+        quartic_backend=:sparse)
+    @test all(isapprox.(hybrid_sparse.m, hybrid.m; atol=1e-10))
+    @test hybrid_sparse.λselfsign == hybrid.λselfsign
+    @test all(isapprox.(hybrid_sparse.λself, hybrid.λself; atol=1e-10))
+    @test CYAxiverse.generate.select_quartic_backend(Q, :auto) == :dense
+    dispatch_probe = zeros(Int, 200, 500)
+    for column in axes(dispatch_probe, 2)
+        dispatch_probe[mod1(column, 200), column] = 1
+    end
+    @test CYAxiverse.generate.select_quartic_backend(dispatch_probe, :auto) == :sparse
     hybrid_masses_only = CYAxiverse.generate.pq_hybrid_physical_spectrum(K, L, Q; prec=200, quartics=false)
     @test all(isapprox.(hybrid_masses_only.m, expected; atol=1e-10))
     @test isempty(hybrid_masses_only.λself)
