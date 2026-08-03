@@ -1594,31 +1594,13 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
 end
 
 function LQtilde(h11::Int, tri::Int, cy::Int; hilbert = false)
-    if hilbert
-        pot_data = potential(h11, tri, cy; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)    
-    else
-        pot_data = potential(h11, tri, cy; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    end
+    pot_data = potential(h11, tri, cy; hilbert = hilbert)
+    return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
 end	
 
 function LQtilde(geom_idx::GeometryIndex; hilbert = false)
-    if hilbert
-        pot_data = potential(geom_idx; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    else
-        pot_data = potential(geom_idx; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    end
+    pot_data = potential(geom_idx; hilbert = hilbert)
+    return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
 end	
 
 """
