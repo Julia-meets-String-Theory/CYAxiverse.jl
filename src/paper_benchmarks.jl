@@ -239,6 +239,7 @@ end
 """Kinetic matrix at volume scale `k`, using `tau(k)=k*tau(1)`."""
 n8_kinetic_matrix(k::Real) = n8_geometry().kinetic / Float64(k)^2
 
+"""Locate the N=8 hilltop for volume scale `k` and return its soft mode."""
 function n8_hilltop(k::Real; branch::Symbol=:a, tolerance::Float64=1e-12)
     seeds = (
         a=[0.0, 0.00499839, 0.99500161, 0.75995156,
@@ -420,6 +421,7 @@ function n8_minima_scan(; scales=(0.66, 0.68), starts::Int=2048,
     end
 end
 
+"""Evaluate potential and slow-roll quantities at one N=8 flow point."""
 function _n8_flow_state(theta, k, kinetic, kinetic_inverse)
     derivatives = n8_potential_derivatives(theta, k)
     gradient_norm = sqrt(max(dot(derivatives.gradient, kinetic_inverse * derivatives.gradient), 0.0))
@@ -517,6 +519,7 @@ function n8_gradient_flow(delta_k::Real; displacement::Real=1e-8,
        initial)
 end
 
+"""Build the canonical soft/heavy decomposition used by valley flow."""
 function _n8_valley_setup(k, displacement, branch)
     initial = n8_inflation_initial_condition(k; displacement=displacement, branch=branch)
     kinetic = Matrix(n8_kinetic_matrix(k))
@@ -528,6 +531,7 @@ function _n8_valley_setup(k, displacement, branch)
     (; initial, kinetic, factor, to_theta, soft, transverse)
 end
 
+"""Minimize heavy coordinates at a fixed soft valley coordinate."""
 function _n8_valley_point(setup, k, x, z0)
     canonical = setup.soft .* x .+ setup.transverse * z0
     function theta_at(z)
@@ -625,6 +629,7 @@ function n8_valley_flow(delta_k::Real; displacement::Real=1e-8,
            (abs(point.eta) >= 1 || point.epsilon >= 1))
 end
 
+"""Take an implicit backward-Euler step for stiff gradient flow."""
 function _n8_backward_euler(theta, k, kinetic_inverse, scale, du;
         tolerance=1e-12, iterations=30)
     next = copy(theta)

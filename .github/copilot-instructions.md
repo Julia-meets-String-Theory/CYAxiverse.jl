@@ -21,7 +21,7 @@
   julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
   julia --project=docs docs/make.jl
   ```
-- No formatter or linter is configured. GitHub Actions runs package build/tests and documentation builds; its Julia 1.7 entries predate the current `Project.toml` Julia 1.12 compatibility requirement.
+- No formatter or linter is configured. GitHub Actions runs package tests on Julia 1.12 and builds the documentation with Julia 1.12.
 
 ## Architecture
 

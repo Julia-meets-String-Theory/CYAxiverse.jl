@@ -240,6 +240,12 @@ function pq_spectrum(h11::Int,tri::Int,cy::Int=1)
     return (; m = Hvals, fK = fK, fpert = fpert)
 end
 
+"""
+    physical_spectrum(h11, tri, cy=1)
+
+Read the persisted physical spectrum and its metadata from a geometry's
+`spectrum/physical` HDF5 group.
+"""
 function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
     h5open(cyax_file(h11, tri, cy), "r") do file
         physical = file["spectrum/physical"]
@@ -257,6 +263,7 @@ function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
     end
 end
 
+"""Read a persisted physical spectrum using a [`GeometryIndex`](@ref)."""
 function physical_spectrum(geom_idx::GeometryIndex)
     physical_spectrum(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
 end

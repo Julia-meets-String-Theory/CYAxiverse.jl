@@ -9,6 +9,7 @@ using Logging
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
 
+"""Collect warning messages emitted while processing one geometry."""
 struct _BatchWarningLogger <: AbstractLogger
     messages::Vector{String}
 end
@@ -16,10 +17,12 @@ end
 Logging.min_enabled_level(::_BatchWarningLogger) = Logging.Debug
 Logging.shouldlog(::_BatchWarningLogger, args...) = true
 Logging.catch_exceptions(::_BatchWarningLogger) = false
+"""Store warning-level messages in the batch logger."""
 function Logging.handle_message(logger::_BatchWarningLogger, level, message, args...; kwargs...)
     level >= Logging.Warn && push!(logger.messages, string(message))
 end
 
+"""Print command-line usage for the physical-spectrum batch runner."""
 function _usage()
     println("""
     Usage:
@@ -42,6 +45,7 @@ function _usage()
     """)
 end
 
+"""Parse batch-runner command-line arguments into an options dictionary."""
 function _parse_args(args)
     options = Dict{Symbol, Any}(
         :data_dir => "", :h11 => nothing, :limit => nothing, :offset => 0,
@@ -97,6 +101,7 @@ function _parse_args(args)
     options
 end
 
+"""Parse the integer suffix of a directory name with the given prefix."""
 function _parse_prefixed_int(name::AbstractString, prefix::AbstractString)
     startswith(name, prefix) || return nothing
     try
@@ -106,6 +111,7 @@ function _parse_prefixed_int(name::AbstractString, prefix::AbstractString)
     end
 end
 
+"""Find geometries by scanning the selected database directory tree."""
 function _scanned_geometries(h11_filter)
     root = CYAxiverse.filestructure.present_dir()
     h11_dirs = h11_filter === nothing ? filter(name -> startswith(name, "h11_"), readdir(root)) : [string("h11_", lpad(h11_filter, 3, "0"))]
@@ -130,6 +136,7 @@ function _scanned_geometries(h11_filter)
     geoms
 end
 
+"""Find geometries from the package path index, returning an empty fallback."""
 function _indexed_geometries(h11_filter)
     try
         _, pathinds = CYAxiverse.filestructure.paths_cy()
@@ -140,6 +147,7 @@ function _indexed_geometries(h11_filter)
     end
 end
 
+"""Combine explicit, indexed, and scanned selections with offset and limit."""
 function _selected_geometries(options)
     geoms = if isempty(options[:geometries])
         indexed = _indexed_geometries(options[:h11])
@@ -153,10 +161,12 @@ function _selected_geometries(options)
     options[:limit] === nothing ? geoms : geoms[1:min(options[:limit], length(geoms))]
 end
 
+"""Return the existing `cyax.h5` path for a geometry."""
 function _output_path(root, geom_idx)
     CYAxiverse.filestructure.cyax_file(geom_idx)
 end
 
+"""Return whether an HDF5 file contains a completed physical mass dataset."""
 function _has_physical_spectrum(path)
     isfile(path) || return false
     h5open(path, "r") do file
@@ -164,17 +174,20 @@ function _has_physical_spectrum(path)
     end
 end
 
+"""Convert the eigenvalues of `K` into base-10 Kahler decay constants."""
 function _fK_log10(K)
     log10.(sqrt.(eigen(K).values)) .+
     Float64(log10(CYAxiverse.generate.constants()["MPlanck"])) .-
         Float64(CYAxiverse.generate.constants()["log2π"])
 end
 
+"""Replace one HDF5 dataset, deleting an existing dataset first."""
 function _replace_dataset(group, name, value)
     haskey(group, name) && HDF5.delete_object(group, name)
     group[name] = value
 end
 
+"""Write one physical spectrum and metadata into its existing geometry file."""
 function _write_result(path, geom_idx, spectrum; prec, threshold_log10, quartics, runtime_seconds, provisional, fK=Float64[])
     h5open(path, "r+") do file
         spectrum_group = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
@@ -203,6 +216,7 @@ function _write_result(path, geom_idx, spectrum; prec, threshold_log10, quartics
     end
 end
 
+"""Quote a value when needed for the batch summary CSV."""
 function _csv_escape(value)
     text = replace(string(value), '"' => "\"\"")
     occursin(r"[,\"\n]", text) ? string('"', text, '"') : text
@@ -210,6 +224,7 @@ end
 
 const SUMMARY_HEADER = "h11,polytope,frst,status,error,runtime_seconds,prec,threshold_log10,instantons,physical_count,massless_count,min_mass_log10,max_mass_log10,median_mass_log10,quartics,negative_lambda_count,positive_lambda_count,min_fpert_log10,max_fpert_log10,median_fpert_log10,min_fK_log10,max_fK_log10,median_fK_log10,provisional,output"
 
+"""Create the batch summary CSV and write its header when needed."""
 function _write_summary_header(path; append=false)
     append && isfile(path) && return
     mkpath(dirname(path))
@@ -218,10 +233,12 @@ function _write_summary_header(path; append=false)
     end
 end
 
+"""Return a median or an empty field for an empty collection."""
 function _median_or_empty(values)
     isempty(values) ? "" : median(values)
 end
 
+"""Append one geometry's processing result and summary statistics to CSV."""
 function _append_summary(path, geom_idx; status, error="", runtime_seconds=0.0, prec, threshold_log10,
                          instantons="", spectrum=nothing, quartics=false, provisional=false, output="", fK=Float64[])
     masses = spectrum === nothing ? Float64[] : spectrum.m
@@ -240,6 +257,12 @@ function _append_summary(path, geom_idx; status, error="", runtime_seconds=0.0, 
     end
 end
 
+"""
+    run_batch(options)
+
+Process the selected geometries and persist physical spectra in place. Return
+`true` only when every selected geometry completed successfully or was skipped.
+"""
 function run_batch(options)
     !isempty(options[:data_dir]) && (ENV["CYAXIVERSE_DATA_DIR"] = options[:data_dir])
     threshold = something(options[:threshold_log10], Float64(log10(CYAxiverse.generate.constants()["Hubble"])))

@@ -1104,6 +1104,7 @@ function schur_physical_basis(W::Hermitian{T, Matrix{T}}, float_basis::Matrix{Fl
     eigenvalues, basis, residuals
 end
 
+"""Check whether the Float64-seeded complement lies below the physical threshold."""
 function schur_admissible_float64(W::Hermitian, float_basis::Matrix{Float64}, physical_count::Int, threshold_log10::Float64)
     h11 = size(W, 1)
     physical_count == h11 && return true
@@ -1116,6 +1117,7 @@ function schur_admissible_float64(W::Hermitian, float_basis::Matrix{Float64}, ph
     maximum(complement_eigenvalues) < threshold_eigenvalue
 end
 
+"""Select the dense or sparse quartic contraction backend for `Q`."""
 function select_quartic_backend(Q::Matrix{Int}, backend::Symbol)
     backend in (:auto, :dense, :sparse) || throw(ArgumentError("quartic_backend must be :auto, :dense, or :sparse"))
     backend !== :auto && return backend
@@ -1124,11 +1126,13 @@ function select_quartic_backend(Q::Matrix{Int}, backend::Symbol)
     entries >= 100_000 && density <= 0.10 ? :sparse : :dense
 end
 
+"""Transform charges into the canonical physical-mode basis."""
 function quartic_charge_basis(Q::Matrix{Int}, Kfactor, basis::Matrix{T}, backend::Symbol) where {T}
     transformed_basis = transpose(Kfactor.L) \ basis
     backend === :sparse ? sparse(transpose(Q)) * transformed_basis : T.(transpose(Q)) * transformed_basis
 end
 
+"""Compute signed log-space diagonal quartics for the retained modes."""
 function diagonal_quartics(Q::Matrix{Int}, L::Matrix{Float64}, Kfactor, basis::Matrix{T}, backend::Symbol) where {T}
     transformed_basis = transpose(Kfactor.L) \ basis
     physical_count = size(basis, 2)
@@ -1344,11 +1348,13 @@ function physical_mode_inertia_count(W::Hermitian, threshold_log10::Float64)
     positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold_eigenvalue * I)))
 end
 
+"""Count physical modes after constructing the high-precision leading Hessian."""
 function physical_mode_inertia_count(K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int)
     W, _ = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
     physical_mode_inertia_count(W, threshold_log10)
 end
 
+"""Confirm a physical-mode count by repeating it at increasing precision."""
 function confirm_physical_mode_count(count_at_prec::Int, K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int, max_prec::Int, label::AbstractString)
     working_prec = prec
     while working_prec < max_prec
@@ -1361,6 +1367,12 @@ function confirm_physical_mode_count(count_at_prec::Int, K::Hermitian{Float64, M
     count_at_prec
 end
 
+"""
+    pq_physical_mode_count(K, L, Q; kwargs...)
+
+Count leading-Hessian modes above the physical mass threshold, optionally
+confirming the count at increasing arbitrary precision.
+"""
 function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, confirm::Bool=true, max_prec::Int=4_000, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
@@ -1670,11 +1682,13 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
     return LQLinearlyIndependent(Qtilde, Qbar, Lbar, Ltilde)
 end
 
+"""Load one geometry and select its leading linearly independent instantons."""
 function LQtilde(h11::Int, tri::Int, cy::Int; hilbert = false)
     pot_data = potential(h11, tri, cy; hilbert = hilbert)
     return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
 end	
 
+"""Select leading instantons for a geometry identified by `geom_idx`."""
 function LQtilde(geom_idx::GeometryIndex; hilbert = false)
     pot_data = potential(geom_idx; hilbert = hilbert)
     return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
@@ -1699,10 +1713,12 @@ function reduced_critical_points(L::AbstractMatrix{Float64}, Q::AbstractMatrix{I
         coordinate_basis=selected.Qtilde, equation_scales=equation_scales, kwargs...)
 end
 
+"""Return the sup-norm distance between two points on the unit torus."""
 function _torus_distance(a::AbstractVector{<:Real}, b::AbstractVector{<:Real})
     maximum(min.(abs.(a .- b), 1 .- abs.(a .- b)))
 end
 
+"""Check whether `θ` is already represented among the first `count` columns."""
 function _contains_torus_point(points::AbstractMatrix{<:Real}, θ::AbstractVector{<:Real},
         count::Int; tol::Float64)
     for i in 1:count
@@ -1795,6 +1811,7 @@ function leading_critical_branches(selected::LQLinearlyIndependent;
        det_Qtilde=det_qtilde)
 end
 
+"""Enumerate leading critical branches after selecting independent charges."""
 function leading_critical_branches(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64}; kwargs...)
     leading_critical_branches(LQtilde(Q, L); kwargs...)
 end

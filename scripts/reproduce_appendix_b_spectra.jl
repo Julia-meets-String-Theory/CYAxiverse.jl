@@ -7,6 +7,7 @@ using Statistics
 
 set_theme!(theme_latexfonts())
 
+"""Print command-line usage for the Appendix B reproduction script."""
 function _usage()
     println("""
     Usage:
@@ -21,6 +22,7 @@ function _usage()
     """)
 end
 
+"""Parse plotting options into a dictionary."""
 function _parse_args(args)
     options = Dict{Symbol,Any}(:data_dir => "", :output_dir => "", :h11_min => 4,
         :h11_max => 30, :bins => 160)
@@ -53,6 +55,7 @@ function _parse_args(args)
     options
 end
 
+"""Find HDF5 files under `root` whose h11 values lie in the requested range."""
 function _physical_files(root, h11_min, h11_max)
     files = Tuple{Int,String}[]
     for h11_dir in readdir(root; join=true)
@@ -75,6 +78,7 @@ function _physical_files(root, h11_min, h11_max)
     files
 end
 
+"""Read completed physical-spectrum values grouped by h11."""
 function _read_values(files)
     masses = Dict{Int,Vector{Float64}}()
     fpert = Dict{Int,Vector{Float64}}()
@@ -97,6 +101,7 @@ function _read_values(files)
     masses, fpert, fK, completed
 end
 
+"""Compute a normalized histogram for finite values and supplied bin edges."""
 function _histogram(values, edges)
     counts = zeros(Float64, length(edges) - 1)
     for value in values
@@ -109,6 +114,7 @@ function _histogram(values, edges)
     total == 0 ? counts : counts ./ total
 end
 
+"""Build one normalized histogram column for each h11 value."""
 function _matrix(values, h11s, edges)
     matrix = zeros(Float64, length(edges) - 1, length(h11s))
     for (column, h11) in enumerate(h11s)
@@ -117,6 +123,7 @@ function _matrix(values, h11s, edges)
     matrix
 end
 
+"""Save a PDF heatmap of the spectrum distribution by h11."""
 function _plot_heatmap(path, matrix, h11s, edges, title, xlabel)
     h11_edges = if length(h11s) == 1
         [h11s[1] - 0.5, h11s[1] + 0.5]
@@ -132,10 +139,12 @@ function _plot_heatmap(path, matrix, h11s, edges, title, xlabel)
     save(path, figure)
 end
 
+"""Return a quantile or an empty CSV field for empty values."""
 function _quantile_or_empty(values, q)
     isempty(values) ? "" : quantile(values, q)
 end
 
+"""Write per-h11 quantiles and completion counts to CSV."""
 function _write_summary(path, h11s, masses, fpert, fK, completed)
     open(path, "w") do io
         println(io, "h11,geometries,mass_count,mass_q05,mass_median,mass_q95,fpert_count,fpert_q05,fpert_median,fpert_q95,fK_count,fK_q05,fK_median,fK_q95")
@@ -151,6 +160,7 @@ function _write_summary(path, h11s, masses, fpert, fK, completed)
     end
 end
 
+"""Generate Appendix B spectrum heatmaps and quantile summaries."""
 function main(options)
     data_dir = isempty(options[:data_dir]) ? pwd() : abspath(options[:data_dir])
     output_dir = isempty(options[:output_dir]) ? joinpath(data_dir, "physical_spectrum", "appendix_b") : abspath(options[:output_dir])

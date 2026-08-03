@@ -40,3 +40,15 @@ Pages = ["read.jl"]
 Modules = [CYAxiverse.plotting]
 Pages = ["plotting.jl"]
 ```
+
+## `CYAxiverse.jlm_reduced`
+```@autodocs
+Modules = [CYAxiverse.jlm_reduced]
+Pages = ["jlm_reduced.jl"]
+```
+
+## `CYAxiverse.paper_benchmarks`
+```@autodocs
+Modules = [CYAxiverse.paper_benchmarks]
+Pages = ["paper_benchmarks.jl"]
+```

@@ -2,6 +2,7 @@
 
 using HDF5
 
+"""Read a command-line option from `ARGS`, returning `default` if absent."""
 function option_value(name, default)
     index = findfirst(==(name), ARGS)
     index === nothing && return default
@@ -9,6 +10,7 @@ function option_value(name, default)
     ARGS[index + 1]
 end
 
+"""Copy one legacy physical spectrum into its corresponding `cyax.h5` file."""
 function migrate_file!(legacy_path, target_path)
     h5open(target_path, "r+") do target
         haskey(target, "spectrum/physical/m") && return false
@@ -29,6 +31,7 @@ function migrate_file!(legacy_path, target_path)
     end
 end
 
+"""Migrate the selected legacy spectrum files and return a process exit code."""
 function main()
     data_dir = option_value("--data-dir", ".")
     offset = parse(Int, option_value("--offset", "0"))
