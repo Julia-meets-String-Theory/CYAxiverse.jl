@@ -60,8 +60,20 @@ end
 Returns the present data directory using localARGS
 """
 function present_dir()
-    pwd = ol_DB(localARGS())
-    return pwd
+    if haskey(ENV, "CYAXIVERSE_DATA_DIR") && !isempty(ENV["CYAXIVERSE_DATA_DIR"])
+        return present_dir(ENV["CYAXIVERSE_DATA_DIR"])
+    end
+    return ol_DB(localARGS())
+end
+
+"""
+    present_dir(data_dir)
+
+Returns an absolute data directory path with a trailing separator.
+"""
+function present_dir(data_dir::AbstractString)
+    path = abspath(expanduser(data_dir))
+    return endswith(path, Base.Filesystem.path_separator) ? path : string(path, Base.Filesystem.path_separator)
 end
 """
     plots_dir()

@@ -54,20 +54,20 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     @timeit "Qbar init" Qbar = Matrix{Int}(LQ.Qbar)
     @timeit "Lhat init" Lhat = LQ.Ltilde
     @timeit "Lbar init" Lbar = LQ.Lbar
-    @timeit "Ltilde_min" Ltilde_min::Float64 = minimum(@view(Lhat[2,:]))
-    @timeit "Ldiff_limit" Ldiff_limit::Float64 = log10(threshold)
+    @timeit "Ltilde_min" Ltilde_min = minimum(@view(Lhat[2,:]))
+    @timeit "Ldiff_limit" Ldiff_limit = log10(threshold)
     @timeit "Qbar threshold" Qbar = @view(Qbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     @timeit "Lbar threshold" Lbar = @view(Lbar[:, @view(Lbar[2,:]) .>= (Ltilde_min + Ldiff_limit)])
     @timeit "Qinv" Qinv = (inv(Qhat))
     @timeit "Qinv eps" Qinv = @.(ifelse(abs(Qinv) < 1e-10, zero(Qinv), round(Qinv; digits=4)))
     # Qhat::Matrix{Int} = deepcopy(Qtilde)
     # Lhat = deepcopy(Ltilde)
-    @timeit "αeff init" αeff::Matrix{Rational} = zeros(size(@view(Qhat[:, 1]),1),1)
-    @timeit "α" α::Matrix{Rational} = (Qinv * Qbar)' ##Is this the same as JLM's? YES
+    @timeit "αeff init" αeff = zeros(Rational, size(@view(Qhat[:, 1]),1),1)
+    @timeit "α" α = Matrix{Rational}((Qinv * Qbar)') ##Is this the same as JLM's? YES
     for i in axes(α,1)
         for j in axes(α,2)
             if abs(α[i,j]) > 1e-3
-                @timeit "Ldiff" Ldiff::Float64 = round(Lbar[2,i] - Lhat[2,j], digits=3)
+                @timeit "Ldiff" Ldiff = round(Lbar[2,i] - Lhat[2,j], digits=3)
                 if Ldiff > Ldiff_limit
                 else
                     @timeit "zero α1" α[i,j] = zero(Rational)
@@ -133,13 +133,13 @@ end
 
 function vacua(L::Matrix{Float64},Q::Matrix{Int})
     reset_timer!()
-    @timeit "h11" h11::Int = size(Q,2)
+    @timeit "h11" h11 = size(Q,2)
     if h11 < 50
         ###### Nemo SNF #####
-        @timeit "Nemo matrix" Qtemp::Nemo.fmpz_mat = matrix(Nemo.ZZ,Q)
-        @timeit "SNF" T::Nemo.fmpz_mat = snf_with_transform(Qtemp)[2]
-        @timeit "inv(T)" Tparallel1::Nemo.fmpz_mat = inv(T)[:,1:h11]
-        @timeit "convert T∥" Tparallel::Matrix{Int} = convert(Matrix{Int},Tparallel1)
+        @timeit "Nemo matrix" Qtemp = matrix(Nemo.ZZ,Q)
+        @timeit "SNF" T = snf_with_transform(Qtemp)[2]
+        @timeit "inv(T)" Tparallel1 = inv(T)[:,1:h11]
+        @timeit "convert T∥" Tparallel = convert(Matrix{Int},Tparallel1)
 
         ###### wildart SNF #####
         # @timeit "SNF" F = smith(Q)
@@ -147,18 +147,18 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
         # @timeit "inv(T)" Tparallel::Matrix{Int} = round.(inv(T)[:,1:h11])
         # println(size(T))
         
-        @timeit "θparallel" θparalleltest::Matrix{Float64} = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
+        @timeit "θparallel" θparalleltest = inv(transpose(Float64.(Q)) * Float64.(Q)) * transpose(Float64.(Q)) * Float64.(Tparallel)
     end
-    @timeit "zip LQ" LQtest::Matrix{Float64} = hcat(L,Q);
-    @timeit "sort LQ" LQsorted::Matrix{Float64} = LQtest[sortperm(L[:,2], rev=true), :]
-    @timeit "unzip LQ" Lsorted_test::Matrix{Float64},Qsorted_test::Matrix{Int} = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
-    @timeit "init Qtilde" Qtilde::Matrix{Int} = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
-    @timeit "init Ltilde" Ltilde::Matrix{Float64} = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
-    @timeit "init S" S::Nemo.FmpzMatSpace = MatrixSpace(Nemo.ZZ,1,1)
-    @timeit "init m" m::Nemo.fmpz_mat = matrix(Nemo.ZZ,zeros(1,1))
-    d::Int = 1
-    @timeit "init Qbar" Qbar::Matrix{Int} = zeros(Int,size(Qsorted_test[1,:],1),1)
-    @timeit "init Lbar" Lbar::Matrix{Float64} = zeros(Float64,size(Lsorted_test[1,:],1),1)
+    @timeit "zip LQ" LQtest = hcat(L,Q);
+    @timeit "sort LQ" LQsorted = LQtest[sortperm(L[:,2], rev=true), :]
+    @timeit "unzip LQ" Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
+    @timeit "init Qtilde" Qtilde = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
+    @timeit "init Ltilde" Ltilde = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
+    @timeit "init S" S = MatrixSpace(Nemo.ZZ,1,1)
+    @timeit "init m" m = matrix(Nemo.ZZ,zeros(1,1))
+    d = 1
+    @timeit "init Qbar" Qbar = zeros(Int,size(Qsorted_test[1,:],1),1)
+    @timeit "init Lbar" Lbar = zeros(Float64,size(Lsorted_test[1,:],1),1)
     for i=2:axes(Qsorted_test,1)[end]
         @timeit "Matrix.Space" S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
         @timeit "lin. ind." m = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
@@ -176,12 +176,12 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
     @timeit "Ltilde first pass" Ltilde = Ltilde[:,2:end]
     @timeit "Lbar first pass" Lbar = Lbar[:,2:end]
     println(size(Qbar), size(Lbar),size(Ltilde),size(Qtilde))
-    @timeit "Ltilde min" Ltilde_min::Float64 = minimum(Ltilde[2,:])
+    @timeit "Ltilde min" Ltilde_min = minimum(Ltilde[2,:])
     println(Ltilde_min)
-    @timeit "Ldiff limit" Ldiff_limit::Float64 = log10(0.01)
+    @timeit "Ldiff limit" Ldiff_limit = log10(0.01)
     @timeit "Qbar reduce" Qbar = Qbar[:, Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
     @timeit "Lbar reduce" Lbar = Lbar[:,Lbar[2,:] .>= (Ltilde_min + Ldiff_limit)]
-    @timeit "alpha" α::Matrix{Float64} = round.(Qbar' * inv(Qtilde'))
+    @timeit "alpha" α = round.(Qbar' * inv(Qtilde'))
     println(size(Qbar), size(Lbar), size(α), Qbar[:,1], Lbar[1,2])
     # println(α)
     # i=1

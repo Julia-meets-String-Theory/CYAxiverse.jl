@@ -60,8 +60,13 @@ function __init__()
                     n_vertices=None, n_dual_points=None, n_facets=None,
                     limit=1000, timeout=60, as_list=False, backend=None,
                     dualize=False, favorable=None):
-        return fetch_polytopes(h11,h12,h13,h21,h22,h31,chi,lattice,dim,n_points,n_vertices,
-        n_dual_points,n_facets,limit,timeout,as_list,backend, dualize,favorable)
+        return fetch_polytopes(
+            h11=h11, h12=h12, h13=h13, h21=h21, h22=h22, h31=h31,
+            chi=chi, lattice=lattice, dim=dim, n_points=n_points,
+            n_vertices=n_vertices, n_dual_points=n_dual_points, n_facets=n_facets,
+            limit=limit, timeout=timeout, as_list=as_list, backend=backend,
+            dualize=dualize, favorable=favorable,
+            )
 
     def poly(points, backend=None):
         return Polytope(points,backend)
@@ -97,8 +102,8 @@ end
 
 
 function topologies_generate_fast(h11,n)
-    tri_test = []
-    tri_test_m = []
+    tri_test    = Vector{PyObject}(undef, 0)
+    tri_test_m = Vector{PyObject}(undef, 0)
     #Generate list of $n polytopes at $h11
     poly_test = fetch_polytopes(h11,8*n, lattice="N", as_list=true, favorable=true)
     #Locator for points of polytope for saving
@@ -106,7 +111,7 @@ function topologies_generate_fast(h11,n)
     #If number of polytopes < $n, generate more triangulations per polytope, 
     #otherwise generate 1 triangulation per polytope upto $n
     spt = size(poly_test,1)
-    m = nothing;
+    m = 0;
     std_dev = ifelse(h11 == 491, 1.2, 0.2)
     if spt == 0
         return [0, 0, 0, 0]
@@ -131,8 +136,8 @@ function topologies_generate_fast(h11,n)
         tri_test = [poly_test[i].triangulate() for i=1:n];
         points = @view(points[1:n])
     end
-    simplices = []
-    cy = []
+    simplices = Vector{PyObject}(undef, 0)
+    cy = Vector{PyObject}(undef, 0)
     for t in eachindex(tri_test)
         #Locator for simplices of triangulations for saving
         push!(simplices,tri_test[t].simplices())
@@ -147,8 +152,8 @@ end
 
 
 function topologies_generate_fair(h11,n)
-    tri_test = []
-    tri_test_m = []
+    tri_test = Vector{PyObject}(undef, 0)
+    tri_test_m = Vector{PyObject}(undef, 0)
     #Generate list of $n polytopes at $h11
     poly_test = fetch_polytopes(h11,8*n, lattice="N", as_list=true, favorable=true)
     #Locator for points of polytope for saving
@@ -156,7 +161,7 @@ function topologies_generate_fair(h11,n)
     #If number of polytopes < $n, generate more triangulations per polytope, 
     #otherwise generate 1 triangulation per polytope upto $n
     spt = size(poly_test,1)
-    m = nothing;
+    m = 0;
     if spt == 0
         return [0, 0, 0, 0]
     elseif spt < n && h11 > 3
@@ -169,7 +174,7 @@ function topologies_generate_fair(h11,n)
         else
             tri_test_m = [poly_test[i].random_triangulations_fair(N=m, as_list=true, progress_bar=false) for i=left_over+1:spt];
             tri_test_m1 = [poly_test[i].random_triangulations_fair(N=m+1, as_list=true, progress_bar=false) for i=1:left_over];
-            # tri_test_m = vcat(tri_test_m1, tri_test_m)
+            tri_test_m = vcat(tri_test_m1, tri_test_m)
             # cy_num = [size(tri_test_m[i],1) for i=1:size(tri_test_m,1)]
             # cy_num1 = [size(tri_test_m1[i],1) for i=1:size(tri_test_m1,1)]
             # cy_num = vcat(cy_num1,cy_num)
@@ -180,8 +185,8 @@ function topologies_generate_fair(h11,n)
         tri_test = [poly_test[i].triangulate() for i=1:n];
         points = @view(points[1:n])
     end
-    simplices = []
-    cy = []
+    simplices = Vector{PyObject}(undef, 0)
+    cy = Vector{PyObject}(undef, 0)
     for t in eachindex(tri_test)
         #Locator for simplices of triangulations for saving
         push!(simplices,tri_test[t].simplices())
@@ -203,7 +208,7 @@ Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 
 """
 function topologies(h11::Int, n::Int; fast = true)
-    h11list_temp = []
+    h11list_temp = Vector{Vector{Any}}(undef, 0)
     if fast
         top_data = topologies_generate_fast(h11, n)
     else
@@ -215,7 +220,7 @@ function topologies(h11::Int, n::Int; fast = true)
     else
         mkdir(string(present_dir(),"h11_",lpad(h11,3,"0")))
     end
-    if m === nothing
+    if m === 0
         for tri in eachindex(tri_test)
             if isdir(string(present_dir(),"h11_",lpad(h11,3,"0"),"/np_",lpad(tri,7,"0")))
             else
@@ -275,7 +280,7 @@ Generates triangulations from already computed `points` and `simplices` of polyt
 Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 """
 function cy_from_poly(h11)
-    h11list_temp = []
+    h11list_temp = Vector{Vector{Any}}(undef, 0)
     h11list_inds = np_path_generate(h11)[2]
     for col in eachcol(h11list_inds)
         h11,tri,cy_i = col
@@ -297,16 +302,9 @@ function cy_from_poly(geom_idx::GeometryIndex)
     p = poly(points)
     t = p.triangulate(simplices=simplices)
     cy = t.get_cy()
-    return (h11 = geom_idx.h11, cy = cy, tri = geom_idx.polytope, cy_i = geom_idx.frst)
+    return (; h11 = geom_idx.h11, cy = cy, tri = geom_idx.polytope, cy_i = geom_idx.frst)
 end
-function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
-    glsm = zeros(Int,h11,h11+4)
-    basis = zeros(Int,h11)
-    tip = zeros(Float64,h11)
-    Kinv = zeros(Float64,h11,h11)
-    K = zeros(Float64,h11,h11)
-    tau = zeros(Float64,h11)
-    qprime = zeros(Int,h11+4,h11)
+function geometries_generate(h11,cy; rational_Q = false)
     #Locator for h21s for saving
     h21::Int = cy.h21()
     #GLSM basis for saving
@@ -314,15 +312,8 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     #Divisor basis for saving (allows for reproducibility)
     basis = cy.divisor_basis()
     #Find tip of SKC
-    n,m = 1,1
+    n,m = 1.0,1.0
     tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
-    #Kinv at tip -- save this or save K?
-    if cytools_version() < "0.8.0"
-        Kinv = cy.compute_Kinv(tip)
-    else
-        Kinv = cy.compute_inverse_kahler_metric(tip)
-    end
-    Kinv = Hermitian(1/2 * Kinv + Kinv')
     #Generate list of Q matrices -- only $h11+4 directions
     if rational_Q
         min_points = Int(round(h11^2))
@@ -332,33 +323,43 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
         qprime = cy.toric_effective_cone().rays()
     end
     #PTD volumes at tip
-    tau = cy.compute_divisor_volumes(tip)[basis]
+    tau0 = cy.compute_divisor_volumes(tip)[basis]
+    nq = size(qprime, 1)
+    rhs_constraint = Vector{Float64}(undef, nq)
+    lhs_constraint = Matrix{Float64}(undef, nq, nq)
+    use_legacy_kinv = cytools_version() < "0.8.0"
+    Kinv0 = use_legacy_kinv ? cy.compute_Kinv(tip) :
+                            cy.compute_inverse_kahler_metric(tip)
+    Kinv0 = Hermitian(0.5 * Kinv0 + Kinv0')
+    tau  = copy(tau0)
+    Kinv = copy(Kinv0)
+
     while true
-        rhs_constraint = zeros(size(qprime,1))
-        lhs_constraint = zeros(size(qprime,1),size(qprime,1))
-        for i in axes(qprime,1)
-            for j in axes(qprime,1)
-                if i>j
-                    lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
-                end
+        fill!(lhs_constraint, 0.0)
+        @inbounds for j in 1:nq
+            qj      = @view qprime[j, :]
+            Kinv_qj = Kinv * qj
+            tau_qj  = dot(tau, qj)
+            for i in j+1:nq
+                qi = @view qprime[i, :]
+                lhs_constraint[i,j] = abs(
+                    log(abs(π * dot(qi, Kinv_qj)))
+                    - 2π * dot(tau, qi .+ qj)
+                )
             end
-            rhs_constraint[i] = abs.(log.(abs.(dot(tau, qprime[i, :]))) .+ (-2π * dot(tau, qprime[i,:])))
+            rhs_constraint[j] = abs(log(abs(tau_qj)) - 2π * tau_qj)
         end
-        if LowerTriangular(lhs_constraint .< rhs_constraint) - I(size(qprime,1)) == LowerTriangular(zeros(size(qprime,1), size(qprime,1)))
-            break
-        else
-            m+=1e-2
-            tip = m .* tip
-            #PTD volumes at tip
-            tau = cy.compute_divisor_volumes(tip)[basis]
-            #Kinv at tip -- save this or save K?
-            if cytools_version() < "0.8.0"
-                Kinv = cy.compute_Kinv(tip)
-            else
-                Kinv = cy.compute_inverse_kahler_metric(tip)
-            end
-            Kinv = Hermitian(1/2 * Kinv + Kinv') 
+
+        converged = true
+        @inbounds for i in 1:nq, j in 1:i-1
+            lhs_constraint[i,j] >= rhs_constraint[i] && (converged = false; break)
         end
+        converged && break
+        m   += 1e-2
+        m2   = m^2
+        m4   = m2^2
+        tau  = m2 .* tau0
+        Kinv = m4 .* Kinv0
     end
     if (minimum(tau) > 1.)
     else
@@ -367,11 +368,7 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
         #PTD volumes at tip
         tau = cy.compute_divisor_volumes(tip)[basis]
         #Kinv at tip -- save this or save K?
-        if cytools_version() < "0.8.0"
-            Kinv = cy.compute_Kinv(tip)
-        else
-            Kinv = cy.compute_inverse_kahler_metric(tip)
-        end
+        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
         Kinv = Hermitian(1/2 * Kinv + Kinv')
     end
     tip_prefactor = [sqrt(n),m]
@@ -386,7 +383,7 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
         for j=i+1:size(qprime,1)
             q[size(qprime,1)+n,:] = qprime[j,:]-qprime[i,:]
             L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
-                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
+                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2, 
                     -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
             n+=1
         end
@@ -396,10 +393,9 @@ function geometries_generate(h11,cy,tri,cy_i=1; rational_Q = false)
     #L1 are basis instantons and L2 are cross terms
     L1 = zeros(size(qprime,1),2)
     for j in axes(qprime,1)
-        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
+        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau), -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
     end
     #concatenate L1 and L2
-    L = zeros(Float64,size(qprime,1)+binomial(size(qprime,1),2),2)
     L = vcat(L1,L2)
     keys = ["h21", "glsm", "basis", "tip", "tip_prefactor", "CY_volume", "PTD_volumes", "Kinv", "L", "Q"]
     vals = [h21, Int.(glsm), Int.(basis), Float64.(tip), Float64.(tip_prefactor), Float64(V), Float64.(tau), Float64.(Kinv), hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), q]
@@ -409,40 +405,45 @@ end
 function geometries_generate_hilbert(geom_idx::GeometryIndex)
 	cy = cy_from_poly(geom_idx).cy
 	geom_data = geometry(geom_idx)
-	pot_data = potential(geom_idx)
     basis = geom_data.basis
     tip = geom_data.tip
-    Kinv = geom_data.kinv
-	K = pot_data.K
-    tau = geom_data.τ_volumes
+    Kinv0 = Hermitian(geom_data.kinv)
+    tau0 = geom_data.τ_volumes
     qprime = geom_data.hilbert_basis
-    n,m = 1,1
+    nq = size(qprime, 1)
+    rhs_constraint = Vector{Float64}(undef, nq)
+    lhs_constraint = Matrix{Float64}(undef, nq, nq)
+    use_legacy_kinv = cytools_version() < "0.8.0"
+    n, m = 1.0, 1.0
+    tau  = copy(tau0)
+    Kinv = copy(Kinv0)
+
     while true
-        rhs_constraint = zeros(size(qprime,1))
-        lhs_constraint = zeros(size(qprime,1),size(qprime,1))
-        for i in axes(qprime,1)
-            for j in axes(qprime,1)
-                if i>j
-                    lhs_constraint[i,j] = abs.(log.(abs.(pi*dot(qprime[i,:],(Kinv * qprime[j,:])))) .+ (-2π * dot(tau, qprime[i,:] .+ qprime[j,:])))
-                end
+        fill!(lhs_constraint, 0.0)
+        @inbounds for j in 1:nq
+            qj      = @view qprime[j, :]
+            Kinv_qj = Kinv * qj
+            tau_qj  = dot(tau, qj)
+            for i in j+1:nq
+                qi = @view qprime[i, :]
+                lhs_constraint[i,j] = abs(
+                    log(abs(π * dot(qi, Kinv_qj)))
+                    - 2π * dot(tau, qi .+ qj)
+                )
             end
-            rhs_constraint[i] = abs.(log.(abs.(dot(tau, qprime[i, :]))) .+ (-2π * dot(tau, qprime[i,:])))
+            rhs_constraint[j] = abs(log(abs(tau_qj)) - 2π * tau_qj)
         end
-        if LowerTriangular(lhs_constraint .< rhs_constraint) - I(size(qprime,1)) == LowerTriangular(zeros(size(qprime,1), size(qprime,1)))
-            break
-        else
-            m+=1e-2
-            tip = m .* tip
-            #PTD volumes at tip
-            tau = cy.compute_divisor_volumes(tip)[basis]
-            #Kinv at tip -- save this or save K?
-            if cytools_version() < "0.8.0"
-                Kinv = cy.compute_Kinv(tip)
-            else
-                Kinv = cy.compute_inverse_kahler_metric(tip)
-            end
-            Kinv = Hermitian(1/2 * Kinv + Kinv') 
+
+        converged = true
+        @inbounds for i in 1:nq, j in 1:i-1
+            lhs_constraint[i,j] >= rhs_constraint[i] && (converged = false; break)
         end
+        converged && break
+        m   += 1e-2
+        m2   = m^2
+        m4   = m2^2
+        tau  = m2 .* tau0
+        Kinv = m4 .* Kinv0
     end
     if (minimum(tau) > 1.)
     else
@@ -451,11 +452,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
         #PTD volumes at tip
         tau = cy.compute_divisor_volumes(tip)[basis]
         #Kinv at tip -- save this or save K?
-        if cytools_version() < "0.8.0"
-            Kinv = cy.compute_Kinv(tip)
-        else
-            Kinv = cy.compute_inverse_kahler_metric(tip)
-        end
+        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
         Kinv = Hermitian(1/2 * Kinv + Kinv')
     end
     tip_prefactor = [sqrt(n),m]
@@ -470,7 +467,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
         for j=i+1:size(qprime,1)
             q[size(qprime,1)+n,:] = qprime[j,:]-qprime[i,:]
             L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:])) 
-                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2 
+                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2, 
                     -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
             n+=1
         end
@@ -480,16 +477,15 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
     #L1 are basis instantons and L2 are cross terms
     L1 = zeros(size(qprime,1),2)
     for j in axes(qprime,1)
-        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau) -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
+        L1[j,:] = [(8*pi/V^2)*dot(qprime[j,:],tau), -2*log10(exp(1))*pi*dot(qprime[j,:],tau)]
     end
     #concatenate L1 and L2
-    L = zeros(Float64,size(qprime,1)+binomial(size(qprime,1),2),2)
     L = vcat(L1,L2)
-	return (basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CY_volume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
+	return (; basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CY_volume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
 end
 
 function geometries(h11,cy,tri,cy_i=1)
-    geom_data = geometries_generate(h11, cy, tri, cy_i)
+    geom_data = geometries_generate(h11, cy)
     h5open(cyax_file(h11,tri,cy_i), "r+") do file
         if haskey(file, "cytools/geometric/h21")
         else
