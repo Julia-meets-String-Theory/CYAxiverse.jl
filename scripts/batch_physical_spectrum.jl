@@ -170,27 +170,35 @@ function _fK_log10(K)
         Float64(CYAxiverse.generate.constants()["log2π"])
 end
 
+function _replace_dataset(group, name, value)
+    haskey(group, name) && HDF5.delete_object(group, name)
+    group[name] = value
+end
+
 function _write_result(path, geom_idx, spectrum; prec, threshold_log10, quartics, runtime_seconds, provisional, fK=Float64[])
     h5open(path, "r+") do file
         spectrum_group = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
         physical = haskey(spectrum_group, "physical") ? spectrum_group["physical"] : create_group(spectrum_group, "physical")
         metadata = haskey(physical, "metadata") ? physical["metadata"] : create_group(physical, "metadata")
-        metadata["h11"] = geom_idx.h11
-        metadata["polytope"] = geom_idx.polytope
-        metadata["frst"] = geom_idx.frst
-        metadata["threshold_log10"] = threshold_log10
-        metadata["prec"] = prec
-        metadata["quartics"] = quartics
-        metadata["provisional"] = provisional
-        metadata["runtime_seconds"] = runtime_seconds
-        physical["m"] = spectrum.m
-        physical["mode_indices"] = spectrum.mode_indices
-        physical["mass_signs_or_inertia"] = Int.(spectrum.m .>= threshold_log10)
-        physical["fK_log10"] = fK
+        _replace_dataset(metadata, "h11", geom_idx.h11)
+        _replace_dataset(metadata, "polytope", geom_idx.polytope)
+        _replace_dataset(metadata, "frst", geom_idx.frst)
+        _replace_dataset(metadata, "threshold_log10", threshold_log10)
+        _replace_dataset(metadata, "prec", prec)
+        _replace_dataset(metadata, "quartics", quartics)
+        _replace_dataset(metadata, "provisional", provisional)
+        _replace_dataset(metadata, "runtime_seconds", runtime_seconds)
+        _replace_dataset(physical, "m", spectrum.m)
+        _replace_dataset(physical, "mode_indices", spectrum.mode_indices)
+        _replace_dataset(physical, "fK_log10", fK)
         if quartics
-            physical["lambda_self_sign"] = spectrum.λselfsign
-            physical["lambda_self_log10"] = spectrum.λself
-            physical["fpert_log10"] = spectrum.m .- 0.5 .* spectrum.λself
+            _replace_dataset(physical, "lambda_self_sign", spectrum.λselfsign)
+            _replace_dataset(physical, "lambda_self_log10", spectrum.λself)
+            _replace_dataset(physical, "fpert_log10", spectrum.m .- 0.5 .* spectrum.λself)
+        else
+            for dataset_name in ("lambda_self_sign", "lambda_self_log10", "fpert_log10")
+                haskey(physical, dataset_name) && HDF5.delete_object(physical, dataset_name)
+            end
         end
     end
 end

@@ -78,9 +78,20 @@ end
         loaded = CYAxiverse.read.physical_spectrum(geom_idx)
         @test loaded.m == spectrum.m
         @test loaded.fpert ≈ [-0.5, 0.0]
+        @test loaded.mass_signs_or_inertia == Int[]
     finally
         old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
             (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+    end
+
+    _write_result(output_path, geom_idx, spectrum; prec=200, threshold_log10=-30.0,
+        quartics=false, runtime_seconds=0.2, provisional=false, fK=[5.0, 6.0])
+    HDF5.h5open(output_path, "r") do file
+        @test !HDF5.haskey(file, "spectrum/physical/mass_signs_or_inertia")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_self_sign")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_self_log10")
+        @test !HDF5.haskey(file, "spectrum/physical/fpert_log10")
+        @test read(file["spectrum/physical/metadata/quartics"]) == false
     end
 
     summary_path = joinpath(output_dir, "summary.csv")

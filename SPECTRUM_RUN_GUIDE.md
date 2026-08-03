@@ -11,11 +11,8 @@ The package uses Julia 1.12:
 
 ```sh
 julia --version
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
-
-Python is **not required** for the spectrum batch or plotting commands in this
-guide. They use Julia, HDF5, and the stored geometry data directly. Leave
-`PYTHON` unset unless you are using the optional CYTools/PyCall integration.
 
 Set the local geometry database path. This assumes the database is in a `data/`
 directory below the repository root; replace it if the database is elsewhere:
@@ -23,6 +20,21 @@ directory below the repository root; replace it if the database is elsewhere:
 ```sh
 export DATA="${DATA:-$PWD/data}"
 ```
+
+Before starting a long run, verify that Julia can load the package and that
+`DATA` points to the geometry database rather than to `data/physical_spectrum`:
+
+```sh
+env -u PYTHON julia --project=. -e 'using CYAxiverse; println("CYAxiverse loaded")'
+test -f "$DATA/h11_004/np_0000001/cy_0000001/cyax.h5" && echo "geometry database found"
+```
+
+If either check fails, fix the environment or `DATA` path before launching
+multiple workers.
+
+Python is **not required** for the spectrum batch or plotting commands in this
+guide. They use Julia, HDF5, and the stored geometry data directly. Leave
+`PYTHON` unset unless you are using the optional CYTools/PyCall integration.
 
 For CYTools-backed workflows only, set `PYTHON` to the executable in the
 environment that contains CYTools before starting Julia:
@@ -209,6 +221,51 @@ julia --project=. scripts/batch_physical_spectrum.jl \
 
 Each geometry failure is recorded in the CSV summary and does not stop the remaining geometries.
 
+### Migrate legacy separate spectrum files
+
+Older runs may have written files under `$DATA/physical_spectrum/` instead of
+amending the source geometry files. Move those datasets into the matching
+`cyax.h5` files with:
+
+```sh
+julia --project=. scripts/migrate_legacy_spectra.jl \
+  --data-dir "$DATA"
+```
+
+The migration copies `cytools/spectrum/physical` and its metadata into
+`spectrum/physical` in each corresponding `cyax.h5`. It does not delete or
+modify the legacy files and is safe to rerun; already migrated geometries are
+skipped.
+
+### Monitor and resume a run
+
+Keep per-worker summaries and logs in a dedicated directory. These commands
+show whether Julia workers are still active and whether failures were recorded:
+
+```sh
+ps -axo command= | grep '[j]ulia.*batch_physical_spectrum.jl'
+find "$PARALLEL_DIR" -name '*.csv' -print | wc -l
+grep -lE 'failed:|ERROR|LoadError|Stacktrace' "$PARALLEL_DIR"/*.log
+```
+
+An interrupted terminal does not require restarting completed geometries. Rerun
+the same command without `--force`; existing `spectrum/physical/m` datasets
+are skipped. For a failed or suspicious geometry, rerun only that geometry:
+
+```sh
+julia --project=. scripts/batch_physical_spectrum.jl \
+  --data-dir "$DATA" \
+  --geometry 100,97,1 \
+  --quartics \
+  --prec 200 \
+  --force \
+  --summary "$DATA/logs/h11_100_polytope_97_retry.csv"
+```
+
+Do not run two workers on the same geometry at the same time. Parallel workers
+are safe when each worker receives a disjoint `h11` range, offset, or explicit
+geometry list.
+
 ## 5. Make the Appendix B plots
 
 After batch outputs are available, aggregate them by `h11`:
@@ -264,6 +321,39 @@ println("quartic max difference = ", maximum(abs.(hybrid.λself .- reference.λs
 
 The expected differences should be zero or at the level of floating-point rounding. If the solver emits a provisional warning, record it and do not treat that geometry as a precision validation point without comparing it to the high-precision reference.
 
+### Inspect HDF5 output directly
+
+The quickest completeness check is to verify that every processed source file
+contains `spectrum/physical/m`. A dataset with length zero is valid: it means
+that the geometry has no modes above the physical Hubble threshold. A missing
+dataset means that the geometry has not completed successfully.
+
+For one file, inspect the HDF5 tree with Julia:
+
+```sh
+env -u PYTHON julia --project=. -e '
+using HDF5
+path = ARGS[1]
+h5open(path, "r") do file
+    println("has spectrum/physical/m: ", haskey(file, "spectrum/physical/m"))
+    if haskey(file, "spectrum/physical/m")
+        println("physical modes: ", length(read(file["spectrum/physical/m"])))
+    end
+end
+' "$DATA/h11_004/np_0000001/cy_0000001/cyax.h5"
+```
+
+Each summary row has one of these statuses:
+
+- `success`: the spectrum was computed and saved;
+- `skipped`: a valid output already existed and was left unchanged;
+- `failed`: the geometry could not be processed; inspect the worker log;
+- `provisional=true`: the solver used a provisional numerical result or
+  warning; review it before using it for precision-sensitive comparisons.
+
+An empty physical spectrum is still a successful result. Count missing
+datasets, not zero-length arrays, when deciding whether a sweep is complete.
+
 ## 7. Output and safety notes
 
 - Do not delete existing `cyax.h5` files when restarting a run. Spectrum results
@@ -279,17 +369,54 @@ The expected differences should be zero or at the level of floating-point roundi
 
 ### `nothing/cyax.h5` or a missing database file
 
-The data directory was not selected. Set `DATA` and pass `--data-dir "$DATA"` explicitly.
+The data directory was not selected, or the wrong directory was passed. The
+`--data-dir` value must contain directories such as
+`h11_004/np_0000001/cy_0000001/cyax.h5`; do not pass
+`$DATA/physical_spectrum` as the data root.
+
+```sh
+printf 'DATA=%s\n' "$DATA"
+test -f "$DATA/h11_004/np_0000001/cy_0000001/cyax.h5"
+```
 
 ### Python or PyCall initialization errors
 
-Set `PYTHON` before starting Julia:
+Python and PyCall are not needed for the spectrum runner or the plotting
+script. Start those commands with `PYTHON` unset:
+
+```sh
+env -u PYTHON julia --project=. scripts/batch_physical_spectrum.jl ...
+```
+
+Only set `PYTHON` for a CYTools-backed workflow:
 
 ```sh
 export PYTHON="/full/path/to/python"
 ```
 
-Then rerun the command in a fresh Julia process.
+Then rerun the CYTools command in a fresh Julia process.
+
+### Parallel workers appear idle
+
+Julia may spend several minutes loading the package before processing the first
+geometry. Check the worker logs and process list rather than starting a second
+copy immediately:
+
+```sh
+tail -n 20 "$PARALLEL_DIR/h11_004.log"
+ps -axo pid,etime,pcpu,command= | grep '[j]ulia.*batch_physical_spectrum.jl'
+```
+
+If a worker exits early, inspect its log for `LoadError`, `ERROR`, or an HDF5
+message, then rerun that `h11` value without `--force`.
+
+### HDF5, memory, or resource errors
+
+Reduce `WORKERS`, keep Julia and BLAS single-threaded, and try a smaller
+`--limit` or lower `--prec` pilot. Do not delete the source `cyax.h5` file.
+After the resource issue is fixed, rerun without `--force` so completed files
+are retained. Use `--force` only for a geometry whose output is known to be
+incomplete or invalid.
 
 ### Existing files are skipped
 
@@ -297,10 +424,19 @@ This is normal for resumable runs. Use `--force` only for the specific geometrie
 
 ### The plot script reports no physical spectrum outputs
 
-Check that the batch runner has written files below:
+Check that the batch runner has written `spectrum/physical/m` into source files
+below the geometry database:
 
 ```text
-$DATA/physical_spectrum/
+$DATA/h11_XXX/np_YYYYYYY/cy_ZZZZZZZ/cyax.h5
 ```
 
 Also check that the data directory passed to the plot script is the same one passed to the batch runner.
+
+### Some plot bins are empty
+
+The plotting script cannot create a distribution for an `h11` value with no
+completed physical spectra. Check the per-`h11` summary for `failed` rows and
+confirm that the corresponding HDF5 files contain `spectrum/physical/m`.
+Empty mode arrays are valid and simply contribute no physical masses to a bin;
+they are different from missing datasets.

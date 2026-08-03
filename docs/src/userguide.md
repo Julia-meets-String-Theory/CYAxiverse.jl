@@ -34,7 +34,8 @@ physical mass eigenvectors are returned.
 
 For resumable ensemble runs, use `scripts/batch_physical_spectrum.jl`. It
 discovers indexed or on-disk geometries, flushes one CSV row per geometry, and
-writes compact results below `physical_spectrum/`:
+writes compact results into each source `cyax.h5` file under
+`spectrum/physical`:
 
 ```sh
 julia --project=. scripts/batch_physical_spectrum.jl \
