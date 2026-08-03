@@ -21,9 +21,6 @@ include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
 end
 
 @testset "Geometry-level LQtilde orientation" begin
-    # Geometry files store Q as (h11, instantons) and L as (2, instantons).
-    # This fixture prevents the old Python/Julia transpose convention from
-    # reappearing in the GeometryIndex overload.
     mktempdir() do root
         geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
         mkpath(geom_dir)
@@ -63,12 +60,27 @@ end
         -30.0, 200)
     geom_idx = CYAxiverse.structs.GeometryIndex(2, 3, 4)
     output_dir = mktempdir()
-    output_path = joinpath(output_dir, "spectrum.h5")
+    output_path = joinpath(output_dir, "h11_002", "np_0000003", "cy_0000004", "cyax.h5")
+    mkpath(dirname(output_path))
+    h5open(output_path, "cw") do file
+        create_group(file, "cytools")
+    end
     _write_result(output_path, geom_idx, spectrum; prec=200, threshold_log10=-30.0,
-        quartics=true, runtime_seconds=0.1, provisional=false)
+        quartics=true, runtime_seconds=0.1, provisional=false, fK=[5.0, 6.0])
     HDF5.h5open(output_path, "r") do file
-        @test HDF5.haskey(file, "cytools/spectrum/physical/m")
-        @test read(file["cytools/spectrum/physical/fpert_log10"]) ≈ [-0.5, 0.0]
+        @test HDF5.haskey(file, "spectrum/physical/m")
+        @test read(file["spectrum/physical/fK_log10"]) == [5.0, 6.0]
+        @test read(file["spectrum/physical/fpert_log10"]) ≈ [-0.5, 0.0]
+    end
+    old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+    ENV["CYAXIVERSE_DATA_DIR"] = output_dir
+    try
+        loaded = CYAxiverse.read.physical_spectrum(geom_idx)
+        @test loaded.m == spectrum.m
+        @test loaded.fpert ≈ [-0.5, 0.0]
+    finally
+        old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+            (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
     end
 
     summary_path = joinpath(output_dir, "summary.csv")

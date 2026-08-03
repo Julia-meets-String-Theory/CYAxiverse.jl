@@ -2,6 +2,7 @@
 
 using CYAxiverse
 using HDF5
+using LinearAlgebra
 using Printf
 using Statistics
 using Logging
@@ -153,14 +154,27 @@ function _selected_geometries(options)
 end
 
 function _output_path(root, geom_idx)
-    joinpath(root, "physical_spectrum", @sprintf("h11_%03d", geom_idx.h11),
-        @sprintf("np_%07d", geom_idx.polytope), @sprintf("cy_%07d.h5", geom_idx.frst))
+    CYAxiverse.filestructure.cyax_file(geom_idx)
 end
 
-function _write_result(path, geom_idx, spectrum; prec, threshold_log10, quartics, runtime_seconds, provisional)
-    mkpath(dirname(path))
-    h5open(path, "w") do file
-        metadata = create_group(file, "metadata")
+function _has_physical_spectrum(path)
+    isfile(path) || return false
+    h5open(path, "r") do file
+        haskey(file, "spectrum/physical/m")
+    end
+end
+
+function _fK_log10(K)
+    log10.(sqrt.(eigen(K).values)) .+
+    Float64(log10(CYAxiverse.generate.constants()["MPlanck"])) .-
+        Float64(CYAxiverse.generate.constants()["log2π"])
+end
+
+function _write_result(path, geom_idx, spectrum; prec, threshold_log10, quartics, runtime_seconds, provisional, fK=Float64[])
+    h5open(path, "r+") do file
+        spectrum_group = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
+        physical = haskey(spectrum_group, "physical") ? spectrum_group["physical"] : create_group(spectrum_group, "physical")
+        metadata = haskey(physical, "metadata") ? physical["metadata"] : create_group(physical, "metadata")
         metadata["h11"] = geom_idx.h11
         metadata["polytope"] = geom_idx.polytope
         metadata["frst"] = geom_idx.frst
@@ -169,12 +183,10 @@ function _write_result(path, geom_idx, spectrum; prec, threshold_log10, quartics
         metadata["quartics"] = quartics
         metadata["provisional"] = provisional
         metadata["runtime_seconds"] = runtime_seconds
-        cytools = create_group(file, "cytools")
-        spectrum_group = create_group(cytools, "spectrum")
-        physical = create_group(spectrum_group, "physical")
         physical["m"] = spectrum.m
         physical["mode_indices"] = spectrum.mode_indices
         physical["mass_signs_or_inertia"] = Int.(spectrum.m .>= threshold_log10)
+        physical["fK_log10"] = fK
         if quartics
             physical["lambda_self_sign"] = spectrum.λselfsign
             physical["lambda_self_log10"] = spectrum.λself
@@ -188,7 +200,7 @@ function _csv_escape(value)
     occursin(r"[,\"\n]", text) ? string('"', text, '"') : text
 end
 
-const SUMMARY_HEADER = "h11,polytope,frst,status,error,runtime_seconds,prec,threshold_log10,instantons,physical_count,massless_count,min_mass_log10,max_mass_log10,median_mass_log10,quartics,negative_lambda_count,positive_lambda_count,min_fpert_log10,max_fpert_log10,median_fpert_log10,provisional,output"
+const SUMMARY_HEADER = "h11,polytope,frst,status,error,runtime_seconds,prec,threshold_log10,instantons,physical_count,massless_count,min_mass_log10,max_mass_log10,median_mass_log10,quartics,negative_lambda_count,positive_lambda_count,min_fpert_log10,max_fpert_log10,median_fpert_log10,min_fK_log10,max_fK_log10,median_fK_log10,provisional,output"
 
 function _write_summary_header(path; append=false)
     append && isfile(path) && return
@@ -203,7 +215,7 @@ function _median_or_empty(values)
 end
 
 function _append_summary(path, geom_idx; status, error="", runtime_seconds=0.0, prec, threshold_log10,
-                         instantons="", spectrum=nothing, quartics=false, provisional=false, output="")
+                         instantons="", spectrum=nothing, quartics=false, provisional=false, output="", fK=Float64[])
     masses = spectrum === nothing ? Float64[] : spectrum.m
     lambda = quartics && spectrum !== nothing ? spectrum.λself : Float64[]
     fpert = quartics && spectrum !== nothing ? masses .- 0.5 .* lambda : Float64[]
@@ -211,7 +223,9 @@ function _append_summary(path, geom_idx; status, error="", runtime_seconds=0.0, 
         prec, threshold_log10, instantons, length(masses), count(<(threshold_log10), masses),
         isempty(masses) ? "" : minimum(masses), isempty(masses) ? "" : maximum(masses), _median_or_empty(masses),
         quartics, count(<(0), lambda), count(>(0), lambda), isempty(fpert) ? "" : minimum(fpert),
-        isempty(fpert) ? "" : maximum(fpert), _median_or_empty(fpert), provisional, output]
+        isempty(fpert) ? "" : maximum(fpert), _median_or_empty(fpert),
+        isempty(fK) ? "" : minimum(fK), isempty(fK) ? "" : maximum(fK), _median_or_empty(fK),
+        provisional, output]
     open(path, "a") do io
         println(io, join(_csv_escape.(values), ','))
         flush(io)
@@ -232,7 +246,7 @@ function run_batch(options)
     for (index, geom_idx) in enumerate(geoms)
         path = _output_path(root, geom_idx)
         @printf("[%d/%d] h11=%d polytope=%d frst=%d ", index, length(geoms), geom_idx.h11, geom_idx.polytope, geom_idx.frst)
-        if isfile(path) && !options[:force]
+        if _has_physical_spectrum(path) && !options[:force]
             println("skipped")
             _append_summary(summary, geom_idx; status="skipped", prec=options[:prec], threshold_log10=threshold, quartics=options[:quartics], output=path)
             continue
@@ -248,12 +262,13 @@ function run_batch(options)
                     label="h11=$(geom_idx.h11),polytope=$(geom_idx.polytope),frst=$(geom_idx.frst)")
             end
             runtime = time() - started
+            fK = _fK_log10(potential.K)
             provisional = any(occursin("provisional", lowercase(message)) for message in warning_messages)
             _write_result(path, geom_idx, spectrum; prec=options[:prec], threshold_log10=threshold,
-                quartics=options[:quartics], runtime_seconds=runtime, provisional=provisional)
+                quartics=options[:quartics], runtime_seconds=runtime, provisional=provisional, fK=fK)
             _append_summary(summary, geom_idx; status="success", runtime_seconds=runtime, prec=options[:prec],
                 threshold_log10=threshold, instantons=size(potential.L, 2), spectrum=spectrum,
-                quartics=options[:quartics], provisional=provisional, output=path)
+                quartics=options[:quartics], provisional=provisional, output=path, fK=fK)
             @printf("success physical=%d %.3fs\n", length(spectrum.m), runtime)
         catch err
             runtime = time() - started

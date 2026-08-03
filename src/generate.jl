@@ -535,25 +535,25 @@ function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000)
         spectrum_data = hp_spectrum(K, Ltilde, Qtilde; prec = prec)
 
         h5open(cyax_file(h11, tri, cy), "r+") do file
-            f2 = create_group(file, "spectrum")
-            f2a = create_group(f2, "quartdiag")
+            f2 = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
+            f2a = haskey(f2, "quartdiag") ? f2["quartdiag"] : create_group(f2, "quartdiag")
             f2a["log10", deflate=9] = spectrum_data["λself"]
             f2a["sign", deflate=9] = spectrum_data["λselfsign"]
-            f2e = create_group(f2, "decay")
+            f2e = haskey(f2, "decay") ? f2["decay"] : create_group(f2, "decay")
             f2e["fpert", deflate=9] = spectrum_data["fpert"]
             f2e["fK", deflate=9] = spectrum_data["fK"]
 
-            f2b = create_group(f2, "quart31")
+            f2b = haskey(f2, "quart31") ? f2["quart31"] : create_group(f2, "quart31")
             f2b["log10", deflate=9] = spectrum_data["λ31"]
             f2b["sign", deflate=9] = spectrum_data["λ31sign"]
             f2b["index", deflate=9] = spectrum_data["λ31_i"]
 
-            f2c = create_group(f2, "quart22")
+            f2c = haskey(f2, "quart22") ? f2["quart22"] : create_group(f2, "quart22")
             f2c["log10", deflate=9] = spectrum_data["λ22"]
             f2c["sign", deflate=9] = spectrum_data["λ22sign"]
             f2c["index", deflate=9] = spectrum_data["λ22_i"]
 
-            f2d = create_group(f2, "masses")
+            f2d = haskey(f2, "masses") ? f2["masses"] : create_group(f2, "masses")
             f2d["log10", deflate=9] = spectrum_data["m"]
             f2d["sign", deflate=9] = spectrum_data["msign"]
         end
@@ -1104,6 +1104,18 @@ function schur_physical_basis(W::Hermitian{T, Matrix{T}}, float_basis::Matrix{Fl
     eigenvalues, basis, residuals
 end
 
+function schur_admissible_float64(W::Hermitian, float_basis::Matrix{Float64}, physical_count::Int, threshold_log10::Float64)
+    h11 = size(W, 1)
+    physical_count == h11 && return true
+    complement = @view float_basis[:, 1:end-physical_count]
+    complement_matrix = Symmetric(complement' * Float64.(Matrix(W)) * complement)
+    complement_eigenvalues = eigvals(complement_matrix)
+    all(isfinite, complement_eigenvalues) || return true
+    mass_offset = 9.0 + Float64(log10(constants()["MPlanck"])) + Float64(constants()["log2π"])
+    threshold_eigenvalue = 10.0 ^ (2 * (threshold_log10 - mass_offset))
+    maximum(complement_eigenvalues) < threshold_eigenvalue
+end
+
 function select_quartic_backend(Q::Matrix{Int}, backend::Symbol)
     backend in (:auto, :dense, :sparse) || throw(ArgumentError("quartic_backend must be :auto, :dense, or :sparse"))
     backend !== :auto && return backend
@@ -1211,11 +1223,13 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     seed_basis = pq_basis[:, sortperm(pq_masses)]
     schur_safe = false
     if schur_acceleration && physical_count < h11
-        complement = T.(seed_basis[:, 1:end-physical_count])
-        C = Hermitian(complement' * W * complement)
-        mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
-        threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
-        schur_safe = positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
+        if schur_admissible_float64(W, seed_basis, physical_count, threshold_log10)
+            complement = T.(seed_basis[:, 1:end-physical_count])
+            C = Hermitian(complement' * W * complement)
+            mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
+            threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
+            schur_safe = positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
+        end
     end
     if schur_safe
         eigenvalues, basis, residuals = schur_physical_basis(W, seed_basis, physical_count; maxiter, residual_tolerance)
