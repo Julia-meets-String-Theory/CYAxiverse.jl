@@ -116,7 +116,14 @@ function pq_spectrum_square(α::CYAxiverse.structs.CanonicalQBasis)
         # Qlt[i, :] .= QKs[i, :]
         QKs = deepcopy(QKs1)
     end
-	AxionSpectrum(mapprox[sortperm(mapprox)] .+ 9. .+ Float64(log10(constants()["MPlanck"])), 0.5 .* fapprox[sortperm(mapprox)] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]))
+	order = sortperm(mapprox)
+	CYAxiverse.structs.AxionSpectrum(
+		mapprox[order] .+ 9. .+ Float64(log10(constants()["MPlanck"])),
+		ones(Int, length(order)),
+		0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])),
+		fK .+ Float64(log10(constants()["MPlanck"])) .- Float64(constants()["log2π"]),
+		Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+		zeros(Int, 4, 0), Int[], Float64[], nothing, nothing, nothing)
 end
 
 # ╔═╡ 4476d3fe-db5b-4ed5-aaad-5915b2eb1605

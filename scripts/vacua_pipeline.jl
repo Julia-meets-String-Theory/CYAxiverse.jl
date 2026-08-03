@@ -16,22 +16,24 @@ function save_axion_data(geom_idx, spectrum, vac_est, vac_id; threshold::Float64
         end
         spectrum_group = create_group(file, "spectrum")
         masses_group = create_group(spectrum_group, "masses")
-        masses_group["log10", deflate=9] = spectrum["m"]
-        masses_group["sign", deflate=9] = spectrum["msign"]
+        masses_group["log10", deflate=9] = spectrum.m
+        masses_group["sign", deflate=9] = spectrum.msign
         decay_group = create_group(spectrum_group, "decay")
-        decay_group["fK", deflate=9] = spectrum["fK"]
-        decay_group["fpert", deflate=9] = spectrum["fpert"]
+        decay_group["fK", deflate=9] = spectrum.fK
+        # Preserve the established HDF5 name. For a PQ spectrum this dataset
+        # contains AxionSpectrum.f, the sequential PQ decay quantity.
+        decay_group["fpert", deflate=9] = spectrum.f
         quartdiag_group = create_group(spectrum_group, "quartdiag")
-        quartdiag_group["log10", deflate=9] = spectrum["λself"]
-        quartdiag_group["sign", deflate=9] = spectrum["λselfsign"]
+        quartdiag_group["log10", deflate=9] = spectrum.λself
+        quartdiag_group["sign", deflate=9] = spectrum.λselfsign
         quart31_group = create_group(spectrum_group, "quart31")
-        quart31_group["index", deflate=9] = spectrum["λ31_i"]
-        quart31_group["log10", deflate=9] = spectrum["λ31"]
-        quart31_group["sign", deflate=9] = spectrum["λ31sign"]
+        quart31_group["index", deflate=9] = spectrum.λ31_i
+        quart31_group["log10", deflate=9] = spectrum.λ31
+        quart31_group["sign", deflate=9] = spectrum.λ31sign
         quart22_group = create_group(spectrum_group, "quart22")
-        quart22_group["index", deflate=9] = spectrum["λ22_i"]
-        quart22_group["log10", deflate=9] = spectrum["λ22"]
-        quart22_group["sign", deflate=9] = spectrum["λ22sign"]
+        quart22_group["index", deflate=9] = spectrum.λ22_i
+        quart22_group["log10", deflate=9] = spectrum.λ22
+        quart22_group["sign", deflate=9] = spectrum.λ22sign
 
         if haskey(file, "vacua_pipeline")
             HDF5.delete_object(file, "vacua_pipeline")
@@ -70,7 +72,7 @@ function compute_axion_data(h11::Int, np::Int, cy::Int, data_dir::String; thresh
     pot_data = CYAxiverse.read.potential(geom_idx)
     geom_data = CYAxiverse.read.geometry(geom_idx)
     
-    # 3. Calculate Axion Spectrum (High-Precision Masses, Decay Constants, Quartic Couplings)
+    # 3. Calculate the PQ mass-basis spectrum and quartic couplings.
     spectrum = CYAxiverse.generate.pq_spectrum(geom_idx)
     
     # 4. Calculate Vacua Statistics & Locations
@@ -91,7 +93,7 @@ function compute_axion_data(h11::Int, np::Int, cy::Int, data_dir::String; thresh
 end
 
 # Command-Line Interface Execution
-if !isempty(ARGS)
+if abspath(PROGRAM_FILE) == @__FILE__
     if length(ARGS) < 4
         println("Usage: julia run_axion_analysis.jl <h11> <np> <cy> <data_dir>")
         exit(1)
@@ -112,11 +114,11 @@ if !isempty(ARGS)
     # --- Print Spectra Results ---
     println("\n[+] Axion Spectrum Summary:")
     println("  - Mass Eigenvalues (log10 eV):")
-    println("    ", results["spectrum"]["m"])
+    println("    ", results["spectrum"].m)
     println("  - Decay Constants f_K (log10 M_Planck):")
-    println("    ", results["spectrum"]["fK"])
-    println("  - Perturbative Decay Constants f_pert:")
-    println("    ", results["spectrum"]["fpert"])
+    println("    ", results["spectrum"].fK)
+    println("  - Sequential PQ Decay Quantities f (stored as fpert):")
+    println("    ", results["spectrum"].f)
     
     # --- Print Vacua Results ---
     println("\n[+] Vacua Statistics & Locations:")

@@ -36,11 +36,11 @@ function minimize(geom_idx::GeometryIndex; random_phase=false, threshold = 0.01,
         if size(Q_reduced_temp, 1) == size(Q_reduced_temp, 2)
             return Min_JLM_Square(det_Q_tilde, Int(round(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
         else
-            phase_vector = phase(geom_idx.h11, αtest)
+            phase_vector = phase(geom_idx.h11, αtest)[αtest.αcolmask]
             if random_phase
                 phase_vector = mod.(phase_vector .+ rand(Uniform(0, 2π), size(phase_vector, 1)), 2π)
             end
-            L_reduced = Matrix(hcat(αtest.Lhat[:, 1:geom_idx.h11][:, αtest.αrowmask], αtest.Lhat[:, geom_idx.h11+1:end][:, αtest.αcolmask])')
+            L_reduced = Matrix(hcat(αtest.Lhat[:, 1:geom_idx.h11][:, αtest.αrowmask], αtest.Lbar[:, αtest.αcolmask])')
             # L_reduced = L_reduced[Qrowmask, :]
             flag_int = ifelse(maximum(denominator.(Matrix(Q_reduced))) == 1, 1, 0)
             αrescaled = Matrix{Integer}(det_Q_tilde .* Matrix(Q_reduced))
@@ -86,11 +86,11 @@ function minimize(Q::Matrix{Int}, L::Matrix{Float64}; random_phase=false, thresh
         if size(Q_reduced_temp, 1) == size(Q_reduced_temp, 2)
             return Min_JLM_Square(det_Q_tilde, Int(round(sqrt(abs(det(αtest.Qhat * αtest.Qhat'))))))
         else
-            phase_vector = phase(size(Qtilde, 2), αtest)
+            phase_vector = phase(size(Qtilde, 2), αtest)[αtest.αcolmask]
             if random_phase
                 phase_vector = mod.(phase_vector .+ rand(Uniform(0, 2π), size(phase_vector, 1)), 2π)
             end
-            L_reduced = Matrix(hcat(αtest.Lhat[:, axes(Qtilde, 2)][:, αtest.αrowmask], αtest.Lhat[:, size(Qtilde, 2)+1:end][:, αtest.αcolmask])')
+            L_reduced = Matrix(hcat(αtest.Lhat[:, axes(Qtilde, 2)][:, αtest.αrowmask], αtest.Lbar[:, αtest.αcolmask])')
             # L_reduced = L_reduced[Qrowmask, :]
             flag_int = ifelse(maximum(denominator.(Matrix(Q_reduced))) == 1, 1, 0)
             αrescaled = Matrix{Integer}(det_Q_tilde .* Matrix(Q_reduced))

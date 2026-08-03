@@ -16,6 +16,8 @@ include("filestructure.jl")
 include("read.jl")
 include("minimizer.jl")
 include("generate.jl")
+include("jlm_reduced.jl")
+include("paper_benchmarks.jl")
 include("../add_functions/profiling.jl")
 include("plotting.jl")
 

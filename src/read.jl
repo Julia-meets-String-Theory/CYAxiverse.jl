@@ -240,6 +240,27 @@ function pq_spectrum(h11::Int,tri::Int,cy::Int=1)
     return (; m = Hvals, fK = fK, fpert = fpert)
 end
 
+function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
+    h5open(cyax_file(h11, tri, cy), "r") do file
+        physical = file["spectrum/physical"]
+        return (; m = HDF5.read(physical, "m"),
+            mode_indices = HDF5.read(physical, "mode_indices"),
+            mass_signs_or_inertia = haskey(physical, "mass_signs_or_inertia") ? HDF5.read(physical, "mass_signs_or_inertia") : Int[],
+            fK = HDF5.read(physical, "fK_log10"),
+            λselfsign = haskey(physical, "lambda_self_sign") ? HDF5.read(physical, "lambda_self_sign") : Int[],
+            λself = haskey(physical, "lambda_self_log10") ? HDF5.read(physical, "lambda_self_log10") : Float64[],
+            fpert = haskey(physical, "fpert_log10") ? HDF5.read(physical, "fpert_log10") : Float64[],
+            threshold_log10 = HDF5.read(physical, "metadata/threshold_log10"),
+            prec = HDF5.read(physical, "metadata/prec"),
+            provisional = HDF5.read(physical, "metadata/provisional"),
+            runtime_seconds = HDF5.read(physical, "metadata/runtime_seconds"))
+    end
+end
+
+function physical_spectrum(geom_idx::GeometryIndex)
+    physical_spectrum(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
+end
+
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1)
     Hsign::Vector{Int64}, Hvals::Vector{Float64}, fK::Vector{Float64}, fpert::Vector{Float64},
     quartdiagsign::Vector{Int64},quartdiaglog::Vector{Float64},

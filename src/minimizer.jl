@@ -17,6 +17,114 @@ using ..filestructure: cyax_file, minfile, present_dir
 using ..read: potential
 using ..structs: GeometryIndex
 
+function _first_primes(n::Int)
+    primes = Int[]
+    candidate = 2
+    while length(primes) < n
+        isprime = all(p -> p * p > candidate || candidate % p != 0, primes)
+        isprime && push!(primes, candidate)
+        candidate += 1
+    end
+    primes
+end
+
+function _radical_inverse(index::Int, base::Int)
+    result = 0.0
+    factor = inv(Float64(base))
+    while index > 0
+        index, digit = divrem(index, base)
+        result += digit * factor
+        factor /= base
+    end
+    result
+end
+
+
+"""
+    critical_points(L, Q; phases=zeros(size(Q, 2)), starts=4096,
+                    residual_tolerance=1e-10, merge_tolerance=1e-7)
+
+Find critical points of an integer-charge cosine potential deterministically in
+the unit torus. `Q` has axions in rows and instantons in columns; `L[1, :]`
+stores coefficient signs and `L[2, :]` stores base-10 logarithmic magnitudes.
+
+Initial points are a Halton sequence, so repeated calls are reproducible. Roots
+are folded into `[0,1)^N`, deduplicated using periodic distance, and classified
+by Hessian inertia. The returned coordinates use the paper convention in which
+the potential arguments are `2π Q'θ + phases`.
+"""
+function critical_points(L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real};
+        phases::AbstractVector{<:Real}=zeros(size(Q, 2)), starts::Int=4096,
+        residual_tolerance::Float64=1e-10, merge_tolerance::Float64=1e-7,
+        max_iterations::Int=200,
+        coordinate_basis::Union{Nothing, AbstractMatrix{<:Real}}=nothing,
+        equation_scales::Union{Nothing, AbstractVector{<:Real}}=nothing)
+    size(L, 1) == 2 || throw(DimensionMismatch("L must have two rows"))
+    size(Q, 2) == size(L, 2) || throw(DimensionMismatch("Q columns must match L columns"))
+    length(phases) == size(Q, 2) || throw(DimensionMismatch("one phase is required per instanton"))
+    starts > 0 || throw(ArgumentError("starts must be positive"))
+
+    n, p = size(Q)
+    q = coordinate_basis === nothing ? Matrix{Float64}(Q) : Matrix{Float64}(coordinate_basis) \ Matrix{Float64}(Q)
+    phase = Float64.(phases)
+    logscale = Float64.(L[2, :])
+    amplitudes = Float64.(L[1, :]) .* 10.0 .^ (logscale .- maximum(logscale))
+    row_scales = equation_scales === nothing ? ones(n) : Float64.(equation_scales) ./ maximum(abs, equation_scales)
+    length(row_scales) == n || throw(DimensionMismatch("one equation scale is required per axion"))
+    all(>(0), row_scales) || throw(ArgumentError("equation scales must be positive"))
+    twoπ = 2π
+
+    function gradient!(out, θ)
+        mul!(out, q, amplitudes .* sin.(twoπ .* (q' * θ) .+ phase))
+        out .*= twoπ
+        out ./= row_scales
+        nothing
+    end
+    function hessian!(out, θ)
+        weights = amplitudes .* cos.(twoπ .* (q' * θ) .+ phase)
+        mul!(out, q * Diagonal(weights), q')
+        out .*= twoπ^2
+        out ./= row_scales
+        nothing
+    end
+
+    roots = Vector{Vector{Float64}}()
+    residuals = Float64[]
+    bases = _first_primes(n)
+    for sample in 0:(starts - 1)
+        θ0 = sample == 0 ? zeros(n) : [_radical_inverse(sample, base) for base in bases]
+        result = nlsolve(gradient!, hessian!, θ0; method=:newton,
+            ftol=residual_tolerance, xtol=residual_tolerance, iterations=max_iterations)
+        (result.f_converged || result.x_converged) || continue
+        θ = mod.(result.zero, 1.0)
+        residual = result.residual_norm
+        residual <= residual_tolerance || continue
+        duplicate = any(root -> maximum(min.(abs.(θ .- root), 1 .- abs.(θ .- root))) <= merge_tolerance, roots)
+        duplicate && continue
+        push!(roots, θ)
+        push!(residuals, residual)
+    end
+
+    coordinates = isempty(roots) ? zeros(n, 0) : hcat(roots...)
+    inertia = Vector{NTuple{3, Int}}(undef, length(roots))
+    hessian_eigenvalues = Vector{Vector{Float64}}(undef, length(roots))
+    hessian = zeros(n, n)
+    for (i, θ) in enumerate(roots)
+        weights = amplitudes .* cos.(twoπ .* (q' * θ) .+ phase)
+        physical_hessian = twoπ^2 .* q * Diagonal(weights) * q'
+        inverse_sqrt_scale = Diagonal(inv.(sqrt.(row_scales)))
+        values = eigvals(Hermitian(inverse_sqrt_scale * physical_hessian * inverse_sqrt_scale))
+        scale = max(maximum(abs, values), 1.0)
+        zero_tolerance = 100 * residual_tolerance * scale
+        inertia[i] = (count(<(-zero_tolerance), values), count(x -> abs(x) <= zero_tolerance, values), count(>(zero_tolerance), values))
+        hessian_eigenvalues[i] = values
+    end
+    minima_mask = [entry == (0, 0, n) for entry in inertia]
+    minima = coordinates[:, minima_mask]
+    (; coordinates, minima, inertia, hessian_eigenvalues, residuals,
+       critical_count=length(roots), minima_count=count(minima_mask), starts)
+end
+
 function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,θparalleltest::Matrix,Qtilde::Matrix,algo,prec)
     setprecision(ArbFloat,digits=prec)
     Arb0 = ArbFloat(0.)

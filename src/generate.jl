@@ -14,7 +14,7 @@ using TimerOutputs
 
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
-using ..minimizer: minimize, subspace_minimize
+using ..minimizer: minimize, subspace_minimize, critical_points
 
 using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, PhysicalAxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonHierarchyDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
@@ -535,25 +535,25 @@ function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000)
         spectrum_data = hp_spectrum(K, Ltilde, Qtilde; prec = prec)
 
         h5open(cyax_file(h11, tri, cy), "r+") do file
-            f2 = create_group(file, "spectrum")
-            f2a = create_group(f2, "quartdiag")
+            f2 = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
+            f2a = haskey(f2, "quartdiag") ? f2["quartdiag"] : create_group(f2, "quartdiag")
             f2a["log10", deflate=9] = spectrum_data["λself"]
             f2a["sign", deflate=9] = spectrum_data["λselfsign"]
-            f2e = create_group(f2, "decay")
+            f2e = haskey(f2, "decay") ? f2["decay"] : create_group(f2, "decay")
             f2e["fpert", deflate=9] = spectrum_data["fpert"]
             f2e["fK", deflate=9] = spectrum_data["fK"]
 
-            f2b = create_group(f2, "quart31")
+            f2b = haskey(f2, "quart31") ? f2["quart31"] : create_group(f2, "quart31")
             f2b["log10", deflate=9] = spectrum_data["λ31"]
             f2b["sign", deflate=9] = spectrum_data["λ31sign"]
             f2b["index", deflate=9] = spectrum_data["λ31_i"]
 
-            f2c = create_group(f2, "quart22")
+            f2c = haskey(f2, "quart22") ? f2["quart22"] : create_group(f2, "quart22")
             f2c["log10", deflate=9] = spectrum_data["λ22"]
             f2c["sign", deflate=9] = spectrum_data["λ22sign"]
             f2c["index", deflate=9] = spectrum_data["λ22_i"]
 
-            f2d = create_group(f2, "masses")
+            f2d = haskey(f2, "masses") ? f2["masses"] : create_group(f2, "masses")
             f2d["log10", deflate=9] = spectrum_data["m"]
             f2d["sign", deflate=9] = spectrum_data["msign"]
         end
@@ -797,16 +797,16 @@ end
 """
     leading_hessian_mass_basis(K, L, Q; prec=1_000)
 
-Return the high-precision eigenspectrum and canonical eigenbasis of the Hessian
-formed from a PQ-selected leading instanton set. The returned basis is ordered
-by ascending mass and converted to Float64 only after diagonalization.
+Return the high-precision masses, eigenvalue signs, and canonical eigenbasis of
+the Hessian formed from a PQ-selected leading instanton set. Results are
+ordered by ascending mass and converted to Float64 only after diagonalization.
 """
 function leading_hessian_mass_basis(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; prec::Int=1_000)
     W, _ = high_precision_leading_hessian(K, L, Q; prec)
     eigenvalues, eigenvectors = eigen(W)
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
     order = sortperm(masses)
-    return masses[order], Float64.(eigenvectors[:, order])
+    return masses[order], Int.(sign.(eigenvalues[order])), Float64.(eigenvectors[:, order])
 end
 
 """
@@ -819,7 +819,7 @@ function leading_hessian_mass_basis_float64(K::Hermitian{Float64, Matrix{Float64
     eigenvalues, eigenvectors = eigen(leading_hessian_matrix_float64(K, L, Q))
     masses = 0.5 .* log10.(abs.(eigenvalues)) .+ 9 .+ log10(2.435e18) .+ log10(2π)
     order = sortperm(masses)
-    return masses[order], eigenvectors[:, order]
+    return masses[order], Int.(sign.(eigenvalues[order])), eigenvectors[:, order]
 end
 
 """
@@ -872,8 +872,9 @@ lose precision through cancellation among instanton contributions. Use
 
 # Return value
 
-Returns an `AxionSpectrum` with masses `m`, decay quantities `f` and `fK`, and
-signed base-10 logarithms for `λself`, `λ31`, and `λ22`. The `λ31_i` and
+Returns an `AxionSpectrum` with masses `m`, aligned Hessian signs `msign`,
+decay quantities `f` and `fK`, and signed base-10 logarithms for `λself`,
+`λ31`, and `λ22`. The `λ31_i` and
 `λ22_i` matrices give zero-based mode indices. `quartic_diagnostics` is
 `nothing` by default; when requested, it is aligned with these component
 families and reports final-sum cancellation in the Float64 log-space
@@ -897,15 +898,16 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
     # Match the mass ordering used in the returned PQ spectrum.
     order = sortperm(mapprox)
     masses = mapprox[order] .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
+    mass_signs = Int.(sign.(@view Ltilde[1, order]))
     quartic_basis = P[:, order]
     correction_mode = mixing_correction === true ? :high_precision : mixing_correction === false ? :none : mixing_correction
     @assert correction_mode in (:none, :float64, :high_precision) "mixing_correction must be false, true, :float64, or :high_precision"
     if correction_mode === :high_precision
         # This is the exact eigensystem of PQ's own selected leading-Hessian,
         # not an all-instanton HP calculation.
-        masses, quartic_basis = leading_hessian_mass_basis(K, Ltilde, Qtilde; prec=prec)
+        masses, mass_signs, quartic_basis = leading_hessian_mass_basis(K, Ltilde, Qtilde; prec=prec)
     elseif correction_mode === :float64
-        masses, quartic_basis = leading_hessian_mass_basis_float64(K, Ltilde, Qtilde)
+        masses, mass_signs, quartic_basis = leading_hessian_mass_basis_float64(K, Ltilde, Qtilde)
     end
     if mass_basis_diagnostics && correction_mode === :none
         throw(ArgumentError("mass_basis_diagnostics requires a leading-Hessian mass basis; set mixing_correction to :float64 or :high_precision"))
@@ -958,7 +960,7 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
             QuarticComponentDiagnostics(getindex.(two_two_diagnostics, 1), getindex.(two_two_diagnostics, 2), BitVector(getindex.(two_two_diagnostics, 3)), BitVector(getindex.(two_two_diagnostics, 4))),
         )
     end
-    AxionSpectrum(masses, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
+    AxionSpectrum(masses, mass_signs, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
     quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
     isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics, mass_diagnostics, hierarchy)
@@ -1102,11 +1104,70 @@ function schur_physical_basis(W::Hermitian{T, Matrix{T}}, float_basis::Matrix{Fl
     eigenvalues, basis, residuals
 end
 
+function schur_admissible_float64(W::Hermitian, float_basis::Matrix{Float64}, physical_count::Int, threshold_log10::Float64)
+    h11 = size(W, 1)
+    physical_count == h11 && return true
+    complement = @view float_basis[:, 1:end-physical_count]
+    complement_matrix = Symmetric(complement' * Float64.(Matrix(W)) * complement)
+    complement_eigenvalues = eigvals(complement_matrix)
+    all(isfinite, complement_eigenvalues) || return true
+    mass_offset = 9.0 + Float64(log10(constants()["MPlanck"])) + Float64(constants()["log2π"])
+    threshold_eigenvalue = 10.0 ^ (2 * (threshold_log10 - mass_offset))
+    maximum(complement_eigenvalues) < threshold_eigenvalue
+end
+
+function select_quartic_backend(Q::Matrix{Int}, backend::Symbol)
+    backend in (:auto, :dense, :sparse) || throw(ArgumentError("quartic_backend must be :auto, :dense, or :sparse"))
+    backend !== :auto && return backend
+    entries = length(Q)
+    density = entries == 0 ? 0.0 : count(value -> !iszero(value), Q) / entries
+    entries >= 100_000 && density <= 0.10 ? :sparse : :dense
+end
+
+function quartic_charge_basis(Q::Matrix{Int}, Kfactor, basis::Matrix{T}, backend::Symbol) where {T}
+    transformed_basis = transpose(Kfactor.L) \ basis
+    backend === :sparse ? sparse(transpose(Q)) * transformed_basis : T.(transpose(Q)) * transformed_basis
+end
+
+function diagonal_quartics(Q::Matrix{Int}, L::Matrix{Float64}, Kfactor, basis::Matrix{T}, backend::Symbol) where {T}
+    transformed_basis = transpose(Kfactor.L) \ basis
+    physical_count = size(basis, 2)
+    values = zeros(T, physical_count)
+    quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    if backend === :sparse
+        sparse_Q = sparse(Q)
+        charges = zeros(T, physical_count)
+        for instanton in axes(Q, 2)
+            fill!(charges, zero(T))
+            for pointer in nzrange(sparse_Q, instanton)
+                row = sparse_Q.rowval[pointer]
+                charge = T(sparse_Q.nzval[pointer])
+                for mode in 1:physical_count
+                    charges[mode] += charge * transformed_basis[row, mode]
+                end
+            end
+            scale = quartic_scales[instanton]
+            for mode in 1:physical_count
+                values[mode] += scale * charges[mode]^4
+            end
+        end
+    else
+        charge_basis = T.(transpose(Q)) * transformed_basis
+        for instanton in axes(Q, 2), mode in 1:physical_count
+            values[mode] += quartic_scales[instanton] * charge_basis[instanton, mode]^4
+        end
+    end
+    signs = Int.(sign.(values))
+    logs = [signs[mode] == 0 ? -Inf : Float64(log10(abs(values[mode]))) for mode in 1:physical_count]
+    signs, logs
+end
+
 """
     pq_hybrid_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
                                 maxiter=100, residual_tolerance=1e-30,
                                 schur_acceleration=true, oversampling=8,
-                                quartics=true)
+                                quartics=true, mixed_quartics=true,
+                                quartic_backend=:auto)
 
 Compute only the PQ leading-Hessian modes above `threshold_log10` with a
 sequential-PQ-seeded, arbitrary-precision block subspace iteration. The physical
@@ -1123,6 +1184,14 @@ Set `quartics=false` to return only physical masses, mode indices, and
 eigenvectors. This avoids the rapidly growing physical-sector quartic output
 for large numbers of retained modes.
 
+Set `mixed_quartics=false` with `quartics=true` to compute only diagonal
+`lambda_iiii` self-couplings. This is the compact production mode for large
+ensemble scans.
+
+`quartic_backend=:auto` selects the dense implementation for small or dense
+charge matrices and the sparse implementation for large sparse matrices. Use
+`:dense` or `:sparse` to override the dispatch for benchmarking.
+
 When the block-subspace fallback is used, `oversampling` adds a small number
 of sub-threshold vectors to the iteration and discards them at the end. This
 improves convergence when the spectral gap at the physical threshold is small.
@@ -1132,7 +1201,7 @@ high-precision reference routine. If the requested residual tolerance is not
 met by `maxiter`, a warning is emitted and the provisional result is returned;
 use `pq_physical_spectrum` to validate such a case.
 """
-function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, label::AbstractString="matrix input")
+function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true, quartic_backend::Symbol=:auto, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
@@ -1154,11 +1223,13 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     seed_basis = pq_basis[:, sortperm(pq_masses)]
     schur_safe = false
     if schur_acceleration && physical_count < h11
-        complement = T.(seed_basis[:, 1:end-physical_count])
-        C = Hermitian(complement' * W * complement)
-        mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
-        threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
-        schur_safe = positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
+        if schur_admissible_float64(W, seed_basis, physical_count, threshold_log10)
+            complement = T.(seed_basis[:, 1:end-physical_count])
+            C = Hermitian(complement' * W * complement)
+            mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
+            threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
+            schur_safe = positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
+        end
     end
     if schur_safe
         eigenvalues, basis, residuals = schur_physical_basis(W, seed_basis, physical_count; maxiter, residual_tolerance)
@@ -1181,10 +1252,19 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     maximum(residuals) > residual_tolerance && @warn "hybrid physical spectrum did not reach residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Returning a provisional result."
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
     !quartics && return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
-    Qmass = (T.(Q') / Kfactor.L') * basis
+    selected_backend = select_quartic_backend(Q, quartic_backend)
+    log2π = Float64(constants()["log2π"])
+    if !mixed_quartics
+        self_sign, self_log = diagonal_quartics(Q, L, Kfactor, basis, selected_backend)
+        return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis),
+            self_sign, self_log .+ 4 * log2π,
+            zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+            threshold_log10, prec)
+    end
+    Qmass = quartic_charge_basis(Q, Kfactor, basis, selected_backend)
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
-    qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
-    qindq22 = [(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
+    qindq31 = mixed_quartics ? [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j] : Tuple{Int,Int,Int,Int}[]
+    qindq22 = mixed_quartics ? [(i, i, j, j) for i in 1:physical_count for j in 1:i-1] : Tuple{Int,Int,Int,Int}[]
     function signed_quartic(exponents::NTuple{4, Int})
         value = zero(T)
         for a in eachindex(quartic_scales)
@@ -1205,7 +1285,6 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     for i in eachindex(qindq22)
         two_two_sign[i], two_two_log[i] = signed_quartic(qindq22[i])
     end
-    log2π = Float64(constants()["log2π"])
     PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis),
         self_sign, self_log .+ 4 * log2π,
         isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, three_one_sign, three_one_log .+ 4 * log2π,
@@ -1592,32 +1671,133 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
 end
 
 function LQtilde(h11::Int, tri::Int, cy::Int; hilbert = false)
-    if hilbert
-        pot_data = potential(h11, tri, cy; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)    
-    else
-        pot_data = potential(h11, tri, cy; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    end
+    pot_data = potential(h11, tri, cy; hilbert = hilbert)
+    return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
 end	
 
 function LQtilde(geom_idx::GeometryIndex; hilbert = false)
-    if hilbert
-        pot_data = potential(geom_idx; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    else
-        pot_data = potential(geom_idx; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    end
+    pot_data = potential(geom_idx; hilbert = hilbert)
+    return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
 end	
+
+"""
+    reduced_critical_points(L, Q; kwargs...)
+
+Deterministically find and classify critical points in the leading-charge
+coordinates used in the axion-minima papers. Each stationarity equation is
+scaled by its corresponding leading instanton amplitude, avoiding loss of the
+hierarchically suppressed directions.
+"""
+function reduced_critical_points(L::AbstractMatrix{Float64}, Q::AbstractMatrix{Int}; kwargs...)
+    selected = LQtilde(Q, L)
+    Lordered = hcat(selected.Ltilde, selected.Lbar)
+    Qordered = hcat(selected.Qtilde, selected.Qbar)
+    leading_logs = @view selected.Ltilde[2, :]
+    equation_scales = 10.0 .^ clamp.(leading_logs .- maximum(leading_logs),
+        log10(floatmin(Float64)), 0.0)
+    critical_points(Lordered, Qordered;
+        coordinate_basis=selected.Qtilde, equation_scales=equation_scales, kwargs...)
+end
+
+function _torus_distance(a::AbstractVector{<:Real}, b::AbstractVector{<:Real})
+    maximum(min.(abs.(a .- b), 1 .- abs.(a .- b)))
+end
+
+function _contains_torus_point(points::AbstractMatrix{<:Real}, θ::AbstractVector{<:Real},
+        count::Int; tol::Float64)
+    for i in 1:count
+        _torus_distance(@view(points[:, i]), θ) <= tol && return true
+    end
+    false
+end
+
+"""
+    leading_lattice_offsets(selected; tolerance=1e-8)
+
+Enumerate the finite quotient-lattice offsets solving
+`Qtilde' * θ = 0 mod 1` for the leading selected charge matrix.  The returned
+matrix has one axion-space offset per column and `abs(det(Qtilde))` columns for
+full-rank square `Qtilde`.
+"""
+function leading_lattice_offsets(selected::LQLinearlyIndependent; tolerance::Float64=1e-8)
+    h11 = size(selected.Qtilde, 1)
+    size(selected.Qtilde, 2) == h11 ||
+        throw(ArgumentError("Qtilde must be square to enumerate leading lattice offsets"))
+
+    det_qtilde = abs(round(Int, det(selected.Qtilde)))
+    det_qtilde > 0 || throw(ArgumentError("Qtilde must be nonsingular"))
+
+    inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
+    offsets = zeros(Float64, h11, det_qtilde)
+    offsets[:, 1] .= 0.0
+    count = 1
+    cursor = 1
+    while cursor <= count
+        base = @view offsets[:, cursor]
+        for i in 1:h11
+            θ = mod.(base .+ @view(inverse_transpose[:, i]), 1.0)
+            if !_contains_torus_point(offsets, θ, count; tol=tolerance)
+                count += 1
+                count <= det_qtilde ||
+                    error("lattice enumeration exceeded abs(det(Qtilde))")
+                offsets[:, count] .= θ
+            end
+        end
+        cursor += 1
+    end
+    count == det_qtilde ||
+        @warn "lattice enumeration did not reach abs(det(Qtilde))" found=count expected=det_qtilde
+    offsets[:, 1:count]
+end
+
+"""
+    leading_critical_branches(selected; tolerance=1e-8, max_branches=1_000_000)
+
+Enumerate the leading half-integer critical branches
+`Qtilde' * θ ∈ {0, 1/2}^h11 mod 1`, including the quotient-lattice copies from
+`abs(det(Qtilde))`.  This gives a cheap deterministic prefilter for vacua and
+inflation scans when the leading instantons are strongly hierarchical.  The
+returned coordinates are in the original axion torus, one branch per column.
+
+The `leading_negative_modes` entry is the Hessian inertia of the leading
+selected potential only; downstream callers should still evaluate the full
+potential/Hessian on any retained branches.
+"""
+function leading_critical_branches(selected::LQLinearlyIndependent;
+        tolerance::Float64=1e-8, max_branches::Int=1_000_000)
+    h11 = size(selected.Qtilde, 1)
+    offsets = leading_lattice_offsets(selected; tolerance=tolerance)
+    det_qtilde = size(offsets, 2)
+    branch_count = det_qtilde * 2^h11
+    branch_count <= max_branches ||
+        throw(ArgumentError("leading branch enumeration would create $branch_count branches; increase max_branches explicitly if intended"))
+
+    inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
+    coordinates = zeros(Float64, h11, branch_count)
+    leading_negative_modes = Vector{Int}(undef, branch_count)
+    signs = @view selected.Ltilde[1, :]
+    branch_cursor = 0
+    for mask in 0:(2^h11 - 1)
+        half_phase = [((mask >> (i - 1)) & 1) == 1 ? 0.5 : 0.0 for i in 1:h11]
+        base = inverse_transpose * half_phase
+        negative_modes = count(i -> signs[i] * (half_phase[i] == 0.0 ? 1.0 : -1.0) < 0.0, 1:h11)
+        for j in axes(offsets, 2)
+            branch_cursor += 1
+            coordinates[:, branch_cursor] .= mod.(@view(offsets[:, j]) .+ base, 1.0)
+            leading_negative_modes[branch_cursor] = negative_modes
+        end
+    end
+
+    (; coordinates,
+       leading_negative_modes,
+       branch_count=branch_cursor,
+       leading_minima_count=count(==(0), leading_negative_modes),
+       det_Qtilde=det_qtilde)
+end
+
+function leading_critical_branches(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64}; kwargs...)
+    leading_critical_branches(LQtilde(Q, L); kwargs...)
+end
 
 """
     αmatrix(LQtilde::NamedTuple; threshold::Float64=0.5)
@@ -1648,6 +1828,7 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
 
     # Pre-allocate effective vectors efficiently
     αeff_cols = Vector{Rational}[]
+    αeff_indices = Int[]
     
     @inbounds for i in axes(α, 1)
         keep = false
@@ -1665,14 +1846,18 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
         end
         if keep
             push!(αeff_cols, α[i, :])
+            push!(αeff_indices, i)
         end
     end
 
     if !isempty(αeff_cols)
         αeff = hcat(αeff_cols...)
-        αrowmask = [(L - Lhat[2, h11+1]) < -Ldiff_limit for L in @view(Lhat[2, 1:h11])]
+        Qbar_eff = Qbar_v[:, αeff_indices]
+        Lbar_eff = Lbar_v[:, αeff_indices]
+        perturbation_anchor = Lbar_v[2, first(αeff_indices)]
+        αrowmask = [(L - perturbation_anchor) < -Ldiff_limit for L in @view(Lhat[2, 1:h11])]
         αcolmask = [any(!iszero, col) for col in eachcol(αeff[αrowmask, :])]
-        return Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
+        return Canonicalα(Matrix{Int}(Qhat), Matrix{Int}(Qbar_eff), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar_eff), Matrix{Rational}(αeff), Matrix{Rational}(αeff), Vector{Bool}(αrowmask), Vector{Bool}(αcolmask))
     else
         return CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar))
     end
