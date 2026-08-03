@@ -32,6 +32,24 @@ Set `quartics=false` for large mass-only scans. When quartics are requested,
 every input instanton contributes to their contraction even though only the
 physical mass eigenvectors are returned.
 
+For resumable ensemble runs, use `scripts/batch_physical_spectrum.jl`. It
+discovers indexed or on-disk geometries, flushes one CSV row per geometry, and
+writes compact results below `physical_spectrum/`:
+
+```sh
+julia --project=. scripts/batch_physical_spectrum.jl \
+    --data-dir /path/to/data --h11 200 --limit 100 --mass-only \
+    --summary /path/to/data/logs/physical_spectrum_h11_200.csv
+
+julia --project=. scripts/batch_physical_spectrum.jl \
+    --data-dir /path/to/data --geometry 10,1,1 --quartics --force
+```
+
+The quartic batch mode computes only diagonal self-couplings and derives
+`fpert_log10 = m - 0.5 * lambda_self_log10`; mixed quartic arrays and
+eigenvectors are not persisted. Existing output is skipped unless `--force` is
+given, and per-geometry failures are recorded without stopping the batch.
+
 `pq_spectrum` returns `m` together with the aligned Hessian-eigenvalue signs in
 `msign`. Its sequential PQ decay quantity is `f`; the legacy spectrum HDF5
 schema stores this array under `decay/fpert` for compatibility with existing

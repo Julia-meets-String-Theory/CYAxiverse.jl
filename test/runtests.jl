@@ -4,6 +4,7 @@ using SparseArrays
 using Test
 
 include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
 
 @testset "CYAxiverse.jl" begin
     @testset "core" begin
@@ -16,6 +17,29 @@ include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
             include(joinpath(@__DIR__, "..", "scripts", "cytools_wrapper_repro.jl"))
         end
     end
+end
+
+@testset "Physical spectrum batch persistence" begin
+    spectrum = CYAxiverse.structs.PhysicalAxionSpectrum(
+        [1.0, 2.0], [0, 1], zeros(2, 2), [1, -1], [3.0, 4.0],
+        zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+        -30.0, 200)
+    geom_idx = CYAxiverse.structs.GeometryIndex(2, 3, 4)
+    output_dir = mktempdir()
+    output_path = joinpath(output_dir, "spectrum.h5")
+    _write_result(output_path, geom_idx, spectrum; prec=200, threshold_log10=-30.0,
+        quartics=true, runtime_seconds=0.1, provisional=false)
+    HDF5.h5open(output_path, "r") do file
+        @test HDF5.haskey(file, "cytools/spectrum/physical/m")
+        @test read(file["cytools/spectrum/physical/fpert_log10"]) ≈ [-0.5, 0.0]
+    end
+
+    summary_path = joinpath(output_dir, "summary.csv")
+    _write_summary_header(summary_path)
+    _append_summary(summary_path, geom_idx; status="failed", error="synthetic failure",
+        prec=200, threshold_log10=-30.0)
+    @test count(==( '\n'), read(summary_path, String)) == 2
+    @test occursin("failed", read(summary_path, String))
 end
 
 @testset "Paper reproduction benchmarks" begin

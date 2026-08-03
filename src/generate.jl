@@ -1108,7 +1108,7 @@ end
     pq_hybrid_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
                                 maxiter=100, residual_tolerance=1e-30,
                                 schur_acceleration=true, oversampling=8,
-                                quartics=true)
+                                quartics=true, mixed_quartics=true)
 
 Compute only the PQ leading-Hessian modes above `threshold_log10` with a
 sequential-PQ-seeded, arbitrary-precision block subspace iteration. The physical
@@ -1125,6 +1125,10 @@ Set `quartics=false` to return only physical masses, mode indices, and
 eigenvectors. This avoids the rapidly growing physical-sector quartic output
 for large numbers of retained modes.
 
+Set `mixed_quartics=false` with `quartics=true` to compute only diagonal
+`lambda_iiii` self-couplings. This is the compact production mode for large
+ensemble scans.
+
 When the block-subspace fallback is used, `oversampling` adds a small number
 of sub-threshold vectors to the iteration and discards them at the end. This
 improves convergence when the spectral gap at the physical threshold is small.
@@ -1134,7 +1138,7 @@ high-precision reference routine. If the requested residual tolerance is not
 met by `maxiter`, a warning is emitted and the provisional result is returned;
 use `pq_physical_spectrum` to validate such a case.
 """
-function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, label::AbstractString="matrix input")
+function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
@@ -1185,8 +1189,8 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     !quartics && return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
     Qmass = (T.(Q') / Kfactor.L') * basis
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
-    qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
-    qindq22 = [(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
+    qindq31 = mixed_quartics ? [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j] : Tuple{Int,Int,Int,Int}[]
+    qindq22 = mixed_quartics ? [(i, i, j, j) for i in 1:physical_count for j in 1:i-1] : Tuple{Int,Int,Int,Int}[]
     function signed_quartic(exponents::NTuple{4, Int})
         value = zero(T)
         for a in eachindex(quartic_scales)
@@ -1594,31 +1598,13 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
 end
 
 function LQtilde(h11::Int, tri::Int, cy::Int; hilbert = false)
-    if hilbert
-        pot_data = potential(h11, tri, cy; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)    
-    else
-        pot_data = potential(h11, tri, cy; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    end
+    pot_data = potential(h11, tri, cy; hilbert = hilbert)
+    return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
 end	
 
 function LQtilde(geom_idx::GeometryIndex; hilbert = false)
-    if hilbert
-        pot_data = potential(geom_idx; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    else
-        pot_data = potential(geom_idx; hilbert = hilbert)
-        Q = Matrix{Int}(pot_data.Q')
-        L = Matrix{Float64}(pot_data.L')
-        return LQtilde(Q, L)
-    end
+    pot_data = potential(geom_idx; hilbert = hilbert)
+    return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
 end	
 
 """
