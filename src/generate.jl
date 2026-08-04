@@ -214,6 +214,44 @@ function hessian(x, L::Matrix{Float64}, Q::Matrix)
     end
 end
 
+"""
+    cubic(x, L, Q)
+
+Return the rank-3 field-space derivative tensor
+`∂ᵢ∂ⱼ∂ₖ V(x)` for
+`V(x) = Σₐ Λₐ (1 - cos(Qₐ⋅x))`, where `Λ` is encoded by the signed
+`(sign, log10(abs(Λ)))` columns of `L`.
+
+For a phased potential, evaluate this function at `x + phase`.  In
+particular, the tensor vanishes at the unphased origin but is generally
+nonzero for arbitrary phases.
+"""
+function cubic(x::AbstractVector{<:Real}, L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real})
+    @assert size(L, 2) == 2
+    @assert size(Q, 1) == size(L, 1) && size(Q, 2) == length(x)
+    Λ = L[:, 1] .* 10.0 .^ L[:, 2]
+    phases = Q * x
+    n = size(Q, 2)
+    C = zeros(promote_type(eltype(Λ), eltype(x), Float64), n, n, n)
+    @inbounds for a in axes(Q, 1)
+        coefficient = -Λ[a] * sin(phases[a])
+        for i in 1:n, j in 1:n, k in 1:n
+            C[i, j, k] += coefficient * Q[a, i] * Q[a, j] * Q[a, k]
+        end
+    end
+    C
+end
+
+"""
+    cubic(x, phase, L, Q)
+
+Evaluate the same cubic tensor at `x + phase`.  This is a convenience for
+phase-shifted cosine potentials; the returned tensor is in the coordinate
+basis represented by `Q`.
+"""
+cubic(x::AbstractVector{<:Real}, phase::AbstractVector{<:Real}, L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real}) =
+    cubic(x .+ phase, L, Q)
+
 function hessian_norm(x, Q::Matrix)
     hessian = zeros(size(Q, 1), size(Q, 1))
     if size(Q, 1) == 1
@@ -522,10 +560,15 @@ end
 
 
 """
-    hp_spectrum_save(h11,tri,cy)
+    hp_spectrum_save(h11, tri, cy; prec=5_000, phase=zeros(h11))
 
+Compute and persist the high-precision spectrum and the cubic interaction
+tensor.  The cubic tensor is evaluated at `phase` in the `LQtildebar` charge
+basis and is stored under `spectrum/cubic/tensor`; the phase vector is stored
+under `spectrum/cubic/phase`.
 """
-function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000)
+function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000,
+                          phase::AbstractVector{<:Real}=zeros(Float64, h11))
     if h11 != 0
         pot_data = potential(h11, tri, cy)
         K = pot_data.K
@@ -533,6 +576,7 @@ function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000)
         Ltilde = Matrix{Float64}(LQtilde_data["Lhat"]')
         Qtilde = Matrix{Int}(LQtilde_data["Qhat"]')
         spectrum_data = hp_spectrum(K, Ltilde, Qtilde; prec = prec)
+        cubic_data = cubic(phase, Ltilde, Qtilde)
 
         h5open(cyax_file(h11, tri, cy), "r+") do file
             f2 = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
@@ -556,6 +600,10 @@ function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000)
             f2d = haskey(f2, "masses") ? f2["masses"] : create_group(f2, "masses")
             f2d["log10", deflate=9] = spectrum_data["m"]
             f2d["sign", deflate=9] = spectrum_data["msign"]
+
+            f2g = haskey(f2, "cubic") ? f2["cubic"] : create_group(f2, "cubic")
+            f2g["tensor", deflate=9] = cubic_data
+            f2g["phase", deflate=9] = Float64.(phase)
         end
     end
 
@@ -1516,29 +1564,40 @@ function pq_spectra_generator(h11_min::Int, h11_max::Int, h11list::Matrix{Int})
 end
 
 
-function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
-    if h11!=0
-        file_open::Bool = 0
-        h5open(cyax_file(h11,tri,cy), "r") do file
-            if haskey(file, "spectrum")
-                file_open = 1
-                return nothing
-            end
-        end
-        if file_open == 0
-            pot_data = potential(h11,tri,cy);
-            L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data.L,pot_data.Q,pot_data.K
-            spectrum_data = pq_spectrum(K,L,Q)
-            h5open(cyax_file(h11,tri,1), "r+") do file
-                f2 = create_group(file, "spectrum")
-                f2e = create_group(f2, "decay")
-                f2e["fpert",deflate=9] = spectrum_data["fpert"]
-                f2e["fK",deflate=9] = spectrum_data["fK"]
+"""
+    pq_spectrum_save(h11, tri, cy; phase=zeros(h11))
 
-                f2d = create_group(f2, "masses")
-                f2d["log10",deflate=9] = spectrum_data["m"]
-            end
-        end
+Compute and persist the fast PQ spectrum, including masses, decay constants,
+mass signs, and the cubic interaction tensor in the PQ mass basis.  `phase`
+is the phase-space evaluation point in the selected charge basis.  Outputs
+are written under `spectrum/`, with the cubic tensor at
+`spectrum/cubic/tensor` and its phase at `spectrum/cubic/phase`.
+
+This production path uses the Float64 PQ leading-Hessian basis.  Use
+[`hp_spectrum_save`](@ref) when arbitrary-precision spectrum data are needed.
+"""
+function pq_spectrum_save(h11::Int, tri::Int, cy::Int=1;
+                          phase::AbstractVector{<:Real}=zeros(Float64, h11))
+    h11 == 0 && return nothing
+    pot_data = potential(h11, tri, cy)
+    L, Q, K = pot_data.L, pot_data.Q, pot_data.K
+    spectrum_data = pq_spectrum(K, L, Q)
+    LQtild = LQtilde(Q, L)
+    Kls = cholesky(K).L
+    _, _, basis = leading_hessian_mass_basis_float64(K, LQtild.Ltilde, LQtild.Qtilde)
+    Qmass = (Matrix(LQtild.Qtilde') / Kls') * basis
+    cubic_data = cubic(phase, LQtild.Ltilde, Qmass)
+    h5open(cyax_file(h11, tri, cy), "r+") do file
+        f2 = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
+        f2e = haskey(f2, "decay") ? f2["decay"] : create_group(f2, "decay")
+        f2e["fpert",deflate=9] = spectrum_data.f
+        f2e["fK",deflate=9] = spectrum_data.fK
+        f2d = haskey(f2, "masses") ? f2["masses"] : create_group(f2, "masses")
+        f2d["log10",deflate=9] = spectrum_data.m
+        f2d["sign",deflate=9] = spectrum_data.msign
+        f2g = haskey(f2, "cubic") ? f2["cubic"] : create_group(f2, "cubic")
+        f2g["tensor",deflate=9] = cubic_data
+        f2g["phase",deflate=9] = Float64.(phase)
     end
 end
 

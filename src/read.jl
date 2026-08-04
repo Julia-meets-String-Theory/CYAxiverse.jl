@@ -133,6 +133,25 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
     return Ltemp
 end
 
+"""
+    cubic_tensor(h11, tri, cy=1)
+
+Read the cubic interaction tensor saved by `pq_spectrum_save` or
+`hp_spectrum_save`.  Returns a named tuple with `tensor` and the evaluation
+`phase`; the tensor is stored in the corresponding saved spectrum basis.
+"""
+function cubic_tensor(h11::Int, tri::Int, cy::Int=1)
+    h5open(cyax_file(h11, tri, cy), "r") do file
+        tensor = HDF5.read(file, "spectrum/cubic/tensor")
+        phase = HDF5.read(file, "spectrum/cubic/phase")
+        return (; tensor=tensor, phase=phase)
+    end
+end
+
+function cubic_tensor(geom_idx::GeometryIndex)
+    cubic_tensor(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
+end
+
 
 ##############################
 ##### HDF5.read Vacua data ###
