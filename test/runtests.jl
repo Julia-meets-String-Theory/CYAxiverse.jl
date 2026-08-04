@@ -5,6 +5,7 @@ using Test
 using HDF5
 
 include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
 
 @testset "Geometry-level LQtilde orientation" begin
     mktempdir() do root
@@ -51,7 +52,118 @@ end
     end
 end
 
+@testset "Vacua pipeline persistence and validation" begin
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        path = joinpath(geom_dir, "cyax.h5")
+        h5open(path, "cw") do file
+            spectrum = create_group(file, "spectrum")
+            spectrum["sentinel"] = Int[17, 23]
+        end
+
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+            spectrum = nothing
+            estimate = (vac=3, issquare=1)
+            identified = Dict("vac" => 3)
+            save_axion_data(geom_idx, spectrum, estimate, identified;
+                threshold=0.5, starts=17, residual_tolerance=1e-9,
+                merge_tolerance=1e-6, max_iterations=12, force=false,
+                search_metadata=(search_method="legacy",
+                    search_classification="finite_search_lower_bound",
+                    minimum_count=3, multiplicity=1.0, critical_count=-1,
+                    branch_count=-1, det_Qtilde=-1, search_status="completed"))
+
+            h5open(path, "r") do file
+                @test read(file["spectrum/sentinel"]) == [17, 23]
+                @test read(file["vacua_pipeline/estimate"]) == 3
+                @test read(file["vacua_pipeline/verified"]) == 3
+                @test read(file["vacua_pipeline/metadata/status"]) == "completed"
+                @test read(file["vacua_pipeline/metadata/solver_status"]) == "completed"
+                @test read(file["vacua_pipeline/metadata/starts"]) == 17
+                @test read(file["vacua_pipeline/metadata/method"]) == "legacy"
+            end
+            @test _has_pipeline_result(path)
+            config = _pipeline_config(threshold=0.5, starts=17,
+                residual_tolerance=1e-9, merge_tolerance=1e-6,
+                max_iterations=12, method=:legacy)
+            @test _has_pipeline_result(path; config=config)
+            @test _vacua_result_state(path, config) == :matching
+            matching_summary = joinpath(root, "matching.csv")
+            matching_options = _vacua_parse_args(["--data-dir", root,
+                "--geometry", "2,1,1", "--summary", matching_summary, "--threshold", "0.5",
+                "--starts", "17", "--residual-tolerance", "1e-9",
+                "--merge-tolerance", "1e-6", "--max-iterations", "12", "--dry-run"])
+            @test run_vacua_batch(matching_options)
+            @test occursin("skipped", read(matching_summary, String))
+
+            parallel_summary = joinpath(root, "parallel.csv")
+            parallel_options = _vacua_parse_args(["--data-dir", root,
+                "--geometry", "2,1,1", "--workers", "2", "--blas-threads", "1",
+                "--summary", parallel_summary, "--force"])
+            @test parallel_options[:workers] == 2
+            @test parallel_options[:blas_threads] == 1
+            @test !run_vacua_batch(parallel_options)
+            @test occursin("failed", read(parallel_summary, String))
+
+            mismatched_options = _vacua_parse_args(["--data-dir", root,
+                "--geometry", "2,1,1", "--threshold", "0.6", "--dry-run"])
+            @test _vacua_result_state(path, _vacua_config(mismatched_options)) != :matching
+            @test !run_vacua_batch(mismatched_options)
+            pipeline_data = CYAxiverse.read.pipeline_vacua(geom_idx)
+            @test pipeline_data.estimate == 3
+            @test pipeline_data.metadata.status == "completed"
+            @test pipeline_data.metadata.starts == 17
+            @test pipeline_data.metadata.method == "legacy"
+            @test pipeline_data.metadata.verification_status == "not_applicable"
+            @test pipeline_data.metadata.search_method == "legacy"
+            @test_throws ArgumentError save_axion_data(geom_idx, spectrum, estimate, identified;
+                threshold=0.5, force=false)
+
+            bad_potential = (Q=zeros(Int, 3, 4), L=zeros(2, 4),
+                K=Hermitian(Matrix{Float64}(I, 2, 2)))
+            @test_throws DimensionMismatch _validate_potential(geom_idx, bad_potential)
+        finally
+            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        end
+    end
+end
+
 @testset "Paper reproduction benchmarks" begin
+    @testset "Locally scaled critical-point solver" begin
+        extreme = CYAxiverse.minimizer.critical_points(
+            [1.0 1.0; 0.0 -400.0], [1 0; 0 1]; starts=64)
+        @test extreme.critical_count == 4
+        @test extreme.minima_count == 1
+        @test all(isfinite, reduce(vcat, extreme.hessian_eigenvalues))
+
+        displaced = CYAxiverse.minimizer.critical_points(
+            [1.0 1.0 -1.0;
+             -13.988802496336225 -13.988802497269443 -13.991896359391525],
+            [1 0 1; 0 1 1]; starts=256)
+        @test displaced.critical_count == 6
+        @test displaced.minima_count == 2
+        @test all(isfinite, reduce(vcat, displaced.hessian_eigenvalues))
+
+        n = 26
+        high_dimensional_q = zeros(Int, n, n + 1)
+        high_dimensional_q[:, 1:n] .= Matrix{Int}(I, n, n)
+        high_dimensional_q[1, n + 1] = 1
+        high_dimensional_q[2, n + 1] = 1
+        high_dimensional_l = zeros(2, n + 1)
+        high_dimensional_l[1, 1:n] .= 1.0
+        high_dimensional_l[1, n + 1] = -1.0
+        high_dimensional_l[2, n + 1] = -0.003
+        high_dimensional = CYAxiverse.minimizer.critical_points(
+            high_dimensional_l, high_dimensional_q; starts=64,
+            initial_points=zeros(n, 1))
+        @test high_dimensional.minima_count == 2
+    end
+
     n5 = CYAxiverse.paper_benchmarks.n5_potential()
     @test size(n5.Q) == (5, 8)
     @test n5.qdotτ == [6, 6.25, 24, 26, 31.875, 32, 36.125, 162.125]
@@ -118,6 +230,29 @@ end
         [2 0 1; 0 2 0], [1.0 1.0 1.0; 0.0 -10.0 -1.0])
     @test scaled_square_jlm.N_min == 4
     @test scaled_square_jlm.det_QTilde == 4
+
+    synthetic = (Q=Int[2 0 1; 0 2 1],
+        L=Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0])
+    synthetic_geom = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+    leading_estimate, _, leading_search = _search_vacua(synthetic_geom, synthetic;
+        threshold=0.5, starts=64, residual_tolerance=1e-9,
+        merge_tolerance=1e-6, max_iterations=100,
+        method=:leading_branches, max_branches=1_000)
+    @test leading_estimate.vac == 4
+    @test leading_search.search_classification == "certified_selected_branch_set"
+    @test leading_search.branch_count == 16
+    @test_throws ArgumentError _search_vacua(synthetic_geom, synthetic;
+        threshold=0.5, starts=64, residual_tolerance=1e-9,
+        merge_tolerance=1e-6, max_iterations=100,
+        method=:leading_branches, max_branches=8)
+
+    reduced_estimate, _, reduced_search = _search_vacua(synthetic_geom, synthetic;
+        threshold=0.5, starts=64, residual_tolerance=1e-9,
+        merge_tolerance=1e-6, max_iterations=100,
+        method=:reduced_jlm, max_branches=1_000)
+    @test reduced_estimate.vac == 4
+    @test reduced_search.search_classification == "exact_determinant_branch"
+    @test reduced_search.multiplicity == 4.0
 
     lattice_selected = CYAxiverse.generate.LQtilde(
         [2 0 1; 0 2 1], [1.0 1.0 1.0; 0.0 -1.0 -10.0])
@@ -346,7 +481,18 @@ end
             ENV["CYAXIVERSE_DATA_DIR"] = data_dir
             mkpath(joinpath(data_dir, "h11_002", "np_0000001", "cy_0000001"))
             path = CYAxiverse.filestructure.cyax_file(geom_idx)
-            h5open(path, "w") do _ end
+            h5open(path, "w") do file
+                spectrum_group = create_group(file, "spectrum")
+                masses = create_group(spectrum_group, "masses")
+                masses["log10"] = spectrum.m
+                masses["sign"] = spectrum.msign
+                decay = create_group(spectrum_group, "decay")
+                decay["fK"] = spectrum.fK
+                decay["fpert"] = spectrum.f
+                quartdiag = create_group(spectrum_group, "quartdiag")
+                quartdiag["log10"] = spectrum.λself
+                quartdiag["sign"] = spectrum.λselfsign
+            end
 
             save_axion_data(geom_idx, spectrum, vac_est, vac_id; threshold=0.5)
 

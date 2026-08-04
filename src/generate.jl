@@ -2017,7 +2017,9 @@ end
 
 TBW
 """
-function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector=zeros(size(Q, 1)))
+function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5,
+        phase::Vector=zeros(size(Q, 1)), runs::Int=10_000)
+    runs > 0 || throw(ArgumentError("runs must be positive"))
     # TODO: #4 add phases @vmmhep
     if @isdefined h11
     else
@@ -2036,7 +2038,8 @@ function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, ph
                 Leff = id_basis["Leff"][:, @.(!iszero(row))]
                 Lsubdiff = @view(Leff[2,:]) .- @view(Leff[2,1])
                 Lfull = Leff[1,:] .* 10. .^ Lsubdiff;
-                res = subspace_minimize(Lfull, Matrix(row[row .!= 0]'); phase=phase[i])
+                res = subspace_minimize(Lfull, Matrix(row[row .!= 0]'); runs=runs,
+                    phase=phase[i])
                 if typeof(res) <: Vector
                     res = reshape(res, length(res), 1)
                 end
@@ -2084,10 +2087,11 @@ end
 
 TBW
 """
-function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector=zeros(h11))
+function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5,
+    phase::Vector=zeros(h11), runs::Int=10_000)
     pot_data = potential(h11,tri,cy)
     Q::Matrix{Int}, L::Matrix{Float64} = pot_data.Q, pot_data.L 
-    vacua_id(L, Q; threshold=threshold, phase=phase)
+    vacua_id(L, Q; threshold=threshold, phase=phase, runs=runs)
 end
 
 """

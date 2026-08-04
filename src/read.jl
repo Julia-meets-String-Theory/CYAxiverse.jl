@@ -270,7 +270,41 @@ function pipeline_vacua(h11::Int, tri::Int, cy::Int=1)
         verified = haskey(group, "verified") ? HDF5.read(group, "verified") : nothing
         theta_min = haskey(group, "theta_min") ? HDF5.read(group, "theta_min/numerator") .// HDF5.read(group, "theta_min/denominator") : nothing
         theta_parallel = haskey(group, "theta_parallel") ? HDF5.read(group, "theta_parallel/numerator") .// HDF5.read(group, "theta_parallel/denominator") : nothing
-        return (; threshold, estimate, issquare, extrarows, verified, theta_min, theta_parallel)
+        metadata = if haskey(group, "metadata")
+            metadata_group = group["metadata"]
+            read_metadata(name, default=nothing) =
+                haskey(metadata_group, name) ? HDF5.read(metadata_group, name) : default
+            (; pipeline_version = read_metadata("pipeline_version"),
+               threshold = read_metadata("threshold"),
+               starts = read_metadata("starts"),
+               residual_tolerance = read_metadata("residual_tolerance"),
+               merge_tolerance = read_metadata("merge_tolerance"),
+               max_iterations = read_metadata("max_iterations"),
+               max_branches = read_metadata("max_branches"),
+               method = read_metadata("method"),
+               branch_method = read_metadata("branch_method"),
+               status = read_metadata("status"),
+               solver_status = read_metadata("solver_status", read_metadata("status")),
+               estimate_status = read_metadata("estimate_status"),
+               verification_status = read_metadata("verification_status"),
+               julia_version = read_metadata("julia_version"),
+               git_revision = read_metadata("git_revision"),
+               runtime_seconds = read_metadata("runtime_seconds"),
+               completed_at = read_metadata("completed_at"),
+               error = read_metadata("error"),
+               search_method = read_metadata("search_method"),
+               search_classification = read_metadata("search_classification"),
+               minimum_count = read_metadata("minimum_count"),
+               multiplicity = read_metadata("multiplicity"),
+               critical_count = read_metadata("critical_count"),
+               branch_count = read_metadata("branch_count"),
+               det_Qtilde = read_metadata("det_Qtilde"),
+               search_status = read_metadata("search_status"))
+        else
+            nothing
+        end
+        return (; threshold, estimate, issquare, extrarows, verified, theta_min,
+            theta_parallel, metadata)
     end
 end
 
