@@ -6,6 +6,7 @@ using Dates
 
 const VACUA_PIPELINE_VERSION = "1"
 
+"""Return the short Git revision for provenance metadata."""
 function _git_revision()
     root = dirname(@__DIR__)
     try
@@ -15,6 +16,7 @@ function _git_revision()
     end
 end
 
+"""Validate and normalize an explicitly supplied geometry data directory."""
 function _validate_data_dir(data_dir::AbstractString)
     isempty(strip(data_dir)) && throw(ArgumentError("data_dir must be explicitly provided"))
     path = abspath(expanduser(data_dir))
@@ -24,6 +26,7 @@ function _validate_data_dir(data_dir::AbstractString)
     path
 end
 
+"""Validate the dimensions and finite values of one geometry potential."""
 function _validate_potential(geom_idx, pot_data)
     h11 = geom_idx.h11
     Q, L, K = pot_data.Q, pot_data.L, pot_data.K
@@ -37,6 +40,7 @@ function _validate_potential(geom_idx, pot_data)
     nothing
 end
 
+"""Build the configuration tuple persisted with a vacua pipeline result."""
 function _pipeline_config(; threshold, starts, residual_tolerance, merge_tolerance,
     max_iterations, method, max_branches::Int=1_000_000)
     (; pipeline_version=VACUA_PIPELINE_VERSION, threshold, starts,
@@ -44,6 +48,7 @@ function _pipeline_config(; threshold, starts, residual_tolerance, merge_toleran
        max_branches, branch_method=string(method))
 end
 
+"""Return whether a completed result matches an optional saved configuration."""
 function _has_pipeline_result(path; config=nothing)
     isfile(path) || return false
     h5open(path, "r") do file
@@ -61,6 +66,7 @@ function _has_pipeline_result(path; config=nothing)
     end
 end
 
+"""Return whether an HDF5 geometry file contains a vacua pipeline group."""
 function _has_pipeline_group(path)
     isfile(path) || return false
     h5open(path, "r") do file
@@ -68,6 +74,7 @@ function _has_pipeline_group(path)
     end
 end
 
+"""Write solver, provenance, status, and search metadata to an HDF5 group."""
 function _write_metadata!(group, config; status, estimate_status, verification_status,
     runtime_seconds, solver_status=status, search_metadata=nothing, error_message="")
     metadata = create_group(group, "metadata")
@@ -90,6 +97,7 @@ function _write_metadata!(group, config; status, estimate_status, verification_s
     end
 end
 
+"""Dispatch one geometry to the selected vacua search method."""
 function _search_vacua(geom_idx, pot_data; threshold, starts, residual_tolerance,
         merge_tolerance, max_iterations, method, max_branches)
     Q, L = pot_data.Q, pot_data.L

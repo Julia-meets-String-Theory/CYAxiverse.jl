@@ -9,6 +9,7 @@ include(joinpath(@__DIR__, "vacua_pipeline.jl"))
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
 
+"""Print command-line usage for the vacua batch runner."""
 function _vacua_usage()
     println("""
     Usage:
@@ -38,6 +39,7 @@ function _vacua_usage()
     """)
 end
 
+"""Parse batch-runner command-line arguments into an options dictionary."""
 function _vacua_parse_args(args)
     options = Dict{Symbol, Any}(
         :data_dir => "",
@@ -124,6 +126,7 @@ function _vacua_parse_args(args)
     options
 end
 
+"""Validate batch-runner options before selecting or processing geometries."""
 function _vacua_validate_options(options)
     _validate_data_dir(options[:data_dir])
     options[:threshold] >= 0 || throw(ArgumentError("threshold must be nonnegative"))
@@ -144,6 +147,7 @@ function _vacua_validate_options(options)
     nothing
 end
 
+"""Load indexed geometries, optionally restricted to one h11 value."""
 function _vacua_indexed_geometries(h11_filter)
     try
         _, pathinds = CYAxiverse.filestructure.paths_cy()
@@ -155,6 +159,7 @@ function _vacua_indexed_geometries(h11_filter)
     end
 end
 
+"""Parse an integer suffix when a name starts with the requested prefix."""
 function _vacua_parse_prefixed_int(name::AbstractString, prefix::AbstractString)
     startswith(name, prefix) || return nothing
     try
@@ -164,6 +169,7 @@ function _vacua_parse_prefixed_int(name::AbstractString, prefix::AbstractString)
     end
 end
 
+"""Discover geometry files by scanning the configured data directory."""
 function _vacua_scanned_geometries(h11_filter)
     root = CYAxiverse.filestructure.present_dir()
     h11_dirs = h11_filter === nothing ?
@@ -190,6 +196,7 @@ function _vacua_scanned_geometries(h11_filter)
     geoms
 end
 
+"""Select, offset, and limit the geometries requested by batch options."""
 function _vacua_selected_geometries(options)
     geoms = if isempty(options[:geometries])
         indexed = _vacua_indexed_geometries(options[:h11])
@@ -204,6 +211,7 @@ function _vacua_selected_geometries(options)
     geoms[1:min(options[:limit], length(geoms))]
 end
 
+"""Construct the persisted pipeline configuration for batch options."""
 function _vacua_config(options)
     _pipeline_config(; threshold=options[:threshold], starts=options[:starts],
         residual_tolerance=options[:residual_tolerance],
@@ -212,6 +220,7 @@ function _vacua_config(options)
         max_branches=options[:max_branches])
 end
 
+"""Create a CSV summary header unless an append operation already has one."""
 function _vacua_summary_header(path; append=false)
     isempty(path) && return
     append && isfile(path) && return
@@ -221,11 +230,13 @@ function _vacua_summary_header(path; append=false)
     end
 end
 
+"""Convert a batch-summary field to a single CSV-safe string."""
 function _vacua_csv_value(value)
     value === nothing && return ""
     replace(string(value), '"' => "\"\"", '\n' => ' ', '\r' => ' ')
 end
 
+"""Append and flush one geometry result to the batch CSV summary."""
 function _vacua_append_summary(path, geom_idx, status; estimate=nothing,
         verified=nothing, issquare=nothing, seconds=0.0, message="")
     isempty(path) && return
@@ -237,6 +248,7 @@ function _vacua_append_summary(path, geom_idx, status; estimate=nothing,
     end
 end
 
+"""Classify a geometry result as missing, new, incomplete, mismatched, or reusable."""
 function _vacua_result_state(path, config)
     isfile(path) || return :missing
     _has_pipeline_result(path; config=config) && return :matching
@@ -244,6 +256,7 @@ function _vacua_result_state(path, config)
     _has_pipeline_group(path) ? :incomplete : :new
 end
 
+"""Run one geometry job and return a serializable success or failure record."""
 function _vacua_worker_job(job)
     geom_idx, data_dir, options = job
     started_at = time()
@@ -268,6 +281,7 @@ function _vacua_worker_job(job)
     end
 end
 
+"""Start geometry workers and configure their BLAS thread counts."""
 function _vacua_start_workers(options)
     workers = options[:workers]
     if workers == 1
@@ -321,6 +335,7 @@ function _vacua_start_workers(options)
     worker_ids
 end
 
+"""Run the bounded, resumable vacua batch and stream results to CSV."""
 function run_vacua_batch(options)
     _vacua_validate_options(options)
     ENV["CYAXIVERSE_DATA_DIR"] = _validate_data_dir(options[:data_dir])

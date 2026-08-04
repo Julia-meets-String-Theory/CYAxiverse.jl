@@ -17,6 +17,7 @@ using ..filestructure: cyax_file, minfile, present_dir
 using ..read: potential
 using ..structs: GeometryIndex
 
+"""Return the first `n` prime integers for deterministic Halton sampling."""
 function _first_primes(n::Int)
     primes = Int[]
     candidate = 2
@@ -28,6 +29,7 @@ function _first_primes(n::Int)
     primes
 end
 
+"""Evaluate one coordinate of a Halton sequence in the given prime base."""
 function _radical_inverse(index::Int, base::Int)
     result = 0.0
     factor = inv(Float64(base))

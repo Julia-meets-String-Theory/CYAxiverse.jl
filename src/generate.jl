@@ -1663,6 +1663,7 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     end
 end
 
+"""Select independent charge columns using a reusable Gram--Schmidt workspace."""
 function leading_independent_mask!(tilde_mask::AbstractVector{Bool}, Qsorted::AbstractMatrix{Int}, orthogonal_span::AbstractMatrix{Float64}, residual::AbstractVector{Float64})
     h11, ncols = size(Qsorted)
     fill!(tilde_mask, false)

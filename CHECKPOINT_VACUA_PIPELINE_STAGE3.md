@@ -44,3 +44,27 @@ All pilot files were copied to `/tmp/cyaxiverse-vacua-pilot.ynXqxT`; source HDF5
 ## Remaining scope
 
 This checkpoint establishes completion of Stages 1-3. The handoff's broader publication checklist still requires the full mandatory Stage 4 comparison matrix, large-geometry/thread-scaling Stage 5 benchmarks, and a fresh-environment test report before publication claims. No full h11=4:50 scan or source-data overwrite was launched.
+
+## Post-merge recovery and documentation audit
+
+Date: 2026-08-04
+Branch: `vmm`
+Commit: `ccee738`
+
+- The repaired local-scale Newton solver, stable Hessian inertia classification,
+	deterministic negative-mode seeds, streaming batch runner, and pipeline
+	persistence work were merged from `vacua-pipeline` into `vmm`.
+- The forced `reduced_jlm` recovery used 8 workers, 1 BLAS thread per worker,
+	2,048 starts, and completed 14 previously failed geometries in 134.285 s.
+	All 14 completed without failure or blocking, with 94 verified minima total.
+- The streamed CSV summary and all 14 HDF5 records agreed on status, estimate,
+	and verified counts. These generated data files remain outside Git.
+- The full `julia --project=. -e 'using Pkg; Pkg.test()'` suite passed after
+	resolving the merge conflict in `test/runtests.jl`.
+- Top-level functions introduced or materially changed by the vacua work now
+	have docstrings in the pipeline scripts and solver/supporting modules.
+
+Remaining caveats are unchanged: finite-start numerical counts are lower-bound
+search results unless the recorded method explicitly certifies a selected
+branch set or determinant branch, and the broader Stage 4/5 publication review
+remains outstanding.

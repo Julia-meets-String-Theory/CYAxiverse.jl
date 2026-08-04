@@ -355,6 +355,7 @@ function pipeline_vacua(h11::Int, tri::Int, cy::Int=1)
     end
 end
 
+"""Read vacua pipeline data for a geometry identified by `geom_idx`."""
 function pipeline_vacua(geom_idx::GeometryIndex)
     pipeline_vacua(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
 end
