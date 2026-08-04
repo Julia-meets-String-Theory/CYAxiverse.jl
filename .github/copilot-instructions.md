@@ -6,10 +6,10 @@
   ```sh
   julia --project=. -e 'using Pkg; Pkg.instantiate()'
   ```
-- Loading `CYAxiverse` requires `ENV["PYTHON"]`. Set it to the Python executable that PyCall should use before invoking Julia. `src/init_python.jl` rebuilds PyCall when its configured interpreter differs from this value.
+- Loading `CYAxiverse` for the Julia spectrum and test paths does not require `ENV["PYTHON"]`. Set it to the Python executable that PyCall should use only for optional CYTools/PyCall workflows. `src/init_python.jl` rebuilds PyCall when its configured interpreter differs from this value.
 - Run the full test suite (the same `Pkg.test()` path used by CI) with:
   ```sh
-  PYTHON=/path/to/python julia --project=. -e 'using Pkg; Pkg.test()'
+  julia --project=. -e 'using Pkg; Pkg.test()'
   ```
 - The only independently runnable regression test is the CYTools-wrapper layout repro:
   ```sh
@@ -21,7 +21,7 @@
   julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
   julia --project=docs docs/make.jl
   ```
-- No formatter or linter is configured. GitHub Actions runs package build/tests and documentation builds; its Julia 1.7 entries predate the current `Project.toml` Julia 1.12 compatibility requirement.
+- No formatter or linter is configured. GitHub Actions runs package tests on Julia 1.12 and builds the documentation with Julia 1.12.
 
 ## Architecture
 

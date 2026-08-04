@@ -6,6 +6,7 @@ using HDF5
 
 include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
 
 @testset "Geometry-level LQtilde orientation" begin
     mktempdir() do root
@@ -131,6 +132,55 @@ end
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
+end
+
+@testset "Physical spectrum batch persistence" begin
+    spectrum = CYAxiverse.structs.PhysicalAxionSpectrum(
+        [1.0, 2.0], [0, 1], zeros(2, 2), [1, -1], [3.0, 4.0],
+        zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+        -30.0, 200)
+    geom_idx = CYAxiverse.structs.GeometryIndex(2, 3, 4)
+    output_dir = mktempdir()
+    output_path = joinpath(output_dir, "h11_002", "np_0000003", "cy_0000004", "cyax.h5")
+    mkpath(dirname(output_path))
+    h5open(output_path, "cw") do file
+        create_group(file, "cytools")
+    end
+    _write_result(output_path, geom_idx, spectrum; prec=200, threshold_log10=-30.0,
+        quartics=true, runtime_seconds=0.1, provisional=false, fK=[5.0, 6.0])
+    HDF5.h5open(output_path, "r") do file
+        @test HDF5.haskey(file, "spectrum/physical/m")
+        @test read(file["spectrum/physical/fK_log10"]) == [5.0, 6.0]
+        @test read(file["spectrum/physical/fpert_log10"]) ≈ [-0.5, 0.0]
+    end
+    old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+    ENV["CYAXIVERSE_DATA_DIR"] = output_dir
+    try
+        loaded = CYAxiverse.read.physical_spectrum(geom_idx)
+        @test loaded.m == spectrum.m
+        @test loaded.fpert ≈ [-0.5, 0.0]
+        @test loaded.mass_signs_or_inertia == Int[]
+    finally
+        old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+            (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+    end
+
+    _write_result(output_path, geom_idx, spectrum; prec=200, threshold_log10=-30.0,
+        quartics=false, runtime_seconds=0.2, provisional=false, fK=[5.0, 6.0])
+    HDF5.h5open(output_path, "r") do file
+        @test !HDF5.haskey(file, "spectrum/physical/mass_signs_or_inertia")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_self_sign")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_self_log10")
+        @test !HDF5.haskey(file, "spectrum/physical/fpert_log10")
+        @test read(file["spectrum/physical/metadata/quartics"]) == false
+    end
+
+    summary_path = joinpath(output_dir, "summary.csv")
+    _write_summary_header(summary_path)
+    _append_summary(summary_path, geom_idx; status="failed", error="synthetic failure",
+        prec=200, threshold_log10=-30.0)
+    @test count(==( '\n'), read(summary_path, String)) == 2
+    @test occursin("failed", read(summary_path, String))
 end
 
 @testset "Paper reproduction benchmarks" begin
@@ -402,6 +452,18 @@ end
     @test all(isapprox.(hybrid.m, expected; atol=1e-10))
     @test hybrid.λselfsign == hp["λselfsign"]
     @test all(isapprox.(hybrid.λself, hp["λself"]; atol=1e-10))
+    hybrid_sparse = CYAxiverse.generate.pq_hybrid_physical_spectrum(
+        K, L, Q; prec=200, quartics=true, mixed_quartics=false,
+        quartic_backend=:sparse)
+    @test all(isapprox.(hybrid_sparse.m, hybrid.m; atol=1e-10))
+    @test hybrid_sparse.λselfsign == hybrid.λselfsign
+    @test all(isapprox.(hybrid_sparse.λself, hybrid.λself; atol=1e-10))
+    @test CYAxiverse.generate.select_quartic_backend(Q, :auto) == :dense
+    dispatch_probe = zeros(Int, 200, 500)
+    for column in axes(dispatch_probe, 2)
+        dispatch_probe[mod1(column, 200), column] = 1
+    end
+    @test CYAxiverse.generate.select_quartic_backend(dispatch_probe, :auto) == :sparse
     hybrid_masses_only = CYAxiverse.generate.pq_hybrid_physical_spectrum(K, L, Q; prec=200, quartics=false)
     @test all(isapprox.(hybrid_masses_only.m, expected; atol=1e-10))
     @test isempty(hybrid_masses_only.λself)

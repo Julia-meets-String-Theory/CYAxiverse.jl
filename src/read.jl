@@ -133,6 +133,25 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
     return Ltemp
 end
 
+"""
+    cubic_tensor(h11, tri, cy=1)
+
+Read the cubic interaction tensor saved by `pq_spectrum_save` or
+`hp_spectrum_save`.  Returns a named tuple with `tensor` and the evaluation
+`phase`; the tensor is stored in the corresponding saved spectrum basis.
+"""
+function cubic_tensor(h11::Int, tri::Int, cy::Int=1)
+    h5open(cyax_file(h11, tri, cy), "r") do file
+        tensor = HDF5.read(file, "spectrum/cubic/tensor")
+        phase = HDF5.read(file, "spectrum/cubic/phase")
+        return (; tensor=tensor, phase=phase)
+    end
+end
+
+function cubic_tensor(geom_idx::GeometryIndex)
+    cubic_tensor(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
+end
+
 
 ##############################
 ##### HDF5.read Vacua data ###
@@ -238,6 +257,34 @@ function pq_spectrum(h11::Int,tri::Int,cy::Int=1)
         HDF5.read(file, "spectrum/decay/fK"), HDF5.read(file, "spectrum/decay/fpert")
     end
     return (; m = Hvals, fK = fK, fpert = fpert)
+end
+
+"""
+    physical_spectrum(h11, tri, cy=1)
+
+Read the persisted physical spectrum and its metadata from a geometry's
+`spectrum/physical` HDF5 group.
+"""
+function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
+    h5open(cyax_file(h11, tri, cy), "r") do file
+        physical = file["spectrum/physical"]
+        return (; m = HDF5.read(physical, "m"),
+            mode_indices = HDF5.read(physical, "mode_indices"),
+            mass_signs_or_inertia = haskey(physical, "mass_signs_or_inertia") ? HDF5.read(physical, "mass_signs_or_inertia") : Int[],
+            fK = HDF5.read(physical, "fK_log10"),
+            λselfsign = haskey(physical, "lambda_self_sign") ? HDF5.read(physical, "lambda_self_sign") : Int[],
+            λself = haskey(physical, "lambda_self_log10") ? HDF5.read(physical, "lambda_self_log10") : Float64[],
+            fpert = haskey(physical, "fpert_log10") ? HDF5.read(physical, "fpert_log10") : Float64[],
+            threshold_log10 = HDF5.read(physical, "metadata/threshold_log10"),
+            prec = HDF5.read(physical, "metadata/prec"),
+            provisional = HDF5.read(physical, "metadata/provisional"),
+            runtime_seconds = HDF5.read(physical, "metadata/runtime_seconds"))
+    end
+end
+
+"""Read a persisted physical spectrum using a [`GeometryIndex`](@ref)."""
+function physical_spectrum(geom_idx::GeometryIndex)
+    physical_spectrum(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
 end
 
 function hp_spectrum(h11::Int,tri::Int,cy::Int=1)

@@ -20,6 +20,7 @@ using ..structs: GeometryIndex, Canonicalα, Min_JLM_1D, Min_JLM_ND, Min_JLM_Squ
 
 export ReducedJLMProblem, prepare, minimize, minimize_save
 
+"""Preprocessed charge, scale, and symmetry data for a reduced JLM solve."""
 struct ReducedJLMProblem
     Q_reduced::SparseMatrixCSC{Float64, Int}
     L_reduced::Matrix{Float64}
@@ -31,10 +32,12 @@ struct ReducedJLMProblem
     extra_rows::Int
 end
 
+"""Return the rounded absolute determinant of an integer-valued matrix."""
 function _det_int(Q::AbstractMatrix)
     Int(abs(round(det(Q))))
 end
 
+"""Determine whether reduced charges are integral and compute multiplicity."""
 function _symmetry_multiplicity(det_QTilde::Int, Q_reduced::AbstractMatrix)
     if maximum(denominator.(Matrix(Q_reduced))) == 1
         return true, Float64(det_QTilde)
@@ -46,10 +49,12 @@ function _symmetry_multiplicity(det_QTilde::Int, Q_reduced::AbstractMatrix)
     return false, abs(det_QTilde / volume)
 end
 
+"""Return a mask selecting rows containing at least one nonzero charge."""
 function _nonzero_row_mask(Q::AbstractMatrix)
     [any(!iszero, row) for row in eachrow(Q)]
 end
 
+"""Normalize potential matrices to axion-by-instanton orientation."""
 function _oriented_potential_matrices(pot_data)
     Q = Matrix{Int}(pot_data.Q)
     L = Matrix{Float64}(pot_data.L)
@@ -117,12 +122,14 @@ function prepare(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64}; threshold::
         size(Q_reduced, 1) - size(Q_reduced, 2))
 end
 
+"""Load a geometry's potential data and prepare its reduced JLM problem."""
 function prepare(geom_idx::GeometryIndex; threshold::Float64=0.01, hilbert::Bool=false)
     pot_data = potential(geom_idx; hilbert=hilbert)
     Q, L = _oriented_potential_matrices(pot_data)
     prepare(Q, L; threshold=threshold)
 end
 
+"""Solve a prepared problem and construct the corresponding legacy result."""
 function _minimize_reduced(problem::ReducedJLMProblem; starts::Int=100_000,
         residual_tolerance::Float64=1e-9, merge_tolerance::Float64=1e-6,
         max_iterations::Int=300)
@@ -163,16 +170,19 @@ critical-point search and return a legacy `Min_JLM_*` result.
 """
 minimize(problem::ReducedJLMProblem; kwargs...) = _minimize_reduced(problem; kwargs...)
 
+"""Prepare and solve a reduced JLM problem from charge and scale matrices."""
 function minimize(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64};
         threshold::Float64=0.01, kwargs...)
     minimize(prepare(Q, L; threshold=threshold); kwargs...)
 end
 
+"""Prepare and solve a reduced JLM problem for one indexed geometry."""
 function minimize(geom_idx::GeometryIndex; threshold::Float64=0.01,
         hilbert::Bool=false, kwargs...)
     minimize(prepare(geom_idx; threshold=threshold, hilbert=hilbert); kwargs...)
 end
 
+"""Replace the reduced-minima datasets in an open HDF5 group."""
 function _write_result!(group, min_data)
     for key in ("Nvac", "vac_coords", "extra_rows", "det_QTilde", "issquare")
         haskey(group, key) && HDF5.delete_object(group, key)
@@ -188,6 +198,12 @@ function _write_result!(group, min_data)
     end
 end
 
+"""
+    minimize_save(geom_idx; threshold=0.01, hilbert=false, kwargs...)
+
+Solve a geometry's reduced JLM problem and persist the result to its minima
+file, using the `hilbert` subgroup when requested.
+"""
 function minimize_save(geom_idx::GeometryIndex; threshold::Float64=0.01,
         hilbert::Bool=false, kwargs...)
     min_data = minimize(geom_idx; threshold=threshold, hilbert=hilbert, kwargs...)

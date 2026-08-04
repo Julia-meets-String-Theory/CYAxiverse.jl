@@ -214,6 +214,44 @@ function hessian(x, L::Matrix{Float64}, Q::Matrix)
     end
 end
 
+"""
+    cubic(x, L, Q)
+
+Return the rank-3 field-space derivative tensor
+`∂ᵢ∂ⱼ∂ₖ V(x)` for
+`V(x) = Σₐ Λₐ (1 - cos(Qₐ⋅x))`, where `Λ` is encoded by the signed
+`(sign, log10(abs(Λ)))` columns of `L`.
+
+For a phased potential, evaluate this function at `x + phase`.  In
+particular, the tensor vanishes at the unphased origin but is generally
+nonzero for arbitrary phases.
+"""
+function cubic(x::AbstractVector{<:Real}, L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real})
+    @assert size(L, 2) == 2
+    @assert size(Q, 1) == size(L, 1) && size(Q, 2) == length(x)
+    Λ = L[:, 1] .* 10.0 .^ L[:, 2]
+    phases = Q * x
+    n = size(Q, 2)
+    C = zeros(promote_type(eltype(Λ), eltype(x), Float64), n, n, n)
+    @inbounds for a in axes(Q, 1)
+        coefficient = -Λ[a] * sin(phases[a])
+        for i in 1:n, j in 1:n, k in 1:n
+            C[i, j, k] += coefficient * Q[a, i] * Q[a, j] * Q[a, k]
+        end
+    end
+    C
+end
+
+"""
+    cubic(x, phase, L, Q)
+
+Evaluate the same cubic tensor at `x + phase`.  This is a convenience for
+phase-shifted cosine potentials; the returned tensor is in the coordinate
+basis represented by `Q`.
+"""
+cubic(x::AbstractVector{<:Real}, phase::AbstractVector{<:Real}, L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real}) =
+    cubic(x .+ phase, L, Q)
+
 function hessian_norm(x, Q::Matrix)
     hessian = zeros(size(Q, 1), size(Q, 1))
     if size(Q, 1) == 1
@@ -522,10 +560,15 @@ end
 
 
 """
-    hp_spectrum_save(h11,tri,cy)
+    hp_spectrum_save(h11, tri, cy; prec=5_000, phase=zeros(h11))
 
+Compute and persist the high-precision spectrum and the cubic interaction
+tensor.  The cubic tensor is evaluated at `phase` in the `LQtildebar` charge
+basis and is stored under `spectrum/cubic/tensor`; the phase vector is stored
+under `spectrum/cubic/phase`.
 """
-function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000)
+function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000,
+                          phase::AbstractVector{<:Real}=zeros(Float64, h11))
     if h11 != 0
         pot_data = potential(h11, tri, cy)
         K = pot_data.K
@@ -533,29 +576,34 @@ function hp_spectrum_save(h11::Int, tri::Int, cy::Int=1; prec = 5_000)
         Ltilde = Matrix{Float64}(LQtilde_data["Lhat"]')
         Qtilde = Matrix{Int}(LQtilde_data["Qhat"]')
         spectrum_data = hp_spectrum(K, Ltilde, Qtilde; prec = prec)
+        cubic_data = cubic(phase, Ltilde, Qtilde)
 
         h5open(cyax_file(h11, tri, cy), "r+") do file
-            f2 = create_group(file, "spectrum")
-            f2a = create_group(f2, "quartdiag")
+            f2 = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
+            f2a = haskey(f2, "quartdiag") ? f2["quartdiag"] : create_group(f2, "quartdiag")
             f2a["log10", deflate=9] = spectrum_data["λself"]
             f2a["sign", deflate=9] = spectrum_data["λselfsign"]
-            f2e = create_group(f2, "decay")
+            f2e = haskey(f2, "decay") ? f2["decay"] : create_group(f2, "decay")
             f2e["fpert", deflate=9] = spectrum_data["fpert"]
             f2e["fK", deflate=9] = spectrum_data["fK"]
 
-            f2b = create_group(f2, "quart31")
+            f2b = haskey(f2, "quart31") ? f2["quart31"] : create_group(f2, "quart31")
             f2b["log10", deflate=9] = spectrum_data["λ31"]
             f2b["sign", deflate=9] = spectrum_data["λ31sign"]
             f2b["index", deflate=9] = spectrum_data["λ31_i"]
 
-            f2c = create_group(f2, "quart22")
+            f2c = haskey(f2, "quart22") ? f2["quart22"] : create_group(f2, "quart22")
             f2c["log10", deflate=9] = spectrum_data["λ22"]
             f2c["sign", deflate=9] = spectrum_data["λ22sign"]
             f2c["index", deflate=9] = spectrum_data["λ22_i"]
 
-            f2d = create_group(f2, "masses")
+            f2d = haskey(f2, "masses") ? f2["masses"] : create_group(f2, "masses")
             f2d["log10", deflate=9] = spectrum_data["m"]
             f2d["sign", deflate=9] = spectrum_data["msign"]
+
+            f2g = haskey(f2, "cubic") ? f2["cubic"] : create_group(f2, "cubic")
+            f2g["tensor", deflate=9] = cubic_data
+            f2g["phase", deflate=9] = Float64.(phase)
         end
     end
 
@@ -1104,11 +1152,74 @@ function schur_physical_basis(W::Hermitian{T, Matrix{T}}, float_basis::Matrix{Fl
     eigenvalues, basis, residuals
 end
 
+"""Check whether the Float64-seeded complement lies below the physical threshold."""
+function schur_admissible_float64(W::Hermitian, float_basis::Matrix{Float64}, physical_count::Int, threshold_log10::Float64)
+    h11 = size(W, 1)
+    physical_count == h11 && return true
+    complement = @view float_basis[:, 1:end-physical_count]
+    complement_matrix = Symmetric(complement' * Float64.(Matrix(W)) * complement)
+    complement_eigenvalues = eigvals(complement_matrix)
+    all(isfinite, complement_eigenvalues) || return true
+    mass_offset = 9.0 + Float64(log10(constants()["MPlanck"])) + Float64(constants()["log2π"])
+    threshold_eigenvalue = 10.0 ^ (2 * (threshold_log10 - mass_offset))
+    maximum(complement_eigenvalues) < threshold_eigenvalue
+end
+
+"""Select the dense or sparse quartic contraction backend for `Q`."""
+function select_quartic_backend(Q::Matrix{Int}, backend::Symbol)
+    backend in (:auto, :dense, :sparse) || throw(ArgumentError("quartic_backend must be :auto, :dense, or :sparse"))
+    backend !== :auto && return backend
+    entries = length(Q)
+    density = entries == 0 ? 0.0 : count(value -> !iszero(value), Q) / entries
+    entries >= 100_000 && density <= 0.10 ? :sparse : :dense
+end
+
+"""Transform charges into the canonical physical-mode basis."""
+function quartic_charge_basis(Q::Matrix{Int}, Kfactor, basis::Matrix{T}, backend::Symbol) where {T}
+    transformed_basis = transpose(Kfactor.L) \ basis
+    backend === :sparse ? sparse(transpose(Q)) * transformed_basis : T.(transpose(Q)) * transformed_basis
+end
+
+"""Compute signed log-space diagonal quartics for the retained modes."""
+function diagonal_quartics(Q::Matrix{Int}, L::Matrix{Float64}, Kfactor, basis::Matrix{T}, backend::Symbol) where {T}
+    transformed_basis = transpose(Kfactor.L) \ basis
+    physical_count = size(basis, 2)
+    values = zeros(T, physical_count)
+    quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    if backend === :sparse
+        sparse_Q = sparse(Q)
+        charges = zeros(T, physical_count)
+        for instanton in axes(Q, 2)
+            fill!(charges, zero(T))
+            for pointer in nzrange(sparse_Q, instanton)
+                row = sparse_Q.rowval[pointer]
+                charge = T(sparse_Q.nzval[pointer])
+                for mode in 1:physical_count
+                    charges[mode] += charge * transformed_basis[row, mode]
+                end
+            end
+            scale = quartic_scales[instanton]
+            for mode in 1:physical_count
+                values[mode] += scale * charges[mode]^4
+            end
+        end
+    else
+        charge_basis = T.(transpose(Q)) * transformed_basis
+        for instanton in axes(Q, 2), mode in 1:physical_count
+            values[mode] += quartic_scales[instanton] * charge_basis[instanton, mode]^4
+        end
+    end
+    signs = Int.(sign.(values))
+    logs = [signs[mode] == 0 ? -Inf : Float64(log10(abs(values[mode]))) for mode in 1:physical_count]
+    signs, logs
+end
+
 """
     pq_hybrid_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
                                 maxiter=100, residual_tolerance=1e-30,
                                 schur_acceleration=true, oversampling=8,
-                                quartics=true)
+                                quartics=true, mixed_quartics=true,
+                                quartic_backend=:auto)
 
 Compute only the PQ leading-Hessian modes above `threshold_log10` with a
 sequential-PQ-seeded, arbitrary-precision block subspace iteration. The physical
@@ -1125,6 +1236,14 @@ Set `quartics=false` to return only physical masses, mode indices, and
 eigenvectors. This avoids the rapidly growing physical-sector quartic output
 for large numbers of retained modes.
 
+Set `mixed_quartics=false` with `quartics=true` to compute only diagonal
+`lambda_iiii` self-couplings. This is the compact production mode for large
+ensemble scans.
+
+`quartic_backend=:auto` selects the dense implementation for small or dense
+charge matrices and the sparse implementation for large sparse matrices. Use
+`:dense` or `:sparse` to override the dispatch for benchmarking.
+
 When the block-subspace fallback is used, `oversampling` adds a small number
 of sub-threshold vectors to the iteration and discards them at the end. This
 improves convergence when the spectral gap at the physical threshold is small.
@@ -1134,7 +1253,7 @@ high-precision reference routine. If the requested residual tolerance is not
 met by `maxiter`, a warning is emitted and the provisional result is returned;
 use `pq_physical_spectrum` to validate such a case.
 """
-function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, label::AbstractString="matrix input")
+function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true, quartic_backend::Symbol=:auto, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
@@ -1156,11 +1275,13 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     seed_basis = pq_basis[:, sortperm(pq_masses)]
     schur_safe = false
     if schur_acceleration && physical_count < h11
-        complement = T.(seed_basis[:, 1:end-physical_count])
-        C = Hermitian(complement' * W * complement)
-        mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
-        threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
-        schur_safe = positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
+        if schur_admissible_float64(W, seed_basis, physical_count, threshold_log10)
+            complement = T.(seed_basis[:, 1:end-physical_count])
+            C = Hermitian(complement' * W * complement)
+            mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
+            threshold_eigenvalue = T(10) ^ (2 * (T(threshold_log10) - mass_offset))
+            schur_safe = positive_inertia(bunchkaufman(Hermitian(Matrix(C) - threshold_eigenvalue * I))) == 0
+        end
     end
     if schur_safe
         eigenvalues, basis, residuals = schur_physical_basis(W, seed_basis, physical_count; maxiter, residual_tolerance)
@@ -1183,10 +1304,19 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     maximum(residuals) > residual_tolerance && @warn "hybrid physical spectrum did not reach residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Returning a provisional result."
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
     !quartics && return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
-    Qmass = (T.(Q') / Kfactor.L') * basis
+    selected_backend = select_quartic_backend(Q, quartic_backend)
+    log2π = Float64(constants()["log2π"])
+    if !mixed_quartics
+        self_sign, self_log = diagonal_quartics(Q, L, Kfactor, basis, selected_backend)
+        return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis),
+            self_sign, self_log .+ 4 * log2π,
+            zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+            threshold_log10, prec)
+    end
+    Qmass = quartic_charge_basis(Q, Kfactor, basis, selected_backend)
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
-    qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
-    qindq22 = [(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
+    qindq31 = mixed_quartics ? [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j] : Tuple{Int,Int,Int,Int}[]
+    qindq22 = mixed_quartics ? [(i, i, j, j) for i in 1:physical_count for j in 1:i-1] : Tuple{Int,Int,Int,Int}[]
     function signed_quartic(exponents::NTuple{4, Int})
         value = zero(T)
         for a in eachindex(quartic_scales)
@@ -1207,7 +1337,6 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     for i in eachindex(qindq22)
         two_two_sign[i], two_two_log[i] = signed_quartic(qindq22[i])
     end
-    log2π = Float64(constants()["log2π"])
     PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis),
         self_sign, self_log .+ 4 * log2π,
         isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, three_one_sign, three_one_log .+ 4 * log2π,
@@ -1267,11 +1396,13 @@ function physical_mode_inertia_count(W::Hermitian, threshold_log10::Float64)
     positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold_eigenvalue * I)))
 end
 
+"""Count physical modes after constructing the high-precision leading Hessian."""
 function physical_mode_inertia_count(K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int)
     W, _ = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
     physical_mode_inertia_count(W, threshold_log10)
 end
 
+"""Confirm a physical-mode count by repeating it at increasing precision."""
 function confirm_physical_mode_count(count_at_prec::Int, K::Hermitian{Float64, Matrix{Float64}}, Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, threshold_log10::Float64, prec::Int, max_prec::Int, label::AbstractString)
     working_prec = prec
     while working_prec < max_prec
@@ -1284,6 +1415,12 @@ function confirm_physical_mode_count(count_at_prec::Int, K::Hermitian{Float64, M
     count_at_prec
 end
 
+"""
+    pq_physical_mode_count(K, L, Q; kwargs...)
+
+Count leading-Hessian modes above the physical mass threshold, optionally
+confirming the count at increasing arbitrary precision.
+"""
 function pq_physical_mode_count(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, confirm::Bool=true, max_prec::Int=4_000, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
@@ -1427,29 +1564,40 @@ function pq_spectra_generator(h11_min::Int, h11_max::Int, h11list::Matrix{Int})
 end
 
 
-function pq_spectrum_save(h11::Int,tri::Int,cy::Int=1)
-    if h11!=0
-        file_open::Bool = 0
-        h5open(cyax_file(h11,tri,cy), "r") do file
-            if haskey(file, "spectrum")
-                file_open = 1
-                return nothing
-            end
-        end
-        if file_open == 0
-            pot_data = potential(h11,tri,cy);
-            L::Matrix{Float64}, Q::Matrix{Int}, K::Hermitian{Float64, Matrix{Float64}} = pot_data.L,pot_data.Q,pot_data.K
-            spectrum_data = pq_spectrum(K,L,Q)
-            h5open(cyax_file(h11,tri,1), "r+") do file
-                f2 = create_group(file, "spectrum")
-                f2e = create_group(f2, "decay")
-                f2e["fpert",deflate=9] = spectrum_data["fpert"]
-                f2e["fK",deflate=9] = spectrum_data["fK"]
+"""
+    pq_spectrum_save(h11, tri, cy; phase=zeros(h11))
 
-                f2d = create_group(f2, "masses")
-                f2d["log10",deflate=9] = spectrum_data["m"]
-            end
-        end
+Compute and persist the fast PQ spectrum, including masses, decay constants,
+mass signs, and the cubic interaction tensor in the PQ mass basis.  `phase`
+is the phase-space evaluation point in the selected charge basis.  Outputs
+are written under `spectrum/`, with the cubic tensor at
+`spectrum/cubic/tensor` and its phase at `spectrum/cubic/phase`.
+
+This production path uses the Float64 PQ leading-Hessian basis.  Use
+[`hp_spectrum_save`](@ref) when arbitrary-precision spectrum data are needed.
+"""
+function pq_spectrum_save(h11::Int, tri::Int, cy::Int=1;
+                          phase::AbstractVector{<:Real}=zeros(Float64, h11))
+    h11 == 0 && return nothing
+    pot_data = potential(h11, tri, cy)
+    L, Q, K = pot_data.L, pot_data.Q, pot_data.K
+    spectrum_data = pq_spectrum(K, L, Q)
+    LQtild = LQtilde(Q, L)
+    Kls = cholesky(K).L
+    _, _, basis = leading_hessian_mass_basis_float64(K, LQtild.Ltilde, LQtild.Qtilde)
+    Qmass = (Matrix(LQtild.Qtilde') / Kls') * basis
+    cubic_data = cubic(phase, LQtild.Ltilde, Qmass)
+    h5open(cyax_file(h11, tri, cy), "r+") do file
+        f2 = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
+        f2e = haskey(f2, "decay") ? f2["decay"] : create_group(f2, "decay")
+        f2e["fpert",deflate=9] = spectrum_data.f
+        f2e["fK",deflate=9] = spectrum_data.fK
+        f2d = haskey(f2, "masses") ? f2["masses"] : create_group(f2, "masses")
+        f2d["log10",deflate=9] = spectrum_data.m
+        f2d["sign",deflate=9] = spectrum_data.msign
+        f2g = haskey(f2, "cubic") ? f2["cubic"] : create_group(f2, "cubic")
+        f2g["tensor",deflate=9] = cubic_data
+        f2g["phase",deflate=9] = Float64.(phase)
     end
 end
 
@@ -1593,11 +1741,13 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
     return LQLinearlyIndependent(Qtilde, Qbar, Lbar, Ltilde)
 end
 
+"""Load one geometry and select its leading linearly independent instantons."""
 function LQtilde(h11::Int, tri::Int, cy::Int; hilbert = false)
     pot_data = potential(h11, tri, cy; hilbert = hilbert)
     return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
 end	
 
+"""Select leading instantons for a geometry identified by `geom_idx`."""
 function LQtilde(geom_idx::GeometryIndex; hilbert = false)
     pot_data = potential(geom_idx; hilbert = hilbert)
     return LQtilde(Matrix{Int}(pot_data.Q), Matrix{Float64}(pot_data.L))
@@ -1622,10 +1772,12 @@ function reduced_critical_points(L::AbstractMatrix{Float64}, Q::AbstractMatrix{I
         coordinate_basis=selected.Qtilde, equation_scales=equation_scales, kwargs...)
 end
 
+"""Return the sup-norm distance between two points on the unit torus."""
 function _torus_distance(a::AbstractVector{<:Real}, b::AbstractVector{<:Real})
     maximum(min.(abs.(a .- b), 1 .- abs.(a .- b)))
 end
 
+"""Check whether `θ` is already represented among the first `count` columns."""
 function _contains_torus_point(points::AbstractMatrix{<:Real}, θ::AbstractVector{<:Real},
         count::Int; tol::Float64)
     for i in 1:count
@@ -1718,6 +1870,7 @@ function leading_critical_branches(selected::LQLinearlyIndependent;
        det_Qtilde=det_qtilde)
 end
 
+"""Enumerate leading critical branches after selecting independent charges."""
 function leading_critical_branches(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64}; kwargs...)
     leading_critical_branches(LQtilde(Q, L); kwargs...)
 end
