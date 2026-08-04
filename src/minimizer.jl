@@ -42,7 +42,8 @@ end
 
 """
     critical_points(L, Q; phases=zeros(size(Q, 2)), starts=4096,
-                    residual_tolerance=1e-10, merge_tolerance=1e-7)
+                    residual_tolerance=1e-10, merge_tolerance=1e-7,
+                    initial_points=nothing)
 
 Find critical points of an integer-charge cosine potential deterministically in
 the unit torus. `Q` has axions in rows and instantons in columns; `L[1, :]`
@@ -50,15 +51,21 @@ stores coefficient signs and `L[2, :]` stores base-10 logarithmic magnitudes.
 
 Initial points are a Halton sequence, so repeated calls are reproducible. Roots
 are folded into `[0,1)^N`, deduplicated using periodic distance, and classified
-by Hessian inertia. The returned coordinates use the paper convention in which
-the potential arguments are `2π Q'θ + phases`.
+by Hessian inertia. Equation residuals and Newton Jacobians are scaled locally
+by the largest logarithmic amplitude touching each equation, while the
+classification Hessian is assembled with a symmetric diagonal congruence
+scaling. Optional `initial_points` are deterministic torus seeds; negative
+physical-Hessian modes at those seeds are also sampled to reach displaced
+minima in highly dimensional problems. The returned coordinates use the paper
+convention in which the potential arguments are `2π Q'θ + phases`.
 """
 function critical_points(L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real};
         phases::AbstractVector{<:Real}=zeros(size(Q, 2)), starts::Int=4096,
         residual_tolerance::Float64=1e-10, merge_tolerance::Float64=1e-7,
         max_iterations::Int=200,
         coordinate_basis::Union{Nothing, AbstractMatrix{<:Real}}=nothing,
-        equation_scales::Union{Nothing, AbstractVector{<:Real}}=nothing)
+    equation_scales::Union{Nothing, AbstractVector{<:Real}}=nothing,
+    initial_points::Union{Nothing, AbstractMatrix{<:Real}}=nothing)
     size(L, 1) == 2 || throw(DimensionMismatch("L must have two rows"))
     size(Q, 2) == size(L, 2) || throw(DimensionMismatch("Q columns must match L columns"))
     length(phases) == size(Q, 2) || throw(DimensionMismatch("one phase is required per instanton"))
@@ -66,23 +73,59 @@ function critical_points(L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real};
 
     n, p = size(Q)
     q = coordinate_basis === nothing ? Matrix{Float64}(Q) : Matrix{Float64}(coordinate_basis) \ Matrix{Float64}(Q)
+    if initial_points !== nothing
+        size(initial_points, 1) == n || throw(DimensionMismatch("initial points must have one row per axion"))
+    end
     phase = Float64.(phases)
+    signs = Float64.(L[1, :])
     logscale = Float64.(L[2, :])
-    amplitudes = Float64.(L[1, :]) .* 10.0 .^ (logscale .- maximum(logscale))
+    minimum_logscale = log10(floatmin(Float64))
+    row_logscale = zeros(n)
+    for i in 1:n
+        support = findall(!iszero, @view q[i, :])
+        row_logscale[i] = isempty(support) ? maximum(logscale) : maximum(logscale[support])
+    end
+    scaled_amplitudes = zeros(n, p)
+    for i in 1:n, j in 1:p
+        q[i, j] == 0 && continue
+        delta = logscale[j] - row_logscale[i]
+        delta >= minimum_logscale && (scaled_amplitudes[i, j] = signs[j] * 10.0^delta)
+    end
     row_scales = equation_scales === nothing ? ones(n) : Float64.(equation_scales) ./ maximum(abs, equation_scales)
     length(row_scales) == n || throw(DimensionMismatch("one equation scale is required per axion"))
     all(>(0), row_scales) || throw(ArgumentError("equation scales must be positive"))
     twoπ = 2π
 
+    function scaled_physical_hessian!(out, θ)
+        fill!(out, 0.0)
+        arguments = twoπ .* (q' * θ) .+ phase
+        for row in 1:n, col in 1:n, j in 1:p
+            (q[row, j] == 0 || q[col, j] == 0) && continue
+            delta = logscale[j] - (row_logscale[row] + row_logscale[col]) / 2
+            delta < minimum_logscale && continue
+            out[row, col] += q[row, j] * q[col, j] * signs[j] *
+                10.0^delta * cos(arguments[j])
+        end
+        out .*= twoπ^2
+        nothing
+    end
+
     function gradient!(out, θ)
-        mul!(out, q, amplitudes .* sin.(twoπ .* (q' * θ) .+ phase))
+        fill!(out, 0.0)
+        arguments = twoπ .* (q' * θ) .+ phase
+        for i in 1:n, j in 1:p
+            out[i] += q[i, j] * scaled_amplitudes[i, j] * sin(arguments[j])
+        end
         out .*= twoπ
         out ./= row_scales
         nothing
     end
     function hessian!(out, θ)
-        weights = amplitudes .* cos.(twoπ .* (q' * θ) .+ phase)
-        mul!(out, q * Diagonal(weights), q')
+        fill!(out, 0.0)
+        arguments = twoπ .* (q' * θ) .+ phase
+        for i in 1:n, k in 1:n, j in 1:p
+            out[i, k] += q[i, j] * q[k, j] * scaled_amplitudes[i, j] * cos(arguments[j])
+        end
         out .*= twoπ^2
         out ./= row_scales
         nothing
@@ -91,8 +134,25 @@ function critical_points(L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real};
     roots = Vector{Vector{Float64}}()
     residuals = Float64[]
     bases = _first_primes(n)
-    for sample in 0:(starts - 1)
-        θ0 = sample == 0 ? zeros(n) : [_radical_inverse(sample, base) for base in bases]
+    seed_points = initial_points === nothing ? zeros(n, 0) : Matrix{Float64}(initial_points)
+    if !isempty(seed_points)
+        seed_hessian = zeros(n, n)
+        for seed in eachcol(seed_points)
+            scaled_physical_hessian!(seed_hessian, seed)
+            values, vectors = eigen(Hermitian(seed_hessian))
+            for mode in findall(<(-100 * eps(Float64)), values)
+                direction = vectors[:, mode]
+                direction ./= maximum(abs, direction)
+                seed_points = hcat(seed_points,
+                    mod.(seed .+ 0.125 .* direction, 1.0),
+                    mod.(seed .- 0.125 .* direction, 1.0))
+            end
+        end
+    end
+    seed_count = size(seed_points, 2)
+    for sample in 0:(seed_count + starts - 1)
+        θ0 = sample < seed_count ? @view(seed_points[:, sample + 1]) :
+            (sample == seed_count ? zeros(n) : [_radical_inverse(sample - seed_count, base) for base in bases])
         result = nlsolve(gradient!, hessian!, θ0; method=:newton,
             ftol=residual_tolerance, xtol=residual_tolerance, iterations=max_iterations)
         (result.f_converged || result.x_converged) || continue
@@ -110,10 +170,9 @@ function critical_points(L::AbstractMatrix{<:Real}, Q::AbstractMatrix{<:Real};
     hessian_eigenvalues = Vector{Vector{Float64}}(undef, length(roots))
     hessian = zeros(n, n)
     for (i, θ) in enumerate(roots)
-        weights = amplitudes .* cos.(twoπ .* (q' * θ) .+ phase)
-        physical_hessian = twoπ^2 .* q * Diagonal(weights) * q'
-        inverse_sqrt_scale = Diagonal(inv.(sqrt.(row_scales)))
-        values = eigvals(Hermitian(inverse_sqrt_scale * physical_hessian * inverse_sqrt_scale))
+        scaled_physical_hessian!(hessian, θ)
+        values = eigvals(Hermitian(hessian))
+        fill!(hessian, 0.0)
         scale = max(maximum(abs, values), 1.0)
         zero_tolerance = 100 * residual_tolerance * scale
         inertia[i] = (count(<(-zero_tolerance), values), count(x -> abs(x) <= zero_tolerance, values), count(>(zero_tolerance), values))

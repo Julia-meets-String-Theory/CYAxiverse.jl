@@ -137,12 +137,22 @@ function _minimize_reduced(problem::ReducedJLMProblem; starts::Int=100_000,
 
     n_axions = size(problem.Q_reduced, 2)
     phases = vcat(zeros(n_axions), problem.phases)
-    leading_logs = @view problem.L_reduced[1:n_axions, 2]
-    equation_scales = 10.0 .^ (leading_logs .- maximum(leading_logs))
+    leading_signs = @view problem.L_reduced[1:n_axions, 1]
+    leading_seed = [sign < 0 ? 0.5 : 0.0 for sign in leading_signs]
+    seed_points = [leading_seed]
+    for axion in 1:n_axions
+        for displacement in (-0.125, 0.125)
+            seed = copy(leading_seed)
+            seed[axion] = mod(seed[axion] + displacement, 1.0)
+            push!(seed_points, seed)
+        end
+    end
+    initial_points = hcat(seed_points...)
     solved = critical_points(Matrix(problem.L_reduced'), Matrix(transpose(problem.Q_reduced));
         phases=phases, starts=starts, residual_tolerance=residual_tolerance,
         merge_tolerance=merge_tolerance, max_iterations=max_iterations,
-        equation_scales=equation_scales)
+        initial_points=initial_points,
+    )
 
     minima_count = Int(abs(round(problem.multiplicity * solved.minima_count)))
     coords = Matrix((2π .* solved.minima)')

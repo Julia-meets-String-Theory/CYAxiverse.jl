@@ -3,6 +3,59 @@
 !!! warning
     Under construction
 
+## Vacua minima pipeline
+
+The vacua pipeline keeps the legacy estimate and the numerical minima search
+separate. The search decision tree is:
+
+1. Use the square, determinant-certified leading problem when its branch guard
+    applies. This count is exact for that algebraic problem.
+2. Use `CYAxiverse.generate.leading_critical_branches` to enumerate the
+    selected leading determinant-lattice branches. These branches are a
+    deterministic prefilter; they are not a completeness claim for the full
+    potential.
+3. Use `CYAxiverse.jlm_reduced.prepare` once and repeated
+    `CYAxiverse.jlm_reduced.minimize` calls when reduced-JLM data can be reused.
+    Finite starts and iteration limits make the result a search-budget result.
+4. Use a bounded finite-start critical-point search only when the preceding
+    paths do not apply.
+
+Every persisted result must identify its method, threshold, start budget,
+residual and merge tolerances, iteration bound, solver status, and runtime.
+The single-geometry API defaults to the legacy path and refuses to replace an
+existing `vacua_pipeline` group unless `force=true` is explicit. Existing
+`spectrum` and legacy vacua groups are preserved.
+
+For resumable production work, use the batch runner with a bounded selection
+first:
+
+```sh
+julia --project=. scripts/batch_vacua_pipeline.jl \
+     --data-dir /path/to/data --geometry 4,50,1 --dry-run
+```
+
+The runner skips only completed results whose stored configuration matches the
+requested configuration. Mismatched or incomplete results are reported and
+require `--force`; each completed geometry is flushed immediately to the CSV
+summary. For HPC runs, use `--workers N` to dispatch geometries through
+Julia's `Distributed` worker pool. Results are streamed back to the parent one
+geometry at a time, while `--batch-size B` limits the number of geometries
+held in one dispatch group. Each worker owns its geometry HDF5 operation and
+the parent owns summary writes. Set `--blas-threads M` so that `N * M` does not
+exceed the allocated physical cores:
+
+```sh
+julia --project=. scripts/batch_vacua_pipeline.jl \
+    --data-dir /path/to/data --h11 4 --workers 4 --blas-threads 2 \
+    --batch-size 16 \
+    --starts 2048 --method reduced_jlm \
+    --summary /path/to/logs/vacua_h11_004.csv
+```
+
+The default is one worker, preserving sequential behavior. Workers never
+share HDF5 handles, and failures are returned to the parent for per-geometry
+CSV logging.
+
 ## Physical PQ spectra
 
 `pq_spectrum` provides the fast leading-Hessian spectrum intended for broad
