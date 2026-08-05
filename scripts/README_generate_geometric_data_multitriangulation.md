@@ -40,34 +40,52 @@ The construction choices are:
 7. Require positive effective-divisor volumes and search for the smallest
    stretched-cone prefactor satisfying the instanton/potential-control
    criterion used in arXiv:2309.01831.
-8. Write atomically to `cyax.h5`; incomplete temporary files are not retained.
+8. Apply the fuzzy-axion QCD selection from arXiv:2412.12012: every prime
+   toric divisor has volume at least one, and at least one prime divisor lies in
+   the configurable `[25, 40]` volume window.
+9. If an explicit orientifold is supplied, validate its lattice involution,
+   polytope preservation, FRST preservation, induced integral H2 action, and
+   invariant Kaehler-cone intersection.
+10. Write atomically to `cyax.h5`; incomplete temporary files are not retained.
 
 ### Literature basis
 
 The construction and its downstream data contract were checked against the
 following references:
 
-- Kreuzer and Skarke, *Complete classification of reflexive polyhedra in four
+- *Complete classification of reflexive polyhedra in four
   dimensions*, hep-th/0002240. This is the source classification underlying
   the KS four-dimensional reflexive-polytope database.
-- Demirtas, McAllister, and Rios-Tascon, *Bounding the Kreuzer-Skarke
+- *Bounding the Kreuzer-Skarke
   Landscape*, arXiv:2008.01730. This motivates the secondary-fan random-walk
   and flip sampler used by the `fair` mode.
-- Demirtas et al., *Axion minima in string theory*, arXiv:2309.01831. This
+- *Axion minima in string theory*, arXiv:2309.01831. This
   supplies the stretched-cone and instanton-control criterion used when
   accepting a geometry.
-- Demirtas et al., *Superradiance in String Theory*, arXiv:2103.06812. This
+- *Superradiance in String Theory*, arXiv:2103.06812. This
   is a downstream CYAxiverse physics target and informs preservation of the
   divisor, kinetic, and instanton-potential data needed by later analyses.
 - *Bayesian inference on Calabi-Yau moduli spaces and the axiverse:
   experimental data meets string theory*, arXiv:2512.00144. This motivates
   immutable geometry metadata, explicit cone/basis conventions, provenance,
   and serializable arrays for future inference.
+- *Orientifolding Kreuzer-Skarke*, arXiv:2305.06363. This
+  motivates requiring an explicit involution and invariant triangulation before
+  exporting orientifold-even/odd data.
+- *Fuzzy Axions and Associated Relics*, arXiv:2412.12012. Equation (3.22) and
+  its surrounding construction motivate the prime-divisor lower bound and
+  QCD-visible divisor-volume window.
 
-The first three references determine the geometry-generation algorithm
-directly. The latter two determine which numerical geometry contract and
-provenance must survive into Julia. The script records the directly operative
-construction papers in the HDF5 `provenance_json`.
+The first four references determine the geometry-generation and explicit
+orientifold handoff directly. The remaining references determine which
+numerical geometry contract and provenance must survive into Julia. The script
+records the directly operative construction papers in the HDF5
+`provenance_json`.
+
+The QCD-volume filter is a geometry-selection criterion, not a claim that the
+output contains a complete Standard Model sector. It is applied to the raw
+prime toric divisor volumes returned by CYTools, not to favorable basis
+divisors or effective-cone ray volumes.
 
 ## Environment
 
@@ -230,6 +248,10 @@ polytope.
 | --- | --- | --- |
 | `--max-kaehler-attempts INT` | `100` | Number of stretched-cone/angular Kahler points tested per FRST, including the canonical tip. |
 | `--min-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every exported effective-cone ray after rescaling. |
+| `--min-prime-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every raw prime toric divisor. |
+| `--qcd-volume-min FLOAT` | `25.0` | Lower edge of the QCD-visible prime-divisor volume window. |
+| `--qcd-volume-max FLOAT` | `40.0` | Upper edge of the QCD-visible prime-divisor volume window. |
+| `--orientifold-file PATH` | off | JSON file containing an explicit lattice involution and O3/O7 or O5/O9 metadata. |
 | `--max-m FLOAT` | `1_000_000` | Maximum stretched-cone prefactor searched for the potential-control criterion. |
 
 The canonical stretched-cone tip is found by minimizing the Euclidean norm
@@ -245,6 +267,9 @@ Candidate acceptance requires:
 - finite topology and cone data;
 - a positive physical CY volume and positive curve volumes;
 - positive effective-divisor volumes;
+- every prime toric divisor volume at least `--min-prime-divisor-volume`;
+- at least one prime toric divisor volume in
+  `[--qcd-volume-min, --qcd-volume-max]`;
 - Kahler-cone hyperplane slack at least one at the final tip;
 - the stretched-cone instanton/potential-control inequality to pass.
 
@@ -327,6 +352,37 @@ python scripts/generate_geometric_data_multitriangulation.py \
 
 See [`How_to_slurm.md`](./How_to_slurm.md) for the existing submission notes.
 
+### Explicit orientifold handoff
+
+Orientifolding is opt-in. The generator does not infer an involution, treat the
+identity as a physical orientifold, or claim fixed-locus/tadpole results. Pass a
+JSON file when a lattice involution has been selected from an external
+orientifold analysis:
+
+```json
+{
+  "label": "example-involution",
+  "lattice_matrix": [
+    [1, 0, 0, 0],
+    [0, -1, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, -1]
+  ],
+  "involution_type": "O3/O7",
+  "coefficient_constraints": {}
+}
+```
+
+Run with `--orientifold-file path/to/involution.json`. The matrix must be an
+integer unimodular involution that fixes the origin, preserves every lattice
+point of the polytope, and maps the selected FRST to itself. The script then
+derives the integral H2 action in the exported divisor basis, computes
+`h11_plus`/`h11_minus`, exports invariant and anti-invariant bases, and verifies
+that the orientifold-even Kaehler subspace intersects the Kaehler cone. O3/O7
+versus O5/O9 and coefficient constraints remain explicit metadata; fixed-locus
+topology, tadpole cancellation, fluxes, and phenomenology are downstream
+calculations.
+
 ## Output layout and HDF5 contract
 
 Each accepted geometry is written to:
@@ -354,7 +410,7 @@ cytools/geometric/
   basis, basis_matrix
   tip, tip_prefactor
   CY_volume
-  divisor_volumes, curve_volumes
+  divisor_volumes, prime_divisor_volumes, curve_volumes
   Kinv
   kappa
   c2
@@ -362,6 +418,12 @@ cytools/geometric/
   mori_cone
   kahler_cone
   kahler_hyperplanes
+  orientifold/ (only with --orientifold-file)
+    lattice_matrix
+    h2_involution_matrix
+    invariant_kahler_basis
+    anti_invariant_h2_basis
+    invariant_kahler_point
 cytools/potential/
   L, Q
 provenance/
@@ -377,6 +439,9 @@ Important conventions:
 - `L` retains the CYAxiverse sign/mantissa and base-10 exponent representation.
 - `tip`, `divisor_volumes`, `Kinv`, `curve_volumes`, and `CY_volume` refer to the
   same final rescaled Kahler point.
+- `prime_divisor_volumes` follows the order of CYTools
+  `prime_toric_divisors()` and is the vector used for the QCD filter; the
+  recorded QCD divisor index is zero-based.
 - `provenance_json` is stored both as a root attribute and under
   `provenance/metadata_json`.
 - `cy3_fingerprint` is explicitly a conservative topological fingerprint; it

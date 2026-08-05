@@ -33,11 +33,13 @@ import cytools
 from cytools import Polytope, fetch_polytopes
 
 
-SCHEMA_VERSION = "cyaxiverse-ks-cy3-v2"
+SCHEMA_VERSION = "cyaxiverse-ks-cy3-v3"
 MIN_CYTOOLS_VERSION = (1, 4, 0)
 SOURCE_PAPER_SET = (
     "arXiv:2008.01730v1",  # fair secondary-fan/triangulation sampling
     "arXiv:2309.01831v1",  # stretched-cone potential-control criterion
+    "arXiv:2305.06363v1",  # orientifold-compatible KS constructions
+    "arXiv:2412.12012v1",  # fuzzy-axion QCD divisor-volume requirement
 )
 
 
@@ -117,6 +119,204 @@ def _sha256_json(value):
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _nullspace(matrix, tolerance=1e-10):
+    """Return an orthonormal basis for the numerical nullspace of a matrix."""
+    matrix = np.asarray(matrix, dtype=float)
+    _, singular_values, vh = np.linalg.svd(matrix, full_matrices=True)
+    scale = max(float(np.max(singular_values, initial=0.0)), 1.0)
+    rank = int(np.count_nonzero(singular_values > tolerance * scale))
+    return vh[rank:].T
+
+
+def load_orientifold(path):
+    """Load and validate the explicit orientifold input contract."""
+    if path is None:
+        return {"requested": False, "status": "not_requested"}
+    try:
+        with open(path, encoding="utf-8") as stream:
+            config = json.load(stream)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read orientifold JSON {path!r}: {exc}") from exc
+    if not isinstance(config, dict):
+        raise RuntimeError("Orientifold JSON must contain an object.")
+    try:
+        raw_matrix = np.asarray(config.get("lattice_matrix"), dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("orientifold.lattice_matrix must contain integers.") from exc
+    if raw_matrix.shape != (4, 4) or not np.all(np.isfinite(raw_matrix)):
+        raise RuntimeError("orientifold.lattice_matrix must be an integer 4x4 matrix.")
+    if not np.allclose(raw_matrix, np.rint(raw_matrix)):
+        raise RuntimeError("orientifold.lattice_matrix must contain integers.")
+    matrix = np.rint(raw_matrix).astype(int)
+    orientifold_type = config.get("involution_type")
+    if orientifold_type not in {"O3/O7", "O5/O9"}:
+        raise RuntimeError(
+            "orientifold.involution_type must be exactly 'O3/O7' or 'O5/O9'."
+        )
+    if not np.array_equal(matrix @ matrix, np.eye(4, dtype=int)):
+        raise RuntimeError("orientifold.lattice_matrix must square to the identity.")
+    determinant = round(float(np.linalg.det(matrix)))
+    if determinant not in {-1, 1} or not np.isclose(np.linalg.det(matrix), determinant):
+        raise RuntimeError("orientifold.lattice_matrix must be unimodular.")
+    if not np.array_equal(matrix @ np.zeros(4, dtype=int), np.zeros(4, dtype=int)):
+        raise RuntimeError("The orientifold lattice action must fix the origin.")
+    return {
+        "requested": True,
+        "status": "input_loaded",
+        "source_file": os.path.abspath(path),
+        "lattice_matrix": matrix,
+        "involution_type": orientifold_type,
+        "coefficient_constraints": config.get("coefficient_constraints", {}),
+        "label": config.get("label"),
+    }
+
+
+def validate_orientifold(poly, triangulation, topology, config):
+    """Validate an explicit lattice involution and derive its H2 action."""
+    if not config["requested"]:
+        return config
+    matrix = np.asarray(config["lattice_matrix"], dtype=int)
+    points = np.asarray(poly.points(), dtype=int)
+    point_lookup = {tuple(point): index for index, point in enumerate(points)}
+    mapped_indices = []
+    for point in points:
+        mapped = tuple((matrix @ point).tolist())
+        if mapped not in point_lookup:
+            raise RuntimeError(
+                "The orientifold lattice action does not preserve the KS polytope."
+            )
+        mapped_indices.append(point_lookup[mapped])
+    mapped_indices = np.asarray(mapped_indices, dtype=int)
+    triangulation_points = np.asarray(triangulation.points(), dtype=int)
+    triangulation_global_indices = np.asarray(
+        [point_lookup[tuple(point)] for point in triangulation_points], dtype=int
+    )
+    simplices = {
+        tuple(
+            sorted(int(triangulation_global_indices[vertex]) for vertex in simplex)
+        )
+        for simplex in np.asarray(triangulation.simplices(as_indices=True), dtype=int)
+    }
+    mapped_simplices = {
+        tuple(sorted(int(mapped_indices[vertex]) for vertex in simplex))
+        for simplex in simplices
+    }
+    if mapped_simplices != simplices:
+        raise RuntimeError(
+            "The orientifold lattice action does not preserve the selected FRST."
+        )
+
+    basis_matrix = np.asarray(topology["basis_matrix"], dtype=float)
+    divisor_points = np.concatenate(
+        (np.asarray([0], dtype=int), topology["prime_toric_divisors"])
+    )
+    if basis_matrix.shape[1] != divisor_points.size:
+        raise RuntimeError(
+            "The exported divisor basis does not match CYTools' canonical "
+            "origin-plus-prime-divisor configuration."
+        )
+    mapped_divisor_points = mapped_indices[divisor_points]
+    divisor_positions = {point: position for position, point in enumerate(divisor_points)}
+    try:
+        mapped_divisor_positions = np.asarray(
+            [divisor_positions[point] for point in mapped_divisor_points], dtype=int
+        )
+    except KeyError as exc:
+        raise RuntimeError(
+            "The orientifold action does not preserve the prime toric divisor set."
+        ) from exc
+    permutation = np.zeros((divisor_points.size, divisor_points.size), dtype=float)
+    permutation[np.arange(divisor_points.size), mapped_divisor_positions] = 1.0
+    transformed_basis = basis_matrix @ permutation
+    coefficients, _, _, _ = np.linalg.lstsq(
+        basis_matrix.T, transformed_basis.T, rcond=None
+    )
+    h2_matrix = coefficients.T
+    integral_h2 = np.rint(h2_matrix).astype(int)
+    if not np.allclose(h2_matrix, integral_h2, atol=1e-8):
+        raise RuntimeError(
+            "The orientifold action does not induce an integral action in the "
+            "exported divisor basis."
+        )
+    if not np.allclose(integral_h2 @ basis_matrix, transformed_basis, atol=1e-8):
+        raise RuntimeError("Could not express the orientifold action in H2.")
+    if not np.array_equal(integral_h2 @ integral_h2, np.eye(topology["h11"], dtype=int)):
+        raise RuntimeError("The induced H2 action is not an involution.")
+
+    invariant_basis = _nullspace(integral_h2.T - np.eye(topology["h11"]))
+    anti_invariant_basis = _nullspace(integral_h2.T + np.eye(topology["h11"]))
+    config = dict(config)
+    config.update(
+        {
+            "status": "fan_invariant",
+            "h2_involution_matrix": integral_h2,
+            "invariant_kahler_basis": invariant_basis,
+            "anti_invariant_h2_basis": anti_invariant_basis,
+            "h11_plus": int(invariant_basis.shape[1]),
+            "h11_minus": int(anti_invariant_basis.shape[1]),
+            "polytope_preserved": True,
+            "frst_preserved": True,
+        }
+    )
+    return config
+
+
+def validate_invariant_kaehler_subspace(kahler_cone, reference_tip, orientifold):
+    """Check that the orientifold-even Kähler subspace reaches the cone."""
+    if not orientifold["requested"]:
+        return orientifold
+    h2_matrix = np.asarray(orientifold["h2_involution_matrix"], dtype=float)
+    invariant_basis = np.asarray(orientifold["invariant_kahler_basis"], dtype=float)
+    hyperplanes = np.asarray(kahler_cone.hyperplanes(), dtype=float)
+    if invariant_basis.shape[1] == 0:
+        raise RuntimeError("The orientifold has no invariant H2/Kähler direction.")
+    invariant_tip = invariant_basis @ (invariant_basis.T @ reference_tip)
+    if np.min(hyperplanes @ invariant_tip) < 1.0 - 1e-6:
+        try:
+            from qpsolvers import available_solvers, solve_qp
+        except ImportError as exc:
+            raise RuntimeError(
+                "qpsolvers is required to verify the invariant Kähler subspace."
+            ) from exc
+        equality = h2_matrix.T - np.eye(h2_matrix.shape[0])
+        solvers = sorted(available_solvers)
+        if not solvers:
+            raise RuntimeError("qpsolvers found no solver for invariant Kähler validation.")
+        invariant_tip = None
+        for solver in solvers:
+            try:
+                invariant_tip = solve_qp(
+                    np.eye(reference_tip.size),
+                    np.zeros(reference_tip.size),
+                    G=-hyperplanes,
+                    h=-np.ones(hyperplanes.shape[0]),
+                    A=equality,
+                    b=np.zeros(equality.shape[0]),
+                    solver=solver,
+                    verbose=False,
+                )
+            except Exception:
+                invariant_tip = None
+            if invariant_tip is not None:
+                break
+        if invariant_tip is None:
+            raise RuntimeError(
+                "The orientifold-even Kähler subspace did not intersect the "
+                "stretched Kähler cone."
+            )
+        invariant_tip = np.asarray(invariant_tip, dtype=float)
+    if not np.all(np.isfinite(invariant_tip)) or np.min(hyperplanes @ invariant_tip) < 1.0 - 1e-6:
+        raise RuntimeError(
+            "The orientifold-even Kähler subspace did not intersect the "
+            "stretched Kähler cone."
+        )
+    result = dict(orientifold)
+    result["invariant_kahler_point"] = invariant_tip
+    result["invariant_kahler_cone_intersection"] = True
+    result["status"] = "validated"
+    return result
+
+
 def canonical_points(poly):
     """Return all lattice points in a stable order for provenance/fingerprints."""
     return sorted(tuple(int(coordinate) for coordinate in point) for point in poly.points())
@@ -165,6 +365,7 @@ def extract_topology(cy, triangulation):
     h21 = int(cy.h21())
     basis = np.asarray(cy.divisor_basis(), dtype=int)
     basis_matrix = np.asarray(cy.divisor_basis(as_matrix=True), dtype=int)
+    prime_toric_divisors = np.asarray(cy.prime_toric_divisors(), dtype=int)
     kappa = np.asarray(
         cy.intersection_numbers(in_basis=True, format="coo"), dtype=float
     )
@@ -204,6 +405,7 @@ def extract_topology(cy, triangulation):
         "h21": h21,
         "basis": basis,
         "basis_matrix": basis_matrix,
+        "prime_toric_divisors": prime_toric_divisors,
         "kappa": kappa,
         "c2": c2,
         "mori_cone": mori,
@@ -236,6 +438,10 @@ class PrefactorCriterionNotMet(RuntimeError):
 
 class NoPhysicalKaehlerPoint(RuntimeError):
     """No sampled point has positive volumes on effective-divisor cone rays."""
+
+
+class NoQcdDivisorVolume(RuntimeError):
+    """No stretched point satisfies the prime-divisor QCD volume window."""
 
 
 def sample_stretched_kaehler_points(
@@ -328,6 +534,9 @@ def generate_and_save_geometry(
     max_m,
     max_kaehler_attempts,
     min_divisor_volume,
+    min_prime_divisor_volume,
+    qcd_volume_min,
+    qcd_volume_max,
     rng,
     report,
     *,
@@ -336,6 +545,7 @@ def generate_and_save_geometry(
     polytope_id,
     sampling_metadata,
     ks_database_version,
+    orientifold_config,
 ):
     """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
     report("validating the CYTools FRST")
@@ -344,6 +554,7 @@ def generate_and_save_geometry(
         raise RuntimeError("CYTools reports that the generic CY hypersurface is not smooth.")
     report("computing Hodge, intersection, and divisor-basis data")
     topology = extract_topology(cy, triangulation)
+    orientifold = validate_orientifold(poly, triangulation, topology, orientifold_config)
     h21 = topology["h21"]
     if topology["h11"] != int(h11) or topology["h11"] != int(cy.h11()):
         raise RuntimeError(
@@ -377,6 +588,9 @@ def generate_and_save_geometry(
         reference_tip = np.asarray(
             kahler_cone.tip_of_stretched_cone(1.0), dtype=float
         )
+    orientifold = validate_invariant_kaehler_subspace(
+        kahler_cone, reference_tip, orientifold
+    )
     report("computing effective-cone rays")
     qprime = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
     nq = qprime.shape[0]
@@ -444,6 +658,9 @@ def generate_and_save_geometry(
     if np.min(np.linalg.eigvalsh(kinv0)) <= 0.0:
         raise RuntimeError("The selected Kähler point has a non-positive metric.")
     tau, kinv = tau0.copy(), kinv0.copy()
+    prime_tau0 = np.asarray(cy.compute_divisor_volumes(kaehler_point), dtype=float)
+    if prime_tau0.ndim != 1 or not np.all(np.isfinite(prime_tau0)):
+        raise RuntimeError("CYTools returned invalid prime toric divisor volumes.")
 
     # The original script evaluates this condition in nested Python loops for
     # every 0.01 increment of m.  At h11=491 that dominates the runtime.  The
@@ -510,6 +727,24 @@ def generate_and_save_geometry(
             else:
                 lower_m = midpoint
     m_val = upper_m
+    minimum_m_for_prime_divisors = math.sqrt(
+        min_prime_divisor_volume / float(np.min(prime_tau0))
+    )
+    qcd_interval = None
+    for prime_volume in prime_tau0:
+        lower = math.sqrt(qcd_volume_min / float(prime_volume))
+        upper = math.sqrt(qcd_volume_max / float(prime_volume))
+        lower = max(lower, m_val, minimum_m_for_prime_divisors)
+        if lower <= upper and lower <= max_m and prefactor_is_valid(lower):
+            qcd_interval = (lower, upper)
+            break
+    if qcd_interval is None:
+        raise NoQcdDivisorVolume(
+            "No stretched-cone prefactor satisfies the prime-toric-divisor "
+            f"lower bound {min_prime_divisor_volume:g} and QCD window "
+            f"[{qcd_volume_min:g}, {qcd_volume_max:g}]."
+        )
+    m_val = qcd_interval[0]
     m2 = m_val**2
     tau = m2 * tau0
     kinv = m2**2 * kinv0
@@ -518,6 +753,17 @@ def generate_and_save_geometry(
     # all evaluated at the same final J = m * kaehler_point.
     tip = m_val * kaehler_point
     volume = float(cy.compute_cy_volume(tip))
+    prime_divisor_volumes = m2 * prime_tau0
+    qcd_divisor_indices = np.flatnonzero(
+        (prime_divisor_volumes >= qcd_volume_min)
+        & (prime_divisor_volumes <= qcd_volume_max)
+    )
+    if (
+        np.min(prime_divisor_volumes) < min_prime_divisor_volume - 1e-8
+        or qcd_divisor_indices.size == 0
+    ):
+        raise NoQcdDivisorVolume("Final prime toric divisor volumes failed validation.")
+    qcd_divisor_index = int(qcd_divisor_indices[0])
     curve_volumes = np.asarray(cy.compute_curve_volumes(tip), dtype=float)
     kahler_slack = np.asarray(kahler_cone.hyperplanes(), dtype=float) @ tip
     if (
@@ -590,6 +836,16 @@ def generate_and_save_geometry(
         "kappa_format": "coo",
         "kappa_columns": ["i", "j", "k", "value"],
         "kappa_index_base": 0,
+        "prime_divisor_volume_lower_bound": min_prime_divisor_volume,
+        "prime_divisor_convention": (
+            "CYTools compute_divisor_volumes(tip), ordered by "
+            "CYTools prime_toric_divisors()"
+        ),
+        "qcd_divisor_volume_window": [qcd_volume_min, qcd_volume_max],
+        "qcd_divisor_index": qcd_divisor_index,
+        "qcd_divisor_index_base": 0,
+        "qcd_divisor_volume": float(prime_divisor_volumes[qcd_divisor_index]),
+        "orientifold": orientifold,
     }
     try:
         with h5py.File(temporary_path, "w") as file:
@@ -618,6 +874,12 @@ def generate_and_save_geometry(
             geometric.create_dataset("tip_prefactor", data=tip_prefactor, compression="gzip", compression_opts=9)
             geometric.create_dataset("CY_volume", data=volume)
             geometric.create_dataset("divisor_volumes", data=tau, compression="gzip", compression_opts=9)
+            geometric.create_dataset(
+                "prime_divisor_volumes",
+                data=prime_divisor_volumes,
+                compression="gzip",
+                compression_opts=9,
+            )
             geometric.create_dataset("curve_volumes", data=curve_volumes, compression="gzip", compression_opts=9)
             geometric.create_dataset("Kinv", data=kinv, compression="gzip", compression_opts=9)
             geometric.create_dataset("kappa", data=topology["kappa"], compression="gzip", compression_opts=9)
@@ -642,6 +904,30 @@ def generate_and_save_geometry(
             geometric.attrs["kappa_index_base"] = metadata["kappa_index_base"]
             geometric.attrs["basis_convention"] = metadata["basis_convention"]
             geometric.attrs["intersection_convention"] = metadata["intersection_convention"]
+            if orientifold["requested"]:
+                orientifold_group = geometric.create_group("orientifold")
+                orientifold_group.create_dataset(
+                    "lattice_matrix", data=orientifold["lattice_matrix"]
+                )
+                orientifold_group.create_dataset(
+                    "h2_involution_matrix",
+                    data=orientifold["h2_involution_matrix"],
+                )
+                orientifold_group.create_dataset(
+                    "invariant_kahler_basis",
+                    data=orientifold["invariant_kahler_basis"],
+                )
+                orientifold_group.create_dataset(
+                    "anti_invariant_h2_basis",
+                    data=orientifold["anti_invariant_h2_basis"],
+                )
+                orientifold_group.create_dataset(
+                    "invariant_kahler_point",
+                    data=orientifold["invariant_kahler_point"],
+                )
+                orientifold_group.attrs["involution_type"] = orientifold["involution_type"]
+                orientifold_group.attrs["h11_plus"] = orientifold["h11_plus"]
+                orientifold_group.attrs["h11_minus"] = orientifold["h11_minus"]
             provenance = file.create_group("provenance")
             provenance.create_dataset(
                 "canonical_lattice_points",
@@ -753,6 +1039,9 @@ def process_polytope(task):
         max_m,
         max_kaehler_attempts,
         min_divisor_volume,
+        min_prime_divisor_volume,
+        qcd_volume_min,
+        qcd_volume_max,
         verbose,
         sampling_scheme,
         backend,
@@ -764,6 +1053,7 @@ def process_polytope(task):
         max_steps_to_wall,
         fast_height_scale,
         ks_database_version,
+        orientifold_config,
     ) = task
     try:
         started = time.perf_counter()
@@ -870,6 +1160,9 @@ def process_polytope(task):
                     max_m,
                     max_kaehler_attempts,
                     min_divisor_volume,
+                    min_prime_divisor_volume,
+                    qcd_volume_min,
+                    qcd_volume_max,
                     np.random.default_rng(seed + attempted - 1),
                     report,
                     poly=poly,
@@ -877,8 +1170,13 @@ def process_polytope(task):
                     polytope_id=polytope_id,
                     sampling_metadata=sampling_metadata,
                     ks_database_version=ks_database_version,
+                    orientifold_config=orientifold_config,
                 )
-            except (PrefactorCriterionNotMet, NoPhysicalKaehlerPoint) as exc:
+            except (
+                PrefactorCriterionNotMet,
+                NoPhysicalKaehlerPoint,
+                NoQcdDivisorVolume,
+            ) as exc:
                 rejected += 1
                 report(f"rejected FRST: {exc}")
                 continue
@@ -910,6 +1208,9 @@ def plan_tasks(
     max_m,
     max_kaehler_attempts,
     min_divisor_volume,
+    min_prime_divisor_volume,
+    qcd_volume_min,
+    qcd_volume_max,
     verbose,
     sampling_scheme,
     backend,
@@ -922,6 +1223,7 @@ def plan_tasks(
     fast_height_scale,
     ks_database_version,
     favorable,
+    orientifold_config,
 ):
     """Fetch at most n polytopes and spread n requested geometries over them."""
     polytopes = list(
@@ -956,6 +1258,9 @@ def plan_tasks(
             max_m,
             max_kaehler_attempts,
             min_divisor_volume,
+            min_prime_divisor_volume,
+            qcd_volume_min,
+            qcd_volume_max,
             verbose,
             sampling_scheme,
             backend,
@@ -967,6 +1272,7 @@ def plan_tasks(
             max_steps_to_wall,
             fast_height_scale,
             ks_database_version,
+            orientifold_config,
         )
         for polytope_index, (poly, count) in enumerate(zip(polytopes, counts), start=1)
     ]
@@ -984,6 +1290,9 @@ def run_batch(
     max_m,
     max_kaehler_attempts,
     min_divisor_volume,
+    min_prime_divisor_volume,
+    qcd_volume_min,
+    qcd_volume_max,
     verbose,
     sampling_scheme,
     backend,
@@ -996,6 +1305,7 @@ def run_batch(
     fast_height_scale,
     ks_database_version,
     favorable,
+    orientifold_config,
 ):
     tasks = plan_tasks(
         h11,
@@ -1008,6 +1318,9 @@ def run_batch(
         max_m,
         max_kaehler_attempts,
         min_divisor_volume,
+        min_prime_divisor_volume,
+        qcd_volume_min,
+        qcd_volume_max,
         verbose,
         sampling_scheme,
         backend,
@@ -1020,6 +1333,7 @@ def run_batch(
         fast_height_scale,
         ks_database_version,
         favorable,
+        orientifold_config,
     )
     if not tasks:
         print(f"No favorable N-lattice polytopes found for h11={h11}.")
@@ -1143,6 +1457,30 @@ def main():
         default=1.0,
         help="Required lower bound for every effective-divisor cone ray volume.",
     )
+    parser.add_argument(
+        "--min-prime-divisor-volume",
+        type=float,
+        default=1.0,
+        help="Required lower bound for every prime toric divisor volume.",
+    )
+    parser.add_argument(
+        "--qcd-volume-min",
+        type=float,
+        default=25.0,
+        help="Lower edge of the required prime-divisor QCD volume window.",
+    )
+    parser.add_argument(
+        "--qcd-volume-max",
+        type=float,
+        default=40.0,
+        help="Upper edge of the required prime-divisor QCD volume window.",
+    )
+    parser.add_argument(
+        "--orientifold-file",
+        type=str,
+        default=None,
+        help="JSON file containing an explicit lattice involution and orientifold type.",
+    )
     parser.add_argument("--overwrite", action="store_true", help="Replace existing cyax.h5 files.")
     parser.add_argument(
         "--verbose",
@@ -1161,6 +1499,10 @@ def main():
         parser.error("--max-kaehler-attempts must be positive")
     if args.min_divisor_volume <= 0.0:
         parser.error("--min-divisor-volume must be positive")
+    if args.min_prime_divisor_volume <= 0.0:
+        parser.error("--min-prime-divisor-volume must be positive")
+    if args.qcd_volume_min <= 0.0 or args.qcd_volume_max < args.qcd_volume_min:
+        parser.error("--qcd-volume-min must be positive and no greater than --qcd-volume-max")
     for name, value in (
         ("--n-walk", args.n_walk),
         ("--n-flip", args.n_flip),
@@ -1175,6 +1517,7 @@ def main():
     if args.h11_max < args.h11_min:
         args.h11_max = args.h11_min
     require_cytools_capabilities(args.sampling_scheme)
+    orientifold_config = load_orientifold(args.orientifold_file)
     favorable = {"true": True, "false": False, "any": None}[args.favorable]
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -1193,6 +1536,9 @@ def main():
             args.max_m,
             args.max_kaehler_attempts,
             args.min_divisor_volume,
+            args.min_prime_divisor_volume,
+            args.qcd_volume_min,
+            args.qcd_volume_max,
             args.verbose,
             args.sampling_scheme,
             args.backend,
@@ -1205,6 +1551,7 @@ def main():
             args.fast_height_scale,
             args.ks_database_version,
             favorable,
+            orientifold_config,
         )
     print(f"\nSaved {total_saved} geometry file(s).")
 
