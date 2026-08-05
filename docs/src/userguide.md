@@ -76,9 +76,10 @@ spectrum = CYAxiverse.generate.pq_hybrid_physical_spectrum(
 )
 ```
 
-The mode count is confirmed at increasing arbitrary precision. A warning marks
-any result whose count or refined eigenpairs do not stabilize; such a result is
-provisional and should be rerun at higher precision or checked with
+The mode count is confirmed at increasing arbitrary precision. If the hybrid
+refinement does not stabilize, it falls back to the full high-precision
+eigensystem; a provisional warning is emitted only if that fallback also fails
+validation. Such a result should be rerun at higher precision or checked with
 `pq_physical_spectrum`.
 
 Set `quartics=false` for large mass-only scans. When quartics are requested,
@@ -115,6 +116,38 @@ not allocate the full physical-mode charge matrix.
 `msign`. Its sequential PQ decay quantity is `f`; the legacy spectrum HDF5
 schema stores this array under `decay/fpert` for compatibility with existing
 readers.
+
+### Hierarchy blocks and mass windows
+
+`instanton_scale_blocks(L; gap_log10=1.0, min_block_size=1)` groups contiguous
+log-scale entries without materializing their potentially enormous amplitudes.
+Each block preserves the zero-based input instanton indices and the result
+records every inter-block gap. For a charge-aware perturbative screening,
+`instanton_hierarchy_diagnostics(K, L, Q)` also reports canonical charge
+coupling, separation-to-coupling ratios, and conservative `certified_safe`
+flags. A failed certificate leaves the numerical block/subspace path in use;
+scale separation alone is never treated as a proof of decoupling.
+
+Use `pq_window_spectrum` when only a mass interval is needed:
+
+```julia
+window = CYAxiverse.generate.pq_window_spectrum(
+    potential.K, potential.L, potential.Q;
+    min_log10_mass=12.0,
+    max_log10_mass=18.0,
+    prec=200,
+    quartics=false,
+)
+window.mode_indices
+window.diagnostics
+```
+
+Both window boundaries are counted with arbitrary-precision inertia, and only
+an oversampled band around the requested modes is refined. The diagnostics
+record precision-count stabilization, residual convergence, boundary gaps, and
+whether the reference eigensystem fallback was needed. A lower-threshold query
+is obtained with `max_log10_mass=Inf` and remains compatible with the existing
+`pq_hybrid_physical_spectrum` path.
 
 ### Large-geometry scaling checkpoint
 

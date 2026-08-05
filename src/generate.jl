@@ -16,7 +16,7 @@ using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
 using ..minimizer: minimize, subspace_minimize, critical_points
 
-using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, PhysicalAxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonHierarchyDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
+using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, PhysicalAxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonScaleBlock, PerturbativeSplitDiagnostics, InstantonHierarchyDiagnostics, SpectrumWindowDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
 #################
 ### Constant ####
@@ -777,6 +777,25 @@ function leading_hessian_matrix_float64(K::Hermitian{Float64, Matrix{Float64}}, 
     Hermitian(Kfactor.L \ H / Kfactor.L')
 end
 
+"""Build a Float64 seed Hessian after a common log-scale rescaling."""
+function leading_hessian_matrix_float64_scaled(K::Hermitian{Float64, Matrix{Float64}},
+        L::Matrix{Float64}, Q::Matrix{Int})
+    h11 = size(K, 1)
+    isempty(L) && return Hermitian(zeros(Float64, h11, h11))
+    reference_log = maximum(@view L[2, :])
+    floor_log = log10(floatmin(Float64))
+    scales = Float64[
+        L[1, a] * 10.0^max(L[2, a] - reference_log, floor_log)
+        for a in axes(L, 2)
+    ]
+    H = zeros(Float64, h11, h11)
+    for a in eachindex(scales), i in 1:h11, j in 1:h11
+        H[i, j] += scales[a] * Q[i, a] * Q[j, a]
+    end
+    Kfactor = cholesky(K)
+    Hermitian(Kfactor.L \ H / Kfactor.L')
+end
+
 """Construct the PQ leading Hessian in canonical fields at arbitrary precision.
 
 Only nonzero entries of each instanton charge vector are accumulated. This is
@@ -814,32 +833,135 @@ function mass_basis_accuracy(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{F
 end
 
 """
-    instanton_hierarchy_diagnostics(L)
+    instanton_scale_blocks(L; gap_log10=1.0, min_block_size=1)
 
-Return the leading instanton-scale gap and full scale span from `L[2, :]`.
-The `heuristic_strong_hierarchy` flag requires a leading gap of at least 30
-and a span of at least 1,000 in these log-scale units. Those provisional
-thresholds summarize the h11=10 screening study and are only a cheap
-physics-informed sanity check; use mass-basis diagnostics for certification.
+Sort instantons by descending `L[2, :]` and cluster adjacent entries whose
+log-scale gap is at most `gap_log10`. A gap larger than the configured value
+starts a new block. Small blocks are merged with the adjacent block across the
+smaller boundary gap until every block has at least `min_block_size` entries.
+The returned block indices are zero-based indices into the original `L`.
+
+The result contains `blocks`, `sorted_indices`, `sorted_log_scales`,
+`inter_block_gaps`, and a `diagnostics` named tuple. No scale is materialized,
+so this routine remains safe for extreme log-scale spans.
 """
-function instanton_hierarchy_diagnostics(L::Matrix{Float64})
-    scales = @view L[2, :]
-    largest = -Inf
-    second_largest = -Inf
-    smallest = Inf
-    @inbounds for scale in scales
-        smallest = min(smallest, scale)
-        if scale > largest
-            second_largest = largest
-            largest = scale
-        elseif scale > second_largest
-            second_largest = scale
+function instanton_scale_blocks(L::AbstractMatrix{<:Real};
+        gap_log10::Real=1.0, min_block_size::Int=1)
+    size(L, 1) >= 2 || throw(DimensionMismatch("L must have at least two rows: sign and log10 scale"))
+    min_block_size >= 1 || throw(ArgumentError("min_block_size must be positive"))
+    gap = Float64(gap_log10)
+    isfinite(gap) && gap >= 0 || throw(ArgumentError("gap_log10 must be finite and nonnegative"))
+    logs = Float64.(L[2, :])
+    all(isfinite, logs) || throw(ArgumentError("L log10 scales must be finite"))
+    sorted_positions = sortperm(logs; rev=true)
+    sorted_logs = logs[sorted_positions]
+    ranges = UnitRange{Int}[]
+    start = 1
+    for position in 1:max(length(sorted_logs) - 1, 0)
+        if sorted_logs[position] - sorted_logs[position + 1] > gap
+            push!(ranges, start:position)
+            start = position + 1
         end
     end
-    leading_log_gap = largest - second_largest
-    log_scale_span = largest - smallest
+    !isempty(sorted_logs) && push!(ranges, start:length(sorted_logs))
+
+    # Preserve the clustering rule while preventing undersized boundary blocks.
+    while length(ranges) > 1
+        small = findfirst(range -> length(range) < min_block_size, ranges)
+        small === nothing && break
+        left_gap = small > 1 ? sorted_logs[first(ranges[small - 1])] -
+            sorted_logs[last(ranges[small - 1]) + 1] : Inf
+        right_gap = small < length(ranges) ? sorted_logs[last(ranges[small])] -
+            sorted_logs[first(ranges[small + 1])] : Inf
+        if left_gap <= right_gap
+            ranges[small - 1] = first(ranges[small - 1]):last(ranges[small])
+            deleteat!(ranges, small)
+        else
+            ranges[small] = first(ranges[small]):last(ranges[small + 1])
+            deleteat!(ranges, small + 1)
+        end
+    end
+
+    blocks = InstantonScaleBlock[]
+    for range in ranges
+        push!(blocks, InstantonScaleBlock(
+            Int[sorted_positions[position] - 1 for position in range],
+            collect(range),
+            collect(sorted_logs[range])))
+    end
+    inter_block_gaps = Float64[
+        sorted_logs[last(ranges[i - 1])] - sorted_logs[first(ranges[i])]
+        for i in 2:length(ranges)
+    ]
+    return (; blocks, sorted_indices=Int.(sorted_positions .- 1),
+        sorted_log_scales=sorted_logs, inter_block_gaps,
+        gaps=inter_block_gaps, gap_log10=gap, min_block_size,
+        diagnostics=(block_count=length(blocks),
+            log_scale_span=isempty(sorted_logs) ? 0.0 : maximum(sorted_logs) - minimum(sorted_logs),
+            largest_inter_block_gap=isempty(inter_block_gaps) ? 0.0 : maximum(inter_block_gaps)))
+end
+
+function _instanton_split_diagnostics(K::Hermitian{Float64, Matrix{Float64}},
+        Q::Matrix{Int}, hierarchy)
+    isempty(hierarchy.blocks) && return PerturbativeSplitDiagnostics[]
+    Kfactor = cholesky(K).L
+    Qcanonical = Matrix(Q') / Kfactor'
+    splits = PerturbativeSplitDiagnostics[]
+    for boundary in 1:length(hierarchy.blocks)-1
+        left = reduce(vcat, (block.indices .+ 1 for block in hierarchy.blocks[1:boundary]))
+        right = reduce(vcat, (block.indices .+ 1 for block in hierarchy.blocks[boundary+1:end]))
+        left_charge = @view Qcanonical[left, :]
+        right_charge = @view Qcanonical[right, :]
+        left_norm = opnorm(left_charge)
+        right_norm = opnorm(right_charge)
+        off_block_norm = opnorm(Matrix(left_charge * right_charge'))
+        coupling = off_block_norm / max(left_norm * right_norm, eps(Float64))
+        separation_gap = hierarchy.inter_block_gaps[boundary]
+        coupling_to_gap_ratio = coupling == 0.0 ? 0.0 :
+            separation_gap > 300.0 ? 0.0 : coupling / 10.0^separation_gap
+        # Charge-space alignment is checked independently of the scale gap:
+        # parallel canonical charges are not a certified perturbative split.
+        certified_safe = separation_gap >= 6.0 && coupling <= 1e-6
+        push!(splits, PerturbativeSplitDiagnostics(Float64(off_block_norm),
+            Float64(separation_gap), Float64(coupling_to_gap_ratio), certified_safe))
+    end
+    splits
+end
+
+"""
+    instanton_hierarchy_diagnostics(L; gap_log10=1.0, min_block_size=1)
+
+Return scale-block metadata in addition to the historical leading-gap and span
+screening fields. This overload has no charge geometry, so perturbative split
+certificates are empty. Use `instanton_hierarchy_diagnostics(K, L, Q; kwargs...)`
+to include canonical charge-coupling diagnostics.
+"""
+function instanton_hierarchy_diagnostics(L::AbstractMatrix{<:Real};
+        gap_log10::Real=1.0, min_block_size::Int=1)
+    scales = Float64.(L[2, :])
+    largest = isempty(scales) ? -Inf : maximum(scales)
+    second_largest = length(scales) < 2 ? -Inf : sort(scales; rev=true)[2]
+    smallest = isempty(scales) ? Inf : minimum(scales)
+    leading_log_gap = length(scales) < 2 ? 0.0 : largest - second_largest
+    log_scale_span = isempty(scales) ? 0.0 : largest - smallest
+    hierarchy = instanton_scale_blocks(L; gap_log10, min_block_size)
     InstantonHierarchyDiagnostics(leading_log_gap, log_scale_span,
-        leading_log_gap >= 30 && log_scale_span >= 1_000)
+        leading_log_gap >= 30 && log_scale_span >= 1_000, hierarchy.blocks,
+        hierarchy.inter_block_gaps, PerturbativeSplitDiagnostics[],
+        Float64(gap_log10), min_block_size)
+end
+
+"""Return hierarchy blocks and charge-coupling diagnostics for a potential."""
+function instanton_hierarchy_diagnostics(K::Hermitian{Float64, Matrix{Float64}},
+        L::Matrix{Float64}, Q::Matrix{Int}; gap_log10::Real=1.0,
+        min_block_size::Int=1)
+    hierarchy = instanton_hierarchy_diagnostics(L; gap_log10, min_block_size)
+    splits = _instanton_split_diagnostics(K, Q,
+        instanton_scale_blocks(L; gap_log10, min_block_size))
+    InstantonHierarchyDiagnostics(hierarchy.leading_log_gap,
+        hierarchy.log_scale_span, hierarchy.heuristic_strong_hierarchy,
+        hierarchy.blocks, hierarchy.inter_block_gaps, splits, Float64(gap_log10),
+        min_block_size)
 end
 
 """
@@ -930,7 +1052,6 @@ contraction. Signs of `λ31` additionally depend on the arbitrary sign
 convention for individual mass eigenvectors.
 """
 function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; mixing_correction::Union{Bool, Symbol}=:float64, prec::Int=1_000, quartic_diagnostics::Bool=false, mass_basis_diagnostics::Bool=false, hierarchy_diagnostics::Bool=false)
-    # TODO: #17 Include threshold
     h11::Int = size(K,1)
     fK::Vector{Float64} = log10.(sqrt.(eigen(K).values))
     Kls = cholesky(K).L
@@ -961,7 +1082,8 @@ function pq_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64},
         throw(ArgumentError("mass_basis_diagnostics requires a leading-Hessian mass basis; set mixing_correction to :float64 or :high_precision"))
     end
     mass_diagnostics = mass_basis_diagnostics ? mass_basis_accuracy(K, Ltilde, Qtilde, quartic_basis) : nothing
-    hierarchy = hierarchy_diagnostics ? instanton_hierarchy_diagnostics(L) : nothing
+    hierarchy = hierarchy_diagnostics ?
+        instanton_hierarchy_diagnostics(K, L, Q) : nothing
     Qpq = Qcanonical * quartic_basis
     scale_sign = Int.(sign.(@view L[1, :]))
     scale_log = log(10) .* @view(L[2, :])
@@ -1250,10 +1372,11 @@ improves convergence when the spectral gap at the physical threshold is small.
 
 The returned `PhysicalAxionSpectrum` has the same fields as the full
 high-precision reference routine. If the requested residual tolerance is not
-met by `maxiter`, a warning is emitted and the provisional result is returned;
-use `pq_physical_spectrum` to validate such a case.
+met by `maxiter`, the solver warns and falls back to the full high-precision
+eigensystem. A provisional result is returned only if that fallback also fails
+the residual check.
 """
-function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true, quartic_backend::Symbol=:auto, label::AbstractString="matrix input")
+function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true, quartic_backend::Symbol=:auto, hierarchy_gap_log10::Float64=1.0, hierarchy_min_block_size::Int=1, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
@@ -1273,9 +1396,19 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
     Qleading = Matrix(Qtilde') / Kls'
     _, pq_masses, pq_basis = pq_canonical_frame(Qleading, Ltilde)
     seed_basis = pq_basis[:, sortperm(pq_masses)]
+    hierarchy = instanton_hierarchy_diagnostics(Ltilde;
+        gap_log10=hierarchy_gap_log10, min_block_size=hierarchy_min_block_size)
+    hierarchy_safe = if length(hierarchy.blocks) > 32
+        false
+    else
+        charge_hierarchy = instanton_hierarchy_diagnostics(K, Ltilde, Qtilde;
+            gap_log10=hierarchy_gap_log10, min_block_size=hierarchy_min_block_size)
+        isempty(charge_hierarchy.perturbative_splits) ||
+            all(split.certified_safe for split in charge_hierarchy.perturbative_splits)
+    end
     schur_safe = false
     if schur_acceleration && physical_count < h11
-        if schur_admissible_float64(W, seed_basis, physical_count, threshold_log10)
+        if hierarchy_safe && schur_admissible_float64(W, seed_basis, physical_count, threshold_log10)
             complement = T.(seed_basis[:, 1:end-physical_count])
             C = Hermitian(complement' * W * complement)
             mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
@@ -1301,7 +1434,24 @@ function pq_hybrid_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::
         end
         basis = Matrix(@view basis[:, end-physical_count+1:end])
     end
-    maximum(residuals) > residual_tolerance && @warn "hybrid physical spectrum did not reach residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Returning a provisional result."
+    if maximum(residuals) > residual_tolerance
+        @warn "hybrid physical spectrum did not reach residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Falling back to the full high-precision eigensystem."
+        all_values, all_vectors = eigen(W)
+        all_masses = Float64.(0.5 .* log10.(abs.(all_values))) .+ 9 .+
+            Float64(log10(constants()["MPlanck"])) .+
+            Float64(constants()["log2π"])
+        all_order = sortperm(all_masses)
+        retained = [index for index in all_order if all_values[index] > 0 &&
+            all_masses[index] >= threshold_log10]
+        length(retained) == physical_count || throw(
+            ArgumentError("hybrid full-eigensystem fallback found $(length(retained)) physical modes; expected $(physical_count) for geometry=$(label)"))
+        eigenvalues = all_values[retained]
+        basis = all_vectors[:, retained]
+        residuals = [Float64(norm(W * @view(basis[:, i]) -
+            eigenvalues[i] .* @view(basis[:, i])) /
+            max(abs(eigenvalues[i]), eps(T))) for i in axes(basis, 2)]
+        maximum(residuals) > residual_tolerance && @warn "hybrid full-eigensystem fallback remained above residual_tolerance=$(residual_tolerance) for geometry=$(label); maximum relative residual=$(maximum(residuals)). Returning a provisional result."
+    end
     masses = Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ 9 .+ Float64(log10(constants()["MPlanck"])) .+ Float64(constants()["log2π"])
     !quartics && return PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
     selected_backend = select_quartic_backend(Q, quartic_backend)
@@ -1354,6 +1504,309 @@ end
 function pq_hybrid_physical_spectrum(geom_idx::GeometryIndex; label::AbstractString="h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), frst=$(geom_idx.frst)", kwargs...)
     pot_data = potential(geom_idx)
     pq_hybrid_physical_spectrum(pot_data.K, pot_data.L, pot_data.Q; label, kwargs...)
+end
+
+function _empty_physical_spectrum(threshold_log10::Float64, prec::Int, h11::Int;
+        min_log10_mass::Float64=threshold_log10,
+        max_log10_mass::Float64=Inf,
+        diagnostics::Union{Nothing, SpectrumWindowDiagnostics}=nothing)
+    PhysicalAxionSpectrum(Float64[], Int[], zeros(Float64, h11, 0), Int[], Float64[],
+        zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+        threshold_log10, prec, min_log10_mass, max_log10_mass, diagnostics)
+end
+
+"""Contract quartics and assemble a physical spectrum from a refined basis."""
+function _physical_spectrum_from_basis(K::Hermitian{Float64, Matrix{Float64}},
+        L::Matrix{Float64}, Q::Matrix{Int}, basis::Matrix{T}, masses::Vector{Float64},
+        mode_indices::Vector{Int}; threshold_log10::Float64,
+        min_log10_mass::Float64=threshold_log10, max_log10_mass::Float64=Inf,
+        prec::Int, quartics::Bool, mixed_quartics::Bool,
+        quartic_backend::Symbol, diagnostics=nothing) where {T}
+    !quartics && return PhysicalAxionSpectrum(masses, mode_indices, Float64.(basis),
+        Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+        zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec,
+        min_log10_mass, max_log10_mass, diagnostics)
+    Kfactor = cholesky(K)
+    selected_backend = select_quartic_backend(Q, quartic_backend)
+    log2π = Float64(constants()["log2π"])
+    if !mixed_quartics
+        self_sign, self_log = diagonal_quartics(Q, L, Kfactor, basis, selected_backend)
+        return PhysicalAxionSpectrum(masses, mode_indices, Float64.(basis),
+            self_sign, self_log .+ 4 * log2π, zeros(Int, 4, 0), Int[], Float64[],
+            zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec,
+            min_log10_mass, max_log10_mass, diagnostics)
+    end
+    Qmass = quartic_charge_basis(Q, Kfactor, basis, selected_backend)
+    quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
+    physical_count = length(masses)
+    qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
+    qindq22 = [(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
+    function signed_quartic(exponents::NTuple{4, Int})
+        value = zero(T)
+        for a in eachindex(quartic_scales)
+            value += quartic_scales[a] * Qmass[a, exponents[1]] *
+                Qmass[a, exponents[2]] * Qmass[a, exponents[3]] * Qmass[a, exponents[4]]
+        end
+        value_sign = Int(sign(value))
+        value_sign, value_sign == 0 ? -Inf : Float64(log10(abs(value)))
+    end
+    self_sign = zeros(Int, physical_count)
+    self_log = zeros(Float64, physical_count)
+    for i in 1:physical_count
+        self_sign[i], self_log[i] = signed_quartic((i, i, i, i))
+    end
+    three_one_sign = zeros(Int, length(qindq31))
+    three_one_log = zeros(Float64, length(qindq31))
+    for i in eachindex(qindq31)
+        three_one_sign[i], three_one_log[i] = signed_quartic(qindq31[i])
+    end
+    two_two_sign = zeros(Int, length(qindq22))
+    two_two_log = zeros(Float64, length(qindq22))
+    for i in eachindex(qindq22)
+        two_two_sign[i], two_two_log[i] = signed_quartic(qindq22[i])
+    end
+    PhysicalAxionSpectrum(masses, mode_indices, Float64.(basis),
+        self_sign, self_log .+ 4 * log2π,
+        isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1,
+        three_one_sign, three_one_log .+ 4 * log2π,
+        isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1,
+        two_two_sign, two_two_log .+ 4 * log2π, threshold_log10, prec,
+        min_log10_mass, max_log10_mass, diagnostics)
+end
+
+function _window_counts(W::Hermitian, min_log10_mass::Float64,
+        max_log10_mass::Float64)
+    T = eltype(W)
+    mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
+    # Bounds arrive as Float64 mass logs while the inertia matrix is arbitrary
+    # precision; retain a small decimal margin so a round-tripped boundary mode
+    # is included rather than lost to the Float64 conversion.
+    inclusive_margin = T("1e-10")
+    function count_above(bound::Float64, margin)
+        threshold = T(10) ^ (2 * (T(bound) + margin - mass_offset))
+        positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold * I)))
+    end
+    h11 = size(W, 1)
+    lower_count = isinf(min_log10_mass) && min_log10_mass < 0 ? h11 :
+        count_above(min_log10_mass, -inclusive_margin)
+    upper_count = isinf(max_log10_mass) && max_log10_mass > 0 ? 0 :
+        count_above(max_log10_mass, inclusive_margin)
+    lower_count, upper_count
+end
+
+function _window_counts_at_precision(K::Hermitian{Float64, Matrix{Float64}},
+        Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, min_log10_mass::Float64,
+        max_log10_mass::Float64, prec::Int)
+    W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
+    lower_count, upper_count = _window_counts(W, min_log10_mass, max_log10_mass)
+    W, Kfactor, lower_count, upper_count
+end
+
+function _confirm_window_counts(K::Hermitian{Float64, Matrix{Float64}},
+        Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, min_log10_mass::Float64,
+        max_log10_mass::Float64, prec::Int, max_prec::Int, confirm::Bool,
+        label::AbstractString)
+    max_prec >= prec || throw(ArgumentError("max_prec must be at least prec"))
+    W, Kfactor, lower_count, upper_count = _window_counts_at_precision(
+        K, Ltilde, Qtilde, min_log10_mass, max_log10_mass, prec)
+    records = NTuple{3,Int}[(prec, lower_count, upper_count)]
+    stable = true
+    working_prec = prec
+    if confirm
+        stable = false
+        while working_prec < max_prec
+            working_prec = min(2 * working_prec, max_prec)
+            next_W, next_Kfactor, next_lower, next_upper = _window_counts_at_precision(
+                K, Ltilde, Qtilde, min_log10_mass, max_log10_mass, working_prec)
+            push!(records, (working_prec, next_lower, next_upper))
+            W, Kfactor = next_W, next_Kfactor
+            if next_lower == lower_count && next_upper == upper_count
+                stable = true
+                break
+            end
+            lower_count, upper_count = next_lower, next_upper
+        end
+        if !stable
+            @warn "window mode counts did not stabilize by max_prec=$(max_prec) for geometry=$(label); returning a provisional result"
+        end
+    end
+    W, Kfactor, lower_count, upper_count, records, stable
+end
+
+function _mass_values(eigenvalues, mass_offset::Float64)
+    Float64.(0.5 .* log10.(abs.(eigenvalues))) .+ mass_offset
+end
+
+"""
+    pq_window_spectrum(K, L, Q; min_log10_mass=-Inf, max_log10_mass=Inf,
+                       prec=1_000, maxiter=100, residual_tolerance=1e-30)
+
+Compute only the leading-Hessian modes in a two-sided physical mass window.
+Both boundaries are counted with arbitrary-precision inertia. PQ-seeded Schur
+refinement is then applied to an oversampled band around the requested
+eigenspace; a full arbitrary-precision reference eigensystem is used only
+when the targeted refinement fails interval or residual validation.
+
+`oversampling` adds candidates on both boundaries, `quartics=false` skips all
+quartic contractions, and `mixed_quartics=false` retains only self-couplings.
+The returned `PhysicalAxionSpectrum.diagnostics` records precision counts,
+boundary validation, convergence, and fallback status.
+"""
+function pq_window_spectrum(K::Hermitian{Float64, Matrix{Float64}},
+        L::Matrix{Float64}, Q::Matrix{Int};
+        min_log10_mass::Real=-Inf, max_log10_mass::Real=Inf,
+        prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30,
+        oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true,
+        quartic_backend::Symbol=:auto, confirm::Bool=true, max_prec::Int=4_000,
+        schur_acceleration::Bool=true, hierarchy_gap_log10::Float64=1.0,
+        hierarchy_min_block_size::Int=1, label::AbstractString="matrix input")
+    min_log10_mass = Float64(min_log10_mass)
+    max_log10_mass = Float64(max_log10_mass)
+    isfinite(min_log10_mass) || min_log10_mass == -Inf ||
+        throw(ArgumentError("min_log10_mass must be finite or -Inf"))
+    isfinite(max_log10_mass) || max_log10_mass == Inf ||
+        throw(ArgumentError("max_log10_mass must be finite or Inf"))
+    maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
+    oversampling >= 0 || throw(ArgumentError("oversampling must be nonnegative"))
+
+    LQtild = LQtilde(Q, L)
+    Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+    hierarchy = instanton_hierarchy_diagnostics(Ltilde;
+        gap_log10=hierarchy_gap_log10, min_block_size=hierarchy_min_block_size)
+    if length(hierarchy.blocks) <= 32
+        hierarchy = instanton_hierarchy_diagnostics(K, Ltilde, Qtilde;
+            gap_log10=hierarchy_gap_log10, min_block_size=hierarchy_min_block_size)
+    end
+    if min_log10_mass > max_log10_mass
+        diagnostics = SpectrumWindowDiagnostics(NTuple{3,Int}[], 0, 0, Inf, Inf,
+            0.0, true, false, true, false, hierarchy)
+        return _empty_physical_spectrum(min_log10_mass, prec, size(K, 1);
+            min_log10_mass, max_log10_mass, diagnostics)
+    end
+
+    W, Kfactor, lower_count, upper_count, count_records, counts_stable =
+        _confirm_window_counts(K, Ltilde, Qtilde, min_log10_mass,
+            max_log10_mass, prec, max_prec, confirm, label)
+    target_count = max(lower_count - upper_count, 0)
+    if target_count == 0
+        diagnostics = SpectrumWindowDiagnostics(count_records, lower_count, upper_count,
+            Inf, Inf, 0.0, true, false, counts_stable, !counts_stable, hierarchy)
+        return _empty_physical_spectrum(min_log10_mass, prec, size(K, 1);
+            min_log10_mass, max_log10_mass, diagnostics)
+    end
+    setprecision(ArbFloat; digits=prec)
+    T = eltype(W)
+    h11 = size(K, 1)
+    mass_offset = 9.0 + Float64(log10(constants()["MPlanck"])) +
+        Float64(constants()["log2π"])
+
+    fallback_used = !schur_acceleration
+    refined_values = T[]
+    refined_basis = zeros(T, h11, 0)
+    residuals = Float64[]
+    if schur_acceleration
+        float_values, float_vectors = eigen(leading_hessian_matrix_float64_scaled(K, Ltilde, Qtilde))
+        positive_float_order = sortperm(
+            findall(value -> value > 0, float_values);
+            by=index -> float_values[index])
+        if length(positive_float_order) >= lower_count
+            positive_count = length(positive_float_order)
+            target_global_start = positive_count - lower_count + 1
+            target_global_end = positive_count - upper_count
+            candidate_start = max(1, target_global_start - oversampling)
+            candidate_end = min(positive_count, target_global_end + oversampling)
+            candidates = positive_float_order[candidate_start:candidate_end]
+            target_start = findfirst(==(positive_float_order[target_global_start]), candidates)
+            target_end = findfirst(==(positive_float_order[target_global_end]), candidates)
+            if target_start !== nothing && target_end !== nothing
+                complement = setdiff(collect(1:h11), candidates)
+                candidate_basis = hcat(float_vectors[:, complement],
+                    float_vectors[:, candidates])
+                refine_count = length(candidates)
+                try
+                    refined_values, refined_basis, residuals = schur_physical_basis(
+                        W, candidate_basis, refine_count; maxiter, residual_tolerance)
+                catch err
+                    if err isa SingularException || err isa PosDefException
+                        fallback_used = true
+                    else
+                        rethrow()
+                    end
+                end
+                if !fallback_used
+                    refined_masses = _mass_values(refined_values, mass_offset)
+                    inside = findall(mass -> mass >= min_log10_mass &&
+                        mass <= max_log10_mass, refined_masses)
+                    if length(inside) != target_count ||
+                            any(!isfinite, refined_masses[inside])
+                        fallback_used = true
+                    end
+                end
+            else
+                fallback_used = true
+            end
+        else
+            fallback_used = true
+        end
+    end
+
+    if fallback_used
+        all_values, all_vectors = eigen(W)
+        all_masses = _mass_values(all_values, mass_offset)
+        all_order = sortperm(all_masses)
+        inside = [index for index in all_order if all_values[index] > 0 &&
+            all_masses[index] >= min_log10_mass && all_masses[index] <= max_log10_mass]
+        refined_values = all_values[inside]
+        refined_basis = all_vectors[:, inside]
+        masses = all_masses[inside]
+        mode_indices = Int[findfirst(==(index), all_order) - 1 for index in inside]
+        residuals = [Float64(norm(W * @view(refined_basis[:, i]) -
+            refined_values[i] .* @view(refined_basis[:, i])) /
+            max(abs(refined_values[i]), eps(T))) for i in axes(refined_basis, 2)]
+    else
+        refined_masses = _mass_values(refined_values, mass_offset)
+        inside = findall(mass -> mass >= min_log10_mass && mass <= max_log10_mass,
+            refined_masses)
+        refined_values = refined_values[inside]
+        refined_basis = refined_basis[:, inside]
+        masses = refined_masses[inside]
+        mode_indices = collect(h11 - lower_count:h11 - upper_count - 1)
+    end
+    order = sortperm(masses)
+    masses = masses[order]
+    refined_values = refined_values[order]
+    refined_basis = refined_basis[:, order]
+    mode_indices = mode_indices[order]
+    interval_ok = all(mass -> mass >= min_log10_mass && mass <= max_log10_mass, masses)
+    max_residual = isempty(residuals) ? 0.0 : maximum(residuals)
+    converged = max_residual <= residual_tolerance
+    provisional = !counts_stable || !converged || !interval_ok ||
+        length(masses) != target_count
+    if provisional
+        @warn "window spectrum did not satisfy residual or interval validation for geometry=$(label); returning a provisional result"
+    end
+    lower_boundary_gap = isempty(masses) || isinf(min_log10_mass) ? Inf :
+        minimum(abs.(masses .- min_log10_mass))
+    upper_boundary_gap = isempty(masses) || isinf(max_log10_mass) ? Inf :
+        minimum(abs.(masses .- max_log10_mass))
+    diagnostics = SpectrumWindowDiagnostics(count_records, lower_count, upper_count,
+        lower_boundary_gap, upper_boundary_gap, max_residual, converged,
+        fallback_used, !provisional, provisional, hierarchy)
+    _physical_spectrum_from_basis(K, L, Q, refined_basis, masses, mode_indices;
+        threshold_log10=min_log10_mass, min_log10_mass, max_log10_mass, prec,
+        quartics, mixed_quartics, quartic_backend, diagnostics)
+end
+
+"""Load one geometry and delegate to [`pq_window_spectrum`](@ref)."""
+function pq_window_spectrum(h11::Int, tri::Int, cy::Int; kwargs...)
+    pot_data = potential(h11, tri, cy)
+    pq_window_spectrum(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
+end
+
+"""Load one indexed geometry and delegate to [`pq_window_spectrum`](@ref)."""
+function pq_window_spectrum(geom_idx::GeometryIndex; kwargs...)
+    pot_data = potential(geom_idx)
+    pq_window_spectrum(pot_data.K, pot_data.L, pot_data.Q; kwargs...)
 end
 
 function positive_inertia(factor::BunchKaufman)
