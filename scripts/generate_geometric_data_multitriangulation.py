@@ -33,7 +33,7 @@ import cytools
 from cytools import Polytope, fetch_polytopes
 
 
-SCHEMA_VERSION = "cyaxiverse-ks-cy3-v3"
+SCHEMA_VERSION = "cyaxiverse-ks-cy3-v4"
 MIN_CYTOOLS_VERSION = (1, 4, 0)
 SOURCE_PAPER_SET = (
     "arXiv:2008.01730v1",  # fair secondary-fan/triangulation sampling
@@ -318,7 +318,7 @@ def validate_invariant_kaehler_subspace(kahler_cone, reference_tip, orientifold)
 
 
 def canonical_points(poly):
-    """Return all lattice points in a stable order for provenance/fingerprints."""
+    """Return all lattice points in a stable order for construction metadata."""
     return sorted(tuple(int(coordinate) for coordinate in point) for point in poly.points())
 
 
@@ -811,7 +811,7 @@ def generate_and_save_geometry(
     report("writing HDF5 data")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     temporary_path = f"{filepath}.tmp-{os.getpid()}-{time.time_ns()}"
-    metadata = {
+    construction_metadata = {
         "schema_version": SCHEMA_VERSION,
         "source_paper_set": SOURCE_PAPER_SET,
         "cytools_version": cytools.version,
@@ -850,8 +850,8 @@ def generate_and_save_geometry(
     try:
         with h5py.File(temporary_path, "w") as file:
             file.attrs["schema_version"] = SCHEMA_VERSION
-            file.attrs["provenance_json"] = json.dumps(
-                _jsonable(metadata), sort_keys=True, separators=(",", ":")
+            file.attrs["construction_metadata_json"] = json.dumps(
+                _jsonable(construction_metadata), sort_keys=True, separators=(",", ":")
             )
             cytools_group = file.create_group("cytools")
             geometric = cytools_group.create_group("geometric")
@@ -900,10 +900,10 @@ def generate_and_save_geometry(
             geometric.attrs["triangulation_id"] = triangulation_id
             geometric.attrs["cy3_fingerprint"] = cy3_fingerprint
             geometric.attrs["sampling_scheme"] = sampling_metadata["scheme"]
-            geometric.attrs["kappa_format"] = metadata["kappa_format"]
-            geometric.attrs["kappa_index_base"] = metadata["kappa_index_base"]
-            geometric.attrs["basis_convention"] = metadata["basis_convention"]
-            geometric.attrs["intersection_convention"] = metadata["intersection_convention"]
+            geometric.attrs["kappa_format"] = construction_metadata["kappa_format"]
+            geometric.attrs["kappa_index_base"] = construction_metadata["kappa_index_base"]
+            geometric.attrs["basis_convention"] = construction_metadata["basis_convention"]
+            geometric.attrs["intersection_convention"] = construction_metadata["intersection_convention"]
             if orientifold["requested"]:
                 orientifold_group = geometric.create_group("orientifold")
                 orientifold_group.create_dataset(
@@ -928,19 +928,19 @@ def generate_and_save_geometry(
                 orientifold_group.attrs["involution_type"] = orientifold["involution_type"]
                 orientifold_group.attrs["h11_plus"] = orientifold["h11_plus"]
                 orientifold_group.attrs["h11_minus"] = orientifold["h11_minus"]
-            provenance = file.create_group("provenance")
-            provenance.create_dataset(
+            construction_metadata_group = file.create_group("construction_metadata")
+            construction_metadata_group.create_dataset(
                 "canonical_lattice_points",
                 data=np.asarray(canonical_points(poly), dtype=int),
                 compression="gzip",
             )
-            provenance.create_dataset(
+            construction_metadata_group.create_dataset(
                 "face_restriction_dim2",
                 data=np.asarray(topology["face_restriction_dim2"], dtype=int),
                 compression="gzip",
             )
-            provenance.attrs["metadata_json"] = json.dumps(
-                _jsonable(metadata), sort_keys=True, separators=(",", ":")
+            construction_metadata_group.attrs["construction_metadata_json"] = json.dumps(
+                _jsonable(construction_metadata), sort_keys=True, separators=(",", ":")
             )
             potential = cytools_group.create_group("potential")
             potential.create_dataset("L", data=l, compression="gzip", compression_opts=9)

@@ -67,7 +67,8 @@ following references:
   divisor, kinetic, and instanton-potential data needed by later analyses.
 - *Bayesian inference on Calabi-Yau moduli spaces and the axiverse:
   experimental data meets string theory*, arXiv:2512.00144. This motivates
-  immutable geometry metadata, explicit cone/basis conventions, provenance,
+  immutable geometry metadata, explicit cone/basis conventions,
+  construction metadata,
   and serializable arrays for future inference.
 - *Orientifolding Kreuzer-Skarke*, arXiv:2305.06363. This
   motivates requiring an explicit involution and invariant triangulation before
@@ -78,9 +79,9 @@ following references:
 
 The first four references determine the geometry-generation and explicit
 orientifold handoff directly. The remaining references determine which
-numerical geometry contract and provenance must survive into Julia. The script
-records the directly operative construction papers in the HDF5
-`provenance_json`.
+numerical geometry contract and construction metadata must survive into Julia.
+The script records the directly operative construction papers in the HDF5
+`construction_metadata_json`.
 
 The QCD-volume filter is a geometry-selection criterion, not a claim that the
 output contains a complete Standard Model sector. It is applied to the raw
@@ -165,7 +166,7 @@ sample is needed.
 | `--n INT` | `1` | Number of accepted geometries requested per `h11`. Must be positive. |
 | `--outdir PATH` | `.` | Root directory for the generated database. |
 | `--cores INT` | all available | Number of worker processes. Use `1` for debugging and deterministic logs. |
-| `--seed INT` | `0` | Base seed. Worker and candidate seeds are derived from it and recorded in provenance. |
+| `--seed INT` | `0` | Base seed. Worker and candidate seeds are derived from it and recorded in construction metadata. |
 | `--overwrite` | off | Replace existing output slots. Without this flag, existing `cyax.h5` files count toward `--n` and are skipped. |
 | `--verbose` | off | Print per-worker stages and elapsed times. Recommended for high `h11`. |
 
@@ -396,7 +397,8 @@ OUTDIR/
 ```
 
 The indices are zero-padded and identify output slots. They are not substitutes
-for the stable polytope and triangulation fingerprints stored in provenance.
+for the stable polytope and triangulation fingerprints stored in construction
+metadata.
 
 The file contains:
 
@@ -426,7 +428,7 @@ cytools/geometric/
     invariant_kahler_point
 cytools/potential/
   L, Q
-provenance/
+construction_metadata/
   canonical_lattice_points
   face_restriction_dim2
 ```
@@ -442,15 +444,15 @@ Important conventions:
 - `prime_divisor_volumes` follows the order of CYTools
   `prime_toric_divisors()` and is the vector used for the QCD filter; the
   recorded QCD divisor index is zero-based.
-- `provenance_json` is stored both as a root attribute and under
-  `provenance/metadata_json`.
+- `construction_metadata_json` is stored both as a root attribute and as an
+  attribute of the `construction_metadata` group.
 - `cy3_fingerprint` is explicitly a conservative topological fingerprint; it
   is not a complete diffeomorphism or birational-equivalence test.
 
-The provenance records the CYTools version, KS label, sampler and all sampler
-controls, seed, favorability choice, FRST validation flags, basis/intersection
-conventions, polytope identity, triangulation identity, topology fingerprint,
-MOSEK status, and solver choices.
+The construction metadata records the CYTools version, KS label, sampler and
+all sampler controls, seed, favorability choice, FRST validation flags,
+basis/intersection conventions, polytope identity, triangulation identity,
+topology fingerprint, MOSEK status, and solver choices.
 
 ## Inspecting an artifact
 
@@ -464,12 +466,12 @@ import h5py
 
 path = "/path/to/database/h11_008/np_0000001/cy_0000001/cyax.h5"
 with h5py.File(path, "r") as f:
-    metadata = json.loads(f.attrs["provenance_json"])
-    print("schema:", metadata["schema_version"])
-    print("CYTools:", metadata["cytools_version"])
+    construction_metadata = json.loads(f.attrs["construction_metadata_json"])
+    print("schema:", construction_metadata["schema_version"])
+    print("CYTools:", construction_metadata["cytools_version"])
     print("h11/h21:", f["cytools/geometric/h11"][()], f["cytools/geometric/h21"][()])
-    print("sampler:", metadata["sampling"]["scheme"])
-    print("tip solver:", metadata["mosek_license"]["tip_solver"])
+    print("sampler:", construction_metadata["sampling"]["scheme"])
+    print("tip solver:", construction_metadata["mosek_license"]["tip_solver"])
 PY
 ```
 
