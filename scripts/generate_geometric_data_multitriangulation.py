@@ -10,10 +10,18 @@ Each FRST has its own toric Kähler cone and stretched-cone tip.  A candidate is
 saved only when its tip can be dilated to satisfy the control criterion of
 arXiv:2309.01831, eq. (21).  Failed candidates are rejected and replaced by
 new FRST samples up to a user-configurable attempt budget.
+
+The default ``fair`` sampler delegates secondary-fan walks and flips to
+CYTools. ``fast`` is available for explicitly biased coverage/training scans.
+Kähler-cone quadratic programs prefer MOSEK when it is licensed and available; if
+``$MOSEKLM_LICENSE_FILE`` is unset, a standard ``$HOME/mosek.lic`` is exposed
+to the child solver without reading or copying the license contents.
 """
 
 import argparse
+import hashlib
 import itertools
+import json
 import math
 import os
 import time
@@ -21,7 +29,205 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import h5py
 import numpy as np
+import cytools
 from cytools import Polytope, fetch_polytopes
+
+
+SCHEMA_VERSION = "cyaxiverse-ks-cy3-v2"
+MIN_CYTOOLS_VERSION = (1, 4, 0)
+SOURCE_PAPER_SET = (
+    "arXiv:2008.01730v1",  # fair secondary-fan/triangulation sampling
+    "arXiv:2309.01831v1",  # stretched-cone potential-control criterion
+)
+
+
+def configure_mosek_license():
+    """Expose the conventional user MOSEK license path without embedding it."""
+    configured = os.environ.get("MOSEKLM_LICENSE_FILE")
+    if configured:
+        source = "MOSEKLM_LICENSE_FILE"
+    else:
+        home_license = os.path.join(os.path.expanduser("~"), "mosek.lic")
+        if not os.path.isfile(home_license):
+            return {"configured": False, "activated": False, "source": None}
+        os.environ["MOSEKLM_LICENSE_FILE"] = home_license
+        source = "$HOME/mosek.lic"
+
+    # CYTools caches this status, so refresh it after exposing a non-default
+    # license path and before any cone optimization is requested.
+    try:
+        cytools.config.check_mosek_license(silent=True)
+        activated = bool(cytools.config.mosek_is_activated())
+    except (ImportError, OSError, RuntimeError):
+        activated = False
+    return {"configured": True, "activated": activated, "source": source}
+
+
+def require_cytools_capabilities(sampling_scheme):
+    """Fail early if the selected CYTools construction path is unavailable."""
+    version = getattr(cytools, "version", None)
+    if version is None:
+        raise RuntimeError("CYTools does not expose its version; refusing to write data.")
+    try:
+        parsed_version = tuple(int(component) for component in version.split("."))
+    except ValueError as exc:
+        raise RuntimeError(f"Unparseable CYTools version {version!r}.") from exc
+    if parsed_version < MIN_CYTOOLS_VERSION:
+        required = ".".join(str(component) for component in MIN_CYTOOLS_VERSION)
+        raise RuntimeError(
+            f"CYTools {version} is too old for this generator; require >= {required}."
+        )
+
+    required = [
+        (Polytope, "triangulate"),
+        (Polytope, "random_triangulations_fast"),
+        (Polytope, "random_triangulations_fair"),
+    ]
+    missing = [
+        f"{owner.__name__}.{name}"
+        for owner, name in required
+        if not hasattr(owner, name)
+    ]
+    if sampling_scheme not in {"fast", "fair"}:
+        raise ValueError(f"Unsupported sampling scheme {sampling_scheme!r}.")
+    if missing:
+        raise RuntimeError(
+            "Installed CYTools is missing required public APIs: " + ", ".join(missing)
+        )
+    configure_mosek_license()
+
+
+def _jsonable(value):
+    """Convert CYTools/numpy scalar containers into deterministic JSON values."""
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.integer, np.floating)):
+        return value.item()
+    if isinstance(value, (tuple, list)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    return value
+
+
+def _sha256_json(value):
+    encoded = json.dumps(
+        _jsonable(value), sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def canonical_points(poly):
+    """Return all lattice points in a stable order for provenance/fingerprints."""
+    return sorted(tuple(int(coordinate) for coordinate in point) for point in poly.points())
+
+
+def polytope_identity(poly):
+    """Identify a fetched KS polytope without inventing an unstable database ID."""
+    points = canonical_points(poly)
+    return f"lattice-points-sha256:{_sha256_json(points)}", points
+
+
+def validate_frst(poly, triangulation):
+    """Validate the CYTools FRST contract before constructing the hypersurface."""
+    if poly.ambient_dim() != 4 or poly.dim() != 4:
+        raise RuntimeError(
+            f"KS-to-CY3 construction requires a full-dimensional 4-polytope; "
+            f"got ambient_dim={poly.ambient_dim()}, dim={poly.dim()}."
+        )
+    if not poly.is_reflexive():
+        raise RuntimeError("The fetched KS polytope is not reflexive.")
+
+    expected_labels = set(poly.labels_not_facet)
+    actual_labels = set(int(label) for label in triangulation.labels)
+    if actual_labels != expected_labels:
+        raise RuntimeError(
+            "FRST point configuration is not the reflexive default: it must "
+            "contain exactly the lattice points outside facet interiors, including "
+            "the origin."
+        )
+
+    checks = {
+        "fine": bool(triangulation.is_fine()),
+        "regular": bool(triangulation.is_regular()),
+        "star": bool(triangulation.is_star()),
+        "valid": bool(triangulation.is_valid()),
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    if failed:
+        raise RuntimeError("FRST validation failed for: " + ", ".join(failed))
+    return checks
+
+
+def extract_topology(cy, triangulation):
+    """Extract the serializable CYTools topology used by Julia and fingerprints."""
+    h11 = int(cy.h11())
+    h21 = int(cy.h21())
+    basis = np.asarray(cy.divisor_basis(), dtype=int)
+    basis_matrix = np.asarray(cy.divisor_basis(as_matrix=True), dtype=int)
+    kappa = np.asarray(
+        cy.intersection_numbers(in_basis=True, format="coo"), dtype=float
+    )
+    if kappa.ndim != 2 or kappa.shape[1] != 4:
+        raise RuntimeError(
+            "CYTools returned an unexpected sparse intersection-number layout; "
+            f"expected four [i, j, k, value] columns, got shape {kappa.shape}."
+        )
+    if basis.ndim == 1 and basis.size != h11:
+        raise RuntimeError(
+            f"Divisor basis has length {basis.size}, but CYTools reports h11={h11}."
+        )
+    if basis.ndim == 2 and basis.shape[0] != h11:
+        raise RuntimeError(
+            f"Generic divisor basis has {basis.shape[0]} rows, but h11={h11}."
+        )
+
+    c2 = np.asarray(cy.second_chern_class(in_basis=True), dtype=float)
+    mori = np.asarray(cy.toric_mori_cone(in_basis=True).rays(), dtype=float)
+    kahler = cy.toric_kahler_cone()
+    kahler_rays = np.asarray(kahler.rays(), dtype=float)
+    kahler_hyperplanes = np.asarray(kahler.hyperplanes(), dtype=float)
+    if c2.shape != (h11,):
+        raise RuntimeError(f"Unexpected c2 shape {c2.shape}; expected {(h11,)}.")
+    for name, array in (
+        ("intersection numbers", kappa),
+        ("c2", c2),
+        ("Mori cone", mori),
+        ("Kähler cone rays", kahler_rays),
+        ("Kähler cone hyperplanes", kahler_hyperplanes),
+    ):
+        if not np.all(np.isfinite(array)):
+            raise RuntimeError(f"CYTools returned non-finite {name}.")
+
+    topology = {
+        "h11": h11,
+        "h21": h21,
+        "basis": basis,
+        "basis_matrix": basis_matrix,
+        "kappa": kappa,
+        "c2": c2,
+        "mori_cone": mori,
+        "kahler_cone_rays": kahler_rays,
+        "kahler_cone_hyperplanes": kahler_hyperplanes,
+        "face_restriction_dim2": triangulation.simplices(on_faces_dim=2),
+    }
+    return topology
+
+
+def topology_identity(polytope_id, triangulation, topology):
+    """Build a conservative, explicitly non-complete CY3 topology fingerprint."""
+    triangulation_id = f"frst-sha256:{_sha256_json(triangulation.simplices().tolist())}"
+    fingerprint_payload = {
+        "polytope_id": polytope_id,
+        "simplices": triangulation.simplices().tolist(),
+        "face_restriction_dim2": topology["face_restriction_dim2"],
+        "h11": topology["h11"],
+        "h21": topology["h21"],
+        "kappa": topology["kappa"],
+        "c2": topology["c2"],
+    }
+    cy3_fingerprint = f"topological-sha256:{_sha256_json(fingerprint_payload)}"
+    return triangulation_id, cy3_fingerprint
 
 
 class PrefactorCriterionNotMet(RuntimeError):
@@ -32,7 +238,9 @@ class NoPhysicalKaehlerPoint(RuntimeError):
     """No sampled point has positive volumes on effective-divisor cone rays."""
 
 
-def sample_stretched_kaehler_points(kahler_cone, reference_tip, rng, attempts, report):
+def sample_stretched_kaehler_points(
+    kahler_cone, reference_tip, rng, attempts, report, solver_used=None
+):
     """Yield randomized points in the same stretched Kähler region.
 
     The canonical SKC tip is the norm-minimizing point in ``H t >= 1``.  At
@@ -40,6 +248,7 @@ def sample_stretched_kaehler_points(kahler_cone, reference_tip, rng, attempts, r
     is the Euclidean projection of a random target onto that same polyhedron,
     so it remains inside the Kähler cone with every curve-wall distance >= 1.
     """
+    mosek_license = configure_mosek_license()
     yield np.asarray(reference_tip, dtype=float)
     if attempts <= 1:
         return
@@ -56,11 +265,19 @@ def sample_stretched_kaehler_points(kahler_cone, reference_tip, rng, attempts, r
         raise RuntimeError("Unexpected toric Kähler-cone hyperplane representation.")
     if not available_solvers:
         raise RuntimeError("qpsolvers found no installed quadratic-program solver.")
-    solvers = (["mosek"] if "mosek" in available_solvers else []) + [
+    solvers = (["mosek"] if mosek_license["activated"] and "mosek" in available_solvers else []) + [
         name for name in sorted(available_solvers) if name != "mosek"
     ]
     identity = np.eye(reference_tip.size)
     target_norm = max(float(np.linalg.norm(reference_tip)), 1.0)
+    report(
+        "MOSEK is "
+        + (
+            "licensed and preferred"
+            if mosek_license["activated"] and "mosek" in available_solvers
+            else "not licensed/available; using the first available qpsolvers backend"
+        )
+    )
 
     for number in range(2, attempts + 1):
         direction = rng.normal(size=reference_tip.size)
@@ -70,7 +287,7 @@ def sample_stretched_kaehler_points(kahler_cone, reference_tip, rng, attempts, r
         target = target_norm * (2.0 ** rng.uniform(-1.0, 4.0)) * direction
         report(f"projecting randomized Kähler point {number}/{attempts}")
         point = None
-        solver_used = None
+        selected_solver = None
         for solver in solvers:
             try:
                 point = solve_qp(
@@ -84,7 +301,7 @@ def sample_stretched_kaehler_points(kahler_cone, reference_tip, rng, attempts, r
             except Exception:
                 point = None
             if point is not None:
-                solver_used = solver
+                selected_solver = solver
                 break
         if point is None:
             report(
@@ -94,7 +311,9 @@ def sample_stretched_kaehler_points(kahler_cone, reference_tip, rng, attempts, r
             continue
         point = np.asarray(point, dtype=float)
         if np.all(np.isfinite(point)) and np.min(hyperplanes @ point) >= 1.0 - 1e-6:
-            report(f"randomized Kähler projection succeeded with {solver_used}")
+            report(f"randomized Kähler projection succeeded with {selected_solver}")
+            if solver_used is not None:
+                solver_used.append(selected_solver)
             yield point
         else:
             report("randomized Kähler projection was infeasible; skipping candidate")
@@ -111,21 +330,61 @@ def generate_and_save_geometry(
     min_divisor_volume,
     rng,
     report,
+    *,
+    poly,
+    triangulation,
+    polytope_id,
+    sampling_metadata,
+    ks_database_version,
 ):
     """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
-    report("computing Hodge, GLSM, and divisor-basis data")
-    h21 = int(cy.h21())
+    report("validating the CYTools FRST")
+    frst_validation = validate_frst(poly, triangulation)
+    if not bool(cy.is_smooth()):
+        raise RuntimeError("CYTools reports that the generic CY hypersurface is not smooth.")
+    report("computing Hodge, intersection, and divisor-basis data")
+    topology = extract_topology(cy, triangulation)
+    h21 = topology["h21"]
+    if topology["h11"] != int(h11) or topology["h11"] != int(cy.h11()):
+        raise RuntimeError(
+            f"h11 mismatch between request ({h11}) and CYTools ({topology['h11']})."
+        )
+    triangulation_id, cy3_fingerprint = topology_identity(
+        polytope_id, triangulation, topology
+    )
+    favorable = bool(poly.is_favorable(lattice="N"))
     glsm = np.asarray(cy.glsm_charge_matrix(include_origin=False), dtype=int)
-    basis = np.asarray(cy.divisor_basis(), dtype=int)
+    basis = topology["basis"]
 
     report("finding the stretched Kähler-cone tip (this can be slow without Mosek)")
     kahler_cone = cy.toric_kahler_cone()
-    reference_tip = np.asarray(
-        kahler_cone.tip_of_stretched_cone(1.0), dtype=float
-    )
+    mosek_license = configure_mosek_license()
+    tip_solver = "cytools-default"
+    if mosek_license["activated"]:
+        try:
+            reference_tip = np.asarray(
+                kahler_cone.tip_of_stretched_cone(1.0, backend="mosek"),
+                dtype=float,
+            )
+            tip_solver = "mosek"
+        except Exception as exc:
+            report(f"licensed MOSEK tip solve failed; falling back to CYTools default: {exc}")
+            reference_tip = np.asarray(
+                kahler_cone.tip_of_stretched_cone(1.0), dtype=float
+            )
+            tip_solver = "cytools-default-after-mosek-failure"
+    else:
+        reference_tip = np.asarray(
+            kahler_cone.tip_of_stretched_cone(1.0), dtype=float
+        )
     report("computing effective-cone rays")
     qprime = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
     nq = qprime.shape[0]
+    if qprime.ndim != 2 or qprime.shape[1] != int(h11):
+        raise RuntimeError(
+            "Effective-cone rays are not expressed in the exported divisor basis: "
+            f"got shape {qprime.shape}, expected (*, {h11})."
+        )
 
     # Eq. (20) of arXiv:2309.01831 concerns effective four-cycles on the CY.
     # Do *not* require every ambient toric divisor returned by CYTools to be
@@ -136,9 +395,15 @@ def generate_and_save_geometry(
     report("searching angular Kähler directions with positive effective-divisor volumes")
     kaehler_point = None
     divisor_scale = None
+    projection_solvers = []
     for kaehler_attempt, candidate in enumerate(
         sample_stretched_kaehler_points(
-            kahler_cone, reference_tip, rng, max_kaehler_attempts, report
+            kahler_cone,
+            reference_tip,
+            rng,
+            max_kaehler_attempts,
+            report,
+            projection_solvers,
         ),
         start=1,
     ):
@@ -168,8 +433,16 @@ def generate_and_save_geometry(
 
     report("computing divisor volumes and inverse Kähler metric")
     tau0 = np.asarray(cy.compute_divisor_volumes(kaehler_point, in_basis=True), dtype=float)
+    if tau0.shape != (int(h11),) or not np.all(np.isfinite(tau0)):
+        raise RuntimeError(
+            f"CYTools returned invalid basis divisor volumes with shape {tau0.shape}."
+        )
     kinv0_raw = np.asarray(cy.compute_inverse_kahler_metric(kaehler_point), dtype=float)
     kinv0 = 0.5 * (kinv0_raw + kinv0_raw.T)
+    if kinv0.shape != (int(h11), int(h11)) or not np.all(np.isfinite(kinv0)):
+        raise RuntimeError("CYTools returned an invalid inverse Kähler metric.")
+    if np.min(np.linalg.eigvalsh(kinv0)) <= 0.0:
+        raise RuntimeError("The selected Kähler point has a non-positive metric.")
     tau, kinv = tau0.copy(), kinv0.copy()
 
     # The original script evaluates this condition in nested Python loops for
@@ -245,6 +518,16 @@ def generate_and_save_geometry(
     # all evaluated at the same final J = m * kaehler_point.
     tip = m_val * kaehler_point
     volume = float(cy.compute_cy_volume(tip))
+    curve_volumes = np.asarray(cy.compute_curve_volumes(tip), dtype=float)
+    kahler_slack = np.asarray(kahler_cone.hyperplanes(), dtype=float) @ tip
+    if (
+        not np.isfinite(volume)
+        or volume <= 0.0
+        or not np.all(np.isfinite(curve_volumes))
+        or np.min(curve_volumes) <= 0.0
+        or np.min(kahler_slack) < 1.0 - 1e-6
+    ):
+        raise RuntimeError("Final CY geometry failed volume or Kähler-cone validation.")
     tip_prefactor = np.asarray([divisor_scale, m_val], dtype=float)
 
     report(f"building potential data from {nq} effective-cone rays")
@@ -273,28 +556,113 @@ def generate_and_save_geometry(
             -2 * math.log10(math.e) * math.pi * q_tau,
         ]
     l_raw = np.vstack((l1, l2))
+    if not np.all(np.isfinite(l_raw)) or np.any(l_raw[:, 0] == 0.0):
+        raise RuntimeError("Potential coefficients contain zero or non-finite amplitudes.")
     l = np.empty_like(l_raw)
     l[:, 0] = np.sign(l_raw[:, 0])
     l[:, 1] = np.log10(np.abs(l_raw[:, 0])) + l_raw[:, 1]
 
     report("writing HDF5 data")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with h5py.File(filepath, "w") as file:
-        cytools_group = file.create_group("cytools")
-        geometric = cytools_group.create_group("geometric")
-        geometric.create_dataset("points", data=poly_points, compression="gzip", compression_opts=9)
-        geometric.create_dataset("simplices", data=simplices, compression="gzip", compression_opts=9)
-        geometric.create_dataset("h21", data=h21)
-        geometric.create_dataset("glsm", data=glsm, compression="gzip", compression_opts=9)
-        geometric.create_dataset("basis", data=basis, compression="gzip", compression_opts=9)
-        geometric.create_dataset("tip", data=tip, compression="gzip", compression_opts=9)
-        geometric.create_dataset("tip_prefactor", data=tip_prefactor, compression="gzip", compression_opts=9)
-        geometric.create_dataset("CY_volume", data=volume)
-        geometric.create_dataset("divisor_volumes", data=tau, compression="gzip", compression_opts=9)
-        geometric.create_dataset("Kinv", data=kinv, compression="gzip", compression_opts=9)
-        potential = cytools_group.create_group("potential")
-        potential.create_dataset("L", data=l, compression="gzip", compression_opts=9)
-        potential.create_dataset("Q", data=q, compression="gzip", compression_opts=9)
+    temporary_path = f"{filepath}.tmp-{os.getpid()}-{time.time_ns()}"
+    metadata = {
+        "schema_version": SCHEMA_VERSION,
+        "source_paper_set": SOURCE_PAPER_SET,
+        "cytools_version": cytools.version,
+        "ks_database_version": ks_database_version,
+        "polytope_id": polytope_id,
+        "polytope_id_kind": "canonical_lattice_point_sha256",
+        "triangulation_id": triangulation_id,
+        "cy3_fingerprint": cy3_fingerprint,
+        "cy3_fingerprint_status": "topological_fingerprint",
+        "sampling": sampling_metadata,
+        "mosek_license": {
+            "configured": mosek_license["configured"],
+            "activated": mosek_license["activated"],
+            "source": mosek_license["source"],
+            "tip_solver": tip_solver,
+            "projection_solvers": sorted(set(projection_solvers)),
+        },
+        "favorable": favorable,
+        "basis_convention": "CYTools divisor_basis(include_origin=True); all numerical vectors in basis",
+        "intersection_convention": "CYTools CalabiYau.intersection_numbers(in_basis=True, format='coo')",
+        "frst_validation": frst_validation,
+        "kappa_format": "coo",
+        "kappa_columns": ["i", "j", "k", "value"],
+        "kappa_index_base": 0,
+    }
+    try:
+        with h5py.File(temporary_path, "w") as file:
+            file.attrs["schema_version"] = SCHEMA_VERSION
+            file.attrs["provenance_json"] = json.dumps(
+                _jsonable(metadata), sort_keys=True, separators=(",", ":")
+            )
+            cytools_group = file.create_group("cytools")
+            geometric = cytools_group.create_group("geometric")
+            geometric.create_dataset("points", data=poly_points, compression="gzip", compression_opts=9)
+            geometric.create_dataset(
+                "triangulation_points",
+                data=np.asarray(triangulation.points(), dtype=int),
+                compression="gzip",
+                compression_opts=9,
+            )
+            geometric.create_dataset("simplices", data=simplices, compression="gzip", compression_opts=9)
+            geometric.create_dataset("h11", data=topology["h11"])
+            geometric.create_dataset("h21", data=h21)
+            geometric.create_dataset("glsm", data=glsm, compression="gzip", compression_opts=9)
+            geometric.create_dataset("basis", data=basis, compression="gzip", compression_opts=9)
+            geometric.create_dataset(
+                "basis_matrix", data=topology["basis_matrix"], compression="gzip", compression_opts=9
+            )
+            geometric.create_dataset("tip", data=tip, compression="gzip", compression_opts=9)
+            geometric.create_dataset("tip_prefactor", data=tip_prefactor, compression="gzip", compression_opts=9)
+            geometric.create_dataset("CY_volume", data=volume)
+            geometric.create_dataset("divisor_volumes", data=tau, compression="gzip", compression_opts=9)
+            geometric.create_dataset("curve_volumes", data=curve_volumes, compression="gzip", compression_opts=9)
+            geometric.create_dataset("Kinv", data=kinv, compression="gzip", compression_opts=9)
+            geometric.create_dataset("kappa", data=topology["kappa"], compression="gzip", compression_opts=9)
+            geometric.create_dataset("c2", data=topology["c2"], compression="gzip", compression_opts=9)
+            geometric.create_dataset("effective_cone", data=qprime, compression="gzip", compression_opts=9)
+            geometric.create_dataset("mori_cone", data=topology["mori_cone"], compression="gzip", compression_opts=9)
+            geometric.create_dataset(
+                "kahler_cone", data=topology["kahler_cone_rays"], compression="gzip", compression_opts=9
+            )
+            geometric.create_dataset(
+                "kahler_hyperplanes",
+                data=topology["kahler_cone_hyperplanes"],
+                compression="gzip",
+                compression_opts=9,
+            )
+            geometric.attrs["favorable"] = favorable
+            geometric.attrs["polytope_id"] = polytope_id
+            geometric.attrs["triangulation_id"] = triangulation_id
+            geometric.attrs["cy3_fingerprint"] = cy3_fingerprint
+            geometric.attrs["sampling_scheme"] = sampling_metadata["scheme"]
+            geometric.attrs["kappa_format"] = metadata["kappa_format"]
+            geometric.attrs["kappa_index_base"] = metadata["kappa_index_base"]
+            geometric.attrs["basis_convention"] = metadata["basis_convention"]
+            geometric.attrs["intersection_convention"] = metadata["intersection_convention"]
+            provenance = file.create_group("provenance")
+            provenance.create_dataset(
+                "canonical_lattice_points",
+                data=np.asarray(canonical_points(poly), dtype=int),
+                compression="gzip",
+            )
+            provenance.create_dataset(
+                "face_restriction_dim2",
+                data=np.asarray(topology["face_restriction_dim2"], dtype=int),
+                compression="gzip",
+            )
+            provenance.attrs["metadata_json"] = json.dumps(
+                _jsonable(metadata), sort_keys=True, separators=(",", ":")
+            )
+            potential = cytools_group.create_group("potential")
+            potential.create_dataset("L", data=l, compression="gzip", compression_opts=9)
+            potential.create_dataset("Q", data=q, compression="gzip", compression_opts=9)
+        os.replace(temporary_path, filepath)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 
 def output_path(base_dir, h11, polytope_index, triangulation_index):
@@ -304,6 +672,69 @@ def output_path(base_dir, h11, polytope_index, triangulation_index):
         f"np_{polytope_index:07d}",
         f"cy_{triangulation_index:07d}",
         "cyax.h5",
+    )
+
+
+def triangulation_candidates(
+    poly,
+    sampling_scheme,
+    max_tip_attempts,
+    max_retries,
+    backend,
+    seed,
+    n_walk,
+    n_flip,
+    initial_walk_steps,
+    fine_tune_steps,
+    walk_step_size,
+    max_steps_to_wall,
+    fast_height_scale,
+):
+    """Yield CYTools FRSTs with an explicit fast or fair sampling contract."""
+    point_labels = tuple(poly.labels_not_facet)
+    if sampling_scheme == "fast":
+        # The deterministic candidate is useful for coverage scans, but is
+        # deliberately recorded as part of the biased fast ensemble.
+        yield poly.triangulate(
+            points=point_labels,
+            make_star=True,
+            backend=backend,
+            verbosity=0,
+        )
+        remaining = max_tip_attempts - 1
+        if remaining > 0:
+            yield from poly.random_triangulations_fast(
+                N=remaining,
+                c=fast_height_scale,
+                max_retries=max_retries,
+                make_star=True,
+                only_fine=True,
+                points=point_labels,
+                backend=backend,
+                as_list=False,
+                progress_bar=False,
+                seed=seed,
+            )
+        return
+
+    # CYTools implements the secondary-fan walk and random-flip sampler from
+    # arXiv:2008.01730; keep this adapter declarative and pass every control
+    # parameter explicitly so artifacts are reproducible.
+    yield from poly.random_triangulations_fair(
+        N=max_tip_attempts,
+        n_walk=n_walk,
+        n_flip=n_flip,
+        initial_walk_steps=initial_walk_steps,
+        walk_step_size=walk_step_size,
+        max_steps_to_wall=max_steps_to_wall,
+        fine_tune_steps=fine_tune_steps,
+        max_retries=max_retries,
+        make_star=True,
+        points=point_labels,
+        backend=backend,
+        as_list=False,
+        progress_bar=False,
+        seed=seed,
     )
 
 
@@ -323,6 +754,16 @@ def process_polytope(task):
         max_kaehler_attempts,
         min_divisor_volume,
         verbose,
+        sampling_scheme,
+        backend,
+        n_walk,
+        n_flip,
+        initial_walk_steps,
+        fine_tune_steps,
+        walk_step_size,
+        max_steps_to_wall,
+        fast_height_scale,
+        ks_database_version,
     ) = task
     try:
         started = time.perf_counter()
@@ -338,8 +779,34 @@ def process_polytope(task):
         # Vertices, rather than all lattice points, make reconstruction cheap for
         # the h11=491 N-lattice polytope (which has 680 lattice points).
         report("constructing polytope")
-        poly = Polytope(vertices)
+        poly = Polytope(vertices, deterministic_glsm_basis=True)
         points = np.asarray(poly.points(), dtype=int)
+        n_points = len(points)
+        n_walk = n_points // 10 + 10 if n_walk is None else n_walk
+        n_flip = n_points // 10 + 10 if n_flip is None else n_flip
+        initial_walk_steps = (
+            2 * n_points // 10 + 10
+            if initial_walk_steps is None
+            else initial_walk_steps
+        )
+        polytope_id, _ = polytope_identity(poly)
+        mosek_license = configure_mosek_license()
+        sampling_metadata = {
+            "scheme": sampling_scheme,
+            "backend": backend,
+            "seed": seed,
+            "N_walk": n_walk,
+            "N_flip": n_flip,
+            "initial_walk_steps": initial_walk_steps,
+            "fine_tune_steps": fine_tune_steps,
+            "walk_step_size": walk_step_size,
+            "max_steps_to_wall": max_steps_to_wall,
+            "max_retries": max_retries,
+            "fast_height_scale": fast_height_scale,
+            "qp_solver_preference": "mosek_if_licensed_then_available",
+            "mosek_license_configured": mosek_license["configured"],
+            "mosek_license_activated": mosek_license["activated"],
+        }
 
         # Output indices represent accepted geometries, not raw triangulation
         # attempts.  This lets a resumed scan retain prior successful samples.
@@ -363,22 +830,22 @@ def process_polytope(task):
                 "skipped": accepted,
             }
 
-        # The deterministic triangulation is the first candidate.  Subsequent
-        # candidates are streamed, so a large retry budget does not retain a
-        # large list of triangulation objects in memory.
-        report("constructing the initial FRST candidate")
-        candidates = [poly.triangulate(backend="cgal")]
-        if max_tip_attempts > 1:
-            candidates = itertools.chain(
-                candidates,
-                poly.random_triangulations_fast(
-                    N=max_tip_attempts - 1,
-                    max_retries=max_retries,
-                    backend="cgal",
-                    as_list=False,
-                    seed=seed,
-                ),
-            )
+        report(f"sampling FRST candidates with scheme={sampling_scheme}")
+        candidates = triangulation_candidates(
+            poly,
+            sampling_scheme,
+            max_tip_attempts,
+            max_retries,
+            backend,
+            seed,
+            n_walk,
+            n_flip,
+            initial_walk_steps,
+            fine_tune_steps,
+            walk_step_size,
+            max_steps_to_wall,
+            fast_height_scale,
+        )
 
         saved = rejected = attempted = 0
         for triangulation in candidates:
@@ -405,6 +872,11 @@ def process_polytope(task):
                     min_divisor_volume,
                     np.random.default_rng(seed + attempted - 1),
                     report,
+                    poly=poly,
+                    triangulation=triangulation,
+                    polytope_id=polytope_id,
+                    sampling_metadata=sampling_metadata,
+                    ks_database_version=ks_database_version,
                 )
             except (PrefactorCriterionNotMet, NoPhysicalKaehlerPoint) as exc:
                 rejected += 1
@@ -439,10 +911,27 @@ def plan_tasks(
     max_kaehler_attempts,
     min_divisor_volume,
     verbose,
+    sampling_scheme,
+    backend,
+    n_walk,
+    n_flip,
+    initial_walk_steps,
+    fine_tune_steps,
+    walk_step_size,
+    max_steps_to_wall,
+    fast_height_scale,
+    ks_database_version,
+    favorable,
 ):
     """Fetch at most n polytopes and spread n requested geometries over them."""
     polytopes = list(
-        fetch_polytopes(h11=h11, limit=n_geometries, lattice="N", favorable=True)
+        fetch_polytopes(
+            h11=h11,
+            limit=n_geometries,
+            lattice="N",
+            favorable=favorable,
+            deterministic_glsm_basis=True,
+        )
     )
     if not polytopes:
         return []
@@ -468,6 +957,16 @@ def plan_tasks(
             max_kaehler_attempts,
             min_divisor_volume,
             verbose,
+            sampling_scheme,
+            backend,
+            n_walk,
+            n_flip,
+            initial_walk_steps,
+            fine_tune_steps,
+            walk_step_size,
+            max_steps_to_wall,
+            fast_height_scale,
+            ks_database_version,
         )
         for polytope_index, (poly, count) in enumerate(zip(polytopes, counts), start=1)
     ]
@@ -486,6 +985,17 @@ def run_batch(
     max_kaehler_attempts,
     min_divisor_volume,
     verbose,
+    sampling_scheme,
+    backend,
+    n_walk,
+    n_flip,
+    initial_walk_steps,
+    fine_tune_steps,
+    walk_step_size,
+    max_steps_to_wall,
+    fast_height_scale,
+    ks_database_version,
+    favorable,
 ):
     tasks = plan_tasks(
         h11,
@@ -499,6 +1009,17 @@ def run_batch(
         max_kaehler_attempts,
         min_divisor_volume,
         verbose,
+        sampling_scheme,
+        backend,
+        n_walk,
+        n_flip,
+        initial_walk_steps,
+        fine_tune_steps,
+        walk_step_size,
+        max_steps_to_wall,
+        fast_height_scale,
+        ks_database_version,
+        favorable,
     )
     if not tasks:
         print(f"No favorable N-lattice polytopes found for h11={h11}.")
@@ -509,12 +1030,14 @@ def run_batch(
         f"geometry/triangulation output(s)."
     )
     saved = 0
+    failures = []
     with ProcessPoolExecutor(max_workers=n_cores) as executor:
         futures = [executor.submit(process_polytope, task) for task in tasks]
         for future in as_completed(futures):
             result = future.result()
             if not result["ok"]:
                 print(f"ERROR np_{result['polytope_index']:07d}: {result['error']}")
+                failures.append(result)
                 continue
             saved += result["saved"]
             print(
@@ -523,6 +1046,12 @@ def run_batch(
                 f"{result['attempted']} FRST attempts; saved {result['saved']}, "
                 f"rejected {result['rejected']}, skipped {result['skipped']}."
             )
+    if failures:
+        details = "; ".join(
+            f"np_{failure['polytope_index']:07d}: {failure['error']}"
+            for failure in failures
+        )
+        raise RuntimeError(f"CYTools generation failed; no complete batch result: {details}")
     return saved
 
 
@@ -534,6 +1063,29 @@ def main():
     parser.add_argument("--outdir", type=str, default=".", help="Base directory for output data.")
     parser.add_argument("--cores", type=int, default=None, help="Worker count (default: all available).")
     parser.add_argument("--seed", type=int, default=0, help="Seed for reproducible random triangulations.")
+    parser.add_argument(
+        "--sampling-scheme",
+        choices=("fair", "fast"),
+        default="fair",
+        help="FRST ensemble: fair secondary-fan walk (default) or biased fast heights.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("cgal", "qhull"),
+        default="cgal",
+        help="CYTools triangulation backend.",
+    )
+    parser.add_argument(
+        "--favorable",
+        choices=("true", "false", "any"),
+        default="true",
+        help="KS favorability filter; 'any' also permits expanded non-favorable bases.",
+    )
+    parser.add_argument(
+        "--ks-database-version",
+        default="CYTools fetch_polytopes endpoint (version not exposed)",
+        help="Version/endpoint label recorded in every artifact.",
+    )
     parser.add_argument("--max-retries", type=int, default=50, help="Bound per-FRST search retries.")
     parser.add_argument(
         "--max-tip-attempts",
@@ -553,6 +1105,38 @@ def main():
         default=100,
         help="Angular Kähler points tested per FRST (including the canonical tip).",
     )
+    parser.add_argument("--n-walk", type=int, default=None, help="Fair sampler walk steps per sample.")
+    parser.add_argument("--n-flip", type=int, default=None, help="Fair sampler flips per sample.")
+    parser.add_argument(
+        "--initial-walk-steps",
+        type=int,
+        default=None,
+        help="Fair sampler burn-in walk steps before recording samples.",
+    )
+    parser.add_argument(
+        "--fine-tune-steps",
+        type=int,
+        default=8,
+        help="Fair sampler wall-location refinement steps.",
+    )
+    parser.add_argument(
+        "--walk-step-size",
+        type=float,
+        default=1e-2,
+        help="Fair sampler secondary-fan walk step size.",
+    )
+    parser.add_argument(
+        "--max-steps-to-wall",
+        type=int,
+        default=25,
+        help="Fair sampler maximum search steps toward a secondary-fan wall.",
+    )
+    parser.add_argument(
+        "--fast-height-scale",
+        type=float,
+        default=0.2,
+        help="Fast sampler Gaussian height scale passed to CYTools.",
+    )
     parser.add_argument(
         "--min-divisor-volume",
         type=float,
@@ -569,14 +1153,29 @@ def main():
 
     if args.n < 1:
         parser.error("--n must be positive")
+    if args.sampling_scheme not in {"fair", "fast"}:
+        parser.error("--sampling-scheme must be fair or fast")
     if args.max_tip_attempts < 1:
         parser.error("--max-tip-attempts must be positive")
     if args.max_kaehler_attempts < 1:
         parser.error("--max-kaehler-attempts must be positive")
     if args.min_divisor_volume <= 0.0:
         parser.error("--min-divisor-volume must be positive")
+    for name, value in (
+        ("--n-walk", args.n_walk),
+        ("--n-flip", args.n_flip),
+        ("--initial-walk-steps", args.initial_walk_steps),
+    ):
+        if value is not None and value < 1:
+            parser.error(f"{name} must be positive")
+    if args.fine_tune_steps < 1 or args.max_steps_to_wall < 1:
+        parser.error("--fine-tune-steps and --max-steps-to-wall must be positive")
+    if args.walk_step_size <= 0.0 or args.fast_height_scale <= 0.0:
+        parser.error("--walk-step-size and --fast-height-scale must be positive")
     if args.h11_max < args.h11_min:
         args.h11_max = args.h11_min
+    require_cytools_capabilities(args.sampling_scheme)
+    favorable = {"true": True, "false": False, "any": None}[args.favorable]
     os.makedirs(args.outdir, exist_ok=True)
 
     total_saved = 0
@@ -595,6 +1194,17 @@ def main():
             args.max_kaehler_attempts,
             args.min_divisor_volume,
             args.verbose,
+            args.sampling_scheme,
+            args.backend,
+            args.n_walk,
+            args.n_flip,
+            args.initial_walk_steps,
+            args.fine_tune_steps,
+            args.walk_step_size,
+            args.max_steps_to_wall,
+            args.fast_height_scale,
+            args.ks_database_version,
+            favorable,
         )
     print(f"\nSaved {total_saved} geometry file(s).")
 
