@@ -53,3 +53,30 @@ Pages = ["jlm_reduced.jl"]
 Modules = [CYAxiverse.paper_benchmarks]
 Pages = ["paper_benchmarks.jl"]
 ```
+## `CYAxiverse.cytools_wrapper`
+```@autodocs
+Modules = [CYAxiverse.cytools_wrapper]
+Pages = ["add_functions/cytools_wrapper.jl"]
+```
+
+## Inflation benchmark bases
+
+The poly-102 benchmark helpers are available under
+`CYAxiverse.paper_benchmarks`. Their raw coordinates are angular variables in
+radians, with canonical coordinates defined by
+`chi = K^(1/2) * theta`.
+
+Pass `basis=:mass_eigenbasis` to
+`n8_unstable_direction`, `n8_inflation_initial_condition`,
+`n8_hilltop_probe`, or `n8_slow_roll_trajectory` to use the fixed hilltop mass
+basis. Its raw vectors solve
+
+```text
+H_theta * v_i = m_i^2 * K * v_i,
+v_i' * K * v_j = delta_ij.
+```
+
+The basis is constructed once at the catastrophe/hilltop and is not
+recomputed along the nonlinear trajectory. At fixed `K`, the
+most-negative canonical-Hessian direction is the corresponding unstable mass
+direction; it is distinct from the kinetic eigenbasis.

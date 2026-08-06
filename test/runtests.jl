@@ -629,4 +629,98 @@ end
             ENV["CYAXIVERSE_DATA_DIR"] = previous_data_dir
         end
     end
+
+    @testset "inflation reproduction contracts" begin
+        benchmark = CYAxiverse.paper_benchmarks
+        n8 = benchmark.n8_potential(k=benchmark.N8_KC; trajectory=true)
+        @test size(n8.Q) == (8, 10)
+        @test n8.phases == zeros(10)
+        @test n8.qdotτ == [14.0, 14.5, 14.5, 15.5, 15.5, 15.5, 15.5, 16.0, 17.0, 17.0]
+        appendix = benchmark.n8_potential(k=benchmark.N8_KC)
+        @test size(appendix.Q) == (8, 12)
+        @test appendix.qdotτ[end-1:end] == [25.0, 45.0]
+
+        geometry = benchmark.n8_geometry()
+        expected_metric_eigenvalues = sort([
+            8.20e-4, 6.35e-4, 5.97e-4, 3.13e-4,
+            1.24e-4, 9.15e-5, 8.30e-5, 5.84e-5,
+        ])
+        @test all(isapprox.(eigvals(geometry.kinetic), expected_metric_eigenvalues; rtol=6e-3))
+        k_detuned = benchmark.N8_KC + 1e-3
+        @test Matrix(benchmark.n8_kinetic_matrix(k_detuned)) ≈
+            Matrix(benchmark.n8_kinetic_matrix(benchmark.N8_KC)) *
+            (benchmark.N8_KC / k_detuned)^2
+        @test Matrix(benchmark.n8_kinetic_matrix(1.0)) ≈ Matrix(geometry.kinetic)
+
+        critical = benchmark.n8_degenerate_point()
+        @test critical.converged
+        @test isapprox(critical.k, 0.674506370003365; atol=1e-15)
+        @test critical.gradient_residual < 1e-10
+        @test critical.null_residual < 1e-10
+
+        mass_basis = benchmark.n8_mass_eigenbasis(critical.k)
+        @test mass_basis.basis == :mass_eigenbasis
+        @test mass_basis.orthonormality_residual < 1e-10
+        @test mass_basis.generalized_residual < 1e-10
+        @test all(isapprox.(mass_basis.raw_eigenvectors' *
+            mass_basis.metric * mass_basis.raw_eigenvectors, Matrix(I, 8, 8);
+            atol=1e-10))
+        mass_direction = benchmark.n8_unstable_direction(
+            critical.k; basis=:mass_eigenbasis)
+        canonical_direction = benchmark.n8_unstable_direction(
+            critical.k; basis=:canonical_hessian)
+        @test mass_direction.basis == :mass_eigenbasis
+        @test canonical_direction.basis == :canonical_hessian
+        @test abs(dot(mass_direction.raw,
+            mass_direction.metric * canonical_direction.raw)) > 1 - 1e-10
+        @test norm(mass_direction.hessian_theta * mass_direction.raw -
+            mass_direction.metric * mass_direction.raw *
+            mass_direction.eigenvalues[mass_direction.index]) < 1e-10
+
+        initial = benchmark.n8_inflation_initial_condition(critical.k + 1e-7)
+        @test isapprox(initial.canonical_norm, 1e-8; rtol=1e-8)
+        @test isapprox(initial.canonical_norm,
+            sqrt(dot(initial.theta - initial.theta_critical,
+                Matrix(benchmark.n8_kinetic_matrix(critical.k + 1e-7)) *
+                (initial.theta - initial.theta_critical))); rtol=1e-8)
+        mass_initial = benchmark.n8_inflation_initial_condition(
+            critical.k + 1e-7; basis=:mass_eigenbasis)
+        @test mass_initial.basis == :mass_eigenbasis
+        @test isapprox(mass_initial.canonical_norm, 1e-8; rtol=1e-8)
+        @test mass_initial.basis_theta == benchmark.N8_BEST_X
+        @test mass_initial.basis_k == critical.k + 1e-7
+
+        audit = benchmark.n8_basis_directions(critical.k + 1e-7)
+        @test hasproperty(audit.directions, :E_mass_eigenbasis)
+        @test audit.equivalent_mass_direction > 1 - 1e-10
+
+        n8_tuned = benchmark.n8_hilltop_efolds(1e-7).efolds
+        @test isapprox(n8_tuned, 463115.0; rtol=0.01)
+        n8_sixty = benchmark.n8_hilltop_efolds(1.5320548620798324e-3).efolds
+        @test isapprox(n8_sixty, 60.0; rtol=0.08)
+
+        @test isapprox(benchmark.n5_critical_scale(), 0.674506370003365; atol=1e-15)
+        @test isapprox(benchmark.n5_reduced_ratio(benchmark.n5_critical_scale()), 0.25; atol=1e-15)
+        n5_geometry = benchmark.n5_geometry()
+        @test n5_geometry.h11 == 5
+        @test n5_geometry.h21 == 75
+        @test n5_geometry.euler == -140
+        @test isapprox(n5_geometry.volume, 149.3958333333367; rtol=1e-13)
+        @test n5_geometry.divisor_volumes == [6.0, 24.0, 36.125, 32.0, 6.25]
+        @test n5_geometry.vertices == benchmark.N5_VERTICES
+        n5_light = benchmark.n5_light_direction()
+        @test isapprox(dot(n5_light.direction,
+            n5_light.metric * n5_light.direction), 1.0; atol=1e-12)
+        @test Matrix(benchmark.n5_kinetic_matrix(1.0)) ≈ Matrix(n5_geometry.kinetic)
+        n8_probe = benchmark.n8_hilltop_probe(1e-7; sample_count=5)
+        @test n8_probe.end_event == :local_normal_form
+        @test length(n8_probe.samples) == 5
+        @test isapprox(n8_probe.efolds, benchmark.n8_hilltop_efolds(1e-7).efolds)
+        mass_trajectory = benchmark.n8_slow_roll_trajectory(
+            1e-7; basis=:mass_eigenbasis, max_efolds=0)
+        @test mass_trajectory.basis == :mass_eigenbasis
+        @test mass_trajectory.steps == 0
+        @test isapprox(benchmark.n5_hilltop_efolds(1e-7).efolds, 27349.0; rtol=1e-10)
+        @test isapprox(benchmark.n5_hilltop_efolds(6.65e-5).efolds, 60.0; rtol=0.02)
+    end
 end
