@@ -787,6 +787,7 @@ function n8_degenerate_point(; kwargs...)
 end
 
 module author_inflation
+using LinearAlgebra
 using OrdinaryDiffEq
 
 const N8_KC = 0.674506370003365
