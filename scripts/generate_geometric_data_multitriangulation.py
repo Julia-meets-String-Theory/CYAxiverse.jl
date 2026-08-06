@@ -1197,6 +1197,28 @@ def process_polytope(task):
         return {"ok": False, "polytope_index": polytope_index, "error": repr(exc)}
 
 
+def parse_h11_values(values):
+    """Parse explicit h11 values from comma- or whitespace-separated arguments."""
+    tokens = []
+    for value in values:
+        cleaned = value.strip()
+        if cleaned.startswith("[") and cleaned.endswith("]"):
+            cleaned = cleaned[1:-1]
+        tokens.extend(cleaned.replace(",", " ").split())
+    if not tokens:
+        raise ValueError("at least one h11 value is required")
+
+    try:
+        h11_values = [int(token) for token in tokens]
+    except ValueError as exc:
+        raise ValueError("h11 values must be integers") from exc
+    if any(h11 < 1 for h11 in h11_values):
+        raise ValueError("h11 values must be positive")
+    if len(set(h11_values)) != len(h11_values):
+        raise ValueError("h11 values must be unique")
+    return h11_values
+
+
 def plan_tasks(
     h11,
     n_geometries,
@@ -1373,6 +1395,21 @@ def main():
     parser = argparse.ArgumentParser(description="Generate CYTools geometry data for Julia.")
     parser.add_argument("--h11_min", type=int, default=4, help="Starting h11 value.")
     parser.add_argument("--h11_max", type=int, default=4, help="Ending h11 value (inclusive).")
+    parser.add_argument(
+        "--h11_interval",
+        type=int,
+        default=1,
+        help="Step between h11_min and h11_max (inclusive; ignored with --h11s).",
+    )
+    parser.add_argument(
+        "--h11s",
+        "--h11-list",
+        "--h11_list",
+        dest="h11s",
+        nargs="+",
+        metavar="H11",
+        help="Explicit h11 values, e.g. '[4,10,20,50]' or '4 10 20 50'.",
+    )
     parser.add_argument("--n", type=int, default=1, help="Target number of CY geometries per h11.")
     parser.add_argument("--outdir", type=str, default=".", help="Base directory for output data.")
     parser.add_argument("--cores", type=int, default=None, help="Worker count (default: all available).")
@@ -1514,15 +1551,28 @@ def main():
         parser.error("--fine-tune-steps and --max-steps-to-wall must be positive")
     if args.walk_step_size <= 0.0 or args.fast_height_scale <= 0.0:
         parser.error("--walk-step-size and --fast-height-scale must be positive")
-    if args.h11_max < args.h11_min:
-        args.h11_max = args.h11_min
+    if args.h11_interval < 1:
+        parser.error("--h11_interval must be positive")
+    if args.h11s is not None:
+        if args.h11_interval != 1:
+            parser.error("--h11_interval cannot be combined with --h11s")
+        try:
+            h11_values = parse_h11_values(args.h11s)
+        except ValueError as exc:
+            parser.error(f"--h11s: {exc}")
+    else:
+        if args.h11_min < 1 or args.h11_max < 1:
+            parser.error("--h11_min and --h11_max must be positive")
+        if args.h11_max < args.h11_min:
+            args.h11_max = args.h11_min
+        h11_values = list(range(args.h11_min, args.h11_max + 1, args.h11_interval))
     require_cytools_capabilities(args.sampling_scheme)
     orientifold_config = load_orientifold(args.orientifold_file)
     favorable = {"true": True, "false": False, "any": None}[args.favorable]
     os.makedirs(args.outdir, exist_ok=True)
 
     total_saved = 0
-    for h11 in range(args.h11_min, args.h11_max + 1):
+    for h11 in h11_values:
         print(f"\n>>> Processing h11={h11} <<<")
         total_saved += run_batch(
             h11,

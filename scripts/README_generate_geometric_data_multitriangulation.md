@@ -144,6 +144,22 @@ one file per accepted triangulation. `--n` counts accepted output geometries,
 not the number of raw FRST attempts and not necessarily the number of distinct
 polytopes.
 
+To process only selected values, pass an explicit list:
+
+```bash
+python scripts/generate_geometric_data_multitriangulation.py \
+    --h11s '[4,10,20,50]' \
+    --n 10
+```
+
+Alternatively, use an interval with the inclusive minimum and maximum:
+
+```bash
+python scripts/generate_geometric_data_multitriangulation.py \
+    --h11_min 10 --h11_max 50 --h11_interval 10 \
+    --n 10
+```
+
 The batch is parallelized by polytope. Each worker receives only the polytope
 vertices and scalar generation options, reconstructs its own CYTools objects,
 generates its assigned FRST candidates, and writes distinct output slots. This
@@ -163,6 +179,8 @@ sample is needed.
 | --- | --- | --- |
 | `--h11_min INT` | `4` | First `h11` value, inclusive. |
 | `--h11_max INT` | `4` | Last `h11` value, inclusive. Values below `h11_min` are clamped to `h11_min`. |
+| `--h11_interval INT` | `1` | Step used between `h11_min` and `h11_max`, inclusive. Must be positive. |
+| `--h11s H11 [H11 ...]` | unset | Explicit positive, unique `h11` values. Values may be comma-separated or supplied as a bracketed list; this replaces the min/max range. |
 | `--n INT` | `1` | Number of accepted geometries requested per `h11`. Must be positive. |
 | `--outdir PATH` | `.` | Root directory for the generated database. |
 | `--cores INT` | all available | Number of worker processes. Use `1` for debugging and deterministic logs. |
