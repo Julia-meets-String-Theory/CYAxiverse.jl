@@ -34,7 +34,9 @@ The construction choices are:
 4. Validate fineness, regularity, the star condition, and triangulation
    validity before constructing the hypersurface.
 5. Extract Hodge data, intersection numbers, the divisor basis, the Mori cone,
-   the Kahler cone, the effective cone, and the second Chern class.
+   Kähler-cone hyperplanes, the effective cone, and the second Chern class.
+   Kähler-cone rays are an optional export because enumerating them can be
+   prohibitively expensive at large `h11`.
 6. Prefer MOSEK for stretched-cone quadratic optimization when a valid license
    and the qpsolvers MOSEK backend are available.
 7. Require positive effective-divisor volumes and search for the smallest
@@ -261,6 +263,78 @@ the random walk`. If a fair run stalls, try the other backend, restore the
 CYTools defaults, increase `--max-steps-to-wall`, or move to a larger target
 polytope.
 
+### Recommended workflow for small geometries
+
+Small-`h11` runs are useful for learning the workflow and checking the HDF5
+schema, but they are not automatically representative of the larger KS
+ensemble. Their secondary-fan state spaces can be unusually small, so the
+fair sampler may report warnings, revisit the same triangulations, or fail to
+make a useful random walk. These messages are often expected for a small
+fixture rather than evidence of a broken CYTools installation.
+
+Use the following progression:
+
+1. Start with one geometry, one worker, the `fast` sampler, and a fresh output
+   directory. This tests installation, CY construction, the acceptance filters,
+   and HDF5 writing without making an ensemble claim.
+2. Repeat with `fair` at a modest `h11` such as 8--10 when you want to test the
+   production sampler. Keep the default fair-sampler controls initially.
+3. Increase `--n`, then `--cores`, and only then widen the `h11` range. This
+   makes it much easier to identify whether a slowdown comes from triangulation,
+   Kähler optimization, physical rejection, or parallel I/O.
+4. Save the command, seed, CYTools version, sampler, backend, and rejection
+   counts with the run. `fast` results must remain labeled as biased coverage
+   samples, not fair samples.
+
+For example, a safe first check is:
+
+```bash
+source activate cytools
+python scripts/generate_geometric_data_multitriangulation.py \
+    --h11_min 4 --h11_max 4 --n 1 \
+    --sampling-scheme fast \
+    --cores 1 --seed 17 \
+    --max-tip-attempts 5 \
+    --max-kaehler-attempts 3 \
+    --outdir /tmp/cyaxiverse-small-smoke \
+    --verbose 2>&1 | tee /tmp/cyaxiverse-small-smoke.log
+```
+
+For a fair-sampler diagnostic, change only `--sampling-scheme fast` to
+`--sampling-scheme fair` and use a new output directory. If the run emits
+`Couldn't find wall` or a random-walk error at very small `h11`, first try
+`--backend qhull`, restore any changed fair-sampler controls, or move to a
+slightly larger `h11`; do not silently relabel the resulting `fast` run as
+fair.
+
+The attempt counters have different meanings:
+
+- `--max-retries` bounds retries internal to the triangulation sampler;
+- `--max-tip-attempts` bounds FRST candidates tested for each polytope;
+- `--max-kaehler-attempts` bounds angular Kähler points tested for each FRST;
+- `--n` is the number of accepted geometries requested per `h11`, not the
+  number of candidates tried.
+
+Messages such as `NoPhysicalKaehlerPoint`, `PrefactorCriterionNotMet`, or
+`NoQcdDivisorVolume` mean that a candidate was rejected by a physical filter.
+Increasing the attempt budget may find another candidate, but it does not make
+the rejected geometry physically viable. Record these counts when comparing
+runs.
+
+The default output does not enumerate Kähler-cone rays. The generator only
+needs the Kähler-cone hyperplanes for its current stretched-cone optimization
+and validation, while CYTools' dual-ray enumeration can become very slow once
+the cone dimension is moderately large (CYTools warns around dimensions above
+12 and considers it likely impractical above roughly 18). Use
+`--export-kahler-rays` only for a downstream analysis that explicitly requires
+cone generators; it is normally unnecessary for small-geometry smoke tests and
+should not be enabled casually in high-`h11` scans.
+
+Finally, use a new output directory while learning the workflow. Existing
+`cyax.h5` files count toward `--n` and are skipped by default; `--overwrite`
+replaces existing slots and should be reserved for an intentional regeneration
+with the same documented settings.
+
 ### Kahler-cone and acceptance controls
 
 | Option | Default | Meaning |
@@ -271,6 +345,7 @@ polytope.
 | `--qcd-volume-min FLOAT` | `25.0` | Lower edge of the QCD-visible prime-divisor volume window. |
 | `--qcd-volume-max FLOAT` | `40.0` | Upper edge of the QCD-visible prime-divisor volume window. |
 | `--orientifold-file PATH` | off | JSON file containing an explicit lattice involution and O3/O7 or O5/O9 metadata. |
+| `--export-kahler-rays` | off | Enumerate and store Kähler-cone rays; expensive at large `h11`. |
 | `--max-m FLOAT` | `1_000_000` | Maximum stretched-cone prefactor searched for the potential-control criterion. |
 
 The canonical stretched-cone tip is found by minimizing the Euclidean norm
@@ -428,6 +503,7 @@ cytools/geometric/
   h11, h21
   glsm
   basis, basis_matrix
+  prime_toric_divisors
   tip, tip_prefactor
   CY_volume
   divisor_volumes, prime_divisor_volumes, curve_volumes
@@ -436,7 +512,7 @@ cytools/geometric/
   c2
   effective_cone
   mori_cone
-  kahler_cone
+  kahler_cone (only with --export-kahler-rays)
   kahler_hyperplanes
   orientifold/ (only with --orientifold-file)
     lattice_matrix
@@ -460,8 +536,13 @@ Important conventions:
 - `tip`, `divisor_volumes`, `Kinv`, `curve_volumes`, and `CY_volume` refer to the
   same final rescaled Kahler point.
 - `prime_divisor_volumes` follows the order of CYTools
-  `prime_toric_divisors()` and is the vector used for the QCD filter; the
-  recorded QCD divisor index is zero-based.
+  `prime_toric_divisors()` and is the vector used for the QCD filter. The
+  corresponding `prime_toric_divisors` index array is exported explicitly;
+  the recorded QCD divisor index is zero-based.
+- `kahler_hyperplanes` is always exported and is sufficient for the generator's
+  stretched-cone optimization and physical validation. Use
+  `--export-kahler-rays` only when a downstream sampler explicitly requires a
+  generator representation of the Kähler cone.
 - `construction_metadata_json` is stored both as a root attribute and as an
   attribute of the `construction_metadata` group.
 - `cy3_fingerprint` is explicitly a conservative topological fingerprint; it

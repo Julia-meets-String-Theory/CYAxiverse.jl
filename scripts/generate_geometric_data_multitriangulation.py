@@ -33,7 +33,7 @@ import cytools
 from cytools import Polytope, fetch_polytopes
 
 
-SCHEMA_VERSION = "cyaxiverse-ks-cy3-v4"
+SCHEMA_VERSION = "cyaxiverse-ks-cy3-v5"
 MIN_CYTOOLS_VERSION = (1, 4, 0)
 SOURCE_PAPER_SET = (
     "arXiv:2008.01730v1",  # fair secondary-fan/triangulation sampling
@@ -359,8 +359,14 @@ def validate_frst(poly, triangulation):
     return checks
 
 
-def extract_topology(cy, triangulation):
-    """Extract the serializable CYTools topology used by Julia and fingerprints."""
+def extract_topology(cy, triangulation, *, export_kahler_rays=False):
+    """Extract serializable CYTools topology used by Julia and fingerprints.
+
+    Kähler-cone hyperplanes are sufficient for the physical validation and
+    stretched-cone optimization performed by this generator. Enumerating the
+    dual Kähler-cone rays is therefore opt-in: it can be prohibitively
+    expensive at large h11 even though the hyperplanes are already available.
+    """
     h11 = int(cy.h11())
     h21 = int(cy.h21())
     basis = np.asarray(cy.divisor_basis(), dtype=int)
@@ -386,17 +392,21 @@ def extract_topology(cy, triangulation):
     c2 = np.asarray(cy.second_chern_class(in_basis=True), dtype=float)
     mori = np.asarray(cy.toric_mori_cone(in_basis=True).rays(), dtype=float)
     kahler = cy.toric_kahler_cone()
-    kahler_rays = np.asarray(kahler.rays(), dtype=float)
+    kahler_rays = None
+    if export_kahler_rays:
+        kahler_rays = np.asarray(kahler.rays(), dtype=float)
     kahler_hyperplanes = np.asarray(kahler.hyperplanes(), dtype=float)
     if c2.shape != (h11,):
         raise RuntimeError(f"Unexpected c2 shape {c2.shape}; expected {(h11,)}.")
-    for name, array in (
+    finite_arrays = [
         ("intersection numbers", kappa),
         ("c2", c2),
         ("Mori cone", mori),
-        ("Kähler cone rays", kahler_rays),
         ("Kähler cone hyperplanes", kahler_hyperplanes),
-    ):
+    ]
+    if kahler_rays is not None:
+        finite_arrays.append(("Kähler cone rays", kahler_rays))
+    for name, array in finite_arrays:
         if not np.all(np.isfinite(array)):
             raise RuntimeError(f"CYTools returned non-finite {name}.")
 
@@ -546,6 +556,7 @@ def generate_and_save_geometry(
     sampling_metadata,
     ks_database_version,
     orientifold_config,
+    export_kahler_rays=False,
 ):
     """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
     report("validating the CYTools FRST")
@@ -553,7 +564,9 @@ def generate_and_save_geometry(
     if not bool(cy.is_smooth()):
         raise RuntimeError("CYTools reports that the generic CY hypersurface is not smooth.")
     report("computing Hodge, intersection, and divisor-basis data")
-    topology = extract_topology(cy, triangulation)
+    topology = extract_topology(
+        cy, triangulation, export_kahler_rays=export_kahler_rays
+    )
     orientifold = validate_orientifold(poly, triangulation, topology, orientifold_config)
     h21 = topology["h21"]
     if topology["h11"] != int(h11) or topology["h11"] != int(cy.h11()):
@@ -845,6 +858,7 @@ def generate_and_save_geometry(
         "qcd_divisor_index": qcd_divisor_index,
         "qcd_divisor_index_base": 0,
         "qcd_divisor_volume": float(prime_divisor_volumes[qcd_divisor_index]),
+        "kahler_cone_rays_exported": bool(export_kahler_rays),
         "orientifold": orientifold,
     }
     try:
@@ -870,6 +884,12 @@ def generate_and_save_geometry(
             geometric.create_dataset(
                 "basis_matrix", data=topology["basis_matrix"], compression="gzip", compression_opts=9
             )
+            geometric.create_dataset(
+                "prime_toric_divisors",
+                data=topology["prime_toric_divisors"],
+                compression="gzip",
+                compression_opts=9,
+            )
             geometric.create_dataset("tip", data=tip, compression="gzip", compression_opts=9)
             geometric.create_dataset("tip_prefactor", data=tip_prefactor, compression="gzip", compression_opts=9)
             geometric.create_dataset("CY_volume", data=volume)
@@ -886,9 +906,13 @@ def generate_and_save_geometry(
             geometric.create_dataset("c2", data=topology["c2"], compression="gzip", compression_opts=9)
             geometric.create_dataset("effective_cone", data=qprime, compression="gzip", compression_opts=9)
             geometric.create_dataset("mori_cone", data=topology["mori_cone"], compression="gzip", compression_opts=9)
-            geometric.create_dataset(
-                "kahler_cone", data=topology["kahler_cone_rays"], compression="gzip", compression_opts=9
-            )
+            if topology["kahler_cone_rays"] is not None:
+                geometric.create_dataset(
+                    "kahler_cone",
+                    data=topology["kahler_cone_rays"],
+                    compression="gzip",
+                    compression_opts=9,
+                )
             geometric.create_dataset(
                 "kahler_hyperplanes",
                 data=topology["kahler_cone_hyperplanes"],
@@ -1054,6 +1078,7 @@ def process_polytope(task):
         fast_height_scale,
         ks_database_version,
         orientifold_config,
+        export_kahler_rays,
     ) = task
     try:
         started = time.perf_counter()
@@ -1171,6 +1196,7 @@ def process_polytope(task):
                     sampling_metadata=sampling_metadata,
                     ks_database_version=ks_database_version,
                     orientifold_config=orientifold_config,
+                    export_kahler_rays=export_kahler_rays,
                 )
             except (
                 PrefactorCriterionNotMet,
@@ -1246,6 +1272,7 @@ def plan_tasks(
     ks_database_version,
     favorable,
     orientifold_config,
+    export_kahler_rays,
 ):
     """Fetch at most n polytopes and spread n requested geometries over them."""
     polytopes = list(
@@ -1295,6 +1322,7 @@ def plan_tasks(
             fast_height_scale,
             ks_database_version,
             orientifold_config,
+            export_kahler_rays,
         )
         for polytope_index, (poly, count) in enumerate(zip(polytopes, counts), start=1)
     ]
@@ -1328,6 +1356,7 @@ def run_batch(
     ks_database_version,
     favorable,
     orientifold_config,
+    export_kahler_rays,
 ):
     tasks = plan_tasks(
         h11,
@@ -1356,6 +1385,7 @@ def run_batch(
         ks_database_version,
         favorable,
         orientifold_config,
+        export_kahler_rays,
     )
     if not tasks:
         print(f"No favorable N-lattice polytopes found for h11={h11}.")
@@ -1518,6 +1548,14 @@ def main():
         default=None,
         help="JSON file containing an explicit lattice involution and orientifold type.",
     )
+    parser.add_argument(
+        "--export-kahler-rays",
+        action="store_true",
+        help=(
+            "Enumerate and store Kähler-cone rays. This is optional and can be "
+            "prohibitively expensive at large h11; hyperplanes are always stored."
+        ),
+    )
     parser.add_argument("--overwrite", action="store_true", help="Replace existing cyax.h5 files.")
     parser.add_argument(
         "--verbose",
@@ -1602,6 +1640,7 @@ def main():
             args.ks_database_version,
             favorable,
             orientifold_config,
+            args.export_kahler_rays,
         )
     print(f"\nSaved {total_saved} geometry file(s).")
 
