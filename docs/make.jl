@@ -7,7 +7,7 @@ makedocs(
     authors = "Viraf M. Mehta",
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical = "https://vmmhep.github.io/CYAxiverse.jl/stable/"),
+        canonical = "https://julia-meets-string-theory.github.io/CYAxiverse.jl/stable/"),
     modules = [CYAxiverse],
     pages = [
         "Home" => "index.md",
@@ -23,7 +23,7 @@ makedocs(
 if get(ENV, "CI", "false") == "true"
     deploydocs(
         branch = "gh-pages",
-        repo = "github.com/vmmhep/CYAxiverse.jl.git",
+        repo = "github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
         devbranch = "dev",
         target = "build",
         deps = nothing,
