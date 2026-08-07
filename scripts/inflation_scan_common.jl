@@ -77,6 +77,83 @@ function _timed_call(f; measurement_scope::Symbol=:unspecified)
     inflation_stage_measure(f; measurement_scope)
 end
 
+"""Reusable workspace for the LAPACK symmetric eigensolver used by screening.
+
+`LinearAlgebra.LAPACK.syevd!` allocates its work arrays on every call.  A
+screening pass can call the eigensolver once per branch, so keep the arrays and
+the scalar arguments at the scan-workspace boundary instead.  DSYEVD destroys
+the input matrix in the same way as the public wrapper; callers therefore pass
+the already disposable canonical Hessian buffer.
+"""
+mutable struct _SymmetricEigenWorkspace
+    eigenvalues::Vector{Float64}
+    work::Vector{Float64}
+    iwork::Vector{LinearAlgebra.BlasInt}
+    jobz::Ref{UInt8}
+    uplo::Ref{UInt8}
+    n::Ref{LinearAlgebra.BlasInt}
+    lda::Ref{LinearAlgebra.BlasInt}
+    lwork::Ref{LinearAlgebra.BlasInt}
+    liwork::Ref{LinearAlgebra.BlasInt}
+    info::Ref{LinearAlgebra.BlasInt}
+end
+
+function _dsyevd_call!(jobz::Ref{UInt8}, uplo::Ref{UInt8},
+        n::Ref{LinearAlgebra.BlasInt}, matrix::AbstractArray{Float64},
+        lda::Ref{LinearAlgebra.BlasInt}, eigenvalues::Vector{Float64},
+        work::AbstractVector{Float64}, lwork::Ref{LinearAlgebra.BlasInt},
+        iwork::AbstractVector{LinearAlgebra.BlasInt},
+        liwork::Ref{LinearAlgebra.BlasInt}, info::Ref{LinearAlgebra.BlasInt})
+    ccall((LinearAlgebra.BLAS.@blasfunc(dsyevd_),
+            LinearAlgebra.libblastrampoline), Cvoid,
+        (Ref{UInt8}, Ref{UInt8}, Ref{LinearAlgebra.BlasInt}, Ptr{Float64},
+         Ref{LinearAlgebra.BlasInt}, Ptr{Float64}, Ptr{Float64},
+         Ref{LinearAlgebra.BlasInt}, Ptr{LinearAlgebra.BlasInt},
+         Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Clong, Clong),
+        jobz, uplo, n, matrix, lda, eigenvalues, work, lwork, iwork,
+        liwork, info, Clong(1), Clong(1))
+    nothing
+end
+
+function _symmetric_eigen_workspace(n::Integer)
+    n > 0 || throw(ArgumentError("symmetric eigensolver dimension must be positive"))
+    dimension = LinearAlgebra.BlasInt(n)
+    query_matrix = Vector{Float64}(undef, n * n)
+    query_eigenvalues = Vector{Float64}(undef, n)
+    query_work = Vector{Float64}(undef, 1)
+    query_iwork = Vector{LinearAlgebra.BlasInt}(undef, 1)
+    query_lwork = Ref{LinearAlgebra.BlasInt}(-1)
+    query_liwork = Ref{LinearAlgebra.BlasInt}(-1)
+    query_info = Ref{LinearAlgebra.BlasInt}(0)
+    _dsyevd_call!(Ref(UInt8('N')), Ref(UInt8('U')), Ref(dimension),
+        query_matrix, Ref(dimension), query_eigenvalues, query_work,
+        query_lwork, query_iwork, query_liwork, query_info)
+    query_info[] == 0 ||
+        throw(ErrorException("DSYEVD workspace query failed with INFO=$(query_info[])"))
+    lwork = max(1, Int(round(query_work[1])))
+    liwork = max(1, Int(query_iwork[1]))
+    _SymmetricEigenWorkspace(
+        zeros(Float64, n),
+        zeros(Float64, lwork),
+        zeros(LinearAlgebra.BlasInt, liwork),
+        Ref(UInt8('N')), Ref(UInt8('U')), Ref(dimension), Ref(dimension),
+        Ref(LinearAlgebra.BlasInt(lwork)), Ref(LinearAlgebra.BlasInt(liwork)),
+        Ref(LinearAlgebra.BlasInt(0)))
+end
+
+function _symmetric_eigenvalues!(workspace::_SymmetricEigenWorkspace,
+        matrix::StridedMatrix{Float64})
+    size(matrix, 1) == size(matrix, 2) == length(workspace.eigenvalues) ||
+        throw(DimensionMismatch("matrix dimension does not match eigensolver workspace"))
+    workspace.info[] = 0
+    _dsyevd_call!(workspace.jobz, workspace.uplo, workspace.n, matrix,
+        workspace.lda, workspace.eigenvalues, workspace.work, workspace.lwork,
+        workspace.iwork, workspace.liwork, workspace.info)
+    workspace.info[] == 0 ||
+        throw(ErrorException("DSYEVD failed with INFO=$(workspace.info[])"))
+    workspace.eigenvalues
+end
+
 function _normalized_derivatives(theta::AbstractVector{<:Real},
         Q::Matrix{Int}, L::Matrix{Float64})
     workspace = CYAxiverse.generate.logshifted_derivative_workspace(Q, L)
@@ -109,12 +186,19 @@ mutable struct _ClassificationWorkspace
     derivative_evaluator::CYAxiverse.generate.StructuredChargeEvaluator
     canonical_hessian::Matrix{Float64}
     inverse_metric_gradient::Vector{Float64}
+    factor_lower::Matrix{Float64}
+    eigen_workspace::_SymmetricEigenWorkspace
 end
 
-function _classification_workspace(Q::Matrix{Int}, L::Matrix{Float64})
+function _classification_workspace(Q::Matrix{Int}, L::Matrix{Float64}, Kfactor)
     h11 = size(Q, 1)
     derivative_evaluator = CYAxiverse.generate.structured_charge_evaluator(Q, L)
-    _ClassificationWorkspace(derivative_evaluator, zeros(h11, h11), zeros(h11))
+    # `cholesky` defaults to an upper-factor representation; materialize the
+    # lower view once so both BLAS calls below see the same factor as the
+    # previous per-branch `parent(Kfactor.L)` path.
+    factor_lower = Matrix(Kfactor.L)
+    _ClassificationWorkspace(derivative_evaluator, zeros(h11, h11), zeros(h11),
+        factor_lower, _symmetric_eigen_workspace(h11))
 end
 
 """Classify one branch while reusing all geometry- and loop-sized buffers."""
@@ -128,12 +212,13 @@ function _classify_point!(workspace::_ClassificationWorkspace,
 
     canonical_hessian = workspace.canonical_hessian
     copyto!(canonical_hessian, hessian)
-    factor_lower = parent(Kfactor.L)
+    factor_lower = workspace.factor_lower
     LinearAlgebra.BLAS.trsm!('L', 'L', 'N', 'N', 1.0,
         factor_lower, canonical_hessian)
     LinearAlgebra.BLAS.trsm!('R', 'L', 'T', 'N', 1.0,
         factor_lower, canonical_hessian)
-    eigenvalues = LinearAlgebra.LAPACK.syevd!('N', 'U', canonical_hessian)
+    eigenvalues = _symmetric_eigenvalues!(workspace.eigen_workspace,
+        canonical_hessian)
 
     inverse_metric_gradient = workspace.inverse_metric_gradient
     copyto!(inverse_metric_gradient, gradient)
@@ -204,7 +289,7 @@ end
 
 function _classify_branches(branches, Q, L, Kfactor)
     accumulator = _ClassificationAccumulator()
-    workspace = _classification_workspace(Q, L)
+    workspace = _classification_workspace(Q, L, Kfactor)
     for index in axes(branches.coordinates, 2)
         classification = _classify_point!(workspace,
             @view(branches.coordinates[:, index]), Q, Kfactor)
@@ -217,7 +302,7 @@ function _classify_leading_branches(selected, Q, L, Kfactor;
         max_branches::Int, negative_mode_range::Union{Nothing,UnitRange{Int}}=nothing,
         max_negative_modes::Union{Nothing,Int}=nothing)
     accumulator = _ClassificationAccumulator()
-    workspace = _classification_workspace(Q, L)
+    workspace = _classification_workspace(Q, L, Kfactor)
     branch_count = 0
     leading_minima_count = 0
     stream_report = CYAxiverse.generate.foreach_leading_critical_branch(

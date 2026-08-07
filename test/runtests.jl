@@ -139,6 +139,22 @@ end
     @test fallback_derivatives.hessian == expected_fallback.hessian
 end
 
+@testset "Cached screening Hessian eigensolver" begin
+    for dimension in (3, 8)
+        matrix = randn(dimension, dimension)
+        matrix = (matrix + matrix') / 2
+        expected = eigvals(Symmetric(matrix))
+        workspace = _symmetric_eigen_workspace(dimension)
+        eigenvalues = _symmetric_eigenvalues!(workspace, copy(matrix))
+        @test eigenvalues === workspace.eigenvalues
+        @test eigenvalues ≈ expected
+
+        warmed_matrix = copy(matrix)
+        _symmetric_eigenvalues!(workspace, warmed_matrix)
+        @test @allocated(_symmetric_eigenvalues!(workspace, warmed_matrix)) <= 4096
+    end
+end
+
 @testset "Inflation append-only scan shards" begin
     mktempdir() do root
         geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
@@ -568,6 +584,14 @@ end
 
     lattice_selected = CYAxiverse.generate.LQtilde(
         [2 0 1; 0 2 1], [1.0 1.0 1.0; 0.0 -1.0 -10.0])
+    exact_det_matrix = Int[-3 -1; 0 -1]
+    @test CYAxiverse.generate._exact_integer_determinant(exact_det_matrix) == 3
+    @test CYAxiverse.generate._exact_integer_determinant(Int[0 1; 1 0]) == -1
+    @test CYAxiverse.generate._exact_integer_determinant(exact_det_matrix) ==
+        det(Matrix{BigInt}(exact_det_matrix))
+    overflow_det_matrix = Int[typemax(Int) 0; 0 2]
+    @test CYAxiverse.generate._exact_integer_determinant(overflow_det_matrix) ==
+        BigInt(typemax(Int)) * 2
     lattice_offsets = CYAxiverse.generate.leading_lattice_offsets(lattice_selected)
     @test size(lattice_offsets) == (2, 4)
     @test all(maximum(abs.(mod.(lattice_selected.Qtilde' * lattice_offsets, 1.0)); dims=1) .< 1e-12)

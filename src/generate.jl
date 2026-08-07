@@ -2119,6 +2119,54 @@ function _torus_distance(a::AbstractVector{<:Real}, b::AbstractVector{<:Real})
     maximum(min.(abs.(a .- b), 1 .- abs.(a .- b)))
 end
 
+"""Compute an exact integer determinant without dense BigInt work when safe."""
+function _exact_integer_determinant(matrix::AbstractMatrix{Int})
+    size(matrix, 1) == size(matrix, 2) ||
+        throw(ArgumentError("exact integer determinant requires a square matrix"))
+    dimension = size(matrix, 1)
+    dimension == 0 && return big(1)
+    work = Matrix{Int}(matrix)
+    sign = 1
+    denominator = 1
+    try
+        @inbounds for pivot_index in 1:(dimension - 1)
+            pivot_row = pivot_index
+            while pivot_row <= dimension && iszero(work[pivot_row, pivot_index])
+                pivot_row += 1
+            end
+            pivot_row > dimension && return big(0)
+            if pivot_row != pivot_index
+                for column in 1:dimension
+                    work[pivot_index, column], work[pivot_row, column] =
+                        work[pivot_row, column], work[pivot_index, column]
+                end
+                sign = -sign
+            end
+            pivot = work[pivot_index, pivot_index]
+            for row in (pivot_index + 1):dimension
+                entry = work[row, pivot_index]
+                work[row, pivot_index] = 0
+                for column in (pivot_index + 1):dimension
+                    numerator = Base.checked_sub(
+                        Base.checked_mul(work[row, column], pivot),
+                        Base.checked_mul(entry, work[pivot_index, column]))
+                    if denominator != 1
+                        rem(numerator, denominator) == 0 ||
+                            return det(Matrix{BigInt}(matrix))
+                        numerator ÷= denominator
+                    end
+                    work[row, column] = numerator
+                end
+            end
+            denominator = pivot
+        end
+        BigInt(Base.checked_mul(sign, work[dimension, dimension]))
+    catch error
+        error isa OverflowError || rethrow()
+        det(Matrix{BigInt}(matrix))
+    end
+end
+
 """Check whether `θ` is already represented among the first `count` columns."""
 function _contains_torus_point(points::AbstractMatrix{<:Real}, θ::AbstractVector{<:Real},
         count::Int; tol::Float64)
@@ -2136,15 +2184,18 @@ Enumerate the finite quotient-lattice offsets solving
 matrix has one axion-space offset per column and `abs(det(Qtilde))` columns for
 full-rank square `Qtilde`.
 """
-function leading_lattice_offsets(selected::LQLinearlyIndependent; tolerance::Float64=1e-8)
+function leading_lattice_offsets(selected::LQLinearlyIndependent;
+        tolerance::Float64=1e-8,
+        det_qtilde_big::Union{Nothing,BigInt}=nothing)
     h11 = size(selected.Qtilde, 1)
     size(selected.Qtilde, 2) == h11 ||
         throw(ArgumentError("Qtilde must be square to enumerate leading lattice offsets"))
 
-    det_qtilde_big = abs(det(Matrix{BigInt}(selected.Qtilde)))
-    det_qtilde_big <= BigInt(typemax(Int)) ||
+    exact_det = det_qtilde_big === nothing ?
+        abs(_exact_integer_determinant(selected.Qtilde)) : abs(det_qtilde_big)
+    exact_det <= BigInt(typemax(Int)) ||
         throw(ArgumentError("abs(det(Qtilde)) is too large to materialize lattice offsets"))
-    det_qtilde = Int(det_qtilde_big)
+    det_qtilde = Int(exact_det)
     det_qtilde > 0 || throw(ArgumentError("Qtilde must be nonsingular"))
 
     inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
@@ -2175,7 +2226,7 @@ function _leading_det_qtilde(selected::LQLinearlyIndependent)
     h11 = size(selected.Qtilde, 1)
     size(selected.Qtilde, 2) == h11 ||
         throw(ArgumentError("Qtilde must be square"))
-    abs(det(Matrix{BigInt}(selected.Qtilde)))
+    abs(_exact_integer_determinant(selected.Qtilde))
 end
 
 """Normalize the optional leading-index filter and validate its bounds."""
@@ -2237,6 +2288,33 @@ function _foreach_leading_mask(callback::Function, bit::Int, mask::BigInt,
     nothing
 end
 
+"""Visit filtered masks without allocating BigInt intermediates per node."""
+function _foreach_leading_mask_bits(callback::Function, bit::Int,
+        selected::BitVector, baseline::BitVector, zero_signs::BitVector,
+        negative_modes::Int, minimum_index::Int, maximum_index::Int)
+    remaining = bit + 1
+    negative_modes > maximum_index && return nothing
+    negative_modes + remaining < minimum_index && return nothing
+    if bit < 0
+        minimum_index <= negative_modes <= maximum_index &&
+            callback(selected, negative_modes)
+        return nothing
+    end
+
+    index = bit + 1
+    selected[index] = false
+    zero_flip = zero_signs[index] ? 0 : (baseline[index] ? 1 : 0)
+    _foreach_leading_mask_bits(callback, bit - 1, selected, baseline,
+        zero_signs, negative_modes + zero_flip, minimum_index, maximum_index)
+
+    selected[index] = true
+    one_flip = zero_signs[index] ? 0 : (baseline[index] ? 0 : 1)
+    _foreach_leading_mask_bits(callback, bit - 1, selected, baseline,
+        zero_signs, negative_modes + one_flip, minimum_index, maximum_index)
+    selected[index] = false
+    nothing
+end
+
 """Return a compact report for a streamed leading-branch search."""
 function _leading_stream_report(branch_count::BigInt, mask_count::BigInt,
         masks_visited::BigInt, det_qtilde::BigInt,
@@ -2291,19 +2369,13 @@ function foreach_leading_critical_branch(callback::Function,
     mask_count == 0 && return _leading_stream_report(
         branch_count, BigInt(2)^h11, big(0), det_qtilde, index_range)
 
-    offsets = leading_lattice_offsets(selected; tolerance=tolerance)
+    offsets = leading_lattice_offsets(selected; tolerance=tolerance,
+        det_qtilde_big=det_qtilde)
 
     inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
     half_phase = zeros(Float64, h11)
     base = zeros(Float64, h11)
     theta = zeros(Float64, h11)
-    baseline = big(0)
-    zero_signs = big(0)
-    @inbounds for i in 1:h11
-        signs[i] < 0.0 && (baseline |= big(1) << (i - 1))
-        iszero(signs[i]) && (zero_signs |= big(1) << (i - 1))
-    end
-
     visit_mask = function(mask::BigInt, negative_modes::Int)
         @inbounds for i in 1:h11
             half_phase[i] = ((mask >> (i - 1)) & big(1)) == big(1) ? 0.5 : 0.0
@@ -2325,8 +2397,28 @@ function foreach_leading_critical_branch(callback::Function,
                 (((mask >> (i - 1)) & 1) == 0 ? 1.0 : -1.0) < 0.0, 1:h11))
         end
     else
-        _foreach_leading_mask(visit_mask, h11 - 1, big(0), baseline,
-            zero_signs, 0, first(index_range), last(index_range))
+        baseline = BitVector(undef, h11)
+        zero_signs = BitVector(undef, h11)
+        @inbounds for i in 1:h11
+            baseline[i] = signs[i] < 0.0
+            zero_signs[i] = iszero(signs[i])
+        end
+        visit_bits = function(mask_bits::BitVector, negative_modes::Int)
+            @inbounds for i in 1:h11
+                half_phase[i] = mask_bits[i] ? 0.5 : 0.0
+            end
+            LinearAlgebra.mul!(base, inverse_transpose, half_phase)
+            for j in axes(offsets, 2)
+                @inbounds for i in 1:h11
+                    theta[i] = mod(offsets[i, j] + base[i], 1.0)
+                end
+                callback(theta, negative_modes)
+            end
+            nothing
+        end
+        _foreach_leading_mask_bits(visit_bits, h11 - 1,
+            falses(h11), baseline, zero_signs, 0,
+            first(index_range), last(index_range))
     end
     masks_visited = index_range === nothing ? mask_count :
         _leading_mask_count(h11, signs, index_range)
