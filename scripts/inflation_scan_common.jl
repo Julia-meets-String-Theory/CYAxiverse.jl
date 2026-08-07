@@ -6,17 +6,19 @@ shared by the one-geometry contract probe and the scan-prep driver without
 introducing a package-level scan API.
 """
 
+if !isdefined(@__MODULE__, :INFLATION_DIAGNOSTIC_SCHEMA_VERSION)
+    include(joinpath(@__DIR__, "inflation_diagnostics_common.jl"))
+end
+
 using CYAxiverse
 using LinearAlgebra
 using Statistics
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
-const INFLATION_SCAN_CONTRACT_VERSION = "2"
+const INFLATION_SCAN_CONTRACT_VERSION = "3"
 
-function _timed_call(f)
-    GC.gc(false)
-    measured = @timed f()
-    (; value=measured.value, seconds=measured.time, bytes=measured.bytes)
+function _timed_call(f; measurement_scope::Symbol=:unspecified)
+    inflation_stage_measure(f; measurement_scope)
 end
 
 function _oriented_potential(geom_idx::GeometryIndex)
@@ -190,21 +192,23 @@ function _classify_leading_branches(selected, Q, L, Kfactor; max_branches::Int)
 end
 
 """Run the locked, bounded scan-prep sequence for one geometry."""
-function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000)
+function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000,
+        measurement_scope::Symbol=:unspecified)
     max_branches > 0 || throw(ArgumentError("max_branches must be positive"))
     started = time_ns()
-    loaded = _timed_call(() -> _oriented_potential(geom_idx))
+    loaded = _timed_call(() -> _oriented_potential(geom_idx); measurement_scope)
     Q, L, K = loaded.value
 
-    selected = _timed_call(() -> CYAxiverse.generate.LQtilde(Q, L))
+    selected = _timed_call(() -> CYAxiverse.generate.LQtilde(Q, L);
+        measurement_scope)
     hierarchy = _timed_call(() ->
-        CYAxiverse.generate.instanton_hierarchy_diagnostics(L))
-    factor = _timed_call(() -> cholesky(K))
+        CYAxiverse.generate.instanton_hierarchy_diagnostics(L); measurement_scope)
+    factor = _timed_call(() -> cholesky(K); measurement_scope)
     mass_basis = _timed_call(() ->
         CYAxiverse.generate.leading_hessian_mass_basis_float64(
-            K, selected.value.Ltilde, selected.value.Qtilde))
+            K, selected.value.Ltilde, selected.value.Qtilde); measurement_scope)
     classified = _timed_call(() -> _classify_leading_branches(
-        selected.value, Q, L, factor.value; max_branches))
+        selected.value, Q, L, factor.value; max_branches); measurement_scope)
 
     masses, mass_signs, _ = mass_basis.value
     branch_classification = classified.value.classification
@@ -212,6 +216,8 @@ function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000)
     best = branch_classification.best
     flattest = branch_classification.flattest
     (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
+       diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+       measurement_scope=classified.measurement_scope,
        h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
        status=:success, instantons=size(Q, 2), selected_instantons=size(
            selected.value.Qtilde, 2), qtilde_det=abs(det(Float64.(selected.value.Qtilde))),
@@ -233,8 +239,17 @@ function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000)
        stage_hierarchy_s=hierarchy.seconds, stage_factor_s=factor.seconds,
        stage_mass_basis_s=mass_basis.seconds, stage_branches_s=0.0,
        stage_classify_s=classified.seconds,
+       stage_load_output_bytes=loaded.output_bytes,
+       stage_select_output_bytes=selected.output_bytes,
+       stage_hierarchy_output_bytes=hierarchy.output_bytes,
+       stage_factor_output_bytes=factor.output_bytes,
+       stage_mass_basis_output_bytes=mass_basis.output_bytes,
+       stage_classify_output_bytes=classified.output_bytes,
        stage_allocated_bytes=loaded.bytes + selected.bytes + hierarchy.bytes +
            factor.bytes + mass_basis.bytes + classified.bytes,
+       stage_output_bytes=loaded.output_bytes + selected.output_bytes +
+           hierarchy.output_bytes + factor.output_bytes + mass_basis.output_bytes +
+           classified.output_bytes,
        total_seconds=(time_ns() - started) / 1e9)
 end
 

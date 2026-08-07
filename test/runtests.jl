@@ -820,13 +820,20 @@ end
             refinement_config = inflation_refinement_config(
                 precision_bits=64, max_time=10, max_step=1,
                 initial_step=1e-5, sample_count=1, reltol=1e-8,
-                abstol=1e-10, maxiters=1_000_000)
+                abstol=1e-10, maxiters=1_000_000,
+                measurement_scope=:cold)
             refinement_candidate = inflation_refinement_candidate(
-                "trajectory-contract"; delta_k=1.5320548620798324e-3)
+                "trajectory-contract"; delta_k=1.5320548620798324e-3,
+                screening=(status=:candidate, measurement_scope=:cold,
+                    value=1.0, epsilon=0.5, min_eta=-0.5, negative_modes=1,
+                    wall_seconds=0.001, allocated_bytes=123,
+                    output_bytes=64))
             refined = refine_inflation_candidate(refinement_candidate;
                 config=refinement_config)
             @test refined.summary.refinement_status == :completed
             @test refined.summary.event_policy == :final_finite_exit
+            @test refined.summary.measurement_status == :completed
+            @test refined.summary.measurement_scope == :cold
             @test refined.summary.accepted_steps > 0
             @test _refinement_solver_status(ReturnCode.Success) ==
                 (:completed, "")
@@ -836,6 +843,33 @@ end
             @test short_flow.entered_slow_roll
             @test short_flow.end_event == :tmax
             @test !short_flow.terminated
+            diagnostic_row = inflation_refinement_diagnostic_row(
+                refinement_candidate, refined)
+            serialization = inflation_stage_measure(
+                () -> inflation_diagnostic_csv_line(diagnostic_row);
+                measurement_scope=:warm)
+            diagnostic_row = inflation_refinement_diagnostic_row(
+                refinement_candidate, refined; serialization)
+            @test diagnostic_row.screen_status == :candidate
+            @test diagnostic_row.screen_epsilon == 0.5
+            @test diagnostic_row.refinement_status == :completed
+            @test diagnostic_row.serialization_status == :completed
+            @test diagnostic_row.serialization_measurement_scope == :warm
+            @test diagnostic_row.serialization_output_bytes > 0
+            @test occursin("candidate_id", inflation_diagnostic_csv_line(
+                diagnostic_row; header=true))
+            diagnostic_path = joinpath(mktempdir(), "stage4.csv")
+            written = inflation_append_diagnostic_row(diagnostic_path,
+                diagnostic_row; measurement_scope=:warm, header=true)
+            @test written.status == :completed
+            @test written.measurement_scope == :warm
+            @test isfile(diagnostic_path)
+            @test count(==('\n'), read(diagnostic_path, String)) == 2
+            failed_measurement = inflation_stage_measure(
+                () -> throw(ArgumentError("stage-4 failure"));
+                measurement_scope=:warm, capture_errors=true)
+            @test failed_measurement.status == :failed
+            @test occursin("stage-4 failure", failed_measurement.error)
             not_selected = refine_inflation_candidate(
                 inflation_refinement_candidate("not-selected";
                     delta_k=1e-3, accepted=false); config=refinement_config)

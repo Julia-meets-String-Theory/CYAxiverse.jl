@@ -6,6 +6,10 @@ adapter makes that boundary explicit without pretending that the solver accepts
 an arbitrary Q/L/K geometry yet.
 """
 
+if !isdefined(@__MODULE__, :INFLATION_DIAGNOSTIC_SCHEMA_VERSION)
+    include(joinpath(@__DIR__, "inflation_diagnostics_common.jl"))
+end
+
 using CYAxiverse
 using OrdinaryDiffEq
 
@@ -19,6 +23,7 @@ function inflation_refinement_config(; precision_bits::Int=100,
         reltol=nothing, abstol=nothing, maxiters::Int=10^8,
         displacement::Real=1e-8, displacement_sign::Real=-1.0,
         basis::Symbol=:canonical_hessian,
+        measurement_scope::Symbol=:unspecified,
         basis_theta::AbstractVector{<:Real}=Poly102RefinementModel.N8_BEST_X)
     precision_bits >= 64 ||
         throw(ArgumentError("precision_bits must be at least 64"))
@@ -33,6 +38,7 @@ function inflation_refinement_config(; precision_bits::Int=100,
         throw(ArgumentError("displacement_sign must be nonzero"))
     basis === :canonical_hessian || basis === :mass_eigenbasis ||
         throw(ArgumentError("unsupported refinement basis: $basis"))
+    _inflation_validate_measurement_scope(measurement_scope)
     all(isfinite, basis_theta) && length(basis_theta) == 8 ||
         throw(DimensionMismatch("poly-102 refinement requires eight finite basis coordinates"))
     reltol === nothing || reltol > 0 || throw(ArgumentError("reltol must be positive"))
@@ -43,6 +49,7 @@ function inflation_refinement_config(; precision_bits::Int=100,
        abstol=abstol === nothing ? nothing : Float64(abstol), maxiters,
        displacement=Float64(displacement),
        displacement_sign=Float64(displacement_sign), basis,
+       measurement_scope,
        basis_theta=Float64.(basis_theta),
        solver_method=:Rodas5P, event_policy=:final_finite_exit)
 end
@@ -63,8 +70,13 @@ function _refinement_summary(candidate, config, status::Symbol;
     (; candidate_id=candidate.candidate_id, model=candidate.model,
        delta_k=candidate.delta_k, screen_accepted=candidate.accepted,
        refinement_status=status, error=error_message,
+       measurement_status=measured === nothing ? :not_measured : measured.status,
+       diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+       measurement_scope=measured === nothing ? config.measurement_scope :
+           measured.measurement_scope,
        precision_bits=config.precision_bits,
        solver_method=config.solver_method, event_policy=config.event_policy,
+       solver_retcode=solver === nothing ? nothing : string(solver.retcode),
        reltol=config.reltol, abstol=config.abstol,
        max_time=config.max_time, scan_step=config.scan_step,
        max_step=config.max_step, initial_step=config.initial_step,
@@ -79,9 +91,9 @@ function _refinement_summary(candidate, config, status::Symbol;
        rejected_steps=solver === nothing ? 0 : solver.rejected_steps,
        rhs_evaluations=solver === nothing ? 0 : solver.rhs_evaluations,
        jacobian_evaluations=solver === nothing ? 0 : solver.jacobian_evaluations,
-       wall_seconds=measured === nothing ? 0.0 : measured.time,
+       wall_seconds=measured === nothing ? 0.0 : measured.seconds,
        allocated_bytes=measured === nothing ? 0 : measured.bytes,
-       output_bytes=trajectory === nothing ? 0 : Base.summarysize(trajectory))
+       output_bytes=measured === nothing ? 0 : measured.output_bytes)
 end
 
 function _refinement_solver_status(retcode)
@@ -99,9 +111,8 @@ function refine_inflation_candidate(candidate;
         summary=_refinement_summary(candidate, config, :unsupported_model),
         trajectory=nothing)
 
-    GC.gc(false)
-    try
-        measured = @timed Poly102RefinementModel.n8_physical_gradient_flow(
+    measured = inflation_stage_measure(
+        () -> Poly102RefinementModel.n8_physical_gradient_flow(
             candidate.delta_k; displacement=config.displacement,
             displacement_sign=config.displacement_sign,
             max_time=config.max_time, scan_step=config.scan_step,
@@ -109,7 +120,13 @@ function refine_inflation_candidate(candidate;
             initial_step=config.initial_step, basis=config.basis,
             basis_theta=config.basis_theta, precision_bits=config.precision_bits,
             reltol=config.reltol, abstol=config.abstol,
-            maxiters=config.maxiters)
+            maxiters=config.maxiters);
+        measurement_scope=config.measurement_scope, capture_errors=true)
+    if measured.status === :failed
+        return (; summary=_refinement_summary(candidate, config, :failed;
+                   error_message=measured.error, measured), trajectory=nothing)
+    end
+    try
         trajectory = measured.value
         status, error_message = _refinement_solver_status(
             trajectory.solver.retcode)

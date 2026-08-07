@@ -11,7 +11,7 @@ The bounded scan-prep driver is
 `scripts/inflation_scan_prep.jl`. It reuses the same sequence, discovers or
 selects geometries in deterministic order, and appends one fixed-schema CSV
 row after each geometry. `success` means all preparation stages completed;
-`branch_cap` means the explicit materialization bound prevented branch
+`branch_cap` means the explicit enumeration bound prevented branch
 enumeration; `failed` means an unexpected load or numerical error. The driver
 does not run trajectory refinement or write geometry files.
 
@@ -41,10 +41,11 @@ For each `GeometryIndex(h11, polytope, frst)`:
    branch using the package's reusable log-shifted workspace. Classification
    policy is local to the script; it is not currently a package API.
 
-The generic trajectory/refinement call is deliberately not part of this
-contract yet. It must accept a validated geometry-specific representation and
-explicitly record solver precision, tolerances, event policy, status, and
-failure diagnostics before it is added here.
+An arbitrary-geometry trajectory/refinement call is deliberately not part of
+this contract yet. It must accept a validated geometry-specific representation
+and explicitly record solver precision, tolerances, event policy, status, and
+failure diagnostics before it is added here. The current model-specific Stage
+3 adapter is documented below.
 
 ## Sample contract probe
 
@@ -68,8 +69,10 @@ leading_minima_count=1
 candidate_slowroll_saddles=0
 ```
 
-The first run includes Julia method compilation. The recorded stage fields are
-diagnostic only until a warmup policy is added to the eventual scan driver.
+The first run includes Julia method compilation and is marked
+`measurement_scope=cold`; subsequent geometries in the same process are marked
+`measurement_scope=warm`. The recorded stage fields remain diagnostics rather
+than a production throughput guarantee.
 
 ## Scan-prep output and resume contract
 
@@ -93,7 +96,24 @@ pool/checkpoint/shard system required for an O(10^5) scan.
 
 `stage_branches_s` remains in the fixed CSV schema for compatibility and is
 zero in the streaming path. Branch enumeration and per-branch classification
-are measured together in `stage_classify_s`.
+are measured together in `stage_classify_s`. Contract version 3 also records
+the diagnostic schema version, measurement scope, and per-stage output sizes.
+
+## Stage 4: coherent diagnostics
+
+The shared script layer is
+`scripts/inflation_diagnostics_common.jl`. `inflation_stage_measure` records a
+stage status, error text, cold/warm/unspecified scope, wall time, allocated
+bytes, and output size. It can capture exceptions without turning a failed
+stage into a successful row.
+
+`inflation_refinement_diagnostic_row` flattens the screening record and the
+Stage 3 refinement summary into one candidate row. It includes screening
+quantities, refinement status and retcode, event outcome, solver counters,
+allocation/output diagnostics, and a separately measurable serialization
+section. `inflation_append_diagnostic_row` measures formatting plus the
+append/flush operation for that row. CSV formatting is kept script-level; no
+package diagnostics API is introduced.
 
 ## Real-geometry bounded scalability slice
 

@@ -13,7 +13,8 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 using Printf
 
 const SCAN_PREP_FIELDS = (
-    :contract_version, :data_dir, :max_branches,
+    :contract_version, :diagnostic_schema_version, :measurement_scope,
+    :data_dir, :max_branches,
     :h11, :polytope, :frst, :status, :error,
     :instantons, :selected_instantons, :qtilde_det,
     :leading_log_gap, :log_scale_span, :strong_hierarchy,
@@ -23,7 +24,10 @@ const SCAN_PREP_FIELDS = (
     :best_abs_min_eta, :mass_min, :mass_max, :negative_mass_count,
     :stage_load_s, :stage_select_s, :stage_hierarchy_s, :stage_factor_s,
     :stage_mass_basis_s, :stage_branches_s, :stage_classify_s,
-    :stage_allocated_bytes, :total_seconds)
+    :stage_load_output_bytes, :stage_select_output_bytes,
+    :stage_hierarchy_output_bytes, :stage_factor_output_bytes,
+    :stage_mass_basis_output_bytes, :stage_classify_output_bytes,
+    :stage_allocated_bytes, :stage_output_bytes, :total_seconds)
 const SCAN_PREP_HEADER = join(string.(SCAN_PREP_FIELDS), ',')
 
 function _scan_prep_usage()
@@ -284,13 +288,17 @@ function run_scan_prep(options)
             continue
         end
         started = time()
+        measurement_scope = index == 1 ? :cold : :warm
         summary = try
-            run_geometry(geom_idx; max_branches=options[:max_branches])
+            run_geometry(geom_idx; max_branches=options[:max_branches],
+                measurement_scope)
         catch error
             failure = _scan_prep_error_status(error)
             failure.status == :failed && (failed += 1)
             failure.status == :branch_cap && (branch_caps += 1)
             (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
+               diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+               measurement_scope,
                h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
                status=failure.status, total_seconds=time() - started), failure.message
         end
