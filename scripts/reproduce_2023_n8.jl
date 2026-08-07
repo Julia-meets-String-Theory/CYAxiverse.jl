@@ -7,7 +7,7 @@ using Printf
 
 requested_starts = isempty(ARGS) ? 2048 : parse(Int, ARGS[1])
 starts = max(requested_starts, 2048)
-results = CYAxiverse.paper_benchmarks.n8_minima_scan(; starts=starts)
+results = CYAxiverse.axion_benchmarks.n8_minima_scan(; starts=starts)
 
 println("N=8 2023-paper minima checkpoint")
 @printf("starts per scale: %d\n", starts)

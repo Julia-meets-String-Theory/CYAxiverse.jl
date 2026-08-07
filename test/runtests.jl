@@ -632,6 +632,7 @@ end
 
     @testset "inflation reproduction contracts" begin
         benchmark = CYAxiverse.paper_benchmarks
+        poly102 = benchmark.poly102_inflation
         n8 = benchmark.n8_potential(k=benchmark.N8_KC; trajectory=true)
         @test size(n8.Q) == (8, 10)
         @test n8.phases == zeros(10)
@@ -652,22 +653,22 @@ end
             (benchmark.N8_KC / k_detuned)^2
         @test Matrix(benchmark.n8_kinetic_matrix(1.0)) ≈ Matrix(geometry.kinetic)
 
-        critical = benchmark.n8_degenerate_point()
+        critical = poly102.n8_degenerate_point()
         @test critical.converged
         @test isapprox(critical.k, 0.674506370003365; atol=1e-15)
         @test critical.gradient_residual < 1e-10
         @test critical.null_residual < 1e-10
 
-        mass_basis = benchmark.n8_mass_eigenbasis(critical.k)
+        mass_basis = poly102.n8_mass_eigenbasis(critical.k)
         @test mass_basis.basis == :mass_eigenbasis
         @test mass_basis.orthonormality_residual < 1e-10
         @test mass_basis.generalized_residual < 1e-10
         @test all(isapprox.(mass_basis.raw_eigenvectors' *
             mass_basis.metric * mass_basis.raw_eigenvectors, Matrix(I, 8, 8);
             atol=1e-10))
-        mass_direction = benchmark.n8_unstable_direction(
+        mass_direction = poly102.n8_unstable_direction(
             critical.k; basis=:mass_eigenbasis)
-        canonical_direction = benchmark.n8_unstable_direction(
+        canonical_direction = poly102.n8_unstable_direction(
             critical.k; basis=:canonical_hessian)
         @test mass_direction.basis == :mass_eigenbasis
         @test canonical_direction.basis == :canonical_hessian
@@ -677,50 +678,116 @@ end
             mass_direction.metric * mass_direction.raw *
             mass_direction.eigenvalues[mass_direction.index]) < 1e-10
 
-        initial = benchmark.n8_inflation_initial_condition(critical.k + 1e-7)
+        initial = poly102.n8_inflation_initial_condition(critical.k + 1e-7)
         @test isapprox(initial.canonical_norm, 1e-8; rtol=1e-8)
         @test isapprox(initial.canonical_norm,
             sqrt(dot(initial.theta - initial.theta_critical,
-                Matrix(benchmark.n8_kinetic_matrix(critical.k + 1e-7)) *
+                Matrix(poly102.n8_kinetic_matrix(critical.k + 1e-7)) *
                 (initial.theta - initial.theta_critical))); rtol=1e-8)
-        mass_initial = benchmark.n8_inflation_initial_condition(
+        mass_initial = poly102.n8_inflation_initial_condition(
             critical.k + 1e-7; basis=:mass_eigenbasis)
         @test mass_initial.basis == :mass_eigenbasis
         @test isapprox(mass_initial.canonical_norm, 1e-8; rtol=1e-8)
-        @test mass_initial.basis_theta == benchmark.N8_BEST_X
+        @test mass_initial.basis_theta == poly102.N8_BEST_X
         @test mass_initial.basis_k == critical.k + 1e-7
 
-        audit = benchmark.n8_basis_directions(critical.k + 1e-7)
+        audit = poly102.n8_basis_directions(critical.k + 1e-7)
         @test hasproperty(audit.directions, :E_mass_eigenbasis)
         @test audit.equivalent_mass_direction > 1 - 1e-10
 
-        n8_tuned = benchmark.n8_hilltop_efolds(1e-7).efolds
+        n8_tuned = poly102.n8_hilltop_normal_form_efolds(1e-7).efolds
         @test isapprox(n8_tuned, 463115.0; rtol=0.01)
-        n8_sixty = benchmark.n8_hilltop_efolds(1.5320548620798324e-3).efolds
+        n8_sixty = poly102.n8_hilltop_normal_form_efolds(1.5320548620798324e-3).efolds
         @test isapprox(n8_sixty, 60.0; rtol=0.08)
 
-        @test isapprox(benchmark.n5_critical_scale(), 0.674506370003365; atol=1e-15)
-        @test isapprox(benchmark.n5_reduced_ratio(benchmark.n5_critical_scale()), 0.25; atol=1e-15)
-        n5_geometry = benchmark.n5_geometry()
+        @test isapprox(poly102.n5_critical_scale(), 0.674506370003365; atol=1e-15)
+        @test isapprox(poly102.n5_reduced_ratio(poly102.n5_critical_scale()), 0.25; atol=1e-15)
+        n5_geometry = poly102.n5_geometry()
         @test n5_geometry.h11 == 5
         @test n5_geometry.h21 == 75
         @test n5_geometry.euler == -140
         @test isapprox(n5_geometry.volume, 149.3958333333367; rtol=1e-13)
         @test n5_geometry.divisor_volumes == [6.0, 24.0, 36.125, 32.0, 6.25]
-        @test n5_geometry.vertices == benchmark.N5_VERTICES
-        n5_light = benchmark.n5_light_direction()
+        @test n5_geometry.vertices == poly102.N5_VERTICES
+        n5_light = poly102.n5_light_direction()
         @test isapprox(dot(n5_light.direction,
             n5_light.metric * n5_light.direction), 1.0; atol=1e-12)
-        @test Matrix(benchmark.n5_kinetic_matrix(1.0)) ≈ Matrix(n5_geometry.kinetic)
-        n8_probe = benchmark.n8_hilltop_probe(1e-7; sample_count=5)
+        @test Matrix(poly102.n5_kinetic_matrix(1.0)) ≈ Matrix(n5_geometry.kinetic)
+        n8_probe = poly102.n8_hilltop_normal_form(1e-7; sample_count=5)
         @test n8_probe.end_event == :local_normal_form
         @test length(n8_probe.samples) == 5
-        @test isapprox(n8_probe.efolds, benchmark.n8_hilltop_efolds(1e-7).efolds)
-        mass_trajectory = benchmark.n8_slow_roll_trajectory(
+        @test isapprox(n8_probe.efolds, poly102.n8_hilltop_normal_form_efolds(1e-7).efolds)
+        mass_trajectory = poly102.n8_efold_gradient_flow(
             1e-7; basis=:mass_eigenbasis, max_efolds=0)
         @test mass_trajectory.basis == :mass_eigenbasis
         @test mass_trajectory.steps == 0
-        @test isapprox(benchmark.n5_hilltop_efolds(1e-7).efolds, 27349.0; rtol=1e-10)
-        @test isapprox(benchmark.n5_hilltop_efolds(6.65e-5).efolds, 60.0; rtol=0.02)
+        @test isapprox(poly102.n5_hilltop_normal_form_efolds(1e-7).efolds, 27349.0; rtol=1e-10)
+        @test isapprox(poly102.n5_hilltop_normal_form_efolds(6.65e-5).efolds, 60.0; rtol=0.02)
+
+        @testset "inflation trajectory contracts" begin
+            maps = poly102.n8_coordinate_maps(k_detuned)
+            @test maps.raw_to_canonical' * maps.raw_to_canonical ≈ maps.metric atol=1e-12
+            @test maps.canonical_to_raw * maps.raw_to_canonical ≈ Matrix(I, 8, 8) atol=1e-12
+
+            theta = poly102.N8_BEST_X .+ 0.01 .* collect(1:8)
+            derivatives = poly102.n8_potential_derivatives(
+                theta, k_detuned; trajectory=true)
+            finite_difference_step = 1e-6
+            finite_difference_raw = [
+                let plus=copy(theta), minus=copy(theta)
+                    plus[index] += finite_difference_step
+                    minus[index] -= finite_difference_step
+                    (poly102.n8_potential_derivatives(
+                        plus, k_detuned; trajectory=true).value -
+                     poly102.n8_potential_derivatives(
+                        minus, k_detuned; trajectory=true).value) /
+                    (2finite_difference_step)
+                end
+                for index in eachindex(theta)
+            ]
+            @test norm(derivatives.gradient - finite_difference_raw, Inf) < 1e-8
+
+            chi = maps.raw_to_canonical * theta
+            canonical_gradient = maps.canonical_to_raw' * derivatives.gradient
+            finite_difference_canonical = [
+                let plus=copy(chi), minus=copy(chi)
+                    plus[index] += finite_difference_step
+                    minus[index] -= finite_difference_step
+                    (poly102.n8_potential_derivatives(
+                        maps.canonical_to_raw * plus, k_detuned;
+                        trajectory=true).value -
+                     poly102.n8_potential_derivatives(
+                        maps.canonical_to_raw * minus, k_detuned;
+                        trajectory=true).value) /
+                    (2finite_difference_step)
+                end
+                for index in eachindex(chi)
+            ]
+            @test norm(canonical_gradient - finite_difference_canonical, Inf) < 1e-8
+
+            trajectory_initial = poly102.n8_inflation_initial_condition(
+                k_detuned; basis=:mass_eigenbasis)
+            metric = Matrix(poly102.n8_kinetic_matrix(k_detuned))
+            @test isapprox(dot(trajectory_initial.initial_tangent,
+                metric * trajectory_initial.initial_tangent), 1.0; atol=1e-10)
+            moving_basis = poly102.n8_mass_eigenbasis(
+                k_detuned; theta=trajectory_initial.theta)
+            fixed_index = argmin(trajectory_initial.basis_eigenvalues)
+            moving_index = argmin(moving_basis.eigenvalues)
+            @test trajectory_initial.basis_theta == poly102.N8_BEST_X
+            @test norm(trajectory_initial.basis_raw_eigenvectors[:, fixed_index] -
+                moving_basis.raw_eigenvectors[:, moving_index]) > 1e-6
+
+            short_flow = poly102.n8_physical_gradient_flow(
+                1.5320548620798324e-3; precision_bits=64, max_time=10,
+                max_step=1, initial_step=1e-5, sample_count=1,
+                reltol=1e-8, abstol=1e-10, maxiters=1_000_000)
+            @test short_flow.entered_slow_roll
+            @test short_flow.end_event == :tmax
+            @test !short_flow.terminated
+            @test_throws ArgumentError poly102.n8_physical_gradient_flow(
+                1.5320548620798324e-3; precision_bits=64, max_time=1,
+                method=:FBDF)
+        end
     end
 end
