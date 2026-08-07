@@ -44,16 +44,12 @@ end
 
 function _normalized_derivatives(theta::AbstractVector{<:Real},
         Q::Matrix{Int}, L::Matrix{Float64})
-    logs = @view L[2, :]
-    shift = maximum(logs)
-    amplitudes = L[1, :] .* 10.0 .^ (logs .- shift)
-    arguments = 2π .* (Q' * theta)
-    weighted_sines = amplitudes .* sin.(arguments)
-    weighted_cosines = amplitudes .* cos.(arguments)
-    (; value=sum(amplitudes .* (1 .- cos.(arguments))),
-       gradient=2π .* Q * weighted_sines,
-       hessian=(2π)^2 .* Q * Diagonal(weighted_cosines) * Q',
-       amplitudes, arguments, log_shift=shift)
+    workspace = CYAxiverse.generate.logshifted_derivative_workspace(Q, L)
+    derivatives = CYAxiverse.generate.logshifted_derivatives!(
+        workspace, theta, Q)
+    (; value=derivatives.value, gradient=derivatives.gradient,
+       hessian=derivatives.hessian, amplitudes=workspace.amplitudes,
+       arguments=2π .* (Q' * theta), log_shift=derivatives.log_shift)
 end
 
 function _classify_point(theta, Q, L, Kfactor)
@@ -74,15 +70,69 @@ function _classify_point(theta, Q, L, Kfactor)
        positive_modes=count(>(0), eigenvalues))
 end
 
+mutable struct _ClassificationWorkspace
+    derivatives::CYAxiverse.generate.LogShiftedDerivativeWorkspace
+    canonical_hessian::Matrix{Float64}
+    inverse_metric_gradient::Vector{Float64}
+end
+
+function _classification_workspace(Q::Matrix{Int}, L::Matrix{Float64})
+    h11 = size(Q, 1)
+    derivatives = CYAxiverse.generate.logshifted_derivative_workspace(Q, L)
+    _ClassificationWorkspace(derivatives, zeros(h11, h11), zeros(h11))
+end
+
+"""Classify one branch while reusing all geometry- and loop-sized buffers."""
+function _classify_point!(workspace::_ClassificationWorkspace,
+        theta::AbstractVector{<:Real}, Q::Matrix{Int}, Kfactor)
+    derivatives = CYAxiverse.generate.logshifted_derivatives!(
+        workspace.derivatives, theta, Q)
+    gradient = derivatives.gradient
+    hessian = derivatives.hessian
+    value = derivatives.value
+
+    canonical_hessian = workspace.canonical_hessian
+    copyto!(canonical_hessian, hessian)
+    ldiv!(LowerTriangular(Kfactor.L), canonical_hessian)
+    rdiv!(canonical_hessian, UpperTriangular(Kfactor.L'))
+    eigenvalues = eigvals!(Symmetric(canonical_hessian))
+
+    inverse_metric_gradient = workspace.inverse_metric_gradient
+    copyto!(inverse_metric_gradient, gradient)
+    ldiv!(LowerTriangular(Kfactor.L), inverse_metric_gradient)
+    ldiv!(UpperTriangular(Kfactor.L'), inverse_metric_gradient)
+    gradient_norm = sqrt(max(dot(gradient, inverse_metric_gradient), 0.0))
+    epsilon = value == 0 ? Inf : 0.5 * (gradient_norm / abs(value))^2
+    if value == 0
+        min_eta = max_eta = abs_min_eta = Inf
+    else
+        min_eta = Inf
+        max_eta = -Inf
+        abs_min_eta = Inf
+        for eigenvalue in eigenvalues
+            eta = eigenvalue / value
+            min_eta = min(min_eta, eta)
+            max_eta = max(max_eta, eta)
+            abs_min_eta = min(abs_min_eta, abs(eta))
+        end
+    end
+    scale = max(maximum(abs, eigenvalues), 1.0)
+    (; value, gradient_norm, epsilon, min_eta, max_eta, abs_min_eta,
+       negative_modes=count(<(0), eigenvalues),
+       zeroish_modes=count(x -> abs(x) <= 1e-10 * scale, eigenvalues),
+       positive_modes=count(>(0), eigenvalues))
+end
+
 function _classify_branches(branches, Q, L, Kfactor)
     saddle_count = 0
     candidate_count = 0
     least_tachyonic = nothing
     best = nothing
     flattest = nothing
+    workspace = _classification_workspace(Q, L)
     for index in axes(branches.coordinates, 2)
-        classification = _classify_point(
-            @view(branches.coordinates[:, index]), Q, L, Kfactor)
+        classification = _classify_point!(workspace,
+            @view(branches.coordinates[:, index]), Q, Kfactor)
         classification.negative_modes > 0 || continue
         classification.value > 0 || continue
         saddle_count += 1

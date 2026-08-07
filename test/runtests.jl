@@ -40,6 +40,29 @@ include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
     end
 end
 
+@testset "Log-shifted derivative workspace" begin
+    Q = Int[1 0 1; 0 1 1]
+    L = Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+    theta = [0.13, 0.27]
+    workspace = CYAxiverse.generate.logshifted_derivative_workspace(Q, L)
+    derivatives = CYAxiverse.generate.logshifted_derivatives!(workspace, theta, Q)
+    shift = maximum(L[2, :])
+    amplitudes = L[1, :] .* 10.0 .^ (L[2, :] .- shift)
+    arguments = 2π .* (Q' * theta)
+    expected_value = sum(amplitudes .* (1 .- cos.(arguments)))
+    expected_gradient = 2π .* Q * (amplitudes .* sin.(arguments))
+    expected_hessian = (2π)^2 .* Q *
+        Diagonal(amplitudes .* cos.(arguments)) * Q'
+    @test derivatives.log_shift == shift
+    @test derivatives.value ≈ expected_value
+    @test derivatives.gradient ≈ expected_gradient
+    @test derivatives.hessian ≈ expected_hessian
+    first_gradient = derivatives.gradient
+    second = CYAxiverse.generate.logshifted_derivatives!(workspace, [0.21, 0.31], Q)
+    @test second.gradient === first_gradient
+    @test second.hessian === derivatives.hessian
+end
+
 @testset "CYAxiverse.jl" begin
     @testset "core" begin
         @test CYAxiverse.greet_CYAxiverse() == "Hello CYAxiverse!"

@@ -99,7 +99,7 @@ boundaries without changing the package in this scan-prep phase.
 | Current script function | Eventual package boundary | Decision for this phase |
 | --- | --- | --- |
 | `inflation_scan_common.jl::_oriented_potential` and `analyze_inflation_candidates.jl::oriented_potential` | A central input-normalization and validation function returning the package's canonical `Q`, `L`, and `K` orientation | Keep script-local; avoid two independent implementations when the API work begins |
-| `inflation_scan_common.jl::_normalized_derivatives` and `analyze_inflation_candidates.jl::derivatives` | A log-shifted potential/gradient/Hessian evaluator with an explicit returned scale shift | Strong API candidate; the numerical stabilization is reusable, while scan thresholds are not |
+| `inflation_scan_common.jl::_normalized_derivatives` and `analyze_inflation_candidates.jl::derivatives` | `generate.logshifted_derivative_workspace` plus the in-place `generate.logshifted_derivatives!` evaluator | Promoted narrowly; the reusable buffers and numerical stabilization are package-owned, while scan thresholds are not |
 | `inflation_scan_common.jl::_classify_point` and `analyze_inflation_candidates.jl::classify_point` | A reusable canonical-gradient and Hessian diagnostic, accepting a caller-owned factorization or prepared context | Strong API candidate; keep `epsilon < 1`, `|eta| < 1`, and saddle-selection policy in the script |
 | `inflation_scan_common.jl::_classify_branches` | A branch iterator or per-branch diagnostic callback, not an aggregate `scan` API | Candidate after materialization costs are measured; retain aggregate policy in the script |
 | `inflation_scan_common.jl::run_geometry` | No package equivalent: this is orchestration across loading, screening, timing, and failure policy | Keep script-only |
@@ -110,5 +110,10 @@ boundaries without changing the package in this scan-prep phase.
 
 The immediate implementation therefore only shares the locked call sequence
 between the contract probe and `scripts/inflation_scan_prep.jl`. No candidate
-above is promoted into the package yet, and unrelated batch, persistence, and
-plotting helpers are outside this inventory.
+other than the derivative workspace is promoted into the package yet, and
+unrelated batch, persistence, and plotting helpers are outside this inventory.
+
+The derivative workspace is the first deliberate exception: it is a narrow
+numerical primitive now used by the script, with focused aliasing and value
+regression tests. The per-branch eigensolver allocation and a streaming branch
+enumerator remain measured follow-up targets; they are not hidden by this API.

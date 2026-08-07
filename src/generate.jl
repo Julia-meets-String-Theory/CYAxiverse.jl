@@ -95,6 +95,85 @@ function pseudo_Q(h11::Int, tri::Int, cy::Int=1)
 end
 
 """
+    LogShiftedDerivativeWorkspace
+
+Reusable Float64 buffers for evaluating a log-shifted axion potential. The
+stored amplitudes represent the potential divided by `10^log_shift`; this
+keeps hierarchically suppressed instantons finite during screening.
+"""
+mutable struct LogShiftedDerivativeWorkspace
+    amplitudes::Vector{Float64}
+    gradient::Vector{Float64}
+    hessian::Matrix{Float64}
+    log_shift::Float64
+end
+
+"""
+    logshifted_derivative_workspace(Q, L)
+
+Prepare reusable derivative buffers for `Q :: h11 × n` and
+`L :: 2 × n`. `L[2, :]` is interpreted as base-10 log scale and `L[1, :]`
+as the signed coefficient.
+"""
+function logshifted_derivative_workspace(Q::AbstractMatrix{Int},
+        L::AbstractMatrix{Float64})
+    size(L, 1) == 2 || throw(DimensionMismatch("L must have two rows"))
+    size(Q, 2) == size(L, 2) ||
+        throw(DimensionMismatch("Q and L must have the same instanton count"))
+    all(isfinite, L) || throw(ArgumentError("L contains non-finite values"))
+    log_shift = maximum(@view L[2, :])
+    amplitudes = @view(L[1, :]) .* 10.0 .^ (@view(L[2, :]) .- log_shift)
+    h11 = size(Q, 1)
+    LogShiftedDerivativeWorkspace(amplitudes, zeros(Float64, h11),
+        zeros(Float64, h11, h11), log_shift)
+end
+
+"""
+    logshifted_derivatives!(workspace, theta, Q)
+
+Evaluate the log-shifted value, gradient, and Hessian in place. The returned
+named tuple borrows `workspace.gradient` and `workspace.hessian`; callers must
+consume or copy them before the next call. The normalized value is related to
+the physical potential by `V = 10^workspace.log_shift * value`.
+"""
+function logshifted_derivatives!(workspace::LogShiftedDerivativeWorkspace,
+        theta::AbstractVector{<:Real}, Q::AbstractMatrix{Int})
+    h11 = length(workspace.gradient)
+    length(theta) == h11 ||
+        throw(DimensionMismatch("theta must have one entry per axion"))
+    size(Q, 1) == h11 || throw(DimensionMismatch("Q has the wrong axion count"))
+    size(Q, 2) == length(workspace.amplitudes) ||
+        throw(DimensionMismatch("Q has the wrong instanton count"))
+    gradient = workspace.gradient
+    hessian = workspace.hessian
+    fill!(gradient, 0.0)
+    fill!(hessian, 0.0)
+    value = 0.0
+    two_pi = 2π
+    four_pi_squared = (2π)^2
+    @inbounds for a in axes(Q, 2)
+        phase = 0.0
+        for i in axes(Q, 1)
+            phase += Q[i, a] * theta[i]
+        end
+        amplitude = workspace.amplitudes[a]
+        sine = sin(two_pi * phase)
+        cosine = cos(two_pi * phase)
+        value += amplitude * (1.0 - cosine)
+        gradient_scale = two_pi * amplitude * sine
+        hessian_scale = four_pi_squared * amplitude * cosine
+        for i in axes(Q, 1)
+            charge_i = Q[i, a]
+            gradient[i] += gradient_scale * charge_i
+            for j in axes(Q, 1)
+                hessian[i, j] += hessian_scale * charge_i * Q[j, a]
+            end
+        end
+    end
+    (; value, gradient, hessian, log_shift=workspace.log_shift)
+end
+
+"""
     pseudo_K(h11,tri,cy=1)
 
 Randomly generates an h11 × h11 Hermitian matrix with positive definite eigenvalues. \n
