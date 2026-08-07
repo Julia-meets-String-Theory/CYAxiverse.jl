@@ -118,6 +118,37 @@ that LAPACK workspace would require a separate, version-sensitive numerical
 boundary; it is the next targeted optimization rather than an aggregate scan
 API.
 
+## Stage 3: optional high-precision refinement
+
+The Stage 3 boundary is implemented in
+`scripts/inflation_refinement_common.jl`. It is intentionally script-level and
+model-specific at this point because the validated arbitrary-precision solver
+is `n8_poly102`; it does not yet accept an arbitrary scan-prep `Q/L/K` geometry.
+
+An eligible candidate must provide:
+
+- `candidate_id`, for provenance;
+- `model=:n8_poly102`, selecting the registered refiner;
+- positive `delta_k`, the model-specific detuning; and
+- `accepted=true`, supplied by the Float64 screening policy.
+
+`inflation_refinement_config` makes precision, tolerances, displacement,
+solver horizon, step limits, sample count, basis, and `maxiters` explicit. The
+refiner returns a scalar summary plus the compact trajectory result. The
+summary records `:not_selected`, `:unsupported_model`, `:completed`, or
+`:failed`, along with the final-finite-exit event policy, solver counters,
+wall time, allocated bytes, output size, and error text when applicable.
+
+A bounded 64-bit pilot at `max_time=10` completed with 40 accepted steps,
+`entered_slow_roll=true`, `end_event=:tmax`, and 6.6845119358 e-folds. Its
+cold allocation was approximately 975 MB; a warmed repeat allocated
+180,987,872 bytes in 0.157 seconds, while the compact returned result was
+15,936 bytes. A shorter `max_time=0.01` smoke call completed with 18 accepted
+steps and no slow-roll window, but still allocated approximately 814 MB cold.
+This confirms that the refinement stage must remain opt-in and
+candidate-limited. It also means this adapter is a contract/provenance
+boundary, not yet a production refiner for the real-geometry corpus.
+
 ## Workflow API candidates for a later overhaul
 
 This is a deliberately short inventory of functions used by the current
@@ -134,6 +165,7 @@ boundaries without changing the package in this scan-prep phase.
 | `analyze_inflation_candidates.jl::reduced_solve` | No new API: it is a thin wrapper around `leading_critical_branches` | Keep script-only |
 | `inflation_reproduction.jl::n5_fixture` and `n8_fixture` | No generic package API; these assemble benchmark-specific serialized fixtures | Keep benchmark script-only |
 | `inflation_reproduction.jl::print_basis_audit` | Possibly a benchmark-specific `basis_audit` helper under `paper_benchmarks` if the audit is reused | Defer; do not generalize during scan-prep |
+| `inflation_refinement_common.jl::refine_inflation_candidate` | A future model-dispatched refinement boundary with explicit candidate and solver metadata | Implemented script-level for `:n8_poly102`; do not promote until arbitrary-geometry trajectory inputs exist |
 | `benchmark_inflation_scalability.jl::trajectory` | A future model-specific trajectory entry point with explicit solver/event metadata | Keep under `paper_benchmarks`; it is not a generic geometry scan API |
 
 The immediate implementation therefore only shares the locked call sequence

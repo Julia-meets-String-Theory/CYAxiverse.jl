@@ -7,6 +7,7 @@ using HDF5
 include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_refinement_common.jl"))
 
 @testset "Geometry-level LQtilde orientation" begin
     mktempdir() do root
@@ -816,13 +817,35 @@ end
             @test norm(trajectory_initial.basis_raw_eigenvectors[:, fixed_index] -
                 moving_basis.raw_eigenvectors[:, moving_index]) > 1e-6
 
-            short_flow = poly102.n8_physical_gradient_flow(
-                1.5320548620798324e-3; precision_bits=64, max_time=10,
-                max_step=1, initial_step=1e-5, sample_count=1,
-                reltol=1e-8, abstol=1e-10, maxiters=1_000_000)
+            refinement_config = inflation_refinement_config(
+                precision_bits=64, max_time=10, max_step=1,
+                initial_step=1e-5, sample_count=1, reltol=1e-8,
+                abstol=1e-10, maxiters=1_000_000)
+            refinement_candidate = inflation_refinement_candidate(
+                "trajectory-contract"; delta_k=1.5320548620798324e-3)
+            refined = refine_inflation_candidate(refinement_candidate;
+                config=refinement_config)
+            @test refined.summary.refinement_status == :completed
+            @test refined.summary.event_policy == :final_finite_exit
+            @test refined.summary.accepted_steps > 0
+            @test _refinement_solver_status(ReturnCode.Success) ==
+                (:completed, "")
+            @test first(_refinement_solver_status(ReturnCode.MaxIters)) ==
+                :failed
+            short_flow = refined.trajectory
             @test short_flow.entered_slow_roll
             @test short_flow.end_event == :tmax
             @test !short_flow.terminated
+            not_selected = refine_inflation_candidate(
+                inflation_refinement_candidate("not-selected";
+                    delta_k=1e-3, accepted=false); config=refinement_config)
+            @test not_selected.summary.refinement_status == :not_selected
+            @test not_selected.summary.allocated_bytes == 0
+            unsupported = refine_inflation_candidate(
+                inflation_refinement_candidate("unsupported";
+                    model=:unregistered, delta_k=1e-3);
+                config=refinement_config)
+            @test unsupported.summary.refinement_status == :unsupported_model
             @test_throws ArgumentError poly102.n8_physical_gradient_flow(
                 1.5320548620798324e-3; precision_bits=64, max_time=1,
                 method=:FBDF)
