@@ -8,6 +8,7 @@ include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_refinement_common.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
 
 @testset "Geometry-level LQtilde orientation" begin
     mktempdir() do root
@@ -62,6 +63,56 @@ end
     second = CYAxiverse.generate.logshifted_derivatives!(workspace, [0.21, 0.31], Q)
     @test second.gradient === first_gradient
     @test second.hessian === derivatives.hessian
+end
+
+@testset "Inflation append-only scan shards" begin
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            potential["Q"] = Int[1 0 1; 0 1 1]
+            potential["L"] = Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+            geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+        end
+
+        shard_dir = joinpath(root, "shards")
+        options = _scan_prep_parse_args([
+            "--data-dir", root, "--geometry", "2,1,1",
+            "--max-branches", "100000", "--shard-dir", shard_dir,
+            "--run-id", "test-stage5"])
+        @test run_scan_prep(options)
+        paths = inflation_shard_paths(shard_dir)
+        @test length(paths) == 1
+        @test count(==('\n'), read(paths[1], String)) == 2
+        @test (2, 1, 1) in inflation_completed_shard_geometries(
+            shard_dir; data_dir=abspath(root), max_branches=100000)
+
+        resume_options = _scan_prep_parse_args([
+            "--data-dir", root, "--geometry", "2,1,1",
+            "--max-branches", "100000", "--shard-dir", shard_dir,
+            "--resume"])
+        @test run_scan_prep(resume_options)
+        @test count(==('\n'), read(paths[1], String)) == 2
+
+        merged = joinpath(root, "merged.csv")
+        @test inflation_merge_shards(paths, merged) == merged
+        @test readlines(merged)[1] == INFLATION_SHARD_HEADER
+        @test_throws ArgumentError inflation_merge_shards(paths, merged)
+
+        failed_dir = joinpath(root, "failed-shards")
+        failed_options = _scan_prep_parse_args([
+            "--data-dir", root, "--geometry", "9,1,1",
+            "--shard-dir", failed_dir, "--retries", "1"])
+        @test !run_scan_prep(failed_options)
+        failed_path = only(inflation_shard_paths(failed_dir))
+        @test count(==('\n'), read(failed_path, String)) == 3
+        @test occursin("attempt", read(failed_path, String))
+        @test isempty(inflation_completed_shard_geometries(
+            failed_dir; data_dir=abspath(root), max_branches=1_000_000))
+    end
 end
 
 @testset "CYAxiverse.jl" begin

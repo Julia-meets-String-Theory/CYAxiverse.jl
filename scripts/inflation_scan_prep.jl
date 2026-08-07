@@ -4,8 +4,8 @@
 
 The numerical sequence lives in `inflation_scan_common.jl` and is deliberately
 script-only.  This driver adds deterministic geometry selection, streamed CSV
-summaries, and a conservative resume check.  It does not run trajectory
-refinement, create workers, or write geometry files.
+summaries, append-only shard persistence, and a conservative resume check.  It
+does not run trajectory refinement, create workers, or write geometry files.
 """
 
 include(joinpath(@__DIR__, "inflation_scan_common.jl"))
@@ -30,6 +30,8 @@ const SCAN_PREP_FIELDS = (
     :stage_allocated_bytes, :stage_output_bytes, :total_seconds)
 const SCAN_PREP_HEADER = join(string.(SCAN_PREP_FIELDS), ',')
 
+include(joinpath(@__DIR__, "inflation_scan_shards_common.jl"))
+
 function _scan_prep_usage()
     println("""
     Usage:
@@ -45,6 +47,11 @@ function _scan_prep_usage()
       --summary PATH        Stream one preparation row per geometry to PATH.
       --append-summary      Append to an existing compatible summary.
       --resume              Skip successful/branch-cap rows matching this run configuration.
+      --shard-dir PATH      Write one append-only shard in this directory.
+      --shard-index N       One-based shard index; default: 1.
+      --shard-count N       Total deterministic shard count; default: 1.
+      --run-id ID           Provenance label written to every shard row.
+      --retries N           Retry failed geometries N times; default: 0.
     """)
 end
 
@@ -53,9 +60,12 @@ function _scan_prep_parse_args(args)
         :data_dir => get(ENV, "CYAXIVERSE_DATA_DIR", ""),
         :h11 => nothing, :limit => nothing, :offset => 0,
         :geometries => GeometryIndex[], :max_branches => 1_000_000,
-        :summary => "", :append_summary => false, :resume => false)
+        :summary => "", :append_summary => false, :resume => false,
+        :shard_dir => "", :shard_index => 1, :shard_count => 1,
+        :run_id => "", :retries => 0)
     valued = ("--data-dir", "--h11", "--limit", "--offset", "--geometry",
-        "--max-branches", "--summary")
+        "--max-branches", "--summary", "--shard-dir", "--shard-index",
+        "--shard-count", "--run-id", "--retries")
     index = 1
     while index <= length(args)
         arg = args[index]
@@ -85,6 +95,16 @@ function _scan_prep_parse_args(args)
                 options[:max_branches] = parse(Int, value)
             elseif arg == "--summary"
                 options[:summary] = value
+            elseif arg == "--shard-dir"
+                options[:shard_dir] = value
+            elseif arg == "--shard-index"
+                options[:shard_index] = parse(Int, value)
+            elseif arg == "--shard-count"
+                options[:shard_count] = parse(Int, value)
+            elseif arg == "--run-id"
+                options[:run_id] = value
+            elseif arg == "--retries"
+                options[:retries] = parse(Int, value)
             end
             index += 1
         else
@@ -98,6 +118,14 @@ function _scan_prep_parse_args(args)
     options[:limit] === nothing || options[:limit] > 0 || error("--limit must be positive")
     options[:offset] >= 0 || error("--offset must be nonnegative")
     options[:max_branches] > 0 || error("--max-branches must be positive")
+    isempty(options[:summary]) || isempty(options[:shard_dir]) ||
+        error("--summary and --shard-dir are mutually exclusive")
+    options[:shard_count] > 0 || error("--shard-count must be positive")
+    1 <= options[:shard_index] <= options[:shard_count] ||
+        error("--shard-index must be between 1 and --shard-count")
+    isempty(options[:shard_dir]) && options[:shard_count] != 1 &&
+        error("--shard-count requires --shard-dir")
+    options[:retries] >= 0 || error("--retries must be nonnegative")
     options
 end
 
@@ -152,7 +180,11 @@ function _scan_prep_selected_geometries(options)
     sort!(geoms, by=geom -> (geom.h11, geom.polytope, geom.frst))
     first_index = min(options[:offset] + 1, length(geoms) + 1)
     geoms = geoms[first_index:end]
-    options[:limit] === nothing ? geoms : geoms[1:min(options[:limit], length(geoms))]
+    geoms = options[:limit] === nothing ? geoms :
+        geoms[1:min(options[:limit], length(geoms))]
+    options[:shard_count] == 1 && return geoms
+    [geom for (index, geom) in enumerate(geoms)
+        if mod(index - 1, options[:shard_count]) + 1 == options[:shard_index]]
 end
 
 function _scan_prep_csv_escape(value)
@@ -262,19 +294,41 @@ function run_scan_prep(options)
     ENV["CYAXIVERSE_DATA_DIR"] = data_dir
     geoms = _scan_prep_selected_geometries(options)
     isempty(geoms) && throw(ArgumentError("no geometries selected"))
-    summary_path = isempty(options[:summary]) ?
+    shard_mode = !isempty(options[:shard_dir])
+    summary_path = shard_mode ? "" : (isempty(options[:summary]) ?
         joinpath(data_dir, "logs", "inflation_scan_prep.csv") :
-        abspath(expanduser(options[:summary]))
-    options[:resume] && !isfile(summary_path) &&
-        throw(ArgumentError("--resume requires an existing summary: $summary_path"))
-    _scan_prep_write_header(summary_path;
-        append=options[:append_summary] || options[:resume])
-    resumable = options[:resume] ? _scan_prep_completed(summary_path;
-        data_dir, max_branches=options[:max_branches]) : Set{Tuple{Int, Int, Int}}()
+        abspath(expanduser(options[:summary])))
+    shard_path = ""
+    run_id = isempty(options[:run_id]) ?
+        string("scan-prep-", getpid(), "-", round(Int, time())) : options[:run_id]
+    if shard_mode
+        shard_dir = abspath(expanduser(options[:shard_dir]))
+        shard_path = joinpath(shard_dir, string("inflation_scan_prep_shard_",
+            lpad(options[:shard_index], 4, '0'), "_of_",
+            lpad(options[:shard_count], 4, '0'), ".csv"))
+        options[:resume] && !isfile(shard_path) &&
+            throw(ArgumentError("--resume requires an existing shard: $shard_path"))
+        inflation_prepare_shard(shard_path;
+            append=options[:append_summary] || options[:resume])
+        resumable = options[:resume] ? inflation_completed_shard_geometries(
+            shard_dir; data_dir, max_branches=options[:max_branches]) :
+            Set{Tuple{Int, Int, Int}}()
+    else
+        options[:resume] && !isfile(summary_path) &&
+            throw(ArgumentError("--resume requires an existing summary: $summary_path"))
+        _scan_prep_write_header(summary_path;
+            append=options[:append_summary] || options[:resume])
+        resumable = options[:resume] ? _scan_prep_completed(summary_path;
+            data_dir, max_branches=options[:max_branches]) : Set{Tuple{Int, Int, Int}}()
+    end
 
     @printf("Inflation scan-prep: %d geometries max_branches=%d\n",
         length(geoms), options[:max_branches])
-    @printf("data_dir=%s\nsummary=%s\n", data_dir, summary_path)
+    if shard_mode
+        @printf("data_dir=%s\nshard=%s\nrun_id=%s\n", data_dir, shard_path, run_id)
+    else
+        @printf("data_dir=%s\nsummary=%s\n", data_dir, summary_path)
+    end
     successes = 0
     branch_caps = 0
     failed = 0
@@ -287,36 +341,56 @@ function run_scan_prep(options)
                 index, length(geoms), geom_idx.h11, geom_idx.polytope, geom_idx.frst)
             continue
         end
-        started = time()
-        measurement_scope = index == 1 ? :cold : :warm
-        summary = try
-            run_geometry(geom_idx; max_branches=options[:max_branches],
-                measurement_scope)
-        catch error
-            failure = _scan_prep_error_status(error)
-            failure.status == :failed && (failed += 1)
-            failure.status == :branch_cap && (branch_caps += 1)
-            (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
-               diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
-               measurement_scope,
-               h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
-               status=failure.status, total_seconds=time() - started), failure.message
+        final_summary = nothing
+        final_message = ""
+        final_attempt = 0
+        for attempt in 1:(options[:retries] + 1)
+            final_attempt = attempt
+            started = time()
+            measurement_scope = index == 1 ? :cold : :warm
+            summary = try
+                run_geometry(geom_idx; max_branches=options[:max_branches],
+                    measurement_scope)
+            catch error
+                failure = _scan_prep_error_status(error)
+                (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
+                   diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
+                   measurement_scope,
+                   h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
+                   status=failure.status, total_seconds=time() - started), failure.message
+            end
+            if !(summary isa NamedTuple)
+                result, message = summary
+                final_summary, final_message = result, message
+            else
+                final_summary = summary
+                final_message = ""
+            end
+            if shard_mode
+                inflation_append_shard_row(shard_path, final_summary;
+                    run_id, shard_index=options[:shard_index],
+                    shard_count=options[:shard_count], attempt,
+                    started_unix_s=started, finished_unix_s=time(), data_dir,
+                    max_branches=options[:max_branches], error_message=final_message)
+            else
+                _scan_prep_append(summary_path, final_summary; data_dir,
+                    max_branches=options[:max_branches], error=final_message)
+            end
+            final_summary.status in (:failed,) && attempt <= options[:retries] &&
+                continue
+            break
         end
-        if !(summary isa NamedTuple)
-            result, message = summary
-            _scan_prep_append(summary_path, result; data_dir,
-                max_branches=options[:max_branches], error=message)
-            @printf("[%d/%d] h11=%d polytope=%d frst=%d status=%s seconds=%.3f\n",
-                index, length(geoms), geom_idx.h11, geom_idx.polytope, geom_idx.frst,
-                result.status, result.total_seconds)
+        if final_summary.status == :failed
+            failed += 1
+        elseif final_summary.status == :branch_cap
+            branch_caps += 1
         else
             successes += 1
-            _scan_prep_append(summary_path, summary; data_dir,
-                max_branches=options[:max_branches])
-            @printf("[%d/%d] h11=%d polytope=%d frst=%d status=%s branches=%d seconds=%.3f\n",
-                index, length(geoms), geom_idx.h11, geom_idx.polytope, geom_idx.frst,
-                summary.status, summary.branch_count, summary.total_seconds)
         end
+        branches = hasproperty(final_summary, :branch_count) ? final_summary.branch_count : 0
+        @printf("[%d/%d] h11=%d polytope=%d frst=%d status=%s attempts=%d branches=%d seconds=%.3f\n",
+            index, length(geoms), geom_idx.h11, geom_idx.polytope, geom_idx.frst,
+            final_summary.status, final_attempt, branches, final_summary.total_seconds)
     end
     @printf("Finished: success=%d branch_cap=%d skipped=%d failed=%d\n",
         successes, branch_caps, skipped, failed)

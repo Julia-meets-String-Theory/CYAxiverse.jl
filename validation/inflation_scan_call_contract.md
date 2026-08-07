@@ -115,6 +115,49 @@ section. `inflation_append_diagnostic_row` measures formatting plus the
 append/flush operation for that row. CSV formatting is kept script-level; no
 package diagnostics API is introduced.
 
+## Stage 5: append-only result and checkpoint shards
+
+The Stage 5 persistence layer is
+`scripts/inflation_scan_shards_common.jl`. A scan invocation can own one shard
+file and append one row per geometry attempt:
+
+```sh
+julia --project=. --startup-file=no \
+  scripts/inflation_scan_prep.jl \
+  --data-dir DATA_ROOT --h11 8 --shard-dir /tmp/inflation-shards \
+  --shard-index 1 --shard-count 4 --retries 1 --resume
+```
+
+`--shard-index` is one-based. The selected geometries are partitioned in the
+same deterministic order used by the single-process driver, so four separate
+invocations with indices 1 through 4 produce four worker-local shards. Each
+writer validates its fixed header and flushes every row. The row retains the
+shard schema version, run label, shard assignment, attempt number, start/end
+timestamps, scan contract version, data root, branch cap, geometry identity,
+status, error text, and all Stage 4 diagnostics.
+
+`--resume` scans the shard directory and skips only matching `success` or
+`branch_cap` terminal rows. Failed rows remain in place and are retried when
+selected again; `--retries N` records each failed attempt before the next one.
+This makes interruption recoverable without materializing a global result
+array. The shard writer is intentionally script-level and has one writer per
+file; the package APIs and numerical call sequence are unchanged.
+
+After the workers finish, merge shards deterministically while preserving all
+attempt rows:
+
+```sh
+julia --project=. --startup-file=no \
+  scripts/inflation_scan_merge_shards.jl \
+  --shard-dir /tmp/inflation-shards \
+  --output /tmp/inflation-scan-merged.csv
+```
+
+The current Stage 5 driver covers bounded screening, where the explicit branch
+cap is the per-geometry bound. It does not impose a hard wall-clock kill on an
+arbitrary-precision trajectory; that remains coupled to the future
+geometry-specific refinement worker rather than being hidden in scan-prep.
+
 ## Real-geometry bounded scalability slice
 
 The first real-data slice used the local `../../data` corpus with
