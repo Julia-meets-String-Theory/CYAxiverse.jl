@@ -35,11 +35,11 @@ within the inflation screening/refinement path and directly related API work.
 - Implementation base commit: `6441e00 add stratified inflation scan pilot`
 - Previous Stage 5 commit: `57ac75e add inflation scan result shards`
 
-The worktree is clean except for the intentionally untracked
-`INFLATION_REPRODUCTION_CHECKPOINT.md`. Preserve that file. It is a historical
-checkpoint from the earlier trajectory-reproduction continuation; do not
-delete, reset, or overwrite it. This document supersedes its scan-specific
-status.
+The historical
+`INFLATION_REPRODUCTION_CHECKPOINT.md` is preserved as a tracked file in
+commit `38d3a3d`. Preserve that file. It records the earlier
+trajectory-reproduction continuation; do not delete, reset, or overwrite it.
+This document supersedes its scan-specific status.
 
 ## Completed implementation
 
@@ -357,7 +357,8 @@ notes, schema changes, code, and tests.
 ## Safety and handoff rules
 
 - Never use `git reset --hard`, `git checkout --`, or broad cleanup commands.
-- Preserve unrelated worktree modifications and the untracked checkpoint.
+- Preserve unrelated worktree modifications and
+  `INFLATION_REPRODUCTION_CHECKPOINT.md`.
 - Do not overwrite published fixtures or comparison CSVs with unvalidated
   trajectory results.
 - Do not launch a large scan from this handoff.
