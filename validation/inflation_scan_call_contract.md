@@ -158,6 +158,34 @@ cap is the per-geometry bound. It does not impose a hard wall-clock kill on an
 arbitrary-precision trajectory; that remains coupled to the future
 geometry-specific refinement worker rather than being hidden in scan-prep.
 
+## Stage 6: stratified real-geometry pilot
+
+The bounded real-data pilot is
+`scripts/inflation_scan_pilot.jl`. It samples evenly spaced geometries within
+each available `h11` group, applies an optional global cap, and delegates every
+geometry call to the Stage 5 shard-backed scan-prep driver. Since instanton
+count, hierarchy, and candidate count are screening outputs, those dimensions
+are used for post-screen grouping rather than pre-screen selection.
+
+Example:
+
+```sh
+julia --project=. --startup-file=no \
+  scripts/inflation_scan_pilot.jl \
+  --data-dir ../../data --sample-per-h11 1 --max-geometries 20 \
+  --max-branches 100000 --shard-dir /tmp/inflation-pilot-shards \
+  --report /tmp/inflation-pilot-report.csv
+```
+
+The pilot report groups exact `h11` rows by instanton-count bin, strong/not-
+strong hierarchy, and candidate-count bin. The measured 20-geometry pilot is
+recorded in `validation/inflation_scan_stage6_pilot.md`. It found 7 successful
+screens, 13 explicit branch-cap outcomes, and no failures after fixing the
+high-dimensional `2^h11` integer-overflow bookkeeping bug. It also showed that
+the h11=300 sample produced approximately 589 MB of stage allocations and 226
+MB of stage output, reinforcing that high-dimensional screening needs an
+explicit resource policy before a large scan.
+
 ## Real-geometry bounded scalability slice
 
 The first real-data slice used the local `../../data` corpus with

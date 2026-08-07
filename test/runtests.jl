@@ -9,6 +9,7 @@ include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_refinement_common.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
 
 @testset "Geometry-level LQtilde orientation" begin
     mktempdir() do root
@@ -112,6 +113,50 @@ end
         @test occursin("attempt", read(failed_path, String))
         @test isempty(inflation_completed_shard_geometries(
             failed_dir; data_dir=abspath(root), max_branches=1_000_000))
+    end
+end
+
+@testset "Inflation stratified pilot selection and report" begin
+    @test _leading_branch_det_qtilde(4, 2) == 1
+    @test _leading_branch_det_qtilde(1, 150) == 0
+    mktempdir() do root
+        for (h11, count) in ((4, 3), (8, 2))
+            for index in 1:count
+                path = joinpath(root, string("h11_", lpad(h11, 3, '0')),
+                    string("np_", lpad(index, 7, '0')), "cy_0000001", "cyax.h5")
+                mkpath(dirname(path))
+                open(path, "w") do io
+                    write(io, "synthetic pilot placeholder")
+                end
+            end
+        end
+        selected = inflation_pilot_select_geometries(root;
+            sample_per_h11=2)
+        @test length(selected) == 4
+        @test sort(unique(geom.h11 for geom in selected)) == [4, 8]
+        capped = inflation_pilot_select_geometries(root;
+            sample_per_h11=2, max_geometries=3)
+        @test length(capped) == 3
+        @test capped[1].h11 == 4
+
+        rows = [
+            (h11=4, polytope=1, frst=1, status=:success, attempt=1,
+                instantons=40, strong_hierarchy=true, leading_log_gap=5.0,
+                log_scale_span=12.0, branch_count=8, candidate_count=2,
+                total_seconds=0.25, allocated_bytes=1000, output_bytes=200,
+                error=""),
+            (h11=4, polytope=2, frst=1, status=:failed, attempt=2,
+                instantons=42, strong_hierarchy=false, leading_log_gap=2.0,
+                log_scale_span=6.0, branch_count=0, candidate_count=0,
+                total_seconds=0.5, allocated_bytes=0, output_bytes=0,
+                error="synthetic failure")]
+        reports = _inflation_pilot_report_rows(rows)
+        @test length(reports) == 2
+        @test sum(report.geometries for report in reports) == 2
+        @test sum(report.failures for report in reports) == 1
+        report_path = joinpath(root, "pilot-report.csv")
+        @test _inflation_pilot_write_report(report_path, reports) == report_path
+        @test occursin("mean_allocated_bytes", read(report_path, String))
     end
 end
 

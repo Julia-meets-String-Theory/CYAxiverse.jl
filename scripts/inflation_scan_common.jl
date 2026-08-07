@@ -163,6 +163,12 @@ function _finish_classification(accumulator::_ClassificationAccumulator)
        best=accumulator.best, flattest=accumulator.flattest)
 end
 
+function _leading_branch_det_qtilde(branch_count::Int, qtilde_dimension::Int)
+    qtilde_dimension >= 0 ||
+        throw(ArgumentError("qtilde_dimension must be nonnegative"))
+    branch_count ÷ (BigInt(2)^qtilde_dimension)
+end
+
 function _classify_branches(branches, Q, L, Kfactor)
     accumulator = _ClassificationAccumulator()
     workspace = _classification_workspace(Q, L)
@@ -188,7 +194,8 @@ function _classify_leading_branches(selected, Q, L, Kfactor; max_branches::Int)
     end
     (; classification=_finish_classification(accumulator), branch_count,
        leading_minima_count,
-       det_Qtilde=branch_count ÷ 2^size(selected.Qtilde, 1))
+       det_Qtilde=_leading_branch_det_qtilde(
+           branch_count, size(selected.Qtilde, 1)))
 end
 
 """Run the locked, bounded scan-prep sequence for one geometry."""
