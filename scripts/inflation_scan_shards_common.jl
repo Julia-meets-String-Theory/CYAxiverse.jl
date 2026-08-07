@@ -8,7 +8,7 @@ them.
 """
 
 if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
-    const INFLATION_SHARD_SCHEMA_VERSION = "1"
+    const INFLATION_SHARD_SCHEMA_VERSION = "2"
     const INFLATION_SHARD_METADATA_FIELDS = (
         :shard_schema_version, :run_id, :shard_index, :shard_count,
         :attempt, :started_unix_s, :finished_unix_s)
@@ -83,7 +83,9 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
     function inflation_append_shard_row(path::AbstractString, summary;
             run_id::AbstractString, shard_index::Int, shard_count::Int,
             attempt::Int, started_unix_s::Real, finished_unix_s::Real,
-            data_dir::AbstractString, max_branches::Int, error_message="")
+            data_dir::AbstractString, max_branches::Int,
+            negative_mode_range=nothing, max_negative_modes=nothing,
+            error_message="")
         shard_index >= 1 || throw(ArgumentError("shard_index must be positive"))
         shard_count >= shard_index ||
             throw(ArgumentError("shard_index must not exceed shard_count"))
@@ -107,6 +109,10 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
                 data_dir
             elseif field === :max_branches
                 max_branches
+            elseif field === :negative_mode_range
+                max_negative_modes === nothing ?
+                    inflation_negative_mode_range_label(negative_mode_range) :
+                    inflation_negative_mode_range_label(0:max_negative_modes)
             elseif field === :error && !isempty(error_message)
                 error_message
             else
@@ -132,9 +138,11 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
     """Return geometry keys with a matching successful terminal row."""
     function inflation_completed_shard_geometries(shard_dir::AbstractString;
             data_dir::AbstractString, max_branches::Int,
+            negative_mode_range=nothing, max_negative_modes=nothing,
             contract_version::AbstractString=INFLATION_SCAN_CONTRACT_VERSION)
         completed = Set{Tuple{Int, Int, Int}}()
-        required = (:contract_version, :data_dir, :max_branches, :h11,
+        required = (:contract_version, :data_dir, :max_branches,
+            :negative_mode_range, :h11,
             :polytope, :frst, :status)
         for path in inflation_shard_paths(shard_dir)
             _inflation_shard_validate_header(path)
@@ -152,6 +160,11 @@ if !isdefined(@__MODULE__, :INFLATION_SHARD_SCHEMA_VERSION)
                     fields[positions[:data_dir]] == data_dir || continue
                     try
                         parse(Int, fields[positions[:max_branches]]) == max_branches || continue
+                        expected_range = negative_mode_range === nothing && max_negative_modes === nothing ?
+                            "all" : max_negative_modes === nothing ?
+                            inflation_negative_mode_range_label(negative_mode_range) :
+                            inflation_negative_mode_range_label(0:max_negative_modes)
+                        fields[positions[:negative_mode_range]] == expected_range || continue
                         fields[positions[:status]] in ("success", "branch_cap") || continue
                         key = (parse(Int, fields[positions[:h11]]),
                             parse(Int, fields[positions[:polytope]]),

@@ -15,7 +15,23 @@ using LinearAlgebra
 using Statistics
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
-const INFLATION_SCAN_CONTRACT_VERSION = "3"
+const INFLATION_SCAN_CONTRACT_VERSION = "4"
+
+"""Parse `K` or `K:L` into an inclusive leading-index range."""
+function inflation_parse_negative_mode_range(value::AbstractString)
+    text = strip(value)
+    lowercase(text) == "all" && return nothing
+    parts = split(text, ':')
+    length(parts) in (1, 2) ||
+        throw(ArgumentError("negative-mode range must be K, K:K, or all"))
+    first_index = parse(Int, parts[1])
+    last_index = length(parts) == 1 ? first_index : parse(Int, parts[2])
+    first_index:last_index
+end
+
+"""Use a stable CSV/resume label for a leading-index search range."""
+inflation_negative_mode_range_label(range::Union{Nothing,UnitRange{Int}}) =
+    range === nothing ? "all" : string(first(range), ":", last(range))
 
 """Script-level resource and refinement policy for bounded screening."""
 const INFLATION_SCREENING_POLICY = (
@@ -90,22 +106,22 @@ function _classify_point(theta, Q, L, Kfactor)
 end
 
 mutable struct _ClassificationWorkspace
-    derivatives::CYAxiverse.generate.LogShiftedDerivativeWorkspace
+    derivative_evaluator::CYAxiverse.generate.StructuredChargeEvaluator
     canonical_hessian::Matrix{Float64}
     inverse_metric_gradient::Vector{Float64}
 end
 
 function _classification_workspace(Q::Matrix{Int}, L::Matrix{Float64})
     h11 = size(Q, 1)
-    derivatives = CYAxiverse.generate.logshifted_derivative_workspace(Q, L)
-    _ClassificationWorkspace(derivatives, zeros(h11, h11), zeros(h11))
+    derivative_evaluator = CYAxiverse.generate.structured_charge_evaluator(Q, L)
+    _ClassificationWorkspace(derivative_evaluator, zeros(h11, h11), zeros(h11))
 end
 
 """Classify one branch while reusing all geometry- and loop-sized buffers."""
 function _classify_point!(workspace::_ClassificationWorkspace,
         theta::AbstractVector{<:Real}, Q::Matrix{Int}, Kfactor)
-    derivatives = CYAxiverse.generate.logshifted_derivatives!(
-        workspace.derivatives, theta, Q)
+    derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+        workspace.derivative_evaluator, theta, Q)
     gradient = derivatives.gradient
     hessian = derivatives.hessian
     value = derivatives.value
@@ -197,27 +213,33 @@ function _classify_branches(branches, Q, L, Kfactor)
     _finish_classification(accumulator)
 end
 
-function _classify_leading_branches(selected, Q, L, Kfactor; max_branches::Int)
+function _classify_leading_branches(selected, Q, L, Kfactor;
+        max_branches::Int, negative_mode_range::Union{Nothing,UnitRange{Int}}=nothing,
+        max_negative_modes::Union{Nothing,Int}=nothing)
     accumulator = _ClassificationAccumulator()
     workspace = _classification_workspace(Q, L)
     branch_count = 0
     leading_minima_count = 0
-    CYAxiverse.generate.foreach_leading_critical_branch(
-            selected; max_branches) do theta, leading_negative_modes
+    stream_report = CYAxiverse.generate.foreach_leading_critical_branch(
+            selected; max_branches, negative_mode_range, max_negative_modes) do theta, leading_negative_modes
         branch_count += 1
         leading_negative_modes == 0 && (leading_minima_count += 1)
         classification = _classify_point!(workspace, theta, Q, Kfactor)
         _record_classification!(accumulator, classification)
     end
+    representation = workspace.derivative_evaluator.representation
     (; classification=_finish_classification(accumulator), branch_count,
-       leading_minima_count,
-       det_Qtilde=_leading_branch_det_qtilde(
-           branch_count, size(selected.Qtilde, 1)))
+       leading_minima_count, stream_report,
+       structured_charge_validated=representation.validated,
+       structured_fallback_reason=representation.fallback_reason,
+       det_Qtilde=stream_report.lattice_copy_count)
 end
 
 """Run the locked, bounded scan-prep sequence for one geometry."""
 function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000,
-        measurement_scope::Symbol=:unspecified)
+        measurement_scope::Symbol=:unspecified,
+        negative_mode_range::Union{Nothing,UnitRange{Int}}=nothing,
+        max_negative_modes::Union{Nothing,Int}=nothing)
     max_branches > 0 || throw(ArgumentError("max_branches must be positive"))
     started = time_ns()
     loaded = _timed_call(() -> CYAxiverse.read.oriented_potential(geom_idx);
@@ -233,7 +255,8 @@ function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000,
         CYAxiverse.generate.leading_hessian_mass_basis_float64(
             K, selected.value.Ltilde, selected.value.Qtilde); measurement_scope)
     classified = _timed_call(() -> _classify_leading_branches(
-        selected.value, Q, L, factor.value; max_branches); measurement_scope)
+        selected.value, Q, L, factor.value; max_branches,
+        negative_mode_range, max_negative_modes); measurement_scope)
 
     masses, mass_signs, _ = mass_basis.value
     branch_classification = classified.value.classification
@@ -245,11 +268,21 @@ function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000,
        measurement_scope=classified.measurement_scope,
        h11=geom_idx.h11, polytope=geom_idx.polytope, frst=geom_idx.frst,
        status=:success, instantons=size(Q, 2), selected_instantons=size(
-           selected.value.Qtilde, 2), qtilde_det=abs(det(Float64.(selected.value.Qtilde))),
+           selected.value.Qtilde, 2), qtilde_det=classified.value.det_Qtilde,
        leading_log_gap=hierarchy.value.leading_log_gap,
        log_scale_span=hierarchy.value.log_scale_span,
        strong_hierarchy=hierarchy.value.heuristic_strong_hierarchy,
        branch_count=classified.value.branch_count,
+       negative_mode_range=inflation_negative_mode_range_label(
+           classified.value.stream_report.negative_mode_range),
+       structured_charge_validated=classified.value.structured_charge_validated,
+       structured_fallback_reason=classified.value.structured_fallback_reason,
+       search_classification=classified.value.stream_report.search_classification,
+       mask_count=classified.value.stream_report.mask_count,
+       masks_visited=classified.value.stream_report.masks_visited,
+       masks_skipped=classified.value.stream_report.masks_skipped,
+       lattice_copy_count=classified.value.stream_report.lattice_copy_count,
+       lattice_copies_visited=classified.value.stream_report.lattice_copies_visited,
        leading_minima_count=classified.value.leading_minima_count,
        saddle_count=branch_classification.saddle_count,
        candidate_slowroll_saddles=branch_classification.candidate_count,

@@ -87,6 +87,58 @@ end
     @test second.hessian === derivatives.hessian
 end
 
+@testset "Structured pairwise charge evaluator" begin
+    h11 = 2
+    base_count = h11 + 4
+    base_Q = Int[1 0 1 2 1 0;
+                 0 1 1 1 0 2]
+    Q = let columns = [base_Q[:, index] for index in 1:base_count]
+        for i in 1:(base_count - 1), j in (i + 1):base_count
+            orientation = iseven(i + j) ? 1 : -1
+            push!(columns, orientation .* (base_Q[:, j] - base_Q[:, i]))
+        end
+        hcat(columns...)
+    end
+    L = zeros(Float64, 2, size(Q, 2))
+    L[1, :] .= 1.0
+    L[2, :] .= collect(0.0:-1.0:-(size(Q, 2) - 1))
+    representation = CYAxiverse.generate.structured_charge_representation(Q, L)
+    @test representation.validated
+    @test representation.base_count == base_count
+    @test length(representation.pair_i) == binomial(base_count, 2)
+    @test representation.L === L
+
+    structured = CYAxiverse.generate.structured_charge_evaluator(Q, L)
+    generic_workspace = CYAxiverse.generate.logshifted_derivative_workspace(Q, L)
+    @test !structured.uses_generic_fallback
+    for theta in ([0.123, 0.456], [0.731, 0.219], [0.0, 0.5])
+        structured_derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+            structured, theta, Q)
+        generic_derivatives = CYAxiverse.generate.logshifted_derivatives!(
+            generic_workspace, theta, Q)
+        @test isapprox(structured_derivatives.value, generic_derivatives.value;
+            rtol=1e-13, atol=1e-13)
+        @test isapprox(structured_derivatives.gradient, generic_derivatives.gradient;
+            rtol=1e-13, atol=1e-13)
+        @test isapprox(structured_derivatives.hessian, generic_derivatives.hessian;
+            rtol=1e-13, atol=1e-13)
+    end
+
+    invalid_Q = copy(Q)
+    invalid_Q[1, end] += 1
+    fallback = CYAxiverse.generate.structured_charge_evaluator(invalid_Q, L)
+    @test !fallback.representation.validated
+    @test fallback.uses_generic_fallback
+    fallback_derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+        fallback, [0.123, 0.456], invalid_Q)
+    expected_fallback = CYAxiverse.generate.logshifted_derivatives!(
+        CYAxiverse.generate.logshifted_derivative_workspace(invalid_Q, L),
+        [0.123, 0.456], invalid_Q)
+    @test fallback_derivatives.value == expected_fallback.value
+    @test fallback_derivatives.gradient == expected_fallback.gradient
+    @test fallback_derivatives.hessian == expected_fallback.hessian
+end
+
 @testset "Inflation append-only scan shards" begin
     mktempdir() do root
         geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
@@ -118,6 +170,20 @@ end
             "--resume"])
         @test run_scan_prep(resume_options)
         @test count(==('\n'), read(paths[1], String)) == 2
+
+        low_index_shard_dir = joinpath(root, "low-index-shards")
+        low_index_options = _scan_prep_parse_args([
+            "--data-dir", root, "--geometry", "2,1,1",
+            "--max-branches", "100000", "--negative-mode-range", "1:1",
+            "--shard-dir", low_index_shard_dir])
+        @test run_scan_prep(low_index_options)
+        low_index_path = inflation_shard_paths(low_index_shard_dir)[1]
+        low_index_text = read(low_index_path, String)
+        @test occursin("negative_mode_range", first(split(low_index_text, '\n')))
+        @test occursin(",1:1,", low_index_text)
+        @test (2, 1, 1) in inflation_completed_shard_geometries(
+            low_index_shard_dir; data_dir=abspath(root), max_branches=100000,
+            negative_mode_range=1:1)
 
         merged = joinpath(root, "merged.csv")
         @test inflation_merge_shards(paths, merged) == merged
@@ -527,6 +593,71 @@ end
     @test streamed_coordinates == lattice_branches.coordinates
     @test streamed_modes == lattice_branches.leading_negative_modes
     @test callback_reused[]
+
+    # A low-index search is a deterministic subset of the legacy numeric-mask
+    # ordering.  Its report keeps the exact full mask count and the selected
+    # mask/lattice coverage separate.
+    low_index_coordinates = Matrix{Float64}(undef, 2, 8)
+    low_index_modes = Int[]
+    low_index_cursor = 0
+    low_index_report = CYAxiverse.generate.foreach_leading_critical_branch(
+            lattice_selected; max_branches=1_000,
+            negative_mode_range=1:1) do theta, negative_modes
+        low_index_cursor += 1
+        low_index_coordinates[:, low_index_cursor] .= theta
+        push!(low_index_modes, negative_modes)
+    end
+    expected_low_index = findall(==(1), lattice_branches.leading_negative_modes)
+    @test low_index_coordinates == lattice_branches.coordinates[:, expected_low_index]
+    @test low_index_modes == lattice_branches.leading_negative_modes[expected_low_index]
+    @test low_index_report.branch_count == 8
+    @test low_index_report.mask_count == 4
+    @test low_index_report.masks_visited == 2
+    @test low_index_report.masks_skipped == 2
+    @test low_index_report.lattice_copy_count == 4
+    @test low_index_report.lattice_copies_visited == 8
+    @test low_index_report.search_classification == :deterministic_low_index_enumeration
+
+    low_index_branches = CYAxiverse.generate.leading_critical_branches(
+        lattice_selected; max_branches=1_000, negative_mode_range=1:1)
+    @test low_index_branches.branch_count == 8
+    @test low_index_branches.leading_minima_count == 0
+    @test low_index_branches.stream_report == low_index_report
+    @test_throws ArgumentError CYAxiverse.generate.foreach_leading_critical_branch(
+        lattice_selected; max_branches=1_000,
+        negative_mode_range=1:1, max_negative_modes=2) do theta, negative_modes
+        nothing
+    end
+
+    zero_sign_selected = CYAxiverse.generate.LQtilde(
+        [1 0 1; 0 1 1], [0.0 1.0 1.0; 0.0 -1.0 -10.0])
+    zero_sign_branches = CYAxiverse.generate.leading_critical_branches(
+        zero_sign_selected; max_branches=1_000)
+    @test sort(zero_sign_branches.leading_negative_modes) == [0, 0, 1, 1]
+    @test CYAxiverse.generate.leading_critical_branches(zero_sign_selected;
+        max_branches=1_000, negative_mode_range=1:1).branch_count == 2
+
+    # The exact count is checked before lattice-offset allocation, even when
+    # h11 is large enough that 2^h11 cannot be represented by an Int.
+    high_h11 = 150
+    high_Q = hcat(Matrix{Int}(I, high_h11, high_h11),
+        zeros(Int, high_h11, 1))
+    high_L = zeros(Float64, 2, high_h11 + 1)
+    high_L[1, :] .= 1.0
+    high_L[2, 1:high_h11] .= collect(0.0:-1.0:-149.0)
+    high_L[2, end] = -1000.0
+    high_selected = CYAxiverse.generate.LQtilde(high_Q, high_L)
+    high_report = CYAxiverse.generate.foreach_leading_critical_branch(
+        high_selected; max_branches=1_000, negative_mode_range=1:1) do theta, negative_modes
+        nothing
+    end
+    @test high_report.branch_count == 150
+    @test high_report.masks_visited == 150
+    @test high_report.mask_count == BigInt(2)^high_h11
+    @test_throws ArgumentError CYAxiverse.generate.foreach_leading_critical_branch(
+        high_selected; max_branches=1_000) do theta, negative_modes
+        nothing
+    end
 
     signed_selected = CYAxiverse.generate.LQtilde(
         [1 0 1; 0 1 1], [-1.0 1.0 1.0; 0.0 -1.0 -10.0])

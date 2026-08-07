@@ -36,10 +36,15 @@ For each `GeometryIndex(h11, polytope, frst)`:
 6. `CYAxiverse.generate.foreach_leading_critical_branch(
    selected; max_branches=...)` streams the leading branches only when the
    explicit branch cap permits it. The callback reuses one coordinate vector;
-   the scan-prep path does not materialize the full branch matrix.
+   the scan-prep path does not materialize the full branch matrix. An explicit
+   `negative_mode_range=1:1` or `1:2` performs deterministic low-index
+   enumeration; its return report records the exact full mask count, masks
+   visited/skipped, lattice copies, and search classification.
 7. The script evaluates the full `Q/L` potential derivatives on each streamed
-   branch using the package's reusable log-shifted workspace. Classification
-   policy is local to the script; it is not currently a package API.
+   branch using a validated structured base-plus-pairwise evaluator when the
+   geometry proves that representation, otherwise using the generic reusable
+   log-shifted workspace. Classification policy is local to the script; it is
+   not currently a package API.
 
 An arbitrary-geometry trajectory/refinement call is deliberately not part of
 this contract yet. It must accept a validated geometry-specific representation
@@ -96,8 +101,10 @@ pool/checkpoint/shard system required for an O(10^5) scan.
 
 `stage_branches_s` remains in the fixed CSV schema for compatibility and is
 zero in the streaming path. Branch enumeration and per-branch classification
-are measured together in `stage_classify_s`. Contract version 3 also records
-the diagnostic schema version, measurement scope, and per-stage output sizes.
+are measured together in `stage_classify_s`. Contract version 4 also records
+the diagnostic schema version, measurement scope, per-stage output sizes,
+leading-index search coverage, and structured charge validation/fallback
+status.
 
 ## Stage 4: coherent diagnostics
 

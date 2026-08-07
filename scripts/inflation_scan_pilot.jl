@@ -26,6 +26,10 @@ function _inflation_pilot_usage()
       --sample-per-h11 N    Evenly spaced geometries per h11. Default: 1.
       --max-geometries N    Global cap, sampled evenly across selected h11 groups.
       --max-branches N      Bound leading branch enumeration. Default: 100000.
+      --negative-mode-range K[:K]
+                            Search only leading branches in an index range.
+      --max-negative-modes K
+                            Search leading branches with index 0 through K.
       --shard-dir PATH      Stage 5 shard directory.
       --report PATH         Aggregated pilot report CSV.
       --run-id ID           Provenance label for shard rows.
@@ -40,10 +44,12 @@ function _inflation_pilot_parse_args(args)
         :h11 => nothing, :h11_min => nothing, :h11_max => nothing,
         :sample_per_h11 => 1, :max_geometries => nothing,
         :max_branches => 100_000, :shard_dir => "", :report => "",
+        :negative_mode_range => nothing, :max_negative_modes => nothing,
         :run_id => "", :retries => 0, :resume => false)
     valued = ("--data-dir", "--h11", "--h11-min", "--h11-max",
         "--sample-per-h11", "--max-geometries",
-        "--max-branches", "--shard-dir", "--report", "--run-id", "--retries")
+        "--max-branches", "--negative-mode-range", "--max-negative-modes",
+        "--shard-dir", "--report", "--run-id", "--retries")
     index = 1
     while index <= length(args)
         arg = args[index]
@@ -69,6 +75,11 @@ function _inflation_pilot_parse_args(args)
                 options[:max_geometries] = parse(Int, value)
             elseif arg == "--max-branches"
                 options[:max_branches] = parse(Int, value)
+            elseif arg == "--negative-mode-range"
+                options[:negative_mode_range] =
+                    inflation_parse_negative_mode_range(value)
+            elseif arg == "--max-negative-modes"
+                options[:max_negative_modes] = parse(Int, value)
             elseif arg == "--shard-dir"
                 options[:shard_dir] = value
             elseif arg == "--report"
@@ -104,6 +115,10 @@ function _inflation_pilot_parse_args(args)
     options[:max_geometries] === nothing || options[:max_geometries] > 0 ||
         error("--max-geometries must be positive")
     options[:max_branches] > 0 || error("--max-branches must be positive")
+    options[:max_negative_modes] === nothing || options[:max_negative_modes] >= 0 ||
+        error("--max-negative-modes must be nonnegative")
+    options[:negative_mode_range] === nothing || options[:max_negative_modes] === nothing ||
+        error("use only one of --negative-mode-range and --max-negative-modes")
     options[:retries] >= 0 || error("--retries must be nonnegative")
     options
 end
@@ -331,6 +346,12 @@ function _inflation_pilot_scan_options(options, geometries, shard_dir)
     args = String["--data-dir", options[:data_dir],
         "--max-branches", string(options[:max_branches]),
         "--shard-dir", shard_dir, "--shard-index", "1", "--shard-count", "1"]
+    if options[:max_negative_modes] !== nothing
+        append!(args, ["--max-negative-modes", string(options[:max_negative_modes])])
+    elseif options[:negative_mode_range] !== nothing
+        append!(args, ["--negative-mode-range",
+            inflation_negative_mode_range_label(options[:negative_mode_range])])
+    end
     isempty(options[:run_id]) || append!(args, ["--run-id", options[:run_id]])
     options[:retries] == 0 || append!(args, ["--retries", string(options[:retries])])
     options[:resume] && push!(args, "--resume")

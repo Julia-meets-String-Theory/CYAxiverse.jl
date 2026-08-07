@@ -16,7 +16,10 @@ const SCAN_PREP_FIELDS = (
     :contract_version, :diagnostic_schema_version, :measurement_scope,
     :data_dir, :max_branches,
     :h11, :polytope, :frst, :status, :error,
-    :instantons, :selected_instantons, :qtilde_det,
+    :instantons, :selected_instantons, :qtilde_det, :negative_mode_range,
+    :structured_charge_validated, :structured_fallback_reason,
+    :search_classification, :mask_count, :masks_visited, :masks_skipped,
+    :lattice_copy_count, :lattice_copies_visited,
     :leading_log_gap, :log_scale_span, :strong_hierarchy,
     :branch_count, :leading_minima_count, :saddle_count,
     :candidate_slowroll_saddles, :least_tachyonic_min_eta,
@@ -44,6 +47,11 @@ function _scan_prep_usage()
       --offset N            Skip the first N selected geometries.
       --geometry H,P,F      Process an explicit geometry; may be repeated.
       --max-branches N      Bound leading branch enumeration. Default: 1000000.
+      --negative-mode-range K[:K]
+                            Search only leading branches in an index range;
+                            default: all.
+      --max-negative-modes K
+                            Search leading branches with index 0 through K.
       --summary PATH        Stream one preparation row per geometry to PATH.
       --append-summary      Append to an existing compatible summary.
       --resume              Skip successful/branch-cap rows matching this run configuration.
@@ -60,11 +68,13 @@ function _scan_prep_parse_args(args)
         :data_dir => get(ENV, "CYAXIVERSE_DATA_DIR", ""),
         :h11 => nothing, :limit => nothing, :offset => 0,
         :geometries => GeometryIndex[], :max_branches => 1_000_000,
+        :negative_mode_range => nothing, :max_negative_modes => nothing,
         :summary => "", :append_summary => false, :resume => false,
         :shard_dir => "", :shard_index => 1, :shard_count => 1,
         :run_id => "", :retries => 0)
     valued = ("--data-dir", "--h11", "--limit", "--offset", "--geometry",
-        "--max-branches", "--summary", "--shard-dir", "--shard-index",
+        "--max-branches", "--negative-mode-range", "--max-negative-modes",
+        "--summary", "--shard-dir", "--shard-index",
         "--shard-count", "--run-id", "--retries")
     index = 1
     while index <= length(args)
@@ -93,6 +103,11 @@ function _scan_prep_parse_args(args)
                 push!(options[:geometries], GeometryIndex(parts...))
             elseif arg == "--max-branches"
                 options[:max_branches] = parse(Int, value)
+            elseif arg == "--negative-mode-range"
+                options[:negative_mode_range] =
+                    inflation_parse_negative_mode_range(value)
+            elseif arg == "--max-negative-modes"
+                options[:max_negative_modes] = parse(Int, value)
             elseif arg == "--summary"
                 options[:summary] = value
             elseif arg == "--shard-dir"
@@ -118,6 +133,15 @@ function _scan_prep_parse_args(args)
     options[:limit] === nothing || options[:limit] > 0 || error("--limit must be positive")
     options[:offset] >= 0 || error("--offset must be nonnegative")
     options[:max_branches] > 0 || error("--max-branches must be positive")
+    options[:negative_mode_range] === nothing ||
+        (first(options[:negative_mode_range]) >= 0 &&
+         last(options[:negative_mode_range]) >= first(options[:negative_mode_range])) ||
+        error("--negative-mode-range must be nonnegative and ordered")
+    options[:max_negative_modes] === nothing ||
+        options[:max_negative_modes] >= 0 ||
+        error("--max-negative-modes must be nonnegative")
+    options[:negative_mode_range] === nothing || options[:max_negative_modes] === nothing ||
+        error("use only one of --negative-mode-range and --max-negative-modes")
     isempty(options[:summary]) || isempty(options[:shard_dir]) ||
         error("--summary and --shard-dir are mutually exclusive")
     options[:shard_count] > 0 || error("--shard-count must be positive")
@@ -236,14 +260,16 @@ function _scan_prep_write_header(path::AbstractString; append::Bool=false)
     path
 end
 
-function _scan_prep_completed(path::AbstractString; data_dir, max_branches)
+function _scan_prep_completed(path::AbstractString; data_dir, max_branches,
+        negative_mode_range=nothing, max_negative_modes=nothing)
     completed = Set{Tuple{Int, Int, Int}}()
     isfile(path) || return completed
     lines = readlines(path)
     isempty(lines) && return completed
     header = _scan_prep_csv_fields(lines[1])
     positions = Dict(Symbol(name) => index for (index, name) in enumerate(header))
-    required = (:contract_version, :data_dir, :max_branches, :h11, :polytope, :frst, :status)
+    required = (:contract_version, :data_dir, :max_branches,
+        :negative_mode_range, :h11, :polytope, :frst, :status)
     all(name -> haskey(positions, name), required) ||
         throw(ArgumentError("summary is missing scan-prep resume fields: $path"))
     for line in @view lines[2:end]
@@ -254,6 +280,11 @@ function _scan_prep_completed(path::AbstractString; data_dir, max_branches)
         fields[positions[:data_dir]] == data_dir || continue
         try
             parse(Int, fields[positions[:max_branches]]) == max_branches || continue
+            expected_range = negative_mode_range === nothing && max_negative_modes === nothing ?
+                "all" : max_negative_modes === nothing ?
+                inflation_negative_mode_range_label(negative_mode_range) :
+                inflation_negative_mode_range_label(0:max_negative_modes)
+            fields[positions[:negative_mode_range]] == expected_range || continue
             status = fields[positions[:status]]
             status in ("success", "branch_cap") || continue
             key = (parse(Int, fields[positions[:h11]]),
@@ -267,13 +298,18 @@ function _scan_prep_completed(path::AbstractString; data_dir, max_branches)
     completed
 end
 
-function _scan_prep_append(path::AbstractString, summary; data_dir, max_branches, error="")
+function _scan_prep_append(path::AbstractString, summary; data_dir, max_branches,
+        negative_mode_range=nothing, max_negative_modes=nothing, error="")
     values = Any[]
     for field in SCAN_PREP_FIELDS
         value = if field === :data_dir
             data_dir
         elseif field === :max_branches
             max_branches
+        elseif field === :negative_mode_range
+            max_negative_modes === nothing ?
+                inflation_negative_mode_range_label(negative_mode_range) :
+                inflation_negative_mode_range_label(0:max_negative_modes)
         elseif field === :error
             error
         elseif hasproperty(summary, field)
@@ -311,7 +347,9 @@ function run_scan_prep(options)
         inflation_prepare_shard(shard_path;
             append=options[:append_summary] || options[:resume])
         resumable = options[:resume] ? inflation_completed_shard_geometries(
-            shard_dir; data_dir, max_branches=options[:max_branches]) :
+            shard_dir; data_dir, max_branches=options[:max_branches],
+            negative_mode_range=options[:negative_mode_range],
+            max_negative_modes=options[:max_negative_modes]) :
             Set{Tuple{Int, Int, Int}}()
     else
         options[:resume] && !isfile(summary_path) &&
@@ -319,11 +357,16 @@ function run_scan_prep(options)
         _scan_prep_write_header(summary_path;
             append=options[:append_summary] || options[:resume])
         resumable = options[:resume] ? _scan_prep_completed(summary_path;
-            data_dir, max_branches=options[:max_branches]) : Set{Tuple{Int, Int, Int}}()
+            data_dir, max_branches=options[:max_branches],
+            negative_mode_range=options[:negative_mode_range],
+            max_negative_modes=options[:max_negative_modes]) : Set{Tuple{Int, Int, Int}}()
     end
 
-    @printf("Inflation scan-prep: %d geometries max_branches=%d\n",
-        length(geoms), options[:max_branches])
+    range_label = options[:max_negative_modes] === nothing ?
+        inflation_negative_mode_range_label(options[:negative_mode_range]) :
+        inflation_negative_mode_range_label(0:options[:max_negative_modes])
+    @printf("Inflation scan-prep: %d geometries max_branches=%d leading_index=%s\n",
+        length(geoms), options[:max_branches], range_label)
     if shard_mode
         @printf("data_dir=%s\nshard=%s\nrun_id=%s\n", data_dir, shard_path, run_id)
     else
@@ -350,7 +393,9 @@ function run_scan_prep(options)
             measurement_scope = index == 1 ? :cold : :warm
             summary = try
                 run_geometry(geom_idx; max_branches=options[:max_branches],
-                    measurement_scope)
+                    measurement_scope,
+                    negative_mode_range=options[:negative_mode_range],
+                    max_negative_modes=options[:max_negative_modes])
             catch error
                 failure = _scan_prep_error_status(error)
                 (; contract_version=INFLATION_SCAN_CONTRACT_VERSION,
@@ -371,10 +416,16 @@ function run_scan_prep(options)
                     run_id, shard_index=options[:shard_index],
                     shard_count=options[:shard_count], attempt,
                     started_unix_s=started, finished_unix_s=time(), data_dir,
-                    max_branches=options[:max_branches], error_message=final_message)
+                    max_branches=options[:max_branches],
+                    negative_mode_range=options[:negative_mode_range],
+                    max_negative_modes=options[:max_negative_modes],
+                    error_message=final_message)
             else
                 _scan_prep_append(summary_path, final_summary; data_dir,
-                    max_branches=options[:max_branches], error=final_message)
+                    max_branches=options[:max_branches],
+                    negative_mode_range=options[:negative_mode_range],
+                    max_negative_modes=options[:max_negative_modes],
+                    error=final_message)
             end
             final_summary.status in (:failed,) && attempt <= options[:retries] &&
                 continue
