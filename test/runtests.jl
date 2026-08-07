@@ -32,10 +32,31 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
             from_geometry = CYAxiverse.generate.LQtilde(geom_idx)
             from_matrices = CYAxiverse.generate.LQtilde(
                 Int[1 0 1; 0 1 1], Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0])
+            oriented = CYAxiverse.read.oriented_potential(geom_idx)
+            @test oriented.Q == Int[1 0 1; 0 1 1]
+            @test oriented.L == Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+            @test Matrix(oriented.K) == Matrix{Float64}(I, 2, 2)
             @test from_geometry.Qtilde == from_matrices.Qtilde
             @test from_geometry.Ltilde == from_matrices.Ltilde
             @test from_geometry.Qbar == from_matrices.Qbar
             @test from_geometry.Lbar == from_matrices.Lbar
+
+            transposed_dir = joinpath(root, "h11_002", "np_0000002", "cy_0000001")
+            mkpath(transposed_dir)
+            h5open(joinpath(transposed_dir, "cyax.h5"), "cw") do file
+                cytools = create_group(file, "cytools")
+                potential = create_group(cytools, "potential")
+                geometric = create_group(cytools, "geometric")
+                potential["Q"] = Int[1 0; 0 1; 1 1]
+                potential["L"] = Float64[1.0 0.0; 1.0 -1.0; 1.0 -10.0]
+                geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+            end
+            transposed = CYAxiverse.read.oriented_potential(
+                CYAxiverse.structs.GeometryIndex(2, 2, 1))
+            @test size(transposed.Q) == (2, 3)
+            @test size(transposed.L) == (2, 3)
+            @test transposed.Q == Int[1 0 1; 0 1 1]
+            @test transposed.L == Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
         finally
             old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
@@ -119,6 +140,30 @@ end
 @testset "Inflation stratified pilot selection and report" begin
     @test _leading_branch_det_qtilde(4, 2) == 1
     @test _leading_branch_det_qtilde(1, 150) == 0
+    @test inflation_screening_tier(50) == :normal
+    @test inflation_screening_tier(100) == :middle
+    @test inflation_screening_tier(150) == :high_memory_queue
+    @test inflation_branch_estimate_lower_bound(150) == big(2)^150
+    @test !inflation_refinement_eligible((status=:success, h11=150,
+        candidate_count=1, allocated_bytes=1, output_bytes=1))
+    @test inflation_refinement_eligible((status=:success, h11=15,
+        candidate_count=1, allocated_bytes=1, output_bytes=1))
+    high_h11_selected = CYAxiverse.structs.LQLinearlyIndependent(
+        Matrix{Int}(I, 150, 150), zeros(Int, 150, 0),
+        zeros(Float64, 2, 0),
+        vcat(ones(Float64, 1, 150), zeros(Float64, 1, 150)))
+    high_h11_error = try
+        CYAxiverse.generate.foreach_leading_critical_branch(
+            high_h11_selected; max_branches=100_000) do _, _
+            nothing
+        end
+        nothing
+    catch error
+        error
+    end
+    @test high_h11_error isa ArgumentError
+    @test occursin("1427247692705959881058285969449495136382746624 branches",
+        sprint(showerror, high_h11_error))
     mktempdir() do root
         for (h11, count) in ((4, 3), (8, 2))
             for index in 1:count
@@ -138,6 +183,10 @@ end
             sample_per_h11=2, max_geometries=3)
         @test length(capped) == 3
         @test capped[1].h11 == 4
+        middle_only = inflation_pilot_select_geometries(root;
+            h11_min=8, h11_max=8, sample_per_h11=2)
+        @test length(middle_only) == 2
+        @test all(geom -> geom.h11 == 8, middle_only)
 
         rows = [
             (h11=4, polytope=1, frst=1, status=:success, attempt=1,

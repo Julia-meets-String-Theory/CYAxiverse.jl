@@ -1933,16 +1933,22 @@ function foreach_leading_critical_branch(callback::Function,
     h11 = size(selected.Qtilde, 1)
     offsets = leading_lattice_offsets(selected; tolerance=tolerance)
     det_qtilde = size(offsets, 2)
-    branch_count = det_qtilde * 2^h11
-    branch_count <= max_branches ||
+    # Keep the estimate exact until the explicit cap has been checked.  An
+    # Int-valued `2^h11` silently wrapped to zero for the high-dimensional
+    # geometries in the expanded corpus, making the mask loop empty and
+    # misreporting a bounded branch-cap case as a successful zero-branch
+    # enumeration.
+    branch_count = BigInt(det_qtilde) * (BigInt(2)^h11)
+    branch_count <= BigInt(max_branches) ||
         throw(ArgumentError("leading branch enumeration would create $branch_count branches; increase max_branches explicitly if intended"))
+    mask_count = Int(BigInt(2)^h11)
 
     inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
     half_phase = zeros(Float64, h11)
     base = zeros(Float64, h11)
     theta = zeros(Float64, h11)
     signs = @view selected.Ltilde[1, :]
-    for mask in 0:(2^h11 - 1)
+    for mask in 0:(mask_count - 1)
         @inbounds for i in 1:h11
             half_phase[i] = ((mask >> (i - 1)) & 1) == 1 ? 0.5 : 0.0
         end
@@ -1983,12 +1989,13 @@ function leading_critical_branches(selected::LQLinearlyIndependent;
     h11 = size(selected.Qtilde, 1)
     offsets = leading_lattice_offsets(selected; tolerance=tolerance)
     det_qtilde = size(offsets, 2)
-    branch_count = det_qtilde * 2^h11
-    branch_count <= max_branches ||
+    branch_count = BigInt(det_qtilde) * (BigInt(2)^h11)
+    branch_count <= BigInt(max_branches) ||
         throw(ArgumentError("leading branch enumeration would create $branch_count branches; increase max_branches explicitly if intended"))
 
-    coordinates = zeros(Float64, h11, branch_count)
-    leading_negative_modes = Vector{Int}(undef, branch_count)
+    branch_count_int = Int(branch_count)
+    coordinates = zeros(Float64, h11, branch_count_int)
+    leading_negative_modes = Vector{Int}(undef, branch_count_int)
     branch_cursor = Ref(0)
     foreach_leading_critical_branch(selected; tolerance, max_branches) do theta, negative_modes
         branch_cursor[] += 1

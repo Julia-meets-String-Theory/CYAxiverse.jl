@@ -17,31 +17,48 @@ using Statistics
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
 const INFLATION_SCAN_CONTRACT_VERSION = "3"
 
-function _timed_call(f; measurement_scope::Symbol=:unspecified)
-    inflation_stage_measure(f; measurement_scope)
+"""Script-level resource and refinement policy for bounded screening."""
+const INFLATION_SCREENING_POLICY = (
+    normal_h11_max=50,
+    middle_h11_max=100,
+    high_memory_h11_min=101,
+    max_stage_allocated_bytes=750_000_000,
+    max_stage_output_bytes=300_000_000,
+)
+
+function inflation_screening_tier(h11::Integer;
+        policy=INFLATION_SCREENING_POLICY)
+    h11 > 0 || throw(ArgumentError("h11 must be positive"))
+    h11 <= policy.normal_h11_max ? :normal :
+        h11 <= policy.middle_h11_max && h11 < policy.high_memory_h11_min ?
+        :middle : :high_memory_queue
 end
 
-function _oriented_potential(geom_idx::GeometryIndex)
-    potential = CYAxiverse.read.potential(geom_idx)
-    Q = Matrix{Int}(potential.Q)
-    L = Matrix{Float64}(potential.L)
-    if size(L, 1) != 2 && size(L, 2) == 2
-        L = Matrix(L')
-    end
-    if size(Q, 2) != size(L, 2) && size(Q, 1) == size(L, 2)
-        Q = Matrix(Q')
-    end
-    size(L, 1) == 2 || throw(DimensionMismatch("L must have two rows"))
-    size(Q, 2) == size(L, 2) ||
-        throw(DimensionMismatch("Q and L must have the same instanton count"))
-    size(Q, 1) == size(potential.K, 1) ||
-        throw(DimensionMismatch("Q and K must have the same axion count"))
-    size(Q, 2) > size(Q, 1) ||
-        throw(DimensionMismatch("Q must contain more instantons than axions"))
-    all(isfinite, L) || throw(ArgumentError("L contains non-finite values"))
-    K = Hermitian(Matrix{Float64}(potential.K))
-    all(isfinite, Matrix(K)) || throw(ArgumentError("K contains non-finite values"))
-    Q, L, K
+"""Exact lower bound on the half-integer branch multiplicity."""
+inflation_branch_estimate_lower_bound(h11::Integer) = BigInt(2)^h11
+
+"""Return whether a completed screen is eligible for Stage 3 refinement."""
+function inflation_refinement_eligible(summary;
+        policy=INFLATION_SCREENING_POLICY)
+    status = hasproperty(summary, :status) ? summary.status : :failed
+    candidates = hasproperty(summary, :candidate_slowroll_saddles) ?
+        summary.candidate_slowroll_saddles :
+        (hasproperty(summary, :candidate_count) ? summary.candidate_count : 0)
+    allocated = hasproperty(summary, :stage_allocated_bytes) ?
+        summary.stage_allocated_bytes :
+        (hasproperty(summary, :allocated_bytes) ? summary.allocated_bytes : 0)
+    output = hasproperty(summary, :stage_output_bytes) ?
+        summary.stage_output_bytes :
+        (hasproperty(summary, :output_bytes) ? summary.output_bytes : 0)
+    h11 = hasproperty(summary, :h11) ? summary.h11 : typemax(Int)
+    status == :success && candidates > 0 &&
+        inflation_screening_tier(h11; policy) != :high_memory_queue &&
+        allocated <= policy.max_stage_allocated_bytes &&
+        output <= policy.max_stage_output_bytes
+end
+
+function _timed_call(f; measurement_scope::Symbol=:unspecified)
+    inflation_stage_measure(f; measurement_scope)
 end
 
 function _normalized_derivatives(theta::AbstractVector{<:Real},
@@ -203,8 +220,9 @@ function run_geometry(geom_idx::GeometryIndex; max_branches::Int=1_000_000,
         measurement_scope::Symbol=:unspecified)
     max_branches > 0 || throw(ArgumentError("max_branches must be positive"))
     started = time_ns()
-    loaded = _timed_call(() -> _oriented_potential(geom_idx); measurement_scope)
-    Q, L, K = loaded.value
+    loaded = _timed_call(() -> CYAxiverse.read.oriented_potential(geom_idx);
+        measurement_scope)
+    Q, L, K = loaded.value.Q, loaded.value.L, loaded.value.K
 
     selected = _timed_call(() -> CYAxiverse.generate.LQtilde(Q, L);
         measurement_scope)

@@ -186,6 +186,30 @@ the h11=300 sample produced approximately 589 MB of stage allocations and 226
 MB of stage output, reinforcing that high-dimensional screening needs an
 explicit resource policy before a large scan.
 
+## High-dimensional enumeration audit and policy
+
+The h11=150 and h11=300 pilot geometries were audited directly after the
+integer-safety fix. Their selected charge matrices are full rank with exact
+determinants 2 and 4, respectively. The branch counts are therefore
+`2 * 2^150` and `4 * 2^300`; with `max_branches=100000`, both now raise the
+explicit branch-cap `ArgumentError` before the callback. The earlier zero
+streamed branches were an Int overflow in the mask count, not a mathematically
+empty leading set. The h11=15 comparison geometry streams 32,768 branches.
+
+The package computes branch estimates with `BigInt` and converts to an Int
+mask count only after the cap check. Scan policy remains script-local:
+
+- normal screening tier: `h11 <= 50`;
+- middle screening tier: `51 <= h11 <= 100`;
+- high-memory queue: `h11 >= 101`;
+- Stage 3 refinement requires a successful candidate in the normal or middle
+  tier, with at most 750 MB cumulative stage allocation and 300 MB stage
+  output.
+
+`inflation_screening_tier`, `inflation_refinement_eligible`, and the exact
+lower-bound helper are policy/diagnostic helpers only; they do not alter the
+locked numerical call sequence.
+
 ## Real-geometry bounded scalability slice
 
 The first real-data slice used the local `../../data` corpus with
@@ -240,15 +264,15 @@ This confirms that the refinement stage must remain opt-in and
 candidate-limited. It also means this adapter is a contract/provenance
 boundary, not yet a production refiner for the real-geometry corpus.
 
-## Workflow API candidates for a later overhaul
+## Workflow API boundaries and remaining candidates
 
 This is a deliberately short inventory of functions used by the current
 inflation reproduction and screening work. It identifies reusable numerical
-boundaries without changing the package in this scan-prep phase.
+boundaries while keeping orchestration and policy in the scripts.
 
 | Current script function | Eventual package boundary | Decision for this phase |
 | --- | --- | --- |
-| `inflation_scan_common.jl::_oriented_potential` and `analyze_inflation_candidates.jl::oriented_potential` | A central input-normalization and validation function returning the package's canonical `Q`, `L`, and `K` orientation | Keep script-local; avoid two independent implementations when the API work begins |
+| Former duplicate orientation helpers in `inflation_scan_common.jl` and `analyze_inflation_candidates.jl` | `CYAxiverse.read.oriented_potential`, returning the package's canonical `Q`, `L`, and `K` orientation | Promoted; both callers now use the package helper, while thresholds and policy remain script-local |
 | `inflation_scan_common.jl::_normalized_derivatives` and `analyze_inflation_candidates.jl::derivatives` | `generate.logshifted_derivative_workspace` plus the in-place `generate.logshifted_derivatives!` evaluator | Promoted narrowly; the reusable buffers and numerical stabilization are package-owned, while scan thresholds are not |
 | `inflation_scan_common.jl::_classify_point` and `analyze_inflation_candidates.jl::classify_point` | A reusable canonical-gradient and Hessian diagnostic, accepting a caller-owned factorization or prepared context | Strong API candidate; keep `epsilon < 1`, `|eta| < 1`, and saddle-selection policy in the script |
 | `inflation_scan_common.jl::_classify_branches` | `generate.foreach_leading_critical_branch` for streaming, plus per-branch diagnostics later; not an aggregate `scan` API | Streaming branch enumeration promoted; aggregate classification policy remains script-local |
@@ -259,11 +283,11 @@ boundaries without changing the package in this scan-prep phase.
 | `inflation_refinement_common.jl::refine_inflation_candidate` | A future model-dispatched refinement boundary with explicit candidate and solver metadata | Implemented script-level for `:n8_poly102`; do not promote until arbitrary-geometry trajectory inputs exist |
 | `benchmark_inflation_scalability.jl::trajectory` | A future model-specific trajectory entry point with explicit solver/event metadata | Keep under `paper_benchmarks`; it is not a generic geometry scan API |
 
-The immediate implementation therefore only shares the locked call sequence
-between the contract probe and `scripts/inflation_scan_prep.jl`. No candidate
-other than the derivative workspace and streaming branch enumerator is promoted
-into the package yet, and
-unrelated batch, persistence, and plotting helpers are outside this inventory.
+The current implementation shares the locked call sequence between the
+contract probe and `scripts/inflation_scan_prep.jl`, and promotes only the
+canonical orientation boundary in addition to the existing derivative
+workspace and streaming branch primitives. Unrelated batch, persistence, and
+plotting helpers remain outside this inventory.
 
 The derivative workspace and streaming branch enumerator are deliberate narrow
 exceptions: they are reusable numerical primitives now used by the script,

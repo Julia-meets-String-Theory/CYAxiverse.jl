@@ -21,6 +21,8 @@ function _inflation_pilot_usage()
     Options:
       --data-dir PATH       Data root containing h11_*/np_*/cy_*/cyax.h5.
       --h11 N               Restrict the pilot to one h11 value.
+      --h11-min N           Restrict the pilot to h11 >= N.
+      --h11-max N           Restrict the pilot to h11 <= N.
       --sample-per-h11 N    Evenly spaced geometries per h11. Default: 1.
       --max-geometries N    Global cap, sampled evenly across selected h11 groups.
       --max-branches N      Bound leading branch enumeration. Default: 100000.
@@ -35,10 +37,12 @@ end
 function _inflation_pilot_parse_args(args)
     options = Dict{Symbol, Any}(
         :data_dir => get(ENV, "CYAXIVERSE_DATA_DIR", ""),
-        :h11 => nothing, :sample_per_h11 => 1, :max_geometries => nothing,
+        :h11 => nothing, :h11_min => nothing, :h11_max => nothing,
+        :sample_per_h11 => 1, :max_geometries => nothing,
         :max_branches => 100_000, :shard_dir => "", :report => "",
         :run_id => "", :retries => 0, :resume => false)
-    valued = ("--data-dir", "--h11", "--sample-per-h11", "--max-geometries",
+    valued = ("--data-dir", "--h11", "--h11-min", "--h11-max",
+        "--sample-per-h11", "--max-geometries",
         "--max-branches", "--shard-dir", "--report", "--run-id", "--retries")
     index = 1
     while index <= length(args)
@@ -55,6 +59,10 @@ function _inflation_pilot_parse_args(args)
                 options[:data_dir] = value
             elseif arg == "--h11"
                 options[:h11] = parse(Int, value)
+            elseif arg == "--h11-min"
+                options[:h11_min] = parse(Int, value)
+            elseif arg == "--h11-max"
+                options[:h11_max] = parse(Int, value)
             elseif arg == "--sample-per-h11"
                 options[:sample_per_h11] = parse(Int, value)
             elseif arg == "--max-geometries"
@@ -79,6 +87,19 @@ function _inflation_pilot_parse_args(args)
     isempty(options[:data_dir]) && error("--data-dir or CYAXIVERSE_DATA_DIR is required")
     options[:data_dir] = abspath(expanduser(options[:data_dir]))
     options[:h11] === nothing || options[:h11] > 0 || error("--h11 must be positive")
+    options[:h11_min] === nothing || options[:h11_min] > 0 ||
+        error("--h11-min must be positive")
+    options[:h11_max] === nothing || options[:h11_max] > 0 ||
+        error("--h11-max must be positive")
+    options[:h11] === nothing || options[:h11_min] === nothing ||
+        options[:h11] >= options[:h11_min] ||
+        error("--h11 must be at least --h11-min")
+    options[:h11] === nothing || options[:h11_max] === nothing ||
+        options[:h11] <= options[:h11_max] ||
+        error("--h11 must be at most --h11-max")
+    options[:h11_min] === nothing || options[:h11_max] === nothing ||
+        options[:h11_min] <= options[:h11_max] ||
+        error("--h11-min must not exceed --h11-max")
     options[:sample_per_h11] > 0 || error("--sample-per-h11 must be positive")
     options[:max_geometries] === nothing || options[:max_geometries] > 0 ||
         error("--max-geometries must be positive")
@@ -87,12 +108,15 @@ function _inflation_pilot_parse_args(args)
     options
 end
 
-function _inflation_pilot_h11_values(data_dir::AbstractString, h11_filter)
+function _inflation_pilot_h11_values(data_dir::AbstractString, h11_filter;
+        h11_min=nothing, h11_max=nothing)
     values = Int[]
     for name in sort(readdir(data_dir))
         h11 = _scan_prep_parse_prefixed_int(name, "h11_")
         h11 === nothing && continue
         h11_filter === nothing || h11 == h11_filter || continue
+        h11_min === nothing || h11 >= h11_min || continue
+        h11_max === nothing || h11 <= h11_max || continue
         isdir(joinpath(data_dir, name)) && push!(values, h11)
     end
     sort!(unique(values))
@@ -148,8 +172,10 @@ end
 
 """Select evenly spaced geometries per h11, with an optional round-robin cap."""
 function inflation_pilot_select_geometries(data_dir::AbstractString;
-        h11_filter=nothing, sample_per_h11::Int=1, max_geometries=nothing)
-    h11_values = _inflation_pilot_h11_values(data_dir, h11_filter)
+        h11_filter=nothing, h11_min=nothing, h11_max=nothing,
+        sample_per_h11::Int=1, max_geometries=nothing)
+    h11_values = _inflation_pilot_h11_values(data_dir, h11_filter;
+        h11_min, h11_max)
     groups = Dict{Int, Vector{GeometryIndex}}()
     for h11 in h11_values
         total = _inflation_pilot_group_count(data_dir, h11)
@@ -258,11 +284,14 @@ function _inflation_pilot_report_rows(rows)
     for key in sort(collect(keys(groups)))
         group = groups[key]
         statuses = [row.status for row in group]
-        push!(reports, (; h11=key[1], instanton_bin=key[2],
+        push!(reports, (; h11=key[1], screening_tier=string(
+                inflation_screening_tier(key[1])), instanton_bin=key[2],
             hierarchy_bin=key[3], candidate_bin=key[4], geometries=length(group),
             successes=count(==(Symbol(:success)), statuses),
             branch_caps=count(==(Symbol(:branch_cap)), statuses),
             failures=count(==(Symbol(:failed)), statuses),
+            empty_enumerations=count(==(Symbol(:empty_enumeration)), statuses),
+            refinement_eligible=count(inflation_refinement_eligible, group),
             mean_instantons=_inflation_pilot_mean(group, :instantons),
             mean_leading_log_gap=_inflation_pilot_mean(group, :leading_log_gap),
             mean_log_scale_span=_inflation_pilot_mean(group, :log_scale_span),
@@ -277,8 +306,9 @@ function _inflation_pilot_report_rows(rows)
 end
 
 const INFLATION_PILOT_REPORT_FIELDS = (
-    :h11, :instanton_bin, :hierarchy_bin, :candidate_bin, :geometries,
-    :successes, :branch_caps, :failures, :mean_instantons,
+    :h11, :screening_tier, :instanton_bin, :hierarchy_bin, :candidate_bin,
+    :geometries, :successes, :branch_caps, :failures, :empty_enumerations,
+    :refinement_eligible, :mean_instantons,
     :mean_leading_log_gap, :mean_log_scale_span, :mean_branch_count,
     :mean_candidate_count, :mean_total_seconds, :mean_allocated_bytes,
     :max_allocated_bytes, :mean_output_bytes)
@@ -314,7 +344,8 @@ end
 function run_inflation_pilot(options)
     data_dir = _scan_prep_validate_data_dir(options[:data_dir])
     selected = inflation_pilot_select_geometries(data_dir;
-        h11_filter=options[:h11], sample_per_h11=options[:sample_per_h11],
+        h11_filter=options[:h11], h11_min=options[:h11_min],
+        h11_max=options[:h11_max], sample_per_h11=options[:sample_per_h11],
         max_geometries=options[:max_geometries])
     isempty(selected) && throw(ArgumentError("pilot selected no geometries"))
     shard_dir = isempty(options[:shard_dir]) ?

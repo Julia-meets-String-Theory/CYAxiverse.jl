@@ -116,6 +116,13 @@ not allocate the full physical-mode charge matrix.
 schema stores this array under `decay/fpert` for compatibility with existing
 readers.
 
+## Inflation screening
+
+`CYAxiverse.read.oriented_potential(geom_idx)` is the package-owned
+normalization boundary for screening inputs. It returns canonical `Q`, `L`,
+and `K` orientations and validates dimensions and finite numerical data; scan
+thresholds and resource policy remain script-level decisions.
+
 ### Large-geometry scaling checkpoint
 
 The mass-only hybrid solver was validated on ten geometries each at

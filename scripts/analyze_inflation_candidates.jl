@@ -8,20 +8,6 @@ using Statistics
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
 
-function oriented_potential(geom_idx)
-    pot = CYAxiverse.read.potential(geom_idx)
-    Q = Matrix{Int}(pot.Q)
-    L = Matrix{Float64}(pot.L)
-    if size(L, 1) != 2 && size(L, 2) == 2
-        L = Matrix(L')
-    end
-    if size(Q, 2) != size(L, 2) && size(Q, 1) == size(L, 2)
-        Q = Matrix(Q')
-    end
-    K = Matrix(pot.K)
-    Q, L, K
-end
-
 function derivatives(theta, Q, L)
     logscale = L[2, :]
     amplitudes = L[1, :] .* 10.0 .^ (logscale .- maximum(logscale))
@@ -64,7 +50,8 @@ function reduced_solve(Q, L, selected; starts)
 end
 
 function analyze_geometry(geom_idx; starts=8192)
-    Q, L, K = oriented_potential(geom_idx)
+    oriented = CYAxiverse.read.oriented_potential(geom_idx)
+    Q, L, K = oriented.Q, oriented.L, oriented.K
     selected = CYAxiverse.generate.LQtilde(Q, L)
     hierarchy = CYAxiverse.generate.instanton_hierarchy_diagnostics(L)
     solved = reduced_solve(Q, L, selected; starts=starts)
