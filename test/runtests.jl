@@ -366,6 +366,21 @@ end
     @test count(==(0), lattice_branches.leading_negative_modes) == 4
     @test count(==(1), lattice_branches.leading_negative_modes) == 8
     @test count(==(2), lattice_branches.leading_negative_modes) == 4
+    streamed_coordinates = zeros(Float64, size(lattice_branches.coordinates))
+    streamed_modes = Int[]
+    callback_theta = Ref{Any}(nothing)
+    callback_reused = Ref(true)
+    CYAxiverse.generate.foreach_leading_critical_branch(lattice_selected;
+            max_branches=1_000) do theta, negative_modes
+        callback_theta[] === nothing ||
+            (callback_reused[] &= callback_theta[] === theta)
+        callback_theta[] = theta
+        push!(streamed_modes, negative_modes)
+        streamed_coordinates[:, length(streamed_modes)] .= theta
+    end
+    @test streamed_coordinates == lattice_branches.coordinates
+    @test streamed_modes == lattice_branches.leading_negative_modes
+    @test callback_reused[]
 
     signed_selected = CYAxiverse.generate.LQtilde(
         [1 0 1; 0 1 1], [-1.0 1.0 1.0; 0.0 -1.0 -10.0])

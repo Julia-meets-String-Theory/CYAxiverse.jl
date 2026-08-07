@@ -33,12 +33,13 @@ For each `GeometryIndex(h11, polytope, frst)`:
    K, selected.Ltilde, selected.Qtilde)` supplies a Float64 mass-basis
    diagnostic. It is a screening diagnostic, not the arbitrary-precision
    trajectory calculation.
-6. `CYAxiverse.generate.leading_critical_branches(
-   selected; max_branches=...)` enumerates the leading branches only when the
-   explicit branch cap permits it.
-7. The script evaluates the full `Q/L` potential derivatives on each returned
-   branch using log-shifted amplitudes. Classification is local to the script;
-   it is not currently a package API.
+6. `CYAxiverse.generate.foreach_leading_critical_branch(
+   selected; max_branches=...)` streams the leading branches only when the
+   explicit branch cap permits it. The callback reuses one coordinate vector;
+   the scan-prep path does not materialize the full branch matrix.
+7. The script evaluates the full `Q/L` potential derivatives on each streamed
+   branch using the package's reusable log-shifted workspace. Classification
+   policy is local to the script; it is not currently a package API.
 
 The generic trajectory/refinement call is deliberately not part of this
 contract yet. It must accept a validated geometry-specific representation and
@@ -90,6 +91,33 @@ data root, branch cap, and status `success` or `branch_cap`; failed rows are
 retried. This is a bounded scan-prep mechanism, not yet the production worker
 pool/checkpoint/shard system required for an O(10^5) scan.
 
+`stage_branches_s` remains in the fixed CSV schema for compatibility and is
+zero in the streaming path. Branch enumeration and per-branch classification
+are measured together in `stage_classify_s`.
+
+## Real-geometry bounded scalability slice
+
+The first real-data slice used the local `../../data` corpus with
+`--max-branches 100000`. The first geometry in each process was excluded from
+the warm averages because it includes Julia compilation and method-cache work.
+`stage_allocated_bytes` is the total of all preparation stages, not retained
+memory; the streaming callback prevents the branch-coordinate matrix from
+being retained.
+
+| h11 | warm geometries | mean branches | max branches | mean classify s | mean stage bytes | max stage bytes |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 9 | 739.6 | 1,024 | 0.004968 | 2,900,404 | 3,993,824 |
+| 10 | 9 | 1,934.2 | 4,096 | 0.017375 | 9,204,213 | 19,367,744 |
+| 11 | 4 | 7,168.0 | 10,240 | 0.080929 | 34,513,420 | 49,466,784 |
+
+These are bounded slices, not a full-corpus throughput claim. The remaining
+per-branch allocation is the public `LAPACK.syevd!` eigensolver workspace:
+on the warm synthetic h11=14 probe it allocated 4,432 bytes per call, while
+the derivative and BLAS triangular-solve stages were allocation-free. Reusing
+that LAPACK workspace would require a separate, version-sensitive numerical
+boundary; it is the next targeted optimization rather than an aggregate scan
+API.
+
 ## Workflow API candidates for a later overhaul
 
 This is a deliberately short inventory of functions used by the current
@@ -101,7 +129,7 @@ boundaries without changing the package in this scan-prep phase.
 | `inflation_scan_common.jl::_oriented_potential` and `analyze_inflation_candidates.jl::oriented_potential` | A central input-normalization and validation function returning the package's canonical `Q`, `L`, and `K` orientation | Keep script-local; avoid two independent implementations when the API work begins |
 | `inflation_scan_common.jl::_normalized_derivatives` and `analyze_inflation_candidates.jl::derivatives` | `generate.logshifted_derivative_workspace` plus the in-place `generate.logshifted_derivatives!` evaluator | Promoted narrowly; the reusable buffers and numerical stabilization are package-owned, while scan thresholds are not |
 | `inflation_scan_common.jl::_classify_point` and `analyze_inflation_candidates.jl::classify_point` | A reusable canonical-gradient and Hessian diagnostic, accepting a caller-owned factorization or prepared context | Strong API candidate; keep `epsilon < 1`, `|eta| < 1`, and saddle-selection policy in the script |
-| `inflation_scan_common.jl::_classify_branches` | A branch iterator or per-branch diagnostic callback, not an aggregate `scan` API | Candidate after materialization costs are measured; retain aggregate policy in the script |
+| `inflation_scan_common.jl::_classify_branches` | `generate.foreach_leading_critical_branch` for streaming, plus per-branch diagnostics later; not an aggregate `scan` API | Streaming branch enumeration promoted; aggregate classification policy remains script-local |
 | `inflation_scan_common.jl::run_geometry` | No package equivalent: this is orchestration across loading, screening, timing, and failure policy | Keep script-only |
 | `analyze_inflation_candidates.jl::reduced_solve` | No new API: it is a thin wrapper around `leading_critical_branches` | Keep script-only |
 | `inflation_reproduction.jl::n5_fixture` and `n8_fixture` | No generic package API; these assemble benchmark-specific serialized fixtures | Keep benchmark script-only |
@@ -110,10 +138,11 @@ boundaries without changing the package in this scan-prep phase.
 
 The immediate implementation therefore only shares the locked call sequence
 between the contract probe and `scripts/inflation_scan_prep.jl`. No candidate
-other than the derivative workspace is promoted into the package yet, and
+other than the derivative workspace and streaming branch enumerator is promoted
+into the package yet, and
 unrelated batch, persistence, and plotting helpers are outside this inventory.
 
-The derivative workspace is the first deliberate exception: it is a narrow
-numerical primitive now used by the script, with focused aliasing and value
-regression tests. The per-branch eigensolver allocation and a streaming branch
-enumerator remain measured follow-up targets; they are not hidden by this API.
+The derivative workspace and streaming branch enumerator are deliberate narrow
+exceptions: they are reusable numerical primitives now used by the script,
+with focused value/coordinate regression tests. The per-branch eigensolver
+allocation remains a measured follow-up target; it is not hidden by these APIs.

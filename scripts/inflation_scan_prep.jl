@@ -37,7 +37,7 @@ function _scan_prep_usage()
       --limit N             Process at most N selected geometries.
       --offset N            Skip the first N selected geometries.
       --geometry H,P,F      Process an explicit geometry; may be repeated.
-      --max-branches N      Bound leading branch materialization. Default: 1000000.
+      --max-branches N      Bound leading branch enumeration. Default: 1000000.
       --summary PATH        Stream one preparation row per geometry to PATH.
       --append-summary      Append to an existing compatible summary.
       --resume              Skip successful/branch-cap rows matching this run configuration.

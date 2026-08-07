@@ -12,8 +12,8 @@ The current contract is:
    diagnostic.
 4. `generate.leading_hessian_mass_basis_float64(K, Ltilde, Qtilde)` supplies a
    cheap Float64 mass-basis diagnostic.
-5. `generate.leading_critical_branches(selected; max_branches=...)` enumerates
-   bounded leading branches for full-potential screening.
+5. `generate.foreach_leading_critical_branch(selected; max_branches=...)`
+   streams bounded leading branches for full-potential screening.
 
 The shared script helper uses log-shifted amplitudes so that screening ratios
 remain finite for hierarchically suppressed instantons. It is deliberately

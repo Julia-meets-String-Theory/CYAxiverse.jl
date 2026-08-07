@@ -1916,6 +1916,56 @@ function leading_lattice_offsets(selected::LQLinearlyIndependent; tolerance::Flo
 end
 
 """
+    foreach_leading_critical_branch(callback, selected; tolerance=1e-8,
+        max_branches=1_000_000)
+
+Stream the leading half-integer critical branches to `callback` without
+materializing the full coordinate matrix. The callback receives
+`(theta, leading_negative_modes)`; `theta` is a reused mutable vector and must
+not be retained or mutated. The explicit branch cap is checked before the
+first callback.
+
+This is the memory-bounded counterpart to [`leading_critical_branches`](@ref).
+"""
+function foreach_leading_critical_branch(callback::Function,
+        selected::LQLinearlyIndependent; tolerance::Float64=1e-8,
+        max_branches::Int=1_000_000)
+    h11 = size(selected.Qtilde, 1)
+    offsets = leading_lattice_offsets(selected; tolerance=tolerance)
+    det_qtilde = size(offsets, 2)
+    branch_count = det_qtilde * 2^h11
+    branch_count <= max_branches ||
+        throw(ArgumentError("leading branch enumeration would create $branch_count branches; increase max_branches explicitly if intended"))
+
+    inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
+    half_phase = zeros(Float64, h11)
+    base = zeros(Float64, h11)
+    theta = zeros(Float64, h11)
+    signs = @view selected.Ltilde[1, :]
+    for mask in 0:(2^h11 - 1)
+        @inbounds for i in 1:h11
+            half_phase[i] = ((mask >> (i - 1)) & 1) == 1 ? 0.5 : 0.0
+        end
+        LinearAlgebra.mul!(base, inverse_transpose, half_phase)
+        negative_modes = count(i -> signs[i] *
+            (half_phase[i] == 0.0 ? 1.0 : -1.0) < 0.0, 1:h11)
+        for j in axes(offsets, 2)
+            @inbounds for i in 1:h11
+                theta[i] = mod(offsets[i, j] + base[i], 1.0)
+            end
+            callback(theta, negative_modes)
+        end
+    end
+    nothing
+end
+
+"""Stream leading critical branches with the selected matrix as first argument."""
+function foreach_leading_critical_branch(selected::LQLinearlyIndependent,
+        callback::Function; kwargs...)
+    foreach_leading_critical_branch(callback, selected; kwargs...)
+end
+
+"""
     leading_critical_branches(selected; tolerance=1e-8, max_branches=1_000_000)
 
 Enumerate the leading half-integer critical branches
@@ -1937,25 +1987,18 @@ function leading_critical_branches(selected::LQLinearlyIndependent;
     branch_count <= max_branches ||
         throw(ArgumentError("leading branch enumeration would create $branch_count branches; increase max_branches explicitly if intended"))
 
-    inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
     coordinates = zeros(Float64, h11, branch_count)
     leading_negative_modes = Vector{Int}(undef, branch_count)
-    signs = @view selected.Ltilde[1, :]
-    branch_cursor = 0
-    for mask in 0:(2^h11 - 1)
-        half_phase = [((mask >> (i - 1)) & 1) == 1 ? 0.5 : 0.0 for i in 1:h11]
-        base = inverse_transpose * half_phase
-        negative_modes = count(i -> signs[i] * (half_phase[i] == 0.0 ? 1.0 : -1.0) < 0.0, 1:h11)
-        for j in axes(offsets, 2)
-            branch_cursor += 1
-            coordinates[:, branch_cursor] .= mod.(@view(offsets[:, j]) .+ base, 1.0)
-            leading_negative_modes[branch_cursor] = negative_modes
-        end
+    branch_cursor = Ref(0)
+    foreach_leading_critical_branch(selected; tolerance, max_branches) do theta, negative_modes
+        branch_cursor[] += 1
+        coordinates[:, branch_cursor[]] .= theta
+        leading_negative_modes[branch_cursor[]] = negative_modes
     end
 
     (; coordinates,
        leading_negative_modes,
-       branch_count=branch_cursor,
+       branch_count=branch_cursor[],
        leading_minima_count=count(==(0), leading_negative_modes),
        det_Qtilde=det_qtilde)
 end
