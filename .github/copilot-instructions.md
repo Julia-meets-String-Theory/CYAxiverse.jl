@@ -42,7 +42,8 @@
 # CYAxiverse.jl Copilot Additional Guidelines
 
 ## Julia Package Standards
-- Target Julia v1.10+ (LTS) compatibility.
+- Target Julia 1.12 only, matching `Project.toml` and the Julia 1.12 CI and
+  documentation environments.
 - Ensure all public functions are explicitly `export`ed in `src/CYAxiverse.jl`.
 - Prefer strict type annotations in struct definitions, but use duck typing/parametric types for function arguments where flexibility is needed.
 - Write docstrings for all exported functions using standard Julia Markdown syntax and LaTeX math (`$ ... $`).

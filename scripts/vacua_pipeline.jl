@@ -4,6 +4,11 @@ using LinearAlgebra
 using Printf
 using Dates
 
+# This file is included by both the test harness and the batch runner.  Keep
+# the helper definitions behind a module-local guard so a second include is a
+# no-op while direct invocation still reaches the CLI below.
+if !isdefined(@__MODULE__, :VACUA_PIPELINE_VERSION)
+
 const VACUA_PIPELINE_VERSION = "1"
 
 """Return the short Git revision for provenance metadata."""
@@ -121,7 +126,7 @@ function _search_vacua(geom_idx, pot_data; threshold, starts, residual_tolerance
             (; vac=branches.leading_minima_count, issquare=0,
                 extrarows=size(selected.Qtilde, 2) - size(selected.Qtilde, 1))
         end
-        locations = Dict{String, Any}("vac" => branches.leading_minima_count)
+        locations = Dict{String, Int}("vac" => branches.leading_minima_count)
         search = (; search_method="leading_branches",
             search_classification="certified_selected_branch_set",
             minimum_count=branches.leading_minima_count, multiplicity=1.0,
@@ -136,7 +141,7 @@ function _search_vacua(geom_idx, pot_data; threshold, starts, residual_tolerance
         square = minimum isa CYAxiverse.structs.Min_JLM_Square
         estimate = square ? (; vac=minimum.N_min, issquare=1) :
             (; vac=minimum.N_min, issquare=0, extrarows=minimum.extra_rows)
-        locations = Dict{String, Any}("vac" => minimum.N_min)
+        locations = Dict{String, Int}("vac" => minimum.N_min)
         search = (; search_method="reduced_jlm",
             search_classification=square ? "exact_determinant_branch" :
                 "finite_search_lower_bound",
@@ -265,6 +270,8 @@ function compute_axion_data(h11::Int, np::Int, cy::Int, data_dir::String;
         "geometry" => geom_data
     )
 end
+
+end # !isdefined(@__MODULE__, :VACUA_PIPELINE_VERSION)
 
 # Command-Line Interface Execution
 if abspath(PROGRAM_FILE) == @__FILE__

@@ -22,10 +22,9 @@ function _usage()
     """)
 end
 
-"""Parse plotting options into a dictionary."""
+"""Parse plotting options into a typed options tuple."""
 function _parse_args(args)
-    options = Dict{Symbol,Any}(:data_dir => "", :output_dir => "", :h11_min => 4,
-        :h11_max => 30, :bins => 160)
+    options = (data_dir="", output_dir="", h11_min=4, h11_max=30, bins=160)
     i = 1
     while i <= length(args)
         arg = args[i]
@@ -38,15 +37,15 @@ function _parse_args(args)
         i == length(args) && error("missing value for $arg")
         value = args[i + 1]
         if arg == "--data-dir"
-            options[:data_dir] = value
+            options = merge(options, (; data_dir=value))
         elseif arg == "--output-dir"
-            options[:output_dir] = value
+            options = merge(options, (; output_dir=value))
         elseif arg == "--h11-min"
-            options[:h11_min] = parse(Int, value)
+            options = merge(options, (; h11_min=parse(Int, value)))
         elseif arg == "--h11-max"
-            options[:h11_max] = parse(Int, value)
+            options = merge(options, (; h11_max=parse(Int, value)))
         else
-            options[:bins] = parse(Int, value)
+            options = merge(options, (; bins=parse(Int, value)))
         end
         i += 2
     end

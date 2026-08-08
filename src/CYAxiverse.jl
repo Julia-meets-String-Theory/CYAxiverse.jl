@@ -27,6 +27,11 @@ end
 
 export greet_CYAxiverse
 
+"""
+    greet_CYAxiverse()
+
+Return the package's standard greeting.
+"""
 greet_CYAxiverse() = "Hello CYAxiverse!"
 
 end
