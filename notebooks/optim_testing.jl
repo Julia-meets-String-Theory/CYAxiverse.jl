@@ -17,7 +17,7 @@ end
 # ╔═╡ 3788df6d-c756-4b6a-8d75-8cd018ab2991
 begin
 	import Pkg	
-	Pkg.activate("/scratch/users/mehta2/cyaxiverse/CYAxiverse")
+	Pkg.activate(joinpath(@__DIR__, "..", "notebooks"))
 end
 
 # ╔═╡ d1f78454-3ba0-4569-a491-f52e737c7dc3

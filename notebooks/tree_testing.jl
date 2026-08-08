@@ -8,7 +8,7 @@ using InteractiveUtils
 using Pkg; 
 
 # ╔═╡ 09ef6adb-c76a-469d-8f25-3d2089a6f684
-Pkg.activate("/scratch/users/mehta2/cyaxiverse/CYAxiverse");
+Pkg.activate(joinpath(@__DIR__, "..", "notebooks"));
 
 # ╔═╡ 0227789b-1548-4d6a-ad2f-ef017530849b
 using PlutoUI, HDF5, ArbNumerics, LineSearches, Optim, CairoMakie, Distributions, LinearAlgebra, ProgressLogging, Revise, Random, SparseArrays, LeftChildRightSiblingTrees, Profile

@@ -6,7 +6,7 @@ using InteractiveUtils
 # ╔═╡ 8ef9d8b7-f1eb-4b0d-8c7a-4dd40391d7de
 begin
     import Pkg
-    Pkg.activate("/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl")
+    Pkg.activate(joinpath(@__DIR__, "..", "notebooks"))
     ENV["PYTHON"] = "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python"
     using LinearAlgebra
     using HDF5

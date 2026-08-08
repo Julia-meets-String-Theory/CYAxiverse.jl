@@ -90,7 +90,9 @@ function n8_full_potential(; k::Real=1.0)
         push!(charges, collect(qj - qi)); push!(signs, sign(prefactor))
         push!(logs, log10(abs(prefactor)) - 2π * dot(qi + qj, tau) * _LOG10E)
     end
-    (; Q=hcat(charges...), L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
+    Q::Matrix{Int} = hcat(charges...)
+    L::Matrix{Float64} = vcat(reshape(signs, 1, :), reshape(logs, 1, :))
+    (; Q, L,
        diagonal_count=12, cross_count=66)
 end
 
@@ -178,16 +180,17 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real};
     ordered_qdotτ = [reference.qdotτ[findfirst(==(column), original_columns)] for column in eachcol(Qordered)]
     n = size(qcanonical, 1)
 
-    function scaled_quantities(theta, k)
+    function scaled_quantities(theta::AbstractVector{<:Real}, k::Float64)
         L = instanton_scales(ordered_qdotτ, k)
         logs = vec(L[2, :])
         amplitudes = vec(L[1, :]) .* 10.0 .^ (logs .- maximum(logs))
         row_scales = amplitudes[1:n]
         arguments = 2π .* (qcanonical' * theta)
-        gradient = 2π .* qcanonical * (amplitudes .* sin.(arguments))
-        hessian = (2π)^2 .* qcanonical * Diagonal(amplitudes .* cos.(arguments)) * qcanonical'
         inverse_sqrt = Diagonal(inv.(sqrt.(row_scales)))
-        gradient ./ row_scales, inverse_sqrt * hessian * inverse_sqrt
+        scaled_gradient = (2π .* qcanonical * (amplitudes .* sin.(arguments))) ./ row_scales
+        scaled_hessian = inverse_sqrt *
+            ((2π)^2 .* qcanonical * Diagonal(amplitudes .* cos.(arguments)) * qcanonical') * inverse_sqrt
+        scaled_gradient, scaled_hessian
     end
 
     _, initial_hessian = scaled_quantities(Float64.(initial_theta), Float64(k0))
@@ -197,9 +200,9 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real};
         theta = @view state[1:n]
         null_vector = @view state[(n + 1):(2n)]
         k = state[end]
-        gradient, hessian = scaled_quantities(theta, k)
-        out[1:n] .= gradient
-        out[(n + 1):(2n)] .= hessian * null_vector
+        gradient_value, hessian_value = scaled_quantities(theta, k)
+        out[1:n] .= gradient_value
+        out[(n + 1):(2n)] .= hessian_value * null_vector
         out[end] = dot(null_vector, null_vector) - 1
         nothing
     end
@@ -208,10 +211,10 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real};
     theta = mod.(result.zero[1:n], 1.0)
     null_vector = result.zero[(n + 1):(2n)]
     k = result.zero[end]
-    gradient, hessian = scaled_quantities(theta, k)
-    eigenvalues = eigvals(Hermitian(hessian))
+    gradient_value, hessian_value = scaled_quantities(theta, k)
+    eigenvalues = eigvals(Hermitian(hessian_value))
     (; theta, null_vector=null_vector / norm(null_vector), k, eigenvalues,
-       gradient_residual=norm(gradient, Inf), null_residual=norm(hessian * null_vector, Inf),
+       gradient_residual=norm(gradient_value, Inf), null_residual=norm(hessian_value * null_vector, Inf),
        converged=result.f_converged || result.x_converged, iterations=result.iterations)
 end
 
@@ -226,9 +229,17 @@ function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
         full::Bool=false)
     length(theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
     k > 0 || throw(ArgumentError("k must be positive"))
-    benchmark = full ? n8_full_potential(k=k) : n8_potential(k=k)
-    q = Matrix{Float64}(benchmark.Q)
-    amplitudes = vec(benchmark.L[1, :]) .* 10.0 .^ vec(benchmark.L[2, :])
+    benchmark_l = if full
+        n8_full_potential(k=k).L
+    else
+        n8_potential(k=k).L
+    end
+    q = if full
+        Matrix{Float64}(n8_full_potential(k=k).Q)
+    else
+        Matrix{Float64}(n8_potential(k=k).Q)
+    end
+    amplitudes = vec(benchmark_l[1, :]) .* 10.0 .^ vec(benchmark_l[2, :])
     arguments = 2π .* (q' * Float64.(theta))
     value = sum(amplitudes .* (1 .- cos.(arguments)))
     gradient = 2π .* q * (amplitudes .* sin.(arguments))

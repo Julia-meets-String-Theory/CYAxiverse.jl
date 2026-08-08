@@ -9,7 +9,7 @@ using Pkg;
 
 # ╔═╡ fbb69bcb-64c6-42c2-8ce1-666f397eb40e
 # ╠═╡ show_logs = false
-Pkg.activate("/scratch/users/mehta2/cyaxiverse/CYAxiverse");
+Pkg.activate(joinpath(@__DIR__, "..", "notebooks"));
 
 # ╔═╡ b1362f7d-55e5-48d6-a695-f3bf59d8bf99
 using PlutoUI, HDF5, ArbNumerics, LineSearches, Optim, CairoMakie, Distributions, LinearAlgebra, ProgressLogging, Revise, Random, SparseArrays, NLsolve, NormalForms, DifferentialEquations, IntervalArithmetic, IntervalRootFinding, StaticArrays, Nemo, ColorSchemes, Dates

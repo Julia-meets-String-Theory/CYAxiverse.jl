@@ -19,7 +19,7 @@ end
 # ╔═╡ 24cd43c0-d41a-435a-8328-587ae4141bc1
 begin
     using Pkg
-    Pkg.activate("/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl")
+    Pkg.activate(joinpath(@__DIR__, "..", "notebooks"))
     ENV["PYTHON"] = "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python"
 end
 

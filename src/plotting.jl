@@ -107,16 +107,16 @@ function vacua_db_jlm_box(square::Matrix, one_dim::Matrix, n_dim::Matrix; displa
     kwargs2 = (; xticklabelfont = "STIX", yticklabelfont = "STIX", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true, xlabelsize = 60, ylabelsize = 60, palette = (; patchcolor = colors[size(h11list[h11list .<= floor(max_h11 / 4)], 1)+1:size(h11list[h11list .<= floor(max_h11 / 2)], 1)]))
     kwargs3 = (; xticklabelfont = "STIX", yticklabelfont = "STIX", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true, xlabelsize = 60, ylabelsize = 60, palette = (; patchcolor = colors[size(h11list[h11list .<= floor(max_h11 / 2)], 1)+1:size(h11list[h11list .<= floor(3*max_h11 / 4)], 1)]))
     kwargs4 = (; xticklabelfont = "STIX", yticklabelfont = "STIX", xminorticksvisible = true, xminorgridvisible = true, yminorticksvisible = true, yminorgridvisible = true, xlabelsize = 60, ylabelsize = 60, palette = (; patchcolor = colors[size(h11list[h11list .<= floor(3*max_h11 / 4)], 1)+1 : end]))
-    if orientation == :horizontal
-        ax1 = Axis(f[1, 1]; kwargs1...)
-        ax2 = Axis(f[1, 2]; kwargs2...)
-        ax3 = Axis(f[1, 3]; kwargs3...)
-        ax4 = Axis(f[1, 4]; kwargs4...)
+    ax1, ax2, ax3, ax4 = if orientation == :horizontal
+        (Axis(f[1, 1]; kwargs1...), Axis(f[1, 2]; kwargs2...),
+            Axis(f[1, 3]; kwargs3...), Axis(f[1, 4]; kwargs4...))
     elseif orientation == :vertical
-        ax1 = Axis(f[4, 1], xticks = [4, collect(20:20:100)...], xlabel = L"$N$"; kwargs1...)
-        ax2 = Axis(f[3, 1], xticks = [collect(100:20:200)...]; kwargs2...)
-        ax3 = Axis(f[2, 1], xticks = [collect(200:20:300)...]; kwargs3...)
-        ax4 = Axis(f[1, 1], xticks = [collect(300:20:399)..., 404, 416, 433, 462, 491]; kwargs4...)
+        (Axis(f[4, 1], xticks = [4, collect(20:20:100)...], xlabel = L"$N$"; kwargs1...),
+            Axis(f[3, 1], xticks = [collect(100:20:200)...]; kwargs2...),
+            Axis(f[2, 1], xticks = [collect(200:20:300)...]; kwargs3...),
+            Axis(f[1, 1], xticks = [collect(300:20:399)..., 404, 416, 433, 462, 491]; kwargs4...))
+    else
+        error("Please specify boxplot orientation (options are :horizontal or :vertical)")
     end
     for item in sort(h11list[h11list .<= floor(max_h11 / 4)])
         CairoMakie.boxplot!(ax1, vacua_full[1, vacua_full[1, :] .== item], vacua_full[end, vacua_full[1, :] .== item], marker = :xcross, markersize = 10, whiskerwidth = 0.75, width = 0.9, orientation = orientation, gap = 0)

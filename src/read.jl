@@ -6,8 +6,13 @@ Functions that access the database.
 module read
 using HDF5
 using LinearAlgebra
+using ArbNumerics: ArbFloat
 using ..filestructure: cyax_file, minfile, geom_dir_read
 using ..structs: GeometryIndex, TopologicalData, GeometricData, AxionPotential, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square
+
+function _read_dataset(group::HDF5.Group, name::AbstractString)
+    HDF5.read(group[name]::HDF5.Dataset)
+end
 ###########################
 ##### Read CYTools data ###
 ###########################
@@ -162,7 +167,9 @@ function qshape(h11::Int,tri::Int,cy::Int=1)
     ωnorm2 = 0.0
     square = 0
     vacua = 0.0
-    h5open(joinpath(geom_dir_read(h11,tri,cy),"qshape.h5"), "r") do file
+    root = geom_dir_read(h11, tri, cy)
+    root === nothing && throw(ArgumentError("geometry directory is not available for h11=$h11, tri=$tri, cy=$cy"))
+    h5open(joinpath(root, "qshape.h5"), "r") do file
         square = HDF5.read(file, "square")
         vacua = HDF5.read(file, "vacua_estimate")
         if haskey(file, "extra_rows")
@@ -267,18 +274,19 @@ Read the persisted physical spectrum and its metadata from a geometry's
 """
 function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
     h5open(cyax_file(h11, tri, cy), "r") do file
-        physical = file["spectrum/physical"]
-        return (; m = HDF5.read(physical, "m"),
-            mode_indices = HDF5.read(physical, "mode_indices"),
-            mass_signs_or_inertia = haskey(physical, "mass_signs_or_inertia") ? HDF5.read(physical, "mass_signs_or_inertia") : Int[],
-            fK = HDF5.read(physical, "fK_log10"),
-            λselfsign = haskey(physical, "lambda_self_sign") ? HDF5.read(physical, "lambda_self_sign") : Int[],
-            λself = haskey(physical, "lambda_self_log10") ? HDF5.read(physical, "lambda_self_log10") : Float64[],
-            fpert = haskey(physical, "fpert_log10") ? HDF5.read(physical, "fpert_log10") : Float64[],
-            threshold_log10 = HDF5.read(physical, "metadata/threshold_log10"),
-            prec = HDF5.read(physical, "metadata/prec"),
-            provisional = HDF5.read(physical, "metadata/provisional"),
-            runtime_seconds = HDF5.read(physical, "metadata/runtime_seconds"))
+        physical = file["spectrum/physical"]::HDF5.Group
+        metadata = physical["metadata"]::HDF5.Group
+        return (; m = _read_dataset(physical, "m"),
+            mode_indices = _read_dataset(physical, "mode_indices"),
+            mass_signs_or_inertia = haskey(physical, "mass_signs_or_inertia") ? _read_dataset(physical, "mass_signs_or_inertia") : Int[],
+            fK = _read_dataset(physical, "fK_log10"),
+            λselfsign = haskey(physical, "lambda_self_sign") ? _read_dataset(physical, "lambda_self_sign") : Int[],
+            λself = haskey(physical, "lambda_self_log10") ? _read_dataset(physical, "lambda_self_log10") : Float64[],
+            fpert = haskey(physical, "fpert_log10") ? _read_dataset(physical, "fpert_log10") : Float64[],
+            threshold_log10 = _read_dataset(metadata, "threshold_log10"),
+            prec = _read_dataset(metadata, "prec"),
+            provisional = _read_dataset(metadata, "provisional"),
+            runtime_seconds = _read_dataset(metadata, "runtime_seconds"))
     end
 end
 
@@ -309,18 +317,24 @@ Read the vacua estimate and coordinates written by `scripts/vacua_pipeline.jl`.
 """
 function pipeline_vacua(h11::Int, tri::Int, cy::Int=1)
     h5open(cyax_file(h11, tri, cy), "r") do file
-        group = file["vacua_pipeline"]
-        threshold = HDF5.read(group, "threshold")
-        estimate = HDF5.read(group, "estimate")
-        issquare = HDF5.read(group, "issquare")
-        extrarows = haskey(group, "extrarows") ? HDF5.read(group, "extrarows") : nothing
-        verified = haskey(group, "verified") ? HDF5.read(group, "verified") : nothing
-        theta_min = haskey(group, "theta_min") ? HDF5.read(group, "theta_min/numerator") .// HDF5.read(group, "theta_min/denominator") : nothing
-        theta_parallel = haskey(group, "theta_parallel") ? HDF5.read(group, "theta_parallel/numerator") .// HDF5.read(group, "theta_parallel/denominator") : nothing
+        group = file["vacua_pipeline"]::HDF5.Group
+        threshold = _read_dataset(group, "threshold")
+        estimate = _read_dataset(group, "estimate")
+        issquare = _read_dataset(group, "issquare")
+        extrarows = haskey(group, "extrarows") ? _read_dataset(group, "extrarows") : nothing
+        verified = haskey(group, "verified") ? _read_dataset(group, "verified") : nothing
+        theta_min = haskey(group, "theta_min") ? begin
+            theta_group = group["theta_min"]::HDF5.Group
+            _read_dataset(theta_group, "numerator") .// _read_dataset(theta_group, "denominator")
+        end : nothing
+        theta_parallel = haskey(group, "theta_parallel") ? begin
+            theta_group = group["theta_parallel"]::HDF5.Group
+            _read_dataset(theta_group, "numerator") .// _read_dataset(theta_group, "denominator")
+        end : nothing
         metadata = if haskey(group, "metadata")
-            metadata_group = group["metadata"]
+            metadata_group = group["metadata"]::HDF5.Group
             read_metadata(name, default=nothing) =
-                haskey(metadata_group, name) ? HDF5.read(metadata_group, name) : default
+                haskey(metadata_group, name) ? _read_dataset(metadata_group, name) : default
             (; pipeline_version = read_metadata("pipeline_version"),
                threshold = read_metadata("threshold"),
                starts = read_metadata("starts"),

@@ -157,16 +157,23 @@ struct AxionSpectrum
     instanton_hierarchy::Union{Nothing, InstantonHierarchyDiagnostics}
 end
 
-Base.@kwdef struct IndexedAxionSpectrum{T<:Float64}
+struct IndexedAxionSpectrum{T<:Float64}
     h11::Int
     polytope::Int
     frst::Int
     m::Vector{T}
     f::Vector{T}
     fK::Vector{T}
-    function IndexedAxionSpectrum(geom_idx::GeometryIndex, spectrum::AxionSpectrum)
-        IndexedAxionSpectrum(geom_idx.h11, geom_idx.polytope, geom_idx.frst, spectrum.m, spectrum.f, spectrum.fK)
-    end
+end
+
+function IndexedAxionSpectrum(; h11::Int, polytope::Int, frst::Int,
+        m::Vector{T}, f::Vector{T}, fK::Vector{T}) where {T<:Float64}
+    IndexedAxionSpectrum{T}(h11, polytope, frst, m, f, fK)
+end
+
+function IndexedAxionSpectrum(geom_idx::GeometryIndex, spectrum::AxionSpectrum)
+    IndexedAxionSpectrum(Int(geom_idx.h11), Int(geom_idx.polytope), Int(geom_idx.frst),
+        spectrum.m, spectrum.f, spectrum.fK)
 end
 
 

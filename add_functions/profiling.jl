@@ -6,9 +6,11 @@ using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays
 using GenericLinearAlgebra
 using Distributions
 using TimerOutputs
+using Optim
 
 using ..filestructure: cyax_file, minfile, present_dir
 using ..read: potential
+using ..minimizer: _legacy_qx, _legacy_gradient, _legacy_hessian
 using ..structs: LQLinearlyIndependent, GeometryIndex, AxionPotential, CanonicalQBasis, ProjectedQ, Projector
 
 
@@ -84,7 +86,7 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
         end
         @timeit "αeff final" αeff = hcat(I(h11), αeff)
     end
-    CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar), Matrix{Rational}(αeff))
+    CanonicalQBasis(Matrix{Int}(Qhat), Matrix{Int}(Qbar), Matrix{Float64}(Lhat), Matrix{Float64}(Lbar))
 end
 
 function project_out(v::Vector{T} where T<:Union{Rational{Int64}, Integer})
@@ -154,13 +156,13 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int})
     @timeit "unzip LQ" Lsorted_test,Qsorted_test = LQsorted[:,1:2], Int.(LQsorted[:,3:end])
     @timeit "init Qtilde" Qtilde = hcat(zeros(Int,size(Qsorted_test[1,:],1)),Qsorted_test[1,:])
     @timeit "init Ltilde" Ltilde = hcat(zeros(Float64,size(Lsorted_test[1,:],1)),Lsorted_test[1,:])
-    @timeit "init S" S = MatrixSpace(Nemo.ZZ,1,1)
+    @timeit "init S" S = Nemo.MatrixSpace(Nemo.ZZ,1,1)
     @timeit "init m" m = matrix(Nemo.ZZ,zeros(1,1))
     d = 1
     @timeit "init Qbar" Qbar = zeros(Int,size(Qsorted_test[1,:],1),1)
     @timeit "init Lbar" Lbar = zeros(Float64,size(Lsorted_test[1,:],1),1)
     for i=2:axes(Qsorted_test,1)[end]
-        @timeit "Matrix.Space" S = MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
+        @timeit "Matrix.Space" S = Nemo.MatrixSpace(Nemo.ZZ, size(Qtilde,1), (size(Qtilde,2)))
         @timeit "lin. ind." m = S(hcat(Qtilde[:,2:end],Qsorted_test[i,:]))
         @timeit "NullSpace" d = Nemo.nullspace(m)[1]
         if d == 0
@@ -234,50 +236,16 @@ function minimiser(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gr
     Arb1 = ArbFloat(1.)
     Arb2π = ArbFloat(2π)
     threshold = 0.01
-    function QX(x::Vector)
-        Qx = zeros(ArbFloat,size(QV,1));
-        @tullio Qx[c] = QV[c,i] * x[i]
-        return Qx
-    end
+    QX(x::Vector) = _legacy_qx(QV, x)
     function fitness(x::Vector)
         V = dot(LV,(Arb1 .- cos.(QX(x))))
         return V
     end
     function grad!(gradient::Vector, x::Vector)
-        grad_temp = zeros(ArbFloat, size(LV,1),h11)
-        @tullio grad_temp[c,i] = QV[c,i] * sin.(QX(x)[c])
-        @tullio gradient[i] = LV[c] * grad_temp[c,i]
+        gradient .= _legacy_gradient(LV, QV, x)
     end
-    function hess(x::Vector)
-        grad2::Matrix{ArbFloat} = zeros(ArbFloat,(h11,h11))
-        hind1::Vector{Vector{Int64}} = [[x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>=y]
-        grad2_temp::Vector{ArbFloat} = zeros(ArbFloat,size(hind1,1))
-        grad2_temp1::Matrix{Float64} = zeros(Float64,size(LV,1),size(hind1,1))
-        @tullio grad2_temp1[c,k] = @inbounds(begin
-        i,j = hind1[k]
-                QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false
-        @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i in eachindex(hind1)
-            j,k = hind1[i]
-            grad2[j,k] = grad2_temp[i]
-        end
-        hessfull = Hermitian(grad2 + transpose(grad2) - Diagonal(grad2))
-    end
-    function hess!(hessian::Matrix, x::Vector)
-        grad2 = zeros(ArbFloat,(h11,h11))
-        hind1 = [[x,y]::Vector{Int64} for x=1:h11,y=1:h11 if x>=y]
-        grad2_temp = zeros(ArbFloat,size(hind1,1))
-        grad2_temp1 = zeros(ArbFloat,size(LV,1),size(hind1,1))
-        @tullio grad2_temp1[c,k] = @inbounds(begin
-                i,j = hind1[k]
-                QV[c,i] * QV[c,j] * cos.(QX(x)[c]) end) grad=false avx=false
-        @tullio grad2_temp[k] = grad2_temp1[c,k] * LV[c]
-        @inbounds for i in eachindex(hind1)
-            j,k = hind1[i]
-            grad2[j,k] = grad2_temp[i]
-        end
-        hessian .= grad2 + transpose(grad2) - Diagonal(grad2)
-    end
+    hess(x::Vector) = _legacy_hessian(LV, QV, x)
+    hess!(hessian::Matrix, x::Vector) = (hessian .= _legacy_hessian(LV, QV, x))
     grad(x) = vcat([dot(LV,QV[:,i] .* sin.(QX(x))) for i ∈ 1:h11]...)
     res = optimize(fitness,grad!,hess!,
                 x0, algo,

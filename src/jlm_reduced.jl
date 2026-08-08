@@ -183,7 +183,8 @@ function minimize(geom_idx::GeometryIndex; threshold::Float64=0.01,
 end
 
 """Replace the reduced-minima datasets in an open HDF5 group."""
-function _write_result!(group, min_data)
+function _write_result!(group::Union{HDF5.File, HDF5.Group},
+        min_data::Union{Min_JLM_Square, Min_JLM_1D, Min_JLM_ND})
     for key in ("Nvac", "vac_coords", "extra_rows", "det_QTilde", "issquare")
         haskey(group, key) && HDF5.delete_object(group, key)
     end
@@ -210,7 +211,7 @@ function minimize_save(geom_idx::GeometryIndex; threshold::Float64=0.01,
     h5open(minfile(geom_idx), isfile(minfile(geom_idx)) ? "r+" : "cw") do file
         if hilbert
             haskey(file, "hilbert") || create_group(file, "hilbert")
-            _write_result!(file["hilbert"], min_data)
+            _write_result!(file["hilbert"]::HDF5.Group, min_data)
         else
             _write_result!(file, min_data)
         end

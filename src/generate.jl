@@ -10,11 +10,12 @@ using LinearAlgebra
 using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays, NormalForms, IntervalArithmetic, StaticArrays
 using GenericLinearAlgebra
 using Distributions
+using Random: rand!
 using TimerOutputs
 
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
 using ..read: potential, vacua_jlm
-using ..minimizer: minimize, subspace_minimize, critical_points
+using ..minimizer: minimize, subspace_minimize, critical_points, minima_lattice
 
 using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, PhysicalAxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonHierarchyDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
@@ -261,13 +262,13 @@ function hessian_norm(x, Q::Matrix)
         hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
         # SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
     else
-        hessian = zeros(size(Q, 1), size(Q, 1), zeros(Q, 2))
+        hessian = zeros(size(Q, 1), size(Q, 1), size(Q, 2))
         for i in axes(Q, 1), j in axes(Q, 1), k in axes(Q, 2)
             if i>=j
                 hessian[i, j, k] = (transpose(@view(Q[i, :])) * @view(Q[j, :])) * cos.(x' * Q)[k]
             end
         end
-        hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
+        return hessian
     end
 end
 ##############################
@@ -1579,14 +1580,14 @@ function pq_spectrum_save(h11::Int, tri::Int, cy::Int=1;
     Qmass = (Matrix(LQtild.Qtilde') / Kls') * basis
     cubic_data = cubic(phase, LQtild.Ltilde, Qmass)
     h5open(cyax_file(h11, tri, cy), "r+") do file
-        f2 = haskey(file, "spectrum") ? file["spectrum"] : create_group(file, "spectrum")
-        f2e = haskey(f2, "decay") ? f2["decay"] : create_group(f2, "decay")
+        f2 = haskey(file, "spectrum") ? file["spectrum"]::HDF5.Group : create_group(file, "spectrum")
+        f2e = haskey(f2, "decay") ? f2["decay"]::HDF5.Group : create_group(f2, "decay")
         f2e["fpert",deflate=9] = spectrum_data.f
         f2e["fK",deflate=9] = spectrum_data.fK
-        f2d = haskey(f2, "masses") ? f2["masses"] : create_group(f2, "masses")
+        f2d = haskey(f2, "masses") ? f2["masses"]::HDF5.Group : create_group(f2, "masses")
         f2d["log10",deflate=9] = spectrum_data.m
         f2d["sign",deflate=9] = spectrum_data.msign
-        f2g = haskey(f2, "cubic") ? f2["cubic"] : create_group(f2, "cubic")
+        f2g = haskey(f2, "cubic") ? f2["cubic"]::HDF5.Group : create_group(f2, "cubic")
         f2g["tensor",deflate=9] = cubic_data
         f2g["phase",deflate=9] = Float64.(phase)
     end
@@ -1632,10 +1633,10 @@ Dict{String, Any} with 3 entries:
 """
 function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     h11::Int = size(Q,2)
+    θparalleltest::Matrix{Rational} = zeros(Rational, 0, 0)
     if h11 <= 50
         snf_data = vacua_SNF(Q)
-        Tparallel::Matrix{Int} = snf_data.Tparallel
-        θparalleltest::Matrix{Float64} = snf_data.θparallel
+        θparalleltest = snf_data.θparallel
     end
     data = LQtildebar(L,Q; threshold=threshold)
     Qtilde = data["Qtilde"]
@@ -1887,10 +1888,10 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Qbar_v = @view(Qbar[:, valid_cols])
     Lbar_v = @view(Lbar[:, valid_cols])
 
-    Qinv = inv(Qhat)
+    Qinv::Matrix{Rational} = inv(Qhat)
     @. Qinv = ifelse(abs(Qinv) < 1e-4, zero(Rational), Rational(Qinv))
 
-    α = (Qinv * Qbar_v)'
+    α::Matrix{Rational} = Matrix{Rational}((Qinv * Qbar_v)')
     @. α = ifelse(abs(α) < 1e-4, zero(Rational), Rational(α))
     @. α = ifelse(mod(α, 1) < 1e-3, round(α), α)
 
@@ -1919,7 +1920,7 @@ function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     end
 
     if !isempty(αeff_cols)
-        αeff = hcat(αeff_cols...)
+        αeff::Matrix{Rational} = hcat(αeff_cols...)
         Qbar_eff = Qbar_v[:, αeff_indices]
         Lbar_eff = Lbar_v[:, αeff_indices]
         perturbation_anchor = Lbar_v[2, first(αeff_indices)]
@@ -1956,6 +1957,10 @@ function ωnorm2(LQ::CanonicalQBasis)
 		end
 	end
 	sum(ωnorm) / size(Qhat, 2)
+end
+
+function ωnorm2(LQ::Canonicalα)
+    ωnorm2(CanonicalQBasis(LQ.Qhat, LQ.Qbar, LQ.Lhat, LQ.Lbar))
 end
 
 function ωnorm2(geom_idx::GeometryIndex; threshold::Float64 = 0.5)
@@ -2266,7 +2271,7 @@ function basis_snf(rays::Matrix{Int})
     return BasisSNF(vol_basis, θparalleltest, θparalleltestinv)
 end
 
-function vacua_SNF(Q::Matrix{Integer})
+function vacua_SNF(Q::AbstractMatrix{<:Integer})
     h11::Int = size(Q,2)
     ###### Nemo SNF #####
     Qtemp::Nemo.ZZMatrix = matrix(Nemo.ZZ,Q)
@@ -2309,10 +2314,10 @@ Dict{String, Any} with 3 entries:
 function vacua_TB(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
     
     h11::Int = size(Q,2)
+    θparalleltest::Matrix{Rational} = zeros(Rational, 0, 0)
     if h11 <= 50
         snf_data = vacua_SNF(Q)
-        Tparallel::Matrix{Int} = snf_data.Tparallel
-        θparalleltest::Matrix{Float64} = snf_data.θparallel
+        θparalleltest = snf_data.θparallel
     end
     data = LQtildebar(L,Q; threshold=threshold)
     Qtilde = data["Qtilde"]
@@ -2428,6 +2433,7 @@ Uses the projection method of _PQ Axiverse_ [paper](https://arxiv.org/abs/2112.0
 """
 function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold = 1e-2)
 	setprecision(ArbFloat; digits=5_000)
+    h11 = size(Q, 2)
     LQtilde = LQtildebar(L, Q; threshold=threshold)
 	Ltilde = LQtilde["Ltilde"][:,sortperm(LQtilde["Ltilde"][2,:], rev=true)]
     Qtilde = LQtilde["Qtilde"]'[sortperm(Ltilde[2,:], rev=true), :]
@@ -2454,10 +2460,11 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold = 1e-2)
 			Lsubdiff = Lsub[2,:] .- Lsub[2,1]
 			Lfull = Lsubdiff[1,:] .* 10. .^ Lsubdiff[2,:];
 			Qsubmask = [sum(i .== 0) < size(Qsub,1) for i in eachcol(Qsub)]
-			Qsub = Qsub[:,Qsubmask]
-			for run_number = 1:10_000
-				x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
-				res = CYAxiverse.minimizer.minimize(Lfull, Qsub, x0) ##need to write subsystem minimizer
+				Qsub = Qsub[:,Qsubmask]
+			res::Dict{String,Any} = Dict{String,Any}()
+				for run_number = 1:10_000
+					x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
+					res = minimize(Lfull, Qsub, x0) ##need to write subsystem minimizer
 				res["Vmin_log"] = res["Vmin_log"] .+ Lsub[2,1]
 			end
 			xmin = hcat(res["xmin"]...)
@@ -2468,7 +2475,7 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold = 1e-2)
 			xmin = xmin[:,sortperm([norm(i,Inf) for i in eachcol(xmin)])]
             xmin[xmin .< 10. * eps()] .= 0.
             println(size(xmin))
-			lattice_vecs = CYAxiverse.minimizer.minima_lattice(xmin) ##need to write lattice minimizer
+				lattice_vecs = minima_lattice(xmin) ##need to write lattice minimizer
 			basis_vectors[idx-size(lattice_vecs["lattice_vectors"],2):idx, :] = lattice_vecs["lattice_vectors"]
 		end
         T = orth_basis(Qtilde[idx, :])
@@ -2540,18 +2547,19 @@ function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=
                 return "Sorry, there are degeneracies.  Please try another example."
             else
                 min_list = []
-                θmin(n::Int) = [(2π*n-δ)/norm(Qsub) for δ in hcat(phase[idx]...)]
+                θmin(n::Int, phase_values, qsub) =
+                    [(2π*n - δ) / norm(qsub) for δ in phase_values]
                 # TODO: #10 check gradient / hessian
                 # TODO: #9 Lambdas have different signså
                 m = 0
                 esub = Qsub ./ norm(Qsub)
                 limit = ifelse(any(0. .< abs.(Qsub) .< 1.), 2π/minimum(abs.(esub[esub .!= 0.])), 2π)
                 println("limit: ", limit)
-                while all(i -> i < limit, θmin(m))
+                while all(i -> i < limit, θmin(m, phase[idx], Qsub))
                     # TODO: #12 Check condition on periodicity
-                    push!(min_list, θmin(m))
+                    push!(min_list, θmin(m, phase[idx], Qsub))
                     m+=1
-                    println("θmin: ", θmin(m))
+                    println("θmin: ", θmin(m, phase[idx], Qsub))
                 end
                 # min_list = hcat(min_list...)
                 push!(θmin_list, min_list)
@@ -2571,8 +2579,6 @@ function vacua_projector(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=
             println("projectedQ: ", projectedQ_list[idx])
             # TODO: #11 construct θ_min
             idx +=1
-            println("phases: ", δlist)
-            println("size(phases): ", size(δlist))
             println("projector: ", projector)
             println("projector[projector .!= 0]: ", projector[projector .!=0])
             println("size(projector): ", size(projector))
@@ -2797,12 +2803,12 @@ TBW
 function θmin(Ω::ProjectedQ; phase=zeros(size(Ω.Ωperp, 2)), n::Vector=zeros(size(Ω.Ωperp, 2)))
     min = zeros(size(Ω.Ωperp, 2))
     for i ∈ axes(Ω.Ωperp, 2)
-        n = 0
+        n_i = 0
         while 0 ≤ min[i] < 2π
-            min = 2π * n - phase[i] / norm(Ωperp[:, i])
-            n+=1
+            min[i] = 2π * n_i - phase[i] / norm(Ω.Ωperp[:, i])
+            n_i += 1
         end
-        ei = hcat([Ωperp[:, i] / norm(Ωperp[:, i]) for i in axes(Ωperp, 1)]...)
+        ei = hcat([Ω.Ωperp[:, i] / norm(Ω.Ωperp[:, i]) for _ in axes(Ω.Ωperp, 1)]...)
     end
 end
 
