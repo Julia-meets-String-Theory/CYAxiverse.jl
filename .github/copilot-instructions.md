@@ -38,3 +38,20 @@
 - Instanton-scale matrices conventionally store each value as `[sign_or_mantissa, base-10 exponent]`. Convert with `L[:, 1] .* 10 .^ L[:, 2]` only where full values are required; preserve this representation in persisted and inter-module data.
 - Functions commonly provide both scalar geometry arguments `(h11, tri, cy=1)` and a `GeometryIndex` overload. Maintain both forms when extending geometry-facing APIs.
 - Numerical code mixes `Float64`, exact `Rational`, and `ArbFloat` values. Avoid narrowing the existing declared types, particularly in basis and minimization code that deliberately switches to `Rational{BigInt}` for large denominators.
+
+# CYAxiverse.jl Copilot Additional Guidelines
+
+## Julia Package Standards
+- Target Julia v1.10+ (LTS) compatibility.
+- Ensure all public functions are explicitly `export`ed in `src/CYAxiverse.jl`.
+- Prefer strict type annotations in struct definitions, but use duck typing/parametric types for function arguments where flexibility is needed.
+- Write docstrings for all exported functions using standard Julia Markdown syntax and LaTeX math (`$ ... $`).
+
+## Performance & Scientific Computing
+- Ensure type stability across computational loops. Avoid generic `Any` types in internal arrays or containers.
+- Use in-place mutations (`!`) for memory-heavy matrix operations (e.g., `compute_masses!`).
+- Benchmark critical loops with `BenchmarkTools.@btime` and inspect allocation counts.
+
+## Code Quality & Testing
+- Use Julia's native `Test` package with `@testset` blocks in `test/runtests.jl`.
+- All PRs must maintain 100% passing tests (`failed=0`).

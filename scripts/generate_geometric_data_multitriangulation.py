@@ -25,7 +25,7 @@ import json
 import math
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 
 import h5py
 import numpy as np
@@ -278,7 +278,10 @@ def validate_invariant_kaehler_subspace(kahler_cone, reference_tip, orientifold)
             raise RuntimeError(
                 "qpsolvers is required to verify the invariant Kähler subspace."
             ) from exc
+        from scipy.sparse import csc_matrix, eye as sparse_eye
+
         equality = h2_matrix.T - np.eye(h2_matrix.shape[0])
+        qp_hyperplanes = csc_matrix(hyperplanes)
         solvers = sorted(available_solvers)
         if not solvers:
             raise RuntimeError("qpsolvers found no solver for invariant Kähler validation.")
@@ -286,11 +289,11 @@ def validate_invariant_kaehler_subspace(kahler_cone, reference_tip, orientifold)
         for solver in solvers:
             try:
                 invariant_tip = solve_qp(
-                    np.eye(reference_tip.size),
+                    sparse_eye(reference_tip.size, format="csc"),
                     np.zeros(reference_tip.size),
-                    G=-hyperplanes,
+                    G=-qp_hyperplanes,
                     h=-np.ones(hyperplanes.shape[0]),
-                    A=equality,
+                    A=csc_matrix(equality),
                     b=np.zeros(equality.shape[0]),
                     solver=solver,
                     verbose=False,
@@ -470,6 +473,7 @@ def sample_stretched_kaehler_points(
         return
     try:
         from qpsolvers import available_solvers, solve_qp
+        from scipy.sparse import csc_matrix, eye as sparse_eye
     except ImportError as exc:
         raise RuntimeError(
             "Angular Kähler-point sampling requires qpsolvers (a CYTools "
@@ -484,7 +488,8 @@ def sample_stretched_kaehler_points(
     solvers = (["mosek"] if mosek_license["activated"] and "mosek" in available_solvers else []) + [
         name for name in sorted(available_solvers) if name != "mosek"
     ]
-    identity = np.eye(reference_tip.size)
+    qp_hyperplanes = csc_matrix(hyperplanes)
+    identity = sparse_eye(reference_tip.size, format="csc")
     target_norm = max(float(np.linalg.norm(reference_tip)), 1.0)
     report(
         "MOSEK is "
@@ -509,7 +514,7 @@ def sample_stretched_kaehler_points(
                 point = solve_qp(
                     identity,
                     -target,
-                    G=-hyperplanes,
+                    G=-qp_hyperplanes,
                     h=-np.ones(hyperplanes.shape[0]),
                     solver=solver,
                     verbose=False,
@@ -1136,6 +1141,7 @@ def process_polytope(task):
         if accepted >= requested and not overwrite:
             return {
                 "ok": True,
+                "h11": h11,
                 "polytope_index": polytope_index,
                 "requested": requested,
                 "attempted": 0,
@@ -1211,6 +1217,7 @@ def process_polytope(task):
             next_output_index += 1
         return {
             "ok": True,
+            "h11": h11,
             "polytope_index": polytope_index,
             "requested": requested,
             "attempted": attempted,
@@ -1220,7 +1227,12 @@ def process_polytope(task):
             "skipped": len(existing_indices),
         }
     except Exception as exc:
-        return {"ok": False, "polytope_index": polytope_index, "error": repr(exc)}
+        return {
+            "ok": False,
+            "h11": h11,
+            "polytope_index": polytope_index,
+            "error": repr(exc),
+        }
 
 
 def parse_h11_values(values):
@@ -1273,28 +1285,55 @@ def plan_tasks(
     favorable,
     orientifold_config,
     export_kahler_rays,
+    frsts_per_polytope=None,
+    replacement_pool_size=0,
+    return_replacement_tasks=False,
 ):
-    """Fetch at most n polytopes and spread n requested geometries over them."""
+    """Fetch favorable polytopes and assign each its FRST output target.
+
+    When ``return_replacement_tasks`` is true, the first ``n_geometries``
+    polytopes are active and any additional fetched polytopes are returned as
+    zero-target replacement tasks.  The replacement tasks receive their real
+    target only after an active polytope produces a shortfall.
+    """
+    fetch_limit = n_geometries + max(0, replacement_pool_size)
     polytopes = list(
         fetch_polytopes(
             h11=h11,
-            limit=n_geometries,
+            limit=fetch_limit,
             lattice="N",
             favorable=favorable,
             deterministic_glsm_basis=True,
         )
     )
     if not polytopes:
-        return []
+        return ([], []) if return_replacement_tasks else []
 
-    # Give every available polytope one geometry, then distribute the remaining
-    # requests round-robin as extra triangulations of those polytopes.
-    counts = [1] * len(polytopes)
-    for index in itertools.islice(itertools.cycle(range(len(polytopes))), n_geometries - len(polytopes)):
-        counts[index] += 1
+    active_polytopes = polytopes[:n_geometries]
+    replacement_polytopes = polytopes[n_geometries:]
 
-    return [
-        (
+    if frsts_per_polytope is not None:
+        # In per-polytope mode, --n is the requested number of favorable
+        # polytopes. Preserve the combined target if fewer are available by
+        # distributing it as evenly as possible across those that were found.
+        total_target = n_geometries * frsts_per_polytope
+        base_target, remainder = divmod(total_target, len(active_polytopes))
+        counts = [
+            base_target + (1 if index < remainder else 0)
+            for index in range(len(active_polytopes))
+        ]
+    else:
+        # Default mode: give every available polytope one geometry, then
+        # distribute remaining requests round-robin as extra triangulations.
+        counts = [1] * len(active_polytopes)
+        for index in itertools.islice(
+            itertools.cycle(range(len(active_polytopes))),
+            n_geometries - len(active_polytopes),
+        ):
+            counts[index] += 1
+
+    def make_task(polytope_index, poly, count):
+        return (
             polytope_index,
             np.asarray(poly.vertices(), dtype=int),
             h11,
@@ -1324,8 +1363,23 @@ def plan_tasks(
             orientifold_config,
             export_kahler_rays,
         )
-        for polytope_index, (poly, count) in enumerate(zip(polytopes, counts), start=1)
+
+    tasks = [
+        make_task(polytope_index, poly, count)
+        for polytope_index, (poly, count) in enumerate(
+            zip(active_polytopes, counts), start=1
+        )
     ]
+    if not return_replacement_tasks:
+        return tasks
+
+    replacement_tasks = [
+        make_task(polytope_index, poly, 0)
+        for polytope_index, poly in enumerate(
+            replacement_polytopes, start=len(active_polytopes) + 1
+        )
+    ]
+    return tasks, replacement_tasks
 
 
 def run_batch(
@@ -1357,6 +1411,7 @@ def run_batch(
     favorable,
     orientifold_config,
     export_kahler_rays,
+    frsts_per_polytope=None,
 ):
     tasks = plan_tasks(
         h11,
@@ -1386,39 +1441,211 @@ def run_batch(
         favorable,
         orientifold_config,
         export_kahler_rays,
+        frsts_per_polytope,
     )
     if not tasks:
         print(f"No favorable N-lattice polytopes found for h11={h11}.")
         return 0
 
+    requested_outputs = sum(task[3] for task in tasks)
+    if frsts_per_polytope is not None and len(tasks) < n_geometries:
+        targets = [task[3] for task in tasks]
+        print(
+            f"Requested {n_geometries} favorable polytopes but found "
+            f"{len(tasks)}; redistributed the combined target of "
+            f"{requested_outputs} FRSTs across per-polytope targets {targets}."
+        )
     print(
-        f"Found {len(tasks)} favorable polytope(s); requesting {n_geometries} "
-        f"geometry/triangulation output(s)."
+        f"Found {len(tasks)} favorable polytope(s); requesting "
+        f"{requested_outputs} geometry/triangulation output(s)."
     )
+    return _run_tasks(tasks, n_cores)
+
+
+def _run_tasks(tasks, n_cores):
+    """Run task tuples in one shared pool and aggregate their results."""
     saved = 0
     failures = []
     with ProcessPoolExecutor(max_workers=n_cores) as executor:
         futures = [executor.submit(process_polytope, task) for task in tasks]
         for future in as_completed(futures):
             result = future.result()
+            label = f"h11={result['h11']} np_{result['polytope_index']:07d}"
             if not result["ok"]:
-                print(f"ERROR np_{result['polytope_index']:07d}: {result['error']}")
+                print(f"ERROR {label}: {result['error']}")
                 failures.append(result)
                 continue
             saved += result["saved"]
             print(
-                f"np_{result['polytope_index']:07d}: accepted "
+                f"{label}: accepted "
                 f"{result['accepted']}/{result['requested']} geometries after "
                 f"{result['attempted']} FRST attempts; saved {result['saved']}, "
                 f"rejected {result['rejected']}, skipped {result['skipped']}."
             )
     if failures:
         details = "; ".join(
-            f"np_{failure['polytope_index']:07d}: {failure['error']}"
+            f"h11={failure['h11']} np_{failure['polytope_index']:07d}: "
+            f"{failure['error']}"
             for failure in failures
         )
         raise RuntimeError(f"CYTools generation failed; no complete batch result: {details}")
     return saved
+
+
+def run_batches(
+    h11_values,
+    n_geometries,
+    base_dir,
+    n_cores,
+    seed,
+    max_retries,
+    max_tip_attempts,
+    overwrite,
+    max_m,
+    max_kaehler_attempts,
+    min_divisor_volume,
+    min_prime_divisor_volume,
+    qcd_volume_min,
+    qcd_volume_max,
+    verbose,
+    sampling_scheme,
+    backend,
+    n_walk,
+    n_flip,
+    initial_walk_steps,
+    fine_tune_steps,
+    walk_step_size,
+    max_steps_to_wall,
+    fast_height_scale,
+    ks_database_version,
+    favorable,
+    orientifold_config,
+    export_kahler_rays,
+    frsts_per_polytope=None,
+    replace_rejected_polytopes=False,
+    max_polytope_replacements=10,
+):
+    """Plan all h11 values into one pool, without an h11 completion barrier.
+
+    Tasks for a later h11 are submitted as soon as that h11 has been planned.
+    Therefore a slow polytope does not prevent idle workers from taking work
+    from another h11 value.
+    """
+    total_saved = 0
+    pending = set()
+    replacement_tasks_by_h11 = {}
+
+    def set_task_target(task, target):
+        """Return a task tuple with a new accepted-output target."""
+        return task[:3] + (target,) + task[4:]
+
+    with ProcessPoolExecutor(max_workers=n_cores) as executor:
+        for h11 in h11_values:
+            print(f"\n>>> Processing h11={h11} <<<")
+            tasks, replacement_tasks = plan_tasks(
+                h11,
+                n_geometries,
+                base_dir,
+                seed,
+                max_retries,
+                max_tip_attempts,
+                overwrite,
+                max_m,
+                max_kaehler_attempts,
+                min_divisor_volume,
+                min_prime_divisor_volume,
+                qcd_volume_min,
+                qcd_volume_max,
+                verbose,
+                sampling_scheme,
+                backend,
+                n_walk,
+                n_flip,
+                initial_walk_steps,
+                fine_tune_steps,
+                walk_step_size,
+                max_steps_to_wall,
+                fast_height_scale,
+                ks_database_version,
+                favorable,
+                orientifold_config,
+                export_kahler_rays,
+                frsts_per_polytope,
+                max_polytope_replacements if replace_rejected_polytopes else 0,
+                True,
+            )
+            replacement_tasks_by_h11[h11] = replacement_tasks
+            if not tasks:
+                print(f"No favorable N-lattice polytopes found for h11={h11}.")
+                continue
+
+            requested_outputs = sum(task[3] for task in tasks)
+            if frsts_per_polytope is not None and len(tasks) < n_geometries:
+                targets = [task[3] for task in tasks]
+                print(
+                    f"Requested {n_geometries} favorable polytopes but found "
+                    f"{len(tasks)}; redistributed the combined target of "
+                    f"{requested_outputs} FRSTs across per-polytope targets {targets}."
+                )
+            print(
+                f"Found {len(tasks)} favorable polytope(s) for h11={h11}; "
+                f"requesting {requested_outputs} geometry/triangulation output(s)."
+            )
+            if replacement_tasks:
+                print(
+                    f"Replacement mode enabled for h11={h11}; fetched "
+                    f"{len(replacement_tasks)} spare favorable polytope(s)."
+                )
+            pending.update(executor.submit(process_polytope, task) for task in tasks)
+
+        failures = []
+        while pending:
+            completed, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in completed:
+                result = future.result()
+                label = f"h11={result['h11']} np_{result['polytope_index']:07d}"
+                if not result["ok"]:
+                    print(f"ERROR {label}: {result['error']}")
+                    failures.append(result)
+                    continue
+                total_saved += result["saved"]
+                print(
+                    f"{label}: accepted {result['accepted']}/{result['requested']} "
+                    f"geometries after {result['attempted']} FRST attempts; "
+                    f"saved {result['saved']}, rejected {result['rejected']}, "
+                    f"skipped {result['skipped']}."
+                )
+
+                shortfall = max(0, result["requested"] - result["accepted"])
+                replacement_tasks = replacement_tasks_by_h11[result["h11"]]
+                if (
+                    replace_rejected_polytopes
+                    and shortfall > 0
+                    and replacement_tasks
+                ):
+                    replacement = set_task_target(replacement_tasks.pop(0), shortfall)
+                    print(
+                        f"Replacing {label}'s shortfall of {shortfall} "
+                        f"accepted geometry/geometries with "
+                        f"np_{replacement[0]:07d}."
+                    )
+                    pending.add(executor.submit(process_polytope, replacement))
+                elif replace_rejected_polytopes and shortfall > 0:
+                    print(
+                        f"No spare favorable polytope remains for {label}; "
+                        f"shortfall={shortfall}."
+                    )
+
+        if failures:
+            details = "; ".join(
+                f"h11={failure['h11']} np_{failure['polytope_index']:07d}: "
+                f"{failure['error']}"
+                for failure in failures
+            )
+            raise RuntimeError(
+                f"CYTools generation failed; no complete batch result: {details}"
+            )
+    return total_saved
 
 
 def main():
@@ -1440,7 +1667,43 @@ def main():
         metavar="H11",
         help="Explicit h11 values, e.g. '[4,10,20,50]' or '4 10 20 50'.",
     )
-    parser.add_argument("--n", type=int, default=1, help="Target number of CY geometries per h11.")
+    parser.add_argument(
+        "--n",
+        type=int,
+        default=1,
+        help=(
+            "Target number of accepted geometries per h11, or number of "
+            "favorable polytopes when --frsts-per-polytope is set."
+        ),
+    )
+    parser.add_argument(
+        "--frsts-per-polytope",
+        "--triangulations-per-polytope",
+        dest="frsts_per_polytope",
+        type=int,
+        default=None,
+        help=(
+            "Request this many accepted FRSTs from every favorable polytope; "
+            "with this option --n is the number of polytopes to fetch."
+        ),
+    )
+    parser.add_argument(
+        "--replace-rejected-polytopes",
+        action="store_true",
+        help=(
+            "Refill accepted-geometry shortfalls with additional favorable "
+            "polytopes fetched for the same h11."
+        ),
+    )
+    parser.add_argument(
+        "--max-polytope-replacements",
+        type=int,
+        default=10,
+        help=(
+            "Maximum spare favorable polytopes fetched per h11 when "
+            "--replace-rejected-polytopes is enabled."
+        ),
+    )
     parser.add_argument("--outdir", type=str, default=".", help="Base directory for output data.")
     parser.add_argument("--cores", type=int, default=None, help="Worker count (default: all available).")
     parser.add_argument("--seed", type=int, default=0, help="Seed for reproducible random triangulations.")
@@ -1566,6 +1829,10 @@ def main():
 
     if args.n < 1:
         parser.error("--n must be positive")
+    if args.frsts_per_polytope is not None and args.frsts_per_polytope < 1:
+        parser.error("--frsts-per-polytope must be positive")
+    if args.max_polytope_replacements < 0:
+        parser.error("--max-polytope-replacements cannot be negative")
     if args.sampling_scheme not in {"fair", "fast"}:
         parser.error("--sampling-scheme must be fair or fast")
     if args.max_tip_attempts < 1:
@@ -1609,39 +1876,39 @@ def main():
     favorable = {"true": True, "false": False, "any": None}[args.favorable]
     os.makedirs(args.outdir, exist_ok=True)
 
-    total_saved = 0
-    for h11 in h11_values:
-        print(f"\n>>> Processing h11={h11} <<<")
-        total_saved += run_batch(
-            h11,
-            args.n,
-            args.outdir,
-            args.cores,
-            args.seed,
-            args.max_retries,
-            args.max_tip_attempts,
-            args.overwrite,
-            args.max_m,
-            args.max_kaehler_attempts,
-            args.min_divisor_volume,
-            args.min_prime_divisor_volume,
-            args.qcd_volume_min,
-            args.qcd_volume_max,
-            args.verbose,
-            args.sampling_scheme,
-            args.backend,
-            args.n_walk,
-            args.n_flip,
-            args.initial_walk_steps,
-            args.fine_tune_steps,
-            args.walk_step_size,
-            args.max_steps_to_wall,
-            args.fast_height_scale,
-            args.ks_database_version,
-            favorable,
-            orientifold_config,
-            args.export_kahler_rays,
-        )
+    total_saved = run_batches(
+        h11_values,
+        args.n,
+        args.outdir,
+        args.cores,
+        args.seed,
+        args.max_retries,
+        args.max_tip_attempts,
+        args.overwrite,
+        args.max_m,
+        args.max_kaehler_attempts,
+        args.min_divisor_volume,
+        args.min_prime_divisor_volume,
+        args.qcd_volume_min,
+        args.qcd_volume_max,
+        args.verbose,
+        args.sampling_scheme,
+        args.backend,
+        args.n_walk,
+        args.n_flip,
+        args.initial_walk_steps,
+        args.fine_tune_steps,
+        args.walk_step_size,
+        args.max_steps_to_wall,
+        args.fast_height_scale,
+        args.ks_database_version,
+        favorable,
+        orientifold_config,
+        args.export_kahler_rays,
+        args.frsts_per_polytope,
+        args.replace_rejected_polytopes,
+        args.max_polytope_replacements,
+    )
     print(f"\nSaved {total_saved} geometry file(s).")
 
 

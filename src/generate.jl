@@ -195,23 +195,14 @@ end
 
 function hessian(x, L::Matrix{Float64}, Q::Matrix)
     Λ = L[:, 1] .* 10. .^ L[:, 2]
+    phases = vec(sum(x .* Q, dims=1))
     hessian = zeros(size(Q, 1), size(Q, 1))
-    if size(Q, 1) == 1
-        for i in axes(Q, 1), j in axes(Q, 1)
-            if i>=j
-                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(x' * Q)[:, i]))
-            end
+    for i in axes(Q, 1), j in axes(Q, 1)
+        if i >= j
+            hessian[i, j] = sum(Λ .* Q[i, :] .* Q[j, :] .* cos.(phases))
         end
-        hessian = hessian + hessian' - Diagonal(hessian)
-    else
-        for i in axes(Q, 1), j in axes(Q, 1)
-            if i>=j
-                hessian[i, j] = sum(Λ' * (@view(Q[i, :]) .* @view(Q[j, :]) .* cos.(sum(x .* Q, dims=1))[:, i]))
-            end
-        end
-        hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
-        # SMatrix{size(hessian, 1), size(hessian,2)}(hessian)
     end
+    Hermitian(hessian + hessian' - Diagonal(hessian))
 end
 
 """

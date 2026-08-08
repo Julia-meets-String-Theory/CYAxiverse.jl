@@ -166,7 +166,11 @@ The batch is parallelized by polytope. Each worker receives only the polytope
 vertices and scalar generation options, reconstructs its own CYTools objects,
 generates its assigned FRST candidates, and writes distinct output slots. This
 keeps large CYTools objects out of inter-process serialization and makes the
-parallel path the normal path rather than a special execution mode.
+parallel path the normal path rather than a special execution mode. When
+multiple `h11` values are requested, they share one worker pool: a long-running
+polytope at one `h11` does not prevent idle workers from processing later
+`h11` values. The command still waits for every submitted task before exiting;
+it does not automatically cancel a slow task.
 
 The command exits successfully only after all requested `h11` batches have
 completed without worker errors. A shortfall caused by rejected candidates is
@@ -183,7 +187,10 @@ sample is needed.
 | `--h11_max INT` | `4` | Last `h11` value, inclusive. Values below `h11_min` are clamped to `h11_min`. |
 | `--h11_interval INT` | `1` | Step used between `h11_min` and `h11_max`, inclusive. Must be positive. |
 | `--h11s H11 [H11 ...]` | unset | Explicit positive, unique `h11` values. Values may be comma-separated or supplied as a bracketed list; this replaces the min/max range. |
-| `--n INT` | `1` | Number of accepted geometries requested per `h11`. Must be positive. |
+| `--n INT` | `1` | Number of accepted geometries requested per `h11`; with `--frsts-per-polytope`, number of favorable polytopes to fetch. |
+| `--frsts-per-polytope INT` | off | Set the per-polytope FRST target. `--n` then counts polytopes; the combined target is `--n` times this value. |
+| `--replace-rejected-polytopes` | off | Refill a polytope's accepted-geometry shortfall with spare favorable polytopes from the same `h11`. |
+| `--max-polytope-replacements INT` | `10` | Maximum spare favorable polytopes fetched per `h11` when replacement mode is enabled. |
 | `--outdir PATH` | `.` | Root directory for the generated database. |
 | `--cores INT` | all available | Number of worker processes. Use `1` for debugging and deterministic logs. |
 | `--seed INT` | `0` | Base seed. Worker and candidate seeds are derived from it and recorded in construction metadata. |
@@ -210,6 +217,8 @@ python scripts/generate_geometric_data_multitriangulation.py \
 Use `--cores 1 --verbose` when diagnosing a failure. With multiple workers:
 
 - polytopes are independent jobs and can be processed concurrently;
+- tasks from different requested `h11` values share the same pool, so there is
+  no completion barrier after each individual `h11`;
 - each worker activates/configures its own CYTools and solver state;
 - MOSEK license discovery is process-safe because workers receive only the
   license path through the environment;
@@ -263,6 +272,42 @@ the random walk`. If a fair run stalls, try the other backend, restore the
 CYTools defaults, increase `--max-steps-to-wall`, or move to a larger target
 polytope.
 
+To balance the sample across polytopes, use `--frsts-per-polytope`. For
+example, the following requests ten favorable polytopes and ten accepted FRSTs
+from each, for up to 100 output geometries at that `h11`:
+
+```bash
+python scripts/generate_geometric_data_multitriangulation.py \
+    --h11_min 300 --h11_max 300 \
+    --n 10 --frsts-per-polytope 10 \
+    --replace-rejected-polytopes \
+    --sampling-scheme fast \
+    --cores 8 --seed 20260807 \
+    --outdir /scratch/database/h11_300 \
+    --verbose
+```
+
+In this mode the combined target is `--n` times `--frsts-per-polytope`. If
+fewer than `--n` favorable polytopes are available, the script preserves that
+combined target and redistributes it as evenly as possible over the polytopes
+that were found. For example, if only four polytopes are available, the
+example above requests 25 FRSTs from each. If the total is not divisible by
+the number of available polytopes, their targets differ by at most one. A
+polytope may still finish below its target if the FRST attempt budget is
+exhausted or all candidates fail the physical acceptance filters. Existing
+output slots are counted per polytope, so the same command can resume an
+interrupted run.
+
+If `--replace-rejected-polytopes` is enabled, the script fetches up to
+`--max-polytope-replacements` spare favorable polytopes per `h11`. Whenever an
+active polytope finishes below its accepted-geometry target, the next spare is
+assigned the missing count. This preserves the combined default-mode target;
+in `--frsts-per-polytope` mode it preserves the combined per-polytope target,
+although the replacement may cause more than the originally requested number
+of polytopes to be used. Replacement is bounded: if the spare pool is
+exhausted, the remaining shortfall is reported. A worker exception is still
+reported as an error rather than silently replaced.
+
 ### Recommended workflow for small geometries
 
 Small-`h11` runs are useful for learning the workflow and checking the HDF5
@@ -312,8 +357,9 @@ The attempt counters have different meanings:
 - `--max-retries` bounds retries internal to the triangulation sampler;
 - `--max-tip-attempts` bounds FRST candidates tested for each polytope;
 - `--max-kaehler-attempts` bounds angular Kähler points tested for each FRST;
-- `--n` is the number of accepted geometries requested per `h11`, not the
-  number of candidates tried.
+- `--n` is the number of accepted geometries requested per `h11` in the default
+  mode; with `--frsts-per-polytope`, it is the number of favorable polytopes.
+  It is never the number of FRST candidates tried.
 
 Messages such as `NoPhysicalKaehlerPoint`, `PrefactorCriterionNotMet`, or
 `NoQcdDivisorVolume` mean that a candidate was rejected by a physical filter.
@@ -354,6 +400,14 @@ licensed and available, the script explicitly requests MOSEK for this solve.
 For randomized angular projections, licensed MOSEK is tried first; other
 qpsolvers backends are fallback candidates. The actual tip and projection
 solvers are recorded per artifact.
+
+At large `h11`, the fallback HiGHS solver may report a SciPy
+`SparseConversionWarning` if a caller supplies dense quadratic-program
+constraints. The generator constructs these constraints as CSC sparse matrices
+so that warning should not normally appear in new runs. If it appears from a
+different dependency path, it is a performance warning rather than a failed
+geometry; check the selected solver and runtime before changing acceptance
+parameters.
 
 Candidate acceptance requires:
 
