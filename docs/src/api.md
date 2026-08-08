@@ -6,6 +6,7 @@ CurrentModule = CYAxiverse
 
 ```@docs
 CYAxiverse.CYAxiverse
+CYAxiverse.greet_CYAxiverse
 ```
 
 ## `CYAxiverse.filestructure`
