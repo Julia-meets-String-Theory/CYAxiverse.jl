@@ -19,6 +19,12 @@ using ..minimizer: minimize, subspace_minimize, critical_points, minima_lattice
 
 using ..structs: GeometryIndex, LQLinearlyIndependent, Projector, CanonicalQBasis, ProjectedQ, AxionPotential, MyTree, AxionSpectrum, PhysicalAxionSpectrum, QuarticComponentDiagnostics, QuarticDiagnostics, MassBasisDiagnostics, InstantonHierarchyDiagnostics, Canonicalα, RationalQSNF, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square, BasisSNF
 
+"""Validated subset of a minimizer result used by the legacy MK workflow."""
+struct _MKMinimizeResult{X, V}
+    xmin::X
+    Vmin_log::V
+end
+
 #################
 ### Constant ####
 #################
@@ -2461,13 +2467,14 @@ function vacua_MK(L::Matrix{Float64}, Q::Matrix{Int}; threshold = 1e-2)
 			Lfull = Lsubdiff[1,:] .* 10. .^ Lsubdiff[2,:];
 			Qsubmask = [sum(i .== 0) < size(Qsub,1) for i in eachcol(Qsub)]
 				Qsub = Qsub[:,Qsubmask]
-			res::Dict{String,Any} = Dict{String,Any}()
+			res = nothing
 				for run_number = 1:10_000
 					x0 = rand(Uniform(0,2π),h11) .* rand(Float64,h11)
-					res = minimize(Lfull, Qsub, x0) ##need to write subsystem minimizer
-				res["Vmin_log"] = res["Vmin_log"] .+ Lsub[2,1]
-			end
-			xmin = hcat(res["xmin"]...)
+					raw_result = minimize(Lfull, Qsub, x0) ##need to write subsystem minimizer
+					res = _MKMinimizeResult(raw_result["xmin"],
+						raw_result["Vmin_log"] .+ Lsub[2,1])
+				end
+			xmin = hcat(res.xmin...)
 			for i in eachcol(xmin)
 				i[:] = @.(mod(i / 2π, 1) ≈ 1 || mod(i / 2π, 1) ≈ 0 ? 0 : i)
 			end

@@ -27,19 +27,9 @@ function _usage()
 end
 
 function _parse_args(args)
-    options = Dict{Symbol, Any}(
-        :data_dir => "",
-        :h11 => nothing,
-        :limit => nothing,
-        :offset => 0,
-        :geometries => GeometryIndex[],
-        :threshold => 0.01,
-        :starts => 100_000,
-        :force => false,
-        :hilbert => false,
-        :summary => "",
-        :append_summary => false,
-    )
+    options = (data_dir="", h11=nothing, limit=nothing, offset=0,
+        geometries=GeometryIndex[], threshold=0.01, starts=100_000,
+        force=false, hilbert=false, summary="", append_summary=false)
 
     i = 1
     while i <= length(args)
@@ -48,33 +38,33 @@ function _parse_args(args)
             _usage()
             exit(0)
         elseif arg == "--force"
-            options[:force] = true
+            options = merge(options, (; force=true))
         elseif arg == "--hilbert"
-            options[:hilbert] = true
+            options = merge(options, (; hilbert=true))
         elseif arg == "--append-summary"
-            options[:append_summary] = true
+            options = merge(options, (; append_summary=true))
         elseif arg in ("--data-dir", "--h11", "--limit", "--offset", "--geometry",
                        "--threshold", "--starts", "--summary")
             i == length(args) && error("missing value for $arg")
             value = args[i + 1]
             if arg == "--data-dir"
-                options[:data_dir] = value
+                options = merge(options, (; data_dir=value))
             elseif arg == "--h11"
-                options[:h11] = parse(Int, value)
+                options = merge(options, (; h11=parse(Int, value)))
             elseif arg == "--limit"
-                options[:limit] = parse(Int, value)
+                options = merge(options, (; limit=parse(Int, value)))
             elseif arg == "--offset"
-                options[:offset] = parse(Int, value)
+                options = merge(options, (; offset=parse(Int, value)))
             elseif arg == "--geometry"
                 parts = parse.(Int, split(value, ","))
                 length(parts) == 3 || error("--geometry must be H,N,C")
-                push!(options[:geometries], GeometryIndex(parts...))
+                push!(options.geometries, GeometryIndex(parts...))
             elseif arg == "--threshold"
-                options[:threshold] = parse(Float64, value)
+                options = merge(options, (; threshold=parse(Float64, value)))
             elseif arg == "--starts"
-                options[:starts] = parse(Int, value)
+                options = merge(options, (; starts=parse(Int, value)))
             elseif arg == "--summary"
-                options[:summary] = value
+                options = merge(options, (; summary=value))
             end
             i += 1
         else

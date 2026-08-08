@@ -8,6 +8,11 @@ using Printf
 include(joinpath(@__DIR__, "vacua_pipeline.jl"))
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
+const VacuaJobOptions = NamedTuple{(:threshold, :starts, :residual_tolerance,
+    :merge_tolerance, :max_iterations, :method, :max_branches, :force),
+    Tuple{Float64, Int, Float64, Float64, Int, Symbol, Int, Bool}}
+const VacuaJob = NamedTuple{(:geom_idx, :data_dir, :options),
+    Tuple{GeometryIndex, String, VacuaJobOptions}}
 
 """Print command-line usage for the vacua batch runner."""
 function _vacua_usage()
@@ -39,29 +44,14 @@ function _vacua_usage()
     """)
 end
 
-"""Parse batch-runner command-line arguments into an options dictionary."""
+"""Parse batch-runner command-line arguments into a typed options tuple."""
 function _vacua_parse_args(args)
-    options = Dict{Symbol, Any}(
-        :data_dir => "",
-        :h11 => nothing,
-        :limit => nothing,
-        :offset => 0,
-        :geometries => GeometryIndex[],
-        :threshold => 0.5,
-        :starts => 10_000,
-        :residual_tolerance => 1e-10,
-        :merge_tolerance => 1e-7,
-        :max_iterations => 200,
-        :method => :legacy,
-        :max_branches => 1_000_000,
-        :summary => "",
-        :append_summary => false,
-        :workers => 1,
-        :blas_threads => nothing,
-        :batch_size => 16,
-        :force => false,
-        :dry_run => false,
-    )
+    options = (data_dir="", h11=nothing, limit=nothing, offset=0,
+        geometries=GeometryIndex[], threshold=0.5, starts=10_000,
+        residual_tolerance=1e-10, merge_tolerance=1e-7, max_iterations=200,
+        method=:legacy, max_branches=1_000_000, summary="",
+        append_summary=false, workers=1, blas_threads=nothing, batch_size=16,
+        force=false, dry_run=false)
 
     valued = ("--data-dir", "--h11", "--limit", "--offset", "--geometry",
         "--threshold", "--starts", "--residual-tolerance", "--merge-tolerance",
@@ -74,48 +64,48 @@ function _vacua_parse_args(args)
             _vacua_usage()
             exit(0)
         elseif arg == "--force"
-            options[:force] = true
+            options = merge(options, (; force=true))
         elseif arg == "--dry-run"
-            options[:dry_run] = true
+            options = merge(options, (; dry_run=true))
         elseif arg == "--append-summary"
-            options[:append_summary] = true
+            options = merge(options, (; append_summary=true))
         elseif arg in valued
             i == length(args) && error("missing value for $arg")
             value = args[i + 1]
             if arg == "--data-dir"
-                options[:data_dir] = value
+                options = merge(options, (; data_dir=value))
             elseif arg == "--h11"
-                options[:h11] = parse(Int, value)
+                options = merge(options, (; h11=parse(Int, value)))
             elseif arg == "--limit"
-                options[:limit] = parse(Int, value)
+                options = merge(options, (; limit=parse(Int, value)))
             elseif arg == "--offset"
-                options[:offset] = parse(Int, value)
+                options = merge(options, (; offset=parse(Int, value)))
             elseif arg == "--geometry"
                 parts = parse.(Int, split(value, ","))
                 length(parts) == 3 || error("--geometry must be H,N,C")
-                push!(options[:geometries], GeometryIndex(parts...))
+                push!(options.geometries, GeometryIndex(parts...))
             elseif arg == "--threshold"
-                options[:threshold] = parse(Float64, value)
+                options = merge(options, (; threshold=parse(Float64, value)))
             elseif arg == "--starts"
-                options[:starts] = parse(Int, value)
+                options = merge(options, (; starts=parse(Int, value)))
             elseif arg == "--residual-tolerance"
-                options[:residual_tolerance] = parse(Float64, value)
+                options = merge(options, (; residual_tolerance=parse(Float64, value)))
             elseif arg == "--merge-tolerance"
-                options[:merge_tolerance] = parse(Float64, value)
+                options = merge(options, (; merge_tolerance=parse(Float64, value)))
             elseif arg == "--max-iterations"
-                options[:max_iterations] = parse(Int, value)
+                options = merge(options, (; max_iterations=parse(Int, value)))
             elseif arg == "--method"
-                options[:method] = Symbol(value)
+                options = merge(options, (; method=Symbol(value)))
             elseif arg == "--max-branches"
-                options[:max_branches] = parse(Int, value)
+                options = merge(options, (; max_branches=parse(Int, value)))
             elseif arg == "--summary"
-                options[:summary] = value
+                options = merge(options, (; summary=value))
             elseif arg == "--workers"
-                options[:workers] = parse(Int, value)
+                options = merge(options, (; workers=parse(Int, value)))
             elseif arg == "--blas-threads"
-                options[:blas_threads] = parse(Int, value)
+                options = merge(options, (; blas_threads=parse(Int, value)))
             elseif arg == "--batch-size"
-                options[:batch_size] = parse(Int, value)
+                options = merge(options, (; batch_size=parse(Int, value)))
             end
             i += 1
         else
@@ -369,7 +359,7 @@ function run_vacua_batch(options)
     failed = 0
     total_start = time()
     worker_ids = Int[]
-    active_jobs = NamedTuple[]
+    active_jobs = VacuaJob[]
     try
         for (index, geom_idx) in enumerate(geoms)
             path = CYAxiverse.filestructure.cyax_file(geom_idx)
@@ -420,11 +410,13 @@ function run_vacua_batch(options)
                 continue
             end
 
-            push!(active_jobs, (geom_idx=geom_idx, data_dir=options[:data_dir], options=(
+            job_options = VacuaJobOptions((
                 threshold=options[:threshold], starts=options[:starts],
                 residual_tolerance=options[:residual_tolerance],
                 merge_tolerance=options[:merge_tolerance], max_iterations=options[:max_iterations],
-                method=options[:method], max_branches=options[:max_branches], force=options[:force])))
+                method=options[:method], max_branches=options[:max_branches], force=options[:force]))
+            push!(active_jobs, VacuaJob((geom_idx=geom_idx, data_dir=options[:data_dir],
+                options=job_options)))
         end
 
         worker_ids = isempty(active_jobs) ? Int[] : _vacua_start_workers(options)

@@ -45,50 +45,49 @@ function _usage()
     """)
 end
 
-"""Parse batch-runner command-line arguments into an options dictionary."""
+"""Parse batch-runner command-line arguments into a typed options tuple."""
 function _parse_args(args)
-    options = Dict{Symbol, Any}(
-        :data_dir => "", :h11 => nothing, :limit => nothing, :offset => 0,
-        :geometries => GeometryIndex[], :prec => 200,
-        :threshold_log10 => nothing, :quartics => false, :force => false,
-        :summary => "", :append_summary => false, :hilbert => false)
+    options = (data_dir="", h11=nothing, limit=nothing, offset=0,
+        geometries=GeometryIndex[], prec=200, threshold_log10=nothing,
+        quartics=false, force=false, summary="", append_summary=false,
+        hilbert=false)
     i = 1
     while i <= length(args)
         arg = args[i]
         if arg in ("--help", "-h")
             _usage(); exit(0)
         elseif arg == "--quartics"
-            options[:quartics] = true
+            options = merge(options, (; quartics=true))
         elseif arg == "--mass-only"
-            options[:quartics] = false
+            options = merge(options, (; quartics=false))
         elseif arg == "--force"
-            options[:force] = true
+            options = merge(options, (; force=true))
         elseif arg == "--append-summary"
-            options[:append_summary] = true
+            options = merge(options, (; append_summary=true))
         elseif arg == "--hilbert"
-            options[:hilbert] = true
+            options = merge(options, (; hilbert=true))
         elseif arg in ("--data-dir", "--h11", "--limit", "--offset", "--geometry",
                        "--prec", "--threshold-log10", "--summary")
             i == length(args) && error("missing value for $arg")
             value = args[i + 1]
             if arg == "--data-dir"
-                options[:data_dir] = value
+                options = merge(options, (; data_dir=value))
             elseif arg == "--h11"
-                options[:h11] = parse(Int, value)
+                options = merge(options, (; h11=parse(Int, value)))
             elseif arg == "--limit"
-                options[:limit] = parse(Int, value)
+                options = merge(options, (; limit=parse(Int, value)))
             elseif arg == "--offset"
-                options[:offset] = parse(Int, value)
+                options = merge(options, (; offset=parse(Int, value)))
             elseif arg == "--geometry"
                 parts = parse.(Int, split(value, ","))
                 length(parts) == 3 || error("--geometry must be H,P,F")
-                push!(options[:geometries], GeometryIndex(parts...))
+                push!(options.geometries, GeometryIndex(parts...))
             elseif arg == "--prec"
-                options[:prec] = parse(Int, value)
+                options = merge(options, (; prec=parse(Int, value)))
             elseif arg == "--threshold-log10"
-                options[:threshold_log10] = parse(Float64, value)
+                options = merge(options, (; threshold_log10=parse(Float64, value)))
             elseif arg == "--summary"
-                options[:summary] = value
+                options = merge(options, (; summary=value))
             end
             i += 1
         else
@@ -244,13 +243,13 @@ function _append_summary(path, geom_idx; status, error="", runtime_seconds=0.0, 
     masses = spectrum === nothing ? Float64[] : spectrum.m
     lambda = quartics && spectrum !== nothing ? spectrum.λself : Float64[]
     fpert = quartics && spectrum !== nothing ? masses .- 0.5 .* lambda : Float64[]
-    values = [geom_idx.h11, geom_idx.polytope, geom_idx.frst, status, error, runtime_seconds,
+    values = (geom_idx.h11, geom_idx.polytope, geom_idx.frst, status, error, runtime_seconds,
         prec, threshold_log10, instantons, length(masses), count(<(threshold_log10), masses),
         isempty(masses) ? "" : minimum(masses), isempty(masses) ? "" : maximum(masses), _median_or_empty(masses),
         quartics, count(<(0), lambda), count(>(0), lambda), isempty(fpert) ? "" : minimum(fpert),
         isempty(fpert) ? "" : maximum(fpert), _median_or_empty(fpert),
         isempty(fK) ? "" : minimum(fK), isempty(fK) ? "" : maximum(fK), _median_or_empty(fK),
-        provisional, output]
+        provisional, output)
     open(path, "a") do io
         println(io, join(_csv_escape.(values), ','))
         flush(io)

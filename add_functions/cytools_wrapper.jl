@@ -24,6 +24,37 @@ using PyCall
 using HDF5
 using LinearAlgebra
 
+"""Typed records used internally before the legacy heterogeneous return."""
+struct _TopologyRecord
+    h11::Int
+    cy::PyObject
+    tri::Int
+    cy_i::Int
+end
+
+"""Intermediate topology batch with dynamic PyCall payloads kept parametric."""
+struct _TopologyBatch{P, R}
+    m::Int
+    poly_tri::Vector{PyObject}
+    poly_retri::R
+    points::P
+    simplices::Vector{PyObject}
+    cy::Vector{PyObject}
+end
+
+"""Convert typed records to the historical heterogeneous 4-by-N API matrix.
+
+The matrix is intentionally confined to this boundary because its second row
+contains PyCall objects while the other rows contain integers.
+"""
+function _legacy_topology_matrix(records::Vector{_TopologyRecord})
+    result = Matrix{Union{Int, PyObject}}(undef, 4, length(records))
+    for (column, record) in pairs(records)
+        result[:, column] = (record.h11, record.cy, record.tri, record.cy_i)
+    end
+    result
+end
+
 
 """
     __init__()
@@ -144,10 +175,7 @@ function topologies_generate_fast(h11,n)
         #Generate list of CY3s
         push!(cy,tri_test[t].get_cy())
     end
-    keys = ["m", "poly_tri", "poly_retri", "points", "simplices", "cy"]
-    vals = [m, tri_test, tri_test_m, points, simplices, cy]
-
-    return Dict(zip(keys,vals))
+    _TopologyBatch(m, tri_test, tri_test_m, points, simplices, cy)
 end
 
 
@@ -193,10 +221,7 @@ function topologies_generate_fair(h11,n)
         #Generate list of CY3s
         push!(cy,tri_test[t].get_cy())
     end
-    keys = ["m", "poly_tri", "poly_retri", "points", "simplices", "cy"]
-    vals = [m, tri_test, tri_test_m, points, simplices, cy]
-
-    return Dict(zip(keys,vals))
+    _TopologyBatch(m, tri_test, tri_test_m, points, simplices, cy)
 end
 """
     topologies(h11::Int, n::Int)
@@ -208,13 +233,14 @@ Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 
 """
 function topologies(h11::Int, n::Int; fast = true)
-    h11list_temp = Vector{Vector{Any}}(undef, 0)
+    h11list_temp = _TopologyRecord[]
     if fast
         top_data = topologies_generate_fast(h11, n)
     else
         top_data = topologies_generate_fair(h11,n)
     end
-    m, tri_test, tri_test_m, points, simplices, cy = top_data["m"], top_data["poly_tri"], top_data["poly_retri"], top_data["points"], top_data["simplices"], top_data["cy"]
+    m, tri_test, tri_test_m, points, simplices, cy = top_data.m, top_data.poly_tri,
+        top_data.poly_retri, top_data.points, top_data.simplices, top_data.cy
     #Create dir for saving -- structure is h11_{$h11}.zfill(3)/np_{$tri}.zfill(7)/cy_{$cy}.zfill(7)/data
     if isdir(string(present_dir(),"h11_",lpad(h11,3,"0")))
     else
@@ -239,7 +265,7 @@ function topologies(h11::Int, n::Int; fast = true)
                 f1a["points",deflate=9] = Int.(points[tri])
                 f1a["simplices",deflate=9] = Int.(simplices[tri])
             end
-            push!(h11list_temp, [h11,cy[tri],tri,1])
+            push!(h11list_temp, _TopologyRecord(h11, cy[tri], tri, 1))
         end
     else
         t = 1
@@ -262,12 +288,12 @@ function topologies(h11::Int, n::Int; fast = true)
                     f1a["points",deflate=9] = Int.(points[tri])
                     f1a["simplices",deflate=9] = Int.(simplices[t])
                 end
-                push!(h11list_temp, [h11,cy[t],tri,cy_i])
+                push!(h11list_temp, _TopologyRecord(h11, cy[t], tri, cy_i))
                 t+=1
             end
         end
     end
-    h11list = hcat(h11list_temp...)
+    h11list = _legacy_topology_matrix(h11list_temp)
     GC.gc()
     return h11list
 end
@@ -280,7 +306,7 @@ Generates triangulations from already computed `points` and `simplices` of polyt
 Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 """
 function cy_from_poly(h11)
-    h11list_temp = Vector{Vector{Any}}(undef, 0)
+    h11list_temp = _TopologyRecord[]
     h11list_inds = np_path_generate(h11)[2]
     for col in eachcol(h11list_inds)
         h11,tri,cy_i = col
@@ -289,9 +315,9 @@ function cy_from_poly(h11)
         p = poly(points)
         t = p.triangulate(simplices=simplices)
         cy = t.get_cy()
-        push!(h11list_temp,[h11,cy,tri,cy_i])
+        push!(h11list_temp, _TopologyRecord(h11, cy, tri, cy_i))
     end
-    h11list = hcat(h11list_temp...)
+    h11list = _legacy_topology_matrix(h11list_temp)
     GC.gc()
     return h11list
 end

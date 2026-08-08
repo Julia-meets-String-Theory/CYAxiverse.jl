@@ -105,6 +105,7 @@ end
             parallel_options = _vacua_parse_args(["--data-dir", root,
                 "--geometry", "2,1,1", "--workers", "2", "--blas-threads", "1",
                 "--summary", parallel_summary, "--force"])
+            @test parallel_options isa NamedTuple
             @test parallel_options[:workers] == 2
             @test parallel_options[:blas_threads] == 1
             @test !run_vacua_batch(parallel_options)
@@ -174,6 +175,11 @@ end
         @test !HDF5.haskey(file, "spectrum/physical/fpert_log10")
         @test read(file["spectrum/physical/metadata/quartics"]) == false
     end
+
+    physical_options = _parse_args(["--geometry", "2,3,4", "--quartics"])
+    @test physical_options isa NamedTuple
+    @test physical_options[:geometries] == [geom_idx]
+    @test physical_options[:quartics]
 
     summary_path = joinpath(output_dir, "summary.csv")
     _write_summary_header(summary_path)
