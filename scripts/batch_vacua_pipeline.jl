@@ -8,6 +8,7 @@ using Printf
 include(joinpath(@__DIR__, "vacua_pipeline.jl"))
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
+const DEFAULT_BLAS_THREADS = 1
 const VacuaJobOptions = NamedTuple{(:threshold, :starts, :residual_tolerance,
     :merge_tolerance, :max_iterations, :method, :max_branches, :force),
     Tuple{Float64, Int, Float64, Float64, Int, Symbol, Int, Bool}}
@@ -31,13 +32,13 @@ function _vacua_usage()
       --residual-tolerance X       Recorded residual tolerance. Default: 1e-10.
       --merge-tolerance X          Recorded merge tolerance. Default: 1e-7.
       --max-iterations N           Recorded iteration bound. Default: 200.
-        --method NAME                Search method: legacy, leading_branches, or reduced_jlm.
+        --method NAME                Search method: auto, legacy, leading_branches, or reduced_jlm.
                             Default: legacy.
         --max-branches N             Bound leading-branch enumeration. Default: 1000000.
       --summary PATH               CSV summary output path.
       --append-summary             Append to an existing summary.
         --workers N                  Geometry worker processes. Default: 1.
-        --blas-threads N             BLAS threads per worker. Default: Julia setting.
+        --blas-threads N             BLAS threads per worker. Default: 1.
         --batch-size N               Maximum geometries dispatched before checkpointing. Default: 16.
       --force                      Recompute and replace an existing matching result.
       --dry-run                    Select and classify geometries without numerical work.
@@ -50,7 +51,7 @@ function _vacua_parse_args(args)
         geometries=GeometryIndex[], threshold=0.5, starts=10_000,
         residual_tolerance=1e-10, merge_tolerance=1e-7, max_iterations=200,
         method=:legacy, max_branches=1_000_000, summary="",
-        append_summary=false, workers=1, blas_threads=nothing, batch_size=16,
+        append_summary=false, workers=1, blas_threads=DEFAULT_BLAS_THREADS, batch_size=16,
         force=false, dry_run=false)
 
     valued = ("--data-dir", "--h11", "--limit", "--offset", "--geometry",
@@ -127,7 +128,7 @@ function _vacua_validate_options(options)
     options[:offset] >= 0 || throw(ArgumentError("offset must be nonnegative"))
     options[:limit] === nothing || options[:limit] > 0 ||
         throw(ArgumentError("limit must be positive"))
-    options[:method] in (:legacy, :leading_branches, :reduced_jlm) ||
+    options[:method] in (:auto, :legacy, :leading_branches, :reduced_jlm) ||
         throw(ArgumentError("unsupported method: $(options[:method])"))
     options[:max_branches] > 0 || throw(ArgumentError("max-branches must be positive"))
     options[:workers] > 0 || throw(ArgumentError("workers must be positive"))
@@ -251,7 +252,7 @@ function _vacua_worker_job(job)
     geom_idx, data_dir, options = job
     started_at = time()
     try
-        result = compute_axion_data(geom_idx.h11, geom_idx.polytope, geom_idx.frst,
+        result = compute_vacua_data(geom_idx.h11, geom_idx.polytope, geom_idx.frst,
             data_dir; threshold=options.threshold, starts=options.starts,
             residual_tolerance=options.residual_tolerance,
             merge_tolerance=options.merge_tolerance,
@@ -292,7 +293,7 @@ function _vacua_start_workers(options)
             geom_idx, data_dir, options = job
             started_at = time()
             try
-                result = compute_axion_data(geom_idx.h11, geom_idx.polytope, geom_idx.frst,
+                result = compute_vacua_data(geom_idx.h11, geom_idx.polytope, geom_idx.frst,
                     data_dir; threshold=options.threshold, starts=options.starts,
                     residual_tolerance=options.residual_tolerance,
                     merge_tolerance=options.merge_tolerance,

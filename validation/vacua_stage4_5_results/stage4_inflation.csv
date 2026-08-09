@@ -1,0 +1,7 @@
+h11,polytope,frst,branch_count,leading_minima_count,archived_branch_count,archived_minima_count,verification_status,solver_status
+5,1,1,160,5,160,5,verified_selected_branch_set,completed
+9,1,1,2560,5,2560,5,verified_selected_branch_set,completed
+10,1,1,5120,5,5120,5,verified_selected_branch_set,completed
+11,1,1,2048,1,10240,5,explained_legacy_geometry_replacement,completed
+11,2,1,10240,5,10240,5,verified_selected_branch_set,completed
+11,7,1,12288,6,12288,6,verified_selected_branch_set,completed

@@ -66,6 +66,24 @@ end
         old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
         ENV["CYAXIVERSE_DATA_DIR"] = root
         try
+            vacuum_geom_dir = joinpath(root, "h11_002", "np_0000002", "cy_0000001")
+            mkpath(vacuum_geom_dir)
+            h5open(joinpath(vacuum_geom_dir, "cyax.h5"), "cw") do file
+                cytools = create_group(file, "cytools")
+                potential = create_group(cytools, "potential")
+                geometric = create_group(cytools, "geometric")
+                potential["Q"] = Int[1 0 1; 0 1 1]
+                potential["L"] = Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+                geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+            end
+            vacuum_only = compute_vacua_data(
+                CYAxiverse.structs.GeometryIndex(2, 2, 1), root;
+                method=:auto, starts=64, save=false)
+            @test !haskey(vacuum_only, "spectrum")
+            @test vacuum_only["search"].auto_selected_method == "exact_determinant"
+            @test vacuum_only["vacua_estimate"].vac == 1
+            @test haskey(vacuum_only["timings"], "potential_load_seconds")
+            @test haskey(vacuum_only["timings"], "vacua_search_seconds")
             geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
             spectrum = nothing
             estimate = (vac=3, issquare=1)
@@ -108,6 +126,9 @@ end
             @test parallel_options isa NamedTuple
             @test parallel_options[:workers] == 2
             @test parallel_options[:blas_threads] == 1
+            default_blas_options = _vacua_parse_args(["--data-dir", root,
+                "--geometry", "2,1,1"])
+            @test default_blas_options[:blas_threads] == 1
             @test !run_vacua_batch(parallel_options)
             @test occursin("failed", read(parallel_summary, String))
 

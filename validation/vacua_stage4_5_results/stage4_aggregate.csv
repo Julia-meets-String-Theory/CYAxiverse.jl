@@ -1,0 +1,9 @@
+h11,n_geometries,computed_mean,computed_median,computed_max,non_square,digitized_mean,mean_delta,discrepancy_status
+4,1008,1.034722,1.000000,3,30,1.196000,-0.161278,not_same_estimand_finite_search_lower_bound
+5,1008,1.103175,1.000000,5,24,1.298600,-0.195425,not_same_estimand_finite_search_lower_bound
+6,1009,1.206145,1.000000,3,12,1.373800,-0.167655,not_same_estimand_finite_search_lower_bound
+7,1010,1.303960,1.000000,4,15,1.423900,-0.119940,not_same_estimand_finite_search_lower_bound
+8,1010,1.412871,1.000000,4,8,1.584900,-0.172029,not_same_estimand_finite_search_lower_bound
+9,1010,1.551485,1.000000,5,8,1.658500,-0.107015,not_same_estimand_finite_search_lower_bound
+10,1000,1.622000,1.000000,5,6,1.738400,-0.116400,not_same_estimand_finite_search_lower_bound
+11,1010,1.700000,1.000000,6,2,1.793000,-0.093000,not_same_estimand_finite_search_lower_bound

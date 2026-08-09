@@ -10,6 +10,7 @@ module jlm_reduced
 
 using HDF5
 using LinearAlgebra
+using Nemo
 using SparseArrays
 
 using ..filestructure: minfile
@@ -32,9 +33,11 @@ struct ReducedJLMProblem
     extra_rows::Int
 end
 
-"""Return the rounded absolute determinant of an integer-valued matrix."""
-function _det_int(Q::AbstractMatrix)
-    Int(abs(round(det(Q))))
+"""Return the exact absolute determinant of an integer-valued square matrix."""
+function _det_int(Q::AbstractMatrix{<:Integer})
+    size(Q, 1) == size(Q, 2) || throw(DimensionMismatch("determinant requires a square matrix"))
+    value = Nemo.det(Nemo.matrix(Nemo.ZZ, Matrix{Int}(Q)))
+    Int(abs(BigInt(value)))
 end
 
 """Determine whether reduced charges are integral and compute multiplicity."""
@@ -94,30 +97,37 @@ function prepare(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64}; threshold::
     colmask = αtest.αcolmask
     n_axions = count(rowmask)
 
-    Q_reduced = hcat(Matrix{Rational}(I, n_axions, n_axions),
-        αtest.α_complete[rowmask, colmask])'
-    Q_square_test = hcat(Matrix{Rational}(I, n_axions, n_axions),
-        αtest.α[rowmask, colmask])'
-
-    for i in (n_axions + 1):size(Q_square_test, 1)
-        row = @view Q_square_test[i, :]
-        if count(!iszero, row) <= 1
-            Q_square_test[i, :] .= zero(Rational)
+    # Decide whether the effective charge set is square without constructing a
+    # second dense rational matrix. Only perturbations involving at least two
+    # leading axions add independent rows to the reduced problem.
+    nontrivial_extra_rows = 0
+    @inbounds for col in axes(αtest.α, 2)
+        αtest.αcolmask[col] || continue
+        nonzero_count = 0
+        for row in axes(αtest.α, 1)
+            αtest.αrowmask[row] && !iszero(αtest.α[row, col]) && (nonzero_count += 1)
         end
+        nonzero_count > 1 && (nontrivial_extra_rows += 1)
     end
-    Q_square_test = Q_square_test[_nonzero_row_mask(Q_square_test), :]
 
-    if size(Q_square_test, 1) == size(Q_square_test, 2)
+    if nontrivial_extra_rows == 0
         return ReducedJLMProblem(spzeros(Float64, 0, 0), zeros(2, 0), Float64[],
             det_QTilde, Float64(det_QTilde), true, det_QTilde, 0)
     end
 
+    Q_reduced = hcat(Matrix{Rational}(I, n_axions, n_axions),
+        αtest.α_complete[rowmask, colmask])'
     L_reduced = Matrix(hcat(αtest.Lhat[:, 1:h11][:, rowmask],
         αtest.Lbar[:, colmask])')
     phases = Float64.(phase(h11, αtest)[colmask])
     integer_charges, multiplicity = _symmetry_multiplicity(det_QTilde, Q_reduced)
 
-    ReducedJLMProblem(sparse(Float64.(Q_reduced)), L_reduced, phases,
+    # Keep the exact rational representation through classification and only
+    # convert values at the numerical solver boundary. Constructing the sparse
+    # matrix directly avoids a dense Float64 copy of the full reduced charge
+    # matrix.
+    Q_reduced_sparse = SparseMatrixCSC{Float64, Int}(sparse(Q_reduced))
+    ReducedJLMProblem(Q_reduced_sparse, L_reduced, phases,
         det_QTilde, multiplicity, integer_charges, nothing,
         size(Q_reduced, 1) - size(Q_reduced, 2))
 end

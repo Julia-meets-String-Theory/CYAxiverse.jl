@@ -1662,16 +1662,19 @@ function vacua(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.5)
 end
 
 """Select independent charge columns using a reusable Gram--Schmidt workspace."""
-function leading_independent_mask!(tilde_mask::AbstractVector{Bool}, Qsorted::AbstractMatrix{Int}, orthogonal_span::AbstractMatrix{Float64}, residual::AbstractVector{Float64})
-    h11, ncols = size(Qsorted)
+function leading_independent_mask!(tilde_mask::AbstractVector{Bool}, Q::AbstractMatrix{Int}, order::AbstractVector{Int}, orthogonal_span::AbstractMatrix{Float64}, residual::AbstractVector{Float64})
+    h11, ncols = size(Q)
+    length(order) == ncols || throw(DimensionMismatch("order must contain one entry per charge column"))
+    length(tilde_mask) == ncols || throw(DimensionMismatch("tilde_mask must contain one entry per charge column"))
     fill!(tilde_mask, false)
     fill!(orthogonal_span, 0.0)
     current_rank = 0
 
-    @inbounds for idx in 1:ncols
+    @inbounds for ordered_idx in 1:ncols
+        idx = order[ordered_idx]
         original_norm_squared = 0.0
         for i in 1:h11
-            value = Float64(Qsorted[i, idx])
+            value = Float64(Q[i, idx])
             residual[i] = value
             original_norm_squared += value * value
         end
@@ -1705,6 +1708,13 @@ function leading_independent_mask!(tilde_mask::AbstractVector{Bool}, Qsorted::Ab
     current_rank
 end
 
+"""Backward-compatible wrapper for callers that already hold ordered charges."""
+function leading_independent_mask!(tilde_mask::AbstractVector{Bool}, Qordered::AbstractMatrix{Int},
+        orthogonal_span::AbstractMatrix{Float64}, residual::AbstractVector{Float64})
+    leading_independent_mask!(tilde_mask, Qordered, Base.OneTo(size(Qordered, 2)),
+        orthogonal_span, residual)
+end
+
 """
     LQtilde(Q, L)
 
@@ -1717,10 +1727,10 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
     @assert size(Q, 1) < size(Q, 2) "Looks like you need to transpose..."
     h11 = size(Q, 1)
     
-    # Sort indices upfront instead of copying/sorting arrays repeatedly
+    # Keep only the ordering permutation. Materializing Q[:, perm] and L[:, perm]
+    # here duplicates the full instanton data, which becomes significant for
+    # large-h11 geometries with many subleading instantons.
     perm = sortperm(@view(L[2, :]), rev=true)
-    Qsorted = Q[:, perm]
-    Lsorted = L[:, perm]
 
     ncols = size(Q, 2)
     tilde_mask = fill(false, ncols)
@@ -1730,12 +1740,14 @@ function LQtilde(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64})
     # the large instanton sets at high h11.
     orthogonal_span = zeros(Float64, h11, h11)
     residual = zeros(Float64, h11)
-    leading_independent_mask!(tilde_mask, Qsorted, orthogonal_span, residual)
+    leading_independent_mask!(tilde_mask, Q, perm, orthogonal_span, residual)
 
-    Qtilde = Qsorted[:, tilde_mask]
-    Ltilde = Lsorted[:, tilde_mask]
-    Qbar = Qsorted[:, .!tilde_mask]
-    Lbar = Lsorted[:, .!tilde_mask]
+    selected_indices = [index for index in perm if tilde_mask[index]]
+    remaining_indices = [index for index in perm if !tilde_mask[index]]
+    Qtilde = Q[:, selected_indices]
+    Ltilde = L[:, selected_indices]
+    Qbar = Q[:, remaining_indices]
+    Lbar = L[:, remaining_indices]
 
     return LQLinearlyIndependent(Qtilde, Qbar, Lbar, Ltilde)
 end

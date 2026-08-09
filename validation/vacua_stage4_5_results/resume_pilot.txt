@@ -1,0 +1,46 @@
+SCI-08 resume/no-corruption pilot
+date=2026-08-09
+geometry=(150,1,1)
+method=reduced_jlm
+threshold=0.5
+starts=1
+blas_threads=1
+source_data_written_original=false
+pilot_data_boundary=copy of real source data under /tmp; original source file untouched
+
+The pilot started from a real physical-spectrum file with no vacua_pipeline
+group. The first batch invocation completed successfully:
+first_status=done
+first_estimate=1
+first_verified=1
+first_issquare=1
+
+An identical second invocation reused the completed result without writing:
+second_status=skipped
+second_message=matching configuration
+
+A threshold-mismatched invocation was attempted with --dry-run. It exited
+nonzero and was blocked rather than overwriting the completed result:
+mismatch_status=config_mismatch
+mismatch_message=completed result has different configuration; use --force
+
+Final read-back of the copied HDF5 file:
+vacua_pipeline_status=completed
+solver_status=completed
+verification_status=verified
+search_classification=exact_determinant_branch
+estimate=1
+verified=1
+
+The following existing spectrum dataset representations matched before and
+after the vacua-only write:
+spectrum/physical/m_sha1=156cbe5c4228bfee6aca49ad0dac0e97602e54fb_size=(2,)
+spectrum/physical/mode_indices_sha1=27c7f2e28c148be666b683460c63610864bda88b_size=(2,)
+spectrum/physical/fK_log10_sha1=fd23e3282f84dd73c29c4dcd2db1079287cab594_size=(150,)
+spectrum/physical/lambda_self_sign_sha1=9045d8ef48db5db504c9143c8ac4fcf395739a61_size=(2,)
+spectrum/physical/lambda_self_log10_sha1=7119f6e4676a812ac64e5dfdc17c07e9bb8cec69_size=(2,)
+spectrum/physical/fpert_log10_sha1=59ddc6cf5f78d0abc922bd8b73a97797f2231ed9_size=(2,)
+
+Interpretation: this validates resumability, configuration mismatch
+protection, and preservation of prior physical-spectrum data for one bounded
+real-data pilot. It does not certify population completeness.
