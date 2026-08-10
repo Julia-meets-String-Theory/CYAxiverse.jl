@@ -11,6 +11,7 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_refinement_common.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
 
 @testset "Scale-continuation pilot diagnostics" begin
     Q = Int[1 2]
@@ -135,6 +136,121 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
         pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS; append=true)
         @test_throws ArgumentError pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS)
         @test_throws ArgumentError pilot_prepare_csv(path, (:wrong_schema,); append=true)
+    end
+end
+
+@testset "Generic inflation point correction and precision boundary" begin
+    Q = Int[1 0; 0 1]
+    L = Float64[1.0 -0.1; 0.0 0.0]
+    K = Float64[2.0 0.3; 0.3 1.0]
+    points = CYAxiverse.inflation_points
+
+    context = points.prepare_context(Q, L, K)
+    @test points.basis_policy().working_basis == :periodic_string
+    @test points.basis_policy().physical_basis == :mass_eigenbasis
+    corrected = points.correct_stationary_point(context, [1.5, -0.5];
+        residual_tolerance=1e-12)
+    @test corrected.status == :converged
+    @test corrected.working_basis == :periodic_string
+    @test corrected.theta ≈ [0.5, 0.5] atol=1e-12
+    @test corrected.residual <= 1e-12
+
+    diagnostic = points.diagnose(context, corrected.theta)
+    @test diagnostic.gradient_residual <= 1e-12
+    @test diagnostic.negative_modes == 1
+    @test diagnostic.zeroish_modes == 0
+    @test diagnostic.positive_modes == 1
+    @test diagnostic.value > 0
+    @test diagnostic.physical_basis == :mass_eigenbasis
+
+    scalar_mass_basis = points.mass_eigenbasis(context, corrected.theta)
+    @test !hasproperty(scalar_mass_basis, :raw_eigenvectors)
+    vector_mass_basis = points.mass_eigenbasis(context, corrected.theta; vectors=true)
+    @test vector_mass_basis.basis == :mass_eigenbasis
+    @test vector_mass_basis.eigenvalues ≈ diagnostic.hessian_eigenvalues
+    @test vector_mass_basis.metric_residual < 1e-12
+    @test vector_mass_basis.generalized_residual < 1e-12
+
+    comparison = points.compare_precision([1.5, -0.5], Q, L, K;
+        precision_bits=128, float_residual_tolerance=1e-12,
+        high_residual_tolerance=1e-25)
+    @test comparison.float_correction.status == :converged
+    @test comparison.high_correction.status == :converged
+    @test comparison.residual_agreement
+    @test comparison.inertia_agreement
+    @test comparison.accepted
+    @test comparison.float_diagnostics.negative_modes ==
+        comparison.high_diagnostics.negative_modes
+
+    @test_throws PosDefException points.prepare_context(Q, L, [-1.0 0.0; 0.0 1.0])
+    @test_throws DimensionMismatch points.prepare_context(Q, L[:, 1:1], K)
+end
+
+@testset "Generic geometry mass-basis gradient flow" begin
+    points = CYAxiverse.inflation_points
+    Q = reshape(Int[1, 2], 1, 2)
+    L = Float64[1.0 1.0; 0.0 log10(0.25)]
+    K = Matrix{Float64}(I, 1, 1)
+    context = points.prepare_context(Q, L, K)
+    flow = points.gradient_flow(context, [0.5]; displacement=1e-3,
+        max_efolds=0.1, step=1e-3)
+    @test flow.status == :completed
+    @test flow.basis == :mass_eigenbasis
+    @test flow.coordinate_chart == :canonical_cholesky
+    @test flow.efolds > 0
+    @test length(flow.mass_direction) == 1
+    @test flow.mass_eigenvalue ≈ 0 atol=1e-10
+
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_001", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        scan_L = copy(L)
+        scan_L[2, 2] = log10(0.24)
+        h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            potential["Q"] = Q
+            potential["L"] = scan_L
+            geometric["Kinv"] = K
+        end
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            geom_idx = CYAxiverse.structs.GeometryIndex(1, 1, 1)
+            prepared = points.prepare_geometry_context(geom_idx)
+            @test prepared.geometry == geom_idx
+            @test prepared.input_basis == :periodic_string
+            @test prepared.source == :oriented_potential
+            geometry_flow = points.gradient_flow(geom_idx, [0.5];
+                displacement=1e-3, max_efolds=0.1, step=1e-3)
+            @test geometry_flow.geometry == geom_idx
+            @test geometry_flow.input_basis == :periodic_string
+            @test geometry_flow.source == :oriented_potential
+            @test geometry_flow.status == :completed
+            @test geometry_flow.basis == :mass_eigenbasis
+
+            scan = scan_geometry_for_inflation(geom_idx;
+                max_branches=100, precision_bits=128,
+                float_tolerance=1e-10, high_tolerance=1e-25,
+                max_points=100, min_efolds=0.05, max_efolds=0.1,
+                flow_step=1e-3, flow_displacement=1e-3)
+            @test scan.refinement.search.search_status == :completed
+            @test !isempty(scan.refinement.candidates)
+            @test length(scan.flow.rows) == 2 * length(scan.refinement.candidates)
+            @test Set(row.displacement_sign for row in scan.flow.rows) == Set((-1, 1))
+            @test all(row.physical_basis == :mass_eigenbasis for row in scan.flow.rows)
+            @test any(row.flow_accepted for row in scan.flow.rows)
+            flow_report = joinpath(root, "flows.csv")
+            _write_csv(flow_report, scan.flow.rows, FLOW_FIELDS)
+            @test length(readlines(flow_report)) == length(scan.flow.rows) + 1
+        finally
+            if old_data_dir === nothing
+                delete!(ENV, "CYAXIVERSE_DATA_DIR")
+            else
+                ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir
+            end
+        end
     end
 end
 
