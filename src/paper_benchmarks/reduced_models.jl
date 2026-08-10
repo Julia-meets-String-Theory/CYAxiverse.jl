@@ -90,7 +90,11 @@ function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full)
         push!(charges, collect(qj - qi)); push!(signs, sign(prefactor))
         push!(logs, log10(abs(prefactor)) - 2π * dot(qi + qj, tau) * _LOG10E)
     end
-    (; Q=hcat(charges...), L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
+    qmatrix = Matrix{Int}(undef, size(qprime, 2), length(charges))
+    for (column, charge) in enumerate(charges)
+        qmatrix[:, column] = charge
+    end
+    (; Q=qmatrix, L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
        volume, volume_normalization, diagonal_count=12, cross_count=66)
 end
 
@@ -224,6 +228,17 @@ Set `full=true` to evaluate the separate 78-term equation-(19) reconstruction.
 The paper's catastrophe search and inflation trajectories use the truncated
 potential of equations (20) and (25), so the 12-term potential is the default.
 """
+function _n8_potential_derivatives(theta::AbstractVector{<:Real}, q::AbstractMatrix{<:Real},
+        L::AbstractMatrix{<:Real})
+    qfloat = Matrix{Float64}(q)
+    amplitudes = vec(L[1, :]) .* 10.0 .^ vec(L[2, :])
+    arguments = 2π .* (qfloat' * Float64.(theta))
+    value = sum(amplitudes .* (1 .- cos.(arguments)))
+    gradient = 2π .* qfloat * (amplitudes .* sin.(arguments))
+    hessian = (2π)^2 .* qfloat * Diagonal(amplitudes .* cos.(arguments)) * qfloat'
+    (; value, gradient, hessian, amplitudes)
+end
+
 function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
         full::Bool=false, volume_normalization::Symbol=:full,
         trajectory::Bool=false)
@@ -231,15 +246,14 @@ function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
         theta, k; trajectory=true, full=full)
     length(theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
     k > 0 || throw(ArgumentError("k must be positive"))
-    benchmark = full ? n8_full_potential(k=k,
-        volume_normalization=volume_normalization) : _n8_potential(k=k)
-    q = Matrix{Float64}(benchmark.Q)
-    amplitudes = vec(benchmark.L[1, :]) .* 10.0 .^ vec(benchmark.L[2, :])
-    arguments = 2π .* (q' * Float64.(theta))
-    value = sum(amplitudes .* (1 .- cos.(arguments)))
-    gradient = 2π .* q * (amplitudes .* sin.(arguments))
-    hessian = (2π)^2 .* q * Diagonal(amplitudes .* cos.(arguments)) * q'
-    (; value, gradient, hessian, amplitudes)
+    if full
+        benchmark = n8_full_potential(k=k,
+            volume_normalization=volume_normalization)
+        return _n8_potential_derivatives(theta, benchmark.Q, benchmark.L)
+    else
+        benchmark = _n8_potential(k=k)
+        return _n8_potential_derivatives(theta, benchmark.Q, benchmark.L)
+    end
 end
 
 """Kinetic matrix at volume scale `k`, using `tau(k)=k*tau(1)`."""
