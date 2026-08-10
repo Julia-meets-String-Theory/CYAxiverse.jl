@@ -97,6 +97,42 @@ function potential(geom_idx::GeometryIndex; hilbert = false)
     end
 end
 
+"""
+    oriented_potential(geom_idx::GeometryIndex)
+
+Load a geometry potential and return its canonical screening orientation as a
+named tuple `(Q, L, K)`: `Q` is `h11 × n_instantons`, `L` is
+`2 × n_instantons`, and `K` is an `h11 × h11` Hermitian Float64 matrix.
+
+The helper accepts the two matrix orientations emitted by older geometry
+files, validates dimensions and finite kinetic/log-scale data, and owns the
+normalization used by numerical screening callers. It does not apply scan
+thresholds or candidate policy.
+"""
+function oriented_potential(geom_idx::GeometryIndex)
+    potential_data = potential(geom_idx)
+    Q = Matrix{Int}(potential_data.Q)
+    L = Matrix{Float64}(potential_data.L)
+    if size(L, 1) != 2 && size(L, 2) == 2
+        L = Matrix(L')
+    end
+    if size(Q, 2) != size(L, 2) && size(Q, 1) == size(L, 2)
+        Q = Matrix(Q')
+    end
+    size(L, 1) == 2 || throw(DimensionMismatch("L must have two rows"))
+    size(Q, 2) == size(L, 2) ||
+        throw(DimensionMismatch("Q and L must have the same instanton count"))
+    K = Hermitian(Matrix{Float64}(potential_data.K))
+    size(K, 1) == size(K, 2) ||
+        throw(DimensionMismatch("K must be square"))
+    size(Q, 1) == size(K, 1) ||
+        throw(DimensionMismatch("Q and K must have the same axion count"))
+    all(isfinite, L) || throw(ArgumentError("L contains non-finite values"))
+    all(isfinite, Matrix(K)) ||
+        throw(ArgumentError("K contains non-finite values"))
+    (; Q, L, K)
+end
+
 
 function potential(h11::Int,tri::Int,cy::Int=1; hilbert = false)
     geom_idx = GeometryIndex(h11, tri, cy)

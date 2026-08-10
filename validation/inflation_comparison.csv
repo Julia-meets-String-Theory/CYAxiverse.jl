@@ -1,0 +1,5 @@
+benchmark,delta_k,package_local_efolds,author_efolds,author_independent_efolds,draft_efolds,method
+N5,1.0e-7,27349.0,27349.0,,27349.0,local reduced model; no independent author trajectory
+N5,6.65e-5,60.00000000000001,60.0,,60.0,local reduced model; no independent author trajectory
+N8_poly102,1.0e-7,464970.4928459734,463115.0,464213.5708051051,463115.0,local normal form; miniforge Python physical flow
+N8_poly102,0.0015320548620798324,63.85738653868245,60.0,59.690642055250756,60.0,local normal form; miniforge Python physical flow

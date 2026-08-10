@@ -95,6 +95,341 @@ function pseudo_Q(h11::Int, tri::Int, cy::Int=1)
 end
 
 """
+    LogShiftedDerivativeWorkspace
+
+Reusable Float64 buffers for evaluating a log-shifted axion potential. The
+stored amplitudes represent the potential divided by `10^log_shift`; this
+keeps hierarchically suppressed instantons finite during screening.
+"""
+mutable struct LogShiftedDerivativeWorkspace
+    amplitudes::Vector{Float64}
+    gradient::Vector{Float64}
+    hessian::Matrix{Float64}
+    log_shift::Float64
+end
+
+"""
+    StructuredChargeRepresentation
+
+Validated base-plus-pairwise representation of a canonical charge matrix.
+The first `base_count` columns are retained as base charges; each later
+column is recorded as an oriented difference of two base columns in the
+original instanton order.  `validated=false` carries an explicit fallback
+reason and must be evaluated with the generic charge path.
+"""
+struct StructuredChargeRepresentation
+    base_Q::Matrix{Int}
+    pair_i::Vector{Int}
+    pair_j::Vector{Int}
+    pair_orientation::Vector{Int}
+    L::Matrix{Float64}
+    base_count::Int
+    validated::Bool
+    fallback_reason::String
+end
+
+"""Reusable buffers for a validated structured charge evaluator."""
+mutable struct StructuredLogShiftedDerivativeWorkspace
+    representation::StructuredChargeRepresentation
+    amplitudes::Vector{Float64}
+    gradient::Vector{Float64}
+    hessian::Matrix{Float64}
+    base_phases::Vector{Float64}
+    base_Q_float::Matrix{Float64}
+    pair_gradient_coeff::Vector{Float64}
+    pair_hessian_coeff::Matrix{Float64}
+    pair_hessian_product::Matrix{Float64}
+    log_shift::Float64
+end
+
+"""Prepared structured evaluator with an explicit generic fallback."""
+struct StructuredChargeEvaluator{W}
+    representation::StructuredChargeRepresentation
+    workspace::W
+    uses_generic_fallback::Bool
+end
+
+"""Hash one integer charge vector for collision-filtered structure lookup."""
+function _charge_vector_hash(Q::AbstractMatrix{Int}, column::Int)
+    value = UInt(0xcbf29ce484222325)
+    @inbounds for row in axes(Q, 1)
+        value ⊻= reinterpret(UInt, Int64(Q[row, column]))
+        value *= UInt(0x100000001b3)
+    end
+    value
+end
+
+"""Hash an oriented difference of two base charge columns."""
+function _charge_difference_hash(Q::AbstractMatrix{Int}, i::Int, j::Int,
+        orientation::Int)
+    value = UInt(0xcbf29ce484222325)
+    @inbounds for row in axes(Q, 1)
+        difference = orientation * (Q[row, j] - Q[row, i])
+        value ⊻= reinterpret(UInt, Int64(difference))
+        value *= UInt(0x100000001b3)
+    end
+    value
+end
+
+"""Build and validate the observed base-plus-pairwise charge structure."""
+function structured_charge_representation(Q::AbstractMatrix{Int},
+        L::AbstractMatrix{Float64}; base_count::Int=size(Q, 1) + 4)
+    q = Q isa Matrix{Int} ? Q : Matrix{Int}(Q)
+    l = L isa Matrix{Float64} ? L : Matrix{Float64}(L)
+    h11 = size(q, 1)
+    n_instantons = size(q, 2)
+    empty_i = Int[]
+    empty_j = Int[]
+    empty_orientation = Int[]
+    fallback = reason -> StructuredChargeRepresentation(
+        h11 == 0 ? zeros(Int, 0, 0) : q[:, 1:min(base_count, n_instantons)],
+        empty_i, empty_j, empty_orientation, l, min(base_count, n_instantons),
+        false, reason)
+
+    size(l, 1) == 2 || return fallback("L must have two rows")
+    size(l, 2) == n_instantons || return fallback("Q and L have different instanton counts")
+    all(isfinite, l) || return fallback("L contains non-finite values")
+    base_count >= 1 || return fallback("base_count must be positive")
+    base_count <= n_instantons || return fallback("not enough columns for the base set")
+    expected = base_count + binomial(base_count, 2)
+    n_instantons == expected ||
+        return fallback("instanton count is not base plus all pairwise differences")
+
+    base_Q = q[:, 1:base_count]
+    buckets = Dict{UInt,Vector{NTuple{3,Int}}}()
+    for i in 1:(base_count - 1), j in (i + 1):base_count
+        for orientation in (-1, 1)
+            key = _charge_difference_hash(base_Q, i, j, orientation)
+            push!(get!(buckets, key, NTuple{3,Int}[]),
+                (i, j, orientation))
+        end
+    end
+
+    pair_i = Vector{Int}(undef, n_instantons - base_count)
+    pair_j = Vector{Int}(undef, n_instantons - base_count)
+    pair_orientation = Vector{Int}(undef, n_instantons - base_count)
+    for column in (base_count + 1):n_instantons
+        candidates = get(buckets, _charge_vector_hash(q, column), nothing)
+        matched = false
+        if candidates !== nothing
+            for (i, j, orientation) in candidates
+                matches = true
+                @inbounds for row in axes(q, 1)
+                    matches &= q[row, column] ==
+                        orientation * (base_Q[row, j] - base_Q[row, i])
+                end
+                if matches
+                    offset = column - base_count
+                    pair_i[offset] = i
+                    pair_j[offset] = j
+                    pair_orientation[offset] = orientation
+                    matched = true
+                    break
+                end
+            end
+        end
+        matched || return fallback(string("charge column ", column,
+            " is not a signed base-column difference"))
+    end
+    StructuredChargeRepresentation(base_Q, pair_i, pair_j,
+        pair_orientation, l, base_count, true, "")
+end
+
+"""
+    structured_charge_evaluator(Q, L; base_count=size(Q, 1) + 4)
+
+Prepare a validated structured evaluator for the observed charge corpus.  If
+the shape or charge proof fails, the returned evaluator retains the failed
+representation and uses the generic log-shifted derivative workspace.
+"""
+function structured_charge_evaluator(Q::AbstractMatrix{Int},
+        L::AbstractMatrix{Float64}; base_count::Int=size(Q, 1) + 4)
+    representation = structured_charge_representation(Q, L; base_count)
+    if representation.validated
+        workspace = structured_logshifted_derivative_workspace(representation)
+        return StructuredChargeEvaluator(representation, workspace, false)
+    end
+    StructuredChargeEvaluator(representation,
+        logshifted_derivative_workspace(Q, L), true)
+end
+
+"""Prepare reusable buffers for a validated structured charge representation."""
+function structured_logshifted_derivative_workspace(
+        representation::StructuredChargeRepresentation)
+    representation.validated || throw(ArgumentError(string(
+        "cannot prepare an unvalidated structured representation: ",
+        representation.fallback_reason)))
+    l = representation.L
+    log_shift = maximum(@view l[2, :])
+    amplitudes = @view(l[1, :]) .* 10.0 .^ (@view(l[2, :]) .- log_shift)
+    h11 = size(representation.base_Q, 1)
+    StructuredLogShiftedDerivativeWorkspace(representation, amplitudes,
+        zeros(Float64, h11), zeros(Float64, h11, h11),
+        zeros(Float64, representation.base_count),
+        Matrix{Float64}(representation.base_Q),
+        zeros(Float64, representation.base_count),
+        zeros(Float64, representation.base_count, representation.base_count),
+        zeros(Float64, h11, representation.base_count), log_shift)
+end
+
+"""Evaluate a validated structured charge potential in place."""
+function structured_logshifted_derivatives!(
+        workspace::StructuredLogShiftedDerivativeWorkspace,
+        theta::AbstractVector{<:Real})
+    representation = workspace.representation
+    h11 = size(representation.base_Q, 1)
+    length(theta) == h11 || throw(DimensionMismatch(
+        "theta must have one entry per axion"))
+    gradient = workspace.gradient
+    hessian = workspace.hessian
+    fill!(gradient, 0.0)
+    fill!(hessian, 0.0)
+    pair_gradient_coeff = workspace.pair_gradient_coeff
+    pair_hessian_coeff = workspace.pair_hessian_coeff
+    fill!(pair_gradient_coeff, 0.0)
+    fill!(pair_hessian_coeff, 0.0)
+    value = 0.0
+    two_pi = 2π
+    four_pi_squared = (2π)^2
+    base_Q = representation.base_Q
+    amplitudes = workspace.amplitudes
+    base_phases = workspace.base_phases
+
+    @inbounds for base_index in 1:representation.base_count
+        phase = 0.0
+        for row in 1:h11
+            phase += base_Q[row, base_index] * theta[row]
+        end
+        base_phases[base_index] = phase
+        amplitude = amplitudes[base_index]
+        sine = sin(two_pi * phase)
+        cosine = cos(two_pi * phase)
+        value += amplitude * (1.0 - cosine)
+        gradient_scale = two_pi * amplitude * sine
+        hessian_scale = four_pi_squared * amplitude * cosine
+        for row in 1:h11
+            charge_row = base_Q[row, base_index]
+            gradient[row] += gradient_scale * charge_row
+            for column in 1:h11
+                hessian[row, column] += hessian_scale * charge_row *
+                    base_Q[column, base_index]
+            end
+        end
+    end
+
+    @inbounds for pair_index in eachindex(representation.pair_i)
+        i = representation.pair_i[pair_index]
+        j = representation.pair_j[pair_index]
+        orientation = representation.pair_orientation[pair_index]
+        phase = orientation * (base_phases[j] - base_phases[i])
+        amplitude = amplitudes[representation.base_count + pair_index]
+        sine = sin(two_pi * phase)
+        cosine = cos(two_pi * phase)
+        value += amplitude * (1.0 - cosine)
+        gradient_scale = two_pi * amplitude * sine
+        hessian_scale = four_pi_squared * amplitude * cosine
+        pair_gradient_coeff[j] += orientation * gradient_scale
+        pair_gradient_coeff[i] -= orientation * gradient_scale
+        pair_hessian_coeff[i, i] += hessian_scale
+        pair_hessian_coeff[j, j] += hessian_scale
+        pair_hessian_coeff[i, j] -= hessian_scale
+        pair_hessian_coeff[j, i] -= hessian_scale
+    end
+    base_Q_float = workspace.base_Q_float
+    LinearAlgebra.mul!(gradient, base_Q_float, pair_gradient_coeff, 1.0, 1.0)
+    LinearAlgebra.mul!(workspace.pair_hessian_product, base_Q_float,
+        pair_hessian_coeff)
+    LinearAlgebra.mul!(hessian, workspace.pair_hessian_product,
+        transpose(base_Q_float), 1.0, 1.0)
+    (; value, gradient, hessian, log_shift=workspace.log_shift)
+end
+
+"""Use the generic evaluator when charge-structure validation fails."""
+function structured_logshifted_derivatives!(
+        workspace::LogShiftedDerivativeWorkspace, theta::AbstractVector{<:Real},
+        Q::AbstractMatrix{Int})
+    logshifted_derivatives!(workspace, theta, Q)
+end
+
+"""Evaluate a prepared structured evaluator, including its generic fallback."""
+function structured_logshifted_derivatives!(
+        evaluator::StructuredChargeEvaluator{LogShiftedDerivativeWorkspace},
+        theta::AbstractVector{<:Real}, Q::AbstractMatrix{Int})
+    logshifted_derivatives!(evaluator.workspace, theta, Q)
+end
+
+function structured_logshifted_derivatives!(
+        evaluator::StructuredChargeEvaluator{StructuredLogShiftedDerivativeWorkspace},
+        theta::AbstractVector{<:Real}, Q::AbstractMatrix{Int})
+    structured_logshifted_derivatives!(evaluator.workspace, theta)
+end
+
+"""
+    logshifted_derivative_workspace(Q, L)
+
+Prepare reusable derivative buffers for `Q :: h11 × n` and
+`L :: 2 × n`. `L[2, :]` is interpreted as base-10 log scale and `L[1, :]`
+as the signed coefficient.
+"""
+function logshifted_derivative_workspace(Q::AbstractMatrix{Int},
+        L::AbstractMatrix{Float64})
+    size(L, 1) == 2 || throw(DimensionMismatch("L must have two rows"))
+    size(Q, 2) == size(L, 2) ||
+        throw(DimensionMismatch("Q and L must have the same instanton count"))
+    all(isfinite, L) || throw(ArgumentError("L contains non-finite values"))
+    log_shift = maximum(@view L[2, :])
+    amplitudes = @view(L[1, :]) .* 10.0 .^ (@view(L[2, :]) .- log_shift)
+    h11 = size(Q, 1)
+    LogShiftedDerivativeWorkspace(amplitudes, zeros(Float64, h11),
+        zeros(Float64, h11, h11), log_shift)
+end
+
+"""
+    logshifted_derivatives!(workspace, theta, Q)
+
+Evaluate the log-shifted value, gradient, and Hessian in place. The returned
+named tuple borrows `workspace.gradient` and `workspace.hessian`; callers must
+consume or copy them before the next call. The normalized value is related to
+the physical potential by `V = 10^workspace.log_shift * value`.
+"""
+function logshifted_derivatives!(workspace::LogShiftedDerivativeWorkspace,
+        theta::AbstractVector{<:Real}, Q::AbstractMatrix{Int})
+    h11 = length(workspace.gradient)
+    length(theta) == h11 ||
+        throw(DimensionMismatch("theta must have one entry per axion"))
+    size(Q, 1) == h11 || throw(DimensionMismatch("Q has the wrong axion count"))
+    size(Q, 2) == length(workspace.amplitudes) ||
+        throw(DimensionMismatch("Q has the wrong instanton count"))
+    gradient = workspace.gradient
+    hessian = workspace.hessian
+    fill!(gradient, 0.0)
+    fill!(hessian, 0.0)
+    value = 0.0
+    two_pi = 2π
+    four_pi_squared = (2π)^2
+    @inbounds for a in axes(Q, 2)
+        phase = 0.0
+        for i in axes(Q, 1)
+            phase += Q[i, a] * theta[i]
+        end
+        amplitude = workspace.amplitudes[a]
+        sine = sin(two_pi * phase)
+        cosine = cos(two_pi * phase)
+        value += amplitude * (1.0 - cosine)
+        gradient_scale = two_pi * amplitude * sine
+        hessian_scale = four_pi_squared * amplitude * cosine
+        for i in axes(Q, 1)
+            charge_i = Q[i, a]
+            gradient[i] += gradient_scale * charge_i
+            for j in axes(Q, 1)
+                hessian[i, j] += hessian_scale * charge_i * Q[j, a]
+            end
+        end
+    end
+    (; value, gradient, hessian, log_shift=workspace.log_shift)
+end
+
+"""
     pseudo_K(h11,tri,cy=1)
 
 Randomly generates an h11 × h11 Hermitian matrix with positive definite eigenvalues. \n
@@ -1788,6 +2123,54 @@ function _torus_distance(a::AbstractVector{<:Real}, b::AbstractVector{<:Real})
     maximum(min.(abs.(a .- b), 1 .- abs.(a .- b)))
 end
 
+"""Compute an exact integer determinant without dense BigInt work when safe."""
+function _exact_integer_determinant(matrix::AbstractMatrix{Int})
+    size(matrix, 1) == size(matrix, 2) ||
+        throw(ArgumentError("exact integer determinant requires a square matrix"))
+    dimension = size(matrix, 1)
+    dimension == 0 && return big(1)
+    work = Matrix{Int}(matrix)
+    sign = 1
+    denominator = 1
+    try
+        @inbounds for pivot_index in 1:(dimension - 1)
+            pivot_row = pivot_index
+            while pivot_row <= dimension && iszero(work[pivot_row, pivot_index])
+                pivot_row += 1
+            end
+            pivot_row > dimension && return big(0)
+            if pivot_row != pivot_index
+                for column in 1:dimension
+                    work[pivot_index, column], work[pivot_row, column] =
+                        work[pivot_row, column], work[pivot_index, column]
+                end
+                sign = -sign
+            end
+            pivot = work[pivot_index, pivot_index]
+            for row in (pivot_index + 1):dimension
+                entry = work[row, pivot_index]
+                work[row, pivot_index] = 0
+                for column in (pivot_index + 1):dimension
+                    numerator = Base.checked_sub(
+                        Base.checked_mul(work[row, column], pivot),
+                        Base.checked_mul(entry, work[pivot_index, column]))
+                    if denominator != 1
+                        rem(numerator, denominator) == 0 ||
+                            return det(Matrix{BigInt}(matrix))
+                        numerator ÷= denominator
+                    end
+                    work[row, column] = numerator
+                end
+            end
+            denominator = pivot
+        end
+        BigInt(Base.checked_mul(sign, work[dimension, dimension]))
+    catch error
+        error isa OverflowError || rethrow()
+        det(Matrix{BigInt}(matrix))
+    end
+end
+
 """Check whether `θ` is already represented among the first `count` columns."""
 function _contains_torus_point(points::AbstractMatrix{<:Real}, θ::AbstractVector{<:Real},
         count::Int; tol::Float64)
@@ -1805,12 +2188,18 @@ Enumerate the finite quotient-lattice offsets solving
 matrix has one axion-space offset per column and `abs(det(Qtilde))` columns for
 full-rank square `Qtilde`.
 """
-function leading_lattice_offsets(selected::LQLinearlyIndependent; tolerance::Float64=1e-8)
+function leading_lattice_offsets(selected::LQLinearlyIndependent;
+        tolerance::Float64=1e-8,
+        det_qtilde_big::Union{Nothing,BigInt}=nothing)
     h11 = size(selected.Qtilde, 1)
     size(selected.Qtilde, 2) == h11 ||
         throw(ArgumentError("Qtilde must be square to enumerate leading lattice offsets"))
 
-    det_qtilde = abs(round(Int, det(selected.Qtilde)))
+    exact_det = det_qtilde_big === nothing ?
+        abs(_exact_integer_determinant(selected.Qtilde)) : abs(det_qtilde_big)
+    exact_det <= BigInt(typemax(Int)) ||
+        throw(ArgumentError("abs(det(Qtilde)) is too large to materialize lattice offsets"))
+    det_qtilde = Int(exact_det)
     det_qtilde > 0 || throw(ArgumentError("Qtilde must be nonsingular"))
 
     inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
@@ -1836,6 +2225,218 @@ function leading_lattice_offsets(selected::LQLinearlyIndependent; tolerance::Flo
     offsets[:, 1:count]
 end
 
+"""Return the exact absolute determinant of a square integer charge matrix."""
+function _leading_det_qtilde(selected::LQLinearlyIndependent)
+    h11 = size(selected.Qtilde, 1)
+    size(selected.Qtilde, 2) == h11 ||
+        throw(ArgumentError("Qtilde must be square"))
+    abs(_exact_integer_determinant(selected.Qtilde))
+end
+
+"""Normalize the optional leading-index filter and validate its bounds."""
+function _leading_negative_mode_range(h11::Int,
+        negative_mode_range::Union{Nothing,UnitRange{Int}},
+        max_negative_modes::Union{Nothing,Int})
+    negative_mode_range === nothing || max_negative_modes === nothing ||
+        throw(ArgumentError("specify only one of negative_mode_range and max_negative_modes"))
+    if max_negative_modes !== nothing
+        0 <= max_negative_modes <= h11 ||
+            throw(ArgumentError("max_negative_modes must lie between 0 and h11"))
+        return 0:max_negative_modes
+    end
+    negative_mode_range === nothing && return nothing
+    isempty(negative_mode_range) &&
+        throw(ArgumentError("negative_mode_range must not be empty"))
+    first(negative_mode_range) >= 0 && last(negative_mode_range) <= h11 ||
+        throw(ArgumentError("negative_mode_range must lie between 0 and h11"))
+    negative_mode_range
+end
+
+"""Count half-integer masks in an exact leading-index range."""
+function _leading_mask_count(h11::Int, signs::AbstractVector{<:Real},
+        negative_mode_range::Union{Nothing,UnitRange{Int}})
+    total_masks = BigInt(2)^h11
+    negative_mode_range === nothing && return total_masks
+    nonzero_count = count(!iszero, signs)
+    zero_count = h11 - nonzero_count
+    sum(index <= nonzero_count ? binomial(BigInt(nonzero_count), index) : big(0)
+        for index in negative_mode_range; init=big(0)) * (BigInt(2)^zero_count)
+end
+
+"""Visit masks in increasing integer order without materializing a mask list."""
+function _foreach_leading_mask(callback::Function, bit::Int, mask::BigInt,
+        baseline::BigInt, zero_signs::BigInt, negative_modes::Int,
+        minimum_index::Int, maximum_index::Int)
+    remaining = bit + 1
+    negative_modes > maximum_index && return nothing
+    negative_modes + remaining < minimum_index && return nothing
+    if bit < 0
+        minimum_index <= negative_modes <= maximum_index && callback(mask, negative_modes)
+        return nothing
+    end
+
+    baseline_bit = Int((baseline >> bit) & big(1))
+    zero_sign = ((zero_signs >> bit) & big(1)) == big(1)
+    # The zero branch is visited first so that the resulting BigInt mask is
+    # visited in increasing numeric order, matching the legacy mask loop.
+    zero_flip = zero_sign ? 0 : baseline_bit
+    _foreach_leading_mask(callback, bit - 1, mask,
+        baseline, zero_signs, negative_modes + zero_flip,
+        minimum_index, maximum_index)
+
+    one_flip = zero_sign ? 0 : 1 - baseline_bit
+    bit_mask = big(1) << bit
+    _foreach_leading_mask(callback, bit - 1, mask | bit_mask,
+        baseline, zero_signs, negative_modes + one_flip,
+        minimum_index, maximum_index)
+    nothing
+end
+
+"""Visit filtered masks without allocating BigInt intermediates per node."""
+function _foreach_leading_mask_bits(callback::Function, bit::Int,
+        selected::BitVector, baseline::BitVector, zero_signs::BitVector,
+        negative_modes::Int, minimum_index::Int, maximum_index::Int)
+    remaining = bit + 1
+    negative_modes > maximum_index && return nothing
+    negative_modes + remaining < minimum_index && return nothing
+    if bit < 0
+        minimum_index <= negative_modes <= maximum_index &&
+            callback(selected, negative_modes)
+        return nothing
+    end
+
+    index = bit + 1
+    selected[index] = false
+    zero_flip = zero_signs[index] ? 0 : (baseline[index] ? 1 : 0)
+    _foreach_leading_mask_bits(callback, bit - 1, selected, baseline,
+        zero_signs, negative_modes + zero_flip, minimum_index, maximum_index)
+
+    selected[index] = true
+    one_flip = zero_signs[index] ? 0 : (baseline[index] ? 0 : 1)
+    _foreach_leading_mask_bits(callback, bit - 1, selected, baseline,
+        zero_signs, negative_modes + one_flip, minimum_index, maximum_index)
+    selected[index] = false
+    nothing
+end
+
+"""Return a compact report for a streamed leading-branch search."""
+function _leading_stream_report(branch_count::BigInt, mask_count::BigInt,
+        masks_visited::BigInt, det_qtilde::BigInt,
+        negative_mode_range::Union{Nothing,UnitRange{Int}})
+    (; branch_count, mask_count, masks_visited,
+       masks_skipped=mask_count - masks_visited,
+       lattice_copy_count=det_qtilde,
+       lattice_copies_visited=masks_visited * det_qtilde,
+       negative_mode_range,
+       search_classification=negative_mode_range === nothing ?
+           :complete_enumeration : :deterministic_low_index_enumeration)
+end
+
+"""
+    foreach_leading_critical_branch(callback, selected; tolerance=1e-8,
+        max_branches=1_000_000, negative_mode_range=nothing,
+        max_negative_modes=nothing)
+
+Stream the leading half-integer critical branches to `callback` without
+materializing the full coordinate matrix. The callback receives
+`(theta, leading_negative_modes)`; `theta` is a reused mutable vector and must
+not be retained or mutated. `negative_mode_range=1:2` keeps only branches
+whose leading selected potential has one or two negative modes, while
+`max_negative_modes=2` is shorthand for `0:2`. The exact branch count is
+checked against `max_branches` before allocating lattice offsets or branch
+workspaces. The return value reports the exact branch count, masks visited and
+skipped, lattice-copy counts, and the search classification.
+
+This is the memory-bounded counterpart to [`leading_critical_branches`](@ref).
+"""
+function foreach_leading_critical_branch(callback::Function,
+        selected::LQLinearlyIndependent; tolerance::Float64=1e-8,
+        max_branches::Int=1_000_000,
+        negative_mode_range::Union{Nothing,UnitRange{Int}}=nothing,
+        max_negative_modes::Union{Nothing,Int}=nothing)
+    h11 = size(selected.Qtilde, 1)
+    max_branches > 0 || throw(ArgumentError("max_branches must be positive"))
+    index_range = _leading_negative_mode_range(h11,
+        negative_mode_range, max_negative_modes)
+    signs = @view selected.Ltilde[1, :]
+    mask_count = _leading_mask_count(h11, signs, index_range)
+    det_qtilde = _leading_det_qtilde(selected)
+    det_qtilde > 0 || throw(ArgumentError("Qtilde must be nonsingular"))
+    branch_count = det_qtilde * mask_count
+    branch_count <= BigInt(max_branches) ||
+        throw(ArgumentError("leading branch enumeration would create $branch_count branches; increase max_branches explicitly if intended"))
+
+    # An index range can be disjoint from the attainable inertia values (for
+    # example, a zero-amplitude selected instanton contributes no negative
+    # mode).  In that case the exact result is empty and no numerical buffers
+    # or lattice offsets need to be allocated.
+    mask_count == 0 && return _leading_stream_report(
+        branch_count, BigInt(2)^h11, big(0), det_qtilde, index_range)
+
+    offsets = leading_lattice_offsets(selected; tolerance=tolerance,
+        det_qtilde_big=det_qtilde)
+
+    inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
+    half_phase = zeros(Float64, h11)
+    base = zeros(Float64, h11)
+    theta = zeros(Float64, h11)
+    visit_mask = function(mask::BigInt, negative_modes::Int)
+        @inbounds for i in 1:h11
+            half_phase[i] = ((mask >> (i - 1)) & big(1)) == big(1) ? 0.5 : 0.0
+        end
+        LinearAlgebra.mul!(base, inverse_transpose, half_phase)
+        for j in axes(offsets, 2)
+            @inbounds for i in 1:h11
+                theta[i] = mod(offsets[i, j] + base[i], 1.0)
+            end
+            callback(theta, negative_modes)
+        end
+        nothing
+    end
+
+    if index_range === nothing
+        mask_count_int = Int(mask_count)
+        for mask in 0:(mask_count_int - 1)
+            visit_mask(BigInt(mask), count(i -> signs[i] *
+                (((mask >> (i - 1)) & 1) == 0 ? 1.0 : -1.0) < 0.0, 1:h11))
+        end
+    else
+        baseline = BitVector(undef, h11)
+        zero_signs = BitVector(undef, h11)
+        @inbounds for i in 1:h11
+            baseline[i] = signs[i] < 0.0
+            zero_signs[i] = iszero(signs[i])
+        end
+        visit_bits = function(mask_bits::BitVector, negative_modes::Int)
+            @inbounds for i in 1:h11
+                half_phase[i] = mask_bits[i] ? 0.5 : 0.0
+            end
+            LinearAlgebra.mul!(base, inverse_transpose, half_phase)
+            for j in axes(offsets, 2)
+                @inbounds for i in 1:h11
+                    theta[i] = mod(offsets[i, j] + base[i], 1.0)
+                end
+                callback(theta, negative_modes)
+            end
+            nothing
+        end
+        _foreach_leading_mask_bits(visit_bits, h11 - 1,
+            falses(h11), baseline, zero_signs, 0,
+            first(index_range), last(index_range))
+    end
+    masks_visited = index_range === nothing ? mask_count :
+        _leading_mask_count(h11, signs, index_range)
+    _leading_stream_report(branch_count, BigInt(2)^h11,
+        masks_visited,
+        det_qtilde, index_range)
+end
+
+"""Stream leading critical branches with the selected matrix as first argument."""
+function foreach_leading_critical_branch(selected::LQLinearlyIndependent,
+        callback::Function; kwargs...)
+    foreach_leading_critical_branch(callback, selected; kwargs...)
+end
+
 """
     leading_critical_branches(selected; tolerance=1e-8, max_branches=1_000_000)
 
@@ -1850,35 +2451,34 @@ selected potential only; downstream callers should still evaluate the full
 potential/Hessian on any retained branches.
 """
 function leading_critical_branches(selected::LQLinearlyIndependent;
-        tolerance::Float64=1e-8, max_branches::Int=1_000_000)
+        tolerance::Float64=1e-8, max_branches::Int=1_000_000,
+        negative_mode_range::Union{Nothing,UnitRange{Int}}=nothing,
+        max_negative_modes::Union{Nothing,Int}=nothing)
     h11 = size(selected.Qtilde, 1)
-    offsets = leading_lattice_offsets(selected; tolerance=tolerance)
-    det_qtilde = size(offsets, 2)
-    branch_count = det_qtilde * 2^h11
-    branch_count <= max_branches ||
+    index_range = _leading_negative_mode_range(h11,
+        negative_mode_range, max_negative_modes)
+    branch_count = _leading_det_qtilde(selected) *
+        _leading_mask_count(h11, @view(selected.Ltilde[1, :]), index_range)
+    branch_count <= BigInt(max_branches) ||
         throw(ArgumentError("leading branch enumeration would create $branch_count branches; increase max_branches explicitly if intended"))
 
-    inverse_transpose = inv(transpose(Float64.(selected.Qtilde)))
-    coordinates = zeros(Float64, h11, branch_count)
-    leading_negative_modes = Vector{Int}(undef, branch_count)
-    signs = @view selected.Ltilde[1, :]
-    branch_cursor = 0
-    for mask in 0:(2^h11 - 1)
-        half_phase = [((mask >> (i - 1)) & 1) == 1 ? 0.5 : 0.0 for i in 1:h11]
-        base = inverse_transpose * half_phase
-        negative_modes = count(i -> signs[i] * (half_phase[i] == 0.0 ? 1.0 : -1.0) < 0.0, 1:h11)
-        for j in axes(offsets, 2)
-            branch_cursor += 1
-            coordinates[:, branch_cursor] .= mod.(@view(offsets[:, j]) .+ base, 1.0)
-            leading_negative_modes[branch_cursor] = negative_modes
-        end
+    branch_count_int = Int(branch_count)
+    coordinates = zeros(Float64, h11, branch_count_int)
+    leading_negative_modes = Vector{Int}(undef, branch_count_int)
+    branch_cursor = Ref(0)
+    stream_report = foreach_leading_critical_branch(selected;
+        tolerance, max_branches, negative_mode_range, max_negative_modes) do theta, negative_modes
+        branch_cursor[] += 1
+        coordinates[:, branch_cursor[]] .= theta
+        leading_negative_modes[branch_cursor[]] = negative_modes
     end
 
     (; coordinates,
        leading_negative_modes,
-       branch_count=branch_cursor,
+       branch_count=branch_cursor[],
        leading_minima_count=count(==(0), leading_negative_modes),
-       det_Qtilde=det_qtilde)
+       det_Qtilde=Int(_leading_det_qtilde(selected)),
+       stream_report)
 end
 
 """Enumerate leading critical branches after selecting independent charges."""

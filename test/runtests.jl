@@ -7,6 +7,136 @@ using HDF5
 include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_refinement_common.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
+
+@testset "Scale-continuation pilot diagnostics" begin
+    Q = Int[1 2]
+    L = Float64[1.0 1.0; 0.0 log10(0.25)]
+    K = reshape([1.0], 1, 1)
+
+    @test pilot_parse_scale_grid("1.0,0.9,1.0") == [0.9, 1.0]
+    defaults = _pilot_parse_args(String[])
+    @test defaults[:scale_status] == :physical
+    @test defaults[:volume_normalization] == :full
+    @test pilot_homotopy_scale(L, 0.9)[2, 2] ≈ 0.9 * L[2, 2]
+    @test_throws ArgumentError pilot_homotopy_scale(L, 1.0;
+        scale_status=:physical)
+
+    # The physical generic path follows the author laws:
+    # tau -> k tau, Kinv -> k^2 Kinv, and either fixed or full CY volume.
+    base_Q = Int[1 0 1 -1 0 1; 0 1 1 1 1 0]
+    base_geometry = (; τ_volumes=[1.0, 2.0], kinv=Matrix{Float64}(I, 2, 2),
+        cy_volume=10.0)
+    base_L = _pilot_author_potential(base_Q, base_geometry.τ_volumes,
+        base_geometry.kinv, base_geometry.cy_volume)
+    cross_coefficient = (8π / base_geometry.cy_volume^2) *
+        (π * dot(base_Q[:, 1], base_geometry.kinv * base_Q[:, 2]) +
+         dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes))
+    @test base_L[2, 4] ≈ log10(abs(cross_coefficient)) -
+        2π * log10(exp(1.0)) *
+        dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes)
+    base_K = Matrix{Float64}(I, 2, 2)
+    fixed = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
+        scale_status=:physical, geometry=base_geometry,
+        volume_normalization=:fixed)
+    full = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
+        scale_status=:physical, geometry=base_geometry,
+        volume_normalization=:full)
+    @test fixed.volume ≈ 10.0
+    @test full.volume ≈ 10.0 * 0.9^(3 / 2)
+    @test log(full.volume) - log(fixed.volume) ≈ (3 / 2) * log(0.9)
+    @test fixed.tau ≈ 0.9 .* base_geometry.τ_volumes
+    @test fixed.kinv ≈ 0.9^2 .* base_geometry.kinv
+    @test fixed.K ≈ base_K / 0.9^2
+    @test fixed.L != full.L
+    @test fixed.scale_status == :physical
+    @test fixed.volume_normalization == :fixed
+
+    # A common amplitude normalization rescales derivatives but cannot move
+    # their zeros or change Hessian signatures in the N=5 potential.
+    n5 = CYAxiverse.paper_benchmarks.n5_potential(k=0.6745)
+    θ5 = collect(range(0.07, 0.63; length=5))
+    base_eval = CYAxiverse.generate.structured_charge_evaluator(n5.Q, n5.L)
+    scaled_L5 = copy(n5.L); scaled_L5[2, :] .+= 7.0
+    scaled_eval = CYAxiverse.generate.structured_charge_evaluator(n5.Q, scaled_L5)
+    base_derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+        base_eval, θ5, n5.Q)
+    scaled_derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+        scaled_eval, θ5, n5.Q)
+    # The production log-shifted evaluator removes this common factor for
+    # numerical conditioning, so its derivative arrays are identical.
+    @test scaled_derivatives.gradient ≈ base_derivatives.gradient
+    @test scaled_derivatives.hessian ≈ base_derivatives.hessian
+    @test sign.(eigvals(Symmetric(base_derivatives.hessian))) ==
+        sign.(eigvals(Symmetric(scaled_derivatives.hessian)))
+    @test _pilot_periodic_distance([0.99], [0.01]) ≈ 0.02
+    @test_throws ArgumentError pilot_select_geometries("/private/tmp",
+        [CYAxiverse.structs.GeometryIndex(491, 1, 1)])
+    resource_capped = pilot_collect_seeds(Q, L; max_branches=100,
+        max_stage_allocated_bytes=1)
+    @test resource_capped.status == :resource_cap
+    @test resource_capped.estimate == 2
+    @test isempty(resource_capped.seeds)
+
+    factor = cholesky(K).L
+    below = _pilot_records([[0.5]], [0], Q,
+        pilot_homotopy_scale(L, 0.99), factor;
+        residual_tolerance=1e-10, max_iterations=20, duplicate_tolerance=1e-7)
+    above = _pilot_records([[0.5]], [0], Q,
+        pilot_homotopy_scale(L, 1.01), factor;
+        residual_tolerance=1e-10, max_iterations=20, duplicate_tolerance=1e-7)
+    physical_records = _pilot_records([[0.5]], [0], Q,
+        pilot_homotopy_scale(L, 1.01), factor;
+        residual_tolerance=1e-10, max_iterations=20, duplicate_tolerance=1e-7,
+        scale_status=:physical)
+    @test all(record -> record.candidate_status == :none, physical_records)
+    @test any(occursin("withheld", record.candidate_reason) for record in physical_records)
+    _pilot_init_branch_ids!(below)
+    matches = pilot_match_records!(below, above; matching_tolerance=0.1)
+    @test length(matches) == 1
+    brackets = _pilot_mark_crossings!(below, above, matches, 0.99, 1.01;
+        zero_eigenvalue_tolerance=1e-6, bracket_number=1,
+        previous_minima=1, current_minima=0)
+    @test brackets == 1
+    @test below[1].near_catastrophe && above[1].near_catastrophe
+    @test below[1].catastrophe_bracket == "bracket-0001"
+    @test below[1].classification.hessian_min > 0
+    @test above[1].classification.hessian_min < 0
+    locked = _classify_point([0.5], Q, L, cholesky(K))
+    @test below[1].classification.value ≈ locked.value
+    @test below[1].classification.negative_modes == 0
+
+    augmented = pilot_augmented_catastrophe([0.5], [1.0], 1.0, Q, L, K;
+        tolerance=1e-10, scale_status=:homotopy_only)
+    @test augmented.converged
+    @test augmented.gradient_residual < 1e-10
+    @test augmented.null_residual < 1e-10
+    @test augmented.normalized_null_vector_residual < 1e-10
+    @test abs(augmented.hessian_eigenvalues[1]) < 1e-10
+
+    benchmark = pilot_benchmark_regression()
+    @test benchmark.passed
+    @test benchmark.n5_critical_scale ≈ 0.674506370003365 atol=1e-12
+    @test benchmark.n5_ratio ≈ 0.25 atol=1e-12
+    @test benchmark.n8_zero_mode
+    @test benchmark.n8_positive_heavy_modes
+    @test benchmark.n8_detuned_negative_modes == 1
+
+    mktempdir() do root
+        path = joinpath(root, "report.csv")
+        pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS)
+        pilot_append_csv(path, (; row_type=:scale, h11=8, polytope=1,
+            frst=1, sampled_scale=1.0), PILOT_SUMMARY_FIELDS)
+        @test length(readlines(path)) == 2
+        @test _pilot_completed_scales(path) == Set([(8, 1, 1, 1.0)])
+        pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS; append=true)
+        @test_throws ArgumentError pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS)
+        @test_throws ArgumentError pilot_prepare_csv(path, (:wrong_schema,); append=true)
+    end
+end
 
 @testset "Geometry-level LQtilde orientation" begin
     mktempdir() do root
@@ -29,14 +159,262 @@ include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
             from_geometry = CYAxiverse.generate.LQtilde(geom_idx)
             from_matrices = CYAxiverse.generate.LQtilde(
                 Int[1 0 1; 0 1 1], Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0])
+            oriented = CYAxiverse.read.oriented_potential(geom_idx)
+            @test oriented.Q == Int[1 0 1; 0 1 1]
+            @test oriented.L == Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+            @test Matrix(oriented.K) == Matrix{Float64}(I, 2, 2)
             @test from_geometry.Qtilde == from_matrices.Qtilde
             @test from_geometry.Ltilde == from_matrices.Ltilde
             @test from_geometry.Qbar == from_matrices.Qbar
             @test from_geometry.Lbar == from_matrices.Lbar
+
+            transposed_dir = joinpath(root, "h11_002", "np_0000002", "cy_0000001")
+            mkpath(transposed_dir)
+            h5open(joinpath(transposed_dir, "cyax.h5"), "cw") do file
+                cytools = create_group(file, "cytools")
+                potential = create_group(cytools, "potential")
+                geometric = create_group(cytools, "geometric")
+                potential["Q"] = Int[1 0; 0 1; 1 1]
+                potential["L"] = Float64[1.0 0.0; 1.0 -1.0; 1.0 -10.0]
+                geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+            end
+            transposed = CYAxiverse.read.oriented_potential(
+                CYAxiverse.structs.GeometryIndex(2, 2, 1))
+            @test size(transposed.Q) == (2, 3)
+            @test size(transposed.L) == (2, 3)
+            @test transposed.Q == Int[1 0 1; 0 1 1]
+            @test transposed.L == Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
         finally
             old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
+    end
+end
+
+@testset "Log-shifted derivative workspace" begin
+    Q = Int[1 0 1; 0 1 1]
+    L = Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+    theta = [0.13, 0.27]
+    workspace = CYAxiverse.generate.logshifted_derivative_workspace(Q, L)
+    derivatives = CYAxiverse.generate.logshifted_derivatives!(workspace, theta, Q)
+    shift = maximum(L[2, :])
+    amplitudes = L[1, :] .* 10.0 .^ (L[2, :] .- shift)
+    arguments = 2π .* (Q' * theta)
+    expected_value = sum(amplitudes .* (1 .- cos.(arguments)))
+    expected_gradient = 2π .* Q * (amplitudes .* sin.(arguments))
+    expected_hessian = (2π)^2 .* Q *
+        Diagonal(amplitudes .* cos.(arguments)) * Q'
+    @test derivatives.log_shift == shift
+    @test derivatives.value ≈ expected_value
+    @test derivatives.gradient ≈ expected_gradient
+    @test derivatives.hessian ≈ expected_hessian
+    first_gradient = derivatives.gradient
+    second = CYAxiverse.generate.logshifted_derivatives!(workspace, [0.21, 0.31], Q)
+    @test second.gradient === first_gradient
+    @test second.hessian === derivatives.hessian
+end
+
+@testset "Structured pairwise charge evaluator" begin
+    h11 = 2
+    base_count = h11 + 4
+    base_Q = Int[1 0 1 2 1 0;
+                 0 1 1 1 0 2]
+    Q = let columns = [base_Q[:, index] for index in 1:base_count]
+        for i in 1:(base_count - 1), j in (i + 1):base_count
+            orientation = iseven(i + j) ? 1 : -1
+            push!(columns, orientation .* (base_Q[:, j] - base_Q[:, i]))
+        end
+        hcat(columns...)
+    end
+    L = zeros(Float64, 2, size(Q, 2))
+    L[1, :] .= 1.0
+    L[2, :] .= collect(0.0:-1.0:-(size(Q, 2) - 1))
+    representation = CYAxiverse.generate.structured_charge_representation(Q, L)
+    @test representation.validated
+    @test representation.base_count == base_count
+    @test length(representation.pair_i) == binomial(base_count, 2)
+    @test representation.L === L
+
+    structured = CYAxiverse.generate.structured_charge_evaluator(Q, L)
+    generic_workspace = CYAxiverse.generate.logshifted_derivative_workspace(Q, L)
+    @test !structured.uses_generic_fallback
+    for theta in ([0.123, 0.456], [0.731, 0.219], [0.0, 0.5])
+        structured_derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+            structured, theta, Q)
+        generic_derivatives = CYAxiverse.generate.logshifted_derivatives!(
+            generic_workspace, theta, Q)
+        @test isapprox(structured_derivatives.value, generic_derivatives.value;
+            rtol=1e-13, atol=1e-13)
+        @test isapprox(structured_derivatives.gradient, generic_derivatives.gradient;
+            rtol=1e-13, atol=1e-13)
+        @test isapprox(structured_derivatives.hessian, generic_derivatives.hessian;
+            rtol=1e-13, atol=1e-13)
+    end
+
+    invalid_Q = copy(Q)
+    invalid_Q[1, end] += 1
+    fallback = CYAxiverse.generate.structured_charge_evaluator(invalid_Q, L)
+    @test !fallback.representation.validated
+    @test fallback.uses_generic_fallback
+    fallback_derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+        fallback, [0.123, 0.456], invalid_Q)
+    expected_fallback = CYAxiverse.generate.logshifted_derivatives!(
+        CYAxiverse.generate.logshifted_derivative_workspace(invalid_Q, L),
+        [0.123, 0.456], invalid_Q)
+    @test fallback_derivatives.value == expected_fallback.value
+    @test fallback_derivatives.gradient == expected_fallback.gradient
+    @test fallback_derivatives.hessian == expected_fallback.hessian
+end
+
+@testset "Cached screening Hessian eigensolver" begin
+    for dimension in (3, 8)
+        matrix = randn(dimension, dimension)
+        matrix = (matrix + matrix') / 2
+        expected = eigvals(Symmetric(matrix))
+        workspace = _symmetric_eigen_workspace(dimension)
+        eigenvalues = _symmetric_eigenvalues!(workspace, copy(matrix))
+        @test eigenvalues === workspace.eigenvalues
+        @test eigenvalues ≈ expected
+
+        warmed_matrix = copy(matrix)
+        _symmetric_eigenvalues!(workspace, warmed_matrix)
+        @test @allocated(_symmetric_eigenvalues!(workspace, warmed_matrix)) <= 4096
+    end
+end
+
+@testset "Inflation append-only scan shards" begin
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            potential["Q"] = Int[1 0 1; 0 1 1]
+            potential["L"] = Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+            geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+        end
+
+        shard_dir = joinpath(root, "shards")
+        options = _scan_prep_parse_args([
+            "--data-dir", root, "--geometry", "2,1,1",
+            "--max-branches", "100000", "--shard-dir", shard_dir,
+            "--run-id", "test-stage5"])
+        @test run_scan_prep(options)
+        paths = inflation_shard_paths(shard_dir)
+        @test length(paths) == 1
+        @test count(==('\n'), read(paths[1], String)) == 2
+        @test (2, 1, 1) in inflation_completed_shard_geometries(
+            shard_dir; data_dir=abspath(root), max_branches=100000)
+
+        resume_options = _scan_prep_parse_args([
+            "--data-dir", root, "--geometry", "2,1,1",
+            "--max-branches", "100000", "--shard-dir", shard_dir,
+            "--resume"])
+        @test run_scan_prep(resume_options)
+        @test count(==('\n'), read(paths[1], String)) == 2
+
+        low_index_shard_dir = joinpath(root, "low-index-shards")
+        low_index_options = _scan_prep_parse_args([
+            "--data-dir", root, "--geometry", "2,1,1",
+            "--max-branches", "100000", "--negative-mode-range", "1:1",
+            "--shard-dir", low_index_shard_dir])
+        @test run_scan_prep(low_index_options)
+        low_index_path = inflation_shard_paths(low_index_shard_dir)[1]
+        low_index_text = read(low_index_path, String)
+        @test occursin("negative_mode_range", first(split(low_index_text, '\n')))
+        @test occursin(",1:1,", low_index_text)
+        @test (2, 1, 1) in inflation_completed_shard_geometries(
+            low_index_shard_dir; data_dir=abspath(root), max_branches=100000,
+            negative_mode_range=1:1)
+
+        merged = joinpath(root, "merged.csv")
+        @test inflation_merge_shards(paths, merged) == merged
+        @test readlines(merged)[1] == INFLATION_SHARD_HEADER
+        @test_throws ArgumentError inflation_merge_shards(paths, merged)
+
+        failed_dir = joinpath(root, "failed-shards")
+        failed_options = _scan_prep_parse_args([
+            "--data-dir", root, "--geometry", "9,1,1",
+            "--shard-dir", failed_dir, "--retries", "1"])
+        @test !run_scan_prep(failed_options)
+        failed_path = only(inflation_shard_paths(failed_dir))
+        @test count(==('\n'), read(failed_path, String)) == 3
+        @test occursin("attempt", read(failed_path, String))
+        @test isempty(inflation_completed_shard_geometries(
+            failed_dir; data_dir=abspath(root), max_branches=1_000_000))
+    end
+end
+
+@testset "Inflation stratified pilot selection and report" begin
+    @test _leading_branch_det_qtilde(4, 2) == 1
+    @test _leading_branch_det_qtilde(1, 150) == 0
+    @test inflation_screening_tier(50) == :normal
+    @test inflation_screening_tier(100) == :middle
+    @test inflation_screening_tier(150) == :high_memory_queue
+    @test inflation_branch_estimate_lower_bound(150) == big(2)^150
+    @test !inflation_refinement_eligible((status=:success, h11=150,
+        candidate_count=1, allocated_bytes=1, output_bytes=1))
+    @test inflation_refinement_eligible((status=:success, h11=15,
+        candidate_count=1, allocated_bytes=1, output_bytes=1))
+    high_h11_selected = CYAxiverse.structs.LQLinearlyIndependent(
+        Matrix{Int}(I, 150, 150), zeros(Int, 150, 0),
+        zeros(Float64, 2, 0),
+        vcat(ones(Float64, 1, 150), zeros(Float64, 1, 150)))
+    high_h11_error = try
+        CYAxiverse.generate.foreach_leading_critical_branch(
+            high_h11_selected; max_branches=100_000) do _, _
+            nothing
+        end
+        nothing
+    catch error
+        error
+    end
+    @test high_h11_error isa ArgumentError
+    @test occursin("1427247692705959881058285969449495136382746624 branches",
+        sprint(showerror, high_h11_error))
+    mktempdir() do root
+        for (h11, count) in ((4, 3), (8, 2))
+            for index in 1:count
+                path = joinpath(root, string("h11_", lpad(h11, 3, '0')),
+                    string("np_", lpad(index, 7, '0')), "cy_0000001", "cyax.h5")
+                mkpath(dirname(path))
+                open(path, "w") do io
+                    write(io, "synthetic pilot placeholder")
+                end
+            end
+        end
+        selected = inflation_pilot_select_geometries(root;
+            sample_per_h11=2)
+        @test length(selected) == 4
+        @test sort(unique(geom.h11 for geom in selected)) == [4, 8]
+        capped = inflation_pilot_select_geometries(root;
+            sample_per_h11=2, max_geometries=3)
+        @test length(capped) == 3
+        @test capped[1].h11 == 4
+        middle_only = inflation_pilot_select_geometries(root;
+            h11_min=8, h11_max=8, sample_per_h11=2)
+        @test length(middle_only) == 2
+        @test all(geom -> geom.h11 == 8, middle_only)
+
+        rows = [
+            (h11=4, polytope=1, frst=1, status=:success, attempt=1,
+                instantons=40, strong_hierarchy=true, leading_log_gap=5.0,
+                log_scale_span=12.0, branch_count=8, candidate_count=2,
+                total_seconds=0.25, allocated_bytes=1000, output_bytes=200,
+                error=""),
+            (h11=4, polytope=2, frst=1, status=:failed, attempt=2,
+                instantons=42, strong_hierarchy=false, leading_log_gap=2.0,
+                log_scale_span=6.0, branch_count=0, candidate_count=0,
+                total_seconds=0.5, allocated_bytes=0, output_bytes=0,
+                error="synthetic failure")]
+        reports = _inflation_pilot_report_rows(rows)
+        @test length(reports) == 2
+        @test sum(report.geometries for report in reports) == 2
+        @test sum(report.failures for report in reports) == 1
+        report_path = joinpath(root, "pilot-report.csv")
+        @test _inflation_pilot_write_report(report_path, reports) == report_path
+        @test occursin("mean_allocated_bytes", read(report_path, String))
     end
 end
 
@@ -308,6 +686,23 @@ end
     @test scaled_square_jlm.N_min == 4
     @test scaled_square_jlm.det_QTilde == 4
 
+    # The legacy alpha-matrix reduction remains the default, while the
+    # catastrophe-paper reduction retains rational coordinates and enlarges
+    # their fundamental domain before solving.
+    catastrophe_fixture = (Q=Int[2 0 1 1; 0 2 1 0; 0 0 1 1],
+        L=Float64[1.0 1.0 1.0 1.0; 0.0 -1.0 -2.0 -3.0])
+    alpha_problem = CYAxiverse.jlm_reduced.prepare(catastrophe_fixture.Q, catastrophe_fixture.L)
+    catastrophe_problem = CYAxiverse.jlm_reduced.prepare(
+        catastrophe_fixture.Q, catastrophe_fixture.L; reduction=:catastrophe)
+    @test alpha_problem.reduction == :alphamatrix
+    @test catastrophe_problem.reduction == :catastrophe
+    @test catastrophe_problem.coordinate_scale == [2, 1]
+    @test Matrix(catastrophe_problem.Q_reduced) == [2 0; 0 1; -1 1]
+    catastrophe_ensemble = CYAxiverse.jlm_reduced.critical_ensemble(
+        catastrophe_problem; starts=256)
+    @test catastrophe_ensemble.critical_count == 8
+    @test catastrophe_ensemble.minima_count == 2
+
     synthetic = (Q=Int[2 0 1; 0 2 1],
         L=Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0])
     synthetic_geom = CYAxiverse.structs.GeometryIndex(2, 1, 1)
@@ -333,6 +728,14 @@ end
 
     lattice_selected = CYAxiverse.generate.LQtilde(
         [2 0 1; 0 2 1], [1.0 1.0 1.0; 0.0 -1.0 -10.0])
+    exact_det_matrix = Int[-3 -1; 0 -1]
+    @test CYAxiverse.generate._exact_integer_determinant(exact_det_matrix) == 3
+    @test CYAxiverse.generate._exact_integer_determinant(Int[0 1; 1 0]) == -1
+    @test CYAxiverse.generate._exact_integer_determinant(exact_det_matrix) ==
+        det(Matrix{BigInt}(exact_det_matrix))
+    overflow_det_matrix = Int[typemax(Int) 0; 0 2]
+    @test CYAxiverse.generate._exact_integer_determinant(overflow_det_matrix) ==
+        BigInt(typemax(Int)) * 2
     lattice_offsets = CYAxiverse.generate.leading_lattice_offsets(lattice_selected)
     @test size(lattice_offsets) == (2, 4)
     @test all(maximum(abs.(mod.(lattice_selected.Qtilde' * lattice_offsets, 1.0)); dims=1) .< 1e-12)
@@ -343,6 +746,86 @@ end
     @test count(==(0), lattice_branches.leading_negative_modes) == 4
     @test count(==(1), lattice_branches.leading_negative_modes) == 8
     @test count(==(2), lattice_branches.leading_negative_modes) == 4
+    streamed_coordinates = zeros(Float64, size(lattice_branches.coordinates))
+    streamed_modes = Int[]
+    callback_theta = Ref{Any}(nothing)
+    callback_reused = Ref(true)
+    CYAxiverse.generate.foreach_leading_critical_branch(lattice_selected;
+            max_branches=1_000) do theta, negative_modes
+        callback_theta[] === nothing ||
+            (callback_reused[] &= callback_theta[] === theta)
+        callback_theta[] = theta
+        push!(streamed_modes, negative_modes)
+        streamed_coordinates[:, length(streamed_modes)] .= theta
+    end
+    @test streamed_coordinates == lattice_branches.coordinates
+    @test streamed_modes == lattice_branches.leading_negative_modes
+    @test callback_reused[]
+
+    # A low-index search is a deterministic subset of the legacy numeric-mask
+    # ordering.  Its report keeps the exact full mask count and the selected
+    # mask/lattice coverage separate.
+    low_index_coordinates = Matrix{Float64}(undef, 2, 8)
+    low_index_modes = Int[]
+    low_index_cursor = 0
+    low_index_report = CYAxiverse.generate.foreach_leading_critical_branch(
+            lattice_selected; max_branches=1_000,
+            negative_mode_range=1:1) do theta, negative_modes
+        low_index_cursor += 1
+        low_index_coordinates[:, low_index_cursor] .= theta
+        push!(low_index_modes, negative_modes)
+    end
+    expected_low_index = findall(==(1), lattice_branches.leading_negative_modes)
+    @test low_index_coordinates == lattice_branches.coordinates[:, expected_low_index]
+    @test low_index_modes == lattice_branches.leading_negative_modes[expected_low_index]
+    @test low_index_report.branch_count == 8
+    @test low_index_report.mask_count == 4
+    @test low_index_report.masks_visited == 2
+    @test low_index_report.masks_skipped == 2
+    @test low_index_report.lattice_copy_count == 4
+    @test low_index_report.lattice_copies_visited == 8
+    @test low_index_report.search_classification == :deterministic_low_index_enumeration
+
+    low_index_branches = CYAxiverse.generate.leading_critical_branches(
+        lattice_selected; max_branches=1_000, negative_mode_range=1:1)
+    @test low_index_branches.branch_count == 8
+    @test low_index_branches.leading_minima_count == 0
+    @test low_index_branches.stream_report == low_index_report
+    @test_throws ArgumentError CYAxiverse.generate.foreach_leading_critical_branch(
+        lattice_selected; max_branches=1_000,
+        negative_mode_range=1:1, max_negative_modes=2) do theta, negative_modes
+        nothing
+    end
+
+    zero_sign_selected = CYAxiverse.generate.LQtilde(
+        [1 0 1; 0 1 1], [0.0 1.0 1.0; 0.0 -1.0 -10.0])
+    zero_sign_branches = CYAxiverse.generate.leading_critical_branches(
+        zero_sign_selected; max_branches=1_000)
+    @test sort(zero_sign_branches.leading_negative_modes) == [0, 0, 1, 1]
+    @test CYAxiverse.generate.leading_critical_branches(zero_sign_selected;
+        max_branches=1_000, negative_mode_range=1:1).branch_count == 2
+
+    # The exact count is checked before lattice-offset allocation, even when
+    # h11 is large enough that 2^h11 cannot be represented by an Int.
+    high_h11 = 150
+    high_Q = hcat(Matrix{Int}(I, high_h11, high_h11),
+        zeros(Int, high_h11, 1))
+    high_L = zeros(Float64, 2, high_h11 + 1)
+    high_L[1, :] .= 1.0
+    high_L[2, 1:high_h11] .= collect(0.0:-1.0:-149.0)
+    high_L[2, end] = -1000.0
+    high_selected = CYAxiverse.generate.LQtilde(high_Q, high_L)
+    high_report = CYAxiverse.generate.foreach_leading_critical_branch(
+        high_selected; max_branches=1_000, negative_mode_range=1:1) do theta, negative_modes
+        nothing
+    end
+    @test high_report.branch_count == 150
+    @test high_report.masks_visited == 150
+    @test high_report.mask_count == BigInt(2)^high_h11
+    @test_throws ArgumentError CYAxiverse.generate.foreach_leading_critical_branch(
+        high_selected; max_branches=1_000) do theta, negative_modes
+        nothing
+    end
 
     signed_selected = CYAxiverse.generate.LQtilde(
         [1 0 1; 0 1 1], [-1.0 1.0 1.0; 0.0 -1.0 -10.0])
@@ -627,6 +1110,223 @@ end
             pop!(ENV, "CYAXIVERSE_DATA_DIR", nothing)
         else
             ENV["CYAXIVERSE_DATA_DIR"] = previous_data_dir
+        end
+    end
+
+    @testset "inflation reproduction contracts" begin
+        benchmark = CYAxiverse.paper_benchmarks
+        poly102 = benchmark.poly102_inflation
+        n8 = benchmark.n8_potential(k=benchmark.N8_KC; trajectory=true)
+        @test size(n8.Q) == (8, 10)
+        @test n8.phases == zeros(10)
+        @test n8.qdotτ == [14.0, 14.5, 14.5, 15.5, 15.5, 15.5, 15.5, 16.0, 17.0, 17.0]
+        appendix = benchmark.n8_potential(k=benchmark.N8_KC)
+        @test size(appendix.Q) == (8, 12)
+        @test appendix.qdotτ[end-1:end] == [25.0, 45.0]
+
+        geometry = benchmark.n8_geometry()
+        expected_metric_eigenvalues = sort([
+            8.20e-4, 6.35e-4, 5.97e-4, 3.13e-4,
+            1.24e-4, 9.15e-5, 8.30e-5, 5.84e-5,
+        ])
+        @test all(isapprox.(eigvals(geometry.kinetic), expected_metric_eigenvalues; rtol=6e-3))
+        k_detuned = benchmark.N8_KC + 1e-3
+        @test Matrix(benchmark.n8_kinetic_matrix(k_detuned)) ≈
+            Matrix(benchmark.n8_kinetic_matrix(benchmark.N8_KC)) *
+            (benchmark.N8_KC / k_detuned)^2
+        @test Matrix(benchmark.n8_kinetic_matrix(1.0)) ≈ Matrix(geometry.kinetic)
+
+        critical = poly102.n8_degenerate_point()
+        @test critical.converged
+        @test isapprox(critical.k, 0.674506370003365; atol=1e-15)
+        @test critical.gradient_residual < 1e-10
+        @test critical.null_residual < 1e-10
+
+        mass_basis = poly102.n8_mass_eigenbasis(critical.k)
+        @test mass_basis.basis == :mass_eigenbasis
+        @test mass_basis.orthonormality_residual < 1e-10
+        @test mass_basis.generalized_residual < 1e-10
+        @test all(isapprox.(mass_basis.raw_eigenvectors' *
+            mass_basis.metric * mass_basis.raw_eigenvectors, Matrix(I, 8, 8);
+            atol=1e-10))
+        mass_direction = poly102.n8_unstable_direction(
+            critical.k; basis=:mass_eigenbasis)
+        canonical_direction = poly102.n8_unstable_direction(
+            critical.k; basis=:canonical_hessian)
+        @test mass_direction.basis == :mass_eigenbasis
+        @test canonical_direction.basis == :canonical_hessian
+        @test abs(dot(mass_direction.raw,
+            mass_direction.metric * canonical_direction.raw)) > 1 - 1e-10
+        @test norm(mass_direction.hessian_theta * mass_direction.raw -
+            mass_direction.metric * mass_direction.raw *
+            mass_direction.eigenvalues[mass_direction.index]) < 1e-10
+
+        initial = poly102.n8_inflation_initial_condition(critical.k + 1e-7)
+        @test isapprox(initial.canonical_norm, 1e-8; rtol=1e-8)
+        @test isapprox(initial.canonical_norm,
+            sqrt(dot(initial.theta - initial.theta_critical,
+                Matrix(poly102.n8_kinetic_matrix(critical.k + 1e-7)) *
+                (initial.theta - initial.theta_critical))); rtol=1e-8)
+        mass_initial = poly102.n8_inflation_initial_condition(
+            critical.k + 1e-7; basis=:mass_eigenbasis)
+        @test mass_initial.basis == :mass_eigenbasis
+        @test isapprox(mass_initial.canonical_norm, 1e-8; rtol=1e-8)
+        @test mass_initial.basis_theta == poly102.N8_BEST_X
+        @test mass_initial.basis_k == critical.k + 1e-7
+
+        audit = poly102.n8_basis_directions(critical.k + 1e-7)
+        @test hasproperty(audit.directions, :E_mass_eigenbasis)
+        @test audit.equivalent_mass_direction > 1 - 1e-10
+
+        n8_tuned = poly102.n8_hilltop_normal_form_efolds(1e-7).efolds
+        @test isapprox(n8_tuned, 463115.0; rtol=0.01)
+        n8_sixty = poly102.n8_hilltop_normal_form_efolds(1.5320548620798324e-3).efolds
+        @test isapprox(n8_sixty, 60.0; rtol=0.08)
+
+        @test isapprox(poly102.n5_critical_scale(), 0.674506370003365; atol=1e-15)
+        @test isapprox(poly102.n5_reduced_ratio(poly102.n5_critical_scale()), 0.25; atol=1e-15)
+        n5_geometry = poly102.n5_geometry()
+        @test n5_geometry.h11 == 5
+        @test n5_geometry.h21 == 75
+        @test n5_geometry.euler == -140
+        @test isapprox(n5_geometry.volume, 149.3958333333367; rtol=1e-13)
+        @test n5_geometry.divisor_volumes == [6.0, 24.0, 36.125, 32.0, 6.25]
+        @test n5_geometry.vertices == poly102.N5_VERTICES
+        n5_light = poly102.n5_light_direction()
+        @test isapprox(dot(n5_light.direction,
+            n5_light.metric * n5_light.direction), 1.0; atol=1e-12)
+        @test Matrix(poly102.n5_kinetic_matrix(1.0)) ≈ Matrix(n5_geometry.kinetic)
+        n8_probe = poly102.n8_hilltop_normal_form(1e-7; sample_count=5)
+        @test n8_probe.end_event == :local_normal_form
+        @test length(n8_probe.samples) == 5
+        @test isapprox(n8_probe.efolds, poly102.n8_hilltop_normal_form_efolds(1e-7).efolds)
+        mass_trajectory = poly102.n8_efold_gradient_flow(
+            1e-7; basis=:mass_eigenbasis, max_efolds=0)
+        @test mass_trajectory.basis == :mass_eigenbasis
+        @test mass_trajectory.steps == 0
+        @test isapprox(poly102.n5_hilltop_normal_form_efolds(1e-7).efolds, 27349.0; rtol=1e-10)
+        @test isapprox(poly102.n5_hilltop_normal_form_efolds(6.65e-5).efolds, 60.0; rtol=0.02)
+
+        @testset "inflation trajectory contracts" begin
+            maps = poly102.n8_coordinate_maps(k_detuned)
+            @test maps.raw_to_canonical' * maps.raw_to_canonical ≈ maps.metric atol=1e-12
+            @test maps.canonical_to_raw * maps.raw_to_canonical ≈ Matrix(I, 8, 8) atol=1e-12
+
+            theta = poly102.N8_BEST_X .+ 0.01 .* collect(1:8)
+            derivatives = poly102.n8_potential_derivatives(
+                theta, k_detuned; trajectory=true)
+            finite_difference_step = 1e-6
+            finite_difference_raw = [
+                let plus=copy(theta), minus=copy(theta)
+                    plus[index] += finite_difference_step
+                    minus[index] -= finite_difference_step
+                    (poly102.n8_potential_derivatives(
+                        plus, k_detuned; trajectory=true).value -
+                     poly102.n8_potential_derivatives(
+                        minus, k_detuned; trajectory=true).value) /
+                    (2finite_difference_step)
+                end
+                for index in eachindex(theta)
+            ]
+            @test norm(derivatives.gradient - finite_difference_raw, Inf) < 1e-8
+
+            chi = maps.raw_to_canonical * theta
+            canonical_gradient = maps.canonical_to_raw' * derivatives.gradient
+            finite_difference_canonical = [
+                let plus=copy(chi), minus=copy(chi)
+                    plus[index] += finite_difference_step
+                    minus[index] -= finite_difference_step
+                    (poly102.n8_potential_derivatives(
+                        maps.canonical_to_raw * plus, k_detuned;
+                        trajectory=true).value -
+                     poly102.n8_potential_derivatives(
+                        maps.canonical_to_raw * minus, k_detuned;
+                        trajectory=true).value) /
+                    (2finite_difference_step)
+                end
+                for index in eachindex(chi)
+            ]
+            @test norm(canonical_gradient - finite_difference_canonical, Inf) < 1e-8
+
+            trajectory_initial = poly102.n8_inflation_initial_condition(
+                k_detuned; basis=:mass_eigenbasis)
+            metric = Matrix(poly102.n8_kinetic_matrix(k_detuned))
+            @test isapprox(dot(trajectory_initial.initial_tangent,
+                metric * trajectory_initial.initial_tangent), 1.0; atol=1e-10)
+            moving_basis = poly102.n8_mass_eigenbasis(
+                k_detuned; theta=trajectory_initial.theta)
+            fixed_index = argmin(trajectory_initial.basis_eigenvalues)
+            moving_index = argmin(moving_basis.eigenvalues)
+            @test trajectory_initial.basis_theta == poly102.N8_BEST_X
+            @test norm(trajectory_initial.basis_raw_eigenvectors[:, fixed_index] -
+                moving_basis.raw_eigenvectors[:, moving_index]) > 1e-6
+
+            refinement_config = inflation_refinement_config(
+                precision_bits=64, max_time=10, max_step=1,
+                initial_step=1e-5, sample_count=1, reltol=1e-8,
+                abstol=1e-10, maxiters=1_000_000,
+                measurement_scope=:cold)
+            refinement_candidate = inflation_refinement_candidate(
+                "trajectory-contract"; delta_k=1.5320548620798324e-3,
+                screening=(status=:candidate, measurement_scope=:cold,
+                    value=1.0, epsilon=0.5, min_eta=-0.5, negative_modes=1,
+                    wall_seconds=0.001, allocated_bytes=123,
+                    output_bytes=64))
+            refined = refine_inflation_candidate(refinement_candidate;
+                config=refinement_config)
+            @test refined.summary.refinement_status == :completed
+            @test refined.summary.event_policy == :final_finite_exit
+            @test refined.summary.measurement_status == :completed
+            @test refined.summary.measurement_scope == :cold
+            @test refined.summary.accepted_steps > 0
+            @test _refinement_solver_status(ReturnCode.Success) ==
+                (:completed, "")
+            @test first(_refinement_solver_status(ReturnCode.MaxIters)) ==
+                :failed
+            short_flow = refined.trajectory
+            @test short_flow.entered_slow_roll
+            @test short_flow.end_event == :tmax
+            @test !short_flow.terminated
+            diagnostic_row = inflation_refinement_diagnostic_row(
+                refinement_candidate, refined)
+            serialization = inflation_stage_measure(
+                () -> inflation_diagnostic_csv_line(diagnostic_row);
+                measurement_scope=:warm)
+            diagnostic_row = inflation_refinement_diagnostic_row(
+                refinement_candidate, refined; serialization)
+            @test diagnostic_row.screen_status == :candidate
+            @test diagnostic_row.screen_epsilon == 0.5
+            @test diagnostic_row.refinement_status == :completed
+            @test diagnostic_row.serialization_status == :completed
+            @test diagnostic_row.serialization_measurement_scope == :warm
+            @test diagnostic_row.serialization_output_bytes > 0
+            @test occursin("candidate_id", inflation_diagnostic_csv_line(
+                diagnostic_row; header=true))
+            diagnostic_path = joinpath(mktempdir(), "stage4.csv")
+            written = inflation_append_diagnostic_row(diagnostic_path,
+                diagnostic_row; measurement_scope=:warm, header=true)
+            @test written.status == :completed
+            @test written.measurement_scope == :warm
+            @test isfile(diagnostic_path)
+            @test count(==('\n'), read(diagnostic_path, String)) == 2
+            failed_measurement = inflation_stage_measure(
+                () -> throw(ArgumentError("stage-4 failure"));
+                measurement_scope=:warm, capture_errors=true)
+            @test failed_measurement.status == :failed
+            @test occursin("stage-4 failure", failed_measurement.error)
+            not_selected = refine_inflation_candidate(
+                inflation_refinement_candidate("not-selected";
+                    delta_k=1e-3, accepted=false); config=refinement_config)
+            @test not_selected.summary.refinement_status == :not_selected
+            @test not_selected.summary.allocated_bytes == 0
+            unsupported = refine_inflation_candidate(
+                inflation_refinement_candidate("unsupported";
+                    model=:unregistered, delta_k=1e-3);
+                config=refinement_config)
+            @test unsupported.summary.refinement_status == :unsupported_model
+            @test_throws ArgumentError poly102.n8_physical_gradient_flow(
+                1.5320548620798324e-3; precision_bits=64, max_time=1,
+                method=:FBDF)
         end
     end
 end
