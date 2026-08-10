@@ -68,14 +68,27 @@ function n8_potential(; k::Real=1.0)
        coefficient_model=:leading_diagonal_terms)
 end
 
-"""Complete equation-(19) potential from the 12 diagonal and 66 cross terms."""
-function n8_full_potential(; k::Real=1.0)
+"""
+    n8_full_potential(; k=1.0, volume_normalization=:full)
+
+Complete equation-(19) potential from the 12 diagonal and 66 cross terms.
+
+`volume_normalization=:full` follows the Kähler-ray scaling implied by
+`tau(k)=k*tau(1)`: `V_CY(k)=V_CY(1)*k^(3/2)`.  The alternative
+`:fixed` keeps the reference CY volume in the explicit `V_CY^-2`
+prefactor, matching the draft-author implementation.  The default is
+`:full` until the convention is clarified with the authors.
+"""
+function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full)
+    volume_normalization in (:full, :fixed) ||
+        throw(ArgumentError("volume_normalization must be :full or :fixed"))
     diagonal = n8_potential(k=k)
     qprime = Matrix{Int}(diagonal.Q')
     geometry = n8_geometry()
     tau = Float64(k) .* geometry.divisor_volumes
     kinv = Float64(k)^2 .* inv(Matrix(geometry.kinetic))
-    volume = geometry.volume * Float64(k)^(3 / 2)
+    volume_scale = volume_normalization === :full ? Float64(k)^(3 / 2) : 1.0
+    volume = geometry.volume * volume_scale
     charges = Vector{Vector{Int}}()
     signs, logs = Float64[], Float64[]
     for charge in eachrow(qprime)
@@ -92,7 +105,7 @@ function n8_full_potential(; k::Real=1.0)
     end
     Q::Matrix{Int} = hcat(charges...)
     L::Matrix{Float64} = vcat(reshape(signs, 1, :), reshape(logs, 1, :))
-    (; Q, L,
+    (; Q, L, volume, volume_normalization,
        diagonal_count=12, cross_count=66)
 end
 
@@ -222,23 +235,24 @@ end
 """Table-1 truncated potential and its first two derivatives in GLSM coordinates.
 
 Set `full=true` to evaluate the separate 78-term equation-(19) reconstruction.
+When `full=true`, `volume_normalization` selects the explicit CY-volume
+scaling in that reconstruction and defaults to `:full`.
 The paper's catastrophe search and inflation trajectories use the truncated
 potential of equations (20) and (25), so the 12-term potential is the default.
 """
 function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
-        full::Bool=false)
+        full::Bool=false, volume_normalization::Symbol=:full)
     length(theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
     k > 0 || throw(ArgumentError("k must be positive"))
-    benchmark_l = if full
-        n8_full_potential(k=k).L
+    volume_normalization in (:full, :fixed) ||
+        throw(ArgumentError("volume_normalization must be :full or :fixed"))
+    benchmark = if full
+        n8_full_potential(k=k, volume_normalization=volume_normalization)
     else
-        n8_potential(k=k).L
+        n8_potential(k=k)
     end
-    q = if full
-        Matrix{Float64}(n8_full_potential(k=k).Q)
-    else
-        Matrix{Float64}(n8_potential(k=k).Q)
-    end
+    benchmark_l = benchmark.L
+    q = Matrix{Float64}(benchmark.Q)
     amplitudes = vec(benchmark_l[1, :]) .* 10.0 .^ vec(benchmark_l[2, :])
     arguments = 2π .* (q' * Float64.(theta))
     value = sum(amplitudes .* (1 .- cos.(arguments)))

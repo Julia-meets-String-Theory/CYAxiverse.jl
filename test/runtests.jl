@@ -366,9 +366,31 @@ end
     theta_glsm = Matrix{Float64}(n8_selected.Qtilde') \ catastrophe.theta
     truncated = CYAxiverse.paper_benchmarks.n8_potential_derivatives(theta_glsm, catastrophe.k)
     full = CYAxiverse.paper_benchmarks.n8_potential_derivatives(theta_glsm, catastrophe.k; full=true)
+    fixed_volume = CYAxiverse.paper_benchmarks.n8_full_potential(
+        k=2.0, volume_normalization=:fixed)
+    full_volume = CYAxiverse.paper_benchmarks.n8_full_potential(k=2.0)
     @test length(truncated.amplitudes) == 12
     @test length(full.amplitudes) == 78
     @test norm(truncated.gradient, Inf) / maximum(abs, truncated.amplitudes) < 1e-10
+    @test full_volume.volume_normalization == :full
+    @test fixed_volume.volume_normalization == :fixed
+    @test isapprox(fixed_volume.volume, 126.0; atol=0)
+    @test isapprox(full_volume.volume, 126.0 * 2.0^(3 / 2); rtol=1e-14)
+    @test full_volume.Q == fixed_volume.Q
+    @test full_volume.L[1, :] == fixed_volume.L[1, :]
+    @test all(isapprox.(full_volume.L[2, :] .- fixed_volume.L[2, :],
+        fill(-3log10(2.0), 78); atol=1e-12))
+    fixed_derivatives = CYAxiverse.paper_benchmarks.n8_potential_derivatives(
+        zeros(8), 2.0; full=true, volume_normalization=:fixed)
+    full_derivatives = CYAxiverse.paper_benchmarks.n8_potential_derivatives(
+        zeros(8), 2.0; full=true)
+    # The leading 12 terms avoid subnormal Float64 log-to-amplitude
+    # conversion in the far-tail cross terms.
+    @test all(isapprox.(full_derivatives.amplitudes[1:12] ./
+        fixed_derivatives.amplitudes[1:12], fill(2.0^-3, 12);
+        rtol=1e-12))
+    @test_throws ArgumentError CYAxiverse.paper_benchmarks.n8_full_potential(
+        volume_normalization=:author)
 
     initial = CYAxiverse.paper_benchmarks.n8_inflation_initial_condition(
         catastrophe.k + 1e-7)
