@@ -76,7 +76,7 @@ The independent reference JSON reports the same values to the displayed precisio
 Command:
 
 ```sh
-julia --project=. --startup-file=no -e 'using CYAxiverse; B=CYAxiverse.paper_benchmarks; d=1.5320548620798324e-3; elapsed=@elapsed result=B.n8_author_trajectory(d; precision_bits=64, max_time=100, scan_step=5, sample_count=1, reltol=1e-8, abstol=1e-10, maxiters=1_000_000); println("elapsed=", elapsed); println("entered=", result.entered_slow_roll, " event=", result.end_event, " efolds=", result.efolds); println("solver=", result.solver)' 
+julia --project=. --startup-file=no -e 'using CYAxiverse; B=CYAxiverse.paper_benchmarks; d=1.5320548620798324e-3; elapsed=@elapsed result=B.n8_author_trajectory(d; precision_bits=64, max_time=100, scan_step=5, sample_count=1, reltol=1e-8, abstol=1e-10, maxiters=1_000_000); println("elapsed=", elapsed); println("entered=", result.entered_slow_roll, " event=", result.end_event, " efolds=", result.efolds); println("solver=", result.solver)'
 ```
 
 Before the `max_step` patch, this completed in about 6.1 seconds and returned:
@@ -187,7 +187,7 @@ Other test groups passed, including geometry, package loading, vacua persistence
 2. Run the bounded author trajectory with the newly added step control:
 
    ```sh
-   julia --project=. --startup-file=no -e 'using CYAxiverse; B=CYAxiverse.paper_benchmarks; d=1.5320548620798324e-3; result=B.n8_author_trajectory(d; precision_bits=64, max_time=1_000, scan_step=5, max_step=5, sample_count=2, reltol=1e-8, abstol=1e-10, maxiters=10_000_000); println(result.entered_slow_roll, " ", result.end_event, " ", result.efolds); println(result.solver)' 
+   julia --project=. --startup-file=no -e 'using CYAxiverse; B=CYAxiverse.paper_benchmarks; d=1.5320548620798324e-3; result=B.n8_author_trajectory(d; precision_bits=64, max_time=1_000, scan_step=5, max_step=5, sample_count=2, reltol=1e-8, abstol=1e-10, maxiters=10_000_000); println(result.entered_slow_roll, " ", result.end_event, " ", result.efolds); println(result.solver)'
    ```
 
    This command was attempted but rejected/interrupted before it ran; no result is available.

@@ -1,9 +1,9 @@
 # Handoff: high-h11 Float64 candidate search and precision zoom-in
 
-Date: 2026-08-07  
-Repository: `CYAxiverse.jl`  
-Worktree: `/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl.worktrees/inflation-reproduction-instructions`  
-Branch: `agents/inflation-reproduction-instructions`  
+Date: 2026-08-07
+Repository: `CYAxiverse.jl`
+Worktree: `/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl.worktrees/inflation-reproduction-instructions`
+Branch: `agents/inflation-reproduction-instructions`
 Baseline commit: `150ca8a fix high-dimensional inflation screening audit`
 
 This document is a self-contained handoff for the next agent. The immediate
