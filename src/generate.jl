@@ -143,10 +143,9 @@ mutable struct StructuredLogShiftedDerivativeWorkspace
 end
 
 """Prepared structured evaluator with an explicit generic fallback."""
-struct StructuredChargeEvaluator
+struct StructuredChargeEvaluator{W}
     representation::StructuredChargeRepresentation
-    workspace::Union{StructuredLogShiftedDerivativeWorkspace,
-        LogShiftedDerivativeWorkspace}
+    workspace::W
     uses_generic_fallback::Bool
 end
 
@@ -353,11 +352,16 @@ function structured_logshifted_derivatives!(
 end
 
 """Evaluate a prepared structured evaluator, including its generic fallback."""
-function structured_logshifted_derivatives!(evaluator::StructuredChargeEvaluator,
+function structured_logshifted_derivatives!(
+        evaluator::StructuredChargeEvaluator{LogShiftedDerivativeWorkspace},
         theta::AbstractVector{<:Real}, Q::AbstractMatrix{Int})
-    evaluator.uses_generic_fallback ?
-        logshifted_derivatives!(evaluator.workspace, theta, Q) :
-        structured_logshifted_derivatives!(evaluator.workspace, theta)
+    logshifted_derivatives!(evaluator.workspace, theta, Q)
+end
+
+function structured_logshifted_derivatives!(
+        evaluator::StructuredChargeEvaluator{StructuredLogShiftedDerivativeWorkspace},
+        theta::AbstractVector{<:Real}, Q::AbstractMatrix{Int})
+    structured_logshifted_derivatives!(evaluator.workspace, theta)
 end
 
 """

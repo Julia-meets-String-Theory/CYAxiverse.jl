@@ -34,8 +34,7 @@ end
 
 The twelve-term, eight-axion potential in Table 1 of the inflation draft.
 """
-function n8_potential(; k::Real=1.0, trajectory::Bool=false)
-    trajectory && return author_inflation.n8_potential(k=k, trajectory=true)
+function _n8_potential(; k::Real=1.0)
     charges = Int[
         -1  1  1  0  0  0  0  1
          0  0  0  1  0  0  0  0
@@ -55,6 +54,11 @@ function n8_potential(; k::Real=1.0, trajectory::Bool=false)
        coefficient_model=:leading_diagonal_terms)
 end
 
+function n8_potential(; k::Real=1.0, trajectory::Bool=false)
+    trajectory && return author_inflation.n8_potential(k=k, trajectory=true)
+    _n8_potential(k=k)
+end
+
 """
     n8_full_potential(; k=1.0, volume_normalization=:full)
 
@@ -65,7 +69,7 @@ The `:full` convention scales the Calabi--Yau volume as `k^(3/2)`;
 function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full)
     volume_normalization in (:full, :fixed) ||
         throw(ArgumentError("volume_normalization must be :full or :fixed"))
-    diagonal = n8_potential(k=k)
+    diagonal = _n8_potential(k=k)
     qprime = Matrix{Int}(diagonal.Q')
     geometry = n8_geometry()
     tau = Float64(k) .* geometry.divisor_volumes
@@ -164,7 +168,7 @@ hierarchy rescaling as the critical-point finder.
 function n8_degenerate_point(initial_theta::AbstractVector{<:Real};
         k0::Real=0.67162, tolerance::Float64=1e-11, max_iterations::Int=1_000)
     length(initial_theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
-    reference = n8_potential(k=k0)
+    reference = _n8_potential(k=k0)
     selected = LQtilde(reference.Q, reference.L)
     Qordered = hcat(selected.Qtilde, selected.Qbar)
     qcanonical = Matrix{Float64}(selected.Qtilde) \ Matrix{Float64}(Qordered)
@@ -180,10 +184,12 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real};
         amplitudes = vec(L[1, :]) .* 10.0 .^ (logs .- maximum(logs))
         row_scales = amplitudes[1:n]
         arguments = 2π .* (qcanonical' * theta)
-        gradient = 2π .* qcanonical * (amplitudes .* sin.(arguments))
-        hessian = (2π)^2 .* qcanonical * Diagonal(amplitudes .* cos.(arguments)) * qcanonical'
+        gradient_value = 2π .* qcanonical * (amplitudes .* sin.(arguments))
+        hessian_value = (2π)^2 .* qcanonical *
+            Diagonal(amplitudes .* cos.(arguments)) * qcanonical'
         inverse_sqrt = Diagonal(inv.(sqrt.(row_scales)))
-        gradient ./ row_scales, inverse_sqrt * hessian * inverse_sqrt
+        gradient_value ./ row_scales,
+            inverse_sqrt * hessian_value * inverse_sqrt
     end
 
     _, initial_hessian = scaled_quantities(Float64.(initial_theta), Float64(k0))
@@ -226,7 +232,7 @@ function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
     length(theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
     k > 0 || throw(ArgumentError("k must be positive"))
     benchmark = full ? n8_full_potential(k=k,
-        volume_normalization=volume_normalization) : n8_potential(k=k)
+        volume_normalization=volume_normalization) : _n8_potential(k=k)
     q = Matrix{Float64}(benchmark.Q)
     amplitudes = vec(benchmark.L[1, :]) .* 10.0 .^ vec(benchmark.L[2, :])
     arguments = 2π .* (q' * Float64.(theta))
