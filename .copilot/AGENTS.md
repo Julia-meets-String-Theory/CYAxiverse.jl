@@ -1,5 +1,10 @@
 # CYAxiverse.jl Architecture & Coding Standards
 
+## 0. Julia Execution Environment
+- Run every Julia command used for CYAxiverse.jl package development directly in the regular local host environment. Do not run Julia through a sandbox, container, Docker image, remote runner, or other isolated environment.
+- If the execution tool defaults to a sandbox, request approved local/unsandboxed execution before running Julia. Do not silently substitute a sandboxed Julia process for tests, audits, benchmarks, package commands, or development scripts.
+- Julia project flags such as `--project=...` and `--startup-file=no` remain appropriate; this rule concerns the operating environment in which Julia runs.
+
 ## 1. Type Stability & Precision Rules
 - Parametrize all numerical functions over float precision `T<:AbstractFloat` (e.g., `Float64`, `BigFloat`, or `ArbNumerics`).
 - Axion mass matrices and instanton actions span 30+ orders of magnitude: NEVER hardcode `Float64` in internal mass/decay-constant routines.

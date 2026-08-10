@@ -2,6 +2,8 @@
 
 ## Environment and commands
 
+- Run every Julia command used for CYAxiverse.jl package development directly in the regular local host environment. Do not run Julia through a sandbox, container, Docker image, remote runner, or other isolated environment. If the execution tool defaults to a sandbox, request approved local/unsandboxed execution first rather than substituting a sandboxed Julia process.
+
 - Use Julia 1.12 as declared in `Project.toml`. Instantiate the package environment with:
   ```sh
   julia --project=. -e 'using Pkg; Pkg.instantiate()'
