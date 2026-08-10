@@ -48,22 +48,27 @@ Modules = [CYAxiverse.jlm_reduced]
 Pages = ["jlm_reduced.jl"]
 ```
 
-## `CYAxiverse.axion_benchmarks`
+## `CYAxiverse.paper_benchmarks`
 ```@autodocs
-Modules = [CYAxiverse.axion_benchmarks]
-Pages = ["paper_benchmarks.jl"]
+Modules = [CYAxiverse.paper_benchmarks]
+Pages = ["paper_benchmarks.jl", "paper_benchmarks/reduced_models.jl",
+    "paper_benchmarks/compatibility.jl"]
 ```
-## `CYAxiverse.cytools_wrapper`
+## `CYAxiverse.paper_benchmarks.author_inflation`
 ```@autodocs
-Modules = [CYAxiverse.cytools_wrapper]
-Pages = ["add_functions/cytools_wrapper.jl"]
+Modules = [CYAxiverse.paper_benchmarks.author_inflation]
+Pages = ["paper_benchmarks/poly102_inflation.jl"]
+```
+```@docs
+CYAxiverse.paper_benchmarks.poly102_inflation
+CYAxiverse.axion_benchmarks
 ```
 
 ## Inflation benchmark bases
 
-The axion benchmark helpers are available under
-`CYAxiverse.axion_benchmarks`. The fixed poly-102 inflation model is exposed as
-`CYAxiverse.axion_benchmarks.poly102_inflation`. Their raw coordinates are angular variables in
+The paper benchmark helpers are available under
+`CYAxiverse.paper_benchmarks`. The fixed poly-102 inflation model is exposed as
+`CYAxiverse.paper_benchmarks.poly102_inflation`. Their raw coordinates are angular variables in
 radians, with canonical coordinates defined by
 `chi = K^(1/2) * theta`.
 
