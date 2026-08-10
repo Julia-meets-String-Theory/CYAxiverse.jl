@@ -93,8 +93,10 @@ def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath):
         for j in range(i + 1, nq):
             q[nq + idx, :] = qprime[j, :] - qprime[i, :]
             
-            term1 = (math.pi * np.dot(qprime[i, :], Kinv @ qprime[j, :]) + 
-                     np.dot((qprime[i, :] + qprime[j, :]), tau)) * 8 * math.pi / (V**2)
+            term1 = (8 * math.pi**2 / (V**2)) * (
+                np.dot(qprime[i, :], Kinv @ qprime[j, :]) +
+                np.dot((qprime[i, :] + qprime[j, :]), tau)
+            )
             term2 = -2 * math.log10(math.e) * math.pi * (np.dot(qprime[i, :], tau) + np.dot(qprime[j, :], tau))
             
             L2[idx, :] = [term1, term2]

@@ -195,7 +195,8 @@ function n8_full_potential(; k::Real=1.0)
     for i in 1:(size(qrows, 1) - 1), j in (i + 1):size(qrows, 1)
         qi, qj = qrows[i, :], qrows[j, :]
         qτ = dot(qi + qj, tau)
-        coeff = (π * dot(qi, kinv * qj) + qτ) * 8π / volume^2
+        coeff = (8π^2 / volume^2) *
+            (dot(qi, kinv * qj) + qτ)
         push!(rows, collect(qj - qi))
         push!(signs, sign(coeff))
         push!(logs, log10(abs(coeff)) - 2π * qτ * log10(exp(1)))

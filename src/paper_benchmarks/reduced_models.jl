@@ -73,7 +73,8 @@ function n8_full_potential(; k::Real=1.0)
     end
     for i in 1:(size(qprime, 1)-1), j in (i+1):size(qprime, 1)
         qi, qj = qprime[i, :], qprime[j, :]
-        prefactor = (π * dot(qi, kinv * qj) + dot(qi + qj, tau)) * 8π / volume^2
+        prefactor = (8π^2 / volume^2) *
+            (dot(qi, kinv * qj) + dot(qi + qj, tau))
         push!(charges, collect(qj - qi)); push!(signs, sign(prefactor))
         push!(logs, log10(abs(prefactor)) - 2π * dot(qi + qj, tau) * _LOG10E)
     end

@@ -10,6 +10,127 @@ include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_refinement_common.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
+
+@testset "Scale-continuation pilot diagnostics" begin
+    Q = Int[1 2]
+    L = Float64[1.0 1.0; 0.0 log10(0.25)]
+    K = reshape([1.0], 1, 1)
+
+    @test pilot_parse_scale_grid("1.0,0.9,1.0") == [0.9, 1.0]
+    defaults = _pilot_parse_args(String[])
+    @test defaults[:scale_status] == :physical
+    @test defaults[:volume_normalization] == :full
+    @test pilot_homotopy_scale(L, 0.9)[2, 2] ≈ 0.9 * L[2, 2]
+    @test_throws ArgumentError pilot_homotopy_scale(L, 1.0;
+        scale_status=:physical)
+
+    # The physical generic path follows the author laws:
+    # tau -> k tau, Kinv -> k^2 Kinv, and either fixed or full CY volume.
+    base_Q = Int[1 0 1 -1 0 1; 0 1 1 1 1 0]
+    base_geometry = (; τ_volumes=[1.0, 2.0], kinv=Matrix{Float64}(I, 2, 2),
+        cy_volume=10.0)
+    base_L = _pilot_author_potential(base_Q, base_geometry.τ_volumes,
+        base_geometry.kinv, base_geometry.cy_volume)
+    cross_coefficient = (8π^2 / base_geometry.cy_volume^2) *
+        (dot(base_Q[:, 1], base_geometry.kinv * base_Q[:, 2]) +
+         dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes))
+    @test base_L[2, 4] ≈ log10(abs(cross_coefficient)) -
+        2π * log10(exp(1.0)) *
+        dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes)
+    base_K = Matrix{Float64}(I, 2, 2)
+    fixed = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
+        scale_status=:physical, geometry=base_geometry,
+        volume_normalization=:fixed)
+    full = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
+        scale_status=:physical, geometry=base_geometry,
+        volume_normalization=:full)
+    @test fixed.volume ≈ 10.0
+    @test full.volume ≈ 10.0 * 0.9^(3 / 2)
+    @test log(full.volume) - log(fixed.volume) ≈ (3 / 2) * log(0.9)
+    @test fixed.tau ≈ 0.9 .* base_geometry.τ_volumes
+    @test fixed.kinv ≈ 0.9^2 .* base_geometry.kinv
+    @test fixed.K ≈ base_K / 0.9^2
+    @test fixed.L != full.L
+    @test fixed.scale_status == :physical
+    @test fixed.volume_normalization == :fixed
+
+    # A common amplitude normalization rescales derivatives but cannot move
+    # their zeros or change Hessian signatures in the N=5 potential.
+    n5 = CYAxiverse.paper_benchmarks.n5_potential(k=0.6745)
+    θ5 = collect(range(0.07, 0.63; length=5))
+    base_eval = CYAxiverse.generate.structured_charge_evaluator(n5.Q, n5.L)
+    scaled_L5 = copy(n5.L); scaled_L5[2, :] .+= 7.0
+    scaled_eval = CYAxiverse.generate.structured_charge_evaluator(n5.Q, scaled_L5)
+    base_derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+        base_eval, θ5, n5.Q)
+    scaled_derivatives = CYAxiverse.generate.structured_logshifted_derivatives!(
+        scaled_eval, θ5, n5.Q)
+    # The production log-shifted evaluator removes this common factor for
+    # numerical conditioning, so its derivative arrays are identical.
+    @test scaled_derivatives.gradient ≈ base_derivatives.gradient
+    @test scaled_derivatives.hessian ≈ base_derivatives.hessian
+    @test sign.(eigvals(Symmetric(base_derivatives.hessian))) ==
+        sign.(eigvals(Symmetric(scaled_derivatives.hessian)))
+    @test _pilot_periodic_distance([0.99], [0.01]) ≈ 0.02
+    @test_throws ArgumentError pilot_select_geometries("/private/tmp",
+        [CYAxiverse.structs.GeometryIndex(491, 1, 1)])
+    resource_capped = pilot_collect_seeds(Q, L; max_branches=100,
+        max_stage_allocated_bytes=1)
+    @test resource_capped.status == :resource_cap
+    @test resource_capped.estimate == 2
+    @test isempty(resource_capped.seeds)
+
+    factor = cholesky(K).L
+    below = _pilot_records([[0.5]], [0], Q,
+        pilot_homotopy_scale(L, 0.99), factor;
+        residual_tolerance=1e-10, max_iterations=20, duplicate_tolerance=1e-7)
+    above = _pilot_records([[0.5]], [0], Q,
+        pilot_homotopy_scale(L, 1.01), factor;
+        residual_tolerance=1e-10, max_iterations=20, duplicate_tolerance=1e-7)
+    _pilot_init_branch_ids!(below)
+    matches = pilot_match_records!(below, above; matching_tolerance=0.1)
+    @test length(matches) == 1
+    brackets = _pilot_mark_crossings!(below, above, matches, 0.99, 1.01;
+        zero_eigenvalue_tolerance=1e-6, bracket_number=1,
+        previous_minima=1, current_minima=0)
+    @test brackets == 1
+    @test below[1].near_catastrophe && above[1].near_catastrophe
+    @test below[1].catastrophe_bracket == "bracket-0001"
+    @test below[1].classification.hessian_min > 0
+    @test above[1].classification.hessian_min < 0
+    locked = _classify_point([0.5], Q, L, cholesky(K))
+    @test below[1].classification.value ≈ locked.value
+    @test below[1].classification.negative_modes == 0
+
+    augmented = pilot_augmented_catastrophe([0.5], [1.0], 1.0, Q, L, K;
+        tolerance=1e-10, scale_status=:homotopy_only)
+    @test augmented.converged
+    @test augmented.gradient_residual < 1e-10
+    @test augmented.null_residual < 1e-10
+    @test augmented.normalized_null_vector_residual < 1e-10
+    @test abs(augmented.hessian_eigenvalues[1]) < 1e-10
+
+    benchmark = pilot_benchmark_regression()
+    @test benchmark.passed
+    @test benchmark.n5_critical_scale ≈ 0.674506370003365 atol=1e-12
+    @test benchmark.n5_ratio ≈ 0.25 atol=1e-12
+    @test benchmark.n8_zero_mode
+    @test benchmark.n8_positive_heavy_modes
+    @test benchmark.n8_detuned_negative_modes == 1
+
+    mktempdir() do root
+        path = joinpath(root, "report.csv")
+        pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS)
+        pilot_append_csv(path, (; row_type=:scale, h11=8, polytope=1,
+            frst=1, sampled_scale=1.0), PILOT_SUMMARY_FIELDS)
+        @test length(readlines(path)) == 2
+        @test _pilot_completed_scales(path) == Set([(8, 1, 1, 1.0)])
+        pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS; append=true)
+        @test_throws ArgumentError pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS)
+        @test_throws ArgumentError pilot_prepare_csv(path, (:wrong_schema,); append=true)
+    end
+end
 
 @testset "Geometry-level LQtilde orientation" begin
     mktempdir() do root

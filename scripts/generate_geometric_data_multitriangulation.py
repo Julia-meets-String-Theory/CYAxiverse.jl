@@ -806,8 +806,8 @@ def generate_and_save_geometry(
             qj = qprime[j]
             q[nq + idx] = qj - qi
             l2[idx] = [
-                (math.pi * (qi @ (kinv @ qj)) + ((qi + qj) @ tau))
-                * 8 * math.pi / volume**2,
+                (8 * math.pi**2 / volume**2)
+                * (qi @ (kinv @ qj) + ((qi + qj) @ tau)),
                 -2 * math.log10(math.e) * math.pi * ((qi @ tau) + (qj @ tau)),
             ]
             idx += 1
