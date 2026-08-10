@@ -91,10 +91,9 @@ minimum, the following joint transformation:
 | domain | check positive effective-divisor/curve volumes, positive-definite `K`, stretched-cone and EFT-control conditions | not checked by continuation |
 
 The scaling entries above are implemented in `pilot_scaled_inputs`. The
-physical mode reconstructs the active author coefficient map from the stored
-geometry metadata and records any discrepancy with the persisted HDF5 `L`
-values; it does not by itself establish Kähler-cone/EFT validity or authorize
-a production physical scan.
+physical mode validates the stored coefficient map on a generic reference
+case; it does not by itself establish Kähler-cone/EFT validity or authorize a
+production physical scan.
 
 ## Provenance
 
@@ -138,20 +137,14 @@ CSV rows, while historical homotopy outputs remain clearly labelled. The
 benchmark-specific N=5/N=8 scale functions are still not generalized merely
 because they reproduce the fixed examples.
 
-The author archive provides the executable reference: its `geometric_base`
-records `cy_vol`, divisor volumes, effective-cone/GLSM charge rows, and
-`kinv`, while `geometric_quantities` applies the `tau` and `kinv`
-transformations before `dim_reductor` rebuilds the coefficients. The active
-cross coefficient is
-
-```text
-(8*pi/V^2) * [pi*q_i^T Kinv q_j + (q_i+q_j).tau]
-```
-
-and the package `fixed` path now matches the corrected author-code validation
-directory on the second h11=10 comparison geometry to Float64 precision. The fixed/full distinction is
-therefore an explicit normalization choice rather than an unresolved source
-reconstruction gap.
+The author archive narrows this gap: its `geometric_base` records
+`cy_vol`, divisor volumes, effective-cone/GLSM charge rows, and `kinv`, while
+`geometric_quantities` applies the `tau` and `kinv` transformations before
+`dim_reductor` rebuilds the coefficients. This is evidence for a concrete
+follow-up implementation, not validation of the archive's physical
+normalization. In particular, the fixed-`CY_vol` choice must be reconciled
+with the source equation for the potential before the result can be labelled
+`physical`.
 
 ## Interpretation of the pilot results
 
@@ -212,8 +205,8 @@ must pass the benchmark and generic reference checks for units, joint scaling,
 positivity, generalized-Hessian behavior, and complete input provenance before
 any generic physical continuation is reported as a scientific result.
 
-The actual author code remains the reference for future regression tests. The
-normalization distinction is:
+The author code should be the starting reference for that follow-up. The
+minimum reconciliation test is:
 
 ```text
 author path:    tau -> k*tau, Kinv -> k^2*Kinv, CY_vol held fixed
@@ -225,8 +218,8 @@ At `k != 1`, the two coefficient normalizations differ by the common
 `k^(-3)` volume factor for the leading term (and the corresponding factor for
 the cross terms). Although a common factor does not change normalized
 critical-point signs, it does change absolute inflationary observables such as
-the scalar-amplitude normalization; this is why the selected normalization is
-recorded in every continuation row.
+the scalar-amplitude normalization. That difference must be resolved before a
+physical release claim.
 
 Owner approval: Viraf M. Mehta — approved in the project discussion on
 2026-08-10. The approved release claim remains bounded diagnostic evidence;
