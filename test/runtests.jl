@@ -88,6 +88,12 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
     above = _pilot_records([[0.5]], [0], Q,
         pilot_homotopy_scale(L, 1.01), factor;
         residual_tolerance=1e-10, max_iterations=20, duplicate_tolerance=1e-7)
+    physical_records = _pilot_records([[0.5]], [0], Q,
+        pilot_homotopy_scale(L, 1.01), factor;
+        residual_tolerance=1e-10, max_iterations=20, duplicate_tolerance=1e-7,
+        scale_status=:physical)
+    @test all(record -> record.candidate_status == :none, physical_records)
+    @test any(occursin("withheld", record.candidate_reason) for record in physical_records)
     _pilot_init_branch_ids!(below)
     matches = pilot_match_records!(below, above; matching_tolerance=0.1)
     @test length(matches) == 1

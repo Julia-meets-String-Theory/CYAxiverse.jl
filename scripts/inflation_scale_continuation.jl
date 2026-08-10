@@ -423,7 +423,7 @@ mutable struct _PilotBranchRecord
 end
 
 function _pilot_records(seeds, modes, Q, L, factor; residual_tolerance,
-        max_iterations, duplicate_tolerance)
+        max_iterations, duplicate_tolerance, scale_status::Symbol=:homotopy_only)
     evaluator = CYAxiverse.generate.structured_charge_evaluator(Q, L)
     records = _PilotBranchRecord[]
     for index in eachindex(seeds)
@@ -449,15 +449,22 @@ function _pilot_records(seeds, modes, Q, L, factor; residual_tolerance,
             _pilot_periodic_distance(record.corrected_theta, corrected.theta) <=
                 duplicate_tolerance, records)
         status = duplicate && status == :converged ? :duplicate : status
-        candidate = classification !== nothing && _pilot_screen_pass(classification)
+        candidate = scale_status == :homotopy_only && classification !== nothing &&
+            _pilot_screen_pass(classification)
+        candidate_reason = if candidate
+            "corrected point passes existing Float64 screen"
+        elseif classification !== nothing && _pilot_screen_pass(classification) &&
+                scale_status == :physical
+            "physical-mode screen hit withheld from candidate classification"
+        else
+            "corrected point does not pass existing Float64 screen"
+        end
         push!(records, _PilotBranchRecord(index, modes[index], copy(seeds[index]),
             copy(corrected.theta), status, corrected.residual, corrected.iterations,
             corrected.seconds, string("seed-", lpad(index, 8, '0')),
             string("branch-", lpad(index, 8, '0')), :unmatched, classification,
             false, "", "", candidate ? :corrected_candidate : :none,
-            candidate ? "corrected point passes existing Float64 screen" :
-                "corrected point does not pass existing Float64 screen",
-            failure))
+            candidate_reason, failure))
     end
     records
 end
@@ -746,7 +753,8 @@ function _pilot_scale_records(geom, data_dir, geometry_path, Q, L, K, hierarchy,
     records = _pilot_records(seed_info.seeds, seed_info.modes, scaled.Q, scaled_L, factor;
         residual_tolerance=options[:correction_tolerance],
         max_iterations=options[:correction_iterations],
-        duplicate_tolerance=options[:duplicate_tolerance])
+        duplicate_tolerance=options[:duplicate_tolerance],
+        scale_status=options[:scale_status])
     if previous === nothing
         _pilot_init_branch_ids!(records)
         matches = Tuple{Int, Int, Float64}[]
