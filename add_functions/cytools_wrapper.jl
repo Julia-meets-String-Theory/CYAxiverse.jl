@@ -408,9 +408,8 @@ function geometries_generate(h11,cy; rational_Q = false)
     for i=1:size(qprime,1)-1
         for j=i+1:size(qprime,1)
             q[size(qprime,1)+n,:] = qprime[j,:]-qprime[i,:]
-            L2[n,:] = [(8*pi^2/V^2) *
-                    (dot(qprime[i,:],(Kinv * qprime[j,:]))
-                    + dot((qprime[i,:]+qprime[j,:]),tau)),
+            L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:]))
+                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2,
                     -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
             n+=1
         end
@@ -493,9 +492,8 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
     for i=1:size(qprime,1)-1
         for j=i+1:size(qprime,1)
             q[size(qprime,1)+n,:] = qprime[j,:]-qprime[i,:]
-            L2[n,:] = [(8*pi^2/V^2) *
-                    (dot(qprime[i,:],(Kinv * qprime[j,:]))
-                    + dot((qprime[i,:]+qprime[j,:]),tau)),
+            L2[n,:] = [(pi*dot(qprime[i,:],(Kinv * qprime[j,:]))
+                    + dot((qprime[i,:]+qprime[j,:]),tau))*8*pi/V^2,
                     -2*log10(exp(1))*pi*(dot(qprime[i,:],tau)+ dot(qprime[j,:],tau))]
             n+=1
         end

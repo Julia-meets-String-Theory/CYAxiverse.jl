@@ -47,9 +47,9 @@ def potential_data(cy, tip, tau, kinv, volume):
         for j in range(i + 1, nq):
             qi, qj = qprime[i], qprime[j]
             charges.append(qj - qi)
-            prefactor = (8 * math.pi**2 / volume**2) * (
-                float(qi @ kinv @ qj) + float((qi + qj) @ tau)
-            )
+            prefactor = (
+                math.pi * float(qi @ kinv @ qj) + float((qi + qj) @ tau)
+            ) * 8 * math.pi / volume**2
             exponent = -2 * math.pi * math.log10(math.e) * float((qi + qj) @ tau)
             raw_coefficients.append((prefactor, exponent))
 

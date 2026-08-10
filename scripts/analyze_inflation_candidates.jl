@@ -38,23 +38,39 @@ function classify_point(theta, Q, L, K)
        eta_values, hessian_eigenvalues=eigs)
 end
 
-function reduced_solve(Q, L, selected; starts)
-    branches = CYAxiverse.generate.leading_critical_branches(selected)
-    (; coordinates=branches.coordinates,
-       original_coordinates=branches.coordinates,
-       critical_count=branches.branch_count,
-       leading_negative_modes=branches.leading_negative_modes,
-       minima_count=branches.leading_minima_count,
-       starts=0,
-       unique_original_count=branches.branch_count)
+function reduced_solve(Q, L, selected; starts, reduction::Symbol=:author)
+    reduction in (:author, :alphamatrix, :leading_branches) ||
+        throw(ArgumentError("inflation reduction must be :author, :alphamatrix, or :leading_branches"))
+    if reduction == :leading_branches
+        branches = CYAxiverse.generate.leading_critical_branches(selected)
+        return (; coordinates=branches.coordinates,
+           original_coordinates=branches.coordinates,
+           critical_count=branches.branch_count,
+           leading_negative_modes=branches.leading_negative_modes,
+           minima_count=branches.leading_minima_count,
+           starts=0,
+           unique_original_count=branches.branch_count)
+    end
+
+    problem = CYAxiverse.jlm_reduced.prepare(Q, L;
+        threshold=0.01, reduction)
+    ensemble = CYAxiverse.jlm_reduced.critical_ensemble(problem; starts)
+    negative_modes = [entry[1] for entry in ensemble.inertia]
+    (; coordinates=ensemble.coordinates,
+       original_coordinates=ensemble.coordinates,
+       critical_count=ensemble.critical_count,
+       leading_negative_modes=negative_modes,
+       minima_count=ensemble.minima_count,
+       starts,
+       unique_original_count=ensemble.critical_count)
 end
 
-function analyze_geometry(geom_idx; starts=8192)
+function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:author)
     oriented = CYAxiverse.read.oriented_potential(geom_idx)
     Q, L, K = oriented.Q, oriented.L, oriented.K
     selected = CYAxiverse.generate.LQtilde(Q, L)
     hierarchy = CYAxiverse.generate.instanton_hierarchy_diagnostics(L)
-    solved = reduced_solve(Q, L, selected; starts=starts)
+    solved = reduced_solve(Q, L, selected; starts=starts, reduction)
 
     point_rows = NamedTuple[]
     for i in axes(solved.original_coordinates, 2)
@@ -92,7 +108,7 @@ function analyze_geometry(geom_idx; starts=8192)
         frst=geom_idx.frst,
         qtilde_det=abs(round(Int, det(selected.Qtilde))),
         instantons=size(Q, 2),
-        enumeration="leading_half_integer_branches",
+        enumeration=string(reduction),
         starts_used=solved.starts,
         branch_count=solved.critical_count,
         unique_original_count=solved.unique_original_count,
@@ -163,11 +179,12 @@ function main(args)
     summaries = NamedTuple[]
     all_points = NamedTuple[]
     starts = parse(Int, get(ENV, "CYAXIVERSE_INFLATION_SCREEN_STARTS", "8192"))
+    reduction = Symbol(get(ENV, "CYAXIVERSE_INFLATION_REDUCTION", "author"))
 
     for geom_idx in parse_geometries(args)
         @printf("analyzing h11=%d polytope=%d frst=%d starts=%d\n",
             geom_idx.h11, geom_idx.polytope, geom_idx.frst, starts)
-        summary, points = analyze_geometry(geom_idx; starts=starts)
+        summary, points = analyze_geometry(geom_idx; starts=starts, reduction)
         push!(summaries, summary)
         append!(all_points, points)
         @printf("  branches=%d leading_minima=%d saddles=%d slowroll_saddles=%d least_tachyonic_eta=%.4g\n",

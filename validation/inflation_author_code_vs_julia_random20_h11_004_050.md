@@ -15,7 +15,7 @@ physical normalization choices:
 - `:fixed`: `CY_vol` held fixed, matching the archived author path;
 - `:full`: `CY_vol -> k^(3/2) CY_vol`.
 
-The Python bridge imports and calls the archived
+The Python bridge imports and calls the corrected author-code validation
 `cytools_catastrophe_scan.geometric_quantities` and
 `Camcode_full_2.dim_reductor` routines. CYTools, SciPy, solver, and HSNF
 modules are dependency shims only; the archived coefficient and reduction

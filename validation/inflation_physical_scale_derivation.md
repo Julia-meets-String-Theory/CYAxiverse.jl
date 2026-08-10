@@ -146,11 +146,11 @@ transformations before `dim_reductor` rebuilds the coefficients. The active
 cross coefficient is
 
 ```text
-(8*pi^2/V^2) * [q_i^T Kinv q_j + (q_i+q_j).tau]
+(8*pi/V^2) * [pi*q_i^T Kinv q_j + (q_i+q_j).tau]
 ```
 
-and the package `fixed` path now matches that code on the second h11=10
-comparison geometry to Float64 precision. The fixed/full distinction is
+and the package `fixed` path now matches the corrected author-code validation
+directory on the second h11=10 comparison geometry to Float64 precision. The fixed/full distinction is
 therefore an explicit normalization choice rather than an unresolved source
 reconstruction gap.
 

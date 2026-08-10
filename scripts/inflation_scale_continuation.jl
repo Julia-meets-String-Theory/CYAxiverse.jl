@@ -124,8 +124,8 @@ function _pilot_author_potential(Q::Matrix{Int}, tau::Vector{Float64},
         qj = @view Q[:, j]
         charge_sum = qi .+ qj
         exponent = -2π * log10e * dot(charge_sum, tau)
-        coefficient = (8π^2 / cy_volume^2) *
-            (dot(qi, kinv * qj) + dot(charge_sum, tau))
+        coefficient = (8π / cy_volume^2) *
+            (π * dot(qi, kinv * qj) + dot(charge_sum, tau))
         if coefficient == 0
             result[1, index] = 0.0
             result[2, index] = -Inf

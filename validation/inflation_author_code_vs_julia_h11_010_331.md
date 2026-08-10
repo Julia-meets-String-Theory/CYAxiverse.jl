@@ -42,19 +42,21 @@ the verified homogeneous volume factor.
 
 ## Source discrepancy
 
-The active author code in `Camcode_full_2.py:138` evaluates the cross term as
+The archived author source in `Camcode_full_2.py:138` contains a cross-term
+prefactor typo. The active comparison source is the repository-local corrected
+copy, which evaluates the cross term as
 
 ```text
-(8*pi^2/V^2) * [q_i^T Kinv q_j + (q_i+q_j).tau]
+(8*pi/V^2) * [pi*q_i^T Kinv q_j + (q_i+q_j).tau]
 ```
 
-The package path now uses the same expression in the continuation helper and
+The package path uses the same expression in the continuation helper and
 the active generic geometry exporters (`add_functions/cytools_wrapper.jl`,
 `scripts/generate_geometric_data.py`, and
 `scripts/generate_geometric_data_multitriangulation.py`):
 
 ```text
-(8*pi^2/V^2) * [q_i^T Kinv q_j + (q_i+q_j).tau]
+(8*pi/V^2) * [pi*q_i^T Kinv q_j + (q_i+q_j).tau]
 ```
 
 The pre-existing HDF5 `L` values retain the older convention on this geometry;

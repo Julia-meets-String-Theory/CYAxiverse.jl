@@ -32,8 +32,8 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
         cy_volume=10.0)
     base_L = _pilot_author_potential(base_Q, base_geometry.τ_volumes,
         base_geometry.kinv, base_geometry.cy_volume)
-    cross_coefficient = (8π^2 / base_geometry.cy_volume^2) *
-        (dot(base_Q[:, 1], base_geometry.kinv * base_Q[:, 2]) +
+    cross_coefficient = (8π / base_geometry.cy_volume^2) *
+        (π * dot(base_Q[:, 1], base_geometry.kinv * base_Q[:, 2]) +
          dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes))
     @test base_L[2, 4] ≈ log10(abs(cross_coefficient)) -
         2π * log10(exp(1.0)) *
@@ -679,6 +679,22 @@ end
         [2 0 1; 0 2 0], [1.0 1.0 1.0; 0.0 -10.0 -1.0])
     @test scaled_square_jlm.N_min == 4
     @test scaled_square_jlm.det_QTilde == 4
+
+    # The legacy alpha-matrix reduction remains the default, while the
+    # author-compatible reduction retains rational coordinates and enlarges
+    # their fundamental domain before solving.
+    author_fixture = (Q=Int[2 0 1 1; 0 2 1 0; 0 0 1 1],
+        L=Float64[1.0 1.0 1.0 1.0; 0.0 -1.0 -2.0 -3.0])
+    alpha_problem = CYAxiverse.jlm_reduced.prepare(author_fixture.Q, author_fixture.L)
+    author_problem = CYAxiverse.jlm_reduced.prepare(author_fixture.Q, author_fixture.L;
+        reduction=:author)
+    @test alpha_problem.reduction == :alphamatrix
+    @test author_problem.reduction == :author
+    @test author_problem.coordinate_scale == [2, 1]
+    @test Matrix(author_problem.Q_reduced) == [2 0; 0 1; -1 1]
+    author_ensemble = CYAxiverse.jlm_reduced.critical_ensemble(author_problem; starts=256)
+    @test author_ensemble.critical_count == 8
+    @test author_ensemble.minima_count == 2
 
     synthetic = (Q=Int[2 0 1; 0 2 1],
         L=Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0])
