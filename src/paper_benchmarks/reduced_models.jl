@@ -55,14 +55,23 @@ function n8_potential(; k::Real=1.0, trajectory::Bool=false)
        coefficient_model=:leading_diagonal_terms)
 end
 
-"""Complete equation-(19) potential from the 12 diagonal and 66 cross terms."""
-function n8_full_potential(; k::Real=1.0)
+"""
+    n8_full_potential(; k=1.0, volume_normalization=:full)
+
+Complete equation-(19) potential from the 12 diagonal and 66 cross terms.
+The `:full` convention scales the Calabi--Yau volume as `k^(3/2)`;
+`:fixed` retains the reference volume for the explicit prefactor.
+"""
+function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full)
+    volume_normalization in (:full, :fixed) ||
+        throw(ArgumentError("volume_normalization must be :full or :fixed"))
     diagonal = n8_potential(k=k)
     qprime = Matrix{Int}(diagonal.Q')
     geometry = n8_geometry()
     tau = Float64(k) .* geometry.divisor_volumes
     kinv = Float64(k)^2 .* inv(Matrix(geometry.kinetic))
-    volume = geometry.volume * Float64(k)^(3 / 2)
+    volume_scale = volume_normalization === :full ? Float64(k)^(3 / 2) : 1.0
+    volume = geometry.volume * volume_scale
     charges = Vector{Vector{Int}}()
     signs, logs = Float64[], Float64[]
     for charge in eachrow(qprime)
@@ -73,13 +82,12 @@ function n8_full_potential(; k::Real=1.0)
     end
     for i in 1:(size(qprime, 1)-1), j in (i+1):size(qprime, 1)
         qi, qj = qprime[i, :], qprime[j, :]
-        prefactor = (8π^2 / volume^2) *
-            (dot(qi, kinv * qj) + dot(qi + qj, tau))
+        prefactor = (π * dot(qi, kinv * qj) + dot(qi + qj, tau)) * 8π / volume^2
         push!(charges, collect(qj - qi)); push!(signs, sign(prefactor))
         push!(logs, log10(abs(prefactor)) - 2π * dot(qi + qj, tau) * _LOG10E)
     end
     (; Q=hcat(charges...), L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
-       diagonal_count=12, cross_count=66)
+       volume, volume_normalization, diagonal_count=12, cross_count=66)
 end
 
 """
@@ -211,12 +219,14 @@ The paper's catastrophe search and inflation trajectories use the truncated
 potential of equations (20) and (25), so the 12-term potential is the default.
 """
 function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
-        full::Bool=false, trajectory::Bool=false)
+        full::Bool=false, volume_normalization::Symbol=:full,
+        trajectory::Bool=false)
     trajectory && return author_inflation.n8_potential_derivatives(
         theta, k; trajectory=true, full=full)
     length(theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
     k > 0 || throw(ArgumentError("k must be positive"))
-    benchmark = full ? n8_full_potential(k=k) : n8_potential(k=k)
+    benchmark = full ? n8_full_potential(k=k,
+        volume_normalization=volume_normalization) : n8_potential(k=k)
     q = Matrix{Float64}(benchmark.Q)
     amplitudes = vec(benchmark.L[1, :]) .* 10.0 .^ vec(benchmark.L[2, :])
     arguments = 2π .* (q' * Float64.(theta))
