@@ -235,6 +235,27 @@ def _compare_maps(package_q, package_l, author_map):
     }
 
 
+def _has_validation_failure(value):
+    """Return whether a nested comparison result contains a failed check."""
+    if isinstance(value, dict):
+        if "error" in value:
+            return True
+        for key, item in value.items():
+            if key == "keys_match" and item is False:
+                return True
+            if key in {"count_mismatch", "sign_mismatches"} and item != 0:
+                return True
+            if key in {"max_finite_log10_error", "max_error"} and (
+                not np.isfinite(item) or item > 1e-10
+            ):
+                return True
+            if _has_validation_failure(item):
+                return True
+    elif isinstance(value, list):
+        return any(_has_validation_failure(item) for item in value)
+    return False
+
+
 def compare_input_dir(input_dir, author_code, author_scan, author_src):
     tau = _read(input_dir / "tau.txt")
     kinv = _read(input_dir / "kinv.txt")
@@ -349,6 +370,8 @@ def main():
     if args.output_json is not None:
         args.output_json.write_text(serialized + "\n")
     print(serialized)
+    if _has_validation_failure(result):
+        raise SystemExit("author-code coefficient validation failed")
 
 
 if __name__ == "__main__":

@@ -254,9 +254,9 @@ end
 mutable struct _ClassificationAccumulator
     saddle_count::Int
     candidate_count::Int
-    least_tachyonic::Any
-    best::Any
-    flattest::Any
+    least_tachyonic::Union{Nothing,NamedTuple}
+    best::Union{Nothing,NamedTuple}
+    flattest::Union{Nothing,NamedTuple}
 end
 
 _ClassificationAccumulator() = _ClassificationAccumulator(0, 0, nothing, nothing, nothing)

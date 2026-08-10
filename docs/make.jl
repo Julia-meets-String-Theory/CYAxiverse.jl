@@ -8,9 +8,10 @@ makedocs(
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true",
         size_threshold = 300 * 1024,
+        size_threshold_warn = 300 * 1024,
         canonical = "https://julia-meets-string-theory.github.io/CYAxiverse.jl/stable/"),
     # Compatibility aliases point to already-documented benchmark modules.
-    checkdocs = :none,
+    checkdocs = :exports,
     modules = [CYAxiverse],
     pages = [
         "Home" => "index.md",

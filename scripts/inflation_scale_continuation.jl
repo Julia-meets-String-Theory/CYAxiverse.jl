@@ -175,6 +175,10 @@ function pilot_scaled_inputs(Q::Matrix{Int}, L::Matrix{Float64}, K,
     kinv = Matrix{Float64}(geometry.kinv)
     cy_volume = Float64(geometry.cy_volume)
     reference = _pilot_reference_diagnostic(Q, L, tau, kinv, cy_volume)
+    reference.sign_mismatches == 0 || throw(ArgumentError(
+        "stored potential sign normalization does not match the physical author path"))
+    reference.max_log10_error <= 1e-10 || throw(ArgumentError(
+        "stored potential log normalization does not match the physical author path"))
     scale_float = Float64(scale)
     scaled_tau = scale_float .* tau
     scaled_kinv = scale_float^2 .* kinv
@@ -317,11 +321,13 @@ function pilot_collect_seeds(Q::Matrix{Int}, L::Matrix{Float64};
         message = sprint(showerror, error)
         status = occursin("leading branch enumeration would create", message) ?
             :branch_cap : :failed
+        # The bounded enumerator throws before exposing a completion report;
+        # do not infer mask coverage from the unconstrained estimate.
         fallback_stream = (; branch_count=estimate, mask_count=coverage.mask_count,
-            masks_visited=coverage.masks_visited,
-            masks_skipped=coverage.mask_count - coverage.masks_visited,
+            masks_visited=big(0),
+            masks_skipped=coverage.mask_count,
             lattice_copy_count=determinant,
-            lattice_copies_visited=coverage.masks_visited * determinant,
+            lattice_copies_visited=big(0),
             negative_mode_range=range,
             search_classification=range === nothing ?
                 :complete_enumeration : :deterministic_low_index_enumeration)
@@ -413,7 +419,7 @@ mutable struct _PilotBranchRecord
     branch_provenance_id::String
     branch_match_id::String
     matching_status::Symbol
-    classification::Any
+    classification::Union{Nothing,NamedTuple}
     near_catastrophe::Bool
     catastrophe_bracket::String
     catastrophe_reason::String
@@ -836,7 +842,10 @@ function pilot_augmented_catastrophe(initial_theta::AbstractVector{<:Real},
        gradient_residual=norm(data.gradient, Inf),
        null_residual=norm(data.hessian * null_vector, Inf),
        normalized_null_vector_residual=abs(dot(null_vector, null_vector) - 1),
-       converged=result.f_converged || result.x_converged,
+       converged=(result.f_converged || result.x_converged) &&
+           norm(data.gradient, Inf) <= tolerance &&
+           norm(data.hessian * null_vector, Inf) <= tolerance &&
+           abs(dot(null_vector, null_vector) - 1) <= tolerance,
        iterations=result.iterations, seconds=(time_ns() - started) / 1e9,
        hessian_eigenvalues=eigvals(Symmetric(
            factor \ data.hessian / factor')))
@@ -846,8 +855,7 @@ function pilot_benchmark_regression()
     benchmark = CYAxiverse.paper_benchmarks.poly102_inflation
     n5_kc = benchmark.n5_critical_scale()
     n5_at = benchmark.n5_reduced_critical_points(n5_kc)
-    n8_seed = [0.0, 0.00499839, 0.99500161, 0.75995156,
-        0.75004523, 0.24995477, 0.0, 0.75495317]
+    n8_seed = copy(benchmark.N8_BEST_X)
     n8 = benchmark.n8_degenerate_point(n8_seed)
     detuned = CYAxiverse.paper_benchmarks.n8_hilltop(n8.k + 1e-7)
     (; n5_critical_scale=n5_kc,

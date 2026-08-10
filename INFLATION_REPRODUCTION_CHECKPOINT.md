@@ -325,22 +325,17 @@ Pipeline tests still print the pre-existing duplicate-include warnings and a
 deliberately exercised temporary `KeyError` failure path, but their assertions
 pass.
 
-Current expected worktree status is:
+The checkpoint is now superseded by the completed CODE-01 integration. The final
+worktree status is:
 
 ```text
- M Project.toml
- M docs/src/api.md
- M scripts/inflation_reproduction.jl
- M scripts/reproduce_2023_n8.jl
- M src/CYAxiverse.jl
- M src/paper_benchmarks.jl
- M test/runtests.jl
-?? INFLATION_REPRODUCTION_CHECKPOINT.md
+## agents/inflation-reproduction-instructions
+clean
 ```
 
-No commit has been made. The validation fixture and comparison CSV were not
-modified. The next safe action is a review of the naming diff followed by the
-physical source-file split; do not reset or clean this worktree.
+The integrated branch is rebased onto `vmm` and contains the approved SCI-01
+decision plus the CODE-01 package, validation, and documentation changes. The
+validation fixture and comparison CSV were not modified.
 
 ## Scientific naming migration
 

@@ -1,5 +1,6 @@
 module author_inflation
 using LinearAlgebra
+using NLsolve
 using OrdinaryDiffEq
 using LinearSolve
 
@@ -245,26 +246,52 @@ end
 """
     n8_degenerate_point(initial_theta=N8_BEST_X; ...)
 
-Return the author's refined poly-102 cusp.  The supplied best point is
-deterministic and avoids making a low-precision root finder part of the
-fixture; a custom starting point is accepted for API compatibility.
+Return the author's refined poly-102 cusp by solving the augmented
+gradient/Hessian-null equations from the supplied starting point.
 """
 function n8_degenerate_point(initial_theta::AbstractVector{<:Real}=N8_BEST_X;
         k0::Real=N8_KC, tolerance::Real=1e-11, max_iterations::Int=1_000)
     length(initial_theta) == 8 || throw(DimensionMismatch("poly-102 needs eight coordinates"))
-    theta = copy(N8_BEST_X)
-    p = n8_potential(k=k0, trajectory=true)
-    d = n8_potential_derivatives(theta, k0; trajectory=true)
-    maps = n8_coordinate_maps(k0)
-    hcanonical = maps.canonical_to_raw' * d.hessian * maps.canonical_to_raw
+    tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
+    max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+    theta₀ = Float64.(initial_theta)
+    k₀ = Float64(k0)
+    d₀ = n8_potential_derivatives(theta₀, k₀; trajectory=true)
+    maps₀ = n8_coordinate_maps(k₀)
+    hcanonical₀ = maps₀.canonical_to_raw' * d₀.hessian * maps₀.canonical_to_raw
+    null₀ = eigen(Symmetric(hcanonical₀)).vectors[:, 1]
+    initial = vcat(theta₀, null₀, k₀)
+    function equations!(out, state)
+        theta = @view state[1:8]
+        null = @view state[9:16]
+        k = state[17]
+        derivatives = n8_potential_derivatives(theta, k; trajectory=true)
+        maps = n8_coordinate_maps(k)
+        hcanonical = maps.canonical_to_raw' * derivatives.hessian * maps.canonical_to_raw
+        out[1:8] .= derivatives.gradient
+        out[9:16] .= hcanonical * null
+        out[17] = dot(null, null) - 1
+        nothing
+    end
+    result = nlsolve(equations!, initial; method=:trust_region,
+        ftol=tolerance, xtol=tolerance, iterations=max_iterations)
+    theta = mod.(result.zero[1:8], 2π)
+    null = result.zero[9:16]
+    k = result.zero[17]
+    derivatives = n8_potential_derivatives(theta, k; trajectory=true)
+    maps = n8_coordinate_maps(k)
+    hcanonical = maps.canonical_to_raw' * derivatives.hessian * maps.canonical_to_raw
     eigensystem = eigen(Symmetric(hcanonical))
-    null = eigensystem.vectors[:, 1]
-    (; theta, null_vector=null, k=Float64(k0),
-       eigenvalues=eigensystem.values,
-       gradient_residual=norm(d.gradient, Inf),
-       null_residual=norm(hcanonical * null, Inf),
-       converged=true, iterations=0, tolerance=Float64(tolerance),
-       max_iterations)
+    gradient_residual = norm(derivatives.gradient, Inf)
+    null_residual = norm(hcanonical * null, Inf)
+    normalized_residual = abs(dot(null, null) - 1)
+    converged = (result.f_converged || result.x_converged) &&
+        gradient_residual <= tolerance && null_residual <= tolerance &&
+        normalized_residual <= tolerance
+    (; theta, null_vector=null / norm(null), k,
+       eigenvalues=eigensystem.values, gradient_residual, null_residual,
+       normalized_null_vector_residual=normalized_residual, converged,
+       iterations=result.iterations, tolerance=Float64(tolerance), max_iterations)
 end
 
 """
