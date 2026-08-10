@@ -76,8 +76,8 @@ function _oriented_potential_matrices(pot_data)
     Q, L
 end
 
-"""Round a floating-point alpha entry in the same tolerance as the author code."""
-function _author_alpha(Qhat::AbstractMatrix{Int}, Qbar::AbstractMatrix{Int})
+"""Round a floating-point alpha entry in the catastrophe-code tolerance."""
+function _catastrophe_alpha(Qhat::AbstractMatrix{Int}, Qbar::AbstractMatrix{Int})
     inverse = inv(Matrix{Rational}(Qhat))
     alpha = Matrix{Rational}(transpose(inverse * Matrix{Rational}(Qbar)))
     for index in eachindex(alpha)
@@ -90,7 +90,7 @@ function _author_alpha(Qhat::AbstractMatrix{Int}, Qbar::AbstractMatrix{Int})
 end
 
 """Return the rightmost nonzero alpha coordinate, or zero for a zero row."""
-function _author_smallest_coordinate(row::AbstractVector{<:Number})
+function _catastrophe_smallest_coordinate(row::AbstractVector{<:Number})
     for index in reverse(eachindex(row))
         !iszero(row[index]) && return index
     end
@@ -98,7 +98,7 @@ function _author_smallest_coordinate(row::AbstractVector{<:Number})
 end
 
 """Integerize a rational charge matrix and return its coordinate periods."""
-function _integerize_author_charges(Q::AbstractMatrix{Rational})
+function _integerize_catastrophe_charges(Q::AbstractMatrix{Rational})
     scales = Int[]
     for column in eachcol(Q)
         scale = foldl(lcm, denominator.(column); init=1)
@@ -111,8 +111,8 @@ function _integerize_author_charges(Q::AbstractMatrix{Rational})
     integer, scales
 end
 
-"""Return a reduced problem using the author paper's row-level alpha filter."""
-function _prepare_author(selected::LQLinearlyIndependent; threshold::Float64)
+"""Return a reduced problem using the catastrophe paper's alpha filter."""
+function _prepare_catastrophe(selected::LQLinearlyIndependent; threshold::Float64)
     threshold > 0 || throw(ArgumentError("threshold must be positive"))
     Qhat = Matrix{Int}(selected.Qtilde)
     Qbar = Matrix{Int}(selected.Qbar)
@@ -120,10 +120,10 @@ function _prepare_author(selected::LQLinearlyIndependent; threshold::Float64)
     Lbar = Matrix{Float64}(selected.Lbar)
     h11 = size(Qhat, 1)
     det_QTilde = _det_int(Qhat)
-    alpha_total = _author_alpha(Qhat, Qbar)
+    alpha_total = _catastrophe_alpha(Qhat, Qbar)
 
     kept = Int[]
-    smallest = [_author_smallest_coordinate(row) for row in eachrow(alpha_total)]
+    smallest = [_catastrophe_smallest_coordinate(row) for row in eachrow(alpha_total)]
     for row in axes(alpha_total, 1)
         coordinate = smallest[row]
         coordinate == 0 && continue
@@ -131,7 +131,7 @@ function _prepare_author(selected::LQLinearlyIndependent; threshold::Float64)
     end
     isempty(kept) && return ReducedJLMProblem(spzeros(Float64, 0, 0), zeros(2, 0),
         Float64[], det_QTilde, Float64(det_QTilde), true, det_QTilde, 0,
-        :author, Int[], zeros(Float64, h11, 0))
+        :catastrophe, Int[], zeros(Float64, h11, 0))
 
     alpha = alpha_total[kept, :]
     Lextra = Lbar[:, kept]
@@ -141,7 +141,7 @@ function _prepare_author(selected::LQLinearlyIndependent; threshold::Float64)
     col_min = findall(count(!iszero, column) > 1 for column in eachcol(matrix_coord))
     isempty(col_min) && return ReducedJLMProblem(spzeros(Float64, 0, 0), zeros(2, 0),
         Float64[], det_QTilde, Float64(det_QTilde), true, det_QTilde, 0,
-        :author, Int[], zeros(Float64, h11, 0))
+        :catastrophe, Int[], zeros(Float64, h11, 0))
 
     qeff = vcat(Matrix{Float64}(I, length(col_min), length(col_min)),
         Float64.(alpha[:, col_min]))
@@ -155,7 +155,7 @@ function _prepare_author(selected::LQLinearlyIndependent; threshold::Float64)
     drop_count = length(non_relevant)
     drop_count < length(col_min) || return ReducedJLMProblem(spzeros(Float64, 0, 0),
         zeros(2, 0), Float64[], det_QTilde, Float64(det_QTilde), true,
-        det_QTilde, 0, :author, Int[], zeros(Float64, h11, 0))
+        det_QTilde, 0, :catastrophe, Int[], zeros(Float64, h11, 0))
     alpha_truncated = Float64.(qeff[length(col_min) + 1:end, drop_count + 1:end])
     col_truncated = col_min[drop_count + 1:end]
     Ltilde_truncated = logs[col_truncated]
@@ -182,11 +182,11 @@ function _prepare_author(selected::LQLinearlyIndependent; threshold::Float64)
     col_reduced = findall(any(!iszero, column) for column in eachcol(alpha_low))
     isempty(col_reduced) && return ReducedJLMProblem(spzeros(Float64, 0, 0), zeros(2, 0),
         Float64[], det_QTilde, Float64(det_QTilde), true, det_QTilde, 0,
-        :author, Int[], zeros(Float64, h11, 0))
+        :catastrophe, Int[], zeros(Float64, h11, 0))
 
     Qrational = vcat(Matrix{Rational}(I, length(col_reduced), length(col_reduced)),
         Matrix{Rational}(alpha_low[:, col_reduced]))
-    integer_Q, coordinate_scale = _integerize_author_charges(Qrational)
+    integer_Q, coordinate_scale = _integerize_catastrophe_charges(Qrational)
 
     # Effective coefficients, including the author's cancellation correction
     # for a one-coordinate row that was removed from the optimizer.
@@ -232,7 +232,7 @@ function _prepare_author(selected::LQLinearlyIndependent; threshold::Float64)
 
     ReducedJLMProblem(sparse(Float64.(integer_Q)), Lreduced, Float64.(phases),
         det_QTilde, 1.0, false, nothing,
-        size(integer_Q, 1) - size(integer_Q, 2), :author,
+        size(integer_Q, 1) - size(integer_Q, 2), :catastrophe,
         coordinate_scale, lift)
 end
 
@@ -246,10 +246,10 @@ stores the reduced charge matrix sparsely and can be passed repeatedly to
 """
 function prepare(Q::AbstractMatrix{Int}, L::AbstractMatrix{Float64};
         threshold::Float64=0.01, reduction::Symbol=:alphamatrix)
-    reduction in (:alphamatrix, :author) ||
-        throw(ArgumentError("reduction must be :alphamatrix or :author"))
+    reduction in (:alphamatrix, :catastrophe) ||
+        throw(ArgumentError("reduction must be :alphamatrix or :catastrophe"))
     selected = LQtilde(Q, L)
-    reduction == :author && return _prepare_author(selected; threshold)
+    reduction == :catastrophe && return _prepare_catastrophe(selected; threshold)
     αtest = αmatrix(selected; threshold=threshold)
 
     if !(αtest isa Canonicalα)
@@ -335,7 +335,7 @@ function critical_ensemble(problem::ReducedJLMProblem; starts::Int=100_000,
         merge_tolerance=merge_tolerance, max_iterations=max_iterations,
         initial_points=hcat(seed_points...))
     reduced_coordinates = problem.coordinate_scale .* solved.coordinates
-    coordinates = problem.reduction == :author ?
+    coordinates = problem.reduction == :catastrophe ?
         mod.(problem.lift_matrix * reduced_coordinates, 1.0) : reduced_coordinates
     merge(solved, (; coordinates, reduced_coordinates))
 end

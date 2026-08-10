@@ -1,8 +1,7 @@
 # SCI-01: physical-scale derivation and release decision
 
 Date: 2026-08-09
-Status: proposed scientific decision; owner approval is required before
-integration
+Status: approved scientific decision; owner approval recorded 2026-08-10
 Program: KS axiverse inflation only
 
 ## Re-evaluation using the draft author's code
@@ -229,4 +228,6 @@ critical-point signs, it does change absolute inflationary observables such as
 the scalar-amplitude normalization; this is why the selected normalization is
 recorded in every continuation row.
 
-Owner approval: ____________________    Date: __________
+Owner approval: Viraf M. Mehta — approved in the project discussion on
+2026-08-10. The approved release claim remains bounded diagnostic evidence;
+generic physical rows are not an inflation-candidate or trajectory sample.

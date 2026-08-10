@@ -681,20 +681,21 @@ end
     @test scaled_square_jlm.det_QTilde == 4
 
     # The legacy alpha-matrix reduction remains the default, while the
-    # author-compatible reduction retains rational coordinates and enlarges
+    # catastrophe-paper reduction retains rational coordinates and enlarges
     # their fundamental domain before solving.
-    author_fixture = (Q=Int[2 0 1 1; 0 2 1 0; 0 0 1 1],
+    catastrophe_fixture = (Q=Int[2 0 1 1; 0 2 1 0; 0 0 1 1],
         L=Float64[1.0 1.0 1.0 1.0; 0.0 -1.0 -2.0 -3.0])
-    alpha_problem = CYAxiverse.jlm_reduced.prepare(author_fixture.Q, author_fixture.L)
-    author_problem = CYAxiverse.jlm_reduced.prepare(author_fixture.Q, author_fixture.L;
-        reduction=:author)
+    alpha_problem = CYAxiverse.jlm_reduced.prepare(catastrophe_fixture.Q, catastrophe_fixture.L)
+    catastrophe_problem = CYAxiverse.jlm_reduced.prepare(
+        catastrophe_fixture.Q, catastrophe_fixture.L; reduction=:catastrophe)
     @test alpha_problem.reduction == :alphamatrix
-    @test author_problem.reduction == :author
-    @test author_problem.coordinate_scale == [2, 1]
-    @test Matrix(author_problem.Q_reduced) == [2 0; 0 1; -1 1]
-    author_ensemble = CYAxiverse.jlm_reduced.critical_ensemble(author_problem; starts=256)
-    @test author_ensemble.critical_count == 8
-    @test author_ensemble.minima_count == 2
+    @test catastrophe_problem.reduction == :catastrophe
+    @test catastrophe_problem.coordinate_scale == [2, 1]
+    @test Matrix(catastrophe_problem.Q_reduced) == [2 0; 0 1; -1 1]
+    catastrophe_ensemble = CYAxiverse.jlm_reduced.critical_ensemble(
+        catastrophe_problem; starts=256)
+    @test catastrophe_ensemble.critical_count == 8
+    @test catastrophe_ensemble.minima_count == 2
 
     synthetic = (Q=Int[2 0 1; 0 2 1],
         L=Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0])

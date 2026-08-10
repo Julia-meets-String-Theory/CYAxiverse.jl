@@ -38,9 +38,9 @@ function classify_point(theta, Q, L, K)
        eta_values, hessian_eigenvalues=eigs)
 end
 
-function reduced_solve(Q, L, selected; starts, reduction::Symbol=:author)
-    reduction in (:author, :alphamatrix, :leading_branches) ||
-        throw(ArgumentError("inflation reduction must be :author, :alphamatrix, or :leading_branches"))
+function reduced_solve(Q, L, selected; starts, reduction::Symbol=:catastrophe)
+    reduction in (:catastrophe, :alphamatrix, :leading_branches) ||
+        throw(ArgumentError("inflation reduction must be :catastrophe, :alphamatrix, or :leading_branches"))
     if reduction == :leading_branches
         branches = CYAxiverse.generate.leading_critical_branches(selected)
         return (; coordinates=branches.coordinates,
@@ -65,7 +65,7 @@ function reduced_solve(Q, L, selected; starts, reduction::Symbol=:author)
        unique_original_count=ensemble.critical_count)
 end
 
-function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:author)
+function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:catastrophe)
     oriented = CYAxiverse.read.oriented_potential(geom_idx)
     Q, L, K = oriented.Q, oriented.L, oriented.K
     selected = CYAxiverse.generate.LQtilde(Q, L)
@@ -179,7 +179,7 @@ function main(args)
     summaries = NamedTuple[]
     all_points = NamedTuple[]
     starts = parse(Int, get(ENV, "CYAXIVERSE_INFLATION_SCREEN_STARTS", "8192"))
-    reduction = Symbol(get(ENV, "CYAXIVERSE_INFLATION_REDUCTION", "author"))
+    reduction = Symbol(get(ENV, "CYAXIVERSE_INFLATION_REDUCTION", "catastrophe"))
 
     for geom_idx in parse_geometries(args)
         @printf("analyzing h11=%d polytope=%d frst=%d starts=%d\n",
