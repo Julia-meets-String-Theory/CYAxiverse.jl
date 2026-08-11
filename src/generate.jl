@@ -532,39 +532,76 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}},
     Tls::Matrix{ArbFloat} = Kfactor.L' \ eigenvectors
     Qrows::Matrix{ArbFloat} = ArbFloat.(transpose(Q))
     QMs::Matrix{ArbFloat} = Qrows * Tls
-    qindq31::Vector{Vector{Int64}} = [[x, x, x, y]::Vector{Int64} for x=1:h11,y=1:h11 if x!=y]
-    qindq22::Vector{Vector{Int64}} = [[x, x, y, y]::Vector{Int64} for x=1:h11,y=1:h11 if x>y]
+    qindq31::Vector{NTuple{4, Int}} = [(x, x, x, y) for x=1:h11,y=1:h11 if x!=y]
+    qindq22::Vector{NTuple{4, Int}} = [(x, x, y, y) for x=1:h11,y=1:h11 if x>y]
     quart31log::Vector{Float64} = zeros(Float64, length(qindq31))
     quart22log::Vector{Float64} = zeros(Float64, length(qindq22))
     quartdiaglog::Vector{Float64} = zeros(Float64, h11)
     quart31sign::Vector{Int} = zeros(Int, length(qindq31))
     quart22sign::Vector{Int} = zeros(Int, length(qindq22))
     quartdiagsign::Vector{Int} = zeros(Int, h11)
+    quart31values = zeros(ArbFloat, length(qindq31))
+    quart22values = zeros(ArbFloat, length(qindq22))
+    quartdiagvalues = zeros(ArbFloat, h11)
+    qmode_squared = zeros(ArbFloat, h11)
+    qmode_cubed = zeros(ArbFloat, h11)
 
-    function signed_log(value::ArbFloat)
+    signed_log(value::ArbFloat) = begin
         value_sign = Int(sign(value))
         value_sign, value_sign == 0 ? -Inf : Float64(log(abs(value)))
     end
 
+    # Fuse the instanton loop across all quartic components. The previous
+    # component-by-component sums repeatedly traversed Lh and allocated a
+    # reduction state for every component.
+    @inbounds for instanton in eachindex(Lh)
+        scale = Lh[instanton]
+        for i in 1:h11
+            qmode = QMs[instanton, i]
+            qmode_squared[i] = qmode^2
+            qmode_cubed[i] = qmode_squared[i] * qmode
+            quartdiagvalues[i] += scale * qmode_squared[i]^2
+        end
+
+        index31 = 1
+        index22 = 1
+        for i in 1:h11
+            for j in 1:h11
+                if i != j
+                    quart31values[index31] += scale * qmode_cubed[i] * QMs[instanton, j]
+                    index31 += 1
+                end
+            end
+            for j in 1:i-1
+                quart22values[index22] += scale * qmode_squared[i] * qmode_squared[j]
+                index22 += 1
+            end
+        end
+    end
     @inbounds for k in eachindex(qindq31)
-        i, _, _, j = qindq31[k]
-        value = sum(Lh[a] * QMs[a, i]^3 * QMs[a, j] for a in eachindex(Lh))
-        quart31sign[k], quart31log[k] = signed_log(value)
+        quart31sign[k], quart31log[k] = signed_log(quart31values[k])
     end
     @inbounds for k in eachindex(qindq22)
-        i, _, j, _ = qindq22[k]
-        value = sum(Lh[a] * QMs[a, i]^2 * QMs[a, j]^2 for a in eachindex(Lh))
-        quart22sign[k], quart22log[k] = signed_log(value)
+        quart22sign[k], quart22log[k] = signed_log(quart22values[k])
     end
     @inbounds for k in 1:h11
-        value = sum(Lh[a] * QMs[a, k]^4 for a in eachindex(Lh))
-        quartdiagsign[k], quartdiaglog[k] = signed_log(value)
+        quartdiagsign[k], quartdiaglog[k] = signed_log(quartdiagvalues[k])
     end
 
     fpert::Vector{Float64} = @.(Hvals + mplanck_log -
         (0.5 * quartdiaglog * log10(exp(1))))
-    qindq31_output = isempty(qindq31) ? zeros(Int, 4, 0) : Array(hcat(qindq31...) .- 1)
-    qindq22_output = isempty(qindq22) ? zeros(Int, 4, 0) : Array(hcat(qindq22...) .- 1)
+    qindq31_output = zeros(Int, 4, length(qindq31))
+    qindq22_output = zeros(Int, 4, length(qindq22))
+    @inbounds for column in eachindex(qindq31)
+        for row in 1:4
+            qindq31_output[row, column] = qindq31[column][row] - 1
+        end
+    end
+    @inbounds for column in eachindex(qindq22)
+        for row in 1:4
+            qindq22_output[row, column] = qindq22[column][row] - 1
+        end
+    end
     vals = Hsign, masses, fK .+ mplanck_log .- log2π, fpert .- log2π,
         quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
         qindq31_output, quart31sign,
