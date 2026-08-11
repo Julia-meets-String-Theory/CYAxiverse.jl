@@ -519,8 +519,10 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}},
     Hsign::Vector{Int64} = @.(sign(Vls))
     Hvals::Vector{Float64} = @.(log10(sqrt(abs(Vls))))
 
-    mplanck_log = Float64(log10(constants()["MPlanck"]))
-    log2π = Float64(constants()["log2π"])
+    constant_data = constants()
+    mplanck_log = Float64(log10(constant_data["MPlanck"]))
+    log2π = Float64(constant_data["log2π"])
+    log10e = log10(exp(1))
     masses = Hvals .+ mplanck_log .+ 9 .+ log2π
     if !quartics
         vals = Hsign, masses, fK .+ mplanck_log .- log2π, Float64[], Int[], Float64[],
@@ -592,7 +594,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}},
     end
 
     fpert::Vector{Float64} = @.(Hvals + mplanck_log -
-        (0.5 * quartdiaglog * log10(exp(1))))
+        (0.5 * quartdiaglog * log10e))
     qindq31_output = zeros(Int, 4, length(qindq31))
     qindq22_output = zeros(Int, 4, length(qindq22))
     @inbounds for column in eachindex(qindq31)
@@ -606,11 +608,11 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}},
         end
     end
     vals = Hsign, masses, fK .+ mplanck_log .- log2π, fpert .- log2π,
-        quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
+        quartdiagsign, quartdiaglog .* log10e .+ 4 * log2π,
         qindq31_output, quart31sign,
-        quart31log .* log10(exp(1)) .+ 4 * log2π,
+        quart31log .* log10e .+ 4 * log2π,
         qindq22_output, quart22sign,
-        quart22log .* log10(exp(1)) .+ 4 * log2π
+        quart22log .* log10e .+ 4 * log2π
 
     keys = ["msign", "m", "fK", "fpert", "λselfsign", "λself", "λ31_i",
         "λ31sign", "λ31", "λ22_i", "λ22sign", "λ22"]
