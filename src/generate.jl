@@ -488,9 +488,12 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}},
 
     setprecision(ArbFloat; digits=prec)
     ninstanton::Int = size(Q, 2)
-    Lsign = ArbFloat.(vec(@view L[1, :]))
-    Llog = ArbFloat.(vec(@view L[2, :]))
-    Lh::Vector{ArbFloat} = Lsign .* (ArbFloat(10) .^ Llog)
+    Lh::Vector{ArbFloat} = Vector{ArbFloat}(undef, ninstanton)
+    ten = ArbFloat(10)
+    @inbounds for instanton in 1:ninstanton
+        Lh[instanton] = ArbFloat(L[1, instanton]) *
+            ten^ArbFloat(L[2, instanton])
+    end
 
     # Accumulate instanton rank-one contributions column by column. This keeps
     # the hot input traversal aligned with Julia's column-major storage.
