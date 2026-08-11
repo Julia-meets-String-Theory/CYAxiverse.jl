@@ -82,6 +82,33 @@ struct MassBasisDiagnostics
 end
 
 """
+    InstantonScaleBlock
+
+Contiguous group in a descending instanton-scale ordering. `indices` are the
+zero-based indices in the input `L`; `sorted_positions` are one-based positions
+in the sorted scale list.
+"""
+struct InstantonScaleBlock
+    indices::Vector{Int}
+    sorted_positions::Vector{Int}
+    log10_scales::Vector{Float64}
+end
+
+"""
+    PerturbativeSplitDiagnostics
+
+Diagnostics for a proposed split between adjacent instanton-scale blocks.
+`certified_safe` is true only when both the scale gap and canonical charge
+coupling pass the conservative numerical screening rule.
+"""
+struct PerturbativeSplitDiagnostics
+    off_block_norm::Float64
+    separation_gap::Float64
+    coupling_to_gap_ratio::Float64
+    certified_safe::Bool
+end
+
+"""
     InstantonHierarchyDiagnostics
 
 Cheap physics-informed diagnostics of the instanton scale hierarchy.
@@ -94,6 +121,39 @@ struct InstantonHierarchyDiagnostics
     leading_log_gap::Float64
     log_scale_span::Float64
     heuristic_strong_hierarchy::Bool
+    blocks::Vector{InstantonScaleBlock}
+    inter_block_gaps::Vector{Float64}
+    perturbative_splits::Vector{PerturbativeSplitDiagnostics}
+    gap_log10::Float64
+    min_block_size::Int
+end
+
+InstantonHierarchyDiagnostics(leading_log_gap::Float64, log_scale_span::Float64,
+    heuristic_strong_hierarchy::Bool) = InstantonHierarchyDiagnostics(
+        leading_log_gap, log_scale_span, heuristic_strong_hierarchy,
+        InstantonScaleBlock[], Float64[], PerturbativeSplitDiagnostics[], 0.0, 1)
+
+"""
+    SpectrumWindowDiagnostics
+
+Validation and convergence metadata for a two-sided mass-window solve.
+`counts_by_precision` stores `(precision, lower_count, upper_count)` entries.
+The boundary gaps are measured in mass-log10 units from the nearest excluded
+mode, and `provisional` is true when residual or interval validation failed.
+"""
+struct SpectrumWindowDiagnostics
+    counts_by_precision::Vector{NTuple{3,Int}}
+    lower_count::Int
+    upper_count::Int
+    lower_boundary_gap::Float64
+    upper_boundary_gap::Float64
+    boundary_margin_log10::Float64
+    max_residual::Float64
+    converged::Bool
+    fallback_used::Bool
+    certified::Bool
+    provisional::Bool
+    hierarchy::InstantonHierarchyDiagnostics
 end
 
 """
@@ -119,6 +179,19 @@ struct PhysicalAxionSpectrum
     λ22::Vector{Float64}
     threshold_log10::Float64
     prec::Int
+    window_min_log10::Float64
+    window_max_log10::Float64
+    diagnostics::Union{Nothing, SpectrumWindowDiagnostics}
+end
+
+function PhysicalAxionSpectrum(m::Vector{Float64}, mode_indices::Vector{Int},
+    eigenvectors::Matrix{Float64}, λselfsign::Vector{Int}, λself::Vector{Float64},
+    λ31_i::Matrix{Int}, λ31sign::Vector{Int}, λ31::Vector{Float64},
+    λ22_i::Matrix{Int}, λ22sign::Vector{Int}, λ22::Vector{Float64},
+    threshold_log10::Float64, prec::Int)
+    PhysicalAxionSpectrum(m, mode_indices, eigenvectors, λselfsign, λself,
+        λ31_i, λ31sign, λ31, λ22_i, λ22sign, λ22, threshold_log10, prec,
+        threshold_log10, Inf, nothing)
 end
 
 """

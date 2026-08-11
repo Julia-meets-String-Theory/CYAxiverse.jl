@@ -95,7 +95,7 @@ Ltest
 end
 
 # ╔═╡ eb35a641-b828-42fe-b01e-ecd6ccc7212f
-CYAxiverse.generate.pq_spectrum(Ktest, hcat(Lsign, Ltest), Matrix{Int}(Qtest')), CYAxiverse.generate.hp_spectrum(Ktest, hcat(Lsign, Ltest), Matrix{Int}(Qtest'))
+CYAxiverse.generate.pq_spectrum(Ktest, hcat(Lsign, Ltest), Qtest), CYAxiverse.generate.hp_spectrum(Ktest, hcat(Lsign, Ltest), Qtest)
 
 # ╔═╡ 2b3a2af1-091b-47df-bc2f-082b00a4342b
 function pq_spectrum_square(α::CYAxiverse.structs.CanonicalQBasis)

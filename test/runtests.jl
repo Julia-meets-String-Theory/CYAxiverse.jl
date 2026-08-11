@@ -1076,8 +1076,8 @@ end
     L = [1.0 0.0;
          -20.0 -1000.0]
 
-    # hp_spectrum's low-level interface uses one instanton per row.
-    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+    # hp_spectrum uses the native column-oriented potential convention.
+    hp = CYAxiverse.generate.hp_spectrum(K, L, Q; prec=200)
 
     # λ = Λ q² / K, followed by hp_spectrum's output-unit conversion.
     expected_mass = 0.5 * (-20.0 + log10(3^2 / 4.0)) +
@@ -1091,7 +1091,40 @@ end
     expected_quartic = -20.0 + 4 * log10(3 / 2) + 4 * log10(2π)
     @test hp["λselfsign"][1] == 1
     @test isapprox(hp["λself"][1], expected_quartic; atol=1e-10)
+
+    hp_mass_only = CYAxiverse.generate.hp_spectrum(K, L, Q;
+        prec=200, quartics=false)
+    @test hp_mass_only["m"] == hp["m"]
+    @test hp_mass_only["msign"] == hp["msign"]
+    @test hp_mass_only["fK"] == hp["fK"]
+    @test isempty(hp_mass_only["fpert"])
+    @test isempty(hp_mass_only["λself"])
+    @test size(hp_mass_only["λ31_i"]) == (4, 0)
+    @test size(hp_mass_only["λ22_i"]) == (4, 0)
 end
+
+@testset "HP spectrum: raw and effective selections" begin
+    K = Hermitian([4.0 0.0;
+                   0.0 9.0])
+    Q = [3 0 3;
+         0 5 0]
+    L = [1.0 1.0 1.0;
+         -20.0 -30.0 -100.0]
+
+    selected = CYAxiverse.generate.LQtildebar(L, Q)
+    @test size(selected["Qhat"], 2) == 2
+    hp_effective = CYAxiverse.generate.hp_spectrum(K, L, Q;
+        prec=200, quartics=false, selection=:hp_effective)
+    hp_provided = CYAxiverse.generate.hp_spectrum(K,
+        selected["Lhat"], selected["Qhat"]; prec=200,
+        quartics=false, selection=:raw)
+
+    @test hp_effective["m"] == hp_provided["m"]
+    @test hp_effective["msign"] == hp_provided["msign"]
+    @test_throws ArgumentError CYAxiverse.generate.hp_spectrum(
+        K, L, Q; quartics=false, selection=:unknown)
+end
+
 @testset "PQ and HP spectrum: diagonal two-axion comparison" begin
     # The leading instantons act on separate axions, so the PQ construction is
     # exact. The third, zero-sign instanton only satisfies N > h11 and makes
@@ -1120,7 +1153,7 @@ end
     @test @allocated(CYAxiverse.generate.leading_independent_mask!(mask, Qsorted, span, residual)) == 0
 
     pq = CYAxiverse.generate.pq_spectrum(K, L, Q; quartic_diagnostics=true, mass_basis_diagnostics=true, hierarchy_diagnostics=true)
-    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+    hp = CYAxiverse.generate.hp_spectrum(K, L, Q; prec=200)
 
     expected = sort([
         0.5 * (-20.0 + log10(3^2 / 4.0)),
@@ -1152,6 +1185,15 @@ end
     @test all(isapprox.(physical.m, expected; atol=1e-10))
     @test physical.λselfsign == hp["λselfsign"]
     @test all(isapprox.(physical.λself, hp["λself"]; atol=1e-10))
+    physical_masses_only = CYAxiverse.generate.pq_physical_spectrum(
+        K, L, Q; prec=200, quartics=false)
+    @test physical_masses_only.mode_indices == physical.mode_indices
+    @test all(isapprox.(physical_masses_only.m, physical.m; atol=1e-10))
+    @test all(isapprox.(physical_masses_only.eigenvectors, physical.eigenvectors; atol=1e-10))
+    @test isempty(physical_masses_only.λself)
+    @test isempty(physical_masses_only.λselfsign)
+    @test size(physical_masses_only.λ31_i) == (4, 0)
+    @test size(physical_masses_only.λ22_i) == (4, 0)
     hybrid = CYAxiverse.generate.pq_hybrid_physical_spectrum(K, L, Q; prec=200)
     @test hybrid.mode_indices == [0, 1]
     @test all(isapprox.(hybrid.m, expected; atol=1e-10))
@@ -1177,6 +1219,28 @@ end
     @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=100, max_prec=100, label="diagonal test") == 2
 end
 
+@testset "Hybrid spectrum: full fallback after nonconvergence" begin
+    K = Hermitian([
+        0.7946177070131799 0.16842382565791195 0.007532002811287394;
+        0.16842382565791195 1.4905142746092241 -1.030351626502046;
+        0.007532002811287394 -1.030351626502046 3.4403322647473655
+    ])
+    Q = [
+        -1 1 -2 2 3 2;
+        -3 0 0 -2 -1 1;
+        -3 1 0 -1 2 -2
+    ]
+    L = vcat(ones(1, 6), reshape(-2.0 .* collect(1:6), 1, 6))
+    reference = CYAxiverse.generate.pq_physical_spectrum(
+        K, L, Q; threshold_log10=26.5, prec=100)
+    hybrid = @test_logs (:warn, r"Falling back to the full high-precision eigensystem") CYAxiverse.generate.pq_hybrid_physical_spectrum(
+        K, L, Q; threshold_log10=26.5, prec=100, maxiter=1,
+        oversampling=0, schur_acceleration=false, quartics=false,
+        label="nonconverged fallback test")
+    @test hybrid.mode_indices == reference.mode_indices
+    @test all(isapprox.(hybrid.m, reference.m; atol=1e-10))
+end
+
 @testset "PQ spectrum: mass-sign propagation" begin
     K = Hermitian(reshape([4.0], 1, 1))
     Q = reshape(Int[3, 6], 1, 2)
@@ -1186,6 +1250,179 @@ end
     @test CYAxiverse.generate.pq_spectrum(K, L, Q).msign == [-1]
     @test CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=:high_precision, prec=200).msign == [-1]
     @test CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=false).msign == [-1]
+end
+
+@testset "Instanton hierarchy blocks" begin
+    L = Float64[1.0 1.0 1.0 1.0;
+                0.0 -0.2 -0.4 -10.0]
+    hierarchy = CYAxiverse.generate.instanton_scale_blocks(L; gap_log10=0.5)
+    @test [block.indices for block in hierarchy.blocks] == [[0, 1, 2], [3]]
+    @test hierarchy.inter_block_gaps == [9.6]
+    @test hierarchy.sorted_indices == [0, 1, 2, 3]
+
+    merged = CYAxiverse.generate.instanton_scale_blocks(L; gap_log10=0.1,
+        min_block_size=2)
+    @test all(length(block.indices) >= 2 for block in merged.blocks)
+
+    permutation = [3, 1, 4, 2]
+    permuted = CYAxiverse.generate.instanton_scale_blocks(L[:, permutation];
+        gap_log10=0.5)
+    @test sort(vcat([block.indices for block in permuted.blocks]...)) == [0, 1, 2, 3]
+
+    extreme = CYAxiverse.generate.instanton_scale_blocks(
+        Float64[1.0 1.0 1.0; 1.0 -1.0 -1.0e6]; gap_log10=10.0)
+    @test all(isfinite, extreme.inter_block_gaps)
+    @test all(isfinite, extreme.sorted_log_scales)
+
+    K = Hermitian(Matrix{Float64}(I, 2, 2))
+    mixed_Q = Int[1 1 0; 0 0 1]
+    mixed = CYAxiverse.generate.instanton_hierarchy_diagnostics(
+        K, Float64[1.0 1.0 1.0; 0.0 -10.0 -10.2], mixed_Q;
+        gap_log10=0.5)
+    @test length(mixed.perturbative_splits) == 1
+    @test mixed.perturbative_splits[1].off_block_norm > 0
+    @test !mixed.perturbative_splits[1].certified_safe
+end
+
+@testset "PQ mass-window spectrum" begin
+    K = Hermitian([4.0 0.0;
+                   0.0 9.0])
+    Q = [3 0 0;
+         0 5 0]
+    L = [1.0 1.0 0.0;
+         -20.0 -30.0 -1000.0]
+    reference = CYAxiverse.generate.pq_physical_spectrum(K, L, Q; prec=120)
+    full_window = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=0.0, max_log10_mass=40.0, prec=120, confirm=false)
+    @test full_window.mode_indices == reference.mode_indices
+    @test all(isapprox.(full_window.m, reference.m; atol=1e-10))
+    @test full_window.diagnostics.certified
+    @test !full_window.diagnostics.fallback_used
+
+    lower = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[1] - 1.0, max_log10_mass=Inf,
+        prec=120, confirm=false, quartics=true, mixed_quartics=false)
+    hybrid_lower = CYAxiverse.generate.pq_hybrid_physical_spectrum(K, L, Q;
+        threshold_log10=reference.m[1] - 1.0, prec=120, quartics=false)
+    @test lower.mode_indices == [0, 1]
+    @test lower.mode_indices == hybrid_lower.mode_indices
+    @test all(isapprox.(lower.m, hybrid_lower.m; atol=1e-10))
+    @test all(isapprox.(lower.λself, reference.λself; atol=1e-10))
+
+    narrow = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[1], max_log10_mass=reference.m[1],
+        prec=120, confirm=false, quartics=false)
+    @test narrow.mode_indices == [0]
+    @test narrow.m[1] ≈ reference.m[1]
+
+    empty_window = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[end] + 1.0,
+        max_log10_mass=reference.m[end] + 2.0, prec=120, confirm=false)
+    @test isempty(empty_window.m)
+    @test size(empty_window.eigenvectors) == (2, 0)
+    @test empty_window.diagnostics.certified
+
+    reversed_window = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=20.0, max_log10_mass=10.0, prec=120, confirm=false,
+        quartics=false)
+    @test isempty(reversed_window.m)
+    @test reversed_window.diagnostics.certified
+end
+
+@testset "PQ mass-window scientific validation edges" begin
+    K = Hermitian(Matrix{Float64}(I, 3, 3))
+    Q = [1 0 0 0;
+         0 1 0 0;
+         0 0 1 0]
+    L = [1.0 1.0 1.0 1.0;
+         -20.0 -22.0 -24.0 -30.0]
+    reference = CYAxiverse.generate.pq_physical_spectrum(K, L, Q; prec=160)
+
+    full_window = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[1] - 1.0,
+        max_log10_mass=reference.m[end] + 1.0, prec=160,
+        confirm=false, quartics=false)
+    @test full_window.mode_indices == reference.mode_indices
+    @test all(isapprox.(full_window.m, reference.m; atol=1e-10))
+    @test full_window.diagnostics.certified
+    @test !full_window.diagnostics.provisional
+
+    exact_upper = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=-Inf, max_log10_mass=reference.m[1], prec=160,
+        confirm=false, quartics=false)
+    @test exact_upper.mode_indices == [0]
+    @test exact_upper.m[1] ≈ reference.m[1]
+    @test exact_upper.diagnostics.certified
+
+    for boundary_margin in (0.0, 1e-8)
+        margin_window = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+            min_log10_mass=-Inf, max_log10_mass=reference.m[1],
+            boundary_margin_log10=boundary_margin, prec=160,
+            confirm=false, quartics=false)
+        @test margin_window.mode_indices == [0]
+        @test margin_window.diagnostics.boundary_margin_log10 == boundary_margin
+        @test margin_window.diagnostics.certified
+    end
+    @test_throws ArgumentError CYAxiverse.generate.pq_window_spectrum(
+        K, L, Q; boundary_margin_log10=-1.0)
+
+    interior = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[2], max_log10_mass=reference.m[2],
+        prec=160, confirm=false, quartics=false)
+    @test interior.mode_indices == [1]
+    @test interior.m[1] ≈ reference.m[2]
+    @test interior.diagnostics.certified
+
+    permutation = [3, 1, 4, 2]
+    permuted = CYAxiverse.generate.pq_window_spectrum(K, L[:, permutation],
+        Q[:, permutation]; min_log10_mass=reference.m[1] - 1.0,
+        max_log10_mass=reference.m[end] + 1.0, prec=160,
+        confirm=false, quartics=true, mixed_quartics=false)
+    unpermuted = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[1] - 1.0,
+        max_log10_mass=reference.m[end] + 1.0, prec=160,
+        confirm=false, quartics=true, mixed_quartics=false)
+    @test permuted.mode_indices == unpermuted.mode_indices
+    @test all(isapprox.(permuted.m, unpermuted.m; atol=1e-10))
+    @test permuted.λselfsign == unpermuted.λselfsign
+    @test all(isapprox.(permuted.λself, unpermuted.λself; atol=1e-10))
+
+    nearly_degenerate = CYAxiverse.generate.instanton_scale_blocks(
+        Float64[1.0 1.0 1.0 1.0;
+                0.0 -0.1 -0.2 -10.0]; gap_log10=0.5)
+    @test [length(block.indices) for block in nearly_degenerate.blocks] == [3, 1]
+    @test nearly_degenerate.inter_block_gaps == [9.8]
+
+    mixed_Q = Int[1 1 0;
+                  0 1 1]
+    mixed_L = Float64[1.0 1.0 1.0;
+                     0.0 -10.0 -20.0]
+    mixed_diagnostics = CYAxiverse.generate.instanton_hierarchy_diagnostics(
+        Hermitian(Matrix{Float64}(I, 2, 2)), mixed_L, mixed_Q; gap_log10=1.0)
+    @test length(mixed_diagnostics.perturbative_splits) == 2
+    @test all(split -> split.off_block_norm > 0,
+        mixed_diagnostics.perturbative_splits)
+    @test all(split -> !split.certified_safe,
+        mixed_diagnostics.perturbative_splits)
+
+    mixed_window = CYAxiverse.generate.pq_window_spectrum(
+        Hermitian(Matrix{Float64}(I, 2, 2)), mixed_L, mixed_Q;
+        min_log10_mass=0.0, max_log10_mass=40.0, prec=160,
+        confirm=false, quartics=false)
+    @test mixed_window.diagnostics.fallback_used
+    @test mixed_window.diagnostics.certified
+    @test !mixed_window.diagnostics.provisional
+
+    extreme = CYAxiverse.generate.pq_window_spectrum(
+        Hermitian(Matrix{Float64}(I, 3, 3)),
+        Float64[1.0 1.0 1.0 1.0;
+                -1.0e6 -1.0e6 + 1.0 -1.0e6 + 2.0 -1.0e6 + 3.0],
+        Q; min_log10_mass=-600_000.0, max_log10_mass=40.0,
+        prec=160, confirm=false, quartics=false)
+    @test length(extreme.m) == 3
+    @test all(isfinite, extreme.m)
+    @test all(isfinite, extreme.eigenvectors)
+    @test extreme.diagnostics.certified
 end
 
 @testset "PQ spectrum: non-diagonal kinetic matrix" begin
@@ -1200,7 +1437,7 @@ end
     pq_legacy = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=false)
     pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
     pq_corrected = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=true, prec=200)
-    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+    hp = CYAxiverse.generate.hp_spectrum(K, L, Q; prec=200)
 
     @test all(isapprox.(pq_legacy.m, hp["m"]; atol=0.1))
     @test all(isapprox.(pq.m, hp["m"]; atol=1e-6))
