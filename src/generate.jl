@@ -512,7 +512,7 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}},
     # Compute the generalized eigensystem at arbitrary precision.
     Ktest = Hermitian(ArbFloat.(Matrix(K)))
     Kfactor = cholesky(Ktest)
-    kinetic_eigenvalues = eigen!(Ktest).values
+    kinetic_eigenvalues = eigvals!(Ktest)
     fK::Vector{Float64} = Float64.(log10.(sqrt.(kinetic_eigenvalues)))
     whitened_hessian = Hermitian(Kfactor.L \ Matrix(hessfull) / Kfactor.L')
     Vls::Vector{ArbFloat}, eigenvectors::Matrix{ArbFloat} = eigen(whitened_hessian)
