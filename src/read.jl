@@ -97,19 +97,100 @@ function potential(geom_idx::GeometryIndex; hilbert = false)
     end
 end
 
+"""Remove redundant repeated leading charge rows from a generated potential.
+
+The geometry generators construct a potential from `n` leading charges and
+the `n * (n - 1) / 2` pairwise differences.  Older artifacts can contain
+repeated leading charges, which otherwise create zero-charge and repeated
+pairwise terms.  Preserve the first representative and its stored
+coefficient, matching the author-side unique-charge convention.  Potentials
+whose term count is not triangular are left unchanged because their leading
+term boundary cannot be inferred safely from the stored arrays.
+"""
+function _canonicalize_generated_potential(Q::Matrix{Int}, L::Matrix{Float64})
+    term_count = size(Q, 2)
+    discriminant = 8 * term_count + 1
+    root = isqrt(discriminant)
+    root^2 == discriminant || return Q, L
+    leading_count = (root - 1) ÷ 2
+    leading_count > 0 || return Q, L
+
+    leading = @view Q[:, 1:leading_count]
+    representatives = Int[]
+    representative_of = zeros(Int, leading_count)
+    for column in axes(leading, 2)
+        existing = findfirst(representative ->
+            @view(leading[:, representative]) == @view(leading[:, column]),
+            representatives)
+        if existing === nothing
+            push!(representatives, column)
+            representative_of[column] = column
+        else
+            representative_column = representatives[existing]
+            L[:, column] == L[:, representative_column] || throw(ArgumentError(
+                "duplicate leading charge rows have inconsistent coefficients"))
+            representative_of[column] = representative_column
+        end
+    end
+    length(representatives) == leading_count && return Q, L
+
+    canonical_count = length(representatives)
+    pair_count = canonical_count * (canonical_count - 1) ÷ 2
+    canonical_Q = Matrix{Int}(undef, size(Q, 1), canonical_count + pair_count)
+    canonical_L = Matrix{Float64}(undef, 2, canonical_count + pair_count)
+    canonical_Q[:, 1:canonical_count] .= leading[:, representatives]
+    canonical_L[:, 1:canonical_count] .= L[:, representatives]
+
+    output_column = canonical_count + 1
+    pair_representatives = Dict{Tuple{Int, Int}, Int}()
+    for first in 1:(leading_count - 1), second in (first + 1):leading_count
+        first_representative = representative_of[first]
+        second_representative = representative_of[second]
+        first_representative == second_representative && continue
+        pair_key = first_representative < second_representative ?
+            (first_representative, second_representative) :
+            (second_representative, first_representative)
+        original_column = leading_count + 1 +
+            sum(leading_count - index for index in 1:(first - 1); init=0) +
+            (second - first - 1)
+        if haskey(pair_representatives, pair_key)
+            L[:, original_column] == L[:, pair_representatives[pair_key]] ||
+                throw(ArgumentError(
+                    "duplicate pairwise charge rows have inconsistent coefficients"))
+        else
+            pair_representatives[pair_key] = original_column
+        end
+    end
+    for first in 1:(canonical_count - 1), second in (first + 1):canonical_count
+        original_first = representatives[first]
+        original_second = representatives[second]
+        pair_offset = sum(leading_count - index for index in 1:(original_first - 1);
+            init=0) +
+            (original_second - original_first - 1)
+        original_column = leading_count + 1 + pair_offset
+        canonical_Q[:, output_column] .= Q[:, original_column]
+        canonical_L[:, output_column] .= L[:, original_column]
+        output_column += 1
+    end
+    canonical_Q, canonical_L
+end
+
 """
     oriented_potential(geom_idx::GeometryIndex)
 
 Load a geometry potential and return its canonical screening orientation as a
 named tuple `(Q, L, K)`: `Q` is `h11 × n_instantons`, `L` is
 `2 × n_instantons`, and `K` is an `h11 × h11` Hermitian Float64 matrix.
+By default, legacy generated potentials are canonicalized to the unique
+leading-charge convention before they are returned.
 
 The helper accepts the two matrix orientations emitted by older geometry
 files, validates dimensions and finite kinetic/log-scale data, and owns the
 normalization used by numerical screening callers. It does not apply scan
 thresholds or candidate policy.
 """
-function oriented_potential(geom_idx::GeometryIndex)
+function oriented_potential(geom_idx::GeometryIndex;
+        canonicalize_charge_rows::Bool=true)
     potential_data = potential(geom_idx)
     Q = Matrix{Int}(potential_data.Q)
     L = Matrix{Float64}(potential_data.L)
@@ -130,6 +211,9 @@ function oriented_potential(geom_idx::GeometryIndex)
     all(isfinite, L) || throw(ArgumentError("L contains non-finite values"))
     all(isfinite, Matrix(K)) ||
         throw(ArgumentError("K contains non-finite values"))
+    if canonicalize_charge_rows
+        Q, L = _canonicalize_generated_potential(Q, L)
+    end
     (; Q, L, K)
 end
 

@@ -300,6 +300,33 @@ end
             @test size(transposed.L) == (2, 3)
             @test transposed.Q == Int[1 0 1; 0 1 1]
             @test transposed.L == Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0]
+
+            duplicate_dir = joinpath(root, "h11_002", "np_0000003", "cy_0000001")
+            mkpath(duplicate_dir)
+            h5open(joinpath(duplicate_dir, "cyax.h5"), "cw") do file
+                cytools = create_group(file, "cytools")
+                potential = create_group(cytools, "potential")
+                geometric = create_group(cytools, "geometric")
+                # Three leading charges, with the second and third redundant;
+                # the remaining columns are their ordered pairwise terms.
+                potential["Q"] = Int[
+                    1 0 0 -1 -1 0;
+                    0 1 1 1 1 0;
+                ]
+                potential["L"] = Float64[
+                    1.0 2.0 2.0 4.0 4.0 6.0;
+                    0.0 -1.0 -1.0 -3.0 -3.0 -5.0;
+                ]
+                geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+            end
+            duplicate = CYAxiverse.read.oriented_potential(
+                CYAxiverse.structs.GeometryIndex(2, 3, 1))
+            @test duplicate.Q == Int[1 0 -1; 0 1 1]
+            @test duplicate.L == Float64[1.0 2.0 4.0; 0.0 -1.0 -3.0]
+            raw_duplicate = CYAxiverse.read.oriented_potential(
+                CYAxiverse.structs.GeometryIndex(2, 3, 1);
+                canonicalize_charge_rows=false)
+            @test size(raw_duplicate.Q) == (2, 6)
         finally
             old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
