@@ -84,7 +84,10 @@ validation. Such a result should be rerun at higher precision or checked with
 
 Set `quartics=false` for large mass-only scans. When quartics are requested,
 every input instanton contributes to their contraction even though only the
-physical mass eigenvectors are returned.
+physical mass eigenvectors are returned. This option is available on both
+`pq_physical_spectrum`, `pq_hybrid_physical_spectrum`, and
+`pq_window_spectrum`; it leaves the mass-only results unchanged while avoiding
+quartic contractions.
 
 For resumable ensemble runs, use `scripts/batch_physical_spectrum.jl`. It
 discovers indexed or on-disk geometries, flushes one CSV row per geometry, and

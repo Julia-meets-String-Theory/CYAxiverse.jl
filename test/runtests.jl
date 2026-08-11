@@ -447,6 +447,15 @@ end
     @test all(isapprox.(physical.m, expected; atol=1e-10))
     @test physical.λselfsign == hp["λselfsign"]
     @test all(isapprox.(physical.λself, hp["λself"]; atol=1e-10))
+    physical_masses_only = CYAxiverse.generate.pq_physical_spectrum(
+        K, L, Q; prec=200, quartics=false)
+    @test physical_masses_only.mode_indices == physical.mode_indices
+    @test all(isapprox.(physical_masses_only.m, physical.m; atol=1e-10))
+    @test all(isapprox.(physical_masses_only.eigenvectors, physical.eigenvectors; atol=1e-10))
+    @test isempty(physical_masses_only.λself)
+    @test isempty(physical_masses_only.λselfsign)
+    @test size(physical_masses_only.λ31_i) == (4, 0)
+    @test size(physical_masses_only.λ22_i) == (4, 0)
     hybrid = CYAxiverse.generate.pq_hybrid_physical_spectrum(K, L, Q; prec=200)
     @test hybrid.mode_indices == [0, 1]
     @test all(isapprox.(hybrid.m, expected; atol=1e-10))

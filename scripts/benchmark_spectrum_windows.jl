@@ -19,7 +19,7 @@ function benchmark_spectrum_window(; h11::Int=100, prec::Int=100,
         window_modes::Int=5)
     K, L, Q = spectrum_benchmark_input(h11)
     reference = CYAxiverse.generate.pq_physical_spectrum(
-        K, L, Q; threshold_log10=-Inf, prec)
+        K, L, Q; threshold_log10=-Inf, prec, quartics=false)
     first_mode = max(1, (h11 - window_modes) ÷ 2)
     last_mode = first_mode + window_modes - 1
     first_mode <= last_mode <= length(reference.m) ||
@@ -30,14 +30,14 @@ function benchmark_spectrum_window(; h11::Int=100, prec::Int=100,
     # Warm both paths so the report measures the numerical kernels rather than
     # package loading and first-call compilation.
     CYAxiverse.generate.pq_physical_spectrum(
-        K, L, Q; threshold_log10=-Inf, prec)
+        K, L, Q; threshold_log10=-Inf, prec, quartics=false)
     CYAxiverse.generate.pq_window_spectrum(
         K, L, Q; min_log10_mass, max_log10_mass, prec,
         confirm=false, quartics=false)
 
     GC.gc()
     reference_seconds = @elapsed CYAxiverse.generate.pq_physical_spectrum(
-        K, L, Q; threshold_log10=-Inf, prec)
+        K, L, Q; threshold_log10=-Inf, prec, quartics=false)
     GC.gc()
     window = CYAxiverse.generate.pq_window_spectrum(
         K, L, Q; min_log10_mass, max_log10_mass, prec,
@@ -48,7 +48,7 @@ function benchmark_spectrum_window(; h11::Int=100, prec::Int=100,
         confirm=false, quartics=false)
     GC.gc()
     reference_allocated = @allocated CYAxiverse.generate.pq_physical_spectrum(
-        K, L, Q; threshold_log10=-Inf, prec)
+        K, L, Q; threshold_log10=-Inf, prec, quartics=false)
     GC.gc()
     window_allocated = @allocated CYAxiverse.generate.pq_window_spectrum(
         K, L, Q; min_log10_mass, max_log10_mass, prec,

@@ -1154,18 +1154,21 @@ function pq_spectrum(geom_idx::GeometryIndex; kwargs...)
 end
 
 """
-    pq_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000)
+    pq_physical_spectrum(K, L, Q; threshold_log10=log10(H₀), prec=1_000,
+                         quartics=true)
 
 Compute a high-precision PQ leading-Hessian spectrum and retain only modes
 whose base-10 mass logarithm is at least `threshold_log10`; by default this is
 the package Hubble scale. Every instanton is retained in the quartic
-contractions, but quartics are returned only for the retained physical modes.
+contractions when `quartics=true`, but quartics are returned only for the
+retained physical modes. Set `quartics=false` for a mass-only reference
+calculation; the masses, mode indices, and eigenvectors are unchanged.
 
 This is a conservative reference implementation for the physical sector. It
 diagonalizes the full leading Hessian at arbitrary precision and is not the
 future threshold-targeted hybrid solver.
 """
-function pq_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000)
+function pq_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, quartics::Bool=true)
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
     W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
@@ -1178,6 +1181,9 @@ function pq_physical_spectrum(K::Hermitian{Float64, Matrix{Float64}}, L::Matrix{
     eigenvectors = eigenvectors[:, order]
     retained = findall(masses .>= threshold_log10)
     physical_masses = masses[retained]
+    !quartics && return PhysicalAxionSpectrum(physical_masses, retained .- 1,
+        Float64.(eigenvectors[:, retained]), Int[], Float64[], zeros(Int, 4, 0),
+        Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[], threshold_log10, prec)
     Qmass = (T.(Q') / Kfactor.L') * eigenvectors[:, retained]
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
     physical_count = length(retained)

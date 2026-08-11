@@ -93,21 +93,23 @@ julia --project=. scripts/benchmark_spectrum_windows.jl
 
 The deterministic benchmark uses `h11=100`, an identity sparse charge basis,
 five requested modes, precision 100, `confirm=false`, and `quartics=false` for
-the window call. On the validation host (Julia 1.12.6, Apple arm64), one
-post-warmup measurement produced:
+both the full reference and window calls. On the validation host (Julia 1.12.6,
+Apple arm64), one post-warmup measurement produced:
 
 | Measurement | Full reference | Window |
 | --- | ---: | ---: |
-| Wall time (s) | 1.232 | 0.624 |
-| Allocated bytes | 1,792,010,064 | 750,916,064 |
+| Wall time (s) | 0.580 | 0.367 |
+| Allocated bytes | 667,037,456 | 741,314,272 |
 | Returned modes | 100 | 5 |
 | Fallback | n/a | false |
 
-This is approximately a 2.0x wall-time reduction and 58% fewer allocated bytes
-for this bounded mass-only case. It is not a production high-`h11` scaling
-claim: the benchmark is synthetic, the reference API computes quartics, and
-the window path still constructs dense Hessian/inertia workspaces. A production
-pilot must measure real sparse CY geometries and report fallback frequency.
+This mass-only comparison gives a 1.58x wall-time reduction, but the window
+path allocates 11.1% more bytes in this run: targeted inertia and dense
+workspace costs outweigh the allocations avoided by not refining the other
+modes. Both paths use the same precision and return the same masses, indices,
+and eigenvectors for the compared modes. It is not a production high-`h11`
+scaling claim: the benchmark is synthetic and a production pilot must measure
+real sparse CY geometries and report fallback frequency.
 
 ## Scientific decision
 
