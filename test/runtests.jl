@@ -371,8 +371,8 @@ end
     L = [1.0 0.0;
          -20.0 -1000.0]
 
-    # hp_spectrum's low-level interface uses one instanton per row.
-    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+    # hp_spectrum uses the native column-oriented potential convention.
+    hp = CYAxiverse.generate.hp_spectrum(K, L, Q; prec=200)
 
     # λ = Λ q² / K, followed by hp_spectrum's output-unit conversion.
     expected_mass = 0.5 * (-20.0 + log10(3^2 / 4.0)) +
@@ -386,7 +386,40 @@ end
     expected_quartic = -20.0 + 4 * log10(3 / 2) + 4 * log10(2π)
     @test hp["λselfsign"][1] == 1
     @test isapprox(hp["λself"][1], expected_quartic; atol=1e-10)
+
+    hp_mass_only = CYAxiverse.generate.hp_spectrum(K, L, Q;
+        prec=200, quartics=false)
+    @test hp_mass_only["m"] == hp["m"]
+    @test hp_mass_only["msign"] == hp["msign"]
+    @test hp_mass_only["fK"] == hp["fK"]
+    @test isempty(hp_mass_only["fpert"])
+    @test isempty(hp_mass_only["λself"])
+    @test size(hp_mass_only["λ31_i"]) == (4, 0)
+    @test size(hp_mass_only["λ22_i"]) == (4, 0)
 end
+
+@testset "HP spectrum: raw and effective selections" begin
+    K = Hermitian([4.0 0.0;
+                   0.0 9.0])
+    Q = [3 0 3;
+         0 5 0]
+    L = [1.0 1.0 1.0;
+         -20.0 -30.0 -100.0]
+
+    selected = CYAxiverse.generate.LQtildebar(L, Q)
+    @test size(selected["Qhat"], 2) == 2
+    hp_effective = CYAxiverse.generate.hp_spectrum(K, L, Q;
+        prec=200, quartics=false, selection=:hp_effective)
+    hp_provided = CYAxiverse.generate.hp_spectrum(K,
+        selected["Lhat"], selected["Qhat"]; prec=200,
+        quartics=false, selection=:raw)
+
+    @test hp_effective["m"] == hp_provided["m"]
+    @test hp_effective["msign"] == hp_provided["msign"]
+    @test_throws ArgumentError CYAxiverse.generate.hp_spectrum(
+        K, L, Q; quartics=false, selection=:unknown)
+end
+
 @testset "PQ and HP spectrum: diagonal two-axion comparison" begin
     # The leading instantons act on separate axions, so the PQ construction is
     # exact. The third, zero-sign instanton only satisfies N > h11 and makes
@@ -415,7 +448,7 @@ end
     @test @allocated(CYAxiverse.generate.leading_independent_mask!(mask, Qsorted, span, residual)) == 0
 
     pq = CYAxiverse.generate.pq_spectrum(K, L, Q; quartic_diagnostics=true, mass_basis_diagnostics=true, hierarchy_diagnostics=true)
-    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+    hp = CYAxiverse.generate.hp_spectrum(K, L, Q; prec=200)
 
     expected = sort([
         0.5 * (-20.0 + log10(3^2 / 4.0)),
@@ -699,7 +732,7 @@ end
     pq_legacy = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=false)
     pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
     pq_corrected = CYAxiverse.generate.pq_spectrum(K, L, Q; mixing_correction=true, prec=200)
-    hp = CYAxiverse.generate.hp_spectrum(K, Matrix(L'), Matrix(Q'); prec=200)
+    hp = CYAxiverse.generate.hp_spectrum(K, L, Q; prec=200)
 
     @test all(isapprox.(pq_legacy.m, hp["m"]; atol=0.1))
     @test all(isapprox.(pq.m, hp["m"]; atol=1e-6))
