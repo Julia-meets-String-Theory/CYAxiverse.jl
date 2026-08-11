@@ -582,6 +582,102 @@ end
     @test reversed_window.diagnostics.certified
 end
 
+@testset "PQ mass-window scientific validation edges" begin
+    K = Hermitian(Matrix{Float64}(I, 3, 3))
+    Q = [1 0 0 0;
+         0 1 0 0;
+         0 0 1 0]
+    L = [1.0 1.0 1.0 1.0;
+         -20.0 -22.0 -24.0 -30.0]
+    reference = CYAxiverse.generate.pq_physical_spectrum(K, L, Q; prec=160)
+
+    full_window = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[1] - 1.0,
+        max_log10_mass=reference.m[end] + 1.0, prec=160,
+        confirm=false, quartics=false)
+    @test full_window.mode_indices == reference.mode_indices
+    @test all(isapprox.(full_window.m, reference.m; atol=1e-10))
+    @test full_window.diagnostics.certified
+    @test !full_window.diagnostics.provisional
+
+    exact_upper = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=-Inf, max_log10_mass=reference.m[1], prec=160,
+        confirm=false, quartics=false)
+    @test exact_upper.mode_indices == [0]
+    @test exact_upper.m[1] ≈ reference.m[1]
+    @test exact_upper.diagnostics.certified
+
+    for boundary_margin in (0.0, 1e-8)
+        margin_window = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+            min_log10_mass=-Inf, max_log10_mass=reference.m[1],
+            boundary_margin_log10=boundary_margin, prec=160,
+            confirm=false, quartics=false)
+        @test margin_window.mode_indices == [0]
+        @test margin_window.diagnostics.boundary_margin_log10 == boundary_margin
+        @test margin_window.diagnostics.certified
+    end
+    @test_throws ArgumentError CYAxiverse.generate.pq_window_spectrum(
+        K, L, Q; boundary_margin_log10=-1.0)
+
+    interior = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[2], max_log10_mass=reference.m[2],
+        prec=160, confirm=false, quartics=false)
+    @test interior.mode_indices == [1]
+    @test interior.m[1] ≈ reference.m[2]
+    @test interior.diagnostics.certified
+
+    permutation = [3, 1, 4, 2]
+    permuted = CYAxiverse.generate.pq_window_spectrum(K, L[:, permutation],
+        Q[:, permutation]; min_log10_mass=reference.m[1] - 1.0,
+        max_log10_mass=reference.m[end] + 1.0, prec=160,
+        confirm=false, quartics=true, mixed_quartics=false)
+    unpermuted = CYAxiverse.generate.pq_window_spectrum(K, L, Q;
+        min_log10_mass=reference.m[1] - 1.0,
+        max_log10_mass=reference.m[end] + 1.0, prec=160,
+        confirm=false, quartics=true, mixed_quartics=false)
+    @test permuted.mode_indices == unpermuted.mode_indices
+    @test all(isapprox.(permuted.m, unpermuted.m; atol=1e-10))
+    @test permuted.λselfsign == unpermuted.λselfsign
+    @test all(isapprox.(permuted.λself, unpermuted.λself; atol=1e-10))
+
+    nearly_degenerate = CYAxiverse.generate.instanton_scale_blocks(
+        Float64[1.0 1.0 1.0 1.0;
+                0.0 -0.1 -0.2 -10.0]; gap_log10=0.5)
+    @test [length(block.indices) for block in nearly_degenerate.blocks] == [3, 1]
+    @test nearly_degenerate.inter_block_gaps == [9.8]
+
+    mixed_Q = Int[1 1 0;
+                  0 1 1]
+    mixed_L = Float64[1.0 1.0 1.0;
+                     0.0 -10.0 -20.0]
+    mixed_diagnostics = CYAxiverse.generate.instanton_hierarchy_diagnostics(
+        Hermitian(Matrix{Float64}(I, 2, 2)), mixed_L, mixed_Q; gap_log10=1.0)
+    @test length(mixed_diagnostics.perturbative_splits) == 2
+    @test all(split -> split.off_block_norm > 0,
+        mixed_diagnostics.perturbative_splits)
+    @test all(split -> !split.certified_safe,
+        mixed_diagnostics.perturbative_splits)
+
+    mixed_window = CYAxiverse.generate.pq_window_spectrum(
+        Hermitian(Matrix{Float64}(I, 2, 2)), mixed_L, mixed_Q;
+        min_log10_mass=0.0, max_log10_mass=40.0, prec=160,
+        confirm=false, quartics=false)
+    @test mixed_window.diagnostics.fallback_used
+    @test mixed_window.diagnostics.certified
+    @test !mixed_window.diagnostics.provisional
+
+    extreme = CYAxiverse.generate.pq_window_spectrum(
+        Hermitian(Matrix{Float64}(I, 3, 3)),
+        Float64[1.0 1.0 1.0 1.0;
+                -1.0e6 -1.0e6 + 1.0 -1.0e6 + 2.0 -1.0e6 + 3.0],
+        Q; min_log10_mass=-600_000.0, max_log10_mass=40.0,
+        prec=160, confirm=false, quartics=false)
+    @test length(extreme.m) == 3
+    @test all(isfinite, extreme.m)
+    @test all(isfinite, extreme.eigenvectors)
+    @test extreme.diagnostics.certified
+end
+
 @testset "PQ spectrum: non-diagonal kinetic matrix" begin
     # A non-diagonal K catches the side on which the Cholesky inverse acts.
     K = Hermitian([4.0 1.2;

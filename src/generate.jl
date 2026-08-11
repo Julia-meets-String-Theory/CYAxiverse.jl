@@ -1575,13 +1575,13 @@ function _physical_spectrum_from_basis(K::Hermitian{Float64, Matrix{Float64}},
 end
 
 function _window_counts(W::Hermitian, min_log10_mass::Float64,
-        max_log10_mass::Float64)
+        max_log10_mass::Float64, boundary_margin_log10::Float64)
     T = eltype(W)
     mass_offset = T(9) + log10(T(constants()["MPlanck"])) + T(constants()["log2π"])
     # Bounds arrive as Float64 mass logs while the inertia matrix is arbitrary
     # precision; retain a small decimal margin so a round-tripped boundary mode
     # is included rather than lost to the Float64 conversion.
-    inclusive_margin = T("1e-10")
+    inclusive_margin = T(boundary_margin_log10)
     function count_above(bound::Float64, margin)
         threshold = T(10) ^ (2 * (T(bound) + margin - mass_offset))
         positive_inertia(bunchkaufman(Hermitian(Matrix(W) - threshold * I)))
@@ -1596,19 +1596,21 @@ end
 
 function _window_counts_at_precision(K::Hermitian{Float64, Matrix{Float64}},
         Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, min_log10_mass::Float64,
-        max_log10_mass::Float64, prec::Int)
+        max_log10_mass::Float64, boundary_margin_log10::Float64, prec::Int)
     W, Kfactor = high_precision_leading_hessian(K, Ltilde, Qtilde; prec)
-    lower_count, upper_count = _window_counts(W, min_log10_mass, max_log10_mass)
+    lower_count, upper_count = _window_counts(W, min_log10_mass, max_log10_mass,
+        boundary_margin_log10)
     W, Kfactor, lower_count, upper_count
 end
 
 function _confirm_window_counts(K::Hermitian{Float64, Matrix{Float64}},
         Ltilde::Matrix{Float64}, Qtilde::Matrix{Int}, min_log10_mass::Float64,
-        max_log10_mass::Float64, prec::Int, max_prec::Int, confirm::Bool,
-        label::AbstractString)
+    max_log10_mass::Float64, boundary_margin_log10::Float64, prec::Int,
+        max_prec::Int, confirm::Bool, label::AbstractString)
     max_prec >= prec || throw(ArgumentError("max_prec must be at least prec"))
     W, Kfactor, lower_count, upper_count = _window_counts_at_precision(
-        K, Ltilde, Qtilde, min_log10_mass, max_log10_mass, prec)
+        K, Ltilde, Qtilde, min_log10_mass, max_log10_mass,
+        boundary_margin_log10, prec)
     records = NTuple{3,Int}[(prec, lower_count, upper_count)]
     stable = true
     working_prec = prec
@@ -1617,7 +1619,8 @@ function _confirm_window_counts(K::Hermitian{Float64, Matrix{Float64}},
         while working_prec < max_prec
             working_prec = min(2 * working_prec, max_prec)
             next_W, next_Kfactor, next_lower, next_upper = _window_counts_at_precision(
-                K, Ltilde, Qtilde, min_log10_mass, max_log10_mass, working_prec)
+                K, Ltilde, Qtilde, min_log10_mass, max_log10_mass,
+                boundary_margin_log10, working_prec)
             push!(records, (working_prec, next_lower, next_upper))
             W, Kfactor = next_W, next_Kfactor
             if next_lower == lower_count && next_upper == upper_count
@@ -1649,7 +1652,9 @@ when the targeted refinement fails interval or residual validation.
 
 `oversampling` adds candidates on both boundaries, `quartics=false` skips all
 quartic contractions, and `mixed_quartics=false` retains only self-couplings.
-The returned `PhysicalAxionSpectrum.diagnostics` records precision counts,
+`boundary_margin_log10` is the symmetric inclusive boundary guard used when
+converting Float64 mass bounds to arbitrary-precision eigenvalue bounds. The
+returned `PhysicalAxionSpectrum.diagnostics` records precision counts,
 boundary validation, convergence, and fallback status.
 """
 function pq_window_spectrum(K::Hermitian{Float64, Matrix{Float64}},
@@ -1659,15 +1664,19 @@ function pq_window_spectrum(K::Hermitian{Float64, Matrix{Float64}},
         oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true,
         quartic_backend::Symbol=:auto, confirm::Bool=true, max_prec::Int=4_000,
         schur_acceleration::Bool=true, hierarchy_gap_log10::Float64=1.0,
-        hierarchy_min_block_size::Int=1, label::AbstractString="matrix input")
+        hierarchy_min_block_size::Int=1, boundary_margin_log10::Real=1e-10,
+        label::AbstractString="matrix input")
     min_log10_mass = Float64(min_log10_mass)
     max_log10_mass = Float64(max_log10_mass)
+    boundary_margin_log10 = Float64(boundary_margin_log10)
     isfinite(min_log10_mass) || min_log10_mass == -Inf ||
         throw(ArgumentError("min_log10_mass must be finite or -Inf"))
     isfinite(max_log10_mass) || max_log10_mass == Inf ||
         throw(ArgumentError("max_log10_mass must be finite or Inf"))
     maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
     oversampling >= 0 || throw(ArgumentError("oversampling must be nonnegative"))
+    isfinite(boundary_margin_log10) && boundary_margin_log10 >= 0 ||
+        throw(ArgumentError("boundary_margin_log10 must be finite and nonnegative"))
 
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
@@ -1679,18 +1688,19 @@ function pq_window_spectrum(K::Hermitian{Float64, Matrix{Float64}},
     end
     if min_log10_mass > max_log10_mass
         diagnostics = SpectrumWindowDiagnostics(NTuple{3,Int}[], 0, 0, Inf, Inf,
-            0.0, true, false, true, false, hierarchy)
+            boundary_margin_log10, 0.0, true, false, true, false, hierarchy)
         return _empty_physical_spectrum(min_log10_mass, prec, size(K, 1);
             min_log10_mass, max_log10_mass, diagnostics)
     end
 
     W, Kfactor, lower_count, upper_count, count_records, counts_stable =
         _confirm_window_counts(K, Ltilde, Qtilde, min_log10_mass,
-            max_log10_mass, prec, max_prec, confirm, label)
+            max_log10_mass, boundary_margin_log10, prec, max_prec, confirm, label)
     target_count = max(lower_count - upper_count, 0)
     if target_count == 0
         diagnostics = SpectrumWindowDiagnostics(count_records, lower_count, upper_count,
-            Inf, Inf, 0.0, true, false, counts_stable, !counts_stable, hierarchy)
+            Inf, Inf, boundary_margin_log10, 0.0, true, false, counts_stable,
+            !counts_stable, hierarchy)
         return _empty_physical_spectrum(min_log10_mass, prec, size(K, 1);
             min_log10_mass, max_log10_mass, diagnostics)
     end
@@ -1700,7 +1710,13 @@ function pq_window_spectrum(K::Hermitian{Float64, Matrix{Float64}},
     mass_offset = 9.0 + Float64(log10(constants()["MPlanck"])) +
         Float64(constants()["log2π"])
 
-    fallback_used = !schur_acceleration
+    # Treat charge-coupling failures as a failed hierarchy certificate.  The
+    # targeted Schur path remains valid only when every proposed split has
+    # passed the conservative scale-and-coupling screen; otherwise use the
+    # complete high-precision reference eigensystem.
+    hierarchy_safe = length(hierarchy.blocks) <= 32 &&
+        all(split.certified_safe for split in hierarchy.perturbative_splits)
+    fallback_used = !schur_acceleration || !hierarchy_safe
     refined_values = T[]
     refined_basis = zeros(T, h11, 0)
     residuals = Float64[]
@@ -1790,8 +1806,9 @@ function pq_window_spectrum(K::Hermitian{Float64, Matrix{Float64}},
     upper_boundary_gap = isempty(masses) || isinf(max_log10_mass) ? Inf :
         minimum(abs.(masses .- max_log10_mass))
     diagnostics = SpectrumWindowDiagnostics(count_records, lower_count, upper_count,
-        lower_boundary_gap, upper_boundary_gap, max_residual, converged,
-        fallback_used, !provisional, provisional, hierarchy)
+        lower_boundary_gap, upper_boundary_gap, boundary_margin_log10,
+        max_residual, converged, fallback_used, !provisional, provisional,
+        hierarchy)
     _physical_spectrum_from_basis(K, L, Q, refined_basis, masses, mode_indices;
         threshold_log10=min_log10_mass, min_log10_mass, max_log10_mass, prec,
         quartics, mixed_quartics, quartic_backend, diagnostics)

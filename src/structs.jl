@@ -147,6 +147,7 @@ struct SpectrumWindowDiagnostics
     upper_count::Int
     lower_boundary_gap::Float64
     upper_boundary_gap::Float64
+    boundary_margin_log10::Float64
     max_residual::Float64
     converged::Bool
     fallback_used::Bool

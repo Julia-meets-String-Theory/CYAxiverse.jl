@@ -143,8 +143,10 @@ window.diagnostics
 ```
 
 Both window boundaries are counted with arbitrary-precision inertia, and only
-an oversampled band around the requested modes is refined. The diagnostics
-record precision-count stabilization, residual convergence, boundary gaps, and
+an oversampled band around the requested modes is refined. The inclusive
+boundary guard is configurable with `boundary_margin_log10` (default `1e-10`)
+and is recorded in the diagnostics. The diagnostics also record
+precision-count stabilization, residual convergence, boundary gaps, and
 whether the reference eigensystem fallback was needed. A lower-threshold query
 is obtained with `max_log10_mass=Inf` and remains compatible with the existing
 `pq_hybrid_physical_spectrum` path.
