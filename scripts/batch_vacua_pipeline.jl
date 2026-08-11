@@ -119,7 +119,8 @@ end
 
 """Validate batch-runner options before selecting or processing geometries."""
 function _vacua_validate_options(options)
-    _validate_data_dir(options[:data_dir])
+    data_dir = CYAxiverse.filestructure.resolve_data_dir(options[:data_dir])
+    _validate_data_dir(data_dir)
     options[:threshold] >= 0 || throw(ArgumentError("threshold must be nonnegative"))
     options[:starts] > 0 || throw(ArgumentError("starts must be positive"))
     options[:residual_tolerance] > 0 || throw(ArgumentError("residual-tolerance must be positive"))
@@ -135,7 +136,7 @@ function _vacua_validate_options(options)
     options[:blas_threads] === nothing || options[:blas_threads] > 0 ||
         throw(ArgumentError("blas-threads must be positive"))
     options[:batch_size] > 0 || throw(ArgumentError("batch-size must be positive"))
-    nothing
+    merge(options, (; data_dir))
 end
 
 """Load indexed geometries, optionally restricted to one h11 value."""
@@ -328,8 +329,8 @@ end
 
 """Run the bounded, resumable vacua batch and stream results to CSV."""
 function run_vacua_batch(options)
-    _vacua_validate_options(options)
-    ENV["CYAXIVERSE_DATA_DIR"] = _validate_data_dir(options[:data_dir])
+    options = _vacua_validate_options(options)
+    ENV["CYAXIVERSE_DATA_DIR"] = options[:data_dir]
     geoms = _vacua_selected_geometries(options)
     isempty(geoms) && error("no geometries selected")
 

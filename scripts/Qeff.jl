@@ -73,10 +73,10 @@ function main_sortQ(h11list::Matrix)
             push!(Qsquare, [h11 tri cy vac])
         end
     end
-    if isfile(joinpath(CYAxiverse.filestructure.data_dir(),"Qshape.h5"))
-        rm(joinpath(CYAxiverse.filestructure.data_dir(),"Qshape.h5"))
+    if isfile(joinpath(CYAxiverse.filestructure.present_dir(),"Qshape.h5"))
+        rm(joinpath(CYAxiverse.filestructure.present_dir(),"Qshape.h5"))
     end
-    h5open(joinpath(CYAxiverse.filestructure.data_dir(),"Qshape.h5"), "cw") do f
+    h5open(joinpath(CYAxiverse.filestructure.present_dir(),"Qshape.h5"), "cw") do f
         if !isa(Qsquare, Vector{Any})
             f["square",deflate=9] = hcat(Qsquare...)
         end
@@ -132,4 +132,3 @@ end
 
 GC.gc()
 CYAxiverse.slurm.writeslurm(CYAxiverse.slurm.jobid,string("All workers are done!"))
-

@@ -25,10 +25,10 @@ ENV["newARGS"] = string("vacua_0323")
 end
 
 function save_vacua_db(square::Matrix, one_dim::Matrix, n_dim::Matrix)
-    if isfile(joinpath(CYAxiverse.filestructure.data_dir(),"vacua_jlm_db.h5"))
-        rm(joinpath(CYAxiverse.filestructure.data_dir(),"vacua_jlm_db.h5"))
+    if isfile(joinpath(CYAxiverse.filestructure.present_dir(),"vacua_jlm_db.h5"))
+        rm(joinpath(CYAxiverse.filestructure.present_dir(),"vacua_jlm_db.h5"))
     end
-    h5open(joinpath(CYAxiverse.filestructure.data_dir(),"vacua_jlm_db.h5"), "cw") do f
+    h5open(joinpath(CYAxiverse.filestructure.present_dir(),"vacua_jlm_db.h5"), "cw") do f
         f["square", deflate=9] = square
         f["one_dim", deflate=9] = one_dim
         f["n_dim", deflate=9] = n_dim

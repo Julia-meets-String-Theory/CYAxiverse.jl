@@ -95,8 +95,7 @@ function _inflation_pilot_parse_args(args)
         end
         index += 1
     end
-    isempty(options[:data_dir]) && error("--data-dir or CYAXIVERSE_DATA_DIR is required")
-    options[:data_dir] = abspath(expanduser(options[:data_dir]))
+    options[:data_dir] = CYAxiverse.filestructure.resolve_data_dir(options[:data_dir])
     options[:h11] === nothing || options[:h11] > 0 || error("--h11 must be positive")
     options[:h11_min] === nothing || options[:h11_min] > 0 ||
         error("--h11-min must be positive")

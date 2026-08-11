@@ -1,5 +1,6 @@
 #!/usr/bin/env julia
 
+using CYAxiverse
 using CairoMakie
 using HDF5
 using Printf
@@ -161,7 +162,7 @@ end
 
 """Generate Appendix B spectrum heatmaps and quantile summaries."""
 function main(options)
-    data_dir = isempty(options[:data_dir]) ? pwd() : abspath(options[:data_dir])
+    data_dir = CYAxiverse.filestructure.resolve_data_dir(options[:data_dir])
     output_dir = isempty(options[:output_dir]) ? joinpath(data_dir, "physical_spectrum", "appendix_b") : abspath(options[:output_dir])
     mkpath(output_dir)
     files = _physical_files(data_dir, options[:h11_min], options[:h11_max])

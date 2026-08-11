@@ -13,6 +13,36 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
 
+@testset "Data directory resolution" begin
+    filestructure = CYAxiverse.filestructure
+    expected_default = normpath(joinpath(@__DIR__, "..", "..", "data"))
+    old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+    old_newargs = get(ENV, "newARGS", nothing)
+    try
+        delete!(ENV, "CYAXIVERSE_DATA_DIR")
+        delete!(ENV, "newARGS")
+        @test filestructure.default_data_dir() == expected_default
+        @test filestructure.resolve_data_dir() == expected_default
+
+        ENV["CYAXIVERSE_DATA_DIR"] = "/tmp/from-environment"
+        @test filestructure.resolve_data_dir() == "/tmp/from-environment"
+        @test filestructure.resolve_data_dir("/tmp/explicit") == "/tmp/explicit"
+        @test filestructure.present_dir() == "/tmp/from-environment/"
+        @test filestructure.present_dir("/tmp/explicit") == "/tmp/explicit/"
+
+        delete!(ENV, "CYAXIVERSE_DATA_DIR")
+        ENV["newARGS"] = "unknown-alias"
+        @test_throws ArgumentError filestructure.resolve_data_dir()
+        ENV["newARGS"] = "docker"
+        @test filestructure.resolve_data_dir() == "/scratch/database"
+    finally
+        old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+            (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        old_newargs === nothing ? delete!(ENV, "newARGS") :
+            (ENV["newARGS"] = old_newargs)
+    end
+end
+
 @testset "Scale-continuation pilot diagnostics" begin
     Q = Int[1 2]
     L = Float64[1.0 1.0; 0.0 log10(0.25)]

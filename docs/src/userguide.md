@@ -3,6 +3,31 @@
 !!! warning
     Under construction
 
+## Data directory selection
+
+The geometry database is rooted at a directory containing entries such as
+`h11_004/np_0000084/cy_0000001/cyax.h5`. When using a checkout of
+`CYAxiverse.jl`, the package's general default is `../data`: the `data`
+directory one level above the repository directory. This default is anchored
+to the package checkout and does not depend on the current working directory.
+
+Data-directory selection follows this order:
+
+1. an explicit `--data-dir` option or function argument;
+2. the `CYAXIVERSE_DATA_DIR` environment variable;
+3. a recognized legacy deployment alias such as `newARGS=docker`;
+4. the checkout-relative default `../data`.
+
+Set `CYAXIVERSE_DATA_DIR` when the database is stored elsewhere:
+
+```sh
+export CYAXIVERSE_DATA_DIR=/path/to/data
+```
+
+The resolver does not create a missing data directory or silently fall back to
+the current working directory. Use `--data-dir` for a different database or
+for an isolated output copy.
+
 ## Vacua minima pipeline
 
 The vacua pipeline keeps the legacy estimate and the numerical minima search

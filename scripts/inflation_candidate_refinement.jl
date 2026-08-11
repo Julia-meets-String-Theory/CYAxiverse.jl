@@ -426,8 +426,7 @@ end
 
 function _candidate_parse_args(args)
     options = Dict{Symbol, Any}(
-        :data_dir => get(ENV, "CYAXIVERSE_DATA_DIR",
-            normpath(joinpath(@__DIR__, "..", "..", "data"))),
+        :data_dir => get(ENV, "CYAXIVERSE_DATA_DIR", ""),
         :geometries => GeometryIndex[],
         :output => "/private/tmp/inflation-candidate-refinement.csv",
         :flow_output => nothing,
@@ -509,7 +508,7 @@ end
 function main(args=ARGS)
     options = _candidate_parse_args(args)
     options === nothing && return nothing
-    ENV["CYAXIVERSE_DATA_DIR"] = abspath(expanduser(options[:data_dir]))
+    ENV["CYAXIVERSE_DATA_DIR"] = CYAxiverse.filestructure.resolve_data_dir(options[:data_dir])
     run_id = string("candidate-refinement-", getpid(), "-", round(Int, time()))
     settings = (; run_id, data_dir=ENV["CYAXIVERSE_DATA_DIR"],
         code_commit=_current_code_commit(),

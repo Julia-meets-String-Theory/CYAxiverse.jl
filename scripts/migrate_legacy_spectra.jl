@@ -1,6 +1,7 @@
 #!/usr/bin/env julia
 
 using HDF5
+using CYAxiverse
 
 """Read a command-line option from `ARGS`, returning `default` if absent."""
 function option_value(name, default)
@@ -33,7 +34,8 @@ end
 
 """Migrate the selected legacy spectrum files and return a process exit code."""
 function main()
-    data_dir = option_value("--data-dir", ".")
+    data_dir = CYAxiverse.filestructure.resolve_data_dir(
+        option_value("--data-dir", ""))
     offset = parse(Int, option_value("--offset", "0"))
     limit = parse(Int, option_value("--limit", "0"))
     offset >= 0 || error("--offset must be nonnegative")

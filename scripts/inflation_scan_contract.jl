@@ -74,12 +74,11 @@ function _parse_args(args)
             error("unknown argument $arg")
         end
     end
-    isempty(data_dir) && error("--data-dir or CYAXIVERSE_DATA_DIR is required")
     isempty(geometries) && error("at least one --geometry H,P,F is required")
     max_branches > 0 || error("--max-branches must be positive")
     negative_mode_range === nothing || max_negative_modes === nothing ||
         error("use only one of --negative-mode-range and --max-negative-modes")
-    (; data_dir=abspath(data_dir), geometries, max_branches,
+    (; data_dir=CYAxiverse.filestructure.resolve_data_dir(data_dir), geometries, max_branches,
        negative_mode_range, max_negative_modes)
 end
 

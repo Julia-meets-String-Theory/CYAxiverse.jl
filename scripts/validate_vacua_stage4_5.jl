@@ -23,8 +23,6 @@ using Statistics
 include(joinpath(@__DIR__, "vacua_pipeline.jl"))
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
-const REPO_ROOT = dirname(@__DIR__)
-const WORKSPACE_ROOT = dirname(REPO_ROOT)
 
 function _usage()
     println("""
@@ -41,7 +39,7 @@ function _usage()
 end
 
 function _parse_args(args)
-    options = (data_dir=joinpath(WORKSPACE_ROOT, "data"),
+    options = (data_dir="",
         output_dir="/tmp/cyaxiverse-vacua-stage4-5", stage4=true, stage5=true,
         stage5_limit=1, threads=[1, 2, 4, 8, 16], starts=1)
     i = 1
@@ -58,7 +56,7 @@ function _parse_args(args)
             i < length(args) || error("missing value for $arg")
             value = args[i + 1]
             if arg == "--data-dir"
-                options = merge(options, (; data_dir=abspath(value)))
+                options = merge(options, (; data_dir=value))
             elseif arg == "--output-dir"
                 options = merge(options, (; output_dir=abspath(value)))
             elseif arg == "--stage5-limit"
@@ -77,7 +75,7 @@ function _parse_args(args)
     options.stage5_limit > 0 || error("stage5-limit must be positive")
     all(>(0), options.threads) || error("threads must be positive")
     options.starts > 0 || error("starts must be positive")
-    options
+    merge(options, (; data_dir=CYAxiverse.filestructure.resolve_data_dir(options.data_dir)))
 end
 
 _csv_fields(line) = split(chomp(line), ',')
