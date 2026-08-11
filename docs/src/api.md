@@ -25,6 +25,13 @@ Pages = ["generate.jl"]
 Modules = [CYAxiverse.structs]
 Pages = ["structs.jl"]
 ```
+
+## `CYAxiverse.inflation_points`
+```@autodocs
+Modules = [CYAxiverse.inflation_points]
+Pages = ["inflation_points.jl"]
+```
+
 ## `CYAxiverse.minimizer`
 ```@autodocs
 Modules = [CYAxiverse.minimizer]
