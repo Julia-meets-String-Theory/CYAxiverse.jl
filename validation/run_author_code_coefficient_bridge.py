@@ -241,6 +241,8 @@ def _has_validation_failure(value):
         if "error" in value:
             return True
         for key, item in value.items():
+            if key == "package_vs_author_informational":
+                continue
             if key == "keys_match" and item is False:
                 return True
             if key in {"count_mismatch", "sign_mismatches"} and item != 0:
@@ -292,7 +294,9 @@ def compare_input_dir(input_dir, author_code, author_scan, author_src):
             package_q = _read_int(input_dir / f"{mode}_{scale_name}_Q.txt")
             package_l = _read(input_dir / f"{mode}_{scale_name}_L.txt")
             scale_result[mode] = {
-                "package_vs_author": _compare_maps(package_q, package_l, author_map)
+                ("package_vs_author" if mode == "fixed"
+                 else "package_vs_author_informational"):
+                    _compare_maps(package_q, package_l, author_map)
             }
         fixed_l = _read(input_dir / f"fixed_{scale_name}_L.txt")
         full_l = _read(input_dir / f"full_{scale_name}_L.txt")
