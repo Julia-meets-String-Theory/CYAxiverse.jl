@@ -119,9 +119,21 @@ function _canonicalize_generated_potential(Q::Matrix{Int}, L::Matrix{Float64})
     representatives = Int[]
     representative_of = zeros(Int, leading_count)
     for column in axes(leading, 2)
-        existing = findfirst(representative ->
-            @view(leading[:, representative]) == @view(leading[:, column]),
-            representatives)
+        existing = nothing
+        for (representative_index, representative_column) in
+                enumerate(representatives)
+            columns_match = true
+            for row in axes(leading, 1)
+                if leading[row, representative_column] != leading[row, column]
+                    columns_match = false
+                    break
+                end
+            end
+            if columns_match
+                existing = representative_index
+                break
+            end
+        end
         if existing === nothing
             push!(representatives, column)
             representative_of[column] = column
