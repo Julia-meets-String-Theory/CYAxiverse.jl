@@ -25,6 +25,19 @@
   ```
 - No formatter or linter is configured. GitHub Actions runs package tests on Julia 1.12 and builds the documentation with Julia 1.12.
 
+## Documentation placement
+
+- Handoffs, planning notes, operational guides, and user-facing Markdown that
+  are not required to build or use the package belong in the workspace parent
+  directory (`../` from the package root), outside the `CYAxiverse.jl` Git
+  checkout. Keep them out of package Git history unless they are required
+  package documentation.
+- Package-required documentation is the exception: pages consumed by
+  `docs/make.jl`, such as API or user-guide pages, remain under `docs/src/`.
+- When moving or creating a document, update every relative link for its new
+  location and verify that local targets still exist. Do not leave a tracked
+  stub solely to redirect to an external handoff.
+
 ## Architecture
 
 - `src/CYAxiverse.jl` is the package entry point. It composes internal submodules rather than re-exporting their APIs; call functionality through module namespaces such as `CYAxiverse.generate`, `CYAxiverse.read`, and `CYAxiverse.filestructure`. Only `greet_CYAxiverse` is exported.
