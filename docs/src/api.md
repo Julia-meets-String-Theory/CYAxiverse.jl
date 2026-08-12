@@ -71,6 +71,12 @@ CYAxiverse.paper_benchmarks.poly102_inflation
 CYAxiverse.axion_benchmarks
 ```
 
+## `CYAxiverse.glimmers`
+```@autodocs
+Modules = [CYAxiverse.glimmers]
+Pages = ["glimmers.jl"]
+```
+
 ## Inflation benchmark bases
 
 The paper benchmark helpers are available under

@@ -112,6 +112,12 @@ If this is the first run, `julia` will precompile the required packages for `CYA
 Enjoy! 
 ![:deploy_parrot:](https://emoji.slack-edge.com/T7DMEKZMH/deployparrot/ef6c902688cec864.gif)
 
+## Glimmers local pilot
+
+See the [Glimmers local pilot guide](glimmers.md) for the bounded hierarchy,
+photon-coupling, and width routines that operate on the locally available
+geometry files.
+
 
 ## Acknowledgements 🙏
 This project was born after publication of [Superradiance in String Theory](https://iopscience.iop.org/article/10.1088/1475-7516/2021/07/033) and I am grateful to my collaborators for their input while this code was evolving.  Huge thanks also to the authors of [CYTools](https://cy.tools/) for their ongoing hard work and to [Mona Dentler](https://inspirehep.net/authors/1635411) for constant help throughout the development of this package.

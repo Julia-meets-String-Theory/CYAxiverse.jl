@@ -16,6 +16,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "User guide" => "userguide.md",
+        "Glimmers local pilot" => "glimmers.md",
         "Examples" => "examples.md",
         "API" => "api.md"
     ]
