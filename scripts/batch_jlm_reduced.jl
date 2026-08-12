@@ -176,9 +176,9 @@ function _append_summary(path, geom_idx, status, min_data, seconds, message="")
 end
 
 function run_batch(options)
-    if !isempty(options[:data_dir])
-        ENV["CYAXIVERSE_DATA_DIR"] = options[:data_dir]
-    end
+    data_dir = CYAxiverse.filestructure.resolve_data_dir(options[:data_dir])
+    options = merge(options, (; data_dir))
+    ENV["CYAXIVERSE_DATA_DIR"] = data_dir
 
     geoms = _selected_geometries(options)
     isempty(geoms) && error("no geometries selected")

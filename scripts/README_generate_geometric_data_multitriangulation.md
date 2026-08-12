@@ -587,6 +587,11 @@ Important conventions:
 - Vectors and matrices are in the CYTools divisor-basis convention recorded in
   `basis_convention`.
 - `L` retains the CYAxiverse sign/mantissa and base-10 exponent representation.
+- The potential charge basis uses unique effective-cone rays. Exact duplicate
+  rows returned by CYTools are removed before the stretched-cone control,
+  pairwise-term construction, and HDF5 write. The raw GLSM dataset remains
+  available for provenance, while `construction_metadata_json` records the
+  raw/canonical ray counts and the number removed.
 - `tip`, `divisor_volumes`, `Kinv`, `curve_volumes`, and `CY_volume` refer to the
   same final rescaled Kahler point.
 - `prime_divisor_volumes` follows the order of CYTools

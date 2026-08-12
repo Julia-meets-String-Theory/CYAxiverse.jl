@@ -98,10 +98,10 @@ println("Number of geometries collected:", size(all_vacua))
 println("Number of geometries errored:", size(no_vacua))
 println("Number of geometries with >20 vacua:", size(large_vacua))
 @time begin
-if isfile(joinpath(CYAxiverse.filestructure.data_dir(), "vacua_db.h5"))
-    rm(joinpath(CYAxiverse.filestructure.data_dir(), "vacua_db.h5"))
+if isfile(joinpath(CYAxiverse.filestructure.present_dir(), "vacua_db.h5"))
+    rm(joinpath(CYAxiverse.filestructure.present_dir(), "vacua_db.h5"))
 end
-h5open(joinpath(CYAxiverse.filestructure.data_dir(), "vacua_db.h5"), "cw") do file
+h5open(joinpath(CYAxiverse.filestructure.present_dir(), "vacua_db.h5"), "cw") do file
     file["all_data", deflate=9] = all_vacua
 end
 end

@@ -31,6 +31,7 @@ import h5py
 import numpy as np
 import cytools
 from cytools import Polytope, fetch_polytopes
+from geometry_charge_conventions import canonicalize_unique_charge_rows
 
 
 SCHEMA_VERSION = "cyaxiverse-ks-cy3-v5"
@@ -610,12 +611,19 @@ def generate_and_save_geometry(
         kahler_cone, reference_tip, orientifold
     )
     report("computing effective-cone rays")
-    qprime = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
-    nq = qprime.shape[0]
-    if qprime.ndim != 2 or qprime.shape[1] != int(h11):
+    qprime_raw = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
+    if qprime_raw.ndim != 2 or qprime_raw.shape[1] != int(h11):
         raise RuntimeError(
             "Effective-cone rays are not expressed in the exported divisor basis: "
-            f"got shape {qprime.shape}, expected (*, {h11})."
+            f"got shape {qprime_raw.shape}, expected (*, {h11})."
+        )
+    qprime, charge_metadata = canonicalize_unique_charge_rows(qprime_raw)
+    nq = qprime.shape[0]
+    if charge_metadata["duplicates_removed"]:
+        report(
+            "removed "
+            f"{charge_metadata['duplicates_removed']} redundant effective-cone "
+            "charge rows before potential construction"
         )
 
     # Eq. (20) of arXiv:2309.01831 concerns effective four-cycles on the CY.
@@ -865,6 +873,12 @@ def generate_and_save_geometry(
         "qcd_divisor_volume": float(prime_divisor_volumes[qcd_divisor_index]),
         "kahler_cone_rays_exported": bool(export_kahler_rays),
         "orientifold": orientifold,
+        "potential_charge_convention": charge_metadata["convention"],
+        "raw_effective_cone_ray_count": charge_metadata["raw_count"],
+        "canonical_effective_cone_ray_count": charge_metadata["canonical_count"],
+        "duplicate_effective_cone_rows_removed": charge_metadata[
+            "duplicates_removed"
+        ],
     }
     try:
         with h5py.File(temporary_path, "w") as file:
@@ -933,6 +947,18 @@ def generate_and_save_geometry(
             geometric.attrs["kappa_index_base"] = construction_metadata["kappa_index_base"]
             geometric.attrs["basis_convention"] = construction_metadata["basis_convention"]
             geometric.attrs["intersection_convention"] = construction_metadata["intersection_convention"]
+            geometric.attrs["potential_charge_convention"] = charge_metadata[
+                "convention"
+            ]
+            geometric.attrs["raw_effective_cone_ray_count"] = charge_metadata[
+                "raw_count"
+            ]
+            geometric.attrs["canonical_effective_cone_ray_count"] = charge_metadata[
+                "canonical_count"
+            ]
+            geometric.attrs["duplicate_effective_cone_rows_removed"] = charge_metadata[
+                "duplicates_removed"
+            ]
             if orientifold["requested"]:
                 orientifold_group = geometric.create_group("orientifold")
                 orientifold_group.create_dataset(

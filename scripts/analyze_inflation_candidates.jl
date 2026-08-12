@@ -172,8 +172,7 @@ function parse_geometries(args)
 end
 
 function main(args)
-    ENV["CYAXIVERSE_DATA_DIR"] = get(ENV, "CYAXIVERSE_DATA_DIR",
-        "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data")
+    ENV["CYAXIVERSE_DATA_DIR"] = CYAxiverse.filestructure.resolve_data_dir()
     outdir = joinpath(@__DIR__, "..", "paper_benchmarks", "2023_minima", "inflation_screen")
     mkpath(outdir)
     summaries = NamedTuple[]

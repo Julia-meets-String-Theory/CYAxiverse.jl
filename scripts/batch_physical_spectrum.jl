@@ -263,7 +263,8 @@ Process the selected geometries and persist physical spectra in place. Return
 `true` only when every selected geometry completed successfully or was skipped.
 """
 function run_batch(options)
-    !isempty(options[:data_dir]) && (ENV["CYAXIVERSE_DATA_DIR"] = options[:data_dir])
+    data_dir = CYAxiverse.filestructure.resolve_data_dir(options[:data_dir])
+    ENV["CYAXIVERSE_DATA_DIR"] = data_dir
     threshold = something(options[:threshold_log10], Float64(log10(CYAxiverse.generate.constants()["Hubble"])))
     geoms = _selected_geometries(options)
     isempty(geoms) && error("no geometries selected")

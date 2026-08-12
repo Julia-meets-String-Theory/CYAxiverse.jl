@@ -41,6 +41,22 @@
 - Functions commonly provide both scalar geometry arguments `(h11, tri, cy=1)` and a `GeometryIndex` overload. Maintain both forms when extending geometry-facing APIs.
 - Numerical code mixes `Float64`, exact `Rational`, and `ArbFloat` values. Avoid narrowing the existing declared types, particularly in basis and minimization code that deliberately switches to `Rational{BigInt}` for large denominators.
 
+## Language and communication
+
+- Use plain English for all code comments, docstrings, and documentation. Avoid abbreviations and acronyms unless they are widely recognized in the CYAxiverse.jl context.
+
+- Use the imperative mood in docstrings and comments. For example, write "Compute the mass matrix" instead of "Computes the mass matrix" or "This function computes the mass matrix."
+
+- Use consistent terminology for mathematical and physical concepts. For example, always refer to "axion potential" rather than "axion potential energy" or "axion potential function."
+
+- Use consistent naming conventions for variables and functions. For example, use `compute_masses` for a function that computes masses, and `mass_matrix` for a variable that stores the mass matrix.  Do not heavily rely on computer-generated names for variables or functions; choose descriptive names that convey the scientific meaning of the code.
+
+- In responses to user queries, provide clear and concise explanations of the code's functionality, including any relevant mathematical or physical context. Avoid unnecessary technical jargon or overly complex explanations.  For example, avoid terms like "provenance" or "regression".
+
+- Avoid using overly technical terms or jargon that may not be familiar to all users. Instead, provide clear explanations and context for any technical terms that are used.
+
+- Use the `physics-communicator` skill to explain complex physics concepts in a way that is accessible to users with varying levels of expertise. Understand that the primary users for this package are theoretical physicists, and tailor explanations accordingly.
+
 # CYAxiverse.jl Copilot Additional Guidelines
 
 ## Julia Package Standards

@@ -999,7 +999,8 @@ function _pilot_partition(geometries, index, count)
 end
 
 function run_scale_continuation(options)
-    data_dir = _pilot_data_dir(options[:data_dir])
+    data_dir = _pilot_data_dir(
+        CYAxiverse.filestructure.resolve_data_dir(options[:data_dir]))
     ENV["CYAXIVERSE_DATA_DIR"] = data_dir
     geometries = pilot_select_geometries(data_dir, options[:geometries];
         h11_filter=options[:h11], max_geometries=options[:max_geometries])

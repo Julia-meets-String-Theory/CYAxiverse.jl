@@ -25,30 +25,92 @@ function localARGS()
         ARGS
     end
 end
+
+const _LEGACY_DATA_DIRS = Dict{String,String}(
+    "KU_Fair" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_KU_Fair_Large/",
+    "inKC" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_Scaled/",
+    "home_Large" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse/",
+    "vacua_test" => "/scratch/users/mehta2/vacua_testing/",
+    "vacua_stretchtest" => "/scratch/users/mehta2/vacua_stretchtesting/",
+    "vacua_new" => "/scratch/users/mehta2/vacua_db/",
+    "vacua_0323" => "/scratch/users/mehta2/vacua_0323/",
+    "vacua_0822" => "/scratch/users/mehta2/vacua_0822/",
+    "vacua_stretch" => "/scratch/users/mehta2/vacua_stretch/",
+    "docker" => "/scratch/database/",
+)
+
 """
     ol_DB(args)
 
 Define dict of directories for data read/write
 """
 function ol_DB(args)
-    ol_db::Dict{String,String} = Dict(
-        "KU_Fair" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_KU_Fair_Large/",
-        "inKC" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_Scaled/", 
-        "home_Large" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse/", 
-        "vacua_test" => "/scratch/users/mehta2/vacua_testing/", 
-        "vacua_stretchtest" => "/scratch/users/mehta2/vacua_stretchtesting/", 
-        "vacua_new" => "/scratch/users/mehta2/vacua_db/",
-        "vacua_0323" => "/scratch/users/mehta2/vacua_0323/",
-        "vacua_0822" => "/scratch/users/mehta2/vacua_0822/",
-        "vacua_stretch" => "/scratch/users/mehta2/vacua_stretch/",
-        "docker" => "/scratch/database/",
-        "pwd" => string(pwd(), "/")
-        )
-    try
-        ol_db[string(args)]
-    catch y
-        ol_db["pwd"]
+    key = string(args)
+    key == "pwd" && return string(pwd(), "/")
+    haskey(_LEGACY_DATA_DIRS, key) || throw(ArgumentError(
+        "unknown CYAxiverse deployment alias '$key'"))
+    _LEGACY_DATA_DIRS[key]
+end
+
+const _PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
+const _WORKSPACE_DATA_DIR = normpath(joinpath(_PACKAGE_ROOT, "..", "data"))
+
+"""
+    default_data_dir()
+
+Return the checkout-relative default data directory, or `nothing` when the
+package is not loaded from a CYAxiverse checkout.
+
+The default is `../data` relative to the `CYAxiverse.jl` repository directory.
+Use `resolve_data_dir` when selecting a data directory for an operation.
+"""
+function default_data_dir()
+    isfile(joinpath(_PACKAGE_ROOT, "Project.toml")) ? _WORKSPACE_DATA_DIR : nothing
+end
+
+"""
+    resolve_data_dir([data_dir])
+
+Resolve the data root using the following precedence:
+
+1. an explicit `data_dir` argument;
+2. `CYAXIVERSE_DATA_DIR`;
+3. a recognized legacy `newARGS` deployment alias;
+4. the checkout-relative default `../data`.
+
+Throw an `ArgumentError` when no applicable location can be determined. Do
+not create the returned directory; callers that write data must make that
+choice explicitly.
+"""
+function resolve_data_dir(data_dir::Union{Nothing,AbstractString}=nothing)
+    explicit = data_dir === nothing ? "" : strip(String(data_dir))
+    environment = strip(get(ENV, "CYAXIVERSE_DATA_DIR", ""))
+    selected = if !isempty(explicit)
+        explicit
+    elseif !isempty(environment)
+        environment
+    elseif haskey(ENV, "newARGS") && !isempty(strip(ENV["newARGS"]))
+        key = strip(ENV["newARGS"])
+        if key == "pwd"
+            pwd()
+        else
+            haskey(_LEGACY_DATA_DIRS, key) || throw(ArgumentError(
+                "unknown CYAxiverse deployment alias '$key'; set " *
+                "CYAXIVERSE_DATA_DIR or pass an explicit data directory"))
+            _LEGACY_DATA_DIRS[key]
+        end
+    else
+        default = default_data_dir()
+        default === nothing && throw(ArgumentError(
+            "unable to determine the CYAxiverse data directory; pass an " *
+            "explicit path or set CYAXIVERSE_DATA_DIR"))
+        default
     end
+    path = normpath(abspath(expanduser(selected)))
+    separator = only(Base.Filesystem.path_separator)
+    path = path == string(separator) ? path : rstrip(path, separator)
+    isempty(path) && throw(ArgumentError("data directory must not be empty"))
+    path
 end
 
 ############################
@@ -60,10 +122,7 @@ end
 Returns the present data directory using localARGS
 """
 function present_dir()
-    if haskey(ENV, "CYAXIVERSE_DATA_DIR") && !isempty(ENV["CYAXIVERSE_DATA_DIR"])
-        return present_dir(ENV["CYAXIVERSE_DATA_DIR"])
-    end
-    return ol_DB(localARGS())
+    present_dir(resolve_data_dir())
 end
 
 """
@@ -72,7 +131,7 @@ end
 Returns an absolute data directory path with a trailing separator.
 """
 function present_dir(data_dir::AbstractString)
-    path = abspath(expanduser(data_dir))
+    path = resolve_data_dir(data_dir)
     return endswith(path, Base.Filesystem.path_separator) ? path : string(path, Base.Filesystem.path_separator)
 end
 """
@@ -81,7 +140,7 @@ end
 Creates/reads a directory for plots
 """
 function plots_dir()
-    pwd = string(ol_DB(localARGS()),"plots")
+    pwd = joinpath(present_dir(), "plots")
     if isdir(pwd)
     else
         mkpath(pwd)
@@ -102,18 +161,19 @@ end
 
 """
     data_dir()
-Creates/reads data directory
+
+Return the resolved data root.
+
+This compatibility alias no longer appends a second `data` path or creates a
+directory. Prefer `present_dir()` or `resolve_data_dir()` in new code.
 """
 function data_dir()
-    if isdir(joinpath(present_dir(),"data"))
-    else 
-        mkdir(joinpath(present_dir(),"data"))
-    end
-    return joinpath(present_dir(),"data")
+    Base.depwarn("data_dir() is a compatibility alias; use present_dir()", :data_dir)
+    present_dir()
 end
 """
     logfile()
-Returns path of logfile in format data_dir()/logs/YYYY:MM:DD:T00:00:00.000log.out
+Returns path of logfile in format present_dir()/logs/YYYY:MM:DD:T00:00:00.000log.out
 """
 function logfile()
     log = string(Dates.DateTime(Dates.now()),"log.out")
@@ -132,7 +192,7 @@ end
 
 """
     np_path_generate(h11)
-Walks through `data_dir()` and returns list of data paths and matrix of `[h11; tri; cy]` -- at specific h11.
+Walks through `present_dir()` and returns list of data paths and matrix of `[h11; tri; cy]` -- at specific h11.
 Saves in h5 file `paths_cy.h5`
 """
 function np_path_generate(h11::Int; geometric_data::Bool = false)
@@ -168,7 +228,7 @@ end
 
 """
     np_path_generate()
-Walks through `data_dir()` and returns list of data paths and matrix of `[h11; tri; cy]`.
+Walks through `present_dir()` and returns list of data paths and matrix of `[h11; tri; cy]`.
 Saves in h5 file `paths_cy.h5`
 """
 function np_path_generate(; geometric_data::Bool = false)
@@ -209,9 +269,9 @@ Saves list of data paths and matrix of `[h11; tri; cy]` in h5 file `paths_cy.h5`
 """
 function np_path()
     np_paths, np_pathinds = np_path_generate()
-    if isfile(joinpath(data_dir(),"paths.h5")) || isfile(joinpath(data_dir(),"paths_cy.h5"))
+    if isfile(joinpath(present_dir(),"paths.h5")) || isfile(joinpath(present_dir(),"paths_cy.h5"))
     else
-        h5open(joinpath(data_dir(),"paths_cy.h5"), "cw") do f
+        h5open(joinpath(present_dir(),"paths_cy.h5"), "cw") do f
             f["paths",deflate=9] = np_paths
             f["pathinds",deflate=9] = np_pathinds
         end
@@ -223,16 +283,16 @@ end
 Loads / generates `paths_cy.h5` which contains the explicit locations and also `[h11; tri; cy]` indices of the geometries already saved.
 """
 function paths_cy()
-    if isfile(joinpath(data_dir(),"paths.h5")) || isfile(joinpath(data_dir(),"paths_cy.h5"))
+    if isfile(joinpath(present_dir(),"paths.h5")) || isfile(joinpath(present_dir(),"paths_cy.h5"))
     else
         return np_path()
     end
     if localARGS()==string("in_KC") 
-        paths_cy,pathinds_cy =  h5open(joinpath(data_dir(),"paths.h5"), "r") do f
+        paths_cy,pathinds_cy =  h5open(joinpath(present_dir(),"paths.h5"), "r") do f
             read(f,"paths"),read(f,"pathinds")
             end;
     else
-        paths_cy,pathinds_cy =  h5open(joinpath(data_dir(),"paths_cy.h5"), "r") do f
+        paths_cy,pathinds_cy =  h5open(joinpath(present_dir(),"paths_cy.h5"), "r") do f
             read(f,"paths"),read(f,"pathinds")
             end;
     end
@@ -478,4 +538,4 @@ function minfile(geom_idx::GeometryIndex)
 end
 
 
-end 
+end

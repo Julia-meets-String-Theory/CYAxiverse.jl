@@ -7,6 +7,7 @@ import numpy as np
 import h5py
 from cytools import fetch_polytopes, Polytope
 from concurrent.futures import ProcessPoolExecutor
+from geometry_charge_conventions import canonicalize_unique_charge_rows
 
 def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath):
     # --- 1. Basic Geometric Quantities ---
@@ -18,7 +19,8 @@ def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath):
     n_val, m_val = 1.0, 1.0
     tip = np.array(cy.toric_kahler_cone().tip_of_stretched_cone(math.sqrt(n_val)), dtype=float)
     
-    qprime = np.array(cy.toric_effective_cone().rays(), dtype=float)
+    qprime_raw = np.array(cy.toric_effective_cone().rays(), dtype=float)
+    qprime, charge_metadata = canonicalize_unique_charge_rows(qprime_raw)
     nq = qprime.shape[0]
     
     # PTD volumes at tip
@@ -130,6 +132,13 @@ def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath):
         f1a.create_dataset("CY_volume", data=V)
         f1a.create_dataset("divisor_volumes", data=tau, compression="gzip", compression_opts=9)
         f1a.create_dataset("Kinv", data=Kinv, compression="gzip", compression_opts=9)
+        f1a.create_dataset("effective_cone", data=qprime, compression="gzip", compression_opts=9)
+        f1a.attrs["potential_charge_convention"] = charge_metadata["convention"]
+        f1a.attrs["raw_effective_cone_ray_count"] = charge_metadata["raw_count"]
+        f1a.attrs["canonical_effective_cone_ray_count"] = charge_metadata["canonical_count"]
+        f1a.attrs["duplicate_effective_cone_rows_removed"] = charge_metadata[
+            "duplicates_removed"
+        ]
         
         # cytools/potential
         f1b = f1.create_group("potential")

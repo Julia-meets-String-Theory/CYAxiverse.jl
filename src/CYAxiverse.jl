@@ -18,6 +18,7 @@ include("minimizer.jl")
 include("generate.jl")
 include("jlm_reduced.jl")
 include("paper_benchmarks.jl")
+include("inflation_points.jl")
 
 """Scientific namespace for the deterministic axion benchmark models."""
 const axion_benchmarks = paper_benchmarks

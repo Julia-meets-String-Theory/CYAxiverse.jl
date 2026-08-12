@@ -3,6 +3,31 @@
 !!! warning
     Under construction
 
+## Data directory selection
+
+The geometry database is rooted at a directory containing entries such as
+`h11_004/np_0000084/cy_0000001/cyax.h5`. When using a checkout of
+`CYAxiverse.jl`, the package's general default is `../data`: the `data`
+directory one level above the repository directory. This default is anchored
+to the package checkout and does not depend on the current working directory.
+
+Data-directory selection follows this order:
+
+1. an explicit `--data-dir` option or function argument;
+2. the `CYAXIVERSE_DATA_DIR` environment variable;
+3. a recognized legacy deployment alias such as `newARGS=docker`;
+4. the checkout-relative default `../data`.
+
+Set `CYAXIVERSE_DATA_DIR` when the database is stored elsewhere:
+
+```sh
+export CYAXIVERSE_DATA_DIR=/path/to/data
+```
+
+The resolver does not create a missing data directory or silently fall back to
+the current working directory. Use `--data-dir` for a different database or
+for an isolated output copy.
+
 ## Vacua minima pipeline
 
 The vacua pipeline keeps the legacy estimate and the numerical minima search
@@ -76,14 +101,18 @@ spectrum = CYAxiverse.generate.pq_hybrid_physical_spectrum(
 )
 ```
 
-The mode count is confirmed at increasing arbitrary precision. A warning marks
-any result whose count or refined eigenpairs do not stabilize; such a result is
-provisional and should be rerun at higher precision or checked with
+The mode count is confirmed at increasing arbitrary precision. If the hybrid
+refinement does not stabilize, it falls back to the full high-precision
+eigensystem; a provisional warning is emitted only if that fallback also fails
+validation. Such a result should be rerun at higher precision or checked with
 `pq_physical_spectrum`.
 
 Set `quartics=false` for large mass-only scans. When quartics are requested,
 every input instanton contributes to their contraction even though only the
-physical mass eigenvectors are returned.
+physical mass eigenvectors are returned. This option is available on both
+`pq_physical_spectrum`, `pq_hybrid_physical_spectrum`, and
+`pq_window_spectrum`; it leaves the mass-only results unchanged while avoiding
+quartic contractions.
 
 For resumable ensemble runs, use `scripts/batch_physical_spectrum.jl`. It
 discovers indexed or on-disk geometries, flushes one CSV row per geometry, and
@@ -116,12 +145,39 @@ not allocate the full physical-mode charge matrix.
 schema stores this array under `decay/fpert` for compatibility with existing
 readers.
 
-## Inflation screening
+### Hierarchy blocks and mass windows
 
-`CYAxiverse.read.oriented_potential(geom_idx)` is the package-owned
-normalization boundary for screening inputs. It returns canonical `Q`, `L`,
-and `K` orientations and validates dimensions and finite numerical data; scan
-thresholds and resource policy remain script-level decisions.
+`instanton_scale_blocks(L; gap_log10=1.0, min_block_size=1)` groups contiguous
+log-scale entries without materializing their potentially enormous amplitudes.
+Each block preserves the zero-based input instanton indices and the result
+records every inter-block gap. For a charge-aware perturbative screening,
+`instanton_hierarchy_diagnostics(K, L, Q)` also reports canonical charge
+coupling, separation-to-coupling ratios, and conservative `certified_safe`
+flags. A failed certificate leaves the numerical block/subspace path in use;
+scale separation alone is never treated as a proof of decoupling.
+
+Use `pq_window_spectrum` when only a mass interval is needed:
+
+```julia
+window = CYAxiverse.generate.pq_window_spectrum(
+    potential.K, potential.L, potential.Q;
+    min_log10_mass=12.0,
+    max_log10_mass=18.0,
+    prec=200,
+    quartics=false,
+)
+window.mode_indices
+window.diagnostics
+```
+
+Both window boundaries are counted with arbitrary-precision inertia, and only
+an oversampled band around the requested modes is refined. The inclusive
+boundary guard is configurable with `boundary_margin_log10` (default `1e-10`)
+and is recorded in the diagnostics. The diagnostics also record
+precision-count stabilization, residual convergence, boundary gaps, and
+whether the reference eigensystem fallback was needed. A lower-threshold query
+is obtained with `max_log10_mass=Inf` and remains compatible with the existing
+`pq_hybrid_physical_spectrum` path.
 
 ### Large-geometry scaling checkpoint
 
@@ -148,3 +204,10 @@ Sparse Hessian accumulation took 0.078 seconds, while canonical whitening took
 3.77 seconds. The whitening makes canonical charges dense; a direct
 canonical-charge rank-one construction was tested and was slower, so sparse
 storage is intentionally confined to the pre-whitening accumulation stage.
+
+## Inflation screening
+
+`CYAxiverse.read.oriented_potential(geom_idx)` is the package-owned
+normalization boundary for screening inputs. It returns canonical `Q`, `L`,
+and `K` orientations and validates dimensions and finite numerical data; scan
+thresholds and resource policy remain script-level decisions.
