@@ -9,9 +9,11 @@ records its Hodge data.  It never writes an HDF5 geometry artifact.
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import resource
+import signal
 import subprocess
 import sys
 import tempfile
@@ -28,6 +30,8 @@ if _benchmark_cache:
 
 import cytools
 from cytools import Polytope
+from cytools.helpers.matrix import LIL_stack
+from cytools.ntfe.ntfe import _find_interior_point_highs
 
 from generate_geometric_data_multitriangulation import (
     NTFE_FACE_SAMPLERS,
@@ -37,6 +41,10 @@ from generate_geometric_data_multitriangulation import (
     require_cytools_capabilities,
     triangulation_candidates,
 )
+
+
+class ResourceLimitExceeded(TimeoutError):
+    """Signal that the benchmark-only wall-clock cap was reached."""
 
 
 DEFAULT_MANIFEST = os.path.join(
@@ -86,6 +94,167 @@ def resource_snapshot():
     return {
         "cpu_seconds": float(usage.ru_utime + usage.ru_stime),
         "peak_rss_bytes": peak_rss_bytes,
+    }
+
+
+def canonical_face_choice_hash(face_triangs):
+    """Hash a selected collection of two-face triangulations."""
+    canonical_faces = []
+    for triangulation in face_triangs:
+        simplices = np.asarray(
+            triangulation.simplices(as_indices=True), dtype=np.int32
+        )
+        if simplices.size == 0:
+            canonical_faces.append([])
+            continue
+        simplices = np.sort(simplices, axis=1)
+        simplices = simplices[np.lexsort(simplices.T[::-1])]
+        canonical_faces.append(simplices.tolist())
+    payload = json.dumps(canonical_faces, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def exact_ntfe_candidates(
+    poly,
+    face_sampler,
+    max_draws,
+    seed,
+    max_face_points,
+    face_pool_size,
+    state,
+):
+    """Yield NTFE extensions with an observable explicit proposal counter.
+
+    The installed CYTools ``ntfe_frts`` API counts requested expanded cones,
+    not the individual face-combination extension attempts.  This diagnostic
+    path follows its local logic after building the same two-face FRT pools:
+    select a face combination, stack its secondary-cone inequalities, find an
+    interior height vector, and construct the star triangulation.  It does not
+    patch CYTools or change the production adapter.
+    """
+    pool_started = time.perf_counter()
+    pool_cpu_started = resource_snapshot()["cpu_seconds"]
+    state["pool_decomposition"] = {
+        "status": "in_progress",
+        "face_sampler": face_sampler,
+        "face_pool_size_requested": face_pool_size,
+        "max_face_points": max_face_points,
+        "pool_build_started": True,
+    }
+    face_pools = poly.face_triangs(
+        dim=2,
+        only_regular=True,
+        max_npts=max_face_points,
+        N_face_triangs=face_pool_size,
+        triang_method=face_sampler,
+        seed=seed,
+        verbosity=0,
+    )
+    pool_wall = time.perf_counter() - pool_started
+    pool_cpu = resource_snapshot()["cpu_seconds"] - pool_cpu_started
+    pool_sizes = [len(pool) for pool in face_pools]
+    state["pool_decomposition"] = {
+        "face_count": len(face_pools),
+        "face_pool_sizes": pool_sizes,
+        "face_pool_size_requested": face_pool_size,
+        "max_face_points": max_face_points,
+        "face_sampler": face_sampler,
+        "pool_build_wall_seconds": pool_wall,
+        "pool_build_cpu_seconds": pool_cpu,
+        "total_face_frt_count": int(sum(pool_sizes)),
+    }
+    if not face_pools or any(size == 0 for size in pool_sizes):
+        state["terminal_status"] = "source_exhausted"
+        state["attempted_proposals"] = 0
+        return
+
+    inequality_started = time.perf_counter()
+    inequality_cpu_started = resource_snapshot()["cpu_seconds"]
+    face_ineqs = poly.triangface_ineqs(
+        face_triangs=face_pools,
+        require_star=False,
+        verbosity=0,
+    )
+    state["pool_decomposition"].update(
+        {
+            "inequality_build_wall_seconds": time.perf_counter() - inequality_started,
+            "inequality_build_cpu_seconds": (
+                resource_snapshot()["cpu_seconds"] - inequality_cpu_started
+            ),
+            "face_inequality_choice_counts": [len(block) for block in face_ineqs],
+        }
+    )
+    choice_counts = [len(block) for block in face_ineqs]
+    total_combinations = math.prod(choice_counts)
+    state["pool_decomposition"]["total_face_combinations"] = int(total_combinations)
+    if total_combinations == 0:
+        state["terminal_status"] = "source_exhausted"
+        state["attempted_proposals"] = 0
+        return
+
+    rng = np.random.default_rng(seed)
+    seen_choices = set()
+    n_draws = min(int(max_draws), int(total_combinations))
+    for _ in range(n_draws):
+        choice = tuple(int(rng.integers(count)) for count in choice_counts)
+        while choice in seen_choices:
+            choice = tuple(int(rng.integers(count)) for count in choice_counts)
+        seen_choices.add(choice)
+        state["attempted_proposals"] += 1
+        selected_faces = [
+            face_pools[face_index][choice[face_index]]
+            for face_index in range(len(choice))
+        ]
+        selected_hash = canonical_face_choice_hash(selected_faces)
+        if selected_hash in state["seen_two_face_hashes"]:
+            state["duplicate_two_face_classes"] += 1
+        state["seen_two_face_hashes"].add(selected_hash)
+        state["two_face_combination_hashes"].append(selected_hash)
+        hypers = LIL_stack(face_ineqs, choice, choice_counts)
+        try:
+            heights = _find_interior_point_highs(
+                hypers, len(poly.labels), c=1
+            )
+        except Exception as exc:
+            state["extension_errors"].append(
+                {"type": type(exc).__name__, "message": str(exc)[:300]}
+            )
+            continue
+        if heights is None:
+            state["non_solid_attempts"] += 1
+            continue
+        state["solid_attempts"] += 1
+        try:
+            triangulation = poly.triangulate(heights=heights, make_star=True)
+        except Exception as exc:
+            state["extension_errors"].append(
+                {"type": type(exc).__name__, "message": str(exc)[:300]}
+            )
+            continue
+        if triangulation is None or not triangulation:
+            state["invalid_extensions"] += 1
+            continue
+        state["yielded_triangulations"] += 1
+        yield triangulation
+
+    state["terminal_status"] = (
+        "source_exhausted" if n_draws < int(max_draws) else "completed"
+    )
+
+
+def exact_budget_payload(exact_state, requested_proposals):
+    """Serialize explicit-harness counters, including partial capped runs."""
+    return {
+        "requested_proposals": requested_proposals,
+        "attempted_proposals": exact_state["attempted_proposals"],
+        "yielded_triangulations": exact_state["yielded_triangulations"],
+        "non_solid_attempts": exact_state["non_solid_attempts"],
+        "solid_attempts": exact_state["solid_attempts"],
+        "invalid_extensions": exact_state["invalid_extensions"],
+        "duplicate_two_face_classes": exact_state["duplicate_two_face_classes"],
+        "extension_errors": exact_state["extension_errors"],
+        "two_face_combination_hashes": exact_state["two_face_combination_hashes"],
+        "pool_decomposition": exact_state["pool_decomposition"],
     }
 
 
@@ -186,6 +355,20 @@ def main():
         default=None,
         help="Stop after this many valid FRSTs; zero consumes the full proposal budget.",
     )
+    parser.add_argument(
+        "--exact-proposals",
+        action="store_true",
+        help=(
+            "Use the benchmark-only explicit face-combination harness for "
+            "ntfe_fast or gnn_ntfe. This counts extension attempts directly."
+        ),
+    )
+    parser.add_argument(
+        "--wall-clock-seconds",
+        type=float,
+        default=None,
+        help="Optional benchmark-only wall-clock cap that still writes an atomic report.",
+    )
     parser.add_argument("--seed", type=int, default=20260813)
     parser.add_argument("--backend", choices=("cgal", "qhull"), default="cgal")
     parser.add_argument("--ntfe-face-sampler", choices=NTFE_FACE_SAMPLERS, default="fast")
@@ -220,6 +403,10 @@ def main():
         parser.error("--ntfe-face-pool-size must be positive")
     if args.include_topology and not args.include_cy:
         parser.error("--include-topology requires --include-cy")
+    if args.exact_proposals and args.sampler not in {"ntfe_fast", "gnn_ntfe"}:
+        parser.error("--exact-proposals requires ntfe_fast or gnn_ntfe")
+    if args.wall_clock_seconds is not None and args.wall_clock_seconds <= 0:
+        parser.error("--wall-clock-seconds must be positive")
 
     proposal_budget = (
         args.proposal_budget if args.proposal_budget is not None else args.candidate_count
@@ -265,6 +452,12 @@ def main():
             "accepted_target": accepted_target,
             "seed": args.seed,
             "backend": args.backend,
+            "exact_proposal_harness": bool(args.exact_proposals),
+            "proposal_budget_semantics": (
+                "explicit face-combination extension attempts"
+                if args.exact_proposals
+                else "CYTools sampler N request; not an explicit extension-attempt count"
+            ),
         },
         "environment": {
             "cytools_version": cytools.version,
@@ -305,6 +498,19 @@ def main():
         },
         "terminal_status": None,
     }
+    exact_state = {
+        "attempted_proposals": 0,
+        "yielded_triangulations": 0,
+        "non_solid_attempts": 0,
+        "solid_attempts": 0,
+        "invalid_extensions": 0,
+        "duplicate_two_face_classes": 0,
+        "seen_two_face_hashes": set(),
+        "two_face_combination_hashes": [],
+        "extension_errors": [],
+        "pool_decomposition": None,
+        "terminal_status": None,
+    }
     try:
         import psutil
 
@@ -317,25 +523,47 @@ def main():
     seen_full = set()
     seen_two_face = set()
     first_valid_topology_done = False
+    previous_alarm = None
+    if args.wall_clock_seconds is not None:
+        if not hasattr(signal, "setitimer"):
+            raise RuntimeError("The wall-clock cap requires signal.setitimer on this platform.")
+
+        def raise_resource_limit(signum, frame):
+            del signum, frame
+            raise ResourceLimitExceeded("benchmark wall-clock cap reached")
+
+        previous_alarm = signal.signal(signal.SIGALRM, raise_resource_limit)
+        signal.setitimer(signal.ITIMER_REAL, args.wall_clock_seconds)
     try:
-        candidates = triangulation_candidates(
-            poly,
-            args.sampler,
-            proposal_budget,
-            50,
-            args.backend,
-            args.seed,
-            None,
-            None,
-            None,
-            8,
-            1e-2,
-            25,
-            0.2,
-            args.ntfe_face_sampler,
-            args.ntfe_max_face_points,
-            args.ntfe_face_pool_size,
-        )
+        if args.exact_proposals:
+            candidates = exact_ntfe_candidates(
+                poly,
+                "dualgnn" if args.sampler == "gnn_ntfe" else args.ntfe_face_sampler,
+                proposal_budget,
+                args.seed,
+                args.ntfe_max_face_points,
+                args.ntfe_face_pool_size,
+                exact_state,
+            )
+        else:
+            candidates = triangulation_candidates(
+                poly,
+                args.sampler,
+                proposal_budget,
+                50,
+                args.backend,
+                args.seed,
+                None,
+                None,
+                None,
+                8,
+                1e-2,
+                25,
+                0.2,
+                args.ntfe_face_sampler,
+                args.ntfe_max_face_points,
+                args.ntfe_face_pool_size,
+            )
         previous = time.perf_counter()
         for candidate_index, triangulation in enumerate(candidates, start=1):
             candidate_started = time.perf_counter()
@@ -407,26 +635,58 @@ def main():
             previous = time.perf_counter()
             if accepted_target and report["counts"]["valid_frsts"] >= accepted_target:
                 break
-        if not report["candidates"]:
+        if args.exact_proposals:
+            report["exact_budget"] = exact_budget_payload(
+                exact_state, proposal_budget
+            )
+            report["counts"]["duplicate_two_face_classes"] = exact_state[
+                "duplicate_two_face_classes"
+            ]
+            report["terminal_status"] = exact_state["terminal_status"]
+            if report["terminal_status"] is None:
+                report["terminal_status"] = "completed"
+        elif not report["candidates"]:
             report["terminal_status"] = "sampler_retry_exhausted"
         elif report["counts"]["valid_frsts"] == 0:
             report["terminal_status"] = "invalid_frst"
         else:
             report["terminal_status"] = "completed"
-    except KeyboardInterrupt:
-        report["terminal_status"] = "sampler_or_cytools_error"
+    except ResourceLimitExceeded:
+        report["terminal_status"] = "resource_cap"
         report["error_type"] = "ResourceLimitExceeded"
         report["error"] = (
-            "Probe interrupted by the explicit external wall-clock resource cap; "
-            "no triangulation was yielded before interruption."
+            "Probe interrupted by the explicit wall-clock resource cap; "
+            "the partial bounded run is retained in this atomic report."
         )
-        report["termination_reason"] = "external_wall_clock_resource_cap"
+        report["termination_reason"] = "wall_clock_resource_cap"
+    except KeyboardInterrupt:
+        cap_reached = (
+            args.wall_clock_seconds is not None
+            and (time.perf_counter() - sampler_started) >= args.wall_clock_seconds
+        )
+        report["terminal_status"] = "resource_cap" if cap_reached else "sampler_or_cytools_error"
+        report["error_type"] = "KeyboardInterrupt"
+        report["error"] = (
+            "Probe interrupted externally after the wall-clock cap."
+            if cap_reached
+            else "Probe interrupted externally before normal completion."
+        )
+        report["termination_reason"] = (
+            "wall_clock_resource_cap" if cap_reached else "external_interrupt"
+        )
     except Exception as exc:
         report["terminal_status"] = "sampler_or_cytools_error"
         report["error_type"] = type(exc).__name__
         report["error"] = str(exc)[:1000]
         raise
     finally:
+        if args.wall_clock_seconds is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_alarm)
+        if args.exact_proposals and "exact_budget" not in report:
+            report["exact_budget"] = exact_budget_payload(
+                exact_state, proposal_budget
+            )
         report["timing"] = {
             "sampler_iteration_seconds": time.perf_counter() - sampler_started,
             "cold_sampler_initialization_seconds": (
