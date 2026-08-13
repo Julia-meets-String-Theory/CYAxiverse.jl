@@ -211,3 +211,48 @@ storage is intentionally confined to the pre-whitening accumulation stage.
 normalization boundary for screening inputs. It returns canonical `Q`, `L`,
 and `K` orientations and validates dimensions and finite numerical data; scan
 thresholds and resource policy remain script-level decisions.
+
+## Publication plotting
+
+Plotting is an optional package extension, so importing `CYAxiverse` does not
+load CairoMakie or a graphical backend. Load the renderer explicitly when a
+plot is needed:
+
+```julia
+using CYAxiverse
+using CairoMakie
+using ColorSchemes
+
+const plotting = CYAxiverse.plotting
+style = plotting.paper_style(resolution = (900, 650))
+```
+
+The default style provides the serif/STIX typography, pale lavender-gray
+background, white gridlines, dark spines, and accent palette used by the
+reference figures. Pass one `style` object to every panel in a figure set.
+The renderers return a `PlotResult` containing the created `figure`, the
+rendered `axis`, and the primary `plot` object.
+
+Statistical and function plots use the same axis preparation path:
+
+```julia
+x = collect(range(1, 491; length = 100))
+fraction_excluded = 0.45 .* exp.(-((x .- 150) ./ 120) .^ 2)
+uncertainty = plotting.band(x, fraction_excluded .- 0.02,
+    fraction_excluded .+ 0.02; label = "95% C.L.")
+
+exclusion = plotting.exclusionplot(x, fraction_excluded;
+    style, bands = (uncertainty,),
+    xlabel = raw"Hodge number $h^{1,1}$",
+    ylabel = "Fraction excluded",
+    label = raw"CY$_3$ manifolds")
+plotting.save_plot("exclusion.pdf", exclusion)
+```
+
+Use `boxplot` for a vector of grouped samples, `scatterplot` for sampled
+geometry data, `minima_plot` for a sampled potential with minimum and critical
+point markers, and `trajectoryplot` for columns of an inflationary trajectory
+matrix. For multi-panel figures, create a Makie `Figure` and use
+`plotting.styled_axis(fig[row, column]; style)` before passing each axis through
+`axis = ...`. Use `axis_kwargs` and `plot_kwargs` for renderer-specific
+customization without changing the shared style.

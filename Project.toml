@@ -6,8 +6,6 @@ authors = ["Viraf M. Mehta <viraf.mehta@itp.uni-hannover.de>"]
 [deps]
 AbstractTrees = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
 ArbNumerics = "7e558dbc-694d-5a72-987c-6f4ebed21442"
-CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
@@ -31,19 +29,24 @@ TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 Tullio = "bc48ee85-29a4-5162-ae0b-a64e1601d4bc"
 
 [weakdeps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 
 [extensions]
+CYAxiverseCairoMakieExt = ["CairoMakie", "ColorSchemes"]
 CYAxiversePyCallExt = "PyCall"
 
 [extras]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Logging", "Printf", "Statistics", "Test"]
+test = ["CairoMakie", "ColorSchemes", "Logging", "Printf", "Statistics", "Test"]
 
 [compat]
 ArbNumerics = "1"
