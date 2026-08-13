@@ -1,17 +1,107 @@
 #!/usr/bin/env julia
 
 using Pkg
+using SHA
 
 const PROJECT_ROOT = normpath(joinpath(@__DIR__, ".."))
-const AUDIT_ENV = mktempdir(prefix="cyaxiverse-audit-")
+const PROJECT_FILE = joinpath(PROJECT_ROOT, "Project.toml")
+const MANIFEST_FILE = joinpath(PROJECT_ROOT, "Manifest.toml")
+const AUDIT_CACHE_VERSION = 1
+const AUDIT_DEPENDENCIES = (("Aqua", "0.8"), ("JET", "0.12"))
 
-Pkg.activate(AUDIT_ENV)
-Pkg.develop(Pkg.PackageSpec(path=PROJECT_ROOT))
-Pkg.add([
-    Pkg.PackageSpec(name="Aqua", version="0.8"),
-    Pkg.PackageSpec(name="JET", version="0.12"),
-])
-Pkg.instantiate()
+const AUDIT_CACHE_ROOT = let
+    configured_root = get(ENV, "CYAXIVERSE_AUDIT_CACHE", "")
+    isempty(configured_root) ?
+        joinpath(first(DEPOT_PATH), "environments", "cyaxiverse-audit") :
+        normpath(abspath(configured_root))
+end
+
+function file_digest(path)
+    isfile(path) || return "missing"
+    bytes2hex(SHA.sha256(read(path)))
+end
+
+function audit_dependency_spec()
+    join(("$name=$version" for (name, version) in AUDIT_DEPENDENCIES), ",")
+end
+
+function cache_key_material()
+    join([
+        "cache-version=$(AUDIT_CACHE_VERSION)",
+        "julia-version=$(VERSION)",
+        "platform=$(Sys.MACHINE)",
+        "project-root=$(PROJECT_ROOT)",
+        "project-sha256=$(file_digest(PROJECT_FILE))",
+        "manifest-sha256=$(file_digest(MANIFEST_FILE))",
+        "audit-dependencies=$(audit_dependency_spec())",
+    ], '\n')
+end
+
+const AUDIT_CACHE_KEY = bytes2hex(SHA.sha256(cache_key_material()))
+const AUDIT_ENV = joinpath(
+    AUDIT_CACHE_ROOT,
+    "v$(AUDIT_CACHE_VERSION)-$(AUDIT_CACHE_KEY)",
+)
+const AUDIT_CACHE_MARKER_NAME = ".cyaxiverse-audit-cache"
+
+function cache_marker(env)
+    join([
+        cache_key_material(),
+        "environment-project-sha256=$(file_digest(joinpath(env, "Project.toml")))",
+        "environment-manifest-sha256=$(file_digest(joinpath(env, "Manifest.toml")))",
+    ], '\n') * '\n'
+end
+
+function cache_is_valid(env)
+    isdir(env) || return false
+    marker = joinpath(env, AUDIT_CACHE_MARKER_NAME)
+    isfile(marker) || return false
+    isfile(joinpath(env, "Project.toml")) || return false
+    isfile(joinpath(env, "Manifest.toml")) || return false
+    read(marker, String) == cache_marker(env)
+end
+
+function audit_dependency_specs()
+    [Pkg.PackageSpec(name=name, version=version) for (name, version) in AUDIT_DEPENDENCIES]
+end
+
+function provision_audit_environment(env)
+    Pkg.activate(env)
+    Pkg.develop(Pkg.PackageSpec(path=PROJECT_ROOT))
+    Pkg.add(audit_dependency_specs())
+    Pkg.instantiate()
+end
+
+function ensure_audit_environment()
+    if cache_is_valid(AUDIT_ENV)
+        println("Using cached audit environment: $(AUDIT_ENV)")
+        Pkg.activate(AUDIT_ENV)
+        return
+    end
+
+    mkpath(AUDIT_CACHE_ROOT)
+    staging = mktempdir(AUDIT_CACHE_ROOT; prefix=".cyaxiverse-audit-")
+    try
+        println("Creating cached audit environment: $(AUDIT_ENV)")
+        provision_audit_environment(staging)
+        open(joinpath(staging, AUDIT_CACHE_MARKER_NAME), "w") do io
+            write(io, cache_marker(staging))
+        end
+
+        if ispath(AUDIT_ENV)
+            cache_is_valid(AUDIT_ENV) || rm(AUDIT_ENV; recursive=true, force=true)
+        end
+        mv(staging, AUDIT_ENV)
+        staging = nothing
+    finally
+        staging === nothing || rm(staging; recursive=true, force=true)
+    end
+
+    cache_is_valid(AUDIT_ENV) || error("Failed to create a valid audit environment cache.")
+    Pkg.activate(AUDIT_ENV)
+end
+
+ensure_audit_environment()
 
 using Aqua
 using JET

@@ -3,6 +3,18 @@
 !!! warning
     Under construction
 
+## Optional plotting
+
+Core package loading does not import the plotting stack. To use the plotting
+namespace, load its optional dependencies explicitly:
+
+```julia
+using CYAxiverse
+using CairoMakie, ColorSchemes
+
+CYAxiverse.plotting.vacua_db_jlm()
+```
+
 ## Data directory selection
 
 The geometry database is rooted at a directory containing entries such as

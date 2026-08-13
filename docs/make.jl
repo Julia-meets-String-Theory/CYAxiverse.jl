@@ -1,6 +1,8 @@
 push!(LOAD_PATH,"../src/")
 using Documenter
+using CairoMakie
 using CYAxiverse
+using ColorSchemes
 
 makedocs(
     sitename = "CYAxiverse.jl",
@@ -9,13 +11,14 @@ makedocs(
         prettyurls = get(ENV, "CI", nothing) == "true",
         size_threshold = 300 * 1024,
         size_threshold_warn = 300 * 1024,
-        canonical = "https://julia-meets-string-theory.github.io/CYAxiverse.jl/stable/"),
+        canonical = "https://julia-meets-string-theory.github.io/CYAxiverse.jl/dev/"),
     # Compatibility aliases point to already-documented benchmark modules.
     checkdocs = :exports,
     modules = [CYAxiverse],
     pages = [
         "Home" => "index.md",
         "User guide" => "userguide.md",
+        "Local axion-photon scan" => "axion_photon.md",
         "Examples" => "examples.md",
         "API" => "api.md"
     ]
