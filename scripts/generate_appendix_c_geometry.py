@@ -54,10 +54,11 @@ def potential_data(cy, tip, tau, kinv, volume):
             raw_coefficients.append((prefactor, exponent))
 
     raw = np.asarray(raw_coefficients, dtype=float)
-    L = np.empty_like(raw)
-    L[:, 0] = np.sign(raw[:, 0])
-    L[:, 1] = np.log10(np.abs(raw[:, 0])) + raw[:, 1]
-    return np.asarray(charges, dtype=int), L
+    L = np.empty((2, raw.shape[0]), dtype=float)
+    L[0, :] = np.sign(raw[:, 0])
+    L[1, :] = np.log10(np.abs(raw[:, 0])) + raw[:, 1]
+    Q = np.asarray(charges, dtype=int).T
+    return Q, L
 
 
 def validate(cy, tau, volume, kinetic, curve_volumes):
@@ -133,7 +134,7 @@ def main():
     print(f"Saved validated Appendix C geometry to {filepath}")
     print(f"h11={cy.h11()}, h21={cy.h21()}, volume={volume:.15g}")
     print(f"divisor volumes={tau.tolist()}")
-    print(f"potential terms={Q.shape[0]}")
+    print(f"potential terms={Q.shape[1]}")
 
 
 if __name__ == "__main__":

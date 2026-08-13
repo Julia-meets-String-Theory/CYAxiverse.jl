@@ -1,16 +1,18 @@
 """
-    CYAxiverse.glimmers
+    CYAxiverse.axion_photon
 
-Small, replayable implementation of the hierarchy, photon-coupling, and
-decay-width formulae used in the Glimmers axiverse analysis.  The reader is
-deliberately explicit about the local-file adaptation: the charge vectors are
-the columns of the stored `effective_cone` matrix, and the stored potential
+Small, replayable implementation of the leading axion hierarchy,
+axion--photon coupling, and decay-width calculations. The reader is
+deliberately explicit about the local-file adaptation: charge vectors are the
+columns of the stored `effective_cone` matrix, and stored potential
 coefficients are retained with their signs.
 
-This namespace does not claim to reproduce the paper's full model ensemble.
-It is intended for a bounded pilot on locally available `cyax.h5` files.
+This namespace operates on bounded local geometry scans. When a geometry was
+generated with the orientifold-compatible intersecting-D7 visible-sector
+policy, it can also use the selected QED divisor and its Euclidean-D3 term to
+derive the stringy light threshold.
 """
-module glimmers
+module axion_photon
 
 using HDF5
 using LinearAlgebra
@@ -20,9 +22,29 @@ using ..structs: GeometryIndex
 
 const M_PLANCK_GEV = 2.435e18
 const ALPHA_EM = 1 / 137.035999084
+const ELECTRON_MASS_EV = 0.511e6
 
-"""Geometry fields needed by the local Glimmers pilot."""
-struct GlimmersGeometry{T<:AbstractFloat}
+"""Orientifold-compatible QCD/QED divisor assignment stored with a geometry."""
+struct VisibleSectorAssignment{T<:AbstractFloat}
+    qcd_divisor_index::Int
+    qed_divisor_index::Int
+    qcd_image_index::Int
+    qed_image_index::Int
+    qcd_divisor_volume::T
+    qed_divisor_volume::T
+    qcd_charge::Vector{Int}
+    qed_charge::Vector{Int}
+    em_charge::Vector{Int}
+    qed_instanton_index::Int
+    qed_log10_lambda4::T
+    qcd_qed_intersection::Bool
+    qcd_invariant::Bool
+    qed_invariant::Bool
+    policy::Symbol
+end
+
+"""Geometry fields needed by the local axion--photon calculation."""
+struct GeometryInputs{T<:AbstractFloat}
     path::String
     index::GeometryIndex{Int}
     tip::Vector{T}
@@ -32,10 +54,11 @@ struct GlimmersGeometry{T<:AbstractFloat}
     direct_charges::Matrix{Int}
     direct_divisor_volumes::Vector{T}
     direct_labels::Vector{Int}
+    visible_sector::Union{Nothing,VisibleSectorAssignment{T}}
 end
 
 """Signed, log-scaled potential read from `cytools/potential`."""
-struct GlimmersPotential{T<:AbstractFloat}
+struct InstantonData{T<:AbstractFloat}
     Q::Matrix{Int}
     log10_lambda4::Vector{T}
     coefficient_signs::Vector{Int}
@@ -48,7 +71,7 @@ end
 with the same `h11 × h11` column convention as the input `Q`. The canonical
 charge matrix is `q = X' * Q_reduced` and is upper triangular.
 """
-struct GlimmersHierarchy{T<:AbstractFloat}
+struct LeadingAxionHierarchy{T<:AbstractFloat}
     selected_indices::Vector{Int}
     dependent_indices::Vector{Int}
     # Keep one selected instanton charge vector per column, matching Q.
@@ -64,8 +87,8 @@ struct GlimmersHierarchy{T<:AbstractFloat}
     metric_residual::T
 end
 
-"""Photon couplings and the two leading decay-width estimates."""
-struct GlimmersPhotonObservables{T<:AbstractFloat}
+"""Axion--photon couplings and the two leading decay-width estimates."""
+struct AxionPhotonObservables{T<:AbstractFloat}
     n_em::Vector{T}
     theta::Matrix{T}
     Cgamma::Vector{T}
@@ -74,18 +97,21 @@ struct GlimmersPhotonObservables{T<:AbstractFloat}
     log10_photon_width_GeV::Vector{T}
     log10_quartic_width_GeV::Vector{T}
     light_threshold_eV::T
+    log10_light_threshold_eV::T
     light_mode_count::Int
     charge_residual::T
 end
 
-"""One row of the local pilot, retaining all scientific intermediates."""
-struct GlimmersPilotResult{T<:AbstractFloat}
-    geometry::GlimmersGeometry{T}
-    potential::GlimmersPotential{T}
-    hierarchy::GlimmersHierarchy{T}
-    photons::GlimmersPhotonObservables{T}
+"""One local scan result, retaining all scientific intermediates."""
+struct AxionPhotonResult{T<:AbstractFloat}
+    geometry::GeometryInputs{T}
+    potential::InstantonData{T}
+    hierarchy::LeadingAxionHierarchy{T}
+    photons::AxionPhotonObservables{T}
     em_divisor_index::Int
     em_divisor_volume::T
+    em_charge_source::Symbol
+    light_threshold_policy::Symbol
     status::Symbol
 end
 
@@ -121,6 +147,75 @@ function _dataset(parent::HDF5.Group, name::AbstractString)
     object isa HDF5.Dataset || throw(ArgumentError(
         "HDF5 object '$name' must be a dataset"))
     object
+end
+
+function _read_int_scalar(parent::HDF5.Group, name::AbstractString)
+    value = HDF5.read(_dataset(parent, name))
+    value isa Integer || throw(ArgumentError(
+        "visible-sector field '$name' must be an integer scalar"))
+    Int(value)
+end
+
+function _read_bool_scalar(parent::HDF5.Group, name::AbstractString)
+    value = _read_int_scalar(parent, name)
+    value in (0, 1) || throw(ArgumentError(
+        "visible-sector field '$name' must be 0 or 1"))
+    value == 1
+end
+
+function _load_visible_sector(file::HDF5.File, geometric::HDF5.Group,
+        ::Type{T}, h11::Int, n_prime_divisors::Int) where {T<:AbstractFloat}
+    haskey(geometric, "visible_sector") || return nothing
+    object = geometric["visible_sector"]
+    object isa HDF5.Group || throw(ArgumentError(
+        "HDF5 object 'cytools/geometric/visible_sector' must be a group"))
+    visible = object
+    required = (
+        "qcd_divisor_index", "qed_divisor_index", "qcd_image_index",
+        "qed_image_index", "qcd_divisor_volume", "qed_divisor_volume",
+        "qcd_charge", "qed_charge", "em_charge", "qed_instanton_index",
+        "qed_log10_lambda4", "qcd_qed_intersection", "qcd_invariant",
+        "qed_invariant")
+    all(haskey(visible, name) for name in required) || throw(ArgumentError(
+        "visible-sector group is missing one or more required fields"))
+
+    qcd_index = _read_int_scalar(visible, "qcd_divisor_index") + 1
+    qed_index = _read_int_scalar(visible, "qed_divisor_index") + 1
+    qcd_image = _read_int_scalar(visible, "qcd_image_index") + 1
+    qed_image = _read_int_scalar(visible, "qed_image_index") + 1
+    all(1 <= index <= n_prime_divisors for index in
+        (qcd_index, qed_index, qcd_image, qed_image)) || throw(ArgumentError(
+        "visible-sector divisor indices are outside the prime-divisor list"))
+
+    qcd_volume = T(HDF5.read(_dataset(visible, "qcd_divisor_volume")))
+    qed_volume = T(HDF5.read(_dataset(visible, "qed_divisor_volume")))
+    all(isfinite, (qcd_volume, qed_volume)) &&
+        all(>(zero(T)), (qcd_volume, qed_volume)) || throw(ArgumentError(
+        "visible-sector divisor volumes must be positive and finite"))
+
+    qcd_charge = _integer_vector(HDF5.read(_dataset(visible, "qcd_charge")),
+        "visible_sector/qcd_charge")
+    qed_charge = _integer_vector(HDF5.read(_dataset(visible, "qed_charge")),
+        "visible_sector/qed_charge")
+    em_charge = _integer_vector(HDF5.read(_dataset(visible, "em_charge")),
+        "visible_sector/em_charge")
+    all(length(charge) == h11 for charge in (qcd_charge, qed_charge, em_charge)) ||
+        throw(DimensionMismatch("visible-sector charge vectors must have h11 entries"))
+    em_charge == qed_charge || throw(ArgumentError(
+        "visible-sector EM charge must match the selected QED divisor charge"))
+
+    qed_instanton_index = _read_int_scalar(visible, "qed_instanton_index") + 1
+    qed_instanton_index > 0 || throw(ArgumentError(
+        "visible-sector QED instanton index must be non-negative"))
+    qed_log10_lambda4 = T(HDF5.read(_dataset(visible, "qed_log10_lambda4")))
+    isfinite(qed_log10_lambda4) || throw(ArgumentError(
+        "visible-sector QED instanton scale must be finite"))
+    VisibleSectorAssignment{T}(qcd_index, qed_index, qcd_image, qed_image,
+        qcd_volume, qed_volume, qcd_charge, qed_charge, em_charge,
+        qed_instanton_index, qed_log10_lambda4,
+        _read_bool_scalar(visible, "qcd_qed_intersection"),
+        _read_bool_scalar(visible, "qcd_invariant"),
+        _read_bool_scalar(visible, "qed_invariant"), :intersecting_d7)
 end
 
 function _read_integer_float_dataset(dataset::HDF5.Dataset,
@@ -182,7 +277,7 @@ function _normalise_potential(Q, L, ::Type{T}) where {T<:AbstractFloat}
     scales .= exponent
     all(isfinite, scales) || throw(ArgumentError("computed instanton scales are non-finite"))
     order = sortperm(scales; rev=true, alg=MergeSort)
-    GlimmersPotential(q, scales[order], signs[order], order)
+    InstantonData(q, scales[order], signs[order], order)
 end
 
 function _load_potential(file::HDF5.File, ::Type{T}) where {T<:AbstractFloat}
@@ -191,8 +286,8 @@ function _load_potential(file::HDF5.File, ::Type{T}) where {T<:AbstractFloat}
     _normalise_potential(Q, L, T)
 end
 
-"""Read a local potential and convert its two-row `L` representation to log Λ⁴."""
-function load_potential(path::AbstractString; T::Type{<:AbstractFloat}=Float64)
+"""Read local instanton data and convert `L` to log Λ⁴."""
+function load_instanton_data(path::AbstractString; T::Type{<:AbstractFloat}=Float64)
     isfile(path) || throw(ArgumentError("geometry file does not exist: $path"))
     h5open(path, "r") do file
         _load_potential(file, T)
@@ -236,7 +331,7 @@ end
 function _load_geometry(file::HDF5.File, path::AbstractString,
         index::GeometryIndex, ::Type{T}) where {T<:AbstractFloat}
     _required_geometry_fields(file) || throw(ArgumentError(
-        "geometry file lacks the complete local Glimmers fields: $path"))
+        "geometry file lacks the complete local axion--photon fields: $path"))
     geometric_object = file["cytools/geometric"]
     geometric_object isa HDF5.Group || throw(ArgumentError(
         "HDF5 object 'cytools/geometric' must be a group"))
@@ -276,8 +371,9 @@ function _load_geometry(file::HDF5.File, path::AbstractString,
         kinv[column, row] = value
     end
     cholesky(Symmetric(kinv))
-    GlimmersGeometry{T}(normpath(abspath(path)), index, tip, divisor_volumes,
-        cy_volume, kinv, direct, direct_volumes, labels)
+    visible_sector = _load_visible_sector(file, geometric, T, h11, length(labels))
+    GeometryInputs{T}(normpath(abspath(path)), index, tip, divisor_volumes,
+        cy_volume, kinv, direct, direct_volumes, labels, visible_sector)
 end
 
 function _load_geometry(path::AbstractString, index::GeometryIndex,
@@ -288,8 +384,8 @@ function _load_geometry(path::AbstractString, index::GeometryIndex,
     end
 end
 
-"""Read geometry metadata and the direct divisor-charge convention from a local file."""
-function load_geometry(path::AbstractString;
+"""Read geometry metadata and direct divisor charges from a local file."""
+function load_geometry_inputs(path::AbstractString;
         T::Type{<:AbstractFloat}=Float64,
         index::Union{Nothing,GeometryIndex}=nothing)
     isfile(path) || throw(ArgumentError("geometry file does not exist: $path"))
@@ -297,10 +393,10 @@ function load_geometry(path::AbstractString;
     _load_geometry(path, selected_index, T)
 end
 
-function load_geometry(index::GeometryIndex;
+function load_geometry_inputs(index::GeometryIndex;
         data_dir=nothing, T::Type{<:AbstractFloat}=Float64)
     path = geometry_path(index; data_dir=data_dir)
-    load_geometry(path; T=T, index=index)
+    load_geometry_inputs(path; T=T, index=index)
 end
 
 function _is_complete_geometry(path::AbstractString)
@@ -310,7 +406,7 @@ function _is_complete_geometry(path::AbstractString)
     end
 end
 
-"""Return deterministic local geometry indices for a bounded pilot."""
+"""Return deterministic local geometry indices for a bounded scan."""
 function local_geometry_indices(data_dir::AbstractString;
         h11s=(15, 100, 200, 300), limit_per_h11::Integer=2,
         require_complete::Bool=true)
@@ -384,7 +480,7 @@ function _rank_state_append!(basis::Matrix{Int64}, active::BitVector,
     true
 end
 
-function _select_independent_terms(potential::GlimmersPotential,
+function _select_independent_terms(potential::InstantonData,
         h11::Int; rank_primes=(1_000_003, 1_000_033))
     size(potential.Q, 1) == h11 || throw(DimensionMismatch(
         "potential charge matrix does not match Kinv"))
@@ -441,8 +537,8 @@ function _canonical_frame(Q_reduced::Matrix{Int}, Kinv::Matrix{T}) where {T<:Abs
     q, theta, factor
 end
 
-"""Construct the leading Glimmers charge frame and log-scale masses."""
-function hierarchy(potential::GlimmersPotential, kinv::AbstractMatrix{<:Real};
+"""Construct the leading axion charge frame and log-scale masses."""
+function leading_hierarchy(potential::InstantonData, kinv::AbstractMatrix{<:Real};
         T::Type{<:AbstractFloat}=Float64,
         signed_scale_policy::Symbol=:require_positive,
         rank_primes=(1_000_003, 1_000_033),
@@ -477,26 +573,26 @@ function hierarchy(potential::GlimmersPotential, kinv::AbstractMatrix{<:Real};
     for i in 1:h11
         log10_f[i] = log_m_planck - log10(T(2π)) - log10(diag_q[i])
         log10_mass[i] = T(0.5) * T(selected_scales[i]) +
-            log_m_planck + T(9) - log10(T(2π)) - log10(diag_q[i])
+            log_m_planck + T(9) + log10(T(2π)) + log10(diag_q[i])
     end
     identity = Matrix{T}(I, h11, h11)
     metric_residual = norm(transpose(theta) * (factor \ theta) - identity, Inf)
     scale = max(norm(q, Inf), one(T))
     triangular_residual = norm(tril(q, -1), Inf) / scale
-    GlimmersHierarchy{T}(selected, dependent, Q_reduced,
+    LeadingAxionHierarchy{T}(selected, dependent, Q_reduced,
         T.(selected_scales), signs, q, theta, log10_f,
         log10_mass, planck, triangular_residual, metric_residual)
 end
 
-function hierarchy(path::AbstractString; T::Type{<:AbstractFloat}=Float64,
+function leading_hierarchy(path::AbstractString; T::Type{<:AbstractFloat}=Float64,
         kwargs...)
-    potential_data = load_potential(path; T=T)
-    geometry_data = load_geometry(path; T=T)
-    hierarchy(potential_data, geometry_data.kinv; T=T, kwargs...)
+    potential_data = load_instanton_data(path; T=T)
+    geometry_data = load_geometry_inputs(path; T=T)
+    leading_hierarchy(potential_data, geometry_data.kinv; T=T, kwargs...)
 end
 
-"""Return the paper's leading-hierarchy mixing matrix Θ."""
-function mixing_matrix(result::GlimmersHierarchy{T}) where {T<:AbstractFloat}
+"""Return the leading-hierarchy mixing matrix Θ."""
+function mixing_matrix(result::LeadingAxionHierarchy{T}) where {T<:AbstractFloat}
     n = length(result.log10_lambda4)
     theta = zeros(T, n, n)
     for a in 1:n, b in 1:n
@@ -514,11 +610,50 @@ function _log10_abs(value::T) where {T<:AbstractFloat}
     iszero(value) ? T(-Inf) : log10(abs(value))
 end
 
+function _exp10_or_zero(value::T) where {T<:AbstractFloat}
+    value < log10(floatmin(T)) ? zero(T) : T(10)^value
+end
+
+"""
+    qed_instanton_log10_threshold_eV(geometry)
+
+Compute the QED light threshold from the selected divisor's Euclidean-D3
+instanton term. The result is `log10(m_QED/eV)` and therefore remains usable
+when the threshold is below the representable range of a regular Float64.
+The geometry must contain an `intersecting_d7` visible-sector assignment.
+"""
+function qed_instanton_log10_threshold_eV(
+        geometry::GeometryInputs{T}; m_planck_GeV::Real=M_PLANCK_GEV) where {T<:AbstractFloat}
+    assignment = geometry.visible_sector
+    assignment === nothing && throw(ArgumentError(
+        "geometry has no orientifold-compatible QCD/QED divisor assignment"))
+    planck = T(m_planck_GeV)
+    planck > zero(T) && isfinite(planck) || throw(ArgumentError(
+        "m_planck_GeV must be positive and finite"))
+    charge = Vector{T}(undef, length(assignment.qed_charge))
+    transformed = similar(charge)
+    @inbounds for index in eachindex(charge)
+        charge[index] = T(assignment.qed_charge[index])
+    end
+    mul!(transformed, geometry.kinv, charge)
+    norm_squared = dot(charge, transformed)
+    norm_squared > zero(T) && isfinite(norm_squared) || throw(ArgumentError(
+        "QED divisor charge has a non-positive kinetic norm"))
+    T(0.5) * assignment.qed_log10_lambda4 + log10(planck) + T(9) +
+        log10(T(2π)) + T(0.5) * log10(norm_squared)
+end
+
+"""Compute the QED light threshold in eV, returning zero only on underflow."""
+function qed_instanton_threshold_eV(geometry::GeometryInputs{T}; kwargs...) where {T<:AbstractFloat}
+    _exp10_or_zero(qed_instanton_log10_threshold_eV(geometry; kwargs...))
+end
+
 """Compute photon couplings, the QED-threshold proxy, and leading widths."""
-function photon_observables(result::GlimmersHierarchy{T},
+function photon_observables(result::LeadingAxionHierarchy{T},
         em_charge::AbstractVector{<:Real};
         alpha_em::Real=ALPHA_EM,
-        light_threshold_eV::Real=0.511e6) where {T<:AbstractFloat}
+        light_threshold_eV::Real=ELECTRON_MASS_EV,
+        light_threshold_log10_eV::Union{Nothing,Real}=nothing) where {T<:AbstractFloat}
     n = size(result.Q_reduced, 1)
     length(em_charge) == n || throw(DimensionMismatch(
         "EM charge vector must have h11 entries"))
@@ -534,9 +669,17 @@ function photon_observables(result::GlimmersHierarchy{T},
         log10_g[i] = log10(T(alpha_em) / T(2π)) - log10_f[i] +
             _log10_abs(Cgamma[i])
     end
-    threshold = T(light_threshold_eV)
-    threshold > zero(T) || throw(ArgumentError("light threshold must be positive"))
-    log_threshold = log10(threshold)
+    threshold, log_threshold = if light_threshold_log10_eV === nothing
+        value = T(light_threshold_eV)
+        value > zero(T) && isfinite(value) || throw(ArgumentError(
+            "light threshold must be positive and finite"))
+        value, log10(value)
+    else
+        value = T(light_threshold_log10_eV)
+        isfinite(value) || throw(ArgumentError(
+            "log10 light threshold must be finite"))
+        _exp10_or_zero(value), value
+    end
     log10_g_effective = copy(log10_g)
     light_count = 0
     for i in 1:n
@@ -559,57 +702,105 @@ function photon_observables(result::GlimmersHierarchy{T},
         log10_quartic_width[a] = T(2) * log_lambda + log10_mass_GeV[a] -
             log10(T(128π^3))
     end
-    GlimmersPhotonObservables{T}(n_em, theta, Cgamma, log10_g,
+    AxionPhotonObservables{T}(n_em, theta, Cgamma, log10_g,
         log10_g_effective, log10_photon_width, log10_quartic_width,
-        threshold, light_count, charge_residual)
+        threshold, log_threshold, light_count, charge_residual)
 end
 
-function _default_em_index(geometry::GlimmersGeometry)
-    findmin(geometry.direct_divisor_volumes)[2]
+function _em_selection(geometry::GeometryInputs, em_divisor_index)
+    assignment = geometry.visible_sector
+    if em_divisor_index === nothing && assignment !== nothing
+        return assignment.qed_divisor_index, assignment.em_charge,
+            assignment.qed_divisor_volume, :visible_sector_qed
+    end
+    em_index = em_divisor_index === nothing ?
+        findmin(geometry.direct_divisor_volumes)[2] : Int(em_divisor_index)
+    1 <= em_index <= size(geometry.direct_charges, 2) ||
+        throw(BoundsError(geometry.direct_charges, (:, em_index)))
+    em_index, geometry.direct_charges[:, em_index],
+        geometry.direct_divisor_volumes[em_index], :direct_effective_cone
 end
 
-function _run_local_pilot(path::AbstractString;
+function _validate_visible_sector_potential(
+        geometry::GeometryInputs, potential::InstantonData)
+    assignment = geometry.visible_sector
+    assignment === nothing && throw(ArgumentError(
+        "visible-sector QED metadata are unavailable"))
+    source = assignment.qed_instanton_index
+    1 <= source <= size(potential.Q, 2) || throw(ArgumentError(
+        "visible-sector QED instanton index is outside the stored potential"))
+    all(index -> potential.Q[index, source] == assignment.qed_charge[index],
+        eachindex(assignment.qed_charge)) || throw(ArgumentError(
+        "visible-sector QED charge does not match its stored instanton column"))
+    sorted_position = findfirst(==(source), potential.source_indices)
+    sorted_position === nothing && throw(ArgumentError(
+        "visible-sector QED instanton index is absent from the sorted potential"))
+    isapprox(potential.log10_lambda4[sorted_position],
+        assignment.qed_log10_lambda4; rtol=zero(eltype(potential.log10_lambda4)),
+        atol=8eps(eltype(potential.log10_lambda4))) || throw(ArgumentError(
+        "visible-sector QED instanton scale does not match its stored potential column"))
+    nothing
+end
+
+function _run_local_scan(path::AbstractString;
         T::Type{<:AbstractFloat}=Float64,
         em_divisor_index::Union{Nothing,Integer}=nothing,
-        light_threshold_eV::Real=0.511e6,
+        light_threshold_eV::Real=ELECTRON_MASS_EV,
+        qed_threshold_policy::Symbol=:electron_proxy,
         signed_scale_policy::Symbol=:require_positive)
     isfile(path) || throw(ArgumentError("geometry file does not exist: $path"))
     index = _index_from_path(path)
     geometry_data, potential_data = h5open(path, "r") do file
         _load_geometry(file, path, index, T), _load_potential(file, T)
     end
-    hierarchy_data = hierarchy(potential_data, geometry_data.kinv; T=T,
+    hierarchy_data = leading_hierarchy(potential_data, geometry_data.kinv; T=T,
         signed_scale_policy=signed_scale_policy)
-    em_index = em_divisor_index === nothing ? _default_em_index(geometry_data) :
-        Int(em_divisor_index)
-    1 <= em_index <= size(geometry_data.direct_charges, 2) ||
-        throw(BoundsError(geometry_data.direct_charges, (:, em_index)))
-    em_charge = geometry_data.direct_charges[:, em_index]
+    qed_threshold_policy in (:electron_proxy, :divisor_instanton) || throw(ArgumentError(
+        "qed_threshold_policy must be :electron_proxy or :divisor_instanton"))
+    em_index, em_charge, em_volume, em_source = _em_selection(
+        geometry_data, em_divisor_index)
+    threshold, threshold_log = if qed_threshold_policy == :divisor_instanton
+        geometry_data.visible_sector === nothing && throw(ArgumentError(
+            "qed_threshold_policy=:divisor_instanton requires visible-sector metadata"))
+        _validate_visible_sector_potential(geometry_data, potential_data)
+        log_threshold = qed_instanton_log10_threshold_eV(geometry_data;
+            m_planck_GeV=hierarchy_data.m_planck_GeV)
+        _exp10_or_zero(log_threshold), log_threshold
+    else
+        value = T(light_threshold_eV)
+        value > zero(T) && isfinite(value) || throw(ArgumentError(
+            "light_threshold_eV must be positive and finite"))
+        value, log10(value)
+    end
     photons = photon_observables(hierarchy_data, em_charge;
-        light_threshold_eV=light_threshold_eV)
-    status = signed_scale_policy == :absolute ? :adapted_absolute_scale :
-        :adapted_local_geometry
-    GlimmersPilotResult{T}(geometry_data, potential_data, hierarchy_data,
-        photons, em_index, geometry_data.direct_divisor_volumes[em_index], status)
+        light_threshold_eV=threshold, light_threshold_log10_eV=threshold_log)
+    status = qed_threshold_policy == :divisor_instanton ?
+        :visible_sector_instanton_threshold :
+        (signed_scale_policy == :absolute ? :adapted_absolute_scale :
+         :adapted_local_geometry)
+    AxionPhotonResult{T}(geometry_data, potential_data, hierarchy_data,
+        photons, em_index, em_volume, em_source, qed_threshold_policy, status)
 end
 
-"""Run the bounded local pilot on deterministic h11 slices."""
-function run_local_pilot(; data_dir=nothing, h11s=(15, 100, 200, 300),
+"""Run a bounded local axion--photon scan on deterministic h11 slices."""
+function run_local_scan(; data_dir=nothing, h11s=(15, 100, 200, 300),
         limit_per_h11::Integer=2, require_complete::Bool=true,
         T::Type{<:AbstractFloat}=Float64,
         em_divisor_index::Union{Nothing,Integer}=nothing,
-        light_threshold_eV::Real=0.511e6,
+        light_threshold_eV::Real=ELECTRON_MASS_EV,
+        qed_threshold_policy::Symbol=:electron_proxy,
         signed_scale_policy::Symbol=:require_positive)
     root = resolve_data_dir(data_dir)
     indices = local_geometry_indices(root; h11s=h11s,
         limit_per_h11=limit_per_h11, require_complete=require_complete)
     isempty(indices) && throw(ArgumentError(
         "no matching complete local geometries were found in $root"))
-    results = GlimmersPilotResult{T}[]
+    results = AxionPhotonResult{T}[]
     for index in indices
-        push!(results, _run_local_pilot(geometry_path(index; data_dir=root);
+        push!(results, _run_local_scan(geometry_path(index; data_dir=root);
             T=T, em_divisor_index=em_divisor_index,
             light_threshold_eV=light_threshold_eV,
+            qed_threshold_policy=qed_threshold_policy,
             signed_scale_policy=signed_scale_policy))
     end
     results
@@ -619,13 +810,15 @@ function _max_log10_abs(values::AbstractVector{T}) where {T<:AbstractFloat}
     maximum((_log10_abs(value) for value in values); init=T(-Inf))
 end
 
-"""Write one compact CSV summary for pilot review; detailed arrays remain in Julia."""
-function write_pilot_csv(path::AbstractString, results::AbstractVector{<:GlimmersPilotResult})
+"""Write one compact CSV summary; detailed arrays remain in Julia."""
+function write_scan_csv(path::AbstractString, results::AbstractVector{<:AxionPhotonResult})
     parent = dirname(normpath(path))
     isdir(parent) || throw(ArgumentError("CSV parent directory does not exist: $parent"))
     fields = ("path", "h11", "polytope", "frst", "status", "n_input",
         "n_selected", "n_dependent", "em_divisor_index", "em_divisor_volume",
-        "light_mode_count", "max_log10_g_GeVinv", "max_log10_Cgamma",
+        "em_charge_source", "light_threshold_policy", "light_threshold_eV",
+        "log10_light_threshold_eV", "light_mode_count", "max_log10_g_GeVinv",
+        "max_log10_Cgamma",
         "triangular_residual", "metric_residual", "charge_residual")
     open(path, "w") do io
         println(io, join(fields, ','))
@@ -637,6 +830,8 @@ function write_pilot_csv(path::AbstractString, results::AbstractVector{<:Glimmer
                 result.status, length(result.potential.source_indices),
                 length(h.selected_indices), length(h.dependent_indices),
                 result.em_divisor_index, result.em_divisor_volume,
+                result.em_charge_source, result.light_threshold_policy,
+                p.light_threshold_eV, p.log10_light_threshold_eV,
                 p.light_mode_count, maximum(p.log10_g_GeVinv),
                 _max_log10_abs(p.Cgamma), h.triangular_residual,
                 h.metric_residual, p.charge_residual)
@@ -646,9 +841,24 @@ function write_pilot_csv(path::AbstractString, results::AbstractVector{<:Glimmer
     normpath(abspath(path))
 end
 
-export GlimmersGeometry, GlimmersPotential, GlimmersHierarchy,
-    GlimmersPhotonObservables, GlimmersPilotResult, load_geometry,
-    load_potential, geometry_path, local_geometry_indices, hierarchy,
-    mixing_matrix, photon_observables, run_local_pilot, write_pilot_csv
+"""Compatibility names retained for existing local analyses."""
+const GlimmersGeometry = GeometryInputs
+const GlimmersPotential = InstantonData
+const GlimmersHierarchy = LeadingAxionHierarchy
+const GlimmersPhotonObservables = AxionPhotonObservables
+const GlimmersPilotResult = AxionPhotonResult
+const load_geometry = load_geometry_inputs
+const load_potential = load_instanton_data
+const hierarchy = leading_hierarchy
+const run_local_pilot = run_local_scan
+const write_pilot_csv = write_scan_csv
+
+export VisibleSectorAssignment, GeometryInputs, InstantonData,
+    LeadingAxionHierarchy, AxionPhotonObservables, AxionPhotonResult,
+    load_geometry_inputs,
+    load_instanton_data, geometry_path, local_geometry_indices,
+    leading_hierarchy, mixing_matrix, photon_observables,
+    qed_instanton_log10_threshold_eV, qed_instanton_threshold_eV,
+    run_local_scan, write_scan_csv
 
 end

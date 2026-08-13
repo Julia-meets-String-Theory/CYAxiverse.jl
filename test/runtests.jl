@@ -27,7 +27,7 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
-include(joinpath(@__DIR__, "glimmers.jl"))
+include(joinpath(@__DIR__, "axion_photon.jl"))
 
 @testset "Data directory resolution" begin
     filestructure = CYAxiverse.filestructure

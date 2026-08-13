@@ -112,11 +112,11 @@ If this is the first run, `julia` will precompile the required packages for `CYA
 Enjoy! 
 ![:deploy_parrot:](https://emoji.slack-edge.com/T7DMEKZMH/deployparrot/ef6c902688cec864.gif)
 
-## Glimmers local pilot
+## Local axion--photon scan
 
-See the [Glimmers local pilot guide](glimmers.md) for the bounded hierarchy,
-photon-coupling, and width routines that operate on the locally available
-geometry files.
+See the [local axion--photon scan guide](axion_photon.md) for the bounded
+hierarchy, photon-coupling, and width routines that operate on the locally
+available geometry files.
 
 
 ## Acknowledgements 🙏
