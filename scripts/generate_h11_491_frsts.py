@@ -19,12 +19,16 @@ two-face-combination accounting.  On this polytope the fast two-face sampler
 can exhaust its finite source after one proposal; the run report records that
 shortfall rather than presenting it as a large or representative sample.  The
 optional ``fast``, ``fair``, and ``gnn_ntfe`` proposal families retain the
-package's controls and provenance metadata.
+package's controls and provenance metadata.  The fixed polytope can be loaded
+from the checked-in replay manifest or the complete KS Parquet mirror.  When
+requested, the visible-sector path records a geometry-derived toy QED
+assignment with exact charge matching and explicit failure categories.
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
 import os
@@ -67,7 +71,10 @@ DEFAULT_MANIFEST = os.path.join(
     os.path.dirname(__file__), "manifests", "h11_491_11_ks.json"
 )
 DEFAULT_OUTDIR = "h11_491_geometry"
+KS_MIRROR_DATASET = "calabi-yau-data/polytopes-4d"
+KS_MIRROR_DATASET_URL = "https://huggingface.co/datasets/calabi-yau-data/polytopes-4d"
 EXPECTED_REJECTIONS = (
+    package_generator.QEDAssignmentFailure,
     package_generator.PrefactorCriterionNotMet,
     package_generator.NoPhysicalKaehlerPoint,
     package_generator.NoQcdDivisorVolume,
@@ -110,16 +117,8 @@ def atomic_json_dump(path, payload):
             os.unlink(temporary)
 
 
-def load_h491_polytope(manifest_path):
-    """Load and validate the one local manifest entry used by this script."""
-    manifest = package_generator.load_polytope_manifest(manifest_path)
-    vertices_list = manifest["by_h11"].get(H11, [])
-    if len(vertices_list) != 1:
-        raise RuntimeError(
-            "The h11=491 manifest must contain exactly one polytope; "
-            f"found {len(vertices_list)}."
-        )
-    vertices = np.asarray(vertices_list[0], dtype=int)
+def _validate_h491_polytope(vertices):
+    """Reconstruct and validate the fixed h11=491 target."""
     poly = Polytope(vertices, deterministic_glsm_basis=True)
     observed = (int(poly.h11()), int(poly.h21()))
     if observed != (H11, H21):
@@ -133,20 +132,118 @@ def load_h491_polytope(manifest_path):
         raise RuntimeError("The h11=491 manifest polytope is not reflexive.")
     if not poly.is_favorable(lattice="N"):
         raise RuntimeError("The h11=491 manifest polytope is not favorable on N.")
-    return manifest, vertices, poly
+    return vertices, poly
 
 
-def polytope_metadata(poly, vertices, manifest_path, manifest):
+def _load_h491_manifest(manifest_path):
+    """Load the one local manifest entry used by this script."""
+    manifest = package_generator.load_polytope_manifest(manifest_path)
+    vertices_list = manifest["by_h11"].get(H11, [])
+    if len(vertices_list) != 1:
+        raise RuntimeError(
+            "The h11=491 manifest must contain exactly one polytope; "
+            f"found {len(vertices_list)}."
+        )
+    vertices, poly = _validate_h491_polytope(np.asarray(vertices_list[0], dtype=int))
+    source = {
+        "source_kind": "local_polytope_manifest",
+        "manifest_path": os.path.abspath(manifest_path),
+        "manifest_sha256": file_sha256(manifest_path),
+        "manifest_source": manifest.get("source"),
+        "physical_h11": H11,
+        "physical_h21": H21,
+    }
+    return source, vertices, poly
+
+
+def _load_h491_mirror(parquet_dir):
+    """Load the published KS Parquet mirror using its dual Hodge labels."""
+    try:
+        import pyarrow.parquet as parquet
+    except ImportError as exc:
+        raise RuntimeError(
+            "The Parquet mirror source requires pyarrow in the CYTools environment."
+        ) from exc
+    parquet_dir = os.path.abspath(os.fspath(parquet_dir))
+    paths = sorted(
+        glob.glob(os.path.join(parquet_dir, "polytopes-4d-*-vertices.parquet")),
+        key=lambda path: int(os.path.basename(path).split("-")[2]),
+    )
+    if not paths:
+        raise RuntimeError(f"No KS Parquet mirror partitions found in {parquet_dir}.")
+    matches = []
+    for path in paths:
+        table = parquet.read_table(path, columns=["vertices", "vertex_count", "h11", "h12"])
+        for row_index, row in enumerate(table.to_pylist()):
+            if int(row["h12"]) != H11:
+                continue
+            vertices = np.asarray(row["vertices"], dtype=int)
+            candidate_vertices, poly = _validate_h491_polytope(vertices)
+            matches.append(
+                (
+                    {
+                        "source_kind": "huggingface_parquet_mirror",
+                        "dataset": KS_MIRROR_DATASET,
+                        "dataset_url": KS_MIRROR_DATASET_URL,
+                        "parquet_file": os.path.abspath(path),
+                        "row_index": int(row_index),
+                        "mirror_h11": int(row["h11"]),
+                        "mirror_h12": int(row["h12"]),
+                        "physical_h11": H11,
+                        "physical_h21": int(row["h11"]),
+                        "vertex_count": int(row["vertex_count"]),
+                        "hodge_mapping": "physical h11=mirror h12; physical h21=mirror h11",
+                    },
+                    candidate_vertices,
+                    poly,
+                )
+            )
+    if len(matches) != 1:
+        raise RuntimeError(
+            "The h11=491 mirror source must contain exactly one matching polytope; "
+            f"found {len(matches)}."
+        )
+    return matches[0]
+
+
+def load_h491_polytope(
+    manifest_path=DEFAULT_MANIFEST, *, database_source="manifest", parquet_dir=None
+):
+    """Load the fixed target from a replay manifest or the KS Parquet mirror."""
+    if database_source == "manifest":
+        return _load_h491_manifest(manifest_path)
+    if database_source == "mirror":
+        if parquet_dir is None:
+            raise ValueError("database_source='mirror' requires parquet_dir")
+        return _load_h491_mirror(parquet_dir)
+    raise ValueError(f"unsupported database source {database_source!r}")
+
+
+def polytope_metadata(poly, vertices, source, manifest=None):
     """Build JSON-safe identity and point-configuration metadata."""
     polytope_id, canonical_points = package_generator.polytope_identity(poly)
+    if isinstance(source, (str, os.PathLike)):
+        source = {
+            "source_kind": "local_polytope_manifest",
+            "manifest_path": os.fspath(source),
+        }
+    source = dict(source or {})
+    manifest_path = source.get("manifest_path")
     return {
         "h11": H11,
         "h21": H21,
         "polytope_index": POLYTOPE_INDEX,
         "identity": polytope_id,
-        "manifest_path": os.path.abspath(manifest_path),
-        "manifest_sha256": file_sha256(manifest_path),
-        "manifest_source": manifest.get("source"),
+        "source": source,
+        "manifest_path": None if manifest_path is None else os.path.abspath(manifest_path),
+        "manifest_sha256": (
+            None if manifest_path is None else file_sha256(manifest_path)
+        ),
+        "manifest_source": (
+            source.get("manifest_source")
+            if manifest is None
+            else manifest.get("source")
+        ),
         "vertices": vertices.tolist(),
         "reflexive": bool(poly.is_reflexive()),
         "favorable_n": bool(poly.is_favorable(lattice="N")),
@@ -172,6 +269,17 @@ def build_parser():
         dest="manifest",
         default=DEFAULT_MANIFEST,
         help="Local KS manifest containing the unique h11=491 polytope.",
+    )
+    parser.add_argument(
+        "--database-source",
+        choices=("manifest", "mirror"),
+        default="manifest",
+        help="Use the checked-in replay manifest or the downloaded KS Parquet mirror.",
+    )
+    parser.add_argument(
+        "--parquet-dir",
+        default=None,
+        help="Directory containing polytopes-4d-*-vertices.parquet for --database-source mirror.",
     )
     parser.add_argument("--outdir", default=DEFAULT_OUTDIR)
     parser.add_argument(
@@ -263,7 +371,36 @@ def build_parser():
     parser.add_argument(
         "--visible-sector-policy", choices=("none", "intersecting_d7"), default="none"
     )
-    parser.add_argument("--qed-divisor-index", type=int, default=None)
+    parser.add_argument(
+        "--qed-selection-policy",
+        choices=("uniform_eligible", "explicit"),
+        default="uniform_eligible",
+        help="Select QED uniformly from the stable eligible pool or use an explicit index.",
+    )
+    parser.add_argument(
+        "--qed-divisor-index",
+        type=int,
+        default=None,
+        help="One-based user-facing QED divisor index for --qed-selection-policy explicit.",
+    )
+    parser.add_argument(
+        "--qed-selection-seed",
+        type=int,
+        default=None,
+        help="Optional reproducible QED pool-selection seed; defaults to the candidate seed.",
+    )
+    parser.add_argument(
+        "--qed-volume-filter",
+        choices=("none", "source_aligned"),
+        default="none",
+        help="Disable filtering or use the source-aligned pre-filter-pool volume check.",
+    )
+    parser.add_argument(
+        "--qed-volume-max",
+        type=float,
+        default=None,
+        help="QED volume upper bound; source_aligned defaults to 127.5.",
+    )
     parser.add_argument("--orientifold-file", type=str, default=None)
     parser.add_argument("--export-kahler-rays", action="store_true")
     parser.add_argument(
@@ -325,16 +462,33 @@ def validate_args(args):
         raise ValueError("--qcd-divisor-index must be non-negative.")
     if args.qcd_divisor_index is not None and args.moduli_policy != "canonical_qcd":
         raise ValueError("--qcd-divisor-index requires --moduli-policy canonical_qcd.")
-    if args.qed_divisor_index is not None and args.qed_divisor_index < 0:
-        raise ValueError("--qed-divisor-index must be non-negative.")
+    if args.qed_divisor_index is not None and args.qed_divisor_index < 1:
+        raise ValueError("--qed-divisor-index is one-based and must be positive.")
+    if args.qed_selection_policy == "explicit" and args.qed_divisor_index is None:
+        raise ValueError("--qed-selection-policy explicit requires --qed-divisor-index.")
+    if args.qed_selection_policy == "uniform_eligible" and args.qed_divisor_index is not None:
+        raise ValueError("--qed-divisor-index requires --qed-selection-policy explicit.")
+    if args.visible_sector_policy == "none" and (
+        args.qed_selection_policy == "explicit" or args.qed_divisor_index is not None
+    ):
+        raise ValueError(
+            "QED selection requires --visible-sector-policy intersecting_d7."
+        )
     if args.visible_sector_policy == "intersecting_d7" and args.orientifold_file is None:
         raise ValueError(
             "--visible-sector-policy intersecting_d7 requires --orientifold-file."
         )
-    if args.qed_divisor_index is not None and args.visible_sector_policy != "intersecting_d7":
-        raise ValueError(
-            "--qed-divisor-index requires --visible-sector-policy intersecting_d7."
-        )
+    if args.qed_volume_filter == "none" and args.qed_volume_max is not None:
+        raise ValueError("--qed-volume-max requires --qed-volume-filter source_aligned.")
+    if args.qed_volume_filter == "source_aligned":
+        if args.qed_volume_max is None:
+            args.qed_volume_max = 127.5
+        if args.qed_volume_max <= 0.0 or not np.isfinite(args.qed_volume_max):
+            raise ValueError("--qed-volume-max must be finite and positive.")
+    if args.database_source == "mirror" and args.parquet_dir is None:
+        raise ValueError("--database-source mirror requires --parquet-dir.")
+    if args.database_source == "manifest" and args.parquet_dir is not None:
+        raise ValueError("--parquet-dir requires --database-source mirror.")
     if args.export_kahler_rays and args.dry_run:
         # This is only informational; the real export remains opt-in.
         pass
@@ -462,6 +616,12 @@ def sampling_metadata(args, poly):
         "ntfe_face_sampler": args.ntfe_face_sampler,
         "ntfe_max_face_points": args.ntfe_max_face_points,
         "ntfe_face_pool_size": args.ntfe_face_pool_size,
+        "visible_sector_policy": args.visible_sector_policy,
+        "qed_selection_policy": args.qed_selection_policy,
+        "qed_selection_seed": args.qed_selection_seed,
+        "qed_volume_filter": args.qed_volume_filter,
+        "qed_volume_max": args.qed_volume_max,
+        "database_source": args.database_source,
         "qp_solver_preference": "mosek_if_licensed_then_available",
         "mosek_license_configured": mosek_license["configured"],
         "mosek_license_activated": mosek_license["activated"],
@@ -482,6 +642,11 @@ def existing_output_indices(outdir):
 
 def make_report(args, poly_metadata_value, outdir, report_path, orientifold):
     direct_ntfe = args.sampling_scheme in {"ntfe_fast", "gnn_ntfe"}
+    source_label = (
+        "KS Parquet mirror"
+        if args.database_source == "mirror"
+        else "local replay manifest"
+    )
     return {
         "schema_version": f"{SCHEMA_VERSION}-h11-491-run",
         "target_population": (
@@ -491,7 +656,7 @@ def make_report(args, poly_metadata_value, outdir, report_path, orientifold):
             else "full CY3 geometries from FRSTs of the unique favorable KS h11=491 polytope"
         ),
         "realised_sample": (
-            "bounded local-manifest HDF5 generation with explicit CY3, Kähler, "
+            f"bounded {source_label} HDF5 generation with explicit CY3, Kähler, "
             "potential, and physical-selection outcomes; not population-representative"
         ),
         "construction": {
@@ -503,6 +668,14 @@ def make_report(args, poly_metadata_value, outdir, report_path, orientifold):
             "physical_selection": True,
             "moduli_policy": args.moduli_policy,
             "visible_sector_policy": args.visible_sector_policy,
+            "qed_selection_policy": args.qed_selection_policy,
+            "qed_selection_seed": args.qed_selection_seed,
+            "qed_volume_filter": args.qed_volume_filter,
+            "qed_volume_max": args.qed_volume_max,
+            "claim_boundary": (
+                "geometry-derived integer divisor-class toy assignment only; not a "
+                "physical Standard Model brane construction or representative ensemble"
+            ),
             "orientifold": package_generator._jsonable(orientifold),
         },
         "sampling": {
@@ -545,6 +718,7 @@ def make_report(args, poly_metadata_value, outdir, report_path, orientifold):
                 "cytools/geometric",
                 "cytools/potential",
                 "construction_metadata",
+                "optional cytools/geometric/visible_sector",
             ],
         },
         "counts": {
@@ -559,6 +733,10 @@ def make_report(args, poly_metadata_value, outdir, report_path, orientifold):
             "duplicate_two_face_classes": 0,
             "written_hdf5": 0,
         },
+        "terminal_failure_counts": {
+            category: 0 for category in package_generator.TERMINAL_FAILURE_CATEGORIES
+        },
+        "failure_records": [],
         "candidates": [],
         "terminal_status": None,
     }
@@ -580,6 +758,11 @@ def generate_candidate(
     report,
 ):
     """Run the package CY3 writer for one FRST and return an audit record."""
+    report.setdefault(
+        "terminal_failure_counts",
+        {category: 0 for category in package_generator.TERMINAL_FAILURE_CATEGORIES},
+    )
+    report.setdefault("failure_records", [])
     started = time.perf_counter()
     cpu_started = sampler_probe.resource_snapshot()["cpu_seconds"]
     candidate = {"candidate_index": candidate_index, "output_index": output_index}
@@ -637,7 +820,7 @@ def generate_candidate(
             args.qcd_volume_target,
             args.qcd_divisor_index,
             args.visible_sector_policy,
-            args.qed_divisor_index,
+            None,
             np.random.default_rng(args.seed + candidate_index - 1),
             report_message,
             poly=poly,
@@ -647,19 +830,72 @@ def generate_candidate(
             ks_database_version=args.ks_database_version,
             orientifold_config=orientifold_config,
             export_kahler_rays=args.export_kahler_rays,
+            polytope_source=report.get("polytope", {}).get("source"),
+            overwrite=args.overwrite,
+            qed_selection_policy=args.qed_selection_policy,
+            qed_divisor_index_user=args.qed_divisor_index,
+            qed_selection_seed=(
+                args.qed_selection_seed
+                if args.qed_selection_seed is not None
+                else args.seed + candidate_index - 1
+            ),
+            qed_volume_max=args.qed_volume_max,
         )
     except EXPECTED_REJECTIONS as exc:
         report["counts"]["rejected_frsts"] += 1
-        candidate["terminal_status"] = "rejected_frst"
+        category = (
+            exc.category
+            if isinstance(exc, package_generator.QEDAssignmentFailure)
+            else {
+                package_generator.PrefactorCriterionNotMet: "prefactor_criterion_not_met",
+                package_generator.NoPhysicalKaehlerPoint: "no_physical_kaehler_point",
+                package_generator.NoQcdDivisorVolume: "no_qcd_divisor_volume",
+                package_generator.NoVisibleSectorAssignment: "no_eligible_qed_divisor",
+            }.get(type(exc), "numerical_geometry_failure")
+        )
+        report["terminal_failure_counts"][category] += 1
+        report["failure_records"].append(
+            {
+                "candidate_index": candidate_index,
+                "category": category,
+                "reason": str(exc)[:1000],
+                "record": package_generator._jsonable(
+                    getattr(exc, "record", {})
+                ),
+            }
+        )
+        candidate["terminal_status"] = category
+        candidate["rejection_type"] = type(exc).__name__
+        candidate["rejection_reason"] = str(exc)[:1000]
+        return candidate
+    except FileExistsError as exc:
+        report["counts"]["rejected_frsts"] += 1
+        report["terminal_failure_counts"]["output_collision"] += 1
+        report["failure_records"].append(
+            {
+                "candidate_index": candidate_index,
+                "category": "output_collision",
+                "reason": str(exc)[:1000],
+            }
+        )
+        candidate["terminal_status"] = "output_collision"
         candidate["rejection_type"] = type(exc).__name__
         candidate["rejection_reason"] = str(exc)[:1000]
         return candidate
     except Exception as exc:
         report["counts"]["candidate_errors"] += 1
-        candidate["terminal_status"] = "geometry_generation_error"
+        report["terminal_failure_counts"]["numerical_geometry_failure"] += 1
+        report["failure_records"].append(
+            {
+                "candidate_index": candidate_index,
+                "category": "numerical_geometry_failure",
+                "reason": str(exc)[:1000],
+            }
+        )
+        candidate["terminal_status"] = "numerical_geometry_failure"
         candidate["error_type"] = type(exc).__name__
         candidate["error"] = str(exc)[:1000]
-        raise
+        return candidate
     finally:
         candidate["cpu_seconds"] = (
             sampler_probe.resource_snapshot()["cpu_seconds"] - cpu_started
@@ -668,12 +904,19 @@ def generate_candidate(
 
     report["counts"]["accepted_geometries"] += 1
     report["counts"]["written_hdf5"] += 1
+    if args.visible_sector_policy != "none":
+        report["terminal_failure_counts"]["accepted_assignment"] += 1
     candidate["terminal_status"] = "accepted_geometry"
     candidate["h5_size_bytes"] = os.path.getsize(filepath)
     candidate["h5_groups"] = [
         "cytools/geometric",
         "cytools/potential",
         "construction_metadata",
+        *(
+            ["cytools/geometric/visible_sector"]
+            if args.visible_sector_policy != "none"
+            else []
+        ),
     ]
     return candidate
 
@@ -681,7 +924,18 @@ def generate_candidate(
 def run_generation(args):
     """Generate full HDF5 geometries and atomically persist the run report."""
     validate_args(args)
-    manifest, vertices, poly = load_h491_polytope(args.manifest)
+    polytope_source, vertices, poly = load_h491_polytope(
+        args.manifest,
+        database_source=args.database_source,
+        parquet_dir=args.parquet_dir,
+    )
+    if (
+        args.database_source == "mirror"
+        and args.ks_database_version == "local h11=491 manifest"
+    ):
+        args.ks_database_version = (
+            f"KS Parquet mirror: {KS_MIRROR_DATASET}"
+        )
     package_generator.require_cytools_capabilities(
         args.sampling_scheme, args.ntfe_face_sampler
     )
@@ -693,7 +947,7 @@ def run_generation(args):
     outdir = os.path.abspath(args.outdir)
     os.makedirs(outdir, exist_ok=True)
     report_path = os.path.abspath(args.report or os.path.join(outdir, "report.json"))
-    poly_metadata_value = polytope_metadata(poly, vertices, args.manifest, manifest)
+    poly_metadata_value = polytope_metadata(poly, vertices, polytope_source)
     report = make_report(args, poly_metadata_value, outdir, report_path, orientifold)
     report["device"] = device
     report["command"] = sys.argv

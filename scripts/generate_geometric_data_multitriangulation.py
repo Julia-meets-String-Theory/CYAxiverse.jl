@@ -41,9 +41,20 @@ import numpy as np
 import cytools
 from cytools import Polytope, fetch_polytopes
 from geometry_charge_conventions import canonicalize_unique_charge_rows
+from qed_divisor_assignment import (
+    QEDAssignmentFailure,
+    TERMINAL_FAILURE_CATEGORIES,
+    classify_qed_leading_status,
+    prime_divisor_charges,
+    prime_divisor_intersection_graph,
+    record_potential_match,
+    select_qed_divisor,
+    stable_divisor_labels,
+    write_visible_sector_hdf5,
+)
 
 
-SCHEMA_VERSION = "cyaxiverse-ks-cy3-v8"
+SCHEMA_VERSION = "cyaxiverse-ks-cy3-v8-qed-assignment"
 MIN_CYTOOLS_VERSION = (1, 4, 0)
 SOURCE_REFERENCES = (
     "arXiv:2008.01730v1",  # fair secondary-fan/triangulation sampling
@@ -253,6 +264,13 @@ def validate_orientifold(poly, triangulation, topology, config):
         raise RuntimeError(
             "The orientifold action does not preserve the prime toric divisor set."
         ) from exc
+    if mapped_divisor_positions[0] != 0:
+        raise RuntimeError("The orientifold action must fix the origin label.")
+    prime_image_indices = mapped_divisor_positions[1:] - 1
+    if np.any(prime_image_indices < 0) or np.any(
+        prime_image_indices >= topology["prime_toric_divisors"].size
+    ):
+        raise RuntimeError("The orientifold prime-divisor image map is invalid.")
     permutation = np.zeros((divisor_points.size, divisor_points.size), dtype=float)
     permutation[np.arange(divisor_points.size), mapped_divisor_positions] = 1.0
     transformed_basis = basis_matrix @ permutation
@@ -270,12 +288,6 @@ def validate_orientifold(poly, triangulation, topology, config):
         raise RuntimeError("Could not express the orientifold action in H2.")
     if not np.array_equal(integral_h2 @ integral_h2, np.eye(topology["h11"], dtype=int)):
         raise RuntimeError("The induced H2 action is not an involution.")
-
-    prime_image_indices = mapped_divisor_positions[1:] - 1
-    if np.any(prime_image_indices < 0) or np.any(
-        prime_image_indices >= topology["prime_toric_divisors"].size
-    ):
-        raise RuntimeError("The orientifold prime-divisor image map is invalid.")
 
     invariant_basis = _nullspace(integral_h2.T - np.eye(topology["h11"]))
     anti_invariant_basis = _nullspace(integral_h2.T + np.eye(topology["h11"]))
@@ -638,88 +650,6 @@ def _visible_qcd_candidates(policy, orientifold, neighbors):
     return candidates
 
 
-def select_visible_sector(
-    policy,
-    orientifold,
-    neighbors,
-    basis_matrix,
-    prime_labels,
-    prime_volumes,
-    qcd_divisor_index,
-    qed_divisor_index=None,
-):
-    """Select an orientifold-compatible intersecting QCD/QED divisor pair."""
-    candidates = _visible_qcd_candidates(policy, orientifold, neighbors)
-    if candidates is None:
-        return None
-    if qcd_divisor_index not in candidates:
-        raise NoVisibleSectorAssignment(
-            f"QCD divisor index {qcd_divisor_index} has no invariant intersecting "
-            "QED divisor in the selected FRST"
-        )
-    image_indices = np.asarray(orientifold["prime_divisor_image_indices"], dtype=int)
-    invariant = image_indices == np.arange(image_indices.size)
-    if qed_divisor_index is None:
-        eligible_qed = [
-            candidate
-            for candidate in neighbors[qcd_divisor_index]
-            if invariant[candidate]
-        ]
-        if not eligible_qed:
-            raise NoVisibleSectorAssignment(
-                f"QCD divisor index {qcd_divisor_index} has no invariant "
-                "intersecting QED divisor"
-            )
-        qed_divisor_index = min(
-            eligible_qed, key=lambda index: (float(prime_volumes[index]), index)
-        )
-        qed_selection = "minimum_volume_invariant_intersection"
-    else:
-        if not 0 <= qed_divisor_index < len(prime_labels):
-            raise NoVisibleSectorAssignment(
-                f"QED divisor index {qed_divisor_index} is outside the prime-divisor list"
-            )
-        if not invariant[qed_divisor_index]:
-            raise NoVisibleSectorAssignment(
-                f"QED divisor index {qed_divisor_index} is not invariant under the orientifold"
-            )
-        if qed_divisor_index not in neighbors[qcd_divisor_index]:
-            raise NoVisibleSectorAssignment(
-                f"QED divisor index {qed_divisor_index} does not intersect the QCD divisor"
-            )
-        qed_selection = "explicit_invariant_intersection"
-
-    basis = np.asarray(basis_matrix, dtype=int)
-    labels = np.asarray(prime_labels, dtype=int)
-    if basis.ndim != 2 or basis.shape[1] <= int(np.max(labels)):
-        raise RuntimeError("the divisor basis matrix cannot represent prime divisors")
-    # CYTools stores divisor-basis coefficients as h11 × n_points columns;
-    # prime-divisor charges are columns selected by their lattice-point labels.
-    qcd_charge = np.asarray(basis[:, labels[qcd_divisor_index]], dtype=int)
-    qed_charge = np.asarray(basis[:, labels[qed_divisor_index]], dtype=int)
-    if qcd_charge.ndim != 1 or qed_charge.shape != qcd_charge.shape:
-        raise RuntimeError("prime divisor charges have inconsistent basis shapes")
-    return {
-        "policy": policy,
-        "qed_selection": qed_selection,
-        "qcd_divisor_index": int(qcd_divisor_index),
-        "qed_divisor_index": int(qed_divisor_index),
-        "qcd_image_index": int(image_indices[qcd_divisor_index]),
-        "qed_image_index": int(image_indices[qed_divisor_index]),
-        "qcd_invariant": bool(invariant[qcd_divisor_index]),
-        "qed_invariant": bool(invariant[qed_divisor_index]),
-        "qcd_qed_intersection": True,
-        "qcd_divisor_volume": float(prime_volumes[qcd_divisor_index]),
-        "qed_divisor_volume": float(prime_volumes[qed_divisor_index]),
-        "qcd_charge": qcd_charge,
-        "qed_charge": qed_charge,
-        "qcd_neighbor_count": int(len(neighbors[qcd_divisor_index])),
-        "qed_candidate_count": int(
-            sum(invariant[index] for index in neighbors[qcd_divisor_index])
-        ),
-    }
-
-
 class PrefactorCriterionNotMet(RuntimeError):
     """The current FRST's tip cannot satisfy the potential-control criterion."""
 
@@ -853,9 +783,20 @@ def generate_and_save_geometry(
     sampling_metadata,
     ks_database_version,
     orientifold_config,
+    polytope_source=None,
     export_kahler_rays=False,
+    overwrite=False,
+    qed_selection_policy="uniform_eligible",
+    qed_divisor_index_user=None,
+    qed_selection_seed=0,
+    qed_volume_max=None,
 ):
     """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
+    # Preserve the package writer's historical zero-based positional option
+    # while making the specialist CLI's explicit index one-based and auditable.
+    if qed_divisor_index_user is None and qed_divisor_index is not None:
+        qed_divisor_index_user = int(qed_divisor_index) + 1
+        qed_selection_policy = "explicit"
     if moduli_policy not in {"adaptive", "canonical_qcd"}:
         raise ValueError(
             "moduli_policy must be 'adaptive' or 'canonical_qcd'"
@@ -872,16 +813,31 @@ def generate_and_save_geometry(
         raise ValueError(
             "visible_sector_policy must be 'none' or 'intersecting_d7'"
         )
+    if qed_selection_policy not in {"uniform_eligible", "explicit"}:
+        raise ValueError(
+            "qed_selection_policy must be 'uniform_eligible' or 'explicit'"
+        )
+    if visible_sector_policy == "none" and (
+        qed_selection_policy == "explicit" or qed_divisor_index_user is not None
+    ):
+        raise QEDAssignmentFailure(
+            "invalid_explicit_index",
+            "QED selection requires visible_sector_policy='intersecting_d7'",
+        )
     if visible_sector_policy == "intersecting_d7" and not orientifold_config.get(
         "requested", False
     ):
         raise NoVisibleSectorAssignment(
             "intersecting_d7 requires --orientifold-file"
         )
-    if qed_divisor_index is not None and visible_sector_policy != "intersecting_d7":
+    if qed_divisor_index_user is not None and visible_sector_policy != "intersecting_d7":
         raise ValueError(
-            "qed_divisor_index requires visible_sector_policy='intersecting_d7'"
+            "qed_divisor_index_user requires visible_sector_policy='intersecting_d7'"
         )
+    if qed_selection_policy == "explicit" and qed_divisor_index_user is None:
+        raise ValueError("explicit QED selection requires qed_divisor_index_user")
+    if qed_selection_policy == "uniform_eligible" and qed_divisor_index_user is not None:
+        raise ValueError("an explicit QED index requires explicit selection")
     report("validating the CYTools FRST")
     frst_validation = validate_frst(poly, triangulation)
     if not bool(cy.is_smooth()):
@@ -891,6 +847,27 @@ def generate_and_save_geometry(
         cy, triangulation, export_kahler_rays=export_kahler_rays
     )
     orientifold = validate_orientifold(poly, triangulation, topology, orientifold_config)
+    prime_labels = np.asarray(topology["prime_toric_divisors"], dtype=int)
+    prime_labels_stable = stable_divisor_labels(prime_labels, poly_points)
+    prime_charges = None
+    prime_intersection_evidence = {}
+    prime_neighbors = None
+    if visible_sector_policy != "none":
+        try:
+            prime_charges = prime_divisor_charges(
+                topology["basis_matrix"], prime_labels
+            )
+            prime_neighbors, prime_intersection_evidence = (
+                prime_divisor_intersection_graph(
+                    prime_labels, topology["face_restriction_dim2"]
+                )
+            )
+        except QEDAssignmentFailure:
+            raise
+        except Exception as exc:
+            raise QEDAssignmentFailure(
+                "invalid_charge_basis_mapping", str(exc)
+            ) from exc
     neighbors = None
     standard_model_divisors = None
     standard_model_qcd_selection = None
@@ -968,6 +945,7 @@ def generate_and_save_geometry(
             f"got shape {qprime_raw.shape}, expected (*, {h11})."
         )
     qprime, charge_metadata = canonicalize_unique_charge_rows(qprime_raw)
+    qprime = np.asarray(qprime, dtype=np.int64)
     nq = qprime.shape[0]
     if charge_metadata["duplicates_removed"]:
         report(
@@ -1218,16 +1196,23 @@ def generate_and_save_geometry(
         )
     tip_prefactor = np.asarray([divisor_scale, m_val], dtype=float)
 
-    visible_sector = select_visible_sector(
-        visible_sector_policy,
-        orientifold,
-        neighbors,
-        topology["basis_matrix"],
-        topology["prime_toric_divisors"],
-        prime_divisor_volumes,
-        qcd_divisor_index,
-        qed_divisor_index,
-    )
+    visible_sector = None
+    if visible_sector_policy != "none":
+        visible_sector = select_qed_divisor(
+            policy=visible_sector_policy,
+            selection_policy=qed_selection_policy,
+            qcd_divisor_index=qcd_divisor_index,
+            prime_toric_divisors=prime_labels,
+            prime_divisor_labels=prime_labels_stable,
+            prime_divisor_charges_array=prime_charges,
+            prime_divisor_volumes=prime_divisor_volumes,
+            neighbors=prime_neighbors,
+            intersection_evidence=prime_intersection_evidence,
+            orientifold=orientifold,
+            effective_seed=qed_selection_seed,
+            qed_divisor_index_user=qed_divisor_index_user,
+            qed_volume_max=qed_volume_max,
+        )
 
     report(f"building potential data from {nq} effective-cone rays")
     num_cross = nq * (nq - 1) // 2
@@ -1244,7 +1229,7 @@ def generate_and_save_geometry(
     # Q is h11 × N and L is 2 × N.  CYTools returns effective-cone rays as
     # rows, so only the assignment into the output matrix changes orientation;
     # no transposed Q/L array is materialized or written.
-    q = np.empty((h11, term_count), dtype=float)
+    q = np.empty((h11, term_count), dtype=np.int64)
     q[:, :nq] = qprime.T
     l_raw = np.empty((2, term_count), dtype=float)
     prefactor = 8 * math.pi / volume**2
@@ -1281,13 +1266,38 @@ def generate_and_save_geometry(
         visible_sector["qed_instanton_index"] = int(qed_potential_source_index)
 
     if output_index != term_count:
+        if visible_sector is not None:
+            raise QEDAssignmentFailure(
+                "potential_term_mismatch",
+                "potential term construction produced an inconsistent count",
+                visible_sector,
+            )
         raise RuntimeError("potential term construction produced an inconsistent count")
     if not np.all(np.isfinite(l_raw)) or np.any(l_raw[0, :] == 0.0):
+        if visible_sector is not None:
+            raise QEDAssignmentFailure(
+                "potential_term_mismatch",
+                "potential coefficients contain zero or non-finite amplitudes",
+                visible_sector,
+            )
         raise RuntimeError("Potential coefficients contain zero or non-finite amplitudes.")
     l = np.empty_like(l_raw)
     l[0, :] = np.sign(l_raw[0, :])
     l[1, :] = np.log10(np.abs(l_raw[0, :])) + l_raw[1, :]
     if visible_sector is not None:
+        visible_sector.update(
+            record_potential_match(
+                q, l, qed_charge, nq, visible_sector["qed_instanton_index"]
+            )
+        )
+        visible_sector["leading_rank_certificate"] = classify_qed_leading_status(
+            q, l, visible_sector["qed_instanton_index"]
+        )
+        visible_sector["qed_leading_status"] = visible_sector[
+            "leading_rank_certificate"
+        ]["status"]
+        visible_sector["terminal_status"] = "accepted_assignment"
+        visible_sector["terminal_reason"] = "geometry-derived QED assignment accepted"
         visible_sector["qed_log10_lambda4"] = float(
             l[1, visible_sector["qed_instanton_index"]]
         )
@@ -1295,7 +1305,7 @@ def generate_and_save_geometry(
     prime_labels = np.asarray(topology["prime_toric_divisors"], dtype=int)
     if basis_matrix.ndim != 2 or basis_matrix.shape[1] <= int(np.max(prime_labels)):
         raise RuntimeError("the divisor basis matrix cannot represent prime divisors")
-    prime_divisor_charges = np.asarray(basis_matrix[:, prime_labels].T, dtype=int)
+    prime_divisor_charges_array = np.asarray(basis_matrix[:, prime_labels].T, dtype=np.int64)
 
     report("writing HDF5 data")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -1307,6 +1317,7 @@ def generate_and_save_geometry(
         "ks_database_version": ks_database_version,
         "polytope_id": polytope_id,
         "polytope_id_kind": "canonical_lattice_point_sha256",
+        "polytope_source": polytope_source,
         "triangulation_id": triangulation_id,
         "cy3_fingerprint": cy3_fingerprint,
         "cy3_fingerprint_status": "topological_fingerprint",
@@ -1359,7 +1370,19 @@ def generate_and_save_geometry(
         ),
         "qcd_volume_target": qcd_volume_target,
         "visible_sector_policy": visible_sector_policy,
+        "qed_selection_policy": qed_selection_policy,
+        "qed_selection_seed": int(qed_selection_seed),
+        "qed_volume_upper_bound": (
+            None if qed_volume_max is None else float(qed_volume_max)
+        ),
+        "qed_volume_filter_policy": (
+            "disabled" if qed_volume_max is None else "pre_filter_pool_then_reject"
+        ),
         "visible_sector": visible_sector,
+        "claim_boundary": (
+            "geometry-derived integer divisor-class toy assignment; not a physical "
+            "Standard Model brane construction or source-ensemble reproduction"
+        ),
         "potential_matrix_convention": {
             "Q": "h11 x N; instanton charges are columns",
             "L": "2 x N; rows are sign/mantissa and log10 scale",
@@ -1407,7 +1430,7 @@ def generate_and_save_geometry(
             )
             geometric.create_dataset(
                 "prime_divisor_charges",
-                data=prime_divisor_charges,
+                data=prime_divisor_charges_array,
                 compression="gzip",
                 compression_opts=9,
             )
@@ -1508,61 +1531,9 @@ def generate_and_save_geometry(
                 orientifold_group.attrs["h11_plus"] = orientifold["h11_plus"]
                 orientifold_group.attrs["h11_minus"] = orientifold["h11_minus"]
             if visible_sector is not None:
-                visible = geometric.create_group("visible_sector")
-                visible.create_dataset(
-                    "qcd_divisor_index", data=visible_sector["qcd_divisor_index"]
+                write_visible_sector_hdf5(
+                    geometric.create_group("visible_sector"), visible_sector
                 )
-                visible.create_dataset(
-                    "qed_divisor_index", data=visible_sector["qed_divisor_index"]
-                )
-                visible.create_dataset(
-                    "qcd_image_index", data=visible_sector["qcd_image_index"]
-                )
-                visible.create_dataset(
-                    "qed_image_index", data=visible_sector["qed_image_index"]
-                )
-                visible.create_dataset(
-                    "qcd_divisor_volume", data=visible_sector["qcd_divisor_volume"]
-                )
-                visible.create_dataset(
-                    "qed_divisor_volume", data=visible_sector["qed_divisor_volume"]
-                )
-                visible.create_dataset(
-                    "qcd_charge", data=visible_sector["qcd_charge"]
-                )
-                visible.create_dataset(
-                    "qed_charge", data=visible_sector["qed_charge"]
-                )
-                visible.create_dataset(
-                    "em_charge", data=visible_sector["qed_charge"]
-                )
-                visible.create_dataset(
-                    "qed_instanton_index",
-                    data=visible_sector["qed_instanton_index"],
-                )
-                visible.create_dataset(
-                    "qed_log10_lambda4",
-                    data=visible_sector["qed_log10_lambda4"],
-                )
-                visible.create_dataset(
-                    "qcd_qed_intersection",
-                    data=int(visible_sector["qcd_qed_intersection"]),
-                )
-                visible.create_dataset(
-                    "qcd_invariant", data=int(visible_sector["qcd_invariant"])
-                )
-                visible.create_dataset(
-                    "qed_invariant", data=int(visible_sector["qed_invariant"])
-                )
-                visible.create_dataset(
-                    "qcd_neighbor_count", data=visible_sector["qcd_neighbor_count"]
-                )
-                visible.create_dataset(
-                    "qed_candidate_count",
-                    data=visible_sector["qed_candidate_count"],
-                )
-                visible.attrs["policy"] = visible_sector["policy"]
-                visible.attrs["qed_selection"] = visible_sector["qed_selection"]
             construction_metadata_group = file.create_group("construction_metadata")
             construction_metadata_group.create_dataset(
                 "canonical_lattice_points",
@@ -1580,7 +1551,11 @@ def generate_and_save_geometry(
             potential = cytools_group.create_group("potential")
             potential.create_dataset("L", data=l, compression="gzip", compression_opts=9)
             potential.create_dataset("Q", data=q, compression="gzip", compression_opts=9)
-        os.replace(temporary_path, filepath)
+        if overwrite:
+            os.replace(temporary_path, filepath)
+        else:
+            os.link(temporary_path, filepath)
+            os.unlink(temporary_path)
     finally:
         if os.path.exists(temporary_path):
             os.unlink(temporary_path)

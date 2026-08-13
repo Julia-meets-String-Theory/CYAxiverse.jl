@@ -121,7 +121,27 @@ class TriangulationCandidateTests(unittest.TestCase):
         self.assertEqual(args.min_prime_divisor_volume, 1.0)
         self.assertEqual(args.qcd_volume_min, 25.0)
         self.assertEqual(args.qcd_volume_max, 40.0)
+        self.assertEqual(args.database_source, "manifest")
+        self.assertEqual(args.qed_selection_policy, "uniform_eligible")
+        self.assertIsNone(args.qed_selection_seed)
+        self.assertIsNone(args.qed_volume_max)
         frst_generator.validate_args(args)
+
+    def test_h491_generator_requires_one_based_explicit_qed_selection(self):
+        args = frst_generator.build_parser().parse_args(
+            [
+                "--visible-sector-policy",
+                "intersecting_d7",
+                "--orientifold-file",
+                "orientifold.json",
+                "--qed-selection-policy",
+                "explicit",
+                "--qed-divisor-index",
+                "0",
+            ]
+        )
+        with self.assertRaises(ValueError):
+            frst_generator.validate_args(args)
 
     def test_h491_generator_uses_package_hdf5_layout(self):
         output_directory = tempfile.mkdtemp(prefix="cyax-h491-frst-artifact-")
