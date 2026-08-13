@@ -1,3 +1,5 @@
 [deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 CYAxiverse = "e5e45d93-5055-4eab-878b-2e484be3f951"
+ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"

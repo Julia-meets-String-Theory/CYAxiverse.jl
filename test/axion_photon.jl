@@ -1,5 +1,12 @@
 using LinearAlgebra
 using HDF5
+import Nemo
+using Random
+
+function _axion_photon_nemo_rank(matrix::AbstractMatrix{Int})
+    isempty(matrix) && return 0
+    Nemo.rank(Nemo.matrix(Nemo.ZZ, Matrix{Int}(matrix)))
+end
 
 @testset "Axion hierarchy and photon-coupling kernels" begin
     axion_photon = CYAxiverse.axion_photon
@@ -12,6 +19,9 @@ using HDF5
 
     @test hierarchy.selected_indices == [2, 1]
     @test hierarchy.dependent_indices == [3]
+    @test hierarchy.rank_certificate.ordered_source_indices == [2, 1, 3]
+    @test hierarchy.rank_certificate.prefix_ranks == [1, 2, 2]
+    @test hierarchy.rank_certificate.selected_determinant == -1
     @test hierarchy.Q_reduced == Int[2 1; 1 0]
     @test hierarchy.q[2, 1] == 0
     @test hierarchy.q[1, 2] != 0
@@ -74,6 +84,88 @@ using HDF5
         expected_log_threshold
     @test axion_photon.qed_instanton_threshold_eV(geometry) ≈
         10.0^expected_log_threshold
+end
+
+@testset "Exact ordered rational rank certificate" begin
+    axion_photon = CYAxiverse.axion_photon
+
+    pathological_Q = Int[1_000_003 1 0; 0 0 1]
+    pathological = axion_photon.InstantonData(
+        pathological_Q, Float64[3.0, 2.0, 1.0], Int[1, 1, 1], Int[1, 2, 3])
+    selected, dependent, certificate = axion_photon._select_independent_terms(
+        pathological, 2)
+    @test selected == [1, 3]
+    @test dependent == [2]
+    @test certificate.prefix_ranks == [1, 1, 2]
+    @test certificate.selected_determinant == BigInt(1_000_003)
+    @test _axion_photon_nemo_rank(pathological_Q[:, selected]) == 2
+
+    hierarchy = axion_photon.leading_hierarchy(pathological,
+        Matrix{Float64}(I, 2, 2))
+    @test hierarchy.selected_indices == [1, 3]
+    @test hierarchy.Q_reduced == Int[1_000_003 0; 0 1]
+    @test hierarchy.rank_certificate.selected_determinant == BigInt(1_000_003)
+    @test _axion_photon_nemo_rank(hierarchy.Q_reduced) == 2
+    payload = axion_photon.rank_certificate_payload(hierarchy.rank_certificate)
+    @test payload.algorithm == "modular_screen_with_exact_rational_fallback_v1"
+    @test payload.matrix_shape == [2, 3]
+    @test payload.selected_determinant == "1000003"
+
+    # Hand-computed case: the first charge is (2, 1), the second is (1, 0),
+    # and Gram--Schmidt gives q = [sqrt(5) 2/sqrt(5); 0 1/sqrt(5)].
+    hand = axion_photon.leading_hierarchy(
+        axion_photon.InstantonData(Int[2 1; 1 0], Float64[7.0, 6.0],
+            Int[1, 1], Int[1, 2]), Matrix{Float64}(I, 2, 2))
+    @test hand.selected_indices == [1, 2]
+    @test hand.dependent_indices == Int[]
+    @test hand.rank_certificate.prefix_ranks == [1, 2]
+    @test hand.rank_certificate.selected_determinant == -1
+    @test hand.q ≈ [sqrt(5.0) 2 / sqrt(5.0); 0.0 1 / sqrt(5.0)]
+    @test hand.theta_from_canonical ≈
+        [2 / sqrt(5.0) 1 / sqrt(5.0); 1 / sqrt(5.0) -2 / sqrt(5.0)]
+
+    rng = MersenneTwister(0x03_0e_aa)
+    for _ in 1:40
+        h11 = rand(rng, 1:4)
+        ncolumns = h11 + rand(rng, 0:4)
+        Q = hcat(Matrix{Int}(I, h11, h11),
+            rand(rng, -3:3, h11, ncolumns - h11))
+        order = randperm(rng, ncolumns)
+        scales = zeros(Float64, ncolumns)
+        for (position, column) in enumerate(order)
+            scales[column] = Float64(ncolumns - position)
+        end
+        potential = axion_photon.InstantonData(Q, scales, ones(Int, ncolumns), order)
+
+        expected_selected = Int[]
+        expected_dependent = Int[]
+        expected_prefix_ranks = Int[]
+        for column in order
+            if length(expected_selected) == h11
+                push!(expected_dependent, column)
+                push!(expected_prefix_ranks, h11)
+                continue
+            end
+            candidate = vcat(expected_selected, column)
+            candidate_rank = _axion_photon_nemo_rank(Q[:, candidate])
+            if candidate_rank > length(expected_selected)
+                push!(expected_selected, column)
+            else
+                push!(expected_dependent, column)
+            end
+            push!(expected_prefix_ranks, candidate_rank)
+        end
+
+        selected, dependent, certificate = axion_photon._select_independent_terms(
+            potential, h11)
+        @test selected == expected_selected
+        @test dependent == expected_dependent
+        @test certificate.ordered_source_indices == order
+        @test certificate.prefix_ranks == expected_prefix_ranks
+        @test _axion_photon_nemo_rank(Q[:, selected]) == h11
+        @test certificate.selected_determinant ==
+            det(Matrix{BigInt}(Q[:, selected]))
+    end
 end
 
 @testset "Visible-sector metadata roundtrip" begin

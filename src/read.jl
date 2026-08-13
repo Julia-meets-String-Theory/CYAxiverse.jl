@@ -75,6 +75,81 @@ function hilbert_basis(geom_idx::GeometryIndex)
     basis
 end
 
+"""
+    visible_sector(geom_idx::GeometryIndex)
+
+Read the geometry-derived toy visible-sector assignment from an HDF5 geometry.
+Return `nothing` when the file was generated without a visible-sector policy.
+The returned named tuple preserves the stored integer charge vectors, candidate
+pool, selection indices, potential source positions, and terminal status.
+"""
+function visible_sector(geom_idx::GeometryIndex)
+    h5open(cyax_file(geom_idx), "r") do file
+        path = "cytools/geometric/visible_sector"
+        haskey(file, path) || return nothing
+        group = file[path]::HDF5.Group
+        read_value(name) = HDF5.read(group[name]::HDF5.Dataset)
+        read_attribute(name, default) = begin
+            group_attributes = attributes(group)
+            haskey(group_attributes, name) ? read(group_attributes[name]) : default
+        end
+        qed_volume_upper_bound = haskey(group, "qed_volume_upper_bound") ?
+            Float64(read_value("qed_volume_upper_bound")) : nothing
+        return (
+            effective_seed = Int(read_value("effective_seed")),
+            candidate_pool_size = Int(read_value("candidate_pool_size")),
+            selection_rank = Int(read_value("selection_rank")),
+            qcd_divisor_index = Int(read_value("qcd_divisor_index")),
+            qed_divisor_index = Int(read_value("qed_divisor_index")),
+            qcd_image_index = Int(read_value("qcd_image_index")),
+            qed_image_index = Int(read_value("qed_image_index")),
+            qcd_divisor_volume = Float64(read_value("qcd_divisor_volume")),
+            qed_divisor_volume = Float64(read_value("qed_divisor_volume")),
+            qed_volume_upper_bound = qed_volume_upper_bound,
+            qed_unsorted_potential_index = Int(read_value("qed_unsorted_potential_index")),
+            qed_post_sort_source_position = Int(read_value("qed_post_sort_source_position")),
+            qed_potential_scale = Float64(read_value("qed_potential_scale")),
+            qed_log10_lambda4 = Float64(read_value("qed_log10_lambda4")),
+            qcd_charge = Vector{Int}(read_value("qcd_charge")),
+            qed_charge = Vector{Int}(read_value("qed_charge")),
+            em_charge = Vector{Int}(read_value("em_charge")),
+            candidate_pool_indices = Vector{Int}(read_value("candidate_pool_indices")),
+            qcd_invariant = Bool(read_value("qcd_invariant")),
+            qed_invariant = Bool(read_value("qed_invariant")),
+            qcd_qed_intersection = Bool(read_value("qcd_qed_intersection")),
+            qed_charge_exact_match = Bool(read_value("qed_charge_exact_match")),
+            policy = String(read_attribute("policy", "")),
+            selection_policy = String(read_attribute("selection_policy", "")),
+            qed_leading_status = String(read_attribute("qed_leading_status", "")),
+            terminal_status = String(read_attribute("terminal_status", "")),
+            terminal_reason = String(read_attribute("terminal_reason", "")),
+            candidate_pool_labels_json = String(
+                read_attribute("candidate_pool_labels_json", "[]")
+            ),
+            intersection_evidence_json = String(
+                read_attribute("intersection_evidence_json", "[]")
+            ),
+        )
+    end
+end
+
+function visible_sector(h11::Int, tri::Int, cy::Int=1)
+    visible_sector(GeometryIndex(h11, tri, cy))
+end
+
+"""Read the serialized construction metadata JSON attribute, if present."""
+function construction_metadata_json(geom_idx::GeometryIndex)
+    h5open(cyax_file(geom_idx), "r") do file
+        metadata = attributes(file)
+        haskey(metadata, "construction_metadata_json") || return nothing
+        String(read(metadata["construction_metadata_json"]))
+    end
+end
+
+function construction_metadata_json(h11::Int, tri::Int, cy::Int=1)
+    construction_metadata_json(GeometryIndex(h11, tri, cy))
+end
+
 #############################
 ##### Read Geometric data ###
 #############################

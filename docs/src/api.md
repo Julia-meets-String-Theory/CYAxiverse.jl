@@ -44,6 +44,9 @@ Pages = ["read.jl"]
 ```
 
 ## `CYAxiverse.plotting`
+```@docs
+CYAxiverse.plotting
+```
 ```@autodocs
 Modules = [CYAxiverse.plotting]
 Pages = ["plotting.jl"]
@@ -77,11 +80,13 @@ CYAxiverse.axion_photon
 CYAxiverse.axion_photon.GeometryInputs
 CYAxiverse.axion_photon.VisibleSectorAssignment
 CYAxiverse.axion_photon.InstantonData
+CYAxiverse.axion_photon.RationalRankCertificate
 CYAxiverse.axion_photon.LeadingAxionHierarchy
 CYAxiverse.axion_photon.AxionPhotonObservables
 CYAxiverse.axion_photon.AxionPhotonResult
 CYAxiverse.axion_photon.geometry_path
 CYAxiverse.axion_photon.local_geometry_indices
+CYAxiverse.axion_photon.rank_certificate_payload
 CYAxiverse.axion_photon.load_geometry_inputs
 CYAxiverse.axion_photon.load_instanton_data
 CYAxiverse.axion_photon.leading_hierarchy

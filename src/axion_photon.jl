@@ -16,6 +16,7 @@ module axion_photon
 
 using HDF5
 using LinearAlgebra
+import Nemo
 
 using ..filestructure: resolve_data_dir
 using ..structs: GeometryIndex
@@ -65,15 +66,34 @@ struct InstantonData{T<:AbstractFloat}
     source_indices::Vector{Int}
 end
 
+"""Exact ordered rational-rank evidence for leading-charge selection.
+
+The certificate records the source-column order, the selected and dependent
+columns, the exact rank after every ordered prefix, and the exact determinant
+of the selected square charge matrix. Recompute the prefix ranks from the
+stored integer charge matrix to independently replay the selection.
+"""
+struct RationalRankCertificate
+    algorithm::String
+    matrix_shape::NTuple{2,Int}
+    ordered_source_indices::Vector{Int}
+    selected_indices::Vector{Int}
+    dependent_indices::Vector{Int}
+    prefix_ranks::Vector{Int}
+    selected_determinant::BigInt
+end
+
 """Leading-charge hierarchy in the canonical Gram--Schmidt frame.
 
 `Q_reduced` and `q` retain one selected instanton charge vector per column,
 with the same `h11 × h11` column convention as the input `Q`. The canonical
-charge matrix is `q = X' * Q_reduced` and is upper triangular.
+charge matrix is `q = X' * Q_reduced` and is upper triangular. The exact
+ordered rational-rank evidence is retained in `rank_certificate`.
 """
 struct LeadingAxionHierarchy{T<:AbstractFloat}
     selected_indices::Vector{Int}
     dependent_indices::Vector{Int}
+    rank_certificate::RationalRankCertificate
     # Keep one selected instanton charge vector per column, matching Q.
     Q_reduced::Matrix{Int}
     log10_lambda4::Vector{T}
@@ -445,7 +465,20 @@ function local_geometry_indices(; data_dir=nothing,
         limit_per_h11=limit_per_h11, require_complete=require_complete)
 end
 
-function _rank_state_append!(basis::Matrix{Int64}, active::BitVector,
+"""Return a JSON-compatible payload for an exact rank certificate."""
+function rank_certificate_payload(certificate::RationalRankCertificate)
+    (algorithm=certificate.algorithm,
+        matrix_shape=collect(certificate.matrix_shape),
+        ordered_source_indices=copy(certificate.ordered_source_indices),
+        selected_indices=copy(certificate.selected_indices),
+        dependent_indices=copy(certificate.dependent_indices),
+        prefix_ranks=copy(certificate.prefix_ranks),
+        selected_determinant=string(certificate.selected_determinant))
+end
+
+const _RANK_SCREENING_PRIME = 1_000_003
+
+function _modular_rank_state_append!(basis::Matrix{Int64}, active::BitVector,
         row::AbstractVector{<:Integer}, prime::Int, work::Vector{Int64})
     n = length(row)
     length(work) == n || throw(DimensionMismatch("rank workspace has the wrong length"))
@@ -465,53 +498,230 @@ function _rank_state_append!(basis::Matrix{Int64}, active::BitVector,
     inverse = invmod(work[pivot], prime)
     @inbounds for column in pivot:n
         work[column] = mod(work[column] * inverse, prime)
+        basis[pivot, column] = work[column]
     end
-    @inbounds for old_pivot in 1:n
-        active[old_pivot] || continue
-        factor = basis[old_pivot, pivot]
-        factor == 0 && continue
-        for column in pivot:n
-            basis[old_pivot, column] =
-                mod(basis[old_pivot, column] - factor * work[column], prime)
-        end
-    end
-    basis[pivot, :] .= work
     active[pivot] = true
     true
 end
 
-function _select_independent_terms(potential::InstantonData,
-        h11::Int; rank_primes=(1_000_003, 1_000_033))
-    size(potential.Q, 1) == h11 || throw(DimensionMismatch(
-        "potential charge matrix does not match Kinv"))
-    primes = Int[Int(p) for p in rank_primes]
-    isempty(primes) && throw(ArgumentError("at least one rank prime is required"))
-    bases = [zeros(Int64, h11, h11) for _ in primes]
-    active = [falses(h11) for _ in primes]
-    workspaces = [zeros(Int64, h11) for _ in primes]
-    selected = Int[]
-    dependent = Int[]
-    for source in eachindex(potential.source_indices)
-        column = potential.source_indices[source]
-        independent = false
-        for prime_index in eachindex(primes)
-            independent |= _rank_state_append!(bases[prime_index],
-                active[prime_index], @view(potential.Q[:, column]),
-                primes[prime_index], workspaces[prime_index])
+function _exact_rank_state_append!(basis::Matrix{Rational{BigInt}}, active::BitVector,
+        row::AbstractVector{<:Integer}, work::Vector{Rational{BigInt}})
+    n = length(row)
+    length(work) == n || throw(DimensionMismatch("rank workspace has the wrong length"))
+    for i in 1:n
+        work[i] = Rational{BigInt}(BigInt(row[i]), BigInt(1))
+    end
+    for pivot in 1:n
+        active[pivot] || continue
+        factor = work[pivot]
+        factor == 0 && continue
+        @inbounds for column in pivot:n
+            work[column] -= factor * basis[pivot, column]
         end
+    end
+    pivot = findfirst(value -> !iszero(value), work)
+    pivot === nothing && return false
+    pivot_value = work[pivot]
+    @inbounds for column in pivot:n
+        work[column] /= pivot_value
+        basis[pivot, column] = work[column]
+    end
+    active[pivot] = true
+    true
+end
+
+function _exact_rank_columns(Q::Matrix{Int}, columns::AbstractVector{Int})
+    isempty(columns) && return 0
+    Int(Nemo.rank(Nemo.matrix(Nemo.ZZ, Matrix{Int}(Q[:, columns]))))
+end
+
+function _first_exactly_independent_pending(Q::Matrix{Int}, selected::Vector{Int},
+        pending::Vector{Int})
+    isempty(pending) && return 0
+    selected_rank = length(selected)
+    _exact_rank_columns(Q, vcat(selected, pending)) == selected_rank && return 0
+    first = 1
+    last = length(pending)
+    while first < last
+        midpoint = (first + last) ÷ 2
+        prefix = vcat(selected, pending[1:midpoint])
+        if _exact_rank_columns(Q, prefix) > selected_rank
+            last = midpoint
+        else
+            first = midpoint + 1
+        end
+    end
+    first
+end
+
+function _initialise_exact_rank_state(Q::Matrix{Int}, selected::Vector{Int})
+    n = size(Q, 1)
+    basis = zeros(Rational{BigInt}, n, n)
+    active = falses(n)
+    workspace = zeros(Rational{BigInt}, n)
+    for column in selected
+        _exact_rank_state_append!(basis, active, @view(Q[:, column]), workspace) ||
+            throw(ArgumentError("selected columns are not exactly independent"))
+    end
+    basis, active, workspace
+end
+
+function _process_exact_columns!(selected::Vector{Int}, dependent::Vector{Int},
+        prefix_ranks::Vector{Int}, Q::Matrix{Int}, positions, columns,
+        basis::Matrix{Rational{BigInt}}, active::BitVector,
+        workspace::Vector{Rational{BigInt}})
+    for (position, column) in zip(positions, columns)
+        if length(selected) == size(Q, 1)
+            push!(dependent, column)
+            prefix_ranks[position] = length(selected)
+            continue
+        end
+        independent = _exact_rank_state_append!(basis, active,
+            @view(Q[:, column]), workspace)
         if independent
             push!(selected, column)
-            if length(selected) == h11
-                append!(dependent, potential.source_indices[(source + 1):end])
-                break
-            end
         else
             push!(dependent, column)
+        end
+        prefix_ranks[position] = length(selected)
+    end
+end
+
+function _exact_integer_determinant(matrix::AbstractMatrix{<:Integer})
+    size(matrix, 1) == size(matrix, 2) || throw(ArgumentError(
+        "exact integer determinant requires a square matrix"))
+    BigInt(Nemo.det(Nemo.matrix(Nemo.ZZ, Matrix{Int}(matrix))))
+end
+
+function _validate_source_order(potential::InstantonData)
+    ncolumns = size(potential.Q, 2)
+    length(potential.source_indices) == ncolumns || throw(DimensionMismatch(
+        "source_indices must contain one entry per charge column"))
+    sort(potential.source_indices) == collect(1:ncolumns) || throw(ArgumentError(
+        "source_indices must be a permutation of the charge-column indices"))
+    nothing
+end
+
+function _select_independent_terms(potential::InstantonData, h11::Int)
+    size(potential.Q, 1) == h11 || throw(DimensionMismatch(
+        "potential charge matrix does not match Kinv"))
+    h11 > 0 || throw(ArgumentError("h11 must be positive"))
+    _validate_source_order(potential)
+    ncolumns = size(potential.Q, 2)
+    modular_basis = zeros(Int64, h11, h11)
+    modular_active = falses(h11)
+    modular_workspace = zeros(Int64, h11)
+    modular_rank = 0
+    selected = Int[]
+    dependent = Int[]
+    prefix_ranks = Vector{Int}(undef, ncolumns)
+    pending_positions = Int[]
+    pending_columns = Int[]
+    exact_mode = false
+    exact_basis = Matrix{Rational{BigInt}}(undef, 0, 0)
+    exact_active = BitVector()
+    exact_workspace = Vector{Rational{BigInt}}()
+    for source_position in eachindex(potential.source_indices)
+        column = potential.source_indices[source_position]
+        if length(selected) == h11
+            push!(dependent, column)
+            prefix_ranks[source_position] = h11
+            continue
+        end
+
+        if exact_mode
+            independent = _exact_rank_state_append!(exact_basis, exact_active,
+                @view(potential.Q[:, column]), exact_workspace)
+            if independent
+                push!(selected, column)
+            else
+                push!(dependent, column)
+            end
+            prefix_ranks[source_position] = length(selected)
+            continue
+        end
+
+        # A rank increase modulo one prime proves rational independence. Buffer
+        # modularly dependent columns and resolve them as one exact batch.
+        modular_independent = modular_rank == length(selected) &&
+            _modular_rank_state_append!(modular_basis, modular_active,
+                @view(potential.Q[:, column]), _RANK_SCREENING_PRIME,
+                modular_workspace)
+        if !modular_independent
+            push!(pending_positions, source_position)
+            push!(pending_columns, column)
+            continue
+        end
+
+        hidden_position = _first_exactly_independent_pending(
+            potential.Q, selected, pending_columns)
+        if hidden_position != 0
+            for index in 1:(hidden_position - 1)
+                push!(dependent, pending_columns[index])
+                prefix_ranks[pending_positions[index]] = length(selected)
+            end
+            exact_basis, exact_active, exact_workspace =
+                _initialise_exact_rank_state(potential.Q, selected)
+            _process_exact_columns!(selected, dependent, prefix_ranks, potential.Q,
+                pending_positions[hidden_position:end],
+                pending_columns[hidden_position:end], exact_basis, exact_active,
+                exact_workspace)
+            empty!(pending_positions)
+            empty!(pending_columns)
+            exact_mode = true
+            independent = _exact_rank_state_append!(exact_basis, exact_active,
+                @view(potential.Q[:, column]), exact_workspace)
+            if independent
+                push!(selected, column)
+            else
+                push!(dependent, column)
+            end
+            prefix_ranks[source_position] = length(selected)
+            continue
+        end
+
+        for (position, pending_column) in zip(pending_positions, pending_columns)
+            push!(dependent, pending_column)
+            prefix_ranks[position] = length(selected)
+        end
+        empty!(pending_positions)
+        empty!(pending_columns)
+        push!(selected, column)
+        modular_rank += 1
+        prefix_ranks[source_position] = length(selected)
+    end
+
+    if !isempty(pending_columns)
+        hidden_position = _first_exactly_independent_pending(
+            potential.Q, selected, pending_columns)
+        if hidden_position == 0
+            for (position, pending_column) in zip(pending_positions, pending_columns)
+                push!(dependent, pending_column)
+                prefix_ranks[position] = length(selected)
+            end
+        else
+            for index in 1:(hidden_position - 1)
+                push!(dependent, pending_columns[index])
+                prefix_ranks[pending_positions[index]] = length(selected)
+            end
+            exact_basis, exact_active, exact_workspace =
+                _initialise_exact_rank_state(potential.Q, selected)
+            _process_exact_columns!(selected, dependent, prefix_ranks, potential.Q,
+                pending_positions[hidden_position:end],
+                pending_columns[hidden_position:end], exact_basis, exact_active,
+                exact_workspace)
         end
     end
     length(selected) == h11 || throw(ArgumentError(
         "leading charges have rank $(length(selected)); expected h11=$h11"))
-    selected, dependent
+    selected_determinant = _exact_integer_determinant(potential.Q[:, selected])
+    selected_determinant != 0 || throw(ArgumentError(
+        "exact rank certificate found a zero selected determinant"))
+    certificate = RationalRankCertificate(
+        "modular_screen_with_exact_rational_fallback_v1", (h11, ncolumns),
+        copy(potential.source_indices), copy(selected), copy(dependent),
+        prefix_ranks, selected_determinant)
+    selected, dependent, certificate
 end
 
 function _canonical_frame(Q_reduced::Matrix{Int}, Kinv::Matrix{T}) where {T<:AbstractFloat}
@@ -541,12 +751,10 @@ end
 function leading_hierarchy(potential::InstantonData, kinv::AbstractMatrix{<:Real};
         T::Type{<:AbstractFloat}=Float64,
         signed_scale_policy::Symbol=:require_positive,
-        rank_primes=(1_000_003, 1_000_033),
         m_planck_GeV::Real=M_PLANCK_GEV)
     size(kinv, 1) == size(kinv, 2) || throw(DimensionMismatch("Kinv must be square"))
     h11 = size(kinv, 1)
-    selected, dependent = _select_independent_terms(potential, h11;
-        rank_primes=rank_primes)
+    selected, dependent, rank_certificate = _select_independent_terms(potential, h11)
     position_by_source = Dict{Int,Int}(
         source => position for (position, source) in enumerate(potential.source_indices))
     selected_positions = [position_by_source[source] for source in selected]
@@ -579,7 +787,7 @@ function leading_hierarchy(potential::InstantonData, kinv::AbstractMatrix{<:Real
     metric_residual = norm(transpose(theta) * (factor \ theta) - identity, Inf)
     scale = max(norm(q, Inf), one(T))
     triangular_residual = norm(tril(q, -1), Inf) / scale
-    LeadingAxionHierarchy{T}(selected, dependent, Q_reduced,
+    LeadingAxionHierarchy{T}(selected, dependent, rank_certificate, Q_reduced,
         T.(selected_scales), signs, q, theta, log10_f,
         log10_mass, planck, triangular_residual, metric_residual)
 end
@@ -854,7 +1062,8 @@ const run_local_pilot = run_local_scan
 const write_pilot_csv = write_scan_csv
 
 export VisibleSectorAssignment, GeometryInputs, InstantonData,
-    LeadingAxionHierarchy, AxionPhotonObservables, AxionPhotonResult,
+    RationalRankCertificate, LeadingAxionHierarchy, AxionPhotonObservables,
+    AxionPhotonResult, rank_certificate_payload,
     load_geometry_inputs,
     load_instanton_data, geometry_path, local_geometry_indices,
     leading_hierarchy, mixing_matrix, photon_observables,
