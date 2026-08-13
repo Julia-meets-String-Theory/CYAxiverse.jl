@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "source": {
+    "paper": "arXiv:2008.01730v1",
+    "section": "Random samples at large Hodge numbers",
+    "polytope": "Delta^circ_(491,11)",
+    "lattice": "N",
+    "claim": "Published vertices of the unique Kreuzer-Skarke polytope with h11=491."
+  },
+  "polytopes": [
+    {
+      "h11": 491,
+      "h21": 11,
+      "vertices": [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [21, 28, 36, 42],
+        [-63, -56, -48, -42]
+      ]
+    }
+  ]
+}
