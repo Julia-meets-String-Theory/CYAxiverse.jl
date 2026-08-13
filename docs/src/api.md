@@ -44,9 +44,6 @@ Pages = ["read.jl"]
 ```
 
 ## `CYAxiverse.plotting`
-```@docs
-CYAxiverse.plotting
-```
 ```@autodocs
 Modules = [CYAxiverse.plotting]
 Pages = ["plotting.jl"]

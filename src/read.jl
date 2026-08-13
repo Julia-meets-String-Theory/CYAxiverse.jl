@@ -91,7 +91,7 @@ function visible_sector(geom_idx::GeometryIndex)
         read_value(name) = HDF5.read(group[name]::HDF5.Dataset)
         read_attribute(name, default) = begin
             group_attributes = attributes(group)
-            haskey(group_attributes, name) ? read(group_attributes[name]) : default
+            haskey(group_attributes, name) ? HDF5.read(group_attributes[name]) : default
         end
         qed_volume_upper_bound = haskey(group, "qed_volume_upper_bound") ?
             Float64(read_value("qed_volume_upper_bound")) : nothing
@@ -142,7 +142,7 @@ function construction_metadata_json(geom_idx::GeometryIndex)
     h5open(cyax_file(geom_idx), "r") do file
         metadata = attributes(file)
         haskey(metadata, "construction_metadata_json") || return nothing
-        String(read(metadata["construction_metadata_json"]))
+        String(HDF5.read(metadata["construction_metadata_json"]))
     end
 end
 
