@@ -31,6 +31,14 @@ The construction choices are:
      Demirtas, McAllister, and Rios-Tascon, arXiv:2008.01730.
    - `fast`: random heights near a Delaunay triangulation. This is useful for
      coverage scans and smoke tests, but is not a fair ensemble.
+   - `ntfe_fast`: sample FRTs on the two-faces, then directly extend only
+     feasible combinations to two-face-inequivalent (NTFE) FRSTs using the
+     algorithm of MacFadden, arXiv:2309.10855. This avoids doing expensive CY
+     work repeatedly for 2-face-equivalent FRSTs. Its finite face pools are a
+     bounded coverage proposal, not a uniform NTFE or FRST sample.
+   - `gnn_ntfe`: use CYTools' optional dualGNN 2-face proposal and the same
+     direct NTFE extension. It is a distinct learned-proposal ensemble whose
+     model, pool size, and extension failures determine the realised support.
 4. Validate fineness, regularity, the star condition, and triangulation
    validity before constructing the hypersurface.
 5. Extract Hodge data, intersection numbers, the divisor basis, the Mori cone,
@@ -39,12 +47,16 @@ The construction choices are:
    prohibitively expensive at large `h11`.
 6. Prefer MOSEK for stretched-cone quadratic optimization when a valid license
    and the qpsolvers MOSEK backend are available.
-7. Require positive effective-divisor volumes and search for the smallest
-   stretched-cone prefactor satisfying the instanton/potential-control
-   criterion used in arXiv:2309.01831.
-8. Apply the fuzzy-axion QCD selection from arXiv:2412.12012: every prime
-   toric divisor has volume at least one, and at least one prime divisor lies in
-   the configurable `[25, 40]` volume window.
+7. Under the default `adaptive` policy, require positive effective-divisor
+   volumes and search for the smallest stretched-cone prefactor satisfying the
+   instanton/potential-control criterion used in arXiv:2309.01831.
+8. Apply the fuzzy-axion QCD selection from arXiv:2412.12012. The default
+   `adaptive` moduli policy requires every prime toric divisor to have volume
+   at least one and places at least one prime divisor in the configurable
+   `[25, 40]` volume window. The optional `canonical_qcd` policy keeps the
+   canonical stretched-cone tip ray, samples a pairwise-intersecting triple of
+   prime toric divisors, and applies a homogeneous radial scaling so its QCD
+   member has volume 40 by default.
 9. If an explicit orientifold is supplied, validate its lattice involution,
    polytope preservation, FRST preservation, induced integral H2 action, and
    invariant Kaehler-cone intersection.
@@ -61,6 +73,9 @@ following references:
 - *Bounding the Kreuzer-Skarke
   Landscape*, arXiv:2008.01730. This motivates the secondary-fan random-walk
   and flip sampler used by the `fair` mode.
+- *Efficient Algorithm for Generating Homotopy Inequivalent Calabi-Yaus*,
+  arXiv:2309.10855. This supplies the direct two-face/secondary-cone extension
+  used by the NTFE modes.
 - *Axion minima in string theory*, arXiv:2309.01831. This
   supplies the stretched-cone and instanton-control criterion used when
   accepting a geometry.
@@ -78,6 +93,9 @@ following references:
 - *Fuzzy Axions and Associated Relics*, arXiv:2412.12012. Equation (3.22) and
   its surrounding construction motivate the prime-divisor lower bound and
   QCD-visible divisor-volume window.
+- *Glimmers from the Axiverse*, arXiv:2309.13145. Its geometry-level recipe
+  motivates the canonical tip, random intersecting-divisor assignment, and
+  QCD divisor volume normalization implemented by `canonical_qcd`.
 
 The first four references determine the geometry-generation and explicit
 orientifold handoff directly. The remaining references determine which
@@ -88,7 +106,11 @@ The script records the directly operative construction papers in the HDF5
 The QCD-volume filter is a geometry-selection criterion, not a claim that the
 output contains a complete Standard Model sector. It is applied to the raw
 prime toric divisor volumes returned by CYTools, not to favorable basis
-divisors or effective-cone ray volumes.
+divisors. In `canonical_qcd`, the sampled triple is a geometric assignment
+recorded in `standard_model/`; it does not construct a D7-brane stack, a QED
+divisor, or stringy instanton data. The effective-cone, curve-volume, and
+Kähler-slack checks remain package-level physical-domain guards in addition to
+the paper's raw prime-divisor `< 1` rejection criterion.
 
 ## Environment
 
@@ -107,6 +129,10 @@ The environment must provide:
 - qpsolvers plus at least one usable backend;
 - the CYTools triangulation backend selected by `--backend`;
 - MOSEK and a valid license if MOSEK optimization is desired.
+
+`gnn_ntfe` (or `--ntfe-face-sampler dualgnn`) additionally needs the optional
+`dualgnn`/PyTorch dependency described in the CYTools documentation. It is not
+part of the base CYTools installation.
 
 The script looks for a license in this order:
 
@@ -238,6 +264,7 @@ share output files, random-number generators, or mutable CYTools objects.
 | --- | --- | --- |
 | `--favorable {true,false,any}` | `true` | Fetch favorable N-lattice polytopes (`true`), non-favorable polytopes (`false`), or do not impose the favorability filter (`any`). |
 | `--ks-database-version TEXT` | endpoint label | Provenance label for the KS source. CYTools does not expose the remote database version automatically, so set this explicitly when the endpoint/version is known. |
+| `--polytope-manifest PATH` | unset | Load explicit, validated KS vertices from a local JSON manifest instead of fetching them from the remote endpoint. |
 
 The script reconstructs each fetched polytope from its vertices in each worker.
 This avoids passing a large lattice-point object between processes and is
@@ -247,7 +274,7 @@ especially important for the high-`h11` KS cases.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--sampling-scheme {fair,fast}` | `fair` | Select the secondary-fan sampler or the faster biased height sampler. |
+| `--sampling-scheme {fair,fast,ntfe_fast,gnn_ntfe}` | `fair` | Select fair secondary-fan MCMC, biased random heights, direct NTFE with sampled 2-face FRTs, or optional dualGNN-guided direct NTFE. |
 | `--backend {cgal,qhull}` | `cgal` | CYTools backend for triangulation construction. |
 | `--max-retries INT` | `50` | Maximum sampler retries for a new triangulation. |
 | `--max-tip-attempts INT` | `50` | Maximum FRST candidates tested per polytope before reporting a shortfall. |
@@ -258,6 +285,9 @@ especially important for the high-`h11` KS cases.
 | `--walk-step-size FLOAT` | `0.01` | Fair-mode secondary-fan step size. |
 | `--max-steps-to-wall INT` | `25` | Fair-mode maximum steps toward a fine-triangulation wall. |
 | `--fast-height-scale FLOAT` | `0.2` | Standard deviation of the Gaussian height perturbation in fast mode. |
+| `--ntfe-face-sampler {fast,fair,grow2d,dualgnn}` | `fast` | 2-face FRT proposal used by `ntfe_fast`. The installed CYTools version is authoritative for availability and behavior. |
+| `--ntfe-max-face-points INT` | `0` | Enumerate only 2-faces up to this size; sample larger faces. `0` samples every 2-face. |
+| `--ntfe-face-pool-size INT` | `5` | FRT proposals retained for each sampled 2-face. This laptop-profiled conservative default explicitly bounds runtime and sampler support; raise it only when broader coverage justifies the cost. |
 
 `fair` is the production default. For small polytopes, CYTools warns that the
 fair random walk may stall because the secondary-fan state space is too small
@@ -307,6 +337,56 @@ although the replacement may cause more than the originally requested number
 of polytopes to be used. Replacement is bounded: if the spare pool is
 exhausted, the remaining shortfall is reported. A worker exception is still
 reported as an error rather than silently replaced.
+
+### h11=491 laptop path
+
+The repository includes the published vertices of the unique favorable
+`(h11,h21)=(491,11)` KS polytope in
+[`manifests/h11_491_11_ks.json`](./manifests/h11_491_11_ks.json). This avoids
+depending on the legacy remote KS endpoint for a replay. First run a bounded
+sampler/CY construction probe:
+
+```bash
+source activate cytools
+XDG_CACHE_HOME=/tmp/cytools-cache \
+python scripts/probe_h11_491_sampler.py \
+    --sampler ntfe_fast --ntfe-face-sampler fast \
+    --ntfe-face-pool-size 5 --candidate-count 1 \
+    --include-cy --include-topology --seed 20260813 \
+    --report /tmp/h11_491_ntfe_probe.json
+```
+
+The probe emits an atomic JSON report with the fixed polytope identity,
+sampler controls, FRST checks, triangulation hash, timing, and (when requested)
+CY Hodge/smoothness checks. It is a performance/validity probe, not an HDF5
+production run or fairness demonstration.
+
+The full generator intentionally preserves the existing dense instanton-
+potential HDF5 contract. At `h11=491`, its raw `Q` matrix alone is about
+460 MiB as `int64` before HDF5 compression, so the bounded probe is the
+appropriate laptop check for the triangulation and topology stages. Redesigning
+that downstream potential representation is a separate data-schema and
+scientific-validation change; it is not hidden inside the sampler choice.
+
+For a single full geometry artifact, retain the manifest and sampler controls,
+start with one worker and a fresh output root, and let the existing physical
+filters account for every rejection:
+
+```bash
+source activate cytools
+XDG_CACHE_HOME=/tmp/cytools-cache \
+python scripts/generate_geometric_data_multitriangulation.py \
+    --h11_min 491 --h11_max 491 --n 1 --cores 1 \
+    --polytope-manifest scripts/manifests/h11_491_11_ks.json \
+    --sampling-scheme ntfe_fast --ntfe-face-sampler fast \
+    --ntfe-max-face-points 0 --ntfe-face-pool-size 5 \
+    --max-tip-attempts 1 --seed 20260813 \
+    --outdir /tmp/cyax-h11-491 --verbose
+```
+
+If the optional GNN environment is installed and independently pinned, repeat
+the identical bounded probe with `--sampler gnn_ntfe`; do not merge the two
+outputs into one unnamed ensemble.
 
 ### Recommended workflow for small geometries
 
@@ -390,9 +470,12 @@ with the same documented settings.
 | `--min-prime-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every raw prime toric divisor. |
 | `--qcd-volume-min FLOAT` | `25.0` | Lower edge of the QCD-visible prime-divisor volume window. |
 | `--qcd-volume-max FLOAT` | `40.0` | Upper edge of the QCD-visible prime-divisor volume window. |
+| `--moduli-policy {adaptive,canonical_qcd}` | `adaptive` | Use randomized angular Kähler points with a QCD window, or the canonical stretched-cone ray with radial QCD normalization. |
+| `--qcd-volume-target FLOAT` | `40.0` | Target prime-divisor volume for `canonical_qcd`. |
+| `--qcd-divisor-index INT` | random member | Optional zero-based CYTools prime-toric-divisor index for `canonical_qcd`; the sampled intersecting triple is restricted to triples containing it. Without it, QCD is chosen uniformly from the sampled triple. |
 | `--orientifold-file PATH` | off | JSON file containing an explicit lattice involution and O3/O7 or O5/O9 metadata. |
 | `--export-kahler-rays` | off | Enumerate and store Kähler-cone rays; expensive at large `h11`. |
-| `--max-m FLOAT` | `1_000_000` | Maximum stretched-cone prefactor searched for the potential-control criterion. |
+| `--max-m FLOAT` | `1_000_000` | Maximum radial prefactor for `canonical_qcd`, or upper bound for the adaptive potential-control search. |
 
 The canonical stretched-cone tip is found by minimizing the Euclidean norm
 subject to unit distance from the Kahler-cone hyperplanes. When MOSEK is
@@ -409,7 +492,7 @@ different dependency path, it is a performance warning rather than a failed
 geometry; check the selected solver and runtime before changing acceptance
 parameters.
 
-Candidate acceptance requires:
+With `--moduli-policy adaptive`, candidate acceptance requires:
 
 - a valid FRST and smooth generic CY hypersurface;
 - finite topology and cone data;
@@ -423,6 +506,24 @@ Candidate acceptance requires:
 
 Rejected candidates are discarded and replaced until the requested count or
 the attempt budget is exhausted.
+
+With `--moduli-policy canonical_qcd`, the same FRST and Kähler cone are used,
+but the angular sampling loop is skipped. Before the tip solve, the generator
+builds the prime-divisor intersection graph from triangulated two-faces and
+reservoir-samples one unordered triangle whose three pairs intersect. One
+member is selected uniformly as QCD, unless `--qcd-divisor-index` fixes the QCD
+member and restricts the triangle sample accordingly. The final Kähler form is
+then `J = m J_tip`, where `m = sqrt(target / tau_QCD)` for that selected prime
+divisor. This gives `tau ∝ m²`, `Kinv ∝ m⁴`, and `Vol(CY) ∝ m³`; the exact
+assignment and scale are recorded in `construction_metadata_json` and
+`cytools/geometric/standard_model`.
+
+The generator does not impose `m >= 1` as a separate pre-filter: the target
+determines the homogeneous scale, after which the final prime-divisor,
+effective-cone, curve-volume, and cone-slack checks are applied. The adaptive
+potential-control search is not applied in this mode. This is a radial
+normalization of an existing geometry, not a new FRST or a claim that a QCD
+divisor has been constructed from a brane model.
 
 ## Useful command recipes
 
@@ -444,6 +545,28 @@ python scripts/generate_geometric_data_multitriangulation.py \
 
 This checks the full geometry-writing path but is intentionally not a fair
 ensemble measurement.
+
+### Canonical QCD-normalized geometry
+
+To retain the canonical stretched-cone direction, sample the Standard Model
+divisor triple, and normalize its QCD member to volume 40, use:
+
+```bash
+source activate cytools
+python scripts/generate_geometric_data_multitriangulation.py \
+    --h11s 15 --n 1 \
+    --moduli-policy canonical_qcd \
+    --qcd-volume-target 40 \
+    --outdir /scratch/database/canonical-qcd \
+    --verbose
+```
+
+Add `--qcd-divisor-index N` when the zero-based CYTools prime-toric-divisor
+index is fixed by a separate model-building input. Without it, the generator
+samples a pairwise-intersecting divisor triple and selects its QCD member
+uniformly. A triple is interpreted as a triangle in the prime-divisor
+intersection graph; this is the explicit, auditable interpretation of the
+paper's under-specified phrase "triple of intersecting divisors".
 
 ### Reproducible fair sample
 
@@ -531,6 +654,19 @@ versus O5/O9 and coefficient constraints remain explicit metadata; fixed-locus
 topology, tadpole cancellation, fluxes, and phenomenology are downstream
 calculations.
 
+For the paper-style visible-sector pilot, add
+`--visible-sector-policy intersecting_d7`. This requires the orientifold file
+to describe an O3/O7 involution with `h11_minus=0`, matching the paper's
+all-C₄-axion assumption. The generator then retains only QCD candidates
+with an invariant intersecting prime divisor, chooses an invariant QED divisor
+(the lowest-volume eligible one unless `--qed-divisor-index` is supplied), and
+records the QCD/QED image map, intersection, divisor-basis charges, and QED
+Euclidean-D3 instanton scale. The QED instanton is appended to the potential
+when its divisor charge is not already one of the direct effective-cone terms.
+This is the paper's stated toy visible-sector assumption, not a complete D7
+model: it does not solve D7 tadpoles, engineer matter, or prove E3 zero-mode
+conditions.
+
 ## Output layout and HDF5 contract
 
 Each accepted geometry is written to:
@@ -558,6 +694,7 @@ cytools/geometric/
   glsm
   basis, basis_matrix
   prime_toric_divisors
+  prime_divisor_charges
   tip, tip_prefactor
   CY_volume
   divisor_volumes, prime_divisor_volumes, curve_volumes
@@ -568,12 +705,24 @@ cytools/geometric/
   mori_cone
   kahler_cone (only with --export-kahler-rays)
   kahler_hyperplanes
+  standard_model/ (only with --moduli-policy canonical_qcd)
+    divisor_indices
+    qcd_divisor_index
   orientifold/ (only with --orientifold-file)
     lattice_matrix
     h2_involution_matrix
     invariant_kahler_basis
     anti_invariant_h2_basis
     invariant_kahler_point
+    prime_divisor_image_indices
+    prime_divisor_invariant_indices
+  visible_sector/ (only with --visible-sector-policy intersecting_d7)
+    qcd_divisor_index, qed_divisor_index
+    qcd_image_index, qed_image_index
+    qcd_divisor_volume, qed_divisor_volume
+    qcd_charge, qed_charge, em_charge
+    qed_instanton_index, qed_log10_lambda4
+    qcd_qed_intersection, qcd_invariant, qed_invariant
 cytools/potential/
   L, Q
 construction_metadata/
@@ -586,7 +735,13 @@ Important conventions:
 - `kappa` is sparse COO with columns `[i, j, k, value]` and zero-based indices.
 - Vectors and matrices are in the CYTools divisor-basis convention recorded in
   `basis_convention`.
+- `basis_matrix` is `h11 × n_points`; a prime-divisor charge is a selected
+  lattice-point column, while `prime_divisor_charges` stores those charges as
+  one row per prime divisor.
 - `L` retains the CYAxiverse sign/mantissa and base-10 exponent representation.
+- `Q` is stored as `h11 × N` with one instanton charge per column, and `L` is
+  stored as `2 × N`; the generator constructs these package-oriented arrays
+  directly rather than writing term-major matrices for Julia to transpose.
 - The potential charge basis uses unique effective-cone rays. Exact duplicate
   rows returned by CYTools are removed before the stretched-cone control,
   pairwise-term construction, and HDF5 write. The raw GLSM dataset remains
@@ -598,6 +753,14 @@ Important conventions:
   `prime_toric_divisors()` and is the vector used for the QCD filter. The
   corresponding `prime_toric_divisors` index array is exported explicitly;
   the recorded QCD divisor index is zero-based.
+- `prime_divisor_charges` has one divisor-basis charge row per entry of
+  `prime_toric_divisors`. Visible-sector divisor indices and image indices are
+  zero-based in HDF5. `qed_instanton_index` is also zero-based and refers to a
+  column of the stored `Q`/`L` arrays.
+- `standard_model/divisor_indices` contains the three zero-based prime-divisor
+  indices selected by `canonical_qcd`; all three pairs are edges of the
+  triangulated two-face intersection graph. `standard_model/qcd_divisor_index`
+  identifies the member whose final volume is normalized to the target.
 - `kahler_hyperplanes` is always exported and is sufficient for the generator's
   stretched-cone optimization and physical validation. Use
   `--export-kahler-rays` only when a downstream sampler explicitly requires a
@@ -654,6 +817,13 @@ end
   acceptance criteria changes the retained ensemble.
 - `fast` is biased by construction and should be labeled as such in downstream
   statistics.
+- `ntfe_fast` saves redundant geometry work by changing the sampling unit to
+  two-face-inequivalent FRSTs. A finite per-face pool and its FRT proposal are
+  selection effects, so it is a labelled coverage sampler, not a fair
+  population sample.
+- `gnn_ntfe` is a separate learned-proposal ensemble. Its checkpoint, CYTools
+  version, model dependency, pool size, extension failures, and duplicate rate
+  belong in the run record before comparing it with a fair or fast sample.
 - The favorable filter changes the population being sampled. Record it and do
   not compare `--favorable true` and `--favorable any` as if they were the same
   ensemble.
