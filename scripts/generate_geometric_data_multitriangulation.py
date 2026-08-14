@@ -71,6 +71,7 @@ from glimmers_schema11 import (
     factorized_charge_metadata,
     sample_capacity_aware_assignments,
     stable_hash,
+    stable_seed,
     write_eft_parquet,
     summarize_terminal_records,
 )
@@ -653,7 +654,7 @@ def _candidate_terminal_status(exc):
     if isinstance(exc, PrefactorCriterionNotMet):
         return "kaehler_tip_failure"
     if isinstance(exc, NoPhysicalKaehlerPoint):
-        return "kaehler_tip_failure"
+        return "kaehler_point_shortfall"
     if isinstance(exc, NoQcdDivisorVolume):
         return "qcd_normalization_failure"
     if isinstance(exc, NoStandardModelAssignment):
@@ -681,7 +682,16 @@ def _triangulation_hashes(triangulation):
 
 
 def sample_stretched_kaehler_points(
-    kahler_cone, reference_tip, rng, attempts, report, solver_used=None
+    kahler_cone,
+    reference_tip,
+    rng,
+    attempts,
+    report,
+    solver_used=None,
+    *,
+    point_seed=None,
+    diagnostics=None,
+    include_metadata=False,
 ):
     """Yield randomized points in the same stretched Kähler region.
 
@@ -691,7 +701,15 @@ def sample_stretched_kaehler_points(
     so it remains inside the Kähler cone with every curve-wall distance >= 1.
     """
     mosek_license = configure_mosek_license()
-    yield np.asarray(reference_tip, dtype=float)
+    reference_point = np.asarray(reference_tip, dtype=float)
+    reference_metadata = {
+        "attempt_index": 1,
+        "point_kind": "canonical_tip",
+        "point_seed": None if point_seed is None else int(point_seed),
+        "solver": None,
+        "point": reference_point,
+    }
+    yield reference_metadata if include_metadata else reference_point
     if attempts <= 1:
         return
     try:
@@ -724,14 +742,23 @@ def sample_stretched_kaehler_points(
     )
 
     for number in range(2, attempts + 1):
-        direction = rng.normal(size=reference_tip.size)
+        attempt_seed = (
+            None
+            if point_seed is None
+            else stable_seed("kaehler-point-attempt", point_seed, number)
+        )
+        attempt_rng = (
+            rng if attempt_seed is None else np.random.default_rng(attempt_seed)
+        )
+        direction = attempt_rng.normal(size=reference_tip.size)
         direction /= max(float(np.linalg.norm(direction)), np.finfo(float).tiny)
         # A logarithmic range makes this explore angles rather than merely a
         # tiny neighborhood of the norm-minimizing reference tip.
-        target = target_norm * (2.0 ** rng.uniform(-1.0, 4.0)) * direction
+        target = target_norm * (2.0 ** attempt_rng.uniform(-1.0, 4.0)) * direction
         report(f"projecting randomized Kähler point {number}/{attempts}")
         point = None
         selected_solver = None
+        solver_errors = []
         for solver in solvers:
             try:
                 point = solve_qp(
@@ -742,7 +769,8 @@ def sample_stretched_kaehler_points(
                     solver=solver,
                     verbose=False,
                 )
-            except Exception:
+            except Exception as exc:
+                solver_errors.append(f"{solver}: {type(exc).__name__}: {exc}")
                 point = None
             if point is not None:
                 selected_solver = solver
@@ -752,15 +780,246 @@ def sample_stretched_kaehler_points(
                 "randomized Kähler projection failed with all available "
                 f"solvers ({', '.join(solvers)}); skipping candidate"
             )
+            if diagnostics is not None:
+                diagnostics.append(
+                    {
+                        "attempt_index": number,
+                        "point_kind": "randomized_projection",
+                        "point_seed": attempt_seed,
+                        "attempted": True,
+                        "point_status": "skipped",
+                        "solver": None,
+                        "failure_reason": "all quadratic-program solvers failed",
+                        "solver_errors": solver_errors,
+                    }
+                )
             continue
         point = np.asarray(point, dtype=float)
         if np.all(np.isfinite(point)) and np.min(hyperplanes @ point) >= 1.0 - 1e-6:
             report(f"randomized Kähler projection succeeded with {selected_solver}")
             if solver_used is not None:
                 solver_used.append(selected_solver)
-            yield point
+            proposal = {
+                "attempt_index": number,
+                "point_kind": "randomized_projection",
+                "point_seed": attempt_seed,
+                "solver": selected_solver,
+                "point": point,
+            }
+            yield proposal if include_metadata else point
         else:
             report("randomized Kähler projection was infeasible; skipping candidate")
+            if diagnostics is not None:
+                diagnostics.append(
+                    {
+                        "attempt_index": number,
+                        "point_kind": "randomized_projection",
+                        "point_seed": attempt_seed,
+                        "attempted": True,
+                        "point_status": "skipped",
+                        "solver": selected_solver,
+                        "failure_reason": "projected point was non-finite or outside the stretched cone",
+                    }
+                )
+
+
+def evaluate_kaehler_point(
+    cy,
+    kahler_cone,
+    effective_cone_rays,
+    point,
+    *,
+    attempt_index,
+    point_kind,
+    point_seed=None,
+    solver=None,
+):
+    """Evaluate one Kähler point without retaining live CYTools objects."""
+    diagnostic = {
+        "attempt_index": int(attempt_index),
+        "point_kind": point_kind,
+        "point_seed": None if point_seed is None else int(point_seed),
+        "attempted": True,
+        "solver": solver,
+        "point_status": "failed",
+        "checks": {},
+    }
+    values = None
+    try:
+        point_array = np.asarray(point, dtype=float).reshape(-1)
+        diagnostic["coordinate_dimension"] = int(point_array.size)
+        diagnostic["point_norm"] = float(np.linalg.norm(point_array))
+        diagnostic["point_sha256"] = stable_hash(point_array.tolist())
+        hyperplanes = np.asarray(kahler_cone.hyperplanes(), dtype=float)
+        slack = hyperplanes @ point_array
+        finite_coordinates = bool(np.all(np.isfinite(point_array)))
+        finite_slack = bool(np.all(np.isfinite(slack)))
+        minimum_slack = float(np.min(slack)) if slack.size else math.inf
+        diagnostic["minimum_kaehler_slack"] = minimum_slack
+        diagnostic["checks"]["finite_coordinates"] = finite_coordinates
+        diagnostic["checks"]["cone_membership"] = bool(
+            finite_slack and minimum_slack >= 1.0 - 1e-6
+        )
+        if not finite_coordinates:
+            raise ValueError("Kähler point coordinates are non-finite")
+        if not diagnostic["checks"]["cone_membership"]:
+            raise ValueError(
+                f"Kähler point is outside the stretched cone: minimum slack {minimum_slack:.6g}"
+            )
+
+        cy_volume = float(cy.compute_cy_volume(point_array))
+        curve_volumes = np.asarray(cy.compute_curve_volumes(point_array), dtype=float)
+        basis_divisor_volumes = np.asarray(
+            cy.compute_divisor_volumes(point_array, in_basis=True), dtype=float
+        )
+        prime_divisor_volumes = np.asarray(
+            cy.compute_divisor_volumes(point_array), dtype=float
+        )
+        effective_divisor_volumes = np.asarray(
+            effective_cone_rays, dtype=float
+        ) @ basis_divisor_volumes
+        inverse_metric = np.asarray(
+            cy.compute_inverse_kahler_metric(point_array), dtype=float
+        )
+        inverse_metric = 0.5 * (inverse_metric + inverse_metric.T)
+        metric_eigenvalues = np.linalg.eigvalsh(inverse_metric)
+
+        diagnostic.update(
+            {
+                "cy_volume": cy_volume,
+                "minimum_curve_volume": (
+                    float(np.min(curve_volumes)) if curve_volumes.size else math.inf
+                ),
+                "minimum_basis_divisor_volume": (
+                    float(np.min(basis_divisor_volumes))
+                    if basis_divisor_volumes.size
+                    else math.inf
+                ),
+                "minimum_prime_divisor_volume": (
+                    float(np.min(prime_divisor_volumes))
+                    if prime_divisor_volumes.size
+                    else math.inf
+                ),
+                "minimum_effective_divisor_volume": (
+                    float(np.min(effective_divisor_volumes))
+                    if effective_divisor_volumes.size
+                    else math.inf
+                ),
+                "minimum_metric_eigenvalue": (
+                    float(np.min(metric_eigenvalues))
+                    if metric_eigenvalues.size
+                    else math.inf
+                ),
+            }
+        )
+        diagnostic["checks"].update(
+            {
+                "finite_cy_volume": bool(np.isfinite(cy_volume)),
+                "positive_cy_volume": bool(np.isfinite(cy_volume) and cy_volume > 0.0),
+                "finite_curve_volumes": bool(np.all(np.isfinite(curve_volumes))),
+                "positive_curve_volumes": bool(
+                    np.all(np.isfinite(curve_volumes))
+                    and (not curve_volumes.size or np.min(curve_volumes) > 0.0)
+                ),
+                "finite_basis_divisor_volumes": bool(
+                    np.all(np.isfinite(basis_divisor_volumes))
+                ),
+                "positive_basis_divisor_volumes": bool(
+                    np.all(np.isfinite(basis_divisor_volumes))
+                    and (not basis_divisor_volumes.size or np.min(basis_divisor_volumes) > 0.0)
+                ),
+                "finite_prime_divisor_volumes": bool(
+                    np.all(np.isfinite(prime_divisor_volumes))
+                ),
+                "positive_prime_divisor_volumes": bool(
+                    np.all(np.isfinite(prime_divisor_volumes))
+                    and (not prime_divisor_volumes.size or np.min(prime_divisor_volumes) > 0.0)
+                ),
+                "finite_effective_divisor_volumes": bool(
+                    np.all(np.isfinite(effective_divisor_volumes))
+                ),
+                "positive_effective_divisor_volumes": bool(
+                    np.all(np.isfinite(effective_divisor_volumes))
+                    and (
+                        not effective_divisor_volumes.size
+                        or np.min(effective_divisor_volumes) > 0.0
+                    )
+                ),
+                "finite_inverse_metric": bool(np.all(np.isfinite(inverse_metric))),
+                "positive_inverse_metric": bool(
+                    np.all(np.isfinite(metric_eigenvalues))
+                    and (not metric_eigenvalues.size or np.min(metric_eigenvalues) > 0.0)
+                ),
+            }
+        )
+        failed_checks = [
+            name for name, passed in diagnostic["checks"].items() if not passed
+        ]
+        if failed_checks:
+            raise ValueError("failed point checks: " + ", ".join(failed_checks))
+        diagnostic["point_status"] = "accepted"
+        values = {
+            "point": point_array,
+            "basis_divisor_volumes": basis_divisor_volumes,
+            "prime_divisor_volumes": prime_divisor_volumes,
+            "effective_divisor_volumes": effective_divisor_volumes,
+            "curve_volumes": curve_volumes,
+            "inverse_metric": inverse_metric,
+            "cy_volume": cy_volume,
+        }
+    except Exception as exc:
+        diagnostic["failure_reason"] = f"{type(exc).__name__}: {exc}"
+        if "checks" not in diagnostic:
+            diagnostic["checks"] = {}
+    return diagnostic, values
+
+
+def select_canonical_qcd_candidate(
+    prime_tau0,
+    tau0,
+    qprime,
+    candidate_indices,
+    qcd_volume_target,
+    min_prime_divisor_volume,
+    min_divisor_volume,
+    max_m,
+    *,
+    allow_m_below_one=False,
+    report=None,
+):
+    """Select the first eligible canonical QCD divisor and radial scale."""
+    prime_tau0 = np.asarray(prime_tau0, dtype=float)
+    tau0 = np.asarray(tau0, dtype=float)
+    qprime = np.asarray(qprime, dtype=float)
+    for candidate_index in candidate_indices:
+        candidate_index = int(candidate_index)
+        if not 0 <= candidate_index < len(prime_tau0):
+            continue
+        prime_volume = float(prime_tau0[candidate_index])
+        if not np.isfinite(prime_volume) or prime_volume <= 0.0:
+            continue
+        candidate_m = math.sqrt(qcd_volume_target / prime_volume)
+        if report is not None:
+            report(
+                f"QCD tip volume={prime_volume:.6g}; "
+                f"homogeneous radial scale m={candidate_m:.6g}"
+            )
+        # The canonical reference run only dilates the tip by default.
+        # Contraction is retained as an explicit opt-in for studies that
+        # reproduce the unrestricted normalization convention.
+        if not allow_m_below_one and candidate_m < 1.0:
+            continue
+        if candidate_m > max_m:
+            continue
+        candidate_tau = candidate_m**2 * tau0
+        candidate_prime_volumes = candidate_m**2 * prime_tau0
+        candidate_effective_volumes = qprime @ candidate_tau
+        if np.min(candidate_prime_volumes) < min_prime_divisor_volume - 1e-8:
+            continue
+        if np.min(candidate_effective_volumes) < min_divisor_volume - 1e-8:
+            continue
+        return candidate_index, candidate_m
+    return None
 
 
 def generate_and_save_geometry(
@@ -789,6 +1048,7 @@ def generate_and_save_geometry(
     sampling_metadata,
     ks_database_version,
     orientifold_config,
+    orientifold_kaehler_policy="none",
     polytope_source=None,
     export_kahler_rays=False,
     overwrite=False,
@@ -800,6 +1060,9 @@ def generate_and_save_geometry(
     eft_mode=False,
     raw_frst_metadata=None,
     topology_audit=None,
+    kaehler_point_seed=None,
+    kaehler_point_diagnostics=None,
+    allow_m_below_one=False,
 ):
     """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
     # Preserve the package writer's historical zero-based positional option
@@ -810,6 +1073,15 @@ def generate_and_save_geometry(
     if moduli_policy not in {"adaptive", "canonical_qcd"}:
         raise ValueError(
             "moduli_policy must be 'adaptive' or 'canonical_qcd'"
+        )
+    if allow_m_below_one and moduli_policy != "canonical_qcd":
+        raise ValueError(
+            "allow_m_below_one requires moduli_policy='canonical_qcd'"
+        )
+    if orientifold_kaehler_policy not in {"none", "require_even_subspace"}:
+        raise ValueError(
+            "orientifold_kaehler_policy must be 'none' or "
+            "'require_even_subspace'"
         )
     if qcd_volume_target <= 0.0:
         raise ValueError("qcd_volume_target must be positive")
@@ -863,6 +1135,16 @@ def generate_and_save_geometry(
         raise ValueError("explicit QED selection requires qed_divisor_index_user")
     if qed_selection_policy == "uniform_eligible" and qed_divisor_index_user is not None:
         raise ValueError("an explicit QED index requires explicit selection")
+    if kaehler_point_seed is None:
+        kaehler_point_seed = stable_seed(
+            "kaehler-point",
+            sampling_metadata.get("seed", 0),
+            sampling_metadata.get("proposal_seed"),
+            polytope_id,
+        )
+    point_diagnostics = (
+        [] if kaehler_point_diagnostics is None else kaehler_point_diagnostics
+    )
     report("validating the CYTools FRST")
     frst_validation = validate_frst(poly, triangulation)
     if topology_audit is not None:
@@ -1007,13 +1289,25 @@ def generate_and_save_geometry(
         reference_tip = np.asarray(
             kahler_cone.tip_of_stretched_cone(1.0), dtype=float
         )
-    orientifold = validate_invariant_kaehler_subspace(
-        kahler_cone, reference_tip, orientifold
-    )
+    if orientifold_kaehler_policy == "require_even_subspace":
+        orientifold = validate_invariant_kaehler_subspace(
+            kahler_cone, reference_tip, orientifold
+        )
+    else:
+        orientifold = dict(orientifold)
+        orientifold["kaehler_subspace_validation_status"] = (
+            "not_required_for_declared_reference_run"
+        )
+        orientifold["invariant_kahler_cone_intersection"] = None
+        orientifold["invariant_kahler_point"] = None
     if topology_audit is not None and orientifold["requested"]:
         topology_audit["orientifold_validation"].update(
             {
                 "status": orientifold.get("status"),
+                "kaehler_subspace_policy": orientifold_kaehler_policy,
+                "kaehler_subspace_validation_status": orientifold.get(
+                    "kaehler_subspace_validation_status", "validated"
+                ),
                 "invariant_kahler_cone_intersection": orientifold.get(
                     "invariant_kahler_cone_intersection"
                 ),
@@ -1052,6 +1346,7 @@ def generate_and_save_geometry(
     # redundant restriction to the hypersurface.  The toric effective-cone
     # rays are the relevant generators, and qprime and tau_basis share the
     # divisor-basis convention below.
+    selected_point_diagnostic = None
     if moduli_policy == "canonical_qcd":
         # Use the canonical stretched-cone ray and impose the visible-sector
         # normalization by a later homogeneous rescaling.  This is the
@@ -1059,36 +1354,63 @@ def generate_and_save_geometry(
         kaehler_point = reference_tip.copy()
         divisor_scale = 1.0
         projection_solvers = []
+        selected_point_diagnostic, selected_point_values = evaluate_kaehler_point(
+            cy,
+            kahler_cone,
+            qprime,
+            kaehler_point,
+            attempt_index=1,
+            point_kind="canonical_tip",
+            point_seed=kaehler_point_seed,
+            solver=tip_solver,
+        )
+        point_diagnostics.append(selected_point_diagnostic)
+        if selected_point_values is None:
+            raise NoPhysicalKaehlerPoint(
+                "The canonical stretched-cone tip failed the Kähler-point domain checks."
+            )
         report("using the canonical stretched-cone ray for QCD normalization")
     else:
         report("searching angular Kähler directions with positive effective-divisor volumes")
         kaehler_point = None
         divisor_scale = None
         projection_solvers = []
-        for kaehler_attempt, candidate in enumerate(
-            sample_stretched_kaehler_points(
-                kahler_cone,
-                reference_tip,
-                rng,
-                max_kaehler_attempts,
-                report,
-                projection_solvers,
-            ),
-            start=1,
+        for proposal in sample_stretched_kaehler_points(
+            kahler_cone,
+            reference_tip,
+            rng,
+            max_kaehler_attempts,
+            report,
+            projection_solvers,
+            point_seed=kaehler_point_seed,
+            diagnostics=point_diagnostics,
+            include_metadata=True,
         ):
-            candidate_tau = np.asarray(
-                cy.compute_divisor_volumes(candidate, in_basis=True), dtype=float
+            kaehler_attempt = int(proposal["attempt_index"])
+            candidate = np.asarray(proposal["point"], dtype=float)
+            candidate_diagnostic, candidate_values = evaluate_kaehler_point(
+                cy,
+                kahler_cone,
+                qprime,
+                candidate,
+                attempt_index=kaehler_attempt,
+                point_kind=proposal["point_kind"],
+                point_seed=proposal.get("point_seed"),
+                solver=proposal.get("solver"),
             )
-            effective_volumes = qprime @ candidate_tau
-            minimum_volume = float(np.min(effective_volumes))
-            if not np.isfinite(minimum_volume) or minimum_volume <= 0.0:
+            point_diagnostics.append(candidate_diagnostic)
+            if candidate_values is None:
                 report(
                     f"rejected Kähler point {kaehler_attempt}/{max_kaehler_attempts}: "
-                    f"minimum effective-divisor volume {minimum_volume:.3e}"
+                    f"{candidate_diagnostic.get('failure_reason', 'domain checks failed')}"
                 )
                 continue
+            effective_volumes = candidate_values["effective_divisor_volumes"]
+            minimum_volume = float(np.min(effective_volumes))
             divisor_scale = max(1.0, math.sqrt(min_divisor_volume / minimum_volume))
             kaehler_point = divisor_scale * candidate
+            selected_point_diagnostic = candidate_diagnostic
+            selected_point_values = candidate_values
             report(
                 f"accepted Kähler point {kaehler_attempt}/{max_kaehler_attempts}; "
                 f"four-cycle scale={divisor_scale:.3e}"
@@ -1149,33 +1471,18 @@ def generate_and_save_geometry(
             candidate_indices = [
                 index for index in candidate_indices if index in visible_qcd_candidate_set
             ]
-        selected_qcd = None
-        for candidate_index in candidate_indices:
-            if not 0 <= candidate_index < len(prime_tau0):
-                continue
-            prime_volume = float(prime_tau0[candidate_index])
-            if not np.isfinite(prime_volume) or prime_volume <= 0.0:
-                continue
-            candidate_m = math.sqrt(qcd_volume_target / prime_volume)
-            report(
-                f"QCD tip volume={prime_volume:.6g}; "
-                f"homogeneous radial scale m={candidate_m:.6g}"
-            )
-            # The prescribed homogeneous solution is m=sqrt(40/tau_QCD).
-            # Do not reject m<1 before applying the stated final divisor
-            # lower-bound test; the scale direction is determined by the
-            # target, not by a hidden max(1, m) convention.
-            if candidate_m > max_m:
-                continue
-            candidate_tau = candidate_m**2 * tau0
-            candidate_prime_volumes = candidate_m**2 * prime_tau0
-            candidate_effective_volumes = qprime @ candidate_tau
-            if np.min(candidate_prime_volumes) < min_prime_divisor_volume - 1e-8:
-                continue
-            if np.min(candidate_effective_volumes) < min_divisor_volume - 1e-8:
-                continue
-            selected_qcd = (int(candidate_index), candidate_m)
-            break
+        selected_qcd = select_canonical_qcd_candidate(
+            prime_tau0,
+            tau0,
+            qprime,
+            candidate_indices,
+            qcd_volume_target,
+            min_prime_divisor_volume,
+            min_divisor_volume,
+            max_m,
+            allow_m_below_one=allow_m_below_one,
+            report=report,
+        )
         if selected_qcd is None:
             requested = (
                 f"prime toric divisor index {qcd_divisor_index}"
@@ -1325,6 +1632,15 @@ def generate_and_save_geometry(
             "Final CY geometry failed volume or Kähler-cone validation: "
             f"CY_volume={volume:.6g}, min_curve_volume={minimum_curve_volume:.6g}, "
             f"min_kahler_slack={minimum_kahler_slack:.6g}, radial_m={m_val:.6g}."
+        )
+    if selected_point_diagnostic is not None:
+        selected_point_diagnostic.update(
+            {
+                "selected_for_normalization": True,
+                "normalization_status": "passed",
+                "radial_scale": float(m_val),
+                "angular_scale": float(divisor_scale),
+            }
         )
     tip_prefactor = np.asarray([divisor_scale, m_val], dtype=float)
 
@@ -1502,6 +1818,16 @@ def generate_and_save_geometry(
     if overwrite:
         raise ValueError("schema 1.1 never overwrites an existing geometry artifact")
     temporary_path = f"{filepath}.tmp-{os.getpid()}-{time.time_ns()}"
+    kaehler_point_status_counts = {}
+    for point_record in point_diagnostics:
+        status = point_record.get("point_status", "unknown")
+        kaehler_point_status_counts[status] = (
+            kaehler_point_status_counts.get(status, 0) + 1
+        )
+    kaehler_point_attempted_count = sum(
+        bool(point_record.get("attempted", False))
+        for point_record in point_diagnostics
+    )
     construction_metadata = {
         "schema_version": SCHEMA_VERSION,
         "schema_semantic_version": SCHEMA_1_1_VERSION,
@@ -1517,6 +1843,25 @@ def generate_and_save_geometry(
         "cy3_fingerprint": cy3_fingerprint,
         "cy3_fingerprint_status": "topological_fingerprint",
         "sampling": sampling_metadata,
+        "kaehler_point_scan": {
+            "policy": moduli_policy,
+            "attempt_budget": int(max_kaehler_attempts),
+            "attempt_budget_semantics": (
+                "one canonical tip evaluation"
+                if moduli_policy == "canonical_qcd"
+                else "at most this many evaluations including the canonical tip"
+            ),
+            "point_seed": int(kaehler_point_seed),
+            "canonical_tip_included": True,
+            "selected_attempt_index": (
+                None
+                if selected_point_diagnostic is None
+                else int(selected_point_diagnostic["attempt_index"])
+            ),
+            "status_counts": kaehler_point_status_counts,
+            "attempted_point_count": kaehler_point_attempted_count,
+            "diagnostics": point_diagnostics,
+        },
         "mosek_license": {
             "configured": mosek_license["configured"],
             "activated": mosek_license["activated"],
@@ -1579,7 +1924,20 @@ def generate_and_save_geometry(
             else "not_applied_in_canonical_qcd"
         ),
         "qcd_volume_target": qcd_volume_target,
+        "allow_m_below_one": bool(allow_m_below_one),
+        "canonical_qcd_normalization": (
+            {
+                "candidate_order": "deterministic_cytools_prime_divisor_index",
+                "contraction_policy": (
+                    "allowed_opt_in" if allow_m_below_one else "disallowed_by_default"
+                ),
+                "selected_radial_scale": float(m_val),
+            }
+            if moduli_policy == "canonical_qcd"
+            else None
+        ),
         "visible_sector_policy": visible_sector_policy,
+        "orientifold_kaehler_policy": orientifold_kaehler_policy,
         "qed_selection_policy": qed_selection_policy,
         "qed_selection_seed": int(qed_selection_seed),
         "qed_volume_upper_bound": (
@@ -1818,10 +2176,11 @@ def generate_and_save_geometry(
                     "anti_invariant_h2_basis",
                     data=orientifold["anti_invariant_h2_basis"],
                 )
-                orientifold_group.create_dataset(
-                    "invariant_kahler_point",
-                    data=orientifold["invariant_kahler_point"],
-                )
+                if orientifold.get("invariant_kahler_point") is not None:
+                    orientifold_group.create_dataset(
+                        "invariant_kahler_point",
+                        data=orientifold["invariant_kahler_point"],
+                    )
                 orientifold_group.create_dataset(
                     "prime_divisor_image_indices",
                     data=orientifold["prime_divisor_image_indices"],
@@ -1833,6 +2192,14 @@ def generate_and_save_geometry(
                 orientifold_group.attrs["involution_type"] = orientifold["involution_type"]
                 orientifold_group.attrs["h11_plus"] = orientifold["h11_plus"]
                 orientifold_group.attrs["h11_minus"] = orientifold["h11_minus"]
+                orientifold_group.attrs["kaehler_subspace_policy"] = (
+                    orientifold_kaehler_policy
+                )
+                orientifold_group.attrs["kaehler_subspace_validation_status"] = (
+                    orientifold.get(
+                        "kaehler_subspace_validation_status", "validated"
+                    )
+                )
             if visible_sector is not None:
                 write_visible_sector_hdf5(
                     geometric.create_group("visible_sector"), visible_sector
