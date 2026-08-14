@@ -39,17 +39,36 @@ Use `--dry-run` for a deterministic input-ledger probe. Stage-2 filters may
 reduce the number of accepted geometries, but they never replenish or alter the
 stage-1 FRST population.
 
-Before a production stage-2 run, confirm the remaining orientifold, Kähler-point,
-divisor, visible-sector, QCD/QED-pool, potential, and EFT stopping choices. The
-command records these choices and any deferrals in `run_manifest.json`; it does
-not turn an unconfirmed choice into a physical claim.
+Before a production stage-2 run, confirm the remaining orientifold, divisor,
+visible-sector, QCD/QED-pool, potential, and EFT stopping choices. The command
+records these choices and any deferrals in `run_manifest.json`; it does not turn
+an unconfirmed choice into a physical claim.
 
-The stage-2 reconstruction also writes `stage2_topology_diagnostics.jsonl`.
+The production Stage-2 reference policy is `canonical_qcd`, matching the
+Glimmers-style construction: retain the stretched-cone tip, inspect eligible
+prime divisors in deterministic index order, skip any whose tip volume already
+exceeds 40, and dilate the first remaining eligible choice so its QCD divisor
+volume is exactly 40. The radial factor therefore satisfies `m >= 1` by
+default. The Stage-2 `--allow-m-below-one` flag is an explicit opt-in to the
+unrestricted normalization convention, allowing contraction when the selected
+tip divisor already exceeds 40; the choice is recorded in run and HDF5
+construction metadata.
+`adaptive` remains available only as an explicitly labelled randomized Kähler
+diagnostic with a 100-point budget, including the canonical tip.
+
+The stage-2 reconstruction also writes `stage2_topology_diagnostics.jsonl` and
+`stage2_kaehler_point_diagnostics.jsonl`.
 It contains a compact structural audit for every input: polytope dimensions and
 reflexivity, FRST checks, smoothness, CYTools Hodge data, basis convention, and
 the shapes/finiteness of intersection, Chern, Mori, and Kähler-cone arrays.
 It records the ledger, raw-dataset, and reconstructed-CYTools triangulation
 hashes separately. Any disagreement is terminal `input_identity_mismatch`.
+
+The reference run uses `--orientifold-kaehler-policy none`: it validates and
+records the orientifold action but does not require an orientifold-even Kähler
+subspace intersection. Use `require_even_subspace` for a separate run that
+requires that physical orientifold constraint; an infeasible intersection then
+terminates as `kaehler_tip_failure`.
 
 The implementation is deliberately CYTools-first: polytope construction,
 triangulation, cone extraction, intersection data, and geometric validation are
@@ -561,9 +580,11 @@ needs the Kähler-cone hyperplanes for its current stretched-cone optimization
 and validation, while CYTools' dual-ray enumeration can become very slow once
 the cone dimension is moderately large (CYTools warns around dimensions above
 12 and considers it likely impractical above roughly 18). Use
-`--export-kahler-rays` only for a downstream analysis that explicitly requires
+`--export-kaehler-rays` only for a downstream analysis that explicitly requires
 cone generators; it is normally unnecessary for small-geometry smoke tests and
-should not be enabled casually in high-`h11` scans.
+should not be enabled casually in high-`h11` scans. The effective-cone rays,
+stored under `cytools/geometric/effective_cone`, are distinct and are required
+for the direct instanton charge matrix `Q`.
 
 Finally, use a new, empty output directory for every run. Schema 1.1 never
 overwrites existing geometry files or accounting artifacts; an output collision
@@ -579,10 +600,11 @@ is a terminal error.
 | `--qcd-volume-min FLOAT` | `25.0` | Lower edge of the QCD-visible prime-divisor volume window. |
 | `--qcd-volume-max FLOAT` | `40.0` | Upper edge of the QCD-visible prime-divisor volume window. |
 | `--moduli-policy {adaptive,canonical_qcd}` | `adaptive` | Use randomized angular Kähler points with a QCD window, or the canonical stretched-cone ray with radial QCD normalization. |
+| `--allow-m-below-one` | off | Stage-2 `canonical_qcd` only: explicitly allow radial contraction (`m < 1`); disabled by default and recorded in metadata. |
 | `--qcd-volume-target FLOAT` | `40.0` | Target prime-divisor volume for `canonical_qcd`. |
-| `--qcd-divisor-index INT` | random member | Optional zero-based CYTools prime-toric-divisor index for `canonical_qcd`; the sampled intersecting triple is restricted to triples containing it. Without it, QCD is chosen uniformly from the sampled triple. |
+| `--qcd-divisor-index INT` | first eligible | Optional zero-based CYTools prime-toric-divisor index for `canonical_qcd`; without it, the first eligible candidate in deterministic CYTools divisor order is used. |
 | `--orientifold-file PATH` | off | JSON file containing an explicit lattice involution and O3/O7 or O5/O9 metadata. |
-| `--export-kahler-rays` | off | Enumerate and store Kähler-cone rays; expensive at large `h11`. |
+| `--export-kaehler-rays` | off | Enumerate and store Kähler-cone rays; expensive at large `h11`. The legacy `--export-kahler-rays` spelling remains accepted. |
 | `--max-m FLOAT` | `1_000_000` | Maximum radial prefactor for `canonical_qcd`, or upper bound for the adaptive potential-control search. |
 
 The canonical stretched-cone tip is found by minimizing the Euclidean norm
@@ -616,20 +638,22 @@ Rejected candidates are discarded and replaced until the requested count or
 the attempt budget is exhausted.
 
 With `--moduli-policy canonical_qcd`, the same FRST and Kähler cone are used,
-but the angular sampling loop is skipped. Before the tip solve, the generator
-builds the prime-divisor intersection graph from triangulated two-faces and
-reservoir-samples one unordered triangle whose three pairs intersect. One
-member is selected uniformly as QCD, unless `--qcd-divisor-index` fixes the QCD
-member and restricts the triangle sample accordingly. The final Kähler form is
-then `J = m J_tip`, where `m = sqrt(target / tau_QCD)` for that selected prime
-divisor. This gives `tau ∝ m²`, `Kinv ∝ m⁴`, and `Vol(CY) ∝ m³`; the exact
-assignment and scale are recorded in `construction_metadata_json` and
-`cytools/geometric/standard_model`.
+but the angular sampling loop is skipped. The eligible prime-divisor candidates
+are inspected in deterministic CYTools order, or restricted to the explicit
+`--qcd-divisor-index` when supplied. Candidates whose tip volume exceeds 40
+are skipped so that the selected radial factor obeys `m >= 1`. The Stage-2
+`--allow-m-below-one` opt-in disables that skip and permits `m < 1`; the final
+Kähler form is then `J = m J_tip`, where `m = sqrt(target / tau_QCD)` for the
+first remaining eligible prime divisor. This gives `tau ∝ m²`, `Kinv ∝ m⁴`,
+and `Vol(CY) ∝ m³`; the exact assignment and scale are recorded in
+`construction_metadata_json` and `cytools/geometric/standard_model`.
 
-The generator does not impose `m >= 1` as a separate pre-filter: the target
-determines the homogeneous scale, after which the final prime-divisor,
-effective-cone, curve-volume, and cone-slack checks are applied. The adaptive
-potential-control search is not applied in this mode. This is a radial
+The generator imposes `m >= 1` in this mode by default: a tip already above the
+target is not contracted and is skipped in deterministic candidate order. With
+the Stage-2 `--allow-m-below-one` opt-in, that candidate is retained and may
+produce `m < 1`. The final
+prime-divisor, effective-cone, curve-volume, and cone-slack checks are then
+applied. The adaptive potential-control search is not applied in this mode. This is a radial
 normalization of an existing geometry, not a new FRST or a claim that a QCD
 divisor has been constructed from a brane model.
 
@@ -815,7 +839,7 @@ cytools/geometric/
   c2
   effective_cone
   mori_cone
-  kahler_cone (only with --export-kahler-rays)
+  kahler_cone (only with --export-kaehler-rays; legacy HDF5 name)
   kahler_hyperplanes
   standard_model/ (only with --moduli-policy canonical_qcd)
     divisor_indices
@@ -825,7 +849,7 @@ cytools/geometric/
     h2_involution_matrix
     invariant_kahler_basis
     anti_invariant_h2_basis
-    invariant_kahler_point
+    invariant_kahler_point (only when the kaehler subspace check is required)
     prime_divisor_image_indices
     prime_divisor_invariant_indices
   visible_sector/ (only with --visible-sector-policy intersecting_d7)
@@ -896,7 +920,7 @@ Important conventions:
   identifies the member whose final volume is normalized to the target.
 - `kahler_hyperplanes` is always exported and is sufficient for the generator's
   stretched-cone optimization and physical validation. Use
-  `--export-kahler-rays` only when a downstream sampler explicitly requires a
+  `--export-kaehler-rays` only when a downstream sampler explicitly requires a
   generator representation of the Kähler cone.
 - `construction_metadata_json` is stored both as a root attribute and as an
   attribute of the `construction_metadata` group.

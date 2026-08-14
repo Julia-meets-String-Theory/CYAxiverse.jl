@@ -38,6 +38,7 @@ from glimmers_schema11 import (
     ensure_fresh_output_root,
     estimate_storage,
     summarize_terminal_records,
+    stable_seed,
     write_eft_parquet,
 )
 
@@ -52,8 +53,34 @@ def build_parser():
     parser.add_argument("--backend", choices=("cgal", "qhull"), default="cgal")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--orientifold-file", default=None)
-    parser.add_argument("--moduli-policy", choices=("adaptive", "canonical_qcd"), default="canonical_qcd")
+    parser.add_argument(
+        "--moduli-policy",
+        choices=("adaptive", "canonical_qcd"),
+        default="canonical_qcd",
+        help=(
+            "Use the deterministic Glimmers-style tip and QCD-volume-40 "
+            "dilation, or select adaptive only for an explicitly labelled "
+            "randomized Kähler diagnostic."
+        ),
+    )
+    parser.add_argument(
+        "--allow-m-below-one",
+        action="store_true",
+        help=(
+            "Allow canonical_qcd to contract the canonical tip (m<1); "
+            "disabled by default and recorded in the run metadata."
+        ),
+    )
     parser.add_argument("--visible-sector-policy", choices=("none", "intersecting_d7"), default="intersecting_d7")
+    parser.add_argument(
+        "--orientifold-kaehler-policy",
+        choices=("none", "require_even_subspace"),
+        default="none",
+        help=(
+            "Require the orientifold-even Kaehler subspace to intersect the "
+            "stretched cone, or record that this check is not required."
+        ),
+    )
     parser.add_argument("--max-m", type=float, default=1_000_000.0)
     parser.add_argument("--max-kaehler-attempts", type=int, default=100)
     parser.add_argument("--min-divisor-volume", type=float, default=1.0)
@@ -61,7 +88,16 @@ def build_parser():
     parser.add_argument("--qcd-volume-target", type=float, default=QCD_VOLUME_TARGET)
     parser.add_argument("--qcd-divisor-index", type=int, default=None)
     parser.add_argument("--qed-volume-max", type=float, default=QED_VOLUME_MAX)
-    parser.add_argument("--export-kahler-rays", action="store_true")
+    parser.add_argument(
+        "--export-kaehler-rays",
+        "--export-kahler-rays",
+        dest="export_kaehler_rays",
+        action="store_true",
+        help=(
+            "Enumerate and store Kaehler-cone rays; effective-cone rays for Q "
+            "are always retained."
+        ),
+    )
     parser.add_argument("--materialize-dense-potential", action="store_true")
     parser.add_argument("--eft", action="store_true", help="Build compact EFT-reference rows after geometry acceptance.")
     parser.add_argument("--eft-minimum-rows", type=int, default=MINIMUM_EFT_ROWS)
@@ -228,7 +264,8 @@ def classify_stage2_failure(error):
         "invalid_charge_basis_mapping": "numerical_geometry_failure",
         "intersection_failure": "topology_validation_failure",
         "qed_volume_rejection": "volume_filter_rejection",
-        "kaehler_tip_failure": "kahler_tip_failure",
+        "kaehler_tip_failure": "kaehler_tip_failure",
+        "kaehler_point_shortfall": "kaehler_point_shortfall",
         "qcd_normalization_failure": "qcd_normalization_failure",
         "output_collision": "output_collision",
         "numerical_geometry_failure": "numerical_geometry_failure",
@@ -240,6 +277,14 @@ def process_raw_frst_artifact(
 ):
     """Process one retained raw FRST and return terminal and audit records."""
     topology_audit = build_topology_audit_record(raw_frst_record, arguments.backend)
+    point_diagnostics = []
+    topology_audit["kaehler_point_scan"] = {
+        "policy": arguments.moduli_policy,
+        "allow_m_below_one": bool(arguments.allow_m_below_one),
+        "attempt_budget": arguments.max_kaehler_attempts,
+        "point_status": "not_run",
+        "diagnostics": point_diagnostics,
+    }
     topology_audit["orientifold_validation"] = orientifold_audit_record(
         orientifold_config
     )
@@ -268,6 +313,23 @@ def process_raw_frst_artifact(
                 "stage1_raw_frst_path": persisted["raw_frst_path"],
                 "stage1_full_triangulation_hash": persisted["full_triangulation_hash"],
                 "stage2_sampler": "none_raw_frst_reconstruction",
+            }
+        )
+        kaehler_point_seed = stable_seed(
+            "stage2-kaehler-point",
+            arguments.seed,
+            persisted["geometry_id"],
+        )
+        sampling_metadata.update(
+            {
+                "stage2_kaehler_point_seed": kaehler_point_seed,
+                "stage2_kaehler_point_attempt_budget": arguments.max_kaehler_attempts,
+            }
+        )
+        topology_audit["kaehler_point_scan"].update(
+            {
+                "point_seed": kaehler_point_seed,
+                "point_status": "running",
             }
         )
 
@@ -302,13 +364,17 @@ def process_raw_frst_artifact(
             sampling_metadata=sampling_metadata,
             ks_database_version=arguments.ks_database_version,
             orientifold_config=orientifold_config,
-            export_kahler_rays=arguments.export_kahler_rays,
+            orientifold_kaehler_policy=arguments.orientifold_kaehler_policy,
+            export_kahler_rays=arguments.export_kaehler_rays,
             qed_selection_policy="uniform_eligible",
             qed_volume_max=arguments.qed_volume_max,
             materialize_dense_potential=arguments.materialize_dense_potential,
             eft_mode=arguments.eft,
             raw_frst_metadata=persisted,
             topology_audit=topology_audit,
+            kaehler_point_seed=kaehler_point_seed,
+            kaehler_point_diagnostics=point_diagnostics,
+            allow_m_below_one=arguments.allow_m_below_one,
         )
         terminal_record.update(
             {
@@ -330,6 +396,12 @@ def process_raw_frst_artifact(
                 "failure_reason": str(error),
             }
         )
+        topology_audit["kaehler_point_scan"].update(
+            {
+                "point_status": "failed",
+                "diagnostic_count": len(point_diagnostics),
+            }
+        )
         failure_record = getattr(error, "record", None)
         if failure_record:
             topology_audit["failure_record"] = failure_record
@@ -344,6 +416,12 @@ def process_raw_frst_artifact(
             {
                 "audit_status": "complete",
                 "stage2_terminal_status": terminal_record["terminal_status"],
+            }
+        )
+        topology_audit["kaehler_point_scan"].update(
+            {
+                "point_status": "accepted",
+                "diagnostic_count": len(point_diagnostics),
             }
         )
     return terminal_record, topology_audit
@@ -389,6 +467,10 @@ def main(argv=None):
         raise ValueError("--eft requires --orientifold-file")
     if arguments.eft and arguments.moduli_policy != "canonical_qcd":
         raise ValueError("--eft requires --moduli-policy canonical_qcd")
+    if arguments.allow_m_below_one and arguments.moduli_policy != "canonical_qcd":
+        raise ValueError(
+            "--allow-m-below-one requires --moduli-policy canonical_qcd"
+        )
     if arguments.moduli_policy == "canonical_qcd" and not np.isclose(
         arguments.qcd_volume_target, QCD_VOLUME_TARGET, rtol=0.0, atol=1e-12
     ):
@@ -405,6 +487,7 @@ def main(argv=None):
     stage1_manifest = read_stage1_manifest(arguments.stage1_root)
     stage1_polytope_manifest = read_stage1_polytope_manifest(arguments.stage1_root)
     topology_diagnostics = []
+    kaehler_point_diagnostics = []
     retained_inputs = [
         record
         for record in input_ledger
@@ -431,6 +514,24 @@ def main(argv=None):
                 "failure_reason": input_record.get("terminal_reason"),
             }
         )
+        kaehler_point_diagnostics.append(
+            {
+                key: input_record.get(key)
+                for key in (
+                    "h11",
+                    "polytope_id",
+                    "raw_frst_path",
+                    "full_triangulation_hash",
+                    "geometry_id",
+                )
+            }
+            | {
+                "attempted": False,
+                "point_status": "not_run",
+                "scan_status": "stage2_input_unavailable",
+                "failure_reason": input_record.get("terminal_reason"),
+            }
+        )
     if not arguments.dry_run:
         for raw_frst_record in retained_inputs:
             terminal_record, topology_audit = process_raw_frst_artifact(
@@ -438,6 +539,22 @@ def main(argv=None):
             )
             stage2_records.append(terminal_record)
             topology_diagnostics.append(topology_audit)
+            for point_record in topology_audit.get(
+                "kaehler_point_scan", {}
+            ).get("diagnostics", ()):
+                kaehler_point_diagnostics.append(
+                    {
+                        key: raw_frst_record.get(key)
+                        for key in (
+                            "h11",
+                            "polytope_id",
+                            "raw_frst_path",
+                            "full_triangulation_hash",
+                            "geometry_id",
+                        )
+                    }
+                    | dict(point_record)
+                )
     else:
         for raw_frst_record in retained_inputs:
             topology_diagnostics.append(
@@ -450,6 +567,24 @@ def main(argv=None):
                     ),
                     "audit_status": "not_run",
                     "stage2_terminal_status": "dry_run",
+                    "failure_reason": "stage-2 reconstruction was not run",
+                }
+            )
+            kaehler_point_diagnostics.append(
+                {
+                    key: raw_frst_record.get(key)
+                    for key in (
+                        "h11",
+                        "polytope_id",
+                        "raw_frst_path",
+                        "full_triangulation_hash",
+                        "geometry_id",
+                    )
+                }
+                | {
+                    "attempted": False,
+                    "point_status": "not_run",
+                    "scan_status": "dry_run",
                     "failure_reason": "stage-2 reconstruction was not run",
                 }
             )
@@ -521,6 +656,16 @@ def main(argv=None):
                 }
             )
     storage_estimate = estimate_storage(arguments.outdir, len(model_rows))
+    kaehler_point_status_counts = {}
+    for point_record in kaehler_point_diagnostics:
+        status = point_record.get("point_status", "unknown")
+        kaehler_point_status_counts[status] = (
+            kaehler_point_status_counts.get(status, 0) + 1
+        )
+    kaehler_point_attempted_count = sum(
+        bool(point_record.get("attempted", False))
+        for point_record in kaehler_point_diagnostics
+    )
     run_manifest = {
         "schema_version": f"cyaxiverse-stage2-evaluation-{SCHEMA_1_1_VERSION}",
         "stage": "stage2_geometry_and_eft_generation",
@@ -542,6 +687,19 @@ def main(argv=None):
         "cytools_version": getattr(generator.cytools, "version", None),
         "hardware_threads": os.cpu_count(),
         "seed": arguments.seed,
+        "moduli_policy": arguments.moduli_policy,
+        "allow_m_below_one": bool(arguments.allow_m_below_one),
+        "kaehler_point_attempt_budget": arguments.max_kaehler_attempts,
+        "kaehler_point_attempt_budget_semantics": (
+            "one canonical tip evaluation"
+            if arguments.moduli_policy == "canonical_qcd"
+            else "at most this many evaluations including the canonical tip"
+        ),
+        "kaehler_point_seed_derivation": (
+            "stable_seed('stage2-kaehler-point', base_seed, geometry_id)"
+        ),
+        "kaehler_point_status_counts": kaehler_point_status_counts,
+        "kaehler_point_attempted_count": kaehler_point_attempted_count,
         "raw_input_count": len(input_ledger),
         "raw_input_count_by_h11_and_status": count_by_h11(input_ledger),
         "retained_raw_input_count": len(retained_inputs),
@@ -561,6 +719,7 @@ def main(argv=None):
         "stage2_filters_do_not_replenish_stage1": True,
         "stage2_input_ledger": "stage2_input_ledger.jsonl",
         "stage2_topology_diagnostics": "stage2_topology_diagnostics.jsonl",
+        "stage2_kaehler_point_diagnostics": "stage2_kaehler_point_diagnostics.jsonl",
         "topology_audit_schema_version": "cyaxiverse-stage2-topology-audit-1.0",
         "accepted_stage2_status": "accepted_geometry",
         "orientifold_policy": {
@@ -575,6 +734,9 @@ def main(argv=None):
             "fixed_locus_validation": "not_performed",
             "tadpole_validation": "not_performed",
             "physical_orientifold_claim": "not_made",
+            "kaehler_subspace_policy": arguments.orientifold_kaehler_policy,
+            "effective_cone_rays_required_for_Q": True,
+            "kaehler_cone_rays_exported": arguments.export_kaehler_rays,
         },
         "user_decisions": [
             {
@@ -601,6 +763,30 @@ def main(argv=None):
                 ),
             },
             {
+                "stage": 4,
+                "answer_value": "confirmed",
+                "answer": (
+                    "retain the current CYTools stretched-cone definition "
+                    "and slack threshold"
+                ),
+            },
+            {
+                "stage": 4,
+                "answer_value": "confirmed",
+                "answer": (
+                    "the reference run does not require an orientifold-even "
+                    "Kaehler-subspace intersection; that check remains opt-in"
+                ),
+            },
+            {
+                "stage": 4,
+                "answer_value": "confirmed",
+                "answer": (
+                    "effective-cone rays are required for Q; Kaehler-cone rays "
+                    "remain optional"
+                ),
+            },
+            {
                 "stage": 3,
                 "answer_value": "confirmed",
                 "answer": (
@@ -616,9 +802,33 @@ def main(argv=None):
                     "outside this generator"
                 ),
             },
+            {
+                "stage": 5,
+                "answer_value": "confirmed",
+                "answer": (
+                    "canonical_qcd is the Glimmers-style production policy; "
+                    "adaptive randomized Kähler points are diagnostic only"
+                ),
+            },
+            {
+                "stage": 5,
+                "answer_value": "confirmed",
+                "answer": (
+                    "the adaptive diagnostic budget is 100 total point evaluations, "
+                    "including the canonical tip"
+                ),
+            },
+            {
+                "stage": 5,
+                "answer_value": "confirmed",
+                "answer": (
+                    "a point shortfall retains the Stage-1 FRST in Stage-2 accounting "
+                    "with kaehler_point_shortfall"
+                ),
+            },
         ],
         "unresolved_scientific_choices": [
-            "Kähler-point, divisor, QCD, visible-sector, and EFT stopping questions remain recorded by the stage-2 command options and require explicit confirmation before production claims.",
+            "Divisor, visible-sector, QCD/QED-pool, potential, and EFT stopping questions remain recorded by the stage-2 command options and require explicit confirmation before production claims.",
         ],
         "eft": {
             "minimum_rows": arguments.eft_minimum_rows,
@@ -631,6 +841,10 @@ def main(argv=None):
     atomic_jsonl_dump(
         Path(arguments.outdir) / "stage2_topology_diagnostics.jsonl",
         topology_diagnostics,
+    )
+    atomic_jsonl_dump(
+        Path(arguments.outdir) / "stage2_kaehler_point_diagnostics.jsonl",
+        kaehler_point_diagnostics,
     )
     if arguments.eft:
         atomic_jsonl_dump(Path(arguments.outdir) / "model_terminal_statuses.jsonl", model_records)
