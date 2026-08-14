@@ -31,8 +31,8 @@ ORIENTIFOLD_DATA = {
 def create_orientifold_file(filepath):
     """
     Creates the required O3/O7 explicit orientifold handoff file.
-    The visible-sector policy 'intersecting_d7' requires a validated O3/O7 
-    orientifold with h11_minus=0.
+    The visible-sector policy 'intersecting_d7' requires a validated O3/O7
+    orientifold; the computed h11 parity split is recorded as metadata.
     """
     filepath = Path(filepath).expanduser().resolve()
     filepath.parent.mkdir(parents=True, exist_ok=True)

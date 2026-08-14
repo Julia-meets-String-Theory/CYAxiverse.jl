@@ -587,6 +587,23 @@ class EFTRowContractTests(unittest.TestCase):
 
 
 class ProvenanceContractTests(unittest.TestCase):
+    def test_cytools_seed_is_replayable_and_within_uint32_range(self):
+        if PROVENANCE is None:
+            self.skipTest("provenance handoff is not present")
+        first = PROVENANCE.cytools_seed(
+            "cyaxiverse-frst-seed-pool", 20260813, 50, 8, 1
+        )
+        second = PROVENANCE.cytools_seed(
+            "cyaxiverse-frst-seed-pool", 20260813, 50, 8, 1
+        )
+        changed = PROVENANCE.cytools_seed(
+            "cyaxiverse-frst-seed-pool", 20260813, 50, 8, 2
+        )
+        self.assertEqual(first, second)
+        self.assertGreaterEqual(first, 0)
+        self.assertLess(first, 2**32)
+        self.assertNotEqual(first, changed)
+
     def test_provenance_digest_changes_for_seed_query_version_and_manifest(self):
         base = {
             "seed": 17,
@@ -737,8 +754,10 @@ class ProvenanceContractTests(unittest.TestCase):
             self.assertIn(label, serialized)
         self.assertEqual(result["sampler_by_h11"]["491"]["name"], "Polytope.ntfe_frts")
         self.assertEqual(result["sampler_by_h11"]["491"]["arguments"]["triang_method"], "fast")
-        self.assertEqual(result["parity_convention"]["h11_plus"], "h11")
-        self.assertEqual(result["parity_convention"]["h11_minus"], 0)
+        self.assertEqual(result["parity_convention"]["assumed_h11_plus"], "h11")
+        self.assertEqual(result["parity_convention"]["assumed_h11_minus"], 0)
+        self.assertIsNone(result["parity_convention"]["computed_h11_minus"])
+        self.assertTrue(result["parity_convention"]["all_h11_c4_assumption"])
         claims = result["claims"]
         self.assertEqual(claims["historical_mapping_status"], "not_attempted_by_policy")
         self.assertEqual(claims["historical_polytope_claim"], "no_historical_polytope_match_claim")

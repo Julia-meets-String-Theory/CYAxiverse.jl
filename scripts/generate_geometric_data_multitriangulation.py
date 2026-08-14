@@ -250,7 +250,7 @@ def validate_orientifold(poly, triangulation, topology, config):
     for point in points:
         mapped = tuple((matrix @ point).tolist())
         if mapped not in point_lookup:
-            raise RuntimeError(
+            raise OrientifoldValidationFailure(
                 "The orientifold lattice action does not preserve the KS polytope."
             )
         mapped_indices.append(point_lookup[mapped])
@@ -270,7 +270,7 @@ def validate_orientifold(poly, triangulation, topology, config):
         for simplex in simplices
     }
     if mapped_simplices != simplices:
-        raise RuntimeError(
+        raise OrientifoldValidationFailure(
             "The orientifold lattice action does not preserve the selected FRST."
         )
 
@@ -279,7 +279,7 @@ def validate_orientifold(poly, triangulation, topology, config):
         (np.asarray([0], dtype=int), topology["prime_toric_divisors"])
     )
     if basis_matrix.shape[1] != divisor_points.size:
-        raise RuntimeError(
+        raise OrientifoldValidationFailure(
             "The exported divisor basis does not match CYTools' canonical "
             "origin-plus-prime-divisor configuration."
         )
@@ -290,16 +290,16 @@ def validate_orientifold(poly, triangulation, topology, config):
             [divisor_positions[point] for point in mapped_divisor_points], dtype=int
         )
     except KeyError as exc:
-        raise RuntimeError(
+        raise OrientifoldValidationFailure(
             "The orientifold action does not preserve the prime toric divisor set."
         ) from exc
     if mapped_divisor_positions[0] != 0:
-        raise RuntimeError("The orientifold action must fix the origin label.")
+        raise OrientifoldValidationFailure("The orientifold action must fix the origin label.")
     prime_image_indices = mapped_divisor_positions[1:] - 1
     if np.any(prime_image_indices < 0) or np.any(
         prime_image_indices >= topology["prime_toric_divisors"].size
     ):
-        raise RuntimeError("The orientifold prime-divisor image map is invalid.")
+        raise OrientifoldValidationFailure("The orientifold prime-divisor image map is invalid.")
     permutation = np.zeros((divisor_points.size, divisor_points.size), dtype=float)
     permutation[np.arange(divisor_points.size), mapped_divisor_positions] = 1.0
     transformed_basis = basis_matrix @ permutation
@@ -309,14 +309,14 @@ def validate_orientifold(poly, triangulation, topology, config):
     h2_matrix = coefficients.T
     integral_h2 = np.rint(h2_matrix).astype(int)
     if not np.allclose(h2_matrix, integral_h2, atol=1e-8):
-        raise RuntimeError(
+        raise OrientifoldValidationFailure(
             "The orientifold action does not induce an integral action in the "
             "exported divisor basis."
         )
     if not np.allclose(integral_h2 @ basis_matrix, transformed_basis, atol=1e-8):
-        raise RuntimeError("Could not express the orientifold action in H2.")
+        raise OrientifoldValidationFailure("Could not express the orientifold action in H2.")
     if not np.array_equal(integral_h2 @ integral_h2, np.eye(topology["h11"], dtype=int)):
-        raise RuntimeError("The induced H2 action is not an involution.")
+        raise OrientifoldValidationFailure("The induced H2 action is not an involution.")
 
     invariant_basis = _nullspace(integral_h2.T - np.eye(topology["h11"]))
     anti_invariant_basis = _nullspace(integral_h2.T + np.eye(topology["h11"]))
@@ -441,6 +441,20 @@ def validate_frst(poly, triangulation):
     return checks
 
 
+def summarize_array_structure(array):
+    """Summarize one numerical array for the structural topology audit."""
+    values = np.asarray(array)
+    try:
+        finite = bool(np.all(np.isfinite(values)))
+    except TypeError:
+        finite = None
+    return {
+        "shape": list(values.shape),
+        "dtype": str(values.dtype),
+        "finite": finite,
+    }
+
+
 def extract_topology(cy, triangulation, *, export_kahler_rays=False):
     """Extract serializable CYTools topology used by Julia and fingerprints.
 
@@ -454,6 +468,16 @@ def extract_topology(cy, triangulation, *, export_kahler_rays=False):
     basis = np.asarray(cy.divisor_basis(), dtype=int)
     basis_matrix = np.asarray(cy.divisor_basis(as_matrix=True), dtype=int)
     prime_toric_divisors = np.asarray(cy.prime_toric_divisors(), dtype=int)
+    if basis_matrix.ndim != 2 or basis_matrix.shape[0] != h11:
+        raise RuntimeError(
+            "CYTools returned an unexpected divisor-basis matrix shape; "
+            f"got {basis_matrix.shape}, expected ({h11}, n_divisors)."
+        )
+    if prime_toric_divisors.ndim != 1:
+        raise RuntimeError(
+            "CYTools returned an unexpected prime-divisor label shape; "
+            f"got {prime_toric_divisors.shape}, expected (n_prime_divisors,)."
+        )
     kappa = np.asarray(
         cy.intersection_numbers(in_basis=True, format="coo"), dtype=float
     )
@@ -473,11 +497,21 @@ def extract_topology(cy, triangulation, *, export_kahler_rays=False):
 
     c2 = np.asarray(cy.second_chern_class(in_basis=True), dtype=float)
     mori = np.asarray(cy.toric_mori_cone(in_basis=True).rays(), dtype=float)
+    if mori.ndim != 2 or mori.shape[1] != h11:
+        raise RuntimeError(
+            "CYTools returned an unexpected Mori-cone shape; "
+            f"got {mori.shape}, expected (n_rays, {h11})."
+        )
     kahler = cy.toric_kahler_cone()
     kahler_rays = None
     if export_kahler_rays:
         kahler_rays = np.asarray(kahler.rays(), dtype=float)
     kahler_hyperplanes = np.asarray(kahler.hyperplanes(), dtype=float)
+    if kahler_hyperplanes.ndim != 2 or kahler_hyperplanes.shape[1] != h11:
+        raise RuntimeError(
+            "CYTools returned an unexpected Kähler-hyperplane shape; "
+            f"got {kahler_hyperplanes.shape}, expected (n_hyperplanes, {h11})."
+        )
     if c2.shape != (h11,):
         raise RuntimeError(f"Unexpected c2 shape {c2.shape}; expected {(h11,)}.")
     finite_arrays = [
@@ -568,10 +602,6 @@ def _visible_qcd_candidates(policy, orientifold, neighbors):
         raise NoVisibleSectorAssignment(
             "intersecting_d7 requires an O3/O7 orientifold for D7 gauge cycles"
         )
-    if orientifold.get("h11_minus", 0) != 0:
-        raise NoVisibleSectorAssignment(
-            "intersecting_d7 requires h11_minus=0 for the all-C4 axion export"
-        )
     image_indices = np.asarray(orientifold["prime_divisor_image_indices"], dtype=int)
     invariant = image_indices == np.arange(image_indices.size)
     candidates = [
@@ -606,6 +636,10 @@ class NoVisibleSectorAssignment(RuntimeError):
     """No orientifold-compatible intersecting QCD/QED divisor pair exists."""
 
 
+class OrientifoldValidationFailure(RuntimeError):
+    """The supplied orientifold does not preserve the selected geometry."""
+
+
 def _candidate_terminal_status(exc):
     """Map implementation failures onto the schema 1.1 terminal vocabulary."""
     if isinstance(exc, QEDAssignmentFailure):
@@ -626,6 +660,8 @@ def _candidate_terminal_status(exc):
         return "topology_or_cone_error"
     if isinstance(exc, NoVisibleSectorAssignment):
         return "no_eligible_intersecting_qed_pair"
+    if isinstance(exc, OrientifoldValidationFailure):
+        return "orientifold_invariance_failure"
     if isinstance(exc, FinalGeometryValidationFailed):
         return "divisor_volume_filter_rejection"
     return "numerical_geometry_failure"
@@ -762,6 +798,8 @@ def generate_and_save_geometry(
     qed_volume_max=None,
     materialize_dense_potential=False,
     eft_mode=False,
+    raw_frst_metadata=None,
+    topology_audit=None,
 ):
     """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
     # Preserve the package writer's historical zero-based positional option
@@ -827,13 +865,73 @@ def generate_and_save_geometry(
         raise ValueError("an explicit QED index requires explicit selection")
     report("validating the CYTools FRST")
     frst_validation = validate_frst(poly, triangulation)
+    if topology_audit is not None:
+        topology_audit["frst_validation"] = frst_validation
+        topology_audit["smooth_hypersurface"] = bool(cy.is_smooth())
     if not bool(cy.is_smooth()):
         raise RuntimeError("CYTools reports that the generic CY hypersurface is not smooth.")
     report("computing Hodge, intersection, and divisor-basis data")
     topology = extract_topology(
         cy, triangulation, export_kahler_rays=export_kahler_rays
     )
+    if topology_audit is not None:
+        topology_audit.update(
+            {
+                "cytools_h11": topology["h11"],
+                "cytools_h21": topology["h21"],
+                "basis_convention": (
+                    "CYTools divisor_basis(include_origin=True); "
+                    "all numerical vectors in basis"
+                ),
+                "intersection_convention": (
+                    "CYTools CalabiYau.intersection_numbers "
+                    "(in_basis=True, format='coo')"
+                ),
+                "topology_arrays": {
+                    "basis": summarize_array_structure(topology["basis"]),
+                    "basis_matrix": summarize_array_structure(
+                        topology["basis_matrix"]
+                    ),
+                    "prime_toric_divisors": summarize_array_structure(
+                        topology["prime_toric_divisors"]
+                    ),
+                    "intersection_numbers": summarize_array_structure(
+                        topology["kappa"]
+                    ),
+                    "second_chern_class": summarize_array_structure(topology["c2"]),
+                    "mori_cone": summarize_array_structure(topology["mori_cone"]),
+                    "kahler_cone_hyperplanes": summarize_array_structure(
+                        topology["kahler_cone_hyperplanes"]
+                    ),
+                    "kahler_cone_rays": (
+                        None
+                        if topology["kahler_cone_rays"] is None
+                        else summarize_array_structure(topology["kahler_cone_rays"])
+                    ),
+                    "face_restriction_dim2": {
+                        "count": len(topology["face_restriction_dim2"]),
+                        "dtype": str(
+                            np.asarray(topology["face_restriction_dim2"]).dtype
+                        ),
+                    },
+                },
+                "topology_validation_status": "passed",
+            }
+        )
     orientifold = validate_orientifold(poly, triangulation, topology, orientifold_config)
+    if topology_audit is not None:
+        topology_audit["orientifold_validation"] = {
+            "requested": bool(orientifold.get("requested", False)),
+            "input_status": orientifold.get("status"),
+            "status": orientifold.get("status"),
+            "involution_type": orientifold.get("involution_type"),
+            "h11_plus": orientifold.get("h11_plus"),
+            "h11_minus": orientifold.get("h11_minus"),
+            "h11_parity_policy": "record_only_not_enforced",
+            "fixed_locus_validation": "not_performed",
+            "tadpole_validation": "not_performed",
+            "physical_orientifold_claim": "not_made",
+        }
     prime_labels = np.asarray(topology["prime_toric_divisors"], dtype=int)
     prime_labels_stable = stable_divisor_labels(prime_labels, poly_points)
     prime_charges = None
@@ -912,6 +1010,15 @@ def generate_and_save_geometry(
     orientifold = validate_invariant_kaehler_subspace(
         kahler_cone, reference_tip, orientifold
     )
+    if topology_audit is not None and orientifold["requested"]:
+        topology_audit["orientifold_validation"].update(
+            {
+                "status": orientifold.get("status"),
+                "invariant_kahler_cone_intersection": orientifold.get(
+                    "invariant_kahler_cone_intersection"
+                ),
+            }
+        )
     if visible_sector_policy == "intersecting_d7":
         visible_qcd_candidates = _visible_qcd_candidates(
             visible_sector_policy, orientifold, neighbors
@@ -1496,7 +1603,18 @@ def generate_and_save_geometry(
             else "not_requested"
         ),
         "detached_random_qcd_record": False,
-        "identity_parity_convention": "h11_plus=h11; h11_minus=0",
+        "c4_basis_convention": "full_cytools_h11_declared_all_c4_assumption",
+        "all_h11_c4_assumption": {
+            "enabled": True,
+            "assumed_h11_minus": 0,
+            "status": "declared_modeling_assumption",
+            "computed_h11_plus": orientifold.get("h11_plus"),
+            "computed_h11_minus": orientifold.get("h11_minus"),
+            "provenance": (
+                "Paper-style full-CYTools-basis convention; not an inferred "
+                "physical orientifold parity result."
+            ),
+        },
         "eft_mode": bool(eft_mode),
         "visible_sector": visible_sector,
         "claim_boundary": (
@@ -1524,6 +1642,22 @@ def generate_and_save_geometry(
         "duplicate_effective_cone_rows_removed": charge_metadata[
             "duplicates_removed"
         ],
+        "raw_frst_input": (
+            None
+            if raw_frst_metadata is None
+            else {
+                "raw_frst_path": raw_frst_metadata.get("raw_frst_path"),
+                "raw_frst_schema_version": raw_frst_metadata.get(
+                    "raw_frst_schema_version"
+                ),
+                "raw_geometry_id": raw_frst_metadata.get("geometry_id"),
+                "raw_polytope_id": raw_frst_metadata.get("polytope_id"),
+                "raw_full_triangulation_hash": raw_frst_metadata.get(
+                    "full_triangulation_hash"
+                ),
+                "stage1_status": raw_frst_metadata.get("stage1_status"),
+            }
+        ),
     }
     try:
         with h5py.File(temporary_path, "w") as file:
@@ -3813,6 +3947,11 @@ def main():
         if args.h11s is not None and set(h11_values) != set(eft_geometry_plan):
             parser.error("--eft --h11s must contain exactly 50,100,200,491")
         h11_values = sorted(eft_geometry_plan)
+        parser.error(
+            "--eft is now split across generate_stage1_raw_frsts.py and "
+            "generate_stage2_eft_reference.py; run stage 1 first and pass its "
+            "raw-FRST output to stage 2"
+        )
     require_cytools_capabilities(args.sampling_scheme, args.ntfe_face_sampler)
     orientifold_config = load_orientifold(args.orientifold_file)
     favorable = {"true": True, "false": False, "any": None}[args.favorable]
@@ -4094,7 +4233,16 @@ def main():
             if fresh_ensemble_manifest is None
             else os.path.join(output_root, "fresh_ensemble_manifest.json")
         ),
-        "identity_parity_convention": "h11_plus=h11; h11_minus=0",
+        "c4_basis_convention": "full_cytools_h11_declared_all_c4_assumption",
+        "all_h11_c4_assumption": {
+            "enabled": True,
+            "assumed_h11_minus": 0,
+            "status": "declared_modeling_assumption",
+            "provenance": (
+                "Paper-style full-CYTools-basis convention; not an inferred "
+                "physical orientifold parity result."
+            ),
+        },
         "sampling_unit": "accepted geometry record; EFT row is an ordered QCD-QED assignment",
         "population_label": "adapted_fresh_favorable_filtered_geometry_reference",
         "paper_mapping_status": "adapted_model_reuse_not_exact_paper_multiplicity",

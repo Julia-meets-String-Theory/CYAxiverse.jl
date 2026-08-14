@@ -1,15 +1,55 @@
 # KS-to-CY3 geometry generator
 
 [`generate_geometric_data_multitriangulation.py`](./generate_geometric_data_multitriangulation.py)
-is the CYTools-backed preprocessing step for the CYAxiverse geometry database.
-It fetches Kreuzer-Skarke (KS) polytopes, constructs fine regular star
-triangulations (FRSTs), builds the corresponding Calabi-Yau threefold
-hypersurfaces, selects a controlled point in the toric Kahler cone, and writes a
-versioned HDF5 artifact for the Julia pipeline.
+is the CYTools-backed geometry implementation used by the CYAxiverse geometry
+database. The schema-1.1 workflow is intentionally split into two commands:
+`generate_stage1_raw_frsts.py` collects the approved raw FRST population, and
+`generate_stage2_eft_reference.py` reconstructs only those retained FRSTs and
+applies the geometry/EFT checks. The older combined `--eft` route is retired.
 
 Schema 1.1 adds a compact, geometry-level factorized charge contract and an
-opt-in `--eft` reference-row layer. The latter is an adapted finite model-reuse
-diagnostic, not a reproduction of the Glimmers model ensemble.
+adapted finite model-reuse diagnostic, not a reproduction of the Glimmers model
+ensemble.
+
+## Independent stage runs
+
+Stage 1 writes only serializable raw FRST artifacts. It does not choose an
+orientifold, search the Kähler cone, apply divisor-volume cuts, or construct EFT
+rows:
+
+```bash
+python scripts/generate_stage1_raw_frsts.py \
+  --h11-plan 50:500,100:500,200:300,491:100 \
+  --outdir /path/to/stage1_raw_frsts
+```
+
+Stage 2 takes that output as a fixed input population. It never generates a
+replacement FRST; missing or corrupt raw files are recorded as unavailable in
+the separate `stage2_input_ledger.jsonl`:
+
+```bash
+python scripts/generate_stage2_eft_reference.py \
+  --stage1-root /path/to/stage1_raw_frsts \
+  --outdir /path/to/stage2_eft \
+  --orientifold-file /path/to/orientifold.json \
+  --eft
+```
+
+Use `--dry-run` for a deterministic input-ledger probe. Stage-2 filters may
+reduce the number of accepted geometries, but they never replenish or alter the
+stage-1 FRST population.
+
+Before a production stage-2 run, confirm the remaining orientifold, Kähler-point,
+divisor, visible-sector, QCD/QED-pool, potential, and EFT stopping choices. The
+command records these choices and any deferrals in `run_manifest.json`; it does
+not turn an unconfirmed choice into a physical claim.
+
+The stage-2 reconstruction also writes `stage2_topology_diagnostics.jsonl`.
+It contains a compact structural audit for every input: polytope dimensions and
+reflexivity, FRST checks, smoothness, CYTools Hodge data, basis convention, and
+the shapes/finiteness of intersection, Chern, Mori, and Kähler-cone arrays.
+It records the ledger, raw-dataset, and reconstructed-CYTools triangulation
+hashes separately. Any disagreement is terminal `input_identity_mismatch`.
 
 The implementation is deliberately CYTools-first: polytope construction,
 triangulation, cone extraction, intersection data, and geometric validation are
@@ -309,11 +349,14 @@ polytope.
 
 ### Schema 1.1 compact EFT-reference mode
 
-`--eft` is an explicit opt-in model layer. It requires the approved geometry
-plan `50:500,100:500,200:300,491:100`, `ntfe_fast` with the native controls
+Stage 1 uses the approved raw-FRST plan
+`50:500,100:500,200:300,491:100`. Stage 2's `--eft` mode requires the approved
+`canonical_qcd`, validated intersecting-D7 toy policy, and strict QED bound
+`Vol(D_QED) < 127.5`. The h11-specific sampler controls belong to stage 1:
+the lower slices use the approved biased fast path, while h11=491 uses native
+`ntfe_fast` with the native controls
 `N=100`, `max_npts=17`, `N_face_triangs=1000`, `as_generator=True`, and the
-`cgal` backend. It also requires `canonical_qcd`, the validated intersecting-D7
-toy policy, and the strict QED bound `Vol(D_QED) < 127.5`.
+`cgal` backend.
 
 Within that fixed plan, the lower slices use the approved biased
 `random_triangulations_fast` path with 10 proposals per polytope; only the
@@ -344,23 +387,27 @@ reuse. It is not an exact reproduction of arXiv:2309.13145, its undocumented
 generator does not run GNN, PyTorch, axion-photon, cosmology, or inflation
 analysis.
 
-The external accounting artifacts written under the fresh output root are
-`polytope_manifest.json`, `candidate_terminal_statuses.jsonl`, `run_manifest.json`,
-`summary_by_h11_and_status.json`, `storage_estimate.json`, and
-`charge_factorized_manifest.json`; `--eft` additionally writes
-`model_terminal_statuses.jsonl` and `eft_models.parquet`. Terminal categories
+Stage 1 writes `frst_candidates/`, `frst_terminal_statuses.jsonl`,
+`polytope_manifest.json`, and `run_manifest.json`. Stage 2 writes
+`stage2_input_ledger.jsonl`, `stage2_terminal_statuses.jsonl`,
+`stage2_topology_diagnostics.jsonl`,
+`charge_factorized_manifest.json`, `polytope_manifest.json`,
+`summary_by_h11_and_status.json`, `storage_estimate.json`, and the geometry
+artifacts; `--eft` additionally writes `model_terminal_statuses.jsonl` and
+`eft_models.parquet`. Terminal categories
 remain separate for sampler, FRST, topology/cone, Kähler, normalization,
 divisor, QED-pool, numerical, I/O, model, and storage failures. The manifest
-also records proposal/retry/duplicate counts and output-collision status.
+also records the fixed stage boundary, raw identities, proposal/retry/duplicate
+counts, and output-collision status.
 
 Relevant options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--eft` | off | Enable the exact schema 1.1 compact EFT-reference layer. |
-| `--eft-geometry-plan TEXT` | `50:500,100:500,200:300,491:100` | Approved h11-to-geometry allocation; other plans are rejected in EFT mode. |
-| `--eft-target-rows INT` | `200000` | Exact adapted row target; other targets are rejected in EFT mode. |
-| `--eft-output-format parquet` | `parquet` | One compressed columnar table. |
+| `generate_stage1_raw_frsts.py --h11-plan TEXT` | `50:500,100:500,200:300,491:100` | Approved h11-to-raw-FRST allocation. |
+| `generate_stage2_eft_reference.py --eft` | off | Build compact EFT-reference rows after stage-2 geometry acceptance. |
+| `--eft-minimum-rows INT` | `100000` | Minimum accepted EFT-reference rows. |
+| `--eft-maximum-rows INT` | `200000` | Exact upper row ceiling. |
 | `--eft-output-path PATH` | `OUTDIR/eft_models.parquet` | Explicit table path inside the fresh output root. |
 | `--materialize-dense-potential` | off | Explicit compatibility opt-in for dense geometry-level `Q/L`; never used by EFT rows. |
 
@@ -713,12 +760,16 @@ derives the integral H2 action in the exported divisor basis, computes
 that the orientifold-even Kaehler subspace intersects the Kaehler cone. O3/O7
 versus O5/O9 and coefficient constraints remain explicit metadata; fixed-locus
 topology, tadpole cancellation, fluxes, and phenomenology are downstream
-calculations.
+calculations. A supplied orientifold that fails polytope, FRST, divisor-image,
+or induced-action preservation is a terminal
+`orientifold_invariance_failure`; the stage-1 FRST is not replaced.
 
 For the paper-style visible-sector pilot, add
 `--visible-sector-policy intersecting_d7`. This requires the orientifold file
-to describe an O3/O7 involution with `h11_minus=0`, matching the paper's
-all-C₄-axion assumption. The generator then retains only QCD candidates
+to describe a validated O3/O7 involution. The generator records the computed
+`h11_plus`/`h11_minus` split but does not reject a nonzero `h11_minus`; the
+reference EFT separately records the paper-style all-C₄-axion assumption.
+The generator then retains only QCD candidates
 with an invariant intersecting prime divisor, chooses an invariant QED divisor
 (the lowest-volume eligible one unless `--qed-divisor-index` is supplied), and
 records the QCD/QED image map, intersection, divisor-basis charges, and QED
@@ -784,7 +835,7 @@ cytools/geometric/
     qcd_charge, qed_charge, em_charge
     qed_instanton_index, qed_log10_lambda4
     qcd_qed_intersection, qcd_invariant, qed_invariant
-  assignment_pool/ (with canonical_qcd + intersecting_d7; required by --eft)
+  assignment_pool/ (with canonical_qcd + intersecting_d7; required by stage-2 --eft)
     pool_rank, qcd_divisor_index, qed_divisor_index
     qcd/qed stable labels, normalization/volume scalars, assignment_hash
     intersection_evidence_json

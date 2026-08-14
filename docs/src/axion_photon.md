@@ -25,11 +25,17 @@ The scan implements the paper's core hierarchy and photon-coupling routines:
 
 The geometry generator also has a pilot visible-sector mode,
 `--visible-sector-policy intersecting_d7`. Given an explicit validated O3/O7
-involution with `h11_minus=0`, it selects an invariant QED divisor intersecting
-the selected QCD divisor, stores both divisor charges and their metadata, and adds the QED
+involution, it selects an invariant QED divisor intersecting the selected QCD
+divisor, stores the computed `h11_plus`/`h11_minus` parity information, and adds the QED
 Euclidean D3 term needed for the paper-style light threshold. This is a
 geometry-level compatibility filter and scale assignment; it is not a full
 D7 tadpole, matter-spectrum, flux, or E3 zero-mode construction.
+
+The reference EFT convention treats the full CYTools `h11` basis as the
+`C4`-axion sector under a declared paper-style all-`C4` assumption. The
+assumption is recorded as metadata and is not inferred from, or enforced by,
+the computed orientifold parity split. A parity-resolved physical EFT would
+instead require an explicit `h11_plus` basis construction.
 
 For the geometry-generation track itself, use
 `--moduli-policy canonical_qcd`. It samples a pairwise-intersecting triangle of
