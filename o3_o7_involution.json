@@ -1,0 +1,31 @@
+{
+  "label": "trivial-h11-minus-zero-involution",
+  "lattice_matrix": [
+    [
+      1,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      1
+    ]
+  ],
+  "involution_type": "O3/O7",
+  "coefficient_constraints": {}
+}

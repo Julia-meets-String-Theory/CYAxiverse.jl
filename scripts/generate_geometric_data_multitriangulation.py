@@ -1986,6 +1986,7 @@ def process_polytope(task):
         materialize_dense_potential,
         proposal_budget,
         retry_budget,
+        polytope_source,
     ) = task
     try:
         started = time.perf_counter()
@@ -2423,6 +2424,20 @@ def plan_tasks(
                 deterministic_glsm_basis=True,
             )
         )
+        polytope_sources = [
+            {
+                "source_kind": "cytools_fetch_polytopes",
+                "query": {
+                    "h11": int(h11),
+                    "lattice": "N",
+                    "favorable": favorable,
+                    "limit": fetch_limit,
+                    "deterministic_glsm_basis": True,
+                },
+                "selection_index": index,
+            }
+            for index, _ in enumerate(polytopes, start=1)
+        ]
     else:
         polytopes = []
         for vertices in polytope_manifest["by_h11"].get(h11, []):
@@ -2435,6 +2450,13 @@ def plan_tasks(
             if favorable is None or bool(poly.is_favorable(lattice="N")) == favorable:
                 polytopes.append(poly)
         polytopes = polytopes[:fetch_limit]
+        polytope_sources = [
+            {
+                "source_kind": "local_polytope_manifest",
+                "manifest_source": polytope_manifest.get("source"),
+            }
+            for _ in polytopes
+        ]
     if not polytopes:
         return ([], []) if return_replacement_tasks else []
 
@@ -2507,6 +2529,7 @@ def plan_tasks(
             materialize_dense_potential,
             proposal_budget,
             retry_budget,
+            polytope_source,
         )
 
     tasks = [
@@ -3382,6 +3405,24 @@ def main():
         "--ks-database-version",
         default="CYTools fetch_polytopes endpoint (version not exposed)",
         help="Version/endpoint label recorded in every artifact.",
+    )
+    parser.add_argument(
+        "--database-source",
+        choices=("cytools", "mirror", "manifest"),
+        default="cytools",
+        help=(
+            "Polytope source: live CYTools fetch_polytopes (default), a KS "
+            "Parquet mirror, or an explicit JSON manifest."
+        ),
+    )
+    parser.add_argument(
+        "--parquet-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory containing polytopes-4d-*-vertices.parquet files for "
+            "--database-source mirror."
+        ),
     )
     parser.add_argument(
         "--polytope-manifest",
