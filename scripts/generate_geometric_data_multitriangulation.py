@@ -11,8 +11,8 @@ default ``adaptive`` moduli policy, a candidate is saved only when an angular
 Kähler point can be dilated to satisfy the control criterion of
 arXiv:2309.01831, eq. (21), and a prime divisor lies in the QCD volume window.
 The optional ``canonical_qcd`` policy keeps the canonical stretched-cone ray
-and applies a homogeneous radial rescaling so a randomly selected member of a
-pairwise-intersecting prime-divisor triple has a requested target volume.  This
+and applies a homogeneous radial rescaling so an explicit or deterministically
+ordered eligible prime divisor has a requested target volume.  This
 is a normalization of an existing FRST, not a new triangulation or a D-brane
 model.  The optional
 ``intersecting_d7`` visible-sector policy adds the paper-style toy assignment:
@@ -46,6 +46,8 @@ from qed_divisor_assignment import (
     QEDAssignmentFailure,
     TERMINAL_FAILURE_CATEGORIES,
     classify_qed_leading_status,
+    enumerate_assignment_pool,
+    normalize_qcd_assignment,
     prime_divisor_charges,
     prime_divisor_intersection_graph,
     record_potential_match,
@@ -53,9 +55,42 @@ from qed_divisor_assignment import (
     stable_divisor_labels,
     write_visible_sector_hdf5,
 )
+from glimmers_schema11 import (
+    CHARGE_FACTORIZED_SCHEMA_VERSION,
+    MAXIMUM_EFT_ROWS,
+    MINIMUM_EFT_ROWS,
+    NORMALIZATION_MAP_VERSION,
+    QCD_VOLUME_TARGET,
+    QED_VOLUME_MAX,
+    SCHEMA_VERSION as SCHEMA_1_1_VERSION,
+    TARGET_GEOMETRY_COUNT,
+    atomic_json_dump,
+    atomic_jsonl_dump,
+    ensure_fresh_output_root,
+    estimate_storage,
+    factorized_charge_metadata,
+    sample_capacity_aware_assignments,
+    stable_hash,
+    write_eft_parquet,
+    summarize_terminal_records,
+)
+from glimmers_proposal_controller import (
+    ProposalControllerConfig,
+    ProposalDecision,
+    run_proposal_controller,
+)
+from glimmers_h491_diagnostics import NativeH491SamplerSettings, diagnose_h491
+from glimmers_eft_row_schema import serialize_eft_row
+from glimmers_provenance import ProvenanceError, production_provenance_gate
+from glimmers_fresh_ensemble_manifest import (
+    build_fresh_ensemble_manifest,
+    default_sampler_by_h11,
+    derive_ensemble_seeds,
+    write_fresh_ensemble_manifest,
+)
 
 
-SCHEMA_VERSION = "cyaxiverse-ks-cy3-v8-qed-assignment"
+SCHEMA_VERSION = "cyaxiverse-ks-cy3-v9-schema-1.1"
 MIN_CYTOOLS_VERSION = (1, 4, 0)
 SOURCE_REFERENCES = (
     "arXiv:2008.01730v1",  # fair secondary-fan/triangulation sampling
@@ -65,10 +100,8 @@ SOURCE_REFERENCES = (
     "arXiv:2305.06363v1",  # orientifold-compatible KS constructions
     "arXiv:2412.12012v1",  # fuzzy-axion QCD divisor-volume requirement
 )
-SAMPLING_SCHEMES = ("fair", "fast", "ntfe_fast", "gnn_ntfe")
-NTFE_FACE_SAMPLERS = ("fast", "fair", "grow2d", "dualgnn")
-KS_MIRROR_DATASET = "calabi-yau-data/polytopes-4d"
-KS_MIRROR_DATASET_URL = "https://huggingface.co/datasets/calabi-yau-data/polytopes-4d"
+SAMPLING_SCHEMES = ("fair", "fast", "ntfe_fast")
+NTFE_FACE_SAMPLERS = ("fast", "fair", "grow2d")
 
 
 def configure_mosek_license():
@@ -115,8 +148,6 @@ def require_cytools_capabilities(sampling_scheme, ntfe_face_sampler):
     ]
     if sampling_scheme == "ntfe_fast":
         required.append((Polytope, "ntfe_frts"))
-    elif sampling_scheme == "gnn_ntfe":
-        required.append((Polytope, "random_triangulations_gnn"))
     missing = [
         f"{owner.__name__}.{name}"
         for owner, name in required
@@ -128,16 +159,11 @@ def require_cytools_capabilities(sampling_scheme, ntfe_face_sampler):
         raise RuntimeError(
             "Installed CYTools is missing required public APIs: " + ", ".join(missing)
         )
-    if sampling_scheme == "gnn_ntfe" or (
-        sampling_scheme == "ntfe_fast" and ntfe_face_sampler == "dualgnn"
-    ):
-        try:
-            import dualgnn  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError(
-                "dualGNN NTFE sampling requires the optional dualgnn package. "
-                "Install the CYTools GNN extra before selecting this mode."
-            ) from exc
+    if ntfe_face_sampler == "dualgnn":
+        raise ValueError(
+            "dualGNN face sampling is forbidden in schema 1.1; use ntfe_fast "
+            "with triang_method=fast"
+        )
     configure_mosek_license()
 
 
@@ -528,103 +554,6 @@ def prime_divisor_neighbors(prime_labels, face_simplices):
     return tuple(tuple(sorted(values)) for values in neighbors)
 
 
-def random_intersecting_triple(neighbors, rng, qcd_divisor_index=None):
-    """Sample a pairwise-intersecting divisor triple uniformly.
-
-    The paper's phrase ``triple of intersecting divisors`` does not specify a
-    triple-intersection number, so the generator makes the toric graph
-    interpretation explicit: every pair in the three-element set must be an
-    edge of the prime-divisor intersection graph.  The reservoir keeps the
-    selection uniform without materializing all ``O(h11**3)`` triangles.
-
-    If a QCD index is supplied, the uniform sample is restricted to triangles
-    containing that divisor; otherwise one member of the sampled triangle is
-    designated QCD uniformly.  Both choices are persisted as construction
-    metadata so the stochastic assignment is auditable.
-    """
-    if neighbors is None:
-        raise NoStandardModelAssignment("a prime-divisor intersection graph is required")
-    n_divisors = len(neighbors)
-    if qcd_divisor_index is not None and not 0 <= qcd_divisor_index < n_divisors:
-        raise NoStandardModelAssignment(
-            f"QCD divisor index {qcd_divisor_index} is outside the prime-divisor graph"
-        )
-
-    # The graph is already stored as sorted tuples.  Sets make the closing
-    # edge lookup O(1), while the reservoir fallback avoids the much larger
-    # allocation of materializing all triangles.
-    neighbor_sets = tuple(set(values) for values in neighbors)
-
-    def is_triangle(first, second, third):
-        return (
-            third in neighbor_sets[first]
-            and second in neighbor_sets[third]
-            and first in neighbor_sets[second]
-        )
-
-    # In the usual pilot case, a few uniform proposals find a triangle much
-    # faster than enumerating the whole graph.  Conditional on success, every
-    # triangle has the same proposal probability; if all proposals miss, the
-    # exact reservoir pass below supplies the same uniform distribution.
-    random_attempts = min(256, max(32, n_divisors))
-    if qcd_divisor_index is None and n_divisors >= 3:
-        for _ in range(random_attempts):
-            proposal = tuple(
-                sorted(int(index) for index in rng.choice(n_divisors, 3, replace=False))
-            )
-            if is_triangle(*proposal):
-                qcd_divisor_index = proposal[int(rng.integers(3))]
-                return proposal, int(qcd_divisor_index)
-    elif qcd_divisor_index is not None and len(neighbors[qcd_divisor_index]) >= 2:
-        qcd_neighbors = neighbors[qcd_divisor_index]
-        for _ in range(random_attempts):
-            pair = rng.choice(len(qcd_neighbors), 2, replace=False)
-            proposal = tuple(
-                sorted(
-                    (
-                        int(qcd_divisor_index),
-                        int(qcd_neighbors[int(pair[0])]),
-                        int(qcd_neighbors[int(pair[1])]),
-                    )
-                )
-            )
-            if is_triangle(*proposal):
-                return proposal, int(qcd_divisor_index)
-
-    selected = None
-    triangle_count = 0
-    for first in range(n_divisors):
-        for second in neighbors[first]:
-            if second <= first or second >= n_divisors:
-                continue
-            for third in neighbors[second]:
-                if third <= second or third >= n_divisors:
-                    continue
-                if not is_triangle(first, second, third):
-                    continue
-                if (
-                    qcd_divisor_index is not None
-                    and qcd_divisor_index not in (first, second, third)
-                ):
-                    continue
-                triangle_count += 1
-                if int(rng.integers(triangle_count)) == 0:
-                    selected = (first, second, third)
-
-    if selected is None:
-        requested = (
-            f"containing QCD divisor {qcd_divisor_index}"
-            if qcd_divisor_index is not None
-            else ""
-        )
-        raise NoStandardModelAssignment(
-            "no pairwise-intersecting prime-divisor triple was found " + requested
-        )
-    if qcd_divisor_index is None:
-        qcd_divisor_index = selected[int(rng.integers(3))]
-    return tuple(int(index) for index in selected), int(qcd_divisor_index)
-
-
 def _visible_qcd_candidates(policy, orientifold, neighbors):
     """Return QCD candidates that have an orientifold-compatible QED partner."""
     if policy == "none":
@@ -675,6 +604,44 @@ class FinalGeometryValidationFailed(RuntimeError):
 
 class NoVisibleSectorAssignment(RuntimeError):
     """No orientifold-compatible intersecting QCD/QED divisor pair exists."""
+
+
+def _candidate_terminal_status(exc):
+    """Map implementation failures onto the schema 1.1 terminal vocabulary."""
+    if isinstance(exc, QEDAssignmentFailure):
+        if exc.category == "no_eligible_qed_divisor":
+            return "no_eligible_intersecting_qed_pair"
+        return exc.category
+    if isinstance(exc, FileExistsError):
+        return "output_collision"
+    if isinstance(exc, OSError):
+        return "io_failure"
+    if isinstance(exc, PrefactorCriterionNotMet):
+        return "kaehler_tip_failure"
+    if isinstance(exc, NoPhysicalKaehlerPoint):
+        return "kaehler_tip_failure"
+    if isinstance(exc, NoQcdDivisorVolume):
+        return "qcd_normalization_failure"
+    if isinstance(exc, NoStandardModelAssignment):
+        return "topology_or_cone_error"
+    if isinstance(exc, NoVisibleSectorAssignment):
+        return "no_eligible_intersecting_qed_pair"
+    if isinstance(exc, FinalGeometryValidationFailed):
+        return "divisor_volume_filter_rejection"
+    return "numerical_geometry_failure"
+
+
+def _triangulation_hashes(triangulation):
+    """Return full and two-face identities without retaining live CYTools data."""
+    full_hash = stable_hash(np.asarray(triangulation.simplices()).tolist())
+    two_face_hash = None
+    try:
+        two_face_hash = stable_hash(
+            np.asarray(triangulation.simplices(on_faces_dim=2), dtype=object).tolist()
+        )
+    except Exception:
+        pass
+    return full_hash, two_face_hash
 
 
 def sample_stretched_kaehler_points(
@@ -793,6 +760,8 @@ def generate_and_save_geometry(
     qed_divisor_index_user=None,
     qed_selection_seed=0,
     qed_volume_max=None,
+    materialize_dense_potential=False,
+    eft_mode=False,
 ):
     """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
     # Preserve the package writer's historical zero-based positional option
@@ -806,6 +775,21 @@ def generate_and_save_geometry(
         )
     if qcd_volume_target <= 0.0:
         raise ValueError("qcd_volume_target must be positive")
+    if moduli_policy == "canonical_qcd" and not np.isclose(
+        qcd_volume_target, QCD_VOLUME_TARGET, rtol=0.0, atol=1e-12
+    ):
+        raise ValueError("canonical_qcd requires the schema 1.1 QCD target volume 40.0")
+    if eft_mode and moduli_policy != "canonical_qcd":
+        raise ValueError("--eft requires --moduli-policy canonical_qcd")
+    if eft_mode and visible_sector_policy != "intersecting_d7":
+        raise ValueError("--eft requires --visible-sector-policy intersecting_d7")
+    if eft_mode and not np.isclose(
+        float(qed_volume_max if qed_volume_max is not None else np.inf),
+        QED_VOLUME_MAX,
+        rtol=0.0,
+        atol=1e-12,
+    ):
+        raise ValueError("--eft requires the strict QED volume bound 127.5")
     if qcd_divisor_index is not None and qcd_divisor_index < 0:
         raise ValueError("qcd_divisor_index must be non-negative")
     if qcd_divisor_index is not None and moduli_policy != "canonical_qcd":
@@ -892,18 +876,16 @@ def generate_and_save_geometry(
     glsm = np.asarray(cy.glsm_charge_matrix(include_origin=False), dtype=int)
     basis = topology["basis"]
     if moduli_policy == "canonical_qcd":
-        requested_qcd_divisor_index = qcd_divisor_index
-        standard_model_divisors, qcd_divisor_index = random_intersecting_triple(
-            neighbors, rng, requested_qcd_divisor_index
-        )
+        # The complete ordered assignment pool is now the visible-sector
+        # acceptance unit.  Keep an explicit QCD index as a deterministic
+        # geometry reference when supplied; otherwise select the first valid
+        # index after the immutable tip data are available below.  There is no
+        # detached random-QCD record in the schema-1.1 flow.
+        standard_model_divisors = None
         standard_model_qcd_selection = (
-            "explicit_qcd_divisor"
-            if requested_qcd_divisor_index is not None
-            else "uniform_random_member"
-        )
-        report(
-            "selected pairwise-intersecting Standard Model divisor triple "
-            f"{standard_model_divisors}; QCD index={qcd_divisor_index}"
+            "explicit_geometry_reference_qcd"
+            if qcd_divisor_index is not None
+            else "deterministic_geometry_reference_qcd"
         )
 
     report("finding the stretched Kähler-cone tip (this can be slow without Mosek)")
@@ -1034,12 +1016,28 @@ def generate_and_save_geometry(
             "The positive prime-divisor point has non-positive effective-ray "
             "volumes in the selected divisor basis."
         )
+    pre_normalization_tip = np.asarray(kaehler_point, dtype=float).copy()
+    pre_normalization_volume = float(cy.compute_cy_volume(pre_normalization_tip))
+    pre_normalization_curve_volumes = np.asarray(
+        cy.compute_curve_volumes(pre_normalization_tip), dtype=float
+    )
+    if (
+        not np.isfinite(pre_normalization_volume)
+        or not np.all(np.isfinite(pre_normalization_curve_volumes))
+    ):
+        raise RuntimeError("pre-normalization geometry data are non-finite")
     if moduli_policy == "canonical_qcd":
         # This is the paper-style geometry prescription: keep the canonical
         # stretched-cone direction and fix only the radial scale from the
         # selected QCD divisor.  The adaptive potential-control search is not
         # part of this normalization and would add avoidable O(nq^2) work.
-        candidate_indices = [qcd_divisor_index]
+        candidate_indices = (
+            [qcd_divisor_index]
+            if qcd_divisor_index is not None
+            else sorted(visible_qcd_candidate_set)
+            if visible_qcd_candidate_set is not None
+            else list(range(len(prime_tau0)))
+        )
         if visible_qcd_candidate_set is not None:
             candidate_indices = [
                 index for index in candidate_indices if index in visible_qcd_candidate_set
@@ -1175,12 +1173,36 @@ def generate_and_save_geometry(
     tip = m_val * kaehler_point
     volume = float(cy.compute_cy_volume(tip))
     prime_divisor_volumes = m2 * prime_tau0
+    if moduli_policy == "canonical_qcd":
+        prime_divisor_volumes[qcd_divisor_index] = QCD_VOLUME_TARGET
     if (
         np.min(prime_divisor_volumes) < min_prime_divisor_volume - 1e-8
         or not qcd_volume_min - 1e-8 <= prime_divisor_volumes[qcd_divisor_index]
         or not prime_divisor_volumes[qcd_divisor_index] <= qcd_volume_max + 1e-8
     ):
         raise NoQcdDivisorVolume("Final prime toric divisor volumes failed validation.")
+    selected_normalization = None
+    if moduli_policy == "canonical_qcd":
+        try:
+            selected_normalization = normalize_qcd_assignment(
+                prime_tau0,
+                tauq0,
+                qcd_divisor_index,
+                target=QCD_VOLUME_TARGET,
+                min_prime=min_prime_divisor_volume,
+                min_effective=min_divisor_volume,
+            )
+        except ValueError as exc:
+            raise NoQcdDivisorVolume(str(exc)) from exc
+        if not np.isclose(
+            float(prime_divisor_volumes[qcd_divisor_index]),
+            QCD_VOLUME_TARGET,
+            rtol=0.0,
+            atol=1e-9,
+        ):
+            raise NoQcdDivisorVolume(
+                "post-normalization QCD divisor volume is not exactly 40.0"
+            )
     curve_volumes = np.asarray(cy.compute_curve_volumes(tip), dtype=float)
     kahler_slack = np.asarray(kahler_cone.hyperplanes(), dtype=float) @ tip
     minimum_curve_volume = float(np.min(curve_volumes)) if curve_volumes.size else math.inf
@@ -1199,8 +1221,38 @@ def generate_and_save_geometry(
         )
     tip_prefactor = np.asarray([divisor_scale, m_val], dtype=float)
 
+    assignment_pool = None
+    if moduli_policy == "canonical_qcd" and visible_sector_policy == "intersecting_d7":
+        invariant_mask = np.asarray(
+            orientifold["prime_divisor_image_indices"], dtype=int
+        ) == np.arange(prime_labels.size)
+        assignment_pool = enumerate_assignment_pool(
+            prime_labels=prime_labels_stable,
+            prime_charges=prime_charges,
+            prime_volumes_reference=prime_tau0,
+            # The assignment helper requires one effective-volume entry per
+            # prime divisor.  The immutable CYTools prime-divisor volumes are
+            # the assignment-level divisor family; the separate effective-cone
+            # ray volumes remain persisted and validated above.
+            effective_volumes_reference=prime_tau0,
+            neighbors=prime_neighbors,
+            intersection_evidence=prime_intersection_evidence,
+            invariant_mask=invariant_mask,
+            qcd_volume_target=QCD_VOLUME_TARGET,
+            min_prime_volume=min_prime_divisor_volume,
+            min_effective_volume=min_divisor_volume,
+            qed_volume_max=(
+                QED_VOLUME_MAX if qed_volume_max is None else float(qed_volume_max)
+            ),
+        )
+        if not assignment_pool:
+            raise QEDAssignmentFailure(
+                "no_eligible_qed_divisor",
+                "the complete ordered QCD-QED assignment pool is empty",
+            )
+
     visible_sector = None
-    if visible_sector_policy != "none":
+    if visible_sector_policy != "none" and not eft_mode:
         visible_sector = select_qed_divisor(
             policy=visible_sector_policy,
             selection_policy=qed_selection_policy,
@@ -1217,93 +1269,119 @@ def generate_and_save_geometry(
             qed_volume_max=qed_volume_max,
         )
 
-    report(f"building potential data from {nq} effective-cone rays")
+    report(f"building factorized potential data from {nq} effective-cone rays")
     num_cross = nq * (nq - 1) // 2
+    q_direct = np.asarray(qprime.T, dtype=np.int64)
+    pair_i = np.empty(num_cross, dtype=np.int64)
+    pair_j = np.empty(num_cross, dtype=np.int64)
+    prefactor = 8 * math.pi / volume**2
+    direct_l_raw = np.empty((2, nq), dtype=float)
+    pair_l_raw = np.empty((2, num_cross), dtype=float)
+    pair_index = 0
+    for direct_index, charge in enumerate(qprime):
+        q_tau = charge @ tau
+        direct_l_raw[0, direct_index] = prefactor * q_tau
+        direct_l_raw[1, direct_index] = -2 * math.log10(math.e) * math.pi * q_tau
+    for i in range(nq - 1):
+        qi = qprime[i]
+        for j in range(i + 1, nq):
+            qj = qprime[j]
+            pair_i[pair_index] = i
+            pair_j[pair_index] = j
+            qsum = qi + qj
+            pair_l_raw[0, pair_index] = (
+                math.pi * (qi @ (kinv @ qj)) + (qsum @ tau)
+            ) * prefactor
+            pair_l_raw[1, pair_index] = -2 * math.log10(math.e) * math.pi * (
+                (qi @ tau) + (qj @ tau)
+            )
+            pair_index += 1
+
+    if (
+        not np.all(np.isfinite(direct_l_raw))
+        or not np.all(np.isfinite(pair_l_raw))
+        or np.any(direct_l_raw[0, :] == 0.0)
+        or np.any(pair_l_raw[0, :] == 0.0)
+    ):
+        raise RuntimeError("Potential coefficients contain zero or non-finite amplitudes.")
+    direct_l = np.empty_like(direct_l_raw)
+    direct_l[0, :] = np.sign(direct_l_raw[0, :])
+    direct_l[1, :] = np.log10(np.abs(direct_l_raw[0, :])) + direct_l_raw[1, :]
+    pair_l = np.empty_like(pair_l_raw)
+    pair_l[0, :] = np.sign(pair_l_raw[0, :])
+    pair_l[1, :] = np.log10(np.abs(pair_l_raw[0, :])) + pair_l_raw[1, :]
+    factorized_charges = factorized_charge_metadata(
+        q_direct, direct_l=direct_l, pair_l=pair_l
+    )
     qed_charge = None if visible_sector is None else visible_sector["qed_charge"]
     qed_direct_index = None
+    qed_l = None
+    qed_potential_source_index = None
     if qed_charge is not None:
         for direct_index, direct_charge in enumerate(qprime):
             if np.array_equal(direct_charge, qed_charge):
                 qed_direct_index = direct_index
                 break
-    extra_qed_term = int(qed_charge is not None and qed_direct_index is None)
-    term_count = nq + num_cross + extra_qed_term
-    # Build the persisted arrays directly in CYAxiverse's column-major layout:
-    # Q is h11 × N and L is 2 × N.  CYTools returns effective-cone rays as
-    # rows, so only the assignment into the output matrix changes orientation;
-    # no transposed Q/L array is materialized or written.
-    q = np.empty((h11, term_count), dtype=np.int64)
-    q[:, :nq] = qprime.T
-    l_raw = np.empty((2, term_count), dtype=float)
-    prefactor = 8 * math.pi / volume**2
-    for direct_index, charge in enumerate(qprime):
-        q_tau = charge @ tau
-        l_raw[0, direct_index] = prefactor * q_tau
-        l_raw[1, direct_index] = -2 * math.log10(math.e) * math.pi * q_tau
-
-    output_index = nq
-    for i in range(nq - 1):
-        qi = qprime[i]
-        for j in range(i + 1, nq):
-            qj = qprime[j]
-            q[:, output_index] = qj - qi
-            qsum = qi + qj
-            l_raw[0, output_index] = (
-                math.pi * (qi @ (kinv @ qj)) + (qsum @ tau)
-            ) * prefactor
-            l_raw[1, output_index] = -2 * math.log10(math.e) * math.pi * (
-                (qi @ tau) + (qj @ tau)
+        qed_tau = qed_charge @ tau
+        qed_l_raw = np.asarray(
+            [prefactor * qed_tau, -2 * math.log10(math.e) * math.pi * qed_tau],
+            dtype=float,
+        )
+        if not np.all(np.isfinite(qed_l_raw)) or qed_l_raw[0] == 0.0:
+            raise QEDAssignmentFailure(
+                "potential_term_mismatch",
+                "QED potential coefficient is zero or non-finite",
+                visible_sector,
             )
-            output_index += 1
-
-    if qed_charge is not None:
-        if qed_direct_index is not None:
-            qed_potential_source_index = qed_direct_index
-        else:
-            qed_potential_source_index = output_index
-            q[:, output_index] = qed_charge
-            qed_tau = qed_charge @ tau
-            l_raw[0, output_index] = prefactor * qed_tau
-            l_raw[1, output_index] = -2 * math.log10(math.e) * math.pi * qed_tau
-            output_index += 1
+        qed_l = np.asarray(
+            [np.sign(qed_l_raw[0]), np.log10(abs(qed_l_raw[0])) + qed_l_raw[1]],
+            dtype=float,
+        )
+        qed_potential_source_index = (
+            qed_direct_index if qed_direct_index is not None else nq + num_cross
+        )
         visible_sector["qed_instanton_index"] = int(qed_potential_source_index)
+        visible_sector["qed_log10_lambda4"] = float(qed_l[1])
 
-    if output_index != term_count:
+    q = None
+    l = None
+    if materialize_dense_potential:
+        dense_pair = q_direct[:, pair_j] - q_direct[:, pair_i]
+        q = np.concatenate((q_direct, dense_pair), axis=1)
+        l = np.concatenate((direct_l, pair_l), axis=1)
+        if qed_charge is not None and qed_direct_index is None:
+            q = np.concatenate((q, np.asarray(qed_charge, dtype=np.int64).reshape(-1, 1)), axis=1)
+            l = np.concatenate((l, qed_l.reshape(2, 1)), axis=1)
         if visible_sector is not None:
-            raise QEDAssignmentFailure(
-                "potential_term_mismatch",
-                "potential term construction produced an inconsistent count",
-                visible_sector,
+            visible_sector.update(
+                record_potential_match(q, l, qed_charge, nq + num_cross, qed_potential_source_index)
             )
-        raise RuntimeError("potential term construction produced an inconsistent count")
-    if not np.all(np.isfinite(l_raw)) or np.any(l_raw[0, :] == 0.0):
-        if visible_sector is not None:
-            raise QEDAssignmentFailure(
-                "potential_term_mismatch",
-                "potential coefficients contain zero or non-finite amplitudes",
-                visible_sector,
+            visible_sector["leading_rank_certificate"] = classify_qed_leading_status(
+                q, l, qed_potential_source_index
             )
-        raise RuntimeError("Potential coefficients contain zero or non-finite amplitudes.")
-    l = np.empty_like(l_raw)
-    l[0, :] = np.sign(l_raw[0, :])
-    l[1, :] = np.log10(np.abs(l_raw[0, :])) + l_raw[1, :]
-    if visible_sector is not None:
+            visible_sector["qed_leading_status"] = visible_sector[
+                "leading_rank_certificate"
+            ]["status"]
+    elif visible_sector is not None:
         visible_sector.update(
-            record_potential_match(
-                q, l, qed_charge, nq, visible_sector["qed_instanton_index"]
-            )
+            {
+                "qed_potential_source": (
+                    "direct_effective_cone"
+                    if qed_direct_index is not None
+                    else "appended_prime_divisor_e3"
+                ),
+                "qed_charge_exact_match": True,
+                "qed_potential_scale": float(qed_l[1]),
+                "qed_leading_status": "not_materialized_factorized",
+                "leading_rank_certificate": {
+                    "status": "not_materialized_factorized",
+                    "method": "factorized_charge_schema_requires_explicit_reconstruction",
+                },
+            }
         )
-        visible_sector["leading_rank_certificate"] = classify_qed_leading_status(
-            q, l, visible_sector["qed_instanton_index"]
-        )
-        visible_sector["qed_leading_status"] = visible_sector[
-            "leading_rank_certificate"
-        ]["status"]
+    if visible_sector is not None:
         visible_sector["terminal_status"] = "accepted_assignment"
         visible_sector["terminal_reason"] = "geometry-derived QED assignment accepted"
-        visible_sector["qed_log10_lambda4"] = float(
-            l[1, visible_sector["qed_instanton_index"]]
-        )
     basis_matrix = np.asarray(topology["basis_matrix"], dtype=int)
     prime_labels = np.asarray(topology["prime_toric_divisors"], dtype=int)
     if basis_matrix.ndim != 2 or basis_matrix.shape[1] <= int(np.max(prime_labels)):
@@ -1312,9 +1390,16 @@ def generate_and_save_geometry(
 
     report("writing HDF5 data")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    if os.path.exists(filepath):
+        raise FileExistsError(f"output collision: {filepath}")
+    if overwrite:
+        raise ValueError("schema 1.1 never overwrites an existing geometry artifact")
     temporary_path = f"{filepath}.tmp-{os.getpid()}-{time.time_ns()}"
     construction_metadata = {
         "schema_version": SCHEMA_VERSION,
+        "schema_semantic_version": SCHEMA_1_1_VERSION,
+        "charge_factorized_schema_version": CHARGE_FACTORIZED_SCHEMA_VERSION,
+        "normalization_map_version": NORMALIZATION_MAP_VERSION,
         "source_references": SOURCE_REFERENCES,
         "cytools_version": cytools.version,
         "ks_database_version": ks_database_version,
@@ -1348,6 +1433,21 @@ def generate_and_save_geometry(
         "qcd_divisor_index": qcd_divisor_index,
         "qcd_divisor_index_base": 0,
         "qcd_divisor_volume": float(prime_divisor_volumes[qcd_divisor_index]),
+        "qcd_divisor_volume_exact": bool(
+            moduli_policy == "canonical_qcd"
+            and np.isclose(
+                float(prime_divisor_volumes[qcd_divisor_index]),
+                QCD_VOLUME_TARGET,
+                rtol=0.0,
+                atol=1e-9,
+            )
+        ),
+        "post_normalization_min_prime_divisor_volume": float(
+            np.min(prime_divisor_volumes)
+        ),
+        "post_normalization_min_effective_divisor_volume": float(
+            np.min(tauq0 * m_val**2)
+        ),
         "moduli_policy": moduli_policy,
         "standard_model": (
             None
@@ -1379,8 +1479,25 @@ def generate_and_save_geometry(
             None if qed_volume_max is None else float(qed_volume_max)
         ),
         "qed_volume_filter_policy": (
-            "disabled" if qed_volume_max is None else "pre_filter_pool_then_reject"
+            "strictly_less_than_127.5_complete_pool"
+            if assignment_pool is not None
+            else ("disabled" if qed_volume_max is None else "pre_filter_pool_then_reject")
         ),
+        "assignment_pool_size": 0 if assignment_pool is None else len(assignment_pool),
+        "assignment_pool_hash": (
+            None if assignment_pool is None else stable_hash(assignment_pool)
+        ),
+        "assignment_pool_status": (
+            "not_requested" if assignment_pool is None else "complete_eligible_ordered_pool"
+        ),
+        "assignment_pool_normalization_scope": (
+            "each_ordered_qcd_qed_assignment"
+            if assignment_pool is not None
+            else "not_requested"
+        ),
+        "detached_random_qcd_record": False,
+        "identity_parity_convention": "h11_plus=h11; h11_minus=0",
+        "eft_mode": bool(eft_mode),
         "visible_sector": visible_sector,
         "claim_boundary": (
             "geometry-derived integer divisor-class toy assignment; not a physical "
@@ -1390,6 +1507,12 @@ def generate_and_save_geometry(
             "Q": "h11 x N; instanton charges are columns",
             "L": "2 x N; rows are sign/mantissa and log10 scale",
         },
+        "potential_storage": (
+            "dense_materialized_explicit_opt_in"
+            if materialize_dense_potential
+            else "factorized_canonical"
+        ),
+        "factorized_charge_convention": factorized_charges["difference_convention"],
         "tip_scale_components": ["angular_scale", "radial_scale"],
         "angular_scale": float(divisor_scale),
         "radial_scale": float(m_val),
@@ -1438,17 +1561,60 @@ def generate_and_save_geometry(
                 compression_opts=9,
             )
             geometric.create_dataset("tip", data=tip, compression="gzip", compression_opts=9)
+            geometric.create_dataset(
+                "tip_pre_normalization",
+                data=pre_normalization_tip,
+                compression="gzip",
+                compression_opts=9,
+            )
             geometric.create_dataset("tip_prefactor", data=tip_prefactor, compression="gzip", compression_opts=9)
             geometric.create_dataset("CY_volume", data=volume)
+            geometric.create_dataset("CY_volume_pre_normalization", data=pre_normalization_volume)
             geometric.create_dataset("divisor_volumes", data=tau, compression="gzip", compression_opts=9)
+            geometric.create_dataset(
+                "divisor_volumes_pre_normalization",
+                data=tau0,
+                compression="gzip",
+                compression_opts=9,
+            )
+            geometric.create_dataset(
+                "effective_divisor_volumes",
+                data=tauq0 * m_val**2,
+                compression="gzip",
+                compression_opts=9,
+            )
+            geometric.create_dataset(
+                "effective_divisor_volumes_pre_normalization",
+                data=tauq0,
+                compression="gzip",
+                compression_opts=9,
+            )
             geometric.create_dataset(
                 "prime_divisor_volumes",
                 data=prime_divisor_volumes,
                 compression="gzip",
                 compression_opts=9,
             )
+            geometric.create_dataset(
+                "prime_divisor_volumes_pre_normalization",
+                data=prime_tau0,
+                compression="gzip",
+                compression_opts=9,
+            )
             geometric.create_dataset("curve_volumes", data=curve_volumes, compression="gzip", compression_opts=9)
+            geometric.create_dataset(
+                "curve_volumes_pre_normalization",
+                data=pre_normalization_curve_volumes,
+                compression="gzip",
+                compression_opts=9,
+            )
             geometric.create_dataset("Kinv", data=kinv, compression="gzip", compression_opts=9)
+            geometric.create_dataset(
+                "Kinv_pre_normalization",
+                data=kinv0,
+                compression="gzip",
+                compression_opts=9,
+            )
             geometric.create_dataset("kappa", data=topology["kappa"], compression="gzip", compression_opts=9)
             geometric.create_dataset("c2", data=topology["c2"], compression="gzip", compression_opts=9)
             geometric.create_dataset("effective_cone", data=qprime, compression="gzip", compression_opts=9)
@@ -1537,6 +1703,68 @@ def generate_and_save_geometry(
                 write_visible_sector_hdf5(
                     geometric.create_group("visible_sector"), visible_sector
                 )
+            if assignment_pool is not None:
+                pool_group = geometric.create_group("assignment_pool")
+                pool_group.attrs["schema_version"] = "ordered-qcd-qed-pool-1.1"
+                pool_group.attrs["pool_status"] = "complete_eligible_ordered_pool"
+                pool_group.attrs["qed_volume_comparison"] = "strictly_less_than_127.5"
+                pool_group.attrs["pool_hash"] = stable_hash(assignment_pool)
+                pool_group.create_dataset(
+                    "pool_rank", data=np.asarray([item["pool_rank"] for item in assignment_pool], dtype=np.int64)
+                )
+                pool_group.create_dataset(
+                    "qcd_divisor_index", data=np.asarray([item["qcd_divisor_index"] for item in assignment_pool], dtype=np.int64)
+                )
+                pool_group.create_dataset(
+                    "qed_divisor_index", data=np.asarray([item["qed_divisor_index"] for item in assignment_pool], dtype=np.int64)
+                )
+                pool_group.create_dataset(
+                    "qcd_divisor_label",
+                    data=np.asarray([item["qcd_divisor_label"] for item in assignment_pool], dtype=np.int64),
+                    compression="gzip",
+                    compression_opts=9,
+                )
+                pool_group.create_dataset(
+                    "qed_divisor_label",
+                    data=np.asarray([item["qed_divisor_label"] for item in assignment_pool], dtype=np.int64),
+                    compression="gzip",
+                    compression_opts=9,
+                )
+                for name in (
+                    "qcd_radial_scale", "qcd_volume_scale", "qcd_volume", "qed_volume",
+                    "minimum_prime_volume", "minimum_effective_volume",
+                ):
+                    pool_group.create_dataset(
+                        name,
+                        data=np.asarray([item[name] for item in assignment_pool], dtype=float),
+                        compression="gzip",
+                        compression_opts=9,
+                    )
+                string_type = h5py.string_dtype(encoding="utf-8")
+                pool_group.create_dataset(
+                    "assignment_hash",
+                    data=np.asarray([item["assignment_hash"] for item in assignment_pool], dtype=object),
+                    dtype=string_type,
+                )
+                pool_group.create_dataset(
+                    "intersection_evidence_json",
+                    data=np.asarray(
+                        [json.dumps(item["intersection_evidence"], sort_keys=True) for item in assignment_pool],
+                        dtype=object,
+                    ),
+                    dtype=string_type,
+                )
+                pool_group.create_dataset(
+                    "terminal_records_json",
+                    data=np.asarray(
+                        [
+                            json.dumps(record, sort_keys=True)
+                            for record in getattr(assignment_pool, "terminal_records", ())
+                        ],
+                        dtype=object,
+                    ),
+                    dtype=string_type,
+                )
             construction_metadata_group = file.create_group("construction_metadata")
             construction_metadata_group.create_dataset(
                 "canonical_lattice_points",
@@ -1552,13 +1780,38 @@ def generate_and_save_geometry(
                 _jsonable(construction_metadata), sort_keys=True, separators=(",", ":")
             )
             potential = cytools_group.create_group("potential")
-            potential.create_dataset("L", data=l, compression="gzip", compression_opts=9)
-            potential.create_dataset("Q", data=q, compression="gzip", compression_opts=9)
-        if overwrite:
-            os.replace(temporary_path, filepath)
-        else:
-            os.link(temporary_path, filepath)
-            os.unlink(temporary_path)
+            potential.attrs["storage_schema"] = (
+                "dense_opt_in" if materialize_dense_potential else "factorized_canonical"
+            )
+            factorized = potential.create_group("factorized")
+            factorized.attrs["schema_version"] = CHARGE_FACTORIZED_SCHEMA_VERSION
+            factorized.attrs["orientation"] = factorized_charges["orientation"]
+            factorized.attrs["difference_convention"] = factorized_charges[
+                "difference_convention"
+            ]
+            factorized.attrs["pair_ordering"] = factorized_charges["pair_ordering"]
+            factorized.create_dataset("Q_direct", data=q_direct, compression="gzip", compression_opts=9)
+            factorized.create_dataset("pair_i", data=pair_i, compression="gzip", compression_opts=9)
+            factorized.create_dataset("pair_j", data=pair_j, compression="gzip", compression_opts=9)
+            factorized.create_dataset(
+                "direct_charge_coefficients",
+                data=factorized_charges["direct_charge_coefficients"],
+                compression="gzip",
+                compression_opts=9,
+            )
+            factorized.create_dataset(
+                "pair_charge_coefficients",
+                data=factorized_charges["pair_charge_coefficients"],
+                compression="gzip",
+                compression_opts=9,
+            )
+            factorized.create_dataset("L_direct", data=direct_l, compression="gzip", compression_opts=9)
+            factorized.create_dataset("L_pairwise", data=pair_l, compression="gzip", compression_opts=9)
+            if materialize_dense_potential:
+                potential.create_dataset("L", data=l, compression="gzip", compression_opts=9)
+                potential.create_dataset("Q", data=q, compression="gzip", compression_opts=9)
+        os.link(temporary_path, filepath)
+        os.unlink(temporary_path)
     finally:
         if os.path.exists(temporary_path):
             os.unlink(temporary_path)
@@ -1591,6 +1844,7 @@ def triangulation_candidates(
     ntfe_face_sampler,
     ntfe_max_face_points,
     ntfe_face_pool_size,
+    ntfe_as_generator=True,
 ):
     """Yield bounded FRST candidates with an explicit sampling contract.
 
@@ -1598,33 +1852,46 @@ def triangulation_candidates(
     NTFE extension algorithm.  It avoids repeatedly constructing CY data for
     FRSTs that differ only away from the two-faces, but its finite 2-face pools
     define a deliberately restricted, non-uniform proposal distribution.
-    ``gnn_ntfe`` uses CYTools' optional dualGNN proposal in the same direct
-    extension framework; the model/pool still define the realised support.
+    Schema 1.1 permits only the package-native ``ntfe_frts`` path with the
+    ``fast`` two-face sampler.  Learned/GNN proposals are intentionally not
+    exposed by this generator.
     """
+    if sampling_scheme not in SAMPLING_SCHEMES:
+        raise ValueError(
+            f"unsupported sampler {sampling_scheme!r}; GNN samplers are unavailable"
+        )
     point_labels = tuple(poly.labels_not_facet)
     if sampling_scheme == "fast":
-        # The deterministic candidate is useful for coverage scans, but is
-        # deliberately recorded as part of the biased fast ensemble.
-        yield poly.triangulate(
-            points=point_labels,
+        yield from poly.random_triangulations_fast(
+            N=max_tip_attempts,
+            c=fast_height_scale,
+            max_retries=max_retries,
             make_star=True,
+            only_fine=True,
+            points=point_labels,
+            backend=backend,
+            as_list=False,
+            progress_bar=False,
+            seed=seed,
+        )
+        return
+
+    if sampling_scheme == "ntfe_fast":
+        if ntfe_face_sampler != "fast":
+            raise ValueError("schema 1.1 ntfe_fast requires triang_method='fast'")
+        if not ntfe_as_generator:
+            raise ValueError("schema 1.1 ntfe_fast requires as_generator=True")
+        yield from poly.ntfe_frts(
+            N=max_tip_attempts,
+            make_star=True,
+            seed=seed,
+            max_npts=ntfe_max_face_points,
+            N_face_triangs=ntfe_face_pool_size,
+            triang_method="fast",
+            as_generator=True,
             backend=backend,
             verbosity=0,
         )
-        remaining = max_tip_attempts - 1
-        if remaining > 0:
-            yield from poly.random_triangulations_fast(
-                N=remaining,
-                c=fast_height_scale,
-                max_retries=max_retries,
-                make_star=True,
-                only_fine=True,
-                points=point_labels,
-                backend=backend,
-                as_list=False,
-                progress_bar=False,
-                seed=seed,
-            )
         return
 
     if sampling_scheme == "ntfe_fast":
@@ -1713,7 +1980,12 @@ def process_polytope(task):
         ks_database_version,
         orientifold_config,
         export_kahler_rays,
-        polytope_source,
+        qed_selection_policy,
+        qed_volume_max,
+        eft_mode,
+        materialize_dense_potential,
+        proposal_budget,
+        retry_budget,
     ) = task
     try:
         started = time.perf_counter()
@@ -1752,15 +2024,17 @@ def process_polytope(task):
             "walk_step_size": walk_step_size,
             "max_steps_to_wall": max_steps_to_wall,
             "max_retries": max_retries,
+            "proposal_budget": proposal_budget,
+            "retry_budget": retry_budget,
             "fast_height_scale": fast_height_scale,
             "sampling_unit": (
                 "two_face_inequivalent_frst"
-                if sampling_scheme in {"ntfe_fast", "gnn_ntfe"}
+                if sampling_scheme == "ntfe_fast"
                 else "frst"
             ),
             "selection_status": (
                 "direct_ntfe_proposal_with_finite_face_pool"
-                if sampling_scheme in {"ntfe_fast", "gnn_ntfe"}
+                if sampling_scheme == "ntfe_fast"
                 else (
                     "provisionally_fair_frst_markov_chain"
                     if sampling_scheme == "fair"
@@ -1770,6 +2044,17 @@ def process_polytope(task):
             "ntfe_face_sampler": ntfe_face_sampler,
             "ntfe_max_face_points": ntfe_max_face_points,
             "ntfe_face_pool_size": ntfe_face_pool_size,
+            "ntfe_as_generator": True,
+            "ntfe_contract": {
+                "N": proposal_budget,
+                "max_npts": ntfe_max_face_points,
+                "N_face_triangs": ntfe_face_pool_size,
+                "as_generator": True,
+                "backend": backend,
+                "triang_method": "fast",
+            }
+            if sampling_scheme == "ntfe_fast"
+            else None,
             "qp_solver_preference": "mosek_if_licensed_then_available",
             "mosek_license_configured": mosek_license["configured"],
             "mosek_license_activated": mosek_license["activated"],
@@ -1798,12 +2083,15 @@ def process_polytope(task):
                 "skipped": accepted,
             }
 
-        report(f"sampling FRST candidates with scheme={sampling_scheme}")
+        report(
+            f"sampling FRST candidates with scheme={sampling_scheme}; "
+            f"proposal_budget={proposal_budget}, retry_budget={retry_budget}"
+        )
         candidates = triangulation_candidates(
             poly,
             sampling_scheme,
-            max_tip_attempts,
-            max_retries,
+            proposal_budget,
+            retry_budget,
             backend,
             seed,
             n_walk,
@@ -1818,25 +2106,68 @@ def process_polytope(task):
             ntfe_face_pool_size,
         )
 
-        saved = rejected = attempted = 0
-        for triangulation in candidates:
-            if accepted >= requested:
-                break
-            attempted += 1
-            triangulation_index = next_output_index
-            filepath = output_path(base_dir, h11, polytope_index, triangulation_index)
-            report(
-                f"testing FRST candidate {attempted}/{max_tip_attempts} "
-                f"for accepted geometry {accepted + 1}/{requested}"
-            )
-            report(f"processing accepted-output slot {triangulation_index}")
-            simplices = np.asarray(triangulation.simplices(), dtype=int)
+        saved = rejected = 0
+        duplicate_full_triangulations = 0
+        duplicate_ntfe_identity = 0
+        seen_full_hashes = set()
+        seen_two_face_hashes = set()
+
+        def evaluate_candidate(triangulation, context):
+            nonlocal saved, rejected, duplicate_full_triangulations, duplicate_ntfe_identity
+            proposal_index = int(context["proposal_index"])
+            proposal_seed = int(context["proposal_seed"])
+            filepath = output_path(base_dir, h11, polytope_index, next_output_index + saved)
+            candidate_base = {
+                "h11": h11,
+                "polytope_index": polytope_index,
+                "polytope_id": polytope_id,
+                "candidate_index": proposal_index,
+                "proposal_index": proposal_index,
+                "sampler": sampling_scheme,
+                "proposal_seed": proposal_seed,
+            }
             try:
+                full_hash, two_face_hash = _triangulation_hashes(triangulation)
+                candidate_base.update(
+                    {
+                        "full_triangulation_hash": full_hash,
+                        "two_face_hash": two_face_hash,
+                    }
+                )
+            except Exception as exc:
+                rejected += 1
+                return ProposalDecision(
+                    "invalid_frst",
+                    f"could not fingerprint candidate: {exc}",
+                    candidate_base,
+                )
+            if full_hash in seen_full_hashes:
+                duplicate_full_triangulations += 1
+                return ProposalDecision(
+                    "duplicate_full_triangulation",
+                    "full triangulation identity already emitted",
+                    candidate_base,
+                )
+            seen_full_hashes.add(full_hash)
+            if sampling_scheme == "ntfe_fast" and two_face_hash in seen_two_face_hashes:
+                duplicate_ntfe_identity += 1
+                return ProposalDecision(
+                    "duplicate_ntfe_identity",
+                    "two-face identity already emitted",
+                    candidate_base,
+                )
+            if sampling_scheme == "ntfe_fast" and two_face_hash is not None:
+                seen_two_face_hashes.add(two_face_hash)
+            try:
+                report(
+                    f"testing FRST proposal {proposal_index}/{proposal_budget} "
+                    f"for accepted geometry {accepted + saved + 1}/{requested}"
+                )
                 generate_and_save_geometry(
                     h11,
                     triangulation.get_cy(),
                     points,
-                    simplices,
+                    np.asarray(triangulation.simplices(), dtype=int),
                     filepath,
                     max_m,
                     max_kaehler_attempts,
@@ -1849,7 +2180,7 @@ def process_polytope(task):
                     qcd_divisor_index,
                     visible_sector_policy,
                     qed_divisor_index,
-                    np.random.default_rng(seed + attempted - 1),
+                    np.random.default_rng(proposal_seed),
                     report,
                     poly=poly,
                     triangulation=triangulation,
@@ -1859,31 +2190,100 @@ def process_polytope(task):
                     orientifold_config=orientifold_config,
                     polytope_source=polytope_source,
                     export_kahler_rays=export_kahler_rays,
+                    qed_selection_policy=qed_selection_policy,
+                    qed_selection_seed=proposal_seed,
+                    qed_volume_max=qed_volume_max,
+                    materialize_dense_potential=materialize_dense_potential,
+                    eft_mode=eft_mode,
                 )
-            except (
-                PrefactorCriterionNotMet,
-                NoPhysicalKaehlerPoint,
-                NoQcdDivisorVolume,
-                NoStandardModelAssignment,
-                FinalGeometryValidationFailed,
-                NoVisibleSectorAssignment,
-            ) as exc:
+            except Exception as exc:
                 rejected += 1
-                report(f"rejected FRST: {exc}")
-                continue
-            accepted += 1
+                report(f"rejected FRST proposal {proposal_index}: {exc}")
+                status = _candidate_terminal_status(exc)
+                if status == "io_failure":
+                    status = "numerical_geometry_failure"
+                return ProposalDecision(status, str(exc), candidate_base)
             saved += 1
-            next_output_index += 1
+            return ProposalDecision(
+                "accepted_geometry",
+                "geometry artifact written atomically",
+                {**candidate_base, "output_path": os.path.abspath(filepath)},
+            )
+
+        controller_config = ProposalControllerConfig(
+            accepted_target=max(0, requested - accepted),
+            proposal_budget=proposal_budget,
+            retry_budget=retry_budget,
+            h11=h11,
+            sampler_name=sampling_scheme,
+            deterministic_seed=int(seed),
+        )
+        controller_report = run_proposal_controller(
+            controller_config, candidates, evaluator=evaluate_candidate
+        )
+        candidate_records = []
+        for record in controller_report.records:
+            metadata = dict(record.metadata)
+            metadata.update(
+                {
+                    "proposal_index": record.proposal_index,
+                    "proposal_seed": record.proposal_seed,
+                    "retry_index": record.retry_index,
+                    "accepted_count_after": record.accepted_count_after,
+                    "terminal_status": record.terminal_status,
+                    "terminal_reason": record.reason,
+                }
+            )
+            candidate_records.append(metadata)
+        if controller_report.terminal_status != "accepted_geometry":
+            candidate_records.append(
+                {
+                    "h11": h11,
+                    "polytope_index": polytope_index,
+                    "sampler": sampling_scheme,
+                    "terminal_status": controller_report.terminal_status,
+                    "terminal_reason": (
+                        f"accepted={accepted + controller_report.accepted_count} "
+                        f"requested={requested}; budget_status="
+                        f"{controller_report.budget_status}"
+                    ),
+                    "proposal_budget": proposal_budget,
+                    "retry_budget": retry_budget,
+                    "proposal_count": controller_report.proposal_count,
+                    "retry_count": controller_report.retry_count,
+                }
+            )
+        h491_diagnostics = None
+        if h11 == 491:
+            settings = NativeH491SamplerSettings(
+                proposal_budget=proposal_budget,
+                accepted_target=requested,
+                deterministic_seed=int(seed),
+                retry_budget=retry_budget,
+            )
+            h491_diagnostics = diagnose_h491(
+                [record for record in candidate_records if "candidate_index" in record],
+                settings=settings,
+                accepted_target=requested,
+            ).to_dict()
+        accepted_total = accepted + controller_report.accepted_count
         return {
             "ok": True,
             "h11": h11,
             "polytope_index": polytope_index,
             "requested": requested,
-            "attempted": attempted,
-            "accepted": accepted,
+            "attempted": controller_report.proposal_count,
+            "accepted": accepted_total,
             "saved": saved,
             "rejected": rejected,
             "skipped": len(existing_indices),
+            "proposal_count": controller_report.proposal_count,
+            "retry_count": controller_report.retry_count,
+            "controller_report": controller_report.to_dict(),
+            "h491_diagnostics": h491_diagnostics,
+            "duplicate_full_triangulations": duplicate_full_triangulations,
+            "duplicate_ntfe_identity": duplicate_ntfe_identity,
+            "candidate_terminal_records": candidate_records,
         }
     except Exception as exc:
         return {
@@ -1954,74 +2354,6 @@ def load_polytope_manifest(path):
     return {"source": manifest.get("source"), "by_h11": by_h11}
 
 
-def load_mirror_polytopes(parquet_dir, h11, limit, favorable):
-    """Read favorable N-lattice polytopes from the KS Parquet mirror."""
-    try:
-        import pyarrow.parquet as parquet
-    except ImportError as exc:
-        raise RuntimeError(
-            "The Parquet mirror source requires pyarrow in the CYTools environment."
-        ) from exc
-
-    parquet_dir = os.path.abspath(os.fspath(parquet_dir))
-    if not os.path.isdir(parquet_dir):
-        raise RuntimeError(f"Parquet mirror directory does not exist: {parquet_dir}")
-    paths = sorted(
-        glob.glob(os.path.join(parquet_dir, "polytopes-4d-*-vertices.parquet")),
-        key=lambda path: int(os.path.basename(path).split("-")[2]),
-    )
-    if not paths:
-        raise RuntimeError(
-            "No polytopes-4d-*-vertices.parquet files found in mirror directory "
-            f"{parquet_dir}."
-        )
-
-    records = []
-    for path in paths:
-        table = parquet.read_table(
-            path, columns=["vertices", "vertex_count", "h11", "h12"]
-        )
-        for row_index, row in enumerate(table.to_pylist()):
-            # The published mirror uses the dual Hodge-label convention:
-            # physical h11 is the mirror h12 column.
-            physical_h11 = int(row["h12"])
-            if physical_h11 != int(h11):
-                continue
-            vertices = np.asarray(row["vertices"], dtype=int)
-            poly = Polytope(vertices, deterministic_glsm_basis=True)
-            if int(poly.h11()) != int(h11):
-                raise RuntimeError(
-                    "KS mirror Hodge-label convention check failed: "
-                    f"{os.path.basename(path)} row {row_index} has requested "
-                    f"h11={h11}, but CYTools constructed h11={poly.h11()}."
-                )
-            if favorable is not None and bool(poly.is_favorable(lattice="N")) != favorable:
-                continue
-            records.append(
-                (
-                    poly,
-                    {
-                        "source_kind": "huggingface_parquet_mirror",
-                        "dataset": KS_MIRROR_DATASET,
-                        "dataset_url": KS_MIRROR_DATASET_URL,
-                        "parquet_file": os.path.abspath(path),
-                        "row_index": int(row_index),
-                        "mirror_h11": int(row["h11"]),
-                        "mirror_h12": int(row["h12"]),
-                        "physical_h11": physical_h11,
-                        "physical_h21": int(row["h11"]),
-                        "vertex_count": int(row["vertex_count"]),
-                        "favorable_checked_by": (
-                            "CYTools Polytope.is_favorable(lattice='N')"
-                        ),
-                    },
-                )
-            )
-            if len(records) >= limit:
-                return records
-    return records
-
-
 def plan_tasks(
     h11,
     n_geometries,
@@ -2062,7 +2394,12 @@ def plan_tasks(
     replacement_pool_size=0,
     return_replacement_tasks=False,
     polytope_manifest=None,
-    database_source=None,
+    qed_selection_policy="uniform_eligible",
+    qed_volume_max=None,
+    eft_mode=False,
+    materialize_dense_potential=False,
+    proposal_budget=None,
+    retry_budget=None,
 ):
     """Fetch favorable polytopes and assign each its FRST output target.
 
@@ -2072,19 +2409,11 @@ def plan_tasks(
     target only after an active polytope produces a shortfall.
     """
     fetch_limit = n_geometries + max(0, replacement_pool_size)
-    if database_source is not None and database_source.get("source_kind") == (
-        "huggingface_parquet_mirror"
-    ):
-        if polytope_manifest is not None:
-            raise ValueError(
-                "A Parquet mirror and a local polytope manifest are mutually exclusive."
-            )
-        records = load_mirror_polytopes(
-            database_source["parquet_dir"], h11, fetch_limit, favorable
-        )
-        polytopes = [polytope for polytope, _ in records]
-        polytope_sources = [source for _, source in records]
-    elif polytope_manifest is None:
+    proposal_budget = max_tip_attempts if proposal_budget is None else int(proposal_budget)
+    retry_budget = max_retries if retry_budget is None else int(retry_budget)
+    if proposal_budget < 1 or retry_budget < 0:
+        raise ValueError("proposal_budget must be positive and retry_budget cannot be negative")
+    if polytope_manifest is None:
         polytopes = list(
             fetch_polytopes(
                 h11=h11,
@@ -2094,20 +2423,6 @@ def plan_tasks(
                 deterministic_glsm_basis=True,
             )
         )
-        polytope_sources = [
-            {
-                "source_kind": "cytools_fetch_polytopes",
-                "query": {
-                    "h11": int(h11),
-                    "lattice": "N",
-                    "favorable": favorable,
-                    "limit": fetch_limit,
-                    "deterministic_glsm_basis": True,
-                },
-                "selection_index": index,
-            }
-            for index, _ in enumerate(polytopes, start=1)
-        ]
     else:
         polytopes = []
         for vertices in polytope_manifest["by_h11"].get(h11, []):
@@ -2120,13 +2435,6 @@ def plan_tasks(
             if favorable is None or bool(poly.is_favorable(lattice="N")) == favorable:
                 polytopes.append(poly)
         polytopes = polytopes[:fetch_limit]
-        polytope_sources = [
-            {
-                "source_kind": "local_polytope_manifest",
-                "manifest_source": polytope_manifest.get("source"),
-            }
-            for _ in polytopes
-        ]
     if not polytopes:
         return ([], []) if return_replacement_tasks else []
 
@@ -2193,7 +2501,12 @@ def plan_tasks(
             ks_database_version,
             orientifold_config,
             export_kahler_rays,
-            polytope_source,
+            qed_selection_policy,
+            qed_volume_max,
+            eft_mode,
+            materialize_dense_potential,
+            proposal_budget,
+            retry_budget,
         )
 
     tasks = [
@@ -2254,7 +2567,12 @@ def run_batch(
     export_kahler_rays,
     frsts_per_polytope=None,
     polytope_manifest=None,
-    database_source=None,
+    qed_selection_policy="uniform_eligible",
+    qed_volume_max=None,
+    eft_mode=False,
+    materialize_dense_potential=False,
+    proposal_budget=None,
+    retry_budget=None,
 ):
     tasks = plan_tasks(
         h11,
@@ -2294,7 +2612,12 @@ def run_batch(
         export_kahler_rays,
         frsts_per_polytope,
         polytope_manifest=polytope_manifest,
-        database_source=database_source,
+        qed_selection_policy=qed_selection_policy,
+        qed_volume_max=qed_volume_max,
+        eft_mode=eft_mode,
+        materialize_dense_potential=materialize_dense_potential,
+        proposal_budget=proposal_budget,
+        retry_budget=retry_budget,
     )
     if not tasks:
         print(f"No favorable N-lattice polytopes found for h11={h11}.")
@@ -2386,7 +2709,14 @@ def run_batches(
     replace_rejected_polytopes=False,
     max_polytope_replacements=10,
     polytope_manifest=None,
-    database_source=None,
+    geometry_targets=None,
+    qed_selection_policy="uniform_eligible",
+    qed_volume_max=None,
+    eft_mode=False,
+    materialize_dense_potential=False,
+    collect_records=False,
+    proposal_budget=None,
+    retry_budget=None,
 ):
     """Plan all h11 values into one pool, without an h11 completion barrier.
 
@@ -2395,6 +2725,7 @@ def run_batches(
     from another h11 value.
     """
     total_saved = 0
+    all_results = []
     pending = set()
     replacement_tasks_by_h11 = {}
 
@@ -2405,13 +2736,32 @@ def run_batches(
     with ProcessPoolExecutor(max_workers=n_cores) as executor:
         for h11 in h11_values:
             print(f"\n>>> Processing h11={h11} <<<")
+            if geometry_targets is None:
+                geometry_target = n_geometries
+                planning_polytope_count = n_geometries
+                planning_frsts_per_polytope = frsts_per_polytope
+            else:
+                geometry_target = int(geometry_targets[h11])
+                planning_polytope_count = {50: 50, 100: 50, 200: 30, 491: 1}[h11]
+                planning_frsts_per_polytope = 100 if h11 == 491 else 10
+            planning_sampling_scheme = (
+                sampling_scheme
+                if geometry_targets is None
+                else ("ntfe_fast" if h11 == 491 else "fast")
+            )
+            planning_max_tip_attempts = (
+                max_tip_attempts
+                if geometry_targets is None
+                else (100 if h11 == 491 else 10)
+            )
+            planning_max_retries = 500 if geometry_targets is not None else max_retries
             tasks, replacement_tasks = plan_tasks(
                 h11,
-                n_geometries,
+                planning_polytope_count,
                 base_dir,
                 seed,
-                max_retries,
-                max_tip_attempts,
+                planning_max_retries,
+                planning_max_tip_attempts,
                 overwrite,
                 max_m,
                 max_kaehler_attempts,
@@ -2425,7 +2775,7 @@ def run_batches(
                 visible_sector_policy,
                 qed_divisor_index,
                 verbose,
-                sampling_scheme,
+                planning_sampling_scheme,
                 backend,
                 n_walk,
                 n_flip,
@@ -2441,11 +2791,22 @@ def run_batches(
                 favorable,
                 orientifold_config,
                 export_kahler_rays,
-                frsts_per_polytope,
+                planning_frsts_per_polytope,
                 max_polytope_replacements if replace_rejected_polytopes else 0,
                 True,
                 polytope_manifest,
-                database_source=database_source,
+                qed_selection_policy=qed_selection_policy,
+                qed_volume_max=qed_volume_max,
+                eft_mode=eft_mode,
+                materialize_dense_potential=materialize_dense_potential,
+                proposal_budget=(
+                    planning_max_tip_attempts
+                    if proposal_budget is None
+                    else proposal_budget
+                ),
+                retry_budget=(
+                    planning_max_retries if retry_budget is None else retry_budget
+                ),
             )
             replacement_tasks_by_h11[h11] = replacement_tasks
             if not tasks:
@@ -2453,10 +2814,10 @@ def run_batches(
                 continue
 
             requested_outputs = sum(task[3] for task in tasks)
-            if frsts_per_polytope is not None and len(tasks) < n_geometries:
+            if planning_frsts_per_polytope is not None and len(tasks) < planning_polytope_count:
                 targets = [task[3] for task in tasks]
                 print(
-                    f"Requested {n_geometries} favorable polytopes but found "
+                    f"Requested {geometry_target} favorable polytopes but found "
                     f"{len(tasks)}; redistributed the combined target of "
                     f"{requested_outputs} FRSTs across per-polytope targets {targets}."
                 )
@@ -2476,6 +2837,7 @@ def run_batches(
             completed, pending = wait(pending, return_when=FIRST_COMPLETED)
             for future in completed:
                 result = future.result()
+                all_results.append(result)
                 label = f"h11={result['h11']} np_{result['polytope_index']:07d}"
                 if not result["ok"]:
                     print(f"ERROR {label}: {result['error']}")
@@ -2515,14 +2877,429 @@ def run_batches(
                 f"{failure['error']}"
                 for failure in failures
             )
-            raise RuntimeError(
-                f"CYTools generation failed; no complete batch result: {details}"
-            )
+            if not collect_records:
+                raise RuntimeError(
+                    f"CYTools generation failed; no complete batch result: {details}"
+                )
+            print(f"Generation completed with worker failures: {details}")
+    if collect_records:
+        return {"saved": total_saved, "results": all_results}
     return total_saved
 
 
+def parse_eft_geometry_plan(value):
+    """Parse and validate the approved schema 1.1 geometry allocation."""
+    plan = {}
+    for token in str(value).replace(" ", "").split(","):
+        if not token or ":" not in token:
+            raise ValueError("geometry plan must use comma-separated h11:count entries")
+        raw_h11, raw_count = token.split(":", 1)
+        try:
+            h11, count = int(raw_h11), int(raw_count)
+        except ValueError as exc:
+            raise ValueError(f"invalid geometry plan entry {token!r}") from exc
+        if h11 < 1 or count < 1 or h11 in plan:
+            raise ValueError(f"invalid or duplicate geometry plan entry {token!r}")
+        plan[h11] = count
+    expected = {50: 500, 100: 500, 200: 300, 491: 100}
+    if plan != expected:
+        raise ValueError(
+            "schema 1.1 requires geometry plan 50:500,100:500,200:300,491:100"
+        )
+    if sum(plan.values()) != TARGET_GEOMETRY_COUNT:
+        raise ValueError("schema 1.1 geometry plan must total 1400")
+    return plan
+
+
+class ModelTargetShortfall(RuntimeError):
+    """The complete assignment pools cannot satisfy the requested row quotas."""
+
+    def __init__(self, message, records):
+        super().__init__(message)
+        self.records = records
+
+
+def _geometry_reference(path):
+    """Read compact geometry/pool references needed by the EFT row layer."""
+    with h5py.File(path, "r") as file:
+        metadata = json.loads(file.attrs["construction_metadata_json"])
+        geometric = file["cytools/geometric"]
+        geometry_id = str(metadata.get("cy3_fingerprint"))
+        if not geometry_id or geometry_id == "None":
+            geometry_id = stable_hash({"path": os.path.abspath(path), "metadata": metadata})
+        result = {
+            "geometry_id": geometry_id,
+            "geometry_file": os.path.abspath(path),
+            "geometry_hash": str(metadata.get("cy3_fingerprint", "")),
+            "geometry_schema_version": str(metadata.get("schema_version", SCHEMA_VERSION)),
+            "charge_factorized_schema_version": str(
+                metadata.get("charge_factorized_schema_version", CHARGE_FACTORIZED_SCHEMA_VERSION)
+            ),
+            "normalization_map_version": str(
+                metadata.get("normalization_map_version", NORMALIZATION_MAP_VERSION)
+            ),
+            "h11": int(geometric["h11"][()]),
+            "h21": int(geometric["h21"][()]),
+            "sampler": str(metadata.get("sampling", {}).get("scheme", "unknown")),
+        }
+        if "assignment_pool" not in geometric:
+            raise ModelTargetShortfall(
+                f"geometry {geometry_id} has no persisted complete assignment pool",
+                [],
+            )
+        pool_group = geometric["assignment_pool"]
+        pool_size = int(pool_group["pool_rank"].shape[0])
+        result["pool_size"] = pool_size
+        result["pool"] = {
+            name: pool_group[name][()]
+            for name in (
+                "pool_rank", "qcd_divisor_index", "qed_divisor_index",
+                "qcd_divisor_label", "qed_divisor_label", "qcd_radial_scale",
+                "qcd_volume_scale", "qcd_volume", "qed_volume",
+                "minimum_prime_volume", "minimum_effective_volume", "assignment_hash",
+            )
+        }
+        factorized = file["cytools/potential/factorized"]
+        result["potential"] = {
+            "Q_direct": factorized["Q_direct"][()],
+            "pair_i": factorized["pair_i"][()],
+            "pair_j": factorized["pair_j"][()],
+            "L_direct": factorized["L_direct"][()],
+            "L_pairwise": factorized["L_pairwise"][()],
+        }
+        result["prime_divisor_charges"] = geometric["prime_divisor_charges"][()]
+        result["divisor_volumes"] = geometric["divisor_volumes"][()]
+        result["cy_volume"] = float(geometric["CY_volume"][()])
+    return result
+
+
+def _decode_hdf5_text(value):
+    """Decode one scalar HDF5 UTF-8 value without changing its identity."""
+    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+
+
+def _materialize_row_potential(reference, assignment):
+    """Materialize only the bounded Q/L view required by the row serializer."""
+    factorized = reference["potential"]
+    q_direct = np.asarray(factorized["Q_direct"], dtype=np.int64)
+    pair_i = np.asarray(factorized["pair_i"], dtype=np.int64)
+    pair_j = np.asarray(factorized["pair_j"], dtype=np.int64)
+    q_pair = q_direct[:, pair_j] - q_direct[:, pair_i]
+    q = np.concatenate((q_direct, q_pair), axis=1)
+    l = np.concatenate(
+        (
+            np.asarray(factorized["L_direct"], dtype=float),
+            np.asarray(factorized["L_pairwise"], dtype=float),
+        ),
+        axis=1,
+    )
+    qed_charge = np.asarray(
+        reference["prime_divisor_charges"][int(assignment["qed_divisor_index"])],
+        dtype=np.int64,
+    )
+    direct_count = q_direct.shape[1]
+    source_index = None
+    for index in range(direct_count):
+        if np.array_equal(q[:, index], qed_charge):
+            source_index = index
+            break
+    if source_index is None:
+        qed_tau = float(qed_charge @ np.asarray(reference["divisor_volumes"], dtype=float))
+        prefactor = 8.0 * math.pi / float(reference["cy_volume"]) ** 2
+        raw = np.asarray(
+            [prefactor * qed_tau, -2.0 * math.log10(math.e) * math.pi * qed_tau],
+            dtype=float,
+        )
+        if not np.all(np.isfinite(raw)) or raw[0] == 0.0:
+            raise ValueError("QED potential coefficient is zero or non-finite")
+        qed_l = np.asarray(
+            [np.sign(raw[0]), np.log10(abs(raw[0])) + raw[1]], dtype=float
+        )
+        source_index = q.shape[1]
+        q = np.concatenate((q, qed_charge.reshape(-1, 1)), axis=1)
+        l = np.concatenate((l, qed_l.reshape(2, 1)), axis=1)
+    return {
+        "Q": q,
+        "L": l,
+        "qed_charge": qed_charge,
+        "direct_count": direct_count,
+        "source_index": source_index,
+    }
+
+
+def expand_eft_reference_rows(
+    accepted_geometry_paths, base_seed, minimum_rows, maximum_rows
+):
+    """Build compact rows from complete pools under capacity-aware bounds."""
+    references = [_geometry_reference(path) for path in sorted(accepted_geometry_paths)]
+    references.sort(key=lambda reference: reference["geometry_id"])
+    assignment_pools = {
+        reference["geometry_id"]: [
+            _decode_hdf5_text(value) for value in reference["pool"]["assignment_hash"]
+        ]
+        for reference in references
+    }
+    capacity = sample_capacity_aware_assignments(
+        assignment_pools,
+        base_seed,
+        minimum_rows=minimum_rows,
+        maximum_rows=maximum_rows,
+    )
+    allocation = capacity["allocation"]
+    terminal_records = [
+        {
+            "terminal_status": capacity["terminal_status"],
+            "terminal_reason": capacity["stop_reason"],
+            "requested_minimum": capacity["requested_minimum"],
+            "ceiling": capacity["ceiling"],
+            "accepted_count": capacity["accepted_count"],
+            "maximum_feasible_rows": capacity["maximum_feasible_rows"],
+        }
+    ]
+    if not capacity["successful"]:
+        raise ModelTargetShortfall(
+            "model capacity shortfall: "
+            f"minimum={minimum_rows} accepted={capacity['accepted_count']} "
+            f"stop_reason={capacity['stop_reason']}",
+            terminal_records,
+        )
+
+    reference_by_id = {reference["geometry_id"]: reference for reference in references}
+    rows = []
+    for row_index, sampled in enumerate(capacity["rows"]):
+        geometry_id = sampled["geometry_id"]
+        reference = reference_by_id[geometry_id]
+        pool = reference["pool"]
+        pool_rank = int(sampled["assignment_pool_rank"])
+        pool_positions = np.flatnonzero(pool["pool_rank"] == pool_rank)
+        if len(pool_positions) != 1:
+            raise ModelTargetShortfall(
+                f"persisted pool rank {pool_rank} is not unique for {geometry_id}",
+                terminal_records,
+            )
+        position = int(pool_positions[0])
+        assignment_hash = _decode_hdf5_text(pool["assignment_hash"][position])
+        if assignment_hash != sampled["assignment_hash"]:
+            raise ModelTargetShortfall(
+                f"assignment hash mismatch for {geometry_id} pool rank {pool_rank}",
+                terminal_records,
+            )
+        assignment = {
+            "geometry_id": geometry_id,
+            "geometry_file": reference["geometry_file"],
+            "geometry_hash": reference["geometry_hash"],
+            "geometry_schema_version": reference["geometry_schema_version"],
+            "charge_factorized_schema_version": reference[
+                "charge_factorized_schema_version"
+            ],
+            "normalization_map_version": reference["normalization_map_version"],
+            "h11": reference["h11"],
+            "h21": reference["h21"],
+            "qcd_divisor_index": int(pool["qcd_divisor_index"][position]),
+            "qed_divisor_index": int(pool["qed_divisor_index"][position]),
+            "qcd_divisor_label": np.asarray(pool["qcd_divisor_label"][position]).tolist(),
+            "qed_divisor_label": np.asarray(pool["qed_divisor_label"][position]).tolist(),
+            "assignment_hash": assignment_hash,
+            "assignment_pool_rank": pool_rank,
+            "assignment_pool_size": reference["pool_size"],
+            "model_seed": int(sampled["model_seed"]),
+            "row_order": row_index,
+            "qcd_radial_scale": float(pool["qcd_radial_scale"][position]),
+            "qcd_volume_scale": float(pool["qcd_volume_scale"][position]),
+            "qcd_volume": float(pool["qcd_volume"][position]),
+            "qed_volume": float(pool["qed_volume"][position]),
+            "minimum_prime_volume": float(pool["minimum_prime_volume"][position]),
+            "minimum_effective_volume": float(pool["minimum_effective_volume"][position]),
+        }
+        potential = _materialize_row_potential(reference, assignment)
+        row = serialize_eft_row(
+            assignment,
+            assignment,
+            potential,
+            model_id=f"{geometry_id}:eft-{row_index:06d}",
+        )
+        row.update(
+            {
+                "requested_minimum": capacity["requested_minimum"],
+                "ceiling": capacity["ceiling"],
+                "accepted_count": capacity["accepted_count"],
+                "stop_reason": capacity["stop_reason"],
+                "sampling_unit": "ordered_qcd_qed_assignment",
+                "assignment_sampling": "uniform_without_replacement",
+            }
+        )
+        rows.append(row)
+        terminal_records.append(
+            {
+                "model_id": row["model_id"],
+                "geometry_id": geometry_id,
+                "h11": reference["h11"],
+                "sampler": reference["sampler"],
+                "terminal_status": "accepted_model_row",
+                "terminal_reason": "compact Parquet row prepared",
+                "pool_rank": pool_rank,
+                "model_seed": int(sampled["model_seed"]),
+            }
+        )
+    return rows, terminal_records, allocation
+
+
+def write_schema11_artifacts(
+    output_root,
+    *,
+    run_manifest,
+    candidate_records,
+    model_records,
+    summary,
+    storage_estimate,
+    charge_factorized_manifest,
+    polytope_manifest,
+    include_model_statuses,
+    fresh_ensemble_manifest=None,
+):
+    """Write all external accounting artifacts with no-overwrite atomic writes."""
+    atomic_jsonl_dump(
+        os.path.join(output_root, "candidate_terminal_statuses.jsonl"), candidate_records
+    )
+    if include_model_statuses:
+        atomic_jsonl_dump(
+            os.path.join(output_root, "model_terminal_statuses.jsonl"), model_records
+        )
+    atomic_json_dump(os.path.join(output_root, "run_manifest.json"), run_manifest)
+    atomic_json_dump(
+        os.path.join(output_root, "summary_by_h11_and_status.json"), summary
+    )
+    atomic_json_dump(os.path.join(output_root, "storage_estimate.json"), storage_estimate)
+    atomic_json_dump(os.path.join(output_root, "polytope_manifest.json"), polytope_manifest)
+    atomic_json_dump(
+        os.path.join(output_root, "charge_factorized_manifest.json"),
+        charge_factorized_manifest,
+    )
+    if fresh_ensemble_manifest is not None:
+        write_fresh_ensemble_manifest(
+            os.path.join(output_root, "fresh_ensemble_manifest.json"),
+            fresh_ensemble_manifest,
+        )
+
+
+def factorized_manifest_for_paths(paths):
+    """Summarize canonical factorized charge artifacts without dense arrays."""
+    entries = []
+    for path in sorted(paths):
+        with h5py.File(path, "r") as file:
+            metadata = json.loads(file.attrs["construction_metadata_json"])
+            factorized = file["cytools/potential/factorized"]
+            factorized_schema = factorized.attrs.get(
+                "schema_version", CHARGE_FACTORIZED_SCHEMA_VERSION
+            )
+            difference_convention = factorized.attrs["difference_convention"]
+            if isinstance(factorized_schema, bytes):
+                factorized_schema = factorized_schema.decode("utf-8")
+            if isinstance(difference_convention, bytes):
+                difference_convention = difference_convention.decode("utf-8")
+            entries.append(
+                {
+                    "geometry_file": os.path.abspath(path),
+                    "geometry_id": metadata.get("cy3_fingerprint"),
+                    "schema_version": metadata.get("schema_version"),
+                    "charge_factorized_schema_version": str(factorized_schema),
+                    "direct_shape": list(factorized["Q_direct"].shape),
+                    "pair_count": int(factorized["pair_i"].shape[0]),
+                    "pair_i_sha256": stable_hash(factorized["pair_i"][()].tolist()),
+                    "pair_j_sha256": stable_hash(factorized["pair_j"][()].tolist()),
+                    "difference_convention": str(difference_convention),
+                    "dense_potential_present": "Q" in file["cytools/potential"],
+                }
+            )
+    return {
+        "schema_version": CHARGE_FACTORIZED_SCHEMA_VERSION,
+        "representation": "direct_once_plus_pair_source_indices",
+        "materialization": "dense Q/L is explicit opt-in only",
+        "geometries": entries,
+    }
+
+
+def _fresh_source_query(args, h11_values, polytope_manifest):
+    """Record the complete fresh source query without making population claims."""
+    criteria = {
+        "lattice": "N",
+        "favorable": True,
+        "reflexive": True,
+        "full_dimensional": True,
+    }
+    returned_polytopes = []
+    if polytope_manifest is not None:
+        for h11 in sorted(h11_values):
+            for ordinal, vertices in enumerate(
+                polytope_manifest["by_h11"].get(h11, []), start=1
+            ):
+                returned_polytopes.append(
+                    {
+                        "h11": int(h11),
+                        "polytope_fingerprint": stable_hash(vertices),
+                        "returned_index": ordinal,
+                    }
+                )
+        source = polytope_manifest.get("source") or "local_polytope_manifest"
+        revision = f"local-manifest:{os.path.abspath(args.polytope_manifest)}"
+    else:
+        expected = {50: 50, 100: 50, 200: 30, 491: 1}
+        for h11 in sorted(h11_values):
+            polytopes = list(
+                fetch_polytopes(
+                    h11=h11,
+                    limit=expected[h11],
+                    lattice="N",
+                    favorable=True,
+                    deterministic_glsm_basis=True,
+                )
+            )
+            for ordinal, poly in enumerate(polytopes, start=1):
+                fingerprint, _ = polytope_identity(poly)
+                returned_polytopes.append(
+                    {
+                        "h11": int(h11),
+                        "polytope_fingerprint": fingerprint,
+                        "returned_index": ordinal,
+                    }
+                )
+        source = args.ks_database_version
+        revision = str(args.ks_database_version)
+    return {
+        "source": source,
+        "source_revision": revision,
+        "query_criteria": criteria,
+        "fresh": True,
+        "result_count": len(returned_polytopes),
+        "returned_order": [
+            item["polytope_fingerprint"] for item in returned_polytopes
+        ],
+        "returned_polytopes": returned_polytopes,
+        "query_ordering": "CYTools returned order preserved within each h11",
+    }
+
+
+def _task17_path():
+    """Return the immutable Task 17 JSON path used by the provenance gate."""
+    return os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "glimmers_local_pilot_tasks",
+            "17_schema11_integration_orchestration.json",
+        )
+    )
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Generate CYTools geometry data for Julia.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate an adapted finite KS geometry reference. Optional --eft "
+            "expands compact ordered QCD-QED assignment rows; it does not "
+            "reproduce the Glimmers paper ensemble."
+        )
+    )
     parser.add_argument("--h11_min", type=int, default=4, help="Starting h11 value.")
     parser.add_argument("--h11_max", type=int, default=4, help="Ending h11 value (inclusive).")
     parser.add_argument(
@@ -2586,8 +3363,7 @@ def main():
         default="fair",
         help=(
             "FRST proposal: fair secondary-fan walk (default), biased fast "
-            "heights, direct NTFE with sampled 2-face FRTs, or optional "
-            "dualGNN-guided direct NTFE."
+            "heights, or package-native ntfe_fast with triang_method=fast."
         ),
     )
     parser.add_argument(
@@ -2608,24 +3384,6 @@ def main():
         help="Version/endpoint label recorded in every artifact.",
     )
     parser.add_argument(
-        "--database-source",
-        choices=("cytools", "mirror", "manifest"),
-        default="cytools",
-        help=(
-            "Polytope source: live CYTools fetch_polytopes (default), the "
-            "downloaded KS Parquet mirror, or an explicit JSON manifest."
-        ),
-    )
-    parser.add_argument(
-        "--parquet-dir",
-        type=str,
-        default=None,
-        help=(
-            "Directory containing polytopes-4d-*-vertices.parquet files for "
-            "--database-source mirror."
-        ),
-    )
-    parser.add_argument(
         "--polytope-manifest",
         default=None,
         help=(
@@ -2636,9 +3394,26 @@ def main():
     parser.add_argument("--max-retries", type=int, default=50, help="Bound per-FRST search retries.")
     parser.add_argument(
         "--max-tip-attempts",
+        "--ntfe-sample-count",
+        dest="max_tip_attempts",
         type=int,
-        default=50,
-        help="Maximum FRST candidates tried per polytope before reporting a shortfall.",
+        default=100,
+        help=(
+            "Maximum FRST candidates tried per polytope; for ntfe_fast this "
+            "is Polytope.ntfe_frts N (default: 100)."
+        ),
+    )
+    parser.add_argument(
+        "--proposal-budget",
+        type=int,
+        default=None,
+        help="Accepted-geometry proposal cap; defaults to --max-tip-attempts.",
+    )
+    parser.add_argument(
+        "--retry-budget",
+        type=int,
+        default=None,
+        help="Rejected-proposal retry cap; defaults to --max-retries.",
     )
     parser.add_argument(
         "--max-m",
@@ -2699,20 +3474,22 @@ def main():
     parser.add_argument(
         "--ntfe-max-face-points",
         type=int,
-        default=0,
-        help=(
-            "Enumerate 2-face FRTs only up to this many points in direct "
-            "NTFE modes; sample larger faces. Zero samples every 2-face."
-        ),
+        default=17,
+        help="Native ntfe_frts max_npts control (schema 1.1 default: 17).",
     )
     parser.add_argument(
         "--ntfe-face-pool-size",
+        "--ntfe-face-triangulations",
+        dest="ntfe_face_pool_size",
         type=int,
-        default=5,
-        help=(
-            "FRT proposals retained per sampled 2-face in direct NTFE modes. "
-            "The conservative laptop default bounds both cost and sampler support."
-        ),
+        default=1000,
+        help="Native ntfe_frts N_face_triangs control (schema 1.1 default: 1000).",
+    )
+    parser.add_argument(
+        "--ntfe-as-generator",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require ntfe_frts as_generator=True; disabling it is rejected.",
     )
     parser.add_argument(
         "--min-divisor-volume",
@@ -2789,6 +3566,18 @@ def main():
         ),
     )
     parser.add_argument(
+        "--qed-selection-policy",
+        choices=("uniform_eligible", "explicit"),
+        default="uniform_eligible",
+        help="Non-EFT visible-sector selection policy; --eft samples its complete pool.",
+    )
+    parser.add_argument(
+        "--qed-volume-max",
+        type=float,
+        default=None,
+        help="Strict QED volume upper bound; --eft fixes this to 127.5.",
+    )
+    parser.add_argument(
         "--orientifold-file",
         type=str,
         default=None,
@@ -2802,7 +3591,50 @@ def main():
             "prohibitively expensive at large h11; hyperplanes are always stored."
         ),
     )
-    parser.add_argument("--overwrite", action="store_true", help="Replace existing cyax.h5 files.")
+    parser.add_argument(
+        "--materialize-dense-potential",
+        action="store_true",
+        help=(
+            "Explicit compatibility opt-in to write dense Q/L in addition to "
+            "the canonical factorized charge artifact."
+        ),
+    )
+    parser.add_argument(
+        "--eft",
+        action="store_true",
+        help=(
+            "Opt in to the approved 1400-geometry compact EFT-reference adaptation "
+            "with capacity-aware ordered-pool sampling."
+        ),
+    )
+    parser.add_argument(
+        "--eft-geometry-plan",
+        default="50:500,100:500,200:300,491:100",
+        help="Schema 1.1 geometry plan h11:count,... (the approved plan is fixed).",
+    )
+    parser.add_argument(
+        "--eft-minimum-rows",
+        type=int,
+        default=MINIMUM_EFT_ROWS,
+        help="Minimum accepted EFT-reference rows (schema 1.1: 100000).",
+    )
+    parser.add_argument(
+        "--eft-maximum-rows",
+        type=int,
+        default=MAXIMUM_EFT_ROWS,
+        help="Hard EFT-reference row ceiling (schema 1.1: 200000).",
+    )
+    parser.add_argument(
+        "--eft-output-format",
+        choices=("parquet",),
+        default="parquet",
+        help="Compressed columnar EFT table format.",
+    )
+    parser.add_argument(
+        "--eft-output-path",
+        default=None,
+        help="EFT Parquet path, relative to --outdir unless absolute.",
+    )
     parser.add_argument(
         "--verbose",
         action="store_true",
@@ -2818,8 +3650,20 @@ def main():
         parser.error("--max-polytope-replacements cannot be negative")
     if args.sampling_scheme not in SAMPLING_SCHEMES:
         parser.error("--sampling-scheme has an unsupported value")
+    if not args.ntfe_as_generator:
+        parser.error("--ntfe-as-generator cannot be disabled; schema 1.1 requires True")
     if args.max_tip_attempts < 1:
         parser.error("--max-tip-attempts must be positive")
+    proposal_budget = (
+        args.max_tip_attempts
+        if args.proposal_budget is None
+        else args.proposal_budget
+    )
+    retry_budget = args.max_retries if args.retry_budget is None else args.retry_budget
+    if proposal_budget < 1:
+        parser.error("--proposal-budget must be positive")
+    if retry_budget < 0:
+        parser.error("--retry-budget cannot be negative")
     if args.max_kaehler_attempts < 1:
         parser.error("--max-kaehler-attempts must be positive")
     if args.min_divisor_volume <= 0.0:
@@ -2830,6 +3674,10 @@ def main():
         parser.error("--qcd-volume-min must be positive and no greater than --qcd-volume-max")
     if args.qcd_volume_target <= 0.0:
         parser.error("--qcd-volume-target must be positive")
+    if args.moduli_policy == "canonical_qcd" and not np.isclose(
+        args.qcd_volume_target, QCD_VOLUME_TARGET, rtol=0.0, atol=1e-12
+    ):
+        parser.error("canonical_qcd requires --qcd-volume-target 40.0")
     if args.qcd_divisor_index is not None and args.qcd_divisor_index < 0:
         parser.error("--qcd-divisor-index must be non-negative")
     if args.qcd_divisor_index is not None and args.moduli_policy != "canonical_qcd":
@@ -2840,6 +3688,44 @@ def main():
         parser.error("--visible-sector-policy intersecting_d7 requires --orientifold-file")
     if args.qed_divisor_index is not None and args.visible_sector_policy != "intersecting_d7":
         parser.error("--qed-divisor-index requires --visible-sector-policy intersecting_d7")
+    if args.qed_selection_policy == "explicit" and args.qed_divisor_index is None:
+        parser.error("--qed-selection-policy explicit requires --qed-divisor-index")
+    if args.qed_volume_max is not None and args.qed_volume_max <= 0.0:
+        parser.error("--qed-volume-max must be positive")
+    if args.eft:
+        if args.sampling_scheme != "ntfe_fast":
+            parser.error("--eft requires --sampling-scheme ntfe_fast")
+        if args.backend != "cgal":
+            parser.error("--eft requires --backend cgal")
+        if args.ntfe_face_sampler != "fast":
+            parser.error("--eft requires ntfe_fast triang_method=fast")
+        if args.proposal_budget is not None and args.proposal_budget != 100:
+            parser.error("--eft requires a native proposal budget of 100")
+        if args.retry_budget is not None and args.retry_budget != 500:
+            parser.error("--eft requires a native retry budget of 500")
+        if args.max_tip_attempts != 100 or args.ntfe_max_face_points != 17 or args.ntfe_face_pool_size != 1000:
+            parser.error(
+                "--eft requires ntfe N=100, max_npts=17, and N_face_triangs=1000"
+            )
+        if not np.isclose(args.fast_height_scale, 0.2, rtol=0.0, atol=1e-12):
+            parser.error("--eft requires lower-h11 fast height scale 0.2")
+        if args.moduli_policy != "canonical_qcd":
+            parser.error("--eft requires --moduli-policy canonical_qcd")
+        if args.visible_sector_policy != "intersecting_d7":
+            parser.error("--eft requires --visible-sector-policy intersecting_d7")
+        if args.orientifold_file is None:
+            parser.error("--eft requires --orientifold-file")
+        if args.eft_minimum_rows != MINIMUM_EFT_ROWS:
+            parser.error("--eft-minimum-rows must be 100000 for schema 1.1")
+        if args.eft_maximum_rows != MAXIMUM_EFT_ROWS:
+            parser.error("--eft-maximum-rows must be 200000 for schema 1.1")
+        try:
+            eft_geometry_plan = parse_eft_geometry_plan(args.eft_geometry_plan)
+        except ValueError as exc:
+            parser.error(f"--eft-geometry-plan: {exc}")
+        args.qed_volume_max = QED_VOLUME_MAX
+    else:
+        eft_geometry_plan = None
     for name, value in (
         ("--n-walk", args.n_walk),
         ("--n-flip", args.n_flip),
@@ -2882,47 +3768,71 @@ def main():
         if args.h11_max < args.h11_min:
             args.h11_max = args.h11_min
         h11_values = list(range(args.h11_min, args.h11_max + 1, args.h11_interval))
+    if args.eft:
+        if args.h11s is not None and set(h11_values) != set(eft_geometry_plan):
+            parser.error("--eft --h11s must contain exactly 50,100,200,491")
+        h11_values = sorted(eft_geometry_plan)
     require_cytools_capabilities(args.sampling_scheme, args.ntfe_face_sampler)
     orientifold_config = load_orientifold(args.orientifold_file)
     favorable = {"true": True, "false": False, "any": None}[args.favorable]
-    polytope_manifest = None
-    if args.database_source == "mirror":
-        database_source = {
-            "source_kind": "huggingface_parquet_mirror",
-            "dataset": KS_MIRROR_DATASET,
-            "dataset_url": KS_MIRROR_DATASET_URL,
-            "parquet_dir": os.path.abspath(args.parquet_dir),
-            "hodge_label_mapping": (
-                "physical N-lattice h11 = mirror h12; physical h21 = mirror h11"
-            ),
-        }
-        if args.ks_database_version == "CYTools fetch_polytopes endpoint (version not exposed)":
-            args.ks_database_version = f"{KS_MIRROR_DATASET} Hugging Face main"
-    elif args.database_source == "manifest":
-        polytope_manifest = load_polytope_manifest(args.polytope_manifest)
-        database_source = {
-            "source_kind": "local_polytope_manifest",
-            "manifest_source": polytope_manifest.get("source"),
-            "manifest_path": os.path.abspath(args.polytope_manifest),
-        }
-        if args.ks_database_version == "CYTools fetch_polytopes endpoint (version not exposed)":
-            args.ks_database_version = f"local polytope manifest: {os.path.abspath(args.polytope_manifest)}"
-    else:
-        database_source = {
-            "source_kind": "cytools_fetch_polytopes",
-            "endpoint": "http://quark.itp.tuwien.ac.at/cgi-bin/cy/cydata.cgi",
-        }
-    os.makedirs(args.outdir, exist_ok=True)
+    polytope_manifest = (
+        None
+        if args.polytope_manifest is None
+        else load_polytope_manifest(args.polytope_manifest)
+    )
+    if polytope_manifest is not None and args.ks_database_version == (
+        "CYTools fetch_polytopes endpoint (version not exposed)"
+    ):
+        args.ks_database_version = (
+            f"local polytope manifest: {os.path.abspath(args.polytope_manifest)}"
+        )
+    provenance_record = None
+    source_query = None
+    if args.eft:
+        source_query = _fresh_source_query(args, h11_values, polytope_manifest)
+        source_files = [
+            os.path.abspath(__file__),
+            os.path.join(os.path.dirname(__file__), "qed_divisor_assignment.py"),
+            os.path.join(os.path.dirname(__file__), "glimmers_schema11.py"),
+            os.path.join(os.path.dirname(__file__), "glimmers_proposal_controller.py"),
+            os.path.join(os.path.dirname(__file__), "glimmers_h491_diagnostics.py"),
+            os.path.join(os.path.dirname(__file__), "glimmers_eft_row_schema.py"),
+            os.path.join(os.path.dirname(__file__), "glimmers_provenance.py"),
+            os.path.join(os.path.dirname(__file__), "glimmers_fresh_ensemble_manifest.py"),
+        ]
+        if args.polytope_manifest is not None:
+            source_files.append(os.path.abspath(args.polytope_manifest))
+        try:
+            provenance_record = production_provenance_gate(
+                repo_root=os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+                task_file=_task17_path(),
+                source_files=source_files,
+                source_query=source_query,
+                output_root=os.path.abspath(args.outdir),
+                input_roots=(
+                    []
+                    if args.polytope_manifest is None
+                    else [os.path.abspath(args.polytope_manifest)]
+                ),
+                command_line=None,
+                seed=args.seed,
+            )
+        except ProvenanceError as exc:
+            parser.error(f"{exc.status}: {exc}")
+    try:
+        output_root = ensure_fresh_output_root(args.outdir)
+    except FileExistsError as exc:
+        parser.error(str(exc))
 
-    total_saved = run_batches(
+    batch_result = run_batches(
         h11_values,
         args.n,
-        args.outdir,
+        output_root,
         args.cores,
         args.seed,
         args.max_retries,
         args.max_tip_attempts,
-        args.overwrite,
+        False,
         args.max_m,
         args.max_kaehler_attempts,
         args.min_divisor_volume,
@@ -2954,10 +3864,268 @@ def main():
         args.frsts_per_polytope,
         args.replace_rejected_polytopes,
         args.max_polytope_replacements,
-        polytope_manifest=polytope_manifest,
-        database_source=database_source,
+        polytope_manifest,
+        geometry_targets=eft_geometry_plan,
+        qed_selection_policy=args.qed_selection_policy,
+        qed_volume_max=args.qed_volume_max,
+        eft_mode=args.eft,
+        materialize_dense_potential=args.materialize_dense_potential,
+        collect_records=True,
+        proposal_budget=(None if args.proposal_budget is None else proposal_budget),
+        retry_budget=(None if args.retry_budget is None else retry_budget),
     )
-    print(f"\nSaved {total_saved} geometry file(s).")
+    candidate_records = []
+    for result in batch_result["results"]:
+        candidate_records.extend(result.get("candidate_terminal_records", []))
+        if not result.get("ok", False):
+            candidate_records.append(
+                {
+                    "h11": result.get("h11"),
+                    "polytope_index": result.get("polytope_index"),
+                    "sampler": args.sampling_scheme,
+                    "terminal_status": "geometry_target_shortfall",
+                    "terminal_reason": result.get("error", "worker failure"),
+                }
+            )
+    accepted_paths = [
+        record["output_path"]
+        for record in candidate_records
+        if record.get("terminal_status") == "accepted_geometry"
+        and os.path.isfile(record.get("output_path", ""))
+    ]
+    model_records = []
+    model_rows = []
+    model_error = None
+    allocation = None
+    if args.eft:
+        accepted_count = len(accepted_paths)
+        if accepted_count != TARGET_GEOMETRY_COUNT:
+            model_error = ModelTargetShortfall(
+                f"geometry target shortfall: requested={TARGET_GEOMETRY_COUNT} emitted={accepted_count}",
+                [
+                    {
+                        "terminal_status": "model_target_shortfall",
+                        "terminal_reason": "fewer than 1400 accepted geometries",
+                        "requested_geometries": TARGET_GEOMETRY_COUNT,
+                        "accepted_geometries": accepted_count,
+                    }
+                ],
+            )
+            model_records.extend(model_error.records)
+        else:
+            try:
+                model_rows, model_records, allocation = expand_eft_reference_rows(
+                    accepted_paths,
+                    args.seed,
+                    args.eft_minimum_rows,
+                    args.eft_maximum_rows,
+                )
+            except ModelTargetShortfall as exc:
+                model_error = exc
+                model_records.extend(exc.records)
+            except Exception as exc:
+                model_error = exc
+                model_records.append(
+                    {
+                        "terminal_status": "model_assignment_rejected",
+                        "terminal_reason": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+    storage_estimate = estimate_storage(
+        output_root, len(model_rows) if args.eft else 0
+    )
+    if args.eft and storage_estimate["status"] != "within_budget" and model_error is None:
+        model_error = RuntimeError("schema 1.1 persistent storage preflight exceeded 2 GiB")
+        model_records.append(
+            {
+                "terminal_status": "storage_budget_exceeded",
+                "terminal_reason": storage_estimate["status"],
+            }
+        )
+    if args.eft and model_error is None:
+        try:
+            eft_path = args.eft_output_path or os.path.join(output_root, "eft_models.parquet")
+            if not os.path.isabs(eft_path):
+                eft_path = os.path.join(output_root, eft_path)
+            if os.path.commonpath((os.path.abspath(eft_path), output_root)) != output_root:
+                raise ValueError("--eft-output-path must be inside the fresh output root")
+            write_eft_parquet(eft_path, model_rows)
+            model_records.append(
+                {
+                    "terminal_status": "accepted_model_table",
+                    "terminal_reason": "one compressed Parquet table written atomically",
+                    "output_path": os.path.abspath(eft_path),
+                    "row_count": len(model_rows),
+                }
+            )
+        except Exception as exc:
+            model_error = exc
+            model_records.append(
+                {
+                    "terminal_status": "model_row_write_failure",
+                    "terminal_reason": f"{type(exc).__name__}: {exc}",
+                }
+            )
+    charge_manifest = factorized_manifest_for_paths(accepted_paths)
+    polytope_entries = {}
+    for record in candidate_records:
+        if "polytope_id" in record:
+            key = (record.get("h11"), record.get("polytope_index"), record.get("polytope_id"))
+            polytope_entries[key] = {
+                "h11": record.get("h11"),
+                "retained_order": record.get("polytope_index"),
+                "polytope_id": record.get("polytope_id"),
+                "polytope_fingerprint": record.get("polytope_id"),
+            }
+    retained_polytopes = sorted(
+        polytope_entries.values(),
+        key=lambda item: (
+            int(item["h11"]),
+            int(item["retained_order"]),
+            str(item["polytope_fingerprint"]),
+        ),
+    )
+    if not retained_polytopes and source_query is not None:
+        retained_polytopes = [
+            {
+                "h11": item["h11"],
+                "retained_order": item["returned_index"],
+                "polytope_fingerprint": item["polytope_fingerprint"],
+            }
+            for item in source_query["returned_polytopes"]
+        ]
+    polytope_manifest = {
+        "schema_version": SCHEMA_1_1_VERSION,
+        "source": args.ks_database_version,
+        "selection_route": "fresh favorable N-lattice query; deterministic returned order",
+        "favorable": True,
+        "lattice": "N",
+        "fresh": True,
+        "expected_counts": {"50": 50, "100": 50, "200": 30, "491": 1}
+        if args.eft
+        else None,
+        "polytopes": retained_polytopes,
+    }
+    fresh_ensemble_manifest = None
+    if args.eft:
+        derived_seeds = derive_ensemble_seeds(
+            args.seed, retained_polytopes, default_sampler_by_h11()
+        )
+        stop_reason = (
+            allocation.get("stop_reason")
+            if allocation is not None
+            else "geometry_target_shortfall" if model_error is not None else "completed"
+        )
+        fresh_ensemble_manifest = build_fresh_ensemble_manifest(
+            provenance_record,
+            source_query=source_query,
+            retained_polytopes=retained_polytopes,
+            base_seed=args.seed,
+            derived_seeds=derived_seeds,
+            source_manifest=args.polytope_manifest,
+            cytools_version=cytools.version,
+            sampler_by_h11=default_sampler_by_h11(),
+            accepted_row_count=len(model_rows),
+            stop_reason=stop_reason,
+            expected_polytope_counts={50: 50, 100: 50, 200: 30, 491: 1},
+            run_metadata={
+                "proposal_budget": proposal_budget,
+                "retry_budget": retry_budget,
+                "minimum_rows": args.eft_minimum_rows,
+                "maximum_rows": args.eft_maximum_rows,
+                "accepted_geometry_count": len(accepted_paths),
+            },
+        )
+    run_manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "schema_semantic_version": SCHEMA_1_1_VERSION,
+        "run_id": stable_hash({"seed": args.seed, "output_root": output_root}),
+        "status": "model_target_shortfall" if model_error else "completed_geometry_only" if not args.eft else "completed",
+        "output_root": output_root,
+        "provenance_digest": (
+            None if provenance_record is None else provenance_record["provenance_digest"]
+        ),
+        "fresh_ensemble_manifest_status": (
+            None if fresh_ensemble_manifest is None else fresh_ensemble_manifest["status"]
+        ),
+        "fresh_ensemble_manifest_path": (
+            None
+            if fresh_ensemble_manifest is None
+            else os.path.join(output_root, "fresh_ensemble_manifest.json")
+        ),
+        "identity_parity_convention": "h11_plus=h11; h11_minus=0",
+        "sampling_unit": "accepted geometry record; EFT row is an ordered QCD-QED assignment",
+        "population_label": "adapted_fresh_favorable_filtered_geometry_reference",
+        "paper_mapping_status": "adapted_model_reuse_not_exact_paper_multiplicity",
+        "exact_paper_non_reproduction_boundary": (
+            "This finite fresh-favorable sample and its compact model reuse do not "
+            "reproduce the paper ensemble, its undocumented model weighting, or a "
+            "uniform/representative KS population."
+        ),
+        "downstream_boundary": "No GNN, PyTorch, axion-photon, cosmology, or inflation analysis is run.",
+        "args": {key: value for key, value in vars(args).items() if key != "h11s"},
+        "h11_values": h11_values,
+        "proposal_budget": proposal_budget,
+        "retry_budget": retry_budget,
+        "sampler_by_h11": (
+            {"50": "fast", "100": "fast", "200": "fast", "491": "ntfe_fast"}
+            if args.eft
+            else "configured_per_run"
+        ),
+        "fresh_favorable_polytope_counts": (
+            {"50": 50, "100": 50, "200": 30, "491": 1}
+            if args.eft
+            else "recorded_by_candidate_tasks"
+        ),
+        "triangulations_per_polytope": (
+            {"50": 10, "100": 10, "200": 10, "491": 100}
+            if args.eft
+            else "configured_per_run"
+        ),
+        "accepted_geometry_count": len(accepted_paths),
+        "candidate_proposal_count": sum(
+            result.get("proposal_count", 0) for result in batch_result["results"]
+        ),
+        "candidate_retry_count": sum(
+            result.get("retry_count", 0) for result in batch_result["results"]
+        ),
+        "duplicate_full_triangulation_count": sum(
+            result.get("duplicate_full_triangulations", 0)
+            for result in batch_result["results"]
+        ),
+        "duplicate_ntfe_identity_count": sum(
+            result.get("duplicate_ntfe_identity", 0) for result in batch_result["results"]
+        ),
+        "output_collision_status": "none_detected",
+        "eft_allocation": allocation,
+    }
+    summary = summarize_terminal_records(candidate_records, model_records)
+    write_schema11_artifacts(
+        output_root,
+        run_manifest=run_manifest,
+        candidate_records=candidate_records,
+        model_records=model_records,
+        summary=summary,
+        storage_estimate=storage_estimate,
+        charge_factorized_manifest=charge_manifest,
+        polytope_manifest=polytope_manifest,
+        include_model_statuses=args.eft,
+        fresh_ensemble_manifest=fresh_ensemble_manifest,
+    )
+    print(
+        f"\nSchema 1.1 summary: saved {len(accepted_paths)} geometry file(s); "
+        f"proposals={run_manifest['candidate_proposal_count']} "
+        f"retries={run_manifest['candidate_retry_count']} "
+        f"duplicates={run_manifest['duplicate_full_triangulation_count'] + run_manifest['duplicate_ntfe_identity_count']}."
+    )
+    if args.eft:
+        if model_error is not None:
+            print(f"EFT model target not completed: {model_error}")
+            raise RuntimeError(str(model_error)) from model_error
+        print(
+            f"EFT reference rows: {len(model_rows)}; "
+            f"minimum={args.eft_minimum_rows}, ceiling={args.eft_maximum_rows}."
+        )
 
 
 if __name__ == "__main__":

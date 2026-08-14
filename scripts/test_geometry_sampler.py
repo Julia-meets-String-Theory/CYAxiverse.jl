@@ -2,6 +2,8 @@
 
 import os
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -13,6 +15,17 @@ os.environ.setdefault("XDG_CACHE_HOME", tempfile.mkdtemp(prefix="cytools-test-ca
 import generate_geometric_data_multitriangulation as generator
 import generate_h11_491_frsts as frst_generator
 import probe_h11_491_sampler as probe
+from glimmers_schema11 import (
+    atomic_json_dump,
+    allocate_eft_quotas,
+    enumerate_assignment_pool,
+    ensure_fresh_output_root,
+    factorized_charge_metadata,
+    normalize_qcd_assignment,
+    reconstruct_pairwise_charges,
+    sample_pool_without_replacement,
+    summarize_terminal_records,
+)
 from generate_geometric_data_multitriangulation import triangulation_candidates
 
 
@@ -44,10 +57,6 @@ class RecordingPolytope:
     def ntfe_frts(self, **kwargs):
         self.calls.append(("ntfe", kwargs))
         return iter(("ntfe-1", "ntfe-2"))
-
-    def random_triangulations_gnn(self, **kwargs):
-        self.calls.append(("gnn", kwargs))
-        return iter(("gnn-1",))
 
     def face_triangs(self, **kwargs):
         self.calls.append(("face_triangs", kwargs))
@@ -270,28 +279,53 @@ class TriangulationCandidateTests(unittest.TestCase):
             },
         )
 
-    def test_gnn_ntfe_passes_pool_and_seed_to_cytools(self):
+    def test_learned_ntfe_sampler_is_unavailable(self):
         poly = RecordingPolytope()
-        self.assertEqual(sampler_candidates(poly, "gnn_ntfe"), ["gnn-1"])
-        self.assertEqual(poly.calls[0][0], "gnn")
+        with self.assertRaises(ValueError):
+            sampler_candidates(poly, "gnn_ntfe")
+
+    def test_ntfe_schema_contract_arguments_route_to_cytools(self):
+        poly = RecordingPolytope()
+        candidates = list(
+            triangulation_candidates(
+                poly,
+                "ntfe_fast",
+                100,
+                50,
+                "cgal",
+                20260813,
+                None,
+                None,
+                None,
+                8,
+                0.01,
+                25,
+                0.2,
+                "fast",
+                17,
+                1000,
+            )
+        )
+        self.assertEqual(candidates, ["ntfe-1", "ntfe-2"])
         self.assertEqual(
             poly.calls[0][1],
             {
-                "N": 2,
+                "N": 100,
                 "make_star": True,
-                "max_npts": 0,
-                "N_face_triangs": 5,
+                "seed": 20260813,
+                "max_npts": 17,
+                "N_face_triangs": 1000,
+                "triang_method": "fast",
                 "as_generator": True,
-                "seed": 123,
+                "backend": "cgal",
                 "verbosity": 0,
             },
         )
 
-    def test_fast_retains_its_explicit_biased_deterministic_candidate(self):
+    def test_fast_routes_only_to_random_height_sampler(self):
         poly = RecordingPolytope()
-        self.assertEqual(sampler_candidates(poly, "fast"), ["deterministic", "fast-1"])
-        self.assertEqual(poly.calls[0][0], "triangulate")
-        self.assertEqual(poly.calls[1][0], "fast")
+        self.assertEqual(sampler_candidates(poly, "fast"), ["fast-1", "fast-2"])
+        self.assertEqual(poly.calls[0][0], "fast")
 
     def test_h491_manifest_plans_without_calling_the_ks_endpoint(self):
         manifest = generator.load_polytope_manifest(H491_MANIFEST)
@@ -394,6 +428,119 @@ class TriangulationCandidateTests(unittest.TestCase):
         self.assertEqual(
             [name for name in os.listdir(report_directory) if name != "report.json"], []
         )
+
+    def test_deterministic_eft_quota_and_row_sampling(self):
+        geometry_ids = [f"geometry-{index:04d}" for index in range(1400)]
+        first = allocate_eft_quotas(geometry_ids)
+        second = allocate_eft_quotas(geometry_ids)
+        self.assertEqual(first, second)
+        self.assertEqual(sum(first.values()), 200000)
+        self.assertEqual(sorted(set(first.values())), [142, 143])
+        self.assertEqual(list(first.values()).count(142), 200)
+        self.assertEqual(list(first.values()).count(143), 1200)
+        sample_first = sample_pool_without_replacement(200, 20, geometry_ids[0], 17)
+        sample_second = sample_pool_without_replacement(200, 20, geometry_ids[0], 17)
+        self.assertEqual(sample_first, sample_second)
+        self.assertEqual(len({rank for rank, _ in sample_first}), 20)
+        self.assertNotEqual(sample_first, sample_pool_without_replacement(200, 20, geometry_ids[0], 18))
+
+    def test_factorized_charge_reconstruction_and_qcd_qed_pool_filters(self):
+        direct = np.asarray([[1, 2, 3], [4, 5, 6]], dtype=np.int64)
+        metadata = factorized_charge_metadata(direct)
+        reconstructed = reconstruct_pairwise_charges(
+            direct, metadata["pair_i"], metadata["pair_j"]
+        )
+        expected = np.column_stack(
+            [direct[:, right] - direct[:, left] for left in range(3) for right in range(left + 1, 3)]
+        )
+        np.testing.assert_array_equal(reconstructed, expected)
+
+        normalized = normalize_qcd_assignment([2.0, 2.0], [1.0, 1.0], 0)
+        self.assertEqual(normalized["qcd_volume"], 40.0)
+        self.assertGreaterEqual(normalized["minimum_prime_volume"], 1.0)
+        pool = enumerate_assignment_pool(
+            prime_labels=[(0, 0, 0, 0), (1, 0, 0, 0), (2, 0, 0, 0)],
+            prime_charges=np.asarray([[1, 0], [0, 1], [1, 1]], dtype=np.int64),
+            prime_volumes_reference=np.asarray([2.0, 2.0, 7.0]),
+            effective_volumes_reference=np.asarray([1.0, 1.0]),
+            neighbors=((1, 2), (0, 2), (0, 1)),
+            intersection_evidence={(0, 1): [((0, 0, 0, 0),)], (1, 2): [((1, 0, 0, 0),)]},
+            invariant_mask=np.asarray([True, True, True]),
+        )
+        self.assertTrue(pool)
+        self.assertTrue(all(item["qcd_volume"] == 40.0 for item in pool))
+        self.assertTrue(all(item["qed_volume"] < 127.5 for item in pool))
+        self.assertTrue(all(item["minimum_prime_volume"] >= 1.0 for item in pool))
+        self.assertTrue(all(item["minimum_effective_volume"] >= 1.0 for item in pool))
+        self.assertTrue(all(item["qcd_divisor_index"] != item["qed_divisor_index"] for item in pool))
+
+    def test_atomic_schema_artifacts_are_no_overwrite(self):
+        output_root = tempfile.mkdtemp(prefix="cyax-schema11-artifacts-")
+        os.rmdir(output_root)
+        ensure_fresh_output_root(output_root)
+        path = os.path.join(output_root, "run_manifest.json")
+        atomic_json_dump(path, {"status": "complete"})
+        with self.assertRaises(FileExistsError):
+            atomic_json_dump(path, {"status": "changed"})
+        with self.assertRaises(FileExistsError):
+            ensure_fresh_output_root(output_root)
+
+    def test_schema_terminal_jsonl_and_manifest_artifacts(self):
+        output_root = tempfile.mkdtemp(prefix="cyax-schema11-manifest-")
+        os.rmdir(output_root)
+        ensure_fresh_output_root(output_root)
+        records = [{"h11": 50, "sampler": "ntfe_fast", "terminal_status": "accepted_geometry"}]
+        model_records = [{"h11": 50, "terminal_status": "accepted_model_row"}]
+        generator.write_schema11_artifacts(
+            output_root,
+            run_manifest={"schema_version": "1.1", "status": "complete"},
+            candidate_records=records,
+            model_records=model_records,
+            summary=summarize_terminal_records(records, model_records),
+            storage_estimate={"status": "within_budget"},
+            charge_factorized_manifest={"schema_version": "glimmers-charge-factorized-1.1"},
+            polytope_manifest={"polytopes": []},
+            include_model_statuses=True,
+        )
+        expected = {
+            "candidate_terminal_statuses.jsonl",
+            "model_terminal_statuses.jsonl",
+            "run_manifest.json",
+            "summary_by_h11_and_status.json",
+            "storage_estimate.json",
+            "charge_factorized_manifest.json",
+            "polytope_manifest.json",
+        }
+        self.assertEqual(set(os.listdir(output_root)), expected)
+        with self.assertRaises(FileExistsError):
+            generator.write_schema11_artifacts(
+                output_root,
+                run_manifest={},
+                candidate_records=[],
+                model_records=[],
+                summary={},
+                storage_estimate={},
+                charge_factorized_manifest={},
+                polytope_manifest={},
+                include_model_statuses=True,
+            )
+
+    def test_eft_cli_help_and_validation(self):
+        script = os.path.join(os.path.dirname(__file__), "generate_geometric_data_multitriangulation.py")
+        help_result = subprocess.run(
+            [sys.executable, script, "--help"], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(help_result.returncode, 0)
+        self.assertIn("--eft", help_result.stdout)
+        self.assertNotIn("gnn", help_result.stdout.lower())
+        invalid_result = subprocess.run(
+            [sys.executable, script, "--eft", "--sampling-scheme", "fair"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(invalid_result.returncode, 0)
+        self.assertIn("--eft requires --sampling-scheme ntfe_fast", invalid_result.stderr)
 
 
 if __name__ == "__main__":

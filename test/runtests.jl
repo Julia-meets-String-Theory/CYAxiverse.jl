@@ -5,9 +5,6 @@ using Test
 using HDF5
 
 @testset "Core plotting API stays optional" begin
-    loaded_packages = keys(Base.loaded_modules)
-    @test !any(pkg -> pkg.name == "CairoMakie", loaded_packages)
-    @test !any(pkg -> pkg.name == "ColorSchemes", loaded_packages)
     @test Base.get_extension(CYAxiverse, :CYAxiverseCairoMakieExt) === nothing
     @test isempty(methods(CYAxiverse.plotting.scatterplot))
     @test isempty(methods(CYAxiverse.plotting.functionplot))

@@ -7,6 +7,10 @@ triangulations (FRSTs), builds the corresponding Calabi-Yau threefold
 hypersurfaces, selects a controlled point in the toric Kahler cone, and writes a
 versioned HDF5 artifact for the Julia pipeline.
 
+Schema 1.1 adds a compact, geometry-level factorized charge contract and an
+opt-in `--eft` reference-row layer. The latter is an adapted finite model-reuse
+diagnostic, not a reproduction of the Glimmers model ensemble.
+
 The implementation is deliberately CYTools-first: polytope construction,
 triangulation, cone extraction, intersection data, and geometric validation are
 delegated to public CYTools APIs. The script does not reimplement toric
@@ -130,9 +134,9 @@ The environment must provide:
 - the CYTools triangulation backend selected by `--backend`;
 - MOSEK and a valid license if MOSEK optimization is desired.
 
-`gnn_ntfe` (or `--ntfe-face-sampler dualgnn`) additionally needs the optional
-`dualgnn`/PyTorch dependency described in the CYTools documentation. It is not
-part of the base CYTools installation.
+The schema 1.1 generator intentionally has no GNN, dualGNN, PyTorch, or learned
+sampler path. This keeps the requested NTFE run on the native CYTools
+implementation only.
 
 The script looks for a license in this order:
 
@@ -220,7 +224,7 @@ sample is needed.
 | `--outdir PATH` | `.` | Root directory for the generated database. |
 | `--cores INT` | all available | Number of worker processes. Use `1` for debugging and deterministic logs. |
 | `--seed INT` | `0` | Base seed. Worker and candidate seeds are derived from it and recorded in construction metadata. |
-| `--overwrite` | off | Replace existing output slots. Without this flag, existing `cyax.h5` files count toward `--n` and are skipped. |
+| output collision policy | no overwrite | Every run requires a fresh output root; existing geometry or manifest paths are terminal collisions. |
 | `--verbose` | off | Print per-worker stages and elapsed times. Recommended for high `h11`. |
 
 For a reproducible rerun, keep the same CYTools version, database endpoint
@@ -277,7 +281,7 @@ especially important for the high-`h11` KS cases.
 | `--sampling-scheme {fair,fast,ntfe_fast,gnn_ntfe}` | `fair` | Select fair secondary-fan MCMC, biased random heights, direct NTFE with sampled 2-face FRTs, or optional dualGNN-guided direct NTFE. |
 | `--backend {cgal,qhull}` | `cgal` | CYTools backend for triangulation construction. |
 | `--max-retries INT` | `50` | Maximum sampler retries for a new triangulation. |
-| `--max-tip-attempts INT` | `50` | Maximum FRST candidates tested per polytope before reporting a shortfall. |
+| `--max-tip-attempts/--ntfe-sample-count INT` | `100` | Maximum FRST candidates; for `ntfe_fast`, native `Polytope.ntfe_frts(N=...)`. |
 | `--n-walk INT` | CYTools default | Fair-mode secondary-fan walk steps per sample. |
 | `--n-flip INT` | CYTools default | Fair-mode random flips per sample. |
 | `--initial-walk-steps INT` | CYTools default | Fair-mode burn-in walk steps before recording samples. |
@@ -285,9 +289,10 @@ especially important for the high-`h11` KS cases.
 | `--walk-step-size FLOAT` | `0.01` | Fair-mode secondary-fan step size. |
 | `--max-steps-to-wall INT` | `25` | Fair-mode maximum steps toward a fine-triangulation wall. |
 | `--fast-height-scale FLOAT` | `0.2` | Standard deviation of the Gaussian height perturbation in fast mode. |
-| `--ntfe-face-sampler {fast,fair,grow2d,dualgnn}` | `fast` | 2-face FRT proposal used by `ntfe_fast`. The installed CYTools version is authoritative for availability and behavior. |
-| `--ntfe-max-face-points INT` | `0` | Enumerate only 2-faces up to this size; sample larger faces. `0` samples every 2-face. |
-| `--ntfe-face-pool-size INT` | `5` | FRT proposals retained for each sampled 2-face. This laptop-profiled conservative default explicitly bounds runtime and sampler support; raise it only when broader coverage justifies the cost. |
+| `--ntfe-face-sampler {fast}` | `fast` | Native `ntfe_frts` `triang_method`; schema 1.1 requires `fast`. |
+| `--ntfe-max-face-points INT` | `17` | Native `ntfe_frts(max_npts=...)`. |
+| `--ntfe-face-pool-size/--ntfe-face-triangulations INT` | `1000` | Native `ntfe_frts(N_face_triangs=...)`. |
+| `--ntfe-as-generator` | `true` | Native `ntfe_frts(as_generator=True)`; disabling it is rejected. |
 
 `fair` is the production default. For small polytopes, CYTools warns that the
 fair random walk may stall because the secondary-fan state space is too small
@@ -301,6 +306,63 @@ very small values can produce `Couldn't find wall` or `There was an error in
 the random walk`. If a fair run stalls, try the other backend, restore the
 CYTools defaults, increase `--max-steps-to-wall`, or move to a larger target
 polytope.
+
+### Schema 1.1 compact EFT-reference mode
+
+`--eft` is an explicit opt-in model layer. It requires the approved geometry
+plan `50:500,100:500,200:300,491:100`, `ntfe_fast` with the native controls
+`N=100`, `max_npts=17`, `N_face_triangs=1000`, `as_generator=True`, and the
+`cgal` backend. It also requires `canonical_qcd`, the validated intersecting-D7
+toy policy, and the strict QED bound `Vol(D_QED) < 127.5`.
+
+Within that fixed plan, the lower slices use the approved biased
+`random_triangulations_fast` path with 10 proposals per polytope; only the
+unique `h11=491` polytope uses native `ntfe_fast` with `N=100`. The CLI
+`--sampling-scheme ntfe_fast` selects this schema-level plan rather than
+silently applying NTFE to the lower slices.
+
+The sampling unit is one accepted geometry plus one ordered `(QCD, QED)` pair
+from that geometry's complete eligible pool. The pool is persisted before row
+sampling and requires distinct divisors, recorded nonzero intersection, exact
+QCD normalization to `Vol(D_QCD)=40.0`, every effective and prime-divisor
+volume at least one, and strict QED volume below `127.5`. For each geometry,
+rows are sampled uniformly without replacement using deterministic row seeds.
+After exactly 1400 geometries, the quota allocator assigns 142 rows to 200
+geometries and 143 rows to 1200 geometries, ordered by stable geometry-ID
+hashes, for exactly 200000 rows. A smaller pool is a model-target shortfall,
+not a reason to duplicate assignments.
+
+Each row contains only scalar/index/reference metadata: geometry path/hash,
+stable divisor labels and indices, pool rank/size, assignment hash, row seed,
+normalization and volume scalars, and schema versions. It contains no dense
+`Q`, `L`, `Kinv`, volume vector, or potential array. The single compressed
+Parquet table path can be set with `--eft-output-path`; `pyarrow` is required.
+
+This is an adapted finite fresh-favorable geometry reference with compact model
+reuse. It is not an exact reproduction of arXiv:2309.13145, its undocumented
+200000-model weighting, or a uniform/representative/complete KS sample. The
+generator does not run GNN, PyTorch, axion-photon, cosmology, or inflation
+analysis.
+
+The external accounting artifacts written under the fresh output root are
+`polytope_manifest.json`, `candidate_terminal_statuses.jsonl`, `run_manifest.json`,
+`summary_by_h11_and_status.json`, `storage_estimate.json`, and
+`charge_factorized_manifest.json`; `--eft` additionally writes
+`model_terminal_statuses.jsonl` and `eft_models.parquet`. Terminal categories
+remain separate for sampler, FRST, topology/cone, Kähler, normalization,
+divisor, QED-pool, numerical, I/O, model, and storage failures. The manifest
+also records proposal/retry/duplicate counts and output-collision status.
+
+Relevant options:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--eft` | off | Enable the exact schema 1.1 compact EFT-reference layer. |
+| `--eft-geometry-plan TEXT` | `50:500,100:500,200:300,491:100` | Approved h11-to-geometry allocation; other plans are rejected in EFT mode. |
+| `--eft-target-rows INT` | `200000` | Exact adapted row target; other targets are rejected in EFT mode. |
+| `--eft-output-format parquet` | `parquet` | One compressed columnar table. |
+| `--eft-output-path PATH` | `OUTDIR/eft_models.parquet` | Explicit table path inside the fresh output root. |
+| `--materialize-dense-potential` | off | Explicit compatibility opt-in for dense geometry-level `Q/L`; never used by EFT rows. |
 
 To balance the sample across polytopes, use `--frsts-per-polytope`. For
 example, the following requests ten favorable polytopes and ten accepted FRSTs
@@ -351,7 +413,7 @@ source activate cytools
 XDG_CACHE_HOME=/tmp/cytools-cache \
 python scripts/probe_h11_491_sampler.py \
     --sampler ntfe_fast --ntfe-face-sampler fast \
-    --ntfe-face-pool-size 5 --candidate-count 1 \
+    --ntfe-face-pool-size 1000 --candidate-count 1 \
     --include-cy --include-topology --seed 20260813 \
     --report /tmp/h11_491_ntfe_probe.json
 ```
@@ -361,12 +423,13 @@ sampler controls, FRST checks, triangulation hash, timing, and (when requested)
 CY Hodge/smoothness checks. It is a performance/validity probe, not an HDF5
 production run or fairness demonstration.
 
-The full generator intentionally preserves the existing dense instanton-
-potential HDF5 contract. At `h11=491`, its raw `Q` matrix alone is about
-460 MiB as `int64` before HDF5 compression, so the bounded probe is the
-appropriate laptop check for the triangulation and topology stages. Redesigning
-that downstream potential representation is a separate data-schema and
-scientific-validation change; it is not hidden inside the sampler choice.
+Schema 1.1 stores the direct charge matrix once per geometry and represents
+pairwise terms with `pair_i`, `pair_j`, and the deterministic convention
+`Q_pair[:,k] = Q_direct[:,pair_j[k]] - Q_direct[:,pair_i[k]]`. Coefficient and
+geometry-reference `L` metadata are stored beside those indices. Dense `Q/L`
+materialization is absent by default and is available only through the explicit
+`--materialize-dense-potential` compatibility option; it is never repeated in
+EFT rows.
 
 For a single full geometry artifact, retain the manifest and sampler controls,
 start with one worker and a fresh output root, and let the existing physical
@@ -379,14 +442,13 @@ python scripts/generate_geometric_data_multitriangulation.py \
     --h11_min 491 --h11_max 491 --n 1 --cores 1 \
     --polytope-manifest scripts/manifests/h11_491_11_ks.json \
     --sampling-scheme ntfe_fast --ntfe-face-sampler fast \
-    --ntfe-max-face-points 0 --ntfe-face-pool-size 5 \
+    --ntfe-max-face-points 17 --ntfe-face-pool-size 1000 \
     --max-tip-attempts 1 --seed 20260813 \
     --outdir /tmp/cyax-h11-491 --verbose
 ```
 
-If the optional GNN environment is installed and independently pinned, repeat
-the identical bounded probe with `--sampler gnn_ntfe`; do not merge the two
-outputs into one unnamed ensemble.
+The requested schema 1.1 production path does not provide a learned/GNN
+alternative. Do not substitute one for `ntfe_fast`.
 
 ### Recommended workflow for small geometries
 
@@ -456,10 +518,9 @@ the cone dimension is moderately large (CYTools warns around dimensions above
 cone generators; it is normally unnecessary for small-geometry smoke tests and
 should not be enabled casually in high-`h11` scans.
 
-Finally, use a new output directory while learning the workflow. Existing
-`cyax.h5` files count toward `--n` and are skipped by default; `--overwrite`
-replaces existing slots and should be reserved for an intentional regeneration
-with the same documented settings.
+Finally, use a new, empty output directory for every run. Schema 1.1 never
+overwrites existing geometry files or accounting artifacts; an output collision
+is a terminal error.
 
 ### Kahler-cone and acceptance controls
 
@@ -723,8 +784,17 @@ cytools/geometric/
     qcd_charge, qed_charge, em_charge
     qed_instanton_index, qed_log10_lambda4
     qcd_qed_intersection, qcd_invariant, qed_invariant
+  assignment_pool/ (with canonical_qcd + intersecting_d7; required by --eft)
+    pool_rank, qcd_divisor_index, qed_divisor_index
+    qcd/qed stable labels, normalization/volume scalars, assignment_hash
+    intersection_evidence_json
+  tip_pre_normalization, divisor/prime/effective/curve volumes_pre_normalization
+  CY_volume_pre_normalization, Kinv_pre_normalization
 cytools/potential/
-  L, Q
+  factorized/
+    Q_direct, pair_i, pair_j, direct/pair coefficient metadata
+    L_direct, L_pairwise (geometry-reference sign/log-scale metadata)
+  L, Q (only with --materialize-dense-potential)
 construction_metadata/
   canonical_lattice_points
   face_restriction_dim2
@@ -738,10 +808,18 @@ Important conventions:
 - `basis_matrix` is `h11 × n_points`; a prime-divisor charge is a selected
   lattice-point column, while `prime_divisor_charges` stores those charges as
   one row per prime divisor.
-- `L` retains the CYAxiverse sign/mantissa and base-10 exponent representation.
-- `Q` is stored as `h11 × N` with one instanton charge per column, and `L` is
-  stored as `2 × N`; the generator constructs these package-oriented arrays
-  directly rather than writing term-major matrices for Julia to transpose.
+- `L_direct`/`L_pairwise` retain the CYAxiverse sign/mantissa and base-10
+  exponent representation for the immutable geometry reference. `Q_direct` is
+  stored once as `h11 × N_direct`; pairwise charges are reconstructed as
+  `Q_direct[:, pair_j] - Q_direct[:, pair_i]`.
+- Dense `Q`/`L` is absent by default and only appears with the explicit
+  `--materialize-dense-potential` compatibility option. EFT rows never contain
+  these arrays.
+- The current Julia `read.potential` API still expects dense
+  `cytools/potential/Q` and `L`. Until a separately reviewed reader adapter
+  reconstructs the factorized representation in bounded chunks, Julia
+  consumers that need that legacy API must use
+  `--materialize-dense-potential`; the schema 1.1 EFT table remains compact.
 - The potential charge basis uses unique effective-cone rays. Exact duplicate
   rows returned by CYTools are removed before the stretched-cone control,
   pairwise-term construction, and HDF5 write. The raw GLSM dataset remains
@@ -755,8 +833,12 @@ Important conventions:
   the recorded QCD divisor index is zero-based.
 - `prime_divisor_charges` has one divisor-basis charge row per entry of
   `prime_toric_divisors`. Visible-sector divisor indices and image indices are
-  zero-based in HDF5. `qed_instanton_index` is also zero-based and refers to a
-  column of the stored `Q`/`L` arrays.
+  zero-based in HDF5. `qed_instanton_index` is zero-based in the logical
+  factorized potential stream; a dense `Q`/`L` column exists only with the
+  explicit compatibility option.
+- `assignment_pool/` is the complete eligible ordered QCD-QED pool, not one
+  permanent QED choice. Its ranks and hashes are the source for deterministic
+  EFT row sampling.
 - `standard_model/divisor_indices` contains the three zero-based prime-divisor
   indices selected by `canonical_qcd`; all three pairs are edges of the
   triangulated two-face intersection graph. `standard_model/qcd_divisor_index`
@@ -821,9 +903,9 @@ end
   two-face-inequivalent FRSTs. A finite per-face pool and its FRT proposal are
   selection effects, so it is a labelled coverage sampler, not a fair
   population sample.
-- `gnn_ntfe` is a separate learned-proposal ensemble. Its checkpoint, CYTools
-  version, model dependency, pool size, extension failures, and duplicate rate
-  belong in the run record before comparing it with a fair or fast sample.
+- `ntfe_fast` is an adapted finite native-NTFE proposal. Its face pool, direct
+  extension failures, duplicate classes, and proposal budget belong in the run
+  record; it must not be labelled uniform, representative, or complete.
 - The favorable filter changes the population being sampled. Record it and do
   not compare `--favorable true` and `--favorable any` as if they were the same
   ensemble.
