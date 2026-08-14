@@ -58,6 +58,13 @@ class QEDAssignmentTests(unittest.TestCase):
             self.select(selection_policy="explicit", qed_divisor_index_user=0)
         self.assertEqual(context.exception.category, "invalid_explicit_index")
 
+    def test_nonzero_h11_minus_is_recorded_but_not_a_visible_sector_rejection(self):
+        orientifold = dict(self.orientifold)
+        orientifold.update({"h11_plus": 1, "h11_minus": 1})
+        result = self.select(orientifold=orientifold)
+        self.assertEqual(result["orientifold_h11_plus"], 1)
+        self.assertEqual(result["orientifold_h11_minus"], 1)
+
     def test_potential_source_has_exact_charge_match(self):
         status = classify_qed_leading_status(
             np.asarray([[1, 0, 1], [0, 1, 1]]),

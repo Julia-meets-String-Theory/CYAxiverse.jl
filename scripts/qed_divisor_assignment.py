@@ -171,10 +171,6 @@ def _orientifold_mask(orientifold, divisor_count):
         raise QEDAssignmentFailure(
             "orientifold_invariance_failure", "intersecting_d7 requires a validated O3/O7 involution"
         )
-    if orientifold.get("h11_minus", 0) != 0:
-        raise QEDAssignmentFailure(
-            "orientifold_invariance_failure", "intersecting_d7 requires h11_minus=0"
-        )
     images = np.asarray(orientifold.get("prime_divisor_image_indices", []), dtype=int).reshape(-1)
     if images.shape != (divisor_count,) or np.any((images < 0) | (images >= divisor_count)):
         raise QEDAssignmentFailure(
@@ -542,7 +538,7 @@ def enumerate_assignment_pool(
                 ),
                 "assignment_policy": "ordered_qcd_qed_complete_pool",
                 "orientifold_invariance_convention": (
-                    "identity_O3/O7_h11_plus_equals_h11_h11_minus_equals_0"
+                    "explicit_validated_O3/O7_prime_divisor_image_map"
                 ),
                 "qcd_invariant": True,
                 "qed_invariant": True,
@@ -645,6 +641,8 @@ def select_qed_divisor(
         "candidate_pool_ordering": "stable_lattice_point_label_lexicographic",
         "qed_volume_upper_bound": None if qed_volume_max is None else float(qed_volume_max),
         "qed_volume_filter_status": "disabled" if qed_volume_max is None else "pending",
+        "orientifold_h11_plus": orientifold.get("h11_plus"),
+        "orientifold_h11_minus": orientifold.get("h11_minus"),
     }
     eligible_before_charge_filter = sorted(
         {
