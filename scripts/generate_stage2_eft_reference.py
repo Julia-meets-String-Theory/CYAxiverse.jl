@@ -170,6 +170,15 @@ def reconstruct_raw_frst(raw_frst_record, backend, topology_audit):
     polytope = generator.Polytope(
         arrays["polytope_vertices"], deterministic_glsm_basis=True
     )
+    # Legacy raw-FRST artifacts carry vertices but only a placeholder point
+    # table.  CYTools prime-divisor labels index the reconstructed full
+    # lattice-point table, so use the authoritative points from this
+    # reconstruction for all downstream geometry writes and label mapping.
+    reconstructed_polytope_points = np.asarray(polytope.points(), dtype=int)
+    persisted["arrays"]["polytope_points"] = reconstructed_polytope_points
+    topology_audit["polytope_point_count"] = int(
+        reconstructed_polytope_points.shape[0]
+    )
     triangulation = polytope.triangulate(
         points=np.asarray(arrays["triangulation_labels"], dtype=int).tolist(),
         simplices=np.asarray(arrays["simplices"], dtype=int).tolist(),
@@ -307,7 +316,14 @@ def process_raw_frst_artifact(
             raw_frst_record, arguments.backend, topology_audit
         )
         calabi_yau = triangulation.get_cy()
-        sampling_metadata = dict(persisted.get("sampler_metadata", {}))
+        sampling_metadata = dict(
+            persisted.get("sampler_metadata")
+            or persisted.get("sampling_metadata")
+            or {}
+        )
+        sampling_metadata.setdefault(
+            "scheme", persisted.get("sampler", "raw_frst_reconstruction")
+        )
         sampling_metadata.update(
             {
                 "stage1_raw_frst_path": persisted["raw_frst_path"],
