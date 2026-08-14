@@ -4,6 +4,21 @@ using SparseArrays
 using Test
 using HDF5
 
+@testset "Core plotting API stays optional" begin
+    @test Base.get_extension(CYAxiverse, :CYAxiverseCairoMakieExt) === nothing
+    @test isempty(methods(CYAxiverse.plotting.scatterplot))
+    @test isempty(methods(CYAxiverse.plotting.functionplot))
+
+    style = CYAxiverse.plotting.paper_style(accent_colors = (:gold, :teal))
+    @test style.background == "#E8E8F0"
+    @test style.accent_colors == ("gold", "teal")
+    @test CYAxiverse.plotting.curve(1:2, [3, 4]; label = "curve").label == "curve"
+    @test_throws DimensionMismatch CYAxiverse.plotting.curve(1:2, [3])
+    @test_throws ArgumentError CYAxiverse.plotting.reference_line(1; orientation = :diagonal)
+end
+
+include(joinpath(@__DIR__, "optional_plotting.jl"))
+
 include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
