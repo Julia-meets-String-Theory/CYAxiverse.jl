@@ -71,6 +71,30 @@ CYAxiverse.paper_benchmarks.poly102_inflation
 CYAxiverse.axion_benchmarks
 ```
 
+## `CYAxiverse.axion_photon`
+```@docs
+CYAxiverse.axion_photon
+CYAxiverse.axion_photon.GeometryInputs
+CYAxiverse.axion_photon.VisibleSectorAssignment
+CYAxiverse.axion_photon.InstantonData
+CYAxiverse.axion_photon.RationalRankCertificate
+CYAxiverse.axion_photon.LeadingAxionHierarchy
+CYAxiverse.axion_photon.AxionPhotonObservables
+CYAxiverse.axion_photon.AxionPhotonResult
+CYAxiverse.axion_photon.geometry_path
+CYAxiverse.axion_photon.local_geometry_indices
+CYAxiverse.axion_photon.rank_certificate_payload
+CYAxiverse.axion_photon.load_geometry_inputs
+CYAxiverse.axion_photon.load_instanton_data
+CYAxiverse.axion_photon.leading_hierarchy
+CYAxiverse.axion_photon.mixing_matrix
+CYAxiverse.axion_photon.photon_observables
+CYAxiverse.axion_photon.qed_instanton_log10_threshold_eV
+CYAxiverse.axion_photon.qed_instanton_threshold_eV
+CYAxiverse.axion_photon.run_local_scan
+CYAxiverse.axion_photon.write_scan_csv
+```
+
 ## Inflation benchmark bases
 
 The paper benchmark helpers are available under

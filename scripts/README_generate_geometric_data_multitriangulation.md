@@ -35,11 +35,14 @@ The construction choices are:
      Demirtas, McAllister, and Rios-Tascon, arXiv:2008.01730.
    - `fast`: random heights near a Delaunay triangulation. This is useful for
      coverage scans and smoke tests, but is not a fair ensemble.
-   - `ntfe_fast`: use the package-native `Polytope.ntfe_frts` path with
-     `triang_method=fast`, `as_generator=True`, and the recorded finite
-     two-face pool. Its sampling unit is a bounded NTFE/FRST proposal with
-     explicit two-face selection effects; it is not a uniform NTFE or FRST
-     sample.
+   - `ntfe_fast`: sample FRTs on the two-faces, then directly extend only
+     feasible combinations to two-face-inequivalent (NTFE) FRSTs using the
+     algorithm of MacFadden, arXiv:2309.10855. This avoids doing expensive CY
+     work repeatedly for 2-face-equivalent FRSTs. Its finite face pools are a
+     bounded coverage proposal, not a uniform NTFE or FRST sample.
+   - `gnn_ntfe`: use CYTools' optional dualGNN 2-face proposal and the same
+     direct NTFE extension. It is a distinct learned-proposal ensemble whose
+     model, pool size, and extension failures determine the realised support.
 4. Validate fineness, regularity, the star condition, and triangulation
    validity before constructing the hypersurface.
 5. Extract Hodge data, intersection numbers, the divisor basis, the Mori cone,
@@ -275,7 +278,7 @@ especially important for the high-`h11` KS cases.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--sampling-scheme {fair,fast,ntfe_fast}` | `fair` | Select fair secondary-fan MCMC, biased random heights, or package-native NTFE with `triang_method=fast`. |
+| `--sampling-scheme {fair,fast,ntfe_fast,gnn_ntfe}` | `fair` | Select fair secondary-fan MCMC, biased random heights, direct NTFE with sampled 2-face FRTs, or optional dualGNN-guided direct NTFE. |
 | `--backend {cgal,qhull}` | `cgal` | CYTools backend for triangulation construction. |
 | `--max-retries INT` | `50` | Maximum sampler retries for a new triangulation. |
 | `--max-tip-attempts/--ntfe-sample-count INT` | `100` | Maximum FRST candidates; for `ntfe_fast`, native `Polytope.ntfe_frts(N=...)`. |

@@ -28,6 +28,7 @@ to the child solver without reading or copying the license contents.
 """
 
 import argparse
+import glob
 import hashlib
 import itertools
 import json
@@ -1893,6 +1894,32 @@ def triangulation_candidates(
         )
         return
 
+    if sampling_scheme == "ntfe_fast":
+        yield from poly.ntfe_frts(
+            N=max_tip_attempts,
+            make_star=True,
+            seed=seed,
+            max_npts=ntfe_max_face_points,
+            N_face_triangs=ntfe_face_pool_size,
+            triang_method=ntfe_face_sampler,
+            as_generator=True,
+            backend=backend,
+            verbosity=0,
+        )
+        return
+
+    if sampling_scheme == "gnn_ntfe":
+        yield from poly.random_triangulations_gnn(
+            N=max_tip_attempts,
+            make_star=True,
+            max_npts=ntfe_max_face_points,
+            N_face_triangs=ntfe_face_pool_size,
+            as_generator=True,
+            seed=seed,
+            verbosity=0,
+        )
+        return
+
     # CYTools implements the secondary-fan walk and random-flip sampler from
     # arXiv:2008.01730; keep this adapter declarative and pass every control
     # parameter explicitly so artifacts are reproducible.
@@ -2161,6 +2188,7 @@ def process_polytope(task):
                     sampling_metadata=sampling_metadata,
                     ks_database_version=ks_database_version,
                     orientifold_config=orientifold_config,
+                    polytope_source=polytope_source,
                     export_kahler_rays=export_kahler_rays,
                     qed_selection_policy=qed_selection_policy,
                     qed_selection_seed=proposal_seed,
@@ -2412,6 +2440,8 @@ def plan_tasks(
 
     active_polytopes = polytopes[:n_geometries]
     replacement_polytopes = polytopes[n_geometries:]
+    active_sources = polytope_sources[:n_geometries]
+    replacement_sources = polytope_sources[n_geometries:]
 
     if frsts_per_polytope is not None:
         # In per-polytope mode, --n is the requested number of favorable
@@ -2433,7 +2463,7 @@ def plan_tasks(
         ):
             counts[index] += 1
 
-    def make_task(polytope_index, poly, count):
+    def make_task(polytope_index, poly, count, polytope_source):
         return (
             polytope_index,
             np.asarray(poly.vertices(), dtype=int),
@@ -2480,18 +2510,19 @@ def plan_tasks(
         )
 
     tasks = [
-        make_task(polytope_index, poly, count)
-        for polytope_index, (poly, count) in enumerate(
-            zip(active_polytopes, counts), start=1
+        make_task(polytope_index, poly, count, polytope_source)
+        for polytope_index, (poly, count, polytope_source) in enumerate(
+            zip(active_polytopes, counts, active_sources), start=1
         )
     ]
     if not return_replacement_tasks:
         return tasks
 
     replacement_tasks = [
-        make_task(polytope_index, poly, 0)
-        for polytope_index, poly in enumerate(
-            replacement_polytopes, start=len(active_polytopes) + 1
+        make_task(polytope_index, poly, 0, polytope_source)
+        for polytope_index, (poly, polytope_source) in enumerate(
+            zip(replacement_polytopes, replacement_sources),
+            start=len(active_polytopes) + 1,
         )
     ]
     return tasks, replacement_tasks
@@ -3712,6 +3743,18 @@ def main():
         parser.error("--ntfe-face-pool-size must be positive")
     if args.h11_interval < 1:
         parser.error("--h11_interval must be positive")
+    if args.database_source == "mirror":
+        if args.parquet_dir is None:
+            parser.error("--database-source mirror requires --parquet-dir")
+        if args.polytope_manifest is not None:
+            parser.error("--parquet-dir and --polytope-manifest are mutually exclusive")
+    elif args.database_source == "manifest":
+        if args.polytope_manifest is None:
+            parser.error("--database-source manifest requires --polytope-manifest")
+        if args.parquet_dir is not None:
+            parser.error("--parquet-dir requires --database-source mirror")
+    elif args.parquet_dir is not None or args.polytope_manifest is not None:
+        parser.error("select --database-source mirror or manifest for the supplied local source")
     if args.h11s is not None:
         if args.h11_interval != 1:
             parser.error("--h11_interval cannot be combined with --h11s")

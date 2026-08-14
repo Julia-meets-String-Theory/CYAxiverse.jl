@@ -85,35 +85,33 @@ def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath):
     
     # --- 3. Instanton charges (Q) and Amplitudes (L) ---
     num_cross = (nq * (nq - 1)) // 2
-    q = np.zeros((nq + num_cross, int(cy.h11())), dtype=float)
-    L2 = np.zeros((num_cross, 2), dtype=float)
+    term_count = nq + num_cross
+    q = np.zeros((int(cy.h11()), term_count), dtype=float)
+    L_raw = np.zeros((2, term_count), dtype=float)
     
-    q[0:nq, :] = qprime
-    
+    q[:, 0:nq] = qprime.T
+
     idx = 0
     for i in range(nq - 1):
         for j in range(i + 1, nq):
-            q[nq + idx, :] = qprime[j, :] - qprime[i, :]
+            q[:, nq + idx] = qprime[j, :] - qprime[i, :]
             
             term1 = (math.pi * np.dot(qprime[i, :], Kinv @ qprime[j, :]) +
                      np.dot((qprime[i, :] + qprime[j, :]), tau)) * 8 * math.pi / (V**2)
             term2 = -2 * math.log10(math.e) * math.pi * (np.dot(qprime[i, :], tau) + np.dot(qprime[j, :], tau))
             
-            L2[idx, :] = [term1, term2]
+            L_raw[0, nq + idx] = term1
+            L_raw[1, nq + idx] = term2
             idx += 1
-            
-    L1 = np.zeros((nq, 2), dtype=float)
+
     for j in range(nq):
-        L1[j, :] = [
-            (8 * math.pi / (V**2)) * np.dot(qprime[j, :], tau),
-            -2 * math.log10(math.e) * math.pi * np.dot(qprime[j, :], tau)
-        ]
-        
-    L_raw = np.vstack((L1, L2))
-    L = np.zeros((L_raw.shape[0], 2), dtype=float)
+        L_raw[0, j] = (8 * math.pi / (V**2)) * np.dot(qprime[j, :], tau)
+        L_raw[1, j] = -2 * math.log10(math.e) * math.pi * np.dot(qprime[j, :], tau)
+
+    L = np.zeros_like(L_raw)
     # L[:, 0] = sign of term1; L[:, 1] = log10(|term1|) + term2
-    L[:, 0] = np.sign(L_raw[:, 0])
-    L[:, 1] = np.log10(np.abs(L_raw[:, 0])) + L_raw[:, 1]
+    L[0, :] = np.sign(L_raw[0, :])
+    L[1, :] = np.log10(np.abs(L_raw[0, :])) + L_raw[1, :]
 
     # --- 4. Write exactly matching HDF5 ---
     os.makedirs(os.path.dirname(filepath), exist_ok=True)

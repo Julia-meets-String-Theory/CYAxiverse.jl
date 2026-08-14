@@ -19,6 +19,11 @@ include("generate.jl")
 include("jlm_reduced.jl")
 include("paper_benchmarks.jl")
 include("inflation_points.jl")
+include("axion_photon.jl")
+
+# Keep the historical module binding as a narrow compatibility alias. New
+# code should use `CYAxiverse.axion_photon`, whose name describes the physics.
+const glimmers = axion_photon
 
 """Scientific namespace for the deterministic axion benchmark models."""
 const axion_benchmarks = paper_benchmarks
