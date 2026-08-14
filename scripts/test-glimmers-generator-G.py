@@ -10,6 +10,9 @@ GENERATOR_SCRIPT = REPOSITORY_ROOT / "scripts" / "generate_geometric_data_multit
 DEFAULT_POLYTOPE_MANIFEST = Path(
     "/private/tmp/cyaxiverse-glimmers-local-mirror-manifest.json"
 )
+DEFAULT_OUTPUT_DIRECTORY = Path(
+    "/private/tmp/cyaxiverse-glimmers-geometry-dataset-20260814G"
+)
 
 
 ORIENTIFOLD_DATA = {
@@ -59,6 +62,25 @@ def local_polytope_manifest():
     return filepath
 
 
+def fresh_output_directory():
+    """Choose a non-existing output root without overwriting prior attempts."""
+    configured = os.environ.get("GLIMMERS_OUTPUT_DIR")
+    if configured:
+        return str(Path(configured).expanduser().resolve())
+
+    if not DEFAULT_OUTPUT_DIRECTORY.exists():
+        return str(DEFAULT_OUTPUT_DIRECTORY)
+
+    for index in range(1, 1000):
+        candidate = Path(f"{DEFAULT_OUTPUT_DIRECTORY}-rerun-{index:03d}")
+        if not candidate.exists():
+            return str(candidate)
+    raise RuntimeError(
+        "Could not find a fresh output directory after 999 attempts; set "
+        "GLIMMERS_OUTPUT_DIR explicitly."
+    )
+
+
 def run_glimmers_generation(outdir, seed, cores=8):
     """
     Executes the repository's CYTools multitriangulation script with the
@@ -66,7 +88,6 @@ def run_glimmers_generation(outdir, seed, cores=8):
     """
     polytope_manifest = local_polytope_manifest()
     outdir = Path(outdir).expanduser().resolve()
-    outdir.mkdir(parents=True, exist_ok=True)
     orientifold_path = create_orientifold_file(
         outdir.parent / f"{outdir.name}-o3_o7_involution.json"
     )
@@ -104,5 +125,5 @@ def run_glimmers_generation(outdir, seed, cores=8):
     subprocess.run(command, check=True, cwd=REPOSITORY_ROOT, env=environment)
 
 if __name__ == "__main__":
-    output_directory = "/private/tmp/cyaxiverse-glimmers-geometry-dataset-20260814G"
+    output_directory = fresh_output_directory()
     run_glimmers_generation(outdir=output_directory, seed=20260814)
