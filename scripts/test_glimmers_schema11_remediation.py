@@ -24,8 +24,13 @@ import numpy as np
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PILOT_DIR = SCRIPT_DIR.parents[2]
-TASK_DIR = PILOT_DIR / "glimmers_local_pilot_tasks"
+TASK_DIR_CANDIDATES = tuple(
+    parent / "glimmers_local_pilot_tasks" for parent in SCRIPT_DIR.parents[1:3]
+)
+TASK_DIR = next(
+    (candidate for candidate in TASK_DIR_CANDIDATES if candidate.is_dir()),
+    TASK_DIR_CANDIDATES[0],
+)
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -176,7 +181,7 @@ def _assignment_fixture():
         dtype=np.int64,
     )
     # Equal positive references make every QCD choice normalize every other
-    # divisor to 40, which is safely below the strict 127.5 QED bound.
+    # divisor to 40, which is safely below the inclusive 127.5 QED bound.
     prime_volumes = np.full(4, 2.0)
     effective_volumes = np.ones(4)
     neighbors = tuple(
@@ -216,11 +221,16 @@ class AssignmentPoolContractTests(unittest.TestCase):
             self.assertIn("qcd_radial_scale", row)
             self.assertIn("qcd_volume_scale", row)
             self.assertIn("normalization_map_version", row)
-            self.assertEqual(row["qcd_volume"], 40.0)
+            self.assertTrue(
+                np.isclose(row["qcd_volume"], 40.0, rtol=0.0, atol=1e-9)
+            )
+            self.assertEqual(row["qcd_volume_tolerance"], 1e-9)
+            self.assertEqual(row["divisor_volume_tolerance"], 1e-8)
+            self.assertLessEqual(row["qcd_volume_residual"], 1e-9)
             self.assertTrue(row["qcd_volume_exact"])
             self.assertGreaterEqual(row["minimum_prime_volume"], 1.0)
             self.assertGreaterEqual(row["minimum_effective_volume"], 1.0)
-            self.assertLess(row["qed_volume"], 127.5)
+            self.assertLessEqual(row["qed_volume"], 127.5)
             self.assertNotEqual(
                 row["qcd_divisor_index"], row["qed_divisor_index"]
             )
@@ -287,9 +297,109 @@ class AssignmentPoolContractTests(unittest.TestCase):
             [row["assignment_hash"] for row in changed_pool],
         )
 
+    def test_inclusive_qed_boundary_and_rejection_summary_are_replayable(self):
+        pool = qed_assignment.enumerate_assignment_pool(
+            prime_labels=[(0, 0, 0, 0), (1, 0, 0, 0)],
+            prime_charges=np.asarray([[1], [2]], dtype=np.int64),
+            prime_volumes_reference=np.asarray([2.5, 7.96875]),
+            effective_volumes_reference=np.asarray([1.0, 1.0]),
+            neighbors=((1,), (0,)),
+            intersection_evidence={
+                (0, 1): [((0, 0, 0, 0), (1, 0, 0, 0))]
+            },
+            invariant_mask=np.asarray([True, True]),
+        )
+        boundary = next(
+            item
+            for item in pool
+            if item["qcd_divisor_index"] == 0
+            and item["qed_divisor_index"] == 1
+        )
+        self.assertEqual(boundary["qed_volume"], 127.5)
+        self.assertEqual(boundary["qed_volume_comparison"], "less_than_or_equal_to")
+        self.assertEqual(
+            pool.rejection_summary,
+            {"total_rejections": 0, "status_counts": {}, "reason_counts": {}},
+        )
+
+    def test_assignment_pool_validation_rejects_duplicate_or_noncontiguous_entries(self):
+        fixture = _assignment_fixture()
+        pool = qed_assignment.enumerate_assignment_pool(**fixture)
+        broken = list(pool)
+        broken[1] = dict(broken[1])
+        broken[1]["pool_rank"] = 99
+        with self.assertRaises(qed_assignment.QEDAssignmentFailure) as context:
+            qed_assignment.validate_assignment_pool(broken)
+        self.assertEqual(context.exception.category, "assignment_pool_shortfall")
+
 
 class CapacitySamplingContractTests(unittest.TestCase):
-    def test_no_replacement_and_row_seed_replay_for_boundary_pool_sizes(self):
+    def test_stage12_exact_target_minimum_and_partial_capacity_accounting(self):
+        self.assertEqual(schema11.MINIMUM_EFT_ROWS, 100_000)
+        self.assertEqual(schema11.MAXIMUM_EFT_ROWS, 200_000)
+
+        partial = schema11.sample_capacity_aware_assignments(
+            {"geometry-partial": ["assignment-a", "assignment-b"]},
+            20260814,
+            minimum_rows=3,
+            maximum_rows=5,
+        )
+        self.assertEqual(partial["raw_assignment_capacity"], 2)
+        self.assertEqual(partial["validated_assignment_capacity"], 2)
+        self.assertEqual(partial["accepted_count"], 2)
+        self.assertEqual(partial["reconciliation"]["requested_target"], 5)
+        self.assertEqual(partial["reconciliation"]["minimum_acceptable"], 3)
+        self.assertEqual(partial["reconciliation"]["capacity_shortfall"], 3)
+        self.assertEqual(partial["reconciliation"]["row_shortfall"], 3)
+        self.assertEqual(partial["reconciliation"]["minimum_shortfall"], 1)
+        self.assertEqual(
+            partial["reconciliation"]["dataset_status"],
+            schema11.DIAGNOSTIC_PARTIAL_DATASET_STATUS,
+        )
+        self.assertTrue(partial["reconciliation"]["diagnostic_success"])
+        self.assertFalse(partial["reconciliation"]["production_complete"])
+        self.assertEqual(
+            partial["conservation"]["accepted_rows"],
+            partial["accepted_count"],
+        )
+        self.assertLessEqual(
+            partial["accepted_count"], partial["validated_assignment_capacity"]
+        )
+
+        complete = schema11.reconcile_eft_capacity(200_000, 200_000)
+        self.assertEqual(
+            complete["dataset_status"],
+            schema11.PRODUCTION_COMPLETE_DATASET_STATUS,
+        )
+        self.assertTrue(complete["production_complete"])
+        self.assertFalse(complete["model_target_shortfall"])
+
+    def test_stage12_partial_parquet_carries_explicit_dataset_label(self):
+        try:
+            import pyarrow.parquet as parquet
+        except ImportError:
+            self.skipTest("pyarrow is not available")
+        with tempfile.TemporaryDirectory(prefix="cyax-stage12-parquet-") as temporary:
+            path = Path(temporary) / "eft_models.parquet"
+            schema11.write_eft_parquet(
+                str(path),
+                [{"model_id": "diagnostic-row"}],
+                metadata={
+                    "cyaxiverse_dataset_status": "diagnostic_partial",
+                    "production_complete": False,
+                    "diagnostic_success": True,
+                    "model_target_shortfall": True,
+                },
+            )
+            metadata = parquet.read_schema(path).metadata
+            self.assertEqual(
+                metadata[b"cyaxiverse_dataset_status"], b"diagnostic_partial"
+            )
+            self.assertEqual(metadata[b"production_complete"], b"False")
+            self.assertEqual(metadata[b"diagnostic_success"], b"True")
+            self.assertEqual(metadata[b"model_target_shortfall"], b"True")
+
+    def test_replacement_sampling_replays_and_collapses_duplicate_identities(self):
         pools = {
             f"geometry-{pool_size}": [f"assignment-{pool_size}-{rank}" for rank in range(pool_size)]
             for pool_size in (7, 142, 143, 265)
@@ -304,27 +414,75 @@ class CapacitySamplingContractTests(unittest.TestCase):
             maximum_rows=sum(map(len, pools.values())),
         )
         self.assertEqual(first, second)
-        self.assertEqual(first["accepted_count"], sum(map(len, pools.values())))
-        self.assertEqual(first["stop_reason"], "ceiling_reached")
+        self.assertEqual(
+            first["planned_accepted_count"], sum(map(len, pools.values()))
+        )
+        self.assertLessEqual(first["accepted_count"], first["planned_accepted_count"])
         by_geometry = {}
         for row in first["rows"]:
             by_geometry.setdefault(row["geometry_id"], []).append(row)
             self.assertEqual(
                 row["row_seed"],
                 schema11.row_assignment_seed(
-                    20260814, row["geometry_id"], row["row_index"]
+                    20260814, row["geometry_id"], row["draw_index"]
                 ),
             )
         for geometry_id, rows in by_geometry.items():
-            self.assertEqual(
-                len(rows), len(pools[geometry_id])
-            )
+            sampling = first["per_geometry_sampling"][geometry_id]
+            self.assertEqual(sampling["draw_cap"], 10 * sampling["requested_unique_rows"])
+            self.assertLessEqual(sampling["total_draws"], sampling["draw_cap"])
+            self.assertEqual(len(rows), sampling["accepted_unique_rows"])
             self.assertEqual(
                 len({row["assignment_pool_rank"] for row in rows}), len(rows)
             )
             self.assertEqual(
                 len({row["assignment_hash"] for row in rows}), len(rows)
             )
+
+    def test_row_failures_retry_same_geometry_and_cap_shortfall_is_accounted(self):
+        def fail_first_two_draws(geometry_id, pool_rank, draw_seed, draw_index):
+            if draw_index < 2:
+                return {
+                    "accepted": False,
+                    "status": "potential_term_mismatch",
+                    "reason": "synthetic reconstruction failure",
+                }
+            return {"accepted": True}
+
+        result = schema11.sample_capacity_aware_assignments(
+            {"geometry-retry": ["a", "b", "c"]},
+            20260814,
+            minimum_rows=1,
+            maximum_rows=2,
+            row_callback=fail_first_two_draws,
+        )
+        sampling = result["per_geometry_sampling"]["geometry-retry"]
+        self.assertEqual(sampling["draw_cap"], 20)
+        self.assertEqual(sampling["failed_draws"], 2)
+        self.assertEqual(sampling["accepted_unique_rows"], 2)
+        self.assertGreaterEqual(sampling["duplicate_draws"], 0)
+        self.assertEqual(sampling["cap_induced_capacity_shortfall"], 0)
+        self.assertTrue(result["successful"])
+
+        always_fail = schema11.sample_capacity_aware_assignments(
+            {"geometry-shortfall": ["only"]},
+            20260814,
+            minimum_rows=1,
+            maximum_rows=1,
+            row_callback=lambda *_args: {
+                "accepted": False,
+                "status": "invalid_row_schema",
+                "reason": "synthetic permanent failure",
+            },
+        )
+        shortfall = always_fail["per_geometry_sampling"]["geometry-shortfall"]
+        self.assertEqual(shortfall["draw_cap"], 10)
+        self.assertEqual(shortfall["total_draws"], 10)
+        self.assertEqual(shortfall["failed_draws"], 10)
+        self.assertEqual(shortfall["accepted_unique_rows"], 0)
+        self.assertEqual(shortfall["cap_induced_capacity_shortfall"], 1)
+        self.assertEqual(always_fail["actual_stop_reason"], "model_target_shortfall")
+        self.assertFalse(always_fail["successful"])
 
     def test_rank_sampler_is_replayable_and_caps_small_pools(self):
         sampled = schema11.sample_pool_without_replacement(
@@ -557,6 +715,18 @@ class EFTRowContractTests(unittest.TestCase):
         self.assertEqual(round_tripped["qed_post_sort_source_position"], 1)
         self.assertEqual(round_tripped["qed_log10_lambda4"], 2.0)
         self.assertEqual(round_tripped["qed_leading_status"], "dependent")
+        inclusive_assignment = dict(assignment)
+        inclusive_assignment["qed_volume"] = 127.5
+        inclusive_row = _as_mapping(serializer(
+            geometry,
+            inclusive_assignment,
+            q=charges,
+            l=scales,
+            qed_charge=charges[:, 1],
+            direct_count=3,
+            source_index=1,
+        ))
+        self.assertEqual(inclusive_row["qed_volume"], 127.5)
         with self.assertRaises(EFT_ROW_SCHEMA.EFTRowFailure) as context:
             serializer(
                 geometry,

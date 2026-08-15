@@ -7,6 +7,7 @@ evidence, volumes, and validated orientifold image map.
 
 from __future__ import annotations
 
+from collections import Counter
 from fractions import Fraction
 
 import hashlib
@@ -17,6 +18,7 @@ import numpy as np
 
 TERMINAL_FAILURE_CATEGORIES = (
     "qcd_normalization_failure",
+    "assignment_pool_shortfall",
     "no_eligible_qed_divisor",
     "invalid_explicit_index",
     "orientifold_invariance_failure",
@@ -31,6 +33,8 @@ TERMINAL_FAILURE_CATEGORIES = (
 )
 
 QCD_VOLUME_TARGET = 40.0
+QCD_VOLUME_TOLERANCE = 1e-9
+DIVISOR_VOLUME_TOLERANCE = 1e-8
 QED_VOLUME_MAX = 127.5
 NORMALIZATION_MAP_VERSION = "homogeneous-qcd-volume-40-v1"
 
@@ -42,12 +46,20 @@ class AssignmentPool(list):
         super().__init__(assignments)
         self.terminal_records = list(terminal_records)
         self.pool_hash = str(pool_hash)
+        self.rejection_records = [
+            record
+            for record in self.terminal_records
+            if record.get("terminal_status") != "accepted_assignment"
+        ]
+        self.rejection_summary = summarize_assignment_pool_rejections(
+            self.rejection_records
+        )
 
     def serializable(self):
-        """Return accepted rows and rejected candidates as JSON-compatible data."""
+        """Return accepted rows and aggregate rejection data as JSON-compatible data."""
         return {
             "accepted_assignments": list(self),
-            "terminal_records": list(self.terminal_records),
+            "rejection_summary": dict(self.rejection_summary),
             "pool_hash": self.pool_hash,
             "pool_status": "complete_eligible_ordered_pool",
         }
@@ -63,6 +75,105 @@ class QEDAssignmentFailure(RuntimeError):
         self.category = category
         self.reason = str(reason)
         self.record = {} if record is None else record
+
+
+def summarize_assignment_pool_rejections(records):
+    """Aggregate assignment-pool rejection statuses and reasons for HDF5 metadata."""
+    status_counts = Counter()
+    reason_counts = Counter()
+    for record in records:
+        if record.get("terminal_status") == "accepted_assignment":
+            continue
+        status = str(record.get("terminal_status", "unknown"))
+        reason = str(record.get("terminal_reason", "unknown"))
+        status_counts[status] += 1
+        reason_counts[reason] += 1
+    return {
+        "total_rejections": int(sum(status_counts.values())),
+        "status_counts": dict(sorted(status_counts.items())),
+        "reason_counts": dict(sorted(reason_counts.items())),
+    }
+
+
+def validate_assignment_pool(pool):
+    """Validate non-empty ordered-pool integrity before geometry acceptance."""
+    if not isinstance(pool, (list, AssignmentPool)) or not pool:
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "the complete eligible ordered assignment pool is empty",
+        )
+    required = {
+        "assignment_hash",
+        "pool_rank",
+        "qcd_divisor_index",
+        "qed_divisor_index",
+        "qcd_divisor_label",
+        "qed_divisor_label",
+        "qcd_volume",
+        "qed_volume",
+        "terminal_status",
+    }
+    pairs = []
+    hashes = []
+    ordering = []
+    for assignment in pool:
+        missing = sorted(required.difference(assignment))
+        if missing:
+            raise QEDAssignmentFailure(
+                "assignment_pool_shortfall",
+                "assignment pool entry is missing required fields: "
+                + ", ".join(missing),
+            )
+        if assignment["terminal_status"] != "accepted_assignment":
+            raise QEDAssignmentFailure(
+                "assignment_pool_shortfall",
+                "assignment pool contains a non-accepted entry",
+            )
+        pair = (
+            int(assignment["qcd_divisor_index"]),
+            int(assignment["qed_divisor_index"]),
+        )
+        if pair in pairs:
+            raise QEDAssignmentFailure(
+                "assignment_pool_shortfall",
+                f"assignment pool contains duplicate ordered pair {pair}",
+            )
+        pairs.append(pair)
+        hashes.append(str(assignment["assignment_hash"]))
+        ordering.append(
+            (
+                tuple(int(value) for value in assignment["qcd_divisor_label"]),
+                tuple(int(value) for value in assignment["qed_divisor_label"]),
+                pair[0],
+                pair[1],
+            )
+        )
+    if [int(assignment["pool_rank"]) for assignment in pool] != list(range(len(pool))):
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "assignment pool ranks are not contiguous and zero-based",
+        )
+    if len(set(hashes)) != len(hashes):
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "assignment pool hashes are not unique",
+        )
+    if ordering != sorted(ordering):
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "assignment pool ordering is not deterministic",
+        )
+    expected_hash = stable_hash(list(pool))
+    if isinstance(pool, AssignmentPool) and pool.pool_hash != expected_hash:
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "assignment pool hash does not match its accepted entries",
+        )
+    return {
+        "pool_status": "complete_eligible_ordered_pool",
+        "pool_size": len(pool),
+        "pool_hash": expected_hash,
+    }
 
 
 def _integer_array(values, name):
@@ -167,9 +278,11 @@ def _orientifold_mask(orientifold, divisor_count):
         raise QEDAssignmentFailure(
             "orientifold_invariance_failure", "intersecting_d7 requires an orientifold input"
         )
-    if orientifold.get("status") != "validated" or orientifold.get("involution_type") != "O3/O7":
+    if orientifold.get("status") not in {"fan_invariant", "validated"} or orientifold.get(
+        "involution_type"
+    ) != "O3/O7":
         raise QEDAssignmentFailure(
-            "orientifold_invariance_failure", "intersecting_d7 requires a validated O3/O7 involution"
+            "orientifold_invariance_failure", "intersecting_d7 requires a validated O3/O7 lattice action"
         )
     images = np.asarray(orientifold.get("prime_divisor_image_indices", []), dtype=int).reshape(-1)
     if images.shape != (divisor_count,) or np.any((images < 0) | (images >= divisor_count)):
@@ -187,7 +300,8 @@ def normalize_qcd_assignment(
     target=40.0,
     min_prime=1.0,
     min_effective=1.0,
-    atol=1e-9,
+    qcd_volume_tolerance=QCD_VOLUME_TOLERANCE,
+    divisor_volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
 ):
     """Normalize one QCD assignment and validate its volume-domain contract.
 
@@ -205,7 +319,8 @@ def normalize_qcd_assignment(
     target = float(target)
     min_prime = float(min_prime)
     min_effective = float(min_effective)
-    atol = float(atol)
+    qcd_volume_tolerance = float(qcd_volume_tolerance)
+    divisor_volume_tolerance = float(divisor_volume_tolerance)
     if not np.isfinite(qcd_scalar) or qcd_scalar != int(qcd_scalar):
         raise ValueError("qcd_index must be a finite integer")
     qcd_index = int(qcd_scalar)
@@ -227,8 +342,10 @@ def normalize_qcd_assignment(
         or not np.isfinite(min_effective)
         or min_prime < 1.0
         or min_effective < 1.0
-        or not np.isfinite(atol)
-        or atol < 0.0
+        or not np.isfinite(qcd_volume_tolerance)
+        or qcd_volume_tolerance < 0.0
+        or not np.isfinite(divisor_volume_tolerance)
+        or divisor_volume_tolerance < 0.0
     ):
         raise ValueError("normalization targets and tolerances must be finite and valid")
     if target != 40.0:
@@ -241,19 +358,18 @@ def normalize_qcd_assignment(
         volume_scale = float(radial_scale**2)
         normalized_prime = volume_scale * prime
         normalized_effective = volume_scale * effective
-    # Keep the serialized QCD value exactly at the approved decimal target,
-    # rather than exposing a one-ulp square/root round-trip difference.
-    normalized_prime[qcd_index] = target
-    qcd_volume = float(target)
+    qcd_volume = float(normalized_prime[qcd_index])
     minimum_prime = float(np.min(normalized_prime))
     minimum_effective = float(np.min(normalized_effective))
     if not np.all(np.isfinite(normalized_prime)) or not np.all(np.isfinite(normalized_effective)):
         raise ValueError("post-normalization volumes are not finite")
-    if not np.isclose(qcd_volume, target, rtol=0.0, atol=atol):
+    if not np.isclose(
+        qcd_volume, target, rtol=0.0, atol=qcd_volume_tolerance
+    ):
         raise ValueError("post-normalization QCD volume is not exactly the target")
-    if minimum_prime < min_prime - atol:
+    if minimum_prime < min_prime - divisor_volume_tolerance:
         raise ValueError("post-normalization prime-divisor minimum is below one")
-    if minimum_effective < min_effective - atol:
+    if minimum_effective < min_effective - divisor_volume_tolerance:
         raise ValueError("post-normalization effective-divisor minimum is below one")
     return {
         "qcd_index": qcd_index,
@@ -265,8 +381,13 @@ def normalize_qcd_assignment(
         "minimum_prime_volume": minimum_prime,
         "minimum_effective_volume": minimum_effective,
         "target": target,
+        "qcd_volume_tolerance": qcd_volume_tolerance,
+        "divisor_volume_tolerance": divisor_volume_tolerance,
+        "qcd_volume_residual": abs(qcd_volume - target),
         "normalization_map_version": NORMALIZATION_MAP_VERSION,
-        "qcd_volume_exact": True,
+        "qcd_volume_exact": bool(
+            np.isclose(qcd_volume, target, rtol=0.0, atol=qcd_volume_tolerance)
+        ),
     }
 
 
@@ -282,6 +403,8 @@ def enumerate_assignment_pool(
     qcd_volume_target=40.0,
     min_prime_volume=1.0,
     min_effective_volume=1.0,
+    qcd_volume_tolerance=QCD_VOLUME_TOLERANCE,
+    divisor_volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
     qed_volume_max=127.5,
     terminal_records=None,
 ):
@@ -406,6 +529,8 @@ def enumerate_assignment_pool(
                 target=qcd_volume_target,
                 min_prime=min_prime_volume,
                 min_effective=min_effective_volume,
+                qcd_volume_tolerance=qcd_volume_tolerance,
+                divisor_volume_tolerance=divisor_volume_tolerance,
             )
         except (FloatingPointError, OverflowError, ValueError) as exc:
             _emit("qcd_normalization_failure", str(exc), qcd_index)
@@ -479,10 +604,10 @@ def enumerate_assignment_pool(
                 )
                 continue
             qed_volume = float(normalized_prime[qed_index])
-            if not qed_volume < qed_volume_max:
+            if not qed_volume <= qed_volume_max:
                 _emit(
                     "qed_volume_rejection",
-                    "normalized QED divisor volume is not strictly below the upper bound",
+                    "normalized QED divisor volume exceeds the inclusive upper bound",
                     qcd_index,
                     qed_index,
                     qed_volume=qed_volume,
@@ -506,6 +631,9 @@ def enumerate_assignment_pool(
                 "qcd_radial_scale": float(normalization["radial_scale"]),
                 "qcd_volume_scale": float(normalization["volume_scale"]),
                 "qcd_volume_target": float(normalization["target"]),
+                "qcd_volume_tolerance": float(normalization["qcd_volume_tolerance"]),
+                "divisor_volume_tolerance": float(normalization["divisor_volume_tolerance"]),
+                "qcd_volume_residual": float(normalization["qcd_volume_residual"]),
                 "qcd_volume": float(normalization["qcd_volume"]),
                 "qcd_divisor_volume": float(normalization["qcd_volume"]),
                 "qed_volume": qed_volume,
@@ -526,11 +654,11 @@ def enumerate_assignment_pool(
                 },
                 "normalization_data_hash": normalization_data_hash,
                 "normalization_map_version": normalization_map_version,
-                "qcd_volume_exact": True,
+                "qcd_volume_exact": bool(normalization["qcd_volume_exact"]),
                 "all_divisor_minimums_valid": True,
-                "qed_volume_filter": "strictly_less_than_127.5",
+                "qed_volume_filter": "less_than_or_equal_to_127.5",
                 "qed_volume_upper_bound": float(qed_volume_max),
-                "qed_volume_comparison": "strictly_less_than",
+                "qed_volume_comparison": "less_than_or_equal_to",
                 "qcd_qed_intersection": True,
                 "intersection_evidence": serial_evidence,
                 "intersection_evidence_convention": (
@@ -584,7 +712,10 @@ def enumerate_assignment_pool(
         record["pool_rank"] = int(assignment["pool_rank"])
     assignment_pool_type = globals().get("AssignmentPool")
     if assignment_pool_type is not None:
-        return assignment_pool_type(pool, collected_terminal_records, _stable_hash(pool))
+        result = assignment_pool_type(pool, collected_terminal_records, _stable_hash(pool))
+        if result:
+            validate_assignment_pool(result)
+        return result
     return pool
 
 
@@ -822,7 +953,10 @@ def write_visible_sector_hdf5(group, assignment):
     ):
         if name in assignment and assignment[name] is not None:
             group.create_dataset(name, data=assignment[name])
-    for name in ("qcd_charge", "qed_charge", "em_charge", "candidate_pool_indices"):
+    for name in (
+        "qcd_charge", "qed_charge", "em_charge", "candidate_pool_indices",
+        "candidate_pool_labels", "qcd_divisor_label", "qed_divisor_label",
+    ):
         if name in assignment:
             group.create_dataset(name, data=np.asarray(assignment[name], dtype=np.int64))
     for name in ("qcd_invariant", "qed_invariant", "qcd_qed_intersection", "qed_charge_exact_match"):
