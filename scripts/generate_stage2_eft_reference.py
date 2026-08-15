@@ -33,11 +33,14 @@ from glimmers_schema11 import (
     QCD_VOLUME_TARGET,
     QED_VOLUME_MAX,
     SCHEMA_VERSION as SCHEMA_1_1_VERSION,
+    TARGET_GEOMETRY_COUNT,
     atomic_json_dump,
     atomic_jsonl_dump,
     ensure_fresh_output_root,
     estimate_storage,
+    reconcile_eft_capacity,
     summarize_terminal_records,
+    stable_hash,
     stable_seed,
     write_eft_parquet,
 )
@@ -103,6 +106,14 @@ def build_parser():
     parser.add_argument("--eft-minimum-rows", type=int, default=MINIMUM_EFT_ROWS)
     parser.add_argument("--eft-maximum-rows", type=int, default=MAXIMUM_EFT_ROWS)
     parser.add_argument("--eft-output-path", default=None)
+    parser.add_argument(
+        "--allow-overwrite-existing-geometry",
+        action="store_true",
+        help=(
+            "Explicitly authorize replacement of an existing cyax.h5 artifact; "
+            "disabled by default and recorded in geometry provenance."
+        ),
+    )
     parser.add_argument("--ks-database-version", default="inherited from stage-1 raw FRST records")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verbose", action="store_true")
@@ -258,6 +269,8 @@ def classify_stage2_failure(error):
             return "orientifold_invariance_failure"
         if error.category == "qcd_normalization_failure":
             return "qcd_normalization_failure"
+        if error.category == "assignment_pool_shortfall":
+            return "assignment_pool_shortfall"
         if error.category == "output_collision":
             return "output_collision"
         if error.category == "potential_term_mismatch":
@@ -287,9 +300,19 @@ def process_raw_frst_artifact(
     """Process one retained raw FRST and return terminal and audit records."""
     topology_audit = build_topology_audit_record(raw_frst_record, arguments.backend)
     point_diagnostics = []
+    assignment_pool_rejection_records = []
     topology_audit["kaehler_point_scan"] = {
         "policy": arguments.moduli_policy,
         "allow_m_below_one": bool(arguments.allow_m_below_one),
+        "qcd_volume_target": generator.QCD_VOLUME_TARGET,
+        "qcd_volume_tolerance": generator.QCD_VOLUME_TOLERANCE,
+        "divisor_volume_tolerance": generator.DIVISOR_VOLUME_TOLERANCE,
+        "normalization_failure_status": "qcd_normalization_failure",
+        "normalization_repair_policy": "none",
+        "selection_policy": (
+            "explicit_qcd_divisor_index_or_first_eligible_ascending_index"
+        ),
+        "post_selection_fallback": "none",
         "attempt_budget": arguments.max_kaehler_attempts,
         "point_status": "not_run",
         "diagnostics": point_diagnostics,
@@ -309,8 +332,24 @@ def process_raw_frst_artifact(
             "candidate_index",
         )
     }
+    terminal_record.update(
+        {
+            "artifact_status": (
+                generator.POOL_PENDING_ARTIFACT_STATUS
+                if arguments.eft
+                else generator.GEOMETRY_ONLY_ARTIFACT_STATUS
+            ),
+            "artifact_written": False,
+            "allow_overwrite_existing_geometry": bool(
+                arguments.allow_overwrite_existing_geometry
+            ),
+        }
+    )
     output_path = build_geometry_output_path(output_root, raw_frst_record)
     terminal_record["output_path"] = str(output_path.resolve())
+    existing_artifact = generator.inspect_geometry_artifact(output_path)
+    if existing_artifact["exists"]:
+        terminal_record["existing_artifact_audit"] = existing_artifact
     try:
         persisted, polytope, triangulation = reconstruct_raw_frst(
             raw_frst_record, arguments.backend, topology_audit
@@ -390,12 +429,31 @@ def process_raw_frst_artifact(
             topology_audit=topology_audit,
             kaehler_point_seed=kaehler_point_seed,
             kaehler_point_diagnostics=point_diagnostics,
+            assignment_pool_rejection_records=assignment_pool_rejection_records,
             allow_m_below_one=arguments.allow_m_below_one,
+            allow_overwrite_existing_geometry=(
+                arguments.allow_overwrite_existing_geometry
+            ),
         )
         terminal_record.update(
             {
-                "terminal_status": "accepted_geometry",
+                "terminal_status": (
+                    "accepted_geometry"
+                    if arguments.eft
+                    else "geometry_only"
+                ),
                 "terminal_reason": "stage-2 geometry artifact written from retained raw FRST",
+                "artifact_status": (
+                    generator.ACCEPTED_GEOMETRY_ARTIFACT_STATUS
+                    if arguments.eft
+                    else generator.GEOMETRY_ONLY_ARTIFACT_STATUS
+                ),
+                "artifact_written": True,
+                "overwrite_event": (
+                    "replaced_existing_geometry"
+                    if existing_artifact.get("exists")
+                    else "created_new_geometry"
+                ),
             }
         )
     except Exception as error:
@@ -408,6 +466,8 @@ def process_raw_frst_artifact(
                     else "failed"
                 ),
                 "stage2_terminal_status": terminal_status,
+                "artifact_status": terminal_record["artifact_status"],
+                "artifact_written": terminal_record["artifact_written"],
                 "failure_type": type(error).__name__,
                 "failure_reason": str(error),
             }
@@ -425,13 +485,24 @@ def process_raw_frst_artifact(
             {
                 "terminal_status": terminal_status,
                 "terminal_reason": f"{type(error).__name__}: {error}",
+                "artifact_status": (
+                    generator.POOL_PENDING_ARTIFACT_STATUS
+                    if arguments.eft
+                    and getattr(error, "category", None) == "assignment_pool_shortfall"
+                    else "not_written"
+                ),
+                "artifact_written": False,
             }
         )
+        topology_audit["artifact_status"] = terminal_record["artifact_status"]
+        topology_audit["artifact_written"] = terminal_record["artifact_written"]
     else:
         topology_audit.update(
             {
                 "audit_status": "complete",
                 "stage2_terminal_status": terminal_record["terminal_status"],
+                "artifact_status": terminal_record["artifact_status"],
+                "artifact_written": terminal_record["artifact_written"],
             }
         )
         topology_audit["kaehler_point_scan"].update(
@@ -440,6 +511,7 @@ def process_raw_frst_artifact(
                 "diagnostic_count": len(point_diagnostics),
             }
         )
+    topology_audit["assignment_pool_rejection_records"] = assignment_pool_rejection_records
     return terminal_record, topology_audit
 
 
@@ -459,6 +531,58 @@ def read_stage1_polytope_manifest(stage1_root):
         return None
     with manifest_path.open(encoding="utf-8") as stream:
         return json.load(stream)
+
+
+def build_frozen_stage1_population_provenance(input_ledger, stage1_manifest):
+    """Record the immutable Stage-1 population used by this Stage-2 run."""
+    retained = [
+        {
+            key: record.get(key)
+            for key in (
+                "h11",
+                "polytope_id",
+                "polytope_index",
+                "candidate_index",
+                "geometry_id",
+                "full_triangulation_hash",
+                "raw_frst_path",
+            )
+        }
+        for record in input_ledger
+        if record.get("stage2_input_status") == "retained_raw_frst"
+    ]
+    retained.sort(
+        key=lambda record: (
+            str(record.get("geometry_id", "")),
+            str(record.get("full_triangulation_hash", "")),
+            str(record.get("raw_frst_path", "")),
+        )
+    )
+    declared_count = None if stage1_manifest is None else stage1_manifest.get(
+        "accepted_geometry_count",
+        stage1_manifest.get("accepted_count"),
+    )
+    return {
+        "population_target": TARGET_GEOMETRY_COUNT,
+        "stage1_manifest_status": (
+            None if stage1_manifest is None else stage1_manifest.get("status")
+        ),
+        "stage1_declared_accepted_count": declared_count,
+        "retained_raw_input_count": len(retained),
+        "accepted_stage2_geometry_count": None,
+        "population_frozen": True,
+        "replenishment_allowed": False,
+        "population_change_policy": (
+            "stage1_population_frozen_no_replenishment_or_population_change"
+        ),
+        "raw_frst_provenance_preserved": True,
+        "raw_frst_identity_fields": [
+            "geometry_id",
+            "full_triangulation_hash",
+            "raw_frst_path",
+        ],
+        "retained_raw_identity_digest": stable_hash(retained),
+    }
 
 
 def current_source_commit():
@@ -483,6 +607,11 @@ def main(argv=None):
         raise ValueError("--eft requires --orientifold-file")
     if arguments.eft and arguments.moduli_policy != "canonical_qcd":
         raise ValueError("--eft requires --moduli-policy canonical_qcd")
+    if arguments.materialize_dense_potential:
+        raise ValueError(
+            "schema 1.1 uses on-demand potential reconstruction; "
+            "dense potential materialization is not permitted"
+        )
     if arguments.allow_m_below_one and arguments.moduli_policy != "canonical_qcd":
         raise ValueError(
             "--allow-m-below-one requires --moduli-policy canonical_qcd"
@@ -492,7 +621,7 @@ def main(argv=None):
     ):
         raise ValueError("canonical_qcd requires --qcd-volume-target 40.0")
     if arguments.eft and arguments.qed_volume_max != QED_VOLUME_MAX:
-        raise ValueError("--eft requires the strict QED volume bound 127.5")
+        raise ValueError("--eft requires the inclusive QED volume bound 127.5")
     if arguments.eft_minimum_rows != MINIMUM_EFT_ROWS or arguments.eft_maximum_rows != MAXIMUM_EFT_ROWS:
         raise ValueError("schema 1.1 EFT row bounds are fixed at 100000 and 200000")
     if not arguments.dry_run:
@@ -504,6 +633,7 @@ def main(argv=None):
     stage1_polytope_manifest = read_stage1_polytope_manifest(arguments.stage1_root)
     topology_diagnostics = []
     kaehler_point_diagnostics = []
+    assignment_pool_rejection_records = []
     retained_inputs = [
         record
         for record in input_ledger
@@ -554,6 +684,9 @@ def main(argv=None):
                 arguments, raw_frst_record, orientifold_config, arguments.outdir
             )
             stage2_records.append(terminal_record)
+            assignment_pool_rejection_records.extend(
+                topology_audit.pop("assignment_pool_rejection_records", ())
+            )
             topology_diagnostics.append(topology_audit)
             for point_record in topology_audit.get(
                 "kaehler_point_scan", {}
@@ -615,18 +748,7 @@ def main(argv=None):
     model_rows = []
     model_error = None
     allocation = None
-    if arguments.eft and not arguments.dry_run and not accepted_geometry_paths:
-        model_error = generator.ModelTargetShortfall(
-            "no accepted geometry artifacts are available for EFT row generation",
-            [],
-        )
-        model_records.append(
-            {
-                "terminal_status": "model_target_shortfall",
-                "terminal_reason": str(model_error),
-            }
-        )
-    if arguments.eft and not arguments.dry_run and accepted_geometry_paths:
+    if arguments.eft and not arguments.dry_run:
         try:
             model_rows, model_records, allocation = generator.expand_eft_reference_rows(
                 accepted_geometry_paths,
@@ -636,15 +758,31 @@ def main(argv=None):
             )
         except Exception as error:
             model_error = error
-            model_records.append(
-                {
-                    "terminal_status": "model_target_shortfall"
-                    if isinstance(error, generator.ModelTargetShortfall)
-                    else "invalid_row_schema",
-                    "terminal_reason": f"{type(error).__name__}: {error}",
-                }
-            )
-    if arguments.eft and not arguments.dry_run and model_error is None and model_rows:
+            if isinstance(error, generator.ModelTargetShortfall):
+                allocation = error.allocation
+                model_records.extend(error.records)
+            else:
+                model_records.append(
+                    {
+                        "terminal_status": "invalid_row_schema",
+                        "terminal_reason": f"{type(error).__name__}: {error}",
+                    }
+                )
+    model_dataset_status = None
+    model_reconciliation = None
+    if arguments.eft and not arguments.dry_run and model_error is None:
+        validated_capacity = (
+            0
+            if allocation is None
+            else int(allocation.get("validated_assignment_capacity", 0))
+        )
+        model_reconciliation = reconcile_eft_capacity(
+            validated_capacity,
+            len(model_rows),
+            minimum_rows=arguments.eft_minimum_rows,
+            maximum_rows=arguments.eft_maximum_rows,
+        )
+        model_dataset_status = model_reconciliation["dataset_status"]
         try:
             eft_path = arguments.eft_output_path or str(Path(arguments.outdir) / "eft_models.parquet")
             if not os.path.isabs(eft_path):
@@ -654,17 +792,58 @@ def main(argv=None):
                 eft_path.relative_to(Path(arguments.outdir).resolve())
             except ValueError as error:
                 raise ValueError("--eft-output-path must remain inside --outdir") from error
-            write_eft_parquet(str(eft_path), model_rows)
+            write_eft_parquet(
+                str(eft_path),
+                model_rows,
+                metadata={
+                    "cyaxiverse_dataset_status": model_dataset_status,
+                    "production_complete": model_reconciliation[
+                        "production_complete"
+                    ],
+                    "diagnostic_success": model_reconciliation[
+                        "diagnostic_success"
+                    ],
+                    "model_target_shortfall": model_reconciliation[
+                        "model_target_shortfall"
+                    ],
+                    "requested_target": model_reconciliation["requested_target"],
+                    "minimum_acceptable": model_reconciliation[
+                        "minimum_acceptable"
+                    ],
+                },
+            )
             model_records.append(
                 {
-                    "terminal_status": "accepted_model_row",
-                    "terminal_reason": "compact EFT-reference Parquet written atomically",
+                    "terminal_status": (
+                        "accepted_model_table"
+                        if model_reconciliation["production_complete"]
+                        else "accepted_diagnostic_partial_model_table"
+                    ),
+                    "terminal_reason": (
+                        "compact EFT-reference Parquet written atomically"
+                        if model_reconciliation["production_complete"]
+                        else "diagnostic partial EFT-reference Parquet written atomically"
+                    ),
                     "output_path": str(eft_path),
                     "row_count": len(model_rows),
+                    "dataset_status": model_dataset_status,
+                    "production_complete": model_reconciliation[
+                        "production_complete"
+                    ],
+                    "diagnostic_success": model_reconciliation[
+                        "diagnostic_success"
+                    ],
                 }
             )
         except Exception as error:
             model_error = error
+            model_dataset_status = "storage_failure"
+            model_reconciliation = {
+                **model_reconciliation,
+                "dataset_status": "storage_failure",
+                "diagnostic_success": False,
+                "production_complete": False,
+            }
             model_records.append(
                 {
                     "terminal_status": "storage_failure",
@@ -682,17 +861,48 @@ def main(argv=None):
         bool(point_record.get("attempted", False))
         for point_record in kaehler_point_diagnostics
     )
+    assignment_pool_rejection_records.sort(
+        key=lambda record: (
+            str(record.get("geometry_id", "")),
+            int(record.get("qcd_index", -1)),
+            int(record.get("qed_index", -1))
+            if record.get("qed_index") is not None
+            else -1,
+            str(record.get("terminal_status", "")),
+            str(record.get("terminal_reason", "")),
+        )
+    )
+    stage1_population = build_frozen_stage1_population_provenance(
+        input_ledger, stage1_manifest
+    )
+    stage1_population["accepted_stage2_geometry_count"] = len(
+        accepted_geometry_paths
+    )
+    model_failure_status = None
+    if model_error is not None:
+        model_failure_status = next(
+            (
+                record.get("terminal_status")
+                for record in reversed(model_records)
+                if record.get("terminal_status")
+                in {"storage_failure", "invalid_row_schema", "model_target_shortfall"}
+            ),
+            "model_target_shortfall",
+        )
     run_manifest = {
         "schema_version": f"cyaxiverse-stage2-evaluation-{SCHEMA_1_1_VERSION}",
         "stage": "stage2_geometry_and_eft_generation",
         "status": (
             "dry_run"
             if arguments.dry_run
-            else "model_target_shortfall"
+            else model_failure_status
             if model_error is not None
             else "completed_geometry_only"
             if not arguments.eft
             else "completed"
+            if model_reconciliation is not None
+            and model_reconciliation["production_complete"]
+            else "completed_diagnostic_partial"
         ),
         "output_root": arguments.outdir,
         "stage1_root": str(Path(arguments.stage1_root).resolve()),
@@ -705,6 +915,19 @@ def main(argv=None):
         "seed": arguments.seed,
         "moduli_policy": arguments.moduli_policy,
         "allow_m_below_one": bool(arguments.allow_m_below_one),
+        "allow_overwrite_existing_geometry": bool(
+            arguments.allow_overwrite_existing_geometry
+        ),
+        "geometry_artifact_policy": {
+            "geometry_only_status": generator.GEOMETRY_ONLY_ARTIFACT_STATUS,
+            "accepted_geometry_status": generator.ACCEPTED_GEOMETRY_ARTIFACT_STATUS,
+            "pool_pending_status": generator.POOL_PENDING_ARTIFACT_STATUS,
+            "geometry_only_pool_policy": "may_finalize_before_pool_construction",
+            "eft_pool_policy": "complete_validated_hashed_pool_required_before_finalization",
+            "pool_pending_eft_policy": "not_accepted_and_no_final_artifact",
+            "overwrite_policy": "explicit_allow_overwrite_existing_geometry_only",
+            "temporary_artifact_policy": "delete_after_status_recording",
+        },
         "kaehler_point_attempt_budget": arguments.max_kaehler_attempts,
         "kaehler_point_attempt_budget_semantics": (
             "one canonical tip evaluation"
@@ -716,6 +939,27 @@ def main(argv=None):
         ),
         "kaehler_point_status_counts": kaehler_point_status_counts,
         "kaehler_point_attempted_count": kaehler_point_attempted_count,
+        "qcd_volume_target": generator.QCD_VOLUME_TARGET,
+        "qcd_volume_tolerance": generator.QCD_VOLUME_TOLERANCE,
+        "normalization_failure_status": "qcd_normalization_failure",
+        "normalization_repair_policy": "none",
+        "selection_policy": (
+            "explicit_qcd_divisor_index_or_first_eligible_ascending_index"
+        ),
+        "post_selection_fallback": "none",
+        "divisor_volume_tolerance": generator.DIVISOR_VOLUME_TOLERANCE,
+        "divisor_volume_contract": {
+            "prime_lower_bound": arguments.min_prime_divisor_volume,
+            "effective_lower_bound": arguments.min_divisor_volume,
+            "tolerance": generator.DIVISOR_VOLUME_TOLERANCE,
+            "failure_status": "qcd_normalization_failure",
+            "evidence_group": "cytools/geometric/divisor_volume_evidence",
+            "point_failure_policy": (
+                "retry_within_adaptive_budget"
+                if arguments.moduli_policy == "adaptive"
+                else "single_canonical_point"
+            ),
+        },
         "raw_input_count": len(input_ledger),
         "raw_input_count_by_h11_and_status": count_by_h11(input_ledger),
         "retained_raw_input_count": len(retained_inputs),
@@ -731,13 +975,30 @@ def main(argv=None):
         "stage2_terminal_count_by_h11_and_status": count_by_h11(
             stage2_records, status_key="terminal_status"
         ),
+        "stage2_artifact_count_by_status": count_by_h11(
+            stage2_records, status_key="artifact_status"
+        ),
+        "geometry_overwrite_event_count": sum(
+            record.get("overwrite_event") == "replaced_existing_geometry"
+            for record in stage2_records
+        ),
         "accepted_geometry_count": len(accepted_geometry_paths),
         "stage2_filters_do_not_replenish_stage1": True,
+        "stage1_population": stage1_population,
+        "stage1_population_frozen": True,
+        "stage1_replenishment_allowed": False,
+        "stage1_population_repair_policy": "forbidden_after_stage1_completion",
         "stage2_input_ledger": "stage2_input_ledger.jsonl",
         "stage2_topology_diagnostics": "stage2_topology_diagnostics.jsonl",
         "stage2_kaehler_point_diagnostics": "stage2_kaehler_point_diagnostics.jsonl",
+        "stage2_assignment_pool_rejections": "stage2_assignment_pool_rejections.jsonl",
+        "assignment_pool_rejection_policy": {
+            "sidecar": "all_candidate_pair_records_with_labels_indices_status_reason",
+            "hdf5": "aggregate_rejection_counts_and_reasons_only",
+        },
         "topology_audit_schema_version": "cyaxiverse-stage2-topology-audit-1.0",
         "accepted_stage2_status": "accepted_geometry",
+        "geometry_only_stage2_status": "geometry_only",
         "orientifold_policy": {
             "required_for_visible_sector_policy": (
                 arguments.visible_sector_policy == "intersecting_d7"
@@ -842,15 +1103,228 @@ def main(argv=None):
                     "with kaehler_point_shortfall"
                 ),
             },
+            {
+                "stage": 7,
+                "answer_value": "confirmed",
+                "answer": (
+                    "retain Vol(D_QCD)=40.0 with final post-normalization absolute "
+                    "tolerance 1e-9 and divisor lower-bound tolerance 1e-8"
+                ),
+            },
+            {
+                "stage": 7,
+                "answer_value": "confirmed",
+                "answer": (
+                    "post-normalization validation is strict: finite data, divisor "
+                    "lower bounds, cone membership, and positivity are required; "
+                    "failures are qcd_normalization_failure with no repair"
+                ),
+            },
+            {
+                "stage": 7,
+                "answer_value": "confirmed",
+                "answer": (
+                    "honor explicit qcd_divisor_index; otherwise choose the first "
+                    "eligible candidate in ascending index order after visible-sector "
+                    "compatibility filtering, with allow_m_below_one retained"
+                ),
+            },
+            {
+                "stage": 8,
+                "answer_value": "confirmed",
+                "answer": (
+                    "accept a geometry only after the complete eligible ordered "
+                    "QCD/QED assignment pool is built, validated, and deterministically hashed; "
+                    "empty or incomplete pools are failures"
+                ),
+            },
+            {
+                "stage": 8,
+                "answer_value": "confirmed",
+                "answer": "use the inclusive QED condition Vol(D_QED) <= 127.5",
+            },
+            {
+                "stage": 8,
+                "answer_value": "confirmed",
+                "answer": (
+                    "write every candidate-pair rejection with labels, indices, status, "
+                    "and reason to a sidecar JSONL; retain aggregate rejection counts "
+                    "and reasons in production HDF5"
+                ),
+            },
+            {
+                "stage": 9,
+                "answer_value": "confirmed",
+                "answer": (
+                    "retain Q as h11 x N_instanton with charge vectors as columns, "
+                    "and use q_pair[:, k] = q_direct[:, pair_j[k]] - "
+                    "q_direct[:, pair_i[k]]"
+                ),
+            },
+            {
+                "stage": 9,
+                "answer_value": "confirmed",
+                "answer": (
+                    "defer potential construction and validation to EFT-row "
+                    "generation; geometry HDF5 acceptance requires sufficient "
+                    "references for deterministic reconstruction"
+                ),
+            },
+            {
+                "stage": 9,
+                "answer_value": "confirmed",
+                "answer": (
+                    "store no dense Q, L, K-inverse, volume, or potential arrays "
+                    "in production HDF5 or EFT rows; persist reconstruction inputs, "
+                    "provenance, references, and replay certificates"
+                ),
+            },
+            {
+                "stage": 10,
+                "answer_value": "confirmed",
+                "answer": (
+                    "an existing cyax.h5 may be overwritten only with the explicit "
+                    "allow-overwrite-existing-geometry flag; record the prior artifact "
+                    "identity/hash and overwrite event in provenance"
+                ),
+            },
+            {
+                "stage": 10,
+                "answer_value": "confirmed",
+                "answer": (
+                    "delete readable-but-incomplete temporary HDF5 artifacts after "
+                    "recording the failure in status artifacts"
+                ),
+            },
+            {
+                "stage": 10,
+                "answer_value": "confirmed",
+                "answer": (
+                    "geometry-only runs may finalize an explicitly labelled geometry_only "
+                    "artifact before pool construction; EFT mode requires a complete "
+                    "validated and hashed pool for accepted_geometry; pool_pending is "
+                    "not accepted under the EFT contract"
+                ),
+            },
+            {
+                "stage": 11,
+                "answer_value": "confirmed",
+                "answer": (
+                    "sample ordered assignment-pool entries with replacement; keep row identity "
+                    "as geometry identity plus ordered assignment, collapse duplicate draws, "
+                    "retry row-level failures within the same accepted geometry, and cap draws "
+                    "per geometry at M_g = 10 * k_g"
+                ),
+            },
+            {
+                "stage": 12,
+                "answer_value": "confirmed",
+                "answer": (
+                    "the exact EFT row target is 200000 and the minimum acceptable "
+                    "count is 100000"
+                ),
+            },
+            {
+                "stage": 12,
+                "answer_value": "confirmed",
+                "answer": (
+                    "below-minimum validated capacity emits a clearly labelled "
+                    "diagnostic partial dataset, records model_target_shortfall and "
+                    "complete accounting, and is diagnostically successful but not "
+                    "production-complete"
+                ),
+            },
+            {
+                "stage": 12,
+                "answer_value": "confirmed",
+                "answer": (
+                    "the completed 1400-FRST Stage-1 population is frozen; row "
+                    "shortfalls cannot be repaired by replenishment or population "
+                    "changes, and raw-FRST provenance must be preserved"
+                ),
+            },
         ],
-        "unresolved_scientific_choices": [
-            "Divisor, visible-sector, QCD/QED-pool, potential, and EFT stopping questions remain recorded by the stage-2 command options and require explicit confirmation before production claims.",
-        ],
+        "unresolved_scientific_choices": [],
         "eft": {
             "minimum_rows": arguments.eft_minimum_rows,
+            "minimum_acceptable_rows": arguments.eft_minimum_rows,
             "maximum_rows": arguments.eft_maximum_rows,
+            "target_rows": arguments.eft_maximum_rows,
             "rows_written": len(model_rows),
+            "terminal_status": (
+                model_failure_status
+                if model_error is not None
+                else "model_target_shortfall"
+                if model_reconciliation is not None
+                and model_reconciliation["model_target_shortfall"]
+                else "accepted_model_table"
+                if model_reconciliation is not None
+                else None
+            ),
+            "dataset_status": model_dataset_status,
+            "production_complete": (
+                False
+                if model_reconciliation is None
+                else model_reconciliation["production_complete"]
+            ),
+            "diagnostic_success": (
+                False
+                if model_reconciliation is None
+                else model_reconciliation["diagnostic_success"]
+            ),
+            "model_target_shortfall": (
+                None
+                if model_reconciliation is None
+                else model_reconciliation["model_target_shortfall"]
+            ),
+            "raw_assignment_capacity": (
+                None
+                if allocation is None
+                else allocation.get("raw_assignment_capacity")
+            ),
+            "validated_assignment_capacity": (
+                None
+                if allocation is None
+                else allocation.get("validated_assignment_capacity")
+            ),
+            "capacity_shortfall": (
+                None
+                if model_reconciliation is None
+                else model_reconciliation["capacity_shortfall"]
+            ),
+            "row_shortfall": (
+                None
+                if model_reconciliation is None
+                else model_reconciliation["row_shortfall"]
+            ),
+            "minimum_shortfall": (
+                None
+                if model_reconciliation is None
+                else model_reconciliation["minimum_shortfall"]
+            ),
+            "counts_reconcile": (
+                None
+                if model_reconciliation is None
+                else {
+                    **model_reconciliation,
+                    "raw_assignment_capacity": allocation.get(
+                        "raw_assignment_capacity", 0
+                    ),
+                    "rows_do_not_exceed_validated_capacity": len(model_rows)
+                    <= model_reconciliation["validated_assignment_capacity"],
+                }
+            ),
+            "sampling_policy": {
+                "assignment_sampling": "uniform_with_replacement",
+                "row_identity": "geometry_id_plus_ordered_assignment",
+                "duplicate_policy": "collapse_duplicate_assignment_draws",
+                "row_failure_policy": "retry_same_geometry",
+                "draw_cap_formula": "M_g = 10 * k_g",
+            },
             "allocation": allocation,
+            "draw_accounting": (
+                None if allocation is None else allocation.get("per_geometry_sampling")
+            ),
         },
     }
     atomic_jsonl_dump(Path(arguments.outdir) / "stage2_terminal_statuses.jsonl", stage2_records)
@@ -861,6 +1335,10 @@ def main(argv=None):
     atomic_jsonl_dump(
         Path(arguments.outdir) / "stage2_kaehler_point_diagnostics.jsonl",
         kaehler_point_diagnostics,
+    )
+    atomic_jsonl_dump(
+        Path(arguments.outdir) / "stage2_assignment_pool_rejections.jsonl",
+        assignment_pool_rejection_records,
     )
     if arguments.eft:
         atomic_jsonl_dump(Path(arguments.outdir) / "model_terminal_statuses.jsonl", model_records)

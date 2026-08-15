@@ -35,6 +35,14 @@ python scripts/generate_stage2_eft_reference.py \
   --eft
 ```
 
+The geometry writer is safe by default: an existing `cyax.h5` is an output
+collision. Replacing one requires the explicit
+`--allow-overwrite-existing-geometry` flag (or the identically named API
+argument). The replacement records the prior artifact hash and identity, the
+flag, and the overwrite event in HDF5 construction metadata and run status.
+The final file is published only after the temporary HDF5 handle is closed;
+failed temporary artifacts are deleted after their failure is recorded.
+
 Use `--dry-run` for a deterministic input-ledger probe. Stage-2 filters may
 reduce the number of accepted geometries, but they never replenish or alter the
 stage-1 FRST population.
@@ -48,7 +56,7 @@ The production Stage-2 reference policy is `canonical_qcd`, matching the
 Glimmers-style construction: retain the stretched-cone tip, inspect eligible
 prime divisors in deterministic index order, skip any whose tip volume already
 exceeds 40, and dilate the first remaining eligible choice so its QCD divisor
-volume is exactly 40. The radial factor therefore satisfies `m >= 1` by
+volume is 40.0 within absolute tolerance `1e-9`. The radial factor therefore satisfies `m >= 1` by
 default. The Stage-2 `--allow-m-below-one` flag is an explicit opt-in to the
 unrestricted normalization convention, allowing contraction when the selected
 tip divisor already exceeds 40; the choice is recorded in run and HDF5
@@ -123,7 +131,9 @@ The construction choices are:
 9. If an explicit orientifold is supplied, validate its lattice involution,
    polytope preservation, FRST preservation, induced integral H2 action, and
    invariant Kaehler-cone intersection.
-10. Write atomically to `cyax.h5`; incomplete temporary files are not retained.
+10. Write atomically to `cyax.h5`; incomplete temporary files are deleted after
+    their failure is recorded. Existing files require the explicit
+    `--allow-overwrite-existing-geometry` authorization.
 
 ### Literature basis
 
@@ -283,7 +293,7 @@ sample is needed.
 | `--outdir PATH` | `.` | Root directory for the generated database. |
 | `--cores INT` | all available | Number of worker processes. Use `1` for debugging and deterministic logs. |
 | `--seed INT` | `0` | Base seed. Worker and candidate seeds are derived from it and recorded in construction metadata. |
-| output collision policy | no overwrite | Every run requires a fresh output root; existing geometry or manifest paths are terminal collisions. |
+| output collision policy | no overwrite | Every run requires a fresh output root; existing geometry or manifest paths are terminal collisions unless the explicit `--allow-overwrite-existing-geometry` authorization is supplied. |
 | `--verbose` | off | Print per-worker stages and elapsed times. Recommended for high `h11`. |
 
 For a reproducible rerun, keep the same CYTools version, database endpoint
@@ -370,8 +380,8 @@ polytope.
 
 Stage 1 uses the approved raw-FRST plan
 `50:500,100:500,200:300,491:100`. Stage 2's `--eft` mode requires the approved
-`canonical_qcd`, validated intersecting-D7 toy policy, and strict QED bound
-`Vol(D_QED) < 127.5`. The h11-specific sampler controls belong to stage 1:
+`canonical_qcd`, validated intersecting-D7 toy policy, and inclusive QED bound
+`Vol(D_QED) <= 127.5`. The h11-specific sampler controls belong to stage 1:
 the lower slices use the approved biased fast path, while h11=491 uses native
 `ntfe_fast` with the native controls
 `N=100`, `max_npts=17`, `N_face_triangs=1000`, `as_generator=True`, and the
@@ -385,17 +395,32 @@ silently applying NTFE to the lower slices.
 
 The sampling unit is one accepted geometry plus one ordered `(QCD, QED)` pair
 from that geometry's complete eligible pool. The pool is persisted before row
-sampling and requires distinct divisors, recorded nonzero intersection, exact
-QCD normalization to `Vol(D_QCD)=40.0`, every effective and prime-divisor
-volume at least one, and strict QED volume below `127.5`. For each geometry,
-rows are sampled uniformly without replacement using deterministic row seeds.
-After exactly 1400 geometries, the quota allocator assigns 142 rows to 200
-geometries and 143 rows to 1200 geometries, ordered by stable geometry-ID
-hashes, for exactly 200000 rows. A smaller pool is a model-target shortfall,
-not a reason to duplicate assignments.
+sampling and requires distinct divisors, recorded nonzero intersection, QCD
+normalization to `Vol(D_QCD)=40.0` within absolute tolerance `1e-9`, every effective and prime-divisor
+volume at least one, and inclusive QED volume at most `127.5`. For each geometry,
+rows are sampled uniformly with replacement using deterministic draw seeds.
+The row identity remains the geometry identity plus the ordered assignment;
+therefore a duplicate draw is collapsed rather than emitted as a second row.
+The quota allocator supplies a requested unique-row count ``k_g`` for each
+geometry. A row-construction failure draws again from that same accepted
+geometry, with a deterministic per-geometry cap ``M_g = 10 * k_g``. The
+manifest records the cap, total draws, accepted unique rows, duplicate draws,
+failed draws, and any cap-induced capacity shortfall. Stage 12 computes
+validated capacity from the distinct ordered assignments that produce
+schema-valid rows, then reconciles that capacity with rows written, the exact
+`200000` target, and the `100000` minimum. The target is never met by
+duplicating assignment identities.
+
+When the exact target is reached, the Parquet table is labelled
+`production_complete`. If validated capacity or row generation falls short,
+the table is still written atomically and labelled `diagnostic_partial`; its
+manifest and Parquet metadata retain `model_target_shortfall`, the true
+validated capacity, rows written, target, minimum, and all draw accounting.
+Such a result is diagnostically successful but is not production-complete,
+including when the count is below `100000`.
 
 Each row contains only scalar/index/reference metadata: geometry path/hash,
-stable divisor labels and indices, pool rank/size, assignment hash, row seed,
+stable divisor labels and indices, pool rank/size, assignment hash, draw seed,
 normalization and volume scalars, and schema versions. It contains no dense
 `Q`, `L`, `Kinv`, volume vector, or potential array. The single compressed
 Parquet table path can be set with `--eft-output-path`; `pyarrow` is required.
@@ -413,7 +438,9 @@ Stage 1 writes `frst_candidates/`, `frst_terminal_statuses.jsonl`,
 `charge_factorized_manifest.json`, `polytope_manifest.json`,
 `summary_by_h11_and_status.json`, `storage_estimate.json`, and the geometry
 artifacts; `--eft` additionally writes `model_terminal_statuses.jsonl` and
-`eft_models.parquet`. Terminal categories
+`eft_models.parquet`. The Stage-1 raw-FRST population is frozen at its
+completed `1400`-geometry plan: Stage 2 never replenishes it or changes its
+identities to repair row capacity. Terminal categories
 remain separate for sampler, FRST, topology/cone, Kähler, normalization,
 divisor, QED-pool, numerical, I/O, model, and storage failures. The manifest
 also records the fixed stage boundary, raw identities, proposal/retry/duplicate
@@ -426,9 +453,9 @@ Relevant options:
 | `generate_stage1_raw_frsts.py --h11-plan TEXT` | `50:500,100:500,200:300,491:100` | Approved h11-to-raw-FRST allocation. |
 | `generate_stage2_eft_reference.py --eft` | off | Build compact EFT-reference rows after stage-2 geometry acceptance. |
 | `--eft-minimum-rows INT` | `100000` | Minimum accepted EFT-reference rows. |
-| `--eft-maximum-rows INT` | `200000` | Exact upper row ceiling. |
+| `--eft-maximum-rows INT` | `200000` | Exact EFT row target. |
 | `--eft-output-path PATH` | `OUTDIR/eft_models.parquet` | Explicit table path inside the fresh output root. |
-| `--materialize-dense-potential` | off | Explicit compatibility opt-in for dense geometry-level `Q/L`; never used by EFT rows. |
+| `--materialize-dense-potential` | off | Legacy compatibility flag; schema 1.1 rejects dense materialization in production HDF5. |
 
 To balance the sample across polytopes, use `--frsts-per-polytope`. For
 example, the following requests ten favorable polytopes and ten accepted FRSTs
@@ -489,13 +516,12 @@ sampler controls, FRST checks, triangulation hash, timing, and (when requested)
 CY Hodge/smoothness checks. It is a performance/validity probe, not an HDF5
 production run or fairness demonstration.
 
-Schema 1.1 stores the direct charge matrix once per geometry and represents
-pairwise terms with `pair_i`, `pair_j`, and the deterministic convention
+Schema 1.1 stores geometry references and represents pairwise terms with
+`pair_i`, `pair_j`, and the deterministic convention
 `Q_pair[:,k] = Q_direct[:,pair_j[k]] - Q_direct[:,pair_i[k]]`. Coefficient and
-geometry-reference `L` metadata are stored beside those indices. Dense `Q/L`
-materialization is absent by default and is available only through the explicit
-`--materialize-dense-potential` compatibility option; it is never repeated in
-EFT rows.
+geometry-reference `L` metadata are reconstructed during EFT-row generation.
+Dense `Q/L` materialization is rejected for production HDF5 and is never
+repeated in EFT rows.
 
 For a single full geometry artifact, retain the manifest and sampler controls,
 start with one worker and a fresh output root, and let the existing physical
@@ -622,12 +648,23 @@ different dependency path, it is a performance warning rather than a failed
 geometry; check the selected solver and runtime before changing acceptance
 parameters.
 
+The divisor-volume contract uses lower bounds of `1.0` by default. The named
+divisor lower-bound tolerance is `1e-8`; the QCD target tolerance is `1e-9`.
+Both are recorded in
+`construction_metadata_json` and `divisor_volume_evidence`; neither is used to
+clip, substitute, or rescale a failed volume vector. The evidence group preserves the
+prime-divisor labels and indices, effective-cone rays and indices, basis order,
+and final/pre-normalization volume vectors. Adaptive candidates must satisfy
+the lower bounds before normalization; the final normalized point is checked
+again after the radial rescaling. Any failed final check is recorded as
+`qcd_normalization_failure`.
+
 With `--moduli-policy adaptive`, candidate acceptance requires:
 
 - a valid FRST and smooth generic CY hypersurface;
 - finite topology and cone data;
 - a positive physical CY volume and positive curve volumes;
-- positive effective-divisor volumes;
+- every effective-cone divisor volume at least `--min-divisor-volume`;
 - every prime toric divisor volume at least `--min-prime-divisor-volume`;
 - at least one prime toric divisor volume in
   `[--qcd-volume-min, --qcd-volume-max]`;
@@ -637,14 +674,14 @@ With `--moduli-policy adaptive`, candidate acceptance requires:
 Rejected candidates are discarded and replaced until the requested count or
 the attempt budget is exhausted.
 
-With `--moduli-policy canonical_qcd`, the same FRST and Kähler cone are used,
+With `--moduli-policy canonical_qcd`, the same FRST and kaehler cone are used,
 but the angular sampling loop is skipped. The eligible prime-divisor candidates
 are inspected in deterministic CYTools order, or restricted to the explicit
 `--qcd-divisor-index` when supplied. Candidates whose tip volume exceeds 40
 are skipped so that the selected radial factor obeys `m >= 1`. The Stage-2
 `--allow-m-below-one` opt-in disables that skip and permits `m < 1`; the final
-Kähler form is then `J = m J_tip`, where `m = sqrt(target / tau_QCD)` for the
-first remaining eligible prime divisor. This gives `tau ∝ m²`, `Kinv ∝ m⁴`,
+kaehler form is then `J = m J_tip`, where `m = sqrt(target / tau_QCD)` for the
+first eligible prime divisor satisfying the pre-normalization checks. This gives `tau ∝ m²`, `Kinv ∝ m⁴`,
 and `Vol(CY) ∝ m³`; the exact assignment and scale are recorded in
 `construction_metadata_json` and `cytools/geometric/standard_model`.
 
@@ -653,7 +690,9 @@ target is not contracted and is skipped in deterministic candidate order. With
 the Stage-2 `--allow-m-below-one` opt-in, that candidate is retained and may
 produce `m < 1`. The final
 prime-divisor, effective-cone, curve-volume, and cone-slack checks are then
-applied. The adaptive potential-control search is not applied in this mode. This is a radial
+applied directly at the final point. No post-selection fallback, clipping,
+hidden rescaling, or substitution is performed; a failed final check is
+`qcd_normalization_failure`. The adaptive potential-control search is not applied in this mode. This is a radial
 normalization of an existing geometry, not a new FRST or a claim that a QCD
 divisor has been constructed from a brane model.
 
@@ -830,11 +869,13 @@ cytools/geometric/
   glsm
   basis, basis_matrix
   prime_toric_divisors
-  prime_divisor_charges
   tip, tip_prefactor
   CY_volume
-  divisor_volumes, prime_divisor_volumes, curve_volumes
-  Kinv
+  divisor_volume_evidence/
+    basis_order
+    prime_divisor_indices, prime_divisor_labels
+    effective_cone_ray_indices, effective_cone_rays
+    volume counts, hashes, minima, and validation attributes
   kappa
   c2
   effective_cone
@@ -863,17 +904,25 @@ cytools/geometric/
     pool_rank, qcd_divisor_index, qed_divisor_index
     qcd/qed stable labels, normalization/volume scalars, assignment_hash
     intersection_evidence_json
-  tip_pre_normalization, divisor/prime/effective/curve volumes_pre_normalization
-  CY_volume_pre_normalization, Kinv_pre_normalization
+    rejection summary attributes (counts/reasons only)
+  tip_pre_normalization, tip_prefactor, CY_volume_pre_normalization
 cytools/potential/
-  factorized/
-    Q_direct, pair_i, pair_j, direct/pair coefficient metadata
-    L_direct, L_pairwise (geometry-reference sign/log-scale metadata)
-  L, Q (only with --materialize-dense-potential)
+  reconstruction attributes only: charge orientation, pair convention,
+  source counts/hashes, replay tolerances, and source dataset names
 construction_metadata/
   canonical_lattice_points
   face_restriction_dim2
 ```
+
+Geometry-artifact acceptance is explicit in both the HDF5 metadata and stage-2
+status records:
+
+- `geometry_only` permits a geometry-only artifact before assignment-pool
+  construction.
+- `accepted_geometry` is reserved for EFT-mode artifacts with a complete,
+  validated, deterministically hashed ordered assignment pool.
+- `pool_pending` records an EFT attempt that has not reached that pool gate; it
+  is not an accepted EFT artifact and does not produce a final `cyax.h5`.
 
 Important conventions:
 
@@ -883,18 +932,18 @@ Important conventions:
 - `basis_matrix` is `h11 × n_points`; a prime-divisor charge is a selected
   lattice-point column, while `prime_divisor_charges` stores those charges as
   one row per prime divisor.
-- `L_direct`/`L_pairwise` retain the CYAxiverse sign/mantissa and base-10
-  exponent representation for the immutable geometry reference. `Q_direct` is
-  stored once as `h11 × N_direct`; pairwise charges are reconstructed as
-  `Q_direct[:, pair_j] - Q_direct[:, pair_i]`.
-- Dense `Q`/`L` is absent by default and only appears with the explicit
-  `--materialize-dense-potential` compatibility option. EFT rows never contain
-  these arrays.
-- The current Julia `read.potential` API still expects dense
-  `cytools/potential/Q` and `L`. Until a separately reviewed reader adapter
-  reconstructs the factorized representation in bounded chunks, Julia
-  consumers that need that legacy API must use
-  `--materialize-dense-potential`; the schema 1.1 EFT table remains compact.
+- `Q` is reconstructed as `h11 × N_instanton`, with charge vectors as columns;
+  pairwise charges use `Q_direct[:, pair_j] - Q_direct[:, pair_i]`. The HDF5
+  artifact stores the source datasets, indices, conventions, hashes, and replay
+  tolerances, not the dense charge or coefficient arrays.
+- Potential construction is deferred to EFT-row generation. A bounded
+  reconstruction uses `kappa`, `basis_matrix`, `prime_toric_divisors`,
+  `effective_cone`, and the accepted `tip`, then validates the stored source
+  hashes and conventions.
+- Production schema 1.1 stores no dense `Q`, `L`, `Kinv`, volume, or potential
+  arrays in HDF5 or EFT rows. The legacy `--materialize-dense-potential` flag is
+  retained only for explicit compatibility detection and is rejected by the
+  production writer.
 - The potential charge basis uses unique effective-cone rays. Exact duplicate
   rows returned by CYTools are removed before the stretched-cone control,
   pairwise-term construction, and HDF5 write. The raw GLSM dataset remains
@@ -906,14 +955,15 @@ Important conventions:
   `prime_toric_divisors()` and is the vector used for the QCD filter. The
   corresponding `prime_toric_divisors` index array is exported explicitly;
   the recorded QCD divisor index is zero-based.
-- `prime_divisor_charges` has one divisor-basis charge row per entry of
-  `prime_toric_divisors`. Visible-sector divisor indices and image indices are
-  zero-based in HDF5. `qed_instanton_index` is zero-based in the logical
-  factorized potential stream; a dense `Q`/`L` column exists only with the
-  explicit compatibility option.
+- Visible-sector divisor indices and image indices are zero-based in HDF5.
+  `qed_instanton_index` is zero-based in the logical reconstructed potential
+  stream; its source charge is recovered from the persisted geometry references.
 - `assignment_pool/` is the complete eligible ordered QCD-QED pool, not one
   permanent QED choice. Its ranks and hashes are the source for deterministic
-  EFT row sampling.
+  EFT row sampling. The QED volume filter is inclusive: `Vol(D_QED) <= 127.5`.
+  Detailed candidate-pair rejection records are written to the stage-2
+  `stage2_assignment_pool_rejections.jsonl` sidecar; HDF5 stores aggregate
+  rejection counts and reasons only.
 - `standard_model/divisor_indices` contains the three zero-based prime-divisor
   indices selected by `canonical_qcd`; all three pairs are edges of the
   triangulated two-face intersection graph. `standard_model/qcd_divisor_index`

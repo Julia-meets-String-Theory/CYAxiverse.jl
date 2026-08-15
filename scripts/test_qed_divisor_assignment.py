@@ -1,7 +1,9 @@
 """Focused regression tests for the specialist toy QED assignment contract."""
 
 import unittest
+import tempfile
 
+import h5py
 import numpy as np
 
 from qed_divisor_assignment import (
@@ -9,6 +11,7 @@ from qed_divisor_assignment import (
     classify_qed_leading_status,
     prime_divisor_intersection_graph,
     select_qed_divisor,
+    write_visible_sector_hdf5,
 )
 
 
@@ -65,6 +68,11 @@ class QEDAssignmentTests(unittest.TestCase):
         self.assertEqual(result["orientifold_h11_plus"], 1)
         self.assertEqual(result["orientifold_h11_minus"], 1)
 
+    def test_fan_invariant_orientifold_is_sufficient_without_kaehler_subspace_check(self):
+        orientifold = dict(self.orientifold, status="fan_invariant")
+        result = self.select(orientifold=orientifold)
+        self.assertEqual(result["candidate_pool_indices"], [1, 2])
+
     def test_potential_source_has_exact_charge_match(self):
         status = classify_qed_leading_status(
             np.asarray([[1, 0, 1], [0, 1, 1]]),
@@ -73,6 +81,25 @@ class QEDAssignmentTests(unittest.TestCase):
         )
         self.assertIn(status["status"], {"leading", "dependent"})
         self.assertEqual(status["method"], "exact_rational_incremental_rank")
+
+    def test_visible_sector_hdf5_persists_divisor_labels(self):
+        assignment = self.select()
+        with tempfile.NamedTemporaryFile(suffix=".h5") as temporary:
+            with h5py.File(temporary.name, "w") as handle:
+                write_visible_sector_hdf5(handle.create_group("visible"), assignment)
+            with h5py.File(temporary.name, "r") as handle:
+                visible = handle["visible"]
+                np.testing.assert_array_equal(
+                    visible["qcd_divisor_label"][()], self.stable[0]
+                )
+                np.testing.assert_array_equal(
+                    visible["qed_divisor_label"][()],
+                    self.stable[assignment["qed_divisor_index"]],
+                )
+                np.testing.assert_array_equal(
+                    visible["candidate_pool_labels"][()],
+                    np.asarray([self.stable[index] for index in [1, 2]]),
+                )
 
 
 if __name__ == "__main__":

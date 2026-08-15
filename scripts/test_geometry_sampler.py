@@ -119,6 +119,25 @@ def sampler_candidates(poly, scheme):
 
 
 class TriangulationCandidateTests(unittest.TestCase):
+    def test_stage10_geometry_generator_exposes_explicit_overwrite_flag(self):
+        # The production parser is constructed inside main; exercise its public
+        # CLI help instead of importing or duplicating its argument table.
+        result = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "generate_geometric_data_multitriangulation.py",
+                ),
+                "--help",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--allow-overwrite-existing-geometry", result.stdout)
+
     def test_h491_generator_cli_keeps_sampler_and_geometry_defaults(self):
         args = frst_generator.build_parser().parse_args([])
         self.assertEqual(args.h11, 491)
@@ -456,7 +475,9 @@ class TriangulationCandidateTests(unittest.TestCase):
         np.testing.assert_array_equal(reconstructed, expected)
 
         normalized = normalize_qcd_assignment([2.0, 2.0], [1.0, 1.0], 0)
-        self.assertEqual(normalized["qcd_volume"], 40.0)
+        self.assertTrue(
+            np.isclose(normalized["qcd_volume"], 40.0, rtol=0.0, atol=1e-9)
+        )
         self.assertGreaterEqual(normalized["minimum_prime_volume"], 1.0)
         pool = enumerate_assignment_pool(
             prime_labels=[(0, 0, 0, 0), (1, 0, 0, 0), (2, 0, 0, 0)],
@@ -468,8 +489,13 @@ class TriangulationCandidateTests(unittest.TestCase):
             invariant_mask=np.asarray([True, True, True]),
         )
         self.assertTrue(pool)
-        self.assertTrue(all(item["qcd_volume"] == 40.0 for item in pool))
-        self.assertTrue(all(item["qed_volume"] < 127.5 for item in pool))
+        self.assertTrue(
+            all(
+                np.isclose(item["qcd_volume"], 40.0, rtol=0.0, atol=1e-9)
+                for item in pool
+            )
+        )
+        self.assertTrue(all(item["qed_volume"] <= 127.5 for item in pool))
         self.assertTrue(all(item["minimum_prime_volume"] >= 1.0 for item in pool))
         self.assertTrue(all(item["minimum_effective_volume"] >= 1.0 for item in pool))
         self.assertTrue(all(item["qcd_divisor_index"] != item["qed_divisor_index"] for item in pool))
