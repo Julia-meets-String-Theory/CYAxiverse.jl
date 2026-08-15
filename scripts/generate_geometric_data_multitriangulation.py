@@ -1457,6 +1457,7 @@ def generate_and_save_geometry(
     materialize_dense_potential=False,
     eft_mode=False,
     raw_frst_metadata=None,
+    topology_override=None,
     topology_audit=None,
     kaehler_point_seed=None,
     kaehler_point_diagnostics=None,
@@ -1556,10 +1557,33 @@ def generate_and_save_geometry(
         topology_audit["smooth_hypersurface"] = bool(cy.is_smooth())
     if not bool(cy.is_smooth()):
         raise RuntimeError("CYTools reports that the generic CY hypersurface is not smooth.")
-    report("computing Hodge, intersection, and divisor-basis data")
-    topology = extract_topology(
-        cy, triangulation, export_kahler_rays=export_kahler_rays
-    )
+    if topology_override is None:
+        report("computing Hodge, intersection, and divisor-basis data")
+        topology = extract_topology(
+            cy, triangulation, export_kahler_rays=export_kahler_rays
+        )
+    else:
+        report("loading validated topology cache")
+        topology = dict(topology_override)
+        topology.setdefault("kahler_cone_rays", None)
+        missing = [
+            name
+            for name in (
+                "h11",
+                "h21",
+                "basis",
+                "basis_matrix",
+                "prime_toric_divisors",
+                "kappa",
+                "c2",
+                "mori_cone",
+                "kahler_cone_hyperplanes",
+                "face_restriction_dim2",
+            )
+            if name not in topology
+        ]
+        if missing:
+            raise RuntimeError(f"validated topology cache is missing fields: {missing}")
     if topology_audit is not None:
         topology_audit.update(
             {

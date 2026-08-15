@@ -15,6 +15,7 @@ import os
 import platform
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -22,10 +23,13 @@ import numpy as np
 import generate_geometric_data_multitriangulation as generator
 from glimmers_raw_frst import (
     RawFRSTError,
+    TOPOLOGY_CACHE_CONVENTIONS,
+    TOPOLOGY_CACHE_SCHEMA_VERSION,
     build_input_ledger,
     compute_triangulation_hash,
     count_by_h11,
     read_raw_frst_artifact,
+    validate_topology_cache,
 )
 from glimmers_schema11 import (
     MAXIMUM_EFT_ROWS,
@@ -34,6 +38,7 @@ from glimmers_schema11 import (
     QED_VOLUME_MAX,
     SCHEMA_VERSION as SCHEMA_1_1_VERSION,
     TARGET_GEOMETRY_COUNT,
+    append_jsonl_record,
     atomic_json_dump,
     atomic_jsonl_dump,
     ensure_fresh_output_root,
@@ -134,6 +139,8 @@ def build_topology_audit_record(raw_frst_record, backend):
         "raw_frst_path": raw_frst_record.get("raw_frst_path"),
         "backend": backend,
         "cytools_version": getattr(generator.cytools, "version", None),
+        "topology_cache_status": "not_run",
+        "topology_cache_reason": None,
         "ledger_full_triangulation_hash": raw_frst_record.get(
             "full_triangulation_hash"
         ),
@@ -153,7 +160,9 @@ def orientifold_audit_record(orientifold_config):
     }
 
 
-def reconstruct_raw_frst(raw_frst_record, backend, topology_audit):
+def reconstruct_raw_frst(
+    raw_frst_record, backend, topology_audit, *, export_kahler_rays=False
+):
     """Reconstruct one CYTools polytope and triangulation from persisted arrays."""
     persisted = read_raw_frst_artifact(raw_frst_record["raw_frst_path"])
     topology_audit.update(
@@ -240,6 +249,35 @@ def reconstruct_raw_frst(raw_frst_record, backend, topology_audit):
             },
         )
     topology_audit["reconstruction_identity_status"] = "passed"
+    expected_cache_identity = {
+        "schema_version": TOPOLOGY_CACHE_SCHEMA_VERSION,
+        "h11": int(persisted["h11"]),
+        "geometry_id": persisted.get("geometry_id"),
+        "raw_geometry_id": persisted.get("geometry_id"),
+        "polytope_id": persisted.get("polytope_id"),
+        "full_triangulation_hash": persisted.get("full_triangulation_hash"),
+        "cytools_version": getattr(generator.cytools, "version", None),
+        "backend": backend,
+        "conventions": TOPOLOGY_CACHE_CONVENTIONS,
+        "kahler_rays_exported": bool(export_kahler_rays),
+    }
+    cache_info = persisted.get("topology_cache")
+    if cache_info is None:
+        topology = None
+        cache_reason = persisted.get(
+            "topology_cache_reason", "raw FRST has no topology cache group"
+        )
+    else:
+        topology, cache_reason = validate_topology_cache(
+            cache_info, expected_cache_identity
+        )
+    if topology is None:
+        topology_audit["topology_cache_status"] = "fallback_recompute"
+        topology_audit["topology_cache_reason"] = cache_reason
+    else:
+        topology_audit["topology_cache_status"] = "hit"
+        topology_audit["topology_cache_reason"] = cache_reason
+        persisted["topology_override"] = topology
     return persisted, polytope, triangulation
 
 
@@ -294,10 +332,65 @@ def classify_stage2_failure(error):
     }.get(status, "numerical_geometry_failure")
 
 
+def _stage2_identity(record):
+    """Return the stable raw-FRST identity fields used in progress records."""
+    return {
+        key: record.get(key)
+        for key in (
+            "h11",
+            "polytope_id",
+            "polytope_index",
+            "candidate_index",
+            "geometry_id",
+            "full_triangulation_hash",
+            "raw_frst_path",
+        )
+    }
+
+
 def process_raw_frst_artifact(
-    arguments, raw_frst_record, orientifold_config, output_root
+    arguments,
+    raw_frst_record,
+    orientifold_config,
+    output_root,
+    progress_callback=None,
 ):
     """Process one retained raw FRST and return terminal and audit records."""
+    candidate_started = time.monotonic()
+    stage_timings = []
+    active_stage = None
+    active_stage_started = None
+
+    def start_stage(stage):
+        """Record a stage start before entering a potentially slow operation."""
+        nonlocal active_stage, active_stage_started
+        finish_stage()
+        active_stage = str(stage)
+        active_stage_started = time.monotonic()
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    **_stage2_identity(raw_frst_record),
+                    "event": "candidate_stage_started",
+                    "stage": active_stage,
+                    "elapsed_seconds": time.monotonic() - candidate_started,
+                }
+            )
+
+    def finish_stage():
+        """Close the current stage interval when the next stage begins."""
+        nonlocal active_stage, active_stage_started
+        if active_stage is None:
+            return
+        stage_timings.append(
+            {
+                "stage": active_stage,
+                "elapsed_seconds": time.monotonic() - active_stage_started,
+            }
+        )
+        active_stage = None
+        active_stage_started = None
+
     topology_audit = build_topology_audit_record(raw_frst_record, arguments.backend)
     point_diagnostics = []
     assignment_pool_rejection_records = []
@@ -351,10 +444,17 @@ def process_raw_frst_artifact(
     if existing_artifact["exists"]:
         terminal_record["existing_artifact_audit"] = existing_artifact
     try:
+        start_stage("reconstruct_raw_frst")
         persisted, polytope, triangulation = reconstruct_raw_frst(
-            raw_frst_record, arguments.backend, topology_audit
+            raw_frst_record,
+            arguments.backend,
+            topology_audit,
+            export_kahler_rays=arguments.export_kaehler_rays,
         )
+        finish_stage()
+        start_stage("construct_calabi_yau")
         calabi_yau = triangulation.get_cy()
+        finish_stage()
         sampling_metadata = dict(
             persisted.get("sampler_metadata")
             or persisted.get("sampling_metadata")
@@ -389,6 +489,7 @@ def process_raw_frst_artifact(
         )
 
         def report(message):
+            start_stage(message)
             if arguments.verbose:
                 print(
                     f"{persisted['geometry_id']}: {message}", flush=True
@@ -427,6 +528,7 @@ def process_raw_frst_artifact(
             eft_mode=arguments.eft,
             raw_frst_metadata=persisted,
             topology_audit=topology_audit,
+            topology_override=persisted.get("topology_override"),
             kaehler_point_seed=kaehler_point_seed,
             kaehler_point_diagnostics=point_diagnostics,
             assignment_pool_rejection_records=assignment_pool_rejection_records,
@@ -435,6 +537,7 @@ def process_raw_frst_artifact(
                 arguments.allow_overwrite_existing_geometry
             ),
         )
+        finish_stage()
         terminal_record.update(
             {
                 "terminal_status": (
@@ -457,6 +560,7 @@ def process_raw_frst_artifact(
             }
         )
     except Exception as error:
+        finish_stage()
         terminal_status = classify_stage2_failure(error)
         topology_audit.update(
             {
@@ -497,6 +601,7 @@ def process_raw_frst_artifact(
         topology_audit["artifact_status"] = terminal_record["artifact_status"]
         topology_audit["artifact_written"] = terminal_record["artifact_written"]
     else:
+        finish_stage()
         topology_audit.update(
             {
                 "audit_status": "complete",
@@ -511,6 +616,10 @@ def process_raw_frst_artifact(
                 "diagnostic_count": len(point_diagnostics),
             }
         )
+    terminal_record["stage2_elapsed_seconds"] = time.monotonic() - candidate_started
+    terminal_record["stage_timings"] = stage_timings
+    topology_audit["stage2_elapsed_seconds"] = terminal_record["stage2_elapsed_seconds"]
+    topology_audit["stage_timings"] = stage_timings
     topology_audit["assignment_pool_rejection_records"] = assignment_pool_rejection_records
     return terminal_record, topology_audit
 
@@ -629,6 +738,34 @@ def main(argv=None):
     orientifold_config = generator.load_orientifold(arguments.orientifold_file)
     input_ledger = build_input_ledger(arguments.stage1_root)
     atomic_jsonl_dump(Path(arguments.outdir) / "stage2_input_ledger.jsonl", input_ledger)
+    progress_path = Path(arguments.outdir) / "stage2_progress.jsonl"
+    partial_terminal_path = Path(arguments.outdir) / "stage2_terminal_statuses.partial.jsonl"
+    partial_topology_path = Path(arguments.outdir) / "stage2_topology_diagnostics.partial.jsonl"
+    partial_kaehler_path = Path(arguments.outdir) / "stage2_kaehler_point_diagnostics.partial.jsonl"
+    partial_rejection_path = Path(arguments.outdir) / "stage2_assignment_pool_rejections.partial.jsonl"
+
+    def record_progress(event):
+        """Append one flushed progress event for interruption-safe diagnostics."""
+        append_jsonl_record(
+            progress_path,
+            {
+                "progress_schema_version": "cyaxiverse-stage2-progress-1.0",
+                "timestamp_unix_ns": time.time_ns(),
+                **event,
+            },
+        )
+
+    record_progress(
+        {
+            "event": "run_started",
+            "raw_input_count": len(input_ledger),
+            "retained_raw_input_count": sum(
+                record.get("stage2_input_status") == "retained_raw_frst"
+                for record in input_ledger
+            ),
+            "command_line": sys.argv if argv is None else [sys.argv[0], *argv],
+        }
+    )
     stage1_manifest = read_stage1_manifest(arguments.stage1_root)
     stage1_polytope_manifest = read_stage1_polytope_manifest(arguments.stage1_root)
     topology_diagnostics = []
@@ -649,6 +786,7 @@ def main(argv=None):
         if record.get("stage2_input_status") != "retained_raw_frst"
     ]
     for input_record in stage2_records:
+        append_jsonl_record(partial_terminal_path, input_record)
         topology_diagnostics.append(
             {
                 **build_topology_audit_record(input_record, arguments.backend),
@@ -679,9 +817,30 @@ def main(argv=None):
             }
         )
     if not arguments.dry_run:
-        for raw_frst_record in retained_inputs:
+        completed_count = len(stage2_records)
+        for retained_input_sequence, raw_frst_record in enumerate(
+            retained_inputs, start=1
+        ):
+            record_progress(
+                {
+                    "event": "candidate_started",
+                    "retained_input_sequence": retained_input_sequence,
+                    "completed_count": completed_count,
+                    **_stage2_identity(raw_frst_record),
+                }
+            )
             terminal_record, topology_audit = process_raw_frst_artifact(
-                arguments, raw_frst_record, orientifold_config, arguments.outdir
+                arguments,
+                raw_frst_record,
+                orientifold_config,
+                arguments.outdir,
+                progress_callback=record_progress,
+            )
+            terminal_record.update(
+                {
+                    "retained_input_sequence": retained_input_sequence,
+                    "completed_count": completed_count + 1,
+                }
             )
             stage2_records.append(terminal_record)
             assignment_pool_rejection_records.extend(
@@ -704,6 +863,44 @@ def main(argv=None):
                     }
                     | dict(point_record)
                 )
+            append_jsonl_record(partial_terminal_path, terminal_record)
+            append_jsonl_record(partial_topology_path, topology_audit)
+            for point_record in topology_audit.get(
+                "kaehler_point_scan", {}
+            ).get("diagnostics", ()):
+                append_jsonl_record(
+                    partial_kaehler_path,
+                    {
+                        key: raw_frst_record.get(key)
+                        for key in (
+                            "h11",
+                            "polytope_id",
+                            "raw_frst_path",
+                            "full_triangulation_hash",
+                            "geometry_id",
+                        )
+                    }
+                    | dict(point_record),
+                )
+            for rejection_record in topology_audit.get(
+                "assignment_pool_rejection_records", ()
+            ):
+                append_jsonl_record(partial_rejection_path, rejection_record)
+            completed_count += 1
+            record_progress(
+                {
+                    "event": "candidate_finished",
+                    "retained_input_sequence": retained_input_sequence,
+                    "completed_count": completed_count,
+                    "terminal_status": terminal_record.get("terminal_status"),
+                    "terminal_reason": terminal_record.get("terminal_reason"),
+                    "stage2_elapsed_seconds": terminal_record.get(
+                        "stage2_elapsed_seconds"
+                    ),
+                    "stage_timings": terminal_record.get("stage_timings", ()),
+                    **_stage2_identity(raw_frst_record),
+                }
+            )
     else:
         for raw_frst_record in retained_inputs:
             topology_diagnostics.append(
@@ -989,6 +1186,19 @@ def main(argv=None):
         "stage1_replenishment_allowed": False,
         "stage1_population_repair_policy": "forbidden_after_stage1_completion",
         "stage2_input_ledger": "stage2_input_ledger.jsonl",
+        "stage2_progress": "stage2_progress.jsonl",
+        "stage2_progress_schema_version": "cyaxiverse-stage2-progress-1.0",
+        "stage2_progress_flush_policy": (
+            "append and fsync run, candidate, stage-start, and candidate-finish events"
+        ),
+        "stage2_partial_terminal_statuses": "stage2_terminal_statuses.partial.jsonl",
+        "stage2_partial_topology_diagnostics": "stage2_topology_diagnostics.partial.jsonl",
+        "stage2_partial_kaehler_point_diagnostics": (
+            "stage2_kaehler_point_diagnostics.partial.jsonl"
+        ),
+        "stage2_partial_assignment_pool_rejections": (
+            "stage2_assignment_pool_rejections.partial.jsonl"
+        ),
         "stage2_topology_diagnostics": "stage2_topology_diagnostics.jsonl",
         "stage2_kaehler_point_diagnostics": "stage2_kaehler_point_diagnostics.jsonl",
         "stage2_assignment_pool_rejections": "stage2_assignment_pool_rejections.jsonl",
@@ -1363,6 +1573,15 @@ def main(argv=None):
     )
     atomic_json_dump(Path(arguments.outdir) / "storage_estimate.json", storage_estimate)
     atomic_json_dump(Path(arguments.outdir) / "run_manifest.json", run_manifest)
+    record_progress(
+        {
+            "event": "run_finalized",
+            "status": run_manifest["status"],
+            "completed_count": len(stage2_records),
+            "accepted_geometry_count": len(accepted_geometry_paths),
+            "eft_row_count": len(model_rows),
+        }
+    )
     if arguments.eft and model_error is not None:
         raise RuntimeError(str(model_error)) from model_error
     print(

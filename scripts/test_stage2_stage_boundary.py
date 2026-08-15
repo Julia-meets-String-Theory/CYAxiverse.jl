@@ -667,6 +667,7 @@ class Stage2BoundaryTests(unittest.TestCase):
                 ]
             )
             self.assertTrue((stage2_root / "stage2_input_ledger.jsonl").is_file())
+            self.assertTrue((stage2_root / "stage2_progress.jsonl").is_file())
             self.assertTrue((stage2_root / "run_manifest.json").is_file())
             self.assertTrue((stage2_root / "charge_factorized_manifest.json").is_file())
             self.assertTrue((stage2_root / "polytope_manifest.json").is_file())
@@ -690,6 +691,14 @@ class Stage2BoundaryTests(unittest.TestCase):
                 "record_only_not_enforced",
             )
             self.assertFalse(list(stage2_root.glob("h11_*/np_*/cy_*/cyax.h5")))
+            progress_events = [
+                json.loads(line)
+                for line in (stage2_root / "stage2_progress.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+            self.assertEqual(progress_events[0]["event"], "run_started")
+            self.assertEqual(progress_events[-1]["event"], "run_finalized")
             manifest = json.loads((stage2_root / "run_manifest.json").read_text())
             self.assertEqual(manifest["stage1_root"], str(stage1_root.resolve()))
             self.assertTrue(manifest["stage2_filters_do_not_replenish_stage1"])
@@ -781,7 +790,21 @@ class Stage2BoundaryTests(unittest.TestCase):
             stage2_root = Path(temporary) / "stage2"
             raw_record = build_input_ledger(stage1_root)[0]
 
-            def fake_process(arguments, record, orientifold_config, output_root):
+            def fake_process(
+                arguments,
+                record,
+                orientifold_config,
+                output_root,
+                progress_callback=None,
+            ):
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "candidate_stage_started",
+                            "stage": "fake_stage",
+                            "geometry_id": record["geometry_id"],
+                        }
+                    )
                 topology_audit = stage2_entrypoint.build_topology_audit_record(
                     record, arguments.backend
                 )
@@ -873,7 +896,21 @@ class Stage2BoundaryTests(unittest.TestCase):
             stage2_root = Path(temporary) / "stage2"
             raw_record = build_input_ledger(stage1_root)[0]
 
-            def fake_process(arguments, record, orientifold_config, output_root):
+            def fake_process(
+                arguments,
+                record,
+                orientifold_config,
+                output_root,
+                progress_callback=None,
+            ):
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "candidate_stage_started",
+                            "stage": "fake_stage",
+                            "geometry_id": record["geometry_id"],
+                        }
+                    )
                 topology_audit = stage2_entrypoint.build_topology_audit_record(
                     record, arguments.backend
                 )
@@ -974,6 +1011,22 @@ class Stage2BoundaryTests(unittest.TestCase):
             self.assertEqual(rejection["qed_index"], 1)
             self.assertEqual(rejection["terminal_status"], "qed_volume_rejection")
             self.assertEqual(rejection["terminal_reason"], "boundary test rejection")
+            progress_events = [
+                json.loads(line)
+                for line in (stage2_root / "stage2_progress.jsonl")
+                .read_text()
+                .splitlines()
+            ]
+            self.assertEqual(
+                [event["event"] for event in progress_events],
+                [
+                    "run_started",
+                    "candidate_started",
+                    "candidate_stage_started",
+                    "candidate_finished",
+                    "run_finalized",
+                ],
+            )
 
 
 if __name__ == "__main__":

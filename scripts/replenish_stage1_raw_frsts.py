@@ -84,7 +84,14 @@ def _replace_json_dump(path: Path, payload) -> None:
 
 
 def _canonical_record(record):
-    return {key: value for key, value in record.items() if key != "arrays"}
+    # ``read_raw_frst_artifact`` also exposes the optional decoded topology
+    # cache.  It contains NumPy arrays and is deliberately not part of the
+    # JSON ledger/manifest representation.
+    return {
+        key: value
+        for key, value in record.items()
+        if key not in {"arrays", "topology_cache"}
+    }
 
 
 def recount_raw_population(stage1_root: Path):
@@ -94,7 +101,7 @@ def recount_raw_population(stage1_root: Path):
     by_h11 = Counter()
     by_polytope = defaultdict(list)
     for path in discover_raw_frst_paths(stage1_root):
-        metadata = read_raw_frst_artifact(path)
+        metadata = read_raw_frst_artifact(path, include_topology_cache=False)
         identity = (metadata["polytope_id"], metadata["full_triangulation_hash"])
         if identity in identities:
             raise RuntimeError(
@@ -454,7 +461,9 @@ def rebuild_manifests(stage1_root: Path, records, identities, before_counts, rep
     for key in sorted(by_polytope):
         h11, polytope_index = key
         group = sorted(by_polytope[key], key=lambda record: str(record["raw_frst_path"]))
-        first = read_raw_frst_artifact(group[0]["raw_frst_path"])
+        first = read_raw_frst_artifact(
+            group[0]["raw_frst_path"], include_topology_cache=False
+        )
         arrays = first["arrays"]
         source = first.get("polytope_source") or first.get("source")
         polytope_entries.append(
@@ -518,7 +527,10 @@ def rebuild_manifests(stage1_root: Path, records, identities, before_counts, rep
         "retained_raw_frst_count": len(records),
         "retained_raw_frst_count_by_h11": {str(k): by_h11[k] for k in sorted(by_h11)},
         "duplicate_full_triangulation_count": 0,
-        "stage_boundary": "stage 1 writes raw FRSTs only; stage 2 is a separate run",
+        "stage_boundary": (
+            "stage 1 writes raw FRSTs plus an optional stage-2-independent "
+            "topology cache; stage 2 is a separate run"
+        ),
         "stage2_started": False,
         "replenishment": {
             "mechanism": "tested alternate favorable polytope selection",

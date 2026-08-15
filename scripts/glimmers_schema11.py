@@ -987,6 +987,20 @@ def atomic_jsonl_dump(path, records):
     _atomic_bytes(path, encoded)
 
 
+def append_jsonl_record(path, record):
+    """Append one serializable JSONL record and flush it to stable storage."""
+    path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    encoded = (
+        json.dumps(_jsonable(record), sort_keys=True, allow_nan=False).encode("utf-8")
+        + b"\n"
+    )
+    with open(path, "ab") as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
 def ensure_fresh_output_root(path):
     """Create an output root only when it is absent or genuinely empty."""
     path = os.path.abspath(path)

@@ -1,8 +1,9 @@
 """Read and write the stage-1 raw-FRST interchange contract.
 
 Keep this module independent of CYTools.  Stage 1 writes lattice data and
-triangulation labels; stage 2 is responsible for reconstructing CYTools
-objects and applying all geometry and EFT cuts.
+triangulation labels, and may additionally persist a validated,
+stage-2-independent topology cache.  Stage 2 remains responsible for
+reconstructing CYTools objects and applying all geometry and EFT cuts.
 """
 
 from __future__ import annotations
@@ -20,6 +21,29 @@ import numpy as np
 
 RAW_FRST_SCHEMA_VERSION = "cyaxiverse-raw-frst-1.0"
 LEGACY_RAW_FRST_SCHEMA_VERSION = "cyaxiverse-raw-frst-1.1"
+TOPOLOGY_CACHE_SCHEMA_VERSION = "cyaxiverse-topology-cache-1.0"
+TOPOLOGY_CACHE_GROUP = "topology_cache"
+TOPOLOGY_CACHE_FIELDS = (
+    "h11",
+    "h21",
+    "basis",
+    "basis_matrix",
+    "prime_toric_divisors",
+    "kappa",
+    "c2",
+    "mori_cone",
+    "kahler_cone_hyperplanes",
+    "face_restriction_dim2",
+)
+TOPOLOGY_CACHE_CONVENTIONS = {
+    "basis": "CYTools divisor_basis(include_origin=True); all numerical vectors in basis",
+    "basis_matrix": "CSR rows are the CYTools divisor_basis(as_matrix=True) rows",
+    "kappa": "CYTools CalabiYau.intersection_numbers(in_basis=True, format='coo'), zero-based indices",
+    "prime_toric_divisors": "CYTools prime_toric_divisors labels, zero-based lattice-point labels",
+    "mori_cone": "CYTools toric_mori_cone(in_basis=True).rays(), rows are rays",
+    "kahler_cone_hyperplanes": "CYTools toric_kahler_cone().hyperplanes(), rows are hyperplanes",
+    "face_restriction_dim2": "CYTools triangulation.simplices(on_faces_dim=2), zero-based point labels",
+}
 RAW_FRST_ARTIFACT_STATUS = "retained"
 RAW_FRST_TERMINAL_STATUSES = (
     "retained_raw_frst",
@@ -111,6 +135,251 @@ def _atomic_hdf5_write(path, write_payload):
             temporary.unlink()
 
 
+def _compressed_dataset(group, name, data):
+    """Write one cache dataset with lossless compression and shuffling."""
+    return group.create_dataset(
+        name,
+        data=np.asarray(data),
+        compression="gzip",
+        compression_opts=9,
+        shuffle=True,
+    )
+
+
+def _csr_components(matrix):
+    """Return lossless CSR components for a two-dimensional numeric matrix."""
+    values = np.asarray(matrix)
+    if values.ndim != 2:
+        raise ValueError("basis_matrix must be two-dimensional")
+    if values.dtype.kind not in "biufc":
+        raise ValueError("basis_matrix must contain HDF5-compatible numeric values")
+    row_indices, column_indices = np.nonzero(values)
+    indptr = np.zeros(values.shape[0] + 1, dtype=np.int64)
+    np.add.at(indptr, row_indices + 1, 1)
+    np.cumsum(indptr, out=indptr)
+    return values[row_indices, column_indices], column_indices.astype(np.int64), indptr
+
+
+def _write_topology_cache(group, topology, cache_metadata):
+    """Serialize the stage-2-independent topology payload into an HDF5 group."""
+    missing = [name for name in TOPOLOGY_CACHE_FIELDS if name not in topology]
+    if missing:
+        raise ValueError(f"topology cache is missing fields: {missing}")
+    cache = group.create_group(TOPOLOGY_CACHE_GROUP)
+    cache.attrs["schema_version"] = TOPOLOGY_CACHE_SCHEMA_VERSION
+    cache.attrs["cache_metadata_json"] = json.dumps(
+        _jsonable(cache_metadata), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    cache.attrs["compression"] = "gzip"
+    cache.attrs["compression_opts"] = 9
+    cache.attrs["shuffle"] = True
+    cache.attrs["index_base"] = 0
+    _compressed_dataset(cache, "h11", np.asarray([int(topology["h11"])], dtype=np.int64))
+    _compressed_dataset(cache, "h21", np.asarray([int(topology["h21"])], dtype=np.int64))
+    _compressed_dataset(cache, "basis", np.asarray(topology["basis"]))
+    basis_data, basis_indices, basis_indptr = _csr_components(topology["basis_matrix"])
+    basis_matrix = cache.create_group("basis_matrix")
+    basis_matrix.attrs["format"] = "csr"
+    basis_matrix.attrs["index_base"] = 0
+    _compressed_dataset(basis_matrix, "data", basis_data)
+    _compressed_dataset(basis_matrix, "indices", basis_indices)
+    _compressed_dataset(basis_matrix, "indptr", basis_indptr)
+    _compressed_dataset(
+        basis_matrix, "shape", np.asarray(np.asarray(topology["basis_matrix"]).shape, dtype=np.int64)
+    )
+    _compressed_dataset(
+        cache, "prime_toric_divisors", np.asarray(topology["prime_toric_divisors"])
+    )
+
+    kappa = np.asarray(topology["kappa"])
+    if kappa.ndim != 2 or kappa.shape[1] != 4:
+        raise ValueError("kappa must have shape (n, 4) in COO row format")
+    kappa_indices = np.asarray(kappa[:, :3])
+    if not np.all(np.isfinite(kappa_indices)) or not np.all(kappa_indices == np.floor(kappa_indices)):
+        raise ValueError("kappa indices must be finite integers")
+    kappa_group = cache.create_group("kappa")
+    kappa_group.attrs["format"] = "coo"
+    kappa_group.attrs["index_base"] = 0
+    _compressed_dataset(kappa_group, "indices", kappa_indices.astype(np.int64))
+    _compressed_dataset(kappa_group, "values", np.asarray(kappa[:, 3]))
+    _compressed_dataset(
+        kappa_group,
+        "shape",
+        np.asarray([int(topology["h11"])] * 3, dtype=np.int64),
+    )
+    for name in (
+        "c2",
+        "mori_cone",
+        "kahler_cone_hyperplanes",
+        "face_restriction_dim2",
+    ):
+        _compressed_dataset(cache, name, np.asarray(topology[name]))
+    return cache
+
+
+def _read_topology_cache(handle):
+    """Read one topology cache group into the generator's topology mapping."""
+    if TOPOLOGY_CACHE_GROUP not in handle:
+        return None
+    cache = handle[TOPOLOGY_CACHE_GROUP]
+    schema_version = cache.attrs.get("schema_version")
+    if isinstance(schema_version, bytes):
+        schema_version = schema_version.decode("utf-8")
+    if schema_version != TOPOLOGY_CACHE_SCHEMA_VERSION:
+        return {
+            "schema_version": schema_version,
+            "metadata": {},
+            "payload": None,
+            "status": "schema_mismatch",
+            "reason": f"unsupported topology cache schema {schema_version!r}",
+        }
+    metadata_json = cache.attrs.get("cache_metadata_json", "{}")
+    if isinstance(metadata_json, bytes):
+        metadata_json = metadata_json.decode("utf-8")
+    try:
+        metadata = json.loads(str(metadata_json))
+    except (TypeError, ValueError) as exc:
+        return {
+            "schema_version": schema_version,
+            "metadata": {},
+            "payload": None,
+            "status": "invalid",
+            "reason": f"cache metadata is not valid JSON: {exc}",
+        }
+    if not isinstance(metadata, dict):
+        return {
+            "schema_version": schema_version,
+            "metadata": {},
+            "payload": None,
+            "status": "invalid",
+            "reason": "cache metadata must be a JSON object",
+        }
+    try:
+        h11 = cache["h11"][()]
+        h21 = cache["h21"][()]
+        if h11.shape != (1,) or h21.shape != (1,):
+            raise ValueError("topology cache Hodge-number datasets must have shape (1,)")
+        h11 = int(h11[0])
+        h21 = int(h21[0])
+        if h11 < 1 or h21 < 0:
+            raise ValueError("topology cache Hodge numbers are out of range")
+        basis_matrix_group = cache["basis_matrix"]
+        basis_shape_values = basis_matrix_group["shape"][()]
+        if basis_shape_values.shape != (2,):
+            raise ValueError("basis_matrix CSR shape must have two entries")
+        basis_shape = tuple(int(value) for value in basis_shape_values.tolist())
+        if basis_shape[0] != h11:
+            raise ValueError("basis_matrix row count does not match h11")
+        basis_matrix = np.zeros(basis_shape, dtype=basis_matrix_group["data"].dtype)
+        indptr = basis_matrix_group["indptr"][()].astype(np.int64, copy=False)
+        indices = basis_matrix_group["indices"][()].astype(np.int64, copy=False)
+        data = basis_matrix_group["data"][()]
+        if (
+            len(basis_shape) != 2
+            or any(value < 0 for value in basis_shape)
+            or indptr.size != basis_shape[0] + 1
+            or indptr[-1] != data.size
+            or indices.size != data.size
+            or np.any(indptr[1:] < indptr[:-1])
+            or (indices.size and (np.min(indices) < 0 or np.max(indices) >= basis_shape[1]))
+        ):
+            raise ValueError("basis_matrix CSR components have inconsistent lengths")
+        for row in range(basis_shape[0]):
+            basis_matrix[row, indices[indptr[row] : indptr[row + 1]]] = data[
+                indptr[row] : indptr[row + 1]
+            ]
+        basis = cache["basis"][()]
+        if basis.ndim not in (1, 2) or basis.shape[0] != h11:
+            raise ValueError("divisor basis shape does not match h11")
+        prime_toric_divisors = cache["prime_toric_divisors"][()]
+        if prime_toric_divisors.ndim != 1 or (
+            prime_toric_divisors.size
+            and (
+                np.min(prime_toric_divisors) < 0
+                or np.max(prime_toric_divisors) >= basis_shape[1]
+            )
+        ):
+            raise ValueError("prime toric divisor labels do not fit basis_matrix")
+        kappa_group = cache["kappa"]
+        kappa_shape = kappa_group["shape"][()]
+        if kappa_shape.shape != (3,) or not np.all(kappa_shape == h11):
+            raise ValueError("kappa shape does not match h11")
+        kappa_indices = kappa_group["indices"][()].astype(np.int64, copy=False)
+        kappa_values = kappa_group["values"][()]
+        if (
+            kappa_indices.ndim != 2
+            or kappa_indices.shape[1] != 3
+            or kappa_values.ndim != 1
+            or kappa_indices.shape[0] != kappa_values.size
+        ):
+            raise ValueError("kappa COO components have inconsistent shapes")
+        kappa = np.column_stack((kappa_indices, kappa_values))
+        c2 = cache["c2"][()]
+        mori_cone = cache["mori_cone"][()]
+        kahler_cone_hyperplanes = cache["kahler_cone_hyperplanes"][()]
+        if c2.shape != (h11,):
+            raise ValueError("c2 shape does not match h11")
+        if mori_cone.ndim != 2 or mori_cone.shape[1] != h11:
+            raise ValueError("Mori-cone shape does not match h11")
+        if (
+            kahler_cone_hyperplanes.ndim != 2
+            or kahler_cone_hyperplanes.shape[1] != h11
+        ):
+            raise ValueError("Kahler-hyperplane shape does not match h11")
+        payload = {
+            "h11": h11,
+            "h21": h21,
+            "basis": basis,
+            "basis_matrix": basis_matrix,
+            "prime_toric_divisors": prime_toric_divisors,
+            "kappa": kappa,
+            "c2": c2,
+            "mori_cone": mori_cone,
+            "kahler_cone_rays": None,
+            "kahler_cone_hyperplanes": kahler_cone_hyperplanes,
+            "face_restriction_dim2": cache["face_restriction_dim2"][()],
+        }
+    except (IndexError, KeyError, TypeError, ValueError, OSError) as exc:
+        return {
+            "schema_version": schema_version,
+            "metadata": metadata,
+            "payload": None,
+            "status": "invalid",
+            "reason": f"cache payload is invalid: {exc}",
+        }
+    return {
+        "schema_version": schema_version,
+        "metadata": metadata,
+        "payload": payload,
+        "status": "available",
+        "reason": "validated by HDF5 codec",
+    }
+
+
+def validate_topology_cache(cache, expected):
+    """Validate cache identity and return its topology or a fallback reason."""
+    if cache is None:
+        return None, "missing topology cache group"
+    if cache.get("status") != "available":
+        return None, str(cache.get("reason", "topology cache is unavailable"))
+    metadata = cache.get("metadata") or {}
+    mismatches = {}
+    for key in expected:
+        recorded = metadata.get(key)
+        wanted = expected.get(key)
+        equal = (
+            stable_hash(recorded) == stable_hash(wanted)
+            if isinstance(recorded, (dict, list, tuple))
+            or isinstance(wanted, (dict, list, tuple))
+            else str(recorded) == str(wanted)
+        )
+        if not equal:
+            mismatches[key] = {"expected": wanted, "recorded": recorded}
+    if mismatches:
+        return None, f"topology cache identity mismatch: {mismatches}"
+    return cache["payload"], "cache identity validated"
+
+
 def write_raw_frst_artifact(
     path,
     *,
@@ -122,8 +391,10 @@ def write_raw_frst_artifact(
     simplices,
     simplex_indices=None,
     metadata=None,
+    topology_cache=None,
+    topology_cache_metadata=None,
 ):
-    """Write one retained FRST without topology or stage-2 derived data."""
+    """Write one retained FRST and an optional stage-2-independent topology cache."""
     vertices = np.asarray(polytope_vertices, dtype=int)
     points = np.asarray(polytope_points, dtype=int)
     labels = np.asarray(triangulation_labels, dtype=int).reshape(-1)
@@ -162,6 +433,11 @@ def write_raw_frst_artifact(
             "simplices_convention": "full FRST simplex labels, sorted within simplex",
         }
     )
+    record.setdefault("topology_cache_status", "not_requested")
+    record.setdefault("topology_cache_reason", "stage-1 topology cache was not requested")
+    if topology_cache is not None:
+        record["topology_cache_status"] = "available"
+        record["topology_cache_reason"] = "stage-1 topology cache computed from held CYTools objects"
 
     def write_payload(handle):
         handle.attrs["raw_frst_schema_version"] = RAW_FRST_SCHEMA_VERSION
@@ -175,6 +451,24 @@ def write_raw_frst_artifact(
         handle.create_dataset("triangulation_points", data=tri_points, compression="gzip", compression_opts=9)
         handle.create_dataset("simplices", data=raw_simplices, compression="gzip", compression_opts=9)
         handle.create_dataset("simplex_indices", data=simplex_indices, compression="gzip", compression_opts=9)
+        if topology_cache is not None:
+            try:
+                _write_topology_cache(
+                    handle,
+                    topology_cache,
+                    topology_cache_metadata or {},
+                )
+            except Exception as exc:
+                # The raw FRST is the stage-1 retention unit.  A cache codec
+                # failure must not turn a valid raw FRST into a rejection.
+                cache = handle.get(TOPOLOGY_CACHE_GROUP)
+                if cache is not None:
+                    del handle[TOPOLOGY_CACHE_GROUP]
+                record["topology_cache_status"] = "write_failed"
+                record["topology_cache_reason"] = f"{type(exc).__name__}: {exc}"
+                handle.attrs["metadata_json"] = json.dumps(
+                    _jsonable(record), sort_keys=True, separators=(",", ":"), allow_nan=False
+                )
 
     _atomic_hdf5_write(path, write_payload)
     record["raw_frst_path"] = str(Path(path).resolve())
@@ -197,8 +491,8 @@ def _read_metadata(handle):
     return metadata
 
 
-def read_raw_frst_artifact(path):
-    """Read and validate one raw FRST artifact without reconstructing CYTools."""
+def read_raw_frst_artifact(path, *, include_topology_cache=True):
+    """Read one raw FRST, optionally decoding its topology cache."""
     resolved = Path(path).resolve()
     legacy_schema = False
     if not resolved.is_file():
@@ -225,6 +519,9 @@ def read_raw_frst_artifact(path):
                     missing = [name for name in datasets if name not in handle]
                     raise RawFRSTError("missing_raw_frst", f"raw FRST datasets are missing: {missing}")
                 arrays = {name: handle[name][()] for name in datasets}
+                topology_cache = (
+                    _read_topology_cache(handle) if include_topology_cache else None
+                )
             elif handle.attrs.get("schema_version") == LEGACY_RAW_FRST_SCHEMA_VERSION and "frst" in handle:
                 # The original Stage-1 collector stored the same serializable
                 # triangulation under a ``frst`` group and omitted the full
@@ -250,6 +547,7 @@ def read_raw_frst_artifact(path):
                     "simplices": simplices,
                     "simplex_indices": simplices.copy(),
                 }
+                topology_cache = None
                 metadata = dict(metadata)
                 metadata.setdefault("stage1_status", RAW_FRST_ARTIFACT_STATUS)
                 metadata.setdefault("raw_frst_schema_version", LEGACY_RAW_FRST_SCHEMA_VERSION)
@@ -298,6 +596,7 @@ def read_raw_frst_artifact(path):
     metadata["raw_frst_path"] = str(resolved)
     metadata["raw_frst_file_sha256"] = file_sha256(resolved)
     metadata["arrays"] = arrays
+    metadata["topology_cache"] = topology_cache
     return metadata
 
 
@@ -346,7 +645,7 @@ def build_input_ledger(stage1_root):
         base = dict(listed_paths.get(path_string, {}))
         base["raw_frst_path"] = str(path.resolve())
         try:
-            metadata = read_raw_frst_artifact(path)
+            metadata = read_raw_frst_artifact(path, include_topology_cache=False)
             if listed_paths and path_string not in listed_paths:
                 raise RawFRSTError(
                     "input_identity_mismatch",
@@ -373,7 +672,11 @@ def build_input_ledger(stage1_root):
                     "stage-1 ledger identity does not match the raw FRST artifact",
                     record={"identity_mismatches": identity_mismatches},
                 )
-            record = {key: value for key, value in metadata.items() if key != "arrays"}
+            record = {
+                key: value
+                for key, value in metadata.items()
+                if key not in {"arrays", "topology_cache"}
+            }
             record.update(
                 {
                     "stage2_input_status": "retained_raw_frst",

@@ -1,9 +1,9 @@
 """Collect the fixed stage-1 raw FRST population.
 
-This command deliberately stops after serializing retained FRST data.  It does
-not construct a CY3, choose an orientifold, search the Kähler cone, assign
-visible-sector divisors, or write EFT rows.  Run
-``generate_stage2_eft_reference.py`` separately on its output.
+This command deliberately stops after serializing retained FRST data and an
+optional stage-2-independent topology cache.  It does not choose an
+orientifold, search the Kähler cone, assign visible-sector divisors, or write
+EFT rows.  Run ``generate_stage2_eft_reference.py`` separately on its output.
 """
 
 from __future__ import annotations
@@ -23,6 +23,9 @@ from cytools import Polytope, fetch_polytopes
 import generate_geometric_data_multitriangulation as generator
 from glimmers_raw_frst import (
     RAW_FRST_SCHEMA_VERSION,
+    TOPOLOGY_CACHE_CONVENTIONS,
+    TOPOLOGY_CACHE_SCHEMA_VERSION,
+    build_raw_frst_geometry_id,
     count_by_h11,
     stable_hash,
     compute_triangulation_hash,
@@ -224,6 +227,48 @@ def collect_raw_frsts_for_polytope(
                 proposal_index,
                 proposal_seed,
             )
+            topology_cache = None
+            topology_cache_metadata = None
+            raw_geometry_id = build_raw_frst_geometry_id(
+                h11, polytope_identifier, full_hash
+            )
+            try:
+                # Reuse the CYTools triangulation already held by the sampler.
+                # This work is deliberately best-effort: retaining the raw
+                # FRST remains the stage-1 accounting unit if a topology
+                # extraction or serialization step fails.
+                calabi_yau = triangulation.get_cy()
+                topology_cache = generator.extract_topology(
+                    calabi_yau, triangulation, export_kahler_rays=False
+                )
+                topology_cache_metadata = {
+                    "schema_version": TOPOLOGY_CACHE_SCHEMA_VERSION,
+                    "h11": int(topology_cache["h11"]),
+                    "h21": int(topology_cache["h21"]),
+                    "geometry_id": raw_geometry_id,
+                    "raw_geometry_id": raw_geometry_id,
+                    "polytope_id": polytope_identifier,
+                    "full_triangulation_hash": full_hash,
+                    "cytools_version": getattr(generator.cytools, "version", None),
+                    "backend": arguments.backend,
+                    "conventions": TOPOLOGY_CACHE_CONVENTIONS,
+                    "kahler_rays_exported": False,
+                }
+                metadata.update(
+                    {
+                        "topology_cache_status": "computed",
+                        "topology_cache_reason": "computed from the held CYTools triangulation",
+                    }
+                )
+            except Exception as cache_error:
+                metadata.update(
+                    {
+                        "topology_cache_status": "compute_failed",
+                        "topology_cache_reason": (
+                            f"{type(cache_error).__name__}: {cache_error}"
+                        ),
+                    }
+                )
             retained = write_raw_frst_artifact(
                 raw_path,
                 h11=h11,
@@ -234,6 +279,8 @@ def collect_raw_frsts_for_polytope(
                 simplices=simplices,
                 simplex_indices=np.asarray(triangulation.simplices(as_indices=True), dtype=int),
                 metadata=metadata,
+                topology_cache=topology_cache,
+                topology_cache_metadata=topology_cache_metadata,
             )
             retained["raw_frst_path"] = str(raw_path.resolve())
             retained.update(
@@ -410,7 +457,10 @@ def main(argv=None):
             record.get("terminal_status") == "duplicate_full_triangulation"
             for record in candidate_records
         ),
-        "stage_boundary": "stage 1 writes raw FRSTs only; stage 2 is a separate run",
+        "stage_boundary": (
+            "stage 1 writes raw FRSTs plus an optional stage-2-independent "
+            "topology cache; stage 2 is a separate run"
+        ),
         "user_decisions": [
             {
                 "stage": 1,

@@ -13,9 +13,12 @@ ensemble.
 
 ## Independent stage runs
 
-Stage 1 writes only serializable raw FRST artifacts. It does not choose an
-orientifold, search the Kähler cone, apply divisor-volume cuts, or construct EFT
-rows:
+Stage 1 writes serializable raw FRST artifacts and, when topology extraction
+succeeds, an optional compressed topology cache inside each raw-FRST HDF5 file.
+The cache contains the Hodge, intersection, divisor-basis, Mori-cone, and
+face-restriction data that are independent of the later physical filters. It
+does not choose an orientifold, search the Kähler cone, apply divisor-volume
+cuts, or construct EFT rows:
 
 ```bash
 python scripts/generate_stage1_raw_frsts.py \
@@ -431,8 +434,9 @@ reuse. It is not an exact reproduction of arXiv:2309.13145, its undocumented
 generator does not run GNN, PyTorch, axion-photon, cosmology, or inflation
 analysis.
 
-Stage 1 writes `frst_candidates/`, `frst_terminal_statuses.jsonl`,
-`polytope_manifest.json`, and `run_manifest.json`. Stage 2 writes
+Stage 1 writes `frst_candidates/` (with optional `topology_cache` groups inside
+the raw-FRST HDF5 files), `frst_terminal_statuses.jsonl`, `polytope_manifest.json`,
+and `run_manifest.json`. Stage 2 writes
 `stage2_input_ledger.jsonl`, `stage2_terminal_statuses.jsonl`,
 `stage2_topology_diagnostics.jsonl`,
 `charge_factorized_manifest.json`, `polytope_manifest.json`,
@@ -445,6 +449,14 @@ remain separate for sampler, FRST, topology/cone, Kähler, normalization,
 divisor, QED-pool, numerical, I/O, model, and storage failures. The manifest
 also records the fixed stage boundary, raw identities, proposal/retry/duplicate
 counts, and output-collision status.
+
+The optional raw-FRST cache uses lossless gzip level 9 with HDF5 shuffle. The
+divisor-basis matrix is stored as CSR (`data`, `indices`, `indptr`, `shape`),
+and the sparse intersection tensor is stored as COO (`indices`, `values`,
+`shape`). Cache metadata records the raw geometry identity, CYTools version,
+triangulation backend, and numerical conventions. Stage 2 validates those
+fields before using the cache; a missing, incompatible, or malformed cache is
+reported and recomputed from the reconstructed CYTools objects.
 
 Relevant options:
 
