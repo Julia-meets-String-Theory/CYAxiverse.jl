@@ -18,6 +18,7 @@ import numpy as np
 
 TERMINAL_FAILURE_CATEGORIES = (
     "qcd_normalization_failure",
+    "qcd_qed_prefilter_shortfall",
     "assignment_pool_shortfall",
     "no_eligible_qed_divisor",
     "invalid_explicit_index",

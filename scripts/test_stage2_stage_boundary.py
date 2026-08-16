@@ -26,6 +26,28 @@ from glimmers_schema11 import atomic_jsonl_dump
 
 
 class Stage2BoundaryTests(unittest.TestCase):
+    def test_historical_sparse_coo_backend_contracts_stored_h491_tensor(self):
+        generator = stage2_entrypoint.generator
+        point = np.ones(491, dtype=float)
+        kappa = np.asarray(
+            [[0, 0, 0, 6.0], [1, 1, 1, 6.0]],
+            dtype=float,
+        )
+        geometry = generator._compute_volume_geometry(
+            None,
+            point,
+            volume_backend=generator.HISTORICAL_VOLUME_BACKEND,
+            kappa=kappa,
+            glsm_charge_matrix=np.eye(491),
+            mori_cone=np.eye(491),
+        )
+        self.assertAlmostEqual(geometry["cy_volume"], 2.0)
+        self.assertAlmostEqual(geometry["basis_divisor_volumes"][0], 3.0)
+        self.assertAlmostEqual(geometry["basis_divisor_volumes"][1], 3.0)
+        self.assertEqual(geometry["basis_divisor_volumes"].shape, (491,))
+        self.assertTrue(np.allclose(geometry["prime_divisor_volumes"], geometry["basis_divisor_volumes"]))
+        self.assertTrue(np.allclose(geometry["curve_volumes"], point))
+
     def test_stage12_freezes_stage1_population_and_preserves_raw_identity_digest(self):
         ledger = [
             {
@@ -136,6 +158,36 @@ class Stage2BoundaryTests(unittest.TestCase):
             generator.ACCEPTED_GEOMETRY_ARTIFACT_STATUS,
         )
 
+    def test_stage2_output_path_uses_unique_frst_index_before_candidate_index(self):
+        first = {
+            "h11": 491,
+            "polytope_index": 1,
+            "candidate_index": 1,
+            "frst_index": 1,
+        }
+        later = {
+            **first,
+            "frst_index": 88,
+        }
+
+        first_path = stage2_entrypoint.build_geometry_output_path("stage2", first)
+        later_path = stage2_entrypoint.build_geometry_output_path("stage2", later)
+
+        self.assertNotEqual(first_path, later_path)
+        self.assertTrue(str(first_path).endswith("h11_491/np_0000001/cy_0000001/cyax.h5"))
+        self.assertTrue(str(later_path).endswith("h11_491/np_0000001/cy_0000088/cyax.h5"))
+
+    def test_stage2_output_path_falls_back_to_candidate_index(self):
+        record = {
+            "h11": 50,
+            "polytope_index": 2,
+            "candidate_index": 7,
+        }
+
+        path = stage2_entrypoint.build_geometry_output_path("stage2", record)
+
+        self.assertTrue(str(path).endswith("h11_050/np_0000002/cy_0000007/cyax.h5"))
+
     def test_stage5_defaults_to_canonical_qcd_and_records_diagnostic_budget(self):
         arguments = stage2_entrypoint.build_parser().parse_args(
             ["--stage1-root", "stage1", "--outdir", "stage2"]
@@ -153,6 +205,197 @@ class Stage2BoundaryTests(unittest.TestCase):
             ]
         )
         self.assertTrue(opt_in_arguments.allow_m_below_one)
+
+    def test_volume_backend_defaults_to_fan_and_historical_mode_is_explicit(self):
+        default_arguments = stage2_entrypoint.build_parser().parse_args(
+            ["--stage1-root", "stage1", "--outdir", "stage2"]
+        )
+        self.assertEqual(
+            default_arguments.volume_backend,
+            stage2_entrypoint.VOLUME_BACKEND_FAN,
+        )
+        historical_arguments = stage2_entrypoint.build_parser().parse_args(
+            [
+                "--stage1-root",
+                "stage1",
+                "--outdir",
+                "stage2",
+                "--volume-backend",
+                stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+            ]
+        )
+        self.assertEqual(
+            historical_arguments.volume_backend,
+            stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+        )
+        auto_arguments = stage2_entrypoint.build_parser().parse_args(
+            [
+                "--stage1-root",
+                "stage1",
+                "--outdir",
+                "stage2",
+                "--volume-backend",
+                stage2_entrypoint.VOLUME_BACKEND_AUTO,
+            ]
+        )
+        self.assertEqual(
+            auto_arguments.volume_backend,
+            stage2_entrypoint.VOLUME_BACKEND_AUTO,
+        )
+
+    def test_auto_volume_backend_selects_historical_only_at_h11_491(self):
+        self.assertEqual(
+            stage2_entrypoint.resolve_volume_backend_for_h11(
+                stage2_entrypoint.VOLUME_BACKEND_AUTO, 50
+            ),
+            stage2_entrypoint.VOLUME_BACKEND_FAN,
+        )
+        self.assertEqual(
+            stage2_entrypoint.resolve_volume_backend_for_h11(
+                stage2_entrypoint.VOLUME_BACKEND_AUTO, 491
+            ),
+            stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+        )
+        self.assertEqual(
+            stage2_entrypoint.generator.resolve_volume_backend(
+                200, stage2_entrypoint.VOLUME_BACKEND_AUTO
+            ),
+            stage2_entrypoint.VOLUME_BACKEND_FAN,
+        )
+
+    def test_historical_volume_backend_accepts_only_h11_491(self):
+        self.assertEqual(
+            stage2_entrypoint.validate_volume_backend_for_h11(
+                stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+                491,
+            ),
+            stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+        )
+        with self.assertRaises(stage2_entrypoint.VolumeBackendConfigurationError):
+            stage2_entrypoint.validate_volume_backend_for_h11(
+                stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+                490,
+            )
+
+    def test_volume_backend_propagates_to_geometry_generator_and_audits(self):
+        arguments = stage2_entrypoint.build_parser().parse_args(
+            [
+                "--stage1-root",
+                "stage1",
+                "--outdir",
+                "stage2",
+                "--volume-backend",
+                stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+                "--visible-sector-policy",
+                "none",
+            ]
+        )
+        raw_record = {
+            "h11": 491,
+            "polytope_id": "polytope-491",
+            "geometry_id": "geometry-491",
+            "polytope_index": 1,
+            "candidate_index": 1,
+            "full_triangulation_hash": "triangulation-491",
+            "raw_frst_path": "/stage1/frst-491.h5",
+        }
+        persisted = {
+            **raw_record,
+            "arrays": {
+                "polytope_points": np.zeros((2, 4), dtype=int),
+                "simplices": np.zeros((1, 5), dtype=int),
+            },
+            "raw_frst_path": raw_record["raw_frst_path"],
+        }
+        fake_triangulation = MagicMock()
+        fake_triangulation.get_cy.return_value = MagicMock()
+        with tempfile.TemporaryDirectory(prefix="cyax-stage2-volume-backend-") as temporary:
+            with patch.object(
+                stage2_entrypoint,
+                "reconstruct_raw_frst",
+                return_value=(persisted, MagicMock(), fake_triangulation),
+            ), patch.object(
+                stage2_entrypoint.generator,
+                "inspect_geometry_artifact",
+                return_value={"exists": False},
+            ), patch.object(
+                stage2_entrypoint.generator,
+                "generate_and_save_geometry",
+            ) as generate_geometry:
+                terminal_record, topology_audit = (
+                    stage2_entrypoint.process_raw_frst_artifact(
+                        arguments,
+                        raw_record,
+                        {},
+                        temporary,
+                    )
+                )
+
+        self.assertTrue(generate_geometry.called)
+        self.assertEqual(
+            generate_geometry.call_args.kwargs["volume_backend"],
+            stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+        )
+        self.assertEqual(terminal_record["volume_backend_status"], "accepted")
+        self.assertEqual(
+            terminal_record["volume_backend_selected"],
+            stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+        )
+        self.assertEqual(topology_audit["volume_backend"], terminal_record["volume_backend"])
+        self.assertEqual(
+            topology_audit["volume_backend_selected"],
+            terminal_record["volume_backend_selected"],
+        )
+        self.assertEqual(topology_audit["volume_backend_status"], "accepted")
+
+    def test_non491_historical_backend_is_terminal_rejection(self):
+        arguments = stage2_entrypoint.build_parser().parse_args(
+            [
+                "--stage1-root",
+                "stage1",
+                "--outdir",
+                "stage2",
+                "--volume-backend",
+                stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
+                "--visible-sector-policy",
+                "none",
+            ]
+        )
+        raw_record = {
+            "h11": 490,
+            "polytope_id": "polytope-490",
+            "geometry_id": "geometry-490",
+            "polytope_index": 1,
+            "candidate_index": 1,
+            "full_triangulation_hash": "triangulation-490",
+            "raw_frst_path": "/stage1/frst-490.h5",
+        }
+        with tempfile.TemporaryDirectory(prefix="cyax-stage2-volume-rejection-") as temporary:
+            with patch.object(
+                stage2_entrypoint,
+                "reconstruct_raw_frst",
+            ) as reconstruct, patch.object(
+                stage2_entrypoint.generator,
+                "inspect_geometry_artifact",
+                return_value={"exists": False},
+            ):
+                terminal_record, topology_audit = (
+                    stage2_entrypoint.process_raw_frst_artifact(
+                        arguments,
+                        raw_record,
+                        {},
+                        temporary,
+                    )
+                )
+
+        reconstruct.assert_not_called()
+        self.assertEqual(
+            terminal_record["terminal_status"], "volume_backend_rejection"
+        )
+        self.assertEqual(terminal_record["volume_backend_status"], "rejected")
+        self.assertEqual(topology_audit["stage2_terminal_status"], "volume_backend_rejection")
+        self.assertEqual(topology_audit["volume_backend_status"], "rejected")
+        self.assertIn("h11=491", terminal_record["terminal_reason"])
 
     def test_kaehler_point_validation_records_domain_checks(self):
         class FakeKaehlerCone:
@@ -441,11 +684,118 @@ class Stage2BoundaryTests(unittest.TestCase):
         self.assertEqual(selected[0], 0)
         self.assertAlmostEqual(selected[1], np.sqrt(0.4))
 
-    def test_canonical_qcd_candidate_order_has_no_post_selection_fallback(self):
+    def test_canonical_qcd_defers_subunit_tip_divisor_cut_until_scaling(self):
+        generator = stage2_entrypoint.generator
+        prime_tip_volumes = np.asarray([2.0, 0.5])
+        basis_tip_volumes = np.asarray([2.0])
+        effective_rays = np.asarray([[0.4]])
+
+        class FakeKaehlerCone:
+            def hyperplanes(self):
+                return np.asarray([[1.0]])
+
+        class FakeCalabiYau:
+            def compute_cy_volume(self, point):
+                return 1.0
+
+            def compute_curve_volumes(self, point):
+                return np.asarray([1.0])
+
+            def compute_divisor_volumes(self, point, in_basis=False):
+                return basis_tip_volumes if in_basis else prime_tip_volumes
+
+            def compute_inverse_kahler_metric(self, point):
+                return np.asarray([[1.0]])
+
+        diagnostic, values = generator.evaluate_kaehler_point(
+            FakeCalabiYau(),
+            FakeKaehlerCone(),
+            effective_rays,
+            np.asarray([1.0]),
+            attempt_index=1,
+            point_kind="canonical_tip",
+            min_prime_divisor_volume=1.0,
+            min_divisor_volume=1.0,
+            enforce_divisor_volume_lower_bounds=False,
+        )
+
+        selected = generator.select_canonical_qcd_candidate(
+            prime_tip_volumes,
+            basis_tip_volumes,
+            effective_rays,
+            [0],
+            40.0,
+            1.0,
+            1.0,
+            1_000_000.0,
+        )
+
+        self.assertLess(np.min(prime_tip_volumes), 1.0)
+        self.assertEqual(diagnostic["point_status"], "accepted")
+        self.assertFalse(diagnostic["checks"]["prime_divisor_volume_lower_bound"])
+        self.assertFalse(diagnostic["checks"]["effective_divisor_volume_lower_bound"])
+        self.assertIsNotNone(values)
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected[0], 0)
+        self.assertAlmostEqual(selected[1] ** 2, 20.0)
+        self.assertGreaterEqual(
+            selected[1] ** 2 * np.min(prime_tip_volumes), 1.0
+        )
+
+    def test_canonical_qcd_rejects_subunit_divisor_that_stays_invalid_after_scaling(self):
+        generator = stage2_entrypoint.generator
+        prime_tip_volumes = np.asarray([2.0, 0.01])
+        basis_tip_volumes = np.asarray([2.0, 0.01])
+        effective_rays = np.eye(2)
+
+        selected = generator.select_canonical_qcd_candidate(
+            prime_tip_volumes,
+            basis_tip_volumes,
+            effective_rays,
+            [0],
+            40.0,
+            1.0,
+            1.0,
+            1_000_000.0,
+        )
+
+        self.assertLess(20.0 * np.min(prime_tip_volumes), 1.0)
+        self.assertIsNone(selected)
+
+    def test_canonical_final_divisor_scaling_avoids_dilated_recompute_drift(self):
+        generator = stage2_entrypoint.generator
+        tau0 = np.asarray([2.0, 0.5])
+        prime_tau0 = np.asarray([2.0, 0.5])
+        effective_rays = np.eye(2)
+        radial_scale = np.sqrt(20.0)
+
+        tau, prime_volumes, effective_volumes = (
+            generator.scale_canonical_divisor_volumes(
+                tau0, prime_tau0, effective_rays, radial_scale
+            )
+        )
+
+        np.testing.assert_allclose(tau, [40.0, 10.0], rtol=0.0, atol=1e-12)
+        np.testing.assert_allclose(
+            prime_volumes, [40.0, 10.0], rtol=0.0, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            effective_volumes, [40.0, 10.0], rtol=0.0, atol=1e-12
+        )
+        self.assertTrue(
+            np.isclose(
+                prime_volumes[0],
+                40.0,
+                rtol=0.0,
+                atol=generator.QCD_VOLUME_TOLERANCE,
+            )
+        )
+
+    def test_canonical_qcd_uses_largest_later_tip_volume_first(self):
         generator = stage2_entrypoint.generator
         selected = generator.select_canonical_qcd_candidate(
-            np.asarray([100.0, 1.0]),
-            np.asarray([1.0, 1.0]),
+            np.asarray([1.0, 2.0]),
+            np.asarray([1.0, 2.0]),
             np.eye(2),
             [0, 1],
             40.0,
@@ -454,18 +804,166 @@ class Stage2BoundaryTests(unittest.TestCase):
             1_000_000.0,
         )
         self.assertEqual(selected[0], 1)
-        self.assertIsNone(
-            generator.select_canonical_qcd_candidate(
-                np.asarray([100.0, 1.0]),
-                np.asarray([1.0, 1.0]),
-                np.eye(2),
-                [0],
-                40.0,
-                1.0,
-                1.0,
-                1_000_000.0,
+        self.assertAlmostEqual(selected[1], np.sqrt(20.0))
+
+    def test_production_qed_prefilter_skips_first_candidate_and_keeps_later_one(self):
+        generator = stage2_entrypoint.generator
+        prime_tip_volumes = np.asarray([8.0, 4.0, 30.0, 10.0])
+        neighbors = ((2,), (3,), (0,), (1,))
+        invariant = np.ones(4, dtype=bool)
+
+        prefilter = generator.prefilter_canonical_qcd_candidates(
+            prime_tip_volumes,
+            [0, 1],
+            neighbors,
+            invariant,
+            40.0,
+            generator.QED_VOLUME_MAX,
+            1_000_000.0,
+        )
+
+        self.assertEqual(prefilter["eligible_candidate_indices"], [1])
+        self.assertEqual(prefilter["candidate_records"][0]["rejection_reason"], "no_eligible_qed_neighbor")
+        self.assertEqual(prefilter["candidate_records"][1]["eligible_qed_indices"], [3])
+        no_survivor = generator.prefilter_canonical_qcd_candidates(
+            prime_tip_volumes,
+            [0],
+            neighbors,
+            invariant,
+            40.0,
+            generator.QED_VOLUME_MAX,
+            1_000_000.0,
+        )
+        self.assertEqual(no_survivor["failure_status"], "qcd_qed_prefilter_shortfall")
+        failure = generator.QEDAssignmentFailure(
+            "qcd_qed_prefilter_shortfall",
+            "prefilter rejected all candidates",
+            no_survivor,
+        )
+        self.assertEqual(
+            stage2_entrypoint.classify_stage2_failure(failure),
+            "qcd_qed_prefilter_shortfall",
+        )
+        selected = generator.select_canonical_qcd_candidate(
+            prime_tip_volumes,
+            prime_tip_volumes,
+            np.eye(4),
+            prefilter["eligible_candidate_indices"],
+            40.0,
+            1.0,
+            1.0,
+            1_000_000.0,
+        )
+        self.assertEqual(selected[0], 1)
+        self.assertAlmostEqual(selected[1] ** 2 * prime_tip_volumes[3], 100.0)
+
+    def test_production_qed_prefilter_uses_candidate_specific_post_normalization_volume(self):
+        generator = stage2_entrypoint.generator
+        prefilter = generator.prefilter_canonical_qcd_candidates(
+            np.asarray([4.0, 2.0, 13.0, 1.0]),
+            [0, 1],
+            ((2,), (3,), (0,), (1,)),
+            np.ones(4, dtype=bool),
+            40.0,
+            127.5,
+            1_000_000.0,
+        )
+
+        first_record, later_record = prefilter["candidate_records"]
+        self.assertAlmostEqual(first_record["radial_scale"] ** 2, 10.0)
+        self.assertAlmostEqual(first_record["neighbor_records"][0]["final_qed_volume"], 130.0)
+        self.assertEqual(first_record["rejection_reason"], "no_eligible_qed_neighbor")
+        self.assertAlmostEqual(later_record["radial_scale"] ** 2, 20.0)
+        self.assertAlmostEqual(later_record["neighbor_records"][0]["final_qed_volume"], 20.0)
+        self.assertEqual(prefilter["eligible_candidate_indices"], [1])
+
+    def test_production_qed_prefilter_is_inactive_outside_eft_canonical_intersecting_d7(self):
+        generator = stage2_entrypoint.generator
+        self.assertFalse(
+            generator.canonical_qcd_qed_prefilter_active(
+                eft_mode=False,
+                moduli_policy="canonical_qcd",
+                visible_sector_policy="intersecting_d7",
             )
         )
+        self.assertFalse(
+            generator.canonical_qcd_qed_prefilter_active(
+                eft_mode=True,
+                moduli_policy="adaptive",
+                visible_sector_policy="intersecting_d7",
+            )
+        )
+        self.assertFalse(
+            generator.canonical_qcd_qed_prefilter_active(
+                eft_mode=True,
+                moduli_policy="canonical_qcd",
+                visible_sector_policy="none",
+            )
+        )
+
+    def test_assignment_pool_remains_authoritative_after_qed_prefilter(self):
+        generator = stage2_entrypoint.generator
+        prefilter = generator.prefilter_canonical_qcd_candidates(
+            np.asarray([40.0, 1.0]),
+            [0],
+            ((1,), (0,)),
+            np.asarray([False, True]),
+            40.0,
+            generator.QED_VOLUME_MAX,
+            1_000_000.0,
+        )
+        self.assertEqual(prefilter["eligible_candidate_indices"], [0])
+
+        pool = generator.enumerate_assignment_pool(
+            prime_labels=((0, 0, 0, 0), (1, 0, 0, 0)),
+            prime_charges=np.asarray([[1, 0], [0, 1]]),
+            prime_volumes_reference=np.asarray([40.0, 1.0]),
+            effective_volumes_reference=np.asarray([40.0, 1.0]),
+            neighbors=((1,), (0,)),
+            intersection_evidence={(0, 1): ((0, 1),)},
+            invariant_mask=np.asarray([False, True]),
+            qed_volume_max=generator.QED_VOLUME_MAX,
+        )
+        self.assertEqual(pool, [])
+        with self.assertRaises(generator.QEDAssignmentFailure) as context:
+            generator.validate_assignment_pool(pool)
+        self.assertEqual(context.exception.category, "assignment_pool_shortfall")
+
+    def test_canonical_qcd_falls_back_after_final_lower_bound_failure(self):
+        generator = stage2_entrypoint.generator
+        # Index 2 has the larger eligible tip volume and is tried first, but
+        # its m=20 scaling leaves index 1 below the final lower bound.  The
+        # smaller candidate at index 0 then succeeds with m=40.
+        selected = generator.select_canonical_qcd_candidate(
+            np.asarray([1.0, 0.04, 2.0]),
+            np.asarray([1.0, 0.04, 2.0]),
+            np.eye(3),
+            [0, 2],
+            40.0,
+            1.0,
+            1.0,
+            1_000_000.0,
+        )
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected[0], 0)
+        self.assertAlmostEqual(selected[1], np.sqrt(40.0))
+
+    def test_canonical_qcd_contraction_opt_in_preserves_legacy_order(self):
+        generator = stage2_entrypoint.generator
+        selected = generator.select_canonical_qcd_candidate(
+            np.asarray([100.0, 3.0]),
+            np.asarray([100.0, 3.0]),
+            np.eye(2),
+            [0, 1],
+            40.0,
+            1.0,
+            1.0,
+            1_000_000.0,
+            allow_m_below_one=True,
+        )
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected[0], 0)
+        self.assertAlmostEqual(selected[1], np.sqrt(0.4))
 
     def test_qcd_normalization_uses_approved_tolerances_without_snapping(self):
         normalization = stage2_entrypoint.generator.normalize_qcd_assignment(
@@ -731,9 +1229,12 @@ class Stage2BoundaryTests(unittest.TestCase):
             self.assertEqual(manifest["normalization_repair_policy"], "none")
             self.assertEqual(
                 manifest["selection_policy"],
-                "explicit_qcd_divisor_index_or_first_eligible_ascending_index",
+                "explicit_qcd_divisor_index_or_deterministic_minimal_dilation",
             )
-            self.assertEqual(manifest["post_selection_fallback"], "none")
+            self.assertEqual(
+                manifest["post_selection_fallback"],
+                "try_next_candidate_after_final_lower_bound_failure",
+            )
             stage7_decisions = [
                 decision for decision in manifest["user_decisions"]
                 if decision["stage"] == 7
@@ -989,6 +1490,11 @@ class Stage2BoundaryTests(unittest.TestCase):
                 .splitlines()[0]
             )
             manifest = json.loads((stage2_root / "run_manifest.json").read_text())
+            partial_rejection = json.loads(
+                (stage2_root / "stage2_assignment_pool_rejections.partial.jsonl")
+                .read_text()
+                .splitlines()[0]
+            )
             rejection = json.loads(
                 (stage2_root / "stage2_assignment_pool_rejections.jsonl")
                 .read_text()
@@ -1006,6 +1512,10 @@ class Stage2BoundaryTests(unittest.TestCase):
             self.assertEqual(
                 manifest["kaehler_point_status_counts"], {"failed": 1}
             )
+            self.assertEqual(
+                partial_rejection["terminal_status"], "qed_volume_rejection"
+            )
+            self.assertEqual(partial_rejection["terminal_reason"], "boundary test rejection")
             self.assertEqual(rejection["geometry_id"], raw_record["geometry_id"])
             self.assertEqual(rejection["qcd_label"], [0, 0, 0, 0])
             self.assertEqual(rejection["qed_index"], 1)

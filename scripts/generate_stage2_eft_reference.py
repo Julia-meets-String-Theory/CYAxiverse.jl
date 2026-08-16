@@ -50,6 +50,49 @@ from glimmers_schema11 import (
     write_eft_parquet,
 )
 
+VOLUME_BACKEND_FAN = "fan"
+VOLUME_BACKEND_HISTORICAL_H11_491 = generator.HISTORICAL_VOLUME_BACKEND
+VOLUME_BACKEND_AUTO = generator.AUTO_VOLUME_BACKEND
+HISTORICAL_VOLUME_BACKEND_H11 = 491
+
+
+class VolumeBackendConfigurationError(ValueError):
+    """Reject a volume backend that is incompatible with the input h11."""
+
+    terminal_status = "volume_backend_rejection"
+
+
+def validate_volume_backend_for_h11(volume_backend, h11):
+    """Validate the requested volume backend against one geometry h11."""
+    if volume_backend == VOLUME_BACKEND_HISTORICAL_H11_491 and int(h11) != HISTORICAL_VOLUME_BACKEND_H11:
+        raise VolumeBackendConfigurationError(
+            f"volume backend {volume_backend!r} is restricted to "
+            f"h11={HISTORICAL_VOLUME_BACKEND_H11}; received h11={int(h11)}"
+        )
+    if volume_backend not in {
+        VOLUME_BACKEND_FAN,
+        VOLUME_BACKEND_HISTORICAL_H11_491,
+        VOLUME_BACKEND_AUTO,
+    }:
+        raise VolumeBackendConfigurationError(
+            f"unsupported volume backend {volume_backend!r}"
+        )
+    return volume_backend
+
+
+def resolve_volume_backend_for_h11(volume_backend, h11):
+    """Resolve the requested policy to the backend used for one geometry."""
+    validate_volume_backend_for_h11(volume_backend, h11)
+    return generator.resolve_volume_backend(int(h11), volume_backend)
+
+
+def selected_volume_backend_or_none(volume_backend, h11):
+    """Return the selected backend when an input record has a valid h11."""
+    try:
+        return resolve_volume_backend_for_h11(volume_backend, h11)
+    except (TypeError, ValueError):
+        return None
+
 
 def build_parser():
     """Build the stage-2 command-line parser."""
@@ -59,6 +102,17 @@ def build_parser():
     parser.add_argument("--stage1-root", required=True, help="Completed stage-1 output root.")
     parser.add_argument("--outdir", required=True, help="Fresh stage-2 output root.")
     parser.add_argument("--backend", choices=("cgal", "qhull"), default="cgal")
+    parser.add_argument(
+        "--volume-backend",
+        choices=(VOLUME_BACKEND_FAN, VOLUME_BACKEND_HISTORICAL_H11_491, VOLUME_BACKEND_AUTO),
+        default=VOLUME_BACKEND_FAN,
+        help=(
+            "Select the volume-contraction implementation. 'fan' preserves "
+            "current CYTools behavior; 'historical_sparse_coo' is an explicit "
+            "h11=491 reproduction compatibility path; 'auto' selects Fan "
+            "below h11=491 and historical_sparse_coo at h11=491."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--orientifold-file", default=None)
     parser.add_argument(
@@ -125,7 +179,12 @@ def build_parser():
     return parser
 
 
-def build_topology_audit_record(raw_frst_record, backend):
+def build_topology_audit_record(
+    raw_frst_record,
+    backend,
+    volume_backend=VOLUME_BACKEND_FAN,
+    selected_volume_backend=None,
+):
     """Create the compact structural audit record for one raw FRST."""
     return {
         "audit_schema_version": "cyaxiverse-stage2-topology-audit-1.0",
@@ -138,6 +197,9 @@ def build_topology_audit_record(raw_frst_record, backend):
         "geometry_id": raw_frst_record.get("geometry_id"),
         "raw_frst_path": raw_frst_record.get("raw_frst_path"),
         "backend": backend,
+        "volume_backend": volume_backend,
+        "volume_backend_selected": selected_volume_backend,
+        "volume_backend_status": "requested",
         "cytools_version": getattr(generator.cytools, "version", None),
         "topology_cache_status": "not_run",
         "topology_cache_reason": None,
@@ -282,23 +344,36 @@ def reconstruct_raw_frst(
 
 
 def build_geometry_output_path(output_root, raw_frst_record):
-    """Map one raw identity to a deterministic stage-2 HDF5 path."""
+    """Map one raw identity to a deterministic stage-2 HDF5 path.
+
+    Prefer the retained FRST slot because legacy raw-FRST metadata can reuse
+    ``candidate_index`` while retaining a distinct ``frst_index``.  Keep the
+    candidate index as a compatibility fallback for older records that do not
+    persist the FRST slot.
+    """
+    frst_index = raw_frst_record.get("frst_index")
+    if frst_index in (None, ""):
+        frst_index = raw_frst_record.get("candidate_index", 0)
     return (
         Path(output_root)
         / f"h11_{int(raw_frst_record['h11']):03d}"
         / f"np_{int(raw_frst_record.get('polytope_index', 0)):07d}"
-        / f"cy_{int(raw_frst_record.get('candidate_index', 0)):07d}"
+        / f"cy_{int(frst_index):07d}"
         / "cyax.h5"
     )
 
 
 def classify_stage2_failure(error):
     """Map implementation failures onto the fixed stage-2 status vocabulary."""
+    if isinstance(error, VolumeBackendConfigurationError):
+        return error.terminal_status
     if isinstance(error, RawFRSTError):
         return error.terminal_status
     if isinstance(error, generator.OrientifoldValidationFailure):
         return "orientifold_invariance_failure"
     if isinstance(error, generator.QEDAssignmentFailure):
+        if error.category == generator.CANONICAL_QCD_QED_PREFILTER_FAILURE_STATUS:
+            return generator.CANONICAL_QCD_QED_PREFILTER_FAILURE_STATUS
         if error.category == "no_eligible_qed_divisor":
             return "no_eligible_intersecting_qed_pair"
         if error.category == "qed_volume_rejection":
@@ -317,6 +392,7 @@ def classify_stage2_failure(error):
     status = generator._candidate_terminal_status(error)
     return {
         "no_eligible_intersecting_qed_pair": "no_eligible_intersecting_qed_pair",
+        "qcd_qed_prefilter_shortfall": "qcd_qed_prefilter_shortfall",
         "divisor_volume_filter_rejection": "volume_filter_rejection",
         "topology_or_cone_error": "topology_validation_failure",
         "io_failure": "storage_failure",
@@ -360,6 +436,7 @@ def process_raw_frst_artifact(
     stage_timings = []
     active_stage = None
     active_stage_started = None
+    selected_volume_backend = None
 
     def start_stage(stage):
         """Record a stage start before entering a potentially slow operation."""
@@ -373,6 +450,8 @@ def process_raw_frst_artifact(
                     **_stage2_identity(raw_frst_record),
                     "event": "candidate_stage_started",
                     "stage": active_stage,
+                    "volume_backend": arguments.volume_backend,
+                    "volume_backend_selected": selected_volume_backend,
                     "elapsed_seconds": time.monotonic() - candidate_started,
                 }
             )
@@ -391,7 +470,12 @@ def process_raw_frst_artifact(
         active_stage = None
         active_stage_started = None
 
-    topology_audit = build_topology_audit_record(raw_frst_record, arguments.backend)
+    topology_audit = build_topology_audit_record(
+        raw_frst_record,
+        arguments.backend,
+        arguments.volume_backend,
+        selected_volume_backend,
+    )
     point_diagnostics = []
     assignment_pool_rejection_records = []
     topology_audit["kaehler_point_scan"] = {
@@ -403,9 +487,22 @@ def process_raw_frst_artifact(
         "normalization_failure_status": "qcd_normalization_failure",
         "normalization_repair_policy": "none",
         "selection_policy": (
-            "explicit_qcd_divisor_index_or_first_eligible_ascending_index"
+            "explicit_qcd_divisor_index_or_"
+            + generator.CANONICAL_QCD_SELECTION_POLICY
         ),
-        "post_selection_fallback": "none",
+        "post_selection_fallback": generator.CANONICAL_QCD_POST_SELECTION_FALLBACK,
+        "canonical_qcd_qed_prefilter": {
+            "active": generator.canonical_qcd_qed_prefilter_active(
+                eft_mode=arguments.eft,
+                moduli_policy=arguments.moduli_policy,
+                visible_sector_policy=arguments.visible_sector_policy,
+            ),
+            "policy": generator.CANONICAL_QCD_QED_PREFILTER_POLICY,
+            "failure_status": generator.CANONICAL_QCD_QED_PREFILTER_FAILURE_STATUS,
+            "effective_qed_volume_max": arguments.qed_volume_max,
+            "final_volume_formula": "m^2 * prime_tau0[qed_index]",
+            "assignment_pool_authoritative": True,
+        },
         "attempt_budget": arguments.max_kaehler_attempts,
         "point_status": "not_run",
         "diagnostics": point_diagnostics,
@@ -427,6 +524,9 @@ def process_raw_frst_artifact(
     }
     terminal_record.update(
         {
+            "volume_backend": arguments.volume_backend,
+            "volume_backend_selected": selected_volume_backend,
+            "volume_backend_status": "requested",
             "artifact_status": (
                 generator.POOL_PENDING_ARTIFACT_STATUS
                 if arguments.eft
@@ -444,6 +544,13 @@ def process_raw_frst_artifact(
     if existing_artifact["exists"]:
         terminal_record["existing_artifact_audit"] = existing_artifact
     try:
+        selected_volume_backend = resolve_volume_backend_for_h11(
+            arguments.volume_backend, raw_frst_record.get("h11")
+        )
+        topology_audit["volume_backend_selected"] = selected_volume_backend
+        topology_audit["volume_backend_status"] = "accepted"
+        terminal_record["volume_backend_selected"] = selected_volume_backend
+        terminal_record["volume_backend_status"] = "accepted"
         start_stage("reconstruct_raw_frst")
         persisted, polytope, triangulation = reconstruct_raw_frst(
             raw_frst_record,
@@ -468,6 +575,7 @@ def process_raw_frst_artifact(
                 "stage1_raw_frst_path": persisted["raw_frst_path"],
                 "stage1_full_triangulation_hash": persisted["full_triangulation_hash"],
                 "stage2_sampler": "none_raw_frst_reconstruction",
+                "volume_backend": arguments.volume_backend,
             }
         )
         kaehler_point_seed = stable_seed(
@@ -533,6 +641,7 @@ def process_raw_frst_artifact(
             kaehler_point_diagnostics=point_diagnostics,
             assignment_pool_rejection_records=assignment_pool_rejection_records,
             allow_m_below_one=arguments.allow_m_below_one,
+            volume_backend=arguments.volume_backend,
             allow_overwrite_existing_geometry=(
                 arguments.allow_overwrite_existing_geometry
             ),
@@ -562,6 +671,9 @@ def process_raw_frst_artifact(
     except Exception as error:
         finish_stage()
         terminal_status = classify_stage2_failure(error)
+        if isinstance(error, VolumeBackendConfigurationError):
+            topology_audit["volume_backend_status"] = "rejected"
+            terminal_record["volume_backend_status"] = "rejected"
         topology_audit.update(
             {
                 "audit_status": (
@@ -570,6 +682,8 @@ def process_raw_frst_artifact(
                     else "failed"
                 ),
                 "stage2_terminal_status": terminal_status,
+                "volume_backend_selected": selected_volume_backend,
+                "volume_backend_status": terminal_record["volume_backend_status"],
                 "artifact_status": terminal_record["artifact_status"],
                 "artifact_written": terminal_record["artifact_written"],
                 "failure_type": type(error).__name__,
@@ -589,6 +703,8 @@ def process_raw_frst_artifact(
             {
                 "terminal_status": terminal_status,
                 "terminal_reason": f"{type(error).__name__}: {error}",
+                "volume_backend_selected": selected_volume_backend,
+                "volume_backend_status": terminal_record["volume_backend_status"],
                 "artifact_status": (
                     generator.POOL_PENDING_ARTIFACT_STATUS
                     if arguments.eft
@@ -606,6 +722,8 @@ def process_raw_frst_artifact(
             {
                 "audit_status": "complete",
                 "stage2_terminal_status": terminal_record["terminal_status"],
+                "volume_backend_selected": selected_volume_backend,
+                "volume_backend_status": terminal_record["volume_backend_status"],
                 "artifact_status": terminal_record["artifact_status"],
                 "artifact_written": terminal_record["artifact_written"],
             }
@@ -779,6 +897,11 @@ def main(argv=None):
     stage2_records = [
         {
             **record,
+            "volume_backend": arguments.volume_backend,
+            "volume_backend_selected": selected_volume_backend_or_none(
+                arguments.volume_backend, record.get("h11")
+            ),
+            "volume_backend_status": "not_run",
             "terminal_status": record["stage2_input_status"],
             "terminal_reason": record.get("terminal_reason", "stage-1 input unavailable"),
         }
@@ -789,7 +912,14 @@ def main(argv=None):
         append_jsonl_record(partial_terminal_path, input_record)
         topology_diagnostics.append(
             {
-                **build_topology_audit_record(input_record, arguments.backend),
+                **build_topology_audit_record(
+                    input_record,
+                    arguments.backend,
+                    arguments.volume_backend,
+                    selected_volume_backend_or_none(
+                        arguments.volume_backend, input_record.get("h11")
+                    ),
+                ),
                 "orientifold_validation": orientifold_audit_record(
                     orientifold_config
                 ),
@@ -824,6 +954,10 @@ def main(argv=None):
             record_progress(
                 {
                     "event": "candidate_started",
+                    "volume_backend": arguments.volume_backend,
+                    "volume_backend_selected": selected_volume_backend_or_none(
+                        arguments.volume_backend, raw_frst_record.get("h11")
+                    ),
                     "retained_input_sequence": retained_input_sequence,
                     "completed_count": completed_count,
                     **_stage2_identity(raw_frst_record),
@@ -843,9 +977,10 @@ def main(argv=None):
                 }
             )
             stage2_records.append(terminal_record)
-            assignment_pool_rejection_records.extend(
+            candidate_rejection_records = tuple(
                 topology_audit.pop("assignment_pool_rejection_records", ())
             )
+            assignment_pool_rejection_records.extend(candidate_rejection_records)
             topology_diagnostics.append(topology_audit)
             for point_record in topology_audit.get(
                 "kaehler_point_scan", {}
@@ -882,9 +1017,7 @@ def main(argv=None):
                     }
                     | dict(point_record),
                 )
-            for rejection_record in topology_audit.get(
-                "assignment_pool_rejection_records", ()
-            ):
+            for rejection_record in candidate_rejection_records:
                 append_jsonl_record(partial_rejection_path, rejection_record)
             completed_count += 1
             record_progress(
@@ -898,21 +1031,34 @@ def main(argv=None):
                         "stage2_elapsed_seconds"
                     ),
                     "stage_timings": terminal_record.get("stage_timings", ()),
+                    "volume_backend": arguments.volume_backend,
+                    "volume_backend_selected": terminal_record.get(
+                        "volume_backend_selected"
+                    ),
                     **_stage2_identity(raw_frst_record),
                 }
             )
     else:
         for raw_frst_record in retained_inputs:
+            selected_volume_backend = selected_volume_backend_or_none(
+                arguments.volume_backend, raw_frst_record.get("h11")
+            )
             topology_diagnostics.append(
                 {
                     **build_topology_audit_record(
-                        raw_frst_record, arguments.backend
+                        raw_frst_record,
+                        arguments.backend,
+                        arguments.volume_backend,
+                        selected_volume_backend,
                     ),
                     "orientifold_validation": orientifold_audit_record(
                         orientifold_config
                     ),
                     "audit_status": "not_run",
                     "stage2_terminal_status": "dry_run",
+                    "volume_backend_status": (
+                        "accepted" if selected_volume_backend is not None else "rejected_for_h11"
+                    ),
                     "failure_reason": "stage-2 reconstruction was not run",
                 }
             )
@@ -1110,6 +1256,20 @@ def main(argv=None):
         "cytools_version": getattr(generator.cytools, "version", None),
         "hardware_threads": os.cpu_count(),
         "seed": arguments.seed,
+        "volume_backend": arguments.volume_backend,
+        "volume_backend_policy": {
+            "default": VOLUME_BACKEND_FAN,
+            "historical_backend": VOLUME_BACKEND_HISTORICAL_H11_491,
+            "historical_backend_h11": HISTORICAL_VOLUME_BACKEND_H11,
+            "auto_backend": VOLUME_BACKEND_AUTO,
+            "selection": (
+                "auto: historical_sparse_coo at h11=491, fan otherwise"
+                if arguments.volume_backend == VOLUME_BACKEND_AUTO
+                else "explicit_cli_option"
+            ),
+            "core_generator_keyword": "volume_backend",
+            "rejection_status": "volume_backend_rejection",
+        },
         "moduli_policy": arguments.moduli_policy,
         "allow_m_below_one": bool(arguments.allow_m_below_one),
         "allow_overwrite_existing_geometry": bool(
@@ -1141,9 +1301,22 @@ def main(argv=None):
         "normalization_failure_status": "qcd_normalization_failure",
         "normalization_repair_policy": "none",
         "selection_policy": (
-            "explicit_qcd_divisor_index_or_first_eligible_ascending_index"
+            "explicit_qcd_divisor_index_or_"
+            + generator.CANONICAL_QCD_SELECTION_POLICY
         ),
-        "post_selection_fallback": "none",
+        "post_selection_fallback": generator.CANONICAL_QCD_POST_SELECTION_FALLBACK,
+        "canonical_qcd_qed_prefilter": {
+            "active": generator.canonical_qcd_qed_prefilter_active(
+                eft_mode=arguments.eft,
+                moduli_policy=arguments.moduli_policy,
+                visible_sector_policy=arguments.visible_sector_policy,
+            ),
+            "policy": generator.CANONICAL_QCD_QED_PREFILTER_POLICY,
+            "failure_status": generator.CANONICAL_QCD_QED_PREFILTER_FAILURE_STATUS,
+            "effective_qed_volume_max": arguments.qed_volume_max,
+            "final_volume_formula": "m^2 * prime_tau0[qed_index]",
+            "assignment_pool_authoritative": True,
+        },
         "divisor_volume_tolerance": generator.DIVISOR_VOLUME_TOLERANCE,
         "divisor_volume_contract": {
             "prime_lower_bound": arguments.min_prime_divisor_volume,
@@ -1334,9 +1507,11 @@ def main(argv=None):
                 "stage": 7,
                 "answer_value": "confirmed",
                 "answer": (
-                    "honor explicit qcd_divisor_index; otherwise choose the first "
-                    "eligible candidate in ascending index order after visible-sector "
-                    "compatibility filtering, with allow_m_below_one retained"
+                    "honor explicit qcd_divisor_index; otherwise choose the "
+                    "largest positive finite eligible tip volume at or below the "
+                    "target, with ascending index tie-break after visible-sector "
+                    "compatibility and production QED-prefilter filtering; retain "
+                    "legacy input order when allow_m_below_one is enabled"
                 ),
             },
             {
@@ -1352,6 +1527,15 @@ def main(argv=None):
                 "stage": 8,
                 "answer_value": "confirmed",
                 "answer": "use the inclusive QED condition Vol(D_QED) <= 127.5",
+            },
+            {
+                "stage": 8,
+                "answer_value": "confirmed",
+                "answer": (
+                    "in production EFT canonical_qcd intersecting_d7 mode, prefilter "
+                    "each QCD candidate using m^2*prime_tau0[qed_index] <= 127.5; "
+                    "the complete assignment pool remains the final authoritative gate"
+                ),
             },
             {
                 "stage": 8,

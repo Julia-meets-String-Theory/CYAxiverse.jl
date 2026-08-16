@@ -87,3 +87,8 @@
 ## Code Quality & Testing
 - Use Julia's native `Test` package with `@testset` blocks in `test/runtests.jl`.
 - All PRs must maintain 100% passing tests (`failed=0`).
+
+## Versioning
+
+- Follow the release and versioning policy in the repository root `AGENTS.md`.
+- Feature branches should record version impact without independently bumping `Project.toml`; apply the actual patch or pre-`1.0.0` minor bump on the reviewed `vmm` to `main` release boundary.

@@ -1,6 +1,6 @@
 name = "CYAxiverse"
 uuid = "e5e45d93-5055-4eab-878b-2e484be3f951"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Viraf M. Mehta <viraf.mehta@itp.uni-hannover.de>"]
 
 [deps]

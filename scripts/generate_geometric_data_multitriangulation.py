@@ -12,13 +12,19 @@ Kähler point can be dilated to satisfy the control criterion of
 arXiv:2309.01831, eq. (21), and a prime divisor lies in the QCD volume window.
 The optional ``canonical_qcd`` policy keeps the canonical stretched-cone ray
 and applies a homogeneous radial rescaling so an explicit or deterministically
-ordered eligible prime divisor has a requested target volume.  This
+ordered eligible prime divisor has a requested target volume.  By default,
+eligible candidates are ordered by descending positive finite tip volume so
+the selected divisor minimizes the required dilation; an explicit divisor
+index remains an override.  This
 is a normalization of an existing FRST, not a new triangulation or a D-brane
 model.  The optional
 ``intersecting_d7`` visible-sector policy adds the paper-style toy assignment:
 it requires a validated O3/O7 involution, selects an invariant QED divisor
 intersecting QCD, and exports the corresponding QED charge and Euclidean-D3
-instanton term.  It does not claim global tadpole or matter cancellation.
+instanton term.  On the production EFT path, a QCD candidate must first have
+an orientifold-invariant intersecting QED neighbor whose candidate-specific
+post-normalization volume is within the inclusive QED bound.  It does not
+claim global tadpole or matter cancellation.
 
 The default ``fair`` sampler delegates secondary-fan walks and flips to
 CYTools. ``fast`` is available for explicitly biased coverage/training scans.
@@ -105,10 +111,28 @@ SOURCE_REFERENCES = (
 )
 SAMPLING_SCHEMES = ("fair", "fast", "ntfe_fast")
 NTFE_FACE_SAMPLERS = ("fast", "fair", "grow2d")
+VOLUME_BACKENDS = ("fan", "historical_sparse_coo", "auto")
+HISTORICAL_VOLUME_BACKEND = "historical_sparse_coo"
+AUTO_VOLUME_BACKEND = "auto"
 KS_MIRROR_DATASET = "calabi-yau-data/polytopes-4d"
 KS_MIRROR_DATASET_URL = "https://huggingface.co/datasets/calabi-yau-data/polytopes-4d"
 QCD_VOLUME_TOLERANCE = 1e-9
 DIVISOR_VOLUME_TOLERANCE = 1e-8
+CANONICAL_QCD_SELECTION_POLICY = "deterministic_minimal_dilation"
+CANONICAL_QCD_CANDIDATE_ORDER = (
+    "descending_positive_finite_tip_volume_at_or_below_target_then_ascending_divisor_index"
+)
+CANONICAL_QCD_CONTRACTION_CANDIDATE_ORDER = "legacy_input_order_when_allow_m_below_one"
+CANONICAL_QCD_POST_SELECTION_FALLBACK = (
+    "try_next_candidate_after_final_lower_bound_failure"
+)
+CANONICAL_QCD_QED_PREFILTER_SCHEMA_VERSION = (
+    "cyaxiverse-canonical-qcd-qed-prefilter-1.0"
+)
+CANONICAL_QCD_QED_PREFILTER_POLICY = (
+    "eft_canonical_qcd_intersecting_d7_final_qed_volume"
+)
+CANONICAL_QCD_QED_PREFILTER_FAILURE_STATUS = "qcd_qed_prefilter_shortfall"
 KAEHLER_SLACK_TOLERANCE = 1e-6
 POTENTIAL_RECONSTRUCTION_SCHEMA_VERSION = "cyaxiverse-potential-reconstruction-1.0"
 POTENTIAL_RECONSTRUCTION_RTOL = 1e-10
@@ -742,6 +766,196 @@ def _visible_qcd_candidates(policy, orientifold, neighbors):
     return candidates
 
 
+def canonical_qcd_qed_prefilter_active(
+    *, eft_mode, moduli_policy, visible_sector_policy
+):
+    """Return whether the production-only canonical QED prefilter is active."""
+    return bool(
+        eft_mode
+        and moduli_policy == "canonical_qcd"
+        and visible_sector_policy == "intersecting_d7"
+    )
+
+
+def _inactive_canonical_qcd_qed_prefilter_metadata(
+    *, eft_mode, moduli_policy, visible_sector_policy
+):
+    """Describe why the production-only canonical QED prefilter is inactive."""
+    return {
+        "schema_version": CANONICAL_QCD_QED_PREFILTER_SCHEMA_VERSION,
+        "policy": CANONICAL_QCD_QED_PREFILTER_POLICY,
+        "active": False,
+        "status": "inactive_outside_production_path",
+        "activation_contract": {
+            "eft_mode": True,
+            "moduli_policy": "canonical_qcd",
+            "visible_sector_policy": "intersecting_d7",
+        },
+        "requested_path": {
+            "eft_mode": bool(eft_mode),
+            "moduli_policy": str(moduli_policy),
+            "visible_sector_policy": str(visible_sector_policy),
+        },
+        "reason": (
+            "apply only to eft_mode=true, moduli_policy=canonical_qcd, "
+            "visible_sector_policy=intersecting_d7"
+        ),
+    }
+
+
+def prefilter_canonical_qcd_candidates(
+    prime_tau0,
+    candidate_indices,
+    neighbors,
+    invariant_mask,
+    qcd_volume_target,
+    effective_qed_volume_max=QED_VOLUME_MAX,
+    max_m=1_000_000.0,
+    *,
+    allow_m_below_one=False,
+):
+    """Filter canonical QCD candidates by their normalized QED neighbors.
+
+    Compute the existing canonical radial scale for every candidate that is
+    admissible under the current ``m`` policy.  Keep a candidate only when a
+    distinct intersecting neighbor is orientifold-invariant and its final
+    volume ``m**2 * prime_tau0[qed_index]`` is at most the inclusive QED
+    bound.  Do not apply charge or assignment-pool checks here; the complete
+    assignment pool remains the authoritative production gate.
+    """
+    prime_tau0 = np.asarray(prime_tau0, dtype=float).reshape(-1)
+    try:
+        qcd_volume_target = float(qcd_volume_target)
+        effective_qed_volume_max = float(effective_qed_volume_max)
+        max_m = float(max_m)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("QCD/QED prefilter parameters must be numeric") from exc
+    if (
+        not np.isfinite(qcd_volume_target)
+        or qcd_volume_target <= 0.0
+        or not np.isfinite(effective_qed_volume_max)
+        or effective_qed_volume_max <= 0.0
+        or not np.isfinite(max_m)
+        or max_m <= 0.0
+    ):
+        raise ValueError("QCD/QED prefilter parameters must be finite and positive")
+    if len(neighbors) != prime_tau0.size:
+        raise ValueError("QCD/QED prefilter neighbors have an inconsistent shape")
+    invariant = np.asarray(invariant_mask, dtype=bool).reshape(-1)
+    if invariant.shape != prime_tau0.shape:
+        raise ValueError("QCD/QED prefilter invariant mask has an inconsistent shape")
+
+    normalized_candidate_indices = []
+    for value in candidate_indices:
+        try:
+            index = int(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("QCD candidate indices must be integers") from exc
+        normalized_candidate_indices.append(index)
+
+    candidate_records = []
+    eligible_candidate_indices = []
+    for qcd_index in normalized_candidate_indices:
+        record = {
+            "qcd_index": qcd_index,
+            "status": "rejected",
+            "eligible_qed_indices": [],
+            "neighbor_records": [],
+        }
+        if not 0 <= qcd_index < prime_tau0.size:
+            record["rejection_reason"] = "qcd_index_out_of_range"
+            candidate_records.append(record)
+            continue
+        qcd_tip_volume = float(prime_tau0[qcd_index])
+        record["qcd_tip_volume"] = qcd_tip_volume
+        if not np.isfinite(qcd_tip_volume) or qcd_tip_volume <= 0.0:
+            record["rejection_reason"] = "qcd_tip_volume_not_positive_finite"
+            candidate_records.append(record)
+            continue
+        candidate_m = math.sqrt(qcd_volume_target / qcd_tip_volume)
+        record["radial_scale"] = float(candidate_m)
+        if not np.isfinite(candidate_m):
+            record["rejection_reason"] = "radial_scale_not_finite"
+            candidate_records.append(record)
+            continue
+        if not allow_m_below_one and candidate_m < 1.0:
+            record["rejection_reason"] = "radial_contraction_disallowed"
+            candidate_records.append(record)
+            continue
+        if candidate_m > max_m:
+            record["rejection_reason"] = "radial_scale_exceeds_max_m"
+            candidate_records.append(record)
+            continue
+
+        with np.errstate(over="ignore", invalid="ignore"):
+            volume_scale = candidate_m**2
+            final_qed_volumes = volume_scale * prime_tau0
+        record["volume_scale"] = float(volume_scale)
+        for qed_index in sorted({int(value) for value in neighbors[qcd_index]}):
+            neighbor_record = {
+                "qed_index": qed_index,
+                "distinct": qed_index != qcd_index,
+                "orientifold_invariant": False,
+                "final_qed_volume": None,
+                "within_effective_max": False,
+                "eligible": False,
+            }
+            if not 0 <= qed_index < prime_tau0.size:
+                neighbor_record["reason"] = "qed_index_out_of_range"
+            elif qed_index == qcd_index:
+                neighbor_record["reason"] = "qcd_qed_must_be_distinct"
+            else:
+                neighbor_record["orientifold_invariant"] = bool(invariant[qed_index])
+                if not invariant[qed_index]:
+                    neighbor_record["reason"] = "qed_divisor_not_orientifold_invariant"
+                    record["neighbor_records"].append(neighbor_record)
+                    continue
+                final_qed_volume = float(final_qed_volumes[qed_index])
+                neighbor_record["final_qed_volume"] = final_qed_volume
+                within_effective_max = bool(
+                    np.isfinite(final_qed_volume)
+                    and final_qed_volume <= effective_qed_volume_max
+                )
+                neighbor_record["within_effective_max"] = within_effective_max
+                if within_effective_max:
+                    neighbor_record["eligible"] = True
+                    record["eligible_qed_indices"].append(qed_index)
+                    neighbor_record["reason"] = "accepted"
+                else:
+                    neighbor_record["reason"] = "qed_volume_exceeds_effective_max"
+            record["neighbor_records"].append(neighbor_record)
+        if record["eligible_qed_indices"]:
+            record["status"] = "accepted"
+            eligible_candidate_indices.append(qcd_index)
+        else:
+            record["rejection_reason"] = "no_eligible_qed_neighbor"
+        candidate_records.append(record)
+
+    return {
+        "schema_version": CANONICAL_QCD_QED_PREFILTER_SCHEMA_VERSION,
+        "policy": CANONICAL_QCD_QED_PREFILTER_POLICY,
+        "active": True,
+        "status": "passed" if eligible_candidate_indices else "no_candidate_survived",
+        "failure_status": (
+            None
+            if eligible_candidate_indices
+            else CANONICAL_QCD_QED_PREFILTER_FAILURE_STATUS
+        ),
+        "qcd_volume_target": qcd_volume_target,
+        "effective_qed_volume_max": effective_qed_volume_max,
+        "qed_volume_comparison": "less_than_or_equal_to_effective_max",
+        "allow_m_below_one": bool(allow_m_below_one),
+        "max_m": max_m,
+        "candidate_indices_input": normalized_candidate_indices,
+        "eligible_candidate_indices": eligible_candidate_indices,
+        "candidate_records": candidate_records,
+        "assignment_pool_authoritative": True,
+        "assignment_pool_authority_policy": (
+            "prefilter_does_not_replace_complete_validated_ordered_assignment_pool"
+        ),
+    }
+
+
 class PrefactorCriterionNotMet(RuntimeError):
     """The current FRST's tip cannot satisfy the potential-control criterion."""
 
@@ -1189,6 +1403,41 @@ def sample_stretched_kaehler_points(
                 )
 
 
+def resolve_volume_backend(h11, volume_backend=None, sampling_metadata=None):
+    """Resolve and validate the selected Stage-2 volume backend.
+
+    Default to CYTools' current Fan path.  The historical sparse COO path is
+    deliberately restricted to h11=491 because it is a reproduction
+    compatibility route for the high-h11 construction, not a general
+    replacement for CYTools.  The explicit ``auto`` policy selects that
+    historical route only at h11=491 and selects Fan elsewhere.
+    """
+    if volume_backend is None:
+        metadata_backend = (
+            None
+            if sampling_metadata is None
+            else sampling_metadata.get("volume_backend")
+        )
+        volume_backend = metadata_backend or os.environ.get(
+            "CYAX_VOLUME_BACKEND", "fan"
+        )
+    volume_backend = str(volume_backend)
+    if volume_backend not in VOLUME_BACKENDS:
+        raise ValueError(
+            f"volume_backend must be one of {VOLUME_BACKENDS}, got {volume_backend!r}"
+        )
+    if volume_backend == AUTO_VOLUME_BACKEND:
+        volume_backend = (
+            HISTORICAL_VOLUME_BACKEND if int(h11) == 491 else "fan"
+        )
+    if volume_backend == HISTORICAL_VOLUME_BACKEND and int(h11) != 491:
+        raise ValueError(
+            "historical_sparse_coo is restricted to h11=491; "
+            f"received h11={int(h11)}"
+        )
+    return volume_backend
+
+
 def evaluate_kaehler_point(
     cy,
     kahler_cone,
@@ -1202,8 +1451,17 @@ def evaluate_kaehler_point(
     min_prime_divisor_volume=1.0,
     min_divisor_volume=1.0,
     volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
+    enforce_divisor_volume_lower_bounds=True,
+    volume_backend="fan",
+    kappa=None,
+    glsm_charge_matrix=None,
+    mori_cone=None,
 ):
-    """Evaluate one Kähler point without retaining live CYTools objects."""
+    """Evaluate one Kähler point without retaining live CYTools objects.
+
+    Defer only the divisor lower-bound checks when the point is an angular
+    direction that will be homogeneously normalized later.
+    """
     diagnostic = {
         "attempt_index": int(attempt_index),
         "point_kind": point_kind,
@@ -1215,6 +1473,10 @@ def evaluate_kaehler_point(
         "divisor_volume_tolerance": float(volume_tolerance),
         "prime_divisor_volume_lower_bound": float(min_prime_divisor_volume),
         "effective_divisor_volume_lower_bound": float(min_divisor_volume),
+        "divisor_volume_lower_bounds_enforced": bool(
+            enforce_divisor_volume_lower_bounds
+        ),
+        "volume_backend": str(volume_backend),
     }
     values = None
     try:
@@ -1239,21 +1501,22 @@ def evaluate_kaehler_point(
                 f"Kähler point is outside the stretched cone: minimum slack {minimum_slack:.6g}"
             )
 
-        cy_volume = float(cy.compute_cy_volume(point_array))
-        curve_volumes = np.asarray(cy.compute_curve_volumes(point_array), dtype=float)
-        basis_divisor_volumes = np.asarray(
-            cy.compute_divisor_volumes(point_array, in_basis=True), dtype=float
+        geometry = _compute_volume_geometry(
+            cy,
+            point_array,
+            volume_backend=volume_backend,
+            kappa=kappa,
+            glsm_charge_matrix=glsm_charge_matrix,
+            mori_cone=mori_cone,
         )
-        prime_divisor_volumes = np.asarray(
-            cy.compute_divisor_volumes(point_array), dtype=float
-        )
+        cy_volume = geometry["cy_volume"]
+        curve_volumes = geometry["curve_volumes"]
+        basis_divisor_volumes = geometry["basis_divisor_volumes"]
+        prime_divisor_volumes = geometry["prime_divisor_volumes"]
         effective_divisor_volumes = np.asarray(
             effective_cone_rays, dtype=float
         ) @ basis_divisor_volumes
-        inverse_metric = np.asarray(
-            cy.compute_inverse_kahler_metric(point_array), dtype=float
-        )
-        inverse_metric = 0.5 * (inverse_metric + inverse_metric.T)
+        inverse_metric = geometry["inverse_metric"]
         metric_eigenvalues = np.linalg.eigvalsh(inverse_metric)
 
         diagnostic.update(
@@ -1340,8 +1603,18 @@ def evaluate_kaehler_point(
                 ),
             }
         )
+        deferred_checks = {
+            "prime_divisor_volume_lower_bound",
+            "effective_divisor_volume_lower_bound",
+        }
         failed_checks = [
-            name for name, passed in diagnostic["checks"].items() if not passed
+            name
+            for name, passed in diagnostic["checks"].items()
+            if not passed
+            and (
+                enforce_divisor_volume_lower_bounds
+                or name not in deferred_checks
+            )
         ]
         if failed_checks:
             raise ValueError("failed point checks: " + ", ".join(failed_checks))
@@ -1375,10 +1648,21 @@ def select_canonical_qcd_candidate(
     allow_m_below_one=False,
     report=None,
 ):
-    """Select the first eligible canonical QCD divisor and radial scale."""
+    """Select a canonical QCD divisor and radial scale.
+
+    With the default ``m >= 1`` policy, order positive finite candidates at
+    or below the target by descending tip volume, then by ascending divisor
+    index.  This minimizes the required dilation while retaining a
+    deterministic fallback when final lower-bound checks reject a candidate.
+    When contraction is explicitly enabled, preserve the legacy input order
+    while admitting candidates above the target; this keeps the opt-in branch
+    conservative and separate from the default policy.
+    """
     prime_tau0 = np.asarray(prime_tau0, dtype=float)
     tau0 = np.asarray(tau0, dtype=float)
     qprime = np.asarray(qprime, dtype=float)
+
+    candidates = []
     for candidate_index in candidate_indices:
         candidate_index = int(candidate_index)
         if not 0 <= candidate_index < len(prime_tau0):
@@ -1387,11 +1671,6 @@ def select_canonical_qcd_candidate(
         if not np.isfinite(prime_volume) or prime_volume <= 0.0:
             continue
         candidate_m = math.sqrt(qcd_volume_target / prime_volume)
-        if report is not None:
-            report(
-                f"QCD tip volume={prime_volume:.6g}; "
-                f"homogeneous radial scale m={candidate_m:.6g}"
-            )
         # The canonical reference run only dilates the tip by default.
         # Contraction is retained as an explicit opt-in for studies that
         # reproduce the unrestricted normalization convention.
@@ -1399,6 +1678,17 @@ def select_canonical_qcd_candidate(
             continue
         if not np.isfinite(candidate_m) or candidate_m > max_m:
             continue
+        candidates.append((candidate_index, prime_volume, candidate_m))
+
+    if not allow_m_below_one:
+        candidates.sort(key=lambda item: (-item[1], item[0]))
+
+    for candidate_index, prime_volume, candidate_m in candidates:
+        if report is not None:
+            report(
+                f"QCD tip volume={prime_volume:.6g}; "
+                f"homogeneous radial scale m={candidate_m:.6g}"
+            )
         candidate_tau = candidate_m**2 * tau0
         candidate_prime_volumes = candidate_m**2 * prime_tau0
         candidate_effective_volumes = qprime @ candidate_tau
@@ -1418,6 +1708,46 @@ def select_canonical_qcd_candidate(
             continue
         return candidate_index, candidate_m
     return None
+
+
+def scale_canonical_divisor_volumes(tau0, prime_tau0, qprime, radial_scale):
+    """Apply the exact homogeneous divisor-volume scaling for a canonical tip."""
+    tau0 = np.asarray(tau0, dtype=float).reshape(-1)
+    prime_tau0 = np.asarray(prime_tau0, dtype=float).reshape(-1)
+    qprime = np.asarray(qprime, dtype=float)
+    radial_scale = float(radial_scale)
+    if (
+        not np.isfinite(radial_scale)
+        or radial_scale <= 0.0
+        or tau0.size == 0
+        or prime_tau0.size == 0
+        or qprime.ndim != 2
+        or qprime.shape[1] != tau0.size
+        or not np.all(np.isfinite(tau0))
+        or not np.all(np.isfinite(prime_tau0))
+        or not np.all(np.isfinite(qprime))
+    ):
+        raise FinalGeometryValidationFailed(
+            "canonical divisor-volume scaling references are invalid"
+        )
+    try:
+        volume_scale = radial_scale**2
+        scaled_tau = volume_scale * tau0
+        scaled_prime_tau = volume_scale * prime_tau0
+        scaled_effective_tau = qprime @ scaled_tau
+    except (FloatingPointError, ValueError) as exc:
+        raise FinalGeometryValidationFailed(
+            "canonical divisor-volume scaling overflowed or has invalid data"
+        ) from exc
+    if not (
+        np.all(np.isfinite(scaled_tau))
+        and np.all(np.isfinite(scaled_prime_tau))
+        and np.all(np.isfinite(scaled_effective_tau))
+    ):
+        raise FinalGeometryValidationFailed(
+            "canonical post-normalization divisor volumes are non-finite"
+        )
+    return scaled_tau, scaled_prime_tau, scaled_effective_tau
 
 
 def generate_and_save_geometry(
@@ -1463,8 +1793,19 @@ def generate_and_save_geometry(
     kaehler_point_diagnostics=None,
     assignment_pool_rejection_records=None,
     allow_m_below_one=False,
+    volume_backend=None,
 ):
-    """Compute the CYAxiverse datasets and write one HDF5 geometry file."""
+    """Compute the CYAxiverse datasets and write one HDF5 geometry file.
+
+    Resolve ``volume_backend`` to the current Fan path by default.  The
+    historical sparse COO compatibility path can be selected explicitly, or
+    through ``sampling_metadata['volume_backend']`` / ``CYAX_VOLUME_BACKEND``;
+    it is accepted only for h11=491.
+    """
+    volume_backend_requested = volume_backend
+    volume_backend = resolve_volume_backend(
+        h11, volume_backend, sampling_metadata=sampling_metadata
+    )
     # Preserve the package writer's historical zero-based positional option
     # while making the specialist CLI's explicit index one-based and auditable.
     if qed_divisor_index_user is None and qed_divisor_index is not None:
@@ -1668,6 +2009,11 @@ def generate_and_save_geometry(
     standard_model_qcd_selection = None
     visible_qcd_candidates = None
     visible_qcd_candidate_set = None
+    canonical_qcd_qed_prefilter = _inactive_canonical_qcd_qed_prefilter_metadata(
+        eft_mode=eft_mode,
+        moduli_policy=moduli_policy,
+        visible_sector_policy=visible_sector_policy,
+    )
     if moduli_policy == "canonical_qcd" or visible_sector_policy == "intersecting_d7":
         neighbors = prime_divisor_neighbors(
             topology["prime_toric_divisors"], topology["face_restriction_dim2"]
@@ -1676,6 +2022,15 @@ def generate_and_save_geometry(
     if topology["h11"] != int(h11) or topology["h11"] != int(cy.h11()):
         raise RuntimeError(
             f"h11 mismatch between request ({h11}) and CYTools ({topology['h11']})."
+    )
+    if topology_audit is not None:
+        topology_audit.setdefault("volume_backend", volume_backend)
+        topology_audit["volume_backend_selected"] = volume_backend
+        topology_audit["historical_contraction"] = (
+            "sparse COO multiplicity-aware contraction from "
+            "CalabiYau.intersection_numbers(in_basis=True, format='coo')"
+            if volume_backend == HISTORICAL_VOLUME_BACKEND
+            else "not_selected"
         )
     triangulation_id, cy3_fingerprint = topology_identity(
         polytope_id, triangulation, topology
@@ -1683,12 +2038,19 @@ def generate_and_save_geometry(
     favorable = bool(poly.is_favorable(lattice="N"))
     glsm = np.asarray(cy.glsm_charge_matrix(include_origin=False), dtype=int)
     basis = topology["basis"]
+    volume_context = {
+        "volume_backend": volume_backend,
+        "kappa": topology["kappa"],
+        "glsm_charge_matrix": glsm,
+        "mori_cone": topology["mori_cone"],
+    }
     if moduli_policy == "canonical_qcd":
         # The complete ordered assignment pool is now the visible-sector
         # acceptance unit.  Keep an explicit QCD index as a deterministic
-        # geometry reference when supplied; otherwise select the first valid
-        # index after the immutable tip data are available below.  There is no
-        # detached random-QCD record in the schema-1.1 flow.
+        # geometry reference when supplied; otherwise use the deterministic
+        # minimal-dilation candidate order after the immutable tip data are
+        # available below.  There is no detached random-QCD record in the
+        # schema-1.1 flow.
         standard_model_divisors = None
         standard_model_qcd_selection = (
             "explicit_geometry_reference_qcd"
@@ -1746,7 +2108,15 @@ def generate_and_save_geometry(
             visible_sector_policy, orientifold, neighbors
         )
         visible_qcd_candidate_set = set(visible_qcd_candidates)
-        if qcd_divisor_index is not None and qcd_divisor_index not in visible_qcd_candidate_set:
+        if (
+            qcd_divisor_index is not None
+            and qcd_divisor_index not in visible_qcd_candidate_set
+            and not canonical_qcd_qed_prefilter_active(
+                eft_mode=eft_mode,
+                moduli_policy=moduli_policy,
+                visible_sector_policy=visible_sector_policy,
+            )
+        ):
             raise NoVisibleSectorAssignment(
                 f"QCD divisor index {qcd_divisor_index} has no invariant "
                 "intersecting QED divisor"
@@ -1794,6 +2164,9 @@ def generate_and_save_geometry(
             min_prime_divisor_volume=min_prime_divisor_volume,
             min_divisor_volume=min_divisor_volume,
             volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
+            # Apply the final >=1 control cut only after QCD normalization.
+            enforce_divisor_volume_lower_bounds=False,
+            **volume_context,
         )
         point_diagnostics.append(selected_point_diagnostic)
         if selected_point_values is None:
@@ -1831,6 +2204,7 @@ def generate_and_save_geometry(
                 min_prime_divisor_volume=min_prime_divisor_volume,
                 min_divisor_volume=min_divisor_volume,
                 volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
+                **volume_context,
             )
             point_diagnostics.append(candidate_diagnostic)
             if candidate_values is None:
@@ -1857,19 +2231,21 @@ def generate_and_save_geometry(
             )
 
     report("computing divisor volumes and inverse Kähler metric")
-    tau0 = np.asarray(cy.compute_divisor_volumes(kaehler_point, in_basis=True), dtype=float)
+    reference_geometry = _compute_volume_geometry(
+        cy, kaehler_point, **volume_context
+    )
+    tau0 = reference_geometry["basis_divisor_volumes"]
     if tau0.shape != (int(h11),) or not np.all(np.isfinite(tau0)):
         raise RuntimeError(
             f"CYTools returned invalid basis divisor volumes with shape {tau0.shape}."
         )
-    kinv0_raw = np.asarray(cy.compute_inverse_kahler_metric(kaehler_point), dtype=float)
-    kinv0 = 0.5 * (kinv0_raw + kinv0_raw.T)
+    kinv0 = reference_geometry["inverse_metric"]
     if kinv0.shape != (int(h11), int(h11)) or not np.all(np.isfinite(kinv0)):
         raise RuntimeError("CYTools returned an invalid inverse Kähler metric.")
     if np.min(np.linalg.eigvalsh(kinv0)) <= 0.0:
         raise RuntimeError("The selected Kähler point has a non-positive metric.")
     tau, kinv = tau0.copy(), kinv0.copy()
-    prime_tau0 = np.asarray(cy.compute_divisor_volumes(kaehler_point), dtype=float)
+    prime_tau0 = reference_geometry["prime_divisor_volumes"]
     if prime_tau0.ndim != 1 or not np.all(np.isfinite(prime_tau0)):
         raise RuntimeError("CYTools returned invalid prime toric divisor volumes.")
 
@@ -1880,31 +2256,88 @@ def generate_and_save_geometry(
             "volumes in the selected divisor basis."
         )
     pre_normalization_tip = np.asarray(kaehler_point, dtype=float).copy()
-    pre_normalization_volume = float(cy.compute_cy_volume(pre_normalization_tip))
-    pre_normalization_curve_volumes = np.asarray(
-        cy.compute_curve_volumes(pre_normalization_tip), dtype=float
+    pre_normalization_geometry = _compute_volume_geometry(
+        cy, pre_normalization_tip, **volume_context
     )
+    pre_normalization_volume = pre_normalization_geometry["cy_volume"]
+    pre_normalization_curve_volumes = pre_normalization_geometry["curve_volumes"]
     if (
         not np.isfinite(pre_normalization_volume)
         or not np.all(np.isfinite(pre_normalization_curve_volumes))
     ):
         raise RuntimeError("pre-normalization geometry data are non-finite")
+    volume_backend_diagnostics = _volume_backend_diagnostics(
+        cy,
+        kaehler_point,
+        reference_geometry,
+        effective_cone_rays=qprime,
+        **volume_context,
+    )
     if moduli_policy == "canonical_qcd":
         # This is the paper-style geometry prescription: keep the canonical
         # stretched-cone direction and fix only the radial scale from the
         # selected QCD divisor.  The adaptive potential-control search is not
         # part of this normalization and would add avoidable O(nq^2) work.
-        candidate_indices = (
-            [qcd_divisor_index]
-            if qcd_divisor_index is not None
-            else sorted(visible_qcd_candidate_set)
-            if visible_qcd_candidate_set is not None
-            else list(range(len(prime_tau0)))
+        production_qed_prefilter = canonical_qcd_qed_prefilter_active(
+            eft_mode=eft_mode,
+            moduli_policy=moduli_policy,
+            visible_sector_policy=visible_sector_policy,
         )
-        if visible_qcd_candidate_set is not None:
-            candidate_indices = [
-                index for index in candidate_indices if index in visible_qcd_candidate_set
+        if production_qed_prefilter:
+            # Evaluate every QCD candidate before minimal-dilation ordering so
+            # the QED volume test is candidate-specific.  An explicit index
+            # remains a singleton override and is never replaced by another
+            # candidate.
+            candidate_indices = (
+                [qcd_divisor_index]
+                if qcd_divisor_index is not None
+                else list(range(len(prime_tau0)))
+            )
+            invariant_mask = np.asarray(
+                orientifold["prime_divisor_image_indices"], dtype=int
+            ) == np.arange(prime_labels.size)
+            canonical_qcd_qed_prefilter = prefilter_canonical_qcd_candidates(
+                prime_tau0,
+                candidate_indices,
+                prime_neighbors,
+                invariant_mask,
+                qcd_volume_target,
+                QED_VOLUME_MAX if qed_volume_max is None else float(qed_volume_max),
+                max_m,
+                allow_m_below_one=allow_m_below_one,
+            )
+            canonical_qcd_qed_prefilter["explicit_qcd_index_override"] = (
+                qcd_divisor_index is not None
+            )
+            if topology_audit is not None:
+                topology_audit["canonical_qcd_qed_prefilter"] = (
+                    canonical_qcd_qed_prefilter
+                )
+            candidate_indices = canonical_qcd_qed_prefilter[
+                "eligible_candidate_indices"
             ]
+            if not candidate_indices:
+                raise QEDAssignmentFailure(
+                    CANONICAL_QCD_QED_PREFILTER_FAILURE_STATUS,
+                    "The canonical QCD QED prefilter rejected every candidate: "
+                    "no distinct intersecting orientifold-invariant QED neighbor "
+                    f"has final volume <= {canonical_qcd_qed_prefilter['effective_qed_volume_max']:g}.",
+                    canonical_qcd_qed_prefilter,
+                )
+        else:
+            candidate_indices = (
+                [qcd_divisor_index]
+                if qcd_divisor_index is not None
+                else sorted(visible_qcd_candidate_set)
+                if visible_qcd_candidate_set is not None
+                else list(range(len(prime_tau0)))
+            )
+            if visible_qcd_candidate_set is not None:
+                candidate_indices = [
+                    index
+                    for index in candidate_indices
+                    if index in visible_qcd_candidate_set
+                ]
         selected_qcd = select_canonical_qcd_candidate(
             prime_tau0,
             tau0,
@@ -1930,6 +2363,18 @@ def generate_and_save_geometry(
                 "lower bound, and final Kähler-cone validation."
             )
         qcd_divisor_index, m_val = selected_qcd
+        if production_qed_prefilter:
+            canonical_qcd_qed_prefilter.update(
+                {
+                    "selected_qcd_index": int(qcd_divisor_index),
+                    "selected_radial_scale": float(m_val),
+                    "selection_status": "selected_after_qed_prefilter",
+                }
+            )
+            if topology_audit is not None:
+                topology_audit["canonical_qcd_qed_prefilter"] = (
+                    canonical_qcd_qed_prefilter
+                )
         qcd_volume_min = qcd_volume_target
         qcd_volume_max = qcd_volume_target
     else:
@@ -2016,22 +2461,34 @@ def generate_and_save_geometry(
     kinv = m2**2 * kinv0
 
     # Store a self-consistent physical point: tau, Kinv and the CY volume are
-    # all evaluated at the same final J = m * kaehler_point.
+    # all evaluated at the same final J = m * kaehler_point.  For the
+    # canonical policy, use the exact homogeneous divisor scaling from the
+    # selected reference point rather than a second floating-point CYTools
+    # evaluation at the dilated point.  The latter can drift beyond the strict
+    # QCD target tolerance even though the homogeneous normalization is exact.
     tip = m_val * kaehler_point
-    volume = float(cy.compute_cy_volume(tip))
-    tau = np.asarray(cy.compute_divisor_volumes(tip, in_basis=True), dtype=float)
+    final_geometry = _compute_volume_geometry(cy, tip, **volume_context)
+    volume = final_geometry["cy_volume"]
+    if moduli_policy == "canonical_qcd":
+        tau, prime_divisor_volumes, effective_divisor_volumes = (
+            scale_canonical_divisor_volumes(
+                tau0, prime_tau0, qprime, m_val
+            )
+        )
+    else:
+        tau = final_geometry["basis_divisor_volumes"]
+        prime_divisor_volumes = final_geometry["prime_divisor_volumes"]
+        effective_divisor_volumes = qprime @ tau
     if tau.shape != (int(h11),) or not np.all(np.isfinite(tau)):
         raise FinalGeometryValidationFailed(
             "post-normalization basis divisor volumes are non-finite or have an invalid shape"
         )
-    prime_divisor_volumes = np.asarray(cy.compute_divisor_volumes(tip), dtype=float)
     if prime_divisor_volumes.ndim != 1 or not np.all(
         np.isfinite(prime_divisor_volumes)
     ):
         raise FinalGeometryValidationFailed(
             "post-normalization prime toric divisor volumes are non-finite"
         )
-    effective_divisor_volumes = qprime @ tau
     if effective_divisor_volumes.ndim != 1 or not np.all(
         np.isfinite(effective_divisor_volumes)
     ):
@@ -2063,7 +2520,7 @@ def generate_and_save_geometry(
         min_prime_divisor_volume,
         min_divisor_volume,
     )
-    curve_volumes = np.asarray(cy.compute_curve_volumes(tip), dtype=float)
+    curve_volumes = final_geometry["curve_volumes"]
     kaehler_slack = np.asarray(kahler_cone.hyperplanes(), dtype=float) @ tip
     normalization_checks = validate_final_qcd_normalization(
         point=tip,
@@ -2293,6 +2750,40 @@ def generate_and_save_geometry(
         "cy3_fingerprint": cy3_fingerprint,
         "cy3_fingerprint_status": "topological_fingerprint",
         "sampling": sampling_metadata,
+        "volume_backend_requested": (
+            "fan" if volume_backend_requested is None else str(volume_backend_requested)
+        ),
+        "volume_backend": volume_backend,
+        "volume_backend_selection": (
+            "h11=491 historical_sparse_coo; all other h11 fan"
+            if volume_backend_requested == AUTO_VOLUME_BACKEND
+            else "explicit_or_default_backend"
+        ),
+        "volume_backend_scope": (
+            "h11=491 compatibility reproduction only"
+            if volume_backend == HISTORICAL_VOLUME_BACKEND
+            else "CYTools Fan path default"
+        ),
+        "historical_contraction": (
+            {
+                "selected": True,
+                "intersection_source": (
+                    "CYTools CalabiYau.intersection_numbers "
+                    "(in_basis=True, format='coo')"
+                ),
+                "formula": (
+                    "V=1/6*kappa_ijk*t_i*t_j*t_k; "
+                    "tau_i=1/2*kappa_ijk*t_j*t_k; "
+                    "repeated-index multiplicities from COO entries"
+                ),
+                "prime_divisor_formula": "glsm_charge_matrix.T @ tau_basis",
+                "effective_divisor_formula": "effective_cone_rays @ tau_basis",
+                "curve_volume_formula": "mori_cone_rays @ t",
+            }
+            if volume_backend == HISTORICAL_VOLUME_BACKEND
+            else {"selected": False},
+        ),
+        "volume_backend_diagnostics": volume_backend_diagnostics,
         "kaehler_point_scan": {
             "policy": moduli_policy,
             "attempt_budget": int(max_kaehler_attempts),
@@ -2328,8 +2819,31 @@ def generate_and_save_geometry(
         "kappa_index_base": 0,
         "prime_divisor_volume_lower_bound": min_prime_divisor_volume,
         "prime_divisor_convention": (
-            "CYTools compute_divisor_volumes(tip), ordered by "
-            "CYTools prime_toric_divisors()"
+            (
+                (
+                    "historical sparse COO basis contraction followed by "
+                    "GLSM.T @ tau_basis at reference tip, then homogeneous m^2 "
+                    "scaling; ordered by CYTools prime_toric_divisors()"
+                )
+                if volume_backend == HISTORICAL_VOLUME_BACKEND
+                else (
+                    "CYTools compute_divisor_volumes(reference tip), then "
+                    "homogeneous m^2 scaling; ordered by CYTools "
+                    "prime_toric_divisors()"
+                )
+            )
+            if moduli_policy == "canonical_qcd"
+            else (
+                (
+                    "historical sparse COO basis contraction followed by "
+                    "GLSM.T @ tau_basis, ordered by CYTools prime_toric_divisors()"
+                )
+                if volume_backend == HISTORICAL_VOLUME_BACKEND
+                else (
+                    "CYTools compute_divisor_volumes(tip), ordered by "
+                    "CYTools prime_toric_divisors()"
+                )
+            )
         ),
         "qcd_divisor_volume_window": [qcd_volume_min, qcd_volume_max],
         "qcd_divisor_index": qcd_divisor_index,
@@ -2386,12 +2900,19 @@ def generate_and_save_geometry(
         "allow_m_below_one": bool(allow_m_below_one),
         "canonical_qcd_normalization": (
             {
-                "candidate_order": "deterministic_cytools_prime_divisor_index",
+                "candidate_order": (
+                    "explicit_qcd_divisor_index"
+                    if qcd_divisor_index is not None
+                    else (
+                        CANONICAL_QCD_CONTRACTION_CANDIDATE_ORDER
+                        if allow_m_below_one
+                        else CANONICAL_QCD_CANDIDATE_ORDER
+                    )
+                ),
                 "selection_policy": (
                     "explicit_qcd_divisor_index"
                     if qcd_divisor_index is not None
-                    and standard_model_qcd_selection == "explicit_geometry_reference_qcd"
-                    else "first_eligible_ascending_index"
+                    else CANONICAL_QCD_SELECTION_POLICY
                 ),
                 "visible_sector_compatibility_filter": (
                     visible_sector_policy == "intersecting_d7"
@@ -2404,7 +2925,12 @@ def generate_and_save_geometry(
                 "selected_qcd_divisor_label": np.asarray(
                     prime_labels_stable[qcd_divisor_index]
                 ).tolist(),
-                "post_selection_fallback": "none",
+                "post_selection_fallback": (
+                    "not_applicable_explicit_override"
+                    if qcd_divisor_index is not None
+                    else CANONICAL_QCD_POST_SELECTION_FALLBACK
+                ),
+                "qed_prefilter": canonical_qcd_qed_prefilter,
                 "repair_policy": "none",
             }
             if moduli_policy == "canonical_qcd"
@@ -2418,10 +2944,11 @@ def generate_and_save_geometry(
             None if qed_volume_max is None else float(qed_volume_max)
         ),
         "qed_volume_filter_policy": (
-            "less_than_or_equal_to_127.5_complete_pool"
+            "qcd_qed_prefilter_then_less_than_or_equal_to_127.5_complete_pool"
             if assignment_pool is not None
             else ("disabled" if qed_volume_max is None else "pre_filter_pool_then_reject")
         ),
+        "canonical_qcd_qed_prefilter": canonical_qcd_qed_prefilter,
         "assignment_pool_size": 0 if assignment_pool is None else len(assignment_pool),
         "assignment_pool_hash": (
             None
@@ -2689,6 +3216,15 @@ def generate_and_save_geometry(
             geometric.attrs["triangulation_id"] = triangulation_id
             geometric.attrs["cy3_fingerprint"] = cy3_fingerprint
             geometric.attrs["sampling_scheme"] = sampling_metadata["scheme"]
+            geometric.attrs["volume_backend_requested"] = construction_metadata[
+                "volume_backend_requested"
+            ]
+            geometric.attrs["volume_backend"] = volume_backend
+            geometric.attrs["historical_contraction"] = json.dumps(
+                _jsonable(construction_metadata["historical_contraction"]),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
             geometric.attrs["kappa_format"] = construction_metadata["kappa_format"]
             geometric.attrs["kappa_index_base"] = construction_metadata["kappa_index_base"]
             geometric.attrs["basis_convention"] = construction_metadata["basis_convention"]
@@ -3017,6 +3553,7 @@ def process_polytope(task):
         qed_volume_max,
         eft_mode,
         materialize_dense_potential,
+        volume_backend,
         proposal_budget,
         retry_budget,
         polytope_source,
@@ -3235,6 +3772,7 @@ def process_polytope(task):
                     allow_overwrite_existing_geometry=(
                         allow_overwrite_existing_geometry
                     ),
+                    volume_backend=volume_backend,
                 )
             except Exception as exc:
                 rejected += 1
@@ -3520,6 +4058,7 @@ def plan_tasks(
     qed_volume_max=None,
     eft_mode=False,
     materialize_dense_potential=False,
+    volume_backend=None,
     proposal_budget=None,
     retry_budget=None,
 ):
@@ -3648,6 +4187,7 @@ def plan_tasks(
             qed_volume_max,
             eft_mode,
             materialize_dense_potential,
+            volume_backend,
             proposal_budget,
             retry_budget,
             polytope_source,
@@ -3715,6 +4255,7 @@ def run_batch(
     qed_volume_max=None,
     eft_mode=False,
     materialize_dense_potential=False,
+    volume_backend=None,
     proposal_budget=None,
     retry_budget=None,
 ):
@@ -3760,6 +4301,7 @@ def run_batch(
         qed_volume_max=qed_volume_max,
         eft_mode=eft_mode,
         materialize_dense_potential=materialize_dense_potential,
+        volume_backend=volume_backend,
         proposal_budget=proposal_budget,
         retry_budget=retry_budget,
     )
@@ -3858,6 +4400,7 @@ def run_batches(
     qed_volume_max=None,
     eft_mode=False,
     materialize_dense_potential=False,
+    volume_backend=None,
     collect_records=False,
     proposal_budget=None,
     retry_budget=None,
@@ -3943,6 +4486,7 @@ def run_batches(
                 qed_volume_max=qed_volume_max,
                 eft_mode=eft_mode,
                 materialize_dense_potential=materialize_dense_potential,
+                volume_backend=volume_backend,
                 proposal_budget=(
                     planning_max_tip_attempts
                     if proposal_budget is None
@@ -4119,6 +4663,158 @@ def _reconstruct_intersection_geometry(kappa, tip):
         "divisor_volumes": divisor_volumes,
         "inverse_metric": inverse_metric,
     }
+
+
+def _compute_volume_geometry(
+    cy,
+    tip,
+    *,
+    volume_backend,
+    kappa=None,
+    glsm_charge_matrix=None,
+    mori_cone=None,
+):
+    """Compute all Stage-2 geometric volumes through one selected backend."""
+    point = np.asarray(tip, dtype=float).reshape(-1)
+    if point.size == 0 or not np.all(np.isfinite(point)):
+        raise ValueError("the Kähler point is empty or non-finite")
+    volume_backend = resolve_volume_backend(point.size, volume_backend)
+    if volume_backend == "fan":
+        cy_volume = float(cy.compute_cy_volume(point))
+        basis_divisor_volumes = np.asarray(
+            cy.compute_divisor_volumes(point, in_basis=True), dtype=float
+        )
+        prime_divisor_volumes = np.asarray(
+            cy.compute_divisor_volumes(point), dtype=float
+        )
+        inverse_metric = np.asarray(
+            cy.compute_inverse_kahler_metric(point), dtype=float
+        )
+        curve_volumes = np.asarray(cy.compute_curve_volumes(point), dtype=float)
+    else:
+        if kappa is None:
+            raise ValueError("historical_sparse_coo requires COO intersection data")
+        if glsm_charge_matrix is None:
+            raise ValueError(
+                "historical_sparse_coo requires the existing GLSM charge matrix"
+            )
+        if mori_cone is None:
+            raise ValueError("historical_sparse_coo requires Mori-cone rays")
+        reconstructed = _reconstruct_intersection_geometry(kappa, point)
+        cy_volume = float(reconstructed["cy_volume"])
+        basis_divisor_volumes = np.asarray(
+            reconstructed["divisor_volumes"], dtype=float
+        )
+        inverse_metric = np.asarray(reconstructed["inverse_metric"], dtype=float)
+        glsm = np.asarray(glsm_charge_matrix, dtype=float)
+        if glsm.ndim != 2 or glsm.shape[0] != point.size:
+            raise ValueError(
+                "the GLSM charge matrix must have one row per divisor-basis coordinate"
+            )
+        prime_divisor_volumes = np.asarray(glsm.T @ basis_divisor_volumes, dtype=float)
+        mori = np.asarray(mori_cone, dtype=float)
+        if mori.ndim != 2 or mori.shape[1] != point.size:
+            raise ValueError("Mori-cone rays must be expressed in the divisor basis")
+        curve_volumes = np.asarray(mori @ point, dtype=float)
+
+    inverse_metric = 0.5 * (inverse_metric + inverse_metric.T)
+    expected_shape = (point.size,)
+    if (
+        basis_divisor_volumes.shape != expected_shape
+        or not np.all(np.isfinite(basis_divisor_volumes))
+        or prime_divisor_volumes.ndim != 1
+        or not np.all(np.isfinite(prime_divisor_volumes))
+        or curve_volumes.ndim != 1
+        or not np.all(np.isfinite(curve_volumes))
+        or inverse_metric.shape != (point.size, point.size)
+        or not np.all(np.isfinite(inverse_metric))
+        or not np.isfinite(cy_volume)
+    ):
+        raise ValueError(
+            f"{volume_backend} returned non-finite or incorrectly shaped geometry data"
+        )
+    return {
+        "cy_volume": cy_volume,
+        "basis_divisor_volumes": basis_divisor_volumes,
+        "prime_divisor_volumes": prime_divisor_volumes,
+        "inverse_metric": inverse_metric,
+        "curve_volumes": curve_volumes,
+    }
+
+
+def _volume_backend_diagnostics(
+    cy,
+    tip,
+    selected_geometry,
+    *,
+    volume_backend,
+    kappa=None,
+    glsm_charge_matrix=None,
+    mori_cone=None,
+    effective_cone_rays=None,
+):
+    """Record a bounded Fan comparison when historical mode is selected."""
+    diagnostics = {
+        "selected_backend": volume_backend,
+        "status": "not_requested",
+    }
+    if volume_backend != HISTORICAL_VOLUME_BACKEND:
+        return diagnostics
+    try:
+        fan_geometry = _compute_volume_geometry(
+            cy,
+            tip,
+            volume_backend="fan",
+            kappa=kappa,
+            glsm_charge_matrix=glsm_charge_matrix,
+            mori_cone=mori_cone,
+        )
+        historical_basis = np.asarray(
+            selected_geometry["basis_divisor_volumes"], dtype=float
+        )
+        fan_basis = np.asarray(fan_geometry["basis_divisor_volumes"], dtype=float)
+        comparison = {
+            "status": "recorded",
+            "point_sha256": stable_hash(np.asarray(tip, dtype=float).tolist()),
+            "fan_cy_volume": float(fan_geometry["cy_volume"]),
+            "historical_cy_volume": float(selected_geometry["cy_volume"]),
+            "fan_min_basis_divisor_volume": float(np.min(fan_basis)),
+            "historical_min_basis_divisor_volume": float(np.min(historical_basis)),
+            "fan_nonpositive_basis_count": int(np.count_nonzero(fan_basis <= 0.0)),
+            "historical_nonpositive_basis_count": int(
+                np.count_nonzero(historical_basis <= 0.0)
+            ),
+            "max_abs_basis_volume_difference": float(
+                np.max(np.abs(fan_basis - historical_basis))
+            ),
+        }
+        if effective_cone_rays is not None:
+            qprime = np.asarray(effective_cone_rays, dtype=float)
+            fan_effective = qprime @ fan_basis
+            historical_effective = qprime @ historical_basis
+            comparison.update(
+                {
+                    "fan_min_effective_divisor_volume": float(np.min(fan_effective)),
+                    "historical_min_effective_divisor_volume": float(
+                        np.min(historical_effective)
+                    ),
+                    "fan_nonpositive_effective_count": int(
+                        np.count_nonzero(fan_effective <= 0.0)
+                    ),
+                    "historical_nonpositive_effective_count": int(
+                        np.count_nonzero(historical_effective <= 0.0)
+                    ),
+                }
+            )
+        diagnostics.update(comparison)
+    except Exception as exc:
+        diagnostics.update(
+            {
+                "status": "fan_comparison_failed",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+    return diagnostics
 
 
 def _signed_log_scale(raw_amplitude, raw_exponent):
@@ -5013,6 +5709,17 @@ def main():
         help="Required lower bound for every prime toric divisor volume.",
     )
     parser.add_argument(
+        "--volume-backend",
+        choices=VOLUME_BACKENDS,
+        default="fan",
+        help=(
+            "Stage-2 volume backend. fan is the CYTools default; "
+            "historical_sparse_coo reproduces the historical sparse COO "
+            "contraction and is restricted to h11=491; auto selects "
+            "historical_sparse_coo at h11=491 and fan otherwise."
+        ),
+    )
+    parser.add_argument(
         "--qcd-volume-min",
         type=float,
         default=25.0,
@@ -5277,6 +5984,10 @@ def main():
         if args.h11_max < args.h11_min:
             args.h11_max = args.h11_min
         h11_values = list(range(args.h11_min, args.h11_max + 1, args.h11_interval))
+    if args.volume_backend == HISTORICAL_VOLUME_BACKEND and any(
+        int(value) != 491 for value in h11_values
+    ):
+        parser.error("--volume-backend historical_sparse_coo requires h11=491 only")
     if args.eft:
         if args.h11s is not None and set(h11_values) != set(eft_geometry_plan):
             parser.error("--eft --h11s must contain exactly 50,100,200,491")
@@ -5384,6 +6095,7 @@ def main():
         qed_volume_max=args.qed_volume_max,
         eft_mode=args.eft,
         materialize_dense_potential=args.materialize_dense_potential,
+        volume_backend=args.volume_backend,
         collect_records=True,
         proposal_budget=(None if args.proposal_budget is None else proposal_budget),
         retry_budget=(None if args.retry_budget is None else retry_budget),

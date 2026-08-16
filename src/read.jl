@@ -172,6 +172,39 @@ function potential(geom_idx::GeometryIndex; hilbert = false)
     end
 end
 
+"""
+    potential_factored(geom_idx::GeometryIndex; hilbert=false)
+
+Read a potential together with the inverse kinetic metric and its Cholesky
+factor.  Return `C` such that `Kinv ≈ C * C'`; callers that whiten a Hessian
+can therefore form `C' * H * C` without explicitly constructing `inv(Kinv)`.
+"""
+function potential_factored(geom_idx::GeometryIndex; hilbert = false)
+    L, Q, Kinv = h5open(cyax_file(geom_idx), "r") do file
+        if hilbert
+            HDF5.read(file, "cytools/hilbert/potential/L"),
+            HDF5.read(file, "cytools/hilbert/potential/Q"),
+            HDF5.read(file, "cytools/hilbert/geometric/Kinv")
+        else
+            HDF5.read(file, "cytools/potential/L"),
+            HDF5.read(file, "cytools/potential/Q"),
+            HDF5.read(file, "cytools/geometric/Kinv")
+        end
+    end
+    L = Matrix{Float64}(L)
+    Q = Matrix{Int}(Q)
+    Kinv = Matrix{Float64}(Kinv)
+    size(Kinv, 1) == size(Kinv, 2) ||
+        throw(DimensionMismatch("Kinv must be square"))
+    Kinv = (Kinv + transpose(Kinv)) / 2
+    C = Matrix(cholesky(Symmetric(Kinv)).L)
+    (; L, Q, Kinv, C)
+end
+
+function potential_factored(h11::Int, tri::Int, cy::Int=1; hilbert=false)
+    potential_factored(GeometryIndex(h11, tri, cy); hilbert)
+end
+
 """Remove redundant repeated leading charge rows from a generated potential.
 
 The geometry generators construct a potential from `n` leading charges and
@@ -336,12 +369,14 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
     L::Matrix{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
         HDF5.read(file, "cytools/potential/L")
     end
-    Ltemp::Vector{ArbFloat} = zeros(ArbFloat,size(L,2))
-    @inbounds for i in axes(L,1)
-        mantissa = ArbFloat(L[i,1])
-        exponent = ArbFloat(10.) ^ ArbFloat(L[i,2])
+    T = typeof(ArbFloat(0))
+    Ltemp::Vector{T} = zeros(T, size(L, 2))
+    ten = T(10)
+    @inbounds for i in axes(L, 2)
+        mantissa = T(L[1, i])
+        exponent = ten ^ T(L[2, i])
         Ltemp[i] = mantissa * exponent
-        end
+    end
     return Ltemp
 end
 
