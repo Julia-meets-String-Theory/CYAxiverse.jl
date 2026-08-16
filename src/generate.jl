@@ -870,8 +870,12 @@ function hp_spectrum(K::Hermitian{Float64, Matrix{Float64}},
     Tls::Matrix{ArbFloat} = Kfactor.L' \ eigenvectors
     Qrows::Matrix{ArbFloat} = ArbFloat.(transpose(Q))
     QMs::Matrix{ArbFloat} = Qrows * Tls
-    qindq31::Vector{NTuple{4, Int}} = [(x, x, x, y) for x=1:h11,y=1:h11 if x!=y]
-    qindq22::Vector{NTuple{4, Int}} = [(x, x, y, y) for x=1:h11,y=1:h11 if x>y]
+    # These must enumerate in the same order as the fused accumulation loop
+    # below, which runs the first index slowest. A two-dimensional
+    # comprehension iterates column-major (first index fastest) and so
+    # transposes the labels relative to the accumulated values.
+    qindq31::Vector{NTuple{4, Int}} = [(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
+    qindq22::Vector{NTuple{4, Int}} = [(i, i, j, j) for i in 1:h11 for j in 1:i-1]
     quart31log::Vector{Float64} = zeros(Float64, length(qindq31))
     quart22log::Vector{Float64} = zeros(Float64, length(qindq22))
     quartdiaglog::Vector{Float64} = zeros(Float64, h11)
@@ -3434,12 +3438,16 @@ function basis_snf(rays::Matrix{Int})
         Tparallel = Matrix{Int}(Tparallel1)
         θparalleltest = Matrix{Rational}(inv(transpose(Rational.(rays)) * Rational.(rays)) * transpose(Rational.(rays)) * Tparallel)
         θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
-		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational(θparalleltest)))
+        # `inv` must be taken as a matrix inverse before broadcasting; inside
+        # `@.` it would apply elementwise.
+        θinv = Matrix{Rational}(inv(θparalleltest))
+        θparalleltestinv = @.(ifelse(abs(θinv) < 1e-4, zero(θinv), Rational(θinv)))
     else
         Tparallel = Matrix{BigInt}(Tparallel1)
         θparalleltest = Matrix{Rational{BigInt}}(inv(transpose(Rational.(rays)) * Rational.(rays)) * transpose(Rational.(rays)) * Tparallel)
         θparalleltest = @.(ifelse(abs(θparalleltest) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
-		θparalleltestinv = @.(ifelse(abs(inv(θparalleltest)) < 1e-4, zero(θparalleltest), Rational{BigInt}(θparalleltest)))
+        θinv = Matrix{Rational{BigInt}}(inv(θparalleltest))
+        θparalleltestinv = @.(ifelse(abs(θinv) < 1e-4, zero(θinv), Rational{BigInt}(θinv)))
     end
 	vol_basis = abs(det(θparalleltest))
     return BasisSNF(vol_basis, θparalleltest, θparalleltestinv)

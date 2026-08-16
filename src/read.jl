@@ -336,12 +336,14 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
     L::Matrix{Float64} = h5open(cyax_file(h11,tri,cy), "r") do file
         HDF5.read(file, "cytools/potential/L")
     end
-    Ltemp::Vector{ArbFloat} = zeros(ArbFloat,size(L,2))
-    @inbounds for i in axes(L,1)
-        mantissa = ArbFloat(L[i,1])
-        exponent = ArbFloat(10.) ^ ArbFloat(L[i,2])
+    # L is stored 2 × N: row 1 is the sign/mantissa, row 2 the log10 scale,
+    # one instanton per column.
+    Ltemp::Vector{ArbFloat} = zeros(ArbFloat, size(L, 2))
+    @inbounds for i in axes(L, 2)
+        mantissa = ArbFloat(L[1, i])
+        exponent = ArbFloat(10.) ^ ArbFloat(L[2, i])
         Ltemp[i] = mantissa * exponent
-        end
+    end
     return Ltemp
 end
 
