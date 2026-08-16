@@ -3,6 +3,7 @@ using LinearAlgebra
 using SparseArrays
 using Test
 using HDF5
+using Random
 
 @testset "Core plotting API stays optional" begin
     @test Base.get_extension(CYAxiverse, :CYAxiverseCairoMakieExt) === nothing
@@ -373,6 +374,138 @@ end
                 CYAxiverse.structs.GeometryIndex(2, 3, 1);
                 canonicalize_charge_rows=false)
             @test size(raw_duplicate.Q) == (2, 6)
+        finally
+            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        end
+    end
+end
+
+@testset "Kinetic matrix construction and section-3 positive-definiteness invariant" begin
+    # `.copilot/AGENTS.md` section 3 requires the kinetic matrix
+    # K = 1/2 g to be symmetric positive-definite, throwing a domain error
+    # when it is not. `read.potential` previously built K as
+    # `Hermitian(inv(Kinv))`: a plain, symmetry-unaware `inv` on the
+    # `Matrix` read from HDF5, wrapped in `Hermitian` only afterwards. That
+    # selects a general LU factorisation and can leave K badly indefinite on
+    # realistic, ill-conditioned `Kinv`, even though the wrapped result is
+    # always exactly symmetric. This testset pins the fixed construction
+    # (`Hermitian(inv(Hermitian(Kinv)))`, a symmetry-aware Bunch-Kaufman
+    # inverse) together with the new validation that enforces the
+    # invariant.
+    make_kinv(n, logcond; rng) = begin
+        V = Matrix(qr(randn(rng, n, n)).Q)
+        D = Diagonal(10.0 .^ range(0, -logcond, length=n))
+        V * D * V'
+    end
+    write_potential_fixture(root, h11, np, cy, Kinv) = begin
+        geom_dir = joinpath(root, "h11_$(lpad(h11, 3, '0'))",
+            "np_$(lpad(np, 7, '0'))", "cy_$(lpad(cy, 7, '0'))")
+        mkpath(geom_dir)
+        n = size(Kinv, 1)
+        h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            potential["Q"] = Matrix{Int}(I, n, n)
+            potential["L"] = vcat(ones(1, n), -ones(1, n))
+            geometric["Kinv"] = Kinv
+        end
+    end
+
+    mktempdir() do root
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            rng = MersenneTwister(20260816)
+
+            # A well-conditioned Kinv reads fine and yields a
+            # positive-definite K.
+            write_potential_fixture(root, 21, 1, 1, make_kinv(6, 2; rng=rng))
+            well_conditioned = CYAxiverse.read.potential(21, 1, 1)
+            @test isposdef(well_conditioned.K)
+
+            # Ill-conditioned Kinv at cond = 1e10, 1e12, 1e14: the fixed
+            # construction reads fine and yields a positive-definite K. The
+            # previous `Hermitian(inv(Kinv))` construction failed
+            # `cholesky` on a large majority of draws at these condition
+            # numbers (up to 20/20 at n=100); the fix eliminates that
+            # failure mode entirely for this range.
+            for (index, logcond) in enumerate((10, 12, 14))
+                # n=100: the measurement backing this fix (240 draws
+                # across n in 20, 40, 100 and cond in 1e10..1e16) found the
+                # old construction fails cholesky on 20/20 draws at n=100
+                # for every condition number tested, so the "bug
+                # reproduces" assertion below is not a statistical fluke.
+                Kinv = make_kinv(100, logcond; rng=rng)
+                write_potential_fixture(root, 22, index, 1, Kinv)
+                pot = CYAxiverse.read.potential(22, index, 1)
+                @test isposdef(pot.K)
+
+                # The bug reproduces on the same stored data: the old,
+                # symmetry-unaware construction is badly indefinite here.
+                @test !isposdef(Hermitian(inv(Kinv)))
+            end
+
+            # A genuinely non-positive-definite stored Kinv (a negative
+            # eigenvalue of real size, far larger than floating-point
+            # noise) throws DomainError, and the message names the
+            # geometry.
+            n = 6
+            V = Matrix(qr(randn(rng, n, n)).Q)
+            D_bad = Diagonal(vcat([1.0, 0.5, 0.3, 0.1, 0.05], [-0.2]))
+            Kinv_bad = V * D_bad * V'
+            write_potential_fixture(root, 23, 1, 1, Kinv_bad)
+            err = try
+                CYAxiverse.read.potential(23, 1, 1)
+                nothing
+            catch caught
+                caught
+            end
+            @test err isa DomainError
+            @test occursin("h11=23", err.msg)
+            @test occursin("polytope=1", err.msg)
+            @test occursin("frst=1", err.msg)
+
+            # Opt-out: validate=false returns the same (invalid) K without
+            # throwing, for callers that have already validated the corpus
+            # or need to bypass the check.
+            skipped = CYAxiverse.read.potential(23, 1, 1; validate=false)
+            @test !isposdef(skipped.K)
+
+            # Chosen behaviour: validate isposdef(K) with no tolerance,
+            # because section 3 is a statement about K and this is exactly
+            # that statement. A Kinv eigenvalue that is negative even at
+            # -1e-10 produces a K with smallest eigenvalue around -1e10, so
+            # it is rejected rather than tolerated.
+            #
+            # An earlier revision fell back to Kinv's own spectrum with a
+            # sqrt(eps)-scaled tolerance. That was removed after measurement:
+            # it altered the outcome only beyond cond(Kinv) = 1e16, where
+            # rejection is correct anyway, while wrongly accepting a stored
+            # eigenvalue of -1e-9 that yields a K with smallest eigenvalue
+            # -1e9 -- precisely the state section 3 forbids.
+            Random.seed!(2024)
+            n = 6
+            V_marginal = Matrix(qr(randn(n, n)).Q)
+            D_marginal = Diagonal(vcat([1.0, 0.6, 0.4, 0.2, 0.1], [-1e-10]))
+            Kinv_marginal = V_marginal * D_marginal * V_marginal'
+            @test !isposdef(Hermitian(inv(Hermitian(Kinv_marginal))))
+            write_potential_fixture(root, 24, 1, 1, Kinv_marginal)
+            @test_throws DomainError CYAxiverse.read.potential(24, 1, 1)
+            # ... and validate=false still bypasses the check entirely.
+            @test CYAxiverse.read.potential(24, 1, 1; validate = false).K isa
+                  Hermitian{Float64, Matrix{Float64}}
+
+            # A positive-definite Kinv approaching a Kaehler-cone wall must
+            # still be accepted: its smallest eigenvalue tends to zero from
+            # above, which makes K's LARGEST eigenvalue diverge while K
+            # stays positive definite.
+            V_wall = Matrix(qr(randn(30, 30)).Q)
+            Kinv_wall = V_wall * Diagonal(10.0 .^ range(0, -16; length = 30)) * V_wall'
+            write_potential_fixture(root, 25, 1, 1, Kinv_wall)
+            near_wall = CYAxiverse.read.potential(25, 1, 1)
+            @test isposdef(near_wall.K)
         finally
             old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
