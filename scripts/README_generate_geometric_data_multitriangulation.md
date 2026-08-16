@@ -16,15 +16,41 @@ ensemble.
 Stage 1 writes serializable raw FRST artifacts and, when topology extraction
 succeeds, an optional compressed topology cache inside each raw-FRST HDF5 file.
 The cache contains the Hodge, intersection, divisor-basis, Mori-cone, and
-face-restriction data that are independent of the later physical filters. It
-does not choose an orientifold, search the Kähler cone, apply divisor-volume
-cuts, or construct EFT rows:
+face-restriction data that are independent of the later physical filters. For
+`h11=491` only, Stage 1 additionally evaluates the CYTools canonical
+stretched-cone tip as an observational preflight; it does not choose a
+physical Kähler point, apply divisor-volume cuts, or construct EFT rows:
 
 ```bash
 python scripts/generate_stage1_raw_frsts.py \
   --h11-plan 50:500,100:500,200:300,491:100 \
   --outdir /path/to/stage1_raw_frsts
 ```
+
+For `h11=491` only, Stage 1 also runs a compact CYTools canonical-tip
+preflight while the sampled triangulation is still in memory. It uses
+`tip_of_stretched_cone(1)` and records the solver, cone-array shapes, point
+hash, cone slack, CY/curve/metric checks, basis/prime/effective divisor-volume
+minima, and divisor-convention checks in each retained raw-FRST record under
+`canonical_tip_preflight`. The prime-volume convention check uses
+`calabi_yau.polytope().glsm_charge_matrix(include_origin=False).T @ tau_basis`.
+The `divisor_basis(as_matrix=True)` result is recorded separately as a
+basis-selection matrix; it is not a prime charge matrix. MOSEK is preferred when configured; otherwise
+the CYTools default solver is recorded. This is an annotation, not a Stage-1
+acceptance filter: a valid FRST with a canonical-tip divisor shortfall remains
+`retained_raw_frst` and is classified separately as
+`canonical_tip_divisor_volume_shortfall`. The diagnostic checks only the
+canonical point and does not establish that no other Kähler point can work.
+The run manifest summarizes these classifications under
+`canonical_tip_preflight_classification_count_by_h11`.
+
+The h11=491 preflight does not use
+`CalabiYau.intersection_numbers(in_basis=True, format='coo')` to reconstruct
+divisor volumes or to gate the result. CYTools warns that this reconstruction
+can be unreliable at large h11, so the intersection calculation is omitted
+from the preflight and marked non-authoritative. The direct GLSM prime-volume
+check and the effective-ray check are the authoritative convention checks;
+the basis-selection matrix is retained separately for provenance.
 
 Stage 2 takes that output as a fixed input population. It never generates a
 replacement FRST; missing or corrupt raw files are recorded as unavailable in
@@ -56,13 +82,19 @@ records these choices and any deferrals in `run_manifest.json`; it does not turn
 an unconfirmed choice into a physical claim.
 
 The production Stage-2 reference policy is `canonical_qcd`, matching the
-Glimmers-style construction: retain the stretched-cone tip, inspect eligible
-prime divisors in deterministic index order, skip any whose tip volume already
-exceeds 40, and dilate the first remaining eligible choice so its QCD divisor
-volume is 40.0 within absolute tolerance `1e-9`. The radial factor therefore satisfies `m >= 1` by
-default. The Stage-2 `--allow-m-below-one` flag is an explicit opt-in to the
-unrestricted normalization convention, allowing contraction when the selected
-tip divisor already exceeds 40; the choice is recorded in run and HDF5
+Glimmers-style stretched-cone construction but using a new deterministic
+minimal-dilation selection rule: retain the stretched-cone tip, discard
+non-positive/non-finite candidates and candidates whose tip volume exceeds 40,
+then order the remaining prime divisors by descending positive tip volume and
+ascending divisor index. The generator tries candidates in that order until
+the final prime/effective divisor lower bounds pass, and dilates the selected
+QCD divisor to volume 40.0 within absolute tolerance `1e-9`. The radial factor
+therefore satisfies `m >= 1` by default. An explicit
+`--qcd-divisor-index` remains a singleton override and is never reordered.
+The Stage-2 `--allow-m-below-one` flag is an explicit conservative opt-in to
+the legacy contraction behavior: candidates above 40 are admitted but the
+caller-provided/index order is retained rather than applying the new default
+ordering. The chosen policy and fallback behavior are recorded in run and HDF5
 construction metadata.
 `adaptive` remains available only as an explicitly labelled randomized Kähler
 diagnostic with a 100-point budget, including the canonical tip.
@@ -448,7 +480,9 @@ identities to repair row capacity. Terminal categories
 remain separate for sampler, FRST, topology/cone, Kähler, normalization,
 divisor, QED-pool, numerical, I/O, model, and storage failures. The manifest
 also records the fixed stage boundary, raw identities, proposal/retry/duplicate
-counts, and output-collision status.
+counts, output-collision status, and the production-only
+`qcd_qed_prefilter_shortfall` status when no candidate has an eligible
+candidate-specific QED neighbor.
 
 The optional raw-FRST cache uses lossless gzip level 9 with HDF5 shuffle. The
 divisor-basis matrix is stored as CSR (`data`, `indices`, `indptr`, `shape`),
@@ -468,6 +502,7 @@ Relevant options:
 | `--eft-maximum-rows INT` | `200000` | Exact EFT row target. |
 | `--eft-output-path PATH` | `OUTDIR/eft_models.parquet` | Explicit table path inside the fresh output root. |
 | `--materialize-dense-potential` | off | Legacy compatibility flag; schema 1.1 rejects dense materialization in production HDF5. |
+| `generate_stage2_eft_reference.py --volume-backend {fan,historical_sparse_coo,auto}` | `fan` | Select the current CYTools Fan contractions, the explicit h11=491 historical sparse-COO compatibility path, or `auto` (Fan below h11=491 and historical sparse COO at h11=491); the selected backend is recorded per geometry. |
 
 To balance the sample across polytopes, use `--frsts-per-polytope`. For
 example, the following requests ten favorable polytopes and ten accepted FRSTs
@@ -633,14 +668,14 @@ is a terminal error.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--max-kaehler-attempts INT` | `100` | Number of stretched-cone/angular Kahler points tested per FRST, including the canonical tip. |
-| `--min-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every exported effective-cone ray after rescaling. |
-| `--min-prime-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every raw prime toric divisor. |
+| `--min-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every exported effective-cone ray at the final rescaled point. |
+| `--min-prime-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every raw prime toric divisor at the final rescaled point. |
 | `--qcd-volume-min FLOAT` | `25.0` | Lower edge of the QCD-visible prime-divisor volume window. |
 | `--qcd-volume-max FLOAT` | `40.0` | Upper edge of the QCD-visible prime-divisor volume window. |
 | `--moduli-policy {adaptive,canonical_qcd}` | `adaptive` | Use randomized angular Kähler points with a QCD window, or the canonical stretched-cone ray with radial QCD normalization. |
 | `--allow-m-below-one` | off | Stage-2 `canonical_qcd` only: explicitly allow radial contraction (`m < 1`); disabled by default and recorded in metadata. |
 | `--qcd-volume-target FLOAT` | `40.0` | Target prime-divisor volume for `canonical_qcd`. |
-| `--qcd-divisor-index INT` | first eligible | Optional zero-based CYTools prime-toric-divisor index for `canonical_qcd`; without it, the first eligible candidate in deterministic CYTools divisor order is used. |
+| `--qcd-divisor-index INT` | minimal-dilation policy | Optional zero-based CYTools prime-toric-divisor index override for `canonical_qcd`; without it, eligible candidates at or below the target are tried from largest tip volume to smallest, with ascending index as the tie-break. |
 | `--orientifold-file PATH` | off | JSON file containing an explicit lattice involution and O3/O7 or O5/O9 metadata. |
 | `--export-kaehler-rays` | off | Enumerate and store Kähler-cone rays; expensive at large `h11`. The legacy `--export-kahler-rays` spelling remains accepted. |
 | `--max-m FLOAT` | `1_000_000` | Maximum radial prefactor for `canonical_qcd`, or upper bound for the adaptive potential-control search. |
@@ -652,6 +687,62 @@ For randomized angular projections, licensed MOSEK is tried first; other
 qpsolvers backends are fallback candidates. The actual tip and projection
 solvers are recorded per artifact.
 
+#### Canonical QCD normalization and filter order
+
+For `--moduli-policy canonical_qcd`, the canonical stretched-cone tip is the
+angular direction, not the final radial point. Let `J_tip` be the point returned
+by `tip_of_stretched_cone(1.0)`. For a selected prime toric QCD divisor, set
+
+`m = sqrt(40 / Vol(D_QCD)_tip)`
+
+and `J_final = m J_tip`. By default, candidates with `m < 1` are skipped;
+`--allow-m-below-one` explicitly permits contraction. Divisor volumes scale as
+`m^2`, so the homogeneous scaling sets `Vol(D_QCD)=40.0` within the recorded
+tolerance. The CY volume scales as `m^3` and is not normalized to `1`; only the
+selected QCD divisor is normalized to `40.0`.
+
+The pre-dilation tip evaluation is a diagnostic and precondition stage. It
+requires finite coordinates and cone membership, positive finite CY and curve
+volumes, a finite positive-definite inverse metric, and finite positive divisor
+data. A positive scaling factor cannot repair a negative or non-finite divisor
+volume, so those cases fail before normalization. These diagnostics are kept
+separate from the final normalized-point checks.
+
+The divisor `>= 1` lower-bound checks are authoritative after scaling. At
+`J_final`, validate every raw prime-toric-divisor volume and every exported
+effective-cone divisor volume. A failed pre-dilation precondition remains a
+Kähler-stage terminal status such as `kaehler_tip_failure` or
+`kaehler_point_shortfall`; a failed post-dilation target, lower-bound, or final
+domain check is recorded as `qcd_normalization_failure`.
+
+#### Production EFT QED-aware QCD prefilter
+
+The QED-aware QCD prefilter is active only when all three production settings
+are enabled: `--eft`, `--moduli-policy canonical_qcd`, and
+`--visible-sector-policy intersecting_d7`. For each QCD candidate, compute
+
+`m = sqrt(qcd_volume_target / prime_tau0[qcd_idx])`
+
+under the existing `m >= 1` default and `--allow-m-below-one` opt-in policy.
+Keep the candidate only when at least one distinct intersecting neighbor is
+orientifold-invariant and satisfies the inclusive final-volume condition
+
+`m^2 * prime_tau0[qed_idx] <= effective_qed_volume_max`
+
+with `effective_qed_volume_max=127.5` by default. The deterministic
+minimal-dilation candidate ordering remains in force, and
+`--qcd-divisor-index` remains a singleton override. A candidate that fails the
+prefilter is rejected before normalization selection so the next ordered
+candidate can be tried. If all candidates fail, Stage 2 records
+`qcd_qed_prefilter_shortfall` and candidate-level prefilter metadata rather
+than reporting a generic QCD-volume failure.
+
+This is an early volume/neighbor filter, not a replacement for assignment
+validation. `enumerate_assignment_pool` still normalizes every candidate and
+the complete ordered pool remains the authoritative final gate. The prefilter
+is inactive for non-EFT runs, geometry-only output, and
+`visible_sector_policy=none`; those paths retain their existing behavior.
+
 At large `h11`, the fallback HiGHS solver may report a SciPy
 `SparseConversionWarning` if a caller supplies dense quadratic-program
 constraints. The generator constructs these constraints as CSC sparse matrices
@@ -662,14 +753,14 @@ parameters.
 
 The divisor-volume contract uses lower bounds of `1.0` by default. The named
 divisor lower-bound tolerance is `1e-8`; the QCD target tolerance is `1e-9`.
-Both are recorded in
-`construction_metadata_json` and `divisor_volume_evidence`; neither is used to
-clip, substitute, or rescale a failed volume vector. The evidence group preserves the
-prime-divisor labels and indices, effective-cone rays and indices, basis order,
-and final/pre-normalization volume vectors. Adaptive candidates must satisfy
-the lower bounds before normalization; the final normalized point is checked
-again after the radial rescaling. Any failed final check is recorded as
-`qcd_normalization_failure`.
+Both are recorded in `construction_metadata_json` and
+`divisor_volume_evidence`; neither is used to clip, substitute, or rescale a
+failed volume vector. The evidence group preserves the prime-divisor labels and
+indices, effective-cone rays and indices, basis order, and final/pre-
+normalization volume vectors. In `canonical_qcd`, the lower-bound rejection is
+authoritative at the final rescaled point. Adaptive candidates retain their
+separate pre-normalization lower-bound check and are checked again after radial
+rescaling. Any failed final check is recorded as `qcd_normalization_failure`.
 
 With `--moduli-policy adaptive`, candidate acceptance requires:
 
@@ -686,27 +777,29 @@ With `--moduli-policy adaptive`, candidate acceptance requires:
 Rejected candidates are discarded and replaced until the requested count or
 the attempt budget is exhausted.
 
-With `--moduli-policy canonical_qcd`, the same FRST and kaehler cone are used,
-but the angular sampling loop is skipped. The eligible prime-divisor candidates
-are inspected in deterministic CYTools order, or restricted to the explicit
-`--qcd-divisor-index` when supplied. Candidates whose tip volume exceeds 40
-are skipped so that the selected radial factor obeys `m >= 1`. The Stage-2
-`--allow-m-below-one` opt-in disables that skip and permits `m < 1`; the final
-kaehler form is then `J = m J_tip`, where `m = sqrt(target / tau_QCD)` for the
-first eligible prime divisor satisfying the pre-normalization checks. This gives `tau ∝ m²`, `Kinv ∝ m⁴`,
-and `Vol(CY) ∝ m³`; the exact assignment and scale are recorded in
-`construction_metadata_json` and `cytools/geometric/standard_model`.
+With `--moduli-policy canonical_qcd`, the same FRST and Kähler cone are used,
+but the angular sampling loop is skipped. Unless
+`--qcd-divisor-index` is supplied, eligible prime-divisor candidates at or
+below `40` are ordered by descending positive finite tip volume, then
+ascending divisor index. This chooses the smallest allowed dilation. Each
+candidate is tested through the final prime/effective divisor lower-bound
+contract, so a candidate that fails is followed by the next smaller tip
+volume. An explicit index remains a singleton override and is not reordered.
+A candidate whose tip volume exceeds `40` is skipped by default so that
+`m >= 1`; the Stage-2 `--allow-m-below-one` opt-in admits those candidates but
+retains the legacy caller-provided/index order. The selected point is then
+`J_final = m J_tip`, with `m = sqrt(40 / Vol(D_QCD)_tip)`.
 
-The generator imposes `m >= 1` in this mode by default: a tip already above the
-target is not contracted and is skipped in deterministic candidate order. With
-the Stage-2 `--allow-m-below-one` opt-in, that candidate is retained and may
-produce `m < 1`. The final
-prime-divisor, effective-cone, curve-volume, and cone-slack checks are then
-applied directly at the final point. No post-selection fallback, clipping,
-hidden rescaling, or substitution is performed; a failed final check is
-`qcd_normalization_failure`. The adaptive potential-control search is not applied in this mode. This is a radial
-normalization of an existing geometry, not a new FRST or a claim that a QCD
-divisor has been constructed from a brane model.
+At the final point, prime-divisor, effective-cone, curve-volume, cone-slack,
+metric, QCD-target, and divisor-lower-bound checks are applied directly. The
+canonical selector falls back to the next candidate only when the final
+lower-bound contract rejects the current candidate; it performs no clipping,
+hidden rescaling, or substitution. The adaptive potential-control search is
+not applied in this mode.
+The exact assignment and scale are recorded in `construction_metadata_json` and
+`cytools/geometric/standard_model`. This is a radial normalization of an
+existing geometry, not a new FRST or a claim that a QCD divisor has been
+constructed from a brane model.
 
 ## Useful command recipes
 
@@ -962,7 +1055,11 @@ Important conventions:
   available for provenance, while `construction_metadata_json` records the
   raw/canonical ray counts and the number removed.
 - `tip`, `divisor_volumes`, `Kinv`, `curve_volumes`, and `CY_volume` refer to the
-  same final rescaled Kahler point.
+  same final rescaled Kähler point. `tip_pre_normalization` and
+  `CY_volume_pre_normalization` preserve the corresponding pre-dilation
+  diagnostics. `CY_volume` is the computed final CY volume, not a unit-
+  normalized value; under canonical homogeneous scaling it is
+  `m^3 * CY_volume_pre_normalization`.
 - `prime_divisor_volumes` follows the order of CYTools
   `prime_toric_divisors()` and is the vector used for the QCD filter. The
   corresponding `prime_toric_divisors` index array is exported explicitly;

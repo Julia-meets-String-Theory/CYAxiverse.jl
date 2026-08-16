@@ -4,8 +4,7 @@ using Random
 using SparseArrays
 using Test
 using HDF5
-using Random
-using ArbNumerics
+using ArbNumerics: ArbFloat, precision, setprecision
 
 @testset "Core plotting API stays optional" begin
     @test Base.get_extension(CYAxiverse, :CYAxiverseCairoMakieExt) === nothing
@@ -1363,6 +1362,196 @@ end
     end
 end
 
+@testset "Concrete arbitrary-precision scales and L_arb layout" begin
+    original_precision = precision(ArbFloat)
+    setprecision(ArbFloat; digits=80)
+    try
+        scales = CYAxiverse.generate.pseudo_L(1, 1; log=false)
+        @test isconcretetype(eltype(scales))
+        @test eltype(scales) == typeof(ArbFloat(0))
+
+        legacy_hessian = CYAxiverse.minimizer._legacy_hessian(
+            Float64[1.0, -2.0], Int[1 2; 3 4], Float64[0.1, 0.2])
+        @test isconcretetype(eltype(legacy_hessian))
+        @test eltype(legacy_hessian) == typeof(ArbFloat(0))
+        legacy_gradient = CYAxiverse.minimizer._legacy_gradient(
+            Float64[1.0, -2.0], Int[1 2; 3 4], Float64[0.1, 0.2])
+        @test isconcretetype(eltype(legacy_gradient))
+        @test eltype(legacy_gradient) == typeof(ArbFloat(0))
+
+        mktempdir() do root
+            geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+            mkpath(geom_dir)
+            stored_L = Float64[1.0  -2.0  3.0;
+                               -4.0 -6.0 -8.0]
+            h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+                potential = create_group(create_group(file, "cytools"), "potential")
+                potential["L"] = stored_L
+            end
+
+            old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+            ENV["CYAXIVERSE_DATA_DIR"] = root
+            try
+                loaded = CYAxiverse.read.L_arb(2, 1, 1)
+                expected = ArbFloat.(stored_L[1, :]) .*
+                    ArbFloat(10) .^ ArbFloat.(stored_L[2, :])
+                @test isconcretetype(eltype(loaded))
+                @test eltype(loaded) == typeof(ArbFloat(0))
+                @test loaded == expected
+            finally
+                old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                    (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+            end
+        end
+    finally
+        setprecision(ArbFloat; bits=original_precision)
+    end
+end
+
+@testset "Phase-hoisted Hessian parity" begin
+    minimizer = CYAxiverse.minimizer
+    generate = CYAxiverse.generate
+
+    function legacy_phase_hessian(LV, QV, x)
+        T = promote_type(eltype(LV), eltype(QV), eltype(x))
+        hessian = zeros(T, size(QV, 1), size(QV, 1))
+        for i in axes(QV, 1), j in axes(QV, 1)
+            if i >= j
+                hessian[i, j] = sum(LV' *
+                    (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
+            end
+        end
+        hessian
+    end
+
+    LV = Float64[1.25, -0.75, 0.5]
+    QV = Float64[1.0 2.0 -1.0;
+                 0.5 -3.0 4.0]
+    x = Float64[0.37, -0.22]
+    expected = legacy_phase_hessian(LV, QV, x)
+    actual = zeros(Float64, 2, 2)
+    minimizer._phase_hessian!(actual, LV, QV, cos.(x' * QV))
+    @test actual == expected
+    @test actual + actual' - Diagonal(actual) ==
+        expected + expected' - Diagonal(expected)
+
+    original_precision = precision(ArbFloat)
+    setprecision(ArbFloat; digits=80)
+    try
+        T = typeof(ArbFloat(0))
+        LV_arb = T.(LV)
+        QV_arb = T.(QV)
+        x_arb = T.(x)
+        expected_arb = legacy_phase_hessian(LV_arb, QV_arb, x_arb)
+        actual_arb = zeros(T, 2, 2)
+        minimizer._phase_hessian!(actual_arb, LV_arb, QV_arb,
+            cos.(x_arb' * QV_arb))
+        @test actual_arb == expected_arb
+        @test eltype(actual_arb) == T
+    finally
+        setprecision(ArbFloat; bits=original_precision)
+    end
+
+    function legacy_hessian_norm(x, Q::Matrix)
+        hessian = zeros(size(Q, 1), size(Q, 1))
+        if size(Q, 1) == 1
+            for i in axes(Q, 1), j in axes(Q, 1)
+                if i >= j
+                    hessian[i, j] = (transpose(@view(Q[i, :])) *
+                        @view(Q[j, :])) * cos.(x' * Q)[i]
+                end
+            end
+            hessian = hessian + hessian' - Diagonal(hessian)
+        elseif size(Q, 1) == size(Q, 2)
+            for i in axes(Q, 1), j in axes(Q, 1)
+                if i >= j
+                    hessian[i, j] = (transpose(@view(Q[i, :])) *
+                        @view(Q[j, :])) * cos.(x' * Q)[i]
+                end
+            end
+            hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
+        else
+            hessian = zeros(size(Q, 1), size(Q, 1), size(Q, 2))
+            for i in axes(Q, 1), j in axes(Q, 1), k in axes(Q, 2)
+                if i >= j
+                    hessian[i, j, k] = (transpose(@view(Q[i, :])) *
+                        @view(Q[j, :])) * cos.(x' * Q)[k]
+                end
+            end
+            return hessian
+        end
+    end
+
+    Qone = reshape(Float64[1.0, -2.0, 3.0], 1, 3)
+    @test generate.hessian_norm([0.31], Qone) ==
+        legacy_hessian_norm([0.31], Qone)
+
+    Qsquare = Float64[1.0 2.0; 3.0 4.0]
+    xsquare = Float64[0.17, -0.23]
+    @test Matrix(generate.hessian_norm(xsquare, Qsquare)) ==
+        Matrix(legacy_hessian_norm(xsquare, Qsquare))
+
+    Qrect = Float64[1.0 2.0 3.0; -1.0 4.0 0.5]
+    xrect = Float64[0.12, -0.41]
+    @test generate.hessian_norm(xrect, Qrect) ==
+        legacy_hessian_norm(xrect, Qrect)
+
+    Qempty = zeros(Float64, 2, 0)
+    @test size(generate.hessian_norm([0.2, -0.1], Qempty)) == (2, 2, 0)
+end
+
+@testset "Factored Kinv whitening remains stable when Kinv is ill-conditioned" begin
+    # This Kinv has condition number about 4 × 10^10.  Forming K = inv(Kinv)
+    # before whitening loses the small kinetic direction on older paths.
+    Kinv = Float64[1.0 1.0 - 5e-11;
+                   1.0 - 5e-11 1.0]
+    Q = Int[1 0 1;
+            0 1 1]
+    L = Float64[1.0 1.0 1.0;
+                -20.0 -21.0 -22.0]
+
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            potential["Q"] = Q
+            potential["L"] = L
+            geometric["Kinv"] = Kinv
+        end
+
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+            factored = CYAxiverse.read.potential_factored(geom_idx)
+            @test factored.Kinv ≈ Kinv
+            @test factored.C * transpose(factored.C) ≈ Kinv rtol=1e-12 atol=1e-15
+
+            hp = CYAxiverse.generate.hp_spectrum(geom_idx;
+                prec=200, quartics=false, selection=:raw)
+            reference = setprecision(BigFloat, 400) do
+                Cbig = cholesky(Symmetric(BigFloat.(Kinv))).L
+                Hbig = BigFloat.(Q) *
+                    Diagonal(BigFloat.(L[1, :]) .* (BigFloat(10) .^ BigFloat.(L[2, :]))) *
+                    transpose(BigFloat.(Q))
+                values = eigvals(Symmetric(transpose(Cbig) * Hbig * Cbig))
+                Float64.(0.5 .* log10.(abs.(values)) .+ 9 .+
+                    log10(BigFloat("2.435e18")) .+ log10(2BigFloat(π)))
+            end
+            @test hp["m"] ≈ reference atol=5e-6
+        finally
+            if old_data_dir === nothing
+                delete!(ENV, "CYAXIVERSE_DATA_DIR")
+            else
+                ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir
+            end
+        end
+    end
+end
+
 @testset "HP spectrum: raw and effective selections" begin
     K = Hermitian([4.0 0.0;
                    0.0 9.0])
@@ -1476,7 +1665,124 @@ end
     @test isempty(hybrid_masses_only.λself)
     @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=200) == 2
     @test CYAxiverse.generate.pq_schur_admissible(K, L, Q; prec=200)
-    @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=100, max_prec=100, label="diagonal test") == 2
+    @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(
+        K, L, Q; threshold_log10=expected[1], prec=100, max_prec=100,
+        label="diagonal test") == 1
+end
+
+@testset "PQ quartic cache and linear log-sum" begin
+    G = CYAxiverse.generate
+
+    Qpq = Float64[1.0 0.0 -2.0;
+                  -2.0 3.0 0.5]
+    charge_sign, charge_logabs = G._cache_charge_sign_logabs(Qpq)
+    @test charge_sign isa Matrix{Int8}
+    @test Int.(charge_sign) == [1 0 -1; -1 1 1]
+    @test charge_logabs[1, 1] == 0.0
+    @test charge_logabs[1, 2] == -Inf
+    @test charge_logabs[1, 3] ≈ log(2.0)
+    @test charge_logabs[2, 3] ≈ log(0.5)
+
+    logs = [log(1.0), log(3.0), log(2.0), log(1e-200)]
+    original_logs = copy(logs)
+    expected_lse = log(sum(exp.(logs)))
+    @test G.logsum_sorted!(logs, length(logs)) ≈ expected_lse rtol=1e-14
+    @test logs == original_logs
+    @test G.logsum_sorted!(Float64[], 0) == -Inf
+    @test G.logsum_sorted!([-Inf, -Inf], 2) == -Inf
+    @test G.logsum_sorted!([Inf, 0.0], 2) == Inf
+    @test isnan(G.logsum_sorted!([NaN, 0.0], 2))
+
+    sorted_reference = sort(copy(logs))
+    reference_lse = sorted_reference[1]
+    for i in 2:length(sorted_reference)
+        reference_lse += G.gauss_sum(sorted_reference[i] - reference_lse)
+    end
+    @test G.logsum_sorted!(copy(logs), length(logs)) ≈ reference_lse rtol=1e-14
+
+    scale_sign = Int[1, -1, 1, -1]
+    scale_log = zeros(4)
+    positive_logs = zeros(4)
+    negative_logs = zeros(4)
+    all_one_charges = ones(Float64, 4, 1)
+    all_one_sign, all_one_logabs = G._cache_charge_sign_logabs(all_one_charges)
+    exact_cancel = G.pq_contracted_log!(positive_logs, negative_logs,
+        scale_sign, scale_log, all_one_sign, all_one_logabs, (1, 1, 1, 1))
+    @test exact_cancel[1] == 0
+    @test exact_cancel[2] == 0.0
+    @test exact_cancel[3] ≈ log(4.0)
+
+    near_cancel = G.pq_contracted_log!(positive_logs, negative_logs,
+        scale_sign[1:2], [0.0, -log(2.0)], all_one_sign, all_one_logabs,
+        (1, 1, 1, 1))
+    @test near_cancel[1] == 1
+    @test near_cancel[2] ≈ log(0.5) atol=1e-14
+    @test near_cancel[3] ≈ log(1.5) atol=1e-14
+
+    shrinking = G.pq_contracted_log!(positive_logs, negative_logs,
+        @view(scale_sign[1:1]), @view(scale_log[1:1]), all_one_sign,
+        all_one_logabs, (1, 1, 1, 1))
+    @test shrinking == (1, 0.0, 0.0)
+
+    K = Hermitian(reshape([4.0], 1, 1))
+    Q = reshape(Int[3, 6], 1, 2)
+    L = [1.0 1.0;
+         -20.0 -1000.0]
+    pq = G.pq_spectrum(K, L, Q; mixing_correction=:high_precision,
+        prec=200, quartic_diagnostics=true)
+    hp = G.hp_spectrum(K, L, Q; prec=200)
+    @test pq.λselfsign == hp["λselfsign"]
+    @test pq.λself ≈ hp["λself"] atol=1e-10
+end
+
+@testset "Float64 inertia certificate and Arb fallback" begin
+    G = CYAxiverse.generate
+    C = Matrix{Float64}(I, 2, 2)
+    Q = Int[1 0 0;
+            0 1 0]
+    L = Float64[1.0 1.0 0.0;
+                -20.0 -30.0 -400.0]
+    Ltilde = L[:, 1:2]
+    Qtilde = Q[:, 1:2]
+    threshold = Float64(log10(G.constants()["Hubble"]))
+
+    certificate = G._float64_leading_hessian_certificate(C, Ltilde, Qtilde)
+    @test certificate !== nothing
+    @test G._certified_float64_inertia_count(certificate, threshold) == 2
+
+    mass_offset = 9.0 + Float64(log10(G.constants()["MPlanck"])) +
+        Float64(G.constants()["log2π"])
+    ambiguous_threshold = 0.5 * log10(abs(certificate.eigenvalues[1])) + mass_offset
+    @test G._certified_float64_inertia_count(certificate, ambiguous_threshold) === nothing
+    @test G._float64_leading_hessian_certificate(
+        C, Float64[1.0 1.0; -400.0 -30.0], Qtilde) === nothing
+    @test G._float64_leading_hessian_certificate(
+        C, Float64[1.0 1.0; 400.0 30.0], Qtilde) === nothing
+
+    @test G._certified_float64_window_counts(C, Ltilde, Qtilde,
+        0.0, 40.0, 0.0) == (2, 0)
+    @test G._next_confirmation_precision(1_000, 4_000) == 1_500
+    @test G._next_confirmation_precision(1_500, 4_000) == 2_250
+    @test G._next_confirmation_precision(3_375, 4_000) == 4_000
+    W0, Cprecision0 = G.high_precision_leading_hessian(C, Ltilde, Qtilde; prec=80)
+    _, _, _, _, records, _ = G._confirm_window_counts(W0, Cprecision0, C,
+        Ltilde, Qtilde, ambiguous_threshold, ambiguous_threshold, 0.0,
+        80, 120, true, "B2 precision schedule")
+    @test first(records)[1] == 80
+    @test last(records)[1] == 120
+
+    @test G.pq_physical_mode_count(Hermitian(2.0 .* Matrix{Float64}(I, 2, 2)),
+        L, Q; prec=120, confirm=true) == 2
+    window = G.pq_window_spectrum(Hermitian(2.0 .* Matrix{Float64}(I, 2, 2)),
+        L, Q; min_log10_mass=0.0, max_log10_mass=40.0, prec=120,
+        confirm=true, quartics=false)
+    @test window.diagnostics.counts_by_precision == [(120, 2, 0)]
+
+    fallback_count = G._pq_physical_mode_count_factored(C, L, Q;
+        threshold_log10=ambiguous_threshold, prec=80, confirm=false)
+    reference_count = G.physical_mode_inertia_count(C, Ltilde, Qtilde,
+        ambiguous_threshold, 80)
+    @test fallback_count == reference_count
 end
 
 @testset "Hybrid spectrum: full fallback after nonconvergence" begin

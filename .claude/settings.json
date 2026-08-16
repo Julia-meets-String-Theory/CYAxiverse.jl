@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "code-foundations@rtd": true,
+    "what@rtd": true
+  }
+}

@@ -37,6 +37,9 @@ from glimmers_schema11 import atomic_json_dump, atomic_jsonl_dump, ensure_fresh_
 APPROVED_PLAN = {50: 500, 100: 500, 200: 300, 491: 100}
 POLYTOPE_COUNTS = {50: 50, 100: 50, 200: 30, 491: 1}
 FRSTS_PER_POLYTOPE = {50: 10, 100: 10, 200: 10, 491: 100}
+H491_CANONICAL_TIP_PREFLIGHT_SCHEMA_VERSION = (
+    "cyaxiverse-h491-canonical-tip-preflight-1.0"
+)
 
 
 def parse_raw_frst_plan(value):
@@ -143,6 +146,294 @@ def build_raw_frst_metadata(
     }
 
 
+def run_h491_canonical_tip_preflight(calabi_yau):
+    """Annotate an h11=491 FRST with a CYTools canonical-tip diagnostic.
+
+    Keep this check observational: a valid FRST remains the Stage-1 retention
+    unit even when the canonical stretched-cone tip has negative or subunit
+    divisor volumes.  Stage 2 remains responsible for physical point
+    selection and filtering.
+    """
+    result = {
+        "schema_version": H491_CANONICAL_TIP_PREFLIGHT_SCHEMA_VERSION,
+        "h11": 491,
+        "method": "tip_of_stretched_cone(1.0)",
+        "tip_parameter": 1.0,
+        "cytools_version": getattr(generator.cytools, "version", None),
+        "status": "error",
+        "classification": "canonical_tip_preflight_error",
+        "solver": None,
+        "solver_policy": "mosek_if_licensed_then_cytools_default",
+        "mosek_configured": None,
+        "mosek_activated": None,
+        "mosek_fallback_reason": None,
+        "divisor_volume_lower_bounds_enforced": False,
+        "basis_selection_matrix": None,
+        "prime_charge_matrix": None,
+        "intersection_reconstruction": {
+            "status": "omitted",
+            "authoritative": False,
+            "method": "CalabiYau.intersection_numbers(in_basis=True, format='coo')",
+            "reason": (
+                "Omitted from the h11=491 preflight gate because CYTools warns "
+                "that high-h11 intersection reconstruction is unreliable."
+            ),
+        },
+        "diagnostic": None,
+    }
+    try:
+        if int(calabi_yau.h11()) != 491:
+            result.update(
+                {
+                    "status": "not_applicable",
+                    "classification": "not_h11_491",
+                }
+            )
+            return result
+
+        kahler_cone = calabi_yau.toric_kahler_cone()
+        license_status = generator.configure_mosek_license()
+        result["mosek_configured"] = bool(license_status.get("configured", False))
+        result["mosek_activated"] = bool(license_status.get("activated", False))
+        if result["mosek_activated"]:
+            try:
+                tip = np.asarray(
+                    kahler_cone.tip_of_stretched_cone(1.0, backend="mosek"),
+                    dtype=float,
+                )
+                result["solver"] = "mosek"
+            except Exception as exc:
+                result["mosek_fallback_reason"] = (
+                    f"{type(exc).__name__}: {exc}"
+                )
+                tip = np.asarray(
+                    kahler_cone.tip_of_stretched_cone(1.0), dtype=float
+                )
+                result["solver"] = "cytools-default-after-mosek-failure"
+        else:
+            tip = np.asarray(kahler_cone.tip_of_stretched_cone(1.0), dtype=float)
+            result["solver"] = "cytools-default"
+
+        hyperplanes = np.asarray(kahler_cone.hyperplanes(), dtype=float)
+        effective_cone_rays = np.asarray(
+            calabi_yau.toric_effective_cone().rays(), dtype=float
+        )
+        result["kahler_hyperplanes_shape"] = list(hyperplanes.shape)
+        result["effective_cone_rays_shape"] = list(effective_cone_rays.shape)
+        if (
+            hyperplanes.ndim != 2
+            or hyperplanes.shape[1] != 491
+            or effective_cone_rays.ndim != 2
+            or effective_cone_rays.shape[1] != 491
+        ):
+            raise ValueError(
+                "unexpected h11=491 cone shape: "
+                f"Kähler={hyperplanes.shape}, effective={effective_cone_rays.shape}"
+            )
+
+        residual_checks = {
+            "status": "unavailable",
+            "authoritative": True,
+            "absolute_tolerance": 1e-8,
+            "relative_tolerance": 1e-10,
+            "prime_from_glsm_charge_matrix": None,
+            "effective_from_basis": None,
+        }
+        try:
+            basis_selection_matrix_raw = np.asarray(
+                calabi_yau.divisor_basis(as_matrix=True)
+            )
+            basis_selection_matrix = np.asarray(
+                basis_selection_matrix_raw, dtype=float
+            )
+            prime_charge_matrix_raw = np.asarray(
+                calabi_yau.polytope().glsm_charge_matrix(include_origin=False)
+            )
+            prime_charge_matrix = np.asarray(prime_charge_matrix_raw, dtype=float)
+            prime_labels = np.asarray(
+                calabi_yau.prime_toric_divisors(), dtype=int
+            ).reshape(-1)
+            basis_volumes = np.asarray(
+                calabi_yau.compute_divisor_volumes(tip, in_basis=True),
+                dtype=float,
+            ).reshape(-1)
+            prime_volumes = np.asarray(
+                calabi_yau.compute_divisor_volumes(tip), dtype=float
+            ).reshape(-1)
+            if basis_selection_matrix.ndim != 2:
+                raise ValueError(
+                    "CYTools divisor_basis(as_matrix=True) must be two-dimensional"
+                )
+            if prime_charge_matrix.ndim != 2:
+                raise ValueError(
+                    "CYTools GLSM charge matrix must be two-dimensional"
+                )
+            if basis_selection_matrix.shape[0] != basis_volumes.size:
+                raise ValueError(
+                    "basis-selection matrix row count does not match basis volumes"
+                )
+            if prime_charge_matrix.shape[0] != basis_volumes.size:
+                raise ValueError(
+                    "GLSM charge matrix row count does not match basis volumes"
+                )
+            if prime_charge_matrix.shape[1] != prime_volumes.size:
+                raise ValueError(
+                    "GLSM charge matrix column count does not match prime volumes"
+                )
+            prime_from_glsm_charge_matrix = prime_charge_matrix.T @ basis_volumes
+            effective_from_basis = effective_cone_rays @ basis_volumes
+
+            def residual_entry(reference, observed):
+                reference = np.asarray(reference, dtype=float).reshape(-1)
+                observed = np.asarray(observed, dtype=float).reshape(-1)
+                if reference.shape != observed.shape:
+                    raise ValueError(
+                        "residual arrays have different shapes: "
+                        f"{reference.shape} versus {observed.shape}"
+                    )
+                difference = np.asarray(reference) - np.asarray(observed)
+                allowed = 1e-8 + 1e-10 * np.maximum(
+                    np.abs(reference), np.abs(observed)
+                )
+                normalized = np.divide(
+                    np.abs(difference),
+                    allowed,
+                    out=np.zeros_like(difference, dtype=float),
+                    where=allowed > 0.0,
+                )
+                maximum = (
+                    float(np.max(np.abs(difference)))
+                    if difference.size
+                    else 0.0
+                )
+                maximum_normalized = (
+                    float(np.max(normalized)) if normalized.size else 0.0
+                )
+                return {
+                    "max_abs_residual": maximum,
+                    "max_normalized_residual": maximum_normalized,
+                    "finite": bool(np.all(np.isfinite(difference))),
+                    "passed": bool(
+                        np.all(np.isfinite(difference))
+                        and maximum_normalized <= 1.0
+                    ),
+                }
+
+            result["basis_selection_matrix"] = {
+                "shape": list(basis_selection_matrix_raw.shape),
+                "dtype": str(basis_selection_matrix_raw.dtype),
+                "sha256": stable_hash(basis_selection_matrix_raw.tolist()),
+                "role": (
+                    "CYTools divisor_basis(as_matrix=True) basis selector; "
+                    "not a prime charge matrix"
+                ),
+            }
+            result["prime_charge_matrix"] = {
+                "shape": list(prime_charge_matrix_raw.shape),
+                "dtype": str(prime_charge_matrix_raw.dtype),
+                "sha256": stable_hash(prime_charge_matrix_raw.tolist()),
+                "role": (
+                    "CYTools polytope().glsm_charge_matrix(include_origin=False); "
+                    "prime volumes are Q.T @ tau_basis"
+                ),
+            }
+            residual_checks.update(
+                {
+                    "status": "complete",
+                    "prime_from_glsm_charge_matrix": residual_entry(
+                        prime_volumes, prime_from_glsm_charge_matrix
+                    ),
+                    "effective_from_basis": residual_entry(
+                        effective_from_basis, effective_cone_rays @ basis_volumes
+                    ),
+                    "basis_selection_matrix_shape": list(
+                        basis_selection_matrix.shape
+                    ),
+                    "prime_charge_matrix_shape": list(prime_charge_matrix.shape),
+                    "prime_toric_divisors_shape": list(prime_labels.shape),
+                }
+            )
+        except Exception as exc:
+            residual_checks["reason"] = f"{type(exc).__name__}: {exc}"
+        result["residual_checks"] = residual_checks
+
+        diagnostic, _ = generator.evaluate_kaehler_point(
+            calabi_yau,
+            kahler_cone,
+            effective_cone_rays,
+            tip,
+            attempt_index=1,
+            point_kind="canonical_tip",
+            solver=result["solver"],
+            min_prime_divisor_volume=1.0,
+            min_divisor_volume=1.0,
+            enforce_divisor_volume_lower_bounds=False,
+        )
+        result["diagnostic"] = generator._jsonable(diagnostic)
+        checks = diagnostic.get("checks", {})
+        residual_status = result.get("residual_checks", {}).get("status")
+        residual_checks_passed = (
+            residual_status == "complete"
+            and all(
+                result["residual_checks"].get(name, {}).get("passed") is True
+                for name in (
+                    "prime_from_glsm_charge_matrix",
+                    "effective_from_basis",
+                )
+            )
+        )
+        divisor_checks = {
+            "finite_basis_divisor_volumes",
+            "positive_basis_divisor_volumes",
+            "finite_prime_divisor_volumes",
+            "positive_prime_divisor_volumes",
+            "finite_effective_divisor_volumes",
+            "positive_effective_divisor_volumes",
+            "prime_divisor_volume_lower_bound",
+            "effective_divisor_volume_lower_bound",
+        }
+        core_checks = {
+            name: passed
+            for name, passed in checks.items()
+            if name not in divisor_checks
+        }
+        divisor_shortfall = any(
+            checks.get(name) is False for name in divisor_checks
+        )
+        if residual_status == "complete" and not residual_checks_passed:
+            result["status"] = "evaluation_failed"
+            result["classification"] = "topology_validation_failure"
+            result["failure_stage"] = "basis_convention"
+        elif divisor_shortfall and all(value is True for value in core_checks.values()):
+            minima = [
+                diagnostic.get("minimum_basis_divisor_volume"),
+                diagnostic.get("minimum_prime_divisor_volume"),
+                diagnostic.get("minimum_effective_divisor_volume"),
+            ]
+            finite_minima = [
+                value
+                for value in minima
+                if isinstance(value, (int, float, np.integer, np.floating))
+                and np.isfinite(value)
+            ]
+            result["shortfall_kind"] = (
+                "negative_divisor_volume"
+                if any(value < 0.0 for value in finite_minima)
+                else "subunit_divisor_volume"
+            )
+            result["status"] = "annotated_divisor_volume_shortfall"
+            result["classification"] = "canonical_tip_divisor_volume_shortfall"
+        elif diagnostic.get("point_status") == "accepted":
+            result["status"] = "passed"
+            result["classification"] = "passed"
+        else:
+            result["status"] = "evaluation_failed"
+            result["classification"] = "canonical_tip_preflight_failure"
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
 def collect_raw_frsts_for_polytope(
     arguments,
     h11,
@@ -232,6 +523,7 @@ def collect_raw_frsts_for_polytope(
             raw_geometry_id = build_raw_frst_geometry_id(
                 h11, polytope_identifier, full_hash
             )
+            calabi_yau = None
             try:
                 # Reuse the CYTools triangulation already held by the sampler.
                 # This work is deliberately best-effort: retaining the raw
@@ -269,6 +561,24 @@ def collect_raw_frsts_for_polytope(
                         ),
                     }
                 )
+            if h11 == 491:
+                if calabi_yau is None:
+                    canonical_tip_preflight = {
+                        "schema_version": H491_CANONICAL_TIP_PREFLIGHT_SCHEMA_VERSION,
+                        "h11": 491,
+                        "method": "tip_of_stretched_cone(1.0)",
+                        "tip_parameter": 1.0,
+                        "cytools_version": getattr(generator.cytools, "version", None),
+                        "status": "unavailable",
+                        "classification": "canonical_tip_preflight_unavailable",
+                        "reason": "CYTools Calabi-Yau construction failed before preflight",
+                        "divisor_volume_lower_bounds_enforced": False,
+                    }
+                else:
+                    canonical_tip_preflight = run_h491_canonical_tip_preflight(
+                        calabi_yau
+                    )
+                metadata["canonical_tip_preflight"] = canonical_tip_preflight
             retained = write_raw_frst_artifact(
                 raw_path,
                 h11=h11,
@@ -321,6 +631,22 @@ def collect_raw_frsts_for_polytope(
             }
         )
     return terminal_records
+
+
+def summarize_nested_preflight_classifications(records):
+    """Count nested h11=491 preflight classifications without new statuses."""
+    counts = {}
+    for record in records:
+        preflight = record.get("canonical_tip_preflight") or {}
+        if int(record.get("h11", -1)) != 491 or not preflight:
+            continue
+        classification = preflight.get("classification", "unknown")
+        h11_counts = counts.setdefault("491", {})
+        h11_counts[classification] = h11_counts.get(classification, 0) + 1
+    return {
+        h11: dict(sorted(classifications.items()))
+        for h11, classifications in sorted(counts.items())
+    }
 
 
 def build_parser():
@@ -449,6 +775,9 @@ def main(argv=None):
         "retained_raw_frst_count": len(retained_records),
         "retained_raw_frst_count_by_h11": count_by_h11(
             retained_records, status_key="terminal_status"
+        ),
+        "canonical_tip_preflight_classification_count_by_h11": summarize_nested_preflight_classifications(
+            retained_records
         ),
         "terminal_status_count_by_h11": count_by_h11(
             candidate_records, status_key="terminal_status"
