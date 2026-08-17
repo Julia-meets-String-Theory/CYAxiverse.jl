@@ -18,6 +18,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "User guide" => "userguide.md",
+        "Pipelines" => "pipelines.md",
         "Local axion-photon scan" => "axion_photon.md",
         "Examples" => "examples.md",
         "API" => "api.md"
