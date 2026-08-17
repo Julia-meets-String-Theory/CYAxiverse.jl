@@ -615,6 +615,58 @@ function hessian_norm(x, Q::Matrix)
     end
 end
 ##############################
+#### Small preallocation helpers ####
+##############################
+
+"""
+    _quartic_index_matrix(indices)
+
+Build the zero-based `4 x length(indices)` charge-index matrix used by the
+quartic spectrum outputs from `indices`, a vector of 4-element integer
+tuples. Each tuple becomes one column, with every entry converted from
+Julia's 1-based indexing to the package's zero-based convention by
+subtracting 1.
+
+Filling a preallocated matrix column by column avoids splatting `indices`
+into `hcat`, whose per-argument overhead dominates once `indices` holds
+thousands of tuples (as it does once `h11` reaches order 100).
+"""
+function _quartic_index_matrix(indices::AbstractVector{<:NTuple{4, Integer}})
+    output = zeros(Int, 4, length(indices))
+    @inbounds for column in eachindex(indices)
+        entry = indices[column]
+        for row in 1:4
+            output[row, column] = entry[row] - 1
+        end
+    end
+    return output
+end
+
+"""
+    _hcat_columns(blocks)
+
+Concatenate `blocks`, an iterable of vectors and/or matrices that share the
+same number of rows, into a single matrix, columnwise. This produces exactly
+the same result as `hcat(blocks...)`, but fills one preallocated array
+instead of splatting `blocks` into `hcat`, whose per-argument overhead
+dominates once `blocks` holds many entries.
+"""
+function _hcat_columns(blocks)
+    isempty(blocks) && return hcat(blocks...)
+    n_rows = size(first(blocks), 1)
+    element_type = mapreduce(eltype, promote_type, blocks)
+    total_columns = sum(block -> size(block, 2), blocks)
+    output = Matrix{element_type}(undef, n_rows, total_columns)
+    column = 1
+    @inbounds for block in blocks
+        block_columns = size(block, 2)
+        output[:, column:column + block_columns - 1] .= block
+        column += block_columns
+    end
+    return output
+end
+
+##############################
 #### Computing Spectra #######
 ##############################
 
@@ -772,8 +824,29 @@ function _hp_selected_potential(L::AbstractMatrix{<:Real},
     Qnative = Matrix{Int}(Q)
     selection === :raw && return Lnative, Qnative
 
-    selected = LQtildebar(Lnative, Qnative)
-    Matrix{Float64}(selected["Lhat"]), Matrix{Int}(selected["Qhat"])
+    # LQtildebar selects the leading independent charges with an exact
+    # Nemo.nullspace test and grows Qtilde/Qbar/Ltilde/Lbar with hcat inside
+    # its instanton loop, which is quadratic-time and reallocates on every
+    # instanton. LQtilde performs the same greedy selection with a
+    # preallocated, doubly-reorthogonalized Gram-Schmidt workspace, and
+    # αmatrix reproduces LQtildebar's threshold-based merge of near-degenerate
+    # subleading charges back into the basis, keeping Qhat/Qbar separate
+    # (Qhat == Qtilde) rather than pre-concatenated. Re-concatenating here
+    # reproduces LQtildebar's combined "Qhat" output exactly: this has been
+    # checked column-for-column against LQtildebar across many h11 and
+    # threshold values, including cases that exercise the merge branch (see
+    # the "LQtilde/αmatrix reproduce LQtildebar's hp_effective selection"
+    # testset in test/runtests.jl).
+    selected = LQtilde(Qnative, Lnative)
+    canonical = αmatrix(selected)
+    if canonical isa Canonicalα
+        Lhat = hcat(canonical.Lhat, canonical.Lbar)
+        Qhat = hcat(canonical.Qhat, canonical.Qbar)
+    else
+        Lhat = canonical.Lhat
+        Qhat = canonical.Qhat
+    end
+    Matrix{Float64}(Lhat), Matrix{Int}(Qhat)
 end
 
 """
@@ -931,18 +1004,8 @@ function _hp_spectrum_factored(C::Matrix{Float64},
 
     fpert::Vector{Float64} = @.(Hvals + mplanck_log -
         (0.5 * quartdiaglog * log10e))
-    qindq31_output = zeros(Int, 4, length(qindq31))
-    qindq22_output = zeros(Int, 4, length(qindq22))
-    @inbounds for column in eachindex(qindq31)
-        for row in 1:4
-            qindq31_output[row, column] = qindq31[column][row] - 1
-        end
-    end
-    @inbounds for column in eachindex(qindq22)
-        for row in 1:4
-            qindq22_output[row, column] = qindq22[column][row] - 1
-        end
-    end
+    qindq31_output = _quartic_index_matrix(qindq31)
+    qindq22_output = _quartic_index_matrix(qindq22)
     vals = Hsign, masses, fK .+ mplanck_log .- log2π, fpert .- log2π,
         quartdiagsign, quartdiaglog .* log10e .+ 4 * log2π,
         qindq31_output, quart31sign,
@@ -1502,9 +1565,20 @@ function _instanton_split_diagnostics(C::Matrix{Float64},
         right = reduce(vcat, (block.indices .+ 1 for block in hierarchy.blocks[boundary+1:end]))
         left_charge = @view Qcanonical[left, :]
         right_charge = @view Qcanonical[right, :]
-        left_norm = opnorm(left_charge)
-        right_norm = opnorm(right_charge)
-        off_block_norm = opnorm(Matrix(left_charge * right_charge'))
+        # left_charge = Q_left * R_left and right_charge = Q_right * R_right via
+        # thin QR, with Q_left and Q_right having orthonormal columns. Sandwiching
+        # any matrix between two orthonormal-column factors leaves the operator
+        # norm unchanged, so opnorm(left_charge) == opnorm(R_left),
+        # opnorm(right_charge) == opnorm(R_right), and
+        # opnorm(left_charge * right_charge') == opnorm(R_left * R_right').
+        # R_left and R_right are h11 x h11 (or smaller), so this replaces a full
+        # SVD of a dense n_left x n_right matrix with SVDs of two small QR
+        # factors and their h11 x h11 product.
+        R_left = qr(Matrix(left_charge)).R
+        R_right = qr(Matrix(right_charge)).R
+        left_norm = opnorm(R_left)
+        right_norm = opnorm(R_right)
+        off_block_norm = opnorm(R_left * R_right')
         coupling = off_block_norm / max(left_norm * right_norm, eps(Float64))
         separation_gap = hierarchy.inter_block_gaps[boundary]
         coupling_to_gap_ratio = coupling == 0.0 ? 0.0 :
@@ -1742,8 +1816,8 @@ function _pq_spectrum_factored(C::Matrix{Float64}, L::Matrix{Float64}, Q::Matrix
     end
     AxionSpectrum(masses, mass_signs, 0.5 .* fapprox[order] .+ Float64(log10(constants()["MPlanck"])), fK .+ Float64(log10(constants()["MPlanck"])) .- log2π,
     quartdiagsign, quartdiaglog .* log10(exp(1)) .+ 4 * log2π,
-    isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
-    isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics, mass_diagnostics, hierarchy)
+    _quartic_index_matrix(qindq31), quart31sign, quart31log .* log10(exp(1)) .+ 4 * log2π,
+    _quartic_index_matrix(qindq22), quart22sign, quart22log .* log10(exp(1)) .+ 4 * log2π, diagnostics, mass_diagnostics, hierarchy)
 end
 
 """Compute the PQ spectrum from a kinetic metric `K`."""
@@ -1832,8 +1906,8 @@ function _pq_physical_spectrum_factored(C::Matrix{Float64}, L::Matrix{Float64}, 
     log2π = Float64(constants()["log2π"])
     PhysicalAxionSpectrum(physical_masses, retained .- 1, Float64.(eigenvectors[:, retained]),
         self_sign, self_log .+ 4 * log2π,
-        isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, three_one_sign, three_one_log .+ 4 * log2π,
-        isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, two_two_sign, two_two_log .+ 4 * log2π,
+        _quartic_index_matrix(qindq31), three_one_sign, three_one_log .+ 4 * log2π,
+        _quartic_index_matrix(qindq22), two_two_sign, two_two_log .+ 4 * log2π,
         threshold_log10, prec)
 end
 
@@ -2157,8 +2231,8 @@ function _pq_hybrid_physical_spectrum_factored(C::Matrix{Float64}, L::Matrix{Flo
     end
     PhysicalAxionSpectrum(masses, collect(h11-physical_count:h11-1), Float64.(basis),
         self_sign, self_log .+ 4 * log2π,
-        isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1, three_one_sign, three_one_log .+ 4 * log2π,
-        isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1, two_two_sign, two_two_log .+ 4 * log2π,
+        _quartic_index_matrix(qindq31), three_one_sign, three_one_log .+ 4 * log2π,
+        _quartic_index_matrix(qindq22), two_two_sign, two_two_log .+ 4 * log2π,
         threshold_log10, prec)
 end
 
@@ -2239,9 +2313,9 @@ function _physical_spectrum_from_basis(C::AbstractMatrix,
     end
     PhysicalAxionSpectrum(masses, mode_indices, Float64.(basis),
         self_sign, self_log .+ 4 * log2π,
-        isempty(qindq31) ? zeros(Int, 4, 0) : hcat(collect.(qindq31)...) .- 1,
+        _quartic_index_matrix(qindq31),
         three_one_sign, three_one_log .+ 4 * log2π,
-        isempty(qindq22) ? zeros(Int, 4, 0) : hcat(collect.(qindq22)...) .- 1,
+        _quartic_index_matrix(qindq22),
         two_two_sign, two_two_log .+ 4 * log2π, threshold_log10, prec,
         min_log10_mass, max_log10_mass, diagnostics)
 end
@@ -3698,7 +3772,7 @@ function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5,
             end
         end
         keys = ["θ̃∥", "vac"]
-        xmin = hcat(xmin...)
+        xmin = _hcat_columns(xmin)
         xmin = sort(xmin, dims = 2)
         min_num = 1
         while min_num < size(xmin, 2)
