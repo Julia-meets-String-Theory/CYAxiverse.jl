@@ -1,5 +1,6 @@
 using CYAxiverse
 using LinearAlgebra
+using Random
 using SparseArrays
 using Test
 using HDF5
@@ -1753,6 +1754,80 @@ end
             @test_throws ArgumentError poly102.n8_physical_gradient_flow(
                 1.5320548620798324e-3; precision_bits=64, max_time=1,
                 method=:FBDF)
+        end
+    end
+end
+
+@testset "analyze_inflation_candidates: whitened point classification" begin
+    # The script defines `derivatives`, `classify_point` and `main`, names that
+    # would collide with the scan scripts already included at top level, so it
+    # is loaded into its own module.
+    candidates = Module(:AnalyzeInflationCandidates)
+    Base.include(candidates, joinpath(@__DIR__, "..", "scripts",
+        "analyze_inflation_candidates.jl"))
+
+    # The implementation exactly as it stood before the whitening change, kept
+    # here so the equivalence is pinned rather than asserted.
+    function classify_point_explicit_inverse(theta, Q, L, K)
+        d = candidates.derivatives(theta, Q, L)
+        factor = cholesky(Hermitian(K)).L
+        to_theta = inv(factor')
+        canonical_hessian = to_theta' * d.hessian * to_theta
+        eigs = eigvals(Hermitian(canonical_hessian))
+        gradnorm = sqrt(max(dot(d.gradient, inv(K) * d.gradient), 0.0))
+        (; value=d.value, gradnorm, hessian_eigenvalues=eigs)
+    end
+
+    function classification_fixture(h11, condition_number; seed = 42)
+        rng = MersenneTwister(seed)
+        Q = Matrix(CYAxiverse.generate.pseudo_Q(h11, 1)')
+        L = Matrix(CYAxiverse.generate.pseudo_L(h11, 1)')
+        rotation = qr(randn(rng, h11, h11)).Q
+        spectrum = exp10.(range(0, -log10(condition_number); length = h11))
+        K = Matrix(Hermitian(rotation * Diagonal(spectrum) * rotation'))
+        Q, L, K
+    end
+
+    @testset "reproduces the explicit-inverse form" begin
+        for h11 in (6, 10, 20), condition_number in (1e2, 1e6)
+            Q, L, K = classification_fixture(h11, condition_number)
+            theta = 0.37 .* ones(h11) .+ 0.11 .* (1:h11) ./ h11
+            expected = classify_point_explicit_inverse(theta, Q, L, K)
+            actual = candidates.classify_point(theta, Q, L, cholesky(Hermitian(K)))
+            @test actual.value == expected.value
+            @test actual.gradnorm ≈ expected.gradnorm rtol=1e-8
+            @test actual.hessian_eigenvalues ≈ expected.hessian_eigenvalues atol=
+                1e-8 * max(maximum(abs, expected.hessian_eigenvalues), 1.0)
+        end
+    end
+
+    @testset "gradnorm is the K-inverse norm of the gradient" begin
+        # norm(L \ g) == sqrt(g' K^-1 g) is the identity the whitened form
+        # relies on; without it `epsilon` would not be the slow-roll parameter.
+        for h11 in (8, 16)
+            Q, L, K = classification_fixture(h11, 1e4)
+            theta = 0.29 .* ones(h11) .+ 0.07 .* (1:h11) ./ h11
+            d = candidates.derivatives(theta, Q, L)
+            actual = candidates.classify_point(theta, Q, L, cholesky(Hermitian(K)))
+            @test actual.gradnorm ≈ sqrt(dot(d.gradient, K \ d.gradient)) rtol=1e-9
+            @test actual.gradnorm >= 0
+        end
+    end
+
+    @testset "factorization may be hoisted out of a point loop" begin
+        # `analyze_geometry` factors K once and reuses it for every critical
+        # point; that must agree with factoring per point.
+        h11 = 12
+        Q, L, K = classification_fixture(h11, 1e5)
+        factor = cholesky(Hermitian(K))
+        for i in 1:4
+            theta = 0.3 .+ 0.4 .* rand(MersenneTwister(i), h11)
+            hoisted = candidates.classify_point(theta, Q, L, factor)
+            per_point = candidates.classify_point(theta, Q, L, K)
+            @test hoisted.gradnorm == per_point.gradnorm
+            @test hoisted.epsilon == per_point.epsilon
+            @test hoisted.hessian_eigenvalues == per_point.hessian_eigenvalues
+            @test hoisted.negative_modes == per_point.negative_modes
         end
     end
 end
