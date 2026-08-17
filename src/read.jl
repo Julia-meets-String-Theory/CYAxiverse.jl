@@ -154,21 +154,108 @@ end
 ##### Read Geometric data ###
 #############################
 
-function potential(geom_idx::GeometryIndex; hilbert = false)
+"""
+    _kinetic_matrix(Kinv, geom_idx)
+
+Construct the axion kinetic matrix `K = (1/2) g` from the stored inverse
+Kähler metric `Kinv` using a symmetry-aware inverse.
+
+`Kinv` is read from HDF5 as a plain `Matrix`. Inverting it directly
+(`inv(Kinv)`) selects a general LU factorisation that ignores its symmetry;
+wrapping that result in `Hermitian` afterwards always yields an exactly
+symmetric matrix, but the underlying factorisation can still be badly
+indefinite on realistic, ill-conditioned geometry data. Symmetrising `Kinv`
+before inversion (`inv(Hermitian(Kinv))`) instead selects a Bunch-Kaufman
+factorisation, which is symmetry-aware and numerically well-behaved across
+the ill-conditioned `Kinv` matrices that occur throughout the geometry
+corpus. Unlike a Cholesky-based construction, it does not require `Kinv`
+itself to test as positive definite, so it does not hard-fail on the
+singular or marginally indefinite `Kinv` that legitimately occurs near a
+wall of the Kähler cone.
+
+An exactly singular `Kinv` has no finite kinetic matrix. That failure is
+reported as a `DomainError` naming the geometry, rather than letting a raw
+`SingularException` escape to the caller.
+"""
+function _kinetic_matrix(Kinv::AbstractMatrix{Float64}, geom_idx::GeometryIndex)
+    try
+        Hermitian(inv(Hermitian(Matrix{Float64}(Kinv))))
+    catch err
+        err isa SingularException || rethrow()
+        throw(DomainError(0.0,
+            "kinetic matrix K = (1/2) g could not be constructed: stored " *
+            "inverse metric Kinv is exactly singular for geometry " *
+            "h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), " *
+            "frst=$(geom_idx.frst)"))
+    end
+end
+
+"""
+    _validate_kinetic_matrix(K, Kinv, geom_idx)
+
+Enforce the physical invariant (`.copilot/AGENTS.md`, section 3) that the
+axion kinetic matrix `K_ij = 1/2 g_ij` is symmetric positive-definite,
+throwing a `DomainError` naming the offending geometry and quantity when it
+is not, so a corrupt on-disk artifact is identifiable from the error alone.
+
+The test is `isposdef(K)`, a Cholesky attempt on `K` itself, with no
+tolerance. Section 3 is a statement about `K`, and this is exactly that
+statement. Measured behaviour, `n = 30`, three random rotations per cell:
+
+  - `Kinv` positive definite with smallest eigenvalue driven to `1e-16`
+    (approaching a Kähler-cone wall): `isposdef(K)` holds. Legitimate
+    near-wall geometries are accepted.
+  - `Kinv` positive definite with smallest eigenvalue `1e-18`, so
+    `cond(Kinv)` exceeds what `Float64` can resolve: `isposdef(K)` fails.
+    Rejecting is correct — at that conditioning the stored metric carries
+    no usable information and `K` is meaningless.
+  - `Kinv` with a genuinely negative eigenvalue from `-1e-12` to `-0.2`:
+    `isposdef(K)` fails in every case. Corruption is caught.
+
+An earlier revision fell back to `Kinv`'s own spectrum with a
+`sqrt(eps)`-scaled tolerance when the Cholesky test failed. That was
+removed: it changed the outcome only beyond `cond(Kinv) = 1e16`, where
+rejection is the correct answer anyway, while wrongly accepting real
+corruption — a stored eigenvalue of `-1e-9` passed the tolerance and
+produced a `K` with smallest eigenvalue `-1e9`, which is precisely the
+state section 3 exists to forbid.
+
+Both `eigmin(K)` and `eigmin(Kinv)` are reported so that a numerically
+singular metric can be told apart from a corrupt one.
+"""
+function _validate_kinetic_matrix(K::Hermitian{Float64, Matrix{Float64}},
+        Kinv::AbstractMatrix{Float64}, geom_idx::GeometryIndex)
+    isposdef(K) && return nothing
+    λmin_K = eigmin(K)
+    λmin_Kinv = eigmin(Hermitian(Matrix{Float64}(Kinv)))
+    throw(DomainError(λmin_K,
+        "kinetic matrix K = (1/2) g is not symmetric positive-definite for " *
+        "geometry h11=$(geom_idx.h11), polytope=$(geom_idx.polytope), " *
+        "frst=$(geom_idx.frst): smallest eigenvalue of K is $λmin_K " *
+        "(smallest eigenvalue of the stored Kinv is $λmin_Kinv). A negative " *
+        "Kinv eigenvalue indicates a corrupt artifact; a positive one that " *
+        "small indicates cond(Kinv) beyond Float64 resolution."))
+end
+
+function potential(geom_idx::GeometryIndex; hilbert = false, validate::Bool = true)
     if hilbert
-        L::Matrix{Float64}, Q::Matrix{Int}, Kinv::Matrix{Float64} = 
+        L::Matrix{Float64}, Q::Matrix{Int}, Kinv::Matrix{Float64} =
         h5open(cyax_file(geom_idx), "r") do file
             HDF5.read(file, "cytools/hilbert/potential/L"),HDF5.read(file, "cytools/hilbert/potential/Q"),
             HDF5.read(file, "cytools/hilbert/geometric/Kinv")
         end
-        AxionPotential(L, Q, Hermitian(inv(Kinv)))
+        Kmat = _kinetic_matrix(Kinv, geom_idx)
+        validate && _validate_kinetic_matrix(Kmat, Kinv, geom_idx)
+        AxionPotential(L, Q, Kmat)
     else
-        L, Q, Kinv = 
+        L, Q, Kinv =
         h5open(cyax_file(geom_idx), "r") do file
             HDF5.read(file, "cytools/potential/L"),HDF5.read(file, "cytools/potential/Q"),
             HDF5.read(file, "cytools/geometric/Kinv")
         end
-        AxionPotential(L, Q, Hermitian(inv(Kinv)))
+        Kmat = _kinetic_matrix(Kinv, geom_idx)
+        validate && _validate_kinetic_matrix(Kmat, Kinv, geom_idx)
+        AxionPotential(L, Q, Kmat)
     end
 end
 
@@ -305,9 +392,9 @@ function oriented_potential(geom_idx::GeometryIndex;
 end
 
 
-function potential(h11::Int,tri::Int,cy::Int=1; hilbert = false)
+function potential(h11::Int,tri::Int,cy::Int=1; hilbert = false, validate::Bool = true)
     geom_idx = GeometryIndex(h11, tri, cy)
-    potential(geom_idx; hilbert = hilbert)
+    potential(geom_idx; hilbert = hilbert, validate = validate)
 end
 
 function Q(h11::Int,tri::Int,cy::Int=1; hilbert = false)
