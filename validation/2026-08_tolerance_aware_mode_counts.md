@@ -124,6 +124,8 @@ Added, both additive:
 
 `abs_min_eta`, `min_eta` and `max_eta` keep their existing definitions. Redefining η is a physics decision — whether a curvature-free direction is a genuine flat modulus or noise is not decidable from the spectrum — so both quantities are reported side by side rather than one silently replacing the other.
 
+**Resolution (2026-08-17, DECISION-ETA):** the maintainer decided `min_eta`/`abs_min_eta` should exclude directions with no resolvable curvature. `fix/eta-resolvable-metric` redefines both accordingly and drops the now-redundant `abs_min_eta_resolvable`/`best_abs_min_eta_resolvable` columns; `max_eta` is unchanged. The measurements above remain the historical record of the side-by-side comparison that motivated the decision.
+
 ---
 
 ## 6. The committed artifact is not a clean baseline

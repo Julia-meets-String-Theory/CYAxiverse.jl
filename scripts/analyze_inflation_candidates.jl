@@ -39,18 +39,19 @@ function classify_point(theta, Q, L, Kfactor::Cholesky)
     # scale as a tachyon, and `saddle_rows` below filters on
     # `negative_modes > 0`.
     modes = CYAxiverse.generate.spectrum_mode_counts(eigs)
-    # `abs_min_eta` is the flatness figure of merit, and a curvature-free
-    # direction drives it to zero, making a point look maximally flat on
-    # numerical noise. Reported alongside is the same quantity restricted to
-    # directions with resolvable curvature, so the two can be compared
-    # without changing what `abs_min_eta` has always meant.
+    # `min_eta`/`abs_min_eta` are the flatness figures of merit; a
+    # curvature-free direction drives eta to zero, making a point look
+    # maximally flat (or spuriously tachyonic) on numerical noise. Both are
+    # restricted to directions with resolvable curvature (DECISION-ETA).
+    # `max_eta` is left over the full spectrum since nothing filters an
+    # upper bound toward zero.
     resolvable = abs.(eigs) .> modes.tolerance
-    abs_min_eta_resolvable = d.value == 0 || !any(resolvable) ? Inf :
-        minimum(abs.(eta_values[resolvable]))
+    no_resolvable_eta = d.value == 0 || !any(resolvable)
+    min_eta = no_resolvable_eta ? Inf : minimum(eta_values[resolvable])
+    abs_min_eta = no_resolvable_eta ? Inf : minimum(abs.(eta_values[resolvable]))
     (; value=d.value, gradnorm, epsilon,
-       min_eta=minimum(eta_values), max_eta=maximum(eta_values),
-       abs_min_eta=minimum(abs.(eta_values)),
-       abs_min_eta_resolvable,
+       min_eta, max_eta=maximum(eta_values),
+       abs_min_eta,
        negative_modes=modes.negative,
        zeroish_modes=modes.zeroish,
        positive_modes=modes.positive,
@@ -115,7 +116,6 @@ function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:catastrophe)
             min_eta=c.min_eta,
             max_eta=c.max_eta,
             abs_min_eta=c.abs_min_eta,
-            abs_min_eta_resolvable=c.abs_min_eta_resolvable,
             negative_modes=c.negative_modes,
             zeroish_modes=c.zeroish_modes,
             positive_modes=c.positive_modes,
@@ -158,8 +158,6 @@ function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:catastrophe)
         least_tachyonic_value=least_tachyonic === nothing ? NaN : least_tachyonic.value,
         best_min_eta=best === nothing ? NaN : best.min_eta,
         best_abs_min_eta=flattest === nothing ? NaN : flattest.abs_min_eta,
-        best_abs_min_eta_resolvable=flattest === nothing ? NaN :
-            flattest.abs_min_eta_resolvable,
         best_epsilon=flattest === nothing ? NaN : flattest.epsilon,
         zeroish_mode_points=count(row -> row.zeroish_modes > 0, point_rows),
         candidate_slowroll_saddles=count(row -> row.epsilon < 1 && abs(row.min_eta) < 1, saddle_rows),
