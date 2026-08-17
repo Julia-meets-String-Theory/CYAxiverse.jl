@@ -507,6 +507,81 @@ end
             write_potential_fixture(root, 25, 1, 1, Kinv_wall)
             near_wall = CYAxiverse.read.potential(25, 1, 1)
             @test isposdef(near_wall.K)
+
+            # --- validate = :warn -------------------------------------------
+            # A 2026-08-16 read-only sweep of all 30,975 stored geometries
+            # found zero violations and no cond(Kinv) above 1.5e9, so the
+            # throwing path cannot currently fire on real data. It is
+            # expected to become reachable around h11 = 500, where the
+            # measured trend log10(cond) = 1.936 + 0.0161*h11 crosses the
+            # regime the check exists for. A batch driver sweeping the
+            # corpus must record such a geometry and continue rather than
+            # halt mid-run, which is what :warn provides.
+            #
+            # Geometry 23 has a stored eigenvalue of -0.2 and throws under
+            # the default.
+            @test_logs (:warn,) match_mode = :any CYAxiverse.read.potential(
+                23, 1, 1; validate = :warn)
+
+            warn_records, warned = Test.collect_test_logs() do
+                CYAxiverse.read.potential(23, 1, 1; validate = :warn)
+            end
+            # It returns the potential instead of throwing ...
+            @test warned.K isa Hermitian{Float64, Matrix{Float64}}
+            @test !isposdef(warned.K)
+            # ... and the record names the geometry, carrying both
+            # eigenvalues as structured fields a driver can filter on.
+            violation = only(filter(
+                record -> record.level >= Base.CoreLogging.Warn, warn_records))
+            @test occursin("h11=23", violation.message)
+            @test occursin("polytope=1", violation.message)
+            @test occursin("frst=1", violation.message)
+            keywords = Dict(violation.kwargs)
+            @test keywords[:h11] == 23
+            @test keywords[:polytope] == 1
+            @test keywords[:frst] == 1
+            @test keywords[:eigmin_K] < 0
+            @test keywords[:eigmin_Kinv] ≈ -0.2 atol = 1e-8
+
+            # The throwing and warning paths must describe the geometry
+            # identically, so a warning in a batch log and an error from an
+            # interactive read are the same diagnostic.
+            thrown = try
+                CYAxiverse.read.potential(23, 1, 1; validate = :throw)
+                nothing
+            catch caught
+                caught
+            end
+            @test thrown isa DomainError
+            @test thrown.msg == violation.message
+
+            # A conforming geometry warns about nothing.
+            @test_logs min_level = Base.CoreLogging.Warn CYAxiverse.read.potential(
+                25, 1, 1; validate = :warn)
+
+            # --- symbol spellings and the typo guard ------------------------
+            # :throw and :skip are the explicit spellings of true and false.
+            @test_throws DomainError CYAxiverse.read.potential(23, 1, 1;
+                validate = :throw)
+            @test !isposdef(CYAxiverse.read.potential(23, 1, 1;
+                validate = :skip).K)
+
+            # An unrecognized value must be rejected, not silently treated as
+            # "no validation" -- otherwise a typo disables the invariant.
+            @test_throws ArgumentError CYAxiverse.read.potential(23, 1, 1;
+                validate = :warm)
+            @test_throws ArgumentError CYAxiverse.read.potential(21, 1, 1;
+                validate = :validate)
+
+            # oriented_potential forwards validate, since the scan drivers
+            # read through it rather than through potential directly.
+            @test_throws DomainError CYAxiverse.read.oriented_potential(
+                CYAxiverse.structs.GeometryIndex(23, 1, 1))
+            @test_logs (:warn,) match_mode = :any CYAxiverse.read.oriented_potential(
+                CYAxiverse.structs.GeometryIndex(23, 1, 1); validate = :warn)
+            @test CYAxiverse.read.oriented_potential(
+                CYAxiverse.structs.GeometryIndex(23, 1, 1); validate = false).K isa
+                  Hermitian{Float64, Matrix{Float64}}
         finally
             old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
