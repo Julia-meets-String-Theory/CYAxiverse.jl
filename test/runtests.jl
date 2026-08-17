@@ -2064,3 +2064,63 @@ end
         end
     end
 end
+
+@testset "Tier-A optimisations preserve values" begin
+    # A2: _quartic_index_matrix replaces `hcat(collect.(idx)...) .- 1`.
+    let
+        legacy(indices) = isempty(indices) ? zeros(Int, 4, 0) :
+                          hcat(collect.(indices)...) .- 1
+        for h11 in (1, 2, 4, 7)
+            i31 = [(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
+            i22 = [(i, i, j, j) for i in 1:h11 for j in 1:i-1]
+            @test CYAxiverse.generate._quartic_index_matrix(i31) == legacy(i31)
+            @test CYAxiverse.generate._quartic_index_matrix(i22) == legacy(i22)
+        end
+        # The empty case must keep its shape, not collapse to a 0x0.
+        @test size(CYAxiverse.generate._quartic_index_matrix(NTuple{4, Int}[])) == (4, 0)
+    end
+
+    # A2: _hcat_columns replaces `hcat(blocks...)`.
+    let blocks = [rand(3, 2) for _ in 1:5]
+        @test CYAxiverse.generate._hcat_columns(blocks) == hcat(blocks...)
+    end
+    let blocks = [rand(4) for _ in 1:6]
+        @test CYAxiverse.generate._hcat_columns(blocks) == hcat(blocks...)
+    end
+
+    # A9: sandwiching between orthonormal-column QR factors leaves the
+    # operator norm unchanged, so the thin-QR form is exact.
+    let
+        for (nl, nr, h11) in ((300, 200, 12), (150, 150, 8), (40, 90, 20))
+            A = randn(nl, h11)
+            B = randn(nr, h11)
+            RA = qr(A).R
+            RB = qr(B).R
+            @test isapprox(opnorm(RA), opnorm(A); rtol = 1e-12)
+            @test isapprox(opnorm(RB), opnorm(B); rtol = 1e-12)
+            @test isapprox(opnorm(RA * RB'), opnorm(A * B'); rtol = 1e-10)
+        end
+    end
+
+    # A11: _hp_selected_potential now routes through LQtilde + αmatrix
+    # instead of LQtildebar. The combined (Lhat, Qhat) pair must be
+    # identical, since αmatrix keeps Qhat and Qbar separate where
+    # LQtildebar pre-concatenates them.
+    let
+        for h11 in (4, 6, 8, 10, 12, 15)
+            Q = Matrix(CYAxiverse.generate.pseudo_Q(h11, 1)')
+            L = Matrix(CYAxiverse.generate.pseudo_L(h11, 1)')
+            legacy = CYAxiverse.generate.LQtildebar(Matrix{Float64}(L), Matrix{Int}(Q))
+            legacy_L = Matrix{Float64}(legacy["Lhat"])
+            legacy_Q = Matrix{Int}(legacy["Qhat"])
+            fast_L, fast_Q = CYAxiverse.generate._hp_selected_potential(L, Q, :hp_effective)
+            @test size(fast_Q) == size(legacy_Q)
+            @test fast_Q == legacy_Q
+            @test fast_L == legacy_L
+            # LQtilde uses a floating-point rank test where LQtildebar uses
+            # exact Nemo.nullspace. Pin that the fast selector never accepts
+            # a rationally dependent column.
+            @test rank(Matrix{Rational{BigInt}}(fast_Q)) == size(fast_Q, 2)
+        end
+    end
+end

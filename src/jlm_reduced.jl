@@ -14,7 +14,7 @@ using Nemo
 using SparseArrays
 
 using ..filestructure: minfile
-using ..generate: LQtilde, LQLinearlyIndependent, αmatrix, phase, vacua_SNF
+using ..generate: LQtilde, LQLinearlyIndependent, αmatrix, phase, vacua_SNF, _hcat_columns
 using ..minimizer: critical_points
 using ..read: potential
 using ..structs: GeometryIndex, Canonicalα, Min_JLM_1D, Min_JLM_ND, Min_JLM_Square
@@ -333,7 +333,7 @@ function critical_ensemble(problem::ReducedJLMProblem; starts::Int=100_000,
     solved = critical_points(Matrix(problem.L_reduced'), Matrix(transpose(problem.Q_reduced));
         phases=phases, starts=starts, residual_tolerance=residual_tolerance,
         merge_tolerance=merge_tolerance, max_iterations=max_iterations,
-        initial_points=hcat(seed_points...))
+        initial_points=_hcat_columns(seed_points))
     reduced_coordinates = problem.coordinate_scale .* solved.coordinates
     coordinates = problem.reduction == :catastrophe ?
         mod.(problem.lift_matrix * reduced_coordinates, 1.0) : reduced_coordinates
