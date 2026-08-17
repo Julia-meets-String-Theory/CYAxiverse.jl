@@ -886,19 +886,56 @@ def select_qed_divisor(
     return record
 
 
-def _rank(rows):
+def _reduce_against_basis(vector, basis):
+    """Reduce one integer vector against a persistent exact-fraction basis.
+
+    ``basis`` maps pivot column -> reduced row and is updated in place when
+    ``vector`` is independent of it. Returns the new pivot index, or ``None``
+    when ``vector`` is already in the basis's span.
+    """
+    work = [Fraction(int(value)) for value in vector]
+    for pivot, row in sorted(basis.items()):
+        factor = work[pivot]
+        if factor:
+            work = [value - factor * row[index] for index, value in enumerate(work)]
+    pivot = next((index for index, value in enumerate(work) if value), None)
+    if pivot is not None:
+        scale = work[pivot]
+        basis[pivot] = tuple(value / scale for value in work)
+    return pivot
+
+
+def compute_leading_rank_order(charges, scales):
+    """Rank potential-term columns by exact-rational incremental elimination.
+
+    Walks columns in descending physical-scale priority and greedily grows an
+    exact-fraction basis, exactly as the previous per-column
+    ``_rank(selected + [candidate])`` design did -- but ``_rank`` rebuilt and
+    re-reduced the *entire* accepted basis from scratch on every candidate,
+    turning an O(rank) reduction into an O(rank^2) one repeated once per
+    column. Reducing each candidate against a basis carried across
+    iterations keeps the same greedy selection and final rank while cutting
+    that per-candidate cost by a factor of the running basis size. Once the
+    basis reaches full row rank, every further column is provably dependent
+    (rank cannot exceed the row dimension), so the scan stops there without
+    changing ``selected`` or ``rank``.
+
+    Returns geometry-only data (independent of any one QED assignment): the
+    full priority ``order``, the ``selected`` leading-column indices in the
+    order they entered the basis, and the achieved ``rank``.
+    """
+    q = charges
+    full_rank = q.shape[0]
+    order = sorted(range(q.shape[1]), key=lambda index: (-float(scales[index]), index))
     basis = {}
-    for vector in rows:
-        work = [Fraction(int(value)) for value in vector]
-        for pivot, row in sorted(basis.items()):
-            factor = work[pivot]
-            if factor:
-                work = [value - factor * row[index] for index, value in enumerate(work)]
-        pivot = next((index for index, value in enumerate(work) if value), None)
+    selected = []
+    for index in order:
+        pivot = _reduce_against_basis(q[:, index], basis)
         if pivot is not None:
-            scale = work[pivot]
-            basis[pivot] = tuple(value / scale for value in work)
-    return len(basis)
+            selected.append(index)
+        if len(basis) == full_rank:
+            break
+    return {"order": order, "selected": selected, "rank": len(basis)}
 
 
 def record_potential_match(q, l, qed_charge, direct_count, source_index):
@@ -919,25 +956,39 @@ def record_potential_match(q, l, qed_charge, direct_count, source_index):
     }
 
 
-def classify_qed_leading_status(charges, scales, source_index):
-    """Classify leading rank using exact integer row-rank increments."""
+def classify_qed_leading_status(charges, scales, source_index, *, leading_rank_order=None):
+    """Classify leading rank using exact integer row-rank increments.
+
+    ``leading_rank_order`` is an optional precomputed
+    :func:`compute_leading_rank_order` result. It depends only on ``charges``
+    and ``scales``, never on ``source_index``, so a caller working through a
+    geometry's whole assignment pool one QED index at a time can compute it
+    once per geometry and pass it in on every call for that geometry instead
+    of paying the exact-rational elimination cost per assignment.
+    """
     q = _integer_array(charges, "potential charge matrix")
     l = np.asarray(scales, dtype=float)
     if l.shape != (2, q.shape[1]) or not 0 <= int(source_index) < q.shape[1]:
         raise QEDAssignmentFailure("potential_term_mismatch", "potential arrays have incompatible shapes")
-    order = sorted(range(q.shape[1]), key=lambda index: (-float(l[1, index]), index))
-    selected = []
-    rank = 0
-    for index in order:
-        next_rank = _rank([q[:, selected_index] for selected_index in selected] + [q[:, index]])
-        if next_rank > rank:
-            selected.append(index)
-            rank = next_rank
+    if leading_rank_order is None:
+        leading_rank_order = compute_leading_rank_order(q, l[1, :])
+    elif len(leading_rank_order.get("order", ())) != q.shape[1]:
+        raise QEDAssignmentFailure(
+            "potential_term_mismatch",
+            "leading_rank_order was computed for a different potential term count",
+        )
+    selected = leading_rank_order["selected"]
+    rank = leading_rank_order["rank"]
     status = "leading" if int(source_index) in selected else "dependent"
+    # ordered_source_indices (the full priority order over every potential
+    # term -- up to ~10^5 entries at large h11) is deliberately not part of
+    # this certificate. It is identical for every row drawn from the same
+    # geometry and fully reconstructible from the geometry's Q/L, so storing
+    # it per row would redundantly duplicate geometry-level data into every
+    # assignment's persisted record.
     return {
         "status": status,
         "selected_source_indices": [int(index) for index in selected],
-        "ordered_source_indices": [int(index) for index in order],
         "selected_rank": int(rank),
         "method": "exact_rational_incremental_rank",
     }

@@ -52,6 +52,7 @@ from qed_divisor_assignment import (
     QEDAssignmentFailure,
     TERMINAL_FAILURE_CATEGORIES,
     classify_qed_leading_status,
+    compute_leading_rank_order,
     enumerate_assignment_pool,
     normalize_qcd_assignment,
     prime_divisor_charges,
@@ -4836,21 +4837,28 @@ def _signed_log_scale(raw_amplitude, raw_exponent):
     )
 
 
-def reconstruct_potential_from_reference(reference, assignment):
-    """Reconstruct one bounded potential view from compact geometry references.
+def _geometry_potential_terms(reference):
+    """Compute and cache the assignment-independent Q/L terms for a geometry.
 
-    The HDF5 artifact stores the intersection tensor, divisor basis, effective
-    cone, and accepted Kaehler point, but not dense potential or metric arrays.
-    Reconstruct those arrays transiently for exact source matching and rank
-    certification of one EFT row.
+    The pairwise effective-cone enumeration and the metric contraction below
+    scale as O(rays^2) and depend only on ``reference``, never on the QCD/QED
+    assignment being scored. ``expand_eft_reference_rows`` calls
+    ``reconstruct_potential_from_reference`` once per assignment-pool entry
+    (up to thousands of times for one geometry), so recomputing this block on
+    every call turns an O(rays^2) cost into O(pool_size * rays^2). Cache it on
+    ``reference`` itself and reuse it across every assignment drawn from that
+    geometry's pool.
     """
+    cached = reference.get("_potential_terms")
+    if cached is not None:
+        return cached
+
     h11 = int(reference["h11"])
     effective_cone = np.asarray(reference["effective_cone"], dtype=np.int64)
     if effective_cone.ndim != 2 or effective_cone.shape[1] != h11:
         raise ValueError("effective-cone reconstruction input has an invalid shape")
     if np.unique(effective_cone, axis=0).shape[0] != effective_cone.shape[0]:
         raise ValueError("effective-cone reconstruction input contains duplicate rays")
-    q_direct = effective_cone.T
     geometry = _reconstruct_intersection_geometry(reference["kappa"], reference["tip"])
     tau = geometry["divisor_volumes"]
     inverse_metric = geometry["inverse_metric"]
@@ -4878,6 +4886,7 @@ def reconstruct_potential_from_reference(reference, assignment):
             pair_j.append(j)
     pair_i = np.asarray(pair_i, dtype=np.int64)
     pair_j = np.asarray(pair_j, dtype=np.int64)
+    q_direct = effective_cone.T
     q_pair = q_direct[:, pair_j] - q_direct[:, pair_i]
     q = np.concatenate((q_direct, q_pair), axis=1)
 
@@ -4902,6 +4911,66 @@ def reconstruct_potential_from_reference(reference, assignment):
         axis=1,
     )
 
+    terms = {
+        "geometry": geometry,
+        "tau": tau,
+        "prefactor": prefactor,
+        "prime_charges": prime_charges,
+        "prime_volumes": prime_volumes,
+        "effective_volumes": effective_volumes,
+        "direct_count": direct_count,
+        "pair_i": pair_i,
+        "pair_j": pair_j,
+        "q_direct": q_direct,
+        "q": q,
+        "l": l,
+        # stable_hash() JSON-encodes the full array via .tolist(); for a large
+        # pool these certificate hashes are the next-largest per-call cost
+        # after the O(rays^2) terms above, and are just as geometry-only as
+        # long as no assignment-specific column gets appended to q/l below.
+        "effective_cone_sha256": stable_hash(effective_cone.tolist()),
+        "pair_source_index_sha256": stable_hash(
+            {"pair_i": pair_i.tolist(), "pair_j": pair_j.tolist()}
+        ),
+        "q_sha256": stable_hash(q.tolist()),
+        "l_sha256": stable_hash(l.tolist()),
+        # classify_qed_leading_status's exact-rational elimination depends
+        # only on q/l (never on which QED index is being scored), but is
+        # itself expensive at large h11 -- computing it once per geometry
+        # here, instead of once per pool entry downstream, is what makes that
+        # elimination cost O(num_geometries) rather than O(pool_size).
+        "leading_rank_order": compute_leading_rank_order(q, l[1, :]),
+    }
+    reference["_potential_terms"] = terms
+    return terms
+
+
+def reconstruct_potential_from_reference(reference, assignment):
+    """Reconstruct one bounded potential view from compact geometry references.
+
+    The HDF5 artifact stores the intersection tensor, divisor basis, effective
+    cone, and accepted Kaehler point, but not dense potential or metric arrays.
+    Reconstruct those arrays transiently for exact source matching and rank
+    certification of one EFT row. The geometry-only terms (everything but the
+    QED-divisor column selection) are cached per ``reference`` by
+    ``_geometry_potential_terms``, since a single geometry's assignment pool
+    can call this once per pool entry.
+    """
+    terms = _geometry_potential_terms(reference)
+    geometry = terms["geometry"]
+    tau = terms["tau"]
+    prefactor = terms["prefactor"]
+    prime_charges = terms["prime_charges"]
+    prime_volumes = terms["prime_volumes"]
+    effective_volumes = terms["effective_volumes"]
+    direct_count = terms["direct_count"]
+    pair_i = terms["pair_i"]
+    pair_j = terms["pair_j"]
+    q_direct = terms["q_direct"]
+    q = terms["q"]
+    l = terms["l"]
+    effective_cone = q_direct.T
+
     qed_charge = np.asarray(
         prime_charges[int(assignment["qed_divisor_index"])], dtype=np.int64
     )
@@ -4913,7 +4982,8 @@ def reconstruct_potential_from_reference(reference, assignment):
         ),
         None,
     )
-    if source_index is None:
+    appended = source_index is None
+    if appended:
         qed_tau = float(qed_charge @ tau)
         qed_raw_amplitude = prefactor * qed_tau
         qed_raw_exponent = -2.0 * math.log10(math.e) * math.pi * qed_tau
@@ -4923,6 +4993,18 @@ def reconstruct_potential_from_reference(reference, assignment):
         source_index = q.shape[1]
         q = np.concatenate((q, qed_charge.reshape(-1, 1)), axis=1)
         l = np.concatenate((l, qed_l), axis=1)
+        q_sha256 = stable_hash(q.tolist())
+        l_sha256 = stable_hash(l.tolist())
+        # The cached leading_rank_order was computed on the unappended q/l;
+        # it does not account for this extra column, so it cannot be reused.
+        leading_rank_order = None
+    else:
+        # q/l are still exactly the cached geometry-only arrays; reuse their
+        # precomputed hashes and rank order instead of redoing tens of
+        # millions of hash/elimination operations per pool entry.
+        q_sha256 = terms["q_sha256"]
+        l_sha256 = terms["l_sha256"]
+        leading_rank_order = terms["leading_rank_order"]
 
     certificate = {
         "schema_version": POTENTIAL_RECONSTRUCTION_SCHEMA_VERSION,
@@ -4938,12 +5020,10 @@ def reconstruct_potential_from_reference(reference, assignment):
         "qed_source_kind": (
             "direct_effective_cone" if source_index < direct_count else "appended_prime_divisor_e3"
         ),
-        "effective_cone_sha256": stable_hash(effective_cone.tolist()),
-        "pair_source_index_sha256": stable_hash(
-            {"pair_i": pair_i.tolist(), "pair_j": pair_j.tolist()}
-        ),
-        "q_sha256": stable_hash(q.tolist()),
-        "l_sha256": stable_hash(l.tolist()),
+        "effective_cone_sha256": terms["effective_cone_sha256"],
+        "pair_source_index_sha256": terms["pair_source_index_sha256"],
+        "q_sha256": q_sha256,
+        "l_sha256": l_sha256,
         "replay_rtol": POTENTIAL_RECONSTRUCTION_RTOL,
         "replay_atol": POTENTIAL_RECONSTRUCTION_ATOL,
     }
@@ -4953,6 +5033,7 @@ def reconstruct_potential_from_reference(reference, assignment):
         "qed_charge": qed_charge,
         "direct_count": direct_count,
         "source_index": int(source_index),
+        "leading_rank_order": leading_rank_order,
         "reconstruction": {
             **geometry,
             "prime_divisor_volumes": prime_volumes,
@@ -5038,14 +5119,147 @@ def _decode_hdf5_text(value):
 
 
 def _materialize_row_potential(reference, assignment):
-    """Materialize one bounded Q/L view from geometry references only."""
-    reconstruction = dict(reference["reconstruction"])
-    reconstruction["h11"] = reference["h11"]
+    """Materialize one bounded Q/L view from geometry references only.
+
+    The ``reconstruction`` view is built once per outer ``reference`` and
+    reused, not rebuilt per call: ``reconstruct_potential_from_reference``
+    caches its O(rays^2) geometry-only terms on the dict object it receives,
+    and that cache is only useful across a geometry's whole assignment pool
+    if every draw for that geometry is handed the same object.
+    """
+    reconstruction = reference.get("_reconstruction_view")
+    if reconstruction is None:
+        reconstruction = dict(reference["reconstruction"])
+        reconstruction["h11"] = reference["h11"]
+        reference["_reconstruction_view"] = reconstruction
     return reconstruct_potential_from_reference(reconstruction, assignment)
 
 
+def _build_row_for_draw(reference, geometry_id, pool_rank, draw_seed, draw_index):
+    """Materialize and validate one row for one persisted assignment-pool entry.
+
+    Takes ``reference`` directly (rather than looking it up by ``geometry_id``
+    from a shared mapping) so this function is a plain, picklable, module-level
+    callable: the same code path runs identically whether it is called
+    in-process or dispatched to a worker process by
+    :func:`_validate_geometry_pool`.
+    """
+    pool = reference["pool"]
+    pool_positions = np.flatnonzero(pool["pool_rank"] == int(pool_rank))
+    if len(pool_positions) != 1:
+        return {
+            "accepted": False,
+            "status": "invalid_geometry_reference",
+            "reason": f"persisted pool rank {pool_rank} is not unique for {geometry_id}",
+        }
+    position = int(pool_positions[0])
+    assignment_hash = _decode_hdf5_text(pool["assignment_hash"][position])
+    assignment = {
+        "geometry_id": geometry_id,
+        "geometry_file": reference["geometry_file"],
+        "geometry_hash": reference["geometry_hash"],
+        "geometry_schema_version": reference["geometry_schema_version"],
+        "charge_factorized_schema_version": reference[
+            "charge_factorized_schema_version"
+        ],
+        "normalization_map_version": reference["normalization_map_version"],
+        "h11": reference["h11"],
+        "h21": reference["h21"],
+        "qcd_divisor_index": int(pool["qcd_divisor_index"][position]),
+        "qed_divisor_index": int(pool["qed_divisor_index"][position]),
+        "qcd_divisor_label": np.asarray(pool["qcd_divisor_label"][position]).tolist(),
+        "qed_divisor_label": np.asarray(pool["qed_divisor_label"][position]).tolist(),
+        "assignment_hash": assignment_hash,
+        "assignment_pool_rank": int(pool_rank),
+        "assignment_pool_size": reference["pool_size"],
+        "model_seed": int(draw_seed),
+        "draw_seed": int(draw_seed),
+        "draw_index": int(draw_index),
+        "qcd_radial_scale": float(pool["qcd_radial_scale"][position]),
+        "qcd_volume_scale": float(pool["qcd_volume_scale"][position]),
+        "qcd_volume": float(pool["qcd_volume"][position]),
+        "qcd_volume_target": float(pool["qcd_volume_target"][position]),
+        "qcd_volume_tolerance": float(pool["qcd_volume_tolerance"][position]),
+        "divisor_volume_tolerance": float(pool["divisor_volume_tolerance"][position]),
+        "qcd_volume_residual": float(pool["qcd_volume_residual"][position]),
+        "qed_volume": float(pool["qed_volume"][position]),
+        "minimum_prime_volume": float(pool["minimum_prime_volume"][position]),
+        "minimum_effective_volume": float(pool["minimum_effective_volume"][position]),
+    }
+    try:
+        potential = _materialize_row_potential(reference, assignment)
+        row = serialize_eft_row(
+            assignment,
+            assignment,
+            potential,
+            model_id=f"{geometry_id}:assignment-{assignment_hash}",
+        )
+    except Exception as error:
+        status = getattr(error, "terminal_status", getattr(error, "category", "invalid_row_schema"))
+        if status not in {
+            "invalid_geometry_reference",
+            "potential_term_mismatch",
+            "rank_span_classification_failure",
+            "missing_assignment_derived_data",
+            "invalid_row_schema",
+        }:
+            status = "invalid_row_schema"
+        return {
+            "accepted": False,
+            "status": status,
+            "reason": f"{type(error).__name__}: {error}",
+        }
+    return {"accepted": True, "record": row}
+
+
+def _validate_geometry_pool(geometry_id, reference, base_seed):
+    """Validate one geometry's entire assignment pool.
+
+    Every draw for a geometry is independent of every other geometry's draws
+    -- the only sharing is the per-geometry cache inside ``reference`` that
+    :func:`_materialize_row_potential` builds on first use and reuses for the
+    rest of that geometry's pool. That makes one geometry's whole pool the
+    natural unit of parallel work: :func:`expand_eft_reference_rows` can run
+    this function for many geometries at once in separate processes, each
+    paying its own O(rays^2) geometry-only setup cost concurrently instead of
+    one after another.
+    """
+    valid_ranks = []
+    prevalidated = {}
+    failure_records = []
+    pool = reference["pool"]
+    for pool_rank in range(reference["pool_size"]):
+        validation_seed = stable_seed(
+            "stage12-capacity-validation", base_seed, geometry_id, pool_rank
+        )
+        result = _build_row_for_draw(
+            reference, geometry_id, pool_rank, validation_seed, pool_rank
+        )
+        if result.get("accepted"):
+            valid_ranks.append(pool_rank)
+            prevalidated[pool_rank] = result["record"]
+            continue
+        failure_records.append(
+            {
+                "terminal_status": result.get(
+                    "status", "invalid_row_schema"
+                ),
+                "terminal_reason": result.get(
+                    "reason", "row construction failed during capacity validation"
+                ),
+                "geometry_id": geometry_id,
+                "assignment_pool_rank": pool_rank,
+                "assignment_hash": _decode_hdf5_text(
+                    pool["assignment_hash"][pool_rank]
+                ),
+                "capacity_validation": True,
+            }
+        )
+    return geometry_id, valid_ranks, prevalidated, failure_records
+
+
 def expand_eft_reference_rows(
-    accepted_geometry_paths, base_seed, minimum_rows, maximum_rows
+    accepted_geometry_paths, base_seed, minimum_rows, maximum_rows, workers=None
 ):
     """Build compact rows with replacement sampling and bounded retries.
 
@@ -5054,6 +5268,14 @@ def expand_eft_reference_rows(
     row-construction failures trigger another draw from the same geometry, and
     the draw cap is ``M_g = 10 * k_g``.  The returned allocation contains the
     per-geometry accounting needed to audit cap-induced capacity shortfalls.
+
+    ``workers`` controls how many geometries' capacity validation
+    (:func:`_validate_geometry_pool`) runs concurrently via
+    ``ProcessPoolExecutor``. ``None`` matches this codebase's existing
+    ``--cores``-style convention and lets the pool pick ``os.cpu_count()``
+    workers; pass ``1`` to force strictly sequential, single-process
+    execution. With zero or one accepted geometry there is nothing to
+    parallelize, so the pool is skipped either way.
     """
     references = [_geometry_reference(path) for path in sorted(accepted_geometry_paths)]
     references.sort(key=lambda reference: reference["geometry_id"])
@@ -5065,113 +5287,45 @@ def expand_eft_reference_rows(
     }
     reference_by_id = {reference["geometry_id"]: reference for reference in references}
 
-    def build_row_for_draw(geometry_id, pool_rank, draw_seed, draw_index):
-        reference = reference_by_id[geometry_id]
-        pool = reference["pool"]
-        pool_positions = np.flatnonzero(pool["pool_rank"] == int(pool_rank))
-        if len(pool_positions) != 1:
-            return {
-                "accepted": False,
-                "status": "invalid_geometry_reference",
-                "reason": f"persisted pool rank {pool_rank} is not unique for {geometry_id}",
-            }
-        position = int(pool_positions[0])
-        assignment_hash = _decode_hdf5_text(pool["assignment_hash"][position])
-        assignment = {
-            "geometry_id": geometry_id,
-            "geometry_file": reference["geometry_file"],
-            "geometry_hash": reference["geometry_hash"],
-            "geometry_schema_version": reference["geometry_schema_version"],
-            "charge_factorized_schema_version": reference[
-                "charge_factorized_schema_version"
-            ],
-            "normalization_map_version": reference["normalization_map_version"],
-            "h11": reference["h11"],
-            "h21": reference["h21"],
-            "qcd_divisor_index": int(pool["qcd_divisor_index"][position]),
-            "qed_divisor_index": int(pool["qed_divisor_index"][position]),
-            "qcd_divisor_label": np.asarray(pool["qcd_divisor_label"][position]).tolist(),
-            "qed_divisor_label": np.asarray(pool["qed_divisor_label"][position]).tolist(),
-            "assignment_hash": assignment_hash,
-            "assignment_pool_rank": int(pool_rank),
-            "assignment_pool_size": reference["pool_size"],
-            "model_seed": int(draw_seed),
-            "draw_seed": int(draw_seed),
-            "draw_index": int(draw_index),
-            "qcd_radial_scale": float(pool["qcd_radial_scale"][position]),
-            "qcd_volume_scale": float(pool["qcd_volume_scale"][position]),
-            "qcd_volume": float(pool["qcd_volume"][position]),
-            "qcd_volume_target": float(pool["qcd_volume_target"][position]),
-            "qcd_volume_tolerance": float(pool["qcd_volume_tolerance"][position]),
-            "divisor_volume_tolerance": float(pool["divisor_volume_tolerance"][position]),
-            "qcd_volume_residual": float(pool["qcd_volume_residual"][position]),
-            "qed_volume": float(pool["qed_volume"][position]),
-            "minimum_prime_volume": float(pool["minimum_prime_volume"][position]),
-            "minimum_effective_volume": float(pool["minimum_effective_volume"][position]),
-        }
-        try:
-            potential = _materialize_row_potential(reference, assignment)
-            row = serialize_eft_row(
-                assignment,
-                assignment,
-                potential,
-                model_id=f"{geometry_id}:assignment-{assignment_hash}",
-            )
-        except Exception as error:
-            status = getattr(error, "terminal_status", getattr(error, "category", "invalid_row_schema"))
-            if status not in {
-                "invalid_geometry_reference",
-                "potential_term_mismatch",
-                "rank_span_classification_failure",
-                "missing_assignment_derived_data",
-                "invalid_row_schema",
-            }:
-                status = "invalid_row_schema"
-            return {
-                "accepted": False,
-                "status": status,
-                "reason": f"{type(error).__name__}: {error}",
-            }
-        return {"accepted": True, "record": row}
-
     # Validate every persisted assignment before sampling.  This makes the
     # capacity claim the number of distinct ordered assignments that can
     # actually produce a schema-valid row, rather than the raw pool size or
     # the number encountered by the replacement sampler.
+    geometry_ids_in_order = sorted(assignment_pools)
+    results_by_geometry = {}
+    if workers != 1 and len(geometry_ids_in_order) > 1:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(
+                    _validate_geometry_pool,
+                    geometry_id,
+                    reference_by_id[geometry_id],
+                    base_seed,
+                )
+                for geometry_id in geometry_ids_in_order
+            ]
+            for future in as_completed(futures):
+                geometry_id, valid_ranks, prevalidated, failure_records = future.result()
+                results_by_geometry[geometry_id] = (valid_ranks, prevalidated, failure_records)
+    else:
+        for geometry_id in geometry_ids_in_order:
+            _, valid_ranks, prevalidated, failure_records = _validate_geometry_pool(
+                geometry_id, reference_by_id[geometry_id], base_seed
+            )
+            results_by_geometry[geometry_id] = (valid_ranks, prevalidated, failure_records)
+
+    # Merge in fixed geometry_id order regardless of which worker finished
+    # first, so terminal_records/prevalidated_rows are byte-identical to the
+    # sequential path no matter how many workers ran or in what order.
     validated_pool_ranks = {}
     prevalidated_rows = {}
     validation_failure_records = []
-    for geometry_id in sorted(assignment_pools):
-        valid_ranks = []
-        pool = reference_by_id[geometry_id]["pool"]
-        for pool_rank in range(reference_by_id[geometry_id]["pool_size"]):
-            validation_seed = stable_seed(
-                "stage12-capacity-validation", base_seed, geometry_id, pool_rank
-            )
-            result = build_row_for_draw(
-                geometry_id, pool_rank, validation_seed, pool_rank
-            )
-            if result.get("accepted"):
-                valid_ranks.append(pool_rank)
-                prevalidated_rows[(geometry_id, pool_rank)] = result["record"]
-                continue
-            validation_failure_records.append(
-                {
-                    "terminal_status": result.get(
-                        "status", "invalid_row_schema"
-                    ),
-                    "terminal_reason": result.get(
-                        "reason", "row construction failed during capacity validation"
-                    ),
-                    "geometry_id": geometry_id,
-                    "assignment_pool_rank": pool_rank,
-                    "assignment_hash": _decode_hdf5_text(
-                        pool["assignment_hash"][pool_rank]
-                    ),
-                    "capacity_validation": True,
-                }
-            )
+    for geometry_id in geometry_ids_in_order:
+        valid_ranks, prevalidated, failure_records = results_by_geometry[geometry_id]
         validated_pool_ranks[geometry_id] = valid_ranks
+        for pool_rank, record in prevalidated.items():
+            prevalidated_rows[(geometry_id, pool_rank)] = record
+        validation_failure_records.extend(failure_records)
 
     def capacity_validated_row_callback(geometry_id, pool_rank, draw_seed, draw_index):
         prevalidated = prevalidated_rows.get((geometry_id, int(pool_rank)))
@@ -6145,6 +6299,7 @@ def main():
                     args.seed,
                     args.eft_minimum_rows,
                     args.eft_maximum_rows,
+                    workers=args.cores,
                 )
             except ModelTargetShortfall as exc:
                 model_error = exc
