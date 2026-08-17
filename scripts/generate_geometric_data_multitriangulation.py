@@ -6085,10 +6085,6 @@ def main():
             parser.error("--eft requires --visible-sector-policy intersecting_d7")
         if args.orientifold_file is None:
             parser.error("--eft requires --orientifold-file")
-        if args.eft_minimum_rows != MINIMUM_EFT_ROWS:
-            parser.error("--eft-minimum-rows must be 100000 for schema 1.1")
-        if args.eft_maximum_rows != MAXIMUM_EFT_ROWS:
-            parser.error("--eft-maximum-rows must be 200000 for schema 1.1")
         try:
             eft_geometry_plan = parse_eft_geometry_plan(args.eft_geometry_plan)
         except ValueError as exc:

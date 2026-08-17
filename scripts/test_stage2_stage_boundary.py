@@ -1396,6 +1396,48 @@ class Stage2BoundaryTests(unittest.TestCase):
                 manifest["orientifold_policy"]["required_for_visible_sector_policy"]
             )
 
+    def test_eft_row_bounds_are_configurable_not_fixed(self):
+        # --eft-minimum-rows/--eft-maximum-rows default to the approved
+        # schema 1.1 values (100000/200000) but must accept other positive,
+        # minimum-at-most-maximum values for bounded exploratory or
+        # validation runs -- they are not locked to exactly those two
+        # numbers.
+        with tempfile.TemporaryDirectory(prefix="cyax-stage2-row-bounds-") as temporary:
+            stage1_root = Path(temporary) / "stage1"
+            stage1_root.mkdir()
+            self._write_stage1_fixture(stage1_root)
+            orientifold_path = Path(temporary) / "orientifold.json"
+            orientifold_path.write_text(
+                json.dumps(
+                    {
+                        "involution_type": "O3/O7",
+                        "lattice_matrix": np.eye(4, dtype=int).tolist(),
+                    }
+                )
+            )
+            stage2_root = Path(temporary) / "stage2"
+            stage2_main(
+                [
+                    "--stage1-root",
+                    str(stage1_root),
+                    "--outdir",
+                    str(stage2_root),
+                    "--visible-sector-policy",
+                    "intersecting_d7",
+                    "--orientifold-file",
+                    str(orientifold_path),
+                    "--eft",
+                    "--eft-minimum-rows",
+                    "5",
+                    "--eft-maximum-rows",
+                    "180000",
+                    "--dry-run",
+                ]
+            )
+            manifest = json.loads((stage2_root / "run_manifest.json").read_text())
+            self.assertEqual(manifest["eft"]["minimum_rows"], 5)
+            self.assertEqual(manifest["eft"]["maximum_rows"], 180000)
+
     def test_stage12_subminimum_capacity_writes_diagnostic_partial_output(self):
         try:
             import pyarrow.parquet as parquet

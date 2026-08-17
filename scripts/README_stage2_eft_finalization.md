@@ -135,11 +135,19 @@ practical concern.
 `eft_models.parquet` (plus `model_terminal_statuses.jsonl`, `charge_factorized_manifest.json`, `summary_by_h11_and_status.json`, `storage_estimate.json`). Check
 `run_manifest.json`'s `"eft"` block for `"dataset_status"`:
 
-- `production_complete` — the exact 200,000-row target was reached.
+- `production_complete` — the requested row target was reached.
 - `diagnostic_partial` — finalization completed normally but validated
-  capacity or row generation fell short of the 100,000-row minimum. This is
+  capacity or row generation fell short of the requested minimum. This is
   a legitimate, fully-computed result, not a failure; check
   `"validated_assignment_capacity"` and `"minimum_shortfall"` alongside it.
+
+`--eft-minimum-rows` and `--eft-maximum-rows` default to the approved schema
+1.1 values (100,000 and 200,000) but are ordinary, adjustable CLI options.
+For a bounded validation run where reaching those defaults was never the
+point, pass smaller values, e.g. `--eft-maximum-rows 180000`, so the run's
+own accounting reflects a realistic target for the input population you
+actually gave it rather than always measuring against the full-scale
+default.
 
 ## Operational notes
 

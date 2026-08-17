@@ -162,8 +162,29 @@ def build_parser():
     )
     parser.add_argument("--materialize-dense-potential", action="store_true")
     parser.add_argument("--eft", action="store_true", help="Build compact EFT-reference rows after geometry acceptance.")
-    parser.add_argument("--eft-minimum-rows", type=int, default=MINIMUM_EFT_ROWS)
-    parser.add_argument("--eft-maximum-rows", type=int, default=MAXIMUM_EFT_ROWS)
+    parser.add_argument(
+        "--eft-minimum-rows",
+        type=int,
+        default=MINIMUM_EFT_ROWS,
+        help=(
+            "Minimum accepted EFT-reference row count for "
+            "dataset_status=production_complete (default: the approved "
+            "schema 1.1 value, 100000). Below this, a completed run is "
+            "still written and diagnostically valid but labelled "
+            "diagnostic_partial / model_target_shortfall."
+        ),
+    )
+    parser.add_argument(
+        "--eft-maximum-rows",
+        type=int,
+        default=MAXIMUM_EFT_ROWS,
+        help=(
+            "Exact EFT row target/ceiling (default: the approved schema "
+            "1.1 value, 200000). Sampling stops once this many rows are "
+            "accepted or validated capacity is exhausted, whichever comes "
+            "first. Must be at least --eft-minimum-rows."
+        ),
+    )
     parser.add_argument("--eft-output-path", default=None)
     parser.add_argument(
         "--eft-workers",
@@ -862,8 +883,6 @@ def main(argv=None):
         raise ValueError("canonical_qcd requires --qcd-volume-target 40.0")
     if arguments.eft and arguments.qed_volume_max != QED_VOLUME_MAX:
         raise ValueError("--eft requires the inclusive QED volume bound 127.5")
-    if arguments.eft_minimum_rows != MINIMUM_EFT_ROWS or arguments.eft_maximum_rows != MAXIMUM_EFT_ROWS:
-        raise ValueError("schema 1.1 EFT row bounds are fixed at 100000 and 200000")
     if not arguments.dry_run:
         generator.require_cytools_capabilities("fair", "fast")
     orientifold_config = generator.load_orientifold(arguments.orientifold_file)

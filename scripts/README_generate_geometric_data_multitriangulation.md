@@ -442,17 +442,23 @@ geometry, with a deterministic per-geometry cap ``M_g = 10 * k_g``. The
 manifest records the cap, total draws, accepted unique rows, duplicate draws,
 failed draws, and any cap-induced capacity shortfall. Stage 12 computes
 validated capacity from the distinct ordered assignments that produce
-schema-valid rows, then reconciles that capacity with rows written, the exact
-`200000` target, and the `100000` minimum. The target is never met by
+schema-valid rows, then reconciles that capacity with rows written, the
+requested target (`--eft-maximum-rows`, default `200000`), and the requested
+minimum (`--eft-minimum-rows`, default `100000`). The target is never met by
 duplicating assignment identities.
 
-When the exact target is reached, the Parquet table is labelled
+When the requested target is reached, the Parquet table is labelled
 `production_complete`. If validated capacity or row generation falls short,
 the table is still written atomically and labelled `diagnostic_partial`; its
 manifest and Parquet metadata retain `model_target_shortfall`, the true
 validated capacity, rows written, target, minimum, and all draw accounting.
 Such a result is diagnostically successful but is not production-complete,
-including when the count is below `100000`.
+including when the count is below the requested minimum.
+
+`--eft-minimum-rows` and `--eft-maximum-rows` default to the approved schema
+1.1 values (`100000` and `200000`) but are genuine, freely adjustable CLI
+options, not fixed constants; pass smaller values for a bounded exploratory
+or validation run where reaching the full defaults is not the goal.
 
 EFT finalization validates every persisted assignment-pool entry before
 sampling, and the per-geometry cost of that validation (reconstructing the
@@ -512,8 +518,8 @@ Relevant options:
 | --- | --- | --- |
 | `generate_stage1_raw_frsts.py --h11-plan TEXT` | `50:500,100:500,200:300,491:100` | Approved h11-to-raw-FRST allocation. |
 | `generate_stage2_eft_reference.py --eft` | off | Build compact EFT-reference rows after stage-2 geometry acceptance. |
-| `--eft-minimum-rows INT` | `100000` | Minimum accepted EFT-reference rows. |
-| `--eft-maximum-rows INT` | `200000` | Exact EFT row target. |
+| `--eft-minimum-rows INT` | `100000` | Minimum accepted EFT-reference rows for `production_complete`; configurable, e.g. for a bounded validation run. |
+| `--eft-maximum-rows INT` | `200000` | EFT row target/ceiling; configurable, e.g. for a bounded validation run. |
 | `--eft-output-path PATH` | `OUTDIR/eft_models.parquet` | Explicit table path inside the fresh output root. |
 | `--eft-workers INT` | all available cores | Worker processes for per-geometry EFT finalization; pass `1` for strictly sequential execution. Does not change output, only wall-clock time. |
 | `--materialize-dense-potential` | off | Legacy compatibility flag; schema 1.1 rejects dense materialization in production HDF5. |
