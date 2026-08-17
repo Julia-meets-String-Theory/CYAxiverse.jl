@@ -2072,4 +2072,132 @@ end
             @test hoisted.negative_modes == per_point.negative_modes
         end
     end
+
+    @testset "mode counts are tolerance-aware and partition the spectrum" begin
+        for h11 in (8, 12, 16)
+            Q, L, K = classification_fixture(h11, 1e5)
+            theta = 0.31 .* ones(h11) .+ 0.09 .* (1:h11) ./ h11
+            c = candidates.classify_point(theta, Q, L, cholesky(Hermitian(K)))
+
+            # The invariant `analyze_geometry` now asserts for every point.
+            @test c.negative_modes + c.zeroish_modes + c.positive_modes == h11
+
+            # The previous overlapping triple could not satisfy it, because a
+            # zeroish eigenvalue was also counted as negative or positive.
+            scale = max(maximum(abs, c.hessian_eigenvalues), 1.0)
+            tolerance = 1e-10 * scale
+            old_negative = count(<(0), c.hessian_eigenvalues)
+            old_zeroish = count(x -> abs(x) <= tolerance, c.hessian_eigenvalues)
+            old_positive = count(>(0), c.hessian_eigenvalues)
+            if old_zeroish > 0
+                @test old_negative + old_zeroish + old_positive > h11
+                @test c.negative_modes <= old_negative
+            end
+
+            # No mode is called a tachyon unless it clears the band.
+            @test c.negative_modes ==
+                  count(x -> x < -tolerance, c.hessian_eigenvalues)
+        end
+    end
+
+    @testset "the flatness metric separates resolvable from zeroish modes" begin
+        # abs_min_eta is driven to zero by any curvature-free direction, so a
+        # point can look maximally flat on numerical noise. The resolvable
+        # variant restricts to directions carrying real curvature; it is never
+        # smaller, and is strictly larger when a zeroish mode is present.
+        for h11 in (10, 14)
+            Q, L, K = classification_fixture(h11, 1e5)
+            theta = 0.23 .* ones(h11) .+ 0.13 .* (1:h11) ./ h11
+            c = candidates.classify_point(theta, Q, L, cholesky(Hermitian(K)))
+            @test c.abs_min_eta_resolvable >= c.abs_min_eta
+            if c.zeroish_modes > 0
+                @test c.abs_min_eta_resolvable > c.abs_min_eta
+            end
+        end
+    end
+end
+
+@testset "spectrum_mode_counts partitions a symmetric spectrum" begin
+    counts = CYAxiverse.generate.spectrum_mode_counts
+
+    @testset "the three counts partition the spectrum" begin
+        # This is the property the previous `count(<(0))` / toleranced-zeroish
+        # / `count(>(0))` triple could not offer: those overlapped, so they
+        # summed to more than the mode count and no invariant was available.
+        for spectrum in (
+                [1.0, 2.0, 3.0],
+                [-1.0, -2.0, -3.0],
+                [-1.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0],
+                [1e-18, -1e-18, 5.0],
+                randn(MersenneTwister(11), 50),
+                exp10.(range(-20, 3; length = 25)))
+            modes = counts(spectrum)
+            @test modes.negative + modes.zeroish + modes.positive ==
+                  length(spectrum)
+        end
+    end
+
+    @testset "the zeroish band is relative to the largest mode" begin
+        # 1e-17 relative to a scale of 1e6 is inside a 1e-10 band, so it is
+        # neither a tachyon nor a positive mode.
+        modes = counts([1e6, -1e-11, 1e-11])
+        @test modes.scale == 1e6
+        @test modes.tolerance == 1e-4
+        @test modes.negative == 0
+        @test modes.positive == 1
+        @test modes.zeroish == 2
+
+        # The same two entries against a scale of 1 are resolvable.
+        resolved = counts([1.0, -1e-11, 1e-11]; relative_tolerance = 1e-13)
+        @test resolved.negative == 1
+        @test resolved.positive == 2
+        @test resolved.zeroish == 0
+    end
+
+    @testset "scale has an absolute floor of one" begin
+        # A uniformly tiny spectrum must not manufacture a huge relative
+        # tolerance from its own smallness.
+        modes = counts([1e-30, -1e-30])
+        @test modes.scale == 1.0
+        @test modes.tolerance == 1e-10
+        @test modes.zeroish == 2
+    end
+
+    @testset "boundary is inclusive for zeroish" begin
+        # |eig| == tolerance counts as zeroish, matching the `<=` the previous
+        # zeroish test used.
+        modes = counts([1.0, 1e-10, -1e-10]; relative_tolerance = 1e-10)
+        @test modes.zeroish == 2
+        @test modes.negative == 0
+        @test modes.positive == 1
+    end
+
+    @testset "a sign test disagrees exactly where it should" begin
+        # The regression this function exists to prevent: a mode at 1e-17
+        # relative is reported as a tachyon by a sign test.
+        spectrum = [5.0, 3.0, -1e-16]
+        @test count(<(0), spectrum) == 1          # old behaviour
+        @test counts(spectrum).negative == 0      # new behaviour
+        @test counts(spectrum).zeroish == 1
+    end
+
+    @testset "degenerate inputs" begin
+        empty_modes = counts(Float64[])
+        @test empty_modes.negative == 0
+        @test empty_modes.zeroish == 0
+        @test empty_modes.positive == 0
+
+        # A zero tolerance reduces to an exact sign test with zeros grouped
+        # as zeroish, still partitioning.
+        exact = counts([-1.0, 0.0, 1.0]; relative_tolerance = 0.0)
+        @test (exact.negative, exact.zeroish, exact.positive) == (1, 1, 1)
+
+        @test_throws ArgumentError counts([1.0]; relative_tolerance = -1e-10)
+    end
+
+    @testset "integer spectra are accepted" begin
+        modes = counts([-2, 0, 3])
+        @test (modes.negative, modes.zeroish, modes.positive) == (1, 1, 1)
+    end
 end

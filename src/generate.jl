@@ -1346,6 +1346,60 @@ function _instanton_split_diagnostics(K::Hermitian{Float64, Matrix{Float64}},
 end
 
 """
+    spectrum_mode_counts(eigenvalues; relative_tolerance=1e-10)
+
+Partition a symmetric spectrum into negative, numerically-zero and positive
+modes, returning `(; negative, zeroish, positive, tolerance, scale)`.
+
+The three counts **partition** the spectrum: `negative + zeroish + positive`
+always equals `length(eigenvalues)`. That is the property callers should rely
+on, and it is what distinguishes this from counting signs directly.
+
+`tolerance = relative_tolerance * scale`, with
+`scale = max(maximum(abs, eigenvalues), 1.0)`, so the band is relative to the
+largest mode with an absolute floor for spectra that are uniformly tiny.
+
+Counting signs directly — `count(<(0), eigenvalues)` — assigns an eigenvalue
+that is zero to within rounding to whichever side its last bit happens to
+fall on. For an inflation screen that matters: a Hessian mode at `1e-17`
+relative to the spectrum's scale is not a tachyon, but a sign test reports it
+as one, and a saddle filter keyed on `negative > 0` then admits the point.
+Pairing an untoleranced sign test with a separate toleranced "zeroish" count
+also double-counts, so the three numbers do not sum to the mode count and no
+invariant is available to catch the inconsistency.
+
+Callers wanting the physical mode content of a critical point should use
+`negative` and `positive`. `zeroish` counts directions carrying no resolvable
+curvature, about which the spectrum is silent: whether such a direction is a
+genuine flat modulus or numerical noise is not decidable from the spectrum
+alone, so this function reports it rather than choosing.
+"""
+function spectrum_mode_counts(eigenvalues::AbstractVector{<:Real};
+        relative_tolerance::Real = 1e-10)
+    relative_tolerance >= 0 || throw(ArgumentError(
+        "relative_tolerance must be nonnegative, got $relative_tolerance"))
+    if isempty(eigenvalues)
+        return (; negative = 0, zeroish = 0, positive = 0,
+                tolerance = 0.0, scale = 1.0)
+    end
+    scale = max(Float64(maximum(abs, eigenvalues)), 1.0)
+    tolerance = Float64(relative_tolerance) * scale
+    negative = 0
+    zeroish = 0
+    positive = 0
+    @inbounds for eigenvalue in eigenvalues
+        if eigenvalue < -tolerance
+            negative += 1
+        elseif eigenvalue > tolerance
+            positive += 1
+        else
+            zeroish += 1
+        end
+    end
+    (; negative, zeroish, positive, tolerance, scale)
+end
+
+"""
     instanton_hierarchy_diagnostics(L; gap_log10=1.0, min_block_size=1)
 
 Return scale-block metadata in addition to the historical leading-gap and span
