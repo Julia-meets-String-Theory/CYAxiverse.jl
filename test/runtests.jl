@@ -4,6 +4,7 @@ using SparseArrays
 using Test
 using HDF5
 using Random
+using ArbNumerics
 
 @testset "Core plotting API stays optional" begin
     @test Base.get_extension(CYAxiverse, :CYAxiverseCairoMakieExt) === nothing
@@ -1250,6 +1251,114 @@ end
     @test isempty(hp_mass_only["λself"])
     @test size(hp_mass_only["λ31_i"]) == (4, 0)
     @test size(hp_mass_only["λ22_i"]) == (4, 0)
+end
+
+@testset "HP spectrum: quartic labels match accumulated values" begin
+    # The quartic index lists must enumerate in the same order as the fused
+    # instanton accumulation loop, which runs the first index slowest. A
+    # two-dimensional comprehension iterates column-major and transposes the
+    # labels relative to the values. That is invisible at h11 == 1 (both
+    # families are empty) and at h11 <= 3 for λ22, so this fixture uses
+    # h11 == 4 and checks every component against an independent reference.
+    h11 = 4
+    Q = [1  0  0  0  1 -1  2  0;
+         0  1  0  0  1  0  1  1;
+         0  0  1  0  0  1  0  2;
+         0  0  0  1  1  1  1  0]
+    L = [   1.0    1.0    1.0    1.0    1.0   -1.0    1.0    1.0;
+          -20.0  -22.0  -25.0  -27.0  -30.0  -33.0  -36.0  -40.0]
+    K = Hermitian([2.0 0.3 0.1 0.0;
+                   0.3 1.5 0.2 0.1;
+                   0.1 0.2 1.8 0.4;
+                   0.0 0.1 0.4 1.2])
+
+    prec = 120
+    hp = CYAxiverse.generate.hp_spectrum(K, L, Q; prec = prec)
+
+    # Reference: component-at-a-time contraction with no loop fusion and no
+    # index bookkeeping shared with the implementation under test.
+    setprecision(ArbFloat; digits = prec)
+    AF = typeof(ArbFloat(0))
+    ninst = size(Q, 2)
+    Lh = AF[AF(L[1, a]) * AF(10)^AF(L[2, a]) for a in 1:ninst]
+    hess = zeros(AF, h11, h11)
+    for a in 1:ninst, i in 1:h11, j in 1:h11
+        hess[i, j] += Lh[a] * Q[i, a] * Q[j, a]
+    end
+    Kf = cholesky(Hermitian(AF.(Matrix(K))))
+    whitened = Hermitian(Kf.L \ Matrix(Hermitian(hess)) / Kf.L')
+    Tls = Kf.L' \ eigen(whitened).vectors
+    QMs = AF.(transpose(Q)) * Tls
+    to_out(v) = Float64(log10(abs(v))) + 4 * log10(2π)
+
+    # λ31 is not symmetric under i <-> j, so transposed labels are a genuine
+    # mislabelling rather than a reordering of equal values.
+    @test size(hp["λ31_i"], 2) == h11 * (h11 - 1)
+    for k in axes(hp["λ31_i"], 2)
+        i, j = hp["λ31_i"][1, k] + 1, hp["λ31_i"][4, k] + 1
+        ref = sum(Lh[a] * QMs[a, i]^3 * QMs[a, j] for a in 1:ninst)
+        @test isapprox(hp["λ31"][k], to_out(ref); atol = 1e-9)
+        @test hp["λ31sign"][k] == Int(sign(ref))
+    end
+
+    @test size(hp["λ22_i"], 2) == h11 * (h11 - 1) ÷ 2
+    for k in axes(hp["λ22_i"], 2)
+        i, j = hp["λ22_i"][1, k] + 1, hp["λ22_i"][4, k] + 1
+        ref = sum(Lh[a] * QMs[a, i]^2 * QMs[a, j]^2 for a in 1:ninst)
+        @test isapprox(hp["λ22"][k], to_out(ref); atol = 1e-9)
+        @test hp["λ22sign"][k] == Int(sign(ref))
+    end
+
+    for i in 1:h11
+        ref = sum(Lh[a] * QMs[a, i]^4 for a in 1:ninst)
+        @test isapprox(hp["λself"][i], to_out(ref); atol = 1e-9)
+    end
+
+    # hp_spectrum and pq_spectrum must agree on the component labelling.
+    pq = CYAxiverse.generate.pq_spectrum(K, L, Q)
+    @test hp["λ31_i"] == pq.λ31_i
+    @test hp["λ22_i"] == pq.λ22_i
+end
+
+@testset "basis_snf: id_coords is the matrix inverse" begin
+    # `inv` inside a `@.` broadcast applies elementwise, which made id_coords a
+    # thresholded copy of basis rather than its inverse.
+    for rays in (Matrix{Int}(I, 3, 3), [1 0 0; 1 1 0; 0 1 1], [2 1 0; 0 1 0; 0 0 3])
+        basis = CYAxiverse.generate.basis_snf(Matrix{Int}(rays))
+        @test basis.basis * basis.id_coords == I
+        @test basis.volume == abs(det(basis.basis))
+    end
+    # A case where the inverse genuinely differs from the basis itself.
+    nontrivial = CYAxiverse.generate.basis_snf([2 1 0; 0 1 0; 0 0 3])
+    @test nontrivial.basis != nontrivial.id_coords
+end
+
+@testset "read.L_arb: column-oriented instanton scales" begin
+    mktempdir() do root
+        geom = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom)
+        # L is stored 2 × N: sign/mantissa on row 1, log10 scale on row 2.
+        L = [   1.0   -1.0    1.0;
+              -20.0  -25.0  -30.0]
+        h5open(joinpath(geom, "cyax.h5"), "cw") do file
+            potential = create_group(create_group(file, "cytools"), "potential")
+            potential["L"] = L
+        end
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            setprecision(ArbFloat; digits = 60)
+            scales = CYAxiverse.read.L_arb(2, 1, 1)
+            @test length(scales) == size(L, 2)
+            for a in axes(L, 2)
+                @test isapprox(Float64(log10(abs(scales[a]))), L[2, a]; atol = 1e-12)
+                @test Int(sign(scales[a])) == Int(sign(L[1, a]))
+            end
+        finally
+            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        end
+    end
 end
 
 @testset "HP spectrum: raw and effective selections" begin
