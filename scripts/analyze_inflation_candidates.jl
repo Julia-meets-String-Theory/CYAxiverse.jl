@@ -19,14 +19,19 @@ function derivatives(theta, Q, L)
     (; value, gradient, hessian, amplitudes)
 end
 
-function classify_point(theta, Q, L, K)
+# `K` is fixed across every critical point of a geometry, so the caller factors
+# it once and threads the factorization through. This matches the `Kfactor`
+# convention `inflation_scan_common.jl::_classify_point` already uses.
+function classify_point(theta, Q, L, Kfactor::Cholesky)
     d = derivatives(theta, Q, L)
-    factor = cholesky(Hermitian(K)).L
-    to_theta = inv(factor')
-    canonical_hessian = to_theta' * d.hessian * to_theta
+    # L^{-1} H L^{-T}, the Hessian in the canonically normalized frame. Solving
+    # against the triangular factor avoids forming `inv(factor')` densely.
+    canonical_hessian = Kfactor.L \ d.hessian / Kfactor.L'
     eigs = eigvals(Hermitian(canonical_hessian))
-    kinetic_inverse = inv(K)
-    gradnorm = sqrt(max(dot(d.gradient, kinetic_inverse * d.gradient), 0.0))
+    # |grad|_K = sqrt(g' K^{-1} g) = norm(L^{-1} g). The whitened gradient's
+    # norm is nonnegative by construction, so the clamp that the explicit
+    # `inv(K)` form needed against a slightly negative quadratic form is gone.
+    gradnorm = norm(Kfactor.L \ d.gradient)
     epsilon = d.value == 0 ? Inf : 0.5 * (gradnorm / abs(d.value))^2
     eta_values = d.value == 0 ? fill(Inf, length(eigs)) : eigs ./ d.value
     (; value=d.value, gradnorm, epsilon,
@@ -37,6 +42,11 @@ function classify_point(theta, Q, L, K)
        positive_modes=count(>(0), eigs),
        eta_values, hessian_eigenvalues=eigs)
 end
+
+# Retained so a caller holding only `K` still works; `analyze_geometry` factors
+# once and calls the method above directly.
+classify_point(theta, Q, L, K::AbstractMatrix) =
+    classify_point(theta, Q, L, cholesky(Hermitian(K)))
 
 function reduced_solve(Q, L, selected; starts, reduction::Symbol=:catastrophe)
     reduction in (:catastrophe, :alphamatrix, :leading_branches) ||
@@ -72,10 +82,13 @@ function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:catastrophe)
     hierarchy = CYAxiverse.generate.instanton_hierarchy_diagnostics(L)
     solved = reduced_solve(Q, L, selected; starts=starts, reduction)
 
+    # One factorization for the geometry, reused by every critical point below.
+    Kfactor = cholesky(Hermitian(K))
+
     point_rows = NamedTuple[]
     for i in axes(solved.original_coordinates, 2)
         theta = solved.original_coordinates[:, i]
-        c = classify_point(theta, Q, L, K)
+        c = classify_point(theta, Q, L, Kfactor)
         push!(point_rows, (
             h11=geom_idx.h11,
             polytope=geom_idx.polytope,
