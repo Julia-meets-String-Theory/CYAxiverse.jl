@@ -28,6 +28,7 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
 include(joinpath(@__DIR__, "axion_photon.jl"))
 
 @testset "Data directory resolution" begin
@@ -1834,6 +1835,156 @@ end
             @test_throws ArgumentError poly102.n8_physical_gradient_flow(
                 1.5320548620798324e-3; precision_bits=64, max_time=1,
                 method=:FBDF)
+        end
+    end
+end
+
+@testset "Quartic index migration: relabel old two-dimensional order" begin
+    # The pre-fix `hp_spectrum` built its quartic index lists with a
+    # two-dimensional comprehension, which iterates column-major, while the
+    # fused accumulation loop that fills the corresponding values runs the
+    # first index slowest. This fixture writes an `index` dataset in that old
+    # order and checks that the migration rewrites it to the order the
+    # current source actually produces, obtained from a real call into
+    # `hp_spectrum` rather than a formula duplicated in this test.
+    h11 = 4
+    Q = [1  0  0  0  1 -1  2  0;
+         0  1  0  0  1  0  1  1;
+         0  0  1  0  0  1  0  2;
+         0  0  0  1  1  1  1  0]
+    L = [   1.0    1.0    1.0    1.0    1.0   -1.0    1.0    1.0;
+          -20.0  -22.0  -25.0  -27.0  -30.0  -33.0  -36.0  -40.0]
+    K = Hermitian([2.0 0.3 0.1 0.0;
+                   0.3 1.5 0.2 0.1;
+                   0.1 0.2 1.8 0.4;
+                   0.0 0.1 0.4 1.2])
+    hp = CYAxiverse.generate.hp_spectrum(K, L, Q; prec = 120)
+    current_index31 = hp["λ31_i"]
+    current_index22 = hp["λ22_i"]
+    @test size(current_index31, 2) == h11 * (h11 - 1)
+    @test size(current_index22, 2) == h11 * (h11 - 1) ÷ 2
+
+    # The pre-fix column-major comprehension, exactly as it read before the
+    # source fix (see commit "Fix quartic component labelling and basis_snf
+    # inverse"). This is independent of the migration script's own copy of
+    # the same formula: it is typed here from the historical source, not
+    # imported from the script under test.
+    old_components_31 = [(x, x, x, y) for x = 1:h11, y = 1:h11 if x != y]
+    old_components_22 = [(x, x, y, y) for x = 1:h11, y = 1:h11 if x > y]
+    to_zero_based_matrix(components) = begin
+        matrix = zeros(Int, 4, length(components))
+        for column in eachindex(components), row in 1:4
+            matrix[row, column] = components[column][row] - 1
+        end
+        matrix
+    end
+    old_index31 = to_zero_based_matrix(old_components_31)
+    old_index22 = to_zero_based_matrix(old_components_22)
+    @test old_index31 != current_index31
+    @test old_index22 != current_index22
+
+    # Known, arbitrary values unrelated to the physics: only their byte
+    # identity across the migration is being tested.
+    log10_31 = collect(1.0:size(old_index31, 2))
+    sign_31 = [isodd(k) ? 1 : -1 for k in 1:size(old_index31, 2)]
+    log10_22 = collect(101.0:100.0 + size(old_index22, 2))
+    sign_22 = [isodd(k) ? -1 : 1 for k in 1:size(old_index22, 2)]
+
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_004", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        path = joinpath(geom_dir, "cyax.h5")
+        h5open(path, "cw") do file
+            spectrum = create_group(file, "spectrum")
+            quart31 = create_group(spectrum, "quart31")
+            quart31["log10", deflate=9] = log10_31
+            quart31["sign", deflate=9] = sign_31
+            quart31["index", deflate=9] = old_index31
+            quart22 = create_group(spectrum, "quart22")
+            quart22["log10", deflate=9] = log10_22
+            quart22["sign", deflate=9] = sign_22
+            quart22["index", deflate=9] = old_index22
+        end
+
+        # Unrecognised path: a second geometry whose stored index matches
+        # neither the old nor the current order. It must be left untouched
+        # by every run below, including the final --apply pass.
+        garbage_dir = joinpath(root, "h11_004", "np_0000002", "cy_0000001")
+        mkpath(garbage_dir)
+        garbage_path = joinpath(garbage_dir, "cyax.h5")
+        garbage_index31 = old_index31 .+ 99
+        h5open(garbage_path, "cw") do file
+            spectrum = create_group(file, "spectrum")
+            quart31 = create_group(spectrum, "quart31")
+            quart31["log10", deflate=9] = log10_31
+            quart31["sign", deflate=9] = sign_31
+            quart31["index", deflate=9] = garbage_index31
+        end
+
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        try
+            # Default is report-only: the on-disk old order must survive a
+            # run without --apply.
+            dry_options = _quartic_parse_args(["--data-dir", root, "--h11", "4"])
+            dry_result = run_quartic_index_migration(dry_options)
+            @test dry_result.migrated == 2
+            @test dry_result.files_written == 0
+            @test dry_result.success
+            h5open(path, "r") do file
+                @test read(file, "spectrum/quart31/index") == old_index31
+                @test read(file, "spectrum/quart22/index") == old_index22
+            end
+
+            apply_options = _quartic_parse_args(["--data-dir", root, "--h11", "4", "--apply"])
+            apply_result = run_quartic_index_migration(apply_options)
+            @test apply_result.migrated == 2
+            @test apply_result.already_correct == 0
+            @test apply_result.unrecognised == 1
+            @test apply_result.files_written == 1
+            @test apply_result.success
+            @test any(occursin("np_0000002", entry) for entry in apply_result.unrecognised_paths)
+
+            h5open(path, "r") do file
+                # The index datasets now carry the labelling the current
+                # source actually produces.
+                @test read(file, "spectrum/quart31/index") == current_index31
+                @test read(file, "spectrum/quart22/index") == current_index22
+                # log10 and sign were never opened for writing and must be
+                # bit-identical to what was written before migration.
+                @test read(file, "spectrum/quart31/log10") == log10_31
+                @test read(file, "spectrum/quart31/sign") == sign_31
+                @test read(file, "spectrum/quart22/log10") == log10_22
+                @test read(file, "spectrum/quart22/sign") == sign_22
+            end
+            h5open(garbage_path, "r") do file
+                @test read(file, "spectrum/quart31/index") == garbage_index31
+                @test read(file, "spectrum/quart31/log10") == log10_31
+                @test read(file, "spectrum/quart31/sign") == sign_31
+            end
+
+            # Re-running must be a no-op: everything is already correct, and
+            # the unrecognised dataset is still left untouched.
+            second_result = run_quartic_index_migration(apply_options)
+            @test second_result.migrated == 0
+            @test second_result.already_correct == 2
+            @test second_result.unrecognised == 1
+            @test second_result.files_written == 0
+            @test second_result.success
+
+            h5open(path, "r") do file
+                @test read(file, "spectrum/quart31/index") == current_index31
+                @test read(file, "spectrum/quart22/index") == current_index22
+                @test read(file, "spectrum/quart31/log10") == log10_31
+                @test read(file, "spectrum/quart31/sign") == sign_31
+                @test read(file, "spectrum/quart22/log10") == log10_22
+                @test read(file, "spectrum/quart22/sign") == sign_22
+            end
+            h5open(garbage_path, "r") do file
+                @test read(file, "spectrum/quart31/index") == garbage_index31
+            end
+        finally
+            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 end
