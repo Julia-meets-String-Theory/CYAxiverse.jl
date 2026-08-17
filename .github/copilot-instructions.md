@@ -1,5 +1,14 @@
 # CYAxiverse.jl Copilot Instructions
 
+## Generative AI policy
+
+Follow `AI_POLICY.md` at the repository root. It is normative for every
+AI tool used against this repository — GitHub Copilot, Claude Code,
+Codex, or any other agent — and for the contributors directing them.
+Label your own commits with a `Co-Authored-By:` trailer (or your tool's
+equivalent) rather than leaving AI-assisted work unlabelled, and never
+alter or bypass existing tests to force a pass.
+
 ## Environment and commands
 
 - Run every Julia command used for CYAxiverse.jl package development directly in the regular local host environment. Do not run Julia through a sandbox, container, Docker image, remote runner, or other isolated environment. If the execution tool defaults to a sandbox, request approved local/unsandboxed execution first rather than substituting a sandboxed Julia process.
