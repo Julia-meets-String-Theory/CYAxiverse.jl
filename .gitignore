@@ -5,3 +5,22 @@ jlm_python/multi_solver_phase_fraction.py
 jlm_python/one_dim_phase_fraction.py
 .DS_Store
 /scripts/__pycache__/
+
+# Local AI agent configuration and skills
+/.agents/
+/.codex/
+/.claude/
+/.cursor/
+/.gemini/
+/.windsurf/
+/.aider*
+/.continue/
+/.roo/
+/.kiro/
+/.amazonq/
+/CLAUDE.md
+/GEMINI.md
+/COPILOT.md
+/.github/agents/
+/.github/instructions/
+/.github/skills/
