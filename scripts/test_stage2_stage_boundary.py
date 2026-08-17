@@ -509,6 +509,132 @@ class Stage2BoundaryTests(unittest.TestCase):
             "q_pair[:, k] = q_direct[:, pair_j[k]] - q_direct[:, pair_i[k]]",
         )
 
+    def _two_divisor_potential_reference(self):
+        return {
+            "h11": 1,
+            "kappa": np.asarray([[0, 0, 0, 6.0]]),
+            "tip": np.asarray([1.0]),
+            "effective_cone": np.asarray([[1]], dtype=np.int64),
+            "basis_matrix": np.asarray([[1, 2]], dtype=np.int64),
+            "prime_toric_divisors": np.asarray([0, 1], dtype=np.int64),
+        }
+
+    def test_geometry_potential_terms_cached_across_assignments(self):
+        # A geometry's assignment pool can call reconstruct_potential_from_reference
+        # once per pool entry (thousands of times for large h11). The O(rays^2)
+        # geometry-only terms must be computed once per reference, not once per
+        # assignment, or EFT finalization stalls for hours on large pools.
+        generator = stage2_entrypoint.generator
+        reference = self._two_divisor_potential_reference()
+        original = generator._reconstruct_intersection_geometry
+        with patch.object(
+            generator, "_reconstruct_intersection_geometry", side_effect=original
+        ) as mocked:
+            first = generator.reconstruct_potential_from_reference(
+                reference, {"qed_divisor_index": 0}
+            )
+            second = generator.reconstruct_potential_from_reference(
+                reference, {"qed_divisor_index": 1}
+            )
+            self.assertEqual(mocked.call_count, 1)
+
+        self.assertEqual(first["Q"].shape[1], 1)
+        self.assertEqual(second["Q"].shape[1], 2)
+        np.testing.assert_array_equal(second["qed_charge"], np.asarray([2]))
+
+        other_reference = self._two_divisor_potential_reference()
+        with patch.object(
+            generator, "_reconstruct_intersection_geometry", side_effect=original
+        ) as mocked_other:
+            generator.reconstruct_potential_from_reference(
+                other_reference, {"qed_divisor_index": 0}
+            )
+            self.assertEqual(mocked_other.call_count, 1)
+
+    def test_geometry_potential_terms_append_does_not_leak_across_calls(self):
+        generator = stage2_entrypoint.generator
+        reference = self._two_divisor_potential_reference()
+
+        appended = generator.reconstruct_potential_from_reference(
+            reference, {"qed_divisor_index": 1}
+        )
+        self.assertEqual(appended["Q"].shape[1], 2)
+
+        direct_again = generator.reconstruct_potential_from_reference(
+            reference, {"qed_divisor_index": 0}
+        )
+        self.assertEqual(direct_again["Q"].shape[1], 1)
+        self.assertEqual(reference["_potential_terms"]["q"].shape[1], 1)
+
+    def test_leading_rank_order_reused_when_direct_and_invalidated_on_append(self):
+        # classify_qed_leading_status's exact-rational elimination is the
+        # single most expensive per-call cost at large h11 (O(rank) columns
+        # times an O(basis) reduction each, on a matrix with O(rays^2)
+        # columns). It depends only on q/l, so _geometry_potential_terms
+        # computes it once per geometry and reconstruct_potential_from_reference
+        # must hand that cached order back on every pool entry that resolves
+        # to a direct QED source -- but not on the rarer entry that appends a
+        # new column, since that column was never part of the cached
+        # elimination.
+        generator = stage2_entrypoint.generator
+        reference = self._two_divisor_potential_reference()
+        original = generator.compute_leading_rank_order
+        with patch.object(
+            generator, "compute_leading_rank_order", side_effect=original
+        ) as mocked:
+            direct = generator.reconstruct_potential_from_reference(
+                reference, {"qed_divisor_index": 0}
+            )
+            appended = generator.reconstruct_potential_from_reference(
+                reference, {"qed_divisor_index": 1}
+            )
+            # _geometry_potential_terms itself only runs once per reference,
+            # so compute_leading_rank_order is called exactly once regardless
+            # of how many assignments are scored against this geometry.
+            self.assertEqual(mocked.call_count, 1)
+
+        self.assertIsNotNone(direct["leading_rank_order"])
+        self.assertIs(
+            direct["leading_rank_order"],
+            reference["_potential_terms"]["leading_rank_order"],
+        )
+        self.assertIsNone(appended["leading_rank_order"])
+
+    def test_materialize_row_potential_caches_across_pool_entries(self):
+        # _materialize_row_potential is expand_eft_reference_rows's real call
+        # site (via build_row_for_draw), invoked once per assignment-pool
+        # entry for the SAME outer reference object. It must hand
+        # reconstruct_potential_from_reference the same reconstruction dict
+        # every time so the geometry-only cache actually persists across a
+        # geometry's whole pool, not just across repeat calls with an
+        # already-identical object (which reconstruct_potential_from_reference
+        # alone cannot guarantee if its caller rebuilds a fresh dict per call).
+        generator = stage2_entrypoint.generator
+        outer_reference = {
+            "h11": 1,
+            "reconstruction": {
+                "kappa": np.asarray([[0, 0, 0, 6.0]]),
+                "tip": np.asarray([1.0]),
+                "effective_cone": np.asarray([[1]], dtype=np.int64),
+                "basis_matrix": np.asarray([[1, 2]], dtype=np.int64),
+                "prime_toric_divisors": np.asarray([0, 1], dtype=np.int64),
+            },
+        }
+        original = generator._reconstruct_intersection_geometry
+        with patch.object(
+            generator, "_reconstruct_intersection_geometry", side_effect=original
+        ) as mocked:
+            first = generator._materialize_row_potential(
+                outer_reference, {"qed_divisor_index": 0}
+            )
+            second = generator._materialize_row_potential(
+                outer_reference, {"qed_divisor_index": 1}
+            )
+            self.assertEqual(mocked.call_count, 1)
+
+        self.assertEqual(first["Q"].shape[1], 1)
+        self.assertEqual(second["Q"].shape[1], 2)
+
     def test_no_valid_kaehler_point_has_point_shortfall_status(self):
         error = stage2_entrypoint.generator.NoPhysicalKaehlerPoint(
             "no valid point"

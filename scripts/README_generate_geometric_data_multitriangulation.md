@@ -454,6 +454,20 @@ validated capacity, rows written, target, minimum, and all draw accounting.
 Such a result is diagnostically successful but is not production-complete,
 including when the count is below `100000`.
 
+EFT finalization validates every persisted assignment-pool entry before
+sampling, and the per-geometry cost of that validation (reconstructing the
+bounded potential and classifying the leading-rank status of every QED
+candidate) is cached once per geometry and reused across the rest of that
+geometry's pool; it is not recomputed per row. Because that per-geometry
+setup cost grows with `h11` and every accepted geometry's pool is independent
+of every other geometry's pool, finalization runs one worker process per
+geometry via `--eft-workers` (default: all available cores, matching
+`--cores` elsewhere in this codebase; pass `1` to force strictly sequential
+execution). Parallel and sequential execution produce identical output; only
+wall-clock time differs. At `h11=491`, the geometry-only setup is the
+dominant cost per accepted geometry, so a population with many `h11=491`
+geometries benefits the most from more workers.
+
 Each row contains only scalar/index/reference metadata: geometry path/hash,
 stable divisor labels and indices, pool rank/size, assignment hash, draw seed,
 normalization and volume scalars, and schema versions. It contains no dense
@@ -501,6 +515,7 @@ Relevant options:
 | `--eft-minimum-rows INT` | `100000` | Minimum accepted EFT-reference rows. |
 | `--eft-maximum-rows INT` | `200000` | Exact EFT row target. |
 | `--eft-output-path PATH` | `OUTDIR/eft_models.parquet` | Explicit table path inside the fresh output root. |
+| `--eft-workers INT` | all available cores | Worker processes for per-geometry EFT finalization; pass `1` for strictly sequential execution. Does not change output, only wall-clock time. |
 | `--materialize-dense-potential` | off | Legacy compatibility flag; schema 1.1 rejects dense materialization in production HDF5. |
 | `generate_stage2_eft_reference.py --volume-backend {fan,historical_sparse_coo,auto}` | `fan` | Select the current CYTools Fan contractions, the explicit h11=491 historical sparse-COO compatibility path, or `auto` (Fan below h11=491 and historical sparse COO at h11=491); the selected backend is recorded per geometry. |
 

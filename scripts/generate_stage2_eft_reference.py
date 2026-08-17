@@ -166,6 +166,19 @@ def build_parser():
     parser.add_argument("--eft-maximum-rows", type=int, default=MAXIMUM_EFT_ROWS)
     parser.add_argument("--eft-output-path", default=None)
     parser.add_argument(
+        "--eft-workers",
+        type=int,
+        default=None,
+        help=(
+            "Worker processes for EFT finalization's per-geometry capacity "
+            "validation (default: all available, matching --cores elsewhere "
+            "in this codebase). Pass 1 to force strictly sequential "
+            "execution. Each accepted geometry's capacity validation is "
+            "independent of every other's, so this parallelizes across "
+            "geometries, not within one geometry's pool."
+        ),
+    )
+    parser.add_argument(
         "--allow-overwrite-existing-geometry",
         action="store_true",
         help=(
@@ -1098,6 +1111,7 @@ def main(argv=None):
                 arguments.seed,
                 arguments.eft_minimum_rows,
                 arguments.eft_maximum_rows,
+                workers=arguments.eft_workers,
             )
         except Exception as error:
             model_error = error
@@ -1644,6 +1658,7 @@ def main(argv=None):
             "minimum_acceptable_rows": arguments.eft_minimum_rows,
             "maximum_rows": arguments.eft_maximum_rows,
             "target_rows": arguments.eft_maximum_rows,
+            "eft_workers_requested": arguments.eft_workers,
             "rows_written": len(model_rows),
             "terminal_status": (
                 model_failure_status

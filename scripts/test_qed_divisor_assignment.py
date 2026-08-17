@@ -2,6 +2,7 @@
 
 import unittest
 import tempfile
+from fractions import Fraction
 
 import h5py
 import numpy as np
@@ -9,10 +10,40 @@ import numpy as np
 from qed_divisor_assignment import (
     QEDAssignmentFailure,
     classify_qed_leading_status,
+    compute_leading_rank_order,
     prime_divisor_intersection_graph,
     select_qed_divisor,
     write_visible_sector_hdf5,
 )
+
+
+def _reference_rank(rows):
+    """Rebuild-from-scratch exact-fraction rank: the pre-optimization oracle."""
+    basis = {}
+    for vector in rows:
+        work = [Fraction(int(value)) for value in vector]
+        for pivot, row in sorted(basis.items()):
+            factor = work[pivot]
+            if factor:
+                work = [value - factor * row[index] for index, value in enumerate(work)]
+        pivot = next((index for index, value in enumerate(work) if value), None)
+        if pivot is not None:
+            scale = work[pivot]
+            basis[pivot] = tuple(value / scale for value in work)
+    return len(basis)
+
+
+def _reference_leading_rank_order(q, priorities):
+    """Oracle: the original no-early-exit, rebuild-from-scratch selection."""
+    order = sorted(range(q.shape[1]), key=lambda index: (-float(priorities[index]), index))
+    selected = []
+    rank = 0
+    for index in order:
+        next_rank = _reference_rank([q[:, i] for i in selected] + [q[:, index]])
+        if next_rank > rank:
+            selected.append(index)
+            rank = next_rank
+    return {"order": order, "selected": selected, "rank": rank}
 
 
 class QEDAssignmentTests(unittest.TestCase):
@@ -81,6 +112,51 @@ class QEDAssignmentTests(unittest.TestCase):
         )
         self.assertIn(status["status"], {"leading", "dependent"})
         self.assertEqual(status["method"], "exact_rational_incremental_rank")
+
+    def test_leading_rank_order_matches_rebuild_from_scratch_oracle(self):
+        # classify_qed_leading_status used to rebuild its exact-fraction basis
+        # from scratch for every candidate column (O(rank^2) per candidate,
+        # repeated once per column). compute_leading_rank_order instead
+        # carries a persistent basis across candidates and exits once rank
+        # saturates. Both must select the same leading columns in the same
+        # order and reach the same rank, since neither change can alter which
+        # vectors are linearly independent or when.
+        rng = np.random.default_rng(2026)
+        for trial in range(20):
+            rows, cols = 5, 14
+            q = rng.integers(-3, 4, size=(rows, cols))
+            priorities = rng.random(cols)
+            got = compute_leading_rank_order(q, priorities)
+            want = _reference_leading_rank_order(q, priorities)
+            self.assertEqual(got["order"], want["order"], msg=f"trial {trial}")
+            self.assertEqual(got["selected"], want["selected"], msg=f"trial {trial}")
+            self.assertEqual(got["rank"], want["rank"], msg=f"trial {trial}")
+
+    def test_leading_rank_order_early_exit_matches_full_scan_with_duplicate_and_dependent_columns(self):
+        # Columns 2 and 3 duplicate columns 0 and 1; column 4 is their sum
+        # (dependent). Rank saturates at 2 well before all 5 columns are
+        # scanned, exercising the early-exit path against a case with
+        # explicit duplicates and a linear combination.
+        q = np.asarray([[1, 0, 1, 0, 1], [0, 1, 0, 1, 1]])
+        priorities = np.asarray([5.0, 4.0, 3.0, 2.0, 1.0])
+        got = compute_leading_rank_order(q, priorities)
+        want = _reference_leading_rank_order(q, priorities)
+        self.assertEqual(got, want)
+        self.assertEqual(got["rank"], 2)
+        self.assertEqual(got["selected"], [0, 1])
+
+    def test_classify_qed_leading_status_accepts_precomputed_order(self):
+        # A caller working through one geometry's whole assignment pool can
+        # compute the geometry-only leading_rank_order once and pass it back
+        # in on every per-assignment call instead of paying the elimination
+        # cost again for every QED index in the pool.
+        q = np.asarray([[1, 0, 1], [0, 1, 1]])
+        l = np.asarray([[1.0, 1.0, 1.0], [-2.0, -1.0, -3.0]])
+        precomputed = compute_leading_rank_order(q, l[1, :])
+
+        direct = classify_qed_leading_status(q, l, 1)
+        via_cache = classify_qed_leading_status(q, l, 1, leading_rank_order=precomputed)
+        self.assertEqual(direct, via_cache)
 
     def test_visible_sector_hdf5_persists_divisor_labels(self):
         assignment = self.select()

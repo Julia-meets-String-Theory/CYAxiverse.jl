@@ -755,6 +755,106 @@ class EFTRowContractTests(unittest.TestCase):
             context.exception.terminal_status, "missing_assignment_derived_data"
         )
 
+    def test_leading_rank_certificate_omits_ordered_source_indices(self):
+        # ordered_source_indices (the full priority order over every
+        # potential term) is identical for every row drawn from one
+        # geometry and reconstructible from the geometry's Q/L. Persisting
+        # it per row was the dominant storage cost at large h11 (hundreds of
+        # KB per row); it must not appear in a serialized row's certificate.
+        serializer = _find_callable(EFT_ROW_SCHEMA, ("serialize_eft_row", "build_eft_row"))
+        if serializer is None:
+            self.skipTest("EFT row-schema handoff is not present")
+        assignment = {
+            "model_id": "geometry-0001:eft-000",
+            "geometry_id": "geometry-0001",
+            "assignment_hash": "a" * 64,
+            "assignment_pool_rank": 0,
+            "assignment_pool_size": 7,
+            "qcd_divisor_index": 0,
+            "qed_divisor_index": 1,
+            "qcd_divisor_label": [0, 0, 0, 0],
+            "qed_divisor_label": [1, 0, 0, 0],
+            "qcd_volume_scale": 1.0,
+            "qcd_volume": 40.0,
+            "qed_volume": 2.0,
+            "charge_factorized_schema_version": "glimmers-charge-factorized-1.1",
+            "normalization_map_version": schema11.NORMALIZATION_MAP_VERSION,
+        }
+        geometry = {
+            "geometry_id": "geometry-0001",
+            "charge_factorized_schema_version": "glimmers-charge-factorized-1.1",
+        }
+        charges = np.asarray(
+            [
+                [1_000_003, 2_000_006, 0],
+                [0, 0, 1],
+            ],
+            dtype=np.int64,
+        )
+        scales = np.asarray([[1.0, 1.0, 1.0], [3.0, 2.0, 1.0]])
+        row = _as_mapping(serializer(
+            geometry,
+            assignment,
+            q=charges,
+            l=scales,
+            qed_charge=charges[:, 1],
+            direct_count=3,
+            source_index=1,
+        ))
+        certificate = json.loads(row["leading_rank_certificate"])
+        self.assertNotIn("ordered_source_indices", certificate)
+        self.assertIn("selected_source_indices", certificate)
+
+    def test_row_validation_rejects_ordered_source_indices_in_certificate(self):
+        # A row cannot smuggle the dropped field back in: validate_eft_row
+        # must actively reject it rather than silently accepting extra data.
+        serializer = _find_callable(EFT_ROW_SCHEMA, ("serialize_eft_row", "build_eft_row"))
+        if serializer is None:
+            self.skipTest("EFT row-schema handoff is not present")
+        assignment = {
+            "model_id": "geometry-0001:eft-000",
+            "geometry_id": "geometry-0001",
+            "assignment_hash": "a" * 64,
+            "assignment_pool_rank": 0,
+            "assignment_pool_size": 7,
+            "qcd_divisor_index": 0,
+            "qed_divisor_index": 1,
+            "qcd_divisor_label": [0, 0, 0, 0],
+            "qed_divisor_label": [1, 0, 0, 0],
+            "qcd_volume_scale": 1.0,
+            "qcd_volume": 40.0,
+            "qed_volume": 2.0,
+            "charge_factorized_schema_version": "glimmers-charge-factorized-1.1",
+            "normalization_map_version": schema11.NORMALIZATION_MAP_VERSION,
+        }
+        geometry = {
+            "geometry_id": "geometry-0001",
+            "charge_factorized_schema_version": "glimmers-charge-factorized-1.1",
+        }
+        charges = np.asarray(
+            [
+                [1_000_003, 2_000_006, 0],
+                [0, 0, 1],
+            ],
+            dtype=np.int64,
+        )
+        scales = np.asarray([[1.0, 1.0, 1.0], [3.0, 2.0, 1.0]])
+        row = dict(_as_mapping(serializer(
+            geometry,
+            assignment,
+            q=charges,
+            l=scales,
+            qed_charge=charges[:, 1],
+            direct_count=3,
+            source_index=1,
+        )))
+        certificate = json.loads(row["leading_rank_certificate"])
+        certificate["ordered_source_indices"] = certificate["selected_source_indices"]
+        row["leading_rank_certificate"] = json.dumps(certificate)
+        with self.assertRaises(EFT_ROW_SCHEMA.EFTRowFailure) as context:
+            EFT_ROW_SCHEMA.validate_eft_row(row)
+        self.assertEqual(context.exception.terminal_status, "invalid_row_schema")
+
 
 class ProvenanceContractTests(unittest.TestCase):
     def test_cytools_seed_is_replayable_and_within_uint32_range(self):
