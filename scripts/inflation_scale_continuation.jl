@@ -355,15 +355,15 @@ function _pilot_classify(theta, Q::Matrix{Int}, L::Matrix{Float64}, factor,
     value = derivatives.value
     epsilon = value == 0 ? Inf : 0.5 * (gradient_norm / abs(value))^2
     eta_values = value == 0 ? fill(Inf, length(eigenvalues)) : eigenvalues ./ value
-    eigen_scale = max(maximum(abs, eigenvalues), 1.0)
+    modes = CYAxiverse.generate.spectrum_mode_counts(eigenvalues)
     (; value, gradient_norm, epsilon,
        min_eta=minimum(eta_values), max_eta=maximum(eta_values),
        abs_min_eta=minimum(abs.(eta_values)),
        hessian_min=minimum(eigenvalues), hessian_max=maximum(eigenvalues),
        abs_min_hessian=minimum(abs.(eigenvalues)),
-       negative_modes=count(<(0), eigenvalues),
-       zeroish_modes=count(x -> abs(x) <= 1e-10 * eigen_scale, eigenvalues),
-       positive_modes=count(>(0), eigenvalues), eigenvalues)
+       negative_modes=modes.negative,
+       zeroish_modes=modes.zeroish,
+       positive_modes=modes.positive, eigenvalues)
 end
 
 _pilot_screen_pass(classification) = classification.value > 0 &&

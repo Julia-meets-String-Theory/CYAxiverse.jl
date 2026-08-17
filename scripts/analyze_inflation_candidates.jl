@@ -34,12 +34,26 @@ function classify_point(theta, Q, L, Kfactor::Cholesky)
     gradnorm = norm(Kfactor.L \ d.gradient)
     epsilon = d.value == 0 ? Inf : 0.5 * (gradnorm / abs(d.value))^2
     eta_values = d.value == 0 ? fill(Inf, length(eigs)) : eigs ./ d.value
+    # Tolerance-aware and partitioning: negative + zeroish + positive == h11.
+    # A sign test would report a mode at 1e-17 relative to the spectrum's
+    # scale as a tachyon, and `saddle_rows` below filters on
+    # `negative_modes > 0`.
+    modes = CYAxiverse.generate.spectrum_mode_counts(eigs)
+    # `abs_min_eta` is the flatness figure of merit, and a curvature-free
+    # direction drives it to zero, making a point look maximally flat on
+    # numerical noise. Reported alongside is the same quantity restricted to
+    # directions with resolvable curvature, so the two can be compared
+    # without changing what `abs_min_eta` has always meant.
+    resolvable = abs.(eigs) .> modes.tolerance
+    abs_min_eta_resolvable = d.value == 0 || !any(resolvable) ? Inf :
+        minimum(abs.(eta_values[resolvable]))
     (; value=d.value, gradnorm, epsilon,
        min_eta=minimum(eta_values), max_eta=maximum(eta_values),
        abs_min_eta=minimum(abs.(eta_values)),
-       negative_modes=count(<(0), eigs),
-       zeroish_modes=count(x -> abs(x) <= 1e-10 * max(maximum(abs, eigs), 1.0), eigs),
-       positive_modes=count(>(0), eigs),
+       abs_min_eta_resolvable,
+       negative_modes=modes.negative,
+       zeroish_modes=modes.zeroish,
+       positive_modes=modes.positive,
        eta_values, hessian_eigenvalues=eigs)
 end
 
@@ -101,10 +115,20 @@ function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:catastrophe)
             min_eta=c.min_eta,
             max_eta=c.max_eta,
             abs_min_eta=c.abs_min_eta,
+            abs_min_eta_resolvable=c.abs_min_eta_resolvable,
             negative_modes=c.negative_modes,
             zeroish_modes=c.zeroish_modes,
             positive_modes=c.positive_modes,
         ))
+    end
+    # The counts partition the spectrum, so this must hold for every point.
+    # It is the invariant the previous overlapping counts could not offer.
+    for row in point_rows
+        row.negative_modes + row.zeroish_modes + row.positive_modes ==
+            size(Q, 1) || error(string(
+                "mode counts do not partition the spectrum for h11=",
+                geom_idx.h11, " polytope=", geom_idx.polytope,
+                " frst=", geom_idx.frst, " point=", row.point_index))
     end
 
     saddle_rows = filter(row -> row.negative_modes > 0 && row.value > 0, point_rows)
@@ -134,7 +158,10 @@ function analyze_geometry(geom_idx; starts=8192, reduction::Symbol=:catastrophe)
         least_tachyonic_value=least_tachyonic === nothing ? NaN : least_tachyonic.value,
         best_min_eta=best === nothing ? NaN : best.min_eta,
         best_abs_min_eta=flattest === nothing ? NaN : flattest.abs_min_eta,
+        best_abs_min_eta_resolvable=flattest === nothing ? NaN :
+            flattest.abs_min_eta_resolvable,
         best_epsilon=flattest === nothing ? NaN : flattest.epsilon,
+        zeroish_mode_points=count(row -> row.zeroish_modes > 0, point_rows),
         candidate_slowroll_saddles=count(row -> row.epsilon < 1 && abs(row.min_eta) < 1, saddle_rows),
     )
     summary, point_rows

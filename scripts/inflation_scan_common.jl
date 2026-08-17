@@ -178,13 +178,13 @@ function _classify_point(theta, Q, L, Kfactor)
     value = derivatives.value
     epsilon = value == 0 ? Inf : 0.5 * (gradient_norm / abs(value))^2
     eta_values = value == 0 ? fill(Inf, length(eigenvalues)) : eigenvalues ./ value
-    scale = max(maximum(abs, eigenvalues), 1.0)
+    modes = CYAxiverse.generate.spectrum_mode_counts(eigenvalues)
     (; value, gradient_norm, epsilon,
        min_eta=minimum(eta_values), max_eta=maximum(eta_values),
        abs_min_eta=minimum(abs.(eta_values)),
-       negative_modes=count(<(0), eigenvalues),
-       zeroish_modes=count(x -> abs(x) <= 1e-10 * scale, eigenvalues),
-       positive_modes=count(>(0), eigenvalues))
+       negative_modes=modes.negative,
+       zeroish_modes=modes.zeroish,
+       positive_modes=modes.positive)
 end
 
 mutable struct _ClassificationWorkspace
@@ -244,11 +244,11 @@ function _classify_point!(workspace::_ClassificationWorkspace,
             abs_min_eta = min(abs_min_eta, abs(eta))
         end
     end
-    scale = max(maximum(abs, eigenvalues), 1.0)
+    modes = CYAxiverse.generate.spectrum_mode_counts(eigenvalues)
     (; value, gradient_norm, epsilon, min_eta, max_eta, abs_min_eta,
-       negative_modes=count(<(0), eigenvalues),
-       zeroish_modes=count(x -> abs(x) <= 1e-10 * scale, eigenvalues),
-       positive_modes=count(>(0), eigenvalues))
+       negative_modes=modes.negative,
+       zeroish_modes=modes.zeroish,
+       positive_modes=modes.positive)
 end
 
 mutable struct _ClassificationAccumulator
