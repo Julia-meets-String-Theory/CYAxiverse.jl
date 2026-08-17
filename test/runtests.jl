@@ -2101,18 +2101,21 @@ end
         end
     end
 
-    @testset "the flatness metric separates resolvable from zeroish modes" begin
-        # abs_min_eta is driven to zero by any curvature-free direction, so a
-        # point can look maximally flat on numerical noise. The resolvable
-        # variant restricts to directions carrying real curvature; it is never
-        # smaller, and is strictly larger when a zeroish mode is present.
+    @testset "the flatness metric excludes curvature-free directions" begin
+        # abs_min_eta/min_eta used to range over the whole spectrum, so a
+        # curvature-free direction drove them to zero (or spuriously
+        # negative on noise). They are now restricted to directions with
+        # resolvable curvature (DECISION-ETA); the naive whole-spectrum
+        # minimum is never larger, and strictly smaller when a zeroish mode
+        # is present.
         for h11 in (10, 14)
             Q, L, K = classification_fixture(h11, 1e5)
             theta = 0.23 .* ones(h11) .+ 0.13 .* (1:h11) ./ h11
             c = candidates.classify_point(theta, Q, L, cholesky(Hermitian(K)))
-            @test c.abs_min_eta_resolvable >= c.abs_min_eta
+            naive_abs_min_eta = minimum(abs.(c.eta_values))
+            @test c.abs_min_eta >= naive_abs_min_eta
             if c.zeroish_modes > 0
-                @test c.abs_min_eta_resolvable > c.abs_min_eta
+                @test c.abs_min_eta > naive_abs_min_eta
             end
         end
     end
