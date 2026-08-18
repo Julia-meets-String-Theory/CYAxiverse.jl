@@ -1384,9 +1384,13 @@ end
             @test PB.fuzzy_axion_criterion_one(tau, model.lambda)
             @test PB.fuzzy_axion_criterion_two(
                 tau[model.qcd_divisor_index], model.lambda)
-            m_check = sqrt(model.mass_reference_ev^2 *
-                exp(-2π * model.tau_reference * (model.lambda^2 - 1)))
-            @test isapprox(m_check, PB.FUZZY_AXION_MASS_TARGET_EV; rtol=1e-8)
+            # Re-derived in log10 space, matching how enumerate_fuzzy_axion_models
+            # itself solves for lambda -- the linear form can underflow to
+            # exactly 0.0 for a strongly-suppressed sub-leading instanton
+            # (see fuzzy_axion_dilation_root's docstring).
+            log10_m_check = model.mass_reference_log10_ev -
+                (π * model.tau_reference * (model.lambda^2 - 1)) / log(10)
+            @test isapprox(log10_m_check, log10(PB.FUZZY_AXION_MASS_TARGET_EV); atol=1e-8)
         end
         # Every model's qcd_divisor_index and axion_index must be valid,
         # in-range references into the input arrays.
@@ -1403,6 +1407,59 @@ end
             Q, tau, V_real, P_real, m32_real, Kinv[1:3, 1:3])
         @test_throws DimensionMismatch PB.leading_axion_reference_data(
             Q, tau[1:end-1], V_real, P_real, m32_real, Kinv)
+
+        # Regression for a real full-h11=4-population failure (priority 4,
+        # record index 46 of the 285-record h21_plus_zero-accepted export):
+        # a sub-leading (4th-ranked) instanton with tau_reference=306.0 gave
+        # mass_log10_ev_reference=-390.15, and 10.0^(-390.15) underflows to
+        # exactly 0.0 in Float64 (Float64's smallest positive value is
+        # ~5e-324) -- enumerate_fuzzy_axion_models used to compute
+        # `10.0^log10_mass` before root-solving and crashed with
+        # "mass_reference_ev must be positive" on this exact input. Confirmed
+        # live against the real export record, not fabricated.
+        @test 10.0^(-390.1476386436961) == 0.0
+        lambda_underflow_avoided = PB.fuzzy_axion_dilation_root_log10(
+            -390.1476386436961, 306.0000364594718)
+        @test lambda_underflow_avoided !== nothing
+        @test isfinite(lambda_underflow_avoided)
+        # Hand-derived expectation: argument = 1 + ln(10)*(log10_m - log10(target))/(pi*tau)
+        expected_argument = 1.0 + log(10.0) *
+            (-390.1476386436961 - log10(PB.FUZZY_AXION_MASS_TARGET_EV)) /
+            (π * 306.0000364594718)
+        @test isapprox(lambda_underflow_avoided, sqrt(expected_argument); rtol=1e-10)
+
+        Q_record46 = Int[
+            1 0 0 1 0 0 0 1
+            0 1 1 -2 0 0 0 -6
+            0 0 1 -3 1 1 0 -8
+            0 0 0 -1 0 0 1 -3
+        ]
+        tau_record46 = Float64[
+            3039.5003719815713, 97.5000132125037, 403.5000496719755,
+            1925.0002361800668, 306.0000364594718, 306.0000364594718,
+            1.499999998081662, 2.0000010365299246,
+        ]
+        cy_volume_record46 = 5741.334389020104
+        Kinv_record46 = [
+            1.2358372022962462e7 312722.4226720411 1.3089883116565086e6 18237.00220856627
+            312722.4226720411 428435.77269930055 -271070.73200224846 -22380.337504440147
+            1.3089883116565086e6 -271070.73200224846 374544.0892527923 -21129.337304245895
+            18237.00220856627 -22380.337504440147 -21129.337304245895 114835.68772785066
+        ]
+        P_record46 = PB.fuzzy_axion_prefactor_P(0.5)
+        K_record46 = PB.fuzzy_axion_kahler_potential(cy_volume_record46)
+        W_record46 = PB.fuzzy_axion_flux_superpotential(1.0)
+        m32_record46 = PB.fuzzy_axion_gravitino_mass(
+            P_record46, K_record46, abs(W_record46); mplanck_ev=1.0)
+        models_record46 = PB.enumerate_fuzzy_axion_models(
+            Q_record46, tau_record46, cy_volume_record46, P_record46, m32_record46,
+            Kinv_record46)
+        for model in models_record46
+            @test PB.fuzzy_axion_criterion_one(tau_record46, model.lambda)
+            @test PB.fuzzy_axion_criterion_two(
+                tau_record46[model.qcd_divisor_index], model.lambda)
+            @test isfinite(model.mass_reference_log10_ev)
+        end
     end
 end
 

@@ -18,9 +18,12 @@ import argparse
 import json
 import math
 import os
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
+import h5py
 import numpy as np
 
 from generate_geometric_data_multitriangulation import (
@@ -457,6 +460,129 @@ def _export_kaehler_point(triangulation):
     }
 
 
+MODEL_STAGE_DRIVER = Path(__file__).resolve().parent / "fuzzy_axion_model_stage_driver.jl"
+
+
+def _write_model_stage_input(records: list[dict], path: Path) -> None:
+    """Write flat (X, FRST) Kähler-point export records to HDF5 for the Julia driver.
+
+    HDF5 is used rather than JSON because it is already a hard dependency on
+    both sides of this package (``h5py`` here, ``HDF5.jl`` in
+    ``Project.toml``); ``CYAxiverse`` has no JSON-parsing package, and this
+    keeps priority 4 from having to add one. ``Q``/``inverse_metric`` are
+    written in their Python-documented shapes (h11 x N, h11 x h11); the Julia
+    driver is responsible for undoing HDF5.jl's dimension-order reversal on
+    read (see its module docstring -- confirmed empirically, not assumed,
+    before writing that script).
+    """
+
+    with h5py.File(path, "w") as file:
+        file.create_dataset("record_count", data=len(records))
+        for index, record in enumerate(records):
+            group = file.create_group(f"records/{index}")
+            group.create_dataset("Q", data=np.array(record["glsm_charge_matrix"], dtype=np.int64))
+            group.create_dataset("tau", data=np.array(record["prime_divisor_volumes"], dtype=np.float64))
+            group.create_dataset("cy_volume", data=float(record["cy_volume"]))
+            group.create_dataset(
+                "inverse_metric", data=np.array(record["inverse_metric"], dtype=np.float64)
+            )
+
+
+def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
+    """Run priority 3's Julia model-stage evaluator over the exported Kähler points.
+
+    ``gs``/``W0`` are a single documented convention applied uniformly to
+    every record -- never tuned per record or towards the 3,348 target (see
+    validation/fuzzy_axions_2412_12012_kaehler_qcd_model_count_scope_20260818.md
+    Sec. 6, "Acceptance tests for the 3,348 comparison").
+    """
+
+    convention = {
+        "gs": args.gs,
+        "gs_justification": (
+            "paper's stated main-analysis reference value, eq. 3.28-3.29 (gs=0.5 -> P~5e-4)"
+        ),
+        "w0_real": args.w0_real,
+        "w0_imag": args.w0_imag,
+        "w0_justification": (
+            "no ensemble-specific W0 value is stated in the source (Sec. 3.4 gives only "
+            "the reheating-example illustrative value W0=1e-5, and argues -- eq. 3.26-3.27 "
+            "-- that the fuzzy axion's own decay constant is near-insensitive to W0 once its "
+            "mass is pinned by construction, though this does not bound the model *count*, "
+            "see the scope doc Sec. 3 point 2); defaults to W0=1, matching the paper's own "
+            "Sec. 4.2.1 hand-worked-example convention, and is not tuned to approach the "
+            "3,348 target"
+        ),
+    }
+
+    if not records:
+        return {
+            "input_record_count": 0,
+            "total_model_count": None,
+            "model_count_per_record": [],
+            "models": [] if args.keep_details else None,
+            "convention": convention,
+            "diagnostic_reason": (
+                "no accepted h21_plus_zero-class Kahler-point export records in this run"
+            ),
+        }
+
+    with tempfile.TemporaryDirectory(prefix="fuzzy_axion_model_stage_") as workdir_name:
+        workdir = Path(workdir_name)
+        input_path = workdir / "model_stage_input.h5"
+        output_path = workdir / "model_stage_output.h5"
+        _write_model_stage_input(records, input_path)
+
+        julia_project = args.julia_project or Path(__file__).resolve().parent.parent
+        subprocess.run(
+            [
+                args.julia_binary,
+                f"--project={julia_project}",
+                str(MODEL_STAGE_DRIVER),
+                str(input_path),
+                str(output_path),
+                str(args.gs),
+                str(args.w0_real),
+                str(args.w0_imag),
+            ],
+            check=True,
+        )
+
+        with h5py.File(output_path, "r") as file:
+            total_model_count = int(file["total_model_count"][()])
+            model_count_per_record = np.asarray(file["model_count_per_record"]).tolist()
+            prefactor_P = float(file["prefactor_P"][()])
+            models = None
+            if args.keep_details:
+                record_index = np.asarray(file["model_record_index"])
+                axion_index = np.asarray(file["model_axion_index"])
+                qcd_divisor_index = np.asarray(file["model_qcd_divisor_index"])
+                lam = np.asarray(file["model_lambda"])
+                mass_reference_log10_ev = np.asarray(file["model_mass_reference_log10_ev"])
+                tau_reference = np.asarray(file["model_tau_reference"])
+                models = [
+                    {
+                        "record_index": int(record_index[i]),
+                        "axion_index": int(axion_index[i]),
+                        "qcd_divisor_index": int(qcd_divisor_index[i]),
+                        "lambda": float(lam[i]),
+                        "mass_reference_log10_ev": float(mass_reference_log10_ev[i]),
+                        "tau_reference": float(tau_reference[i]),
+                    }
+                    for i in range(len(record_index))
+                ]
+
+    convention["prefactor_P"] = prefactor_P
+    return {
+        "input_record_count": len(records),
+        "total_model_count": total_model_count,
+        "model_count_per_record": model_count_per_record,
+        "models": models,
+        "convention": convention,
+        "diagnostic_reason": None,
+    }
+
+
 def _jsonable(value):
     if isinstance(value, np.ndarray):
         return value.tolist()
@@ -489,6 +615,8 @@ def reproduce(args):
     orientifold_h11_zero_count = 0
     kaehler_export_accepted_count = 0
     kaehler_export_rejected_count = 0
+    export_kaehler_points = args.export_kaehler_points or args.model_stage
+    model_stage_records = [] if args.model_stage else None
     details = []
     for poly_index, (poly, provenance) in enumerate(records):
         raw, classes = _frst_classes(poly)
@@ -533,7 +661,7 @@ def reproduce(args):
             orientifold_inherited_count += orientifold["inherited"]
             orientifold_h11_zero_count += orientifold["h11_minus_zero"]
         kaehler_export_per_class = None
-        if args.export_kaehler_points and frozen_per_class is not None:
+        if export_kaehler_points and frozen_per_class is not None:
             # Only the classes actually accepted by the h21_plus_zero
             # trilayer/frozen-conifold path (Algorithm 1's model-stage input
             # population, see validation/fuzzy_axions_2412_12012_kaehler_qcd_model_count_scope_20260818.md
@@ -548,6 +676,17 @@ def reproduce(args):
                 kaehler_export_per_class.append(record)
                 if record["status"] == "accepted":
                     kaehler_export_accepted_count += 1
+                    if args.model_stage:
+                        model_stage_records.append(
+                            {
+                                "polytope_index": poly_index,
+                                "frst_class_index": class_index,
+                                "glsm_charge_matrix": record["glsm_charge_matrix"],
+                                "prime_divisor_volumes": record["prime_divisor_volumes"],
+                                "cy_volume": record["cy_volume"],
+                                "inverse_metric": record["inverse_metric"],
+                            }
+                        )
                 else:
                     kaehler_export_rejected_count += 1
         details.append(
@@ -575,6 +714,31 @@ def reproduce(args):
                 flush=True,
             )
 
+    population_complete = bool(args.limit >= 10**9)
+    population_exact_267 = (
+        trilayer_nonfrozen_class_count == PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]
+        and population_complete
+    )
+    model_stage = _run_model_stage(model_stage_records, args) if args.model_stage else None
+    if model_stage is not None and model_stage["diagnostic_reason"] is None:
+        reasons = []
+        if not population_complete:
+            reasons.append("run was limited via --limit; population is not the full h11=4 set")
+        if trilayer_nonfrozen_class_count != PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]:
+            reasons.append(
+                f"input population is {trilayer_nonfrozen_class_count} h21_plus_zero-accepted "
+                f"FRST classes, not the exact {PAPER_TARGETS['h11_minus_zero_h21_plus_zero_orientifold_cys']}"
+                "-target population (see "
+                "fuzzy_axions_2412_12012_h21_plus_gap_investigation_20260817.md)"
+            )
+        if model_stage["total_model_count"] != PAPER_TARGETS["models"]:
+            reasons.append(
+                f"total model count {model_stage['total_model_count']} != paper target "
+                f"{PAPER_TARGETS['models']}"
+            )
+        if reasons:
+            model_stage["diagnostic_reason"] = "; ".join(reasons)
+
     summary = {
         "schema_version": "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.0",
         "paper": "arXiv:2412.12012",
@@ -585,7 +749,7 @@ def reproduce(args):
             "requested_h11": 4,
             "favorable_lattice": "N",
             "record_count": len(records),
-            "population_complete": bool(args.limit >= 10**9),
+            "population_complete": population_complete,
         },
         "counts": {
             "favorable_polytopes": len(records),
@@ -604,10 +768,10 @@ def reproduce(args):
             if args.orientifold_audit
             else None,
             "kaehler_point_export_accepted_count": kaehler_export_accepted_count
-            if args.export_kaehler_points
+            if export_kaehler_points
             else None,
             "kaehler_point_export_rejected_count": kaehler_export_rejected_count
-            if args.export_kaehler_points
+            if export_kaehler_points
             else None,
         },
         "paper_targets": PAPER_TARGETS,
@@ -619,7 +783,17 @@ def reproduce(args):
                 if trilayer_nonfrozen_class_count == PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]
                 else "diagnostic_only"
             ),
+            "model_count": (
+                None
+                if model_stage is None
+                else (
+                    "benchmark_match_candidate"
+                    if population_exact_267 and model_stage["total_model_count"] == PAPER_TARGETS["models"]
+                    else "diagnostic_only"
+                )
+            ),
         },
+        "model_stage": model_stage,
         "details": details if args.keep_details else None,
     }
     return _jsonable(summary)
@@ -641,6 +815,48 @@ def main():
             "every h21_plus_zero-accepted FRST class. Requires --keep-details "
             "to appear in the output."
         ),
+    )
+    parser.add_argument(
+        "--model-stage",
+        action="store_true",
+        help=(
+            "Run priority 4: per h21_plus_zero-accepted FRST class, export the "
+            "Algorithm-1 canonical-tip Kahler point (implies --export-kaehler-points) "
+            "and enumerate (QCD divisor, fuzzy axion) models via "
+            "CYAxiverse.paper_benchmarks.enumerate_fuzzy_axion_models (bridged through "
+            "Julia via HDF5), comparing the total model count against the paper's "
+            "target of 3,348 under the acceptance-test discipline in "
+            "validation/fuzzy_axions_2412_12012_kaehler_qcd_model_count_scope_20260818.md "
+            "Sec. 6."
+        ),
+    )
+    parser.add_argument(
+        "--gs",
+        type=float,
+        default=0.5,
+        help="String coupling used for the prefactor P = gs^4/128 (eq. 3.28-3.29); "
+        "the paper's stated main-analysis value is 0.5.",
+    )
+    parser.add_argument(
+        "--w0-real",
+        type=float,
+        default=1.0,
+        help="Real part of the flux superpotential W0 (eq. 3.12); no ensemble-specific "
+        "value is given in the source, so this defaults to the paper's own Sec. 4.2.1 "
+        "hand-worked-example convention W0=1.",
+    )
+    parser.add_argument("--w0-imag", type=float, default=0.0)
+    parser.add_argument(
+        "--julia-binary",
+        default="julia",
+        help="Julia executable used to run scripts/fuzzy_axion_model_stage_driver.jl.",
+    )
+    parser.add_argument(
+        "--julia-project",
+        type=Path,
+        default=None,
+        help="Julia --project path for the model-stage driver; defaults to this "
+        "repository's root (the parent of scripts/).",
     )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()

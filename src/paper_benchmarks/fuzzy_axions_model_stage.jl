@@ -103,13 +103,43 @@ Sec. 1.4):
 Returns `nothing` when no positive real root exists (`mass_reference_ev <=
 mass_target_ev`: dilating outward only decreases the mass further, so the
 target can never be reached by increasing λ from the t0 reference).
+
+Delegates to [`fuzzy_axion_dilation_root_log10`](@ref); prefer that form
+directly when the reference mass is only available as `log10(mass)` (as
+`leading_axion_reference_data` returns it) -- for a sufficiently suppressed
+sub-leading instanton under the eq. 3.20 hierarchy, `10.0^log10_mass`
+underflows to exactly `0.0` in `Float64` (observed live on a real h11=4
+export record: `log10(mass) ≈ -390` for a fourth-ranked leading axion, well
+below `Float64`'s ~1e-308 smallest positive value), which would make this
+linear-mass form reject an otherwise well-defined contracting root.
 """
 function fuzzy_axion_dilation_root(mass_reference_ev::Real, tau_reference::Real;
         mass_target_ev::Real=FUZZY_AXION_MASS_TARGET_EV)
     mass_reference_ev > 0 || throw(ArgumentError("mass_reference_ev must be positive"))
+    fuzzy_axion_dilation_root_log10(log10(Float64(mass_reference_ev)), tau_reference;
+        mass_target_ev)
+end
+
+"""
+    fuzzy_axion_dilation_root_log10(mass_reference_log10_ev, tau_reference; mass_target_ev=FUZZY_AXION_MASS_TARGET_EV)
+
+Same closed-form root as [`fuzzy_axion_dilation_root`](@ref)
+(`λ = sqrt(1 + ln(mass_reference_ev/mass_target_ev) / (π*tau_reference))`,
+rewritten with `ln(a/b) = ln(10)*(log10(a) - log10(b))`), but takes the
+reference mass as `log10(mass_reference_ev)` directly. Never materializes
+the linear reference mass, so it cannot underflow the way
+`fuzzy_axion_dilation_root(10.0^mass_reference_log10_ev, ...)` can for a
+strongly-suppressed sub-leading instanton -- see that function's docstring.
+"""
+function fuzzy_axion_dilation_root_log10(mass_reference_log10_ev::Real, tau_reference::Real;
+        mass_target_ev::Real=FUZZY_AXION_MASS_TARGET_EV)
+    isfinite(mass_reference_log10_ev) ||
+        throw(ArgumentError("mass_reference_log10_ev must be finite"))
     tau_reference > 0 || throw(ArgumentError("tau_reference must be positive"))
     mass_target_ev > 0 || throw(ArgumentError("mass_target_ev must be positive"))
-    argument = 1.0 + log(mass_reference_ev / mass_target_ev) / (π * tau_reference)
+    argument = 1.0 + log(10.0) *
+        (Float64(mass_reference_log10_ev) - log10(Float64(mass_target_ev))) /
+        (π * Float64(tau_reference))
     argument > 0 || return nothing
     sqrt(argument)
 end
@@ -155,6 +185,13 @@ same `λ_a`. This is mathematically equivalent to Algorithm 1's literal
 `for D ... for λ ...` nesting (criteria 1 and 3 do not depend on `D`) but
 avoids re-solving `λ_a` once per divisor. One record is returned per
 accepted `(D, a)` pair; criterion 3 is satisfied by construction at `λ_a`.
+
+Each returned model carries `mass_reference_log10_ev` (`log10` of the
+reference-point mass), not the linear value -- the linear value can
+underflow to exactly `0.0` for a strongly-suppressed sub-leading instanton
+(see [`fuzzy_axion_dilation_root`](@ref)'s docstring), so the root-solve
+itself uses [`fuzzy_axion_dilation_root_log10`](@ref) directly on
+`reference.mass_log10_ev_reference`, never materializing the linear mass.
 """
 function enumerate_fuzzy_axion_models(Q::AbstractMatrix{Int}, tau::AbstractVector{<:Real},
         cy_volume::Real, prefactor_P::Real, gravitino_mass_planck_units::Real,
@@ -168,8 +205,8 @@ function enumerate_fuzzy_axion_models(Q::AbstractMatrix{Int}, tau::AbstractVecto
     n_divisors = length(tau)
     models = NamedTuple[]
     for a in 1:n_leading
-        mass_reference_ev = 10.0^reference.mass_log10_ev_reference[a]
-        lambda = fuzzy_axion_dilation_root(mass_reference_ev, reference.tau_reference[a];
+        mass_reference_log10_ev = reference.mass_log10_ev_reference[a]
+        lambda = fuzzy_axion_dilation_root_log10(mass_reference_log10_ev, reference.tau_reference[a];
             mass_target_ev=mass_target_ev)
         lambda === nothing && continue
         fuzzy_axion_criterion_one(tau, lambda) || continue
@@ -180,7 +217,7 @@ function enumerate_fuzzy_axion_models(Q::AbstractMatrix{Int}, tau::AbstractVecto
                 axion_index=a,
                 qcd_divisor_index=divisor_index,
                 lambda=lambda,
-                mass_reference_ev=mass_reference_ev,
+                mass_reference_log10_ev=mass_reference_log10_ev,
                 tau_reference=reference.tau_reference[a],
             ))
         end
