@@ -43,7 +43,6 @@ function main()
     w0 = Complex{Float64}(parse(Float64, w0_real_arg), parse(Float64, w0_imag_arg))
 
     prefactor_P = CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(gs)
-    superpotential = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(w0)
 
     record_count = h5open(file -> read(file, "record_count"), input_path, "r")
 
@@ -67,6 +66,19 @@ function main()
             inverse_metric = Matrix{Float64}(permutedims(read(group, "inverse_metric")))
 
             kahler_pot = CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(cy_volume)
+            # eq. (3.9), (3.12): S_alpha = 2*pi*Vol(Sigma_alpha) for the
+            # alpha-th prime toric divisor (Vol(Sigma_alpha) is exactly this
+            # record's own `tau`, since `tau` already is Q_{i,alpha}*T^i);
+            # A_alpha=1 throughout the source. The imaginary axionic-phase
+            # part of S_alpha (2*pi*i*Q_{i,alpha}*theta^i) is not tracked
+            # anywhere in this pipeline, so instanton terms are evaluated at
+            # theta=0 (real axis) -- the natural default in the absence of a
+            # fixed axion-vev convention, and consistent with these terms
+            # being a small, real, leading-order correction to W0 per
+            # `fuzzy_axion_flux_superpotential`'s own docstring.
+            instanton_terms = exp.(-2π .* tau)
+            superpotential = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(
+                w0, instanton_terms)
             gravitino_mass = CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(
                 prefactor_P, kahler_pot, superpotential; mplanck_ev=1.0)
 
