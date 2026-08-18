@@ -4,8 +4,12 @@
 This is a source-matched audit driver, not a replacement for the production
 geometry generator.  It reads the same KS Parquet mirror as the generator,
 counts FRST classes using the paper's two-face equivalence relation, and
-records the special trilayer involution together with the frozen-conifold
-diagnostic used by the paper's orientifold cut.
+records the special trilayer involution together with two independent
+per-FRST-class diagnostics: the frozen-conifold smoothness check (Moritz
+eqs. 4.48-4.50, a separate orientifold-background smoothness condition)
+and the h^{2,1}_+(X,I)=0 Hodge-number identity (eq. 4.51), the latter
+being the actual gate for the paper's h11_minus_zero_h21_plus_zero
+population.
 
 The orientifold and model stages are intentionally represented as explicit
 diagnostic records.  A count is labelled ``exact`` only when the implementation
@@ -231,6 +235,188 @@ def _frozen_conifold_diagnostic(triangulation, p0):
         "surface_records": surface_records,
         "unavailable_cones": unavailable,
         "frozen_surface_count": len(frozen),
+    }
+
+
+def _fixed_locus_components(triangulation, p0):
+    """Enumerate the irreducible fixed-locus components F_I(sigma), L=I.
+
+    Per Moritz eqs. (4.33)-(4.35), with L=I the nu label is trivially 0 and
+    every cone is pointwise L-invariant, so the smooth-cone components of
+    the fixed point set are labelled by cones sigma (of any dimension 0-4)
+    satisfying the parity condition t + (1/2) sum(sigma(1)) in N, i.e. with
+    t=p0/2, p0 + sum(rays in sigma(1)) in 2N.  Per the reduction described
+    just before eq. (4.35) ("one then removes the F~(sigma,nu) that are
+    already contained in a higher dimensional component"), a candidate
+    cone is discarded whenever a proper face of it also satisfies the
+    parity condition, since V(sigma) is then already contained in that
+    smaller face's own (larger) stratum.
+    """
+
+    fan = triangulation.fan()
+    vectors = _as_int_rows(fan.vectors())
+    p0 = np.asarray(p0, dtype=int)
+
+    def parity_ok(idxs):
+        total = p0 + (vectors[list(idxs)].sum(axis=0) if idxs else 0)
+        return bool(np.all(total % 2 == 0))
+
+    def indices_of(cone):
+        ray_points = _as_int_rows(cone.rays())
+        idxs = []
+        for point in ray_points:
+            matches = np.flatnonzero(np.all(vectors == point, axis=1))
+            if matches.size != 1:
+                return None
+            idxs.append(int(matches[0]))
+        return tuple(sorted(idxs))
+
+    candidates = []
+    unavailable = False
+    reasons = []
+    if parity_ok(()):
+        candidates.append((0, ()))
+    for k in (1, 2, 3, 4):
+        for cone in fan.cones(dim=k, formal=True):
+            idxs = indices_of(cone)
+            if idxs is None:
+                unavailable = True
+                reasons.append(f"ray_lookup_failed dim={k}")
+                continue
+            if not parity_ok(idxs):
+                continue
+            if k % 2 == 0 and not cone.is_smooth():
+                # Eq. (4.46): f vanishes identically on F~(sigma) for even
+                # dim(sigma), so all of F~(sigma) becomes part of F_I; the
+                # smoothness discussion of Sec. 4.6 requires this toric
+                # stratum itself to be smooth for its contribution to
+                # chi(F_I) to be well defined.
+                unavailable = True
+                reasons.append(f"non_smooth_even_dim_component dim={k} rays={idxs}")
+                continue
+            # For odd dim(sigma), f is a generic section (eq. 4.46) and the
+            # paper's own requirement is weaker than cone smoothness ("no
+            # orbifold singularities of F~(sigma,nu) intersect the
+            # hypersurface", Sec. 4.6) -- independently verified not to
+            # change the population count (see the fixed-locus validation
+            # note), so a non-smooth odd-dimension cone is kept, not
+            # excluded.
+            candidates.append((k, idxs))
+
+    sets = [set(idxs) for _, idxs in candidates]
+    minimal = [
+        (k, idxs)
+        for i, (k, idxs) in enumerate(candidates)
+        if not any(j != i and sets[j] < sets[i] for j in range(len(candidates)))
+    ]
+    return minimal, unavailable, reasons
+
+
+def _fixed_locus_euler_characteristic(poly, triangulation, p0):
+    """Compute chi(F_I) for the L=I trilayer fixed locus.
+
+    Dispatches each irreducible component F_I(sigma) from
+    ``_fixed_locus_components`` by dim(sigma) parity (Moritz eq. 4.46):
+
+    - even dim(sigma): F_I(sigma)=F~(sigma) in full, a smooth complete
+      toric variety whose Euler characteristic equals its number of
+      maximal cones (each toric torus-fixed point contributes 1).
+    - dim(sigma)=1 (a ray p, F~(sigma)=D_p): F_I(sigma)=D_p . X, a
+      generic-hypersurface-section surface in the Calabi-Yau threefold X.
+      By adjunction (K_X=0), chi(D_p.X) = D_p^3 + c2(X).D_p -- verified
+      to agree with an independent ambient toric-Chern-class derivation
+      to numerical precision on real h11=4 examples, see
+      validation/fuzzy_axions_2412_12012_h21_plus_fixed_locus_20260818.md.
+    - dim(sigma)=3 (rays p,q,r spanning a curve V(sigma)): F_I(sigma) is
+      the point set cut by X on that curve, whose count is the ambient
+      quadruple intersection D_p.D_q.D_r.X = sum_s kappa[p,q,r,s].
+    """
+
+    components, unavailable, reasons = _fixed_locus_components(triangulation, p0)
+    if unavailable:
+        return {"chi_F_I": None, "status": "unavailable", "reasons": reasons, "components": []}
+
+    fan = triangulation.fan()
+    vectors = _as_int_rows(fan.vectors())
+    maximal_cones = [set(cone) for cone in fan.cones(as_inds=True)]
+    tensor = _ambient_intersection_tensor(triangulation)
+    kappa = tensor[1:, 1:, 1:, 1:]
+
+    cy = triangulation.get_cy()
+    prime_divs = set(cy.prime_toric_divisors())
+    inter_dense = None
+    c2_vec = None
+
+    chi_total = 0.0
+    detail = []
+    for k, idxs in components:
+        if k % 2 == 0:
+            chi = float(sum(1 for cone in maximal_cones if set(idxs) <= cone))
+            detail.append({"dim": k, "rays": idxs, "chi": chi, "kind": "toric_stratum"})
+        elif k == 1:
+            ray_index = idxs[0]
+            point_index = int(poly.points_to_indices(vectors[ray_index].reshape(1, -1))[0])
+            if point_index not in prime_divs:
+                return {
+                    "chi_F_I": None,
+                    "status": "unavailable",
+                    "reasons": reasons + [f"ray {ray_index} is not a prime toric divisor of X"],
+                    "components": detail,
+                }
+            if inter_dense is None:
+                inter_dense = cy.intersection_numbers(in_basis=False, format="dense")
+                c2_vec = cy.second_chern_class(in_basis=False, include_origin=True)
+            chi = float(
+                inter_dense[point_index, point_index, point_index] + c2_vec[point_index]
+            )
+            detail.append({"dim": k, "rays": idxs, "chi": chi, "kind": "divisor_surface"})
+        else:
+            p_index, q_index, r_index = idxs
+            chi = float(kappa[p_index, q_index, r_index, :].sum())
+            detail.append({"dim": k, "rays": idxs, "chi": chi, "kind": "curve_points"})
+        chi_total += chi
+
+    return {"chi_F_I": chi_total, "status": "computed", "reasons": reasons, "components": detail}
+
+
+def _h21_plus_zero_diagnostic(poly, triangulation, p0):
+    """Test whether h^{2,1}_+(X,I)=0 exactly, via Moritz eq. (4.51).
+
+    For L=I, h^{1,1}_-(X,I)=0 identically (the identity lattice action
+    fixes every toric divisor class), so eq. (4.51) reduces to
+    h^{2,1}_-(X,I) = (chi(F_I) - chi(X))/4 - 1, and h^{2,1}_+ = h^{2,1}(X)
+    - h^{2,1}_-(X,I).  Independently validated against the paper's own
+    h11=2 worked example (Sec. 4.2.1, eq. 4.2): reproduces the stated
+    (h^{1,1}_+,h^{1,1}_-,h^{2,1}_+,h^{2,1}_-) = (2,0,0,132) exactly, and
+    reproduces the paper's 267-class h11=4 population target exactly when
+    applied across all trilayer FRST classes.  See
+    validation/fuzzy_axions_2412_12012_h21_plus_fixed_locus_20260818.md.
+    """
+
+    result = _fixed_locus_euler_characteristic(poly, triangulation, p0)
+    if result["status"] != "computed":
+        return {
+            "status": "unavailable",
+            "reasons": result["reasons"],
+            "chi_F_I": None,
+            "h21_minus": None,
+            "h21_plus": None,
+            "components": result["components"],
+        }
+    cy = triangulation.get_cy()
+    chi_X = cy.chi()
+    h21_X = cy.h21()
+    chi_FI = result["chi_F_I"]
+    h21_minus = (chi_FI - chi_X) / 4.0 - 1.0
+    h21_plus = h21_X - h21_minus
+    is_zero = abs(h21_plus) < 1e-6
+    return {
+        "status": "h21_plus_zero" if is_zero else "h21_plus_nonzero",
+        "reasons": result["reasons"],
+        "chi_F_I": chi_FI,
+        "h21_minus": h21_minus,
+        "h21_plus": h21_plus,
+        "components": result["components"],
     }
 
 
@@ -608,6 +794,7 @@ def reproduce(args):
     trilayer_polytope_count = 0
     trilayer_class_count = 0
     trilayer_nonfrozen_class_count = 0
+    trilayer_h21_plus_zero_class_count = 0
     identity_action_cy_count = 0
     identity_valid_action_cy_count = 0
     identity_action_count = 0
@@ -632,18 +819,21 @@ def reproduce(args):
         frozen = None
         frozen_per_class = None
         nonfrozen_class_count_this_polytope = 0
+        h21_per_class = None
+        h21_plus_zero_class_count_this_polytope = 0
         orientifold = None
         if trilayer is not None:
             trilayer_polytope_count += 1
             trilayer_class_count += len(classes)
             # The special trilayer involution (L=I) is compatible with every
-            # FRST -- but the frozen-conifold diagnostic is evaluated on a
+            # FRST -- but both per-class diagnostics below are evaluated on a
             # specific simplicial fan, and different FRST classes of the same
             # polytope can subdivide the fixed toric divisors differently.
-            # Measured directly: the diagnostic's status varies across FRST
-            # classes of the same polytope in ~22% of a sampled subset (see
+            # Measured directly: the frozen-conifold diagnostic's status
+            # varies across FRST classes of the same polytope in ~22% of a
+            # sampled subset (see
             # validation/fuzzy_axions_2412_12012_frst_dependent_frozen_conifold_20260817.md).
-            # It must therefore be evaluated per FRST class, not propagated
+            # Both must therefore be evaluated per FRST class, not propagated
             # from a single representative.
             frozen_per_class = [
                 _frozen_conifold_diagnostic(triangulation, trilayer["p0"])
@@ -656,20 +846,36 @@ def reproduce(args):
             )
             trilayer_nonfrozen_class_count += nonfrozen_class_count_this_polytope
             frozen = frozen_per_class[0] if frozen_per_class else None
+            # The actual h11_minus_zero_h21_plus_zero population gate (eq.
+            # 4.51 applied directly): independently validated to reproduce
+            # the paper's own h11=2 worked example's Hodge splitting exactly
+            # and the h11=4 population's 267-class target exactly -- unlike
+            # `frozen_per_class` above, which is a separate smoothness
+            # diagnostic for the orientifold background, not part of this
+            # population's definition. See
+            # validation/fuzzy_axions_2412_12012_h21_plus_fixed_locus_20260818.md.
+            h21_per_class = [
+                _h21_plus_zero_diagnostic(poly, triangulation, trilayer["p0"])
+                for triangulation in classes
+            ]
+            h21_plus_zero_class_count_this_polytope = sum(
+                1 for result in h21_per_class if result["status"] == "h21_plus_zero"
+            )
+            trilayer_h21_plus_zero_class_count += h21_plus_zero_class_count_this_polytope
         if args.orientifold_audit:
             orientifold = _orientifold_action_audit(poly, classes)
             orientifold_inherited_count += orientifold["inherited"]
             orientifold_h11_zero_count += orientifold["h11_minus_zero"]
         kaehler_export_per_class = None
-        if export_kaehler_points and frozen_per_class is not None:
+        if export_kaehler_points and h21_per_class is not None:
             # Only the classes actually accepted by the h21_plus_zero
-            # trilayer/frozen-conifold path (Algorithm 1's model-stage input
-            # population, see validation/fuzzy_axions_2412_12012_kaehler_qcd_model_count_scope_20260818.md
+            # population gate (Algorithm 1's model-stage input population,
+            # see validation/fuzzy_axions_2412_12012_kaehler_qcd_model_count_scope_20260818.md
             # section 6) get a live-CYTools export; the rest stay `None` so
-            # index alignment with `frozen_conifold_per_class` is preserved.
+            # index alignment with `h21_per_class` is preserved.
             kaehler_export_per_class = []
             for class_index, triangulation in enumerate(classes):
-                if frozen_per_class[class_index]["status"] != "no_frozen_conifold_obstruction":
+                if h21_per_class[class_index]["status"] != "h21_plus_zero":
                     kaehler_export_per_class.append(None)
                     continue
                 record = _export_kaehler_point(triangulation)
@@ -699,6 +905,8 @@ def reproduce(args):
                 "frozen_conifold": frozen,
                 "frozen_conifold_per_class": frozen_per_class,
                 "nonfrozen_class_count": nonfrozen_class_count_this_polytope,
+                "h21_plus_zero_per_class": h21_per_class,
+                "h21_plus_zero_class_count": h21_plus_zero_class_count_this_polytope,
                 "identity_torus_action_numerators": actions.tolist(),
                 "identity_valid_o3o7_action_numerators": valid_actions.tolist(),
                 "orientifold_action_audit": orientifold,
@@ -710,13 +918,14 @@ def reproduce(args):
                 f"processed {poly_index + 1}/{len(records)} polytopes; "
                 f"raw={total_raw}, classes={total_classes}, "
                 f"trilayer_classes={trilayer_class_count}, "
-                f"nonfrozen_trilayer_classes={trilayer_nonfrozen_class_count}",
+                f"nonfrozen_trilayer_classes={trilayer_nonfrozen_class_count}, "
+                f"h21_plus_zero_trilayer_classes={trilayer_h21_plus_zero_class_count}",
                 flush=True,
             )
 
     population_complete = bool(args.limit >= 10**9)
     population_exact_267 = (
-        trilayer_nonfrozen_class_count == PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]
+        trilayer_h21_plus_zero_class_count == PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]
         and population_complete
     )
     model_stage = _run_model_stage(model_stage_records, args) if args.model_stage else None
@@ -724,12 +933,12 @@ def reproduce(args):
         reasons = []
         if not population_complete:
             reasons.append("run was limited via --limit; population is not the full h11=4 set")
-        if trilayer_nonfrozen_class_count != PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]:
+        if trilayer_h21_plus_zero_class_count != PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]:
             reasons.append(
-                f"input population is {trilayer_nonfrozen_class_count} h21_plus_zero-accepted "
+                f"input population is {trilayer_h21_plus_zero_class_count} h21_plus_zero-accepted "
                 f"FRST classes, not the exact {PAPER_TARGETS['h11_minus_zero_h21_plus_zero_orientifold_cys']}"
                 "-target population (see "
-                "fuzzy_axions_2412_12012_h21_plus_gap_investigation_20260817.md)"
+                "fuzzy_axions_2412_12012_h21_plus_fixed_locus_20260818.md)"
             )
         if model_stage["total_model_count"] != PAPER_TARGETS["models"]:
             reasons.append(
@@ -757,7 +966,10 @@ def reproduce(args):
             "frst_classes": total_classes,
             "raw_trilayer_polytopes": trilayer_polytope_count,
             "raw_trilayer_frst_classes": trilayer_class_count,
+            # A separate orientifold-background smoothness diagnostic, not
+            # this population's own gate -- see h21_plus_zero_trilayer_frst_classes.
             "nonfrozen_trilayer_frst_classes": trilayer_nonfrozen_class_count,
+            "h21_plus_zero_trilayer_frst_classes": trilayer_h21_plus_zero_class_count,
             "identity_torus_action_count": identity_action_count,
             "identity_torus_action_cy_count": identity_action_cy_count,
             "identity_valid_o3o7_action_cy_count": identity_valid_action_cy_count,
@@ -780,7 +992,7 @@ def reproduce(args):
             "frst_classes": "exact" if total_classes == PAPER_TARGETS["frst_classes"] else "mismatch",
             "h21_plus_zero": (
                 "benchmark_match_candidate"
-                if trilayer_nonfrozen_class_count == PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]
+                if trilayer_h21_plus_zero_class_count == PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]
                 else "diagnostic_only"
             ),
             "model_count": (
