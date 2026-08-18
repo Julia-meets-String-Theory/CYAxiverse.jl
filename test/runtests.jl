@@ -1460,6 +1460,52 @@ end
                 tau_record46[model.qcd_divisor_index], model.lambda)
             @test isfinite(model.mass_reference_log10_ev)
         end
+
+        # Self-reference exclusion: an axion cannot be paired with its own
+        # divisor as its candidate QCD divisor (see enumerate_fuzzy_axion_models's
+        # docstring). Real geometry, not synthetic: the paper's own h1,1=2
+        # worked example (Sec. 4.2.1, eq. 4.2-4.4), evaluated at the genuine
+        # Algorithm-1 canonical Kahler-cone-tip point (CYTools
+        # `kahler_cone.tip_of_stretched_cone(1.0)`, NOT the paper's own
+        # hand-picked illustrative t*) -- confirmed against the paper's text
+        # that toric divisor D6 (tau=0.5 here) is "the QCD axion" and D2
+        # (tau=2.5) is "the fuzzy axion". Before this exclusion existed,
+        # every one of this geometry's 3 generated models was self-referential
+        # (either D6 paired with itself, or D2 paired with itself), a finding
+        # recorded in
+        # validation/fuzzy_axions_2412_12012_mass_formula_missing_qcd_axion_20260818.md.
+        Q_h11_2 = [7 1 1 2 3 0; 2 0 0 0 1 1]
+        tau_h11_2 = [18.499999999999993, 2.499999999999999, 2.499999999999999,
+            4.999999999999998, 7.9999999999999964, 0.49999999999999956]
+        cy_volume_h11_2 = 3.4999999999999982
+        Kinv_h11_2 = [11.0 -9.0; -9.0 43.0]
+        P_h11_2 = PB.fuzzy_axion_prefactor_P(0.5029733)
+        K_h11_2 = PB.fuzzy_axion_kahler_potential(cy_volume_h11_2)
+        W_h11_2 = PB.fuzzy_axion_flux_superpotential(1.0)
+        m32_h11_2 = PB.fuzzy_axion_gravitino_mass(
+            P_h11_2, K_h11_2, abs(W_h11_2); mplanck_ev=1.0)
+        reference_h11_2 = PB.leading_axion_reference_data(
+            Q_h11_2, tau_h11_2, cy_volume_h11_2, P_h11_2, m32_h11_2, Kinv_h11_2)
+        # divisor_index must round-trip exactly back through Q/tau.
+        for a in eachindex(reference_h11_2.divisor_index)
+            @test @view(Q_h11_2[:, reference_h11_2.divisor_index[a]]) ==
+                @view(reference_h11_2.Qtilde[:, a])
+            @test tau_h11_2[reference_h11_2.divisor_index[a]] ==
+                reference_h11_2.tau_reference[a]
+        end
+        models_h11_2 = PB.enumerate_fuzzy_axion_models(
+            Q_h11_2, tau_h11_2, cy_volume_h11_2, P_h11_2, m32_h11_2, Kinv_h11_2)
+        @test all(
+            model.qcd_divisor_index != reference_h11_2.divisor_index[model.axion_index]
+            for model in models_h11_2
+        )
+        # A distinct divisor that merely happens to share the same volume
+        # (D2 and D3 both have tau=2.5 here) is a different physical 4-cycle
+        # and must NOT be excluded -- only literal self-reference is.
+        @test any(
+            model.axion_index == 2 && model.qcd_divisor_index == 3
+            for model in models_h11_2
+        )
     end
 end
 

@@ -42,6 +42,12 @@ and `fuzzy_axion_gravitino_mass(...; mplanck_ev=1.0)` output respectively
 before the final Mpl-to-eV "restoration").
 
 `inverse_metric` is `K^{ij}` at t0 (the Priority-1 export's `inverse_metric`).
+
+Also returns `divisor_index`, the original 1-based column of `Q`/`tau` each
+selected leading axion was built from -- needed by
+[`enumerate_fuzzy_axion_models`](@ref) to exclude an axion from being paired
+with its own divisor as a candidate QCD divisor (see that function's
+docstring).
 """
 function leading_axion_reference_data(Q::AbstractMatrix{Int}, tau::AbstractVector{<:Real},
         cy_volume::Real, prefactor_P::Real, gravitino_mass_planck_units::Real,
@@ -78,15 +84,17 @@ function leading_axion_reference_data(Q::AbstractMatrix{Int}, tau::AbstractVecto
 
     n_leading = size(selected.Qtilde, 2)
     tau_reference = zeros(Float64, n_leading)
+    divisor_index = zeros(Int, n_leading)
     for a in 1:n_leading
         column = @view selected.Qtilde[:, a]
         match = findfirst(j -> @view(Q[:, j]) == column, axes(Q, 2))
         match === nothing && throw(ArgumentError(
             "a selected leading charge column was not found among the original Q columns"))
         tau_reference[a] = tau[match]
+        divisor_index[a] = match
     end
 
-    (; Qtilde = selected.Qtilde, tau_reference,
+    (; Qtilde = selected.Qtilde, tau_reference, divisor_index,
        mass_log10_ev_reference = masses_log10_ev)
 end
 
@@ -192,6 +200,23 @@ underflow to exactly `0.0` for a strongly-suppressed sub-leading instanton
 (see [`fuzzy_axion_dilation_root`](@ref)'s docstring), so the root-solve
 itself uses [`fuzzy_axion_dilation_root_log10`](@ref) directly on
 `reference.mass_log10_ev_reference`, never materializing the linear mass.
+
+A candidate QCD divisor `D` equal to axion `a`'s own divisor (`D ==
+reference.divisor_index[a]`) is excluded: that would require the same
+four-cycle to simultaneously host the D7-brane stack realizing QCD
+(criterion 2) and be the instanton wrapping that generates axion `a`'s own
+ultralight mass (criterion 3) -- every worked example in the source
+(Sec. 4.2) keeps the QCD divisor and the fuzzy-axion divisor distinct
+(e.g. Sec. 4.2.1: "the QCD axion is associated to the prime toric divisor
+D6, and the fuzzy axion is associated to the prime toric divisor D2"), and
+this pairing is not merely disfavored but physically incoherent (the same
+cycle cannot be both the fixed engineering choice hosting a non-dynamical
+gauge stack and the field being continuously dilated toward an unrelated
+mass target). Confirmed empirically to matter: on the real Algorithm-1
+canonical-tip point for the paper's own h1,1=2 example, every one of this
+geometry's currently-generated models was of exactly this self-referential
+form before this exclusion was added (see
+`validation/fuzzy_axions_2412_12012_mass_formula_missing_qcd_axion_20260818.md`).
 """
 function enumerate_fuzzy_axion_models(Q::AbstractMatrix{Int}, tau::AbstractVector{<:Real},
         cy_volume::Real, prefactor_P::Real, gravitino_mass_planck_units::Real,
@@ -211,6 +236,7 @@ function enumerate_fuzzy_axion_models(Q::AbstractMatrix{Int}, tau::AbstractVecto
         lambda === nothing && continue
         fuzzy_axion_criterion_one(tau, lambda) || continue
         for divisor_index in 1:n_divisors
+            divisor_index == reference.divisor_index[a] && continue
             fuzzy_axion_criterion_two(tau[divisor_index], lambda;
                 volume_min=qcd_volume_min, volume_max=qcd_volume_max) || continue
             push!(models, (;

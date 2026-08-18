@@ -111,7 +111,9 @@ class ModelStageDriverBridgeTest(unittest.TestCase):
             gs = {GS}
             w0 = Complex{{Float64}}({W0_REAL}, {W0_IMAG})
             prefactor_P = CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(gs)
-            superpotential = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(w0)
+            instanton_terms = exp.(-2π .* tau)
+            superpotential = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(
+                w0, instanton_terms)
             kahler_pot = CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(cy_volume)
             gravitino_mass = CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(
                 prefactor_P, kahler_pot, superpotential; mplanck_ev=1.0)
