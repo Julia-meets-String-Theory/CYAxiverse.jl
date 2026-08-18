@@ -1461,19 +1461,24 @@ end
             @test isfinite(model.mass_reference_log10_ev)
         end
 
-        # Self-reference exclusion: an axion cannot be paired with its own
-        # divisor as its candidate QCD divisor (see enumerate_fuzzy_axion_models's
+        # Self-reference is NOT excluded: a candidate QCD divisor equal to
+        # axion `a`'s own divisor is a valid Algorithm-1 model, matching the
+        # paper's literal text (see enumerate_fuzzy_axion_models's
         # docstring). Real geometry, not synthetic: the paper's own h1,1=2
         # worked example (Sec. 4.2.1, eq. 4.2-4.4), evaluated at the genuine
         # Algorithm-1 canonical Kahler-cone-tip point (CYTools
         # `kahler_cone.tip_of_stretched_cone(1.0)`, NOT the paper's own
         # hand-picked illustrative t*) -- confirmed against the paper's text
         # that toric divisor D6 (tau=0.5 here) is "the QCD axion" and D2
-        # (tau=2.5) is "the fuzzy axion". Before this exclusion existed,
-        # every one of this geometry's 3 generated models was self-referential
-        # (either D6 paired with itself, or D2 paired with itself), a finding
-        # recorded in
-        # validation/fuzzy_axions_2412_12012_mass_formula_missing_qcd_axion_20260818.md.
+        # (tau=2.5) is "the fuzzy axion". Of this geometry's 3 generated
+        # models, 2 are self-referential (axion 1 paired with its own
+        # divisor D6, axion 2 paired with its own divisor D2) and 1 is not
+        # (axion 2 paired with the distinct-but-same-volume divisor D3),
+        # per
+        # validation/fuzzy_axions_2412_12012_model_count_gap_scope_20260818.md
+        # Sec. 0/0b's population-wide measurement that self-referential
+        # pairing is the modal outcome (69% mean, present in every one of
+        # 267 records), not a rare case worth excluding.
         Q_h11_2 = [7 1 1 2 3 0; 2 0 0 0 1 1]
         tau_h11_2 = [18.499999999999993, 2.499999999999999, 2.499999999999999,
             4.999999999999998, 7.9999999999999964, 0.49999999999999956]
@@ -1495,13 +1500,23 @@ end
         end
         models_h11_2 = PB.enumerate_fuzzy_axion_models(
             Q_h11_2, tau_h11_2, cy_volume_h11_2, P_h11_2, m32_h11_2, Kinv_h11_2)
-        @test all(
-            model.qcd_divisor_index != reference_h11_2.divisor_index[model.axion_index]
+        @test length(models_h11_2) == 3
+        self_referential = [
+            model.qcd_divisor_index == reference_h11_2.divisor_index[model.axion_index]
+            for model in models_h11_2
+        ]
+        @test count(self_referential) == 2
+        @test any(
+            model.axion_index == 1 && model.qcd_divisor_index == 6
+            for model in models_h11_2
+        )
+        @test any(
+            model.axion_index == 2 && model.qcd_divisor_index == 2
             for model in models_h11_2
         )
         # A distinct divisor that merely happens to share the same volume
         # (D2 and D3 both have tau=2.5 here) is a different physical 4-cycle
-        # and must NOT be excluded -- only literal self-reference is.
+        # and is not self-referential.
         @test any(
             model.axion_index == 2 && model.qcd_divisor_index == 3
             for model in models_h11_2
