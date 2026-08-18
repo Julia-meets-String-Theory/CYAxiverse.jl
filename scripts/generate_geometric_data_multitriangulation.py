@@ -47,6 +47,7 @@ import h5py
 import numpy as np
 import cytools
 from cytools import Polytope, fetch_polytopes
+from cytools.utils import filter_tensor_indices, symmetric_sparse_to_dense
 from geometry_charge_conventions import canonicalize_unique_charge_rows
 from qed_divisor_assignment import (
     QEDAssignmentFailure,
@@ -112,9 +113,11 @@ SOURCE_REFERENCES = (
 )
 SAMPLING_SCHEMES = ("fair", "fast", "ntfe_fast")
 NTFE_FACE_SAMPLERS = ("fast", "fair", "grow2d")
-VOLUME_BACKENDS = ("fan", "historical_sparse_coo", "auto")
+VOLUME_BACKENDS = ("fan", "historical_sparse_coo", "fan_integer_constrained", "auto")
 HISTORICAL_VOLUME_BACKEND = "historical_sparse_coo"
+FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND = "fan_integer_constrained"
 AUTO_VOLUME_BACKEND = "auto"
+ROUND_TO_INTEGER_ERROR_TOLERANCE = 5e-2
 KS_MIRROR_DATASET = "calabi-yau-data/polytopes-4d"
 KS_MIRROR_DATASET_URL = "https://huggingface.co/datasets/calabi-yau-data/polytopes-4d"
 QCD_VOLUME_TOLERANCE = 1e-9
@@ -398,7 +401,8 @@ def validate_orientifold(poly, triangulation, topology, config):
         mapped = tuple((matrix @ point).tolist())
         if mapped not in point_lookup:
             raise OrientifoldValidationFailure(
-                "The orientifold lattice action does not preserve the KS polytope."
+                "The orientifold lattice action does not preserve the KS polytope.",
+                stage="polytope_not_preserved",
             )
         mapped_indices.append(point_lookup[mapped])
     mapped_indices = np.asarray(mapped_indices, dtype=int)
@@ -418,7 +422,8 @@ def validate_orientifold(poly, triangulation, topology, config):
     }
     if mapped_simplices != simplices:
         raise OrientifoldValidationFailure(
-            "The orientifold lattice action does not preserve the selected FRST."
+            "The orientifold lattice action does not preserve the selected FRST.",
+            stage="frst_not_preserved",
         )
 
     basis_matrix = np.asarray(topology["basis_matrix"], dtype=float)
@@ -438,15 +443,22 @@ def validate_orientifold(poly, triangulation, topology, config):
         )
     except KeyError as exc:
         raise OrientifoldValidationFailure(
-            "The orientifold action does not preserve the prime toric divisor set."
+            "The orientifold action does not preserve the prime toric divisor set.",
+            stage="prime_divisor_set_not_preserved",
         ) from exc
     if mapped_divisor_positions[0] != 0:
-        raise OrientifoldValidationFailure("The orientifold action must fix the origin label.")
+        raise OrientifoldValidationFailure(
+            "The orientifold action must fix the origin label.",
+            stage="prime_divisor_set_not_preserved",
+        )
     prime_image_indices = mapped_divisor_positions[1:] - 1
     if np.any(prime_image_indices < 0) or np.any(
         prime_image_indices >= topology["prime_toric_divisors"].size
     ):
-        raise OrientifoldValidationFailure("The orientifold prime-divisor image map is invalid.")
+        raise OrientifoldValidationFailure(
+            "The orientifold prime-divisor image map is invalid.",
+            stage="prime_divisor_set_not_preserved",
+        )
     permutation = np.zeros((divisor_points.size, divisor_points.size), dtype=float)
     permutation[np.arange(divisor_points.size), mapped_divisor_positions] = 1.0
     transformed_basis = basis_matrix @ permutation
@@ -458,12 +470,19 @@ def validate_orientifold(poly, triangulation, topology, config):
     if not np.allclose(h2_matrix, integral_h2, atol=1e-8):
         raise OrientifoldValidationFailure(
             "The orientifold action does not induce an integral action in the "
-            "exported divisor basis."
+            "exported divisor basis.",
+            stage="nonintegral_h2_action",
         )
     if not np.allclose(integral_h2 @ basis_matrix, transformed_basis, atol=1e-8):
-        raise OrientifoldValidationFailure("Could not express the orientifold action in H2.")
+        raise OrientifoldValidationFailure(
+            "Could not express the orientifold action in H2.",
+            stage="nonintegral_h2_action",
+        )
     if not np.array_equal(integral_h2 @ integral_h2, np.eye(topology["h11"], dtype=int)):
-        raise OrientifoldValidationFailure("The induced H2 action is not an involution.")
+        raise OrientifoldValidationFailure(
+            "The induced H2 action is not an involution.",
+            stage="h2_action_not_involution",
+        )
 
     invariant_basis = _nullspace(integral_h2.T - np.eye(topology["h11"]))
     anti_invariant_basis = _nullspace(integral_h2.T + np.eye(topology["h11"]))
@@ -1221,6 +1240,10 @@ class NoVisibleSectorAssignment(RuntimeError):
 class OrientifoldValidationFailure(RuntimeError):
     """The supplied orientifold does not preserve the selected geometry."""
 
+    def __init__(self, message, stage=None):
+        super().__init__(message)
+        self.stage = stage
+
 
 def _candidate_terminal_status(exc):
     """Map implementation failures onto the schema 1.1 terminal vocabulary."""
@@ -1412,6 +1435,13 @@ def resolve_volume_backend(h11, volume_backend=None, sampling_metadata=None):
     compatibility route for the high-h11 construction, not a general
     replacement for CYTools.  The explicit ``auto`` policy selects that
     historical route only at h11=491 and selects Fan elsewhere.
+
+    ``fan_integer_constrained`` is a third, explicitly-selected diagnostic
+    route: it applies the historical route's own integer-snap-and-tolerance
+    check (see ``_reconstruct_fan_integer_constrained_geometry``) to Fan's
+    ambient intersection numbers before basis reduction.  It carries no h11
+    restriction and is never selected by ``auto``; it exists for numerical
+    comparison against the other two routes, not as a production default.
     """
     if volume_backend is None:
         metadata_backend = (
@@ -1857,9 +1887,14 @@ def generate_and_save_geometry(
         raise ValueError(
             "visible_sector_policy must be 'none' or 'intersecting_d7'"
         )
-    if qed_selection_policy not in {"uniform_eligible", "explicit"}:
+    if qed_selection_policy not in {
+        "uniform_eligible",
+        "uniform_eligible_with_fallback",
+        "explicit",
+    }:
         raise ValueError(
-            "qed_selection_policy must be 'uniform_eligible' or 'explicit'"
+            "qed_selection_policy must be 'uniform_eligible', "
+            "'uniform_eligible_with_fallback', or 'explicit'"
         )
     if visible_sector_policy == "none" and (
         qed_selection_policy == "explicit" or qed_divisor_index_user is not None
@@ -1880,7 +1915,10 @@ def generate_and_save_geometry(
         )
     if qed_selection_policy == "explicit" and qed_divisor_index_user is None:
         raise ValueError("explicit QED selection requires qed_divisor_index_user")
-    if qed_selection_policy == "uniform_eligible" and qed_divisor_index_user is not None:
+    if (
+        qed_selection_policy in {"uniform_eligible", "uniform_eligible_with_fallback"}
+        and qed_divisor_index_user is not None
+    ):
         raise ValueError("an explicit QED index requires explicit selection")
     if kaehler_point_seed is None:
         kaehler_point_seed = stable_seed(
@@ -2763,7 +2801,13 @@ def generate_and_save_geometry(
         "volume_backend_scope": (
             "h11=491 compatibility reproduction only"
             if volume_backend == HISTORICAL_VOLUME_BACKEND
-            else "CYTools Fan path default"
+            else (
+                "numerical-comparison diagnostic: legacy integer-snap check "
+                "applied to Fan's ambient intersection numbers before basis "
+                "reduction; not selected by 'auto', no h11 restriction"
+                if volume_backend == FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND
+                else "CYTools Fan path default"
+            )
         ),
         "historical_contraction": (
             {
@@ -2782,6 +2826,28 @@ def generate_and_save_geometry(
                 "curve_volume_formula": "mori_cone_rays @ t",
             }
             if volume_backend == HISTORICAL_VOLUME_BACKEND
+            else {"selected": False},
+        ),
+        "fan_integer_constrained_contraction": (
+            {
+                "selected": True,
+                "intersection_source": (
+                    "CYTools Fan.intersection_numbers(pushed_down=True, "
+                    "in_basis=False), integer-rounded with a 5e-2 tolerance "
+                    "check gated on canonical_divisor_is_smooth(), then "
+                    "basis-reduced with the same cytools.utils helpers the "
+                    "historical route uses"
+                ),
+                "formula": (
+                    "V=1/6*kappa_ijk*t_i*t_j*t_k; "
+                    "tau_i=1/2*kappa_ijk*t_j*t_k; "
+                    "kappa from integer-snapped, basis-reduced ambient Fan "
+                    "intersection numbers"
+                ),
+                "prime_divisor_formula": "glsm_charge_matrix.T @ tau_basis",
+                "curve_volume_formula": "CYTools compute_curve_volumes(t) (shared Mori-cone route, not backend-specific)",
+            }
+            if volume_backend == FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND
             else {"selected": False},
         ),
         "volume_backend_diagnostics": volume_backend_diagnostics,
@@ -2828,9 +2894,17 @@ def generate_and_save_geometry(
                 )
                 if volume_backend == HISTORICAL_VOLUME_BACKEND
                 else (
-                    "CYTools compute_divisor_volumes(reference tip), then "
-                    "homogeneous m^2 scaling; ordered by CYTools "
-                    "prime_toric_divisors()"
+                    (
+                        "integer-constrained Fan basis contraction followed by "
+                        "GLSM.T @ tau_basis at reference tip, then homogeneous "
+                        "m^2 scaling; ordered by CYTools prime_toric_divisors()"
+                    )
+                    if volume_backend == FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND
+                    else (
+                        "CYTools compute_divisor_volumes(reference tip), then "
+                        "homogeneous m^2 scaling; ordered by CYTools "
+                        "prime_toric_divisors()"
+                    )
                 )
             )
             if moduli_policy == "canonical_qcd"
@@ -2841,8 +2915,16 @@ def generate_and_save_geometry(
                 )
                 if volume_backend == HISTORICAL_VOLUME_BACKEND
                 else (
-                    "CYTools compute_divisor_volumes(tip), ordered by "
-                    "CYTools prime_toric_divisors()"
+                    (
+                        "integer-constrained Fan basis contraction followed by "
+                        "GLSM.T @ tau_basis, ordered by CYTools "
+                        "prime_toric_divisors()"
+                    )
+                    if volume_backend == FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND
+                    else (
+                        "CYTools compute_divisor_volumes(tip), ordered by "
+                        "CYTools prime_toric_divisors()"
+                    )
                 )
             )
         ),
@@ -4666,6 +4748,98 @@ def _reconstruct_intersection_geometry(kappa, tip):
     }
 
 
+def _reconstruct_fan_integer_constrained_geometry(cy, tip):
+    """Reconstruct volume, divisor volumes, and the inverse metric from Fan's
+    ambient intersection numbers, after applying the historical route's own
+    integer-snap-and-tolerance check.
+
+    CYTools' historical/DOK route snaps its ambient, not-yet-basis-reduced
+    intersection numbers to the nearest integer, gated on
+    ``canonical_divisor_is_smooth()``, before ever reducing to the divisor
+    basis (see ``cytools/toricvariety.py``, the block that rounds
+    "intersections with canonical divisor").  Fan's ``pushed_down=True,
+    in_basis=False`` intersection numbers are the ambient-level entries of
+    the same shape, so the identical check applies to them before this
+    function performs the same basis reduction the historical route uses.
+
+    This isolates whether Fan/historical disagreement in the final volumes
+    is float noise around a shared integer answer (the case this repository
+    has measured on a declared sample), or a genuinely different set of
+    ambient intersection numbers.  Not a replacement for either existing
+    backend; it is a diagnostic comparison route, never selected by
+    ``auto``.
+    """
+    point = np.asarray(tip, dtype=float).reshape(-1)
+    if point.size == 0 or not np.all(np.isfinite(point)):
+        raise ValueError("the stored accepted Kaehler point is invalid")
+
+    # `_fan` is CYTools' own lazily-created attribute (see
+    # cytools/calabiyau.py, compute_cy_volume/compute_divisor_volumes/
+    # compute_kappa_matrix); replicate that lazy-init here so this backend
+    # works regardless of whether a Fan-route computation ran first.
+    if not hasattr(cy, "_fan"):
+        cy._fan = cy.triangulation().fan()
+
+    ambient_variety = cy.ambient_variety()
+    canonical_divisor_is_smooth = bool(ambient_variety.canonical_divisor_is_smooth())
+
+    raw_pushed = dict(
+        cy._fan.intersection_numbers(
+            pushed_down=True,
+            in_basis=False,
+            symmetrize=False,
+            as_np_array=False,
+            copy=True,
+        )
+    )
+
+    if canonical_divisor_is_smooth:
+        deviations = [abs(v - round(v)) for v in raw_pushed.values()]
+        if deviations and max(deviations) > ROUND_TO_INTEGER_ERROR_TOLERANCE:
+            raise ValueError(
+                "non-integer intersection numbers detected in a smooth "
+                "canonical divisor while applying the fan_integer_constrained "
+                f"backend (max deviation {max(deviations):.6g} exceeds "
+                f"tolerance {ROUND_TO_INTEGER_ERROR_TOLERANCE:.6g})"
+            )
+        reduced_source = {}
+        for key, value in raw_pushed.items():
+            rounded_value = int(round(value))
+            if rounded_value != 0:
+                reduced_source[key] = float(rounded_value)
+    else:
+        reduced_source = dict(raw_pushed)
+
+    basis = np.asarray(cy.divisor_basis(), dtype=int)
+    if basis.ndim == 2:
+        dense_basis_kappa = symmetric_sparse_to_dense(reduced_source, basis)
+    else:
+        basis_reduced_dok = filter_tensor_indices(reduced_source, basis.tolist())
+        dense_basis_kappa = symmetric_sparse_to_dense(basis_reduced_dok)
+    dense_basis_kappa = np.asarray(dense_basis_kappa, dtype=float)
+
+    kappa_matrix = np.tensordot(dense_basis_kappa, point, axes=([-1], [0]))
+    cy_volume = float((kappa_matrix @ point) @ point / 6.0)
+    divisor_volumes = np.asarray((kappa_matrix @ point) / 2.0, dtype=float)
+    inverse_metric = 4.0 * (
+        np.outer(divisor_volumes, divisor_volumes) - kappa_matrix * cy_volume
+    )
+    inverse_metric = 0.5 * (inverse_metric + inverse_metric.T)
+    if (
+        not np.isfinite(cy_volume)
+        or cy_volume <= 0.0
+        or not np.all(np.isfinite(divisor_volumes))
+        or not np.all(np.isfinite(inverse_metric))
+    ):
+        raise ValueError("reconstructed geometric quantities are non-finite or non-positive")
+    return {
+        "cy_volume": float(cy_volume),
+        "divisor_volumes": divisor_volumes,
+        "inverse_metric": inverse_metric,
+        "canonical_divisor_is_smooth": canonical_divisor_is_smooth,
+    }
+
+
 def _compute_volume_geometry(
     cy,
     tip,
@@ -4691,6 +4865,29 @@ def _compute_volume_geometry(
         inverse_metric = np.asarray(
             cy.compute_inverse_kahler_metric(point), dtype=float
         )
+        curve_volumes = np.asarray(cy.compute_curve_volumes(point), dtype=float)
+    elif volume_backend == FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND:
+        if glsm_charge_matrix is None:
+            raise ValueError(
+                "fan_integer_constrained requires the existing GLSM charge matrix"
+            )
+        reconstructed = _reconstruct_fan_integer_constrained_geometry(cy, point)
+        cy_volume = float(reconstructed["cy_volume"])
+        basis_divisor_volumes = np.asarray(
+            reconstructed["divisor_volumes"], dtype=float
+        )
+        inverse_metric = np.asarray(reconstructed["inverse_metric"], dtype=float)
+        glsm = np.asarray(glsm_charge_matrix, dtype=float)
+        if glsm.ndim != 2 or glsm.shape[0] != point.size:
+            raise ValueError(
+                "the GLSM charge matrix must have one row per divisor-basis coordinate"
+            )
+        prime_divisor_volumes = np.asarray(glsm.T @ basis_divisor_volumes, dtype=float)
+        # Curve volumes depend only on the shared Mori-cone/secondary-cone
+        # combinatorics, not on the intersection-number algorithm (see
+        # cy.toric_mori_cone / ToricVariety.mori_cone), so this backend reuses
+        # the same native call the "fan" branch uses rather than recomputing
+        # from `mori_cone` data.
         curve_volumes = np.asarray(cy.compute_curve_volumes(point), dtype=float)
     else:
         if kappa is None:

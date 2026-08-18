@@ -1218,6 +1218,192 @@ end
     expected_kinetic_eigenvalues = sort([8.20e-4, 6.35e-4, 5.97e-4, 3.13e-4,
                                          1.24e-4, 9.15e-5, 8.30e-5, 5.84e-5])
     @test all(isapprox.(eigvals(geometry.kinetic), expected_kinetic_eigenvalues; rtol=6e-3))
+
+    @testset "Fuzzy-axion mass-scale formulas (arXiv:2412.12012)" begin
+        mplanck_ev = Float64(CYAxiverse.generate.constants()["MPlanck"]) * 1e9
+
+        @test CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(1.0) == 0.0
+        @test isapprox(CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(exp(1)), -2.0)
+        @test isapprox(CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(exp(2)), -4.0)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(0.0)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(-1.0)
+
+        @test isapprox(CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(1.0), 1.0 / 128.0)
+        # arXiv:2412.12012: "For the reasonable reference value gs = 0.5, we
+        # have P ~ 5 * 10^-4, and this is the value we have used in our main
+        # analysis." Quoted to one significant figure.
+        p_reference = CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(0.5)
+        @test isapprox(p_reference, 0.5^4 / 128.0)
+        @test isapprox(round(p_reference; digits=4), 5e-4)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(0.0)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(-0.5)
+
+        w_default = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(1e-5)
+        @test isapprox(real(w_default), 1e-5)
+        @test imag(w_default) == 0.0
+        w_real_terms = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(
+            1e-5, [0.1, -0.05])
+        @test isapprox(real(w_real_terms), 1e-5 + 0.1 - 0.05)
+        w_complex_terms = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(
+            0.0, [0.1 + 0.2im])
+        @test isapprox(real(w_complex_terms), 0.1)
+        @test isapprox(imag(w_complex_terms), 0.2)
+
+        # P=1, K=0, |W|=1 -> m_3/2 = Mpl exactly.
+        @test isapprox(
+            CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(1.0, 0.0, 1.0),
+            mplanck_ev)
+        # P=1, K=-2 (fuzzy_axion_kahler_potential(e)), |W|=1 -> m_3/2 = Mpl / e.
+        @test isapprox(
+            CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(
+                1.0, CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(exp(1)), 1.0),
+            mplanck_ev / exp(1))
+        # |W| = |3+4i| = 5.
+        @test isapprox(
+            CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(1.0, 0.0, 3.0 + 4.0im),
+            5.0 * mplanck_ev)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(
+            -1.0, 0.0, 1.0)
+    end
+
+    @testset "Fuzzy-axion model-stage evaluator (arXiv:2412.12012 Algorithm 1)" begin
+        PB = CYAxiverse.paper_benchmarks
+        G = CYAxiverse.generate
+
+        Q = Int[
+            1 0 -1 2 6 0 0 4
+            0 1  1 0 0 0 0 -2
+            0 0  0 1 3 1 0 1
+            0 0 -1 1 3 0 1 2
+        ]
+        tau = Float64[0.5, 8.0, 0.5, 11.0, 33.0, 3.0, 7.0, 3.0000001]
+        Kinv = [
+            1.0 0.1 0.05 0.0
+            0.1 1.0 0.1 0.05
+            0.05 0.1 1.0 0.1
+            0.0 0.05 0.1 1.0
+        ]
+
+        # `leading_axion_reference_data`'s Cholesky/canonical-frame/unit-conversion
+        # plumbing must exactly reproduce the established public
+        # `pq_spectrum(K, L, Q; mixing_correction=false)` API when the eq. 3.18
+        # prefactor injection is neutralized (8*pi*sqrt(P)*m32/V == 1). This
+        # isolates "did I wire the existing, already-used mass machinery
+        # correctly" from "is eq. 3.19's own normalization convention exactly
+        # right", the latter being inherited, untouched, from the existing
+        # pq_canonical_frame/pq_spectrum implementation.
+        P_neutral = 1.0
+        V_neutral = 1.0
+        m32_neutral = 1.0 / (8π)
+        reference_neutral = PB.leading_axion_reference_data(
+            Q, tau, V_neutral, P_neutral, m32_neutral, Kinv)
+        Kmetric = Hermitian(inv(Hermitian(Kinv)))
+        L_raw = PB.instanton_scales(tau, 1.0)
+        established = G.pq_spectrum(Kmetric, L_raw, Q; mixing_correction=false)
+        @test isapprox(
+            sort(reference_neutral.mass_log10_ev_reference), established.m; atol=1e-8)
+
+        # The eq. 3.18 prefactor log10(8*pi*sqrt(P)*m32/V) is a uniform
+        # additive shift to log10(Lambda^4) that changes by 0.5*Δlog10(P)
+        # when only P changes; since m ~ sqrt(Lambda^4), every reference mass
+        # must then shift by half of *that*, i.e. 0.25*Δlog10(P) overall.
+        P_other = 4.0
+        reference_other = PB.leading_axion_reference_data(
+            Q, tau, V_neutral, P_other, m32_neutral, Kinv)
+        expected_shift = 0.25 * (log10(P_other) - log10(P_neutral))
+        @test all(isapprox.(
+            reference_other.mass_log10_ev_reference .-
+                reference_neutral.mass_log10_ev_reference,
+            expected_shift; atol=1e-8))
+
+        # Every selected leading charge column must be an exact original
+        # column of Q (LQtilde selects raw columns, never transforms them),
+        # and each reference tau must be minable back from that column's
+        # position in the input tau vector.
+        for a in axes(reference_neutral.Qtilde, 2)
+            column = @view reference_neutral.Qtilde[:, a]
+            match = findfirst(j -> @view(Q[:, j]) == column, axes(Q, 2))
+            @test match !== nothing
+            @test reference_neutral.tau_reference[a] == tau[match]
+        end
+
+        # Closed-form lambda root: exact inversion of eq. 3.24-3.27's
+        # m(lambda)^2 = m(1)^2 * exp(-2*pi*tau(1)*(lambda^2-1)).
+        m_ref = 1e10
+        tau_ref = 5.0
+        lambda = PB.fuzzy_axion_dilation_root(m_ref, tau_ref)
+        @test lambda !== nothing
+        m_at_lambda = sqrt(m_ref^2 * exp(-2π * tau_ref * (lambda^2 - 1)))
+        @test isapprox(m_at_lambda, PB.FUZZY_AXION_MASS_TARGET_EV; rtol=1e-10)
+        # Algorithm 1 quantifies over lambda in R+ with no lower bound of 1
+        # (Sec. 4.1's literal "for lambda in {lambda in R+ | ...}"), so a
+        # reference mass already at or below the target can still have a
+        # valid *contracting* root (lambda < 1) -- verified directly against
+        # the same closed-form relation used above.
+        lambda_contract = PB.fuzzy_axion_dilation_root(1e-19, tau_ref)
+        @test lambda_contract !== nothing
+        @test lambda_contract < 1.0
+        m_at_lambda_contract = sqrt(1e-19^2 * exp(-2π * tau_ref * (lambda_contract^2 - 1)))
+        @test isapprox(m_at_lambda_contract, PB.FUZZY_AXION_MASS_TARGET_EV; rtol=1e-10)
+        # Genuinely no real root: the reference mass is far enough below the
+        # target that even lambda -> 0 cannot raise it back up.
+        @test PB.fuzzy_axion_dilation_root(1e-30, tau_ref) === nothing
+        @test_throws ArgumentError PB.fuzzy_axion_dilation_root(-1.0, tau_ref)
+        @test_throws ArgumentError PB.fuzzy_axion_dilation_root(m_ref, -1.0)
+        @test_throws ArgumentError PB.fuzzy_axion_dilation_root(
+            m_ref, tau_ref; mass_target_ev=0.0)
+
+        # Criterion 1: tau -> lambda^2*tau uniformly; boundary is inclusive.
+        @test PB.fuzzy_axion_criterion_one([1.0, 2.0, 0.5], 1.0) == false
+        @test PB.fuzzy_axion_criterion_one([1.0, 2.0, 1.0], 1.0) == true
+        @test PB.fuzzy_axion_criterion_one([0.25, 2.0], 2.0) == true
+        @test_throws ArgumentError PB.fuzzy_axion_criterion_one([1.0], -1.0)
+
+        # Criterion 2: inclusive [25, 40] window on the QCD divisor's volume.
+        @test PB.fuzzy_axion_criterion_two(30.0, 1.0) == true
+        @test PB.fuzzy_axion_criterion_two(24.999, 1.0) == false
+        @test PB.fuzzy_axion_criterion_two(40.001, 1.0) == false
+        @test PB.fuzzy_axion_criterion_two(25.0, 1.0) == true
+        @test PB.fuzzy_axion_criterion_two(40.0, 1.0) == true
+        @test_throws ArgumentError PB.fuzzy_axion_criterion_two(30.0, 0.0)
+
+        # End-to-end: every returned (D, a) model must independently satisfy
+        # all three criteria at its own lambda -- re-derived here from the
+        # function's own inputs/outputs, not merely trusted from its return
+        # value, to catch a criterion evaluated against the wrong lambda or
+        # the wrong divisor index.
+        P_real = CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(0.5)
+        V_real = 9.0
+        K_real = CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(V_real)
+        W_real = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(1e-5)
+        m32_real = CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(
+            P_real, K_real, abs(W_real); mplanck_ev=1.0)
+        models = PB.enumerate_fuzzy_axion_models(Q, tau, V_real, P_real, m32_real, Kinv)
+        @test !isempty(models)
+        for model in models
+            @test PB.fuzzy_axion_criterion_one(tau, model.lambda)
+            @test PB.fuzzy_axion_criterion_two(
+                tau[model.qcd_divisor_index], model.lambda)
+            m_check = sqrt(model.mass_reference_ev^2 *
+                exp(-2π * model.tau_reference * (model.lambda^2 - 1)))
+            @test isapprox(m_check, PB.FUZZY_AXION_MASS_TARGET_EV; rtol=1e-8)
+        end
+        # Every model's qcd_divisor_index and axion_index must be valid,
+        # in-range references into the input arrays.
+        @test all(1 <= m.qcd_divisor_index <= length(tau) for m in models)
+        @test all(1 <= m.axion_index <= size(reference_neutral.Qtilde, 2) for m in models)
+
+        @test_throws ArgumentError PB.leading_axion_reference_data(
+            Q, tau, -1.0, P_real, m32_real, Kinv)
+        @test_throws ArgumentError PB.leading_axion_reference_data(
+            Q, tau, V_real, -1.0, m32_real, Kinv)
+        @test_throws ArgumentError PB.leading_axion_reference_data(
+            Q, tau, V_real, P_real, -1.0, Kinv)
+        @test_throws DimensionMismatch PB.leading_axion_reference_data(
+            Q, tau, V_real, P_real, m32_real, Kinv[1:3, 1:3])
+        @test_throws DimensionMismatch PB.leading_axion_reference_data(
+            Q, tau[1:end-1], V_real, P_real, m32_real, Kinv)
+    end
 end
 
 @testset "HP spectrum: one-axion analytic mass" begin
