@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Reproduce the h11=4 population benchmarks of arXiv:2412.12012.
+"""Reproduce the Table 1 (tab:ScanData) population benchmarks of
+arXiv:2412.12012 for a given ``--h11`` (developed and most thoroughly
+validated against h11=4; targets are also recorded for h11=3 and h11=5).
 
 This is a source-matched audit driver, not a replacement for the production
 geometry generator.  It reads the same KS Parquet mirror as the generator,
@@ -40,18 +42,39 @@ from generate_geometric_data_multitriangulation import (
 )
 from geometry_charge_conventions import canonicalize_unique_charge_rows
 from inherited_orientifold_candidates import (
-    enumerate_polytope_involutions,
-    enumerate_projected_lattice_representatives,
+    _ambient_intersection_tensor,
+    _triangulation_cones,
+    enumerate_orientifold_candidates,
+    facets_with_non_smooth_cones,
+    identity_fixed_surface_n_s_table,
 )
 
 
-PAPER_TARGETS = {
-    "favorable_polytopes": 1185,
-    "frst_classes": 1760,
-    "inherited_orientifold_cys": 1559,
-    "h11_minus_zero_orientifold_cys": 1554,
-    "h11_minus_zero_h21_plus_zero_orientifold_cys": 267,
-    "models": 3348,
+PAPER_TARGETS_BY_H11 = {
+    3: {
+        "favorable_polytopes": 243,
+        "frst_classes": 274,
+        "inherited_orientifold_cys": 253,
+        "h11_minus_zero_orientifold_cys": 253,
+        "h11_minus_zero_h21_plus_zero_orientifold_cys": 66,
+        "models": 263,
+    },
+    4: {
+        "favorable_polytopes": 1185,
+        "frst_classes": 1760,
+        "inherited_orientifold_cys": 1559,
+        "h11_minus_zero_orientifold_cys": 1554,
+        "h11_minus_zero_h21_plus_zero_orientifold_cys": 267,
+        "models": 3348,
+    },
+    5: {
+        "favorable_polytopes": 4897,
+        "frst_classes": 11713,
+        "inherited_orientifold_cys": 9530,
+        "h11_minus_zero_orientifold_cys": 9459,
+        "h11_minus_zero_h21_plus_zero_orientifold_cys": 1033,
+        "models": 29898,
+    },
 }
 
 
@@ -138,22 +161,6 @@ def _identity_torus_actions(poly):
         if np.all((dual_vertices @ numerator + 1) % 2 == 0)
     ]
     return actions, np.asarray(valid, dtype=int)
-
-
-def _ambient_intersection_tensor(triangulation):
-    """Return the toric fourfold intersection tensor.
-
-    CYTools includes the canonical divisor as index zero and the nonzero fan
-    rays as indices one onward.  The frozen-conifold formula below uses only
-    the latter, so the convention is retained explicitly in the caller.
-    """
-
-    tensor = np.asarray(
-        triangulation.fan().intersection_numbers(as_np_array=True), dtype=float
-    )
-    if tensor.ndim != 4 or tensor.shape[0] != tensor.shape[1]:
-        raise ValueError(f"unexpected ambient intersection tensor shape {tensor.shape}")
-    return tensor
 
 
 def _frozen_conifold_diagnostic(triangulation, p0):
@@ -420,108 +427,68 @@ def _h21_plus_zero_diagnostic(poly, triangulation, p0):
     }
 
 
-def _h11_minus_from_divisor_basis(poly, triangulation, matrix):
-    """Derive the integral H2 involution and its odd dimension."""
-
-    basis_matrix = np.asarray(triangulation.get_cy().divisor_basis(as_matrix=True), dtype=float)
-    prime_labels = np.asarray(triangulation.get_cy().prime_toric_divisors(), dtype=int)
-    points = _as_int_rows(poly.points())
-    lookup = {
-        tuple(point): int(label)
-        for point, label in zip(points, poly.points_to_indices(points))
-    }
-    mapped = np.asarray(
-        [lookup[tuple(np.asarray(matrix) @ point)] for point in points], dtype=int
-    )
-    divisor_points = np.concatenate(([0], prime_labels))
-    mapped_divisors = mapped[divisor_points]
-    positions = {int(label): position for position, label in enumerate(divisor_points)}
-    try:
-        mapped_positions = np.asarray([positions[int(label)] for label in mapped_divisors], dtype=int)
-    except KeyError:
-        return None
-    permutation = np.zeros((divisor_points.size, divisor_points.size), dtype=float)
-    permutation[np.arange(divisor_points.size), mapped_positions] = 1.0
-    transformed_basis = basis_matrix @ permutation
-    coefficients, _, _, _ = np.linalg.lstsq(basis_matrix.T, transformed_basis.T, rcond=None)
-    h2 = np.rint(coefficients.T).astype(int)
-    if not np.allclose(coefficients, h2, atol=1e-8):
-        return None
-    if not np.allclose(h2 @ basis_matrix, transformed_basis, atol=1e-8):
-        return None
-    if not np.array_equal(h2 @ h2, np.eye(h2.shape[0], dtype=int)):
-        return None
-    _, singular_values, _ = np.linalg.svd(h2.T + np.eye(h2.shape[0]))
-    rank = int(np.count_nonzero(singular_values > 1e-10))
-    return int(h2.shape[0] - rank)
-
-
-def _class_invariant_under_matrix(poly, triangulation, matrix):
-    """Test source FRST-class invariance under a lattice involution."""
-
-    from cytools.triangulation import Triangulation
-
-    points = _as_int_rows(triangulation.points())
-    transformed_labels = poly.points_to_indices(
-        [tuple(np.asarray(matrix, dtype=int) @ point) for point in points]
-    )
-    transformed = Triangulation(
-        poly,
-        transformed_labels,
-        simplices=triangulation.simplices(as_indices=True),
-        make_star=True,
-        check_input_simplices=False,
-    )
-    return bool(triangulation.is_equivalent(transformed, on_faces_dim=2))
-
-
-def _source_vertex_parity_allows(poly, matrix, torus_shift_numerator, lambda_f=1):
-    """Apply the fixed-dual-vertex part of Moritz eq. (4.45)."""
-
-    dual_vertices = _as_int_rows(poly.dual().vertices())
-    dual_action = np.asarray(matrix, dtype=int).T
-    fixed = [
-        vertex
-        for vertex in dual_vertices
-        if np.array_equal(dual_action @ vertex, vertex)
-    ]
-    numerator = np.asarray(torus_shift_numerator, dtype=int)
-    return bool(
-        all((int(np.dot(numerator, vertex)) + int(lambda_f)) % 2 == 0 for vertex in fixed)
-    )
-
-
 def _orientifold_action_audit(poly, classes):
-    """Count class-level affine O3/O7 candidates with source vertex evidence."""
+    """Count class-level inherited O3/O7 orientifold candidates.
 
-    matrices = enumerate_polytope_involutions(poly.points())
+    Per FRST class, runs the general ``(L, t, lambda_f)`` triple search
+    (``enumerate_orientifold_candidates``, Moritz arXiv:2305.06363 eqs.
+    4.3-4.51) and asks: does this CY admit at least one
+    ``accepted_verified_orientifold`` candidate at all (``inherited``), and
+    does it admit at least one with ``h11_minus==0`` (``h11_minus_zero``)?
+
+    For ``L=identity`` candidates, ``n^S_{df=0}`` evidence (source eq.
+    around line 649-654: isolated nodal points on a 2-dimensional fixed
+    surface) is supplied via ``identity_fixed_surface_n_s_table`` so
+    ``classify_smoothness``'s eq. (4.50) check can actually resolve, rather
+    than reporting ``smoothness_verification_unavailable`` for every
+    candidate with a 2-dimensional fixed component (which is what happened
+    unconditionally before this evidence existed anywhere in this
+    codebase). This replaces an earlier, ad hoc version of this function
+    (source-vertex-parity-only, no fixed-locus/smoothness evidence at all)
+    that gave 16 accepted CYs for the real h11=4 population against a
+    Table-1 target of 1,559 -- see
+    ``validation/fuzzy_axions_2412_12012_h11_3_h11_5_table1_verification_20260818.md``
+    Sec. 6 for the investigation that found and fixed this, including a
+    real polarity bug in ``classify_smoothness`` found at the same time
+    (confirmed against the primary source, not just inferred).
+    ``L != identity`` candidates are still evaluated structurally, but no
+    ``n_S`` evidence is supplied for their own 2-dimensional fixed
+    components here -- that formula's general-``L`` form has not been
+    independently derived or verified, so those candidates remain
+    conservatively unresolved where such evidence would matter.
+
+    Also supplies ``non_smooth_facet_dual_vertices`` evidence (source line
+    ~629: eq. (4.45)'s dual-vertex parity condition applies not only to
+    ``L``-fixed dual vertices but to every dual vertex whose facet of
+    ``Delta_circ`` meets a non-simplicial and/or non-smooth cone of the
+    triangulation's own fan -- independent of ``L``, computed once per
+    triangulation via ``facets_with_non_smooth_cones``).
+    """
+
     if not classes:
         return {"inherited": 0, "h11_minus_zero": 0, "h11_minus_zero_classes": []}
-    h11_minus = {
-        tuple(np.asarray(matrix, dtype=int).flatten()): _h11_minus_from_divisor_basis(
-            poly, classes[0], matrix
-        )
-        for matrix in matrices
-    }
     inherited_classes = set()
     h11_zero_classes = set()
-    for matrix in matrices:
-        key = tuple(np.asarray(matrix, dtype=int).flatten())
-        odd_dimension = h11_minus[key]
-        if odd_dimension is None:
-            continue
-        shifts = enumerate_projected_lattice_representatives(matrix, 1)
-        valid_shift = any(
-            _source_vertex_parity_allows(poly, matrix, shift["numerator"], lambda_f=1)
-            for shift in shifts
+    for class_index, triangulation in enumerate(classes):
+        cy = triangulation.get_cy()
+        topology = dict(extract_topology(cy, triangulation))
+        triangulation_cones = _triangulation_cones(poly, triangulation)
+        topology["fixed_surface_n_s"] = identity_fixed_surface_n_s_table(
+            triangulation_cones, triangulation
         )
-        if not valid_shift:
-            continue
-        for class_index, triangulation in enumerate(classes):
-            if _class_invariant_under_matrix(poly, triangulation, matrix):
-                inherited_classes.add(class_index)
-                if odd_dimension == 0:
-                    h11_zero_classes.add(class_index)
+        topology["non_smooth_facet_dual_vertices"] = facets_with_non_smooth_cones(
+            poly, triangulation
+        )
+        records = enumerate_orientifold_candidates(poly, triangulation, topology)
+        accepted = [
+            record
+            for record in records
+            if record.get("terminal_status") == "accepted_verified_orientifold"
+        ]
+        if accepted:
+            inherited_classes.add(class_index)
+        if any(record.get("h11_minus") == 0 for record in accepted):
+            h11_zero_classes.add(class_index)
     return {
         "inherited": len(inherited_classes),
         "h11_minus_zero": len(h11_zero_classes),
@@ -782,9 +749,10 @@ def _jsonable(value):
 
 
 def reproduce(args):
+    targets = PAPER_TARGETS_BY_H11.get(args.h11)
     records = load_mirror_polytopes(
         args.parquet_dir,
-        h11=4,
+        h11=args.h11,
         limit=args.limit,
         favorable=True,
     )
@@ -924,27 +892,31 @@ def reproduce(args):
             )
 
     population_complete = bool(args.limit >= 10**9)
-    population_exact_267 = (
-        trilayer_h21_plus_zero_class_count == PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]
+    population_exact_target = (
+        targets is not None
+        and trilayer_h21_plus_zero_class_count == targets["h11_minus_zero_h21_plus_zero_orientifold_cys"]
         and population_complete
     )
     model_stage = _run_model_stage(model_stage_records, args) if args.model_stage else None
     if model_stage is not None and model_stage["diagnostic_reason"] is None:
         reasons = []
         if not population_complete:
-            reasons.append("run was limited via --limit; population is not the full h11=4 set")
-        if trilayer_h21_plus_zero_class_count != PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]:
-            reasons.append(
-                f"input population is {trilayer_h21_plus_zero_class_count} h21_plus_zero-accepted "
-                f"FRST classes, not the exact {PAPER_TARGETS['h11_minus_zero_h21_plus_zero_orientifold_cys']}"
-                "-target population (see "
-                "fuzzy_axions_2412_12012_h21_plus_fixed_locus_20260818.md)"
-            )
-        if model_stage["total_model_count"] != PAPER_TARGETS["models"]:
-            reasons.append(
-                f"total model count {model_stage['total_model_count']} != paper target "
-                f"{PAPER_TARGETS['models']}"
-            )
+            reasons.append(f"run was limited via --limit; population is not the full h11={args.h11} set")
+        if targets is None:
+            reasons.append(f"no Table 1 target is recorded for h11={args.h11}; counts are diagnostic only")
+        else:
+            if trilayer_h21_plus_zero_class_count != targets["h11_minus_zero_h21_plus_zero_orientifold_cys"]:
+                reasons.append(
+                    f"input population is {trilayer_h21_plus_zero_class_count} h21_plus_zero-accepted "
+                    f"FRST classes, not the exact {targets['h11_minus_zero_h21_plus_zero_orientifold_cys']}"
+                    "-target population (see "
+                    "fuzzy_axions_2412_12012_h21_plus_fixed_locus_20260818.md)"
+                )
+            if model_stage["total_model_count"] != targets["models"]:
+                reasons.append(
+                    f"total model count {model_stage['total_model_count']} != paper target "
+                    f"{targets['models']}"
+                )
         if reasons:
             model_stage["diagnostic_reason"] = "; ".join(reasons)
 
@@ -955,7 +927,7 @@ def reproduce(args):
         "input": {
             "source": "generator.load_mirror_polytopes",
             "parquet_dir": str(Path(args.parquet_dir).resolve()),
-            "requested_h11": 4,
+            "requested_h11": args.h11,
             "favorable_lattice": "N",
             "record_count": len(records),
             "population_complete": population_complete,
@@ -986,25 +958,34 @@ def reproduce(args):
             if export_kaehler_points
             else None,
         },
-        "paper_targets": PAPER_TARGETS,
-        "claim_status": {
-            "favorable_polytopes": "exact" if len(records) == PAPER_TARGETS["favorable_polytopes"] else "mismatch",
-            "frst_classes": "exact" if total_classes == PAPER_TARGETS["frst_classes"] else "mismatch",
-            "h21_plus_zero": (
-                "benchmark_match_candidate"
-                if trilayer_h21_plus_zero_class_count == PAPER_TARGETS["h11_minus_zero_h21_plus_zero_orientifold_cys"]
-                else "diagnostic_only"
-            ),
-            "model_count": (
-                None
-                if model_stage is None
-                else (
+        "paper_targets": targets,
+        "claim_status": (
+            {
+                "favorable_polytopes": None,
+                "frst_classes": None,
+                "h21_plus_zero": None,
+                "model_count": None,
+            }
+            if targets is None
+            else {
+                "favorable_polytopes": "exact" if len(records) == targets["favorable_polytopes"] else "mismatch",
+                "frst_classes": "exact" if total_classes == targets["frst_classes"] else "mismatch",
+                "h21_plus_zero": (
                     "benchmark_match_candidate"
-                    if population_exact_267 and model_stage["total_model_count"] == PAPER_TARGETS["models"]
+                    if trilayer_h21_plus_zero_class_count == targets["h11_minus_zero_h21_plus_zero_orientifold_cys"]
                     else "diagnostic_only"
-                )
-            ),
-        },
+                ),
+                "model_count": (
+                    None
+                    if model_stage is None
+                    else (
+                        "benchmark_match_candidate"
+                        if population_exact_target and model_stage["total_model_count"] == targets["models"]
+                        else "diagnostic_only"
+                    )
+                ),
+            }
+        ),
         "model_stage": model_stage,
         "details": details if args.keep_details else None,
     }
@@ -1014,6 +995,13 @@ def reproduce(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parquet-dir", required=True)
+    parser.add_argument(
+        "--h11",
+        type=int,
+        default=4,
+        help="Physical h11 to reproduce from arXiv:2412.12012 Table 1 (tab:ScanData); "
+        "3, 4, and 5 have recorded paper targets, others run as diagnostic-only.",
+    )
     parser.add_argument("--limit", type=int, default=10**9)
     parser.add_argument("--progress", type=int, default=50)
     parser.add_argument("--keep-details", action="store_true")

@@ -34,12 +34,16 @@ from generate_geometric_data_multitriangulation import (
     validate_orientifold,
 )
 from inherited_orientifold_candidates import (
+    IDENTITY,
     TERMINAL_STATUSES,
     build_auxiliary_fan,
+    classify_smoothness,
     enumerate_orientifold_candidates,
     enumerate_polytope_involutions,
     enumerate_projected_lattice_representatives,
     write_candidate_manifest,
+    _component_key,
+    _fraction_vector_to_json,
     _lattice_matrix_config,
 )
 
@@ -343,6 +347,69 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         with self.assertRaises(OrientifoldValidationFailure) as context:
             validate_orientifold(poly, triangulation, topology, config)
         self.assertEqual(context.exception.stage, "polytope_not_preserved")
+
+
+class ClassifySmoothnessNsPolarityTests(unittest.TestCase):
+    """Regression coverage for the eq. (4.50) n_S polarity fix.
+
+    arXiv:2305.06363 (line ~647-654) imposes ``n^S_{df=0} = 0`` to avoid
+    isolated nodal points on a 2-dimensional fixed surface -- i.e. n_S != 0
+    is the obstruction, n_S == 0 is smooth. Before this fix,
+    ``classify_smoothness`` treated ``n_s == 0`` as the non-smooth case
+    instead (backwards), though the bug was inert in production because
+    ``topology["fixed_surface_n_s"]`` was never populated anywhere in this
+    codebase, so every such candidate previously resolved to
+    ``smoothness_verification_unavailable`` (n_s is None) regardless of
+    polarity -- see
+    ``fuzzy_axions_2412_12012_h11_3_h11_5_table1_verification_20260818.md``
+    Sec. 6 for the investigation and the primary-source confirmation.
+    """
+
+    def _dim2_component(self, sigma_rays=((1, 0, 0, 0), (0, 1, 0, 0))):
+        return {
+            "sigma_rays": [list(ray) for ray in sigma_rays],
+            "nu": _fraction_vector_to_json((0, 0, 0, 0)),
+            "sigma_dimension": 2,
+            "fixed_toric_dimension": 2,
+            "f_vanishes_identically": True,
+        }
+
+    def _classify(self, component, n_s):
+        topology = {}
+        if n_s is not None:
+            topology = {"fixed_surface_n_s": {_component_key(component): n_s}}
+        return classify_smoothness(
+            IDENTITY,
+            (0.5, 0, 0, 0),
+            1,
+            auxiliary_fan=[],
+            fixed_components=[component],
+            topology=topology,
+            dual_vertices=None,
+        )
+
+    def test_zero_n_s_is_smooth(self):
+        component = self._dim2_component()
+        result = self._classify(component, n_s=0)
+        self.assertEqual(result["status"], "smooth")
+        self.assertEqual(result["verdict"], "smooth")
+
+    def test_nonzero_n_s_is_non_smooth(self):
+        component = self._dim2_component()
+        for n_s in (1, -1, 2):
+            with self.subTest(n_s=n_s):
+                result = self._classify(component, n_s=n_s)
+                self.assertEqual(result["status"], "fixed_point_set_non_smooth")
+                self.assertEqual(result["verdict"], "non_smooth")
+                self.assertTrue(
+                    any(f"n_S = {n_s}" in reason for reason in result["reasons"])
+                )
+
+    def test_missing_evidence_stays_unavailable_not_smooth(self):
+        component = self._dim2_component()
+        result = self._classify(component, n_s=None)
+        self.assertEqual(result["status"], "smoothness_verification_unavailable")
+        self.assertEqual(result["verdict"], "not_verified")
 
 
 class WriteCandidateManifestTests(unittest.TestCase):
