@@ -44,10 +44,11 @@ before the final Mpl-to-eV "restoration").
 `inverse_metric` is `K^{ij}` at t0 (the Priority-1 export's `inverse_metric`).
 
 Also returns `divisor_index`, the original 1-based column of `Q`/`tau` each
-selected leading axion was built from -- needed by
-[`enumerate_fuzzy_axion_models`](@ref) to exclude an axion from being paired
-with its own divisor as a candidate QCD divisor (see that function's
-docstring).
+selected leading axion was built from. Not consumed by
+[`enumerate_fuzzy_axion_models`](@ref) itself (it no longer distinguishes a
+self-paired candidate QCD divisor from any other, see that function's
+docstring); kept for callers that need to identify or analyze
+self-referential `(axion, QCD divisor)` pairs after the fact.
 """
 function leading_axion_reference_data(Q::AbstractMatrix{Int}, tau::AbstractVector{<:Real},
         cy_volume::Real, prefactor_P::Real, gravitino_mass_planck_units::Real,
