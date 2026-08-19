@@ -25,6 +25,7 @@ hard-coded matrices:
 import json
 import tempfile
 import unittest
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -228,24 +229,41 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 
-        expected_count = sum(
-            2 * len(enumerate_projected_lattice_representatives(matrix, 1))
-            for matrix in enumerate_polytope_involutions(BASIS_POINTS)
-        )
+        # Enumeration emits two records (lambda_f in {0, 1}) per *valid* torus
+        # shift, but only ONE (a ``torus_shift_not_involution`` rejection) per
+        # H_+^L coset whose representative 2t is non-integral: source
+        # KS_orientifolds.tex line ~426-428 requires ``2t in N`` for
+        # ``L o phi_[t]`` to square to the identity, so non-integral cosets are
+        # not Z2 involutions and are excluded before the lambda_f loop (see the
+        # 2t-in-N filter in enumerate_orientifold_candidates). The expected
+        # record count is therefore filter-aware, not two-per-shift.
+        expected_count = 0
+        for matrix in enumerate_polytope_involutions(BASIS_POINTS):
+            for shift in enumerate_projected_lattice_representatives(matrix, 1):
+                if any(
+                    Fraction(value).denominator != 1 for value in shift["vector"]
+                ):
+                    expected_count += 1
+                else:
+                    expected_count += 2
         matrix_summaries = [
             record
             for record in records
             if record.get("record_kind") == "lattice_matrix_search_summary"
         ]
         self.assertEqual(len(records), expected_count + len(matrix_summaries))
-        # Any matrix whose full shift/lambda_f search found nothing accepted
-        # must be summarized with this status. For this permissive h11=5
-        # fixture every one of the 10 involutions now finds at least one
-        # genuine accepted candidate once torus_shift is the true t (see the
-        # eq. (4.34) factor-of-2 fix in enumerate_orientifold_candidates:
-        # ``shift["vector"]`` is "[2t]", not t), so matrix_summaries is
-        # empty; assert the subset relation rather than exact equality so
-        # this does not depend on that being empty specifically.
+        # The non-involution filter is exercised by this fixture: at least one
+        # coset per non-identity permutation matrix has a non-integral 2t.
+        self.assertIn(
+            "torus_shift_not_involution",
+            {record["terminal_status"] for record in records},
+        )
+        # Any matrix whose full shift/lambda_f search found nothing accepted is
+        # summarized with ``torus_shift_search_exhausted``. Unlike the
+        # pre-filter fixture, some matrices now legitimately find nothing (their
+        # only surviving shifts fail the smoothness checks), so
+        # matrix_summaries need not be empty; assert the subset relation on its
+        # statuses rather than exact equality.
         self.assertLessEqual(
             {record["terminal_status"] for record in matrix_summaries},
             {"torus_shift_search_exhausted"},
@@ -307,15 +325,17 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 
-        # Record and acceptance counts below reflect the corrected
-        # torus-shift value (t, not source eq. (4.34)'s "[2t]" quotient
-        # representative -- see the factor-of-2 fix in
-        # enumerate_orientifold_candidates). The previous, buggy shift
-        # values collapsed most non-identity-matrix shifts onto degenerate
-        # duplicates, spuriously suppressing genuine acceptances; the
-        # corrected values vary properly, so more of the 4 FRST-preserving
-        # matrices' (shift, lambda_f) triples now pass legitimately.
-        self.assertEqual(len(records), 86)
+        # Record and acceptance counts below are empirically determined (not
+        # hand-derived) and reflect the source eq. (4.34)/line ~428 filter that
+        # excludes torus-shift cosets with non-integral 2t (not Z2 involutions;
+        # see the 2t-in-N filter in enumerate_orientifold_candidates). Relative
+        # to the pre-filter fixture (86 records, 60 accepted) the filter drops
+        # the non-integral cosets: their two lambda_f records each collapse to a
+        # single ``torus_shift_not_involution`` rejection, and any acceptance
+        # that had rested on such a (non-involution) shift is correctly removed.
+        # frst_not_preserved is upstream of the shift search and so is
+        # unchanged.
+        self.assertEqual(len(records), 74)
         accepted = [
             record
             for record in records
@@ -326,8 +346,14 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
             for record in records
             if record["terminal_status"] == "frst_not_preserved"
         ]
-        self.assertEqual(len(accepted), 60)
+        non_involution = [
+            record
+            for record in records
+            if record["terminal_status"] == "torus_shift_not_involution"
+        ]
+        self.assertEqual(len(accepted), 36)
         self.assertEqual(len(frst_failed), 6)
+        self.assertEqual(len(non_involution), 12)
         for record in frst_failed:
             self.assertIsNone(record.get("h11_minus"))
 

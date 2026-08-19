@@ -41,6 +41,7 @@ TERMINAL_STATUSES = (
     "prime_divisor_set_not_preserved",
     "nonintegral_h2_action",
     "h2_action_not_involution",
+    "torus_shift_not_involution",
     "orientifold_h11_minus_filter_rejection",
     "torus_shift_search_exhausted",
     "fixed_point_set_non_smooth",
@@ -460,8 +461,19 @@ def _dual_vertex_parity_evidence(matrix, torus_shift, lambda_f, dual_vertices, e
         return {"available": False, "fixed_dual_vertices": [], "violations": []}
     fixed_vertices = []
     violations = []
+    noninteger_pairings = []
     matrix = np.asarray(matrix, dtype=int)
-    two_t = np.asarray([int(2 * value) for value in torus_shift], dtype=int)
+    # `2t` must stay EXACT. For a non-identity `L` the torus shift carries
+    # quarter-integer components (`torus_shift = (I+L)*bits / 4`), so `2t` can
+    # be a genuine half-integer vector. The prior `int(2*value)` rounded each
+    # such component toward zero -- e.g. `2t=(1/2,1/2,0,0)` became `(0,0,0,0)`
+    # -- silently corrupting eq. (4.45)'s parity for every non-identity-`L`
+    # candidate, the dominant rejection channel in that sector. Identity `L`
+    # never triggered it (its `2t` is always integral), which is exactly why
+    # identity-only validation could not have caught it. Keep `2t` as exact
+    # `Fraction`s and contract against the (integer) dual vertex before any
+    # rounding.
+    two_t = [Fraction(2) * Fraction(value) for value in torus_shift]
     extra_vertices = extra_vertices or set()
     for vertex in np.asarray(dual_vertices, dtype=int):
         vertex_key = tuple(int(value) for value in vertex)
@@ -470,7 +482,6 @@ def _dual_vertex_parity_evidence(matrix, torus_shift, lambda_f, dual_vertices, e
         if not (is_L_fixed or is_non_smooth_facet):
             continue
         vertex_tuple = [int(value) for value in vertex]
-        parity = int(np.dot(two_t, vertex) + int(lambda_f)) % 2
         fixed_vertices.append(vertex_tuple)
         # Source eq. (4.45) excludes a vanishing invariant vertex
         # coefficient.  In the phase convention of eq. (4.43), that
@@ -480,12 +491,27 @@ def _dual_vertex_parity_evidence(matrix, torus_shift, lambda_f, dual_vertices, e
         # imposed on non-L-fixed vertices whose dual facet meets a
         # non-simplicial/non-smooth cone (line ~629's extension, evidence
         # supplied via `extra_vertices`).
-        if parity == 1:
+        #
+        # `<2t, q>` is provably integral for an `L`-fixed `q` (there
+        # `<2t,q> = <(I+L)bits, q>/... ` reduces to an integer pairing). The
+        # only way it can be non-integral is an extension vertex whose facet
+        # meets a non-smooth cone; such a vertex cannot satisfy the integer
+        # "== 0 mod 2" condition at all, so it is a violation by the same
+        # token. These are tallied separately so their frequency is visible.
+        pairing = sum(
+            coeff * int(component) for coeff, component in zip(two_t, vertex)
+        )
+        total = pairing + int(lambda_f)
+        if total.denominator != 1:
+            noninteger_pairings.append(vertex_tuple)
+            violations.append(vertex_tuple)
+        elif int(total) % 2 == 1:
             violations.append(vertex_tuple)
     return {
         "available": True,
         "fixed_dual_vertices": fixed_vertices,
         "violations": violations,
+        "noninteger_pairings": noninteger_pairings,
         "condition": "(2*t.q + lambda_f) mod 2 == 0",
     }
 
@@ -854,12 +880,43 @@ def enumerate_orientifold_candidates(
         for shift in shifts:
             # ``shift["vector"]`` is a representative of source eq. (4.34)'s
             # H_+^L = P_+^L(N)/(2 P_+^L(N)), whose elements are explicitly
-            # labelled "[2t]" there -- it IS 2t, not t. Downstream consumers
-            # (eq. 4.45's dual-vertex parity, eq. 4.33's fixed-component
-            # integrality condition) both use t directly, so it must be
-            # halved once more here. Confirmed empirically for L=identity
-            # against CYTools' own poly.inequivalent_Z2_actions() (t in
-            # {0, 1/2}^4, not {0, 1}^4 as enumerate_projected_lattice_
+            # labelled "[2t]" there -- it IS 2t, not t.
+            two_t = shift["vector"]
+            # Source eq. (4.34) derivation (KS_orientifolds.tex line ~426-428):
+            # a Z2 involution ``L o phi_[t]`` squares to ``phi_[2t]``, so it is
+            # an involution *only if* ``2t in N``. For a non-identity ``L``,
+            # ``enumerate_projected_lattice_representatives`` returns cosets of
+            # ``H_+^L`` whose representative ``2t`` need not be integral (e.g.
+            # ``2t=(1/2,1/2,0,0)`` for a coordinate-swap ``L``); those are not
+            # Z2 involutions at all and must be excluded here, before any
+            # smoothness/parity evaluation -- a non-integral ``2t`` also makes
+            # eq. (4.45)'s ``<2t,q>`` parity ill-defined. Identity ``L`` never
+            # triggers this (its ``2t`` is always integral), which is exactly
+            # why identity-only validation never surfaced it.
+            if any(Fraction(value).denominator != 1 for value in two_t):
+                record = dict(base)
+                record.update(
+                    {
+                        "record_kind": "torus_shift_rejected_noninvolution",
+                        "matrix_candidate_id": matrix_id,
+                        "terminal_status": "torus_shift_not_involution",
+                        "terminal_reason": (
+                            "source eq. (4.34)/line ~428 requires 2t in N for "
+                            "L o phi_[t] to be an involution; this H_+^L coset "
+                            "representative 2t is not integral"
+                        ),
+                        "torus_shift_binary_source": shift["binary_source"],
+                        "torus_shift_search_status": "rejected_noninvolution",
+                    }
+                )
+                records.append(record)
+                matrix_records.append(record)
+                continue
+            # Downstream consumers (eq. 4.45's dual-vertex parity, eq. 4.33's
+            # fixed-component integrality condition) use ``t`` directly, so the
+            # integral ``2t`` is halved once more here. Confirmed empirically
+            # for L=identity against CYTools' own poly.inequivalent_Z2_actions()
+            # (t in {0, 1/2}^4, not {0, 1}^4 as enumerate_projected_lattice_
             # representatives' "vector" gives before this correction).
             torus_shift = tuple(value / 2 for value in shift["vector"])
             for lambda_f in (0, 1):
