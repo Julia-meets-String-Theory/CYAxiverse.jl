@@ -51,6 +51,14 @@ from inherited_orientifold_candidates import (
 
 
 PAPER_TARGETS_BY_H11 = {
+    2: {
+        "favorable_polytopes": 36,
+        "frst_classes": 36,
+        "inherited_orientifold_cys": 32,
+        "h11_minus_zero_orientifold_cys": 32,
+        "h11_minus_zero_h21_plus_zero_orientifold_cys": 11,
+        "models": 2,
+    },
     3: {
         "favorable_polytopes": 243,
         "frst_classes": 274,
@@ -74,6 +82,22 @@ PAPER_TARGETS_BY_H11 = {
         "h11_minus_zero_orientifold_cys": 9459,
         "h11_minus_zero_h21_plus_zero_orientifold_cys": 1033,
         "models": 29898,
+    },
+    6: {
+        "favorable_polytopes": 16608,
+        "frst_classes": 74503,
+        "inherited_orientifold_cys": 54274,
+        "h11_minus_zero_orientifold_cys": 53810,
+        "h11_minus_zero_h21_plus_zero_orientifold_cys": 3623,
+        "models": 231676,
+    },
+    7: {
+        "favorable_polytopes": 48221,
+        "frst_classes": 467283,
+        "inherited_orientifold_cys": 292158,
+        "h11_minus_zero_orientifold_cys": 289684,
+        "h11_minus_zero_h21_plus_zero_orientifold_cys": 12253,
+        "models": 1565380,
     },
 }
 
