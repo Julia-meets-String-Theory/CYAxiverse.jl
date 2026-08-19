@@ -66,6 +66,17 @@ class _FakePoly:
     def points(self):
         return self._points
 
+    def glsm_charge_matrix(self, include_origin=True, points=None, integral=True):
+        # This fixture's point set (origin + independent basis vectors) has
+        # no linear relations among its divisors, so the GLSM charge matrix
+        # -- the true Z^N -> Pic(X) quotient map validate_orientifold now
+        # uses -- is trivially the identity, matching _topology's
+        # basis_matrix (also np.eye(h11)) exactly, since every test call
+        # here sizes `points` to exactly h11 entries (no surplus divisors).
+        del include_origin, integral
+        n = len(points) if points is not None else self._points.shape[0]
+        return np.eye(n, dtype=int)
+
 
 class _FakeTriangulation:
     """Minimal stand-in exposing only what validate_orientifold reads."""

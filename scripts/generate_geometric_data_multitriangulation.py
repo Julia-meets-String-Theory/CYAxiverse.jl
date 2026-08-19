@@ -461,9 +461,45 @@ def validate_orientifold(poly, triangulation, topology, config):
         )
     permutation = np.zeros((divisor_points.size, divisor_points.size), dtype=float)
     permutation[np.arange(divisor_points.size), mapped_divisor_positions] = 1.0
-    transformed_basis = basis_matrix @ permutation
+
+    # `basis_matrix` (CYTools' `divisor_basis(as_matrix=True)`) is, absent an
+    # explicit custom basis (never set in this codebase), a pure 0/1 selector
+    # marking which `h11` of the `N = h11+4` toric-divisor slots were chosen
+    # as basis -- it carries no information about the toric linear relations
+    # among divisor classes. Solving `h2_matrix @ basis_matrix = transformed`
+    # against that selector alone is only exactly consistent when `L` happens
+    # to permute the chosen basis-slot *set* onto itself, which has nothing
+    # to do with whether `L` induces a genuine integral H2 action -- it
+    # always does, for any point-set-preserving lattice automorphism, since
+    # the toric relations (the kernel of Z^N -> Pic(X)) are automorphism-
+    # invariant by construction. Use the actual quotient map instead: the
+    # GLSM charge matrix, restricted to the same `divisor_points` ordering
+    # `basis_matrix` uses, expresses every one of the N divisors' classes
+    # directly in the same basis (verified below) rather than only the
+    # arbitrarily-selected ones.
+    charge_matrix = np.asarray(
+        poly.glsm_charge_matrix(
+            include_origin=True, points=divisor_points.tolist(), integral=True
+        ),
+        dtype=float,
+    )
+    if charge_matrix.shape != (topology["h11"], divisor_points.size):
+        raise OrientifoldValidationFailure(
+            "The GLSM charge matrix does not match the exported divisor "
+            "basis' shape."
+        )
+    basis_slots = np.flatnonzero(np.any(basis_matrix != 0, axis=0))
+    if basis_slots.size != topology["h11"] or not np.allclose(
+        charge_matrix[:, basis_slots], basis_matrix[:, basis_slots], atol=1e-8
+    ):
+        raise OrientifoldValidationFailure(
+            "The GLSM charge matrix and the exported divisor basis disagree "
+            "on the chosen basis divisors."
+        )
+
+    transformed_charges = charge_matrix @ permutation
     coefficients, _, _, _ = np.linalg.lstsq(
-        basis_matrix.T, transformed_basis.T, rcond=None
+        charge_matrix.T, transformed_charges.T, rcond=None
     )
     h2_matrix = coefficients.T
     integral_h2 = np.rint(h2_matrix).astype(int)
@@ -473,7 +509,7 @@ def validate_orientifold(poly, triangulation, topology, config):
             "exported divisor basis.",
             stage="nonintegral_h2_action",
         )
-    if not np.allclose(integral_h2 @ basis_matrix, transformed_basis, atol=1e-8):
+    if not np.allclose(integral_h2 @ charge_matrix, transformed_charges, atol=1e-8):
         raise OrientifoldValidationFailure(
             "Could not express the orientifold action in H2.",
             stage="nonintegral_h2_action",
