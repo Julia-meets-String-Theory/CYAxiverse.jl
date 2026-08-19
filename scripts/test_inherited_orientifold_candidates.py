@@ -227,7 +227,15 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
             if record.get("record_kind") == "lattice_matrix_search_summary"
         ]
         self.assertEqual(len(records), expected_count + len(matrix_summaries))
-        self.assertEqual(
+        # Any matrix whose full shift/lambda_f search found nothing accepted
+        # must be summarized with this status. For this permissive h11=5
+        # fixture every one of the 10 involutions now finds at least one
+        # genuine accepted candidate once torus_shift is the true t (see the
+        # eq. (4.34) factor-of-2 fix in enumerate_orientifold_candidates:
+        # ``shift["vector"]`` is "[2t]", not t), so matrix_summaries is
+        # empty; assert the subset relation rather than exact equality so
+        # this does not depend on that being empty specifically.
+        self.assertLessEqual(
             {record["terminal_status"] for record in matrix_summaries},
             {"torus_shift_search_exhausted"},
         )
@@ -267,9 +275,15 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
             and record["torus_shift"]
             == {"numerator": [0, 0, 0, 0], "denominator": 1}
         ]
-        self.assertEqual(len(accepted), 2)
+        # Only lambda_f=0 survives at (L=I, t=0): lambda_f=1 there forces
+        # every monomial coefficient to vanish identically (source eq.
+        # (4.43) with t=0, lambda_f=1 gives psi_q = -psi_q), so it is
+        # correctly not a valid orientifold action, and
+        # classify_smoothness's identity-sanity shortcut is restricted to
+        # lambda_f=0 accordingly.
+        self.assertEqual(len(accepted), 1)
         self.assertTrue(all(record["lattice_matrix"] == np.eye(4, dtype=int).tolist() for record in accepted))
-        self.assertEqual({record["lambda_f"] for record in accepted}, {0, 1})
+        self.assertEqual({record["lambda_f"] for record in accepted}, {0})
 
     def test_partial_frst_rejects_candidates_that_move_the_excluded_point(self):
         poly = self._poly()
@@ -282,7 +296,15 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 
-        self.assertEqual(len(records), 89)
+        # Record and acceptance counts below reflect the corrected
+        # torus-shift value (t, not source eq. (4.34)'s "[2t]" quotient
+        # representative -- see the factor-of-2 fix in
+        # enumerate_orientifold_candidates). The previous, buggy shift
+        # values collapsed most non-identity-matrix shifts onto degenerate
+        # duplicates, spuriously suppressing genuine acceptances; the
+        # corrected values vary properly, so more of the 4 FRST-preserving
+        # matrices' (shift, lambda_f) triples now pass legitimately.
+        self.assertEqual(len(records), 86)
         accepted = [
             record
             for record in records
@@ -293,12 +315,19 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
             for record in records
             if record["terminal_status"] == "frst_not_preserved"
         ]
-        self.assertEqual(len(accepted), 17)
+        self.assertEqual(len(accepted), 60)
         self.assertEqual(len(frst_failed), 6)
         for record in frst_failed:
             self.assertIsNone(record.get("h11_minus"))
 
-    def test_identity_zero_shift_accepts_both_lambda_choices(self):
+    def test_identity_zero_shift_accepts_lambda_f_zero_only(self):
+        # L=I, t=0 is the trivial (worldsheet-parity-only) action: physically
+        # valid and trivially smooth for lambda_f=0 (O5/O9, whole CY fixed),
+        # but not a valid orientifold action at all for lambda_f=1 (O3/O7):
+        # source eq. (4.43) with t=0, lambda_f=1 forces psi_q = -psi_q for
+        # every monomial coefficient q, i.e. psi_q=0 identically. This
+        # asymmetry must survive both classify_smoothness's shortcut and
+        # _fixed_point_set_description's labelling.
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
         topology = _topology([1, 2, 3, 4], h11=5)
@@ -314,12 +343,24 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
             for record in identity_zero_shift
             if record["terminal_status"] == "accepted_verified_orientifold"
         ]
-        self.assertEqual({record["lambda_f"] for record in accepted}, {0, 1})
+        self.assertEqual({record["lambda_f"] for record in accepted}, {0})
         self.assertTrue(
             all(
                 record["fixed_point_set"]["description"] == "whole_calabi_yau"
                 for record in accepted
             )
+        )
+        rejected_lambda_f_1 = [
+            record
+            for record in identity_zero_shift
+            if record["lambda_f"] == 1
+        ]
+        self.assertEqual(len(rejected_lambda_f_1), 1)
+        self.assertNotEqual(
+            rejected_lambda_f_1[0]["terminal_status"], "accepted_verified_orientifold"
+        )
+        self.assertNotEqual(
+            rejected_lambda_f_1[0]["fixed_point_set"]["description"], "whole_calabi_yau"
         )
 
     def test_candidate_ids_are_stable_across_repeated_calls(self):

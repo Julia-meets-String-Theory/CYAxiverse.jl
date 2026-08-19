@@ -604,8 +604,18 @@ def classify_smoothness(
 ):
     """Classify source smoothness checks without inventing missing evidence."""
     matrix = np.asarray(matrix, dtype=int)
-    is_identity_sanity = np.array_equal(matrix, IDENTITY) and all(
-        value == 0 for value in torus_shift
+    # L=I, t=0 is only a valid (trivially smooth) orientifold action for
+    # lambda_f=0 (worldsheet-parity-only, O9-filling-everything). For
+    # lambda_f=1, source eq. (4.43) with t=0 forces every monomial
+    # coefficient psi_q = -psi_q, i.e. psi_q=0 for all q -- there is no
+    # hypersurface to speak of, and eq. (4.45) (line ~627) correctly reports
+    # a violation at every L-fixed dual vertex (all of them, since L=I).
+    # This branch must not paper over that with the same unconditional
+    # "smooth" verdict used for lambda_f=0.
+    is_identity_sanity = (
+        np.array_equal(matrix, IDENTITY)
+        and all(value == 0 for value in torus_shift)
+        and int(lambda_f) == 0
     )
     parity = _dual_vertex_parity_evidence(
         matrix,
@@ -697,7 +707,15 @@ def classify_smoothness(
 
 
 def _fixed_point_set_description(matrix, torus_shift, fixed_components, smoothness):
-    if np.array_equal(matrix, IDENTITY) and all(value == 0 for value in torus_shift):
+    """Describe the fixed-point set; the whole-CY label must agree with
+    ``classify_smoothness``'s own verdict rather than re-deriving it, so the
+    two cannot fall out of sync (see ``classify_smoothness``'s lambda_f=0
+    restriction on the identity/zero-shift case)."""
+    if (
+        np.array_equal(matrix, IDENTITY)
+        and all(value == 0 for value in torus_shift)
+        and smoothness["status"] == "smooth"
+    ):
         return {
             "description": "whole_calabi_yau",
             "component_count": len(fixed_components),
@@ -789,7 +807,16 @@ def enumerate_orientifold_candidates(
 
         matrix_records = []
         for shift in shifts:
-            torus_shift = shift["vector"]
+            # ``shift["vector"]`` is a representative of source eq. (4.34)'s
+            # H_+^L = P_+^L(N)/(2 P_+^L(N)), whose elements are explicitly
+            # labelled "[2t]" there -- it IS 2t, not t. Downstream consumers
+            # (eq. 4.45's dual-vertex parity, eq. 4.33's fixed-component
+            # integrality condition) both use t directly, so it must be
+            # halved once more here. Confirmed empirically for L=identity
+            # against CYTools' own poly.inequivalent_Z2_actions() (t in
+            # {0, 1/2}^4, not {0, 1}^4 as enumerate_projected_lattice_
+            # representatives' "vector" gives before this correction).
+            torus_shift = tuple(value / 2 for value in shift["vector"])
             for lambda_f in (0, 1):
                 involution_type = "O3/O7" if lambda_f == 1 else "O5/O9"
                 candidate_id = stable_hash(

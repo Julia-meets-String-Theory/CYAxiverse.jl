@@ -504,10 +504,16 @@ def _orientifold_action_audit(poly, classes):
             poly, triangulation
         )
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
+        # Table 1's population (main.tex:1272, item 3 of the ensemble
+        # definition) is explicitly "an ... orientifold involution of O3/O7
+        # type" -- lambda_f=1 only. An accepted lambda_f=0 (O5/O9) candidate
+        # is a real, structurally different orientifold and must not count
+        # as evidence for this row.
         accepted = [
             record
             for record in records
             if record.get("terminal_status") == "accepted_verified_orientifold"
+            and int(record.get("lambda_f", -1)) == 1
         ]
         if accepted:
             inherited_classes.add(class_index)
