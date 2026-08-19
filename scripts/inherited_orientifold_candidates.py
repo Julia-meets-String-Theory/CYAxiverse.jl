@@ -534,6 +534,39 @@ def _n_s_for_two_ray_cone(tensor, vectors, ray_points):
     return int(round(l2 - l_dp - l_dq + dpdq))
 
 
+def _cone_has_smooth_star(fan, sigma_rays):
+    """Is ``S = D_p . D_q`` (the toric surface dual to the 2-cone
+    ``sigma=(p,q)``) itself smooth?
+
+    ``sigma`` being a smooth (unimodular) 2-cone is not sufficient: cone
+    multiplicity is multiplicative across a smooth sub-face's star (choose
+    lattice coordinates with ``p,q`` as the first two basis vectors -- any
+    cone ``tau ⊇ sigma`` then has block-triangular generator matrix, so
+    ``mult(tau) = mult(sigma) * mult(star_image(tau)) = mult(star_image(tau))``
+    since ``mult(sigma)=1``), so ``tau`` is smooth iff its star image in
+    ``N/Z{p,q}`` is -- and that star image *is* the local toric structure of
+    ``S`` itself. So ``sigma`` being a face of any non-simplicial-or-non-
+    smooth cone elsewhere in the fan means ``S`` has a genuine orbifold
+    point there, independent of whether ``sigma`` itself looks smooth in
+    isolation. Verified directly (not just cited) against real fan data in
+    validation/fuzzy_axions_2412_12012_n_s_orbifold_contamination_20260819.md
+    Sec. 4: the star-image determinant matched ``cone.is_smooth()`` for the
+    containing cone exactly, with zero exceptions.
+    """
+
+    sigma_set = set(tuple(int(value) for value in ray) for ray in sigma_rays)
+    for dimension in (3, 4):
+        for cone in fan.cones(dim=dimension, formal=True):
+            rays = np.asarray(cone.rays(), dtype=int)
+            ray_set = set(tuple(int(value) for value in ray) for ray in rays)
+            if not sigma_set.issubset(ray_set):
+                continue
+            is_simplicial = rays.shape[0] == dimension
+            if not (is_simplicial and bool(cone.is_smooth())):
+                return False
+    return True
+
+
 def identity_fixed_surface_n_s_table(triangulation_cones, triangulation):
     """Populate ``n^S_{df=0}`` evidence for ``L=identity``'s 2-dimensional
     fixed components, keyed for ``classify_smoothness``'s
@@ -544,9 +577,9 @@ def identity_fixed_surface_n_s_table(triangulation_cones, triangulation):
     ``-1`` eigenspace -- confirmed empirically, not just asserted), and its
     auxiliary fan ``Sigma_L`` reduces exactly to the ambient fan itself
     (confirmed empirically), so every 2-dimensional fixed component is a
-    smooth 2-cone ``(p, q)`` of the ambient fan directly, matching Moritz
-    eq. around line 572-574 (``t + (1/2) sum(sigma(1)) in N``) exactly --
-    the same case ``reproduce_fuzzy_axions_h11_4.py``'s
+    2-cone ``(p, q)`` of the ambient fan directly, matching Moritz eq.
+    around line 572-574 (``t + (1/2) sum(sigma(1)) in N``) exactly -- the
+    same case ``reproduce_fuzzy_axions_h11_4.py``'s
     ``_frozen_conifold_diagnostic`` already validates end to end against
     the paper's own Table 1 numbers, just for one specific shift
     (the trilayer's ``t=p0/2``) instead of every shift. Not extended to
@@ -554,6 +587,16 @@ def identity_fixed_surface_n_s_table(triangulation_cones, triangulation):
     generally more involved than a direct 2-divisor intersection (Sec. 4.4
     of arXiv:2305.06363), and applying this same formula there has not been
     independently derived or verified.
+
+    ``(p, q)`` being simplicial does *not* mean ``S = D_p.D_q`` is smooth --
+    see ``_cone_has_smooth_star``. Source line 656-657 separately requires
+    ``S`` itself to be smooth (on top of ``n_S=0``); when it isn't, no table
+    entry is written, so ``classify_smoothness``'s existing
+    ``_lookup_surface_n_s -> None`` path reports
+    ``"eq. (4.50) requires fixed-surface n_S evidence"`` in
+    ``unavailable_reasons`` rather than trusting a computed ``n_S`` whose
+    own precondition (a smooth complete intersection with a split normal
+    bundle) does not hold.
     """
 
     auxiliary_fan = build_auxiliary_fan(triangulation_cones, IDENTITY)
@@ -567,6 +610,8 @@ def identity_fixed_surface_n_s_table(triangulation_cones, triangulation):
     table = {}
     for cone in auxiliary_fan:
         if cone["dimension"] != 2 or len(cone["rays"]) != 2:
+            continue
+        if not _cone_has_smooth_star(fan, cone["rays"]):
             continue
         n_s = _n_s_for_two_ray_cone(tensor, vectors, cone["rays"])
         if n_s is None:
