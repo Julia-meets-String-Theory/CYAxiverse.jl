@@ -675,6 +675,17 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
     """
 
     convention = {
+        "qcd_divisor_domain": args.qcd_divisor_domain,
+        "qcd_divisor_domain_justification": (
+            "all_prime is Algorithm 1's literal 'for D in the h11+4 prime toric divisors'; "
+            "leading_nonself is the opt-in candidate restriction to the h11 leading-instanton "
+            "divisors minus the fuzzy axion's own (see enumerate_fuzzy_axion_models's docstring "
+            "and validation/fuzzy_axions_2412_12012_sampler_reverse_engineering_20260818.md). "
+            "Counts under leading_nonself are diagnostic only and undershoot Table 1 at h11>=3 "
+            "by construction, because the sampler's second half -- an enrichment supplying more "
+            "than one Kahler point per surviving (CY, axion, D) combination -- is deliberately "
+            "not implemented"
+        ),
         "gs": args.gs,
         "gs_justification": (
             "paper's stated main-analysis reference value, eq. 3.28-3.29 (gs=0.5 -> P~5e-4)"
@@ -721,6 +732,7 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
                 str(args.gs),
                 str(args.w0_real),
                 str(args.w0_imag),
+                str(args.qcd_divisor_domain),
             ],
             check=True,
         )
@@ -922,8 +934,18 @@ def reproduce(args):
         and population_complete
     )
     model_stage = _run_model_stage(model_stage_records, args) if args.model_stage else None
+    # A non-default QCD-divisor domain is a candidate reading of Algorithm 1,
+    # not a correction to it, so its counts can never be a benchmark-match
+    # claim -- not even where they coincide with Table 1 (they do at h11=2).
+    model_stage_is_literal_algorithm = args.qcd_divisor_domain == "all_prime"
     if model_stage is not None and model_stage["diagnostic_reason"] is None:
         reasons = []
+        if not model_stage_is_literal_algorithm:
+            reasons.append(
+                f"--qcd-divisor-domain={args.qcd_divisor_domain} is an opt-in candidate reading "
+                "of Algorithm 1's 'for D' loop, not the paper's literal text; counts under it "
+                "are diagnostic only regardless of how they compare to Table 1"
+            )
         if not population_complete:
             reasons.append(f"run was limited via --limit; population is not the full h11={args.h11} set")
         if targets is None:
@@ -1004,7 +1026,9 @@ def reproduce(args):
                     if model_stage is None
                     else (
                         "benchmark_match_candidate"
-                        if population_exact_target and model_stage["total_model_count"] == targets["models"]
+                        if population_exact_target
+                        and model_stage_is_literal_algorithm
+                        and model_stage["total_model_count"] == targets["models"]
                         else "diagnostic_only"
                     )
                 ),
@@ -1070,6 +1094,22 @@ def main():
         "hand-worked-example convention W0=1.",
     )
     parser.add_argument("--w0-imag", type=float, default=0.0)
+    parser.add_argument(
+        "--qcd-divisor-domain",
+        choices=("all_prime", "leading_nonself"),
+        default="all_prime",
+        help=(
+            "Which prime toric divisors Algorithm 1's 'for D' loop ranges over. "
+            "all_prime (default) is the paper's literal text: all h11+4 of them, "
+            "self-pairing included. leading_nonself opts into the candidate "
+            "restriction to the h11 leading-instanton divisors minus the fuzzy "
+            "axion's own -- the only one of 48 screened restrictions that survives "
+            "Table 1's h11=2 row and predicts h11=4 and 5 to within 10%% "
+            "(validation/fuzzy_axions_2412_12012_sampler_reverse_engineering_20260818.md). "
+            "It forces model_count claim_status to diagnostic_only, and it undershoots "
+            "Table 1 at h11>=3 by construction; do not tune towards Table 1 to close that."
+        ),
+    )
     parser.add_argument(
         "--julia-binary",
         default="julia",

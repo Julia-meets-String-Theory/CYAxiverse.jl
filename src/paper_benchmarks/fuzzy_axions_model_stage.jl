@@ -25,6 +25,21 @@ const FUZZY_AXION_QCD_VOLUME_MIN = 25.0
 const FUZZY_AXION_QCD_VOLUME_MAX = 40.0
 
 """
+Admissible values of [`enumerate_fuzzy_axion_models`](@ref)'s
+`qcd_divisor_domain` keyword: the set of prime toric divisors Algorithm 1's
+`for D ...` loop ranges over.
+
+`:all_prime` (the default) is the literal reading of Algorithm 1 -- all
+h1,1+4 prime toric divisors, self-pairing included. `:leading_nonself`
+restricts that loop to the h1,1 divisors hosting a leading instanton, minus
+the fuzzy axion's own; it is a *candidate* reading with recorded
+counter-evidence, never the default. See
+[`enumerate_fuzzy_axion_models`](@ref)'s docstring for both sides of the
+argument.
+"""
+const FUZZY_AXION_QCD_DIVISOR_DOMAINS = (:all_prime, :leading_nonself)
+
+"""
     leading_axion_reference_data(Q, tau, cy_volume, prefactor_P, gravitino_mass_planck_units, inverse_metric)
 
 Select the up-to-h11 leading (dominant) instantons via `LQtilde` and return,
@@ -44,10 +59,13 @@ before the final Mpl-to-eV "restoration").
 `inverse_metric` is `K^{ij}` at t0 (the Priority-1 export's `inverse_metric`).
 
 Also returns `divisor_index`, the original 1-based column of `Q`/`tau` each
-selected leading axion was built from. Not consumed by
-[`enumerate_fuzzy_axion_models`](@ref) itself (it no longer distinguishes a
-self-paired candidate QCD divisor from any other, see that function's
-docstring); kept for callers that need to identify or analyze
+selected leading axion was built from. [`enumerate_fuzzy_axion_models`](@ref)'s
+default `qcd_divisor_domain=:all_prime` path does not consume it (that path
+does not distinguish a self-paired candidate QCD divisor from any other, see
+that function's docstring), but its opt-in `:leading_nonself` path is defined
+entirely in terms of it: `divisor_index` *is* the candidate QCD-divisor
+domain there, and `divisor_index[a]` is the single element axion `a` may not
+pair with. Also kept for callers that need to identify or analyze
 self-referential `(axion, QCD divisor)` pairs after the fact.
 """
 function leading_axion_reference_data(Q::AbstractMatrix{Int}, tau::AbstractVector{<:Real},
@@ -202,9 +220,9 @@ underflow to exactly `0.0` for a strongly-suppressed sub-leading instanton
 itself uses [`fuzzy_axion_dilation_root_log10`](@ref) directly on
 `reference.mass_log10_ev_reference`, never materializing the linear mass.
 
-A candidate QCD divisor `D` equal to axion `a`'s own divisor (`D ==
-reference.divisor_index[a]`) is **not** excluded, matching Algorithm 1's
-literal text: its `for D in h1,1+4 prime toric divisors` / `for lambda ...`
+Under the default `qcd_divisor_domain=:all_prime`, a candidate QCD divisor
+`D` equal to axion `a`'s own divisor (`D == reference.divisor_index[a]`) is
+**not** excluded, matching Algorithm 1's literal text: its `for D in h1,1+4 prime toric divisors` / `for lambda ...`
 nesting checks the same three criteria uniformly for every `D`, with no
 stated exception for `D` coinciding with the divisor sourcing the
 criterion-3-satisfying axion (verified by a full-text grep of the arXiv
@@ -229,17 +247,65 @@ Sec. 0/0b for the full reasoning chain and reproducible measurement
 script; this remains a live open question (the paper's own, unpublished
 reference implementation could still apply an unstated exclusion), not a
 closed one.
+
+# `qcd_divisor_domain`
+
+`:all_prime` (default) ranges the `D` loop over all h1,1+4 prime toric
+divisors, as above. `:leading_nonself` restricts it to
+`reference.divisor_index` -- the h1,1 divisors that actually host a leading
+instanton, i.e. an axion -- and additionally skips `D ==
+reference.divisor_index[a]`. Criteria 1, 2 and 3 and the λ_a solve are
+**unchanged**; the keyword changes only which `D` are offered to criterion 2.
+
+This is an opt-in **candidate reading**, not a correction, and the default
+deliberately stays `:all_prime`. Evidence on each side, from
+`validation/fuzzy_axions_2412_12012_sampler_reverse_engineering_20260818.md`:
+
+- *For.* Table 1's h1,1=2 row (2 models from 11 CYs) is unreachable without
+  some `(axion, QCD divisor)` restriction -- every one of our 11 CYs yields
+  at least two models on the Algorithm-1 ray, and a richer sampler can only
+  add (that writeup's Sec. 2.1). Of 48 candidate restrictions screened
+  against Table 1, this one is the only survivor within 10% at both
+  out-of-sample points (h1,1=4 and 5) when its enrichment law is fit on
+  h1,1=2 and 3 alone. Sec. 3.3 of the source writes criterion 1 over
+  `α = 1, …, h1,1+4` but criteria 2 and 3 over `a ∈ {1, …, h1,1}`, the axion
+  range (main.tex:1090-1094); and a divisor hosting the D7 stack realizing
+  QCD carries the QCD axion, which cannot simultaneously be the fuzzy axion.
+- *Against.* Algorithm 1 itself (main.tex:1314-1327) writes `for D ∈` the
+  h1,1+4 prime toric divisors, with no restriction. This reading is
+  consistent with that text only if criterion 2 is taken to fail for every
+  `D` outside the axion set, which the algorithm does not spell out.
+
+Counts under this domain are **diagnostic only** and are expected to
+undershoot Table 1 at h1,1 >= 3 by construction: the restriction is one of
+two independently-necessary halves of the sampler, and the other half (an
+enrichment supplying more than one Kähler point per surviving `(CY, axion,
+D)` combination, required to grow roughly linearly in h1,1) is deliberately
+not implemented -- it is not recoverable from Table 1 even in principle,
+because for fixed `(a, D)` the three criteria cut out a locus of dimension
+h1,1-1 whose discretization the source never states. Do not tune anything
+towards Table 1 to close the residual: every tunable enters only through
+`C := λ_a² τ_a` and is bounded out over its entire range, for this
+restriction as well as for the default one.
 """
 function enumerate_fuzzy_axion_models(Q::AbstractMatrix{Int}, tau::AbstractVector{<:Real},
         cy_volume::Real, prefactor_P::Real, gravitino_mass_planck_units::Real,
         inverse_metric::AbstractMatrix{<:Real};
         mass_target_ev::Real=FUZZY_AXION_MASS_TARGET_EV,
         qcd_volume_min::Real=FUZZY_AXION_QCD_VOLUME_MIN,
-        qcd_volume_max::Real=FUZZY_AXION_QCD_VOLUME_MAX)
+        qcd_volume_max::Real=FUZZY_AXION_QCD_VOLUME_MAX,
+        qcd_divisor_domain::Symbol=:all_prime)
+    qcd_divisor_domain in FUZZY_AXION_QCD_DIVISOR_DOMAINS || throw(ArgumentError(
+        "qcd_divisor_domain must be one of $(FUZZY_AXION_QCD_DIVISOR_DOMAINS), got :$(qcd_divisor_domain)"))
     reference = leading_axion_reference_data(Q, tau, cy_volume, prefactor_P,
         gravitino_mass_planck_units, inverse_metric)
     n_leading = length(reference.tau_reference)
     n_divisors = length(tau)
+    # Sorted so that both domains emit their models in ascending candidate
+    # QCD-divisor index within an axion; `divisor_index` itself is ordered by
+    # the leading-instanton ranking, not by column.
+    candidate_divisors = qcd_divisor_domain === :all_prime ? (1:n_divisors) :
+        sort(reference.divisor_index)
     models = NamedTuple[]
     for a in 1:n_leading
         mass_reference_log10_ev = reference.mass_log10_ev_reference[a]
@@ -247,12 +313,14 @@ function enumerate_fuzzy_axion_models(Q::AbstractMatrix{Int}, tau::AbstractVecto
             mass_target_ev=mass_target_ev)
         lambda === nothing && continue
         fuzzy_axion_criterion_one(tau, lambda) || continue
-        for divisor_index in 1:n_divisors
-            fuzzy_axion_criterion_two(tau[divisor_index], lambda;
+        for qcd_divisor_index in candidate_divisors
+            qcd_divisor_domain === :leading_nonself &&
+                qcd_divisor_index == reference.divisor_index[a] && continue
+            fuzzy_axion_criterion_two(tau[qcd_divisor_index], lambda;
                 volume_min=qcd_volume_min, volume_max=qcd_volume_max) || continue
             push!(models, (;
                 axion_index=a,
-                qcd_divisor_index=divisor_index,
+                qcd_divisor_index=qcd_divisor_index,
                 lambda=lambda,
                 mass_reference_log10_ev=mass_reference_log10_ev,
                 tau_reference=reference.tau_reference[a],

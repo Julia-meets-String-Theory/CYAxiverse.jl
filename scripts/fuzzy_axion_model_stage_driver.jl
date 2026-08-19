@@ -19,7 +19,14 @@ the final JSON summary.
 
 Usage:
     julia --project=. scripts/fuzzy_axion_model_stage_driver.jl \\
-        <input.h5> <output.h5> <gs> <w0_real> <w0_imag>
+        <input.h5> <output.h5> <gs> <w0_real> <w0_imag> [<qcd_divisor_domain>]
+
+`qcd_divisor_domain` is optional and defaults to `all_prime`, the literal
+Algorithm-1 reading. Passing `leading_nonself` opts into the candidate
+restriction documented in `enumerate_fuzzy_axion_models`'s docstring; counts
+produced under it are diagnostic only. The chosen value is written to the
+output file as `qcd_divisor_domain` so a run's provenance is recoverable from
+its artifact alone.
 
 Array-order gotcha (verified empirically before writing this script, not
 assumed): HDF5.jl reads an N-D dataset written by h5py with its dimensions
@@ -36,11 +43,14 @@ using CYAxiverse
 using HDF5
 
 function main()
-    length(ARGS) == 5 || error(
-        "usage: julia fuzzy_axion_model_stage_driver.jl <input.h5> <output.h5> <gs> <w0_real> <w0_imag>")
-    input_path, output_path, gs_arg, w0_real_arg, w0_imag_arg = ARGS
+    length(ARGS) in (5, 6) || error(
+        "usage: julia fuzzy_axion_model_stage_driver.jl <input.h5> <output.h5> <gs> <w0_real> <w0_imag> [<qcd_divisor_domain>]")
+    input_path, output_path, gs_arg, w0_real_arg, w0_imag_arg = ARGS[1:5]
     gs = parse(Float64, gs_arg)
     w0 = Complex{Float64}(parse(Float64, w0_real_arg), parse(Float64, w0_imag_arg))
+    qcd_divisor_domain = length(ARGS) == 6 ? Symbol(ARGS[6]) : :all_prime
+    qcd_divisor_domain in CYAxiverse.paper_benchmarks.FUZZY_AXION_QCD_DIVISOR_DOMAINS || error(
+        "qcd_divisor_domain must be one of $(CYAxiverse.paper_benchmarks.FUZZY_AXION_QCD_DIVISOR_DOMAINS), got :$(qcd_divisor_domain)")
 
     prefactor_P = CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(gs)
 
@@ -84,9 +94,10 @@ function main()
 
             models = try
                 CYAxiverse.paper_benchmarks.enumerate_fuzzy_axion_models(
-                    Q, tau, cy_volume, prefactor_P, gravitino_mass, inverse_metric)
+                    Q, tau, cy_volume, prefactor_P, gravitino_mass, inverse_metric;
+                    qcd_divisor_domain=qcd_divisor_domain)
             catch exception
-                @error "enumerate_fuzzy_axion_models failed" record_index=i Q tau cy_volume inverse_metric gravitino_mass
+                @error "enumerate_fuzzy_axion_models failed" record_index=i Q tau cy_volume inverse_metric gravitino_mass qcd_divisor_domain
                 rethrow(exception)
             end
 
@@ -118,9 +129,11 @@ function main()
         write(file, "w0_real", real(w0))
         write(file, "w0_imag", imag(w0))
         write(file, "prefactor_P", prefactor_P)
+        write(file, "qcd_divisor_domain", String(qcd_divisor_domain))
     end
 
-    println("wrote $(output_path): $(record_count) records, $(total_model_count) total models")
+    println("wrote $(output_path): $(record_count) records, $(total_model_count) total models " *
+            "(qcd_divisor_domain=$(qcd_divisor_domain))")
 end
 
 main()

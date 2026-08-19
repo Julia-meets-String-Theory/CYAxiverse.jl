@@ -65,6 +65,31 @@ GS = 0.5
 W0_REAL = 1.0
 W0_IMAG = 0.0
 
+# Record 0 of the full h1,1=3 population (the Kähler-point export in
+# validation/fuzzy_axions_supp/model_count_gap_20260818/h11_3_detail.json).
+# Real geometry rather than a synthetic fixture, because the point of the
+# --qcd-divisor-domain test below is that the restricted domain is *not*
+# vacuously empty: the leading-instanton divisors here are D1, D2, D7, and
+# the restriction keeps exactly (axion 1, D2) and (axion 2, D1) out of the
+# default domain's 10 models. The same two counts are asserted at the unit
+# level in test/runtests.jl.
+H11_3_Q = [
+    [1, 0, 0, 4, 1, 0, 2],
+    [0, 1, 1, 0, 0, 0, -2],
+    [0, 0, 0, 2, 0, 1, 1],
+]
+H11_3_TAU = [
+    2.000000000261836, 2.000000000397189, 2.000000000397189,
+    14.000000002208573, 2.000000000261836, 3.0000000005806142,
+    3.000000000309908,
+]
+H11_3_CY_VOLUME = 3.6666666675483235
+H11_3_INVERSE_METRIC = [
+    [16.000000004189374, 1.3333333337988176, -20.0000000053531],
+    [1.3333333337988176, 16.000000006355023, 9.333333337232721],
+    [-20.0000000053531, 9.333333337232721, 94.66666669585791],
+]
+
 
 class ModelStageDriverBridgeTest(unittest.TestCase):
     def test_hdf5_bridge_matches_direct_julia_call(self):
@@ -163,6 +188,106 @@ class ModelStageDriverBridgeTest(unittest.TestCase):
             self.assertEqual(bridged_model[0], direct_model[0])  # axion_index
             self.assertEqual(bridged_model[1], direct_model[1])  # qcd_divisor_index
             self.assertAlmostEqual(bridged_model[2], direct_model[2], places=8)  # lambda
+
+    def test_qcd_divisor_domain_reaches_the_julia_enumerator(self):
+        """The optional 6th driver argument must actually change the enumeration.
+
+        ``reproduce_fuzzy_axions_h11_4.py --qcd-divisor-domain`` is only
+        meaningful if it survives the HDF5 bridge, so this asserts the two
+        domains give different, specifically-known counts on the same record
+        and that the driver records which one it ran under.
+        """
+
+        record = {
+            "glsm_charge_matrix": H11_3_Q,
+            "prime_divisor_volumes": H11_3_TAU,
+            "cy_volume": H11_3_CY_VOLUME,
+            "inverse_metric": H11_3_INVERSE_METRIC,
+        }
+
+        def run(domain_args, output_name):
+            with tempfile.TemporaryDirectory(prefix="fuzzy_axion_domain_test_") as workdir_name:
+                workdir = Path(workdir_name)
+                input_path = workdir / "input.h5"
+                output_path = workdir / output_name
+                _write_model_stage_input([record], input_path)
+                subprocess.run(
+                    [
+                        "julia",
+                        f"--project={REPO_ROOT}",
+                        str(DRIVER),
+                        str(input_path),
+                        str(output_path),
+                        str(GS),
+                        str(W0_REAL),
+                        str(W0_IMAG),
+                        *domain_args,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                with h5py.File(output_path, "r") as file:
+                    domain = file["qcd_divisor_domain"][()]
+                    return (
+                        int(file["total_model_count"][()]),
+                        sorted(
+                            zip(
+                                np.asarray(file["model_axion_index"]).tolist(),
+                                np.asarray(file["model_qcd_divisor_index"]).tolist(),
+                            )
+                        ),
+                        domain.decode() if isinstance(domain, bytes) else str(domain),
+                    )
+
+        # Omitting the argument entirely must stay the literal Algorithm-1
+        # reading -- the default is load-bearing, not cosmetic.
+        implicit_total, implicit_pairs, implicit_domain = run([], "implicit.h5")
+        explicit_total, explicit_pairs, explicit_domain = run(["all_prime"], "explicit.h5")
+        restricted_total, restricted_pairs, restricted_domain = run(
+            ["leading_nonself"], "restricted.h5"
+        )
+
+        self.assertEqual(implicit_domain, "all_prime")
+        self.assertEqual(explicit_domain, "all_prime")
+        self.assertEqual(restricted_domain, "leading_nonself")
+        self.assertEqual(implicit_total, 10)
+        self.assertEqual(explicit_total, 10)
+        self.assertEqual(implicit_pairs, explicit_pairs)
+        self.assertEqual(restricted_total, 2)
+        self.assertEqual(restricted_pairs, [(1, 2), (2, 1)])
+        # The restriction may only ever drop candidates.
+        self.assertTrue(set(restricted_pairs).issubset(set(implicit_pairs)))
+
+    def test_rejects_unknown_qcd_divisor_domain(self):
+        record = {
+            "glsm_charge_matrix": SYNTHETIC_Q,
+            "prime_divisor_volumes": SYNTHETIC_TAU,
+            "cy_volume": SYNTHETIC_CY_VOLUME,
+            "inverse_metric": SYNTHETIC_INVERSE_METRIC,
+        }
+
+        with tempfile.TemporaryDirectory(prefix="fuzzy_axion_domain_test_") as workdir_name:
+            workdir = Path(workdir_name)
+            input_path = workdir / "input.h5"
+            _write_model_stage_input([record], input_path)
+            result = subprocess.run(
+                [
+                    "julia",
+                    f"--project={REPO_ROOT}",
+                    str(DRIVER),
+                    str(input_path),
+                    str(workdir / "output.h5"),
+                    str(GS),
+                    str(W0_REAL),
+                    str(W0_IMAG),
+                    "leading",
+                ],
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("qcd_divisor_domain must be one of", result.stderr)
 
     def test_write_model_stage_input_hdf5_shapes(self):
         record = {

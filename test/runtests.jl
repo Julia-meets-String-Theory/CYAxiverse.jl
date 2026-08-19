@@ -1521,6 +1521,73 @@ end
             model.axion_index == 2 && model.qcd_divisor_index == 3
             for model in models_h11_2
         )
+
+        # `qcd_divisor_domain=:leading_nonself` -- the opt-in candidate
+        # restriction of Algorithm 1's `for D` loop to the h1,1 leading-
+        # instanton divisors minus the fuzzy axion's own
+        # (validation/fuzzy_axions_2412_12012_sampler_reverse_engineering_20260818.md
+        # Sec. 3.3). It must not perturb the default path, must reject an
+        # unknown domain, and must produce exactly the subset the rule
+        # names -- checked here against a real h1,1=3 export record so the
+        # restricted set is non-empty, not vacuously so.
+        @test PB.FUZZY_AXION_QCD_DIVISOR_DOMAINS == (:all_prime, :leading_nonself)
+        @test PB.enumerate_fuzzy_axion_models(Q_h11_2, tau_h11_2, cy_volume_h11_2,
+            P_h11_2, m32_h11_2, Kinv_h11_2; qcd_divisor_domain=:all_prime) == models_h11_2
+        @test_throws ArgumentError PB.enumerate_fuzzy_axion_models(
+            Q_h11_2, tau_h11_2, cy_volume_h11_2, P_h11_2, m32_h11_2, Kinv_h11_2;
+            qcd_divisor_domain=:leading)
+        # Both of this geometry's leading divisors (D6, tau=0.5; D2, tau=2.5)
+        # fail criterion 2 at the *other* axion's lambda, so the restriction
+        # empties it: all 3 default models here are self-paired or pair with
+        # D3, which hosts no leading instanton.
+        @test isempty(PB.enumerate_fuzzy_axion_models(Q_h11_2, tau_h11_2, cy_volume_h11_2,
+            P_h11_2, m32_h11_2, Kinv_h11_2; qcd_divisor_domain=:leading_nonself))
+
+        # Real h1,1=3 export record (record 0 of the full h1,1=3 population,
+        # validation/fuzzy_axions_supp/model_count_gap_20260818/h11_3_detail.json).
+        # Leading divisors are D1, D2, D7; the default domain accepts 10
+        # models, the restriction keeps exactly (axion 1, D2) and
+        # (axion 2, D1) -- axion 3's lambda puts the two remaining leading
+        # divisors at tau ~ 22, below criterion 2's floor of 25.
+        Q_h11_3 = [1 0 0 4 1 0 2; 0 1 1 0 0 0 -2; 0 0 0 2 0 1 1]
+        tau_h11_3 = [2.000000000261836, 2.000000000397189, 2.000000000397189,
+            14.000000002208573, 2.000000000261836, 3.0000000005806142,
+            3.000000000309908]
+        cy_volume_h11_3 = 3.6666666675483235
+        Kinv_h11_3 = [16.000000004189374 1.3333333337988176 -20.0000000053531
+            1.3333333337988176 16.000000006355023 9.333333337232721
+            -20.0000000053531 9.333333337232721 94.66666669585791]
+        P_h11_3 = PB.fuzzy_axion_prefactor_P(0.5)
+        K_h11_3 = PB.fuzzy_axion_kahler_potential(cy_volume_h11_3)
+        W_h11_3 = PB.fuzzy_axion_flux_superpotential(1.0)
+        m32_h11_3 = PB.fuzzy_axion_gravitino_mass(
+            P_h11_3, K_h11_3, abs(W_h11_3); mplanck_ev=1.0)
+        reference_h11_3 = PB.leading_axion_reference_data(
+            Q_h11_3, tau_h11_3, cy_volume_h11_3, P_h11_3, m32_h11_3, Kinv_h11_3)
+        @test reference_h11_3.divisor_index == [1, 2, 7]
+        models_h11_3 = PB.enumerate_fuzzy_axion_models(Q_h11_3, tau_h11_3,
+            cy_volume_h11_3, P_h11_3, m32_h11_3, Kinv_h11_3)
+        @test length(models_h11_3) == 10
+        restricted_h11_3 = PB.enumerate_fuzzy_axion_models(Q_h11_3, tau_h11_3,
+            cy_volume_h11_3, P_h11_3, m32_h11_3, Kinv_h11_3;
+            qcd_divisor_domain=:leading_nonself)
+        @test [(m.axion_index, m.qcd_divisor_index) for m in restricted_h11_3] ==
+            [(1, 2), (2, 1)]
+        # The restriction only ever removes candidates: same lambda, same
+        # reference mass, same tau_reference for every surviving pair.
+        for restricted in restricted_h11_3
+            match = only(filter(m -> m.axion_index == restricted.axion_index &&
+                    m.qcd_divisor_index == restricted.qcd_divisor_index, models_h11_3))
+            @test restricted == match
+        end
+        # Every surviving pair satisfies the rule's own three conditions.
+        for restricted in restricted_h11_3
+            @test restricted.qcd_divisor_index in reference_h11_3.divisor_index
+            @test restricted.qcd_divisor_index !=
+                reference_h11_3.divisor_index[restricted.axion_index]
+            @test PB.fuzzy_axion_criterion_two(
+                tau_h11_3[restricted.qcd_divisor_index], restricted.lambda)
+        end
     end
 end
 
