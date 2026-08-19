@@ -26,6 +26,7 @@ import json
 import tempfile
 import unittest
 from fractions import Fraction
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +46,9 @@ from inherited_orientifold_candidates import (
     write_candidate_manifest,
     _component_key,
     _fraction_vector_to_json,
+    _general_fixed_surface_n_s_table,
+    _integer_coordinates,
+    _integer_kernel_basis,
     _lattice_matrix_config,
 )
 
@@ -488,6 +492,64 @@ class ClassifySmoothnessNsPolarityTests(unittest.TestCase):
         result = self._classify(component, n_s=None)
         self.assertEqual(result["status"], "smoothness_verification_unavailable")
         self.assertEqual(result["verdict"], "not_verified")
+
+
+class GeneralFixedSurfaceMachineryTests(unittest.TestCase):
+    """Regression coverage for the integer lattices used by general ``L``."""
+
+    class _Fan:
+        def __init__(self, vectors):
+            self._vectors = np.asarray(vectors, dtype=int)
+
+        def vectors(self):
+            return self._vectors
+
+    class _ToricVariety:
+        def __init__(self, vectors):
+            self._fan = GeneralFixedSurfaceMachineryTests._Fan(vectors)
+
+        def fan(self):
+            return self._fan
+
+    def test_kernel_basis_is_saturated_over_the_integer_lattice(self):
+        # A rational nullspace basis with denominators cleared independently
+        # can miss primitive kernel vectors. This matrix is the smallest
+        # regression found while validating the auxiliary quotient: its
+        # primitive kernel vector (0, 1, -1, 0) must be represented exactly.
+        matrix = np.array(
+            [[3, 1, 1, 1], [0, 0, 0, 1]],
+            dtype=int,
+        )
+        basis = _integer_kernel_basis(matrix)
+        self.assertTrue(np.array_equal(matrix @ basis, np.zeros((2, 2), dtype=int)))
+        coordinates = _integer_coordinates(basis, (0, 1, -1, 0))
+        self.assertIsNotNone(coordinates)
+        self.assertTrue(np.array_equal(basis @ coordinates, (0, 1, -1, 0)))
+
+    def test_general_surface_matches_hand_computed_p1_four_example(self):
+        # Take V=(P^1)^4 with rays +/-e_i and L=diag(1,1,-1,-1). Each of
+        # the four fixed components is S=P^1 x P^1. Its two normal directions
+        # are trivial, while K_V^{-1}|_S=O(2,2), so
+        # int_S c_2(O(2,2) tensor O_S^2)=int_S(2H_1+2H_2)^2=8.
+        basis = np.eye(4, dtype=int)
+        vectors = []
+        for index in range(4):
+            vectors.extend((basis[index], -basis[index]))
+        cones = [
+            tuple(
+                tuple(int(signs[index] * basis[index, coordinate]) for coordinate in range(4))
+                for index in range(4)
+            )
+            for signs in product((-1, 1), repeat=4)
+        ]
+        matrix = np.diag([1, 1, -1, -1])
+        table = _general_fixed_surface_n_s_table(
+            cones,
+            self._ToricVariety(vectors),
+            matrix,
+        )
+        self.assertEqual(len(table), 4)
+        self.assertEqual(set(table.values()), {8})
 
 
 class WriteCandidateManifestTests(unittest.TestCase):

@@ -26,6 +26,10 @@ import time
 import numpy as np
 from sympy import Matrix as _SympyMatrix
 from sympy.matrices.normalforms import hermite_normal_form as _hermite_normal_form
+from sympy.polys.matrices import DomainMatrix as _DomainMatrix
+from sympy.polys.matrices.normalforms import (
+    smith_normal_decomp as _smith_normal_decomp,
+)
 
 from generate_geometric_data_multitriangulation import (
     OrientifoldValidationFailure,
@@ -33,7 +37,7 @@ from generate_geometric_data_multitriangulation import (
 )
 from glimmers_raw_frst import compute_polytope_id, compute_triangulation_hash, stable_hash
 
-CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.0"
+CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.1"
 
 TERMINAL_STATUSES = (
     "polytope_not_preserved",
@@ -593,6 +597,301 @@ def _cone_has_smooth_star(fan, sigma_rays):
     return True
 
 
+def _integer_kernel_basis(matrix):
+    """Return an integer basis for the kernel of an integer matrix."""
+
+    array = np.asarray(matrix, dtype=int)
+    if array.ndim != 2:
+        raise ValueError("matrix must be two-dimensional")
+    rows, columns = array.shape
+    if rows == 0:
+        return np.eye(columns, dtype=int)
+    domain_matrix = _DomainMatrix.from_Matrix(_SympyMatrix(array.tolist()))
+    smith, _, right = _smith_normal_decomp(domain_matrix)
+    diagonal = smith.to_Matrix()
+    rank = sum(
+        index < diagonal.rows
+        and index < diagonal.cols
+        and diagonal[index, index] != 0
+        for index in range(min(diagonal.rows, diagonal.cols))
+    )
+    return np.asarray(right.to_Matrix()[:, rank:], dtype=int)
+
+
+def _integer_coordinates(basis, vector):
+    """Express ``vector`` in the columns of ``basis`` over the integers."""
+
+    basis = _SympyMatrix(np.asarray(basis, dtype=int).tolist())
+    vector = _SympyMatrix(np.asarray(vector, dtype=int).reshape(-1, 1).tolist())
+    try:
+        coordinates = basis.gauss_jordan_solve(vector)[0]
+    except (ValueError, TypeError):
+        return None
+    values = []
+    for value in coordinates:
+        if getattr(value, "q", 1) != 1:
+            return None
+        values.append(int(value))
+    return np.asarray(values, dtype=int)
+
+
+def _sublattice_is_saturated(generators):
+    """Check that a sublattice has no finite-index saturation defect."""
+
+    generators = np.asarray(generators, dtype=int)
+    rank, count = generators.shape
+    if count == 0:
+        return True
+    if count > rank:
+        return False
+    minors = []
+    for rows in itertools.combinations(range(rank), count):
+        minors.append(round(float(np.linalg.det(generators[list(rows), :]))))
+    return abs(math.gcd(*minors)) == 1
+
+
+def _surface_divisor_intersection(left, right, rays, cones):
+    """Intersect two toric divisors on a smooth complete surface fan."""
+
+    left = {tuple(ray): value for ray, value in left.items()}
+    right = {tuple(ray): value for ray, value in right.items()}
+    rays = list(rays)
+    angles = {
+        ray: math.atan2(float(ray[1]), float(ray[0])) for ray in rays
+    }
+    ordered = sorted(rays, key=lambda ray: angles[ray])
+    result = Fraction(0)
+    cone_set = {frozenset(cone) for cone in cones}
+    for index, ray in enumerate(ordered):
+        previous_ray = ordered[index - 1]
+        next_ray = ordered[(index + 1) % len(ordered)]
+        previous = np.asarray(previous_ray, dtype=int)
+        current = np.asarray(ray, dtype=int)
+        following = np.asarray(next_ray, dtype=int)
+        denominator = int(round(np.linalg.det(np.column_stack((previous, current)))))
+        next_denominator = int(
+            round(np.linalg.det(np.column_stack((current, following))))
+        )
+        if abs(denominator) != 1 or abs(next_denominator) != 1:
+            raise ValueError("surface fan contains a non-smooth two-cone")
+        self_intersection = -int(
+            round(np.linalg.det(np.column_stack((previous, following))))
+        )
+        result += self_intersection * left[ray] * right[ray]
+        if frozenset((ray, next_ray)) not in cone_set:
+            raise ValueError("surface fan is not complete around a ray")
+        result += left[ray] * right[next_ray]
+        result += left[next_ray] * right[ray]
+    return result
+
+
+def _ambient_cartier_data(ambient_cone, divisor_point):
+    """Return the local support function for one ambient toric divisor."""
+
+    rays = np.asarray(ambient_cone, dtype=int)
+    if rays.shape != (4, 4) or abs(round(float(np.linalg.det(rays)))) != 1:
+        return None
+    target = np.asarray(
+        [-int(np.array_equal(ray, divisor_point)) for ray in rays], dtype=int
+    )
+    solution = _SympyMatrix(rays.tolist()).inv() * _SympyMatrix(target.tolist())
+    return tuple(solution)
+
+
+def _general_fixed_surface_n_s_table(
+    triangulation_cones, triangulation, matrix, auxiliary_fan=None
+):
+    """Compute eq. (4.50) evidence for general-``L`` fixed surfaces.
+
+    For a two-dimensional component, the fixed surface is the toric orbit
+    closure of ``sigma`` in the auxiliary fan ``Sigma_L``.  Use the toric
+    Euler sequence and adjunction before evaluating the Chern-class integral:
+
+    ``n_S = int_S(c_2(T_V)|_S - c_2(T_S) + c_1(T_S)^2)``.
+
+    The identity case reduces to
+    ``D_p D_q (K_V^-1-D_p)(K_V^-1-D_q)``.  Return no entry when the local
+    fan, Cartier data, or lattice quotient cannot certify a smooth surface.
+    """
+
+    matrix = np.asarray(matrix, dtype=int)
+    if auxiliary_fan is None:
+        auxiliary_fan = build_auxiliary_fan(triangulation_cones, matrix)
+    fixed_rank = int(
+        np.linalg.matrix_rank(np.eye(4, dtype=float) + matrix.astype(float))
+    )
+    if fixed_rank < 2:
+        return {}
+
+    invariant_basis = _integer_kernel_basis(np.eye(4, dtype=int) - matrix)
+    if invariant_basis.shape[1] != fixed_rank:
+        return {}
+    vectors = np.asarray(triangulation.fan().vectors(), dtype=int)
+    if vectors.ndim != 2 or vectors.shape[1] != 4:
+        return {}
+
+    ambient_cone_data = {}
+
+    def local_cartier_data(ambient):
+        ambient_key = tuple(tuple(int(value) for value in ray) for ray in ambient)
+        if ambient_key not in ambient_cone_data:
+            if len(ambient_key) != 4:
+                ambient_cone_data[ambient_key] = None
+            else:
+                data = {
+                    tuple(point): _ambient_cartier_data(ambient_key, point)
+                    for point in vectors
+                }
+                ambient_cone_data[ambient_key] = (
+                    data if all(value is not None for value in data.values()) else None
+                )
+        return ambient_cone_data[ambient_key]
+
+    tables = {}
+    for component_cone in auxiliary_fan:
+        sigma_rays = tuple(tuple(int(value) for value in ray) for ray in component_cone["rays"])
+        sigma_dimension = int(component_cone["dimension"])
+        if fixed_rank - sigma_dimension != 2:
+            continue
+        if len(sigma_rays) != sigma_dimension:
+            continue
+        sigma_coordinates = []
+        for ray in sigma_rays:
+            coordinates = _integer_coordinates(invariant_basis, ray)
+            if coordinates is None:
+                sigma_coordinates = []
+                break
+            sigma_coordinates.append(coordinates)
+        if sigma_dimension and not sigma_coordinates:
+            continue
+        sigma_matrix = (
+            np.column_stack(sigma_coordinates)
+            if sigma_coordinates
+            else np.empty((fixed_rank, 0), dtype=int)
+        )
+        if not _sublattice_is_saturated(sigma_matrix):
+            continue
+        annihilator = _integer_kernel_basis(sigma_matrix.T).T
+        if annihilator.shape != (2, fixed_rank):
+            continue
+
+        surface_cones = {}
+        boundary_rays = {}
+        boundary_scales = {}
+        local_ambient_cones = []
+        for full_cone in auxiliary_fan:
+            full_rays = tuple(tuple(int(value) for value in ray) for ray in full_cone["rays"])
+            if full_cone["dimension"] != fixed_rank or not set(sigma_rays).issubset(full_rays):
+                continue
+            if not full_cone["simplicial"] or len(full_rays) != fixed_rank:
+                surface_cones = {}
+                break
+            quotient_rays = []
+            for ray in full_rays:
+                if ray in sigma_rays:
+                    continue
+                coordinates = _integer_coordinates(invariant_basis, ray)
+                if coordinates is None:
+                    quotient_rays = []
+                    break
+                quotient = annihilator @ coordinates
+                divisor = abs(math.gcd(*quotient.tolist()))
+                if divisor == 0:
+                    quotient_rays = []
+                    break
+                primitive = tuple(int(value // divisor) for value in quotient)
+                quotient_rays.append(primitive)
+                boundary_rays[primitive] = ray
+                boundary_scales[primitive] = divisor
+            if len(quotient_rays) != 2 or quotient_rays[0] == quotient_rays[1]:
+                surface_cones = {}
+                break
+            cone_key = frozenset(quotient_rays)
+            surface_cones.setdefault(cone_key, []).append(full_cone)
+            local_ambient_cones.extend(full_cone["ambient_cones"])
+        if not surface_cones:
+            continue
+
+        boundary_keys = tuple(boundary_rays)
+        if len(boundary_keys) < 3 or any(
+            sum(ray in cone for cone in surface_cones) != 2 for ray in boundary_keys
+        ):
+            continue
+        try:
+            # The reference support function is the Cartier data on sigma.
+            reference_ambient = None
+            for ambient in local_ambient_cones:
+                ambient_key = tuple(tuple(int(value) for value in ray) for ray in ambient)
+                if local_cartier_data(ambient_key) is not None:
+                    reference_ambient = ambient_key
+                    break
+            if reference_ambient is None:
+                continue
+            reference_data = ambient_cone_data[reference_ambient]
+            divisor_coefficients = {}
+            for divisor_point in vectors:
+                divisor_key = tuple(int(value) for value in divisor_point)
+                reference = reference_data[divisor_key]
+                coefficients = {}
+                for cone_key, provenance in surface_cones.items():
+                    ambient = provenance[0]["ambient_cones"][0]
+                    ambient_key = tuple(tuple(int(value) for value in ray) for ray in ambient)
+                    local_data = local_cartier_data(ambient_key)
+                    if local_data is None:
+                        raise ValueError("missing ambient Cartier data")
+                    difference = [value - ref for value, ref in zip(local_data[divisor_key], reference)]
+                    for quotient_ray in cone_key:
+                        ambient_ray = boundary_rays[quotient_ray]
+                        coefficient = -sum(
+                            value * int(component)
+                            for value, component in zip(difference, ambient_ray)
+                        ) / boundary_scales[quotient_ray]
+                        if coefficient.q != 1:
+                            raise ValueError("non-integral restricted Cartier coefficient")
+                        coefficients.setdefault(quotient_ray, Fraction(int(coefficient)))
+                        if coefficients[quotient_ray] != coefficient:
+                            raise ValueError("inconsistent restricted Cartier data")
+                if set(coefficients) != set(boundary_keys):
+                    raise ValueError("incomplete restricted Cartier data")
+                divisor_coefficients[divisor_key] = coefficients
+
+            unit_coefficients = {ray: Fraction(1) for ray in boundary_keys}
+            c2_surface = Fraction(len(surface_cones))
+            c1_surface_squared = _surface_divisor_intersection(
+                unit_coefficients, unit_coefficients, boundary_keys, surface_cones
+            )
+            c2_ambient_restricted = Fraction(0)
+            divisor_keys = [tuple(int(value) for value in point) for point in vectors]
+            for left_index, left_key in enumerate(divisor_keys):
+                for right_key in divisor_keys[left_index + 1 :]:
+                    c2_ambient_restricted += _surface_divisor_intersection(
+                        divisor_coefficients[left_key],
+                        divisor_coefficients[right_key],
+                        boundary_keys,
+                        surface_cones,
+                    )
+            n_s = c2_ambient_restricted - c2_surface + c1_surface_squared
+            if n_s.denominator != 1:
+                continue
+        except (TypeError, ValueError, ZeroDivisionError):
+            continue
+
+        # Every admissible fixed surface is keyed with nu below. The value is
+        # independent of nu because nu translates the toric component without
+        # changing its fan or restricted line bundles.
+        for nu_record in enumerate_projected_lattice_representatives(matrix, -1):
+            tables[
+                _component_key(
+                    {
+                        "sigma_rays": [list(ray) for ray in sigma_rays],
+                        "nu": _fraction_vector_to_json(nu_record["vector"]),
+                    }
+                )
+            ] = int(n_s)
+
+    return tables
+
+
 def identity_fixed_surface_n_s_table(triangulation_cones, triangulation):
     """Populate ``n^S_{df=0}`` evidence for ``L=identity``'s 2-dimensional
     fixed components, keyed for ``classify_smoothness``'s
@@ -863,6 +1162,15 @@ def enumerate_orientifold_candidates(
             continue
 
         auxiliary_fan = build_auxiliary_fan(triangulation_cones, matrix)
+        fixed_surface_n_s = topology.get("fixed_surface_n_s", {})
+        if topology.get("compute_general_fixed_surface_n_s") and not np.array_equal(
+            matrix, IDENTITY
+        ):
+            fixed_surface_n_s = _general_fixed_surface_n_s_table(
+                triangulation_cones, triangulation, matrix, auxiliary_fan
+            )
+        matrix_topology = dict(topology)
+        matrix_topology["fixed_surface_n_s"] = fixed_surface_n_s
         shifts = enumerate_projected_lattice_representatives(matrix, +1)
         if not shifts:
             record = dict(base)
@@ -934,7 +1242,7 @@ def enumerate_orientifold_candidates(
                     lambda_f,
                     auxiliary_fan,
                     fixed_components,
-                    topology,
+                    matrix_topology,
                     dual_vertices,
                 )
                 record.update(
@@ -955,6 +1263,7 @@ def enumerate_orientifold_candidates(
                             if cone["pointwise_L_invariant"]
                         ],
                         "fixed_point_components": fixed_components,
+                        "fixed_surface_n_s_evidence": fixed_surface_n_s,
                         "fixed_point_set": _fixed_point_set_description(
                             matrix, torus_shift, fixed_components, smoothness
                         ),

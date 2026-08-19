@@ -475,11 +475,11 @@ def _orientifold_action_audit(poly, classes):
     Sec. 6 for the investigation that found and fixed this, including a
     real polarity bug in ``classify_smoothness`` found at the same time
     (confirmed against the primary source, not just inferred).
-    ``L != identity`` candidates are still evaluated structurally, but no
-    ``n_S`` evidence is supplied for their own 2-dimensional fixed
-    components here -- that formula's general-``L`` form has not been
-    independently derived or verified, so those candidates remain
-    conservatively unresolved where such evidence would matter.
+    ``L != identity`` candidates receive general fixed-surface ``n_S``
+    evidence from the toric Euler-sequence/adjunction calculation in
+    ``_general_fixed_surface_n_s_table``. The helper returns evidence only
+    when the local quotient fan and ambient Cartier data certify a smooth
+    toric surface; all other components remain conservatively unresolved.
 
     Also supplies ``non_smooth_facet_dual_vertices`` evidence (source line
     ~629: eq. (4.45)'s dual-vertex parity condition applies not only to
@@ -500,6 +500,7 @@ def _orientifold_action_audit(poly, classes):
         topology["fixed_surface_n_s"] = identity_fixed_surface_n_s_table(
             triangulation_cones, triangulation
         )
+        topology["compute_general_fixed_surface_n_s"] = True
         topology["non_smooth_facet_dual_vertices"] = facets_with_non_smooth_cones(
             poly, triangulation
         )
