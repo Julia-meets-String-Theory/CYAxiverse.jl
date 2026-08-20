@@ -79,3 +79,49 @@ repository, not to any single vendor. It is referenced from `AGENTS.md`,
 `.copilot/AGENTS.md`, `.github/copilot-instructions.md`, and `CLAUDE.md` so
 that every agent operating here — and every contributor directing one —
 sees it.
+
+## Context-capacity checkpoint and compaction
+
+This procedure is mandatory for every agent and every continuation of an
+agent working in this repository. When the active context reaches 85% of its
+capacity, stop substantive work and send the following prompt to the
+agent's continuation or compaction mechanism:
+
+```markdown
+Create a detailed summary machine-readable json doc for continuing this coding session. Place it in ../checkpoints/$DATE using the filename convention $TIME-$AGENT-checkpoint.md.  Include:
+
+1. **Completed work**: What tasks were finished
+2. **Current state**: Files modified, their current status
+3. **In progress**: What is being worked on now
+4. **Next steps**: Clear actions to take
+5. **Constraints**: User preferences, project requirements, key decisions made
+6. **Critical context**: Any information essential for continuing
+
+Be concise but preserve enough detail that work can continue seamlessly.
+```
+
+Execute that prompt immediately. Use `YYYY-MM-DD` for `$DATE`, a
+collision-resistant local time for `$TIME`, and the stable agent name for
+`$AGENT`. The `.md` file must contain one valid JSON object, not a prose
+summary or a fenced code block, with machine-readable keys corresponding to
+the six requested sections. Create the parent directory outside this Git
+checkout as required by the documentation-placement rules.
+
+After the checkpoint is written, use that JSON file as the authoritative
+context for a custom compaction. Start a fresh continuation or session when
+the runtime supports it, and seed it with the checkpoint path. The first
+action in the new context must be to read and parse that JSON file. Preserve
+the system, developer, repository, and active user instructions, but do not
+carry the full prior transcript or unverified assumptions into the new task
+state.
+
+If the runtime supports native compaction but cannot accept a file as its
+seed, invoke native compaction immediately and then read the newest JSON
+checkpoint before resuming. If it exposes neither a fresh continuation nor
+native compaction, end the current turn and begin the next turn with the
+checkpoint path as the first instruction; this is the file-based fallback,
+not a claim that the active hidden context was replaced. Do not continue
+substantive work between writing the checkpoint and starting the fresh
+continuation or compaction. If the runtime does not expose an automatic
+context percentage, trigger this procedure at the earliest reliable estimate
+of 85% rather than waiting for context exhaustion.
