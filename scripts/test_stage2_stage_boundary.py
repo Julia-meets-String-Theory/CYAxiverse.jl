@@ -48,6 +48,65 @@ class Stage2BoundaryTests(unittest.TestCase):
         self.assertTrue(np.allclose(geometry["prime_divisor_volumes"], geometry["basis_divisor_volumes"]))
         self.assertTrue(np.allclose(geometry["curve_volumes"], point))
 
+    def test_fan_integer_constrained_backend_rounds_ambient_kappa_before_basis_reduction(self):
+        generator = stage2_entrypoint.generator
+        point = np.ones(2, dtype=float)
+        cy = MagicMock()
+        # Pre-seed `_fan` so the lazy-init branch (mirroring CYTools' own
+        # `if not hasattr(self, "_fan")` pattern) is not exercised here.
+        cy._fan = MagicMock()
+        # Same numbers as the historical_sparse_coo test above (kappa[0,0,0]
+        # = kappa[1,1,1] = 6, all else 0), expressed as Fan's ambient,
+        # not-yet-basis-reduced, not-yet-rounded intersection numbers, with a
+        # tiny float perturbation that must vanish after the 5e-2-tolerance
+        # integer snap.
+        cy._fan.intersection_numbers.return_value = {
+            (0, 0, 0): 6.0 + 1e-9,
+            (1, 1, 1): 6.0 - 1e-9,
+        }
+        cy.ambient_variety.return_value = MagicMock(
+            canonical_divisor_is_smooth=MagicMock(return_value=True)
+        )
+        cy.divisor_basis.return_value = np.array([0, 1])
+        cy.compute_curve_volumes.return_value = point.copy()
+
+        geometry = generator._compute_volume_geometry(
+            cy,
+            point,
+            volume_backend=generator.FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND,
+            glsm_charge_matrix=np.eye(2),
+        )
+        self.assertAlmostEqual(geometry["cy_volume"], 2.0)
+        self.assertAlmostEqual(geometry["basis_divisor_volumes"][0], 3.0)
+        self.assertAlmostEqual(geometry["basis_divisor_volumes"][1], 3.0)
+        self.assertTrue(np.allclose(geometry["prime_divisor_volumes"], geometry["basis_divisor_volumes"]))
+        self.assertTrue(np.allclose(geometry["curve_volumes"], point))
+        # The un-rounded ambient values (6 +/- 1e-9) must have been snapped to
+        # exact integers before contraction, not merely passed through.
+        cy._fan.intersection_numbers.assert_called_once_with(
+            pushed_down=True, in_basis=False, symmetrize=False, as_np_array=False, copy=True,
+        )
+
+    def test_fan_integer_constrained_backend_rejects_deviation_beyond_tolerance(self):
+        generator = stage2_entrypoint.generator
+        point = np.ones(2, dtype=float)
+        cy = MagicMock()
+        cy._fan = MagicMock()
+        # A deviation from the nearest integer larger than the 5e-2 tolerance
+        # must be treated as a real numerical failure, not silently rounded.
+        cy._fan.intersection_numbers.return_value = {(0, 0, 0): 6.2, (1, 1, 1): 6.0}
+        cy.ambient_variety.return_value = MagicMock(
+            canonical_divisor_is_smooth=MagicMock(return_value=True)
+        )
+        cy.divisor_basis.return_value = np.array([0, 1])
+        with self.assertRaises(ValueError):
+            generator._compute_volume_geometry(
+                cy,
+                point,
+                volume_backend=generator.FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND,
+                glsm_charge_matrix=np.eye(2),
+            )
+
     def test_stage12_freezes_stage1_population_and_preserves_raw_identity_digest(self):
         ledger = [
             {
@@ -261,6 +320,29 @@ class Stage2BoundaryTests(unittest.TestCase):
                 200, stage2_entrypoint.VOLUME_BACKEND_AUTO
             ),
             stage2_entrypoint.VOLUME_BACKEND_FAN,
+        )
+
+    def test_fan_integer_constrained_backend_has_no_h11_restriction_and_is_never_auto_selected(self):
+        for h11 in (50, 100, 200, 491):
+            self.assertEqual(
+                stage2_entrypoint.validate_volume_backend_for_h11(
+                    stage2_entrypoint.VOLUME_BACKEND_FAN_INTEGER_CONSTRAINED, h11
+                ),
+                stage2_entrypoint.VOLUME_BACKEND_FAN_INTEGER_CONSTRAINED,
+            )
+        # 'auto' policy is unchanged by adding this backend: still fan below
+        # h11=491 and historical_sparse_coo at h11=491, never the new route.
+        self.assertEqual(
+            stage2_entrypoint.resolve_volume_backend_for_h11(
+                stage2_entrypoint.VOLUME_BACKEND_AUTO, 50
+            ),
+            stage2_entrypoint.VOLUME_BACKEND_FAN,
+        )
+        self.assertEqual(
+            stage2_entrypoint.resolve_volume_backend_for_h11(
+                stage2_entrypoint.VOLUME_BACKEND_AUTO, 491
+            ),
+            stage2_entrypoint.VOLUME_BACKEND_HISTORICAL_H11_491,
         )
 
     def test_historical_volume_backend_accepts_only_h11_491(self):

@@ -52,6 +52,7 @@ from glimmers_schema11 import (
 
 VOLUME_BACKEND_FAN = "fan"
 VOLUME_BACKEND_HISTORICAL_H11_491 = generator.HISTORICAL_VOLUME_BACKEND
+VOLUME_BACKEND_FAN_INTEGER_CONSTRAINED = generator.FAN_INTEGER_CONSTRAINED_VOLUME_BACKEND
 VOLUME_BACKEND_AUTO = generator.AUTO_VOLUME_BACKEND
 HISTORICAL_VOLUME_BACKEND_H11 = 491
 
@@ -72,6 +73,7 @@ def validate_volume_backend_for_h11(volume_backend, h11):
     if volume_backend not in {
         VOLUME_BACKEND_FAN,
         VOLUME_BACKEND_HISTORICAL_H11_491,
+        VOLUME_BACKEND_FAN_INTEGER_CONSTRAINED,
         VOLUME_BACKEND_AUTO,
     }:
         raise VolumeBackendConfigurationError(
@@ -104,12 +106,21 @@ def build_parser():
     parser.add_argument("--backend", choices=("cgal", "qhull"), default="cgal")
     parser.add_argument(
         "--volume-backend",
-        choices=(VOLUME_BACKEND_FAN, VOLUME_BACKEND_HISTORICAL_H11_491, VOLUME_BACKEND_AUTO),
+        choices=(
+            VOLUME_BACKEND_FAN,
+            VOLUME_BACKEND_HISTORICAL_H11_491,
+            VOLUME_BACKEND_FAN_INTEGER_CONSTRAINED,
+            VOLUME_BACKEND_AUTO,
+        ),
         default=VOLUME_BACKEND_FAN,
         help=(
             "Select the volume-contraction implementation. 'fan' preserves "
             "current CYTools behavior; 'historical_sparse_coo' is an explicit "
-            "h11=491 reproduction compatibility path; 'auto' selects Fan "
+            "h11=491 reproduction compatibility path; "
+            "'fan_integer_constrained' applies the historical route's own "
+            "integer-snap check to Fan's ambient intersection numbers before "
+            "basis reduction, as a numerical-comparison diagnostic (no h11 "
+            "restriction, never selected by 'auto'); 'auto' selects Fan "
             "below h11=491 and historical_sparse_coo at h11=491."
         ),
     )
@@ -664,7 +675,7 @@ def process_raw_frst_artifact(
             orientifold_config=orientifold_config,
             orientifold_kaehler_policy=arguments.orientifold_kaehler_policy,
             export_kahler_rays=arguments.export_kaehler_rays,
-            qed_selection_policy="uniform_eligible",
+            qed_selection_policy="uniform_eligible_with_fallback",
             qed_volume_max=arguments.qed_volume_max,
             materialize_dense_potential=arguments.materialize_dense_potential,
             eft_mode=arguments.eft,

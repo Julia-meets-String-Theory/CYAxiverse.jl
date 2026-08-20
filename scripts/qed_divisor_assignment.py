@@ -741,7 +741,11 @@ def select_qed_divisor(
         return None
     if policy != "intersecting_d7":
         raise QEDAssignmentFailure("no_eligible_qed_divisor", f"unsupported visible-sector policy {policy!r}")
-    if selection_policy not in {"uniform_eligible", "explicit"}:
+    if selection_policy not in {
+        "uniform_eligible",
+        "uniform_eligible_with_fallback",
+        "explicit",
+    }:
         raise ValueError(f"unsupported QED selection policy {selection_policy!r}")
 
     labels = np.asarray(prime_toric_divisors, dtype=int).reshape(-1)
@@ -815,7 +819,10 @@ def select_qed_divisor(
         explicit = int(qed_divisor_index_user) - 1
     if selection_policy == "explicit" and explicit is None:
         raise QEDAssignmentFailure("invalid_explicit_index", "explicit QED selection requires an index", record)
-    if selection_policy == "uniform_eligible" and explicit is not None:
+    if (
+        selection_policy in {"uniform_eligible", "uniform_eligible_with_fallback"}
+        and explicit is not None
+    ):
         raise QEDAssignmentFailure("invalid_explicit_index", "an explicit index requires explicit selection", record)
     if selection_policy == "explicit":
         if explicit not in eligible:
@@ -829,61 +836,100 @@ def select_qed_divisor(
                 category, reason = "intersection_failure", "explicit QED divisor does not intersect QCD"
             record["terminal_status"], record["terminal_reason"] = category, reason
             raise QEDAssignmentFailure(category, reason, record)
-        selected, rank = explicit, eligible.index(explicit) + 1
+        try_order = [explicit]
+    elif selection_policy == "uniform_eligible_with_fallback":
+        # A full seeded permutation keeps the first pick's distribution
+        # identical to "uniform_eligible"'s single draw, while giving an
+        # unbiased (not lexicographic-first-biased) order to fall back
+        # through if that first pick fails a per-candidate check below.
+        permutation = np.random.default_rng(int(effective_seed)).permutation(len(eligible))
+        try_order = [eligible[int(position)] for position in permutation]
     else:
         rank = int(np.random.default_rng(int(effective_seed)).integers(len(eligible))) + 1
-        selected = eligible[rank - 1]
-    record.update(
-        {
-            "qed_divisor_index": int(selected),
-            "qed_divisor_index_base": 0,
-            "qed_divisor_index_user": int(selected) + 1,
-            "qed_divisor_index_user_base": 1,
-            "selection_rank": int(rank),
-            "qed_divisor_label": list(stable[selected]),
-            "qed_image_index": int(images[selected]),
-            "qed_invariant": bool(invariant[selected]),
-            "qed_charge": charges[selected].copy(),
-            "em_charge": charges[selected].copy(),
-            "qed_charge_hash": charge_hash(charges[selected]),
-            "em_charge_hash": charge_hash(charges[selected]),
-            "qed_divisor_volume": float(volumes[selected]),
-        }
-    )
-    if qed_volume_max is not None and float(volumes[selected]) > float(qed_volume_max):
-        record.update({"qed_volume_filter_status": "rejected"})
-        record["terminal_status"] = "qed_volume_rejection"
-        record["terminal_reason"] = "selected eligible QED divisor exceeds the volume upper bound"
-        raise QEDAssignmentFailure("qed_volume_rejection", record["terminal_reason"], record)
-    pair = tuple(sorted((qcd_index, selected)))
-    record.update(
-        {
-            "qed_divisor_index": int(selected),
-            "qed_divisor_index_base": 0,
-            "qed_divisor_index_user": int(selected) + 1,
-            "qed_divisor_index_user_base": 1,
-            "selection_rank": int(rank),
-            "qed_divisor_label": list(stable[selected]),
-            "qed_image_index": int(images[selected]),
-            "qed_invariant": bool(invariant[selected]),
-            "qed_charge": charges[selected].copy(),
-            "em_charge": charges[selected].copy(),
-            "qed_charge_hash": charge_hash(charges[selected]),
-            "em_charge_hash": charge_hash(charges[selected]),
-            "qed_divisor_volume": float(volumes[selected]),
-            "qcd_qed_intersection": True,
-            "intersection_evidence": [list(face) for face in intersection_evidence.get(pair, [])],
-            "intersection_evidence_convention": "triangulated_two_face_lattice_point_labels",
-            "charge_convention": "CYTools divisor_basis(as_matrix=True) column selected by prime label",
-            "qed_selection": selection_policy,
-            "qed_volume_filter_status": "passed" if qed_volume_max is not None else "disabled",
-        }
-    )
-    if not record["intersection_evidence"]:
-        record["terminal_status"] = "intersection_failure"
-        record["terminal_reason"] = "no face-level intersection evidence was retained"
-        raise QEDAssignmentFailure("intersection_failure", record["terminal_reason"], record)
-    return record
+        try_order = [eligible[rank - 1]]
+
+    fallback_attempted_candidates = []
+    for attempt_index, selected in enumerate(try_order):
+        rank = eligible.index(selected) + 1
+        candidate = dict(record)
+        candidate.update(
+            {
+                "qed_divisor_index": int(selected),
+                "qed_divisor_index_base": 0,
+                "qed_divisor_index_user": int(selected) + 1,
+                "qed_divisor_index_user_base": 1,
+                "selection_rank": int(rank),
+                "qed_divisor_label": list(stable[selected]),
+                "qed_image_index": int(images[selected]),
+                "qed_invariant": bool(invariant[selected]),
+                "qed_charge": charges[selected].copy(),
+                "em_charge": charges[selected].copy(),
+                "qed_charge_hash": charge_hash(charges[selected]),
+                "em_charge_hash": charge_hash(charges[selected]),
+                "qed_divisor_volume": float(volumes[selected]),
+            }
+        )
+        rejection_category = None
+        rejection_reason = None
+        if qed_volume_max is not None and float(volumes[selected]) > float(qed_volume_max):
+            candidate["qed_volume_filter_status"] = "rejected"
+            rejection_category = "qed_volume_rejection"
+            rejection_reason = "selected eligible QED divisor exceeds the volume upper bound"
+        else:
+            pair = tuple(sorted((qcd_index, selected)))
+            candidate.update(
+                {
+                    "qcd_qed_intersection": True,
+                    "intersection_evidence": [list(face) for face in intersection_evidence.get(pair, [])],
+                    "intersection_evidence_convention": "triangulated_two_face_lattice_point_labels",
+                    "charge_convention": "CYTools divisor_basis(as_matrix=True) column selected by prime label",
+                    "qed_selection": selection_policy,
+                    "qed_volume_filter_status": "passed" if qed_volume_max is not None else "disabled",
+                }
+            )
+            if not candidate["intersection_evidence"]:
+                rejection_category = "intersection_failure"
+                rejection_reason = "no face-level intersection evidence was retained"
+
+        if rejection_category is None:
+            if selection_policy == "uniform_eligible_with_fallback":
+                candidate["fallback_used"] = attempt_index > 0
+                candidate["fallback_attempted_candidates"] = fallback_attempted_candidates
+            return candidate
+
+        fallback_attempted_candidates.append(
+            {
+                "qed_divisor_index": int(selected),
+                "rejection_category": rejection_category,
+                "rejection_reason": rejection_reason,
+            }
+        )
+        if attempt_index == len(try_order) - 1:
+            # Every eligible candidate has now been tried (a single candidate,
+            # for "explicit"/"uniform_eligible"; the whole pool, for
+            # "uniform_eligible_with_fallback"). Report by a fixed category
+            # precedence rather than the last-tried candidate's category,
+            # which would otherwise be an arbitrary artifact of permutation
+            # order.
+            final_category = (
+                "qed_volume_rejection"
+                if any(
+                    entry["rejection_category"] == "qed_volume_rejection"
+                    for entry in fallback_attempted_candidates
+                )
+                else "intersection_failure"
+            )
+            final_reason = next(
+                entry["rejection_reason"]
+                for entry in fallback_attempted_candidates
+                if entry["rejection_category"] == final_category
+            )
+            record.update(candidate)
+            record["terminal_status"] = final_category
+            record["terminal_reason"] = final_reason
+            if selection_policy == "uniform_eligible_with_fallback":
+                record["fallback_attempted_candidates"] = fallback_attempted_candidates
+            raise QEDAssignmentFailure(final_category, final_reason, record)
 
 
 def _reduce_against_basis(vector, basis):
