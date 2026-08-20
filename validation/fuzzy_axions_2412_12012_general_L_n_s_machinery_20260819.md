@@ -28,7 +28,7 @@ The implementation does not close the remaining Table 1 population gap at h11=2,
   obtained from
   `c_2(O(K_V^-1)|_S tensor N*S)` by the toric Euler sequence and adjunction.
 
-The resulting evidence is stored in `fixed_surface_n_s_evidence` on candidate records. The candidate manifest schema is now `cyaxiverse-inherited-orientifold-candidate-2.1` because this is an additive persisted field. The package version remains `0.2.0`; any package-version bump is deferred to the reviewed release boundary.
+The resulting evidence is stored in `fixed_surface_n_s_evidence` on candidate records. The candidate manifest schema is now `cyaxiverse-inherited-orientifold-candidate-2.2`: version 2.1 introduced the general-$L$ evidence, while 2.2 adds the nef/orbifold diagnostics and conservative fan/provenance certificates. The package version remains `0.2.0`; any package-version bump is deferred to the reviewed release boundary.
 
 The audit driver enables this calculation for nonidentity matrices. The identity path remains supplied by its existing independently validated intersection-tensor implementation.
 
@@ -44,7 +44,7 @@ The audit driver enables this calculation for nonidentity matrices. The identity
 
    The implementation returns four fixed components, each with $n_S=8$.
 
-3. The focused Python suite passes 21/21 tests, including the saturated-kernel regression and the explicit $(\mathbb{P}^1)^4$ fixture. The fixed-locus regression passes 1/1 test.
+3. The focused Python suite passes 30/30 tests, including the saturated-kernel regression, exact quotient-fan checks, and the explicit $(\mathbb{P}^1)^4$ fixture. The fixed-locus regression passes 1/1 test.
 
 ## Population measurements
 

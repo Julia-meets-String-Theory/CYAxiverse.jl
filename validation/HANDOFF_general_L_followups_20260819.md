@@ -21,7 +21,7 @@ n_S = int_S c_2(O(K_V^-1)|_S tensor N*S)
 using the auxiliary fixed fan, saturated integer lattices, smooth toric
 surface intersections, and restricted ambient Cartier data. It records
 conservative evidence only when these checks succeed. Candidate manifests use
-schema `cyaxiverse-inherited-orientifold-candidate-2.1`; the package version
+schema `cyaxiverse-inherited-orientifold-candidate-2.2`; the package version
 remains `0.2.0` and must not be bumped on this feature branch.
 
 Validation already completed:

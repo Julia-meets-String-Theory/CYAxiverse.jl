@@ -26,6 +26,7 @@ import math
 import os
 import subprocess
 import tempfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -451,7 +452,13 @@ def _h21_plus_zero_diagnostic(poly, triangulation, p0):
     }
 
 
-def _orientifold_action_audit(poly, classes):
+def _orientifold_action_audit(
+    poly,
+    classes,
+    *,
+    collect_reason_diagnostics=False,
+    polytope_index=None,
+):
     """Count class-level inherited O3/O7 orientifold candidates.
 
     Per FRST class, runs the general ``(L, t, lambda_f)`` triple search
@@ -490,9 +497,20 @@ def _orientifold_action_audit(poly, classes):
     """
 
     if not classes:
-        return {"inherited": 0, "h11_minus_zero": 0, "h11_minus_zero_classes": []}
+        result = {"inherited": 0, "h11_minus_zero": 0, "h11_minus_zero_classes": []}
+        if collect_reason_diagnostics:
+            result["reason_diagnostics"] = {
+                "polytope_index": polytope_index,
+                "surface_attempts": [],
+                "unresolved_components": [],
+                "certified_surfaces": [],
+            }
+        return result
     inherited_classes = set()
     h11_zero_classes = set()
+    surface_attempts = []
+    unresolved_components = []
+    certified_surfaces = []
     for class_index, triangulation in enumerate(classes):
         cy = triangulation.get_cy()
         topology = dict(extract_topology(cy, triangulation))
@@ -504,7 +522,13 @@ def _orientifold_action_audit(poly, classes):
         topology["non_smooth_facet_dual_vertices"] = facets_with_non_smooth_cones(
             poly, triangulation
         )
-        records = enumerate_orientifold_candidates(poly, triangulation, topology)
+        matrix_diagnostics = {} if collect_reason_diagnostics else None
+        records = enumerate_orientifold_candidates(
+            poly,
+            triangulation,
+            topology,
+            general_fixed_surface_diagnostics=matrix_diagnostics,
+        )
         # Table 1's population (main.tex:1272, item 3 of the ensemble
         # definition) is explicitly "an ... orientifold involution of O3/O7
         # type" -- lambda_f=1 only. An accepted lambda_f=0 (O5/O9) candidate
@@ -520,11 +544,117 @@ def _orientifold_action_audit(poly, classes):
             inherited_classes.add(class_index)
         if any(record.get("h11_minus") == 0 for record in accepted):
             h11_zero_classes.add(class_index)
-    return {
+        if collect_reason_diagnostics:
+            for matrix_id, matrix_data in matrix_diagnostics.items():
+                candidate_context_by_component = {}
+                for record in records:
+                    if (
+                        record.get("matrix_candidate_id") != matrix_id
+                        or record.get("lambda_f") != 1
+                    ):
+                        continue
+                    context = {
+                        "candidate_id": record.get("candidate_id"),
+                        "torus_shift": record.get("torus_shift"),
+                        "lambda_f": record.get("lambda_f"),
+                        "h11_plus": record.get("h11_plus"),
+                        "h11_minus": record.get("h11_minus"),
+                        "candidate_terminal_status": record.get("terminal_status"),
+                    }
+                    for fixed_component in record.get("fixed_point_components", []):
+                        component_key = json.dumps(
+                            {
+                                "sigma_rays": fixed_component.get("sigma_rays"),
+                                "nu": fixed_component.get("nu"),
+                            },
+                            sort_keys=True,
+                        )
+                        candidate_context_by_component.setdefault(
+                            component_key, []
+                        ).append(context)
+                for surface in matrix_data["surface_diagnostics"]:
+                    for fixed_component in surface["fixed_components"]:
+                        attempt = {
+                            "polytope_index": polytope_index,
+                            "frst_class_index": class_index,
+                            "matrix_id": matrix_id,
+                            "lattice_matrix": matrix_data["lattice_matrix"],
+                            "fixed_component": fixed_component,
+                            "status": surface["status"],
+                            "reason_code": surface["reason_code"],
+                            "reason": surface["reason"],
+                            "surface_data": {
+                                key: value
+                                for key, value in surface.items()
+                                if key not in {"fixed_components"}
+                            },
+                        }
+                        if surface["status"] == "certified":
+                            component_key = json.dumps(
+                                {
+                                    "sigma_rays": fixed_component.get("sigma_rays"),
+                                    "nu": fixed_component.get("nu"),
+                                },
+                                sort_keys=True,
+                            )
+                            matches = candidate_context_by_component.get(
+                                component_key, []
+                            )
+                            if matches:
+                                attempt["candidate_context"] = matches[0]
+                        surface_attempts.append(attempt)
+                        if surface["status"] == "certified":
+                            certified_surfaces.append(attempt)
+                by_sigma = {
+                    json.dumps(surface["sigma_rays"], sort_keys=True): surface
+                    for surface in matrix_data["surface_diagnostics"]
+                }
+                for record in records:
+                    if record.get("matrix_candidate_id") != matrix_id:
+                        continue
+                    if record.get("lambda_f") != 1:
+                        continue
+                    for fixed_component in record.get("fixed_point_components", []):
+                        if (
+                            int(fixed_component.get("fixed_toric_dimension", -1)) != 2
+                            or not fixed_component.get("f_vanishes_identically")
+                        ):
+                            continue
+                        surface = by_sigma.get(
+                            json.dumps(fixed_component["sigma_rays"], sort_keys=True)
+                        )
+                        if surface is None or surface["status"] == "certified":
+                            continue
+                        unresolved_components.append(
+                            {
+                                "polytope_index": polytope_index,
+                                "frst_class_index": class_index,
+                                "matrix_id": matrix_id,
+                                "candidate_id": record["candidate_id"],
+                                "lattice_matrix": record["lattice_matrix"],
+                                "torus_shift": record["torus_shift"],
+                                "lambda_f": record["lambda_f"],
+                                "h11_plus": record.get("h11_plus"),
+                                "h11_minus": record.get("h11_minus"),
+                                "candidate_terminal_status": record.get("terminal_status"),
+                                "fixed_component": fixed_component,
+                                "reason_code": surface["reason_code"],
+                                "reason": surface["reason"],
+                            }
+                        )
+    result = {
         "inherited": len(inherited_classes),
         "h11_minus_zero": len(h11_zero_classes),
         "h11_minus_zero_classes": sorted(h11_zero_classes),
     }
+    if collect_reason_diagnostics:
+        result["reason_diagnostics"] = {
+            "polytope_index": polytope_index,
+            "surface_attempts": surface_attempts,
+            "unresolved_components": unresolved_components,
+            "certified_surfaces": certified_surfaces,
+        }
+    return result
 
 
 def _export_kaehler_point(triangulation):
@@ -791,6 +921,66 @@ def _jsonable(value):
     return value
 
 
+def _count_reason_rows(rows, key):
+    """Count reason codes by one diagnostic scope key."""
+
+    counts = Counter()
+    for row in rows:
+        counts[str(key(row))] += 1
+    return dict(sorted(counts.items()))
+
+
+def _orientifold_reason_diagnostics_summary(
+    h11,
+    surface_attempts,
+    unresolved_components,
+    certified_surfaces,
+):
+    """Aggregate opt-in general-``L`` fixed-surface evidence by audit scope."""
+
+    skipped = [row for row in surface_attempts if row["status"] == "unavailable"]
+
+    def scope_key(row):
+        return f"{row['polytope_index']}:{row['frst_class_index']}:{row['matrix_id']}"
+
+    def component_key(row):
+        return json.dumps(
+            {
+                "polytope_index": row["polytope_index"],
+                "frst_class_index": row["frst_class_index"],
+                "matrix_id": row["matrix_id"],
+                "fixed_component": row["fixed_component"],
+            },
+            sort_keys=True,
+        )
+
+    reason_counts = dict(sorted(Counter(row["reason_code"] for row in skipped).items()))
+    return {
+        "schema_version": "cyaxiverse-general-L-fixed-surface-diagnostics-1.0",
+        "h11": int(h11),
+        "surface_attempt_count": len(surface_attempts),
+        "skipped_surface_count": len(skipped),
+        "certified_surface_count": len(certified_surfaces),
+        "reason_counts": reason_counts,
+        "reason_counts_by_h11": {str(int(h11)): reason_counts},
+        "reason_counts_by_polytope": _count_reason_rows(
+            skipped, lambda row: row["polytope_index"]
+        ),
+        "reason_counts_by_frst_class": _count_reason_rows(
+            skipped, lambda row: f"{row['polytope_index']}:{row['frst_class_index']}"
+        ),
+        "reason_counts_by_matrix": _count_reason_rows(skipped, scope_key),
+        "reason_counts_by_fixed_component": _count_reason_rows(skipped, component_key),
+        "unresolved_candidate_component_count": len(unresolved_components),
+        "unresolved_candidate_reason_counts": dict(
+            sorted(Counter(row["reason_code"] for row in unresolved_components).items())
+        ),
+        "surface_attempts": surface_attempts,
+        "unresolved_components": unresolved_components,
+        "certified_surfaces": certified_surfaces,
+    }
+
+
 def reproduce(args):
     targets = PAPER_TARGETS_BY_H11.get(args.h11)
     records = load_mirror_polytopes(
@@ -816,6 +1006,9 @@ def reproduce(args):
     export_kaehler_points = args.export_kaehler_points or args.model_stage
     model_stage_records = [] if args.model_stage else None
     details = []
+    reason_surface_attempts = []
+    reason_unresolved_components = []
+    reason_certified_surfaces = []
     for poly_index, (poly, provenance) in enumerate(records):
         raw, classes = _frst_classes(poly)
         total_raw += len(raw)
@@ -874,9 +1067,19 @@ def reproduce(args):
             )
             trilayer_h21_plus_zero_class_count += h21_plus_zero_class_count_this_polytope
         if args.orientifold_audit:
-            orientifold = _orientifold_action_audit(poly, classes)
+            orientifold = _orientifold_action_audit(
+                poly,
+                classes,
+                collect_reason_diagnostics=args.orientifold_reason_diagnostics,
+                polytope_index=poly_index,
+            )
             orientifold_inherited_count += orientifold["inherited"]
             orientifold_h11_zero_count += orientifold["h11_minus_zero"]
+            if args.orientifold_reason_diagnostics:
+                diagnostics = orientifold["reason_diagnostics"]
+                reason_surface_attempts.extend(diagnostics["surface_attempts"])
+                reason_unresolved_components.extend(diagnostics["unresolved_components"])
+                reason_certified_surfaces.extend(diagnostics["certified_surfaces"])
         kaehler_export_per_class = None
         if export_kaehler_points and h21_per_class is not None:
             # Only the classes actually accepted by the h21_plus_zero
@@ -1042,6 +1245,16 @@ def reproduce(args):
             }
         ),
         "model_stage": model_stage,
+        "orientifold_reason_diagnostics": (
+            _orientifold_reason_diagnostics_summary(
+                args.h11,
+                reason_surface_attempts,
+                reason_unresolved_components,
+                reason_certified_surfaces,
+            )
+            if args.orientifold_reason_diagnostics
+            else None
+        ),
         "details": details if args.keep_details else None,
     }
     return _jsonable(summary)
@@ -1061,6 +1274,14 @@ def main():
     parser.add_argument("--progress", type=int, default=50)
     parser.add_argument("--keep-details", action="store_true")
     parser.add_argument("--orientifold-audit", action="store_true")
+    parser.add_argument(
+        "--orientifold-reason-diagnostics",
+        action="store_true",
+        help=(
+            "Record machine-readable general-L fixed-surface reason rows and "
+            "certified Chern-class terms. Requires --orientifold-audit."
+        ),
+    )
     parser.add_argument(
         "--export-kaehler-points",
         action="store_true",

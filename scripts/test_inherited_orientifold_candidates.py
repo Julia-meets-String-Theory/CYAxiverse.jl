@@ -36,8 +36,10 @@ from generate_geometric_data_multitriangulation import (
     validate_orientifold,
 )
 from inherited_orientifold_candidates import (
+    CANDIDATE_SCHEMA_VERSION,
     IDENTITY,
     TERMINAL_STATUSES,
+    _complete_simplicial_fan,
     build_auxiliary_fan,
     classify_smoothness,
     enumerate_orientifold_candidates,
@@ -71,6 +73,13 @@ class _FakePoly:
     def points(self):
         return self._points
 
+    def dual(self):
+        # Enumeration fixtures explicitly supply an empty dual-vertex set so
+        # tests of FRST/H2/filter orchestration do not accidentally exercise
+        # the separate missing-eq.-(4.45)-evidence path. That path is covered
+        # directly by ClassifySmoothnessNsPolarityTests below.
+        return _FakeDualPoly()
+
     def glsm_charge_matrix(self, include_origin=True, points=None, integral=True):
         # This fixture's point set (origin + independent basis vectors) has
         # no linear relations among its divisors, so the GLSM charge matrix
@@ -81,6 +90,11 @@ class _FakePoly:
         del include_origin, integral
         n = len(points) if points is not None else self._points.shape[0]
         return np.eye(n, dtype=int)
+
+
+class _FakeDualPoly:
+    def vertices(self):
+        return np.empty((0, 4), dtype=int)
 
 
 class _FakeTriangulation:
@@ -337,8 +351,10 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         # the non-integral cosets: their two lambda_f records each collapse to a
         # single ``torus_shift_not_involution`` rejection, and any acceptance
         # that had rested on such a (non-involution) shift is correctly removed.
-        # frst_not_preserved is upstream of the shift search and so is
-        # unchanged.
+        # The source Sec. 4.6 requirement for nef generic sections and
+        # orbifold avoidance also leaves seven previously accepted fixture
+        # triples unavailable; ``frst_not_preserved`` and the non-involution
+        # count remain unchanged.
         self.assertEqual(len(records), 74)
         accepted = [
             record
@@ -355,7 +371,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
             for record in records
             if record["terminal_status"] == "torus_shift_not_involution"
         ]
-        self.assertEqual(len(accepted), 36)
+        self.assertEqual(len(accepted), 29)
         self.assertEqual(len(frst_failed), 6)
         self.assertEqual(len(non_involution), 12)
         for record in frst_failed:
@@ -456,7 +472,7 @@ class ClassifySmoothnessNsPolarityTests(unittest.TestCase):
             "f_vanishes_identically": True,
         }
 
-    def _classify(self, component, n_s):
+    def _classify(self, component, n_s, *, dual_vertices="fixture_empty"):
         topology = {}
         if n_s is not None:
             topology = {"fixed_surface_n_s": {_component_key(component): n_s}}
@@ -467,7 +483,11 @@ class ClassifySmoothnessNsPolarityTests(unittest.TestCase):
             auxiliary_fan=[],
             fixed_components=[component],
             topology=topology,
-            dual_vertices=None,
+            dual_vertices=(
+                np.empty((0, 4), dtype=int)
+                if isinstance(dual_vertices, str)
+                else dual_vertices
+            ),
         )
 
     def test_zero_n_s_is_smooth(self):
@@ -492,6 +512,268 @@ class ClassifySmoothnessNsPolarityTests(unittest.TestCase):
         result = self._classify(component, n_s=None)
         self.assertEqual(result["status"], "smoothness_verification_unavailable")
         self.assertEqual(result["verdict"], "not_verified")
+
+    def test_missing_dual_vertex_parity_evidence_stays_unavailable(self):
+        component = self._dim2_component()
+        result = self._classify(component, n_s=0, dual_vertices=None)
+        self.assertEqual(result["status"], "smoothness_verification_unavailable")
+        self.assertEqual(result["verdict"], "not_verified")
+        self.assertIn("dual-vertex parity", " ".join(result["reasons"]))
+
+    def test_nonvanishing_positive_component_requires_source_section_evidence(self):
+        component = {
+            "sigma_rays": [],
+            "nu": _fraction_vector_to_json((0, 0, 0, 0)),
+            "sigma_dimension": 0,
+            "fixed_toric_dimension": 2,
+            "f_vanishes_identically": False,
+        }
+        auxiliary_fan = [
+            {
+                "rays": [[1, 0, 0, 0], [0, 1, 0, 0]],
+                "dimension": 2,
+                "pointwise_L_invariant": True,
+                "simplicial": True,
+                "ambient_cones": [],
+            }
+        ]
+        result = classify_smoothness(
+            np.diag([1, 1, -1, -1]),
+            (0, 0, 0, 0),
+            0,
+            auxiliary_fan=auxiliary_fan,
+            fixed_components=[component],
+            topology={},
+            dual_vertices=np.empty((0, 4), dtype=int),
+        )
+        self.assertEqual(result["status"], "smoothness_verification_unavailable")
+        self.assertIn("nef generic-section", " ".join(result["reasons"]))
+        self.assertEqual(
+            result["positive_component_checks"][0]["reason_code"],
+            "missing_ambient_cone_provenance",
+        )
+
+
+class PositiveComponentSectionChecksTests(unittest.TestCase):
+    """Regression coverage for Moritz Sec. 4.6 section smoothness tests."""
+
+    MATRIX = np.diag([1, 1, 1, -1])
+    EXTRA_RAY = (0, 0, 0, 1)
+    PLUS_FIXED_RAY = (1, 0, 0, 0)
+    MINUS_FIXED_RAY = (-1, 0, 0, 0)
+
+    @staticmethod
+    def _ambient_cone_with_fixed_support(support):
+        """Build a unimodular provenance cone realizing a fixed support form."""
+
+        cones = {
+            (-1, 3, -1): [
+                [-2, -1, 0, -2],
+                [-4, -2, -1, -4],
+                [-4, -2, -1, -3],
+                [-3, -2, -2, -4],
+            ],
+            (-1, -1, 1): [
+                [-2, 1, -2, -2],
+                [-4, 1, -4, -3],
+                [-4, 2, -3, -4],
+                [-3, 0, -4, -2],
+            ],
+            (1, 3, -1): [
+                [-2, 0, -1, -2],
+                [-4, 0, -3, -3],
+                [-4, 1, 0, -4],
+                [-3, 0, -2, -3],
+            ],
+            (1, -1, 1): [
+                [-2, -2, -1, -2],
+                [-4, -4, -1, -3],
+                [-4, -3, 0, -4],
+                [-3, -4, -2, -2],
+            ],
+        }
+        return cones[tuple(support)]
+
+    @classmethod
+    def _fan(cls, surface_rays, ambient_overrides=None):
+        ambient_overrides = ambient_overrides or {}
+        pairs = [
+            (surface_rays[0], surface_rays[1]),
+            (surface_rays[1], surface_rays[2]),
+            (surface_rays[2], surface_rays[0]),
+        ]
+        auxiliary_fan = []
+        for fixed_ray in (cls.PLUS_FIXED_RAY, cls.MINUS_FIXED_RAY):
+            for pair in pairs:
+                fixed_cone = (fixed_ray,) + pair
+                key = frozenset(fixed_cone)
+                ambient = ambient_overrides.get(key)
+                if ambient is None:
+                    ambient = [list(ray) for ray in fixed_cone + (cls.EXTRA_RAY,)]
+                auxiliary_fan.append(
+                    {
+                        "rays": [list(ray) for ray in fixed_cone],
+                        "dimension": 3,
+                        "pointwise_L_invariant": True,
+                        "simplicial": True,
+                        "ambient_cones": [ambient],
+                    }
+                )
+        return auxiliary_fan
+
+    @classmethod
+    def _non_nef_fan(cls):
+        surface_rays = (
+            (0, 0, 1, 0),
+            (0, 1, 0, 0),
+            (0, 0, -1, 0),
+            (0, -1, 3, 0),
+        )
+        pairs = [
+            (surface_rays[0], surface_rays[1]),
+            (surface_rays[1], surface_rays[2]),
+            (surface_rays[2], surface_rays[3]),
+            (surface_rays[3], surface_rays[0]),
+        ]
+        auxiliary_fan = []
+        for fixed_ray in (cls.PLUS_FIXED_RAY, cls.MINUS_FIXED_RAY):
+            for pair in pairs:
+                fixed_cone = (fixed_ray,) + pair
+                auxiliary_fan.append(
+                    {
+                        "rays": [list(ray) for ray in fixed_cone],
+                        "dimension": 3,
+                        "pointwise_L_invariant": True,
+                        "simplicial": True,
+                        "ambient_cones": [
+                            [list(ray) for ray in fixed_cone + (cls.EXTRA_RAY,)]
+                        ],
+                    }
+                )
+        return auxiliary_fan
+
+    @staticmethod
+    def _component():
+        return {
+            "sigma_rays": [],
+            "sigma_dimension": 0,
+            "nu": _fraction_vector_to_json((0, 0, 0, 0)),
+            "fixed_toric_dimension": 3,
+            "f_vanishes_identically": False,
+        }
+
+    def _classify(self, auxiliary_fan):
+        return classify_smoothness(
+            self.MATRIX,
+            (0, 0, 0, 0),
+            0,
+            auxiliary_fan=auxiliary_fan,
+            fixed_components=[self._component()],
+            topology={},
+            dual_vertices=np.empty((0, 4), dtype=int),
+        )
+
+    def test_smooth_nef_fixed_component_is_certified(self):
+        # P^1 x P^2 has a smooth complete quotient fan. The restricted
+        # anti-canonical bundle is O(2,3), so the exact support-function test
+        # must certify nefness and there are no orbifold strata to inspect.
+        surface_rays = ((0, 1, 0, 0), (0, 0, 1, 0), (0, -1, -1, 0))
+        result = self._classify(self._fan(surface_rays))
+        self.assertEqual(result["status"], "smooth")
+        check = result["positive_component_checks"][0]
+        self.assertEqual(check["status"], "certified")
+        self.assertEqual(check["nefness"]["status"], "certified")
+        self.assertTrue(check["nefness"]["nef"])
+        self.assertEqual(check["orbifold_intersection"]["status"], "certified")
+
+    def test_non_nef_restriction_is_rejected(self):
+        # P^1 x F_3 is smooth, but -K_{F_3} has negative degree on the
+        # negative section. This exercises nefness itself, not a fan
+        # simpliciality shortcut.
+        result = self._classify(self._non_nef_fan())
+        self.assertEqual(result["status"], "fixed_point_set_non_smooth")
+        check = result["positive_component_checks"][0]
+        self.assertEqual(check["reason_code"], "restricted_line_bundle_not_nef")
+        self.assertTrue(check["nefness"]["witnesses"])
+
+    def test_orbifold_stratum_intersection_is_rejected(self):
+        # P^1 x P(1,1,2) has a non-smooth two-cone whose orbit is a curve.
+        # The anti-canonical face over that curve has multiple lattice points,
+        # hence its generic Laurent restriction has a zero on the orbifold
+        # curve. The ambient provenance cones remain smooth; the singularity
+        # is in the fixed quotient fan, as required by the source setup.
+        surface_rays = ((0, 1, 0, 0), (0, 0, 1, 0), (0, -1, -2, 0))
+        overrides = {}
+        for fixed_ray, fixed_supports in (
+            (
+                self.PLUS_FIXED_RAY,
+                {
+                    frozenset((
+                        self.PLUS_FIXED_RAY,
+                        surface_rays[1],
+                        surface_rays[2],
+                    )): (-1, 3, -1),
+                    frozenset((
+                        self.PLUS_FIXED_RAY,
+                        surface_rays[2],
+                        surface_rays[0],
+                    )): (-1, -1, 1),
+                },
+            ),
+            (
+                self.MINUS_FIXED_RAY,
+                {
+                    frozenset((
+                        self.MINUS_FIXED_RAY,
+                        surface_rays[1],
+                        surface_rays[2],
+                    )): (1, 3, -1),
+                    frozenset((
+                        self.MINUS_FIXED_RAY,
+                        surface_rays[2],
+                        surface_rays[0],
+                    )): (1, -1, 1),
+                },
+            ),
+        ):
+            del fixed_ray
+            for cone_key, support in fixed_supports.items():
+                overrides[cone_key] = self._ambient_cone_with_fixed_support(support)
+        result = self._classify(self._fan(surface_rays, overrides))
+        self.assertEqual(result["status"], "fixed_point_set_non_smooth")
+        check = result["positive_component_checks"][0]
+        self.assertEqual(check["reason_code"], "orbifold_stratum_intersection")
+        self.assertEqual(check["orbifold_intersection"]["status"], "rejected")
+        self.assertGreater(
+            check["orbifold_intersection"]["singular_strata"][0][
+                "face_lattice_point_count"
+            ],
+            1,
+        )
+
+
+class CompleteSimplicialFanTests(unittest.TestCase):
+    """Regression coverage for the complete quotient-fan certificate."""
+
+    def test_complete_two_dimensional_fan_is_certified(self):
+        fan = [
+            ((1, 0), (0, 1)),
+            ((0, 1), (-1, 0)),
+            ((-1, 0), (0, -1)),
+            ((0, -1), (1, 0)),
+        ]
+        self.assertTrue(_complete_simplicial_fan(fan, 2))
+
+    def test_closed_first_quadrant_incidence_is_not_complete(self):
+        # Every ray occurs in two cones, but this collection has neither
+        # vector-space coverage nor a common-face fan structure: all rays lie
+        # in one quadrant. A codimension-one count alone would accept it.
+        fan = [
+            ((1, 0), (0, 1)),
+            ((0, 1), (1, 1)),
+            ((1, 1), (1, 0)),
+        ]
+        self.assertFalse(_complete_simplicial_fan(fan, 2))
 
 
 class GeneralFixedSurfaceMachineryTests(unittest.TestCase):
@@ -551,6 +833,93 @@ class GeneralFixedSurfaceMachineryTests(unittest.TestCase):
         self.assertEqual(len(table), 4)
         self.assertEqual(set(table.values()), {8})
 
+    def test_general_surface_diagnostics_preserve_terms_and_status(self):
+        basis = np.eye(4, dtype=int)
+        vectors = []
+        for index in range(4):
+            vectors.extend((basis[index], -basis[index]))
+        cones = [
+            tuple(
+                tuple(int(signs[index] * basis[index, coordinate]) for coordinate in range(4))
+                for index in range(4)
+            )
+            for signs in product((-1, 1), repeat=4)
+        ]
+        result = _general_fixed_surface_n_s_table(
+            cones,
+            self._ToricVariety(vectors),
+            np.diag([1, 1, -1, -1]),
+            return_diagnostics=True,
+        )
+        self.assertEqual(set(result["evidence"].values()), {8})
+        # The quotient fan is shared by the four translated fixed components;
+        # keep one fan-level record and retain every component label in it.
+        self.assertEqual(len(result["surface_diagnostics"]), 1)
+        diagnostic = result["surface_diagnostics"][0]
+        self.assertEqual(len(diagnostic["fixed_components"]), 4)
+        self.assertEqual(len(diagnostic["quotient_surface_rays"]), 4)
+        self.assertEqual(len(diagnostic["quotient_surface_cones"]), 4)
+        self.assertEqual(len(diagnostic["surface_cone_provenance"]), 4)
+        self.assertEqual(len(diagnostic["restricted_divisor_coefficients"]), 8)
+        invariant_basis = np.asarray(
+            diagnostic["invariant_lattice_basis"], dtype=int
+        )
+        self.assertEqual(invariant_basis.shape, (4, 2))
+        self.assertTrue(
+            np.array_equal(
+                (np.eye(4, dtype=int) - np.diag([1, 1, -1, -1])) @ invariant_basis,
+                np.zeros((4, 2), dtype=int),
+            )
+        )
+        self.assertEqual(
+            diagnostic["quotient_annihilator"],
+            [[1, 0], [0, 1]],
+        )
+        self.assertTrue(all(item["status"] == "certified" for item in result["surface_diagnostics"]))
+        self.assertEqual(
+            {
+                (
+                    item["c2_ambient_restricted"],
+                    item["c2_surface"],
+                    item["c1_surface_squared"],
+                    item["n_s"],
+                )
+                for item in result["surface_diagnostics"]
+            },
+            # On P1 x P1, c2(T_V)|S = c2(T_S) = 4 and c1(T_S)^2 = 8,
+            # so the source formula gives n_S = 4 - 4 + 8 = 8.
+            {(4, 4, 8, 8)},
+        )
+
+    def test_general_surface_diagnostics_report_missing_full_cone(self):
+        basis = np.eye(4, dtype=int)
+        vectors = []
+        for index in range(4):
+            vectors.extend((basis[index], -basis[index]))
+        auxiliary_fan = [
+            {
+                "rays": [],
+                "dimension": 0,
+                "pointwise_L_invariant": True,
+                "simplicial": True,
+                "ambient_cones": [],
+            }
+        ]
+        result = _general_fixed_surface_n_s_table(
+            [],
+            self._ToricVariety(vectors),
+            np.diag([1, 1, -1, -1]),
+            auxiliary_fan=auxiliary_fan,
+            return_diagnostics=True,
+        )
+        self.assertEqual(result["evidence"], {})
+        self.assertEqual(len(result["surface_diagnostics"]), 1)
+        self.assertEqual(
+            result["surface_diagnostics"][0]["reason_code"],
+            "missing_full_dimensional_auxiliary_cone",
+        )
+        self.assertEqual(len(result["surface_diagnostics"][0]["fixed_components"]), 4)
+
 
 class WriteCandidateManifestTests(unittest.TestCase):
     def test_round_trip_writes_jsonl_and_summary(self):
@@ -590,6 +959,9 @@ class WriteCandidateManifestTests(unittest.TestCase):
             summary_path = Path(f"{path}.summary.json")
             written_summary = json.loads(summary_path.read_text())
             self.assertEqual(written_summary, summary)
+            self.assertEqual(
+                written_summary["schema_version"], CANDIDATE_SCHEMA_VERSION
+            )
             self.assertEqual(written_summary["candidate_count"], 2)
             self.assertEqual(
                 written_summary["status_counts"]["accepted_verified_orientifold"], 1

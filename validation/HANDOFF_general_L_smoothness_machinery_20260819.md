@@ -1,6 +1,6 @@
 # HANDOFF: implement the general-L orientifold smoothness machinery
 
-**For:** a fresh agent (Sonnet 5 or stronger, xhigh). You have no prior context;
+**For:** a fresh agent. You have no prior context;
 everything you need is here or cited by path.
 **Written by:** the session that found and fixed the two cancelling
 non-identity-`L` torus-shift bugs, 2026-08-19, working from

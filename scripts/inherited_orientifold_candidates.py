@@ -24,6 +24,10 @@ import os
 import time
 
 import numpy as np
+try:
+    from scipy.optimize import linprog as _linprog
+except ImportError:  # pragma: no cover - the cytools environment supplies scipy
+    _linprog = None
 from sympy import Matrix as _SympyMatrix
 from sympy.matrices.normalforms import hermite_normal_form as _hermite_normal_form
 from sympy.polys.matrices import DomainMatrix as _DomainMatrix
@@ -37,7 +41,20 @@ from generate_geometric_data_multitriangulation import (
 )
 from glimmers_raw_frst import compute_polytope_id, compute_triangulation_hash, stable_hash
 
-CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.1"
+CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.2"
+
+GENERAL_FIXED_SURFACE_REASON_CODES = (
+    "nonsaturated_fixed_cone_lattice",
+    "missing_full_dimensional_auxiliary_cone",
+    "non_simplicial_full_dimensional_auxiliary_cone",
+    "incomplete_quotient_surface_fan",
+    "non_smooth_ambient_cone",
+    "non_smooth_surface_fan",
+    "missing_restricted_cartier_data",
+    "nonintegral_restricted_cartier_data",
+    "inconsistent_restricted_cartier_data",
+    "nonintegral_final_n_s",
+)
 
 TERMINAL_STATUSES = (
     "polytope_not_preserved",
@@ -267,17 +284,12 @@ def _triangulation_cones(poly, triangulation):
     return sorted(cones)
 
 
-def _primitive_integer_from_float(vector):
-    """Convert a numerical ray direction to a primitive integer vector."""
-    vector = np.asarray(vector, dtype=float)
-    nonzero = np.flatnonzero(np.abs(vector) > 1e-9)
-    if nonzero.size == 0:
+def _primitive_integer_from_exact(vector):
+    """Convert an exact rational ray direction to a primitive integer vector."""
+
+    rational = [Fraction(_exact_fraction(value)) for value in vector]
+    if not any(rational):
         raise ValueError("zero vector is not a ray")
-    first = int(nonzero[0])
-    scale = vector[first]
-    rational = [
-        Fraction(float(value / scale)).limit_denominator(10000) for value in vector
-    ]
     denominator = 1
     for value in rational:
         denominator = math.lcm(denominator, value.denominator)
@@ -285,37 +297,46 @@ def _primitive_integer_from_float(vector):
     divisor = abs(math.gcd(*integer.tolist()))
     if divisor > 1:
         integer //= divisor
-    if np.sign(integer[first]) != np.sign(scale):
-        integer *= -1
     return tuple(int(value) for value in integer)
 
 
-def _nullspace(matrix, tolerance=1e-10):
-    matrix = np.asarray(matrix, dtype=float)
-    _, singular_values, vh = np.linalg.svd(matrix, full_matrices=True)
-    scale = max(float(np.max(singular_values, initial=0.0)), 1.0)
-    rank = int(np.count_nonzero(singular_values > tolerance * scale))
-    return vh[rank:].T
-
-
 def _intersection_rays(cone, matrix):
-    """Find extreme rays of a simplicial cone intersected with ``Fix(matrix)``."""
-    rays = np.asarray(cone, dtype=float).T
-    constraint = np.eye(4, dtype=float) - np.asarray(matrix, dtype=float)
+    """Find extreme rays of a simplicial cone intersected with ``Fix(matrix)``.
+
+    Use exact rational nullspaces.  Floating-point SVD followed by
+    ``limit_denominator`` can change a ray for a numerically delicate or
+    large-coordinate cone before the lattice checks run.
+    """
+
+    rays = _SympyMatrix(np.asarray(cone, dtype=int).T.tolist())
+    constraint = _SympyMatrix(
+        (np.eye(4, dtype=int) - np.asarray(matrix, dtype=int)).tolist()
+    )
     generators = set()
     for size in range(1, len(cone) + 1):
         for support in itertools.combinations(range(len(cone)), size):
-            coefficient_nullspace = _nullspace(constraint @ rays[:, support])
-            if coefficient_nullspace.shape[1] != 1:
+            coefficient_nullspace = (
+                constraint * rays[:, list(support)]
+            ).nullspace()
+            if len(coefficient_nullspace) != 1:
                 continue
-            coefficients = coefficient_nullspace[:, 0]
-            if np.all(coefficients < -1e-9):
-                coefficients = -coefficients
-            if np.any(coefficients <= 1e-9):
+            coefficients = [
+                _exact_fraction(value) for value in coefficient_nullspace[0]
+            ]
+            if all(value < 0 for value in coefficients):
+                coefficients = [-value for value in coefficients]
+            if any(value <= 0 for value in coefficients):
                 continue
-            generator = rays[:, support] @ coefficients
-            primitive = _primitive_integer_from_float(generator)
-            if np.allclose(np.asarray(matrix, dtype=int) @ primitive, primitive):
+            coefficient_matrix = _SympyMatrix(
+                [
+                    _SympyMatrix([[value.numerator]])[0, 0]
+                    / value.denominator
+                    for value in coefficients
+                ]
+            )
+            generator = rays[:, list(support)] * coefficient_matrix
+            primitive = _primitive_integer_from_exact(generator)
+            if np.array_equal(np.asarray(matrix, dtype=int) @ primitive, primitive):
                 generators.add(primitive)
     return tuple(sorted(generators))
 
@@ -698,8 +719,765 @@ def _ambient_cartier_data(ambient_cone, divisor_point):
     return tuple(solution)
 
 
+def _fraction_to_json(value):
+    """Encode one exact rational as an integer or numerator/denominator pair."""
+
+    value = Fraction(value)
+    if value.denominator == 1:
+        return int(value)
+    return {"numerator": int(value.numerator), "denominator": int(value.denominator)}
+
+
+POSITIVE_COMPONENT_MAX_DIMENSION = 3
+MAX_SECTION_LATTICE_POINTS = 100_000
+
+
+def _exact_fraction(value):
+    """Convert an exact SymPy or Python rational to ``Fraction``."""
+
+    if isinstance(value, Fraction):
+        return value
+    numerator = getattr(value, "p", None)
+    denominator = getattr(value, "q", None)
+    if numerator is not None and denominator is not None:
+        return Fraction(int(numerator), int(denominator))
+    return Fraction(value)
+
+
+def _ambient_anticanonical_cartier_data(ambient_cone):
+    """Return local Cartier data for ``-K_V`` on a smooth ambient cone.
+
+    The ambient fan is supplied by an FRST, so a four-cone is smooth exactly
+    when its four primitive ray rows form a unimodular matrix.  Requiring that
+    fact here is deliberate: a non-unimodular or non-simplicial provenance
+    record does not provide enough local Cartier data for a certificate.
+    """
+
+    rays = np.asarray(ambient_cone, dtype=int)
+    if rays.shape != (4, 4):
+        return None
+    determinant = int(_SympyMatrix(rays.tolist()).det())
+    if abs(determinant) != 1:
+        return None
+    solution = _SympyMatrix(rays.tolist()).inv() * _SympyMatrix(
+        [-1, -1, -1, -1]
+    )
+    return tuple(_exact_fraction(value) for value in solution)
+
+
+def _rational_coordinates(basis, vector):
+    """Express a rational vector in a full-column-rank rational basis."""
+
+    basis = _SympyMatrix(np.asarray(basis, dtype=object).tolist())
+    vector = _SympyMatrix([_exact_fraction(value) for value in vector])
+    try:
+        solution = basis.gauss_jordan_solve(vector)[0]
+    except (ValueError, TypeError):
+        return None
+    if any(getattr(value, "free_symbols", set()) for value in solution):
+        return None
+    return tuple(_exact_fraction(value) for value in solution)
+
+
+def _fraction_dot(left, right):
+    """Take an exact dot product."""
+
+    return sum(
+        (_exact_fraction(left_value) * _exact_fraction(right_value))
+        for left_value, right_value in zip(left, right)
+    )
+
+
+def _primitive_quotient_vector(vector):
+    """Return a primitive quotient ray and its positive integral scale."""
+
+    vector = np.asarray(vector, dtype=int)
+    divisor = abs(math.gcd(*[int(value) for value in vector.tolist()]))
+    if divisor == 0:
+        return None
+    primitive = tuple(int(value // divisor) for value in vector)
+    return primitive, divisor
+
+
+def _cone_is_smooth_in_lattice(cone, dimension):
+    """Test smoothness of a simplicial cone in ``Z^dimension`` exactly."""
+
+    cone = tuple(tuple(int(value) for value in ray) for ray in cone)
+    cone_dimension = len(cone)
+    if cone_dimension == 0:
+        return True
+    matrix = np.asarray(cone, dtype=int).T
+    if matrix.shape != (dimension, cone_dimension):
+        return False
+    if cone_dimension == dimension:
+        return abs(int(_SympyMatrix(matrix.tolist()).det())) == 1
+    minors = []
+    for rows in itertools.combinations(range(dimension), cone_dimension):
+        minors.append(
+            abs(int(_SympyMatrix(matrix[list(rows), :].tolist()).det()))
+        )
+    return math.gcd(*minors) == 1
+
+
+def _cone_facet_normals(cone):
+    """Return exact facet covectors for a full-dimensional simplicial cone."""
+
+    matrix = _SympyMatrix(np.asarray(cone, dtype=int).T.tolist())
+    inverse = matrix.inv()
+    return tuple(
+        tuple(_exact_fraction(value) for value in row)
+        for row in inverse.tolist()
+    )
+
+
+def _intersection_cone_extreme_rays(left, right, dimension):
+    """Return the exact extreme rays of two full-dimensional cones.
+
+    The inverse ray matrices give the inequalities defining each simplicial
+    cone.  In dimensions one through three, every nonzero extreme ray of the
+    intersection lies on ``dimension - 1`` of those facet hyperplanes, so
+    enumerating their exact rational nullspaces is complete.  This is used to
+    distinguish a genuine common face from a pair of cones that merely has
+    the same codimension-one incidence counts.
+    """
+
+    if dimension == 1:
+        return (left[0],) if left[0] == right[0] else ()
+    normals = _cone_facet_normals(left) + _cone_facet_normals(right)
+    intersection_rays = set()
+    for selected in itertools.combinations(normals, dimension - 1):
+        normal_matrix = _SympyMatrix([list(normal) for normal in selected])
+        nullspace = normal_matrix.nullspace()
+        if len(nullspace) != 1:
+            continue
+        direction = tuple(_exact_fraction(value) for value in nullspace[0])
+        for sign in (1, -1):
+            candidate = tuple(sign * value for value in direction)
+            if not any(candidate):
+                continue
+            if all(
+                _fraction_dot(normal, candidate) >= 0 for normal in normals
+            ):
+                intersection_rays.add(_primitive_integer_from_exact(candidate))
+    return tuple(sorted(intersection_rays))
+
+
+def _strict_positive_hull_certificate(rays, dimension):
+    """Check that the origin is strictly inside the convex hull of ``rays``.
+
+    A complete fan must contain the origin in the interior of its ray hull.
+    The LP maximizes the common positive weight in
+    ``sum_i w_i ray_i = 0``, ``sum_i w_i = 1``.  An inconclusive numerical
+    margin is rejected conservatively; it never promotes a fan to certified.
+    """
+
+    if _linprog is None or not rays:
+        return False
+    ray_array = np.asarray(rays, dtype=float)
+    if ray_array.shape != (len(rays), dimension) or not np.all(
+        np.isfinite(ray_array)
+    ):
+        return False
+    count = len(rays)
+    equality = np.zeros((dimension + 1, count + 1), dtype=float)
+    equality[:dimension, :count] = ray_array.T
+    equality[dimension, :count] = 1.0
+    upper = np.zeros((count, count + 1), dtype=float)
+    upper[:, :count] = -np.eye(count, dtype=float)
+    upper[:, -1] = 1.0
+    result = _linprog(
+        c=np.r_[np.zeros(count, dtype=float), -1.0],
+        A_ub=upper,
+        b_ub=np.zeros(count, dtype=float),
+        A_eq=equality,
+        b_eq=np.r_[np.zeros(dimension, dtype=float), 1.0],
+        bounds=[(0.0, 1.0)] * count + [(0.0, 1.0)],
+        method="highs",
+    )
+    return bool(result.success and result.x[-1] > 1e-9)
+
+
+def _complete_simplicial_fan(maximal_cones, dimension):
+    """Check completeness, intersections, and simplicity of a finite fan.
+
+    The bounded section certificate requires more than a codimension-one
+    incidence count.  This predicate therefore verifies primitive rays,
+    full-dimensional simplicial cones, exact pairwise common-face
+    intersections, the two-sided codimension-one incidence condition, and
+    vector-space coverage via a strict positive-hull test.  Any unsupported
+    or numerically ambiguous case returns ``False`` so callers keep it
+    unavailable instead of treating it as a smoothness certificate.
+    """
+
+    try:
+        dimension = int(dimension)
+    except (TypeError, ValueError):
+        return False
+    if dimension < 1 or dimension > POSITIVE_COMPONENT_MAX_DIMENSION:
+        return False
+    if not maximal_cones:
+        return False
+
+    normalized_cones = []
+    for cone in maximal_cones:
+        try:
+            normalized_rays = []
+            for ray in cone:
+                normalized_ray = []
+                for value in ray:
+                    rational = _exact_fraction(value)
+                    if rational.denominator != 1:
+                        return False
+                    normalized_ray.append(int(rational))
+                normalized_rays.append(tuple(normalized_ray))
+            normalized = tuple(normalized_rays)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return False
+        if len(normalized) != dimension:
+            return False
+        if any(len(ray) != dimension for ray in normalized):
+            return False
+        if len(set(normalized)) != dimension:
+            return False
+        if any(
+            math.gcd(*[abs(int(value)) for value in ray]) != 1
+            for ray in normalized
+        ):
+            return False
+        if abs(int(_SympyMatrix(np.asarray(normalized, dtype=int).T.tolist()).det())) == 0:
+            return False
+        normalized_cones.append(tuple(sorted(normalized)))
+
+    if len(set(normalized_cones)) != len(normalized_cones):
+        return False
+    all_rays = tuple(sorted({ray for cone in normalized_cones for ray in cone}))
+    if not _strict_positive_hull_certificate(all_rays, dimension):
+        return False
+
+    codimension_one_faces = {}
+    for cone in normalized_cones:
+        for face in itertools.combinations(sorted(cone), max(dimension - 1, 0)):
+            key = frozenset(face)
+            codimension_one_faces[key] = codimension_one_faces.get(key, 0) + 1
+    if not codimension_one_faces or any(
+        count != 2 for count in codimension_one_faces.values()
+    ):
+        return False
+
+    for left_index, left in enumerate(normalized_cones):
+        for right in normalized_cones[left_index + 1 :]:
+            common_rays = set(left).intersection(right)
+            intersection_rays = set(
+                _intersection_cone_extreme_rays(left, right, dimension)
+            )
+            if intersection_rays != common_rays:
+                return False
+    return True
+
+
+def _toric_section_lattice_points(rays, coefficients, dimension):
+    """Enumerate lattice points of a bounded toric divisor polytope exactly."""
+
+    if dimension < 1 or dimension > POSITIVE_COMPONENT_MAX_DIMENSION:
+        return {
+            "status": "unavailable",
+            "reason_code": "unsupported_section_polytope_dimension",
+            "reason": (
+                "exact section-polytope enumeration is bounded to toric "
+                f"dimension {POSITIVE_COMPONENT_MAX_DIMENSION}"
+            ),
+        }
+    rays = tuple(sorted(tuple(int(value) for value in ray) for ray in rays))
+    vertices = set()
+    for selected in itertools.combinations(range(len(rays)), dimension):
+        matrix = _SympyMatrix([rays[index] for index in selected])
+        determinant = int(matrix.det())
+        if determinant == 0:
+            continue
+        right_hand_side = _SympyMatrix(
+            [-_exact_fraction(coefficients[rays[index]]) for index in selected]
+        )
+        solution = matrix.inv() * right_hand_side
+        point = tuple(_exact_fraction(value) for value in solution)
+        if all(
+            _fraction_dot(point, ray) >= -_exact_fraction(coefficients[ray])
+            for ray in rays
+        ):
+            vertices.add(point)
+    if not vertices:
+        return {
+            "status": "unavailable",
+            "reason_code": "section_polytope_unavailable",
+            "reason": (
+                "the restricted anti-canonical divisor has no certifiable "
+                "bounded polytope vertices"
+            ),
+        }
+
+    lower = [min(point[index] for point in vertices) for index in range(dimension)]
+    upper = [max(point[index] for point in vertices) for index in range(dimension)]
+    ranges = [
+        range(math.floor(value), math.ceil(upper[index]) + 1)
+        for index, value in enumerate(lower)
+    ]
+    search_size = math.prod(len(values) for values in ranges)
+    if search_size > MAX_SECTION_LATTICE_POINTS:
+        return {
+            "status": "unavailable",
+            "reason_code": "section_lattice_search_bounded",
+            "reason": (
+                f"the exact section-lattice search would inspect {search_size} "
+                f"integer points, above the bound {MAX_SECTION_LATTICE_POINTS}"
+            ),
+        }
+    points = []
+    for candidate in itertools.product(*ranges):
+        point = tuple(Fraction(int(value)) for value in candidate)
+        if all(
+            _fraction_dot(point, ray) >= -_exact_fraction(coefficients[ray])
+            for ray in rays
+        ):
+            points.append(point)
+    return {
+        "status": "certified",
+        "reason_code": None,
+        "reason": None,
+        "points": tuple(sorted(set(points))),
+        "vertices": tuple(sorted(vertices)),
+    }
+
+
+def _positive_component_section_certificate(auxiliary_fan, matrix, component):
+    """Certify Sec. 4.6 for a positive-dimensional non-vanishing component.
+
+    The component is the toric orbit closure of ``sigma`` in the auxiliary
+    fixed fan.  For dimensions one through three, construct its star fan in
+    the exact quotient lattice, restrict the ambient anti-canonical Cartier
+    data, and apply two source-matched tests:
+
+    * nefness: every local support-function representative lies in the
+      restricted divisor polytope, equivalently the support function is
+      convex on the complete fan;
+    * orbifold avoidance: for each non-smooth cone with positive-dimensional
+      orbit, the restricted section polytope face has exactly one lattice
+      point.  More than one point gives a non-monomial Laurent restriction,
+      which generically has a zero on that orbit.
+
+    Missing provenance, non-Cartier data, incomplete fans, unsupported
+    dimensions, and bounded-search limits are unavailable rather than
+    accepted.
+    """
+
+    matrix = np.asarray(matrix, dtype=int)
+    invariant_basis = _integer_kernel_basis(np.eye(4, dtype=int) - matrix)
+    fixed_rank = int(invariant_basis.shape[1])
+    sigma_rays = tuple(
+        tuple(int(value) for value in ray) for ray in component.get("sigma_rays", [])
+    )
+    sigma_dimension = int(component.get("sigma_dimension", len(sigma_rays)))
+    component_dimension = fixed_rank - sigma_dimension
+    supplied_component_dimension = component.get("fixed_toric_dimension")
+    base = {
+        "component_sigma_rays": [list(ray) for ray in sigma_rays],
+        "component_sigma_dimension": sigma_dimension,
+        "fixed_toric_dimension": component_dimension,
+        "fixed_lattice_basis": np.asarray(invariant_basis, dtype=int).tolist(),
+    }
+
+    def unavailable(reason_code, reason, **extra):
+        return {
+            **base,
+            **extra,
+            "status": "unavailable",
+            "reason_code": reason_code,
+            "reason": reason,
+            "nefness": {
+                "status": "unavailable",
+                "reason_code": reason_code,
+                "reason": reason,
+            },
+            "orbifold_intersection": {
+                "status": "unavailable",
+                "reason_code": reason_code,
+                "reason": reason,
+            },
+        }
+
+    if component_dimension < 1:
+        return unavailable(
+            "nonpositive_fixed_component_dimension",
+            "the supplied fixed-component dimension is not positive",
+        )
+    if (
+        supplied_component_dimension is not None
+        and int(supplied_component_dimension) != component_dimension
+    ):
+        return unavailable(
+            "inconsistent_fixed_component_dimension",
+            "the fixed-component dimension disagrees with the invariant lattice rank",
+        )
+    if component_dimension > POSITIVE_COMPONENT_MAX_DIMENSION:
+        return unavailable(
+            "unsupported_fixed_component_dimension",
+            (
+                "the bounded toric support-function and section-polytope "
+                f"certificate supports dimensions 1 through {POSITIVE_COMPONENT_MAX_DIMENSION}"
+            ),
+        )
+    if sigma_dimension != len(sigma_rays):
+        return unavailable(
+            "nonsaturated_fixed_cone_lattice",
+            "the fixed cone ray count does not match its supplied dimension",
+        )
+    if any(
+        not np.array_equal(matrix @ np.asarray(ray, dtype=int), np.asarray(ray, dtype=int))
+        for ray in sigma_rays
+    ):
+        return unavailable(
+            "nonintegral_fixed_component_lattice",
+            "a fixed-component ray is not pointwise invariant under L",
+        )
+
+    sigma_coordinates = []
+    for ray in sigma_rays:
+        coordinates = _integer_coordinates(invariant_basis, ray)
+        if coordinates is None:
+            return unavailable(
+                "nonintegral_fixed_component_lattice",
+                "a fixed-component ray has no integral coordinate in the invariant lattice",
+            )
+        if math.gcd(*[abs(int(value)) for value in coordinates.tolist()]) != 1:
+            return unavailable(
+                "nonsaturated_fixed_cone_lattice",
+                "a fixed-component ray is not primitive in the invariant lattice",
+            )
+        sigma_coordinates.append(coordinates)
+    sigma_matrix = (
+        np.column_stack(sigma_coordinates)
+        if sigma_coordinates
+        else np.empty((fixed_rank, 0), dtype=int)
+    )
+    if not _sublattice_is_saturated(sigma_matrix):
+        return unavailable(
+            "nonsaturated_fixed_cone_lattice",
+            "the fixed-cone rays generate a proper finite-index sublattice of the invariant lattice",
+        )
+    quotient_annihilator = _integer_kernel_basis(sigma_matrix.T).T
+    if quotient_annihilator.shape != (component_dimension, fixed_rank):
+        return unavailable(
+            "incomplete_fixed_component_fan",
+            "the fixed-cone quotient does not have the supplied dimension",
+        )
+
+    maximal_cones = {}
+    reference_support = None
+    for full_cone in auxiliary_fan:
+        full_rays = tuple(
+            tuple(int(value) for value in ray) for ray in full_cone.get("rays", [])
+        )
+        if int(full_cone.get("dimension", -1)) != fixed_rank:
+            continue
+        if not set(sigma_rays).issubset(full_rays):
+            continue
+        if not bool(full_cone.get("simplicial")) or len(full_rays) != fixed_rank:
+            return unavailable(
+                "non_simplicial_fixed_component_fan",
+                "a full-dimensional auxiliary cone containing the fixed component is non-simplicial",
+            )
+        ambient_cones = full_cone.get("ambient_cones", [])
+        if not ambient_cones:
+            return unavailable(
+                "missing_ambient_cone_provenance",
+                "the full-dimensional auxiliary cone has no ambient-cone provenance for -K_V",
+            )
+        quotient_rays = []
+        quotient_scales = {}
+        for ray in full_rays:
+            if ray in sigma_rays:
+                continue
+            coordinates = _integer_coordinates(invariant_basis, ray)
+            if coordinates is None:
+                return unavailable(
+                    "nonintegral_fixed_component_lattice",
+                    "an auxiliary fixed ray has no integral coordinate in the invariant lattice",
+                )
+            quotient_vector = quotient_annihilator @ coordinates
+            primitive_data = _primitive_quotient_vector(quotient_vector)
+            if primitive_data is None:
+                return unavailable(
+                    "incomplete_fixed_component_fan",
+                    "an auxiliary ray vanishes in the fixed-cone quotient lattice",
+                )
+            primitive, scale = primitive_data
+            if primitive in quotient_rays:
+                return unavailable(
+                    "incomplete_fixed_component_fan",
+                    "a full-dimensional auxiliary cone induces duplicate quotient rays",
+                )
+            quotient_rays.append(primitive)
+            quotient_scales[primitive] = int(scale)
+        if len(quotient_rays) != component_dimension:
+            return unavailable(
+                "incomplete_fixed_component_fan",
+                "a full-dimensional auxiliary cone does not induce the required quotient cone dimension",
+            )
+
+        ambient_supports = []
+        for ambient in ambient_cones:
+            ambient_data = _ambient_anticanonical_cartier_data(ambient)
+            if ambient_data is None:
+                return unavailable(
+                    "missing_ambient_cartier_data",
+                    "an ambient provenance cone is not a smooth unimodular four-cone",
+                )
+            ambient_supports.append(
+                tuple(
+                    sum(
+                        _exact_fraction(invariant_basis[row, column])
+                        * ambient_data[row]
+                        for row in range(4)
+                    )
+                    for column in range(fixed_rank)
+                )
+            )
+        if any(support != ambient_supports[0] for support in ambient_supports[1:]):
+            return unavailable(
+                "inconsistent_ambient_cartier_data",
+                "ambient provenance cones give inconsistent restrictions of -K_V",
+            )
+        local_ambient_support = ambient_supports[0]
+        if reference_support is None:
+            reference_support = local_ambient_support
+        difference = tuple(
+            local - reference
+            for local, reference in zip(local_ambient_support, reference_support)
+        )
+        if any(_fraction_dot(difference, coordinates) != 0 for coordinates in sigma_coordinates):
+            return unavailable(
+                "inconsistent_restricted_cartier_data",
+                "local -K_V support functions do not agree along the fixed cone",
+            )
+        quotient_support = _rational_coordinates(quotient_annihilator.T, difference)
+        if quotient_support is None:
+            return unavailable(
+                "inconsistent_restricted_cartier_data",
+                "the restricted -K_V support function is not integral in the quotient dual lattice",
+            )
+        coefficients = {
+            ray: -_fraction_dot(quotient_support, ray) for ray in quotient_rays
+        }
+        cone_key = frozenset(quotient_rays)
+        record = {
+            "rays": tuple(sorted(quotient_rays)),
+            "support": quotient_support,
+            "coefficients": coefficients,
+            "scales": quotient_scales,
+        }
+        previous = maximal_cones.get(cone_key)
+        if previous is not None and (
+            previous["support"] != record["support"]
+            or previous["coefficients"] != record["coefficients"]
+        ):
+            return unavailable(
+                "inconsistent_restricted_cartier_data",
+                "duplicate quotient cones have inconsistent restricted Cartier data",
+            )
+        maximal_cones[cone_key] = record
+
+    if not maximal_cones:
+        return unavailable(
+            "missing_full_dimensional_auxiliary_cone",
+            "no full-dimensional auxiliary cone contains the fixed component",
+        )
+    maximal_records = [maximal_cones[key] for key in sorted(maximal_cones, key=lambda value: tuple(sorted(value)))]
+    maximal_ray_sets = [record["rays"] for record in maximal_records]
+    if not _complete_simplicial_fan(maximal_ray_sets, component_dimension):
+        return unavailable(
+            "incomplete_fixed_component_fan",
+            "the containing auxiliary cones do not form a complete simplicial quotient fan",
+        )
+
+    coefficients = {}
+    for record in maximal_records:
+        for ray, coefficient in record["coefficients"].items():
+            previous = coefficients.get(ray)
+            if previous is not None and previous != coefficient:
+                return unavailable(
+                    "inconsistent_restricted_cartier_data",
+                    "the restricted -K_V divisor has inconsistent coefficients on a quotient ray",
+                )
+            coefficients[ray] = coefficient
+    nef_witnesses = []
+    support_inequality_margins = []
+    for record in maximal_records:
+        for ray in record["rays"]:
+            degree = _fraction_dot(record["support"], ray) + coefficients[ray]
+            support_inequality_margins.append(
+                {
+                    "maximal_cone": [list(item) for item in record["rays"]],
+                    "ray": list(ray),
+                    "margin": _fraction_to_json(degree),
+                }
+            )
+        for ray in sorted(coefficients):
+            margin = _fraction_dot(record["support"], ray) + coefficients[ray]
+            if margin < 0:
+                nef_witnesses.append(
+                    {
+                        "maximal_cone": [list(item) for item in record["rays"]],
+                        "ray": list(ray),
+                        "support_inequality_margin": _fraction_to_json(margin),
+                    }
+                )
+    nefness = {
+        "status": "rejected" if nef_witnesses else "certified",
+        "nef": not nef_witnesses,
+        "method": "exact_toric_support_function_convexity",
+        "support_inequality_margins": support_inequality_margins,
+        "witnesses": nef_witnesses,
+    }
+    fan_data = {
+        **base,
+        "quotient_annihilator": np.asarray(quotient_annihilator, dtype=int).tolist(),
+        "quotient_rays": [list(ray) for ray in sorted(coefficients)],
+        "quotient_maximal_cones": [
+            [list(ray) for ray in record["rays"]] for record in maximal_records
+        ],
+        "restricted_anticanonical_coefficients": [
+            {"ray": list(ray), "coefficient": _fraction_to_json(coefficients[ray])}
+            for ray in sorted(coefficients)
+        ],
+    }
+    if nef_witnesses:
+        return {
+            **fan_data,
+            "status": "rejected",
+            "reason_code": "restricted_line_bundle_not_nef",
+            "reason": (
+                "the restricted anti-canonical support function violates a "
+                "nefness inequality on the quotient fan"
+            ),
+            "nefness": nefness,
+            "orbifold_intersection": {
+                "status": "not_evaluated",
+                "reason_code": "restricted_line_bundle_not_nef",
+                "reason": "orbifold avoidance is not evaluated after a nefness rejection",
+            },
+        }
+
+    all_cones = {frozenset()}
+    for record in maximal_records:
+        rays = record["rays"]
+        for size in range(1, component_dimension + 1):
+            all_cones.update(frozenset(face) for face in itertools.combinations(rays, size))
+    singular_cones = [
+        tuple(sorted(cone))
+        for cone in all_cones
+        if cone and not _cone_is_smooth_in_lattice(tuple(cone), component_dimension)
+    ]
+    positive_dimensional_singular_cones = [
+        cone for cone in singular_cones if component_dimension - len(cone) > 0
+    ]
+    if not positive_dimensional_singular_cones:
+        return {
+            **fan_data,
+            "status": "certified",
+            "reason_code": None,
+            "reason": None,
+            "nefness": nefness,
+            "orbifold_intersection": {
+                "status": "certified",
+                "avoided": True,
+                "method": "exact_toric_orbit_face_test",
+                "singular_cones": [
+                    [list(ray) for ray in cone] for cone in singular_cones
+                ],
+                "positive_dimensional_singular_cones": [],
+                "reason": (
+                    "all singular toric strata are zero-dimensional, so a "
+                    "generic nonzero section avoids them"
+                ),
+            },
+        }
+
+    section_points = _toric_section_lattice_points(
+        tuple(coefficients), coefficients, component_dimension
+    )
+    if section_points["status"] != "certified":
+        return {
+            **fan_data,
+            "status": "unavailable",
+            "reason_code": section_points["reason_code"],
+            "reason": section_points["reason"],
+            "nefness": nefness,
+            "orbifold_intersection": {
+                "status": "unavailable",
+                "reason_code": section_points["reason_code"],
+                "reason": section_points["reason"],
+            },
+        }
+    all_section_points = section_points["points"]
+    singular_strata = []
+    for cone in positive_dimensional_singular_cones:
+        face_points = tuple(
+            point
+            for point in all_section_points
+            if all(
+                _fraction_dot(point, ray) == -coefficients[ray]
+                for ray in cone
+            )
+        )
+        singular_strata.append(
+            {
+                "cone": [list(ray) for ray in cone],
+                "orbit_dimension": component_dimension - len(cone),
+                "face_lattice_point_count": len(face_points),
+                "face_lattice_points": [
+                    [_fraction_to_json(value) for value in point]
+                    for point in face_points
+                ],
+            }
+        )
+        if len(face_points) != 1:
+            return {
+                **fan_data,
+                "status": "rejected",
+                "reason_code": "orbifold_stratum_intersection",
+                "reason": (
+                    "the restricted section polytope has "
+                    f"{len(face_points)} lattice points on the positive-dimensional "
+                    "orbifold stratum, so a generic section intersects it"
+                ),
+                "nefness": nefness,
+                "orbifold_intersection": {
+                    "status": "rejected",
+                    "avoided": False,
+                    "method": "exact_toric_orbit_face_test",
+                    "singular_strata": singular_strata,
+                },
+            }
+    return {
+        **fan_data,
+        "status": "certified",
+        "reason_code": None,
+        "reason": None,
+        "nefness": nefness,
+        "orbifold_intersection": {
+            "status": "certified",
+            "avoided": True,
+            "method": "exact_toric_orbit_face_test",
+            "singular_strata": singular_strata,
+        },
+    }
+
+
 def _general_fixed_surface_n_s_table(
-    triangulation_cones, triangulation, matrix, auxiliary_fan=None
+    triangulation_cones,
+    triangulation,
+    matrix,
+    auxiliary_fan=None,
+    *,
+    return_diagnostics=False,
 ):
     """Compute eq. (4.50) evidence for general-``L`` fixed surfaces.
 
@@ -712,23 +1490,123 @@ def _general_fixed_surface_n_s_table(
     The identity case reduces to
     ``D_p D_q (K_V^-1-D_p)(K_V^-1-D_q)``.  Return no entry when the local
     fan, Cartier data, or lattice quotient cannot certify a smooth surface.
+    Set ``return_diagnostics`` to return the evidence table together with a
+    machine-readable record for every skipped two-dimensional fixed surface.
     """
 
     matrix = np.asarray(matrix, dtype=int)
     if auxiliary_fan is None:
         auxiliary_fan = build_auxiliary_fan(triangulation_cones, matrix)
+    tables = {}
+    diagnostics = []
+    global_reasons = []
+
+    def finish():
+        if return_diagnostics:
+            return {
+                "evidence": tables,
+                "surface_diagnostics": diagnostics,
+                "global_reasons": global_reasons,
+            }
+        return tables
+
+    nu_records = None
+
+    def record_surface_reason(
+        sigma_rays,
+        sigma_dimension,
+        reason_code,
+        reason,
+    ):
+        if not return_diagnostics:
+            return
+        if reason_code not in GENERAL_FIXED_SURFACE_REASON_CODES:
+            raise ValueError(f"unknown general fixed-surface reason code: {reason_code}")
+        fixed_components = []
+        if nu_records is not None:
+            fixed_components = [
+                {
+                    "sigma_rays": [list(ray) for ray in sigma_rays],
+                    "nu": _fraction_vector_to_json(record["vector"]),
+                }
+                for record in nu_records
+            ]
+        diagnostics.append(
+            {
+                "status": "unavailable",
+                "reason_code": reason_code,
+                "reason": reason,
+                "sigma_rays": [list(ray) for ray in sigma_rays],
+                "sigma_dimension": int(sigma_dimension),
+                "fixed_components": fixed_components,
+            }
+        )
+
+    def record_surface_evidence(
+        sigma_rays,
+        sigma_dimension,
+        c2_ambient_restricted,
+        c2_surface,
+        c1_surface_squared,
+        n_s,
+        diagnostic_data,
+    ):
+        if not return_diagnostics:
+            return
+        diagnostics.append(
+            {
+                "status": "certified",
+                "reason_code": None,
+                "reason": None,
+                "sigma_rays": [list(ray) for ray in sigma_rays],
+                "sigma_dimension": int(sigma_dimension),
+                "fixed_components": [
+                    {
+                        "sigma_rays": [list(ray) for ray in sigma_rays],
+                        "nu": _fraction_vector_to_json(record["vector"]),
+                    }
+                    for record in nu_records
+                ],
+                "c2_ambient_restricted": _fraction_to_json(c2_ambient_restricted),
+                "c2_surface": _fraction_to_json(c2_surface),
+                "c1_surface_squared": _fraction_to_json(c1_surface_squared),
+                "n_s": _fraction_to_json(n_s),
+                **diagnostic_data,
+            }
+        )
+
     fixed_rank = int(
         np.linalg.matrix_rank(np.eye(4, dtype=float) + matrix.astype(float))
     )
     if fixed_rank < 2:
-        return {}
+        global_reasons.append(
+            {
+                "reason_code": "fixed_subspace_dimension_below_surface",
+                "reason": "the invariant subspace has dimension below two",
+            }
+        )
+        return finish()
 
     invariant_basis = _integer_kernel_basis(np.eye(4, dtype=int) - matrix)
     if invariant_basis.shape[1] != fixed_rank:
-        return {}
+        global_reasons.append(
+            {
+                "reason_code": "invariant_basis_rank_mismatch",
+                "reason": "the integer invariant basis rank does not match the fixed subspace rank",
+            }
+        )
+        return finish()
     vectors = np.asarray(triangulation.fan().vectors(), dtype=int)
     if vectors.ndim != 2 or vectors.shape[1] != 4:
-        return {}
+        global_reasons.append(
+            {
+                "reason_code": "invalid_ambient_ray_data",
+                "reason": "the triangulation fan does not expose an integer (n, 4) ray array",
+            }
+        )
+        return finish()
+
+    nu_records = enumerate_projected_lattice_representatives(matrix, -1)
 
     ambient_cone_data = {}
 
@@ -747,13 +1625,18 @@ def _general_fixed_surface_n_s_table(
                 )
         return ambient_cone_data[ambient_key]
 
-    tables = {}
     for component_cone in auxiliary_fan:
         sigma_rays = tuple(tuple(int(value) for value in ray) for ray in component_cone["rays"])
         sigma_dimension = int(component_cone["dimension"])
         if fixed_rank - sigma_dimension != 2:
             continue
         if len(sigma_rays) != sigma_dimension:
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                "nonsaturated_fixed_cone_lattice",
+                "the auxiliary cone ray count does not match its lattice dimension",
+            )
             continue
         sigma_coordinates = []
         for ray in sigma_rays:
@@ -763,6 +1646,12 @@ def _general_fixed_surface_n_s_table(
                 break
             sigma_coordinates.append(coordinates)
         if sigma_dimension and not sigma_coordinates:
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                "nonsaturated_fixed_cone_lattice",
+                "an auxiliary fixed-cone ray has no integral coordinate in the invariant lattice",
+            )
             continue
         sigma_matrix = (
             np.column_stack(sigma_coordinates)
@@ -770,21 +1659,65 @@ def _general_fixed_surface_n_s_table(
             else np.empty((fixed_rank, 0), dtype=int)
         )
         if not _sublattice_is_saturated(sigma_matrix):
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                "nonsaturated_fixed_cone_lattice",
+                "the fixed-cone rays generate a proper finite-index sublattice of the invariant lattice",
+            )
             continue
         annihilator = _integer_kernel_basis(sigma_matrix.T).T
         if annihilator.shape != (2, fixed_rank):
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                "incomplete_quotient_surface_fan",
+                "the quotient annihilator does not have the required two-dimensional rank",
+            )
             continue
 
         surface_cones = {}
         boundary_rays = {}
         boundary_scales = {}
         local_ambient_cones = []
+        full_dimensional_cone_count = 0
+        failure_code = None
+        failure_reason = None
         for full_cone in auxiliary_fan:
             full_rays = tuple(tuple(int(value) for value in ray) for ray in full_cone["rays"])
             if full_cone["dimension"] != fixed_rank or not set(sigma_rays).issubset(full_rays):
                 continue
+            full_dimensional_cone_count += 1
             if not full_cone["simplicial"] or len(full_rays) != fixed_rank:
-                surface_cones = {}
+                failure_code = "non_simplicial_full_dimensional_auxiliary_cone"
+                failure_reason = "a full-dimensional auxiliary cone containing the fixed cone is non-simplicial"
+                break
+            ambient_cones = full_cone.get("ambient_cones", [])
+            if not ambient_cones:
+                failure_code = "missing_full_dimensional_auxiliary_cone"
+                failure_reason = "the full-dimensional auxiliary cone has no ambient-cone provenance"
+                break
+            if any(
+                len(ambient) != 4
+                or abs(round(float(np.linalg.det(np.asarray(ambient, dtype=int))))) != 1
+                for ambient in ambient_cones
+            ):
+                failure_code = "non_smooth_ambient_cone"
+                failure_reason = "a containing ambient cone is not a smooth unimodular four-cone"
+                break
+            for ambient in ambient_cones:
+                ambient_key = tuple(
+                    tuple(int(value) for value in ray) for ray in ambient
+                )
+                local_data = local_cartier_data(ambient_key)
+                if local_data is None:
+                    failure_code = "missing_restricted_cartier_data"
+                    failure_reason = (
+                        "an ambient provenance cone has no complete integral "
+                        "Cartier data for the ambient divisors"
+                    )
+                    break
+            if failure_code is not None:
                 break
             quotient_rays = []
             for ray in full_rays:
@@ -792,30 +1725,95 @@ def _general_fixed_surface_n_s_table(
                     continue
                 coordinates = _integer_coordinates(invariant_basis, ray)
                 if coordinates is None:
-                    quotient_rays = []
+                    failure_code = "incomplete_quotient_surface_fan"
+                    failure_reason = "a full-dimensional auxiliary ray has no integral invariant-lattice coordinate"
                     break
                 quotient = annihilator @ coordinates
                 divisor = abs(math.gcd(*quotient.tolist()))
                 if divisor == 0:
-                    quotient_rays = []
+                    failure_code = "incomplete_quotient_surface_fan"
+                    failure_reason = "a quotient ray vanishes in the two-dimensional quotient lattice"
                     break
                 primitive = tuple(int(value // divisor) for value in quotient)
+                if primitive in boundary_rays and (
+                    boundary_rays[primitive] != ray
+                    or boundary_scales[primitive] != divisor
+                ):
+                    failure_code = "incomplete_quotient_surface_fan"
+                    failure_reason = (
+                        "multiple ambient rays map to one quotient ray with "
+                        "incompatible divisor provenance"
+                    )
+                    break
                 quotient_rays.append(primitive)
                 boundary_rays[primitive] = ray
                 boundary_scales[primitive] = divisor
+            if failure_code is not None:
+                break
             if len(quotient_rays) != 2 or quotient_rays[0] == quotient_rays[1]:
-                surface_cones = {}
+                failure_code = "incomplete_quotient_surface_fan"
+                failure_reason = "a full-dimensional auxiliary cone does not induce two distinct quotient rays"
                 break
             cone_key = frozenset(quotient_rays)
             surface_cones.setdefault(cone_key, []).append(full_cone)
             local_ambient_cones.extend(full_cone["ambient_cones"])
+        if failure_code is not None:
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                failure_code,
+                failure_reason,
+            )
+            continue
         if not surface_cones:
+            reason_code = (
+                "missing_full_dimensional_auxiliary_cone"
+                if full_dimensional_cone_count == 0
+                else "incomplete_quotient_surface_fan"
+            )
+            reason = (
+                "no full-dimensional auxiliary cone contains this fixed cone"
+                if full_dimensional_cone_count == 0
+                else "the containing full-dimensional cones do not form a quotient surface fan"
+            )
+            record_surface_reason(sigma_rays, sigma_dimension, reason_code, reason)
             continue
 
         boundary_keys = tuple(boundary_rays)
         if len(boundary_keys) < 3 or any(
             sum(ray in cone for cone in surface_cones) != 2 for ray in boundary_keys
         ):
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                "incomplete_quotient_surface_fan",
+                "the quotient surface fan is not complete around every boundary ray",
+            )
+            continue
+        try:
+            _surface_divisor_intersection(
+                {ray: Fraction(1) for ray in boundary_keys},
+                {ray: Fraction(1) for ray in boundary_keys},
+                boundary_keys,
+                surface_cones,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            reason_code = (
+                "non_smooth_surface_fan"
+                if "non-smooth" in message
+                else "incomplete_quotient_surface_fan"
+            )
+            record_surface_reason(sigma_rays, sigma_dimension, reason_code, message)
+            continue
+
+        if not local_ambient_cones:
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                "missing_restricted_cartier_data",
+                "the quotient surface fan has no ambient-cone provenance for restriction",
+            )
             continue
         try:
             # The reference support function is the Cartier data on sigma.
@@ -826,6 +1824,12 @@ def _general_fixed_surface_n_s_table(
                     reference_ambient = ambient_key
                     break
             if reference_ambient is None:
+                record_surface_reason(
+                    sigma_rays,
+                    sigma_dimension,
+                    "missing_restricted_cartier_data",
+                    "no containing ambient cone supplied integral Cartier support data for all divisors",
+                )
                 continue
             reference_data = ambient_cone_data[reference_ambient]
             divisor_coefficients = {}
@@ -833,26 +1837,43 @@ def _general_fixed_surface_n_s_table(
                 divisor_key = tuple(int(value) for value in divisor_point)
                 reference = reference_data[divisor_key]
                 coefficients = {}
-                for cone_key, provenance in surface_cones.items():
-                    ambient = provenance[0]["ambient_cones"][0]
-                    ambient_key = tuple(tuple(int(value) for value in ray) for ray in ambient)
-                    local_data = local_cartier_data(ambient_key)
-                    if local_data is None:
-                        raise ValueError("missing ambient Cartier data")
-                    difference = [value - ref for value, ref in zip(local_data[divisor_key], reference)]
-                    for quotient_ray in cone_key:
-                        ambient_ray = boundary_rays[quotient_ray]
-                        coefficient = -sum(
-                            value * int(component)
-                            for value, component in zip(difference, ambient_ray)
-                        ) / boundary_scales[quotient_ray]
-                        if coefficient.q != 1:
-                            raise ValueError("non-integral restricted Cartier coefficient")
-                        coefficients.setdefault(quotient_ray, Fraction(int(coefficient)))
-                        if coefficients[quotient_ray] != coefficient:
-                            raise ValueError("inconsistent restricted Cartier data")
+                for cone_key, full_cones in surface_cones.items():
+                    for full_cone in full_cones:
+                        for ambient in full_cone.get("ambient_cones", []):
+                            ambient_key = tuple(
+                                tuple(int(value) for value in ray)
+                                for ray in ambient
+                            )
+                            local_data = local_cartier_data(ambient_key)
+                            if local_data is None:
+                                raise ValueError("missing ambient Cartier data")
+                            difference = [
+                                value - ref
+                                for value, ref in zip(
+                                    local_data[divisor_key], reference
+                                )
+                            ]
+                            for quotient_ray in cone_key:
+                                ambient_ray = boundary_rays[quotient_ray]
+                                coefficient = -sum(
+                                    value * int(component)
+                                    for value, component in zip(
+                                        difference, ambient_ray
+                                    )
+                                ) / boundary_scales[quotient_ray]
+                                if coefficient.q != 1:
+                                    raise ValueError(
+                                        "non-integral restricted Cartier coefficient"
+                                    )
+                                coefficient = Fraction(int(coefficient))
+                                previous = coefficients.get(quotient_ray)
+                                if previous is not None and previous != coefficient:
+                                    raise ValueError(
+                                        "inconsistent restricted Cartier data"
+                                    )
+                                coefficients[quotient_ray] = coefficient
                 if set(coefficients) != set(boundary_keys):
-                    raise ValueError("incomplete restricted Cartier data")
+                    raise ValueError("missing restricted Cartier data")
                 divisor_coefficients[divisor_key] = coefficients
 
             unit_coefficients = {ray: Fraction(1) for ray in boundary_keys}
@@ -872,14 +1893,112 @@ def _general_fixed_surface_n_s_table(
                     )
             n_s = c2_ambient_restricted - c2_surface + c1_surface_squared
             if n_s.denominator != 1:
+                record_surface_reason(
+                    sigma_rays,
+                    sigma_dimension,
+                    "nonintegral_final_n_s",
+                    f"the final fixed-surface n_S is nonintegral: {n_s}",
+                )
                 continue
-        except (TypeError, ValueError, ZeroDivisionError):
+        except ValueError as exc:
+            message = str(exc)
+            if "non-integral restricted Cartier" in message:
+                reason_code = "nonintegral_restricted_cartier_data"
+            elif "inconsistent restricted Cartier" in message:
+                reason_code = "inconsistent_restricted_cartier_data"
+            elif "missing" in message or "incomplete" in message:
+                reason_code = "missing_restricted_cartier_data"
+            elif "non-smooth" in message:
+                reason_code = "non_smooth_surface_fan"
+            else:
+                reason_code = "missing_restricted_cartier_data"
+            record_surface_reason(sigma_rays, sigma_dimension, reason_code, message)
             continue
+        except (TypeError, KeyError, IndexError, ZeroDivisionError) as exc:
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                "missing_restricted_cartier_data",
+                f"restricted Cartier calculation could not be completed: {exc}",
+            )
+            continue
+
+        ordered_boundary_keys = tuple(sorted(boundary_keys))
+        ordered_surface_cones = tuple(
+            sorted(surface_cones, key=lambda cone: tuple(sorted(cone)))
+        )
+        surface_cone_provenance = []
+        for cone_key in ordered_surface_cones:
+            ambient_cones = {
+                tuple(
+                    tuple(int(value) for value in ray)
+                    for ray in ambient
+                )
+                for full_cone in surface_cones[cone_key]
+                for ambient in full_cone.get("ambient_cones", [])
+            }
+            surface_cone_provenance.append(
+                {
+                    "quotient_cone": [list(ray) for ray in sorted(cone_key)],
+                    "ambient_cones": [
+                        [list(ray) for ray in sorted(ambient)]
+                        for ambient in sorted(ambient_cones)
+                    ],
+                }
+            )
+        diagnostic_data = {
+            "invariant_lattice_basis": np.asarray(
+                invariant_basis, dtype=int
+            ).tolist(),
+            "quotient_annihilator": np.asarray(annihilator, dtype=int).tolist(),
+            "quotient_surface_rays": [
+                list(ray) for ray in ordered_boundary_keys
+            ],
+            "quotient_surface_cones": [
+                [list(ray) for ray in sorted(cone)]
+                for cone in ordered_surface_cones
+            ],
+            "surface_cone_provenance": surface_cone_provenance,
+            "boundary_ray_scales": [
+                {
+                    "quotient_ray": list(ray),
+                    "scale": int(boundary_scales[ray]),
+                }
+                for ray in ordered_boundary_keys
+            ],
+            "reference_ambient_cone": [
+                list(ray) for ray in sorted(reference_ambient)
+            ],
+            "restricted_divisor_coefficients": [
+                {
+                    "ambient_ray": list(divisor_key),
+                    "coefficients": [
+                        {
+                            "quotient_ray": list(ray),
+                            "coefficient": _fraction_to_json(
+                                divisor_coefficients[divisor_key][ray]
+                            ),
+                        }
+                        for ray in ordered_boundary_keys
+                    ],
+                }
+                for divisor_key in sorted(divisor_coefficients)
+            ],
+        }
+        record_surface_evidence(
+            sigma_rays,
+            sigma_dimension,
+            c2_ambient_restricted,
+            c2_surface,
+            c1_surface_squared,
+            n_s,
+            diagnostic_data,
+        )
 
         # Every admissible fixed surface is keyed with nu below. The value is
         # independent of nu because nu translates the toric component without
         # changing its fan or restricted line bundles.
-        for nu_record in enumerate_projected_lattice_representatives(matrix, -1):
+        for nu_record in nu_records:
             tables[
                 _component_key(
                     {
@@ -889,7 +2008,7 @@ def _general_fixed_surface_n_s_table(
                 )
             ] = int(n_s)
 
-    return tables
+    return finish()
 
 
 def identity_fixed_surface_n_s_table(triangulation_cones, triangulation):
@@ -1001,11 +2120,17 @@ def classify_smoothness(
             "method": "identity_sanity_contract",
             "reason": "explicit task-level identity fixture contract",
             "dual_vertex_parity": parity,
+            "positive_component_checks": [],
         }
 
     non_smooth_reasons = []
     unavailable_reasons = []
-    if parity["violations"]:
+    positive_component_checks = []
+    if not parity["available"]:
+        unavailable_reasons.append(
+            "source eq. (4.45) dual-vertex parity evidence is unavailable"
+        )
+    elif parity["violations"]:
         non_smooth_reasons.append(
             "source eq. (4.45) fails for fixed dual vertices: "
             + repr(parity["violations"])
@@ -1023,6 +2148,31 @@ def classify_smoothness(
                     "generic hypersurface avoidance of a non-simplicial auxiliary cone "
                     "was not certified"
                 )
+            if component["fixed_toric_dimension"] > 0:
+                section_check = _positive_component_section_certificate(
+                    auxiliary_fan,
+                    matrix,
+                    component,
+                )
+                section_check["component"] = {
+                    "sigma_rays": component["sigma_rays"],
+                    "sigma_dimension": component["sigma_dimension"],
+                    "nu": component["nu"],
+                }
+                positive_component_checks.append(section_check)
+                if section_check["status"] == "rejected":
+                    non_smooth_reasons.append(
+                        "source Sec. 4.6 rejects positive-dimensional "
+                        "non-vanishing fixed component "
+                        f"[{section_check['reason_code']}]: {section_check['reason']}"
+                    )
+                elif section_check["status"] == "unavailable":
+                    unavailable_reasons.append(
+                        "source Sec. 4.6 requires nef generic-section and "
+                        "orbifold-avoidance evidence for a positive-dimensional "
+                        "non-vanishing fixed component "
+                        f"[{section_check['reason_code']}]: {section_check['reason']}"
+                    )
             continue
         if component["fixed_toric_dimension"] == 3:
             non_smooth_reasons.append(
@@ -1055,24 +2205,27 @@ def classify_smoothness(
         return {
             "status": "fixed_point_set_non_smooth",
             "verdict": "non_smooth",
-            "method": "source_eq_4.45_4.48_4.50_checks",
+            "method": "source_eq_4.45_4.48_4.50_sec_4.6_checks",
             "reasons": non_smooth_reasons,
             "dual_vertex_parity": parity,
+            "positive_component_checks": positive_component_checks,
         }
     if unavailable_reasons:
         return {
             "status": "smoothness_verification_unavailable",
             "verdict": "not_verified",
-            "method": "source_eq_4.45_4.48_4.50_checks",
+            "method": "source_eq_4.45_4.48_4.50_sec_4.6_checks",
             "reasons": sorted(set(unavailable_reasons)),
             "dual_vertex_parity": parity,
+            "positive_component_checks": positive_component_checks,
         }
     return {
         "status": "smooth",
         "verdict": "smooth",
-        "method": "source_eq_4.45_4.48_4.50_checks",
+        "method": "source_eq_4.45_4.48_4.50_sec_4.6_checks",
         "reasons": [],
         "dual_vertex_parity": parity,
+        "positive_component_checks": positive_component_checks,
     }
 
 
@@ -1126,6 +2279,7 @@ def enumerate_orientifold_candidates(
     *,
     h11_minus_target=None,
     dual_polytope=None,
+    general_fixed_surface_diagnostics=None,
 ):
     """Enumerate every matrix, shift, and coefficient-parity candidate."""
     points = np.asarray(poly.points(), dtype=int)
@@ -1166,9 +2320,23 @@ def enumerate_orientifold_candidates(
         if topology.get("compute_general_fixed_surface_n_s") and not np.array_equal(
             matrix, IDENTITY
         ):
-            fixed_surface_n_s = _general_fixed_surface_n_s_table(
-                triangulation_cones, triangulation, matrix, auxiliary_fan
+            n_s_result = _general_fixed_surface_n_s_table(
+                triangulation_cones,
+                triangulation,
+                matrix,
+                auxiliary_fan,
+                return_diagnostics=general_fixed_surface_diagnostics is not None,
             )
+            if general_fixed_surface_diagnostics is not None:
+                fixed_surface_n_s = n_s_result["evidence"]
+                general_fixed_surface_diagnostics[matrix_id] = {
+                    "matrix_id": matrix_id,
+                    "lattice_matrix": matrix.tolist(),
+                    "surface_diagnostics": n_s_result["surface_diagnostics"],
+                    "global_reasons": n_s_result["global_reasons"],
+                }
+            else:
+                fixed_surface_n_s = n_s_result
         matrix_topology = dict(topology)
         matrix_topology["fixed_surface_n_s"] = fixed_surface_n_s
         shifts = enumerate_projected_lattice_representatives(matrix, +1)
