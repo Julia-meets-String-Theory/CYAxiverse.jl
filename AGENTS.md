@@ -44,3 +44,8 @@ existing tests to force a pass.
 - Feature branches and worktrees must state their version impact but should not independently bump `Project.toml`; parallel branches must not all claim the same release version. Apply the actual bump on the reviewed integration or release boundary, normally the `vmm` to `main` release PR. At that boundary, use at least a patch bump for a compatible behavior change and a minor bump for a breaking change while the package is below `1.0.0`.
 - Keep scientific artifact and database schema versions separate from the package version. Record those schema versions, the package version, the source commit, Julia version, dependency manifest, and relevant external-tool versions in generated artifacts when possible.
 - In the final handoff, state the version impact and whether the bump is included or deferred to the release boundary. The release pull-request version check enforces the final bump; TagBot remains responsible for creating release tags after registration.
+
+## Data file creation
+- whenever a data file is created, maximum compression should be used, e.g. `deflate=9` for an hdf5.
+- this also applies to JSONL log files and handoffs -- here the standard should be `zstd` for fast compression / decompression.
+- if compression is not appropriate for a particular data structure, this must be flagged to the user and explicit permission for no or less compression must be requested.
