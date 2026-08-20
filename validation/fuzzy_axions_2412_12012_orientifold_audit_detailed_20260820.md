@@ -29,6 +29,16 @@ Audit driver: [scripts/reproduce_fuzzy_axions_h11_4.py](../scripts/reproduce_fuz
 > **superseded pending an h11=4 rerun with the corrected code**. The base
 > populations, identity-sector diagnostics, and the independent trilayer
 > benchmark are unchanged. See the [checkpoint review note](./fuzzy_axions_2412_12012_checkpoint_review_20260820.md).
+>
+> **Gap-analysis correction (2026-08-20):** A class-level review of the
+> retained artifacts shows that only 6 unaccepted h11=2 classes and 28
+> unaccepted h11=3 classes have candidate-linked unresolved-component
+> evidence. Even granting all of them would give conditional ceilings 16/32
+> and 108/253, leaving deficits 16 and 145. The generic 402 and 1,892 skipped
+> surface rows are evidence attempts, not classes or exhaustive candidate
+> verdicts. Therefore `non_smooth_ambient_cone` must not be presented as the
+> explanation of the full Table 1 gap. See the
+> [comprehensive gap review](./fuzzy_axions_2412_12012_gap_classification_20260820.md).
 
 ## 1. Executive conclusion
 
@@ -197,8 +207,8 @@ a change to the paper's Table 1 target of 253.
 
 ## 4. Comparison with Sheridan et al. Table 1
 
-The relevant source is Sheridan et al., [Fuzzy Axions from String
-Compactifications (arXiv:2412.12012)](https://arxiv.org/abs/2412.12012),
+The relevant source is Sheridan et al., [Fuzzy Axions and Associated Relics
+(arXiv:2412.12012)](https://arxiv.org/abs/2412.12012),
 especially its [HTML version and Table 1](https://arxiv.org/html/2412.12012).
 The Table 1 population numbers are:
 
@@ -626,7 +636,7 @@ populations with the new evidence boundary documented.
 ## 9. References and source links
 
 - Moritz et al., [Orientifolds of Calabi–Yau hypersurfaces (arXiv:2305.06363)](https://arxiv.org/abs/2305.06363), with the [HTML text](https://arxiv.org/html/2305.06363). The fixed-locus construction, coefficient parity, fixed-surface condition, and \(n_S\) smoothness criterion used here are from §§4.3–4.6, especially eqs. (4.26), (4.35), (4.45), (4.48), and (4.50).
-- Sheridan et al., [Fuzzy Axions from String Compactifications (arXiv:2412.12012)](https://arxiv.org/abs/2412.12012), with the [HTML text and Table 1](https://arxiv.org/html/2412.12012). Table 1 supplies the favorable, FRST, inherited-orientifold, \(h^{1,1}_-=0\), \(h^{2,1}_+=0\), and model-count comparison targets.
+- Sheridan et al., [Fuzzy Axions and Associated Relics (arXiv:2412.12012)](https://arxiv.org/abs/2412.12012), with the [HTML text and Table 1](https://arxiv.org/html/2412.12012). Table 1 supplies the favorable, FRST, inherited-orientifold, \(h^{1,1}_-=0\), \(h^{2,1}_+=0\), and model-count comparison targets.
 - [validation/fuzzy_axions_2412_12012_general_L_n_s_machinery_20260819.md](./fuzzy_axions_2412_12012_general_L_n_s_machinery_20260819.md), the implementation handoff for the general-\(L\) \(n_S\) calculation.
 - [validation/HANDOFF_general_L_followups_20260819.md](./HANDOFF_general_L_followups_20260819.md), the diagnostic and follow-up handoff.
 - [validation/fuzzy_axions_2412_12012_general_L_n_s_independent_validation_20260819.md](./fuzzy_axions_2412_12012_general_L_n_s_independent_validation_20260819.md), an independent real h11=3 surface calculation.
