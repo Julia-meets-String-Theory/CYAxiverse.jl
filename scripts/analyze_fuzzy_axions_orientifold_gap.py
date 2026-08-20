@@ -21,6 +21,11 @@ is singular, and it does not establish a paper error.  Generic surface-attempt
 rows and partial candidate contexts are annotations only.  This analysis
 intentionally accepts only h11=2 and h11=3 artifacts; the superseded h11=4
 artifact is out of scope.
+
+When a complete terminal ledger is present, its class funnel and candidate
+status counts are restricted to ``lambda_f=1`` O3/O7 candidates. Matrix rows
+and ``lambda_f=0`` O5/O9 candidates remain available in separate audit counts
+but cannot certify or block the Table 1 O3/O7 population.
 """
 
 from __future__ import annotations
@@ -32,6 +37,13 @@ import json
 from pathlib import Path
 import sys
 from typing import Any, Iterable
+
+from orientifold_terminal_ledger import (
+    LEDGER_SCHEMA_VERSION,
+    TerminalLedgerError,
+    iter_terminal_ledger,
+    validate_source_provenance,
+)
 
 
 SUPPORTED_H11 = (2, 3)
@@ -107,6 +119,12 @@ def _reason_codes(attempts: Iterable[dict[str, Any]]) -> set[str]:
         for attempt in attempts
         if attempt.get("reason_code") not in (None, "")
     }
+
+
+def _is_o3_o7_candidate(row: dict[str, Any]) -> bool:
+    """Return whether a terminal row belongs to the Table 1 O3/O7 funnel."""
+
+    return row.get("record_kind") == "candidate" and row.get("lambda_f") == 1
 
 
 def _class_evidence(detail: dict[str, Any], class_index: int) -> dict[str, Any]:
@@ -199,6 +217,237 @@ def _class_record(
         "category": category,
         "reason": reason,
         **evidence,
+    }
+
+
+def _terminal_ledger_audit(
+    data: dict[str, Any], source_path: Path
+) -> dict[str, Any]:
+    """Build an exhaustive class funnel from the streaming terminal sidecar."""
+    ledger = data.get("terminal_ledger")
+    if not isinstance(ledger, dict):
+        raise ArtifactError(f"{source_path}: terminal_ledger metadata is missing")
+    if ledger.get("schema_version") != LEDGER_SCHEMA_VERSION:
+        raise ArtifactError(
+            f"{source_path}: unsupported terminal ledger schema "
+            f"{ledger.get('schema_version')!r}"
+        )
+    try:
+        validate_source_provenance(ledger["provenance"])
+    except (KeyError, TerminalLedgerError) as exc:
+        raise ArtifactError(f"{source_path}: invalid terminal provenance: {exc}") from exc
+    sidecar = Path(ledger["sidecar_path"]).expanduser().resolve()
+    if not sidecar.is_file():
+        raise ArtifactError(f"{source_path}: terminal sidecar is missing: {sidecar}")
+    expected_sha256 = ledger.get("sidecar_sha256")
+    if not expected_sha256 or _sha256(sidecar) != expected_sha256:
+        raise ArtifactError(f"{source_path}: terminal sidecar SHA-256 does not match metadata")
+
+    expected_classes = set()
+    for detail in data["details"]:
+        polytope_index = _as_int(detail.get("polytope_index"), "polytope_index")
+        class_count = _as_int(detail.get("frst_class_count"), "frst_class_count")
+        expected_classes.update(
+            (polytope_index, class_index) for class_index in range(class_count)
+        )
+
+    all_status_counts: Counter[str] = Counter()
+    o3_o7_status_counts: Counter[str] = Counter()
+    matrix_status_counts: Counter[str] = Counter()
+    global_kind_counts: Counter[str] = Counter()
+    class_state: dict[tuple[int, int], dict[str, Any]] = {}
+    seen_candidate_ids: set[tuple[int, int, str]] = set()
+    record_count = 0
+    try:
+        rows = iter_terminal_ledger(sidecar)
+        for row in rows:
+            record_count += 1
+            try:
+                class_key = (
+                    _as_int(row["polytope_index"], "polytope_index"),
+                    _as_int(row["frst_class_index"], "frst_class_index"),
+                )
+                required = (
+                    "polytope_id",
+                    "frst_hash",
+                    "matrix_id",
+                    "candidate_id",
+                    "lambda_f",
+                    "torus_shift",
+                    "h11_parity",
+                    "fixed_component_evidence",
+                    "terminal_status",
+                    "terminal_reason_code",
+                )
+                missing = [field for field in required if field not in row]
+                if missing:
+                    raise ArtifactError(
+                        f"terminal row is missing required fields: {missing}"
+                    )
+                kind = str(row["record_kind"])
+                status = str(row["terminal_status"])
+                if kind not in {"matrix_validation", "candidate"}:
+                    raise ArtifactError(f"unsupported terminal record kind {kind!r}")
+                if (
+                    kind == "candidate"
+                    and row.get("lambda_f") == 1
+                    and status == "accepted_verified_orientifold"
+                    and row.get("accepted_witness") is None
+                ):
+                    raise ArtifactError(
+                        "lambda_f=1 accepted candidate is missing accepted_witness"
+                    )
+                candidate_id = row.get("candidate_id")
+                if candidate_id is not None:
+                    id_key = (*class_key, str(candidate_id))
+                    if id_key in seen_candidate_ids:
+                        raise ArtifactError(
+                            f"duplicate candidate_id {candidate_id!r} in class {class_key}"
+                        )
+                    seen_candidate_ids.add(id_key)
+            except KeyError as exc:
+                raise ArtifactError(
+                    f"terminal row {record_count} lacks field {exc.args[0]!r}"
+                ) from exc
+            all_status_counts[status] += 1
+            global_kind_counts[kind] += 1
+            state = class_state.setdefault(
+                class_key,
+                {
+                    "polytope_index": class_key[0],
+                    "frst_class_index": class_key[1],
+                    "polytope_id": row["polytope_id"],
+                    "frst_hash": row["frst_hash"],
+                    "matrix_attempt_count": 0,
+                    "candidate_attempt_count": 0,
+                    "matrix_terminal_status_counts": Counter(),
+                    "candidate_terminal_status_counts": Counter(),
+                    "accepted_witness": None,
+                    "candidate_ids": [],
+                },
+            )
+            if (
+                state["polytope_id"] != row["polytope_id"]
+                or state["frst_hash"] != row["frst_hash"]
+            ):
+                raise ArtifactError(
+                    "terminal class identity mismatch for "
+                    f"{class_key}: expected polytope_id={state['polytope_id']!r}, "
+                    f"frst_hash={state['frst_hash']!r}; got "
+                    f"polytope_id={row['polytope_id']!r}, "
+                    f"frst_hash={row['frst_hash']!r}"
+                )
+            if kind == "matrix_validation":
+                state["matrix_attempt_count"] += 1
+                state["matrix_terminal_status_counts"][status] += 1
+                matrix_status_counts[status] += 1
+            else:
+                if _is_o3_o7_candidate(row):
+                    state["candidate_attempt_count"] += 1
+                    state["candidate_terminal_status_counts"][status] += 1
+                    state["candidate_ids"].append(str(row["candidate_id"]))
+                    o3_o7_status_counts[status] += 1
+                    if status == "accepted_verified_orientifold":
+                        if state["accepted_witness"] is None:
+                            state["accepted_witness"] = row.get("accepted_witness")
+    except (OSError, TerminalLedgerError, json.JSONDecodeError) as exc:
+        raise ArtifactError(f"could not read terminal sidecar {sidecar}: {exc}") from exc
+
+    if set(class_state) != expected_classes:
+        missing = sorted(expected_classes - set(class_state))
+        extra = sorted(set(class_state) - expected_classes)
+        raise ArtifactError(
+            f"terminal sidecar class coverage mismatch; missing={missing[:3]}, "
+            f"extra={extra[:3]}"
+        )
+    if record_count != _as_int(ledger.get("record_count"), "terminal_ledger.record_count"):
+        raise ArtifactError(f"{source_path}: terminal record count does not match metadata")
+    if sum(all_status_counts.values()) != record_count:
+        raise ArtifactError(f"{source_path}: terminal statuses are not exhaustive")
+    if global_kind_counts["matrix_validation"] + global_kind_counts["candidate"] != record_count:
+        raise ArtifactError(f"{source_path}: terminal record kinds are not exhaustive")
+
+    class_records = []
+    category_counts: Counter[str] = Counter()
+    for class_key in sorted(class_state):
+        state = class_state[class_key]
+        candidate_statuses = state["candidate_terminal_status_counts"]
+        accepted = state["accepted_witness"] is not None
+        unavailable_count = sum(
+            candidate_statuses.get(status, 0)
+            for status in (
+                "smoothness_verification_unavailable",
+                "numerical_geometry_failure",
+            )
+        )
+        if accepted:
+            category = "certified_inherited"
+            reason = "accepted_verified_orientifold with lambda_f=1"
+        elif unavailable_count:
+            category = "unaccepted_exhaustive_with_unavailable_evidence"
+            reason = (
+                "all enumerated candidate terminals are retained; unavailable "
+                "geometry or smoothness evidence is not promoted to acceptance "
+                "or singularity"
+            )
+        else:
+            category = "unaccepted_exhaustive_terminal_rejection"
+            reason = (
+                "all enumerated candidate terminals are retained and none is an "
+                "accepted O3/O7 witness"
+            )
+        category_counts[category] += 1
+        class_records.append(
+            {
+                "polytope_index": state["polytope_index"],
+                "frst_class_index": state["frst_class_index"],
+                "polytope_id": state["polytope_id"],
+                "frst_hash": state["frst_hash"],
+                "category": category,
+                "reason": reason,
+                "matrix_attempt_count": state["matrix_attempt_count"],
+                "candidate_attempt_count": state["candidate_attempt_count"],
+                "matrix_terminal_status_counts": dict(
+                    sorted(state["matrix_terminal_status_counts"].items())
+                ),
+                "candidate_terminal_status_counts": dict(
+                    sorted(candidate_statuses.items())
+                ),
+                "unavailable_evidence_candidate_count": unavailable_count,
+                "accepted_witness": state["accepted_witness"],
+            }
+        )
+
+    return {
+        "total_frst_class_count": len(class_records),
+        "certified_class_count": category_counts["certified_inherited"],
+        "certified_class_ids": [
+            {
+                "polytope_index": record["polytope_index"],
+                "frst_class_index": record["frst_class_index"],
+            }
+            for record in class_records
+            if record["category"] == "certified_inherited"
+        ],
+        "certified_class_id_basis": "terminal_ledger_accepted_o3o7_witness",
+        "code_unaccepted_class_count": len(class_records)
+        - category_counts["certified_inherited"],
+        "category_counts": dict(sorted(category_counts.items())),
+        "unaccepted_class_records": [
+            record
+            for record in class_records
+            if record["category"] != "certified_inherited"
+        ],
+        "terminal_status_counts": dict(sorted(o3_o7_status_counts.items())),
+        "terminal_status_count_scope": (
+            "candidate rows with lambda_f=1 (O3/O7) only"
+        ),
+        "all_terminal_status_counts": dict(sorted(all_status_counts.items())),
+        "matrix_terminal_status_counts": dict(sorted(matrix_status_counts.items())),
+        "terminal_record_count": record_count,
+        "terminal_record_kind_counts": dict(sorted(global_kind_counts.items())),
+        "candidate_terminal_status_coverage": "complete: every matrix and enumerated candidate has one terminal row",
+        "sidecar_sha256": expected_sha256,
     }
 
 
@@ -414,7 +663,11 @@ def analyze_artifact(
     _validate_artifact(data, h11, path)
     targets = TABLE_1_TARGETS[h11]
     counts = data["counts"]
-    class_level = _class_level_audit(data, h11)
+    class_level = (
+        _terminal_ledger_audit(data, path)
+        if data.get("terminal_ledger") is not None
+        else _class_level_audit(data, h11)
+    )
     inherited_count = _count(counts, "source_evidence_inherited_orientifold_cys")
     h11_zero_count = _count(counts, "source_evidence_h11_minus_zero_orientifold_cys")
     h21_count = _as_int(
@@ -445,6 +698,10 @@ def analyze_artifact(
         candidate_linked_count = class_level["category_counts"].get(
             "unaccepted_with_candidate_linked_unavailable", 0
         )
+        if data.get("terminal_ledger") is not None:
+            candidate_linked_count = class_level["category_counts"].get(
+                "unaccepted_exhaustive_with_unavailable_evidence", 0
+            )
         comparisons[key].update(
             {
                 "target_gap_class_ids": None,
@@ -477,6 +734,9 @@ def analyze_artifact(
         },
         "orientifold_comparison": comparisons,
         "class_level_audit": class_level,
+        "terminal_ledger_audit": (
+            class_level if data.get("terminal_ledger") is not None else None
+        ),
         "fixed_surface_diagnostics": {
             "surface_attempt_count": diagnostic_data.get("surface_attempt_count"),
             "certified_surface_count": diagnostic_data.get("certified_surface_count"),

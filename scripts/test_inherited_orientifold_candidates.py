@@ -35,13 +35,17 @@ from generate_geometric_data_multitriangulation import (
     OrientifoldValidationFailure,
     validate_orientifold,
 )
+from glimmers_raw_frst import stable_hash
 from inherited_orientifold_candidates import (
     CANDIDATE_SCHEMA_VERSION,
     IDENTITY,
     TERMINAL_STATUSES,
     _complete_simplicial_fan,
     _ambient_cartier_data,
+    _ambient_anticanonical_cartier_data,
     _fixed_component_records,
+    _half_ray_shortcut_proof,
+    _nu_equal_mod_span,
     build_auxiliary_fan,
     classify_smoothness,
     enumerate_orientifold_candidates,
@@ -53,12 +57,48 @@ from inherited_orientifold_candidates import (
     _general_fixed_surface_n_s_table,
     _integer_coordinates,
     _integer_kernel_basis,
+    _integer_lattice_membership,
     _lattice_matrix_config,
     _pointwise_invariant_cone_keys,
     _primitive_quotient_vector,
     _sublattice_is_saturated,
     facets_with_non_smooth_cones,
 )
+
+
+class AmbientAnticanonicalCartierDataTests(unittest.TestCase):
+    """Check exact Cartier data on smooth and Gorenstein singular cones."""
+
+    def test_integral_cartier_data_accepts_nonunimodular_gorenstein_cone(self):
+        # The fourth ray gives determinant -2, but all four rays lie on the
+        # integral support hyperplane m dot p = -1 for m=(-1,-1,-1,-1).
+        cone = np.array(
+            [
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, 1, 0],
+                [1, 1, 1, -2],
+            ],
+            dtype=int,
+        )
+        self.assertEqual(
+            _ambient_anticanonical_cartier_data(cone),
+            (-1, -1, -1, -1),
+        )
+
+    def test_nonintegral_cartier_data_remains_unavailable(self):
+        # The same determinant-two shape with a non-Gorenstein fourth ray
+        # produces a half-integral local support function and must not pass.
+        cone = np.array(
+            [
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, 1, 0],
+                [1, 1, 0, -2],
+            ],
+            dtype=int,
+        )
+        self.assertIsNone(_ambient_anticanonical_cartier_data(cone))
 
 BASIS_POINTS = np.array(
     [
@@ -434,10 +474,35 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         first = enumerate_orientifold_candidates(poly, triangulation, topology)
         second = enumerate_orientifold_candidates(poly, triangulation, topology)
 
+        first_candidates = [
+            record for record in first if record.get("record_kind") == "candidate"
+        ]
+        second_candidates = [
+            record for record in second if record.get("record_kind") == "candidate"
+        ]
         self.assertEqual(
-            [record["candidate_id"] for record in first],
-            [record["candidate_id"] for record in second],
+            [record["candidate_id"] for record in first_candidates],
+            [record["candidate_id"] for record in second_candidates],
         )
+        self.assertGreater(len(first_candidates), 1)
+        for record in first_candidates:
+            if record.get("lambda_f") not in (0, 1):
+                continue
+            shifts = {
+                tuple(shift["binary_source"]): shift
+                for shift in enumerate_projected_lattice_representatives(
+                    np.asarray(record["lattice_matrix"], dtype=int), 1
+                )
+            }
+            shift = shifts[tuple(record["torus_shift_binary_source"])]
+            expected = stable_hash(
+                [
+                    record["matrix_id"],
+                    tuple(shift["numerator"]),
+                    int(record["lambda_f"]),
+                ]
+            )
+            self.assertEqual(record["candidate_id"], expected)
 
     def test_hand_constructed_non_preserving_matrix_reports_polytope_stage(self):
         poly = self._poly()
@@ -1109,12 +1174,12 @@ class PointwiseInvariantConeKeyTests(unittest.TestCase):
 
 
 class FixedComponentContainmentReductionTests(unittest.TestCase):
-    """Exact same-nu containment reduction in ``_fixed_component_records``.
+    """Exact phase reduction and containment in ``_fixed_component_records``.
 
-    Source eqs. (4.34)--(4.35): when two admissible components carry the exact
-    same canonical ``nu`` and one sigma-ray set is a strict subset (a proper
-    face) of the other, only the maximal irreducible stratum survives -- the
-    smaller cone (larger orbit-closure variety).  The superset is dropped.
+    Source eqs. (4.30)--(4.35): reduce labels modulo the rational span of the
+    vanishing cone, then remove a component when a proper face carries the
+    compatible phase label. The proper face is the larger orbit-closure
+    component and is retained.
     """
 
     def test_strict_subset_same_nu_retains_only_the_maximal_stratum(self):
@@ -1149,6 +1214,182 @@ class FixedComponentContainmentReductionTests(unittest.TestCase):
         # The superset ray set is not present under the same nu.
         self.assertNotIn(
             frozenset({(2, 0, 0, 0), (0, 2, 0, 0)}), retained_ray_sets
+        )
+
+    def test_distinct_labels_equivalent_modulo_sigma_span(self):
+        """A minus-eigenspace label can be distinct but equivalent on sigma."""
+        matrix = np.diag([1, -1, 1, 1])
+        zero = (Fraction(0),) * 4
+        e2 = (Fraction(0), Fraction(1), Fraction(0), Fraction(0))
+        e1 = (Fraction(1), Fraction(0), Fraction(0), Fraction(0))
+        sigma = ((0, 1, 0, 0),)
+
+        self.assertTrue(_nu_equal_mod_span(zero, e2, sigma))
+        self.assertFalse(_nu_equal_mod_span(zero, e2, ((1, 0, 0, 0),)))
+        self.assertFalse(_nu_equal_mod_span(zero, e1, sigma))
+
+        records = _fixed_component_records(
+            [],
+            matrix,
+            zero,
+            0,
+            fixed_cone_keys=(sigma,),
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(
+            records[0]["fixed_component_integrality"]["method"],
+            "general_quotient_lattice_eq_4.30",
+        )
+
+    def test_genuinely_distinct_labels_are_retained(self):
+        """Labels outside the sigma span describe separate components."""
+        matrix = np.diag([1, -1, 1, 1])
+        sigma = ((1, 0, 0, 0),)
+        records = _fixed_component_records(
+            [],
+            matrix,
+            (Fraction(0),) * 4,
+            0,
+            fixed_cone_keys=(sigma,),
+        )
+        self.assertEqual(len(records), 2)
+        self.assertEqual(
+            {
+                tuple(Fraction(value) for value in record["nu"]["numerator"])
+                for record in records
+            },
+            {(0, 0, 0, 0), (0, 1, 0, 0)},
+        )
+
+    def test_containment_uses_proper_face_and_span_equivalence(self):
+        """A sigma component is removed when its proper face contains it."""
+        matrix = np.diag([1, -1, 1, 1])
+        face = ((0, 1, 0, 0),)
+        sigma = ((0, 1, 0, 0), (0, 0, 1, 0))
+        records = _fixed_component_records(
+            [],
+            matrix,
+            (Fraction(0),) * 4,
+            0,
+            fixed_cone_keys=(face, sigma),
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["sigma_rays"], [[0, 1, 0, 0]])
+
+    def test_conjugated_involution_fixed_components_use_exact_anti_lattice(self):
+        """Verify a shear-conjugated reflection's non-axis-aligned label."""
+        # This is a conjugate of diag(1, 1, 1, -1), not a permutation/sign
+        # change of basis.  Its anti-invariant lattice contains (2,0,0,1),
+        # which a coordinate-wise representative search can miss.
+        matrix = np.array(
+            [[1, 0, 0, -4], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, -1]],
+            dtype=int,
+        )
+        zero = (Fraction(0),) * 4
+        records = _fixed_component_records(
+            [],
+            matrix,
+            zero,
+            0,
+            fixed_cone_keys=(((1, 0, 0, 0),),),
+        )
+
+        self.assertEqual(len(records), 2)
+        self.assertEqual(
+            {
+                tuple(record["nu"]["numerator"])
+                for record in records
+            },
+            {(0, 0, 0, 0), (2, 0, 0, 1)},
+        )
+        self.assertTrue(
+            all(
+                record["fixed_component_integrality"]["method"]
+                == "general_quotient_lattice_eq_4.30"
+                for record in records
+            )
+        )
+
+    def test_saturation_sensitive_span_merges_nonprimitive_phase_labels(self):
+        """Use rational span to identify labels across a saturation defect."""
+        matrix = np.diag([-1, 1, 1, 1])
+        zero = (Fraction(0),) * 4
+        e1 = (Fraction(1), Fraction(0), Fraction(0), Fraction(0))
+        sigma = ((2, 0, 0, 0),)
+
+        # e1 is not in Z*(2 e1), but it is in span_Q(2 e1).  This is the
+        # saturation defect that must not split one fixed component into two.
+        self.assertFalse(
+            _sublattice_is_saturated(np.asarray(sigma, dtype=int).T)
+        )
+        self.assertFalse(
+            _integer_lattice_membership(
+                np.asarray(sigma, dtype=int).T,
+                np.asarray(e1, dtype=int),
+            )
+        )
+        self.assertTrue(_nu_equal_mod_span(zero, e1, sigma))
+
+        records = _fixed_component_records(
+            [],
+            matrix,
+            zero,
+            0,
+            fixed_cone_keys=(sigma,),
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["sigma_rays"], [[2, 0, 0, 0]])
+
+
+class FixedComponentIntegralityPathTests(unittest.TestCase):
+    """Use eq. (4.35) only when retained fan data prove its hypotheses."""
+
+    def test_smooth_fixture_uses_half_ray_shortcut(self):
+        cone = (
+            (1, 0, 0, 0),
+            (0, 1, 0, 0),
+            (0, 0, 1, 0),
+            (0, 0, 0, 1),
+        )
+        auxiliary_fan = build_auxiliary_fan([cone], IDENTITY)
+        proven, reason = _half_ray_shortcut_proof(auxiliary_fan, IDENTITY, ())
+        self.assertTrue(proven)
+        self.assertEqual(reason, "smooth_sigma_and_normal_directions_certified")
+        records = _fixed_component_records(
+            auxiliary_fan,
+            IDENTITY,
+            (Fraction(0),) * 4,
+            0,
+            fixed_cone_keys=((),),
+        )
+        self.assertEqual(
+            records[0]["fixed_component_integrality"]["method"],
+            "smooth_half_ray_eq_4.35",
+        )
+
+    def test_non_smooth_fixture_uses_general_quotient_condition(self):
+        cone = (
+            (1, 0, 0, 0),
+            (1, 3, 0, 0),
+            (0, 0, 1, 0),
+            (0, 0, 0, 1),
+        )
+        sigma = cone[:2]
+        auxiliary_fan = build_auxiliary_fan([cone], IDENTITY)
+        proven, reason = _half_ray_shortcut_proof(auxiliary_fan, IDENTITY, sigma)
+        self.assertFalse(proven)
+        self.assertEqual(reason, "sigma_cone_not_smooth")
+        records = _fixed_component_records(
+            auxiliary_fan,
+            IDENTITY,
+            (Fraction(0),) * 4,
+            0,
+            fixed_cone_keys=(sigma,),
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(
+            records[0]["fixed_component_integrality"]["method"],
+            "general_quotient_lattice_eq_4.30",
         )
 
 

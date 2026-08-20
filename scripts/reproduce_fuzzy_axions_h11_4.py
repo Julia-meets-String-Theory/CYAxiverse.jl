@@ -47,12 +47,14 @@ from generate_geometric_data_multitriangulation import (
 )
 from geometry_charge_conventions import canonicalize_unique_charge_rows
 from inherited_orientifold_candidates import (
+    CANDIDATE_SCHEMA_VERSION,
     _ambient_intersection_tensor,
     _triangulation_cones,
     enumerate_orientifold_candidates,
     facets_with_non_smooth_cones,
     identity_fixed_surface_n_s_table,
 )
+from orientifold_terminal_ledger import TerminalLedgerWriter
 
 
 PAPER_TARGETS_BY_H11 = {
@@ -203,6 +205,47 @@ def _run_repository_command(root, *command):
     if completed.returncode != 0:
         return None
     return completed.stdout.strip()
+
+
+def _working_tree_identity(root):
+    """Hash tracked diffs and untracked file contents for dirty provenance."""
+    try:
+        diff = subprocess.run(
+            ["git", "diff", "--binary", "HEAD", "--"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+        )
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if diff.returncode != 0 or untracked.returncode != 0:
+        return None
+
+    diff_digest = hashlib.sha256(diff.stdout).hexdigest()
+    untracked_digest = hashlib.sha256()
+    names = [name for name in untracked.stdout.split(b"\0") if name]
+    for name in sorted(names):
+        path = root / os.fsdecode(name)
+        try:
+            contents = path.read_bytes()
+        except OSError:
+            return None
+        untracked_digest.update(name)
+        untracked_digest.update(b"\0")
+        untracked_digest.update(contents)
+    tree = _run_repository_command(root, "git", "rev-parse", "HEAD^{tree}")
+    return {
+        "tree_sha256": tree,
+        "diff_sha256": diff_digest,
+        "untracked_sha256": untracked_digest.hexdigest(),
+        "untracked_file_count": len(names),
+    }
 
 
 def _package_version(root):
@@ -359,9 +402,17 @@ def _run_provenance(args, records):
         git_dirty = UNAVAILABLE
     else:
         git_dirty = bool(dirty_output)
+    input_manifest = _parquet_input_manifest(
+        args.parquet_dir,
+        records,
+        limit=args.limit,
+    )
     return {
         "source_commit": commit or UNAVAILABLE,
         "git_dirty": git_dirty,
+        "working_tree_identity": (
+            _working_tree_identity(root) if git_dirty is True else None
+        ),
         "package_version": _package_version(root),
         "runtime_versions": {
             "python": platform.python_version(),
@@ -372,11 +423,8 @@ def _run_provenance(args, records):
             "pyarrow": _distribution_version(("pyarrow",)),
         },
         "cli_arguments": _normalized_cli_arguments(args),
-        "input_partition_manifest": _parquet_input_manifest(
-            args.parquet_dir,
-            records,
-            limit=args.limit,
-        ),
+        "input_partition_manifest_version": "cyaxiverse-parquet-input-manifest-1",
+        "input_partition_manifest": input_manifest,
     }
 
 
@@ -735,6 +783,7 @@ def _orientifold_action_audit(
     *,
     collect_reason_diagnostics=False,
     polytope_index=None,
+    terminal_ledger=None,
 ):
     """Count class-level inherited O3/O7 orientifold candidates.
 
@@ -800,11 +849,21 @@ def _orientifold_action_audit(
             poly, triangulation
         )
         matrix_diagnostics = {} if collect_reason_diagnostics else None
+
+        def record_terminal(record):
+            if terminal_ledger is None:
+                return
+            enriched = dict(record)
+            enriched["polytope_index"] = polytope_index
+            enriched["frst_class_index"] = class_index
+            terminal_ledger.write(enriched)
+
         records = enumerate_orientifold_candidates(
             poly,
             triangulation,
             topology,
             general_fixed_surface_diagnostics=matrix_diagnostics,
+            record_sink=record_terminal,
         )
         # Table 1's population (main.tex:1272, item 3 of the ensemble
         # definition) is explicitly "an ... orientifold involution of O3/O7
@@ -1267,6 +1326,31 @@ def reproduce(args):
         favorable=True,
     )
     run_provenance = _run_provenance(args, records)
+    terminal_ledger = None
+    terminal_ledger_summary = None
+    if args.orientifold_audit:
+        ledger_path = getattr(args, "terminal_ledger", None)
+        if ledger_path is None:
+            output_path = getattr(args, "output", None)
+            if output_path is None:
+                raise ValueError(
+                    "--orientifold-audit requires --terminal-ledger when --output is absent"
+                )
+            output_path = Path(output_path)
+            ledger_path = output_path.with_name(
+                f"{output_path.stem}.terminal-ledger.jsonl"
+            )
+        terminal_ledger = TerminalLedgerWriter(
+            ledger_path,
+            provenance=run_provenance,
+            metadata={
+                "program": "fuzzy-axion inherited-orientifold Table 1 reproduction",
+                "requested_h11": int(args.h11),
+                "candidate_schema": CANDIDATE_SCHEMA_VERSION,
+                "acceptance_scope": "lambda_f=1 and accepted_verified_orientifold only",
+                "search_scope": "supplied_frst_only; lattice involutions; projected torus shifts; both lambda_f values",
+            },
+        )
     polytopes = []
     total_raw = 0
     total_classes = 0
@@ -1350,6 +1434,7 @@ def reproduce(args):
                 classes,
                 collect_reason_diagnostics=args.orientifold_reason_diagnostics,
                 polytope_index=poly_index,
+                terminal_ledger=terminal_ledger,
             )
             orientifold_inherited_count += orientifold["inherited"]
             orientifold_h11_zero_count += orientifold["h11_minus_zero"]
@@ -1426,6 +1511,8 @@ def reproduce(args):
         and population_complete
     )
     model_stage = _run_model_stage(model_stage_records, args) if args.model_stage else None
+    if terminal_ledger is not None:
+        terminal_ledger_summary = terminal_ledger.close()
     # A non-default QCD-divisor domain is a candidate reading of Algorithm 1,
     # not a correction to it, so its counts can never be a benchmark-match
     # claim -- not even where they coincide with Table 1 (they do at h11=2).
@@ -1556,6 +1643,7 @@ def reproduce(args):
             if args.orientifold_reason_diagnostics
             else None
         ),
+        "terminal_ledger": terminal_ledger_summary,
         "details": details if args.keep_details else None,
     }
     return _jsonable(summary)
@@ -1575,6 +1663,14 @@ def _parse_args(argv=None):
     parser.add_argument("--progress", type=int, default=50)
     parser.add_argument("--keep-details", action="store_true")
     parser.add_argument("--orientifold-audit", action="store_true")
+    parser.add_argument(
+        "--terminal-ledger",
+        type=Path,
+        help=(
+            "Write the lossless orientifold terminal ledger to this JSONL path. "
+            "When omitted with --output, use <output-stem>.terminal-ledger.jsonl."
+        ),
+    )
     parser.add_argument(
         "--orientifold-reason-diagnostics",
         action="store_true",
@@ -1655,8 +1751,17 @@ def _parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.orientifold_reason_diagnostics and not args.orientifold_audit:
         parser.error("--orientifold-reason-diagnostics requires --orientifold-audit")
+    if args.orientifold_audit and args.output is None and args.terminal_ledger is None:
+        parser.error(
+            "--orientifold-audit requires --terminal-ledger when --output is absent"
+        )
     if args.output is not None and args.output.exists():
         parser.error(f"refusing to overwrite existing output: {args.output}")
+    if args.terminal_ledger is not None and (
+        args.terminal_ledger.exists()
+        or Path(f"{args.terminal_ledger}.summary.json").exists()
+    ):
+        parser.error(f"refusing to overwrite existing terminal ledger: {args.terminal_ledger}")
     return args
 
 

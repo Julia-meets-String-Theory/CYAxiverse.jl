@@ -41,7 +41,7 @@ from generate_geometric_data_multitriangulation import (
 )
 from glimmers_raw_frst import compute_polytope_id, compute_triangulation_hash, stable_hash
 
-CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.3"
+CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.4"
 
 GENERAL_FIXED_SURFACE_REASON_CODES = (
     "nonsaturated_fixed_cone_lattice",
@@ -57,6 +57,8 @@ GENERAL_FIXED_SURFACE_REASON_CODES = (
 )
 
 TERMINAL_STATUSES = (
+    "matrix_validation_passed",
+    "numerical_geometry_failure",
     "polytope_not_preserved",
     "frst_not_preserved",
     "prime_divisor_set_not_preserved",
@@ -164,6 +166,21 @@ def _fraction_vector_to_json(vector):
     return {"numerator": numerator, "denominator": int(denominator)}
 
 
+def _fraction_vector_from_json(value):
+    """Decode the exact common-denominator representation of a vector."""
+
+    if not isinstance(value, dict):
+        raise ValueError("fraction vector must be an object")
+    numerator = value.get("numerator")
+    denominator = value.get("denominator")
+    if not isinstance(numerator, (list, tuple)) or denominator is None:
+        raise ValueError("fraction vector must contain numerator and denominator")
+    denominator = int(denominator)
+    if denominator == 0:
+        raise ValueError("fraction vector denominator must be nonzero")
+    return tuple(Fraction(int(item), denominator) for item in numerator)
+
+
 def _fraction_sum(vectors):
     result = [Fraction(0) for _ in range(4)]
     for vector in vectors:
@@ -221,6 +238,59 @@ def _same_projected_class(left, right, projector_numerator):
     difference = np.asarray(left, dtype=int) - np.asarray(right, dtype=int)
     generator_columns = 2 * np.asarray(projector_numerator, dtype=int)
     return _integer_lattice_membership(generator_columns, difference)
+
+
+def _vector_in_rational_span(vector, generators):
+    """Test exact membership in the rational span of integer generators."""
+
+    vector = tuple(Fraction(value) for value in vector)
+    generators = tuple(tuple(Fraction(value) for value in generator) for generator in generators)
+    if not generators:
+        return not any(vector)
+    generator_matrix = _SympyMatrix(
+        [[value for value in column] for column in zip(*generators)]
+    )
+    augmented = generator_matrix.row_join(
+        _SympyMatrix([[value] for value in vector])
+    )
+    return generator_matrix.rank() == augmented.rank()
+
+
+def _nu_equal_mod_span(left, right, sigma_rays):
+    """Test exact phase-label equality modulo ``span_Q(sigma)``.
+
+    Moritz eq. (4.30) permits arbitrary coefficients on the rays whose
+    coordinates vanish.  Since the labels are rational, the relevant real
+    span is the same as the exact rational span.  This test deliberately uses
+    rational linear algebra rather than floating rank or a bounded coefficient
+    search.
+    """
+
+    left = tuple(Fraction(value) for value in left)
+    right = tuple(Fraction(value) for value in right)
+    difference = tuple(a - b for a, b in zip(left, right))
+    return _vector_in_rational_span(difference, sigma_rays)
+
+
+def _quotient_lattice_coordinates(vector, sigma_rays):
+    """Return exact coordinates in the quotient lattice dual to ``sigma``.
+
+    If ``U = span_Q(sigma)``, an exact integer basis of
+    ``U^perp ∩ M`` maps ``N`` to ``Z``.  The class of ``vector`` is integral
+    in ``N_R/U`` exactly when every such pairing is an integer.  The Smith
+    normal form used by ``_integer_kernel_basis`` also handles nonprimitive
+    and saturation-sensitive cone generators without a tolerance.
+    """
+
+    sigma_rays = tuple(tuple(int(value) for value in ray) for ray in sigma_rays)
+    if sigma_rays:
+        sigma_matrix = np.asarray(sigma_rays, dtype=int).T
+        annihilator = _integer_kernel_basis(sigma_matrix.T).T
+    else:
+        annihilator = IDENTITY.copy()
+    vector = tuple(Fraction(value) for value in vector)
+    coordinates = tuple(_fraction_dot(row, vector) for row in annihilator)
+    return annihilator, coordinates
 
 
 def enumerate_projected_lattice_representatives(matrix, sign):
@@ -419,6 +489,67 @@ def _pointwise_invariant_cone_keys(triangulation_cones, matrix):
     return tuple(sorted(fixed))
 
 
+def _half_ray_shortcut_proof(auxiliary_fan, matrix, sigma_rays):
+    """Return whether eq. (4.35) is proven for one fixed component.
+
+    The source shortcut requires a smooth ``sigma`` and smooth normal
+    directions.  The retained auxiliary-fan records prove the latter only
+    when every full-dimensional auxiliary cone containing ``sigma`` is
+    simplicial and every ambient provenance cone is a smooth unimodular
+    four-cone.  Missing provenance is therefore an unavailable certificate,
+    not permission to apply the shortcut.
+    """
+
+    sigma_rays = tuple(tuple(int(value) for value in ray) for ray in sigma_rays)
+    if not _cone_is_smooth_in_lattice(sigma_rays, 4):
+        return False, "sigma_cone_not_smooth"
+    if auxiliary_fan is None:
+        return False, "auxiliary_fan_missing"
+
+    matrix = np.asarray(matrix, dtype=int)
+    fixed_rank = _exact_rank(np.eye(4, dtype=int) + matrix)
+    sigma_set = set(sigma_rays)
+    containing_cones = []
+    for cone in auxiliary_fan:
+        rays = tuple(tuple(int(value) for value in ray) for ray in cone.get("rays", []))
+        if cone.get("dimension") != fixed_rank or not sigma_set.issubset(set(rays)):
+            continue
+        containing_cones.append(cone)
+    if not containing_cones:
+        return False, "containing_auxiliary_cone_unavailable"
+
+    for cone in containing_cones:
+        rays = cone.get("rays", [])
+        if not cone.get("simplicial") or len(rays) != fixed_rank:
+            return False, "non_simplicial_auxiliary_normal_fan"
+        ambient_cones = cone.get("ambient_cones", [])
+        if not ambient_cones:
+            return False, "ambient_provenance_unavailable"
+        for ambient in ambient_cones:
+            if len(ambient) != 4 or abs(_exact_determinant(np.asarray(ambient, dtype=int))) != 1:
+                return False, "non_smooth_ambient_normal_direction"
+    return True, "smooth_sigma_and_normal_directions_certified"
+
+
+def _fixed_component_is_contained_in(component, container):
+    """Test source containment from a larger cone to its proper face.
+
+    ``container`` is the higher-dimensional fixed component, so its sigma
+    rays must be a strict subset of ``component``'s rays.  The phase labels
+    must then agree modulo the rational span of the container cone.
+    """
+
+    component_rays = frozenset(tuple(ray) for ray in component["sigma_rays"])
+    container_rays = frozenset(tuple(ray) for ray in container["sigma_rays"])
+    if not container_rays < component_rays:
+        return False
+    return _nu_equal_mod_span(
+        _fraction_vector_from_json(component["nu"]),
+        _fraction_vector_from_json(container["nu"]),
+        tuple(container_rays),
+    )
+
+
 def _fixed_component_records(
     auxiliary_fan,
     matrix,
@@ -427,19 +558,20 @@ def _fixed_component_records(
     *,
     fixed_cone_keys,
 ):
-    """Enumerate source eq. (4.34)--(4.35) fixed components.
+    """Enumerate source eq. (4.30)--(4.35) fixed components.
 
     ``fixed_cone_keys`` must come from faces of the original ambient fan.
     ``auxiliary_fan`` is retained by the caller for the geometry and
     smoothness checks of each component, but its extra intersection rays are
-    not valid component labels.  The containment reduction below is
-    intentionally conservative: it removes only an admissible proper face
-    with the exact same canonical ``nu`` label.  Broader equivalence after
-    shifting ``nu`` by the cone span requires a source-level lattice proof and
-    remains unavailable here.
+    not valid component labels.  For a smooth ``sigma`` with retained proof of
+    smooth normal directions, use the source half-ray shortcut eq. (4.35).
+    Otherwise use the general quotient-lattice condition from eq. (4.30).
+    Reduce phase labels modulo the exact rational span of ``sigma`` and remove
+    a component when it is contained in a component labelled by a proper
+    face.  All three operations use exact rational or Smith-normal-form
+    arithmetic.
     """
     nu_representatives = enumerate_projected_lattice_representatives(matrix, -1)
-    components = []
     # The connected fixed torus has the +1 eigenspace of L.  Keep the
     # source convention (rank(I+L)) while evaluating the rank exactly.
     fixed_subspace_dimension = _exact_rank(
@@ -449,14 +581,35 @@ def _fixed_component_records(
     for source_rays in fixed_cone_keys:
         rays = [tuple(int(value) for value in ray) for ray in source_rays]
         sigma_dimension = _exact_rank(np.asarray(rays, dtype=int)) if rays else 0
+        use_half_ray, shortcut_reason = _half_ray_shortcut_proof(
+            auxiliary_fan,
+            matrix,
+            rays,
+        )
+        integrality_method = (
+            "smooth_half_ray_eq_4.35"
+            if use_half_ray
+            else "general_quotient_lattice_eq_4.30"
+        )
         for nu_record in nu_representatives:
             nu = nu_record["vector"]
-            integrality_vector = _fraction_sum(
-                [torus_shift, nu]
-                + [tuple(Fraction(value, 2) for value in ray) for ray in rays]
-            )
-            if not _is_integral(integrality_vector):
-                continue
+            if use_half_ray:
+                integrality_vector = _fraction_sum(
+                    [torus_shift, nu]
+                    + [tuple(Fraction(value, 2) for value in ray) for ray in rays]
+                )
+                if not _is_integral(integrality_vector):
+                    continue
+                quotient_annihilator = None
+                quotient_coordinates = None
+            else:
+                integrality_vector = _fraction_sum([torus_shift, nu])
+                quotient_annihilator, quotient_coordinates = _quotient_lattice_coordinates(
+                    integrality_vector,
+                    rays,
+                )
+                if any(value.denominator != 1 for value in quotient_coordinates):
+                    continue
             ambient_dimension = fixed_subspace_dimension - sigma_dimension
             if ambient_dimension < 0:
                 continue
@@ -472,7 +625,25 @@ def _fixed_component_records(
                     "sigma_dimension": sigma_dimension,
                     "nu": _fraction_vector_to_json(nu),
                     "nu_binary_source": nu_record["binary_source"],
-                    "integrality_vector": _integer_vector(integrality_vector),
+                    "integrality_vector": (
+                        _integer_vector(integrality_vector)
+                        if _is_integral(integrality_vector)
+                        else None
+                    ),
+                    "fixed_component_integrality": {
+                        "method": integrality_method,
+                        "shortcut_proof": shortcut_reason,
+                        "quotient_annihilator": (
+                            None
+                            if quotient_annihilator is None
+                            else np.asarray(quotient_annihilator, dtype=int).tolist()
+                        ),
+                        "quotient_coordinates": (
+                            None
+                            if quotient_coordinates is None
+                            else [_fraction_to_json(value) for value in quotient_coordinates]
+                        ),
+                    },
                     "fixed_toric_dimension": ambient_dimension,
                     "f_vanishes_identically": bool(vanishes_identically),
                     "hypersurface_component_dimension": (
@@ -483,18 +654,32 @@ def _fixed_component_records(
                 }
             )
 
-    # Keep only maximal irreducible strata for an exactly matching canonical
-    # nu label.  The source permits a more general nu shift by the cone span;
-    # applying that equivalence without a separate lattice proof would risk
-    # silently deleting valid components, so it remains a declared boundary.
-    retained = []
+    # First keep one deterministic representative for each phase class modulo
+    # span(sigma).  The first record is deterministic because the projected
+    # representatives are enumerated in sorted rational-vector order.
+    canonical = []
     for component in admissible:
+        if any(
+            tuple(other["sigma_rays"]) == tuple(component["sigma_rays"])
+            and _nu_equal_mod_span(
+                _fraction_vector_from_json(component["nu"]),
+                _fraction_vector_from_json(other["nu"]),
+                tuple(tuple(ray) for ray in component["sigma_rays"]),
+            )
+            for other in canonical
+        ):
+            continue
+        canonical.append(component)
+
+    # Remove lower-dimensional fixed components already contained in a
+    # higher-dimensional component.  A proper face has the larger orbit
+    # closure, so the containment direction is ``component -> container``.
+    retained = []
+    for component in canonical:
         rays = frozenset(tuple(ray) for ray in component["sigma_rays"])
-        nu_key = json.dumps(component["nu"], sort_keys=True)
         contained_in_admissible_face = any(
-            frozenset(tuple(ray) for ray in other["sigma_rays"]) < rays
-            and json.dumps(other["nu"], sort_keys=True) == nu_key
-            for other in admissible
+            _fixed_component_is_contained_in(component, other)
+            for other in canonical
         )
         if contained_in_admissible_face:
             continue
@@ -839,23 +1024,24 @@ def _exact_fraction(value):
 
 
 def _ambient_anticanonical_cartier_data(ambient_cone):
-    """Return local Cartier data for ``-K_V`` on a smooth ambient cone.
+    """Return exact local Cartier data for ``-K_V`` on a simplicial cone.
 
-    The ambient fan is supplied by an FRST, so a four-cone is smooth exactly
-    when its four primitive ray rows form a unimodular matrix.  Requiring that
-    fact here is deliberate: a non-unimodular or non-simplicial provenance
-    record does not provide enough local Cartier data for a certificate.
+    A non-unimodular simplicial cone can still be Gorenstein: the local
+    anticanonical support function is an integral dual-lattice vector whose
+    pairing with every primitive ray is ``-1``.  Solve that condition exactly
+    and retain only integral solutions.  Non-simplicial, rank-deficient, or
+    genuinely non-Cartier provenance remains unavailable.
     """
 
     rays = np.asarray(ambient_cone, dtype=int)
     if rays.shape != (4, 4):
         return None
-    determinant = int(_SympyMatrix(rays.tolist()).det())
-    if abs(determinant) != 1:
+    ray_matrix = _SympyMatrix(rays.tolist())
+    if ray_matrix.det() == 0:
         return None
-    solution = _SympyMatrix(rays.tolist()).inv() * _SympyMatrix(
-        [-1, -1, -1, -1]
-    )
+    solution = ray_matrix.inv() * _SympyMatrix([-1, -1, -1, -1])
+    if any(getattr(value, "q", 1) != 1 for value in solution):
+        return None
     return tuple(_exact_fraction(value) for value in solution)
 
 
@@ -2382,14 +2568,25 @@ def _fixed_point_set_description(matrix, torus_shift, fixed_components, smoothne
 def _base_record(polytope_id, frst_hash, matrix, candidate_id):
     return {
         "candidate_id": candidate_id,
+        "matrix_id": candidate_id,
         "polytope_id": polytope_id,
         "frst_hash": frst_hash,
         "schema_version": CANDIDATE_SCHEMA_VERSION,
+        "record_kind": "matrix_validation",
         "lattice_matrix": np.asarray(matrix, dtype=int).tolist(),
         "involution_type": None,
         "lambda_f": None,
         "torus_shift": None,
         "fixed_point_set": None,
+    }
+
+
+def _not_evaluated_fixed_component_evidence(reason):
+    """Record an explicit proof boundary before fixed components are evaluated."""
+
+    return {
+        "status": "not_evaluated",
+        "reason": str(reason),
     }
 
 
@@ -2401,6 +2598,7 @@ def enumerate_orientifold_candidates(
     h11_minus_target=None,
     dual_polytope=None,
     general_fixed_surface_diagnostics=None,
+    record_sink=None,
 ):
     """Enumerate every matrix, shift, and coefficient-parity candidate."""
     points = np.asarray(poly.points(), dtype=int)
@@ -2409,7 +2607,16 @@ def enumerate_orientifold_candidates(
     frst_hash = compute_triangulation_hash(simplices)
     triangulation_cones = _triangulation_cones(poly, triangulation)
     dual_vertices = _extract_dual_vertices(poly, dual_polytope)
-    records = []
+    class _RecordCollection(list):
+        def append(self, record):
+            if (
+                record_sink is not None
+                and record.get("record_kind") != "lattice_matrix_search_summary"
+            ):
+                record_sink(dict(record))
+            super().append(record)
+
+    records = _RecordCollection()
 
     for matrix in enumerate_polytope_involutions(points):
         fixed_cone_keys = _pointwise_invariant_cone_keys(triangulation_cones, matrix)
@@ -2431,11 +2638,40 @@ def enumerate_orientifold_candidates(
                 {
                     "terminal_status": exc.stage or "numerical_geometry_failure",
                     "terminal_reason": str(exc),
+                    "terminal_reason_code": exc.stage or "numerical_geometry_failure",
                     "torus_shift_search_status": "not_started",
+                    "h11_parity": {
+                        "status": "unavailable",
+                        "reason": "matrix validation did not produce an H2 parity decomposition",
+                    },
+                    "fixed_component_evidence": _not_evaluated_fixed_component_evidence(
+                        "matrix validation failed before fixed-component evaluation"
+                    ),
                 }
             )
             records.append(record)
             continue
+
+        if record_sink is not None:
+            matrix_success = dict(base)
+            matrix_success.update(
+                {
+                    "record_kind": "matrix_validation",
+                    "matrix_id": matrix_id,
+                    "terminal_status": "matrix_validation_passed",
+                    "terminal_reason": "polytope, FRST, divisor, and H2 validation passed",
+                    "terminal_reason_code": "matrix_validation_passed",
+                    "h11_plus": validated["h11_plus"],
+                    "h11_minus": validated["h11_minus"],
+                    "fixed_component_evidence": _not_evaluated_fixed_component_evidence(
+                        "matrix validation passed; no torus-shift fixed component was evaluated"
+                    ),
+                    "h2_involution_matrix": _to_jsonable(
+                        validated["h2_involution_matrix"]
+                    ),
+                }
+            )
+            record_sink(matrix_success)
 
         auxiliary_fan = build_auxiliary_fan(triangulation_cones, matrix)
         fixed_surface_n_s = topology.get("fixed_surface_n_s", {})
@@ -2467,9 +2703,17 @@ def enumerate_orientifold_candidates(
             record = dict(base)
             record.update(
                 {
+                    "matrix_id": matrix_id,
+                    "record_kind": "matrix_validation",
                     "terminal_status": "torus_shift_search_exhausted",
                     "terminal_reason": "no representatives were generated",
+                    "terminal_reason_code": "torus_shift_search_exhausted",
                     "torus_shift_search_status": "exhausted",
+                    "h11_plus": validated["h11_plus"],
+                    "h11_minus": validated["h11_minus"],
+                    "fixed_component_evidence": _not_evaluated_fixed_component_evidence(
+                        "no torus-shift representative was generated"
+                    ),
                 }
             )
             records.append(record)
@@ -2494,9 +2738,15 @@ def enumerate_orientifold_candidates(
             # why identity-only validation never surfaced it.
             if any(Fraction(value).denominator != 1 for value in two_t):
                 record = dict(base)
+                shift_candidate_id = stable_hash(
+                    [matrix_id, tuple(shift["numerator"]), "noninvolution"]
+                )
                 record.update(
                     {
-                        "record_kind": "torus_shift_rejected_noninvolution",
+                        "record_kind": "candidate",
+                        "matrix_id": matrix_id,
+                        "candidate_id": shift_candidate_id,
+                        "attempt_kind": "torus_shift_rejected_noninvolution",
                         "matrix_candidate_id": matrix_id,
                         "terminal_status": "torus_shift_not_involution",
                         "terminal_reason": (
@@ -2504,8 +2754,14 @@ def enumerate_orientifold_candidates(
                             "L o phi_[t] to be an involution; this H_+^L coset "
                             "representative 2t is not integral"
                         ),
+                        "terminal_reason_code": "torus_shift_not_involution",
                         "torus_shift_binary_source": shift["binary_source"],
                         "torus_shift_search_status": "rejected_noninvolution",
+                        "h11_plus": validated["h11_plus"],
+                        "h11_minus": validated["h11_minus"],
+                        "fixed_component_evidence": _not_evaluated_fixed_component_evidence(
+                            "torus shift was rejected before fixed-component evaluation"
+                        ),
                     }
                 )
                 records.append(record)
@@ -2524,24 +2780,10 @@ def enumerate_orientifold_candidates(
                     [matrix_id, tuple(shift["numerator"]), int(lambda_f)]
                 )
                 record = _base_record(polytope_id, frst_hash, matrix, candidate_id)
-                fixed_components = _fixed_component_records(
-                    auxiliary_fan,
-                    matrix,
-                    torus_shift,
-                    lambda_f,
-                    fixed_cone_keys=fixed_cone_keys,
-                )
-                smoothness = classify_smoothness(
-                    matrix,
-                    torus_shift,
-                    lambda_f,
-                    auxiliary_fan,
-                    fixed_components,
-                    matrix_topology,
-                    dual_vertices,
-                )
                 record.update(
                     {
+                        "record_kind": "candidate",
+                        "matrix_id": matrix_id,
                         "matrix_candidate_id": matrix_id,
                         "involution_type": involution_type,
                         "lambda_f": int(lambda_f),
@@ -2551,6 +2793,50 @@ def enumerate_orientifold_candidates(
                         ),
                         "torus_shift": _fraction_vector_to_json(torus_shift),
                         "torus_shift_binary_source": shift["binary_source"],
+                        "h11_plus": int(validated["h11_plus"]),
+                        "h11_minus": int(validated["h11_minus"]),
+                    }
+                )
+                try:
+                    fixed_components = _fixed_component_records(
+                        auxiliary_fan,
+                        matrix,
+                        torus_shift,
+                        lambda_f,
+                        fixed_cone_keys=fixed_cone_keys,
+                    )
+                    smoothness = classify_smoothness(
+                        matrix,
+                        torus_shift,
+                        lambda_f,
+                        auxiliary_fan,
+                        fixed_components,
+                        matrix_topology,
+                        dual_vertices,
+                    )
+                except Exception as exc:
+                    record.update(
+                        {
+                            "terminal_status": "numerical_geometry_failure",
+                            "terminal_reason": (
+                                "fixed-component construction or smoothness evaluation "
+                                f"failed: {type(exc).__name__}: {exc}"
+                            ),
+                            "terminal_reason_code": "candidate_geometry_evaluation_failure",
+                            "fixed_component_evidence": {
+                                "status": "unavailable",
+                                "reason": (
+                                    "fixed-component construction or smoothness evaluation "
+                                    f"failed: {type(exc).__name__}: {exc}"
+                                ),
+                            },
+                        }
+                    )
+                    records.append(record)
+                    matrix_records.append(record)
+                    continue
+                record.update(
+                    {
                         "auxiliary_fan": auxiliary_fan,
                         "pointwise_invariant_cones": [
                             cone
@@ -2563,8 +2849,6 @@ def enumerate_orientifold_candidates(
                             matrix, torus_shift, fixed_components, smoothness
                         ),
                         "smoothness": smoothness,
-                        "h11_plus": int(validated["h11_plus"]),
-                        "h11_minus": int(validated["h11_minus"]),
                         "h2_involution_matrix": _to_jsonable(
                             validated["h2_involution_matrix"]
                         ),
@@ -2588,6 +2872,10 @@ def enumerate_orientifold_candidates(
                     record["terminal_reason"] = "; ".join(
                         smoothness.get("reasons", [])
                     )
+                    record["terminal_reason_code"] = (
+                        smoothness.get("reason_code")
+                        or smoothness["status"]
+                    )
                 elif h11_minus_target is not None and int(validated["h11_minus"]) != int(
                     h11_minus_target
                 ):
@@ -2596,9 +2884,11 @@ def enumerate_orientifold_candidates(
                         f"h11_minus={validated['h11_minus']} does not match requested "
                         f"target {h11_minus_target}"
                     )
+                    record["terminal_reason_code"] = "orientifold_h11_minus_filter_rejection"
                 else:
                     record["terminal_status"] = "accepted_verified_orientifold"
                     record["terminal_reason"] = None
+                    record["terminal_reason_code"] = "accepted_verified_orientifold"
                 records.append(record)
                 matrix_records.append(record)
         if matrix_records and not any(

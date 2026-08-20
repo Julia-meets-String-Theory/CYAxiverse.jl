@@ -1,9 +1,11 @@
-"""Tests for the artifact-only Table 1 gap classifier."""
+"""Test the artifact-only Table 1 gap classifier."""
 
 from pathlib import Path
+import tempfile
 import unittest
 
 import analyze_fuzzy_axions_orientifold_gap as gap
+from orientifold_terminal_ledger import TerminalLedgerWriter
 
 
 H11_2 = Path("/private/tmp/cyax-orientifold-rerun-h11-2-20260820.json")
@@ -30,7 +32,164 @@ def _detail(
     }
 
 
+def _provenance():
+    return {
+        "source_commit": "fixture-commit",
+        "git_dirty": False,
+        "runtime_versions": {"python": "fixture"},
+        "input_partition_manifest": {"status": "complete", "version": "fixture"},
+    }
+
+
+def _matrix_row(class_index, *, polytope_id="polytope-0", frst_hash=None):
+    return {
+        "polytope_index": 0,
+        "frst_class_index": class_index,
+        "polytope_id": polytope_id,
+        "frst_hash": frst_hash or f"frst-{class_index}",
+        "matrix_id": f"matrix-{class_index}",
+        "candidate_id": f"matrix-{class_index}",
+        "lambda_f": None,
+        "torus_shift": None,
+        "h11_parity": {"h11_plus": 2, "h11_minus": 0},
+        "fixed_component_evidence": {
+            "status": "not_evaluated",
+            "reason": "matrix fixture",
+        },
+        "terminal_status": "matrix_validation_passed",
+        "terminal_reason_code": "matrix_validation_passed",
+        "record_kind": "matrix_validation",
+    }
+
+
+def _candidate_row(
+    class_index,
+    candidate_id,
+    status,
+    *,
+    lambda_f,
+    polytope_id="polytope-0",
+    frst_hash=None,
+):
+    return {
+        "polytope_index": 0,
+        "frst_class_index": class_index,
+        "polytope_id": polytope_id,
+        "frst_hash": frst_hash or f"frst-{class_index}",
+        "matrix_id": f"matrix-{class_index}",
+        "candidate_id": candidate_id,
+        "lambda_f": lambda_f,
+        "torus_shift": {"numerator": [0, 0, 0, 0], "denominator": 1},
+        "h11_parity": {"h11_plus": 2, "h11_minus": 0},
+        "fixed_component_evidence": {
+            "fixed_point_components": [],
+            "fixed_point_set": {"description": "fixture"},
+            "smoothness": {"status": "fixture"},
+        },
+        "terminal_status": status,
+        "terminal_reason_code": status,
+        "record_kind": "candidate",
+    }
+
+
+def _terminal_fixture(rows, class_count):
+    directory = tempfile.TemporaryDirectory(prefix="cyax-gap-ledger-")
+    path = Path(directory.name) / "ledger.jsonl"
+    writer = TerminalLedgerWriter(path, provenance=_provenance())
+    for row in rows:
+        writer.write(row)
+    summary = writer.close()
+    data = {
+        "details": [{"polytope_index": 0, "frst_class_count": class_count}],
+        "terminal_ledger": summary,
+    }
+    return directory, data
+
+
 class GapClassifierUnitTests(unittest.TestCase):
+    def test_terminal_funnel_uses_only_lambda_f_one_candidates(self):
+        rows = [
+            _matrix_row(0),
+            _candidate_row(0, "o5-accepted", "accepted_verified_orientifold", lambda_f=0),
+            _candidate_row(0, "o3-rejected", "fixed_point_set_non_smooth", lambda_f=1),
+            _matrix_row(1),
+            _candidate_row(
+                1,
+                "o5-unavailable",
+                "smoothness_verification_unavailable",
+                lambda_f=0,
+            ),
+            _candidate_row(1, "o3-rejected-2", "torus_shift_not_involution", lambda_f=1),
+        ]
+        directory, data = _terminal_fixture(rows, 2)
+        self.addCleanup(directory.cleanup)
+
+        result = gap._terminal_ledger_audit(data, Path("fixture.json"))
+
+        self.assertEqual(
+            result["category_counts"],
+            {"unaccepted_exhaustive_terminal_rejection": 2},
+        )
+        self.assertEqual(
+            result["terminal_status_counts"],
+            {
+                "fixed_point_set_non_smooth": 1,
+                "torus_shift_not_involution": 1,
+            },
+        )
+        self.assertEqual(
+            result["all_terminal_status_counts"]["accepted_verified_orientifold"],
+            1,
+        )
+        self.assertEqual(
+            result["unaccepted_class_records"][0]["candidate_attempt_count"],
+            1,
+        )
+
+    def test_numerical_geometry_failure_is_unavailable_evidence(self):
+        rows = [
+            _matrix_row(0),
+            _candidate_row(
+                0,
+                "o3-numerical",
+                "numerical_geometry_failure",
+                lambda_f=1,
+            ),
+        ]
+        directory, data = _terminal_fixture(rows, 1)
+        self.addCleanup(directory.cleanup)
+
+        result = gap._terminal_ledger_audit(data, Path("fixture.json"))
+
+        self.assertEqual(
+            result["category_counts"],
+            {"unaccepted_exhaustive_with_unavailable_evidence": 1},
+        )
+        self.assertEqual(
+            result["unaccepted_class_records"][0][
+                "unavailable_evidence_candidate_count"
+            ],
+            1,
+        )
+
+    def test_per_class_polytope_and_frst_identity_must_be_consistent(self):
+        rows = [
+            _matrix_row(0),
+            _candidate_row(0, "o3-a", "fixed_point_set_non_smooth", lambda_f=1),
+            _candidate_row(
+                0,
+                "o3-b",
+                "fixed_point_set_non_smooth",
+                lambda_f=1,
+                frst_hash="different-frst",
+            ),
+        ]
+        directory, data = _terminal_fixture(rows, 1)
+        self.addCleanup(directory.cleanup)
+
+        with self.assertRaisesRegex(gap.ArtifactError, "class identity mismatch"):
+            gap._terminal_ledger_audit(data, Path("fixture.json"))
+
     def test_surface_unavailable_is_annotation_without_candidate_linkage(self):
         detail = _detail(
             attempts=[
