@@ -121,6 +121,43 @@ class TerminalLedgerTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 TerminalLedgerWriter(path, provenance=_provenance())
 
+    def test_class_key_prefers_normal_form_identity(self):
+        with tempfile.TemporaryDirectory(prefix="cyax-terminal-ledger-") as directory:
+            path = Path(directory) / "ledger.jsonl"
+            writer = TerminalLedgerWriter(path, provenance=_provenance())
+
+            def nf_row(candidate_id, normal_form_id, polytope_index):
+                row = _row(candidate_id, "accepted_verified_orientifold")
+                row["polytope_normal_form_id"] = normal_form_id
+                row["polytope_index"] = polytope_index
+                return row
+
+            # Same geometry (same normal-form id) reached from two different
+            # enumeration indices collapses to one class...
+            writer.write(nf_row("cand-a", "normal-form-sha256:same", 3))
+            writer.write(nf_row("cand-b", "normal-form-sha256:same", 17))
+            # ...and a distinct geometry stays a distinct class even when its
+            # enumeration index coincides with an earlier one. Under the old
+            # polytope_index key, cand-c would have merged with cand-a.
+            writer.write(nf_row("cand-c", "normal-form-sha256:other", 3))
+            summary = writer.close()
+
+            self.assertEqual(summary["class_count"], 2)
+            funnel = {
+                record["polytope_normal_form_id"]: record
+                for record in summary["class_funnel"]
+            }
+            self.assertEqual(
+                set(funnel),
+                {"normal-form-sha256:same", "normal-form-sha256:other"},
+            )
+            self.assertEqual(
+                funnel["normal-form-sha256:same"]["candidate_attempt_count"], 2
+            )
+            self.assertEqual(
+                funnel["normal-form-sha256:other"]["candidate_attempt_count"], 1
+            )
+
     def test_missing_required_field_is_rejected(self):
         with tempfile.TemporaryDirectory(prefix="cyax-terminal-ledger-") as directory:
             writer = TerminalLedgerWriter(

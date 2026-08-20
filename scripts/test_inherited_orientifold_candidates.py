@@ -35,7 +35,7 @@ from generate_geometric_data_multitriangulation import (
     OrientifoldValidationFailure,
     validate_orientifold,
 )
-from glimmers_raw_frst import stable_hash
+from glimmers_raw_frst import compute_polytope_normal_form_id, stable_hash
 from inherited_orientifold_candidates import (
     CANDIDATE_SCHEMA_VERSION,
     IDENTITY,
@@ -117,6 +117,12 @@ class _FakePoly:
         self._points = np.asarray(points, dtype=int)
 
     def points(self):
+        return self._points
+
+    def normal_form(self):
+        # Deterministic stand-in for cytools.Polytope.normal_form(): the
+        # fixture's origin-plus-basis point set is already a canonical
+        # representative, so its normal form is itself.
         return self._points
 
     def dual(self):
@@ -1602,6 +1608,57 @@ class NonOrthogonalBasisInvolutionTests(unittest.TestCase):
                 {tuple((matrix @ point).tolist()) for point in self.POINTS},
                 point_set,
             )
+
+
+class PolytopeNormalFormIdentityTests(unittest.TestCase):
+    """The geometry identity keyed into records is lattice-invariant."""
+
+    def test_identifier_is_row_order_invariant(self):
+        points = [[1, 0, 0, 0], [0, 1, 0, 0], [-1, -1, -1, -1], [0, 0, 0, 0]]
+        shuffled = [points[i] for i in (2, 0, 3, 1)]
+        self.assertEqual(
+            compute_polytope_normal_form_id(points),
+            compute_polytope_normal_form_id(shuffled),
+        )
+
+    def test_distinct_normal_forms_get_distinct_identifiers(self):
+        a = compute_polytope_normal_form_id([[1, 0, 0, 0], [0, 1, 0, 0]])
+        b = compute_polytope_normal_form_id([[2, 0, 0, 0], [0, 1, 0, 0]])
+        self.assertNotEqual(a, b)
+        self.assertTrue(a.startswith("normal-form-sha256:"))
+
+    def test_candidate_records_carry_normal_form_identity(self):
+        poly = _FakePoly(BASIS_POINTS)
+        triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
+        topology = _topology([1, 2, 3, 4], h11=5)
+
+        records = enumerate_orientifold_candidates(poly, triangulation, topology)
+
+        expected = compute_polytope_normal_form_id(poly.normal_form())
+        self.assertTrue(records)
+        for record in records:
+            self.assertEqual(record["polytope_normal_form_id"], expected)
+
+    def test_gl_equivalent_presentations_share_identity_real_cytools(self):
+        try:
+            from cytools import Polytope
+        except Exception as exc:  # pragma: no cover - depends on environment
+            self.skipTest(f"cytools unavailable: {exc}")
+        vertices = np.array(
+            [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [-1, -1, -1, -1]]
+        )
+        # A unimodular change of lattice basis (det = 1) is a GL(4,Z)
+        # equivalence: it is the same geometry in a different presentation.
+        unimodular = np.array(
+            [[1, 1, 0, 0], [0, 1, 0, 0], [0, 0, 1, 2], [0, 0, 0, 1]]
+        )
+        self.assertEqual(int(round(np.linalg.det(unimodular))), 1)
+        first = Polytope(vertices.tolist())
+        second = Polytope((vertices @ unimodular.T).tolist())
+        self.assertEqual(
+            compute_polytope_normal_form_id(np.asarray(first.normal_form(), dtype=int)),
+            compute_polytope_normal_form_id(np.asarray(second.normal_form(), dtype=int)),
+        )
 
 
 if __name__ == "__main__":

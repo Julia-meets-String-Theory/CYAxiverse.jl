@@ -102,8 +102,32 @@ def compute_polytope_id(polytope_points):
     return f"lattice-points-sha256:{stable_hash(points)}"
 
 
+def compute_polytope_normal_form_id(normal_form_points):
+    """Return the lattice-invariant geometry identity of a polytope.
+
+    ``normal_form_points`` are the polytope's affine normal form, for example
+    ``cytools.Polytope.normal_form()``: the canonical representative under
+    ``GL(n, Z)`` and lattice translation.  Two reflexive polytopes describe the
+    same geometry exactly when their normal forms agree, so this identity is
+    stable across polytope presentations.  Prefer it over ``compute_polytope_id``
+    (which hashes the raw lattice points as supplied, so lattice-equivalent
+    presentations differ) and over ``compute_triangulation_hash`` (whose simplex
+    indices can coincide for lattice-inequivalent polytopes, so distinct
+    geometries collide).
+    """
+    points = _canonical_rows(normal_form_points, name="normal_form_points")
+    return f"normal-form-sha256:{stable_hash(points)}"
+
+
 def compute_triangulation_hash(simplices):
-    """Return the order-independent identity of the full triangulation."""
+    """Return the order-independent identity of the full triangulation.
+
+    This hashes the simplices as supplied (point indices into the polytope's
+    own point list), so it is a combinatorial fingerprint of one triangulation
+    presentation, not a geometry identity: lattice-inequivalent polytopes with
+    the same index combinatorics collide.  Use ``compute_polytope_normal_form_id``
+    for a geometry-unique identity.
+    """
     return stable_hash(_canonical_rows(simplices, name="simplices"))
 
 

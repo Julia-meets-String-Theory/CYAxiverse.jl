@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-LEDGER_SCHEMA_VERSION = "cyaxiverse-orientifold-terminal-ledger-1.0"
+LEDGER_SCHEMA_VERSION = "cyaxiverse-orientifold-terminal-ledger-1.1"
 LEDGER_TERMINAL_STATUSES = (
     "matrix_validation_passed",
     "numerical_geometry_failure",
@@ -55,6 +55,7 @@ def _required_record(record: dict[str, Any]) -> dict[str, Any]:
     row = _jsonable(dict(record))
     row.setdefault("ledger_schema_version", LEDGER_SCHEMA_VERSION)
     row.setdefault("record_kind", "candidate")
+    row.setdefault("polytope_normal_form_id", None)
     row.setdefault("candidate_id", None)
     row.setdefault("lambda_f", None)
     row.setdefault("torus_shift", None)
@@ -173,10 +174,20 @@ def _required_record(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _stable_class_key(row: dict[str, Any]) -> tuple[Any, Any]:
-    """Return the explicit polytope and FRST class identity."""
-    if "polytope_index" not in row or "frst_class_index" not in row:
+    """Return the geometry-stable polytope and FRST class identity.
+
+    Prefer the lattice-invariant normal-form geometry identity so a class is
+    keyed by geometry rather than by run-order enumeration index.  Fall back to
+    the enumeration index only when the normal-form identity is absent.
+    """
+    if "frst_class_index" not in row:
+        raise TerminalLedgerError("terminal row requires frst_class_index")
+    normal_form_id = row.get("polytope_normal_form_id")
+    if normal_form_id is not None:
+        return str(normal_form_id), int(row["frst_class_index"])
+    if "polytope_index" not in row:
         raise TerminalLedgerError(
-            "terminal row requires polytope_index and frst_class_index"
+            "terminal row requires polytope_normal_form_id or polytope_index"
         )
     return int(row["polytope_index"]), int(row["frst_class_index"])
 
@@ -255,8 +266,9 @@ class TerminalLedgerWriter:
         class_record = self._class_records.setdefault(
             class_key,
             {
-                "polytope_index": class_key[0],
-                "frst_class_index": class_key[1],
+                "polytope_normal_form_id": row.get("polytope_normal_form_id"),
+                "polytope_index": row.get("polytope_index"),
+                "frst_class_index": int(row["frst_class_index"]),
                 "polytope_id": row["polytope_id"],
                 "frst_hash": row["frst_hash"],
                 "matrix_attempt_count": 0,

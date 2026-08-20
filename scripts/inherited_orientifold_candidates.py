@@ -39,9 +39,14 @@ from generate_geometric_data_multitriangulation import (
     OrientifoldValidationFailure,
     validate_orientifold,
 )
-from glimmers_raw_frst import compute_polytope_id, compute_triangulation_hash, stable_hash
+from glimmers_raw_frst import (
+    compute_polytope_id,
+    compute_polytope_normal_form_id,
+    compute_triangulation_hash,
+    stable_hash,
+)
 
-CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.4"
+CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.5"
 
 GENERAL_FIXED_SURFACE_REASON_CODES = (
     "nonsaturated_fixed_cone_lattice",
@@ -2565,11 +2570,12 @@ def _fixed_point_set_description(matrix, torus_shift, fixed_components, smoothne
     }
 
 
-def _base_record(polytope_id, frst_hash, matrix, candidate_id):
+def _base_record(polytope_id, polytope_normal_form_id, frst_hash, matrix, candidate_id):
     return {
         "candidate_id": candidate_id,
         "matrix_id": candidate_id,
         "polytope_id": polytope_id,
+        "polytope_normal_form_id": polytope_normal_form_id,
         "frst_hash": frst_hash,
         "schema_version": CANDIDATE_SCHEMA_VERSION,
         "record_kind": "matrix_validation",
@@ -2603,6 +2609,11 @@ def enumerate_orientifold_candidates(
     """Enumerate every matrix, shift, and coefficient-parity candidate."""
     points = np.asarray(poly.points(), dtype=int)
     polytope_id = compute_polytope_id(points)
+    # Geometry-unique identity: the affine normal form is invariant under
+    # GL(4, Z) and translation, so it distinguishes lattice-inequivalent
+    # polytopes that share the same index-combinatorial triangulation hash.
+    normal_form_points = np.asarray(poly.normal_form(), dtype=int)
+    polytope_normal_form_id = compute_polytope_normal_form_id(normal_form_points)
     simplices = np.asarray(triangulation.simplices(), dtype=int)
     frst_hash = compute_triangulation_hash(simplices)
     triangulation_cones = _triangulation_cones(poly, triangulation)
@@ -2622,7 +2633,9 @@ def enumerate_orientifold_candidates(
         fixed_cone_keys = _pointwise_invariant_cone_keys(triangulation_cones, matrix)
         matrix_tuple = tuple(int(value) for value in matrix.flatten())
         matrix_id = stable_hash([polytope_id, frst_hash, matrix_tuple])
-        base = _base_record(polytope_id, frst_hash, matrix, matrix_id)
+        base = _base_record(
+            polytope_id, polytope_normal_form_id, frst_hash, matrix, matrix_id
+        )
         try:
             # The supplied H2 validator requires a concrete type string even
             # though the type is assigned after lambda_f is selected.
@@ -2779,7 +2792,13 @@ def enumerate_orientifold_candidates(
                 candidate_id = stable_hash(
                     [matrix_id, tuple(shift["numerator"]), int(lambda_f)]
                 )
-                record = _base_record(polytope_id, frst_hash, matrix, candidate_id)
+                record = _base_record(
+                    polytope_id,
+                    polytope_normal_form_id,
+                    frst_hash,
+                    matrix,
+                    candidate_id,
+                )
                 record.update(
                     {
                         "record_kind": "candidate",
