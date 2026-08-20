@@ -24,3 +24,7 @@ jlm_python/one_dim_phase_fraction.py
 /.github/agents/
 /.github/instructions/
 /.github/skills/
+/validation
+.copilot/
+CLAUDE.md
+AGENTS.md
