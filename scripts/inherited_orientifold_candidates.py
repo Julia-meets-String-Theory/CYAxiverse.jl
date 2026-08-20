@@ -41,7 +41,7 @@ from generate_geometric_data_multitriangulation import (
 )
 from glimmers_raw_frst import compute_polytope_id, compute_triangulation_hash, stable_hash
 
-CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.2"
+CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-2.3"
 
 GENERAL_FIXED_SURFACE_REASON_CODES = (
     "nonsaturated_fixed_cone_lattice",
@@ -73,6 +73,29 @@ TERMINAL_STATUSES = (
 )
 
 IDENTITY = np.eye(4, dtype=int)
+# Distinguish an omitted optional extension check from an explicitly failed
+# extraction.  The latter must remain unavailable evidence, not an empty set.
+_EXTRA_VERTEX_EVIDENCE_NOT_REQUESTED = object()
+
+
+def _exact_rank(matrix):
+    """Return the rank of an integer matrix without floating-point rounding."""
+
+    array = np.asarray(matrix, dtype=int)
+    if array.ndim != 2:
+        raise ValueError("matrix must be two-dimensional")
+    if array.shape[0] == 0 or array.shape[1] == 0:
+        return 0
+    return int(_SympyMatrix(array.tolist()).rank())
+
+
+def _exact_determinant(matrix):
+    """Return the exact determinant of an integer matrix."""
+
+    array = np.asarray(matrix, dtype=int)
+    if array.ndim != 2 or array.shape[0] != array.shape[1]:
+        raise ValueError("matrix must be square")
+    return int(_SympyMatrix(array.tolist()).det())
 
 
 def _select_basis_indices(points):
@@ -81,9 +104,7 @@ def _select_basis_indices(points):
     chosen = []
     for index, point in enumerate(points):
         candidate_rows = basis_rows + [point]
-        if np.linalg.matrix_rank(np.asarray(candidate_rows, dtype=float)) == len(
-            candidate_rows
-        ):
+        if _exact_rank(np.asarray(candidate_rows, dtype=int)) == len(candidate_rows):
             basis_rows = candidate_rows
             chosen.append(index)
         if len(chosen) == 4:
@@ -100,21 +121,20 @@ def enumerate_polytope_involutions(points):
     point_set = {tuple(int(value) for value in row) for row in points}
     basis_indices = _select_basis_indices(points)
     basis_points = points[basis_indices]
-    basis_matrix = basis_points.T.astype(float)
-    basis_inverse = np.linalg.inv(basis_matrix)
+    basis_matrix = _SympyMatrix(basis_points.T.tolist())
+    basis_inverse = basis_matrix.inv()
 
     involutions = {tuple(IDENTITY.flatten().tolist()): IDENTITY}
     candidate_points = sorted(point_set)
     for image_tuple in itertools.product(candidate_points, repeat=4):
-        image_matrix = np.asarray(image_tuple, dtype=float).T
-        if abs(np.linalg.det(image_matrix)) < 1e-9:
+        image_matrix = np.asarray(image_tuple, dtype=int).T
+        if _exact_determinant(image_matrix) == 0:
             continue
-        candidate = image_matrix @ basis_inverse
-        rounded = np.rint(candidate)
-        if not np.allclose(candidate, rounded, atol=1e-6):
+        candidate = _SympyMatrix(image_matrix.tolist()) * basis_inverse
+        if any(getattr(value, "q", 1) != 1 for value in candidate):
             continue
-        matrix = rounded.astype(int)
-        determinant = round(float(np.linalg.det(matrix)))
+        matrix = np.asarray(candidate, dtype=int)
+        determinant = _exact_determinant(matrix)
         if determinant not in (-1, 1):
             continue
         if not np.array_equal(matrix @ matrix, IDENTITY):
@@ -360,9 +380,7 @@ def build_auxiliary_fan(triangulation_cones, matrix):
             provenance.setdefault(face, []).append(ambient_cone)
     records = []
     for cone in sorted(auxiliary):
-        dimension = int(
-            np.linalg.matrix_rank(np.asarray(cone, dtype=float)) if cone else 0
-        )
+        dimension = _exact_rank(np.asarray(cone, dtype=int)) if cone else 0
         records.append(
             {
                 "rays": [list(ray) for ray in cone],
@@ -380,17 +398,57 @@ def build_auxiliary_fan(triangulation_cones, matrix):
     return records
 
 
-def _fixed_component_records(auxiliary_fan, matrix, torus_shift, lambda_f):
-    """Enumerate source eq. (4.34)--(4.35) fixed components."""
+def _pointwise_invariant_cone_keys(triangulation_cones, matrix):
+    """Return original-fan faces whose rays are individually fixed by ``L``.
+
+    Moritz eqs. (4.33)--(4.35) label fixed components by cones of the
+    original ambient fan ``Sigma``.  The auxiliary fan ``Sigma_L`` contains
+    additional intersection rays and must not be used as the component-label
+    universe.
+    """
+
+    matrix = np.asarray(matrix, dtype=int)
+    fixed = set()
+    for ambient_cone in triangulation_cones:
+        for face in _all_cone_faces(ambient_cone):
+            if all(
+                np.array_equal(matrix @ np.asarray(ray, dtype=int), ray)
+                for ray in face
+            ):
+                fixed.add(tuple(sorted(tuple(int(value) for value in ray) for ray in face)))
+    return tuple(sorted(fixed))
+
+
+def _fixed_component_records(
+    auxiliary_fan,
+    matrix,
+    torus_shift,
+    lambda_f,
+    *,
+    fixed_cone_keys,
+):
+    """Enumerate source eq. (4.34)--(4.35) fixed components.
+
+    ``fixed_cone_keys`` must come from faces of the original ambient fan.
+    ``auxiliary_fan`` is retained by the caller for the geometry and
+    smoothness checks of each component, but its extra intersection rays are
+    not valid component labels.  The containment reduction below is
+    intentionally conservative: it removes only an admissible proper face
+    with the exact same canonical ``nu`` label.  Broader equivalence after
+    shifting ``nu`` by the cone span requires a source-level lattice proof and
+    remains unavailable here.
+    """
     nu_representatives = enumerate_projected_lattice_representatives(matrix, -1)
     components = []
-    seen = set()
-    fixed_subspace_dimension = int(
-        np.linalg.matrix_rank(np.eye(4, dtype=float) + np.asarray(matrix, dtype=float))
+    # The connected fixed torus has the +1 eigenspace of L.  Keep the
+    # source convention (rank(I+L)) while evaluating the rank exactly.
+    fixed_subspace_dimension = _exact_rank(
+        np.eye(4, dtype=int) + np.asarray(matrix, dtype=int)
     )
-    for cone in auxiliary_fan:
-        rays = [tuple(ray) for ray in cone["rays"]]
-        sigma_dimension = int(cone["dimension"])
+    admissible = []
+    for source_rays in fixed_cone_keys:
+        rays = [tuple(int(value) for value in ray) for ray in source_rays]
+        sigma_dimension = _exact_rank(np.asarray(rays, dtype=int)) if rays else 0
         for nu_record in nu_representatives:
             nu = nu_record["vector"]
             integrality_vector = _fraction_sum(
@@ -399,13 +457,16 @@ def _fixed_component_records(auxiliary_fan, matrix, torus_shift, lambda_f):
             )
             if not _is_integral(integrality_vector):
                 continue
-            key = (tuple(rays), tuple(nu))
-            if key in seen:
+            ambient_dimension = fixed_subspace_dimension - sigma_dimension
+            if ambient_dimension < 0:
                 continue
-            seen.add(key)
-            ambient_dimension = max(fixed_subspace_dimension - sigma_dimension, 0)
             vanishes_identically = (sigma_dimension + int(lambda_f)) % 2 == 1
-            components.append(
+            # A non-vanishing section has no zero-dimensional hypersurface
+            # component; do not persist the empty intersection as a fixed
+            # component record.
+            if ambient_dimension == 0 and not vanishes_identically:
+                continue
+            admissible.append(
                 {
                     "sigma_rays": [list(ray) for ray in rays],
                     "sigma_dimension": sigma_dimension,
@@ -421,8 +482,26 @@ def _fixed_component_records(auxiliary_fan, matrix, torus_shift, lambda_f):
                     ),
                 }
             )
+
+    # Keep only maximal irreducible strata for an exactly matching canonical
+    # nu label.  The source permits a more general nu shift by the cone span;
+    # applying that equivalence without a separate lattice proof would risk
+    # silently deleting valid components, so it remains a declared boundary.
+    retained = []
+    for component in admissible:
+        rays = frozenset(tuple(ray) for ray in component["sigma_rays"])
+        nu_key = json.dumps(component["nu"], sort_keys=True)
+        contained_in_admissible_face = any(
+            frozenset(tuple(ray) for ray in other["sigma_rays"]) < rays
+            and json.dumps(other["nu"], sort_keys=True) == nu_key
+            for other in admissible
+        )
+        if contained_in_admissible_face:
+            continue
+        retained.append(component)
+
     return sorted(
-        components,
+        retained,
         key=lambda item: (
             item["sigma_dimension"],
             tuple(item["sigma_rays"]),
@@ -461,12 +540,15 @@ def facets_with_non_smooth_cones(poly, triangulation):
     ``{m in Delta_circ : <q,m> = -1}`` (the standard reflexive-polytope
     facet/vertex pairing, the same convention already used by
     ``_trilayer_candidate`` in ``reproduce_fuzzy_axions_h11_4.py``). A cone
-    of the fan is "supported on" that facet when all of its ray generators
-    satisfy this equality. Checked for cone dimensions 2-4 (dimension <=1
-    cones are trivially both simplicial and smooth).
+    of the fan geometrically intersects that facet when at least one boundary
+    ray satisfies this equality. Requiring every ray to pair ``-1`` misses
+    cones that meet the facet along a proper face. Checked for cone dimensions
+    2-4 (dimension <=1 cones are trivially both simplicial and smooth).
     """
 
-    dual_vertices = np.asarray(poly.dual().vertices(), dtype=int)
+    dual_vertices = _extract_dual_vertices(poly)
+    if dual_vertices is None:
+        return None
     fan = triangulation.fan()
     flagged = set()
     for dimension in (2, 3, 4):
@@ -476,13 +558,24 @@ def facets_with_non_smooth_cones(poly, triangulation):
             if is_simplicial and bool(cone.is_smooth()):
                 continue
             for vertex in dual_vertices:
-                if np.all(rays @ vertex == -1):
+                if np.any(rays @ vertex == -1):
                     flagged.add(tuple(int(value) for value in vertex))
     return flagged
 
 
-def _dual_vertex_parity_evidence(matrix, torus_shift, lambda_f, dual_vertices, extra_vertices=None):
+def _dual_vertex_parity_evidence(
+    matrix,
+    torus_shift,
+    lambda_f,
+    dual_vertices,
+    extra_vertices=_EXTRA_VERTEX_EVIDENCE_NOT_REQUESTED,
+):
     if dual_vertices is None:
+        return {"available": False, "fixed_dual_vertices": [], "violations": []}
+    if extra_vertices is None:
+        # ``facets_with_non_smooth_cones`` returns None when dual-vertex
+        # extraction fails.  Do not interpret that failed check as evidence
+        # that no additional vertices require the parity condition.
         return {"available": False, "fixed_dual_vertices": [], "violations": []}
     fixed_vertices = []
     violations = []
@@ -499,7 +592,8 @@ def _dual_vertex_parity_evidence(matrix, torus_shift, lambda_f, dual_vertices, e
     # `Fraction`s and contract against the (integer) dual vertex before any
     # rounding.
     two_t = [Fraction(2) * Fraction(value) for value in torus_shift]
-    extra_vertices = extra_vertices or set()
+    if extra_vertices is _EXTRA_VERTEX_EVIDENCE_NOT_REQUESTED:
+        extra_vertices = set()
     for vertex in np.asarray(dual_vertices, dtype=int):
         vertex_key = tuple(int(value) for value in vertex)
         is_L_fixed = np.array_equal(matrix.T @ vertex, vertex)
@@ -667,7 +761,7 @@ def _sublattice_is_saturated(generators):
         return False
     minors = []
     for rows in itertools.combinations(range(rank), count):
-        minors.append(round(float(np.linalg.det(generators[list(rows), :]))))
+        minors.append(_exact_determinant(generators[np.ix_(rows, range(count))]))
     return abs(math.gcd(*minors)) == 1
 
 
@@ -689,14 +783,14 @@ def _surface_divisor_intersection(left, right, rays, cones):
         previous = np.asarray(previous_ray, dtype=int)
         current = np.asarray(ray, dtype=int)
         following = np.asarray(next_ray, dtype=int)
-        denominator = int(round(np.linalg.det(np.column_stack((previous, current)))))
-        next_denominator = int(
-            round(np.linalg.det(np.column_stack((current, following))))
+        denominator = _exact_determinant(np.column_stack((previous, current)))
+        next_denominator = _exact_determinant(
+            np.column_stack((current, following))
         )
         if abs(denominator) != 1 or abs(next_denominator) != 1:
             raise ValueError("surface fan contains a non-smooth two-cone")
-        self_intersection = -int(
-            round(np.linalg.det(np.column_stack((previous, following))))
+        self_intersection = -_exact_determinant(
+            np.column_stack((previous, following))
         )
         result += self_intersection * left[ray] * right[ray]
         if frozenset((ray, next_ray)) not in cone_set:
@@ -710,7 +804,7 @@ def _ambient_cartier_data(ambient_cone, divisor_point):
     """Return the local support function for one ambient toric divisor."""
 
     rays = np.asarray(ambient_cone, dtype=int)
-    if rays.shape != (4, 4) or abs(round(float(np.linalg.det(rays)))) != 1:
+    if rays.shape != (4, 4) or abs(_exact_determinant(rays)) != 1:
         return None
     target = np.asarray(
         [-int(np.array_equal(ray, divisor_point)) for ray in rays], dtype=int
@@ -1477,6 +1571,7 @@ def _general_fixed_surface_n_s_table(
     matrix,
     auxiliary_fan=None,
     *,
+    fixed_cone_keys=None,
     return_diagnostics=False,
 ):
     """Compute eq. (4.50) evidence for general-``L`` fixed surfaces.
@@ -1497,6 +1592,19 @@ def _general_fixed_surface_n_s_table(
     matrix = np.asarray(matrix, dtype=int)
     if auxiliary_fan is None:
         auxiliary_fan = build_auxiliary_fan(triangulation_cones, matrix)
+    if fixed_cone_keys is None:
+        fixed_cone_keys = _pointwise_invariant_cone_keys(triangulation_cones, matrix)
+    source_sigma_keys = []
+    for source_rays in fixed_cone_keys:
+        normalized_rays = tuple(
+            tuple(int(value) for value in ray) for ray in source_rays
+        )
+        if not all(
+            np.array_equal(matrix @ np.asarray(ray, dtype=int), ray)
+            for ray in normalized_rays
+        ):
+            continue
+        source_sigma_keys.append(normalized_rays)
     tables = {}
     diagnostics = []
     global_reasons = []
@@ -1575,9 +1683,7 @@ def _general_fixed_surface_n_s_table(
             }
         )
 
-    fixed_rank = int(
-        np.linalg.matrix_rank(np.eye(4, dtype=float) + matrix.astype(float))
-    )
+    fixed_rank = _exact_rank(np.eye(4, dtype=int) + matrix)
     if fixed_rank < 2:
         global_reasons.append(
             {
@@ -1625,9 +1731,8 @@ def _general_fixed_surface_n_s_table(
                 )
         return ambient_cone_data[ambient_key]
 
-    for component_cone in auxiliary_fan:
-        sigma_rays = tuple(tuple(int(value) for value in ray) for ray in component_cone["rays"])
-        sigma_dimension = int(component_cone["dimension"])
+    for sigma_rays in source_sigma_keys:
+        sigma_dimension = _exact_rank(np.asarray(sigma_rays, dtype=int)) if sigma_rays else 0
         if fixed_rank - sigma_dimension != 2:
             continue
         if len(sigma_rays) != sigma_dimension:
@@ -1699,7 +1804,7 @@ def _general_fixed_surface_n_s_table(
                 break
             if any(
                 len(ambient) != 4
-                or abs(round(float(np.linalg.det(np.asarray(ambient, dtype=int))))) != 1
+                or abs(_exact_determinant(np.asarray(ambient, dtype=int))) != 1
                 for ambient in ambient_cones
             ):
                 failure_code = "non_smooth_ambient_cone"
@@ -1777,6 +1882,18 @@ def _general_fixed_surface_n_s_table(
                 else "the containing full-dimensional cones do not form a quotient surface fan"
             )
             record_surface_reason(sigma_rays, sigma_dimension, reason_code, reason)
+            continue
+
+        if not _complete_simplicial_fan(
+            [tuple(sorted(cone)) for cone in surface_cones],
+            2,
+        ):
+            record_surface_reason(
+                sigma_rays,
+                sigma_dimension,
+                "incomplete_quotient_surface_fan",
+                "the quotient surface fan failed the complete simplicial fan certificate",
+            )
             continue
 
         boundary_keys = tuple(boundary_rays)
@@ -2106,12 +2223,16 @@ def classify_smoothness(
         and all(value == 0 for value in torus_shift)
         and int(lambda_f) == 0
     )
+    extra_vertices = topology.get(
+        "non_smooth_facet_dual_vertices",
+        _EXTRA_VERTEX_EVIDENCE_NOT_REQUESTED,
+    )
     parity = _dual_vertex_parity_evidence(
         matrix,
         torus_shift,
         lambda_f,
         dual_vertices,
-        extra_vertices=topology.get("non_smooth_facet_dual_vertices"),
+        extra_vertices=extra_vertices,
     )
     if is_identity_sanity:
         return {
@@ -2291,6 +2412,7 @@ def enumerate_orientifold_candidates(
     records = []
 
     for matrix in enumerate_polytope_involutions(points):
+        fixed_cone_keys = _pointwise_invariant_cone_keys(triangulation_cones, matrix)
         matrix_tuple = tuple(int(value) for value in matrix.flatten())
         matrix_id = stable_hash([polytope_id, frst_hash, matrix_tuple])
         base = _base_record(polytope_id, frst_hash, matrix, matrix_id)
@@ -2325,6 +2447,7 @@ def enumerate_orientifold_candidates(
                 triangulation,
                 matrix,
                 auxiliary_fan,
+                fixed_cone_keys=fixed_cone_keys,
                 return_diagnostics=general_fixed_surface_diagnostics is not None,
             )
             if general_fixed_surface_diagnostics is not None:
@@ -2402,7 +2525,11 @@ def enumerate_orientifold_candidates(
                 )
                 record = _base_record(polytope_id, frst_hash, matrix, candidate_id)
                 fixed_components = _fixed_component_records(
-                    auxiliary_fan, matrix, torus_shift, lambda_f
+                    auxiliary_fan,
+                    matrix,
+                    torus_shift,
+                    lambda_f,
+                    fixed_cone_keys=fixed_cone_keys,
                 )
                 smoothness = classify_smoothness(
                     matrix,

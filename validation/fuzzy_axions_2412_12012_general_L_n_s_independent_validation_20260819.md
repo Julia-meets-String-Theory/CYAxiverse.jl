@@ -8,7 +8,7 @@ surface calculation only. It does not change the population count.
 
 ## Selected record
 
-- Diagnostic input: `/private/tmp/cyax-orientifold-reason-h11-3.json`
+- Diagnostic input: [final h11=3 audit artifact](/private/tmp/cyax-orientifold-final-reviewed-h11-3-20260819.json)
 - Polytope: `58`
 - FRST class: `0`
 - Matrix ID: `2f37841e536f16c965fce8a3314fa0e9f118a6ae8393a71a11dbcc8903aa7c28`
@@ -29,7 +29,11 @@ surface calculation only. It does not change the population count.
 
 The selected fixed surface itself is certified and has `n_S=0`. The
 candidate-level unresolved status comes from another fixed component. This
-record is therefore not an accepted-population claim.
+record is therefore not an accepted-population claim. Its selected
+`sigma = ((1,0,0,0),)` is an original primitive ray fixed by `L`, so this
+surface does not exercise the disputed nonprimitive auxiliary-ray labeling
+conversion. It remains only a surface-level check and does not validate the
+general-`L` population counts.
 
 ## Exported toric data
 
@@ -72,8 +76,11 @@ its two neighboring rays. I used the toric Euler sequence and adjunction in
 the source convention
 
 ```text
-n_S = c2(T_V)|S - c2(T_S) + c1(T_S)^2.
+n_S = c2(T_V)|S - c2(T_S) + c1(T_S)^2,
 ```
+
+which is the expansion of the source bundle expression
+`c_2(O(K_V^{-1}|_S tensor N^*_{S/V}))`.
 
 The exact comparison is:
 
@@ -88,5 +95,5 @@ All four values match exactly. The matrix is nonidentity, the quotient fan
 is smooth and complete, and the independent result satisfies the required
 `n_S=0` check.
 
-Source formula: Moritz, arXiv:2305.06363, eq. (4.50), around lines
-647--654 in `validation/fuzzy_axions_supp/paper_source_2305_06363/`.
+Source formula: Moritz, [arXiv:2305.06363 (HTML)](https://arxiv.org/html/2305.06363),
+eq. (4.50) (source `KS_orientifolds.tex` lines 643--654).

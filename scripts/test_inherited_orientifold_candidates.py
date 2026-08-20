@@ -40,6 +40,8 @@ from inherited_orientifold_candidates import (
     IDENTITY,
     TERMINAL_STATUSES,
     _complete_simplicial_fan,
+    _ambient_cartier_data,
+    _fixed_component_records,
     build_auxiliary_fan,
     classify_smoothness,
     enumerate_orientifold_candidates,
@@ -52,6 +54,10 @@ from inherited_orientifold_candidates import (
     _integer_coordinates,
     _integer_kernel_basis,
     _lattice_matrix_config,
+    _pointwise_invariant_cone_keys,
+    _primitive_quotient_vector,
+    _sublattice_is_saturated,
+    facets_with_non_smooth_cones,
 )
 
 BASIS_POINTS = np.array(
@@ -520,6 +526,24 @@ class ClassifySmoothnessNsPolarityTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "not_verified")
         self.assertIn("dual-vertex parity", " ".join(result["reasons"]))
 
+    def test_missing_non_smooth_facet_evidence_stays_unavailable(self):
+        component = self._dim2_component()
+        result = classify_smoothness(
+            IDENTITY,
+            (0.5, 0, 0, 0),
+            1,
+            auxiliary_fan=[],
+            fixed_components=[component],
+            topology={
+                "fixed_surface_n_s": {_component_key(component): 0},
+                "non_smooth_facet_dual_vertices": None,
+            },
+            dual_vertices=np.array([[1, 0, 0, 0]], dtype=int),
+        )
+        self.assertEqual(result["status"], "smoothness_verification_unavailable")
+        self.assertEqual(result["verdict"], "not_verified")
+        self.assertIn("dual-vertex parity", " ".join(result["reasons"]))
+
     def test_nonvanishing_positive_component_requires_source_section_evidence(self):
         component = {
             "sigma_rays": [],
@@ -905,11 +929,19 @@ class GeneralFixedSurfaceMachineryTests(unittest.TestCase):
                 "ambient_cones": [],
             }
         ]
+        # Fixed components are now labelled by pointwise-``L``-invariant cones
+        # of the original fan (source eqs. (4.33)--(4.35)), not by the
+        # auxiliary fan ``Sigma_L``. Supply the trivial invariant cone ``()``
+        # as the fixed-cone label explicitly; the bare ``auxiliary_fan`` below
+        # deliberately contains no full-dimensional cone, so this fixed cone
+        # must be reported as missing its containing full-dimensional cone
+        # rather than silently certified.
         result = _general_fixed_surface_n_s_table(
             [],
             self._ToricVariety(vectors),
             np.diag([1, 1, -1, -1]),
             auxiliary_fan=auxiliary_fan,
+            fixed_cone_keys=((),),
             return_diagnostics=True,
         )
         self.assertEqual(result["evidence"], {})
@@ -974,6 +1006,361 @@ class WriteCandidateManifestTests(unittest.TestCase):
             )
             self.assertEqual(written_summary["accepted_candidate_count"], 1)
             self.assertEqual(written_summary["distinct_accepted_frst_count"], 1)
+
+
+class PointwiseInvariantConeKeyTests(unittest.TestCase):
+    """Source-faithful sigma-label universe from Moritz eqs. (4.33)--(4.35).
+
+    ``_pointwise_invariant_cone_keys`` must return only faces of the ORIGINAL
+    ambient fan ``Sigma`` whose every ray is individually fixed
+    (``L @ ray == ray``).  The auxiliary fan ``Sigma_L`` (source eq. (4.26))
+    carries additional intersection rays and is a strictly larger set, so it
+    is not a valid component-label universe.  These two tests pin the two
+    ways that distinction is load-bearing.
+    """
+
+    # Swap the first two ambient coordinates: e1 <-> e2 are moved, e3, e4 fixed.
+    SWAP01 = np.array(
+        [[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=int
+    )
+
+    @staticmethod
+    def _rays_in_keys(keys):
+        return {ray for cone_key in keys for ray in cone_key}
+
+    @staticmethod
+    def _rays_in_auxiliary(fan):
+        return {tuple(int(v) for v in ray) for cone in fan for ray in cone["rays"]}
+
+    def test_coordinate_swap_auxiliary_ray_excluded_as_sigma_label(self):
+        """A ray moved by L is never a sigma label; the auxiliary ray is larger.
+
+        Regression guard: labelling fixed components off ``Sigma_L`` (the
+        auxiliary fan) instead of the pointwise-fixed faces of ``Sigma`` would
+        admit the intersection ray (1,1,0,0), which is NOT a face of the
+        original fan and whose generating rays (1,0,0,0),(0,1,0,0) are not even
+        individually L-fixed.
+        """
+        cone = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
+        keys = _pointwise_invariant_cone_keys([cone], self.SWAP01)
+        key_rays = self._rays_in_keys(keys)
+
+        # e1 is moved by the swap (L @ e1 = e2), so it cannot label a fixed
+        # component and must not appear in any returned cone key.
+        self.assertNotIn((1, 0, 0, 0), key_rays)
+        self.assertNotIn((0, 1, 0, 0), key_rays)
+        # The genuinely fixed rays e3, e4 do appear, individually and as the
+        # maximal fixed face {e3, e4} (cone keys are stored with sorted rays).
+        self.assertIn((0, 0, 1, 0), key_rays)
+        self.assertIn((0, 0, 0, 1), key_rays)
+        self.assertIn(((0, 0, 0, 1), (0, 0, 1, 0)), keys)
+        # Every returned face is pointwise fixed under L (the defining property).
+        for cone_key in keys:
+            for ray in cone_key:
+                self.assertEqual(
+                    tuple((self.SWAP01 @ np.asarray(ray, dtype=int)).tolist()),
+                    tuple(int(v) for v in ray),
+                )
+
+        # Contrast: the auxiliary fan Sigma_L contains the extra intersection
+        # ray (1,1,0,0) (= e1+e2, the fixed direction inside the moved plane),
+        # which is a strictly larger ray set than the sigma-label universe.
+        auxiliary_rays = self._rays_in_auxiliary(
+            build_auxiliary_fan([cone], self.SWAP01)
+        )
+        self.assertIn((1, 1, 0, 0), auxiliary_rays)
+        self.assertNotIn((1, 1, 0, 0), key_rays)
+        self.assertTrue(key_rays < auxiliary_rays)
+
+    def test_nonprimitive_swapped_pair_scale_uses_original_ray_vectors(self):
+        """Sigma labels keep the ORIGINAL lattice scale, not the primitive Sigma_L ray.
+
+        The fixed subspace of the swap forces the auxiliary intersection ray of
+        the nonprimitive original ray (2,2,0,0) to be its primitivisation
+        (1,1,0,0).  ``_pointwise_invariant_cone_keys`` must yield the
+        original-scale (2,2,0,0) (it labels components by original fan rays),
+        while ``build_auxiliary_fan`` primitivises to (1,1,0,0).
+
+        Regression guard: sourcing sigma labels from the primitivised auxiliary
+        rays would silently rescale a component label, changing the eq. (4.35)
+        integrality datum ``sum(ray/2)``.
+        """
+        # (2,2,0,0) is individually fixed by the swap and is nonprimitive.
+        self.assertTrue(
+            np.array_equal(self.SWAP01 @ np.array([2, 2, 0, 0], dtype=int), [2, 2, 0, 0])
+        )
+        cone = ((2, 2, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
+        keys = _pointwise_invariant_cone_keys([cone], self.SWAP01)
+        key_rays = self._rays_in_keys(keys)
+
+        # Original scale is retained; the primitivised auxiliary ray never
+        # appears as a sigma label.
+        self.assertIn((2, 2, 0, 0), key_rays)
+        self.assertNotIn((1, 1, 0, 0), key_rays)
+        # Every returned sigma ray is literally a ray of the original cone.
+        self.assertTrue(key_rays <= set(cone))
+
+        # The auxiliary fan does primitivise: it carries (1,1,0,0), not (2,2,0,0).
+        auxiliary_rays = self._rays_in_auxiliary(
+            build_auxiliary_fan([cone], self.SWAP01)
+        )
+        self.assertIn((1, 1, 0, 0), auxiliary_rays)
+        self.assertNotIn((2, 2, 0, 0), auxiliary_rays)
+
+
+class FixedComponentContainmentReductionTests(unittest.TestCase):
+    """Exact same-nu containment reduction in ``_fixed_component_records``.
+
+    Source eqs. (4.34)--(4.35): when two admissible components carry the exact
+    same canonical ``nu`` and one sigma-ray set is a strict subset (a proper
+    face) of the other, only the maximal irreducible stratum survives -- the
+    smaller cone (larger orbit-closure variety).  The superset is dropped.
+    """
+
+    def test_strict_subset_same_nu_retains_only_the_maximal_stratum(self):
+        """The strict-subset sigma is kept; the superset cone is discarded.
+
+        Regression guard: without the exact-``nu`` containment reduction both
+        the proper face {(2,0,0,0)} and its superset {(2,0,0,0),(0,2,0,0)}
+        would be persisted, double-counting a single fixed stratum and its
+        proper face.
+        """
+        # L = I gives a single canonical nu = 0, so both cones share it exactly.
+        subset_cone = ((2, 0, 0, 0),)
+        superset_cone = ((2, 0, 0, 0), (0, 2, 0, 0))
+        torus_shift = tuple(Fraction(0) for _ in range(4))
+        records = _fixed_component_records(
+            [],
+            IDENTITY,
+            torus_shift,
+            0,
+            fixed_cone_keys=(subset_cone, superset_cone),
+        )
+
+        retained_ray_sets = {
+            frozenset(tuple(ray) for ray in record["sigma_rays"])
+            for record in records
+        }
+        # Only the strict subset (the proper face / maximal stratum) survives.
+        self.assertEqual(retained_ray_sets, {frozenset({(2, 0, 0, 0)})})
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["sigma_rays"], [[2, 0, 0, 0]])
+        self.assertEqual(records[0]["sigma_dimension"], 1)
+        # The superset ray set is not present under the same nu.
+        self.assertNotIn(
+            frozenset({(2, 0, 0, 0), (0, 2, 0, 0)}), retained_ray_sets
+        )
+
+
+class FixedComponentZeroDimensionalFilterTests(unittest.TestCase):
+    """Zero-dimensional non-vanishing strata are not persisted.
+
+    A component with ``ambient_dimension == 0`` (fixed-subspace dimension equal
+    to sigma dimension) and ``vanishes_identically == False``
+    (``(sigma_dimension + lambda_f)`` even) has no hypersurface component: the
+    generic section does not vanish at the point, so there is nothing to
+    persist.  The odd-parity (vanishing) zero-dimensional stratum is kept.
+    """
+
+    def test_even_parity_zero_dim_stratum_is_filtered_odd_parity_kept(self):
+        """Even-parity zero-dim stratum dropped; odd-parity zero-dim stratum kept.
+
+        Regression guard: persisting the empty non-vanishing intersection would
+        emit a spurious point-component record with no hypersurface.
+        """
+        # L = I: fixed_subspace_dimension = rank(2I) = 4. A 4-ray cone has
+        # sigma_dimension 4, so ambient_dimension = 0.
+        full_cone = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
+        # torus_shift chosen so eq. (4.35) integrality holds: t + sum(ray/2)
+        # = (1/2,...) + (1/2,...) = (1,1,1,1).
+        torus_shift = tuple(Fraction(1, 2) for _ in range(4))
+
+        # lambda_f = 0 -> (4 + 0) even -> non-vanishing zero-dim stratum -> dropped.
+        even_parity = _fixed_component_records(
+            [], IDENTITY, torus_shift, 0, fixed_cone_keys=(full_cone,)
+        )
+        self.assertEqual(even_parity, [])
+
+        # lambda_f = 1 -> (4 + 1) odd -> vanishing zero-dim stratum -> retained.
+        odd_parity = _fixed_component_records(
+            [], IDENTITY, torus_shift, 1, fixed_cone_keys=(full_cone,)
+        )
+        self.assertEqual(len(odd_parity), 1)
+        record = odd_parity[0]
+        self.assertEqual(record["sigma_dimension"], 4)
+        self.assertEqual(record["fixed_toric_dimension"], 0)
+        self.assertTrue(record["f_vanishes_identically"])
+
+
+class CompleteSimplicialFanMalformedTests(unittest.TestCase):
+    """``_complete_simplicial_fan`` rejects malformed 2D fans.
+
+    The bounded quotient-surface certificate must reject any fan that is not a
+    complete, simplicial, smooth fan covering the whole plane.  A codimension-
+    one incidence count alone is insufficient, so distinct malformation modes
+    are each rejected while a genuine complete smooth fan is certified.
+    """
+
+    def test_malformed_two_dimensional_fans_are_rejected(self):
+        """Two distinct malformed 2D fans are False; the complete fan is True.
+
+        Regression guard: a first-quadrant-only cover (strict subset of the
+        plane) and a fan with a non-primitive ray must not be treated as a
+        complete simplicial fan.
+        """
+        # (a) First-quadrant only: a single cone covering a strict subset of
+        # the plane; the origin is not interior to the ray hull.
+        first_quadrant_only = [((1, 0), (0, 1))]
+        self.assertFalse(_complete_simplicial_fan(first_quadrant_only, 2))
+
+        # (b) A non-primitive ray (2,0): the fan looks complete by incidence
+        # but the ray gcd is 2, so it is not a valid smooth-fan ray.
+        non_primitive_ray = [
+            ((2, 0), (0, 1)),
+            ((0, 1), (-1, 0)),
+            ((-1, 0), (0, -1)),
+            ((0, -1), (2, 0)),
+        ]
+        self.assertFalse(_complete_simplicial_fan(non_primitive_ray, 2))
+
+        # (c) Overlapping cones sharing a ray but not a common face.
+        overlapping_cones = [((1, 0), (0, 1)), ((1, 0), (1, 1))]
+        self.assertFalse(_complete_simplicial_fan(overlapping_cones, 2))
+
+        # A genuine complete smooth 2D fan: four cones around the origin from
+        # rays (1,0),(0,1),(-1,0),(0,-1).
+        complete_fan = [
+            ((1, 0), (0, 1)),
+            ((0, 1), (-1, 0)),
+            ((-1, 0), (0, -1)),
+            ((0, -1), (1, 0)),
+        ]
+        self.assertTrue(_complete_simplicial_fan(complete_fan, 2))
+
+
+class FacetsWithNonSmoothConesPairingTests(unittest.TestCase):
+    """Facet/cone pairing semantics behind ``facets_with_non_smooth_cones``.
+
+    The function flags a dual vertex ``q`` when a non-simplicial/non-smooth
+    cone meets its dual facet ``{m : <q,m> = -1}`` along ANY boundary ray, via
+    ``np.any(rays @ vertex == -1)`` (eq. (4.45), line ~629 second clause).  The
+    old ``np.all`` semantics required EVERY ray to pair -1 and so missed a cone
+    meeting the facet only along a proper face.
+
+    Building a full CYTools ``poly``/``triangulation`` with a genuine
+    non-smooth cone intersecting a dual facet along one ray is impractical as a
+    unit test, so this tests the two layers the function actually depends on:
+    (1) the exact integer pairing predicate ``np.any(... == -1)`` versus
+    ``np.all(...)`` on a cone that meets the facet along a single ray, and
+    (2) the graceful ``None`` return when dual extraction is unavailable.
+    """
+
+    def test_single_ray_facet_pairing_is_flagged_by_any_not_all(self):
+        """One ray pairing -1 among several flags the facet (np.any), not np.all.
+
+        Regression guard for the eq. (4.45) fix from ``np.all`` to ``np.any``:
+        a cone meeting the dual facet along a proper face (exactly one ray with
+        ``<q, ray> = -1``) must be flagged.
+        """
+        # A 3-ray cone; only the first ray pairs -1 with the dual vertex.
+        rays = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]], dtype=int)
+        vertex = np.array([-1, 0, 0, 0], dtype=int)
+        pairings = rays @ vertex
+        # Exact integer arithmetic; no float tolerance.
+        self.assertEqual(tuple(int(v) for v in pairings), (-1, 0, 0))
+        self.assertTrue(bool(np.any(pairings == -1)))  # new (correct) semantics
+        self.assertFalse(bool(np.all(pairings == -1)))  # old (missed) semantics
+
+    def test_returns_none_when_dual_extraction_is_unavailable(self):
+        """Graceful None when ``poly.dual()`` raises; the fan is never touched.
+
+        Regression guard: a missing/invalid dual must yield ``None`` (evidence
+        unavailable), not an exception, and must short-circuit before reading
+        the triangulation fan.
+        """
+
+        class _RaisingDualPoly:
+            def points(self):
+                return np.zeros((1, 4), dtype=int)
+
+            def dual(self):
+                raise RuntimeError("dual polytope unavailable")
+
+        class _UnreachableTriangulation:
+            def fan(self):
+                raise AssertionError(
+                    "fan() must not be reached when the dual is unavailable"
+                )
+
+        self.assertIsNone(
+            facets_with_non_smooth_cones(
+                _RaisingDualPoly(), _UnreachableTriangulation()
+            )
+        )
+
+
+class NonOrthogonalBasisInvolutionTests(unittest.TestCase):
+    """``enumerate_polytope_involutions`` uses the correct multiplication order.
+
+    The involution is recovered as ``L = image_matrix @ basis_inverse`` with
+    ``basis_matrix = basis_points.T``.  With a NON-orthogonal selected basis,
+    the transposed order ``basis_inverse @ image_matrix`` gives a different,
+    wrong matrix, so an order bug is observable here (it is invisible for the
+    standard-basis fixture, whose ``basis_matrix`` is the identity).
+    """
+
+    # A shear-reflection: fixes e1,e2,e3, sends e4 -> -2 e1 - e4. Non-permutation.
+    L = np.array(
+        [[1, 0, 0, -2], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, -1]], dtype=int
+    )
+    # Point set (origin + five points) closed under L. The first four
+    # independent non-origin points are f1=(1,1,0,0), e2, e3, e4, whose
+    # transpose basis_matrix is lower-triangular and NON-orthogonal
+    # (f1 . e2 = 1). The moved point e4 -> (-2,0,0,-1) makes the set asymmetric
+    # enough that basis_matrix @ L leaves the point set: a transposed
+    # multiplication order would fail to produce L at all.
+    POINTS = np.array(
+        [
+            [0, 0, 0, 0],
+            [1, 1, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+            [-2, 0, 0, -1],
+        ],
+        dtype=int,
+    )
+
+    def test_non_orthogonal_basis_recovers_the_correct_involutions(self):
+        """Every returned L is a valid involution mapping the set to itself.
+
+        Regression guard: the specific shear-reflection L is present ONLY with
+        the correct ``image_matrix @ basis_inverse`` order; the transposed
+        order (``basis_inverse @ image_matrix``) would need image columns equal
+        to ``basis_matrix @ L``, one of which leaves the point set, so it would
+        never yield L on this non-orthogonal basis.
+        """
+        from sympy import Matrix as _SympyMatrix
+
+        self.assertTrue(np.array_equal(self.L @ self.L, np.eye(4, dtype=int)))
+        point_set = {tuple(int(v) for v in row) for row in self.POINTS}
+        involutions = enumerate_polytope_involutions(self.POINTS)
+
+        # The order-sensitive involution must be recovered exactly.
+        self.assertTrue(any(np.array_equal(matrix, self.L) for matrix in involutions))
+
+        identity = np.eye(4, dtype=int)
+        for matrix in involutions:
+            self.assertEqual(matrix.dtype, np.dtype(int))
+            # Exact integer determinant in {-1, 1} (no float tolerance).
+            determinant = int(_SympyMatrix(matrix.tolist()).det())
+            self.assertIn(determinant, (-1, 1))
+            self.assertTrue(np.array_equal(matrix @ matrix, identity))
+            # L must actually map the point set onto itself.
+            self.assertEqual(
+                {tuple((matrix @ point).tolist()) for point in self.POINTS},
+                point_set,
+            )
 
 
 if __name__ == "__main__":

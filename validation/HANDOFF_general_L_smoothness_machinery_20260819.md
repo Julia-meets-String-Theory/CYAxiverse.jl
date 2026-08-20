@@ -103,7 +103,7 @@ case) looks up `n_S` from `topology["fixed_surface_n_s"]`, which is populated
 its `nu` coset `H_-^{id}` is trivial and its `Σ_L` reduces to the ambient fan).
 For a non-identity `L` no evidence is supplied, so every such candidate returns
 `smoothness_verification_unavailable` and is not accepted. Deriving and
-supplying the general-`L` `n_S = ∫_S c_2(O(K_V^{-1})|_S ⊗ N*S)` (source
+supplying the general-`L` `n_S = ∫_S c_2(O(K_V^{-1})|_S ⊗ N^*_{S/V})` (source
 eq. 649) for a non-identity fixed surface `F_L(σ,ν)` would let these candidates
 resolve. The identity formula `n_S = D_p·D_q·(K⁻¹−D_p)·(K⁻¹−D_q)` assumes the
 fixed component is a 2-cone `(p,q)` of the ambient fan; for `L ≠ id` the fixed

@@ -5,6 +5,13 @@
 **Starting commit:** `4fcc3fa` (`Implement general-L fixed-surface smoothness evidence`)
 **Primary source:** Moritz, [arXiv:2305.06363](https://arxiv.org/html/2305.06363), §§4.3--4.6
 
+**Post-checkpoint review:** Read the [checkpoint review note](./fuzzy_axions_2412_12012_checkpoint_review_20260820.md)
+before using the old general-`L` diagnostic totals. The source labels the
+fixed-component cone in the original `Sigma` and retains the original ray
+scale in eq. (4.35), while the current auxiliary path stores primitive
+`Sigma_L` rays. General-`L` rows remain conditional until that mapping is
+derived and the populations are rerun.
+
 ## 1. Current state
 
 The §4.1 general-$L$ fixed-surface $n_S$ machinery is implemented in
@@ -14,14 +21,17 @@ The §4.1 general-$L$ fixed-surface $n_S$ machinery is implemented in
 The implementation computes
 
 ```text
-n_S = int_S c_2(O(K_V^-1)|_S tensor N*S)
+n_S = int_S c_2(O(K_V^-1)|_S tensor N^*_{S/V})
     = int_S c_2(T_V)|_S - c_2(T_S) + c_1(T_S)^2
 ```
 
 using the auxiliary fixed fan, saturated integer lattices, smooth toric
 surface intersections, and restricted ambient Cartier data. It records
-conservative evidence only when these checks succeed. Candidate manifests use
-schema `cyaxiverse-inherited-orientifold-candidate-2.2`; the package version
+conservative evidence only when these checks succeed. Standalone candidate
+manifests use schema `cyaxiverse-inherited-orientifold-candidate-2.3` (2.3
+switched fixed-component labelling to the original-`Sigma` pointwise-invariant
+cones); nested general-`L` diagnostics use schema
+`cyaxiverse-general-L-fixed-surface-diagnostics-1.1`. The package version
 remains `0.2.0` and must not be bumped on this feature branch.
 
 Validation already completed:
@@ -95,6 +105,12 @@ Chow-ring calculation or an explicit generic-section/nodal-point count on the
 fixed surface. The existing $(\mathbb{P}^1)^4$ fixture is a useful unit test,
 but it is not a substitute for a CYTools geometry with a nontrivial quotient
 fan.
+
+The existing independent h11=3 note is only a surface-level check: its
+selected original ray is primitive and therefore does not exercise the
+disputed auxiliary-ray scale conversion. A follow-up validation must preserve
+the original pointwise-invariant cone/ray provenance and test a nonprimitive
+invariant pair before changing any general-`L` population count.
 
 Record the example and the independent calculation in a new validation note.
 If the two methods disagree, stop population work and resolve the convention

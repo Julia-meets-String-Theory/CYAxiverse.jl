@@ -21,9 +21,13 @@ has the corresponding source criterion and complete input evidence.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.metadata
 import json
 import math
 import os
+import platform
+import re
 import subprocess
 import tempfile
 from collections import Counter
@@ -101,6 +105,279 @@ PAPER_TARGETS_BY_H11 = {
         "models": 1565380,
     },
 }
+
+REPRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.1"
+DEPRECATED_COUNT_ALIASES = {
+    "counts.source_vertex_evidence_inherited_orientifold_cys": (
+        "counts.source_evidence_inherited_orientifold_cys"
+    ),
+    "counts.source_vertex_evidence_h11_minus_zero_orientifold_cys": (
+        "counts.source_evidence_h11_minus_zero_orientifold_cys"
+    ),
+}
+UNAVAILABLE = "unavailable"
+
+
+def _population_completion_status(
+    h11,
+    loaded_favorable_polytope_count,
+    *,
+    explicit_basis=None,
+):
+    """Return a conservative completeness status for a loaded population.
+
+    Known Hodge numbers use the favorable-polytope target recorded in Table 1.
+    An unknown Hodge number remains incomplete unless the caller supplies an
+    explicit basis with ``favorable_polytopes`` and ``label`` entries.
+    """
+    loaded_count = int(loaded_favorable_polytope_count)
+    targets = PAPER_TARGETS_BY_H11.get(int(h11))
+    if targets is not None:
+        expected_count = int(targets["favorable_polytopes"])
+        basis = "table_1_favorable_polytope_target"
+        if loaded_count == expected_count:
+            reason = (
+                f"loaded {loaded_count} favorable polytopes, matching the "
+                f"Table 1 target for h11={int(h11)}"
+            )
+            complete = True
+        else:
+            reason = (
+                f"loaded {loaded_count} favorable polytopes, but the Table 1 "
+                f"target for h11={int(h11)} is {expected_count}"
+            )
+            complete = False
+    elif explicit_basis is not None:
+        try:
+            expected_count = int(explicit_basis["favorable_polytopes"])
+            basis_label = str(explicit_basis["label"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "explicit_basis must provide 'favorable_polytopes' and 'label'"
+            ) from exc
+        basis = f"explicit:{basis_label}"
+        complete = loaded_count == expected_count
+        if complete:
+            reason = (
+                f"loaded {loaded_count} favorable polytopes, matching the "
+                f"explicit basis '{basis_label}'"
+            )
+        else:
+            reason = (
+                f"loaded {loaded_count} favorable polytopes, but explicit basis "
+                f"'{basis_label}' requires {expected_count}"
+            )
+    else:
+        expected_count = None
+        basis = "no_explicit_basis"
+        complete = False
+        reason = (
+            f"h11={int(h11)} has no Table 1 favorable-polytope target and no "
+            "explicit completion basis"
+        )
+
+    return {
+        "complete": complete,
+        "basis": basis,
+        "reason": reason,
+        "loaded_favorable_polytopes": loaded_count,
+        "expected_favorable_polytopes": expected_count,
+    }
+
+
+def _repository_root():
+    return Path(__file__).resolve().parent.parent
+
+
+def _run_repository_command(root, *command):
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip()
+
+
+def _package_version(root):
+    project_path = root / "Project.toml"
+    try:
+        project_text = project_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return UNAVAILABLE
+    match = re.search(r"^\s*version\s*=\s*[\"']([^\"']+)[\"']\s*$", project_text, re.MULTILINE)
+    return match.group(1) if match else UNAVAILABLE
+
+
+def _distribution_version(names):
+    for name in names:
+        try:
+            return importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        except Exception:  # pragma: no cover - broken environment metadata
+            return UNAVAILABLE
+    return UNAVAILABLE
+
+
+def _normalize_cli_value(value):
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_cli_value(value[key])
+            for key in sorted(value, key=str)
+        }
+    if isinstance(value, (list, tuple)):
+        return [_normalize_cli_value(item) for item in value]
+    return value
+
+
+def _normalized_cli_arguments(args):
+    return {
+        key: _normalize_cli_value(value)
+        for key, value in sorted(vars(args).items())
+    }
+
+
+def _parquet_partition_sort_key(path):
+    match = re.search(r"polytopes-4d-(\d+)-vertices\.parquet$", path.name)
+    if match:
+        return (0, int(match.group(1)))
+    return (1, path.name)
+
+
+def _matching_parquet_paths(parquet_dir):
+    try:
+        directory = Path(parquet_dir).expanduser().resolve()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return [], "unavailable", "could not resolve parquet directory"
+    if not directory.is_dir():
+        return [], "unavailable", "parquet directory does not exist"
+    try:
+        paths = sorted(
+            directory.glob("polytopes-4d-*-vertices.parquet"),
+            key=_parquet_partition_sort_key,
+        )
+    except OSError:
+        return [], "unavailable", "could not enumerate parquet partitions"
+    if not paths:
+        return [], "unavailable", "no matching parquet partitions"
+    return paths, "available", None
+
+
+def _scanned_parquet_paths(parquet_dir, records, limit=None):
+    paths, status, reason = _matching_parquet_paths(parquet_dir)
+    if status != "available":
+        return paths, status, reason
+
+    record_paths = set()
+    for record in records:
+        try:
+            source = record[1]
+            record_path = source.get("parquet_file")
+            if record_path is not None:
+                record_paths.add(Path(record_path).expanduser().resolve())
+        except (IndexError, OSError, RuntimeError, TypeError, ValueError):
+            continue
+    if limit is None or len(records) < int(limit) or not record_paths:
+        return paths, "all_matching_partitions", None
+
+    matching_record_indices = [
+        index for index, path in enumerate(paths) if path in record_paths
+    ]
+    if not matching_record_indices:
+        return paths, "all_matching_partitions", None
+    last_scanned_index = max(matching_record_indices)
+    return paths[: last_scanned_index + 1], "loader_record_boundary", None
+
+
+def _hash_file(path):
+    digest = hashlib.sha256()
+    try:
+        size_bytes = path.stat().st_size
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except (OSError, ValueError):
+        return {
+            "path": str(path),
+            "size_bytes": None,
+            "sha256": None,
+            "status": UNAVAILABLE,
+        }
+    return {
+        "path": str(path),
+        "size_bytes": int(size_bytes),
+        "sha256": digest.hexdigest(),
+        "status": "available",
+    }
+
+
+def _parquet_input_manifest(parquet_dir, records, limit=None):
+    paths, scan_basis, scan_reason = _scanned_parquet_paths(
+        parquet_dir,
+        records,
+        limit=limit,
+    )
+    partitions = [_hash_file(path) for path in paths]
+    if scan_reason is not None:
+        status = UNAVAILABLE
+    elif any(partition["status"] == UNAVAILABLE for partition in partitions):
+        status = "partial"
+    else:
+        status = "complete"
+    return {
+        "status": status,
+        "scan_basis": scan_basis,
+        "scan_reason": scan_reason,
+        "directory": str(Path(parquet_dir).expanduser())
+        if parquet_dir is not None
+        else UNAVAILABLE,
+        "pattern": "polytopes-4d-*-vertices.parquet",
+        "partitions": partitions,
+    }
+
+
+def _run_provenance(args, records):
+    root = _repository_root()
+    commit = _run_repository_command(root, "git", "rev-parse", "HEAD")
+    dirty_output = _run_repository_command(
+        root,
+        "git",
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+    )
+    if dirty_output is None:
+        git_dirty = UNAVAILABLE
+    else:
+        git_dirty = bool(dirty_output)
+    return {
+        "source_commit": commit or UNAVAILABLE,
+        "git_dirty": git_dirty,
+        "package_version": _package_version(root),
+        "runtime_versions": {
+            "python": platform.python_version(),
+            "cytools": _distribution_version(("cytools",)),
+            "numpy": _distribution_version(("numpy",)),
+            "scipy": _distribution_version(("scipy",)),
+            "sympy": _distribution_version(("sympy",)),
+            "pyarrow": _distribution_version(("pyarrow",)),
+        },
+        "cli_arguments": _normalized_cli_arguments(args),
+        "input_partition_manifest": _parquet_input_manifest(
+            args.parquet_dir,
+            records,
+            limit=args.limit,
+        ),
+    }
 
 
 def _as_int_rows(values: Any) -> np.ndarray:
@@ -956,7 +1233,7 @@ def _orientifold_reason_diagnostics_summary(
 
     reason_counts = dict(sorted(Counter(row["reason_code"] for row in skipped).items()))
     return {
-        "schema_version": "cyaxiverse-general-L-fixed-surface-diagnostics-1.0",
+        "schema_version": "cyaxiverse-general-L-fixed-surface-diagnostics-1.1",
         "h11": int(h11),
         "surface_attempt_count": len(surface_attempts),
         "skipped_surface_count": len(skipped),
@@ -989,6 +1266,7 @@ def reproduce(args):
         limit=args.limit,
         favorable=True,
     )
+    run_provenance = _run_provenance(args, records)
     polytopes = []
     total_raw = 0
     total_classes = 0
@@ -1137,7 +1415,11 @@ def reproduce(args):
                 flush=True,
             )
 
-    population_complete = bool(args.limit >= 10**9)
+    population_completion = _population_completion_status(
+        args.h11,
+        len(records),
+    )
+    population_complete = population_completion["complete"]
     population_exact_target = (
         targets is not None
         and trilayer_h21_plus_zero_class_count == targets["h11_minus_zero_h21_plus_zero_orientifold_cys"]
@@ -1177,9 +1459,13 @@ def reproduce(args):
             model_stage["diagnostic_reason"] = "; ".join(reasons)
 
     summary = {
-        "schema_version": "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.0",
+        "schema_version": REPRODUCTION_SCHEMA_VERSION,
+        "schema_metadata": {
+            "deprecated_aliases": DEPRECATED_COUNT_ALIASES,
+        },
         "paper": "arXiv:2412.12012",
         "orientifold_source": "arXiv:2305.06363",
+        "run_provenance": run_provenance,
         "input": {
             "source": "generator.load_mirror_polytopes",
             "parquet_dir": str(Path(args.parquet_dir).resolve()),
@@ -1187,6 +1473,14 @@ def reproduce(args):
             "favorable_lattice": "N",
             "record_count": len(records),
             "population_complete": population_complete,
+            "population_completion_basis": population_completion["basis"],
+            "population_completion_reason": population_completion["reason"],
+            "population_completion_loaded_favorable_polytopes": population_completion[
+                "loaded_favorable_polytopes"
+            ],
+            "population_completion_expected_favorable_polytopes": population_completion[
+                "expected_favorable_polytopes"
+            ],
         },
         "counts": {
             "favorable_polytopes": len(records),
@@ -1201,6 +1495,13 @@ def reproduce(args):
             "identity_torus_action_count": identity_action_count,
             "identity_torus_action_cy_count": identity_action_cy_count,
             "identity_valid_o3o7_action_cy_count": identity_valid_action_cy_count,
+            "source_evidence_inherited_orientifold_cys": orientifold_inherited_count
+            if args.orientifold_audit
+            else None,
+            "source_evidence_h11_minus_zero_orientifold_cys": orientifold_h11_zero_count
+            if args.orientifold_audit
+            else None,
+            # Deprecated aliases retained for consumers of schema 1.0.
             "source_vertex_evidence_inherited_orientifold_cys": orientifold_inherited_count
             if args.orientifold_audit
             else None,
@@ -1260,7 +1561,7 @@ def reproduce(args):
     return _jsonable(summary)
 
 
-def main():
+def _parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parquet-dir", required=True)
     parser.add_argument(
@@ -1351,7 +1652,16 @@ def main():
         "repository's root (the parent of scripts/).",
     )
     parser.add_argument("--output", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.orientifold_reason_diagnostics and not args.orientifold_audit:
+        parser.error("--orientifold-reason-diagnostics requires --orientifold-audit")
+    if args.output is not None and args.output.exists():
+        parser.error(f"refusing to overwrite existing output: {args.output}")
+    return args
+
+
+def main(argv=None):
+    args = _parse_args(argv)
     result = reproduce(args)
     encoded = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output is None:

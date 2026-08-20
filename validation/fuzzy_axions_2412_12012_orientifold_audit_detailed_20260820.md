@@ -6,20 +6,49 @@ Scope: final post-review full-population audits for favorable Kreuzer–Skarke p
 Implementation: [scripts/inherited_orientifold_candidates.py](../scripts/inherited_orientifold_candidates.py)
 Audit driver: [scripts/reproduce_fuzzy_axions_h11_4.py](../scripts/reproduce_fuzzy_axions_h11_4.py)
 
+> **Rerun status (2026-08-20, corrected general-`L` code):** The general-`L`
+> overcount repair is now implemented and validated by a fresh h11=2 and
+> h11=3 rerun. Fixed components are labelled by pointwise-`L`-invariant cones
+> of the original fan `Sigma` (source eqs. (4.33)–(4.35)) with their original
+> ray scale, and the eq. (4.45) dual-vertex parity condition is now imposed on
+> every dual vertex whose facet meets a non-simplicial/non-smooth cone along a
+> proper face (the corrected `any`-pairing facet test, source line ~629).
+>
+> Effect of the correction: at h11=2 no accepted orientifold changed — the
+> inherited and \(h^{1,1}_-=0\) lower bounds stay (10, 10) and the accepted set
+> is identical polytope-by-polytope. At h11=3 exactly one previously accepted
+> inherited orientifold is now correctly rejected (polytope index 229; see
+> §3.3), so the h11=3 inherited and \(h^{1,1}_-=0\) lower bounds move from 81 to
+> **80**. The general-`L` diagnostic evidence-row counts decrease because the
+> corrected enumeration uses the smaller, source-faithful original-`Sigma`
+> pointwise-invariant cone universe.
+>
+> Scope: this rerun covers **h11=2 and h11=3 only**. Every h11=4 figure in this
+> report (the general-`L` diagnostics, the inherited/\(h^{1,1}_-=0\) counts, and
+> the 20260819 artifact) is the prior auxiliary-`Sigma_L` value and is
+> **superseded pending an h11=4 rerun with the corrected code**. The base
+> populations, identity-sector diagnostics, and the independent trilayer
+> benchmark are unchanged. See the [checkpoint review note](./fuzzy_axions_2412_12012_checkpoint_review_20260820.md).
+
 ## 1. Executive conclusion
 
-The final audits completed successfully for all three Hodge numbers in the
-reviewed orientifold worktree. Each worker exited with status 0, produced a
-valid JSON artifact, and reported no CYTools cache-save warning. The base
-population and the independent \(h^{2,1}_+=0\) trilayer benchmark agree with
-the corresponding rows of Table 1 in Sheridan et al. The inherited-orientifold
-audit itself remains a conservative lower count:
+The h11=2 and h11=3 populations were rerun with the corrected general-`L` code
+and the h11=4 population is shown from the prior run (see the rerun status note
+above). Each worker exited with status 0, produced a valid JSON artifact, and
+reported no CYTools cache-save warning. The base population and the independent
+\(h^{2,1}_+=0\) trilayer benchmark agree with the corresponding rows of Table 1
+in Sheridan et al. The inherited-orientifold audit itself remains a
+conservative lower count:
 
 | \(h^{1,1}\) | favorable polytopes | final FRST classes | audited inherited O3/O7 classes | Table 1 inherited target | audited \(h^{1,1}_-=0\) classes | Table 1 \(h^{1,1}_-=0\) target | audited trilayer \(h^{2,1}_+=0\) classes | Table 1 trilayer target |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 2 | 36 | 36 | 10 | 32 | 10 | 32 | 11 | 11 |
-| 3 | 243 | 274 | 81 | 253 | 81 | 253 | 66 | 66 |
-| 4 | 1185 | 1760 | 435 | 1559 | 429 | 1554 | 267 | 267 |
+| 3 | 243 | 274 | 80 | 253 | 80 | 253 | 66 | 66 |
+| 4 | 1185 | 1760 | 435† | 1559 | 429† | 1554 | 267 | 267 |
+
+† The h11=4 inherited and \(h^{1,1}_-=0\) counts are the prior
+auxiliary-`Sigma_L` values, superseded pending an h11=4 rerun with the
+corrected code. The h11=2 and h11=3 rows are the corrected 2026-08-20 rerun.
 
 The audited orientifold numbers are code-certified class-level counts, not a
 claim that the paper’s Table 1 is incorrect. The gap means that the present
@@ -32,7 +61,7 @@ refuses to promote that candidate.
 
 The reviewed implementation materially increased the certified inherited
 population relative to the pre-review baseline (0, 4, 5 at
-\(h^{1,1}=2,3,4\)) to (10, 81, 435). It still does not close the Table 1 gap,
+\(h^{1,1}=2,3,4\)) to (10, 80, 435†). It still does not close the Table 1 gap,
 and the remaining records must not be relabelled as accepted merely because
 the code could not finish a sufficient smoothness proof.
 
@@ -57,9 +86,12 @@ when that accepted candidate also has \(h^{1,1}_-=0\). An O5/O9
 
 The full machine-readable output contains per-polytope details and the
 opt-in general-\(L\) diagnostics. The output schema is
-cyaxiverse-fuzzy-axions-h11-4-reproduction-1.0; candidate records use
-cyaxiverse-inherited-orientifold-candidate-2.2, and the nested general-\(L\)
-diagnostics use cyaxiverse-general-L-fixed-surface-diagnostics-1.0.
+cyaxiverse-fuzzy-axions-h11-4-reproduction-1.1. Standalone candidate
+manifests use cyaxiverse-inherited-orientifold-candidate-2.3; the nested
+general-\(L\) diagnostics use cyaxiverse-general-L-fixed-surface-diagnostics-1.1.
+The general-`L` diagnostic schema advanced to 1.1 because its enumeration basis
+changed to the original-`Sigma` pointwise-invariant cones; the field structure
+is unchanged.
 
 ## 3. Final audit artifacts and integrity evidence
 
@@ -68,13 +100,21 @@ rather than package source files. Their sizes and SHA-256 hashes are:
 
 | \(h^{1,1}\) | artifact | bytes | SHA-256 |
 |---:|---|---:|---|
-| 2 | [cyax-orientifold-final-reviewed-h11-2-20260819.json](/private/tmp/cyax-orientifold-final-reviewed-h11-2-20260819.json) | 54,557,352 | 27e7b18148bc6730089c86fabb99bd2dae0ff8c91ed721ce302f60106feb647a |
-| 3 | [cyax-orientifold-final-reviewed-h11-3-20260819.json](/private/tmp/cyax-orientifold-final-reviewed-h11-3-20260819.json) | 286,183,888 | 9de41a8967895c3f0de36317b83ce44bb978ae8971b84c573dc30795e2c6dc9f |
-| 4 | [cyax-orientifold-final-reviewed-h11-4-20260819.json](/private/tmp/cyax-orientifold-final-reviewed-h11-4-20260819.json) | 1,365,317,574 | a5849fa7c02040dc4986653168262eac4d299a492d58fe7728e948afcd875769 |
+| 2 | [cyax-orientifold-rerun-h11-2-20260820.json](/private/tmp/cyax-orientifold-rerun-h11-2-20260820.json) | 48,576,572 | c4cc9bc93a8d590d42a2ef98fdb58156da442493f07d5854b8ca8e4873f9ebb0 |
+| 3 | [cyax-orientifold-rerun-h11-3-20260820.json](/private/tmp/cyax-orientifold-rerun-h11-3-20260820.json) | 264,658,672 | 05ce23cc5fa0819a83ecbde0d8784628e5e540a874e8e6ba291ce2ed30f63e42 |
+| 4† | [cyax-orientifold-final-reviewed-h11-4-20260819.json](/private/tmp/cyax-orientifold-final-reviewed-h11-4-20260819.json) | 1,365,317,574 | a5849fa7c02040dc4986653168262eac4d299a492d58fe7728e948afcd875769 |
+
+The h11=2 and h11=3 artifacts are the corrected 2026-08-20 rerun (reproduction
+schema 1.1). † The h11=4 artifact is the prior 2026-08-19 auxiliary-`Sigma_L`
+run (reproduction schema 1.0), retained as the superseded reference pending an
+h11=4 rerun. Its earlier hash was
+`a5849fa7c02040dc4986653168262eac4d299a492d58fe7728e948afcd875769`.
 
 Independent post-run checks confirmed, for every artifact:
 
-- input.population_complete is true;
+- input.population_complete is true, now certified against the Table 1
+  favorable-polytope target (36 loaded for h11=2, 243 for h11=3) rather than a
+  bare record-limit heuristic;
 - the requested \(h^{1,1}\) is 2, 3, or 4 as appropriate;
 - details has one entry per favorable polytope;
 - orientifold_reason_diagnostics.h11 matches the requested Hodge number;
@@ -101,8 +141,8 @@ three final audit runs.
 | identity torus actions | 251 | 2296 | 13218 |
 | identity-action CY classes | 36 | 274 | 1760 |
 | identity-valid O3/O7 CY classes | 25 | 198 | 1153 |
-| source-evidence inherited O3/O7 classes | 10 | 81 | 435 |
-| source-evidence \(h^{1,1}_-=0\) classes | 10 | 81 | 429 |
+| source-evidence inherited O3/O7 classes | 10 | 80 | 435† |
+| source-evidence \(h^{1,1}_-=0\) classes | 10 | 80 | 429† |
 
 The identity-valid O3/O7 row is a useful diagnostic, but it is not the Table
 1 inherited count. Table 1 asks whether a CY admits an inherited orientifold;
@@ -110,19 +150,50 @@ the full audit includes nonidentity \(L\) and torus-shift sectors as well.
 
 ### 3.2 General-\(L\) fixed-surface diagnostics
 
-| \(h^{1,1}\) | surface attempts | certified surfaces | skipped surfaces | skipped reason | unresolved candidate components |
+| \(h^{1,1}\) | diagnostic surface attempts | diagnostic evidence rows | skipped surfaces | skipped reason | unresolved candidate components |
 |---:|---:|---:|---:|---|---:|
-| 2 | 1362 | 862 | 500 | non_smooth_ambient_cone (500) | 33 |
-| 3 | 6314 | 3934 | 2380 | non_smooth_ambient_cone (2380) | 117 |
-| 4 | 25398 | 17024 | 8374 | non_smooth_ambient_cone (8374) | 327 |
+| 2 | 1164 | 762 | 402 | non_smooth_ambient_cone (402) | 33 |
+| 3 | 5510 | 3618 | 1892 | non_smooth_ambient_cone (1892) | 117 |
+| 4† | 25398 | 17024 | 8374 | non_smooth_ambient_cone (8374) | 327 |
 
-The word “certified” in this table refers to a fixed-surface \(n_S\) evidence
-record. It does not by itself mean that the whole orientifold candidate is
-accepted: all fixed components, coefficient parity, the \(h^{1,1}_-\) filter,
-and the O3/O7 condition must also pass. Conversely, an unresolved component
-is not a proof of a singular orientifold; it is a proof that this
-implementation does not possess the sufficient source evidence needed to
-accept it.
+The diagnostic evidence-row count is not a count of fixed components of every
+specific torus shift, because the table does not attach the source eq. (4.35)
+integrality condition to every \(t\). It does not by itself mean that the
+whole orientifold candidate is accepted: all fixed components, coefficient
+parity, the \(h^{1,1}_-\) filter, and the O3/O7 condition must also pass.
+Conversely, an unresolved component is not a proof of a singular orientifold;
+it is a proof that this implementation does not possess the sufficient source
+evidence needed to accept it. The h11=2 and h11=3 rows above are the corrected
+2026-08-20 rerun; the h11=4† row is the superseded pre-fix run, retained pending
+its rerun. The attempt and evidence-row counts fell at h11=2 and h11=3 because
+the corrected enumeration ranges over the smaller, source-faithful
+original-`Sigma` pointwise-invariant cone universe rather than the auxiliary
+fan `Sigma_L`. See the [checkpoint review note](./fuzzy_axions_2412_12012_checkpoint_review_20260820.md).
+
+### 3.3 Overcount correction traced at h11 = 3
+
+The corrected general-`L` code removes exactly one previously accepted
+inherited orientifold relative to the pre-fix run, at polytope index 229. The
+responsible lattice involution is
+
+\[
+L=\begin{pmatrix}1&0&-2&-2\\0&1&-1&1\\0&0&-1&0\\0&0&0&-1\end{pmatrix}.
+\]
+
+In the pre-fix run this candidate reached accepted_verified_orientifold with
+\(\lambda_f=1\): the eq. (4.45) dual-vertex parity condition was checked against
+too few dual vertices, because the earlier facet test required every ray of a
+cone to pair \(-1\) with the dual vertex. With the corrected `any`-pairing test
+(source line ~629), the dual vertices whose facet meets a non-simplicial or
+non-smooth cone along a proper face are also flagged, eq. (4.45) then fails, and
+the candidate is correctly recorded as fixed_point_set_non_smooth. This was
+confirmed by re-running the same FRST class through both the base-commit and the
+corrected enumerator: the base code yields one \(\lambda_f=1\) acceptance for
+this involution, the corrected code yields none, and every other polytope is
+unchanged at h11=2 and h11=3 (the h11=2 accepted set is identical
+polytope-by-polytope). This is the overcount the corrected code is designed to
+remove; it is a downward correction to a conservative lower bound (81 → 80), not
+a change to the paper's Table 1 target of 253.
 
 ## 4. Comparison with Sheridan et al. Table 1
 
@@ -144,8 +215,8 @@ counts are lower:
 | \(h^{1,1}\) | inherited gap (Table 1 − audit) | \(h^{1,1}_-=0\) gap | trilayer gap |
 |---:|---:|---:|---:|
 | 2 | 22 | 22 | 0 |
-| 3 | 172 | 172 | 0 |
-| 4 | 1124 | 1125 | 0 |
+| 3 | 173 | 173 | 0 |
+| 4† | 1124 | 1125 | 0 |
 
 This comparison should be interpreted as a certification-boundary result.
 The audit requires an explicit, source-matched chain of evidence for every
@@ -158,8 +229,9 @@ counts.
 The final counts are nevertheless a substantial improvement over the
 pre-review baseline produced before the nef/orbifold implementation and the
 review fixes: 0, 4, and 5 inherited classes at \(h^{1,1}=2,3,4\), respectively.
-The increases to 10, 81, and 435 show that the added evidence is active, while
-the remaining gap shows that it is not yet complete.
+The increases to 10, 80, and 435† show that the added evidence is active, while
+the remaining gap shows that it is not yet complete (the h11=4 figure remains
+the pre-fix value pending its rerun).
 
 ## 5. Mathematical and physical framework
 
@@ -214,9 +286,11 @@ class level: one accepted action is enough for a class to enter the inherited
 count.
 
 This distinction matters for interpreting the diagnostic surface counts. A
-number such as 17024 certified surfaces at \(h^{1,1}=4\) is not 17024 CYs and
-not 17024 accepted orientifolds. It is a count of fixed-surface evidence rows
-encountered while examining candidate data.
+number such as 17024 diagnostic evidence rows at \(h^{1,1}=4\) is not 17024
+CYs and not 17024 accepted orientifolds. It is a count of generic
+fixed-surface evidence rows encountered while examining candidate data; it is
+not necessarily the number of source-integral fixed components for a specific
+torus shift.
 
 ### 5.3 Inherited lattice involutions and torus shifts
 
@@ -291,10 +365,15 @@ the O3/O7 and smoothness checks.
 The toric fixed-locus construction uses the intersections of the ambient
 cones with the \(L\)-fixed real subspace. These intersections form the finite
 auxiliary fan \(\Sigma_L\), the construction associated with eq. (4.26) of
-Moritz et al. A fixed component is labelled by a cone \(\sigma\in\Sigma_L\)
-and a projected-lattice representative \(\nu\). The integrality condition is
-the source eq. (4.35) condition implemented by the exact rational arithmetic in
-the candidate enumerator.
+Moritz et al. The source’s fixed-component formula (eq. (4.35)) labels a
+pointwise-\(L\)-invariant cone \(\sigma\) in the original \(\Sigma\) and uses
+the original ray vectors, with their lattice scale, in the half-ray sum. The
+implementation now labels fixed components by exactly these original-\(\Sigma\)
+pointwise-invariant cones (function `_pointwise_invariant_cone_keys`), retaining
+the original ray scale, rather than by the primitive rays of \(\Sigma_L\). This
+correction is exercised by a nonprimitive-invariant-pair regression test and is
+validated by the h11=2 and h11=3 rerun; the h11=4 general-\(L\) rows await the
+same rerun. See the [checkpoint review note](./fuzzy_axions_2412_12012_checkpoint_review_20260820.md).
 
 The restriction of the hypersurface polynomial to a fixed component can
 vanish identically for a parity reason. The current implementation records
@@ -327,7 +406,13 @@ silently treated as a successful parity check.
 
 This is the point behind the earlier statement that “the patch
 conservatively leaves positive-dimensional non-vanishing fixed components
-unavailable without the source’s nef/orbifold evidence.” Suppose a fixed
+unavailable without the source’s nef/orbifold evidence.” Moritz also
+requires an invariant Kähler hyperplane/interior point and distinguishes this
+condition from smoothness of the hypersurface in a singular or non-simplicial
+\(L\)-symmetric ambient fan (source `KS_orientifolds.tex:610-617`). The current
+FRST-preserving scope should document the invariant-interior-point argument;
+future non-simplicial or non-unimodular auxiliary fans require an explicit
+check. Suppose a fixed
 component \(F\) has positive toric dimension and the restricted hypersurface
 section does not vanish identically on \(F\). To accept the candidate, one
 needs a sufficient reason that a generic section of the restricted
@@ -372,7 +457,7 @@ restriction vanishes identically, the source’s eq. (4.50) condition is encoded
 through
 
 \[
-n_S=\int_S c_2\!\left(\mathcal O(K_V^{-1}|_S)\otimes N_{S/V}\right).
+n_S=\int_S c_2\!\left(\mathcal O(K_V^{-1}|_S)\otimes N^*_{S/V}\right).
 \]
 
 Using the toric Euler sequence and adjunction, the implementation evaluates
@@ -461,38 +546,42 @@ distinct output files:
 
     PYTHONDONTWRITEBYTECODE=1 python -B scripts/test_inherited_orientifold_candidates.py
     PYTHONDONTWRITEBYTECODE=1 python -B scripts/test_h21_plus_zero_fixed_locus.py
+    PYTHONDONTWRITEBYTECODE=1 python -B scripts/test_reproduce_fuzzy_axions_h11_4.py
+
+    # KS mirror partitions were downloaded from the calabi-yau-data/polytopes-4d
+    # Hugging Face dataset. h11=2 is contained in the 05- and 06-vertex
+    # partitions (36 favorable); h11=3 in the 05-, 06-, and 07-vertex partitions
+    # (243 favorable). Higher-vertex partitions contain no h11=2 or h11=3 rows.
 
     PYTHONDONTWRITEBYTECODE=1 python -B scripts/reproduce_fuzzy_axions_h11_4.py \
       --h11 2 \
-      --parquet-dir /private/tmp/cyax-ks-mirror-h11-4 \
+      --parquet-dir /private/tmp/cyax-ks-mirror-h11-2 \
       --orientifold-audit --orientifold-reason-diagnostics --keep-details \
-      --julia-binary /Users/vmehta/.juliaup/bin/julia \
-      --output /private/tmp/cyax-orientifold-final-reviewed-h11-2-20260819.json
+      --output /private/tmp/cyax-orientifold-rerun-h11-2-20260820.json
 
     PYTHONDONTWRITEBYTECODE=1 python -B scripts/reproduce_fuzzy_axions_h11_4.py \
       --h11 3 \
-      --parquet-dir /private/tmp/cyax-ks-mirror-h11-4 \
+      --parquet-dir /private/tmp/cyax-ks-mirror-h11-3 \
       --orientifold-audit --orientifold-reason-diagnostics --keep-details \
-      --julia-binary /Users/vmehta/.juliaup/bin/julia \
-      --output /private/tmp/cyax-orientifold-final-reviewed-h11-3-20260819.json
+      --output /private/tmp/cyax-orientifold-rerun-h11-3-20260820.json
 
-    PYTHONDONTWRITEBYTECODE=1 python -B scripts/reproduce_fuzzy_axions_h11_4.py \
-      --h11 4 \
-      --parquet-dir /private/tmp/cyax-ks-mirror-h11-4 \
-      --orientifold-audit --orientifold-reason-diagnostics --keep-details \
-      --julia-binary /Users/vmehta/.juliaup/bin/julia \
-      --output /private/tmp/cyax-orientifold-final-reviewed-h11-4-20260819.json
+    # h11=4 was not rerun in this pass; its rows above remain the 2026-08-19
+    # auxiliary-Sigma_L run and are superseded pending a corrected-code rerun.
 
 Integrity checks used after the worker runs included:
 
-    sha256sum /private/tmp/cyax-orientifold-final-reviewed-h11-2-20260819.json
-    sha256sum /private/tmp/cyax-orientifold-final-reviewed-h11-3-20260819.json
-    sha256sum /private/tmp/cyax-orientifold-final-reviewed-h11-4-20260819.json
+    sha256sum /private/tmp/cyax-orientifold-rerun-h11-2-20260820.json
+    sha256sum /private/tmp/cyax-orientifold-rerun-h11-3-20260820.json
+    # h11=4 (superseded): sha256sum /private/tmp/cyax-orientifold-final-reviewed-h11-4-20260819.json
 
 The observed focused-test result was:
 
-    Ran 30 tests ... OK
-    Ran 1 test ... OK
+    Ran 38 tests ... OK   # scripts/test_inherited_orientifold_candidates.py
+    Ran 1 test ... OK     # scripts/test_h21_plus_zero_fixed_locus.py
+    Ran 8 tests ... OK    # scripts/test_reproduce_fuzzy_axions_h11_4.py
+
+The h11=2 and h11=3 audits above were rerun with the corrected general-`L`
+code. The full Julia 1.12 package suite (`Pkg.test()`) also passed with exit 0.
 
 The known CYTools cache warning may occur in focused local tests when the
 environment denies a cache write. It is non-fatal when the test process and
@@ -505,10 +594,11 @@ The remaining gap is scientifically interpretable and should remain visible:
 
 1. Ambient smoothness boundary. All skipped general-\(L\) surface attempts in
    these runs are non_smooth_ambient_cone. The current certificate relies on
-   smooth unimodular ambient four-cones for integral local Cartier data. A
-   non-unimodular provenance cone may still be resolvable after a more general
-   orbifold/crepant analysis, but this implementation does not perform that
-   analysis.
+   smooth unimodular ambient four-cones for integral local Cartier data. The
+   next step is source-compatible Cartier/intersection and orbifold Chow data
+   on non-unimodular provenance cones; this implementation does not yet
+   perform that work. The separate non-simplicial \(L\)-symmetric fan work
+   requires the §4.3 subdivision/removal/gluing construction.
 2. Conservative unavailability. Missing parity, missing provenance,
    incomplete quotient fans, non-nef restrictions, bounded section searches,
    and ambiguous fan-coverage margins are not accepted by default. This is a
@@ -525,10 +615,13 @@ The remaining gap is scientifically interpretable and should remain visible:
    enumeration has reached 2, 263, or 3348 models.
 5. No h11=5 run. The present scope ends at \(h^{1,1}=4\), as requested.
 
-The next scientifically meaningful step is therefore not to relax the
-acceptance status. It is to implement and independently validate the source’s
-orbifold/crepant treatment for the non-smooth ambient provenance sector, then
-rerun the three populations with that new evidence boundary documented.
+The immediate outstanding item is to rerun the h11=4 population with the
+corrected general-`L` code so its superseded rows above can be refreshed. The
+deeper next scientifically meaningful step is not to relax the acceptance
+status: it is to derive and independently validate the source-compatible
+Cartier/intersection treatment for the non-smooth ambient provenance sector,
+separately assess the non-simplicial symmetric fan, and then rerun the
+populations with the new evidence boundary documented.
 
 ## 9. References and source links
 
