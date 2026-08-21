@@ -1319,13 +1319,28 @@ def _orientifold_reason_diagnostics_summary(
 
 def reproduce(args):
     targets = PAPER_TARGETS_BY_H11.get(args.h11)
-    records = load_mirror_polytopes(
+    all_records = load_mirror_polytopes(
         args.parquet_dir,
         h11=args.h11,
         limit=args.limit,
         favorable=True,
     )
-    run_provenance = _run_provenance(args, records)
+    total_favorable = len(all_records)
+    shard_count = int(getattr(args, "shard_count", 1) or 1)
+    shard_index = int(getattr(args, "shard_index", 0) or 0)
+    if shard_count < 1:
+        raise ValueError("--shard-count must be >= 1")
+    if not 0 <= shard_index < shard_count:
+        raise ValueError("--shard-index must be in [0, --shard-count)")
+    is_sharded = shard_count > 1
+    # Deterministic strided partition over the global favorable-polytope index.
+    # Striding (not a contiguous block) averages the varying per-polytope cost
+    # across shards. shard_count==1 selects every record, so the default,
+    # unsharded run is byte-for-byte unchanged.
+    shard_items = list(enumerate(all_records))[shard_index::shard_count]
+    records = [payload for _, payload in shard_items]
+    # Provenance describes the full input dataset and is identical across shards.
+    run_provenance = _run_provenance(args, all_records)
     terminal_ledger = None
     terminal_ledger_summary = None
     if args.orientifold_audit:
@@ -1371,7 +1386,7 @@ def reproduce(args):
     reason_surface_attempts = []
     reason_unresolved_components = []
     reason_certified_surfaces = []
-    for poly_index, (poly, provenance) in enumerate(records):
+    for poly_index, (poly, provenance) in shard_items:
         raw, classes = _frst_classes(poly)
         total_raw += len(raw)
         total_classes += len(classes)
@@ -1500,10 +1515,28 @@ def reproduce(args):
                 flush=True,
             )
 
-    population_completion = _population_completion_status(
-        args.h11,
-        len(records),
-    )
+    if is_sharded:
+        # A single shard can never be population-complete on its own. Report it
+        # as partial and defer the completeness verdict to the merge step; the
+        # expected target is still surfaced for reference.
+        population_completion = {
+            "complete": False,
+            "basis": "sharded_partial_run",
+            "reason": (
+                f"shard {shard_index + 1}/{shard_count} covers {len(records)} of "
+                f"{total_favorable} loaded favorable polytopes; combine shards with "
+                "scripts/merge_orientifold_shards.py to determine completeness"
+            ),
+            "loaded_favorable_polytopes": len(records),
+            "expected_favorable_polytopes": _population_completion_status(
+                args.h11, total_favorable
+            )["expected_favorable_polytopes"],
+        }
+    else:
+        population_completion = _population_completion_status(
+            args.h11,
+            len(records),
+        )
     population_complete = population_completion["complete"]
     population_exact_target = (
         targets is not None
@@ -1559,6 +1592,13 @@ def reproduce(args):
             "requested_h11": args.h11,
             "favorable_lattice": "N",
             "record_count": len(records),
+            "shard": {
+                "index": shard_index,
+                "count": shard_count,
+                "is_sharded": is_sharded,
+                "shard_favorable_polytopes": len(records),
+                "total_favorable_polytopes": total_favorable,
+            },
             "population_complete": population_complete,
             "population_completion_basis": population_completion["basis"],
             "population_completion_reason": population_completion["reason"],
@@ -1649,6 +1689,13 @@ def reproduce(args):
     return _jsonable(summary)
 
 
+def _shard_suffix_path(path, shard_index, shard_count):
+    """Insert a deterministic ``.shardNNN-of-MMM`` tag before the file suffix."""
+    path = Path(path)
+    tag = f"shard{int(shard_index):03d}-of-{int(shard_count):03d}"
+    return path.with_name(f"{path.stem}.{tag}{path.suffix}")
+
+
 def _parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parquet-dir", required=True)
@@ -1660,6 +1707,25 @@ def _parse_args(argv=None):
         "3, 4, and 5 have recorded paper targets, others run as diagnostic-only.",
     )
     parser.add_argument("--limit", type=int, default=10**9)
+    parser.add_argument(
+        "--shard-count",
+        type=int,
+        default=1,
+        help=(
+            "Total number of parallel shards. The favorable-polytope population "
+            "is partitioned deterministically (strided by global index) across "
+            "shards so each shard processes a disjoint subset. A sharded run is "
+            "always a partial run; combine the per-shard outputs with "
+            "scripts/merge_orientifold_shards.py to recover population totals and "
+            "completeness. Default 1 (no sharding, behaviour unchanged)."
+        ),
+    )
+    parser.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="0-based index of this shard in [0, --shard-count).",
+    )
     parser.add_argument("--progress", type=int, default=50)
     parser.add_argument("--keep-details", action="store_true")
     parser.add_argument("--orientifold-audit", action="store_true")
@@ -1749,6 +1815,19 @@ def _parse_args(argv=None):
     )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    if args.shard_count < 1:
+        parser.error("--shard-count must be >= 1")
+    if not 0 <= args.shard_index < args.shard_count:
+        parser.error("--shard-index must be in [0, --shard-count)")
+    if args.shard_count > 1:
+        # Give each shard distinct output/ledger paths so the immutability
+        # guards below apply per shard and shards never collide on disk.
+        if args.output is not None:
+            args.output = _shard_suffix_path(args.output, args.shard_index, args.shard_count)
+        if args.terminal_ledger is not None:
+            args.terminal_ledger = _shard_suffix_path(
+                args.terminal_ledger, args.shard_index, args.shard_count
+            )
     if args.orientifold_reason_diagnostics and not args.orientifold_audit:
         parser.error("--orientifold-reason-diagnostics requires --orientifold-audit")
     if args.orientifold_audit and args.output is None and args.terminal_ledger is None:

@@ -86,23 +86,87 @@ _EXTRA_VERTEX_EVIDENCE_NOT_REQUESTED = object()
 
 
 def _exact_rank(matrix):
-    """Return the rank of an integer matrix without floating-point rounding."""
+    """Return the rank of an integer matrix without floating-point rounding.
+
+    Exact rational Gaussian elimination over ``Fraction`` on the small integer
+    matrices this module works with (at most a handful of rows in ``Z^4``).
+    This is bit-for-bit identical to the previous ``sympy.Matrix.rank()`` but
+    ~11x faster; it is a dominant hot spot in the fixed-component search (see
+    validation/2026-08_orientifold_performance_review.md, finding F0).
+    """
 
     array = np.asarray(matrix, dtype=int)
     if array.ndim != 2:
         raise ValueError("matrix must be two-dimensional")
-    if array.shape[0] == 0 or array.shape[1] == 0:
+    rows, columns = array.shape
+    if rows == 0 or columns == 0:
         return 0
-    return int(_SympyMatrix(array.tolist()).rank())
+    reduced = [[Fraction(int(value)) for value in row] for row in array.tolist()]
+    rank = 0
+    pivot_row = 0
+    for column in range(columns):
+        pivot = next(
+            (index for index in range(pivot_row, rows) if reduced[index][column] != 0),
+            None,
+        )
+        if pivot is None:
+            continue
+        reduced[pivot_row], reduced[pivot] = reduced[pivot], reduced[pivot_row]
+        pivot_value = reduced[pivot_row][column]
+        for index in range(rows):
+            if index == pivot_row:
+                continue
+            factor = reduced[index][column] / pivot_value
+            if factor == 0:
+                continue
+            for target in range(column, columns):
+                reduced[index][target] -= factor * reduced[pivot_row][target]
+        pivot_row += 1
+        rank += 1
+        if pivot_row == rows:
+            break
+    return rank
 
 
 def _exact_determinant(matrix):
-    """Return the exact determinant of an integer matrix."""
+    """Return the exact determinant of an integer matrix.
+
+    Fraction-free Bareiss elimination in pure Python ints: exact, no
+    floating-point rounding, and ~54x faster than the previous
+    ``sympy.Matrix.det()`` on the 4x4-and-smaller integer matrices this module
+    evaluates in its tightest loops (see
+    validation/2026-08_orientifold_performance_review.md, finding F0). The
+    result is bit-for-bit identical to the sympy determinant.
+    """
 
     array = np.asarray(matrix, dtype=int)
     if array.ndim != 2 or array.shape[0] != array.shape[1]:
         raise ValueError("matrix must be square")
-    return int(_SympyMatrix(array.tolist()).det())
+    entries = [[int(value) for value in row] for row in array.tolist()]
+    size = len(entries)
+    if size == 0:
+        return 1
+    sign = 1
+    previous_pivot = 1
+    for step in range(size - 1):
+        if entries[step][step] == 0:
+            swap = next(
+                (index for index in range(step + 1, size) if entries[index][step] != 0),
+                None,
+            )
+            if swap is None:
+                return 0
+            entries[step], entries[swap] = entries[swap], entries[step]
+            sign = -sign
+        pivot = entries[step][step]
+        for index in range(step + 1, size):
+            row_head = entries[index][step]
+            for column in range(step + 1, size):
+                entries[index][column] = (
+                    entries[index][column] * pivot - row_head * entries[step][column]
+                ) // previous_pivot
+        previous_pivot = pivot
+    return sign * entries[size - 1][size - 1]
 
 
 def _select_basis_indices(points):
@@ -119,13 +183,56 @@ def _select_basis_indices(points):
     raise ValueError("points do not span a rank-4 lattice; cannot select a basis")
 
 
-def enumerate_polytope_involutions(points):
-    """Enumerate deterministic integer involutions preserving a 4d point set."""
-    points = np.asarray(points, dtype=int)
-    if points.ndim != 2 or points.shape[1] != 4:
-        raise ValueError("points must be an (n, 4) integer array")
+def _involution_sort_key(matrix):
+    return tuple(int(value) for value in np.asarray(matrix, dtype=int).flatten())
 
-    point_set = {tuple(int(value) for value in row) for row in points}
+
+def _preserves_point_set(matrix, point_set):
+    return all(
+        tuple(int(value) for value in (matrix @ np.asarray(point, dtype=int)).tolist())
+        in point_set
+        for point in point_set
+    )
+
+
+def _polytope_involutions_from_automorphisms(poly, point_set):
+    """Fast exact involutions via the CYTools polytope automorphism group.
+
+    ``poly.automorphisms(square_to_one=True, action='left')`` returns exactly
+    the ``SL^pm(4, Z)`` matrices ``L`` with ``L^2 = I`` that leave the polytope
+    -- hence its whole lattice point set -- invariant, acting on column vectors
+    by ``L @ point`` (the convention used throughout this module). Verified
+    equal to the brute-force product search on real KS h11=4 polytopes and
+    ~120x faster (see validation/2026-08_orientifold_performance_review.md,
+    finding F2); the determinant, involution, and point-set guards below make
+    the fast path self-validating so a future convention change cannot silently
+    admit a wrong matrix.
+    """
+
+    involutions = {}
+    for candidate in poly.automorphisms(square_to_one=True, action="left"):
+        matrix = np.asarray(candidate, dtype=int)
+        if matrix.shape != (4, 4):
+            continue
+        if _exact_determinant(matrix) not in (-1, 1):
+            continue
+        if not np.array_equal(matrix @ matrix, IDENTITY):
+            continue
+        if not _preserves_point_set(matrix, point_set):
+            continue
+        involutions[_involution_sort_key(matrix)] = matrix
+    involutions.setdefault(_involution_sort_key(IDENTITY), IDENTITY)
+    return [involutions[key] for key in sorted(involutions)]
+
+
+def _enumerate_polytope_involutions_bruteforce(points, point_set):
+    """Reference brute-force involution search over the raw point set.
+
+    Retained for callers that supply a bare point array without a CYTools
+    object (the fixture tests) and as an executable specification for
+    ``_polytope_involutions_from_automorphisms``.
+    """
+
     basis_indices = _select_basis_indices(points)
     basis_points = points[basis_indices]
     basis_matrix = _SympyMatrix(basis_points.T.tolist())
@@ -151,6 +258,24 @@ def enumerate_polytope_involutions(points):
         involutions[tuple(matrix.flatten().tolist())] = matrix
 
     return [involutions[key] for key in sorted(involutions)]
+
+
+def enumerate_polytope_involutions(points, *, poly=None):
+    """Enumerate deterministic integer involutions preserving a 4d point set.
+
+    When a CYTools ``poly`` is supplied (the production path) use its
+    automorphism group; otherwise fall back to the brute-force product search
+    over the supplied point array. Both return the same sorted list of integer
+    involution matrices acting on column vectors by ``matrix @ point``.
+    """
+    points = np.asarray(points, dtype=int)
+    if points.ndim != 2 or points.shape[1] != 4:
+        raise ValueError("points must be an (n, 4) integer array")
+
+    point_set = {tuple(int(value) for value in row) for row in points}
+    if poly is not None and hasattr(poly, "automorphisms"):
+        return _polytope_involutions_from_automorphisms(poly, point_set)
+    return _enumerate_polytope_involutions_bruteforce(points, point_set)
 
 
 def _fraction_vector(vector):
@@ -562,6 +687,7 @@ def _fixed_component_records(
     lambda_f,
     *,
     fixed_cone_keys,
+    half_ray_cache=None,
 ):
     """Enumerate source eq. (4.30)--(4.35) fixed components.
 
@@ -586,11 +712,21 @@ def _fixed_component_records(
     for source_rays in fixed_cone_keys:
         rays = [tuple(int(value) for value in ray) for ray in source_rays]
         sigma_dimension = _exact_rank(np.asarray(rays, dtype=int)) if rays else 0
-        use_half_ray, shortcut_reason = _half_ray_shortcut_proof(
-            auxiliary_fan,
-            matrix,
-            rays,
-        )
+        # The half-ray shortcut proof depends only on (auxiliary_fan, matrix,
+        # rays) -- all fixed across the 16 torus shifts and both lambda_f
+        # values of a matrix -- so cache it per matrix (finding F3). Bit-for-bit
+        # identical, ~18s of recomputation removed on a 6-polytope h11=4 slice.
+        half_ray_key = tuple(rays)
+        if half_ray_cache is not None and half_ray_key in half_ray_cache:
+            use_half_ray, shortcut_reason = half_ray_cache[half_ray_key]
+        else:
+            use_half_ray, shortcut_reason = _half_ray_shortcut_proof(
+                auxiliary_fan,
+                matrix,
+                rays,
+            )
+            if half_ray_cache is not None:
+                half_ray_cache[half_ray_key] = (use_half_ray, shortcut_reason)
         integrality_method = (
             "smooth_half_ray_eq_4.35"
             if use_half_ray
@@ -2398,6 +2534,7 @@ def classify_smoothness(
     fixed_components,
     topology,
     dual_vertices,
+    section_cache=None,
 ):
     """Classify source smoothness checks without inventing missing evidence."""
     matrix = np.asarray(matrix, dtype=int)
@@ -2461,11 +2598,27 @@ def classify_smoothness(
                     "was not certified"
                 )
             if component["fixed_toric_dimension"] > 0:
-                section_check = _positive_component_section_certificate(
-                    auxiliary_fan,
-                    matrix,
-                    component,
+                # The section certificate depends only on (auxiliary_fan,
+                # matrix, sigma_rays, nu); torus_shift and lambda_f do not
+                # enter it, so cache it per matrix keyed by the component's
+                # (sigma_rays, nu). Bit-for-bit identical (finding F3). The
+                # cached value never carries the per-call "component" field, so
+                # a fresh copy is returned before that field is attached.
+                section_key = (
+                    tuple(tuple(int(value) for value in ray) for ray in component["sigma_rays"]),
+                    json.dumps(component["nu"], sort_keys=True),
                 )
+                if section_cache is not None and section_key in section_cache:
+                    section_check = dict(section_cache[section_key])
+                else:
+                    section_check = _positive_component_section_certificate(
+                        auxiliary_fan,
+                        matrix,
+                        component,
+                    )
+                    if section_cache is not None:
+                        section_cache[section_key] = section_check
+                    section_check = dict(section_check)
                 section_check["component"] = {
                     "sigma_rays": component["sigma_rays"],
                     "sigma_dimension": component["sigma_dimension"],
@@ -2629,7 +2782,7 @@ def enumerate_orientifold_candidates(
 
     records = _RecordCollection()
 
-    for matrix in enumerate_polytope_involutions(points):
+    for matrix in enumerate_polytope_involutions(points, poly=poly):
         fixed_cone_keys = _pointwise_invariant_cone_keys(triangulation_cones, matrix)
         matrix_tuple = tuple(int(value) for value in matrix.flatten())
         matrix_id = stable_hash([polytope_id, frst_hash, matrix_tuple])
@@ -2733,6 +2886,11 @@ def enumerate_orientifold_candidates(
             continue
 
         matrix_records = []
+        # Per-matrix memo caches: the half-ray shortcut proof and the
+        # positive-component section certificate are invariant across this
+        # matrix's torus shifts and lambda_f values (finding F3).
+        half_ray_cache = {}
+        section_cache = {}
         for shift in shifts:
             # ``shift["vector"]`` is a representative of source eq. (4.34)'s
             # H_+^L = P_+^L(N)/(2 P_+^L(N)), whose elements are explicitly
@@ -2823,6 +2981,7 @@ def enumerate_orientifold_candidates(
                         torus_shift,
                         lambda_f,
                         fixed_cone_keys=fixed_cone_keys,
+                        half_ray_cache=half_ray_cache,
                     )
                     smoothness = classify_smoothness(
                         matrix,
@@ -2832,6 +2991,7 @@ def enumerate_orientifold_candidates(
                         fixed_components,
                         matrix_topology,
                         dual_vertices,
+                        section_cache=section_cache,
                     )
                 except Exception as exc:
                     record.update(
