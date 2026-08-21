@@ -4068,6 +4068,7 @@ def load_polytope_manifest(path):
 def load_mirror_polytopes(parquet_dir, h11, limit, favorable):
     """Read favorable N-lattice polytopes from the KS Parquet mirror."""
     try:
+        import pyarrow as pa
         import pyarrow.parquet as parquet
     except ImportError as exc:
         raise RuntimeError(
@@ -4089,15 +4090,27 @@ def load_mirror_polytopes(parquet_dir, h11, limit, favorable):
 
     records = []
     for path in paths:
+        # Predicate pushdown on the physical-h11 (mirror h12) column: decode
+        # only the small h12 column first, skip any partition with no matching
+        # rows, and materialize only the matching rows. The high-vertex KS
+        # partitions hold tens of millions of rows and zero low-h11 polytopes;
+        # the previous unconditional ``table.to_pylist()`` over every row cost
+        # minutes and tens of GB of Python objects per such partition. Row
+        # indices stay the original per-partition positions, so provenance and
+        # outputs are byte-for-byte unchanged.
+        h12_column = parquet.read_table(path, columns=["h12"]).column("h12")
+        match_positions = np.flatnonzero(
+            h12_column.to_numpy(zero_copy_only=False) == int(h11)
+        )
+        if match_positions.size == 0:
+            continue
         table = parquet.read_table(
             path, columns=["vertices", "vertex_count", "h11", "h12"]
-        )
-        for row_index, row in enumerate(table.to_pylist()):
+        ).take(pa.array(match_positions))
+        for row_index, row in zip(match_positions.tolist(), table.to_pylist()):
             # The published mirror uses the dual Hodge-label convention:
-            # physical h11 is the mirror h12 column.
+            # physical h11 is the mirror h12 column (== h11 here by pushdown).
             physical_h11 = int(row["h12"])
-            if physical_h11 != int(h11):
-                continue
             vertices = np.asarray(row["vertices"], dtype=int)
             poly = Polytope(vertices, deterministic_glsm_basis=True)
             if int(poly.h11()) != int(h11):
