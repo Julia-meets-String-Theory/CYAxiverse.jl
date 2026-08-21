@@ -561,16 +561,15 @@ def _frozen_conifold_diagnostic(triangulation, p0):
         if not ray_indices:
             continue
         p_index, q_index = ray_indices
-        n_rays = vectors.shape[0]
-        l2 = 0.0
-        l_dp = 0.0
-        l_dq = 0.0
-        for r in range(1, n_rays + 1):
-            for s in range(1, n_rays + 1):
-                l2 += tensor[p_index, q_index, r, s]
-            l_dp += tensor[p_index, q_index, r, p_index]
-            l_dq += tensor[p_index, q_index, r, q_index]
-        dpdq = tensor[p_index, q_index, p_index, q_index]
+        # Vectorised over the fan rays (indices 1..n_rays; index 0 is the
+        # canonical divisor, excluded as in the original double loop). Exact
+        # integer-valued tensor entries make the numpy sums identical to the
+        # sequential Python sums before rounding (finding F4).
+        block = tensor[p_index, q_index]
+        l2 = block[1:, 1:].sum()
+        l_dp = block[1:, p_index].sum()
+        l_dq = block[1:, q_index].sum()
+        dpdq = block[p_index, q_index]
         n_s = int(round(l2 - l_dp - l_dq + dpdq))
         surface_records.append(
             {

@@ -83,6 +83,9 @@ IDENTITY = np.eye(4, dtype=int)
 # Distinguish an omitted optional extension check from an explicitly failed
 # extraction.  The latter must remain unavailable evidence, not an empty set.
 _EXTRA_VERTEX_EVIDENCE_NOT_REQUESTED = object()
+# Cache of base Hermite normal forms keyed by generator columns (finding F6).
+# Keys are 4x4 integer tuples; the set of distinct generators in a run is small.
+_BASE_HNF_CACHE = {}
 
 
 def _exact_rank(matrix):
@@ -347,9 +350,20 @@ def _integer_lattice_membership(generator_columns, target):
     without CYTools objects regardless), so using it for exact Hermite
     normal form arithmetic adds no new environment requirement.
     """
-    generator_matrix = _SympyMatrix(np.asarray(generator_columns, dtype=int).tolist())
+    # The base HNF depends only on ``generator_columns`` (fixed across a whole
+    # projected-lattice enumeration), so cache it and recompute only the
+    # augmented HNF per target (finding F6). Exact; only avoids recomputation.
+    generator_key = tuple(
+        tuple(int(value) for value in row)
+        for row in np.asarray(generator_columns, dtype=int).tolist()
+    )
+    cached = _BASE_HNF_CACHE.get(generator_key)
+    if cached is None:
+        generator_matrix = _SympyMatrix([list(row) for row in generator_key])
+        cached = (_hermite_normal_form(generator_matrix), generator_matrix)
+        _BASE_HNF_CACHE[generator_key] = cached
+    base_hnf, generator_matrix = cached
     target_vector = _SympyMatrix(np.asarray(target, dtype=int).reshape(-1, 1).tolist())
-    base_hnf = _hermite_normal_form(generator_matrix)
     augmented_hnf = _hermite_normal_form(generator_matrix.row_join(target_vector))
     return base_hnf == augmented_hnf
 
@@ -994,14 +1008,15 @@ def _n_s_for_two_ray_cone(tensor, vectors, ray_points):
             return None
         ray_indices.append(int(matches[0]) + 1)
     p_index, q_index = ray_indices
-    n_rays = vectors.shape[0]
-    l2 = l_dp = l_dq = 0.0
-    for r in range(1, n_rays + 1):
-        for s in range(1, n_rays + 1):
-            l2 += tensor[p_index, q_index, r, s]
-        l_dp += tensor[p_index, q_index, r, p_index]
-        l_dq += tensor[p_index, q_index, r, q_index]
-    dpdq = tensor[p_index, q_index, p_index, q_index]
+    # Vectorised over the fan rays (indices 1..n_rays; index 0 is the canonical
+    # divisor and is excluded, as in the original double loop). The tensor
+    # entries are exact small integers stored as floats, so the numpy sums are
+    # exactly equal to the sequential Python sums before rounding (finding F4).
+    block = tensor[p_index, q_index]
+    l2 = block[1:, 1:].sum()
+    l_dp = block[1:, p_index].sum()
+    l_dq = block[1:, q_index].sum()
+    dpdq = block[p_index, q_index]
     return int(round(l2 - l_dp - l_dq + dpdq))
 
 

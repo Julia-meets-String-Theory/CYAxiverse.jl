@@ -79,15 +79,30 @@ re-evaluates completeness and Table 1 claim status against the merged totals.
 `--shard-count 1` (default) is a byte-for-byte no-op. Works on one multicore
 box (`&`) and on SLURM job arrays.
 
-### F4 — Vectorise the O(n²) tensor loops — **pending**
-`_n_s_for_two_ray_cone` (`:863`) and `_frozen_conifold_diagnostic`
-(`reproduce…:568`) sum the ambient intersection tensor with pure-Python
-`for r: for s:`. Replace with `tensor[p,q].sum()` etc. Low priority at
-`h11 ≤ 10` (small tensors); becomes relevant with F7.
+**Operational notes for sharded runs (measured, not assumed):**
+1. **Give each shard an isolated `HOME`, `XDG_CACHE_HOME`, and
+   `NUMBA_CACHE_DIR`.** Pointing several shards at one cache directory
+   serialises CYTools on a shared lock — observed dropping six shards to ~7%
+   CPU each with zero throughput. Isolated caches restore ~100% CPU per shard.
+2. **Parallelism is memory-bound, not core-bound.** Each CYTools worker holds
+   ~2 GB resident; six concurrent workers exhausted a ~16 GB machine, driving
+   it into swap-thrash and uninterruptible waits (cores appear idle). Cap the
+   shard count at roughly `RAM / 2 GB`, independent of core count.
+3. Pin BLAS/OpenMP to one thread per shard (`OMP_NUM_THREADS=1`,
+   `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`) so shards do not oversubscribe.
 
-### F6 — Integer HNF membership — **pending, minor**
-`_integer_lattice_membership` (`:205`) uses sympy HNF (~1.3 s). Fold into the
-F0 integer-arithmetic pass if convenient.
+### F4 — Vectorise the O(n²) tensor loops — **DONE, verified**
+`_n_s_for_two_ray_cone` and `_frozen_conifold_diagnostic` (`reproduce…`) summed
+the ambient intersection tensor with a pure-Python `for r: for s:`. Replaced
+with numpy slice sums (`block[1:,1:].sum()` etc.). The tensor entries are exact
+integer-valued floats, so the sums are identical before rounding; ledger
+byte-identical.
+
+### F6 — Cache the base Hermite normal form — **DONE, verified**
+`_integer_lattice_membership` (`:205`) recomputed `HNF(generator_columns)` on
+every call though the generators are fixed across a projected-lattice
+enumeration. Cached the base HNF (`_BASE_HNF_CACHE`) so only the augmented HNF
+is recomputed per target. Exact; ledger byte-identical.
 
 ### F7 — Large-`h11` scaling ceilings — **deferred to a sampling mode**
 For the exhaustive `h11 ≤ 10` target these are handled by F0/F2/F5. They are
@@ -104,10 +119,18 @@ constant-factor work; the plan is a separate **sampling** mode (deferred):
 
 ## Verification protocol used
 
-For each of F0/F2/F3/F5: (a) `python -m unittest` on the three orientifold
-test modules stays green (66 tests); (b) a real `h11=4` slice run produces a
-terminal-ledger JSONL that is **byte-identical** to the pre-change run
-(`diff` empty); F5 additionally verified by an `h11=2` single-run vs
-2-shard-plus-merge equivalence. Changes are performance-only and carry **no
-version impact** to scientific results; the reproduction/ledger schema
-versions are unchanged.
+For each of F0/F2/F3/F4/F5/F6: (a) `python -m unittest` on the orientifold +
+merge test modules stays green (73 tests); (b) a real `h11=4` slice run
+produces a terminal-ledger JSONL that is **byte-identical** to the pre-change
+run (`diff` empty); F5 additionally verified by an `h11=2` single-run vs
+2-shard-plus-merge equivalence.
+
+**Full-population validation.** The complete `h11=2` favorable population (36
+polytopes) run with **all** optimisations across 4 shards and merged reproduces
+the pre-optimisation committed baseline **exactly**: record_count 3106,
+class_count 36, `accepted_verified_orientifold` 569, `fixed_point_set_non_smooth`
+1600, and every other terminal-status and record-kind count; `favorable_polytopes
+= 36` equals the Table 1 target, so `population_complete = True`.
+
+Changes are performance-only and carry **no version impact** to scientific
+results; the reproduction/ledger schema versions are unchanged.
