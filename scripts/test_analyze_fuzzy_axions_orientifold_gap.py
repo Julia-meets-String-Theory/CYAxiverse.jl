@@ -3,6 +3,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import analyze_fuzzy_axions_orientifold_gap as gap
 from orientifold_terminal_ledger import TerminalLedgerWriter
@@ -327,9 +328,39 @@ class GapClassifierUnitTests(unittest.TestCase):
         )
         self.assertEqual(len(categories), 4)
 
-    def test_h11_four_is_rejected_by_scope(self):
-        with self.assertRaises(gap.ArtifactError):
-            gap.load_artifact(H11_2, 4)
+    def test_unsupported_h11_is_rejected_by_scope(self):
+        # The scope guard fires before any file access.
+        with self.assertRaisesRegex(gap.ArtifactError, "supports"):
+            gap.load_artifact(H11_2, 6)
+
+    def test_h11_four_and_five_are_now_supported(self):
+        self.assertIn(4, gap.SUPPORTED_H11)
+        self.assertIn(5, gap.SUPPORTED_H11)
+
+    def test_source_verified_table_1_targets(self):
+        # arXiv:2412.12012v1 Table 1 / tab:ScanData, source-verified.
+        self.assertEqual(
+            gap.TABLE_1_TARGETS[4],
+            {
+                "favorable_polytopes": 1185,
+                "frst_classes": 1760,
+                "inherited_orientifold_cys": 1559,
+                "h11_minus_zero_orientifold_cys": 1554,
+                "h11_minus_zero_h21_plus_zero_orientifold_cys": 267,
+                "models": 3348,
+            },
+        )
+        self.assertEqual(
+            gap.TABLE_1_TARGETS[5],
+            {
+                "favorable_polytopes": 4897,
+                "frst_classes": 11713,
+                "inherited_orientifold_cys": 9530,
+                "h11_minus_zero_orientifold_cys": 9459,
+                "h11_minus_zero_h21_plus_zero_orientifold_cys": 1033,
+                "models": 29898,
+            },
+        )
 
     def test_aggregate_gap_is_not_treated_as_class_id_mapping(self):
         result = gap._comparison(253, 80)
@@ -354,6 +385,291 @@ class GapClassifierUnitTests(unittest.TestCase):
             gap._class_level_audit(data, 2)
 
 
+def _geo_matrix_row(polytope_index, class_index, normal_form_id):
+    row = _matrix_row(
+        class_index,
+        polytope_id=f"polytope-{polytope_index}",
+        frst_hash=f"frst-{polytope_index}-{class_index}",
+    )
+    row["polytope_index"] = polytope_index
+    row["polytope_normal_form_id"] = normal_form_id
+    row["matrix_id"] = f"matrix-{polytope_index}-{class_index}"
+    row["candidate_id"] = f"matrix-{polytope_index}-{class_index}"
+    return row
+
+
+def _geo_candidate_row(polytope_index, class_index, normal_form_id, candidate_id, status, *, lambda_f):
+    row = _candidate_row(
+        class_index,
+        candidate_id,
+        status,
+        lambda_f=lambda_f,
+        polytope_id=f"polytope-{polytope_index}",
+        frst_hash=f"frst-{polytope_index}-{class_index}",
+    )
+    row["polytope_index"] = polytope_index
+    row["polytope_normal_form_id"] = normal_form_id
+    row["matrix_id"] = f"matrix-{polytope_index}-{class_index}"
+    return row
+
+
+def _shard_ledger(rows, *, prefix="cyax-gap-shard-"):
+    """Write one shard's rows to a real JSONL sidecar; return (dir, summary)."""
+    directory = tempfile.TemporaryDirectory(prefix=prefix)
+    path = Path(directory.name) / "ledger.jsonl"
+    writer = TerminalLedgerWriter(path, provenance=_provenance())
+    for row in rows:
+        writer.write(row)
+    summary = writer.close()
+    return directory, summary
+
+
+# A synthetic Table 1 entry so the sharded path can be exercised without
+# un-gating the real (source-verification-pending) h11=4/5 targets.
+_SYNTH_H11 = 97
+_SYNTH_TARGETS = {
+    "favorable_polytopes": 2,
+    "frst_classes": 4,
+    "inherited_orientifold_cys": 3,
+    "h11_minus_zero_orientifold_cys": 3,
+    "h11_minus_zero_h21_plus_zero_orientifold_cys": 1,
+    "models": 5,
+}
+
+
+def _shard_artifact(summary, *, index, count, shard_favorable, total_favorable, counts):
+    return {
+        "schema_version": gap.REPRODUCTION_SCHEMA_VERSION,
+        "run_provenance": {"source_commit": "fixture-commit"},
+        "input": {
+            "requested_h11": _SYNTH_H11,
+            "population_complete": False,
+            "shard": {
+                "index": index,
+                "count": count,
+                "is_sharded": True,
+                "shard_favorable_polytopes": shard_favorable,
+                "total_favorable_polytopes": total_favorable,
+            },
+        },
+        "counts": counts,
+        "paper_targets": dict(_SYNTH_TARGETS),
+        "terminal_ledger": summary,
+    }
+
+
+def _two_shard_population():
+    """Build a disjoint two-shard population: 4 classes, 1 certified, 1 unavailable."""
+    dir0, summary0 = _shard_ledger(
+        [
+            _geo_matrix_row(0, 0, "nf-0"),
+            _geo_candidate_row(0, 0, "nf-0", "o3-accept", "accepted_verified_orientifold", lambda_f=1),
+            _geo_matrix_row(0, 1, "nf-0"),
+            _geo_candidate_row(0, 1, "nf-0", "o3-unavail", "smoothness_verification_unavailable", lambda_f=1),
+        ]
+    )
+    dir1, summary1 = _shard_ledger(
+        [
+            _geo_matrix_row(1, 0, "nf-1"),
+            _geo_candidate_row(1, 0, "nf-1", "o3-rej-a", "fixed_point_set_non_smooth", lambda_f=1),
+            _geo_matrix_row(1, 1, "nf-1"),
+            _geo_candidate_row(1, 1, "nf-1", "o3-rej-b", "torus_shift_not_involution", lambda_f=1),
+        ]
+    )
+    shard0 = _shard_artifact(
+        summary0,
+        index=0,
+        count=2,
+        shard_favorable=1,
+        total_favorable=2,
+        counts={
+            "favorable_polytopes": 1,
+            "frst_classes": 2,
+            "source_evidence_inherited_orientifold_cys": 1,
+            "source_evidence_h11_minus_zero_orientifold_cys": 1,
+            "h21_plus_zero_trilayer_frst_classes": 1,
+        },
+    )
+    shard1 = _shard_artifact(
+        summary1,
+        index=1,
+        count=2,
+        shard_favorable=1,
+        total_favorable=2,
+        counts={
+            "favorable_polytopes": 1,
+            "frst_classes": 2,
+            "source_evidence_inherited_orientifold_cys": 0,
+            "source_evidence_h11_minus_zero_orientifold_cys": 0,
+            "h21_plus_zero_trilayer_frst_classes": 0,
+        },
+    )
+    return (dir0, dir1), [shard0, shard1]
+
+
+class ShardedTerminalLedgerUnitTests(unittest.TestCase):
+    def test_union_of_disjoint_shards_builds_one_exhaustive_funnel(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+
+        result = gap._sharded_terminal_ledger_audit(
+            [(shards[0], Path("shard0.json"), None), (shards[1], Path("shard1.json"), None)],
+            expected_frst_classes=4,
+            source_label="fixture",
+        )
+
+        self.assertEqual(result["total_frst_class_count"], 4)
+        self.assertEqual(result["certified_class_count"], 1)
+        self.assertEqual(
+            result["category_counts"],
+            {
+                "certified_inherited": 1,
+                "unaccepted_exhaustive_terminal_rejection": 2,
+                "unaccepted_exhaustive_with_unavailable_evidence": 1,
+            },
+        )
+        self.assertEqual(result["shard_count"], 2)
+        self.assertEqual(result["shard_class_counts"], [2, 2])
+        self.assertEqual(result["class_identity_basis"], "polytope_normal_form_id")
+        self.assertIsNone(result["sidecar_sha256"])
+        self.assertEqual(len(result["shard_sidecar_sha256"]), 2)
+
+    def test_class_repeated_across_shards_is_a_disjointness_error(self):
+        # Both shards claim the same geometry identity (nf-dup, class 0).
+        dir0, summary0 = _shard_ledger(
+            [
+                _geo_matrix_row(0, 0, "nf-dup"),
+                _geo_candidate_row(0, 0, "nf-dup", "o3-a", "fixed_point_set_non_smooth", lambda_f=1),
+            ]
+        )
+        dir1, summary1 = _shard_ledger(
+            [
+                _geo_matrix_row(9, 0, "nf-dup"),
+                _geo_candidate_row(9, 0, "nf-dup", "o3-b", "fixed_point_set_non_smooth", lambda_f=1),
+            ]
+        )
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+
+        with self.assertRaisesRegex(gap.ArtifactError, "not disjoint by geometry"):
+            gap._sharded_terminal_ledger_audit(
+                [
+                    ({"terminal_ledger": summary0}, Path("s0.json"), None),
+                    ({"terminal_ledger": summary1}, Path("s1.json"), None),
+                ],
+                expected_frst_classes=1,
+                source_label="fixture",
+            )
+
+    def test_wrong_expected_class_count_is_rejected(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+
+        with self.assertRaisesRegex(gap.ArtifactError, "expected 5"):
+            gap._sharded_terminal_ledger_audit(
+                [(shards[0], Path("s0.json"), None), (shards[1], Path("s1.json"), None)],
+                expected_frst_classes=5,
+                source_label="fixture",
+            )
+
+    def test_shard_record_count_metadata_mismatch_is_rejected(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+        shards[0]["terminal_ledger"] = dict(shards[0]["terminal_ledger"])
+        shards[0]["terminal_ledger"]["record_count"] += 1
+
+        with self.assertRaisesRegex(gap.ArtifactError, "record count does not match"):
+            gap._sharded_terminal_ledger_audit(
+                [(shards[0], Path("s0.json"), None), (shards[1], Path("s1.json"), None)],
+                expected_frst_classes=4,
+                source_label="fixture",
+            )
+
+    def test_sidecar_sha_mismatch_is_rejected(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+        shards[0]["terminal_ledger"] = dict(shards[0]["terminal_ledger"])
+        shards[0]["terminal_ledger"]["sidecar_sha256"] = "0" * 64
+
+        with self.assertRaisesRegex(gap.ArtifactError, "SHA-256 does not match"):
+            gap._sharded_terminal_ledger_audit(
+                [(shards[0], Path("s0.json"), None), (shards[1], Path("s1.json"), None)],
+                expected_frst_classes=4,
+                source_label="fixture",
+            )
+
+
+class ShardedAnalysisTests(unittest.TestCase):
+    def _patched(self):
+        targets = dict(gap.TABLE_1_TARGETS)
+        targets[_SYNTH_H11] = dict(_SYNTH_TARGETS)
+        return (
+            mock.patch.object(gap, "SUPPORTED_H11", (2, 3, _SYNTH_H11)),
+            mock.patch.object(gap, "TABLE_1_TARGETS", targets),
+        )
+
+    def test_end_to_end_sharded_accounting(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+        supported, table = self._patched()
+        with supported, table:
+            analysis = gap.analyze_sharded_artifact(
+                shards,
+                _SYNTH_H11,
+                sidecars=[None, None],
+                source_paths=[Path("s0.json"), Path("s1.json")],
+            )
+
+        self.assertTrue(analysis["population"]["population_complete"])
+        inherited = analysis["orientifold_comparison"]["inherited_orientifold_cys"]
+        self.assertEqual(inherited["code_output"], 1)
+        self.assertEqual(inherited["target_gap_count"], 2)
+        ceiling = inherited["conditional_ceiling"]
+        self.assertEqual(ceiling["certified_code_count"], 1)
+        self.assertEqual(ceiling["candidate_linked_unavailable_class_count"], 1)
+        self.assertEqual(ceiling["conditional_ceiling_count"], 2)
+        self.assertEqual(ceiling["conditional_ceiling_deficit"], 1)
+        self.assertEqual(analysis["class_level_audit"]["certified_class_count"], 1)
+        self.assertEqual(analysis["terminal_ledger_audit"]["shard_count"], 2)
+
+    def test_incomplete_shard_set_is_rejected(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+        supported, table = self._patched()
+        with supported, table, self.assertRaisesRegex(gap.ArtifactError, "shard indices"):
+            gap._validate_sharded_artifacts(
+                [shards[0], shards[0]], _SYNTH_H11, [Path("s0.json"), Path("s0b.json")]
+            )
+
+    def test_mismatched_paper_targets_rejected(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+        shards[1]["paper_targets"] = dict(shards[1]["paper_targets"])
+        shards[1]["paper_targets"]["inherited_orientifold_cys"] = 999
+        supported, table = self._patched()
+        with supported, table, self.assertRaisesRegex(gap.ArtifactError, "paper_targets"):
+            gap._validate_sharded_artifacts(
+                shards, _SYNTH_H11, [Path("s0.json"), Path("s1.json")]
+            )
+
+    def test_sharded_h11_gate_still_blocks_unsupported_h11(self):
+        (dir0, dir1), shards = _two_shard_population()
+        self.addCleanup(dir0.cleanup)
+        self.addCleanup(dir1.cleanup)
+        # Without patching SUPPORTED_H11, the synthetic h11 is refused.
+        with self.assertRaisesRegex(gap.ArtifactError, "sharded analysis supports"):
+            gap._validate_sharded_artifacts(
+                shards, _SYNTH_H11, [Path("s0.json"), Path("s1.json")]
+            )
+
+
 @unittest.skipUnless(H11_2.exists() and H11_3.exists(), "corrected audit artifacts are absent")
 class CorrectedArtifactIntegrationTests(unittest.TestCase):
     @classmethod
@@ -361,9 +677,11 @@ class CorrectedArtifactIntegrationTests(unittest.TestCase):
         cls.result = gap.analyze_paths({2: H11_2, 3: H11_3})
         cls.by_h11 = {entry["h11"]: entry for entry in cls.result["analyses"]}
 
-    def test_scope_excludes_superseded_h11_four(self):
+    def test_single_artifact_scope_defers_sharded_h11(self):
         self.assertEqual(self.result["scope"]["h11"], [2, 3])
-        self.assertEqual(self.result["scope"]["excluded_h11"], [4])
+        self.assertEqual(
+            self.result["scope"]["sharded_h11_analyzed_separately"], [4, 5]
+        )
 
     def test_h11_two_class_level_accounting(self):
         entry = self.by_h11[2]
