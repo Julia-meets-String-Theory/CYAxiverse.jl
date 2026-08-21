@@ -88,7 +88,8 @@ The physical construction controls include `--max-m`,
 CYTools index for the canonical-QCD moduli policy.
 
 The optional `intersecting_d7` policy is a geometry-derived toy assignment.
-It requires a validated O3/O7 orientifold with `h11_minus=0`, selects an
+It requires a validated O3/O7 orientifold, records any computed
+`h11_plus`/`h11_minus` split, and selects an
 orientifold-invariant prime divisor intersecting QCD, derives its exact
 integer divisor-basis charge, and verifies that the corresponding potential
 term is present. It is not a global tadpole, matter-spectrum, or physical

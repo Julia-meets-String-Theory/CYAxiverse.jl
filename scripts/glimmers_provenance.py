@@ -107,6 +107,11 @@ def stable_seed(*parts) -> int:
     return int.from_bytes(bytes.fromhex(stable_digest(parts)[:16]), "big") & ((1 << 63) - 1)
 
 
+def cytools_seed(*parts) -> int:
+    """Derive a deterministic seed accepted by CYTools' 32-bit RNG APIs."""
+    return stable_seed(*parts) & ((1 << 32) - 1)
+
+
 def sha256_file(path, *, chunk_size: int = 1024 * 1024) -> str:
     """Hash one input file, raising the required terminal status when absent."""
     resolved = Path(path).expanduser().resolve()
@@ -430,6 +435,7 @@ __all__ = [
     "host_and_thread_settings",
     "production_provenance_gate",
     "sha256_file",
+    "cytools_seed",
     "stable_digest",
     "stable_seed",
     "validate_provenance_digest",

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import math
 import os
 import time
 from collections import Counter, defaultdict
@@ -29,15 +30,22 @@ MAXIMUM_EFT_ROWS = 200_000
 # yet moved to the explicit minimum/ceiling vocabulary.
 TARGET_EFT_ROWS = MAXIMUM_EFT_ROWS
 QCD_VOLUME_TARGET = 40.0
+QCD_VOLUME_TOLERANCE = 1e-9
+DIVISOR_VOLUME_TOLERANCE = 1e-8
 QED_VOLUME_MAX = 127.5
 STORAGE_HARD_STOP_BYTES = 2 * 1024**3
+PRODUCTION_COMPLETE_DATASET_STATUS = "production_complete"
+DIAGNOSTIC_PARTIAL_DATASET_STATUS = "diagnostic_partial"
+MODEL_TARGET_SHORTFALL_STATUS = "model_target_shortfall"
 
 
 def _jsonable(value):
     if isinstance(value, np.ndarray):
         return value.tolist()
     if isinstance(value, (np.integer, np.floating, np.bool_)):
-        return value.item()
+        value = value.item()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
     if isinstance(value, (tuple, list)):
         return [_jsonable(item) for item in value]
     if isinstance(value, dict):
@@ -64,6 +72,44 @@ def stable_seed(*parts):
     """Derive a process-independent non-negative NumPy-compatible seed."""
     digest = stable_hash(parts)
     return int.from_bytes(bytes.fromhex(digest[:16]), byteorder="big") & ((1 << 63) - 1)
+
+
+def reconcile_eft_capacity(
+    validated_capacity,
+    rows_written,
+    *,
+    minimum_rows=MINIMUM_EFT_ROWS,
+    maximum_rows=MAXIMUM_EFT_ROWS,
+):
+    """Reconcile validated assignment capacity with the emitted row table."""
+    capacity = int(validated_capacity)
+    rows = int(rows_written)
+    minimum, target = _validate_row_bounds(minimum_rows, maximum_rows)
+    if capacity < 0 or rows < 0:
+        raise ValueError("validated capacity and rows written must be non-negative")
+    if rows > capacity:
+        raise ValueError("rows written cannot exceed validated assignment capacity")
+    if rows > target:
+        raise ValueError("rows written cannot exceed the exact row target")
+    production_complete = rows == target
+    return {
+        "validated_assignment_capacity": capacity,
+        "rows_written": rows,
+        "requested_target": target,
+        "minimum_acceptable": minimum,
+        "capacity_shortfall": max(0, target - capacity),
+        "row_shortfall": max(0, target - rows),
+        "minimum_shortfall": max(0, minimum - rows),
+        "minimum_reached": rows >= minimum,
+        "production_complete": production_complete,
+        "diagnostic_success": True,
+        "dataset_status": (
+            PRODUCTION_COMPLETE_DATASET_STATUS
+            if production_complete
+            else DIAGNOSTIC_PARTIAL_DATASET_STATUS
+        ),
+        "model_target_shortfall": not production_complete,
+    }
 
 
 class CapacityAllocation(dict):
@@ -249,10 +295,156 @@ def allocate_eft_quotas(
 
 
 def row_assignment_seed(base_seed, geometry_id, row_index):
-    """Return the deterministic seed recorded for one EFT-reference row."""
+    """Return the deterministic seed recorded for one EFT draw."""
     if int(row_index) < 0:
         raise ValueError("row_index must be non-negative")
     return stable_seed("glimmers-eft-row", int(base_seed), str(geometry_id), int(row_index))
+
+
+def sample_pool_with_replacement(
+    pool_size,
+    quota,
+    geometry_id,
+    base_seed,
+    *,
+    assignment_hashes=None,
+    callback=None,
+    draw_cap=None,
+    eligible_pool_ranks=None,
+):
+    """Draw ordered assignments with replacement and collapse accepted duplicates.
+
+    ``quota`` is the requested number of unique accepted rows for one geometry.
+    The deterministic draw cap is ``10 * quota`` unless ``draw_cap`` is supplied
+    explicitly by a caller that is reproducing the same approved policy.  A
+    callback may reject a draw by returning ``{"accepted": False, ...}``; the
+    sampler then draws again from the same geometry.  A duplicate of an already
+    accepted assignment is counted and collapsed without invoking the callback.
+    """
+    pool_size = int(pool_size)
+    quota = int(quota)
+    if pool_size < 0 or quota < 0:
+        raise ValueError("pool_size and quota must be non-negative")
+    if assignment_hashes is None:
+        hashes = [str(index) for index in range(pool_size)]
+    else:
+        hashes = [_stable_text(value) for value in assignment_hashes]
+        if len(hashes) != pool_size:
+            raise ValueError("assignment_hashes must contain one hash per pool rank")
+    if len(set(hashes)) != len(hashes):
+        raise ValueError("assignment hashes must be unique within one geometry")
+    if eligible_pool_ranks is None:
+        eligible = list(range(pool_size))
+    else:
+        eligible = [int(rank) for rank in eligible_pool_ranks]
+        if len(set(eligible)) != len(eligible) or any(
+            rank < 0 or rank >= pool_size for rank in eligible
+        ):
+            raise ValueError("eligible pool ranks must be unique and in range")
+    if draw_cap is None:
+        draw_cap = 10 * quota
+    draw_cap = int(draw_cap)
+    if draw_cap < 0:
+        raise ValueError("draw_cap must be non-negative")
+    if quota and draw_cap == 0:
+        raise ValueError("a positive quota requires a positive draw_cap")
+
+    if not eligible:
+        return {
+            "geometry_id": str(geometry_id),
+            "requested_unique_rows": quota,
+            "draw_cap": draw_cap,
+            "total_draws": 0,
+            "accepted_unique_rows": 0,
+            "duplicate_draws": 0,
+            "failed_draws": 0,
+            "cap_induced_capacity_shortfall": quota,
+            "failure_status_counts": {},
+            "failure_reason_counts": {},
+            "eligible_assignment_capacity": 0,
+            "raw_assignment_pool_capacity": pool_size,
+            "rows": [],
+        }
+
+    accepted = []
+    accepted_hashes = set()
+    duplicate_draws = 0
+    failed_draws = 0
+    failure_status_counts = Counter()
+    failure_reason_counts = Counter()
+    total_draws = 0
+
+    while len(accepted) < quota and total_draws < draw_cap:
+        draw_index = total_draws
+        draw_seed = row_assignment_seed(base_seed, geometry_id, draw_index)
+        total_draws += 1
+        pool_rank = eligible[
+            int(np.random.default_rng(draw_seed).integers(len(eligible)))
+        ]
+        assignment_hash = hashes[pool_rank]
+        if assignment_hash in accepted_hashes:
+            duplicate_draws += 1
+            continue
+
+        result = {"accepted": True}
+        if callback is not None:
+            try:
+                result = callback(pool_rank, draw_seed, draw_index)
+            except Exception as error:  # pragma: no cover - defensive boundary
+                result = {
+                    "accepted": False,
+                    "status": getattr(error, "terminal_status", "invalid_row_schema"),
+                    "reason": f"{type(error).__name__}: {error}",
+                }
+            if not isinstance(result, Mapping) or "accepted" not in result:
+                raise TypeError(
+                    "assignment draw callback must return a mapping with an 'accepted' field"
+                )
+        if not bool(result["accepted"]):
+            failed_draws += 1
+            status = _stable_text(result.get("status", "invalid_row_schema"))
+            reason = _stable_text(result.get("reason", "row construction failed"))
+            failure_status_counts[status] += 1
+            failure_reason_counts[reason] += 1
+            continue
+
+        accepted_hashes.add(assignment_hash)
+        record = dict(result.get("record", {}))
+        record.update(
+            {
+                "geometry_id": str(geometry_id),
+                "assignment_pool_size": pool_size,
+                "pool_size": pool_size,
+                "assignment_pool_rank": pool_rank,
+                "sampled_rank": pool_rank,
+                "sampled_pool_rank": pool_rank,
+                "row_index": len(accepted),
+                "draw_index": draw_index,
+                "row_seed": draw_seed,
+                "draw_seed": draw_seed,
+                "model_seed": draw_seed,
+                "assignment_hash": assignment_hash,
+            }
+        )
+        accepted.append(record)
+
+    accepted_unique_rows = len(accepted)
+    cap_induced_shortfall = max(0, quota - accepted_unique_rows) if total_draws >= draw_cap else 0
+    return {
+        "geometry_id": str(geometry_id),
+        "requested_unique_rows": quota,
+        "draw_cap": draw_cap,
+        "total_draws": total_draws,
+        "accepted_unique_rows": accepted_unique_rows,
+        "duplicate_draws": duplicate_draws,
+        "failed_draws": failed_draws,
+        "cap_induced_capacity_shortfall": cap_induced_shortfall,
+        "failure_status_counts": dict(sorted(failure_status_counts.items())),
+        "failure_reason_counts": dict(sorted(failure_reason_counts.items())),
+        "eligible_assignment_capacity": len(eligible),
+        "raw_assignment_pool_capacity": pool_size,
+        "rows": accepted,
+    }
 
 
 def sample_pool_without_replacement(
@@ -349,18 +541,22 @@ def sample_capacity_aware_assignments(
     *,
     minimum_rows=MINIMUM_EFT_ROWS,
     maximum_rows=MAXIMUM_EFT_ROWS,
+    row_callback=None,
+    eligible_pool_ranks=None,
 ):
     """Allocate and sample complete assignment-hash pools deterministically.
 
     ``assignment_pools`` is a mapping from a stable geometry ID to an ordered
     sequence of assignment hashes.  The sequence order is the persisted pool
-    rank order.  Return a JSON-compatible record containing the global
-    allocation, row-level replay metadata, conservation counts, and terminal
-    stop reason.  Rows are emitted in stable geometry-hash order, not in input
-    or worker completion order.
+    rank order.  Production sampling is with replacement; accepted duplicate
+    identities are collapsed, and an optional callback can reject a draw and
+    trigger another draw from the same geometry.  Return a JSON-compatible
+    record containing the global allocation, row-level replay metadata,
+    per-geometry draw accounting, and terminal stop reason.  Rows are emitted
+    in stable geometry-hash order, not in input or worker completion order.
     """
-    if not isinstance(assignment_pools, Mapping) or not assignment_pools:
-        raise ValueError("assignment_pools must be a non-empty geometry mapping")
+    if not isinstance(assignment_pools, Mapping):
+        raise ValueError("assignment_pools must be a geometry mapping")
     identifiers = [str(identifier) for identifier in assignment_pools]
     pools = {}
     for identifier, raw_pool in assignment_pools.items():
@@ -385,55 +581,144 @@ def sample_capacity_aware_assignments(
         pools[stable_identifier] = hashes
     if len(pools) != len(identifiers):
         raise ValueError("geometry IDs must be unique after string normalization")
+    eligible = {}
+    for identifier in identifiers:
+        if eligible_pool_ranks is None:
+            eligible[identifier] = list(range(len(pools[identifier])))
+            continue
+        if identifier not in eligible_pool_ranks:
+            raise ValueError(
+                "eligible_pool_ranks must contain one entry for every geometry ID"
+            )
+        ranks = [int(rank) for rank in eligible_pool_ranks[identifier]]
+        if len(set(ranks)) != len(ranks) or any(
+            rank < 0 or rank >= len(pools[identifier]) for rank in ranks
+        ):
+            raise ValueError("eligible pool ranks must be unique and in range")
+        eligible[identifier] = ranks
+    if not identifiers:
+        reconciliation = reconcile_eft_capacity(
+            0,
+            0,
+            minimum_rows=minimum_rows,
+            maximum_rows=maximum_rows,
+        )
+        return {
+            "allocation": {
+                "quotas": {},
+                "pool_capacity_known": True,
+                "pool_sizes": {},
+                "ordered_geometry_ids": [],
+                "requested_minimum": int(minimum_rows),
+                "ceiling": int(maximum_rows),
+                "minimum_rows": int(minimum_rows),
+                "maximum_rows": int(maximum_rows),
+                "maximum_feasible_rows": 0,
+                "accepted_count": 0,
+                "minimum_reached": False,
+                "successful": False,
+                "stop_reason": MODEL_TARGET_SHORTFALL_STATUS,
+                "terminal_status": MODEL_TARGET_SHORTFALL_STATUS,
+            },
+            "rows": [],
+            "requested_minimum": int(minimum_rows),
+            "ceiling": int(maximum_rows),
+            "maximum_feasible_rows": 0,
+            "planned_accepted_count": 0,
+            "accepted_count": 0,
+            "minimum_reached": False,
+            "planned_stop_reason": MODEL_TARGET_SHORTFALL_STATUS,
+            "actual_stop_reason": MODEL_TARGET_SHORTFALL_STATUS,
+            "stop_reason": MODEL_TARGET_SHORTFALL_STATUS,
+            "terminal_status": MODEL_TARGET_SHORTFALL_STATUS,
+            "successful": False,
+            "raw_assignment_capacity": 0,
+            "validated_assignment_capacity": 0,
+            "reconciliation": reconciliation,
+            "per_geometry_sampling": {},
+            "conservation": {
+                "accepted_rows": 0,
+                "sum_allocated_quotas": 0,
+                "pool_capacity": 0,
+                "validated_assignment_capacity": 0,
+                "distinct_sampled_ranks": {},
+            },
+            "claim_boundary": "adapted_finite_model_table_not_exact_200000_reproduction",
+        }
     allocation = allocate_eft_quotas(
         identifiers,
-        {identifier: len(pools[identifier]) for identifier in identifiers},
+        {identifier: len(eligible[identifier]) for identifier in identifiers},
         minimum_rows=minimum_rows,
         maximum_rows=maximum_rows,
     )
     rows = []
+    per_geometry_sampling = {}
     for identifier in allocation.ordered_geometry_ids:
-        rows.extend(
-            sample_pool_without_replacement(
-                len(pools[identifier]),
-                allocation[identifier],
-                identifier,
-                base_seed,
-                assignment_hashes=pools[identifier],
-                requested_minimum=allocation.requested_minimum,
-                ceiling=allocation.ceiling,
-                accepted_count=allocation.accepted_count,
-                stop_reason=allocation.stop_reason,
-                return_records=True,
-            )
+        def geometry_callback(pool_rank, draw_seed, draw_index, *, _identifier=identifier):
+            if row_callback is None:
+                return {"accepted": True}
+            return row_callback(_identifier, pool_rank, draw_seed, draw_index)
+
+        sampling = sample_pool_with_replacement(
+            len(pools[identifier]),
+            allocation[identifier],
+            identifier,
+            base_seed,
+            assignment_hashes=pools[identifier],
+            callback=geometry_callback,
+            eligible_pool_ranks=eligible[identifier],
         )
-    counts = Counter(row["geometry_id"] for row in rows)
-    if sum(counts.values()) != allocation.accepted_count:
-        raise AssertionError("sampled rows do not conserve the allocated count")
-    if any(counts[identifier] != allocation[identifier] for identifier in identifiers):
-        raise AssertionError("sampled rows do not conserve per-geometry quotas")
-    hashes_by_geometry = defaultdict(set)
-    for row in rows:
-        assignment_hash = row["assignment_hash"]
-        if assignment_hash is not None:
-            if assignment_hash in hashes_by_geometry[row["geometry_id"]]:
-                raise AssertionError("duplicate assignment hash sampled within geometry")
-            hashes_by_geometry[row["geometry_id"]].add(assignment_hash)
+        per_geometry_sampling[identifier] = {
+            key: value
+            for key, value in sampling.items()
+            if key != "rows"
+        }
+        rows.extend(sampling["rows"])
+    accepted_count = len(rows)
+    planned_count = allocation.accepted_count
+    if accepted_count < minimum_rows:
+        stop_reason = "model_target_shortfall"
+        terminal_status = "model_target_shortfall"
+    elif accepted_count >= maximum_rows:
+        stop_reason = "ceiling_reached"
+        terminal_status = "model_ceiling_reached"
+    elif accepted_count < planned_count:
+        stop_reason = "capacity_exhausted"
+        terminal_status = "model_minimum_reached"
+    else:
+        stop_reason = allocation.stop_reason
+        terminal_status = allocation.terminal_status
+    validated_capacity = sum(len(eligible[identifier]) for identifier in identifiers)
+    raw_capacity = sum(len(pools[identifier]) for identifier in identifiers)
+    reconciliation = reconcile_eft_capacity(
+        validated_capacity,
+        accepted_count,
+        minimum_rows=minimum_rows,
+        maximum_rows=maximum_rows,
+    )
     return {
         "allocation": allocation.to_dict(),
         "rows": rows,
         "requested_minimum": allocation.requested_minimum,
         "ceiling": allocation.ceiling,
         "maximum_feasible_rows": allocation.maximum_feasible_rows,
-        "accepted_count": allocation.accepted_count,
-        "minimum_reached": allocation.minimum_reached,
-        "stop_reason": allocation.stop_reason,
-        "terminal_status": allocation.terminal_status,
-        "successful": allocation.successful,
+        "planned_accepted_count": planned_count,
+        "accepted_count": accepted_count,
+        "minimum_reached": accepted_count >= minimum_rows,
+        "planned_stop_reason": allocation.stop_reason,
+        "actual_stop_reason": stop_reason,
+        "stop_reason": stop_reason,
+        "terminal_status": terminal_status,
+        "successful": accepted_count >= minimum_rows,
+        "raw_assignment_capacity": raw_capacity,
+        "validated_assignment_capacity": validated_capacity,
+        "reconciliation": reconciliation,
+        "per_geometry_sampling": per_geometry_sampling,
         "conservation": {
             "accepted_rows": len(rows),
-            "sum_allocated_quotas": sum(allocation.values()),
-            "pool_capacity": sum(len(pool) for pool in pools.values()),
+            "sum_allocated_quotas": planned_count,
+            "pool_capacity": raw_capacity,
+            "validated_assignment_capacity": validated_capacity,
             "distinct_sampled_ranks": {
                 identifier: len(
                     {
@@ -457,7 +742,8 @@ def normalize_qcd_assignment(
     target=QCD_VOLUME_TARGET,
     min_prime=1.0,
     min_effective=1.0,
-    atol=1e-9,
+    qcd_volume_tolerance=QCD_VOLUME_TOLERANCE,
+    divisor_volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
 ):
     """Apply and validate homogeneous QCD normalization for one assignment."""
     prime = np.asarray(prime_volumes, dtype=float).reshape(-1)
@@ -469,21 +755,33 @@ def normalize_qcd_assignment(
         raise ValueError("normalization reference volumes or qcd_index are invalid")
     if prime[qcd_index] <= 0.0:
         raise ValueError("QCD reference volume must be positive")
+    qcd_volume_tolerance = float(qcd_volume_tolerance)
+    divisor_volume_tolerance = float(divisor_volume_tolerance)
+    if (
+        not np.isfinite(qcd_volume_tolerance)
+        or qcd_volume_tolerance < 0.0
+        or not np.isfinite(divisor_volume_tolerance)
+        or divisor_volume_tolerance < 0.0
+    ):
+        raise ValueError("normalization tolerances must be finite and non-negative")
     radial_scale = float(np.sqrt(float(target) / prime[qcd_index]))
     scale_squared = radial_scale**2
     normalized_prime = scale_squared * prime
     normalized_effective = scale_squared * effective
-    # Keep the serialized contract exact even when the intermediate IEEE-754
-    # square/root round trip lands one ulp away from the requested decimal.
-    normalized_prime[qcd_index] = float(target)
-    qcd_volume = float(target)
+    qcd_volume = float(normalized_prime[qcd_index])
     minimum_prime = float(np.min(normalized_prime))
     minimum_effective = float(np.min(normalized_effective))
-    if not np.isclose(qcd_volume, float(target), rtol=0.0, atol=atol):
+    if not np.all(np.isfinite(normalized_prime)) or not np.all(
+        np.isfinite(normalized_effective)
+    ):
+        raise ValueError("post-normalization volumes are not finite")
+    if not np.isclose(
+        qcd_volume, float(target), rtol=0.0, atol=qcd_volume_tolerance
+    ):
         raise ValueError("post-normalization QCD volume is not exactly the target")
-    if minimum_prime < float(min_prime) - atol:
+    if minimum_prime < float(min_prime) - divisor_volume_tolerance:
         raise ValueError("post-normalization prime-divisor minimum is below one")
-    if minimum_effective < float(min_effective) - atol:
+    if minimum_effective < float(min_effective) - divisor_volume_tolerance:
         raise ValueError("post-normalization effective-divisor minimum is below one")
     return {
         "qcd_index": qcd_index,
@@ -495,8 +793,15 @@ def normalize_qcd_assignment(
         "minimum_prime_volume": minimum_prime,
         "minimum_effective_volume": minimum_effective,
         "target": float(target),
+        "qcd_volume_tolerance": qcd_volume_tolerance,
+        "divisor_volume_tolerance": divisor_volume_tolerance,
+        "qcd_volume_residual": abs(qcd_volume - float(target)),
         "normalization_map_version": NORMALIZATION_MAP_VERSION,
-        "qcd_volume_exact": True,
+        "qcd_volume_exact": bool(
+            np.isclose(
+                qcd_volume, float(target), rtol=0.0, atol=qcd_volume_tolerance
+            )
+        ),
     }
 
 
@@ -512,6 +817,8 @@ def enumerate_assignment_pool(
     qcd_volume_target=QCD_VOLUME_TARGET,
     min_prime_volume=1.0,
     min_effective_volume=1.0,
+    qcd_volume_tolerance=QCD_VOLUME_TOLERANCE,
+    divisor_volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
     qed_volume_max=QED_VOLUME_MAX,
 ):
     """Enumerate every eligible ordered ``(QCD, QED)`` pair for a geometry."""
@@ -540,6 +847,8 @@ def enumerate_assignment_pool(
                 target=qcd_volume_target,
                 min_prime=min_prime_volume,
                 min_effective=min_effective_volume,
+                qcd_volume_tolerance=qcd_volume_tolerance,
+                divisor_volume_tolerance=divisor_volume_tolerance,
             )
         except ValueError:
             continue
@@ -556,7 +865,7 @@ def enumerate_assignment_pool(
             if not evidence:
                 continue
             qed_volume = float(normalization["prime_volumes"][qed_index])
-            if not qed_volume < float(qed_volume_max):
+            if not qed_volume <= float(qed_volume_max):
                 continue
             assignment = {
                 "qcd_divisor_index": qcd_index,
@@ -572,9 +881,12 @@ def enumerate_assignment_pool(
                 "qcd_radial_scale": normalization["radial_scale"],
                 "qcd_volume_scale": normalization["volume_scale"],
                 "qcd_volume_target": normalization["target"],
-                "qcd_volume_exact": True,
+                "qcd_volume_tolerance": normalization["qcd_volume_tolerance"],
+                "divisor_volume_tolerance": normalization["divisor_volume_tolerance"],
+                "qcd_volume_residual": normalization["qcd_volume_residual"],
+                "qcd_volume_exact": normalization["qcd_volume_exact"],
                 "all_divisor_minimums_valid": True,
-                "qed_volume_filter": "strictly_less_than_127.5",
+                "qed_volume_filter": "less_than_or_equal_to_127.5",
                 "qcd_qed_intersection": True,
                 "intersection_evidence": [list(face) for face in evidence],
                 "intersection_evidence_convention": (
@@ -675,6 +987,20 @@ def atomic_jsonl_dump(path, records):
     _atomic_bytes(path, encoded)
 
 
+def append_jsonl_record(path, record):
+    """Append one serializable JSONL record and flush it to stable storage."""
+    path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    encoded = (
+        json.dumps(_jsonable(record), sort_keys=True, allow_nan=False).encode("utf-8")
+        + b"\n"
+    )
+    with open(path, "ab") as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
 def ensure_fresh_output_root(path):
     """Create an output root only when it is absent or genuinely empty."""
     path = os.path.abspath(path)
@@ -739,7 +1065,7 @@ def estimate_storage(root, model_rows=0, estimated_row_bytes=256):
     return estimate
 
 
-def write_eft_parquet(path, rows):
+def write_eft_parquet(path, rows, *, metadata=None):
     """Write one compressed Parquet table atomically; require pyarrow explicitly."""
     try:
         import pyarrow as pa
@@ -754,6 +1080,15 @@ def write_eft_parquet(path, rows):
         raise FileExistsError(f"output collision: {path}")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     table = pa.Table.from_pylist([_jsonable(row) for row in rows])
+    if metadata:
+        schema_metadata = dict(table.schema.metadata or {})
+        schema_metadata.update(
+            {
+                str(key).encode("utf-8"): str(value).encode("utf-8")
+                for key, value in metadata.items()
+            }
+        )
+        table = table.replace_schema_metadata(schema_metadata)
     temporary = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
     try:
         parquet.write_table(table, temporary, compression="zstd", use_dictionary=True)

@@ -4,8 +4,7 @@ using Random
 using SparseArrays
 using Test
 using HDF5
-using Random
-using ArbNumerics
+using ArbNumerics: ArbFloat, precision, setprecision
 
 @testset "Core plotting API stays optional" begin
     @test Base.get_extension(CYAxiverse, :CYAxiverseCairoMakieExt) === nothing
@@ -1219,6 +1218,377 @@ end
     expected_kinetic_eigenvalues = sort([8.20e-4, 6.35e-4, 5.97e-4, 3.13e-4,
                                          1.24e-4, 9.15e-5, 8.30e-5, 5.84e-5])
     @test all(isapprox.(eigvals(geometry.kinetic), expected_kinetic_eigenvalues; rtol=6e-3))
+
+    @testset "Fuzzy-axion mass-scale formulas (arXiv:2412.12012)" begin
+        mplanck_ev = Float64(CYAxiverse.generate.constants()["MPlanck"]) * 1e9
+
+        @test CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(1.0) == 0.0
+        @test isapprox(CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(exp(1)), -2.0)
+        @test isapprox(CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(exp(2)), -4.0)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(0.0)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(-1.0)
+
+        @test isapprox(CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(1.0), 1.0 / 128.0)
+        # arXiv:2412.12012: "For the reasonable reference value gs = 0.5, we
+        # have P ~ 5 * 10^-4, and this is the value we have used in our main
+        # analysis." Quoted to one significant figure.
+        p_reference = CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(0.5)
+        @test isapprox(p_reference, 0.5^4 / 128.0)
+        @test isapprox(round(p_reference; digits=4), 5e-4)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(0.0)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(-0.5)
+
+        w_default = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(1e-5)
+        @test isapprox(real(w_default), 1e-5)
+        @test imag(w_default) == 0.0
+        w_real_terms = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(
+            1e-5, [0.1, -0.05])
+        @test isapprox(real(w_real_terms), 1e-5 + 0.1 - 0.05)
+        w_complex_terms = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(
+            0.0, [0.1 + 0.2im])
+        @test isapprox(real(w_complex_terms), 0.1)
+        @test isapprox(imag(w_complex_terms), 0.2)
+
+        # P=1, K=0, |W|=1 -> m_3/2 = Mpl exactly.
+        @test isapprox(
+            CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(1.0, 0.0, 1.0),
+            mplanck_ev)
+        # P=1, K=-2 (fuzzy_axion_kahler_potential(e)), |W|=1 -> m_3/2 = Mpl / e.
+        @test isapprox(
+            CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(
+                1.0, CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(exp(1)), 1.0),
+            mplanck_ev / exp(1))
+        # |W| = |3+4i| = 5.
+        @test isapprox(
+            CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(1.0, 0.0, 3.0 + 4.0im),
+            5.0 * mplanck_ev)
+        @test_throws ArgumentError CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(
+            -1.0, 0.0, 1.0)
+    end
+
+    @testset "Fuzzy-axion model-stage evaluator (arXiv:2412.12012 Algorithm 1)" begin
+        PB = CYAxiverse.paper_benchmarks
+        G = CYAxiverse.generate
+
+        Q = Int[
+            1 0 -1 2 6 0 0 4
+            0 1  1 0 0 0 0 -2
+            0 0  0 1 3 1 0 1
+            0 0 -1 1 3 0 1 2
+        ]
+        tau = Float64[0.5, 8.0, 0.5, 11.0, 33.0, 3.0, 7.0, 3.0000001]
+        Kinv = [
+            1.0 0.1 0.05 0.0
+            0.1 1.0 0.1 0.05
+            0.05 0.1 1.0 0.1
+            0.0 0.05 0.1 1.0
+        ]
+
+        # `leading_axion_reference_data`'s Cholesky/canonical-frame/unit-conversion
+        # plumbing must exactly reproduce the established public
+        # `pq_spectrum(K, L, Q; mixing_correction=false)` API when the eq. 3.18
+        # prefactor injection is neutralized (8*pi*sqrt(P)*m32/V == 1). This
+        # isolates "did I wire the existing, already-used mass machinery
+        # correctly" from "is eq. 3.19's own normalization convention exactly
+        # right", the latter being inherited, untouched, from the existing
+        # pq_canonical_frame/pq_spectrum implementation.
+        P_neutral = 1.0
+        V_neutral = 1.0
+        m32_neutral = 1.0 / (8π)
+        reference_neutral = PB.leading_axion_reference_data(
+            Q, tau, V_neutral, P_neutral, m32_neutral, Kinv)
+        Kmetric = Hermitian(inv(Hermitian(Kinv)))
+        L_raw = PB.instanton_scales(tau, 1.0)
+        established = G.pq_spectrum(Kmetric, L_raw, Q; mixing_correction=false)
+        @test isapprox(
+            sort(reference_neutral.mass_log10_ev_reference), established.m; atol=1e-8)
+
+        # The eq. 3.18 prefactor log10(8*pi*sqrt(P)*m32/V) is a uniform
+        # additive shift to log10(Lambda^4) that changes by 0.5*Δlog10(P)
+        # when only P changes; since m ~ sqrt(Lambda^4), every reference mass
+        # must then shift by half of *that*, i.e. 0.25*Δlog10(P) overall.
+        P_other = 4.0
+        reference_other = PB.leading_axion_reference_data(
+            Q, tau, V_neutral, P_other, m32_neutral, Kinv)
+        expected_shift = 0.25 * (log10(P_other) - log10(P_neutral))
+        @test all(isapprox.(
+            reference_other.mass_log10_ev_reference .-
+                reference_neutral.mass_log10_ev_reference,
+            expected_shift; atol=1e-8))
+
+        # Every selected leading charge column must be an exact original
+        # column of Q (LQtilde selects raw columns, never transforms them),
+        # and each reference tau must be minable back from that column's
+        # position in the input tau vector.
+        for a in axes(reference_neutral.Qtilde, 2)
+            column = @view reference_neutral.Qtilde[:, a]
+            match = findfirst(j -> @view(Q[:, j]) == column, axes(Q, 2))
+            @test match !== nothing
+            @test reference_neutral.tau_reference[a] == tau[match]
+        end
+
+        # Closed-form lambda root: exact inversion of eq. 3.24-3.27's
+        # m(lambda)^2 = m(1)^2 * exp(-2*pi*tau(1)*(lambda^2-1)).
+        m_ref = 1e10
+        tau_ref = 5.0
+        lambda = PB.fuzzy_axion_dilation_root(m_ref, tau_ref)
+        @test lambda !== nothing
+        m_at_lambda = sqrt(m_ref^2 * exp(-2π * tau_ref * (lambda^2 - 1)))
+        @test isapprox(m_at_lambda, PB.FUZZY_AXION_MASS_TARGET_EV; rtol=1e-10)
+        # Algorithm 1 quantifies over lambda in R+ with no lower bound of 1
+        # (Sec. 4.1's literal "for lambda in {lambda in R+ | ...}"), so a
+        # reference mass already at or below the target can still have a
+        # valid *contracting* root (lambda < 1) -- verified directly against
+        # the same closed-form relation used above.
+        lambda_contract = PB.fuzzy_axion_dilation_root(1e-19, tau_ref)
+        @test lambda_contract !== nothing
+        @test lambda_contract < 1.0
+        m_at_lambda_contract = sqrt(1e-19^2 * exp(-2π * tau_ref * (lambda_contract^2 - 1)))
+        @test isapprox(m_at_lambda_contract, PB.FUZZY_AXION_MASS_TARGET_EV; rtol=1e-10)
+        # Genuinely no real root: the reference mass is far enough below the
+        # target that even lambda -> 0 cannot raise it back up.
+        @test PB.fuzzy_axion_dilation_root(1e-30, tau_ref) === nothing
+        @test_throws ArgumentError PB.fuzzy_axion_dilation_root(-1.0, tau_ref)
+        @test_throws ArgumentError PB.fuzzy_axion_dilation_root(m_ref, -1.0)
+        @test_throws ArgumentError PB.fuzzy_axion_dilation_root(
+            m_ref, tau_ref; mass_target_ev=0.0)
+
+        # Criterion 1: tau -> lambda^2*tau uniformly; boundary is inclusive.
+        @test PB.fuzzy_axion_criterion_one([1.0, 2.0, 0.5], 1.0) == false
+        @test PB.fuzzy_axion_criterion_one([1.0, 2.0, 1.0], 1.0) == true
+        @test PB.fuzzy_axion_criterion_one([0.25, 2.0], 2.0) == true
+        @test_throws ArgumentError PB.fuzzy_axion_criterion_one([1.0], -1.0)
+
+        # Criterion 2: inclusive [25, 40] window on the QCD divisor's volume.
+        @test PB.fuzzy_axion_criterion_two(30.0, 1.0) == true
+        @test PB.fuzzy_axion_criterion_two(24.999, 1.0) == false
+        @test PB.fuzzy_axion_criterion_two(40.001, 1.0) == false
+        @test PB.fuzzy_axion_criterion_two(25.0, 1.0) == true
+        @test PB.fuzzy_axion_criterion_two(40.0, 1.0) == true
+        @test_throws ArgumentError PB.fuzzy_axion_criterion_two(30.0, 0.0)
+
+        # End-to-end: every returned (D, a) model must independently satisfy
+        # all three criteria at its own lambda -- re-derived here from the
+        # function's own inputs/outputs, not merely trusted from its return
+        # value, to catch a criterion evaluated against the wrong lambda or
+        # the wrong divisor index.
+        P_real = CYAxiverse.paper_benchmarks.fuzzy_axion_prefactor_P(0.5)
+        V_real = 9.0
+        K_real = CYAxiverse.paper_benchmarks.fuzzy_axion_kahler_potential(V_real)
+        W_real = CYAxiverse.paper_benchmarks.fuzzy_axion_flux_superpotential(1e-5)
+        m32_real = CYAxiverse.paper_benchmarks.fuzzy_axion_gravitino_mass(
+            P_real, K_real, abs(W_real); mplanck_ev=1.0)
+        models = PB.enumerate_fuzzy_axion_models(Q, tau, V_real, P_real, m32_real, Kinv)
+        @test !isempty(models)
+        for model in models
+            @test PB.fuzzy_axion_criterion_one(tau, model.lambda)
+            @test PB.fuzzy_axion_criterion_two(
+                tau[model.qcd_divisor_index], model.lambda)
+            # Re-derived in log10 space, matching how enumerate_fuzzy_axion_models
+            # itself solves for lambda -- the linear form can underflow to
+            # exactly 0.0 for a strongly-suppressed sub-leading instanton
+            # (see fuzzy_axion_dilation_root's docstring).
+            log10_m_check = model.mass_reference_log10_ev -
+                (π * model.tau_reference * (model.lambda^2 - 1)) / log(10)
+            @test isapprox(log10_m_check, log10(PB.FUZZY_AXION_MASS_TARGET_EV); atol=1e-8)
+        end
+        # Every model's qcd_divisor_index and axion_index must be valid,
+        # in-range references into the input arrays.
+        @test all(1 <= m.qcd_divisor_index <= length(tau) for m in models)
+        @test all(1 <= m.axion_index <= size(reference_neutral.Qtilde, 2) for m in models)
+
+        @test_throws ArgumentError PB.leading_axion_reference_data(
+            Q, tau, -1.0, P_real, m32_real, Kinv)
+        @test_throws ArgumentError PB.leading_axion_reference_data(
+            Q, tau, V_real, -1.0, m32_real, Kinv)
+        @test_throws ArgumentError PB.leading_axion_reference_data(
+            Q, tau, V_real, P_real, -1.0, Kinv)
+        @test_throws DimensionMismatch PB.leading_axion_reference_data(
+            Q, tau, V_real, P_real, m32_real, Kinv[1:3, 1:3])
+        @test_throws DimensionMismatch PB.leading_axion_reference_data(
+            Q, tau[1:end-1], V_real, P_real, m32_real, Kinv)
+
+        # Regression for a real full-h11=4-population failure (priority 4,
+        # record index 46 of the 285-record h21_plus_zero-accepted export):
+        # a sub-leading (4th-ranked) instanton with tau_reference=306.0 gave
+        # mass_log10_ev_reference=-390.15, and 10.0^(-390.15) underflows to
+        # exactly 0.0 in Float64 (Float64's smallest positive value is
+        # ~5e-324) -- enumerate_fuzzy_axion_models used to compute
+        # `10.0^log10_mass` before root-solving and crashed with
+        # "mass_reference_ev must be positive" on this exact input. Confirmed
+        # live against the real export record, not fabricated.
+        @test 10.0^(-390.1476386436961) == 0.0
+        lambda_underflow_avoided = PB.fuzzy_axion_dilation_root_log10(
+            -390.1476386436961, 306.0000364594718)
+        @test lambda_underflow_avoided !== nothing
+        @test isfinite(lambda_underflow_avoided)
+        # Hand-derived expectation: argument = 1 + ln(10)*(log10_m - log10(target))/(pi*tau)
+        expected_argument = 1.0 + log(10.0) *
+            (-390.1476386436961 - log10(PB.FUZZY_AXION_MASS_TARGET_EV)) /
+            (π * 306.0000364594718)
+        @test isapprox(lambda_underflow_avoided, sqrt(expected_argument); rtol=1e-10)
+
+        Q_record46 = Int[
+            1 0 0 1 0 0 0 1
+            0 1 1 -2 0 0 0 -6
+            0 0 1 -3 1 1 0 -8
+            0 0 0 -1 0 0 1 -3
+        ]
+        tau_record46 = Float64[
+            3039.5003719815713, 97.5000132125037, 403.5000496719755,
+            1925.0002361800668, 306.0000364594718, 306.0000364594718,
+            1.499999998081662, 2.0000010365299246,
+        ]
+        cy_volume_record46 = 5741.334389020104
+        Kinv_record46 = [
+            1.2358372022962462e7 312722.4226720411 1.3089883116565086e6 18237.00220856627
+            312722.4226720411 428435.77269930055 -271070.73200224846 -22380.337504440147
+            1.3089883116565086e6 -271070.73200224846 374544.0892527923 -21129.337304245895
+            18237.00220856627 -22380.337504440147 -21129.337304245895 114835.68772785066
+        ]
+        P_record46 = PB.fuzzy_axion_prefactor_P(0.5)
+        K_record46 = PB.fuzzy_axion_kahler_potential(cy_volume_record46)
+        W_record46 = PB.fuzzy_axion_flux_superpotential(1.0)
+        m32_record46 = PB.fuzzy_axion_gravitino_mass(
+            P_record46, K_record46, abs(W_record46); mplanck_ev=1.0)
+        models_record46 = PB.enumerate_fuzzy_axion_models(
+            Q_record46, tau_record46, cy_volume_record46, P_record46, m32_record46,
+            Kinv_record46)
+        for model in models_record46
+            @test PB.fuzzy_axion_criterion_one(tau_record46, model.lambda)
+            @test PB.fuzzy_axion_criterion_two(
+                tau_record46[model.qcd_divisor_index], model.lambda)
+            @test isfinite(model.mass_reference_log10_ev)
+        end
+
+        # Self-reference is NOT excluded: a candidate QCD divisor equal to
+        # axion `a`'s own divisor is a valid Algorithm-1 model, matching the
+        # paper's literal text (see enumerate_fuzzy_axion_models's
+        # docstring). Real geometry, not synthetic: the paper's own h1,1=2
+        # worked example (Sec. 4.2.1, eq. 4.2-4.4), evaluated at the genuine
+        # Algorithm-1 canonical Kahler-cone-tip point (CYTools
+        # `kahler_cone.tip_of_stretched_cone(1.0)`, NOT the paper's own
+        # hand-picked illustrative t*) -- confirmed against the paper's text
+        # that toric divisor D6 (tau=0.5 here) is "the QCD axion" and D2
+        # (tau=2.5) is "the fuzzy axion". Of this geometry's 3 generated
+        # models, 2 are self-referential (axion 1 paired with its own
+        # divisor D6, axion 2 paired with its own divisor D2) and 1 is not
+        # (axion 2 paired with the distinct-but-same-volume divisor D3),
+        # per
+        # validation/fuzzy_axions_2412_12012_model_count_gap_scope_20260818.md
+        # Sec. 0/0b's population-wide measurement that self-referential
+        # pairing is the modal outcome (69% mean, present in every one of
+        # 267 records), not a rare case worth excluding.
+        Q_h11_2 = [7 1 1 2 3 0; 2 0 0 0 1 1]
+        tau_h11_2 = [18.499999999999993, 2.499999999999999, 2.499999999999999,
+            4.999999999999998, 7.9999999999999964, 0.49999999999999956]
+        cy_volume_h11_2 = 3.4999999999999982
+        Kinv_h11_2 = [11.0 -9.0; -9.0 43.0]
+        P_h11_2 = PB.fuzzy_axion_prefactor_P(0.5029733)
+        K_h11_2 = PB.fuzzy_axion_kahler_potential(cy_volume_h11_2)
+        W_h11_2 = PB.fuzzy_axion_flux_superpotential(1.0)
+        m32_h11_2 = PB.fuzzy_axion_gravitino_mass(
+            P_h11_2, K_h11_2, abs(W_h11_2); mplanck_ev=1.0)
+        reference_h11_2 = PB.leading_axion_reference_data(
+            Q_h11_2, tau_h11_2, cy_volume_h11_2, P_h11_2, m32_h11_2, Kinv_h11_2)
+        # divisor_index must round-trip exactly back through Q/tau.
+        for a in eachindex(reference_h11_2.divisor_index)
+            @test @view(Q_h11_2[:, reference_h11_2.divisor_index[a]]) ==
+                @view(reference_h11_2.Qtilde[:, a])
+            @test tau_h11_2[reference_h11_2.divisor_index[a]] ==
+                reference_h11_2.tau_reference[a]
+        end
+        models_h11_2 = PB.enumerate_fuzzy_axion_models(
+            Q_h11_2, tau_h11_2, cy_volume_h11_2, P_h11_2, m32_h11_2, Kinv_h11_2)
+        @test length(models_h11_2) == 3
+        self_referential = [
+            model.qcd_divisor_index == reference_h11_2.divisor_index[model.axion_index]
+            for model in models_h11_2
+        ]
+        @test count(self_referential) == 2
+        @test any(
+            model.axion_index == 1 && model.qcd_divisor_index == 6
+            for model in models_h11_2
+        )
+        @test any(
+            model.axion_index == 2 && model.qcd_divisor_index == 2
+            for model in models_h11_2
+        )
+        # A distinct divisor that merely happens to share the same volume
+        # (D2 and D3 both have tau=2.5 here) is a different physical 4-cycle
+        # and is not self-referential.
+        @test any(
+            model.axion_index == 2 && model.qcd_divisor_index == 3
+            for model in models_h11_2
+        )
+
+        # `qcd_divisor_domain=:leading_nonself` -- the opt-in candidate
+        # restriction of Algorithm 1's `for D` loop to the h1,1 leading-
+        # instanton divisors minus the fuzzy axion's own
+        # (validation/fuzzy_axions_2412_12012_sampler_reverse_engineering_20260818.md
+        # Sec. 3.3). It must not perturb the default path, must reject an
+        # unknown domain, and must produce exactly the subset the rule
+        # names -- checked here against a real h1,1=3 export record so the
+        # restricted set is non-empty, not vacuously so.
+        @test PB.FUZZY_AXION_QCD_DIVISOR_DOMAINS == (:all_prime, :leading_nonself)
+        @test PB.enumerate_fuzzy_axion_models(Q_h11_2, tau_h11_2, cy_volume_h11_2,
+            P_h11_2, m32_h11_2, Kinv_h11_2; qcd_divisor_domain=:all_prime) == models_h11_2
+        @test_throws ArgumentError PB.enumerate_fuzzy_axion_models(
+            Q_h11_2, tau_h11_2, cy_volume_h11_2, P_h11_2, m32_h11_2, Kinv_h11_2;
+            qcd_divisor_domain=:leading)
+        # Both of this geometry's leading divisors (D6, tau=0.5; D2, tau=2.5)
+        # fail criterion 2 at the *other* axion's lambda, so the restriction
+        # empties it: all 3 default models here are self-paired or pair with
+        # D3, which hosts no leading instanton.
+        @test isempty(PB.enumerate_fuzzy_axion_models(Q_h11_2, tau_h11_2, cy_volume_h11_2,
+            P_h11_2, m32_h11_2, Kinv_h11_2; qcd_divisor_domain=:leading_nonself))
+
+        # Real h1,1=3 export record (record 0 of the full h1,1=3 population,
+        # validation/fuzzy_axions_supp/model_count_gap_20260818/h11_3_detail.json).
+        # Leading divisors are D1, D2, D7; the default domain accepts 10
+        # models, the restriction keeps exactly (axion 1, D2) and
+        # (axion 2, D1) -- axion 3's lambda puts the two remaining leading
+        # divisors at tau ~ 22, below criterion 2's floor of 25.
+        Q_h11_3 = [1 0 0 4 1 0 2; 0 1 1 0 0 0 -2; 0 0 0 2 0 1 1]
+        tau_h11_3 = [2.000000000261836, 2.000000000397189, 2.000000000397189,
+            14.000000002208573, 2.000000000261836, 3.0000000005806142,
+            3.000000000309908]
+        cy_volume_h11_3 = 3.6666666675483235
+        Kinv_h11_3 = [16.000000004189374 1.3333333337988176 -20.0000000053531
+            1.3333333337988176 16.000000006355023 9.333333337232721
+            -20.0000000053531 9.333333337232721 94.66666669585791]
+        P_h11_3 = PB.fuzzy_axion_prefactor_P(0.5)
+        K_h11_3 = PB.fuzzy_axion_kahler_potential(cy_volume_h11_3)
+        W_h11_3 = PB.fuzzy_axion_flux_superpotential(1.0)
+        m32_h11_3 = PB.fuzzy_axion_gravitino_mass(
+            P_h11_3, K_h11_3, abs(W_h11_3); mplanck_ev=1.0)
+        reference_h11_3 = PB.leading_axion_reference_data(
+            Q_h11_3, tau_h11_3, cy_volume_h11_3, P_h11_3, m32_h11_3, Kinv_h11_3)
+        @test reference_h11_3.divisor_index == [1, 2, 7]
+        models_h11_3 = PB.enumerate_fuzzy_axion_models(Q_h11_3, tau_h11_3,
+            cy_volume_h11_3, P_h11_3, m32_h11_3, Kinv_h11_3)
+        @test length(models_h11_3) == 10
+        restricted_h11_3 = PB.enumerate_fuzzy_axion_models(Q_h11_3, tau_h11_3,
+            cy_volume_h11_3, P_h11_3, m32_h11_3, Kinv_h11_3;
+            qcd_divisor_domain=:leading_nonself)
+        @test [(m.axion_index, m.qcd_divisor_index) for m in restricted_h11_3] ==
+            [(1, 2), (2, 1)]
+        # The restriction only ever removes candidates: same lambda, same
+        # reference mass, same tau_reference for every surviving pair.
+        for restricted in restricted_h11_3
+            match = only(filter(m -> m.axion_index == restricted.axion_index &&
+                    m.qcd_divisor_index == restricted.qcd_divisor_index, models_h11_3))
+            @test restricted == match
+        end
+        # Every surviving pair satisfies the rule's own three conditions.
+        for restricted in restricted_h11_3
+            @test restricted.qcd_divisor_index in reference_h11_3.divisor_index
+            @test restricted.qcd_divisor_index !=
+                reference_h11_3.divisor_index[restricted.axion_index]
+            @test PB.fuzzy_axion_criterion_two(
+                tau_h11_3[restricted.qcd_divisor_index], restricted.lambda)
+        end
+    end
 end
 
 @testset "HP spectrum: one-axion analytic mass" begin
@@ -1363,6 +1733,196 @@ end
     end
 end
 
+@testset "Concrete arbitrary-precision scales and L_arb layout" begin
+    original_precision = precision(ArbFloat)
+    setprecision(ArbFloat; digits=80)
+    try
+        scales = CYAxiverse.generate.pseudo_L(1, 1; log=false)
+        @test isconcretetype(eltype(scales))
+        @test eltype(scales) == typeof(ArbFloat(0))
+
+        legacy_hessian = CYAxiverse.minimizer._legacy_hessian(
+            Float64[1.0, -2.0], Int[1 2; 3 4], Float64[0.1, 0.2])
+        @test isconcretetype(eltype(legacy_hessian))
+        @test eltype(legacy_hessian) == typeof(ArbFloat(0))
+        legacy_gradient = CYAxiverse.minimizer._legacy_gradient(
+            Float64[1.0, -2.0], Int[1 2; 3 4], Float64[0.1, 0.2])
+        @test isconcretetype(eltype(legacy_gradient))
+        @test eltype(legacy_gradient) == typeof(ArbFloat(0))
+
+        mktempdir() do root
+            geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+            mkpath(geom_dir)
+            stored_L = Float64[1.0  -2.0  3.0;
+                               -4.0 -6.0 -8.0]
+            h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+                potential = create_group(create_group(file, "cytools"), "potential")
+                potential["L"] = stored_L
+            end
+
+            old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+            ENV["CYAXIVERSE_DATA_DIR"] = root
+            try
+                loaded = CYAxiverse.read.L_arb(2, 1, 1)
+                expected = ArbFloat.(stored_L[1, :]) .*
+                    ArbFloat(10) .^ ArbFloat.(stored_L[2, :])
+                @test isconcretetype(eltype(loaded))
+                @test eltype(loaded) == typeof(ArbFloat(0))
+                @test loaded == expected
+            finally
+                old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                    (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+            end
+        end
+    finally
+        setprecision(ArbFloat; bits=original_precision)
+    end
+end
+
+@testset "Phase-hoisted Hessian parity" begin
+    minimizer = CYAxiverse.minimizer
+    generate = CYAxiverse.generate
+
+    function legacy_phase_hessian(LV, QV, x)
+        T = promote_type(eltype(LV), eltype(QV), eltype(x))
+        hessian = zeros(T, size(QV, 1), size(QV, 1))
+        for i in axes(QV, 1), j in axes(QV, 1)
+            if i >= j
+                hessian[i, j] = sum(LV' *
+                    (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
+            end
+        end
+        hessian
+    end
+
+    LV = Float64[1.25, -0.75, 0.5]
+    QV = Float64[1.0 2.0 -1.0;
+                 0.5 -3.0 4.0]
+    x = Float64[0.37, -0.22]
+    expected = legacy_phase_hessian(LV, QV, x)
+    actual = zeros(Float64, 2, 2)
+    minimizer._phase_hessian!(actual, LV, QV, cos.(x' * QV))
+    @test actual == expected
+    @test actual + actual' - Diagonal(actual) ==
+        expected + expected' - Diagonal(expected)
+
+    original_precision = precision(ArbFloat)
+    setprecision(ArbFloat; digits=80)
+    try
+        T = typeof(ArbFloat(0))
+        LV_arb = T.(LV)
+        QV_arb = T.(QV)
+        x_arb = T.(x)
+        expected_arb = legacy_phase_hessian(LV_arb, QV_arb, x_arb)
+        actual_arb = zeros(T, 2, 2)
+        minimizer._phase_hessian!(actual_arb, LV_arb, QV_arb,
+            cos.(x_arb' * QV_arb))
+        @test actual_arb == expected_arb
+        @test eltype(actual_arb) == T
+    finally
+        setprecision(ArbFloat; bits=original_precision)
+    end
+
+    function legacy_hessian_norm(x, Q::Matrix)
+        hessian = zeros(size(Q, 1), size(Q, 1))
+        if size(Q, 1) == 1
+            for i in axes(Q, 1), j in axes(Q, 1)
+                if i >= j
+                    hessian[i, j] = (transpose(@view(Q[i, :])) *
+                        @view(Q[j, :])) * cos.(x' * Q)[i]
+                end
+            end
+            hessian = hessian + hessian' - Diagonal(hessian)
+        elseif size(Q, 1) == size(Q, 2)
+            for i in axes(Q, 1), j in axes(Q, 1)
+                if i >= j
+                    hessian[i, j] = (transpose(@view(Q[i, :])) *
+                        @view(Q[j, :])) * cos.(x' * Q)[i]
+                end
+            end
+            hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
+        else
+            hessian = zeros(size(Q, 1), size(Q, 1), size(Q, 2))
+            for i in axes(Q, 1), j in axes(Q, 1), k in axes(Q, 2)
+                if i >= j
+                    hessian[i, j, k] = (transpose(@view(Q[i, :])) *
+                        @view(Q[j, :])) * cos.(x' * Q)[k]
+                end
+            end
+            return hessian
+        end
+    end
+
+    Qone = reshape(Float64[1.0, -2.0, 3.0], 1, 3)
+    @test generate.hessian_norm([0.31], Qone) ==
+        legacy_hessian_norm([0.31], Qone)
+
+    Qsquare = Float64[1.0 2.0; 3.0 4.0]
+    xsquare = Float64[0.17, -0.23]
+    @test Matrix(generate.hessian_norm(xsquare, Qsquare)) ==
+        Matrix(legacy_hessian_norm(xsquare, Qsquare))
+
+    Qrect = Float64[1.0 2.0 3.0; -1.0 4.0 0.5]
+    xrect = Float64[0.12, -0.41]
+    @test generate.hessian_norm(xrect, Qrect) ==
+        legacy_hessian_norm(xrect, Qrect)
+
+    Qempty = zeros(Float64, 2, 0)
+    @test size(generate.hessian_norm([0.2, -0.1], Qempty)) == (2, 2, 0)
+end
+
+@testset "Factored Kinv whitening remains stable when Kinv is ill-conditioned" begin
+    # This Kinv has condition number about 4 × 10^10.  Forming K = inv(Kinv)
+    # before whitening loses the small kinetic direction on older paths.
+    Kinv = Float64[1.0 1.0 - 5e-11;
+                   1.0 - 5e-11 1.0]
+    Q = Int[1 0 1;
+            0 1 1]
+    L = Float64[1.0 1.0 1.0;
+                -20.0 -21.0 -22.0]
+
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            potential["Q"] = Q
+            potential["L"] = L
+            geometric["Kinv"] = Kinv
+        end
+
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+            factored = CYAxiverse.read.potential_factored(geom_idx)
+            @test factored.Kinv ≈ Kinv
+            @test factored.C * transpose(factored.C) ≈ Kinv rtol=1e-12 atol=1e-15
+
+            hp = CYAxiverse.generate.hp_spectrum(geom_idx;
+                prec=200, quartics=false, selection=:raw)
+            reference = setprecision(BigFloat, 400) do
+                Cbig = cholesky(Symmetric(BigFloat.(Kinv))).L
+                Hbig = BigFloat.(Q) *
+                    Diagonal(BigFloat.(L[1, :]) .* (BigFloat(10) .^ BigFloat.(L[2, :]))) *
+                    transpose(BigFloat.(Q))
+                values = eigvals(Symmetric(transpose(Cbig) * Hbig * Cbig))
+                Float64.(0.5 .* log10.(abs.(values)) .+ 9 .+
+                    log10(BigFloat("2.435e18")) .+ log10(2BigFloat(π)))
+            end
+            @test hp["m"] ≈ reference atol=5e-6
+        finally
+            if old_data_dir === nothing
+                delete!(ENV, "CYAXIVERSE_DATA_DIR")
+            else
+                ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir
+            end
+        end
+    end
+end
+
 @testset "HP spectrum: raw and effective selections" begin
     K = Hermitian([4.0 0.0;
                    0.0 9.0])
@@ -1476,7 +2036,124 @@ end
     @test isempty(hybrid_masses_only.λself)
     @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=200) == 2
     @test CYAxiverse.generate.pq_schur_admissible(K, L, Q; prec=200)
-    @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(K, L, Q; prec=100, max_prec=100, label="diagonal test") == 2
+    @test_logs (:warn, r"geometry=diagonal test") @test CYAxiverse.generate.pq_physical_mode_count(
+        K, L, Q; threshold_log10=expected[1], prec=100, max_prec=100,
+        label="diagonal test") == 1
+end
+
+@testset "PQ quartic cache and linear log-sum" begin
+    G = CYAxiverse.generate
+
+    Qpq = Float64[1.0 0.0 -2.0;
+                  -2.0 3.0 0.5]
+    charge_sign, charge_logabs = G._cache_charge_sign_logabs(Qpq)
+    @test charge_sign isa Matrix{Int8}
+    @test Int.(charge_sign) == [1 0 -1; -1 1 1]
+    @test charge_logabs[1, 1] == 0.0
+    @test charge_logabs[1, 2] == -Inf
+    @test charge_logabs[1, 3] ≈ log(2.0)
+    @test charge_logabs[2, 3] ≈ log(0.5)
+
+    logs = [log(1.0), log(3.0), log(2.0), log(1e-200)]
+    original_logs = copy(logs)
+    expected_lse = log(sum(exp.(logs)))
+    @test G.logsum_sorted!(logs, length(logs)) ≈ expected_lse rtol=1e-14
+    @test logs == original_logs
+    @test G.logsum_sorted!(Float64[], 0) == -Inf
+    @test G.logsum_sorted!([-Inf, -Inf], 2) == -Inf
+    @test G.logsum_sorted!([Inf, 0.0], 2) == Inf
+    @test isnan(G.logsum_sorted!([NaN, 0.0], 2))
+
+    sorted_reference = sort(copy(logs))
+    reference_lse = sorted_reference[1]
+    for i in 2:length(sorted_reference)
+        reference_lse += G.gauss_sum(sorted_reference[i] - reference_lse)
+    end
+    @test G.logsum_sorted!(copy(logs), length(logs)) ≈ reference_lse rtol=1e-14
+
+    scale_sign = Int[1, -1, 1, -1]
+    scale_log = zeros(4)
+    positive_logs = zeros(4)
+    negative_logs = zeros(4)
+    all_one_charges = ones(Float64, 4, 1)
+    all_one_sign, all_one_logabs = G._cache_charge_sign_logabs(all_one_charges)
+    exact_cancel = G.pq_contracted_log!(positive_logs, negative_logs,
+        scale_sign, scale_log, all_one_sign, all_one_logabs, (1, 1, 1, 1))
+    @test exact_cancel[1] == 0
+    @test exact_cancel[2] == 0.0
+    @test exact_cancel[3] ≈ log(4.0)
+
+    near_cancel = G.pq_contracted_log!(positive_logs, negative_logs,
+        scale_sign[1:2], [0.0, -log(2.0)], all_one_sign, all_one_logabs,
+        (1, 1, 1, 1))
+    @test near_cancel[1] == 1
+    @test near_cancel[2] ≈ log(0.5) atol=1e-14
+    @test near_cancel[3] ≈ log(1.5) atol=1e-14
+
+    shrinking = G.pq_contracted_log!(positive_logs, negative_logs,
+        @view(scale_sign[1:1]), @view(scale_log[1:1]), all_one_sign,
+        all_one_logabs, (1, 1, 1, 1))
+    @test shrinking == (1, 0.0, 0.0)
+
+    K = Hermitian(reshape([4.0], 1, 1))
+    Q = reshape(Int[3, 6], 1, 2)
+    L = [1.0 1.0;
+         -20.0 -1000.0]
+    pq = G.pq_spectrum(K, L, Q; mixing_correction=:high_precision,
+        prec=200, quartic_diagnostics=true)
+    hp = G.hp_spectrum(K, L, Q; prec=200)
+    @test pq.λselfsign == hp["λselfsign"]
+    @test pq.λself ≈ hp["λself"] atol=1e-10
+end
+
+@testset "Float64 inertia certificate and Arb fallback" begin
+    G = CYAxiverse.generate
+    C = Matrix{Float64}(I, 2, 2)
+    Q = Int[1 0 0;
+            0 1 0]
+    L = Float64[1.0 1.0 0.0;
+                -20.0 -30.0 -400.0]
+    Ltilde = L[:, 1:2]
+    Qtilde = Q[:, 1:2]
+    threshold = Float64(log10(G.constants()["Hubble"]))
+
+    certificate = G._float64_leading_hessian_certificate(C, Ltilde, Qtilde)
+    @test certificate !== nothing
+    @test G._certified_float64_inertia_count(certificate, threshold) == 2
+
+    mass_offset = 9.0 + Float64(log10(G.constants()["MPlanck"])) +
+        Float64(G.constants()["log2π"])
+    ambiguous_threshold = 0.5 * log10(abs(certificate.eigenvalues[1])) + mass_offset
+    @test G._certified_float64_inertia_count(certificate, ambiguous_threshold) === nothing
+    @test G._float64_leading_hessian_certificate(
+        C, Float64[1.0 1.0; -400.0 -30.0], Qtilde) === nothing
+    @test G._float64_leading_hessian_certificate(
+        C, Float64[1.0 1.0; 400.0 30.0], Qtilde) === nothing
+
+    @test G._certified_float64_window_counts(C, Ltilde, Qtilde,
+        0.0, 40.0, 0.0) == (2, 0)
+    @test G._next_confirmation_precision(1_000, 4_000) == 1_500
+    @test G._next_confirmation_precision(1_500, 4_000) == 2_250
+    @test G._next_confirmation_precision(3_375, 4_000) == 4_000
+    W0, Cprecision0 = G.high_precision_leading_hessian(C, Ltilde, Qtilde; prec=80)
+    _, _, _, _, records, _ = G._confirm_window_counts(W0, Cprecision0, C,
+        Ltilde, Qtilde, ambiguous_threshold, ambiguous_threshold, 0.0,
+        80, 120, true, "B2 precision schedule")
+    @test first(records)[1] == 80
+    @test last(records)[1] == 120
+
+    @test G.pq_physical_mode_count(Hermitian(2.0 .* Matrix{Float64}(I, 2, 2)),
+        L, Q; prec=120, confirm=true) == 2
+    window = G.pq_window_spectrum(Hermitian(2.0 .* Matrix{Float64}(I, 2, 2)),
+        L, Q; min_log10_mass=0.0, max_log10_mass=40.0, prec=120,
+        confirm=true, quartics=false)
+    @test window.diagnostics.counts_by_precision == [(120, 2, 0)]
+
+    fallback_count = G._pq_physical_mode_count_factored(C, L, Q;
+        threshold_log10=ambiguous_threshold, prec=80, confirm=false)
+    reference_count = G.physical_mode_inertia_count(C, Ltilde, Qtilde,
+        ambiguous_threshold, 80)
+    @test fallback_count == reference_count
 end
 
 @testset "Hybrid spectrum: full fallback after nonconvergence" begin
@@ -2352,6 +3029,66 @@ end
         finally
             old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        end
+    end
+end
+
+@testset "Tier-A optimisations preserve values" begin
+    # A2: _quartic_index_matrix replaces `hcat(collect.(idx)...) .- 1`.
+    let
+        legacy(indices) = isempty(indices) ? zeros(Int, 4, 0) :
+                          hcat(collect.(indices)...) .- 1
+        for h11 in (1, 2, 4, 7)
+            i31 = [(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
+            i22 = [(i, i, j, j) for i in 1:h11 for j in 1:i-1]
+            @test CYAxiverse.generate._quartic_index_matrix(i31) == legacy(i31)
+            @test CYAxiverse.generate._quartic_index_matrix(i22) == legacy(i22)
+        end
+        # The empty case must keep its shape, not collapse to a 0x0.
+        @test size(CYAxiverse.generate._quartic_index_matrix(NTuple{4, Int}[])) == (4, 0)
+    end
+
+    # A2: _hcat_columns replaces `hcat(blocks...)`.
+    let blocks = [rand(3, 2) for _ in 1:5]
+        @test CYAxiverse.generate._hcat_columns(blocks) == hcat(blocks...)
+    end
+    let blocks = [rand(4) for _ in 1:6]
+        @test CYAxiverse.generate._hcat_columns(blocks) == hcat(blocks...)
+    end
+
+    # A9: sandwiching between orthonormal-column QR factors leaves the
+    # operator norm unchanged, so the thin-QR form is exact.
+    let
+        for (nl, nr, h11) in ((300, 200, 12), (150, 150, 8), (40, 90, 20))
+            A = randn(nl, h11)
+            B = randn(nr, h11)
+            RA = qr(A).R
+            RB = qr(B).R
+            @test isapprox(opnorm(RA), opnorm(A); rtol = 1e-12)
+            @test isapprox(opnorm(RB), opnorm(B); rtol = 1e-12)
+            @test isapprox(opnorm(RA * RB'), opnorm(A * B'); rtol = 1e-10)
+        end
+    end
+
+    # A11: _hp_selected_potential now routes through LQtilde + αmatrix
+    # instead of LQtildebar. The combined (Lhat, Qhat) pair must be
+    # identical, since αmatrix keeps Qhat and Qbar separate where
+    # LQtildebar pre-concatenates them.
+    let
+        for h11 in (4, 6, 8, 10, 12, 15)
+            Q = Matrix(CYAxiverse.generate.pseudo_Q(h11, 1)')
+            L = Matrix(CYAxiverse.generate.pseudo_L(h11, 1)')
+            legacy = CYAxiverse.generate.LQtildebar(Matrix{Float64}(L), Matrix{Int}(Q))
+            legacy_L = Matrix{Float64}(legacy["Lhat"])
+            legacy_Q = Matrix{Int}(legacy["Qhat"])
+            fast_L, fast_Q = CYAxiverse.generate._hp_selected_potential(L, Q, :hp_effective)
+            @test size(fast_Q) == size(legacy_Q)
+            @test fast_Q == legacy_Q
+            @test fast_L == legacy_L
+            # LQtilde uses a floating-point rank test where LQtildebar uses
+            # exact Nemo.nullspace. Pin that the fast selector never accepts
+            # a rationally dependent column.
+            @test rank(Matrix{Rational{BigInt}}(fast_Q)) == size(fast_Q, 2)
         end
     end
 end

@@ -25,19 +25,39 @@ The scan implements the paper's core hierarchy and photon-coupling routines:
 
 The geometry generator also has a pilot visible-sector mode,
 `--visible-sector-policy intersecting_d7`. Given an explicit validated O3/O7
-involution with `h11_minus=0`, it selects an invariant QED divisor intersecting
-the selected QCD divisor, stores both divisor charges and their metadata, and adds the QED
+involution, it selects an invariant QED divisor intersecting the selected QCD
+divisor, stores the computed `h11_plus`/`h11_minus` parity information, and adds the QED
 Euclidean D3 term needed for the paper-style light threshold. This is a
 geometry-level compatibility filter and scale assignment; it is not a full
 D7 tadpole, matter-spectrum, flux, or E3 zero-mode construction.
 
+The reference EFT convention treats the full CYTools `h11` basis as the
+`C4`-axion sector under a declared paper-style all-`C4` assumption. The
+assumption is recorded as metadata and is not inferred from, or enforced by,
+the computed orientifold parity split. A parity-resolved physical EFT would
+instead require an explicit `h11_plus` basis construction.
+
 For the geometry-generation track itself, use
-`--moduli-policy canonical_qcd`. It samples a pairwise-intersecting triangle of
-prime toric divisors before finding the stretched-cone tip, chooses one member
-as QCD (or uses `--qcd-divisor-index`), and applies the homogeneous scale
-`m = sqrt(40 / vol(D_QCD)_tip)`. The selected triple and QCD member are stored
-under `cytools/geometric/standard_model`; this is the paper-level geometric
-assignment, not a complete brane construction.
+`--moduli-policy canonical_qcd`. The canonical stretched-cone tip `J_tip` sets
+the angular direction. After selecting one member of the pairwise-intersecting
+prime-divisor triangle as QCD (or using `--qcd-divisor-index`), the generator
+sets `m = sqrt(40 / Vol(D_QCD)_tip)` and evaluates the final point
+`J_final = m J_tip`. Divisor volumes scale as `m^2`; the CY volume scales as
+`m^3` and is not normalized to `1`. The `>= 1` divisor lower-bound checks are
+authoritative at `J_final`; finite, cone, CY-volume, curve-volume, metric, and
+finite-positive-divisor checks remain preconditions, since positive scaling
+cannot repair negative or non-finite divisor data. The selected triple and QCD
+member are stored under `cytools/geometric/standard_model`; this is the
+paper-level geometric assignment, not a complete brane construction.
+
+On the production EFT path (`eft_mode=true`, `canonical_qcd`, and
+`intersecting_d7`), each QCD candidate is first tested against its own radial
+scale: an orientifold-invariant, distinct intersecting QED neighbor must obey
+`m^2 * prime_tau0[qed_idx] <= 127.5`. Candidates are evaluated under the
+existing minimal-dilation order, while an explicit QCD index remains a
+singleton override. This prefilter is not used for geometry-only or
+`visible_sector_policy=none` output, and the complete ordered assignment pool
+still performs the final authoritative validation.
 
 This is an adapted local scan, not a reproduction of the paper's 200,000-model
 ensemble. In particular, the local charge convention and local potential

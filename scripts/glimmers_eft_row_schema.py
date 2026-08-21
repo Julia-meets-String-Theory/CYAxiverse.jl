@@ -31,7 +31,7 @@ except ModuleNotFoundError as exc:
     )
 
 
-ROW_SCHEMA_VERSION = "glimmers-eft-row-1.1"
+ROW_SCHEMA_VERSION = "glimmers-eft-row-1.2"
 POTENTIAL_DERIVATION_VERSION = "cyaxiverse-oriented-potential-L-v1"
 DEFAULT_DERIVATION_STATUS = "adapted_compact_eft_reference"
 ACCEPTED_TERMINAL_STATUS = "accepted_model_row"
@@ -86,17 +86,33 @@ TERMINAL_STATUSES = (
 
 _DENSE_ROW_KEYS = frozenset(
     {
+        # Potential and charge arrays are transient reconstruction products,
+        # never persisted row fields.
         "q",
         "Q",
         "l",
         "L",
         "k",
         "K",
+        "Kinv",
+        "kinv",
+        "k_inverse",
+        "inverse_kahler_metric",
         "qcd_charge",
         "qed_charge",
         "pair_i",
         "pair_j",
         "potential",
+        "potential_arrays",
+        # Dense geometric quantities are likewise reconstructed on demand.
+        "divisor_volumes",
+        "prime_divisor_volumes",
+        "effective_divisor_volumes",
+        "curve_volumes",
+        "volume",
+        "volumes",
+        "CY_volume",
+        "cy_volume",
     }
 )
 
@@ -234,6 +250,11 @@ def _potential_inputs(potential, q, l, qed_charge, direct_count, source_index):
             ),
         )
     )
+    # Optional: a geometry-level compute_leading_rank_order() result computed
+    # once for this q/l pair and reused across a whole assignment pool. Its
+    # absence just means classify_qed_leading_status falls back to computing
+    # it fresh, so it is not part of the required-fields check below.
+    leading_rank_order = potential.get("leading_rank_order")
     missing = [
         name
         for name, value in (
@@ -250,10 +271,10 @@ def _potential_inputs(potential, q, l, qed_charge, direct_count, source_index):
             "potential_term_mismatch",
             "unresolved potential fields: " + ", ".join(missing),
         )
-    return q, l, qed_charge, direct_count, source_index, potential
+    return q, l, qed_charge, direct_count, source_index, leading_rank_order, potential
 
 
-def _replay_potential_conventions(q, l, qed_charge, direct_count, source_index):
+def _replay_potential_conventions(q, l, qed_charge, direct_count, source_index, leading_rank_order=None):
     """Replay the existing exact source-match and rank/span conventions."""
     try:
         q_array = np.asarray(q)
@@ -304,7 +325,7 @@ def _replay_potential_conventions(q, l, qed_charge, direct_count, source_index):
 
     try:
         certificate = classify_qed_leading_status(
-            q_array, l_array, source_index
+            q_array, l_array, source_index, leading_rank_order=leading_rank_order
         )
     except QEDAssignmentFailure as exc:
         status = (
@@ -329,7 +350,7 @@ def _replay_potential_conventions(q, l, qed_charge, direct_count, source_index):
             "rank_span_classification_failure",
             "rank certificate does not record the exact rational method",
         )
-    for field in ("selected_source_indices", "ordered_source_indices", "selected_rank"):
+    for field in ("selected_source_indices", "selected_rank"):
         if certificate.get(field) is None:
             _failure("rank_span_classification_failure", f"rank certificate lacks {field}")
     return match, dict(certificate), direct_count, source_index
@@ -464,10 +485,10 @@ def serialize_eft_row(
             "missing_assignment_derived_data",
             "qcd_volume is not the approved normalized value 40.0",
         )
-    if not qed_volume < QED_VOLUME_MAX:
+    if not qed_volume <= QED_VOLUME_MAX:
         _failure(
             "missing_assignment_derived_data",
-            "qed_volume does not satisfy the strict 127.5 bound",
+            "qed_volume exceeds the inclusive 127.5 bound",
         )
 
     factorized_version = geometry.get("charge_factorized_schema_version")
@@ -516,11 +537,11 @@ def serialize_eft_row(
         "invalid_row_schema",
     )
 
-    q, l, qed_charge, direct_count, source_index, potential = _potential_inputs(
+    q, l, qed_charge, direct_count, source_index, leading_rank_order, potential = _potential_inputs(
         potential, q, l, qed_charge, direct_count, source_index
     )
     match, certificate, direct_count, source_index = _replay_potential_conventions(
-        q, l, qed_charge, direct_count, source_index
+        q, l, qed_charge, direct_count, source_index, leading_rank_order
     )
     logical_term_count = int(np.asarray(q).shape[1])
     pair_source_count = logical_term_count - direct_count
@@ -567,7 +588,7 @@ def serialize_eft_row(
         "qed_charge_exact_match": True,
         "qed_charge_reference": _json_scalar(
             {
-                "storage": "cytools/potential/factorized",
+                "storage": "geometry_references_only",
                 "orientation": POTENTIAL_ORIENTATION,
                 "source_index": source_index,
                 "source_kind": match["qed_potential_source"],
@@ -670,23 +691,25 @@ def validate_eft_row(row, *, geometry=None, assignment=None):
             decoded_json[field] = json.loads(row[field])
         except (TypeError, ValueError) as exc:
             _failure("invalid_row_schema", f"{field} is not valid JSON: {exc}")
+    if "ordered_source_indices" in certificate:
+        _failure(
+            "invalid_row_schema",
+            "rank certificate must not persist ordered_source_indices: it is "
+            "identical for every row of one geometry and is reconstructible "
+            "from the geometry's Q/L, so it does not belong in a compact row",
+        )
     certificate_selected = certificate.get("selected_source_indices")
-    certificate_ordered = certificate.get("ordered_source_indices")
-    if not isinstance(certificate_selected, list) or not isinstance(certificate_ordered, list):
-        _failure("invalid_row_schema", "rank certificate source indices must be lists")
-    if any(not isinstance(index, int) or isinstance(index, bool) for index in certificate_selected + certificate_ordered):
+    if not isinstance(certificate_selected, list):
+        _failure("invalid_row_schema", "rank certificate selected source indices must be a list")
+    if any(not isinstance(index, int) or isinstance(index, bool) for index in certificate_selected):
         _failure("invalid_row_schema", "rank certificate source indices must be integers")
-    if len(set(certificate_ordered)) != len(certificate_ordered):
-        _failure("invalid_row_schema", "rank certificate ordered source indices are not unique")
+    if len(set(certificate_selected)) != len(certificate_selected):
+        _failure("invalid_row_schema", "rank certificate selected source indices are not unique")
     if not isinstance(certificate.get("selected_rank"), int) or isinstance(certificate.get("selected_rank"), bool):
         _failure("invalid_row_schema", "rank certificate selected_rank must be an integer")
     if certificate["selected_rank"] != len(certificate_selected):
         _failure("invalid_row_schema", "rank certificate selected_rank disagrees with selected indices")
     source_index = row["qed_unsorted_potential_index"]
-    if source_index not in certificate_ordered:
-        _failure("invalid_row_schema", "rank certificate does not contain the QED source index")
-    if row["qed_post_sort_source_position"] != certificate_ordered.index(source_index):
-        _failure("invalid_row_schema", "post-sort source position disagrees with rank certificate")
     source_is_selected = source_index in certificate_selected
     if (row["qed_leading_status"] == "leading") != source_is_selected:
         _failure("invalid_row_schema", "leading/dependent status disagrees with selected source indices")
@@ -699,8 +722,11 @@ def validate_eft_row(row, *, geometry=None, assignment=None):
         _failure("invalid_row_schema", "charge reference source kind disagrees with row")
     if charge_reference.get("difference_convention") != PAIRWISE_DIFFERENCE_CONVENTION:
         _failure("invalid_row_schema", "charge reference difference convention is not canonical")
-    if charge_reference.get("storage") != "cytools/potential/factorized":
-        _failure("invalid_row_schema", "charge reference does not point to factorized geometry storage")
+    if charge_reference.get("storage") != "geometry_references_only":
+        _failure(
+            "invalid_row_schema",
+            "charge reference does not point to reference-only geometry storage",
+        )
     if charge_reference.get("pair_ordering") != "lexicographic_i_then_j_with_i_less_than_j":
         _failure("invalid_row_schema", "charge reference pair ordering is not canonical")
     if charge_reference.get("pair_charge_coefficients") != "[-1, +1]":
@@ -724,8 +750,8 @@ def validate_eft_row(row, *, geometry=None, assignment=None):
         _finite_float(row[field], field, "invalid_row_schema")
     if not math.isclose(row["qcd_volume"], QCD_VOLUME_TARGET, rel_tol=0.0, abs_tol=1e-9):
         _failure("invalid_row_schema", "qcd_volume is not 40.0")
-    if not row["qed_volume"] < QED_VOLUME_MAX:
-        _failure("invalid_row_schema", "qed_volume is not strictly below 127.5")
+    if not row["qed_volume"] <= QED_VOLUME_MAX:
+        _failure("invalid_row_schema", "qed_volume exceeds the inclusive 127.5 bound")
 
     if geometry is not None:
         geometry = _mapping(geometry, "geometry", "invalid_geometry_reference")
