@@ -1143,7 +1143,10 @@ end
 """
     project_out(orth_basis::Matrix)
 
-TBW
+Return the orthogonal projector ``I - \\sum_i v_i v_i^{\\top}`` that removes the
+span of the columns ``v_i`` of `orth_basis`. Entries below ``10^{-10}`` in
+magnitude are set to zero. Used by [`orth_basis`](@ref) to build the orthonormal
+complement of a set of directions.
 """
 function project_out(orth_basis::Matrix)
     projector = I(size(orth_basis, 1))
@@ -1832,8 +1835,11 @@ function _pq_spectrum_factored(C::Matrix{Float64}, L::Matrix{Float64}, Q::Matrix
     positive_logs = zeros(Float64, length(scale_sign))
     negative_logs = zeros(Float64, length(scale_sign))
 
-    qindq31 = [(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
-    qindq22 = [(i, i, j, j) for i in 1:h11 for j in 1:i-1]
+    # Typed comprehensions guard against `Vector{Any}` inference when h11=1
+    # makes the filtered/nested generator below yield zero elements; see the
+    # identical fix and rationale at `_pq_hybrid_physical_spectrum_factored`.
+    qindq31 = NTuple{4,Int}[(i, i, i, j) for i in 1:h11 for j in 1:h11 if i != j]
+    qindq22 = NTuple{4,Int}[(i, i, j, j) for i in 1:h11 for j in 1:i-1]
     quartdiagsign = zeros(Int, h11)
     quartdiaglog = zeros(Float64, h11)
     quart31sign = zeros(Int, length(qindq31))
@@ -1933,8 +1939,12 @@ function _pq_physical_spectrum_factored(C::Matrix{Float64}, L::Matrix{Float64}, 
     Qmass = (T.(Q') * Cprecision) * eigenvectors[:, retained]
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
     physical_count = length(retained)
-    qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
-    qindq22 = [(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
+    # Typed comprehensions guard against `Vector{Any}` inference when
+    # physical_count=1 makes the filtered/nested generator below yield zero
+    # elements; see the identical fix and rationale at
+    # `_pq_hybrid_physical_spectrum_factored`.
+    qindq31 = NTuple{4,Int}[(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
+    qindq22 = NTuple{4,Int}[(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
 
     function signed_quartic(exponents::NTuple{4, Int})
         value = zero(T)
@@ -2265,8 +2275,16 @@ function _pq_hybrid_physical_spectrum_factored(C::Matrix{Float64}, L::Matrix{Flo
     end
     Qmass = quartic_charge_basis(Q, Cprecision, basis, selected_backend)
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
-    qindq31 = mixed_quartics ? [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j] : Tuple{Int,Int,Int,Int}[]
-    qindq22 = mixed_quartics ? [(i, i, j, j) for i in 1:physical_count for j in 1:i-1] : Tuple{Int,Int,Int,Int}[]
+    # Typed comprehensions (not bare `[...]`): when `physical_count` is small
+    # enough that the filtered/nested generator below yields zero elements
+    # (e.g. physical_count=1, where `i != j` never holds over `1:1`), a bare
+    # comprehension can infer `Vector{Any}` instead of `Vector{NTuple{4,Int}}`
+    # -- the values are correctly empty either way, but `Any` fails the
+    # concrete `AbstractVector{<:NTuple{4,Integer}}` signature downstream in
+    # `_quartic_index_matrix`. The explicit element type guarantees a
+    # concretely-typed vector regardless of how many elements are produced.
+    qindq31 = mixed_quartics ? NTuple{4,Int}[(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j] : Tuple{Int,Int,Int,Int}[]
+    qindq22 = mixed_quartics ? NTuple{4,Int}[(i, i, j, j) for i in 1:physical_count for j in 1:i-1] : Tuple{Int,Int,Int,Int}[]
     function signed_quartic(exponents::NTuple{4, Int})
         value = zero(T)
         for a in eachindex(quartic_scales)
@@ -2343,8 +2361,12 @@ function _physical_spectrum_from_basis(C::AbstractMatrix,
     Qmass = quartic_charge_basis(Q, C, basis, selected_backend)
     quartic_scales = T.(L[1, :]) .* (T(10) .^ T.(L[2, :]))
     physical_count = length(masses)
-    qindq31 = [(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
-    qindq22 = [(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
+    # Typed comprehensions guard against `Vector{Any}` inference when
+    # physical_count=1 makes the filtered/nested generator below yield zero
+    # elements; see the identical fix and rationale at
+    # `_pq_hybrid_physical_spectrum_factored`.
+    qindq31 = NTuple{4,Int}[(i, i, i, j) for i in 1:physical_count for j in 1:physical_count if i != j]
+    qindq22 = NTuple{4,Int}[(i, i, j, j) for i in 1:physical_count for j in 1:i-1]
     function signed_quartic(exponents::NTuple{4, Int})
         value = zero(T)
         for a in eachindex(quartic_scales)
@@ -3499,9 +3521,17 @@ function leading_critical_branches(Q::AbstractMatrix{Int}, L::AbstractMatrix{Flo
 end
 
 """
-    αmatrix(LQtilde::NamedTuple; threshold::Float64=0.5)
+    αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
 
-TBW
+Build the subleading-instanton coefficient matrix ``\\alpha`` in the canonical
+reduced charge basis. Each retained subleading charge ``\\bar{Q}_a`` is expressed
+against the linearly independent leading charges ``\\hat{Q}`` as
+``\\alpha_a = \\hat{Q}^{-1} \\bar{Q}_a``; a subleading charge whose instanton
+scale falls more than ``\\log_{10}(\\mathrm{threshold})`` below the smallest
+leading scale is dropped as negligible for the vacuum structure. Return a
+[`Canonicalα`](@ref) when effective subleading terms remain, otherwise a
+[`CanonicalQBasis`](@ref). `threshold` is the linear ratio
+``\\Lambda_a / |\\Lambda_j|`` below which an instanton is treated as irrelevant.
 """
 function αmatrix(LQ::LQLinearlyIndependent; threshold::Float64=0.5)
     Qhat = Matrix{Rational}(LQ.Qtilde)
@@ -3576,7 +3606,10 @@ end
 """
     ωnorm2(LQ::CanonicalQBasis)
 
-TBW
+Return the mean squared Euclidean norm of the reduced leading charge columns
+``\\hat{Q}``, averaging ``\\lVert \\hat{Q}_i \\rVert^2`` over the columns that
+carry more than one non-zero entry. This is a scalar diagnostic of how spread
+out the reduced charge lattice is.
 """
 function ωnorm2(LQ::CanonicalQBasis)
 	Qhat = LQ.Qhat
@@ -3725,7 +3758,10 @@ end
 """
     LQtildebar(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
 
-TBW
+Load the potential for geometry ``(h^{1,1}, \\mathrm{tri}, \\mathrm{cy})`` and
+return its reduced leading/subleading charge decomposition, delegating to
+[`LQtildebar(L, Q; threshold)`](@ref). `threshold` is the linear instanton-scale
+ratio below which a subleading charge is discarded.
 """
 function LQtildebar(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     pot_data = potential(h11,tri,cy)
@@ -3793,9 +3829,21 @@ function vacua_id_basis(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5)
     vacua_id_basis(L, Q; threshold=threshold)
 end
 """
-    vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector=zero(Q[1, :]))
+    vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5, phase::Vector=zeros(size(Q, 1)), runs::Int=10_000)
 
-TBW
+Locate the axion vacua of the potential defined by the charge matrix `Q` and the
+signed ``\\log_{10}`` instanton scales `L` (rows ``[\\mathrm{sign}; \\log_{10}|\\Lambda|]``).
+Build the reduced basis with [`vacua_id_basis`](@ref), then solve for the minima
+coordinates in the periodic and canonical bases. Return a dictionary with the
+minima coordinates ``\\tilde{\\theta}_{\\min}`` and ``x_{\\min}`` and the vacuum
+count `vac`. `threshold` sets the instanton-relevance cut, `phase` an optional
+constant phase shift, and `runs` the number of search restarts.
+
+!!! note
+    This legacy search can fail when the reduced charge basis is empty, which
+    happens for deeply suppressed instanton scales such as the orientifolded
+    QCD-volume-40 point. Prefer the reduced-JLM search selected by `method =
+    :auto` in `scripts/vacua_pipeline.jl` for those geometries.
 """
 function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5,
         phase::Vector=zeros(size(Q, 1)), runs::Int=10_000)
@@ -3863,9 +3911,10 @@ function vacua_id(L::Matrix{Float64}, Q::Matrix{Int}; threshold::Float64=0.5,
 end
 
 """
-    vacua_id(h11::Int, tri::Int, cy::Int; threshold, phase::Vector)
+    vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5, phase::Vector=zeros(h11), runs::Int=10_000)
 
-TBW
+Load the potential for geometry ``(h^{1,1}, \\mathrm{tri}, \\mathrm{cy})`` and
+locate its vacua, delegating to [`vacua_id(L, Q; threshold, phase, runs)`](@ref).
 """
 function vacua_id(h11::Int, tri::Int, cy::Int; threshold::Float64=0.5,
     phase::Vector=zeros(h11), runs::Int=10_000)

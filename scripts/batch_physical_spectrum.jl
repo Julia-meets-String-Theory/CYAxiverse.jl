@@ -207,8 +207,16 @@ function _write_result(path, geom_idx, spectrum; prec, threshold_log10, quartics
             _replace_dataset(physical, "lambda_self_sign", spectrum.λselfsign)
             _replace_dataset(physical, "lambda_self_log10", spectrum.λself)
             _replace_dataset(physical, "fpert_log10", spectrum.m .- 0.5 .* spectrum.λself)
+            _replace_dataset(physical, "lambda_31_sign", spectrum.λ31sign)
+            _replace_dataset(physical, "lambda_31_log10", spectrum.λ31)
+            _replace_dataset(physical, "lambda_31_indices", spectrum.λ31_i)
+            _replace_dataset(physical, "lambda_22_sign", spectrum.λ22sign)
+            _replace_dataset(physical, "lambda_22_log10", spectrum.λ22)
+            _replace_dataset(physical, "lambda_22_indices", spectrum.λ22_i)
         else
-            for dataset_name in ("lambda_self_sign", "lambda_self_log10", "fpert_log10")
+            for dataset_name in ("lambda_self_sign", "lambda_self_log10", "fpert_log10",
+                    "lambda_31_sign", "lambda_31_log10", "lambda_31_indices",
+                    "lambda_22_sign", "lambda_22_log10", "lambda_22_indices")
                 haskey(physical, dataset_name) && HDF5.delete_object(physical, dataset_name)
             end
         end
@@ -221,7 +229,7 @@ function _csv_escape(value)
     occursin(r"[,\"\n]", text) ? string('"', text, '"') : text
 end
 
-const SUMMARY_HEADER = "h11,polytope,frst,status,error,runtime_seconds,prec,threshold_log10,instantons,physical_count,massless_count,min_mass_log10,max_mass_log10,median_mass_log10,quartics,negative_lambda_count,positive_lambda_count,min_fpert_log10,max_fpert_log10,median_fpert_log10,min_fK_log10,max_fK_log10,median_fK_log10,provisional,output"
+const SUMMARY_HEADER = "h11,polytope,frst,status,error,runtime_seconds,prec,threshold_log10,instantons,physical_count,massless_count,min_mass_log10,max_mass_log10,median_mass_log10,quartics,negative_lambda_count,positive_lambda_count,min_fpert_log10,max_fpert_log10,median_fpert_log10,min_fK_log10,max_fK_log10,median_fK_log10,lambda_31_count,lambda_22_count,provisional,output"
 
 """Create the batch summary CSV and write its header when needed."""
 function _write_summary_header(path; append=false)
@@ -243,13 +251,15 @@ function _append_summary(path, geom_idx; status, error="", runtime_seconds=0.0, 
     masses = spectrum === nothing ? Float64[] : spectrum.m
     lambda = quartics && spectrum !== nothing ? spectrum.λself : Float64[]
     fpert = quartics && spectrum !== nothing ? masses .- 0.5 .* lambda : Float64[]
+    lambda31_count = quartics && spectrum !== nothing ? length(spectrum.λ31) : 0
+    lambda22_count = quartics && spectrum !== nothing ? length(spectrum.λ22) : 0
     values = (geom_idx.h11, geom_idx.polytope, geom_idx.frst, status, error, runtime_seconds,
         prec, threshold_log10, instantons, length(masses), count(<(threshold_log10), masses),
         isempty(masses) ? "" : minimum(masses), isempty(masses) ? "" : maximum(masses), _median_or_empty(masses),
         quartics, count(<(0), lambda), count(>(0), lambda), isempty(fpert) ? "" : minimum(fpert),
         isempty(fpert) ? "" : maximum(fpert), _median_or_empty(fpert),
         isempty(fK) ? "" : minimum(fK), isempty(fK) ? "" : maximum(fK), _median_or_empty(fK),
-        provisional, output)
+        lambda31_count, lambda22_count, provisional, output)
     open(path, "a") do io
         println(io, join(_csv_escape.(values), ','))
         flush(io)
@@ -289,7 +299,7 @@ function run_batch(options)
             spectrum = Logging.with_logger(_BatchWarningLogger(warning_messages)) do
                 CYAxiverse.generate.pq_hybrid_physical_spectrum(geom_idx;
                     threshold_log10=threshold, prec=options[:prec], quartics=options[:quartics],
-                    mixed_quartics=false,
+                    mixed_quartics=options[:quartics],
                     label="h11=$(geom_idx.h11),polytope=$(geom_idx.polytope),frst=$(geom_idx.frst)")
             end
             runtime = time() - started

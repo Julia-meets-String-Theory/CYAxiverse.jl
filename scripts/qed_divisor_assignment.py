@@ -325,10 +325,15 @@ def normalize_qcd_assignment(
     if not np.isfinite(qcd_scalar) or qcd_scalar != int(qcd_scalar):
         raise ValueError("qcd_index must be a finite integer")
     qcd_index = int(qcd_scalar)
+    # `prime` (one entry per prime toric divisor) and `effective` (one entry
+    # per distinct effective-cone extremal ray, after
+    # `canonicalize_unique_charge_rows` dedup) are legitimately different-
+    # length divisor sets; `effective` is only ever scaled and min-checked
+    # below, never indexed parallel to `prime`, so no shape relationship
+    # between them is required.
     if (
         prime.size == 0
         or effective.size == 0
-        or effective.shape != prime.shape
         or not np.all(np.isfinite(prime))
         or not np.all(np.isfinite(effective))
         or not np.isfinite(qcd_scalar)
