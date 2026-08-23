@@ -33,6 +33,7 @@ import numpy as np
 
 from generate_geometric_data_multitriangulation import (
     OrientifoldValidationFailure,
+    _exact_h2_action_from_glsm,
     validate_orientifold,
 )
 from glimmers_raw_frst import compute_polytope_normal_form_id, stable_hash
@@ -167,6 +168,7 @@ class _FakeTriangulation:
 def _topology(prime_toric_divisors, h11):
     return {
         "basis_matrix": np.eye(h11, dtype=int),
+        "glsm": np.eye(h11, dtype=int),
         "prime_toric_divisors": np.asarray(prime_toric_divisors, dtype=int),
         "h11": h11,
     }
@@ -286,6 +288,27 @@ class EnumeratePolytopeInvolutionsTests(unittest.TestCase):
         self.assertIn((0, 0, 1, 0), fan_rays)
 
 
+class ExactGLSMH2ContractTests(unittest.TestCase):
+    """Check the exact ``M Q = Q P`` quotient-action contract."""
+
+    def test_exact_action_has_zero_residual_and_involution_proof(self):
+        charge_matrix = np.array(
+            [[1, 0, 1, 0], [0, 1, 0, 1]], dtype=int
+        )
+        matrix, proof = _exact_h2_action_from_glsm(
+            charge_matrix, [1, 0, 3, 2]
+        )
+        np.testing.assert_array_equal(matrix, [[0, 1], [1, 0]])
+        self.assertEqual(proof["equation"], "M Q = Q P")
+        self.assertTrue(proof["exact_residual_zero"])
+        self.assertTrue(proof["involution_verified_exactly"])
+
+    def test_nonintegral_relation_solution_fails_closed(self):
+        charge_matrix = np.array([[2, 0, 1], [0, 1, 0]], dtype=int)
+        with self.assertRaisesRegex(ValueError, "nonintegral"):
+            _exact_h2_action_from_glsm(charge_matrix, [1, 0, 2])
+
+
 class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
     def _poly(self):
         return _FakePoly(BASIS_POINTS)
@@ -295,7 +318,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         # A single top-dimensional simplex spanning every point is invariant
         # under any permutation of {1,2,3,4}.
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 
@@ -360,7 +383,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
     def test_h11_minus_zero_filter_keeps_only_the_identity(self):
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         records = enumerate_orientifold_candidates(
             poly, triangulation, topology, h11_minus_target=0
@@ -391,7 +414,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         # {1,2,3} -- 1 identity + 3 transpositions = 4 preserving candidates,
         # the other 10 - 4 = 6 move point 4 and must fail FRST preservation.
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 
@@ -439,7 +462,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         # _fixed_point_set_description's labelling.
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
         identity_zero_shift = [
             record
@@ -475,7 +498,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
     def test_candidate_ids_are_stable_across_repeated_calls(self):
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         first = enumerate_orientifold_candidates(poly, triangulation, topology)
         second = enumerate_orientifold_candidates(poly, triangulation, topology)
@@ -513,7 +536,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
     def test_hand_constructed_non_preserving_matrix_reports_polytope_stage(self):
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
         # Shear e1 -> e1 + e2, not among the polytope's own points.
         shear = np.array(
             [[1, 0, 0, 0], [1, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=int
@@ -1630,7 +1653,7 @@ class PolytopeNormalFormIdentityTests(unittest.TestCase):
     def test_candidate_records_carry_normal_form_identity(self):
         poly = _FakePoly(BASIS_POINTS)
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 

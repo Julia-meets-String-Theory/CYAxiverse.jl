@@ -48,6 +48,7 @@ import numpy as np
 import cytools
 from cytools import Polytope, fetch_polytopes
 from cytools.utils import filter_tensor_indices, symmetric_sparse_to_dense
+from sympy import Matrix as _SympyMatrix
 from geometry_charge_conventions import canonicalize_unique_charge_rows
 from qed_divisor_assignment import (
     QEDAssignmentFailure,
@@ -426,17 +427,16 @@ def validate_orientifold(poly, triangulation, topology, config):
             stage="frst_not_preserved",
         )
 
-    basis_matrix = np.asarray(topology["basis_matrix"], dtype=float)
-    divisor_points = np.concatenate(
-        (np.asarray([0], dtype=int), topology["prime_toric_divisors"])
-    )
-    if basis_matrix.shape[1] != divisor_points.size:
+    prime_toric_divisors = np.asarray(topology["prime_toric_divisors"], dtype=int)
+    if prime_toric_divisors.ndim != 1 or prime_toric_divisors.size == 0:
         raise OrientifoldValidationFailure(
-            "The exported divisor basis does not match CYTools' canonical "
-            "origin-plus-prime-divisor configuration."
+            "The exported prime toric divisor labels are unavailable or malformed.",
+            stage="prime_divisor_set_not_preserved",
         )
-    mapped_divisor_points = mapped_indices[divisor_points]
-    divisor_positions = {point: position for position, point in enumerate(divisor_points)}
+    mapped_divisor_points = mapped_indices[prime_toric_divisors]
+    divisor_positions = {
+        int(point): position for position, point in enumerate(prime_toric_divisors)
+    }
     try:
         mapped_divisor_positions = np.asarray(
             [divisor_positions[point] for point in mapped_divisor_points], dtype=int
@@ -446,87 +446,43 @@ def validate_orientifold(poly, triangulation, topology, config):
             "The orientifold action does not preserve the prime toric divisor set.",
             stage="prime_divisor_set_not_preserved",
         ) from exc
-    if mapped_divisor_positions[0] != 0:
-        raise OrientifoldValidationFailure(
-            "The orientifold action must fix the origin label.",
-            stage="prime_divisor_set_not_preserved",
-        )
-    prime_image_indices = mapped_divisor_positions[1:] - 1
+    prime_image_indices = mapped_divisor_positions
     if np.any(prime_image_indices < 0) or np.any(
-        prime_image_indices >= topology["prime_toric_divisors"].size
+        prime_image_indices >= prime_toric_divisors.size
     ):
         raise OrientifoldValidationFailure(
             "The orientifold prime-divisor image map is invalid.",
             stage="prime_divisor_set_not_preserved",
         )
-    permutation = np.zeros((divisor_points.size, divisor_points.size), dtype=float)
-    permutation[np.arange(divisor_points.size), mapped_divisor_positions] = 1.0
-
-    # `basis_matrix` (CYTools' `divisor_basis(as_matrix=True)`) is, absent an
-    # explicit custom basis (never set in this codebase), a pure 0/1 selector
-    # marking which `h11` of the `N = h11+4` toric-divisor slots were chosen
-    # as basis -- it carries no information about the toric linear relations
-    # among divisor classes. Solving `h2_matrix @ basis_matrix = transformed`
-    # against that selector alone is only exactly consistent when `L` happens
-    # to permute the chosen basis-slot *set* onto itself, which has nothing
-    # to do with whether `L` induces a genuine integral H2 action -- it
-    # always does, for any point-set-preserving lattice automorphism, since
-    # the toric relations (the kernel of Z^N -> Pic(X)) are automorphism-
-    # invariant by construction. Use the actual quotient map instead: the
-    # GLSM charge matrix, restricted to the same `divisor_points` ordering
-    # `basis_matrix` uses, expresses every one of the N divisors' classes
-    # directly in the same basis (verified below) rather than only the
-    # arbitrarily-selected ones.
-    charge_matrix = np.asarray(
-        poly.glsm_charge_matrix(
-            include_origin=True, points=divisor_points.tolist(), integral=True
-        ),
-        dtype=float,
-    )
-    if charge_matrix.shape != (topology["h11"], divisor_points.size):
+    glsm = topology.get("glsm")
+    if glsm is None:
         raise OrientifoldValidationFailure(
-            "The GLSM charge matrix does not match the exported divisor "
-            "basis' shape."
-        )
-    basis_slots = np.flatnonzero(np.any(basis_matrix != 0, axis=0))
-    if basis_slots.size != topology["h11"] or not np.allclose(
-        charge_matrix[:, basis_slots], basis_matrix[:, basis_slots], atol=1e-8
-    ):
-        raise OrientifoldValidationFailure(
-            "The GLSM charge matrix and the exported divisor basis disagree "
-            "on the chosen basis divisors."
-        )
-
-    transformed_charges = charge_matrix @ permutation
-    coefficients, _, _, _ = np.linalg.lstsq(
-        charge_matrix.T, transformed_charges.T, rcond=None
-    )
-    h2_matrix = coefficients.T
-    integral_h2 = np.rint(h2_matrix).astype(int)
-    if not np.allclose(h2_matrix, integral_h2, atol=1e-8):
-        raise OrientifoldValidationFailure(
-            "The orientifold action does not induce an integral action in the "
-            "exported divisor basis.",
+            "The full GLSM quotient/relation matrix is required for the exact H2 action.",
             stage="nonintegral_h2_action",
         )
-    if not np.allclose(integral_h2 @ charge_matrix, transformed_charges, atol=1e-8):
-        raise OrientifoldValidationFailure(
-            "Could not express the orientifold action in H2.",
-            stage="nonintegral_h2_action",
+    try:
+        h2_matrix, h2_action_proof = _exact_h2_action_from_glsm(
+            glsm, prime_image_indices
         )
-    if not np.array_equal(integral_h2 @ integral_h2, np.eye(topology["h11"], dtype=int)):
+    except ValueError as exc:
+        raise OrientifoldValidationFailure(
+            f"Could not derive an exact integral H2 action from GLSM relations: {exc}",
+            stage="nonintegral_h2_action",
+        ) from exc
+    if not np.array_equal(h2_matrix @ h2_matrix, np.eye(topology["h11"], dtype=int)):
         raise OrientifoldValidationFailure(
             "The induced H2 action is not an involution.",
             stage="h2_action_not_involution",
         )
 
-    invariant_basis = _nullspace(integral_h2.T - np.eye(topology["h11"]))
-    anti_invariant_basis = _nullspace(integral_h2.T + np.eye(topology["h11"]))
+    invariant_basis = _nullspace(h2_matrix.T - np.eye(topology["h11"]))
+    anti_invariant_basis = _nullspace(h2_matrix.T + np.eye(topology["h11"]))
     config = dict(config)
     config.update(
         {
             "status": "fan_invariant",
-            "h2_involution_matrix": integral_h2,
+            "h2_involution_matrix": h2_matrix,
+            "h2_action_proof": h2_action_proof,
             "invariant_kahler_basis": invariant_basis,
             "anti_invariant_h2_basis": anti_invariant_basis,
             "h11_plus": int(invariant_basis.shape[1]),
@@ -540,6 +496,82 @@ def validate_orientifold(poly, triangulation, topology, config):
         }
     )
     return config
+
+
+def _exact_h2_action_from_glsm(glsm, prime_image_indices):
+    """Solve ``M Q = Q P`` exactly for the induced H2 action.
+
+    ``Q`` is the integer GLSM quotient/relation matrix with one column per
+    prime toric divisor.  ``P`` is the column permutation induced by the
+    lattice action.  Select an invertible ``h11``-column minor of ``Q`` and
+    solve over exact rationals; then verify every column of the equation and
+    require all entries of ``M`` to be integers.  Return both the integer
+    matrix and a replayable proof of the selected minor and zero residual.
+    """
+    q_array = np.asarray(glsm)
+    if q_array.ndim != 2:
+        raise ValueError(f"GLSM relation matrix must be two-dimensional, got {q_array.shape}")
+    if q_array.shape[0] == 0 or q_array.shape[1] == 0:
+        raise ValueError("GLSM relation matrix must be non-empty")
+    try:
+        q_values = [[int(value) for value in row] for row in q_array.tolist()]
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("GLSM relation matrix must contain exact integers") from exc
+    if any(q_array[i, j] != q_values[i][j] for i in range(q_array.shape[0]) for j in range(q_array.shape[1])):
+        raise ValueError("GLSM relation matrix must contain exact integers")
+    image = np.asarray(prime_image_indices, dtype=int).reshape(-1)
+    if image.size != q_array.shape[1] or sorted(int(value) for value in image) != list(range(image.size)):
+        raise ValueError("prime-divisor image indices must be a permutation of GLSM columns")
+    permutation = _SympyMatrix.zeros(image.size, image.size)
+    for source, target in enumerate(image):
+        permutation[source, int(target)] = 1
+    q_matrix = _SympyMatrix(q_values)
+    transformed = q_matrix * permutation
+    h11, n_prime = q_matrix.shape
+    selected_columns = None
+    selected_minor = None
+    for columns in itertools.combinations(range(n_prime), h11):
+        minor = q_matrix[:, columns]
+        determinant = int(minor.det())
+        if determinant != 0:
+            selected_columns = tuple(int(column) for column in columns)
+            selected_minor = determinant
+            break
+    if selected_columns is None:
+        raise ValueError("GLSM relation matrix does not have full row rank")
+    basis_minor = q_matrix[:, selected_columns]
+    transformed_minor = transformed[:, selected_columns]
+    rational_matrix = transformed_minor * basis_minor.inv()
+    if any(value.q != 1 for value in rational_matrix):
+        raise ValueError(
+            "the exact GLSM quotient/relation solution is nonintegral"
+        )
+    residual = rational_matrix * q_matrix - transformed
+    if any(value != 0 for value in residual):
+        raise ValueError(
+            "the exact GLSM quotient/relation residual is nonzero"
+        )
+    integer_matrix = np.asarray(
+        [[int(value) for value in row] for row in rational_matrix.tolist()],
+        dtype=np.int64,
+    )
+    if not np.array_equal(integer_matrix @ integer_matrix, np.eye(h11, dtype=np.int64)):
+        raise ValueError("the exact GLSM quotient/relation action is not an involution")
+    return integer_matrix, {
+        "method": "exact_full_glsm_quotient_relation",
+        "equation": "M Q = Q P",
+        "row_convention": "Q[h11, n_prime], P[source, image], M[h11, h11]",
+        "Q_shape": [int(h11), int(n_prime)],
+        "P_shape": [int(n_prime), int(n_prime)],
+        "Q_rank": int(h11),
+        "selected_column_indices": list(selected_columns),
+        "selected_minor_determinant": int(selected_minor),
+        "exact_rational_solution": True,
+        "integral_solution": True,
+        "exact_residual_zero": True,
+        "exact_residual_max_abs": 0,
+        "involution_verified_exactly": True,
+    }
 
 
 def validate_invariant_kaehler_subspace(kahler_cone, reference_tip, orientifold):
@@ -670,6 +702,7 @@ def extract_topology(cy, triangulation, *, export_kahler_rays=False):
     basis = np.asarray(cy.divisor_basis(), dtype=int)
     basis_matrix = np.asarray(cy.divisor_basis(as_matrix=True), dtype=int)
     prime_toric_divisors = np.asarray(cy.prime_toric_divisors(), dtype=int)
+    glsm = np.asarray(cy.glsm_charge_matrix(include_origin=False), dtype=int)
     if basis_matrix.ndim != 2 or basis_matrix.shape[0] != h11:
         raise RuntimeError(
             "CYTools returned an unexpected divisor-basis matrix shape; "
@@ -679,6 +712,11 @@ def extract_topology(cy, triangulation, *, export_kahler_rays=False):
         raise RuntimeError(
             "CYTools returned an unexpected prime-divisor label shape; "
             f"got {prime_toric_divisors.shape}, expected (n_prime_divisors,)."
+        )
+    if glsm.ndim != 2 or glsm.shape != (h11, prime_toric_divisors.size):
+        raise RuntimeError(
+            "CYTools returned an unexpected GLSM quotient/relation matrix shape; "
+            f"got {glsm.shape}, expected ({h11}, {prime_toric_divisors.size})."
         )
     kappa = np.asarray(
         cy.intersection_numbers(in_basis=True, format="coo"), dtype=float
@@ -734,6 +772,7 @@ def extract_topology(cy, triangulation, *, export_kahler_rays=False):
         "basis": basis,
         "basis_matrix": basis_matrix,
         "prime_toric_divisors": prime_toric_divisors,
+        "glsm": glsm,
         "kappa": kappa,
         "c2": c2,
         "mori_cone": mori,
