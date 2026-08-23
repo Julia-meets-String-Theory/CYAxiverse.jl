@@ -1035,7 +1035,10 @@ end
         merge_tolerance=1e-6, max_iterations=100,
         method=:leading_branches, max_branches=1_000)
     @test leading_estimate.vac == 4
-    @test leading_search.search_classification == "certified_selected_branch_set"
+    @test leading_search.search_classification ==
+        "complete_selected_leading_branch_count"
+    @test leading_search.legacy_search_classification ==
+        "certified_selected_branch_set"
     @test leading_search.branch_count == 16
     @test_throws ArgumentError _search_vacua(synthetic_geom, synthetic;
         threshold=0.5, starts=64, residual_tolerance=1e-9,
@@ -1047,7 +1050,10 @@ end
         merge_tolerance=1e-6, max_iterations=100,
         method=:reduced_jlm, max_branches=1_000)
     @test reduced_estimate.vac == 4
-    @test reduced_search.search_classification == "exact_determinant_branch"
+    @test reduced_search.search_classification ==
+        "square_reduced_potential_determinant_count"
+    @test reduced_search.legacy_search_classification ==
+        "exact_determinant_branch"
     @test reduced_search.multiplicity == 4.0
 
     lattice_selected = CYAxiverse.generate.LQtilde(
