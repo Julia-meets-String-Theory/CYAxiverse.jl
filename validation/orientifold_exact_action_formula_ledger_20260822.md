@@ -1,7 +1,7 @@
 # Exact-action orientifold formula ledger
 
-Date: 2026-08-22  
-Status: source validation and approved implementation complete  
+Date: 2026-08-22
+Status: source validation and approved implementation complete
 Scope: inherited holomorphic involutions of anticanonical Calabi--Yau
 hypersurfaces in toric fourfolds, and the population convention used by the
 fuzzy-axion study.
