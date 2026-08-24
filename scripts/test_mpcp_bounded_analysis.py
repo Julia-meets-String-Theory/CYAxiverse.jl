@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 import copy
+from unittest import mock
 
 import numpy as np
 
@@ -12,6 +13,8 @@ from mpcp_bounded_analysis import (
     FORMULA_SCHEMA_VERSION,
     SUPPORTED_CYTOOLS_API_VERSION,
     _canonical_digest,
+    _all_triangulations,
+    analyze_replay_index,
     _certificate_key,
     build_replay_certificate,
     hodge_split_from_euler,
@@ -113,8 +116,10 @@ class _FakePolytope:
     def points(self):
         return POINTS
 
-    def all_triangulations(self, only_fine=True, only_regular=True, only_star=True):
-        self.seen_filters = (only_fine, only_regular, only_star)
+    def all_triangulations(self, only_fine=True, only_regular=True, only_star=True,
+                           include_points_interior_to_facets=False):
+        self.seen_filters = (only_fine, only_regular, only_star,
+                             include_points_interior_to_facets)
         return iter(self._triangulations)
 
 
@@ -384,6 +389,76 @@ class AnalyticMPCPTests(unittest.TestCase):
         self.assertEqual(lower["cell_count"], 2)
         self.assertEqual(len(lower["cells"]), 1)
         self.assertTrue(lower["cells_truncated"])
+        self.assertTrue(lower["terminal"])
+        self.assertFalse(lower["certification_allowed"])
+
+    def test_triangulation_cap_is_terminal_and_not_exhaustive(self):
+        tri = _FakeTriangulation([[0, 1, 2, 3, 4]])
+        poly = _FakePolytope([tri])
+        records, enumeration = _all_triangulations(
+            poly, cap=0, deadline=float("inf")
+        )
+        self.assertEqual(records, [])
+        self.assertEqual(enumeration["status"], "resource_capped")
+        self.assertTrue(enumeration["terminal"])
+        self.assertFalse(enumeration["complete"])
+        self.assertFalse(enumeration["certification_allowed"])
+
+    def test_top_level_triangulation_cap_is_terminal_and_uncertified(self):
+        poly = _FakePolytope([])
+        selected = _FakeTriangulation([[0, 1, 2, 3, 4]])
+        source_identity = {
+            "terminal": False,
+            "expected_hodge": {"h11": 2, "h21": 120, "chi": -236},
+            "expected_point_count": 5,
+            "expected_boundary_point_count": 5,
+            "global_point_count": 5,
+            "global_points": POINTS.tolist(),
+            "polytope_id": "fixture-polytope",
+            "source_sha256": "fixture-source",
+            "source_row": 21,
+        }
+        record = {"index": 26, "actions": [ACTION]}
+        with mock.patch("mpcp_bounded_analysis._source_identity_evidence",
+                        return_value=source_identity), \
+             mock.patch("mpcp_bounded_analysis._construct_polytope",
+                        return_value=(poly, {"status": "constructed"})), \
+             mock.patch("mpcp_bounded_analysis._hodge_values",
+                        return_value={"h11": 2, "h21": 120, "chi": -236}), \
+             mock.patch("mpcp_bounded_analysis.height_one_point_evidence",
+                        return_value={"height_one_point_count": 5}), \
+             mock.patch("mpcp_bounded_analysis._construct_selected_triangulation",
+                        return_value=(selected, {"status": "constructed"})), \
+             mock.patch("mpcp_bounded_analysis._selected_identity_evidence",
+                        return_value={"status": "matched"}), \
+             mock.patch("mpcp_bounded_analysis.resolved_hodge_evidence",
+                        return_value={"h11": 2, "h21": 120, "chi": -236}), \
+             mock.patch("mpcp_bounded_analysis._hodge_match_evidence",
+                        return_value={"status": "matched", "terminal": False}), \
+             mock.patch("mpcp_bounded_analysis._points_from_object",
+                        return_value=POINTS), \
+             mock.patch("mpcp_bounded_analysis.omitted_point_facet_evidence",
+                        return_value={"status": "omitted_facet_interior_points_certified",
+                                      "triangulation_point_count": 5}), \
+             mock.patch("mpcp_bounded_analysis._public_geometry_evidence",
+                        return_value={}), \
+             mock.patch("mpcp_bounded_analysis.dual_action_evidence",
+                        return_value={"status": "verified", "terminal": False}), \
+             mock.patch("mpcp_bounded_analysis._all_triangulations",
+                        return_value=([], {"status": "resource_capped", "terminal": True,
+                                          "complete": False,
+                                          "certification_allowed": False})):
+            report = analyze_replay_index(26, record,
+                                          caps={"max_triangulations": 0})
+        self.assertEqual(report["status"], "resource_capped")
+        self.assertEqual(report["analysis_status"], "terminal_resource_capped")
+        self.assertTrue(report["terminal"])
+        self.assertFalse(report["complete"])
+        self.assertFalse(report["certification_allowed"])
+        self.assertIn(
+            "resource_capped_triangulation_enumeration",
+            {row["terminal_status"] for row in report["terminal_records"]},
+        )
 
     def test_resolved_eq_4_51_does_not_assume_h11_two(self):
         split = hodge_split_from_euler(

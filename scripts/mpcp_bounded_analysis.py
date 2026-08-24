@@ -1557,6 +1557,9 @@ def lower_subdivision_evidence(
             "cell_cap": max_cells,
             "cells": cells,
             "cells_truncated": cells_truncated,
+            "terminal": cells_truncated,
+            "complete": not cells_truncated,
+            "certification_allowed": not cells_truncated,
             "simplicial": all(len(cell) <= 4 for cell in cells) if cells else None,
             "tie_breaking": False,
             "fallback": None,
@@ -1607,6 +1610,9 @@ def _all_triangulations(poly: Any, *, cap: int, deadline: float) -> tuple[list[d
             "status": "all_triangulations_unavailable",
             "reason": "Polytope.all_triangulations is absent; no single triangulate fallback is permitted",
             "fallback": None,
+            "terminal": True,
+            "complete": False,
+            "certification_allowed": False,
         }
     kwargs = {
         "only_fine": True,
@@ -1625,6 +1631,9 @@ def _all_triangulations(poly: Any, *, cap: int, deadline: float) -> tuple[list[d
             "reason": f"{type(exc).__name__}: {exc}",
             "kwargs": kwargs,
             "fallback": None,
+            "terminal": True,
+            "complete": False,
+            "certification_allowed": False,
         }
     records: list[dict[str, Any]] = []
     capped = False
@@ -1671,6 +1680,9 @@ def _all_triangulations(poly: Any, *, cap: int, deadline: float) -> tuple[list[d
             "yielded": len(records),
             "capped": capped,
             "fallback": None,
+            "terminal": True,
+            "complete": False,
+            "certification_allowed": False,
         }
     return records, {
         "status": "resource_capped" if capped else "all_triangulations_exhausted",
@@ -1680,6 +1692,9 @@ def _all_triangulations(poly: Any, *, cap: int, deadline: float) -> tuple[list[d
         "capped": capped,
         "terminal_accounting": "all yielded candidates retained; cap is explicit",
         "fallback": None,
+        "terminal": capped,
+        "complete": not capped,
+        "certification_allowed": not capped,
     }
 
 
@@ -2540,6 +2555,10 @@ def analyze_replay_index(
         "selected_frst": None,
         "table1_status": "not_comparable",
         "same_table1_status": "not_comparable",
+        "status": "not_started",
+        "terminal": False,
+        "complete": False,
+        "certification_allowed": False,
     }
     if index not in TARGET_INDICES:
         report["terminal_records"].append({"terminal_status": "index_out_of_scope", "reason": f"only {TARGET_INDICES} are permitted"})
@@ -2715,6 +2734,33 @@ def analyze_replay_index(
         deadline=start + float(caps["max_seconds_per_index"]),
     )
     report["triangulation_enumeration"] = _jsonable({key: value for key, value in enumeration.items() if key != "triangulation"})
+    if enumeration.get("status") == "resource_capped":
+        report["status"] = "resource_capped"
+        report["analysis_status"] = "terminal_resource_capped"
+        report["terminal"] = True
+        report["complete"] = False
+        report["certification_allowed"] = False
+        report["terminal_records"].append({
+            "terminal_status": "resource_capped_triangulation_enumeration",
+            "reason": (
+                "triangulation enumeration stopped at the declared cap; the yielded "
+                "prefix is bounded diagnostic evidence, not an exhaustive population"
+            ),
+            "enumeration": report["triangulation_enumeration"],
+        })
+        report["refinement_records"] = [
+            _jsonable({key: value for key, value in row.items() if key != "triangulation"})
+            for row in raw_refinements
+        ]
+        report["counts"] = {
+            "triangulations_yielded": len(raw_refinements),
+            "refinements_retained": len(report["refinement_records"]),
+            "action_evaluations": 0,
+            "action_terminal_records": 0,
+            "terminal_records": len(report["terminal_records"]),
+            "replay_certificates": 0,
+        }
+        return report
     candidate_point_counts = sorted({
         int(row["point_count"])
         for row in raw_refinements
@@ -2912,16 +2958,39 @@ def analyze_replay_index(
             candidate_record["action_compatibility"].append(compatibility)
             if action.get("lattice_matrix") is not None:
                 height_evidence = symmetric_heights(poly, selected, action["lattice_matrix"])
+                lower_evidence = lower_subdivision_evidence(
+                    poly,
+                    height_evidence,
+                    max_cells=int(caps["max_refinement_cells"]),
+                )
                 candidate_record["equivariant_refinement"].append({
                     "action_index": action_index,
                     "symmetric_heights": height_evidence,
-                    "lower_subdivision": lower_subdivision_evidence(
-                        poly,
-                        height_evidence,
-                        max_cells=int(caps["max_refinement_cells"]),
-                    ),
+                    "lower_subdivision": lower_evidence,
                     "selected_frst_preserved": selected_identity == identity,
                 })
+                if lower_evidence.get("terminal"):
+                    candidate_record["terminal_status"] = "resource_capped_cells"
+                    report["terminal_records"].append({
+                        "terminal_status": "resource_capped_cells",
+                        "reason": (
+                            "lower-subdivision cells were truncated at the declared "
+                            "cap; this action and the analysis are incomplete"
+                        ),
+                        "candidate_index": refinement["candidate_index"],
+                        "action_index": action_index,
+                    })
+                    report["action_records"].append({
+                        "candidate_index": refinement["candidate_index"],
+                        "action_index": action_index,
+                        "terminal_status": "resource_capped_cells",
+                        "reason": (
+                            "lower-subdivision cells were truncated at the declared "
+                            "cap; truncated cells cannot certify an action"
+                        ),
+                        "lower_subdivision": lower_evidence,
+                    })
+                    continue
             if compatibility.get("status") != "fan_preserved":
                 report["action_records"].append({
                     "candidate_index": refinement["candidate_index"],
@@ -2941,7 +3010,8 @@ def analyze_replay_index(
             evaluated["candidate_index"] = refinement["candidate_index"]
             evaluated["action_index"] = action_index
             report["action_records"].append(_jsonable(evaluated))
-        candidate_record["terminal_status"] = "refinement_enumerated"
+        if candidate_record.get("terminal_status") != "resource_capped_cells":
+            candidate_record["terminal_status"] = "refinement_enumerated"
         report["refinement_records"].append(candidate_record)
         if time.monotonic() > start + float(caps["max_seconds_per_index"]):
             report["terminal_records"].append({"terminal_status": "resource_cap_seconds", "reason": "per-index time cap reached"})
@@ -2984,6 +3054,33 @@ def analyze_replay_index(
     }
     report["table1_status"] = _table1_status(record, report)
     report["same_table1_status"] = report["table1_status"]
+    terminal_statuses = {
+        row.get("terminal_status") for row in report["terminal_records"]
+    }
+    has_seconds_cap = "resource_cap_seconds" in terminal_statuses
+    has_cell_cap = "resource_capped_cells" in terminal_statuses or any(
+        row.get("terminal_status") == "resource_capped_cells"
+        for row in report["action_records"]
+    )
+    if has_seconds_cap:
+        report["status"] = "resource_cap_seconds"
+        report["analysis_status"] = "terminal_resource_cap_seconds"
+    elif has_cell_cap:
+        report["status"] = "resource_capped_cells"
+        report["analysis_status"] = "terminal_resource_capped_cells"
+    else:
+        report["status"] = "computed"
+        report["analysis_status"] = "computed"
+    has_terminal_cap = has_seconds_cap or has_cell_cap
+    report["complete"] = (
+        enumeration.get("status") == "all_triangulations_exhausted"
+        and not has_terminal_cap
+    )
+    report["terminal"] = bool(report["terminal_records"])
+    report["certification_allowed"] = report["complete"] and not any(
+        row.get("terminal_status") == "resource_capped_cells"
+        for row in report["action_records"]
+    )
     return report
 
 
