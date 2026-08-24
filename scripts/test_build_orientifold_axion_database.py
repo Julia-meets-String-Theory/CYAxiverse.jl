@@ -21,6 +21,7 @@ import numpy as np
 from build_orientifold_axion_database import (
     canonical_prime_divisor_volumes,
     action_witness_digest,
+    certify_and_build_pending,
     default_run_manifest_path,
     enrich_accepted_witness_matrices,
     EXACT_ACTION_H21_PLUS_STATUS,
@@ -29,6 +30,8 @@ from build_orientifold_axion_database import (
     find_exact_trilayer_witnesses,
     find_accepted_o3o7_witness,
     load_ledger_accepted_classes,
+    load_mpcp_certificates,
+    _lookup_mpcp_certificate,
     main,
     orientifold_action_digest,
     lattice_matrix_digest,
@@ -37,6 +40,7 @@ from build_orientifold_axion_database import (
     require_exact_action_h21_plus_validation,
     _witness_matches_ledger,
     write_run_manifest,
+    write_json_report,
 )
 from glimmers_raw_frst import stable_hash
 import orientifold_general_l_geometry as general_l
@@ -47,6 +51,7 @@ from toric_fixed_component_euler import (
     normalized_lattice_volume_ehrhart,
     transverse_component_euler_orbit,
 )
+from mpcp_bounded_analysis import build_replay_certificate, point_identity
 
 
 def _smooth_toric_certificate(rays, maximal_cones, coefficients):
@@ -136,6 +141,53 @@ _REJECTED_ENTRY = {
     "polytope_normal_form_id": "normal-form-sha256:dddd",
     "status_counts": {"fixed_point_set_non_smooth": 4},
 }
+
+
+def _valid_mpcp_certificate_fixture():
+    """Build one source-keyed certificate that passes the replay validator."""
+    points = np.asarray([
+        [0, 0, 0, 0], [1, 0, 0, 0], [0, 1, 0, 0],
+        [0, 0, 1, 0], [0, 0, 0, 1],
+    ], dtype=int)
+    source = {
+        "source_sha256": "source-fixture-sha",
+        "parquet_sha256": "source-fixture-sha",
+        "source_row": 21,
+        "polytope_id": f"lattice-points-sha256:{point_identity(points)}",
+        "global_points": points.tolist(),
+    }
+    action = {
+        "lattice_matrix": np.eye(4, dtype=int).tolist(),
+        "torus_shift": {"numerator": [0, 0, 0, 0], "denominator": 1},
+        "lambda_f": 1,
+    }
+    report = {
+        "schema_version": "cyaxiverse-bounded-mpcp-replay-1.3",
+        "runtime_provenance": {"cytools_version_guard": {
+            "status": "verified", "expected": "1.4.12", "observed": "1.4.12",
+        }},
+        "selected_frst": {"identity": "fixture-frst"},
+        "source_identity": source,
+    }
+    action_record = {
+        "terminal_status": "refined_action_evaluated",
+        "candidate_index": 0,
+        "frst_hash": "fixture-frst",
+        "action": action,
+        "fixed_locus_euler": {"status": "computed", "chi_F_I": 0, "components": []},
+        "refined_glsm": {
+            "status": "refined_h2_action_verified", "h2_matrix": [[1]], "proof": {},
+        },
+        "hodge_split": {
+            "h11_plus": 1, "h11_minus": 0, "h21_plus": 0,
+            "h21_minus": 0, "chi_fixed_locus": 0, "chi_x": 0,
+        },
+    }
+    certificate = build_replay_certificate(
+        26, {"source": source}, report, action_record
+    )
+    assert certificate is not None
+    return certificate
 
 
 class LoadLedgerAcceptedClassesTests(unittest.TestCase):
@@ -602,10 +654,11 @@ class LoadLedgerAcceptedClassesTests(unittest.TestCase):
             "provenance": {"schema_version": "fixture"},
             "candidates": [candidate],
         }
+        certificate = _valid_mpcp_certificate_fixture()
         with mock.patch(
             "build_orientifold_axion_database.reconstruct_trilayer_actions",
             return_value=reconstruction,
-        ), mock.patch(
+        ) as reconstruct, mock.patch(
             "build_orientifold_axion_database.compute_polytope_id",
             return_value="poly",
         ), mock.patch(
@@ -615,8 +668,12 @@ class LoadLedgerAcceptedClassesTests(unittest.TestCase):
             witnesses = find_exact_trilayer_witnesses(
                 mock.Mock(points=lambda: np.zeros((1, 4), dtype=int)),
                 mock.Mock(simplices=lambda: np.zeros((1, 5), dtype=int)),
-                frst_class_index=0,
+                frst_class_index=0, mpcp_certificate=certificate,
+                source_record={"source": certificate["source"]},
             )
+        reconstruction_kwargs = reconstruct.call_args.kwargs
+        self.assertIs(reconstruction_kwargs["mpcp_certificate"], certificate)
+        self.assertEqual(reconstruction_kwargs["source_record"]["source"], certificate["source"])
         self.assertEqual(len(witnesses), 1)
         witness = witnesses[0]
         self.assertEqual(witness["involution_type"], "O3/O7")
@@ -775,6 +832,170 @@ class LoadLedgerAcceptedClassesTests(unittest.TestCase):
             self.assertEqual(reference["manifest_file_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
             self.assertEqual(reference["manifest_payload_sha256"], payload["manifest_payload_sha256"])
             self.assertEqual(write_run_manifest(path, payload), reference)
+
+    def test_report_is_json_zst_level19_and_refuses_changed_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            path = Path(directory_name) / "report.json.zst"
+            report = {"h11": 2, "status": "selected"}
+            reference = write_json_report(path, report)
+            decoded = subprocess.run(
+                ["zstd", "-dc", str(path)], check=True, capture_output=True
+            ).stdout
+            self.assertEqual(json.loads(decoded)["schema_version"],
+                             "cyaxiverse-orientifold-bridge-report-1.0")
+            expected = subprocess.run(
+                ["zstd", "-q", "-19", "-c"],
+                input=(json.dumps({"h11": 2, "status": "selected",
+                                   "schema_version":
+                                   "cyaxiverse-orientifold-bridge-report-1.0"},
+                                  indent=2, sort_keys=True) + "\n").encode(),
+                check=True, capture_output=True,
+            ).stdout
+            self.assertEqual(path.read_bytes(), expected)
+            self.assertEqual(reference["file_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(write_json_report(path, report), reference)
+            with self.assertRaisesRegex(FileExistsError, "refusing to overwrite"):
+                write_json_report(path, {"h11": 3})
+            with self.assertRaisesRegex(ValueError, r"\.json\.zst"):
+                write_json_report(Path(directory_name) / "report.json", report)
+
+    def test_full_stage_writes_final_report_once_after_build(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            report_path = directory / "report.json.zst"
+            manifest_path = directory / "manifest.json.zst"
+            argv = [
+                "build_orientifold_axion_database.py", "--h11", "2",
+                "--parquet-dir", str(directory / "mirror"),
+                "--ledger-population-dir", str(directory / "population"),
+                "--ledger-name", "ledger.json.zst",
+                "--matrix-catalog", str(directory / "catalog.json.zst"),
+                "--matrix-terminal-ledger", str(directory / "terminal.jsonl"),
+                "--db-root", str(directory / "database"),
+                "--manifest", str(manifest_path),
+                "--report", str(report_path),
+            ]
+            manifest = {
+                "manifest_file_sha256": "manifest-file",
+                "manifest_payload_sha256": "manifest-payload",
+                "manifest_path": str(manifest_path),
+            }
+            audit = {
+                "live_minus_ledger": [], "ledger_minus_live": [],
+                "live_duplicate_keys": [], "ledger_duplicate_keys": [],
+                "equal": True,
+            }
+            with mock.patch("build_orientifold_axion_database.sys.argv", argv), \
+                 mock.patch("build_orientifold_axion_database.require_clean_git_source", return_value=("commit", "tree")), \
+                 mock.patch("build_orientifold_axion_database.run_population_preflight", return_value=None), \
+                 mock.patch("build_orientifold_axion_database.require_exact_action_h21_plus_validation"), \
+                 mock.patch("build_orientifold_axion_database.sha256_of_file", return_value="ledger-sha"), \
+                 mock.patch("build_orientifold_axion_database.build_run_manifest", return_value=manifest), \
+                 mock.patch("build_orientifold_axion_database.write_run_manifest", return_value=manifest), \
+                 mock.patch("build_orientifold_axion_database.load_ledger_accepted_classes", return_value=([], {}, "ledger-sha")), \
+                 mock.patch("build_orientifold_axion_database.enrich_accepted_witness_matrices", return_value=([], {})), \
+                 mock.patch("build_orientifold_axion_database.select_and_verify_trilayer_population", return_value=([], [], 0, [])), \
+                 mock.patch("build_orientifold_axion_database.population_set_audit", return_value=audit), \
+                 mock.patch("build_orientifold_axion_database.PAPER_TRILAYER_TARGETS", {}), \
+                 mock.patch("build_orientifold_axion_database.build_database", return_value=([], [])), \
+                 mock.patch("build_orientifold_axion_database.write_json_report") as write_report:
+                main()
+            self.assertEqual(write_report.call_count, 1)
+            self.assertIn("build_results", write_report.call_args.args[1])
+
+    def test_certificate_input_is_required_before_population_selection(self):
+        with self.assertRaisesRegex(FileNotFoundError, "certificate input is missing"):
+            load_mpcp_certificates(Path("/private/tmp/does-not-exist-mpcp.json.zst"))
+        with tempfile.TemporaryDirectory() as directory_name:
+            path = Path(directory_name) / "invalid.json"
+            path.write_text(json.dumps({"certificates": [{}]}), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "certificate 0 is invalid"):
+                load_mpcp_certificates(path)
+
+    def test_valid_certificate_is_loaded_and_joined_by_polytope_and_frst(self):
+        certificate = _valid_mpcp_certificate_fixture()
+        with tempfile.TemporaryDirectory() as directory_name:
+            path = Path(directory_name) / "certificates.json"
+            path.write_text(json.dumps({"certificates": [certificate]}), encoding="utf-8")
+            loaded = load_mpcp_certificates(path)
+        self.assertEqual(loaded["count"], 1)
+        loaded_certificate = loaded["certificates"][0]
+        self.assertEqual(
+            _lookup_mpcp_certificate(
+                [loaded_certificate],
+                polytope_id=loaded_certificate["source"]["polytope_id"],
+                frst_hash=loaded_certificate["frst"]["frst_hash"],
+            ),
+            loaded_certificate,
+        )
+        self.assertIsNone(
+            _lookup_mpcp_certificate(
+                [loaded_certificate],
+                polytope_id=loaded_certificate["source"]["polytope_id"],
+                frst_hash="different-frst",
+            )
+        )
+
+    def test_preflight_failure_precedes_geometry_loading(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            argv = [
+                "build_orientifold_axion_database.py", "--h11", "4",
+                "--parquet-dir", str(Path(directory_name) / "mirror"),
+                "--ledger-population-dir", str(Path(directory_name) / "population"),
+                "--ledger-name", "ledger.json.zst",
+                "--db-root", str(Path(directory_name) / "database"),
+            ]
+            with mock.patch("build_orientifold_axion_database.sys.argv", argv), \
+                 mock.patch("build_orientifold_axion_database.require_clean_git_source"), \
+                 mock.patch(
+                     "build_orientifold_axion_database.run_population_preflight",
+                     side_effect=RuntimeError("preflight gate"),
+                 ), \
+                 mock.patch(
+                     "build_orientifold_axion_database.mg.load_mirror_polytopes",
+                 ) as load_geometry:
+                with self.assertRaisesRegex(RuntimeError, "preflight gate"):
+                    main()
+            load_geometry.assert_not_called()
+
+    def test_pending_stage_forwards_loaded_certificate_to_reconstruction(self):
+        certificate = _valid_mpcp_certificate_fixture()
+        record = {
+            "poly_index": 0,
+            "class_index": 0,
+            "polytope_id": certificate["source"]["polytope_id"],
+            "frst_hash": certificate["frst"]["frst_hash"],
+            "poly": mock.Mock(
+                points=lambda: np.asarray(certificate["source"]["global_points"])
+            ),
+            "triangulation": mock.Mock(),
+            "ledger_entry": {},
+        }
+        args = Namespace(h11=4)
+        with mock.patch(
+            "build_orientifold_axion_database.require_exact_action_h21_plus_validation",
+        ), mock.patch(
+            "build_orientifold_axion_database._selected_records_by_key",
+            return_value={(0, 0): record},
+        ), mock.patch(
+            "build_orientifold_axion_database.find_exact_trilayer_witnesses",
+            return_value=[],
+        ) as find_witnesses, mock.patch(
+            "build_orientifold_axion_database._exact_trilayer_topology",
+            return_value={},
+        ), mock.patch(
+            "build_orientifold_axion_database.reconstruct_trilayer_actions",
+            return_value={"candidates": []},
+        ):
+            certified, not_certified = certify_and_build_pending(
+                args, {(0, 0)}, "ledger.zst", "ledger-sha", str(Path.cwd()),
+                1, {}, {}, mpcp_certificates=[certificate],
+            )
+        self.assertEqual(certified, [])
+        self.assertEqual(len(not_certified), 1)
+        self.assertIs(
+            find_witnesses.call_args.kwargs["mpcp_certificate"], certificate
+        )
 
     def test_default_manifest_path_is_configuration_specific(self):
         common = dict(

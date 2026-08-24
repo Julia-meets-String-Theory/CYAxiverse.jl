@@ -101,6 +101,7 @@ import inherited_orientifold_candidates as ioc
 import orientifold_general_l_geometry as general_l
 import reproduce_fuzzy_axions_h11_4 as repro
 import toric_fixed_component_euler as toric_euler
+from orientifold_population_preflight import run_population_preflight
 from trilayer_involutions import reconstruct_trilayer_actions
 from glimmers_raw_frst import compute_polytope_id, compute_triangulation_hash, stable_hash
 from qed_divisor_assignment import (
@@ -111,6 +112,7 @@ from qed_divisor_assignment import (
 
 BRIDGE_SCHEMA_VERSION = "cyaxiverse-phase1-orientifold-axiverse-bridge-1.2"
 ORIENTIFOLD_PROVENANCE_SCHEMA_VERSION = "cyaxiverse-phase1-orientifold-provenance-1.2"
+REPORT_SCHEMA_VERSION = "cyaxiverse-orientifold-bridge-report-1.0"
 EXACT_ACTION_H21_PLUS_STATUS = "not_validated"
 EXACT_ACTION_H21_PLUS_REASON = (
     "analytic exact-action kernels pass, but full permitted h11=2 and h11=3 "
@@ -347,6 +349,106 @@ def write_run_manifest(path, manifest):
         "path": path,
         "manifest_payload_sha256": manifest["manifest_payload_sha256"],
         "manifest_file_sha256": manifest_file_sha256,
+    }
+
+
+def write_json_report(path, report):
+    """Write one compressed report atomically and refuse implicit overwrite."""
+    path = Path(path)
+    if path.suffixes[-2:] != [".json", ".zst"]:
+        raise ValueError("report output must use the .json.zst contract")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(report)
+    payload.setdefault("schema_version", REPORT_SCHEMA_VERSION)
+    encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    compressed = subprocess.run(
+        ["zstd", "-q", "-19", "-c"], input=encoded, check=True,
+        capture_output=True,
+    ).stdout
+    digest = hashlib.sha256(compressed).hexdigest()
+    if path.exists():
+        if path.read_bytes() == compressed:
+            return {"path": path, "file_sha256": digest}
+        raise FileExistsError(f"refusing to overwrite an existing report: {path}")
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}-{time.time_ns()}")
+    try:
+        temporary.write_bytes(compressed)
+        with temporary.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+        except OSError:  # pragma: no cover - platform-specific directory fsync
+            directory_fd = None
+        if directory_fd is not None:
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    except Exception:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+    return {"path": path, "file_sha256": digest}
+
+
+def load_mpcp_certificates(path):
+    """Load and validate the complete bounded-certificate input before scanning."""
+    if path is None:
+        raise RuntimeError(
+            "bounded MPCP certificate input is required; pass --mpcp-certificates PATH"
+        )
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"bounded MPCP certificate input is missing: {path}")
+    if path.name.endswith(".zst"):
+        completed = subprocess.run(
+            ["zstd", "-dc", str(path)], check=False, capture_output=True
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"could not read bounded MPCP certificates: {detail}")
+        encoded = completed.stdout
+    else:
+        encoded = path.read_bytes()
+    try:
+        payload = json.loads(encoded)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"bounded MPCP certificate input is not valid JSON: {path}") from exc
+    certificates = payload.get("certificates") if isinstance(payload, dict) else payload
+    if not isinstance(certificates, list) or not certificates:
+        raise RuntimeError("bounded MPCP certificate input must contain a non-empty certificates list")
+    from mpcp_bounded_analysis import validate_replay_certificate
+
+    seen = set()
+    validated = []
+    for position, certificate in enumerate(certificates):
+        check = validate_replay_certificate(certificate)
+        if check.get("status") != "valid":
+            reasons = "; ".join(check.get("reasons", []))
+            raise RuntimeError(
+                f"bounded MPCP certificate {position} is invalid: {reasons}"
+            )
+        source = certificate.get("source", {})
+        frst = certificate.get("frst", {})
+        key = (source.get("polytope_id"), frst.get("frst_hash"))
+        if not all(isinstance(value, str) and value for value in key):
+            raise RuntimeError(
+                f"bounded MPCP certificate {position} is missing polytope_id/frst_hash identity"
+            )
+        if key in seen:
+            raise RuntimeError(f"duplicate bounded MPCP certificate identity: {key[0]}::{key[1]}")
+        seen.add(key)
+        validated.append(dict(certificate))
+    return {
+        "certificates": validated,
+        "count": len(validated),
+        "identity_digest": hashlib.sha256(
+            json.dumps(sorted(f"{polytope}::{frst}" for polytope, frst in seen),
+                       separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "path": str(path.resolve()),
+        "file_sha256": sha256_of_file(str(path)),
     }
 
 
@@ -622,6 +724,10 @@ def select_and_verify_trilayer_population(
     provenance cross-reference.
     """
     require_exact_action_h21_plus_validation()
+    if mpcp_certificates is None and h11 in (4, 5):
+        raise RuntimeError(
+            "bounded MPCP certificate input is required for population selection"
+        )
     ledger_by_key = {
         (entry["polytope_id"], entry["frst_class_index"]): entry
         for entry in ledger_accepted
@@ -659,11 +765,25 @@ def select_and_verify_trilayer_population(
                 polytope_id=polytope_id,
                 frst_hash=frst_hash,
             )
+            if bounded_certificate is None and h11 in (4, 5):
+                raise RuntimeError(
+                    "missing bounded MPCP certificate for required identity "
+                    f"{polytope_id}::{frst_hash}"
+                )
+            reconstruction_kwargs = {"return_all_evidence": True}
+            if bounded_certificate is not None:
+                reconstruction_kwargs.update(
+                    mpcp_certificate=bounded_certificate,
+                    source_record={
+                        "source": {
+                            "polytope_id": polytope_id,
+                            "global_points": points.tolist(),
+                        }
+                    },
+                )
             witnesses, live_action_evidence = find_exact_trilayer_witnesses(
                 poly, triangulation, ledger_entry,
-                frst_class_index=class_index,
-                return_all_evidence=True,
-                mpcp_certificate=bounded_certificate,
+                frst_class_index=class_index, **reconstruction_kwargs,
             )
             for witness in witnesses:
                 witness["polytope_id"] = polytope_id
@@ -1713,6 +1833,12 @@ def main():
         type=Path,
         help="immutable terminal JSONL used only to verify the matrix catalog source SHA",
     )
+    parser.add_argument(
+        "--mpcp-certificates",
+        type=Path,
+        default=None,
+        help="JSON or JSON.zst bounded MPCP certificate input keyed by (polytope_id, frst_hash)",
+    )
     parser.add_argument("--db-root", required=True, help="Destination database root directory.")
     parser.add_argument(
         "--stage", choices=("select", "full", "certify-pending"), default="full",
@@ -1738,7 +1864,10 @@ def main():
         help="For --stage certify-pending: the certified count from the prior main "
         "build, recorded in provenance and used as the base for the running total.",
     )
-    parser.add_argument("--report", type=Path, default=None, help="Optional JSON report output path.")
+    parser.add_argument(
+        "--report", type=Path, default=None,
+        help="Optional compressed report output path; must end in .json.zst.",
+    )
     parser.add_argument(
         "--manifest", type=Path, default=None,
         help="Optional zstd-compressed run-manifest path; defaults under --db-root.",
@@ -1776,6 +1905,10 @@ def main():
     # clean commit.  This prevents artifacts from being attributed to a
     # partially edited worktree.
     require_clean_git_source(str(package_root))
+    population_preflight = run_population_preflight(package_root, args.h11)
+    certificate_input = None
+    if args.h11 in (4, 5) or args.mpcp_certificates is not None:
+        certificate_input = load_mpcp_certificates(args.mpcp_certificates)
     # The identity-action diagnostic is validated, but general-L fixed-locus
     # Euler evidence is not. Stop before a scan, manifest, or HDF5 output.
     require_exact_action_h21_plus_validation()
@@ -1826,6 +1959,9 @@ def main():
         certified_results, not_certified = certify_and_build_pending(
             args, pending_keys, ledger_zst_path, ledger_sha256, str(package_root),
             args.np_index_start, run_manifest, certification_info,
+            mpcp_certificates=(
+                None if certificate_input is None else certificate_input["certificates"]
+            ),
         )
         report = {
             "h11": args.h11,
@@ -1838,8 +1974,15 @@ def main():
             "certified_results": _jsonable(certified_results),
             "not_certified": _jsonable(not_certified),
         }
+        if population_preflight is not None:
+            report["population_preflight"] = population_preflight
+        if certificate_input is not None:
+            report["bounded_mpcp_certificates"] = {
+                key: value for key, value in certificate_input.items()
+                if key != "certificates"
+            }
         if args.report is not None:
-            args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+            write_json_report(args.report, report)
             print(f"\nwrote {args.report}")
         return
 
@@ -1858,7 +2001,10 @@ def main():
     )
 
     selected, mismatches, total_h21_plus_zero, live_population = select_and_verify_trilayer_population(
-        args.h11, args.parquet_dir, ledger_accepted
+        args.h11, args.parquet_dir, ledger_accepted,
+        mpcp_certificates=(
+            None if certificate_input is None else certificate_input["certificates"]
+        ),
     )
     population_audit = population_set_audit(live_population, ledger_accepted)
 
@@ -1917,6 +2063,13 @@ def main():
             ]
         ),
     }
+    if population_preflight is not None:
+        report["population_preflight"] = population_preflight
+    if certificate_input is not None:
+        report["bounded_mpcp_certificates"] = {
+            key: value for key, value in certificate_input.items()
+            if key != "certificates"
+        }
 
     print(f"\n=== Step A hard-gate evidence (h11={args.h11}) ===")
     print(f"paper Table 1 target trilayer class count: {target}")
@@ -1974,10 +2127,6 @@ def main():
     report["conditional_ceiling"] = target
     report["pending_certification"] = report["mismatches"] if certification_gap_matches_exactly else []
 
-    if args.report is not None:
-        args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-        print(f"\nwrote {args.report}")
-
     if not certification_gap_matches_exactly and (
         mismatches
         or population_audit["ledger_minus_live"]
@@ -1986,6 +2135,9 @@ def main():
         or (target is not None and len(selected) != target)
     ):
         print("\nSTOPPING per Phase 1 hard-gate policy; no HDF5 files written.")
+        if args.report is not None:
+            write_json_report(args.report, report)
+            print(f"\nwrote {args.report}")
         sys.exit(1)
 
     if certification_gap_matches_exactly:
@@ -1996,6 +2148,9 @@ def main():
         )
 
     if args.stage == "select":
+        if args.report is not None:
+            write_json_report(args.report, report)
+            print(f"\nwrote {args.report}")
         print("\n--stage=select: stopping after population selection/verification.")
         return
 
@@ -2012,7 +2167,7 @@ def main():
     )
     report["build_results"] = _jsonable(build_results)
     if args.report is not None:
-        args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        write_json_report(args.report, report)
         print(f"\nupdated {args.report}")
 
     if classes_with_no_viable_qcd_divisor:
@@ -2305,7 +2460,8 @@ def build_database(args, selected, ledger_zst_path, ledger_sha256, package_root,
 
 
 def certify_and_build_pending(args, pending_keys, ledger_zst_path, ledger_sha256,
-        package_root, np_index_start, run_manifest, certification_info):
+        package_root, np_index_start, run_manifest, certification_info,
+        *, mpcp_certificates=None):
     """Attempt to certify specific classes and build the ones that succeed.
 
     `pending_keys` is a set of (poly_index, class_index) pairs -- normally the
@@ -2325,7 +2481,9 @@ def certify_and_build_pending(args, pending_keys, ledger_zst_path, ledger_sha256
 
     print(f"\n=== re-scanning h11={args.h11} population to recover the {len(pending_keys)} "
           "pending classes' live CYTools objects ===", flush=True)
-    records = _selected_records_by_key(args, pending_keys)
+    records = _selected_records_by_key(
+        args, pending_keys, mpcp_certificates=mpcp_certificates
+    )
     missing_keys = pending_keys - set(records.keys())
     if missing_keys:
         raise RuntimeError(
@@ -2343,9 +2501,32 @@ def certify_and_build_pending(args, pending_keys, ledger_zst_path, ledger_sha256
             poly_index, class_index = key
             print(f"\n--- certifying poly_index={poly_index} class_index={class_index} ---",
                   flush=True)
+            bounded_certificate = _lookup_mpcp_certificate(
+                mpcp_certificates,
+                polytope_id=record["polytope_id"],
+                frst_hash=record["frst_hash"],
+            )
+            if bounded_certificate is None and args.h11 in (4, 5):
+                raise RuntimeError(
+                    "missing bounded MPCP certificate for pending identity "
+                    f"{record['polytope_id']}::{record['frst_hash']}"
+                )
+            reconstruction_kwargs = {
+                "frst_class_index": int(record["class_index"]),
+            }
+            if bounded_certificate is not None:
+                reconstruction_kwargs.update(
+                    mpcp_certificate=bounded_certificate,
+                    source_record={"source": {
+                        "polytope_id": record["polytope_id"],
+                        "global_points": np.asarray(
+                            record["poly"].points(), dtype=int
+                        ).tolist(),
+                    }},
+                )
             witnesses = find_exact_trilayer_witnesses(
                 record["poly"], record["triangulation"], record["ledger_entry"],
-                frst_class_index=int(record["class_index"])
+                **reconstruction_kwargs,
             )
             if not witnesses:
                 status_counts = {}
@@ -2389,7 +2570,7 @@ def certify_and_build_pending(args, pending_keys, ledger_zst_path, ledger_sha256
     return certified_results, not_certified
 
 
-def _selected_records_by_key(args, wanted_keys):
+def _selected_records_by_key(args, wanted_keys, *, mpcp_certificates=None):
     """Re-scan the population and return only the requested (poly,class) records.
 
     Returns a dict keyed by (poly_index, class_index) holding the same record
@@ -2421,9 +2602,26 @@ def _selected_records_by_key(args, wanted_keys):
                 continue
             simplices = np.asarray(triangulation.simplices(), dtype=int)
             frst_hash = compute_triangulation_hash(simplices)
+            bounded_certificate = _lookup_mpcp_certificate(
+                mpcp_certificates, polytope_id=polytope_id, frst_hash=frst_hash
+            )
+            if bounded_certificate is None and args.h11 in (4, 5):
+                raise RuntimeError(
+                    "missing bounded MPCP certificate for pending identity "
+                    f"{polytope_id}::{frst_hash}"
+                )
+            reconstruction_kwargs = {"frst_class_index": class_index}
+            if bounded_certificate is not None:
+                reconstruction_kwargs.update(
+                    mpcp_certificate=bounded_certificate,
+                    source_record={"source": {
+                        "polytope_id": polytope_id,
+                        "global_points": points.tolist(),
+                    }},
+                )
             witnesses = find_exact_trilayer_witnesses(
                 poly, triangulation, ledger_by_key.get((polytope_id, class_index)),
-                frst_class_index=class_index
+                **reconstruction_kwargs,
             )
             if not witnesses:
                 continue

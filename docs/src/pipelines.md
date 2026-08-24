@@ -43,6 +43,28 @@ KS database (cytools.fetch_polytopes) or scripts/manifests/h11_491_11_ks.json
                   eft_models.parquet
 ```
 
+### Higher-h11 orientifold preflight
+
+The h11=4 and h11=5 orientifold paths are replay paths. Before loading any
+geometry, run `scripts/orientifold_population_preflight.py`. The preflight
+reads and fingerprints the required handoffs in `../handoffs_checkpoints/`,
+verifies every file listed by the durable population's `SHA256SUMS.txt`, runs
+`zstd -t` on compressed artifacts, and checks the stored h11, favorable
+polytope, FRST-class, trilayer, and `population_complete` metadata.
+
+The preflight fails closed when a handoff, artifact, checksum, compression
+check, or metadata check is missing. It does not read parquet data or run
+CYTools. Run it with:
+
+```sh
+python scripts/orientifold_population_preflight.py --h11 4
+python scripts/orientifold_population_preflight.py --h11 5
+```
+
+The bridge stores the successful `population_preflight` acknowledgement in
+its compressed `.json.zst` report. Reports use zstd level 19 and refuse to
+replace an existing report unless the bytes are identical.
+
 ## Vacua pipeline (`vacua-stage-N`)
 
 Julia, validated by `scripts/validate_vacua_stage4_5.jl`
