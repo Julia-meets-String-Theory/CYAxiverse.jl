@@ -695,7 +695,9 @@ function pipeline_vacua(h11::Int, tri::Int, cy::Int=1)
                critical_count = read_metadata("critical_count"),
                branch_count = read_metadata("branch_count"),
                det_Qtilde = read_metadata("det_Qtilde"),
-               search_status = read_metadata("search_status"))
+               search_status = read_metadata("search_status"),
+               terminal_status = read_metadata("terminal_status"),
+               configuration_digest = read_metadata("configuration_digest"))
         else
             nothing
         end

@@ -29,6 +29,7 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
 include(joinpath(@__DIR__, "axion_photon.jl"))
 
@@ -841,12 +842,16 @@ end
             pipeline_data = CYAxiverse.read.pipeline_vacua(geom_idx)
             @test pipeline_data.estimate == 3
             @test pipeline_data.metadata.status == "completed"
+            @test pipeline_data.metadata.terminal_status == "completed"
+            @test pipeline_data.metadata.configuration_digest isa AbstractString
             @test pipeline_data.metadata.starts == 17
             @test pipeline_data.metadata.method == "legacy"
             @test pipeline_data.metadata.verification_status == "not_applicable"
             @test pipeline_data.metadata.search_method == "legacy"
             @test_throws ArgumentError save_axion_data(geom_idx, spectrum, estimate, identified;
                 threshold=0.5, force=false)
+            save_axion_data(geom_idx, spectrum, estimate, identified;
+                threshold=0.5, force=true)
 
             bad_potential = (Q=zeros(Int, 3, 4), L=zeros(2, 4),
                 K=Hermitian(Matrix{Float64}(I, 2, 2)))
@@ -855,6 +860,96 @@ end
             old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
+    end
+end
+
+@testset "Inflation persistence requires explicit force and preserves precision" begin
+    previous_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+    try
+        mktempdir() do data_dir
+            ENV["CYAXIVERSE_DATA_DIR"] = data_dir
+            geom_idx = CYAxiverse.structs.GeometryIndex(2, 7, 1)
+            geom_dir = joinpath(data_dir, "h11_002", "np_0000007", "cy_0000001")
+            mkpath(geom_dir)
+            path = joinpath(geom_dir, "cyax.h5")
+            h5open(path, "w") do file
+                file["geometry_sentinel"] = Int[1]
+            end
+            precise = setprecision(BigFloat, 256) do
+                parse(BigFloat, "1.234567890123456789012345678901234567890123456789")
+            end
+            slow_precise = setprecision(BigFloat, 256) do
+                parse(BigFloat, "2.34567890123456789012345678901234567890123456789")
+            end
+            flow_row = (; precision_bits=256, flow_status=:completed,
+                flow_end_event=:exit, flow_efolds=precise,
+                flow_slow_roll_efolds=slow_precise, flow_accepted=true,
+                candidate_index=1, displacement_sign=1,
+                leading_negative_modes=1)
+            catastrophe = (; status=:success,
+                result=(leading_minima_count=1, saddle_count=0, branch_count=1,
+                    qtilde_det=1, mass_min=1.0, mass_max=2.0,
+                    negative_mass_count=1, candidate_slowroll_saddles=0))
+            efolds = (; status=:success,
+                result=(refinement=(search=(search_status=:completed,
+                    coverage_status=:complete, refinement_status=:completed),
+                    candidates=[flow_row]), flow=(rows=[flow_row], qualified=1)))
+            write_inflation_group!(geom_idx, catastrophe, efolds;
+                catastrophe_settings=(; max_branches=10),
+                efold_settings=(; max_branches=10, precision_bits=256,
+                    float_tolerance=1e-10, high_tolerance=1e-40,
+                    max_points=10, min_efolds=50, max_efolds=60,
+                    flow_step=1e-3, flow_displacement=1e-8),
+                pipeline_config_digest="fixture-digest")
+
+            h5open(path, "r") do file
+                trajectories = file["inflation/efolds/trajectories"]
+                flow_bytes = read(trajectories["flow_efolds"])
+                flow_lengths = read(trajectories["flow_efolds_lengths"])
+                slow_bytes = read(trajectories["flow_slow_roll_efolds"])
+                slow_lengths = read(trajectories["flow_slow_roll_efolds_lengths"])
+                decode = (bytes, lengths, index) ->
+                    String(bytes[1:lengths[index], index])
+                flow_text = decode(flow_bytes, flow_lengths, 1)
+                slow_text = decode(slow_bytes, slow_lengths, 1)
+                @test flow_text == string(precise)
+                @test slow_text == string(slow_precise)
+                flow_round_trip = setprecision(
+                    Int(read(trajectories["flow_precision_bits_by_row"])[1])
+                ) do
+                    parse(BigFloat, flow_text)
+                end
+                slow_round_trip = setprecision(
+                    Int(read(trajectories["flow_precision_bits_by_row"])[1])
+                ) do
+                    parse(BigFloat, slow_text)
+                end
+                @test flow_round_trip == precise
+                @test slow_round_trip == slow_precise
+                @test read(trajectories["flow_precision_bits"]) == 256
+                @test read(trajectories["flow_precision_bits_by_row"]) == [256]
+                @test read(trajectories["flow_numeric_encoding"]) == "decimal_string"
+                @test read(file["inflation/terminal_status"]) == "completed"
+                @test read(file["inflation/configuration_digest"]) == "fixture-digest"
+            end
+            @test_throws ArgumentError write_inflation_group!(geom_idx, catastrophe, efolds;
+                catastrophe_settings=(; max_branches=10),
+                efold_settings=(; max_branches=10, precision_bits=256,
+                    float_tolerance=1e-10, high_tolerance=1e-40,
+                    max_points=10, min_efolds=50, max_efolds=60,
+                    flow_step=1e-3, flow_displacement=1e-8),
+                pipeline_config_digest="fixture-digest", force=false)
+            write_inflation_group!(geom_idx, catastrophe, efolds;
+                catastrophe_settings=(; max_branches=10),
+                efold_settings=(; max_branches=10, precision_bits=256,
+                    float_tolerance=1e-10, high_tolerance=1e-40,
+                    max_points=10, min_efolds=50, max_efolds=60,
+                    flow_step=1e-3, flow_displacement=1e-8),
+                pipeline_config_digest="fixture-digest", force=true)
+        end
+    finally
+        previous_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+            (ENV["CYAXIVERSE_DATA_DIR"] = previous_data_dir)
     end
 end
 
