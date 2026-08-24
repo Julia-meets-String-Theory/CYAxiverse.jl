@@ -48,11 +48,36 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 isdefined(@__MODULE__, :scan_geometry_for_inflation) ||
     include(joinpath(@__DIR__, "inflation_candidate_refinement.jl"))
 
-const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.0"
+const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.1"
 const INFLATION_LEGACY_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-1.0"
+const INFLATION_FLOW_ENCODING_SCHEMA_VERSION = "cyaxiverse-inflation-flow-decimal-string-1.0"
 
 """Hash the complete Pipeline 2 configuration contract."""
 _phase3_config_digest(value) = bytes2hex(sha256(repr(value)))
+
+"""Return a fixed-width UTF-8 byte matrix and lengths for strings.
+
+HDF5 cannot combine variable-length Julia `String` vectors with compression.
+Store the bytes explicitly instead: each column is one UTF-8 string, padded
+with zero bytes, and the companion lengths dataset makes the representation
+lossless and replayable without a numeric narrowing conversion.
+"""
+function _string_bytes(values)
+    encoded = [Vector{UInt8}(codeunits(string(value))) for value in values]
+    lengths = Int[length(bytes) for bytes in encoded]
+    width = isempty(lengths) ? 0 : maximum(lengths)
+    bytes = zeros(UInt8, width, length(encoded))
+    for (column, value) in enumerate(encoded)
+        isempty(value) || (bytes[1:length(value), column] = value)
+    end
+    bytes, lengths
+end
+
+function _write_string_bytes!(group, name, values)
+    bytes, lengths = _string_bytes(values)
+    group[name, deflate=9] = bytes
+    group[string(name, "_lengths"), deflate=9] = lengths
+end
 
 function _phase3_git_commit()
     try
@@ -79,11 +104,9 @@ function _inflation_write_blocked(path)
     isfile(path) || return false
     h5open(path, "r") do file
         haskey(file, "inflation") || return false
-        # Legacy groups without a terminal status are preserved rather than
-        # silently replaced.  Explicit failed records are the only retryable
-        # state; completed and unknown states require force=true.
-        haskey(file, "inflation/status") || return true
-        read(file["inflation/status"]) != "failed"
+        # Preserve every existing group, including failed and legacy groups.
+        # Replacing one requires the caller to state force=true explicitly.
+        true
     end
 end
 
@@ -186,14 +209,26 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
                 rows = scan.flow.rows
                 if !isempty(rows)
                     trajectories = create_group(efolds, "trajectories")
-                    trajectories["flow_status", deflate=9] =
-                        [string(row.flow_status) for row in rows]
-                    trajectories["flow_end_event", deflate=9] =
-                        [string(row.flow_end_event) for row in rows]
-                    trajectories["flow_efolds", deflate=9] =
-                        Float64[Float64(row.flow_efolds) for row in rows]
-                    trajectories["flow_slow_roll_efolds", deflate=9] =
-                        Float64[Float64(row.flow_slow_roll_efolds) for row in rows]
+                    trajectories["flow_precision_bits", deflate=9] =
+                        maximum(Int[row.precision_bits for row in rows])
+                    trajectories["flow_precision_bits_by_row", deflate=9] =
+                        Int[row.precision_bits for row in rows]
+                    trajectories["flow_numeric_encoding"] = "decimal_string"
+                    trajectories["flow_numeric_encoding_schema"] =
+                        INFLATION_FLOW_ENCODING_SCHEMA_VERSION
+                    _write_string_bytes!(trajectories, "flow_status",
+                        [row.flow_status for row in rows])
+                    _write_string_bytes!(trajectories, "flow_end_event",
+                        [row.flow_end_event for row in rows])
+                    # BigFloat values are persisted as decimal strings.  This
+                    # is the smallest HDF5 representation that preserves the
+                    # arbitrary-precision value without an implicit Float64
+                    # conversion; precision_bits and the encoding schema make
+                    # the representation replayable.
+                    _write_string_bytes!(trajectories, "flow_efolds",
+                        [row.flow_efolds for row in rows])
+                    _write_string_bytes!(trajectories, "flow_slow_roll_efolds",
+                        [row.flow_slow_roll_efolds for row in rows])
                     trajectories["flow_accepted", deflate=9] =
                         Int[Int(row.flow_accepted) for row in rows]
                     trajectories["candidate_index", deflate=9] =
@@ -296,13 +331,27 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
             skipped_count += 1
             continue
         end
+        if !force && (_pipeline_group_exists(target_path) ||
+                _inflation_write_blocked(target_path))
+            println("blocked: persisted vacua/inflation data exists; pass force=true")
+            push!(results, (; h11, np, cy, vacua_status=:blocked,
+                vacua_vac=-1,
+                vacua_error="persisted pipeline data exists; explicit force=true required",
+                leading_branch_status=:blocked,
+                leading_branch_saddle_count=-1,
+                leading_minima_count=-1,
+                efold_search_status=:blocked,
+                n_efold_candidates=-1,
+                n_qualified_efolds=-1))
+            continue
+        end
         print("[$index/$(length(indices))] h11=$h11 np=$np cy=$cy: ")
 
         vacua_status = :skipped
         vacua_vac = -1
         vacua_error = ""
         try
-            vacua_force = force || _has_pipeline_result(target_path)
+            vacua_force = force
             vacua_result = compute_vacua_data(geom_idx, data_dir; method=:auto,
                 save=true, force=vacua_force, starts=10_000)
             vacua_status = Symbol(vacua_result["search"].search_status)
@@ -340,7 +389,7 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
         write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             catastrophe_settings, efold_settings,
             pipeline_config_digest=pipeline_config_digest,
-            force=force || _has_inflation_group(target_path))
+            force=force)
 
         push!(results, (; h11, np, cy, vacua_status, vacua_vac, vacua_error,
             leading_branch_status=catastrophe_outcome.status,

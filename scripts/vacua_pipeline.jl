@@ -113,6 +113,14 @@ function _has_pipeline_result(path; config=nothing)
     end
 end
 
+"""Return whether a geometry file contains any persisted vacua group."""
+function _pipeline_group_exists(path)
+    isfile(path) || return false
+    h5open(path, "r") do file
+        haskey(file, "vacua_pipeline")
+    end
+end
+
 """Return whether an HDF5 geometry file contains a vacua pipeline group."""
 function _has_pipeline_group(path; config=nothing)
     isfile(path) || return false
@@ -299,7 +307,7 @@ function save_axion_data(geom_idx, spectrum, vac_est, vac_id; threshold::Float64
     isfile(target) || throw(ArgumentError("geometry file does not exist: $target"))
     config = _pipeline_config(; threshold, starts, residual_tolerance,
         merge_tolerance, max_iterations, method, max_branches)
-    !_has_pipeline_group(target) || force ||
+    !_pipeline_group_exists(target) || force ||
         throw(ArgumentError("vacua_pipeline already exists; pass force=true to replace $target"))
 
     temporary = string(target, ".vacua-pipeline.tmp-", getpid(), "-", time_ns())
