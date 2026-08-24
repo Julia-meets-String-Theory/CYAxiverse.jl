@@ -80,48 +80,35 @@ repository, not to any single vendor. It is referenced from `AGENTS.md`,
 that every agent operating here — and every contributor directing one —
 sees it.
 
-## Context-capacity checkpoint and compaction
+## Context checkpoints and continuation
 
-This procedure is mandatory for every agent and every continuation of an
-agent working in this repository. When the active context reaches 85% of its
-capacity, stop substantive work and send the following prompt to the
-agent's continuation or compaction mechanism:
+Use a checkpoint when the runtime signals compaction or context pressure, when
+the user requests one, or when a long task reaches a natural handoff boundary.
+Do not invent an 85% context measurement when the runtime does not expose one.
 
-```markdown
-Create a detailed summary machine-readable json doc for continuing this coding session. Place it in ../checkpoints/$DATE using the filename convention $TIME-$AGENT-checkpoint.md.  Include:
+Before handing work to a continuation, stop substantive work and write one
+valid JSON object to a Markdown file outside the Git checkout. Use a
+collision-resistant path such as
+`../checkpoints/YYYY-MM-DD/HHMMSS-agent-checkpoint.md`. Include these keys:
 
-1. **Completed work**: What tasks were finished
-2. **Current state**: Files modified, their current status
-3. **In progress**: What is being worked on now
-4. **Next steps**: Clear actions to take
-5. **Constraints**: User preferences, project requirements, key decisions made
-6. **Critical context**: Any information essential for continuing
+- `completed_work`
+- `current_state`
+- `in_progress`
+- `next_steps`
+- `constraints`
+- `critical_context`
 
-Be concise but preserve enough detail that work can continue seamlessly.
-```
+The continuation must read and parse the checkpoint before taking action. If
+the runtime cannot start a continuation or perform native compaction, report
+the checkpoint path and end the turn. Do not claim that writing the file
+replaced hidden context, and do not continue substantive work between writing
+the checkpoint and the handoff.
 
-Execute that prompt immediately. Use `YYYY-MM-DD` for `$DATE`, a
-collision-resistant local time for `$TIME`, and the stable agent name for
-`$AGENT`. The `.md` file must contain one valid JSON object, not a prose
-summary or a fenced code block, with machine-readable keys corresponding to
-the six requested sections. Create the parent directory outside this Git
-checkout as required by the documentation-placement rules.
+## Artifact compression
 
-After the checkpoint is written, use that JSON file as the authoritative
-context for a custom compaction. Start a fresh continuation or session when
-the runtime supports it, and seed it with the checkpoint path. The first
-action in the new context must be to read and parse that JSON file. Preserve
-the system, developer, repository, and active user instructions, but do not
-carry the full prior transcript or unverified assumptions into the new task
-state.
-
-If the runtime supports native compaction but cannot accept a file as its
-seed, invoke native compaction immediately and then read the newest JSON
-checkpoint before resuming. If it exposes neither a fresh continuation nor
-native compaction, end the current turn and begin the next turn with the
-checkpoint path as the first instruction; this is the file-based fallback,
-not a claim that the active hidden context was replaced. Do not continue
-substantive work between writing the checkpoint and starting the fresh
-continuation or compaction. If the runtime does not expose an automatic
-context percentage, trigger this procedure at the earliest reliable estimate
-of 85% rather than waiting for context exhaustion.
+- Use `deflate=9` for HDF5.
+- Use `zstd -19` for machine-readable JSON and JSONL artifacts.
+- Keep human-readable Markdown handoffs uncompressed when readability is
+  required.
+- If compression is inappropriate, record the reason and request permission
+  for a lower-compression or uncompressed artifact.

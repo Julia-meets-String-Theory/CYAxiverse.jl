@@ -1,13 +1,7 @@
 # CYAxiverse.jl Copilot Instructions
 
-## Generative AI policy
-
-Follow `AI_POLICY.md` at the repository root. It is normative for every
-AI tool used against this repository — GitHub Copilot, Claude Code,
-Codex, or any other agent — and for the contributors directing them.
-Label your own commits with a `Co-Authored-By:` trailer (or your tool's
-equivalent) rather than leaving AI-assisted work unlabelled, and never
-alter or bypass existing tests to force a pass.
+Generative-AI authorship, testing integrity, and disclosure rules are defined
+once in `AI_POLICY.md`; do not duplicate them here.
 
 ## Environment and commands
 
@@ -77,14 +71,16 @@ alter or bypass existing tests to force a pass.
 
 - Avoid using overly technical terms or jargon that may not be familiar to all users. Instead, provide clear explanations and context for any technical terms that are used.
 
-- Use the `physics-communicator` skill to explain complex physics concepts in a way that is accessible to users with varying levels of expertise. Understand that the primary users for this package are theoretical physicists, and tailor explanations accordingly.
+- Explain physics in plain English. Use only skills that are available in the
+  current environment; do not invoke a named skill that is not installed.
 
 # CYAxiverse.jl Copilot Additional Guidelines
 
 ## Julia Package Standards
 - Target Julia 1.12 only, matching `Project.toml` and the Julia 1.12 CI and
   documentation environments.
-- Ensure all public functions are explicitly `export`ed in `src/CYAxiverse.jl`.
+- Do not add exports automatically. `src/CYAxiverse.jl` currently exports only
+  `greet_CYAxiverse`; changing that public API requires an explicit API review.
 - Prefer strict type annotations in struct definitions, but use duck typing/parametric types for function arguments where flexibility is needed.
 - Write docstrings for all exported functions using standard Julia Markdown syntax and LaTeX math (`$ ... $`).
 
@@ -95,7 +91,9 @@ alter or bypass existing tests to force a pass.
 
 ## Code Quality & Testing
 - Use Julia's native `Test` package with `@testset` blocks in `test/runtests.jl`.
-- All PRs must maintain 100% passing tests (`failed=0`).
+- All applicable tests must pass. Report the exact command, exit status,
+  summary, warnings, and any unavailable optional checks; do not require a
+  literal `failed=0` string from every test framework.
 
 ## Versioning
 
