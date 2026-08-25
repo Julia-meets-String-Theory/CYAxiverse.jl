@@ -21,13 +21,14 @@ import numpy as np
 
 RAW_FRST_SCHEMA_VERSION = "cyaxiverse-raw-frst-1.0"
 LEGACY_RAW_FRST_SCHEMA_VERSION = "cyaxiverse-raw-frst-1.1"
-TOPOLOGY_CACHE_SCHEMA_VERSION = "cyaxiverse-topology-cache-1.0"
+TOPOLOGY_CACHE_SCHEMA_VERSION = "cyaxiverse-topology-cache-1.1"
 TOPOLOGY_CACHE_GROUP = "topology_cache"
 TOPOLOGY_CACHE_FIELDS = (
     "h11",
     "h21",
     "basis",
     "basis_matrix",
+    "glsm",
     "prime_toric_divisors",
     "kappa",
     "c2",
@@ -38,6 +39,7 @@ TOPOLOGY_CACHE_FIELDS = (
 TOPOLOGY_CACHE_CONVENTIONS = {
     "basis": "CYTools divisor_basis(include_origin=True); all numerical vectors in basis",
     "basis_matrix": "CSR rows are the CYTools divisor_basis(as_matrix=True) rows",
+    "glsm": "CYTools polytope.glsm_charge_matrix(include_origin=False), rows are H2 relations and columns are prime toric divisors",
     "kappa": "CYTools CalabiYau.intersection_numbers(in_basis=True, format='coo'), zero-based indices",
     "prime_toric_divisors": "CYTools prime_toric_divisors labels, zero-based lattice-point labels",
     "mori_cone": "CYTools toric_mori_cone(in_basis=True).rays(), rows are rays",
@@ -214,6 +216,10 @@ def _write_topology_cache(group, topology, cache_metadata):
     _compressed_dataset(
         cache, "prime_toric_divisors", np.asarray(topology["prime_toric_divisors"])
     )
+    glsm = np.asarray(topology["glsm"])
+    if glsm.ndim != 2 or glsm.shape[0] != int(topology["h11"]):
+        raise ValueError("glsm must have shape (h11, n_prime_divisors)")
+    _compressed_dataset(cache, "glsm", glsm.astype(np.int64, copy=False))
 
     kappa = np.asarray(topology["kappa"])
     if kappa.ndim != 2 or kappa.shape[1] != 4:
@@ -324,6 +330,9 @@ def _read_topology_cache(handle):
             )
         ):
             raise ValueError("prime toric divisor labels do not fit basis_matrix")
+        glsm = cache["glsm"][()].astype(np.int64, copy=False)
+        if glsm.ndim != 2 or glsm.shape != (h11, prime_toric_divisors.size):
+            raise ValueError("glsm shape does not match h11 and prime toric divisors")
         kappa_group = cache["kappa"]
         kappa_shape = kappa_group["shape"][()]
         if kappa_shape.shape != (3,) or not np.all(kappa_shape == h11):
@@ -355,6 +364,7 @@ def _read_topology_cache(handle):
             "h21": h21,
             "basis": basis,
             "basis_matrix": basis_matrix,
+            "glsm": glsm,
             "prime_toric_divisors": prime_toric_divisors,
             "kappa": kappa,
             "c2": c2,

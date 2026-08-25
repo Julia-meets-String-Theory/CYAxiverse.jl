@@ -11,8 +11,8 @@ HDF5 file) and then branch:
 
 1. **Axion spectra** — CYTools geometry → masses `m`, perturbative decay
    constants `fpert`, and quartic self-couplings `λ`.
-2. **Vacua and inflation** — CYTools geometry → number of vacua, whether
-   catastrophes (tachyonic saddle directions) are present, and the number of
+2. **Vacua and inflation** — CYTools geometry → number of vacua,
+   leading-branch fixed-geometry saddle diagnostics, and the number of
    e-folds along candidate inflationary trajectories.
 
 Both pipelines run on the standard Calabi–Yau geometry and on orientifolded
@@ -55,7 +55,7 @@ hand. All datasets are written with maximum compression (`deflate=9` in Julia,
 | `cytools/potential/` | geometry generation | `L` (instanton scales), `Q` (charge matrix) |
 | `spectrum/physical/` | pipeline 1 | `m`, `mode_indices`, `fK_log10`, `fpert_log10`, `lambda_self_sign`, `lambda_self_log10`, `metadata/` |
 | `vacua_pipeline/` | pipeline 2 | `estimate`, `issquare`, `metadata/` (`auto_selected_method`, `det_Qtilde`, `branch_count`, `search_status`, …) |
-| `inflation/` | pipeline 2 | `catastrophes/` (`catastrophes_present`, `leading_minima_count`, saddle and negative-mass counts), e-fold flow results |
+| `inflation/` | pipeline 2 | legacy-compatible `catastrophes/` group containing `leading_branch_saddle_count`, `leading_branch_saddles_present`, `leading_minima_count`, saddle and negative-mass counts, plus e-fold flow results; `scale_status=homotopy_only` |
 | `orientifold/` | orientifold bridge | involution (`h2_involution_matrix`, `lattice_matrix`, `torus_shift_*`), `lambda_f`, `h11_minus`, `h11_plus`, `h21_plus`, and reproduction provenance |
 | `construction_metadata/` | geometry generation | canonical lattice points, face-restriction data |
 
@@ -104,8 +104,8 @@ julia --project=. --startup-file=no scripts/batch_physical_spectrum.jl \
 |---|---|
 | `m` | `log10` of each physical axion mass in eV |
 | `mode_indices` | index of each retained physical mode |
-| `fK_log10` | `log10` Kähler decay constant, in Planck units |
-| `fpert_log10` | `log10` perturbative decay constant (`m - ½·λself`) |
+| `fK_log10` | `log10` Kähler decay constant, in GeV |
+| `fpert_log10` | `log10(fpert/GeV) = log10(m/eV) - 9 - ½·log10(abs(lambda_self))` |
 | `lambda_self_log10`, `lambda_self_sign` | signed `log10` of the quartic self-coupling |
 
 Masses, decay constants, and instanton scales span 30+ orders of magnitude, so
@@ -127,22 +127,24 @@ julia --project=. --startup-file=no scripts/vacua_pipeline.jl \
 
 The three physical quantities come from three established components:
 
-- **Number of vacua** — [`CYAxiverse.jlm_reduced`](@ref
-  "CYAxiverse.jlm_reduced") reduced-JLM search, driven through
-  `compute_axion_data`/`compute_vacua_data`. **Always select `method = :auto`**
-  (exact-determinant → leading-branch → reduced-JLM, with a legacy fallback).
+- **Number of vacua** — the hierarchy-truncated potential search, driven
+  through `compute_axion_data`/`compute_vacua_data`. **Always select
+  `method = :auto`** (determinant count → selected leading-branch count →
+  finite multistart lower bound, with a legacy fallback). The algorithm
+  identifier is retained only as internal compatibility metadata.
   The `:legacy` default of those entry points uses
   [`CYAxiverse.generate.vacua_id`](@ref), whose reduced charge basis can come
   back empty on geometries with deeply suppressed instantons (for example the
   orientifolded QCD-volume-40 point, where `log10|Λ|` reaches several hundred
-  negative), raising a `BoundsError`. The reduced-JLM engine handles those
+  negative), raising a `BoundsError`. The finite-search engine handles those
   geometries; the legacy path is retained only for backward compatibility.
-- **Catastrophes present** — the generalized-Hessian classification from
+- **Leading-branch saddles** — the generalized-Hessian classification from
   [`CYAxiverse.inflation_points.diagnose`](@ref): a stationary point with one
   or more negative mass-squared modes is a saddle/tachyonic direction. The
-  inflation scan records `catastrophes_present`, a saddle count, and
-  `leading_minima_count` (stationary points with zero negative modes), which
-  cross-checks the reduced-JLM vacua count.
+  inflation scan records `leading_branch_saddles_present`, a saddle count,
+  and `leading_minima_count` (stationary points with zero negative modes).
+  This is a bounded fixed-geometry diagnostic, not a catastrophe-continuation
+  result; `scale_status=homotopy_only` is persisted.
 - **E-folds** — [`CYAxiverse.inflation_points.gradient_flow`](@ref) integrates
   a bounded slow-roll flow from a physical mass-mode displacement and records
   the total and slow-roll e-folds, the exit event, and a `:max_efolds` status
@@ -153,8 +155,10 @@ The three physical quantities come from three established components:
 - `vacua_pipeline/` — `estimate` (the vacua count), `issquare`, and a
   `metadata` group recording `auto_selected_method`, `det_Qtilde`,
   `branch_count`, `search_status`, the Git revision, and timing.
-- `inflation/catastrophes/` — `catastrophes_present`, `leading_minima_count`,
-  saddle and negative-mass counts, and mass bounds.
+- `inflation/catastrophes/` (legacy-compatible group) — `leading_branch_saddles_present`,
+  `leading_branch_saddle_count`, `leading_minima_count`, saddle and
+  negative-mass counts, and mass bounds. Legacy v1 names are retained only
+  under `legacy_v1/` with an explicit migration note.
 - `inflation/` e-fold results — per-candidate flow status, total and slow-roll
   e-folds, and the qualified-trajectory count.
 
@@ -235,7 +239,7 @@ KS database (cytools.fetch_polytopes) or scripts/manifests/h11_491_11_ks.json
         │
         ▼  scripts/generate_stage1_raw_frsts.py            [geometry-stage-1]
            emits  frst_candidates/*.h5  (lattice pts, simplices, tri hash,
-                    optional topology_cache: h11, h21, basis, kappa, c2, …)
+                    optional topology_cache: h11, h21, basis, glsm, kappa, c2, …)
                   frst_terminal_statuses.jsonl, polytope_manifest.json,
                   run_manifest.json
            population is FROZEN at 1400 geometries

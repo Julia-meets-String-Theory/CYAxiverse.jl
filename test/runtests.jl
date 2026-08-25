@@ -757,6 +757,15 @@ end
 end
 
 @testset "Vacua pipeline persistence and validation" begin
+    migrated_metadata = _normalize_vacua_search_metadata((
+        search_classification="exact_determinant_branch", search_method="reduced_jlm"))
+    @test migrated_metadata.search_classification ==
+        "square_reduced_potential_determinant_count"
+    @test migrated_metadata.legacy_search_classification ==
+        "exact_determinant_branch"
+    @test migrated_metadata.classification_schema_version ==
+        "cyaxiverse-vacua-classification-2"
+
     mktempdir() do root
         geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
         mkpath(geom_dir)
@@ -795,7 +804,7 @@ end
                 threshold=0.5, starts=17, residual_tolerance=1e-9,
                 merge_tolerance=1e-6, max_iterations=12, force=false,
                 search_metadata=(search_method="legacy",
-                    search_classification="finite_search_lower_bound",
+                    search_classification="finite_multistart_minimum_lower_bound",
                     minimum_count=3, multiplicity=1.0, critical_count=-1,
                     branch_count=-1, det_Qtilde=-1, search_status="completed"))
 
@@ -846,8 +855,36 @@ end
             @test pipeline_data.metadata.method == "legacy"
             @test pipeline_data.metadata.verification_status == "not_applicable"
             @test pipeline_data.metadata.search_method == "legacy"
+            @test pipeline_data.metadata.search_classification ==
+                "finite_multistart_minimum_lower_bound"
+            @test pipeline_data.metadata.legacy_search_classification ==
+                "finite_search_lower_bound"
+            @test pipeline_data.metadata.classification_schema_version ==
+                "cyaxiverse-vacua-classification-2"
+            @test pipeline_data.metadata.model_scope ==
+                "hierarchy_truncated_axion_potential"
+            @test pipeline_data.metadata.full_potential_status == "not_validated"
             @test_throws ArgumentError save_axion_data(geom_idx, spectrum, estimate, identified;
                 threshold=0.5, force=false)
+
+            # A failed terminal record is incomplete and can be repaired on
+            # resume; a completed record above remains protected.
+            h5open(path, "r+") do file
+                HDF5.delete_object(file, "vacua_pipeline/metadata/status")
+                file["vacua_pipeline/metadata/status"] = "failed"
+                HDF5.delete_object(file, "vacua_pipeline/metadata/terminal_status")
+                file["vacua_pipeline/metadata/terminal_status"] = "failed"
+            end
+            @test !_has_pipeline_result(path)
+            @test !_has_pipeline_group(path)
+            save_axion_data(geom_idx, spectrum, estimate, identified;
+                threshold=0.5, starts=17, residual_tolerance=1e-9,
+                merge_tolerance=1e-6, max_iterations=12, force=false,
+                search_metadata=(search_method="legacy",
+                    search_classification="finite_multistart_minimum_lower_bound",
+                    minimum_count=3, multiplicity=1.0, critical_count=-1,
+                    branch_count=-1, det_Qtilde=-1, search_status="completed"))
+            @test _has_pipeline_result(path)
 
             bad_potential = (Q=zeros(Int, 3, 4), L=zeros(2, 4),
                 K=Hermitian(Matrix{Float64}(I, 2, 2)))
@@ -860,6 +897,7 @@ end
 end
 
 @testset "Physical spectrum batch persistence" begin
+    @test _fpert_log10([18.0], [4.0]) ≈ [7.0]
     # Non-empty λ31/λ22 (one cross-quartic term each) so the round-trip
     # below actually exercises the new lambda_31_*/lambda_22_* datasets,
     # not just their empty-array degenerate case.
@@ -877,10 +915,21 @@ end
     end
     _write_result(output_path, geom_idx, spectrum; prec=200, threshold_log10=-30.0,
         quartics=true, runtime_seconds=0.1, provisional=false, fK=[5.0, 6.0])
+    completed_config = _physical_spectrum_config(; prec=200,
+        threshold_log10=-30.0, quartics=true)
+    @test _has_physical_spectrum(output_path; config=completed_config)
+    @test !_has_physical_spectrum(output_path; config=_physical_spectrum_config(
+        prec=201, threshold_log10=-30.0, quartics=true))
     HDF5.h5open(output_path, "r") do file
         @test HDF5.haskey(file, "spectrum/physical/m")
         @test read(file["spectrum/physical/fK_log10"]) == [5.0, 6.0]
-        @test read(file["spectrum/physical/fpert_log10"]) ≈ [-0.5, 0.0]
+        @test read(file["spectrum/physical/fpert_log10"]) ≈ [-9.5, -9.0]
+        @test read(file["spectrum/physical/metadata/mass_log10_unit"]) == "eV"
+        @test read(file["spectrum/physical/metadata/fpert_log10_unit"]) == "GeV"
+        @test read(file["spectrum/physical/metadata/fpert_formula"]) ==
+            "log10(fpert/GeV)=log10(m/eV)-9-0.5*log10(abs(lambda_self))"
+        @test read(file["spectrum/physical/metadata/log_domain_policy"]) ==
+            "not_recorded_for_fixture"
         @test read(file["spectrum/physical/lambda_31_sign"]) == [1]
         @test read(file["spectrum/physical/lambda_31_log10"]) == [0.5]
         @test read(file["spectrum/physical/lambda_31_indices"]) == reshape([1, 1, 1, 2], 4, 1)
@@ -893,7 +942,10 @@ end
     try
         loaded = CYAxiverse.read.physical_spectrum(geom_idx)
         @test loaded.m == spectrum.m
-        @test loaded.fpert ≈ [-0.5, 0.0]
+        @test loaded.fpert ≈ [-9.5, -9.0]
+        @test loaded.schema_version == "cyaxiverse-physical-spectrum-3"
+        @test loaded.fpert_log10_unit == "GeV"
+        @test loaded.fpert_convention == "lambda_self_abs_log10"
         @test loaded.mass_signs_or_inertia == Int[]
     finally
         old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
@@ -1052,7 +1104,10 @@ end
         merge_tolerance=1e-6, max_iterations=100,
         method=:leading_branches, max_branches=1_000)
     @test leading_estimate.vac == 4
-    @test leading_search.search_classification == "certified_selected_branch_set"
+    @test leading_search.search_classification ==
+        "complete_selected_leading_branch_count"
+    @test leading_search.legacy_search_classification ==
+        "certified_selected_branch_set"
     @test leading_search.branch_count == 16
     @test_throws ArgumentError _search_vacua(synthetic_geom, synthetic;
         threshold=0.5, starts=64, residual_tolerance=1e-9,
@@ -1064,7 +1119,10 @@ end
         merge_tolerance=1e-6, max_iterations=100,
         method=:reduced_jlm, max_branches=1_000)
     @test reduced_estimate.vac == 4
-    @test reduced_search.search_classification == "exact_determinant_branch"
+    @test reduced_search.search_classification ==
+        "square_reduced_potential_determinant_count"
+    @test reduced_search.legacy_search_classification ==
+        "exact_determinant_branch"
     @test reduced_search.multiplicity == 4.0
 
     lattice_selected = CYAxiverse.generate.LQtilde(
@@ -2227,6 +2285,44 @@ end
         Float64[1.0 1.0 1.0; 1.0 -1.0 -1.0e6]; gap_log10=10.0)
     @test all(isfinite, extreme.inter_block_gaps)
     @test all(isfinite, extreme.sorted_log_scales)
+    precision_audit = CYAxiverse.generate.instanton_scale_precision_diagnostics(
+        Float64[1.0 1.0 1.0; 0.0 -10.0 -1.0e6];
+        linear_boundary_precision_digits=160)
+    @test precision_audit.policy ==
+        "log_domain_with_arbitrary_precision_linear_boundaries"
+    @test precision_audit.truncated_count == 1
+    @test precision_audit.status == "truncated_with_log_bound"
+    @test precision_audit.truncation_bound_log10 < -300.0
+    @test precision_audit.linear_boundary_precision_digits == 160
+
+    # Sub-floor Float64 seed terms are zero, rather than multiple fabricated
+    # floatmin weights. The arbitrary-precision physical selection retains
+    # the terms and therefore agrees with the reference leading set.
+    seed_C = Matrix{Float64}(I, 2, 2)
+    subfloor_Q = Int[1 0 1;
+                     0 1 1]
+    subfloor_L = Float64[1.0 1.0 1.0;
+                         0.0 -400.0 -401.0]
+    subfloor_W = CYAxiverse.generate.leading_hessian_matrix_float64_scaled(
+        seed_C, subfloor_L, subfloor_Q)
+    @test subfloor_W[1, 1] == 1.0
+    @test subfloor_W[1, 2] == 0.0
+    @test subfloor_W[2, 2] == 0.0
+    seed_Q = Int[1 0 1 0;
+                 0 1 0 1]
+    seed_L = Float64[1.0 1.0 1.0 1.0;
+                     0.0 -20.0 -21.0 -400.0]
+    seed_W = CYAxiverse.generate.leading_hessian_matrix_float64_scaled(
+        seed_C, seed_L, seed_Q)
+    @test seed_W[2, 2] == 10.0^-20
+    @test seed_W[1, 1] == 1.0
+    @test seed_W[1, 2] == 0.0
+    reference_pq = CYAxiverse.generate.pq_spectrum(Hermitian(seed_C), seed_L[:, 1:3],
+        seed_Q[:, 1:3]; mixing_correction=:high_precision, prec=200)
+    extended_pq = CYAxiverse.generate.pq_spectrum(Hermitian(seed_C), seed_L, seed_Q;
+        mixing_correction=:high_precision, prec=200)
+    @test extended_pq.msign == reference_pq.msign
+    @test extended_pq.m ≈ reference_pq.m atol=1e-10
 
     K = Hermitian(Matrix{Float64}(I, 2, 2))
     mixed_Q = Int[1 1 0; 0 0 1]
@@ -3313,13 +3409,20 @@ end
             h5open(path, "r") do file
                 @test haskey(file, "inflation")
                 @test haskey(file, "vacua_pipeline")
+                @test String(HDF5.read(file["inflation/scale_status"])) == "homotopy_only"
+                @test String(HDF5.read(file["inflation/claim_boundary"])) ==
+                    "bounded fixed-geometry-null diagnostics only; physical continuation not implemented"
                 cat = file["inflation/catastrophes"]
                 @test String(HDF5.read(cat["status"])) == "completed"
                 @test HDF5.read(cat["leading_minima_count"]) ==
                     catastrophe_outcome.result.leading_minima_count
-                @test HDF5.read(cat["saddle_count"]) ==
+                @test HDF5.read(cat["leading_branch_saddle_count"]) ==
                     catastrophe_outcome.result.saddle_count
-                @test HDF5.read(cat["catastrophes_present"]) ==
+                @test HDF5.read(cat["leading_branch_saddles_present"]) ==
+                    Int(catastrophe_outcome.result.saddle_count > 0)
+                @test HDF5.read(cat["legacy_v1/saddle_count"]) ==
+                    catastrophe_outcome.result.saddle_count
+                @test HDF5.read(cat["legacy_v1/catastrophes_present"]) ==
                     Int(catastrophe_outcome.result.saddle_count > 0)
 
                 ef = file["inflation/efolds"]
@@ -3344,7 +3447,7 @@ end
             # result is still exactly what is on disk.
             h5open(path, "r") do file
                 cat = file["inflation/catastrophes"]
-                @test HDF5.read(cat["saddle_count"]) ==
+                @test HDF5.read(cat["leading_branch_saddle_count"]) ==
                     catastrophe_outcome.result.saddle_count
             end
 
@@ -3362,12 +3465,25 @@ end
             h5open(path, "r") do file
                 cat = file["inflation/catastrophes"]
                 @test String(HDF5.read(cat["status"])) == "failed"
-                @test HDF5.read(cat["saddle_count"]) == -1
+                @test HDF5.read(cat["leading_branch_saddle_count"]) == -1
+                @test HDF5.read(cat["legacy_v1/saddle_count"]) == -1
                 @test String(HDF5.read(cat["error"])) == "synthetic failure for testing"
                 ef = file["inflation/efolds"]
                 @test String(HDF5.read(ef["search_status"])) == "failed"
                 @test HDF5.read(ef["n_candidates"]) == -1
             end
+            @test !_has_inflation_group(path)
+            @test !_pipeline2_complete(path)
+            @test !_inflation_write_blocked(path)
+            # Failed terminal records are retryable without force; a
+            # completed record remains protected by the no-overwrite guard.
+            write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
+                catastrophe_settings=(; max_branches=1_000),
+                efold_settings=(; max_branches=1_000, precision_bits=128,
+                    float_tolerance=1e-10, high_tolerance=1e-25,
+                    max_points=100, min_efolds=0.01, max_efolds=0.05,
+                    flow_step=1e-3, flow_displacement=1e-3))
+            @test _has_inflation_group(path)
 
             # 5. A geometry file that does not exist yet is rejected outright
             # -- this writer never creates a geometry, only appends to one.

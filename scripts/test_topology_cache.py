@@ -22,6 +22,7 @@ def sample_topology():
         "basis_matrix": np.asarray(
             [[1, 0, 2, 0, 0], [0, -3, 0, 0, 0]], dtype=np.int64
         ),
+        "glsm": np.asarray([[1, 0, 2], [0, -3, 0]], dtype=np.int64),
         "prime_toric_divisors": np.asarray([0, 2, 4], dtype=np.int64),
         "kappa": np.asarray(
             [[0, 0, 0, 1.5], [0, 1, 2, -2.0], [1, 1, 1, 4.25]], dtype=np.float64

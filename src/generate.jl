@@ -1426,17 +1426,25 @@ function _certified_float64_window_counts(C::Matrix{Float64}, L::Matrix{Float64}
         (lower_count, upper_count)
 end
 
-"""Build a Float64 seed Hessian after a common log-scale rescaling."""
+"""Build a Float64 seed Hessian after a common log-scale rescaling.
+
+Instanton terms below the Float64 linear boundary are assigned exactly zero
+in this seed. They are not promoted to equal `floatmin` contributions, which
+would fabricate weights and can rotate a null-space seed. The arbitrary-
+precision Hessian retains every term.
+"""
 function leading_hessian_matrix_float64_scaled(C::Matrix{Float64},
         L::Matrix{Float64}, Q::Matrix{Int})
     h11 = size(C, 1)
     isempty(L) && return Hermitian(zeros(Float64, h11, h11))
     reference_log = maximum(@view L[2, :])
     floor_log = log10(floatmin(Float64))
-    scales = Float64[
-        L[1, a] * 10.0^max(L[2, a] - reference_log, floor_log)
-        for a in axes(L, 2)
-    ]
+    scales = Float64[]
+    for a in axes(L, 2)
+        relative_log = L[2, a] - reference_log
+        push!(scales, relative_log < floor_log ? 0.0 :
+            L[1, a] * 10.0^relative_log)
+    end
     H = zeros(Float64, h11, h11)
     for a in eachindex(scales), i in 1:h11, j in 1:h11
         H[i, j] += scales[a] * Q[i, a] * Q[j, a]
@@ -1479,7 +1487,11 @@ function high_precision_leading_hessian(K::Hermitian{Float64, Matrix{Float64}}, 
 end
 
 function mass_basis_accuracy(C::Matrix{Float64}, L::Matrix{Float64}, Q::Matrix{Int}, basis::Matrix{Float64})
-    W = leading_hessian_matrix_float64(C, L, Q)
+    # Use the same common log-scale normalization as the Float64 seed.  The
+    # residual and gap diagnostics are invariant under this positive scalar,
+    # while the unscaled matrix can silently underflow for extreme instanton
+    # logs.
+    W = leading_hessian_matrix_float64_scaled(C, L, Q)
     Wbasis = W * basis
     eigenvalues = vec(sum(basis .* Wbasis; dims=1))
     scale = opnorm(W, Inf)
@@ -1560,6 +1572,37 @@ function instanton_scale_blocks(L::AbstractMatrix{<:Real};
         diagnostics=(block_count=length(blocks),
             log_scale_span=isempty(sorted_logs) ? 0.0 : maximum(sorted_logs) - minimum(sorted_logs),
             largest_inter_block_gap=isempty(inter_block_gaps) ? 0.0 : maximum(inter_block_gaps)))
+end
+
+"""
+    instanton_scale_precision_diagnostics(L; linear_floor_log10=log10(floatmin(Float64)))
+
+Describe the terms that a normalized Float64 linear boundary would omit.  All
+comparisons remain in log10 space; the reported bound is also logarithmic, so
+this audit is safe for scales far below Float64's linear range.  Production
+high-precision Hessian paths do not use the omitted terms, but the diagnostic
+is persisted whenever a Float64 seed or equation-scale boundary is used.
+"""
+function instanton_scale_precision_diagnostics(L::AbstractMatrix{<:Real};
+        linear_floor_log10::Real=log10(floatmin(Float64)),
+        linear_boundary_precision_digits::Int=0)
+    size(L, 1) >= 2 ||
+        throw(DimensionMismatch("L must have at least two rows: sign and log10 scale"))
+    logs = Float64.(L[2, :])
+    all(isfinite, logs) || throw(ArgumentError("L log10 scales must be finite"))
+    floor = Float64(linear_floor_log10)
+    isfinite(floor) || throw(ArgumentError("linear_floor_log10 must be finite"))
+    reference = isempty(logs) ? -Inf : maximum(logs)
+    relative = isempty(logs) ? Float64[] : logs .- reference
+    omitted = findall(<(floor), relative)
+    omitted_max = isempty(omitted) ? -Inf : maximum(relative[omitted])
+    bound = isempty(omitted) ? -Inf : omitted_max + log10(length(omitted))
+    (; policy="log_domain_with_arbitrary_precision_linear_boundaries",
+        scale_span_log10=isempty(logs) ? 0.0 : maximum(logs) - minimum(logs),
+        reference_log10=reference, linear_floor_log10=floor,
+        truncated_count=length(omitted), truncation_bound_log10=bound,
+        linear_boundary_precision_digits,
+        status=isempty(omitted) ? "no_truncation" : "truncated_with_log_bound")
 end
 
 function _instanton_split_diagnostics(C::Matrix{Float64},
@@ -1727,8 +1770,10 @@ Float64 counterpart to [`leading_hessian_mass_basis`](@ref). It is suitable
 only for well-resolved leading-Hessian modes.
 """
 function leading_hessian_mass_basis_float64(C::Matrix{Float64}, L::Matrix{Float64}, Q::Matrix{Int})
-    eigenvalues, eigenvectors = eigen(leading_hessian_matrix_float64(C, L, Q))
-    masses = 0.5 .* log10.(abs.(eigenvalues)) .+ 9 .+ log10(2.435e18) .+ log10(2π)
+    scale_precision = instanton_scale_precision_diagnostics(L)
+    eigenvalues, eigenvectors = eigen(leading_hessian_matrix_float64_scaled(C, L, Q))
+    masses = 0.5 .* (log10.(abs.(eigenvalues)) .+ scale_precision.reference_log10) .+
+        9 .+ log10(2.435e18) .+ log10(2π)
     order = sortperm(masses)
     return masses[order], Int.(sign.(eigenvalues[order])), eigenvectors[:, order]
 end
@@ -2184,6 +2229,14 @@ the residual check.
 function _pq_hybrid_physical_spectrum_factored(C::Matrix{Float64}, L::Matrix{Float64}, Q::Matrix{Int}; threshold_log10::Float64=Float64(log10(constants()["Hubble"])), prec::Int=1_000, maxiter::Int=100, residual_tolerance::Float64=1e-30, schur_acceleration::Bool=true, oversampling::Int=8, quartics::Bool=true, mixed_quartics::Bool=true, quartic_backend::Symbol=:auto, hierarchy_gap_log10::Float64=1.0, hierarchy_min_block_size::Int=1, label::AbstractString="matrix input")
     LQtild = LQtilde(Q, L)
     Ltilde, Qtilde = LQtild.Ltilde, LQtild.Qtilde
+    scale_precision = instanton_scale_precision_diagnostics(L;
+        linear_boundary_precision_digits=prec)
+    if scale_precision.truncated_count > 0
+        @warn("log-domain linear-boundary truncation is used only for the Float64 seed; " *
+            "arbitrary-precision Hessian retains all instantons",
+            geometry=label, truncated_count=scale_precision.truncated_count,
+            truncation_bound_log10=scale_precision.truncation_bound_log10)
+    end
     W, Cprecision = high_precision_leading_hessian(C, Ltilde, Qtilde; prec)
     certified_count = _certified_float64_inertia_count(C, Ltilde, Qtilde,
         threshold_log10)

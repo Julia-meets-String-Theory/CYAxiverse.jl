@@ -169,19 +169,35 @@ begin
     `pipeline_vacua` for the `vacua_pipeline` group. No dedicated reader
     currently exposes the `lambda_31_log10`/`lambda_22_log10`
     cross-quartic couplings, or the `inflation` and `orientifold` groups,
-    so those fields are read directly with HDF5.jl. Return `nothing` when
-    the file is missing or cannot be read, so one damaged file does not
-    stop the whole scan.
+    so those fields are read directly with HDF5.jl. Return an explicit
+    inclusion/exclusion record when a file is missing or cannot be read, so
+    exclusions are counted rather than silently dropped.
     """
     function read_geometry_row(root::AbstractString, h11::Int, tri::Int, cy::Int)
         ENV["CYAXIVERSE_DATA_DIR"] = root
         path = CYAxiverse.filestructure.cyax_file(h11, tri, cy)
-        isfile(path) || return nothing
+        isfile(path) || return (; status="excluded", reason="missing_file", row=nothing)
         try
             spectrum = CYAxiverse.read.physical_spectrum(h11, tri, cy)
             vacua = CYAxiverse.read.pipeline_vacua(h11, tri, cy)
+            vacua.metadata.model_scope == "hierarchy_truncated_axion_potential" ||
+                error("unscoped vacuum result")
+            vacua.metadata.full_potential_status == "not_validated" ||
+                error("unverified full-potential status")
             extra = HDF5.h5open(path, "r") do file
                 physical = file["spectrum/physical"]
+                physical_metadata = file["spectrum/physical/metadata"]
+                String(HDF5.read(physical_metadata, "schema_version")) ==
+                    "cyaxiverse-physical-spectrum-3" ||
+                    error("stale physical-spectrum schema")
+                String(HDF5.read(physical_metadata, "fpert_formula")) ==
+                    "log10(fpert/GeV)=log10(m/eV)-9-0.5*log10(abs(lambda_self))" ||
+                    error("unverified fpert convention")
+                String(HDF5.read(file["inflation/schema_version"])) ==
+                    "cyaxiverse-phase3-orientifold-inflation-2.0" ||
+                    error("stale inflation schema")
+                String(HDF5.read(file["inflation/scale_status"])) == "homotopy_only" ||
+                    error("unverified inflation scale status")
                 catastrophes = file["inflation/catastrophes"]
                 efolds = file["inflation/efolds"]
                 orientifold = file["orientifold"]
@@ -189,8 +205,12 @@ begin
                 (;
                     lambda_31 = HDF5.read(physical, "lambda_31_log10"),
                     lambda_22 = HDF5.read(physical, "lambda_22_log10"),
-                    saddle_count = Int(HDF5.read(catastrophes, "saddle_count")),
-                    catastrophes_present = Int(HDF5.read(catastrophes, "catastrophes_present")) != 0,
+                    leading_branch_saddle_count = Int(HDF5.read(
+                        catastrophes, "leading_branch_saddle_count")),
+                    leading_branch_saddles_present = Int(HDF5.read(
+                        catastrophes, "leading_branch_saddles_present")) != 0,
+                    scale_status = String(HDF5.read(file["inflation/scale_status"])),
+                    claim_boundary = String(HDF5.read(file["inflation/claim_boundary"])),
                     leading_minima_count = Int(HDF5.read(catastrophes, "leading_minima_count")),
                     n_efold_candidates = Int(HDF5.read(efolds, "n_candidates")),
                     n_qualified_efolds = Int(HDF5.read(efolds, "n_qualified")),
@@ -199,29 +219,34 @@ begin
                         Float64(HDF5.read(file, qcd_key)) : NaN,
                 )
             end
-            return (;
+            return (; status="included", reason="", row=(;
                 h11 = h11, tri = tri, cy = cy,
                 n_modes = length(spectrum.m),
                 m = spectrum.m,
                 fpert = spectrum.fpert,
-                fK = spectrum.fK,
+                fK_all = spectrum.fK,
                 lambda_self = spectrum.λself,
                 lambda_31 = extra.lambda_31,
                 lambda_22 = extra.lambda_22,
                 n_vacua = vacua.estimate,
                 vacua_issquare = vacua.issquare,
                 vacua_verified = vacua.verified,
-                saddle_count = extra.saddle_count,
-                catastrophes_present = extra.catastrophes_present,
+                search_classification = vacua.metadata.search_classification,
+                model_scope = vacua.metadata.model_scope,
+                full_potential_status = vacua.metadata.full_potential_status,
+                leading_branch_saddle_count = extra.leading_branch_saddle_count,
+                leading_branch_saddles_present = extra.leading_branch_saddles_present,
+                scale_status = extra.scale_status,
+                claim_boundary = extra.claim_boundary,
                 leading_minima_count = extra.leading_minima_count,
                 n_efold_candidates = extra.n_efold_candidates,
                 n_qualified_efolds = extra.n_qualified_efolds,
                 h11_minus = extra.h11_minus,
                 qcd_divisor_volume = extra.qcd_divisor_volume,
-            )
+            ))
         catch error
             @warn "Could not read a geometry file; skipping it" h11 tri cy path error
-            return nothing
+            return (; status="excluded", reason="read_error:" * sprint(showerror, error), row=nothing)
         end
     end
 end
@@ -238,9 +263,15 @@ begin
     geometry_index = Dict(h => discover_geometries(db_root_value, h) for h in h11_levels)
     geometry_counts = Dict(h => length(geometry_index[h]) for h in h11_levels)
     all_geometries = reduce(vcat, (geometry_index[h] for h in h11_levels); init = NTuple{3,Int}[])
-    loaded_rows = [read_geometry_row(db_root_value, h, tri, cy) for (h, tri, cy) in all_geometries]
-    rows = filter(!isnothing, loaded_rows)
-    skipped_count = length(all_geometries) - length(rows)
+    loaded_records = [read_geometry_row(db_root_value, h, tri, cy)
+        for (h, tri, cy) in all_geometries]
+    rows = [record.row for record in loaded_records if record.status == "included"]
+    excluded_records = filter(record -> record.status == "excluded", loaded_records)
+    skipped_count = length(excluded_records)
+    exclusion_reasons = Dict{String,Int}()
+    for record in excluded_records
+        exclusion_reasons[record.reason] = get(exclusion_reasons, record.reason, 0) + 1
+    end
     load_elapsed_seconds = time() - load_start_time
 end
 
@@ -250,8 +281,8 @@ md"""
 
 Loaded **$(length(rows))** geometry rows across **$(length(h11_levels))**
 h11 levels from `$(db_root_value)` in **$(round(load_elapsed_seconds; digits=1))**
-seconds; **$(skipped_count)** files were present on disk but could not be
-read and were skipped.
+seconds; **$(skipped_count)** files were excluded. Exclusion counts by reason:
+`$(isempty(exclusion_reasons) ? "none" : join(["$(reason)=$(count)" for (reason, count) in sort(collect(exclusion_reasons))], ", "))`.
 
 Certified triangulation classes are `np_*` directories with an
 ``h^{1,1}_-=0``, ``h^{2,1}_+=0`` orientifold already written to disk; each
@@ -264,6 +295,11 @@ the published target from Sheridan, Carta, Gendler, McAllister, and Moritz
 Counts are read from the database root at run time, so a certification
 job that is still appending geometries is reflected honestly rather than
 baked in as a fixed number.
+
+Vacuum counts are stratified by the persisted `search_classification` and
+are estimates for the `hierarchy_truncated_axion_potential` model scope;
+`full_potential_status=not_validated` is not interpreted as a full-potential
+claim.
 """
 
 # ╔═╡ a275d2a1-4cc9-4c56-ae26-6638d4138828
@@ -291,24 +327,126 @@ end
 md"""
 ## Distribution summary statistics
 
-Median, mean, and standard deviation are computed over all axion modes
-pooled across every certified geometry at each h11, except for the
-vacuum count and saddle count, which are per-geometry scalars.
+The primary summaries use the declared hierarchy
+`modes -> assignment median -> class median`: each `cy_*` assignment first
+contributes one within-assignment mode median, then each `np_*` triangulation
+class contributes one median of its assignment medians. Assignment-uniform
+and mode-uniform values are shown as separate sensitivities. Retained masses
+and `fpert` use the physical-mode arrays, while `fK_all` is an explicitly
+separate all-mode Kähler estimate and is never treated as a retained-mode
+quantity.
 """
 
 # ╔═╡ 4c7b4484-389b-45e6-bde5-4505268a0594
 begin
-    """Return the values of a per-mode field, pooled across every row at
-    one `h11`.
+    """Return finite raw mode values, pooled across assignments at one `h11`.
+
+    A row is one ordered QCD/QED assignment (`cy_*`). This is the
+    mode-uniform sensitivity and is deliberately the only estimator that
+    weights assignments by their number of modes.
     """
-    function pooled_mode_values(all_rows, h::Int, field::Symbol)
+    function mode_uniform_values(all_rows, h::Int, field::Symbol)
         values = Float64[]
         for row in all_rows
             row.h11 == h || continue
-            append!(values, Float64.(getproperty(row, field)))
+            append!(values, filter(isfinite, Float64.(getproperty(row, field))))
         end
         return values
     end
+
+    """Return one median per assignment, with each assignment equal weight.
+
+    The mode median is computed before assignments are combined. This is the
+    assignment-uniform sensitivity and is distinct from `mode_uniform_values`.
+    """
+    function assignment_uniform_values(all_rows, h::Int, field::Symbol)
+        values = Float64[]
+        for row in all_rows
+            row.h11 == h || continue
+            modes = filter(isfinite, Float64.(getproperty(row, field)))
+            isempty(modes) || push!(values, median(modes))
+        end
+        return values
+    end
+
+    """Return one equal-weight contribution per triangulation class.
+
+    A class can have multiple `cy_*` assignments. Reduce each assignment to
+    its within-assignment mode median, then reduce the class to the median of
+    those assignment medians. This prevents classes with more assignments or
+    modes from receiving extra within-class weight.
+    """
+    function class_uniform_values(all_rows, h::Int, field::Symbol)
+        by_class = Dict{Tuple{Int,Int},Vector{Float64}}()
+        for row in all_rows
+            row.h11 == h || continue
+            modes = filter(isfinite, Float64.(getproperty(row, field)))
+            isempty(modes) && continue
+            push!(get!(by_class, (row.h11, row.tri), Float64[]), median(modes))
+        end
+        return [median(assignment_values) for assignment_values in Base.values(by_class)
+            if !isempty(assignment_values)]
+    end
+
+    """Return scalar values with one contribution per assignment."""
+    function assignment_uniform_scalar_values(all_rows, h::Int, field::Symbol;
+            classification=nothing)
+        values = Float64[]
+        for row in all_rows
+            row.h11 == h || continue
+            classification === nothing || row.search_classification == classification || continue
+            value = Float64(getproperty(row, field))
+            isfinite(value) && push!(values, value)
+        end
+        return values
+    end
+
+    """Return scalar values with one median contribution per class."""
+    function class_uniform_scalar_values(all_rows, h::Int, field::Symbol;
+            classification=nothing)
+        by_class = Dict{Tuple{Int,Int},Vector{Float64}}()
+        for row in all_rows
+            row.h11 == h || continue
+            classification === nothing || row.search_classification == classification || continue
+            value = Float64(getproperty(row, field))
+            isfinite(value) || continue
+            push!(get!(by_class, (row.h11, row.tri), Float64[]), value)
+        end
+        return [median(class_values) for class_values in Base.values(by_class)
+            if !isempty(class_values)]
+    end
+
+    # Compatibility aliases retain the old callable names without retaining
+    # the old, incorrect weighting semantics.
+    pooled_mode_values(all_rows, h::Int, field::Symbol) =
+        mode_uniform_values(all_rows, h, field)
+    class_uniform_mode_values(all_rows, h::Int, field::Symbol) =
+        class_uniform_values(all_rows, h, field)
+    assignment_uniform_mode_values(all_rows, h::Int, field::Symbol) =
+        assignment_uniform_values(all_rows, h, field)
+
+    """Check the weighting hierarchy on a small deterministic fixture.
+
+    This assertion does not read the production database. It guards against
+    accidentally reverting to pooled modes when changing the notebook.
+    """
+    function statistics_helper_fixture_check()
+        fixture = [
+            (h11=2, tri=1, cy=1, m=[0.0, 2.0], fpert=[0.0, 2.0], fK_all=[0.0, 2.0], n_modes=2, search_classification="fixture"),
+            (h11=2, tri=1, cy=2, m=[0.0, 0.0, 0.0, 0.0], fpert=[0.0, 0.0, 0.0, 0.0], fK_all=[0.0, 0.0, 0.0, 0.0], n_modes=4, search_classification="fixture"),
+            (h11=2, tri=2, cy=1, m=[10.0], fpert=[10.0], fK_all=[10.0], n_modes=1, search_classification="fixture"),
+        ]
+        for field in (:m, :fpert, :fK_all)
+            @assert sort(class_uniform_values(fixture, 2, field)) == [0.5, 10.0]
+            @assert sort(assignment_uniform_values(fixture, 2, field)) == [0.0, 1.0, 10.0]
+            @assert sort(mode_uniform_values(fixture, 2, field)) ==
+                [0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 10.0]
+        end
+        @assert sort(class_uniform_scalar_values(fixture, 2, :n_modes)) == [1.0, 3.0]
+        @assert sort(assignment_uniform_scalar_values(fixture, 2, :n_modes)) == [1.0, 2.0, 4.0]
+        return true
+    end
+    @assert statistics_helper_fixture_check()
 
     """Return the per-geometry scalar values of a field at one `h11`."""
     function per_geometry_values(all_rows, h::Int, field::Symbol)
@@ -336,20 +474,30 @@ begin
     end
 
     summary_lines = String[
-        "| h11 | modes pooled | log10(m/eV) med/mean/std | log10(f_pert/GeV) med/mean/std | vacua per geometry med/mean/std | saddles per geometry med/mean/std |",
-        "|--:|--:|:--|:--|:--|:--|",
+        "| h11 | classes (class n) | assignments (assignment n) | class-uniform m med/mean/std | assignment-uniform m sensitivity | mode-uniform m sensitivity | class-uniform fpert med/mean/std | assignment-uniform fpert sensitivity | mode-uniform fpert sensitivity | class-uniform all-mode fK med/mean/std | assignment-uniform all-mode fK sensitivity | mode-uniform all-mode fK sensitivity |",
+        "|--:|--:|--:|:--|:--|:--|:--|:--|:--|:--|:--|:--|",
     ]
     for h in h11_levels
-        mass_summary_values = pooled_mode_values(rows, h, :m)
-        fpert_summary_values = pooled_mode_values(rows, h, :fpert)
-        vacua_summary_values = per_geometry_values(rows, h, :n_vacua)
-        saddle_summary_values = per_geometry_values(rows, h, :saddle_count)
+        mass_summary_values = class_uniform_values(rows, h, :m)
+        mass_assignment_values = assignment_uniform_values(rows, h, :m)
+        mass_mode_values = mode_uniform_values(rows, h, :m)
+        fpert_summary_values = class_uniform_values(rows, h, :fpert)
+        fpert_assignment_values = assignment_uniform_values(rows, h, :fpert)
+        fpert_mode_values = mode_uniform_values(rows, h, :fpert)
+        fK_summary_values = class_uniform_values(rows, h, :fK_all)
+        fK_assignment_values = assignment_uniform_values(rows, h, :fK_all)
+        fK_mode_values = mode_uniform_values(rows, h, :fK_all)
+        class_count = length(class_uniform_scalar_values(rows, h, :n_modes))
+        assignment_count = length(assignment_uniform_values(rows, h, :m))
         push!(summary_lines,
-            "| $(h) | $(length(mass_summary_values)) | $(summary_cell_text(mass_summary_values)) | " *
-            "$(summary_cell_text(fpert_summary_values)) | $(summary_cell_text(vacua_summary_values)) | " *
-            "$(summary_cell_text(saddle_summary_values)) |")
+            "| $(h) | $(class_count) | $(assignment_count) | " *
+            "$(summary_cell_text(mass_summary_values)) | $(summary_cell_text(mass_assignment_values)) | " *
+            "$(summary_cell_text(mass_mode_values)) | $(summary_cell_text(fpert_summary_values)) | " *
+            "$(summary_cell_text(fpert_assignment_values)) | $(summary_cell_text(fpert_mode_values)) | " *
+            "$(summary_cell_text(fK_summary_values)) | $(summary_cell_text(fK_assignment_values)) | " *
+            "$(summary_cell_text(fK_mode_values)) |")
     end
-    isempty(h11_levels) && push!(summary_lines, "| *(no data)* | | | | | |")
+    isempty(h11_levels) && push!(summary_lines, "| *(no data)* | | | | | | | | | | | |")
     Markdown.parse(join(summary_lines, "\n"))
 end
 
@@ -400,14 +548,16 @@ md"""
 ## Perturbative and Kähler decay constants
 
 Two panels show ``\log_{10}(f_a/\mathrm{GeV})`` from the perturbative
-estimate (`fpert_log10`) and from the Kähler-metric estimate
-(`fK_log10`), pooled across every retained mode at each h11.
+estimate (`fpert_log10`) over retained modes and from the Kähler-metric
+estimate (`fK_log10`) over all kinetic modes. Raw mode-uniform panels are
+sensitivities; the primary table also reports assignment-uniform sensitivity
+after taking one mode median per assignment.
 """
 
 # ╔═╡ d4277970-3ca5-43af-bb34-88b3f3bd918f
 begin
     fpert_groups_all = [pooled_mode_values(rows, h, :fpert) for h in h11_levels]
-    fK_groups_all = [pooled_mode_values(rows, h, :fK) for h in h11_levels]
+    fK_groups_all = [pooled_mode_values(rows, h, :fK_all) for h in h11_levels]
     if any(!isempty, fpert_groups_all) || any(!isempty, fK_groups_all)
         decay_figure = Figure(size = style.resolution, fontsize = style.fontsize,
             figure_padding = style.figure_padding, backgroundcolor = style.background)
@@ -616,8 +766,10 @@ md"""
 ## Vacuum count per geometry
 
 `vacua_pipeline/estimate` is the number of inequivalent vacua found by
-the vacua pipeline for each geometry (`scripts/vacua_pipeline.jl`); the
-box groups these per-geometry counts by h11.
+the vacua pipeline for each ordered QCD/QED assignment
+(`scripts/vacua_pipeline.jl`). The box groups these assignment values by
+h11. The stratified table reports the class-uniform primary statistic and
+the assignment-uniform sensitivity separately.
 """
 
 # ╔═╡ fdf5d0ab-ed43-4791-965d-43ba4dad6bd6
@@ -642,7 +794,34 @@ md"""
 Saved to `orientifold_vacua_count_by_h11.pdf`. Verified and square-vacua
 status per geometry are recorded in `vacua_pipeline/verified` and
 `vacua_pipeline/issquare`; this panel presents the estimated count only.
+The stratified table below is the auditable primary summary.
 """
+
+# ╔═╡ 7ad7b50d-4c64-47b5-a10e-f9fc9d4e0e17
+begin
+    classification_levels = sort(unique(row.search_classification for row in rows))
+    vacua_strata_lines = String[
+        "| h11 | search_classification | model_scope | full_potential_status | classes (class n) | assignments (assignment n) | class-uniform vacua med/mean/std | assignment-uniform vacua sensitivity |",
+        "|--:|:--|:--|:--|--:|--:|:--|:--|",
+    ]
+    for h in h11_levels, classification in classification_levels
+        stratum = [row for row in rows if row.h11 == h &&
+            row.search_classification == classification]
+        isempty(stratum) && continue
+        class_values = class_uniform_scalar_values(rows, h, :n_vacua;
+            classification=classification)
+        assignment_values = assignment_uniform_scalar_values(rows, h, :n_vacua;
+            classification=classification)
+        push!(vacua_strata_lines,
+            "| $(h) | `$(classification)` | `$(first(stratum).model_scope)` | " *
+            "`$(first(stratum).full_potential_status)` | $(length(class_values)) | " *
+            "$(length(assignment_values)) | $(summary_cell_text(class_values)) | " *
+            "$(summary_cell_text(assignment_values)) |")
+    end
+    isempty(classification_levels) &&
+        push!(vacua_strata_lines, "| *(no data)* | | | | | | | |")
+    Markdown.parse(join(vacua_strata_lines, "\n"))
+end
 
 # ╔═╡ ea087f4f-3103-485b-8a34-340b087f8ac2
 md"""
@@ -650,8 +829,8 @@ md"""
 
 `n_efold_candidates`, `n_qualified_efolds`, and `leading_minima_count`
 are the raw outputs of the e-fold search
-(`inflation/efolds/n_candidates`, `inflation/efolds/n_qualified`, and
-`inflation/catastrophes/leading_minima_count`). At h11 = 2-5 almost every
+(`inflation/efolds/n_candidates`, `inflation/efolds/n_qualified`, and the
+legacy-compatible `inflation/catastrophes/leading_minima_count`). At h11 = 2-5 almost every
 geometry qualifies zero trajectories; the panels below show that
 honestly rather than hiding the near-empty distributions.
 """
@@ -701,51 +880,80 @@ smoothed over.
 
 # ╔═╡ 51360cc3-8268-44c9-b4b2-8fa1c47a36dd
 md"""
-## Catastrophe search: saddle counts
+## Leading-branch saddle counts
 
-`inflation/catastrophes/saddle_count` is the number of slow-roll saddle
-points found by the catastrophe search for each geometry; every
-certified geometry examined so far has at least one saddle
-(`catastrophes_present = true`).
+The legacy-compatible `inflation/catastrophes/leading_branch_saddle_count`
+field is the number of
+fixed-geometry leading-branch saddle points found by the bounded search.
+It is not a catastrophe-continuation result. The persisted
+`scale_status=homotopy_only` and bounded fixed-geometry claim boundary are
+kept visible in every row.
 """
 
 # ╔═╡ 822cfed7-9876-4146-aaea-c42e7e7d017d
 begin
-    saddle_groups_all = [per_geometry_values(rows, h, :saddle_count) for h in h11_levels]
-    catastrophe_present_count = count(row -> row.catastrophes_present, rows)
-    catastrophe_present_fraction = isempty(rows) ? NaN :
-        100 * catastrophe_present_count / length(rows)
+    saddle_groups_all = [per_geometry_values(rows, h, :leading_branch_saddle_count)
+        for h in h11_levels]
+    saddle_present_count = count(row -> row.leading_branch_saddles_present, rows)
+    saddle_present_fraction = isempty(rows) ? NaN :
+        100 * saddle_present_count / length(rows)
     if any(!isempty, saddle_groups_all)
         saddle_levels, saddle_groups = nonempty_groups(h11_levels, saddle_groups_all)
         saddle_result = plotting.boxplot(saddle_groups; style = style,
             positions = Float64.(saddle_levels), labels = string.(saddle_levels),
             xlabel = L"$h^{1,1}$", ylabel = "saddle count",
-            title = "Catastrophe search: saddle count per geometry")
+            title = "Leading-branch saddle count per geometry")
         saddle_path = joinpath(plots_output_dir, "orientifold_saddle_count_by_h11.pdf")
         plotting.save_plot(saddle_path, saddle_result)
         saddle_result.figure
     else
-        md"*No catastrophe-search data is available for the selected database root.*"
+        md"*No leading-branch saddle data is available for the selected database root.*"
     end
 end
 
 # ╔═╡ c664175a-5f88-4e0c-bf1c-d7cdf7790296
 md"""
 Saved to `orientifold_saddle_count_by_h11.pdf`. Across all loaded
-geometries, **$(catastrophe_present_count)** of **$(length(rows))**
-($(isnan(catastrophe_present_fraction) ? "n/a" : @sprintf("%.1f%%", catastrophe_present_fraction)))
-have at least one catastrophe saddle.
+geometries, **$(saddle_present_count)** of **$(length(rows))**
+($(isnan(saddle_present_fraction) ? "n/a" : @sprintf("%.1f%%", saddle_present_fraction)))
+have at least one leading-branch saddle. This is a bounded fixed-geometry
+diagnostic, not a catastrophe claim.
 """
+
+# ╔═╡ 1f86e4f1-34c0-4ef1-9a82-5a89b0dcd3e4
+begin
+    saddle_strata_lines = String[
+        "| h11 | search_classification | classes (class n) | assignments (assignment n) | class-uniform saddle count med/mean/std | assignment-uniform saddle sensitivity |",
+        "|--:|:--|--:|--:|:--|:--|",
+    ]
+    for h in h11_levels, classification in classification_levels
+        stratum = [row for row in rows if row.h11 == h &&
+            row.search_classification == classification]
+        isempty(stratum) && continue
+        class_values = class_uniform_scalar_values(rows, h,
+            :leading_branch_saddle_count; classification=classification)
+        assignment_values = assignment_uniform_scalar_values(rows, h,
+            :leading_branch_saddle_count; classification=classification)
+        push!(saddle_strata_lines,
+            "| $(h) | `$(classification)` | $(length(class_values)) | " *
+            "$(length(assignment_values)) | $(summary_cell_text(class_values)) | " *
+            "$(summary_cell_text(assignment_values)) |")
+    end
+    isempty(classification_levels) &&
+        push!(saddle_strata_lines, "| *(no data)* | | | | | |")
+    Markdown.parse(join(saddle_strata_lines, "\n"))
+end
 
 # ╔═╡ c936e240-1866-4531-8162-2aed7e506fa5
 md"""
 ## Notes on units and provenance
 
-- Axion masses (`m`) are ``\log_{10}`` of the physical mass in eV; decay
-  constants (`fpert`, `fK`) are ``\log_{10}`` of the decay constant in
-  GeV. Both conventions follow `CYAxiverse.generate`'s physical-spectrum
-  calculation (`src/generate.jl`), which adds the reduced Planck mass in
-  GeV and, for masses only, a GeV-to-eV exponent offset.
+- Axion masses (`m`) are ``\log_{10}`` of the physical mass in eV. The
+  perturbative estimate is explicitly
+  ``\log_{10}(f_{\mathrm{pert}}/\mathrm{GeV}) =
+  \log_{10}(m/\mathrm{eV}) - 9 - \frac12\log_{10}|\lambda_{\mathrm{self}}|``.
+  `fK_all` is the all-mode Kähler estimate in ``\log_{10}`` GeV and is kept
+  separate from retained-mode masses and `fpert`.
 - Quartic couplings (`lambda_self_log10`, `lambda_31_log10`,
   `lambda_22_log10`) are ``\log_{10}`` of the coupling magnitude; their
   signs are stored separately (`*_sign`) and are not shown in this
@@ -796,10 +1004,12 @@ md"""
 # ╟─bdff4ef4-0780-44ef-942b-ef268c1448f0
 # ╠═fdf5d0ab-ed43-4791-965d-43ba4dad6bd6
 # ╟─44e044b2-64c0-424e-9704-6ff44fbcc39b
+# ╠═7ad7b50d-4c64-47b5-a10e-f9fc9d4e0e17
 # ╟─ea087f4f-3103-485b-8a34-340b087f8ac2
 # ╠═ba4ef886-d5e9-4610-b11a-01e7f1cf18c6
 # ╟─5187b806-4215-4bec-9350-ce320e427cc9
 # ╟─51360cc3-8268-44c9-b4b2-8fa1c47a36dd
 # ╠═822cfed7-9876-4146-aaea-c42e7e7d017d
 # ╟─c664175a-5f88-4e0c-bf1c-d7cdf7790296
+# ╠═1f86e4f1-34c0-4ef1-9a82-5a89b0dcd3e4
 # ╟─c936e240-1866-4531-8162-2aed7e506fa5

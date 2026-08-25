@@ -26,6 +26,30 @@ from glimmers_schema11 import atomic_jsonl_dump
 
 
 class Stage2BoundaryTests(unittest.TestCase):
+    def test_canonical_orientifold_action_digest_and_contract(self):
+        generator = stage2_entrypoint.generator
+        action = {
+            "lattice_matrix": np.eye(4, dtype=int).tolist(),
+            "torus_shift": {"numerator": [0, 0, 0, 1], "denominator": 2},
+            "lambda_f": 1,
+        }
+        config = dict(action, involution_type="O3/O7", canonical_action_required=True)
+        config["action_digest"] = generator.stable_hash(action)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "orientifold.json"
+            path.write_text(json.dumps(config))
+            loaded = generator.load_orientifold(str(path))
+        self.assertEqual(loaded["action_digest"], config["action_digest"])
+        self.assertEqual(loaded["torus_shift"], action["torus_shift"])
+        self.assertEqual(loaded["lambda_f"], 1)
+
+        config["action_digest"] = "wrong"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "orientifold.json"
+            path.write_text(json.dumps(config))
+            with self.assertRaisesRegex(RuntimeError, "action_digest"):
+                generator.load_orientifold(str(path))
+
     def test_historical_sparse_coo_backend_contracts_stored_h491_tensor(self):
         generator = stage2_entrypoint.generator
         point = np.ones(491, dtype=float)
@@ -570,6 +594,7 @@ class Stage2BoundaryTests(unittest.TestCase):
             "kappa": np.asarray([[0, 0, 0, 6.0]]),
             "tip": np.asarray([1.0]),
             "effective_cone": np.asarray([[1]], dtype=np.int64),
+            "glsm": np.asarray([[1]], dtype=np.int64),
             "basis_matrix": np.asarray([[1]], dtype=np.int64),
             "prime_toric_divisors": np.asarray([0], dtype=np.int64),
         }
@@ -597,6 +622,7 @@ class Stage2BoundaryTests(unittest.TestCase):
             "kappa": np.asarray([[0, 0, 0, 6.0]]),
             "tip": np.asarray([1.0]),
             "effective_cone": np.asarray([[1]], dtype=np.int64),
+            "glsm": np.asarray([[1, 2]], dtype=np.int64),
             "basis_matrix": np.asarray([[1, 2]], dtype=np.int64),
             "prime_toric_divisors": np.asarray([0, 1], dtype=np.int64),
         }
@@ -698,6 +724,7 @@ class Stage2BoundaryTests(unittest.TestCase):
                 "kappa": np.asarray([[0, 0, 0, 6.0]]),
                 "tip": np.asarray([1.0]),
                 "effective_cone": np.asarray([[1]], dtype=np.int64),
+                "glsm": np.asarray([[1, 2]], dtype=np.int64),
                 "basis_matrix": np.asarray([[1, 2]], dtype=np.int64),
                 "prime_toric_divisors": np.asarray([0, 1], dtype=np.int64),
             },

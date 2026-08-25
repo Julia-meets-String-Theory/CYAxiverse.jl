@@ -1019,6 +1019,7 @@ cytools/geometric/
     invariant_kahler_point (only when the kaehler subspace check is required)
     prime_divisor_image_indices
     prime_divisor_invariant_indices
+    h2_action_proof_json (exact GLSM quotient/relation residual evidence)
   visible_sector/ (only with --visible-sector-policy intersecting_d7)
     qcd_divisor_index, qed_divisor_index
     qcd_image_index, qed_image_index
@@ -1058,6 +1059,11 @@ Important conventions:
 - `basis_matrix` is `h11 × n_points`; a prime-divisor charge is a selected
   lattice-point column, while `prime_divisor_charges` stores those charges as
   one row per prime divisor.
+- The orientifold H2 action is solved exactly from the full GLSM
+  quotient/relation matrix by `M Q = Q P`; `basis_matrix` is a divisor-slot
+  selector and is not used for this action. The persisted proof records the
+  selected nonzero minor, exact integer solution, zero residual, and involution
+  check.
 - `Q` is reconstructed as `h11 × N_instanton`, with charge vectors as columns;
   pairwise charges use `Q_direct[:, pair_j] - Q_direct[:, pair_i]`. The HDF5
   artifact stores the source datasets, indices, conventions, hashes, and replay

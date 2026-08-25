@@ -2,21 +2,22 @@
 
 For every `cyax.h5` under a given `h11_002` root, this script persists:
 
-- `vacua_pipeline`: the existing reduced-JLM vacua count, computed via the
+- `vacua_pipeline`: the hierarchy-truncated vacua estimate, computed via the
   package's own `scripts/vacua_pipeline.jl` (`compute_vacua_data`) with
   `method=:auto` passed explicitly. The default method on that engine is
   `:legacy`, which throws a `BoundsError` on these deeply-suppressed-instanton
   geometries (instanton log10 scales spanning roughly -111 to -654); `:auto`
-  (exact determinant -> selected branch set -> reduced JLM finite search)
+  (exact determinant -> selected branch set -> legacy finite-search fallback)
   completes cleanly. This script does not change that engine's default --
   it only ever calls it with `method=:auto`.
-- `inflation/catastrophes`: the Hessian negative-mode classification of the
+- `inflation/catastrophes` (legacy-compatible group name): the Hessian
+  negative-mode classification of the
   leading critical branches, via `scripts/inflation_scan_common.jl`'s
   `run_geometry`. `leading_minima_count` (negative_modes==0) is the same
   quantity `vacua_pipeline`'s `:auto` path independently arrives at via a
   different algorithm (recorded as a cross-check, not the persisted vacua
-  count); `saddle_count` (negative_modes>0 among the classified branches) is
-  the catastrophe/tachyonic-branch count.
+  count); `leading_branch_saddle_count` (negative_modes>0 among the classified
+  branches) is the leading-branch saddle count.
 - `inflation/efolds`: candidate inflationary trajectories from
   `scripts/inflation_candidate_refinement.jl`'s `scan_geometry_for_inflation`
   (bounded stationary-point refinement at Float64 and arbitrary precision,
@@ -36,6 +37,7 @@ using HDF5
 using Printf
 using Dates
 using Random
+using SHA
 
 include(joinpath(@__DIR__, "vacua_pipeline.jl"))
 include(joinpath(@__DIR__, "inflation_scan_common.jl"))
@@ -46,7 +48,11 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 isdefined(@__MODULE__, :scan_geometry_for_inflation) ||
     include(joinpath(@__DIR__, "inflation_candidate_refinement.jl"))
 
-const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-1.0"
+const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.0"
+const INFLATION_LEGACY_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-1.0"
+
+"""Hash the complete Pipeline 2 configuration contract."""
+_phase3_config_digest(value) = bytes2hex(sha256(repr(value)))
 
 function _phase3_git_commit()
     try
@@ -57,10 +63,27 @@ function _phase3_git_commit()
 end
 
 """Return whether a geometry file already carries an `inflation` group."""
-function _has_inflation_group(path)
+function _has_inflation_group(path; config_digest=nothing)
     isfile(path) || return false
     h5open(path, "r") do file
-        haskey(file, "inflation")
+        haskey(file, "inflation/status") || return false
+        read(file["inflation/status"]) == "completed" || return false
+        config_digest === nothing && return true
+        haskey(file, "inflation/configuration_digest") || return false
+        read(file["inflation/configuration_digest"]) == config_digest
+    end
+end
+
+"""Return whether an existing inflation group must not be replaced implicitly."""
+function _inflation_write_blocked(path)
+    isfile(path) || return false
+    h5open(path, "r") do file
+        haskey(file, "inflation") || return false
+        # Legacy groups without a terminal status are preserved rather than
+        # silently replaced.  Explicit failed records are the only retryable
+        # state; completed and unknown states require force=true.
+        haskey(file, "inflation/status") || return true
+        read(file["inflation/status"]) != "failed"
     end
 end
 
@@ -71,32 +94,45 @@ mutates the target file in place, and never overwrites an existing
 `inflation` group unless `force=true`.
 """
 function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
-        catastrophe_settings, efold_settings, force::Bool=false)
+        catastrophe_settings, efold_settings, force::Bool=false,
+        pipeline_config_digest=nothing)
     target = CYAxiverse.filestructure.cyax_file(geom_idx)
     isfile(target) || throw(ArgumentError("geometry file does not exist: $target"))
-    !_has_inflation_group(target) || force ||
+    config_digest = something(pipeline_config_digest,
+        _phase3_config_digest((; catastrophe_settings, efold_settings)))
+    !_inflation_write_blocked(target) || force ||
         throw(ArgumentError("inflation group already exists; pass force=true to replace $target"))
 
     temporary = string(target, ".inflation.tmp-", getpid(), "-", time_ns())
+    phase3_status = catastrophe_outcome.status == :success &&
+        efold_outcome.status == :success ? "completed" : "failed"
     cp(target, temporary; force=true)
     try
         h5open(temporary, "r+") do file
             haskey(file, "inflation") && HDF5.delete_object(file, "inflation")
             group = create_group(file, "inflation")
             group["schema_version"] = INFLATION_GROUP_SCHEMA_VERSION
+            group["configuration_digest"] = config_digest
+            group["status"] = phase3_status
+            group["terminal_status"] = phase3_status
             group["julia_version"] = string(VERSION)
             group["git_revision"] = _phase3_git_commit()
             group["completed_at"] = string(Dates.now())
+            group["scale_status"] = "homotopy_only"
+            group["claim_boundary"] =
+                "bounded fixed-geometry-null diagnostics only; physical continuation not implemented"
 
             catastrophes = create_group(group, "catastrophes")
             catastrophes["method"] = "leading_critical_branch_hessian_classification"
             catastrophes["source"] = "scripts/inflation_scan_common.jl:run_geometry"
+            catastrophes["scale_status"] = "homotopy_only"
             if catastrophe_outcome.status == :success
                 r = catastrophe_outcome.result
                 catastrophes["status"] = "completed"
                 catastrophes["leading_minima_count", deflate=9] = r.leading_minima_count
-                catastrophes["saddle_count", deflate=9] = r.saddle_count
-                catastrophes["catastrophes_present", deflate=9] = Int(r.saddle_count > 0)
+                catastrophes["leading_branch_saddle_count", deflate=9] = r.saddle_count
+                catastrophes["leading_branch_saddles_present", deflate=9] =
+                    Int(r.saddle_count > 0)
                 catastrophes["branch_count", deflate=9] = r.branch_count
                 catastrophes["qtilde_det", deflate=9] = Int(r.qtilde_det)
                 catastrophes["mass_min", deflate=9] = r.mass_min
@@ -104,11 +140,13 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
                 catastrophes["negative_mass_count", deflate=9] = r.negative_mass_count
                 catastrophes["candidate_slowroll_saddles", deflate=9] = r.candidate_slowroll_saddles
                 catastrophes["error"] = ""
+                legacy_saddle_count = r.saddle_count
+                legacy_saddles_present = Int(r.saddle_count > 0)
             else
                 catastrophes["status"] = string(catastrophe_outcome.status)
                 catastrophes["leading_minima_count", deflate=9] = -1
-                catastrophes["saddle_count", deflate=9] = -1
-                catastrophes["catastrophes_present", deflate=9] = -1
+                catastrophes["leading_branch_saddle_count", deflate=9] = -1
+                catastrophes["leading_branch_saddles_present", deflate=9] = -1
                 catastrophes["branch_count", deflate=9] = -1
                 catastrophes["qtilde_det", deflate=9] = -1
                 catastrophes["mass_min", deflate=9] = NaN
@@ -116,7 +154,15 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
                 catastrophes["negative_mass_count", deflate=9] = -1
                 catastrophes["candidate_slowroll_saddles", deflate=9] = -1
                 catastrophes["error"] = catastrophe_outcome.message
+                legacy_saddle_count = -1
+                legacy_saddles_present = -1
             end
+            legacy = create_group(catastrophes, "legacy_v1")
+            legacy["schema_version"] = INFLATION_LEGACY_SCHEMA_VERSION
+            legacy["migration"] =
+                "saddle_count -> leading_branch_saddle_count; catastrophes_present -> leading_branch_saddles_present"
+            legacy["saddle_count", deflate=9] = legacy_saddle_count
+            legacy["catastrophes_present", deflate=9] = legacy_saddles_present
             catastrophe_meta = create_group(catastrophes, "metadata")
             for (name, value) in pairs(catastrophe_settings)
                 catastrophe_meta[string(name)] = value isa Symbol ? string(value) :
@@ -127,6 +173,7 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             efolds["method"] = "bounded_stationary_point_refinement_then_gradient_flow"
             efolds["source"] =
                 "scripts/inflation_candidate_refinement.jl:scan_geometry_for_inflation"
+            efolds["scale_status"] = "homotopy_only"
             if efold_outcome.status == :success
                 scan = efold_outcome.result
                 efolds["search_status"] = string(scan.refinement.search.search_status)
@@ -206,11 +253,12 @@ geometry is skipped rather than re-attempted (which would otherwise hit the
 `vacua_pipeline`/`inflation` no-overwrite guards and be misreported as a
 failure).
 """
-function _pipeline2_complete(path::AbstractString)
+function _pipeline2_complete(path::AbstractString; vacua_config=nothing,
+        config_digest=nothing)
     isfile(path) || return false
-    h5open(path, "r") do file
-        haskey(file, "vacua_pipeline") && haskey(file, "inflation")
-    end
+    _has_pipeline_result(path; config=vacua_config) || return false
+    _has_inflation_group(path; config_digest) || return false
+    true
 end
 
 function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
@@ -231,13 +279,20 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
     efold_settings = (; max_branches=max_branches_efold, precision_bits,
         float_tolerance, high_tolerance, max_points, min_efolds, max_efolds,
         flow_step, flow_displacement)
+    vacua_config = _pipeline_config(; threshold=0.5, starts=10_000,
+        residual_tolerance=1e-10, merge_tolerance=1e-7, max_iterations=200,
+        method=:auto, max_branches=1_000_000)
+    pipeline_config_digest = _phase3_config_digest((; h11, vacua_config,
+        catastrophe_settings, efold_settings))
 
     results = NamedTuple[]
     skipped_count = 0
     for (index, (np, cy)) in enumerate(indices)
         geom_idx = CYAxiverse.structs.GeometryIndex(h11, np, cy)
+        target_path = CYAxiverse.filestructure.cyax_file(geom_idx)
         if skip_existing && !force &&
-                _pipeline2_complete(CYAxiverse.filestructure.cyax_file(geom_idx))
+                _pipeline2_complete(target_path;
+                    vacua_config, config_digest=pipeline_config_digest)
             skipped_count += 1
             continue
         end
@@ -247,8 +302,9 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
         vacua_vac = -1
         vacua_error = ""
         try
+            vacua_force = force || _has_pipeline_result(target_path)
             vacua_result = compute_vacua_data(geom_idx, data_dir; method=:auto,
-                save=true, force=force, starts=10_000)
+                save=true, force=vacua_force, starts=10_000)
             vacua_status = Symbol(vacua_result["search"].search_status)
             vacua_vac = vacua_result["vacua_estimate"].vac
         catch error
@@ -263,10 +319,10 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
         catch error
             (; status=:failed, message=sprint(showerror, error))
         end
-        catastrophe_label = catastrophe_outcome.status == :success ?
-            "$(catastrophe_outcome.status)(saddles=$(catastrophe_outcome.result.saddle_count))" :
+        leading_branch_label = catastrophe_outcome.status == :success ?
+            "$(catastrophe_outcome.status)(leading_branch_saddles=$(catastrophe_outcome.result.saddle_count))" :
             string(catastrophe_outcome.status)
-        print("catastrophes=$catastrophe_label ")
+        print("leading_branch_saddles=$leading_branch_label ")
 
         efold_outcome = try
             (; status=:success, result=scan_geometry_for_inflation(geom_idx;
@@ -282,11 +338,13 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
         println("efolds=$efold_label")
 
         write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
-            catastrophe_settings, efold_settings, force)
+            catastrophe_settings, efold_settings,
+            pipeline_config_digest=pipeline_config_digest,
+            force=force || _has_inflation_group(target_path))
 
         push!(results, (; h11, np, cy, vacua_status, vacua_vac, vacua_error,
-            catastrophe_status=catastrophe_outcome.status,
-            saddle_count=catastrophe_outcome.status == :success ?
+            leading_branch_status=catastrophe_outcome.status,
+            leading_branch_saddle_count=catastrophe_outcome.status == :success ?
                 catastrophe_outcome.result.saddle_count : -1,
             leading_minima_count=catastrophe_outcome.status == :success ?
                 catastrophe_outcome.result.leading_minima_count : -1,
@@ -310,8 +368,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
     println("\n=== summary ===")
     println("geometries: ", length(results))
     println("vacua completed: ", count(r -> r.vacua_status == :completed, results))
-    println("catastrophes present (saddle_count>0): ",
-        count(r -> r.saddle_count > 0, results))
+    println("leading-branch saddles present (leading_branch_saddle_count>0): ",
+        count(r -> r.leading_branch_saddle_count > 0, results))
     println("efold search completed: ",
         count(r -> r.efold_search_status == :completed, results))
     println("geometries with >=1 qualified efold trajectory: ",
