@@ -1,226 +1,217 @@
 # SCI-01: physical-scale derivation and release decision
 
-Date: 2026-08-09
-Status: approved scientific decision; owner approval recorded 2026-08-10
+Date: 2026-08-25
+Status: owner-selected convention and fails-closed physical-domain certificate
+implemented; physical-scale production authorization remains pending
 Program: KS axiverse inflation only
 
-## Re-evaluation using the draft author's code
+## Authoritative source identity
 
-This addendum supersedes the earlier statement that a generic physical path
-was merely a future possibility. The draft author's Python/CYTools code does
-provide an explicit generic effective-theory path. It is materially richer
-than the legacy homotopy and is now the pilot's default mode:
+The current primary paper is
+`/Users/vmehta/Documents/CYAxiverse/cyaxiverse/catastrophicKS.pdf`,
+SHA-256
+`b0f5539bf0fb40e401d93b8cfcbe3e725ba8849efdde2519646103d5f004d2e6`.
+The PDF metadata identifies *Catastrophic Inflation in the Axiverse* by Naomi
+Gendler, Oliver Janssen, Matthew Kleban, and Cameron Norton; it has 35 pages.
+All page references below give the printed paper page and, where useful, the
+corresponding PDF page rendered during the read-only review.
 
-```text
-tau(k)  = k * tau(1)
-Kinv(k) = k^2 * Kinv(1)
-Q(k)    = Q(1)
-```
+The generic Julia continuation inspected for this decision is
+`scripts/inflation_scale_continuation.jl`, whose pre-edit SHA-256 was
+`b144b377d7f2246e25bb516a908c5d81ddb3ef0d6e491ae62e0d463a3774fc97`.
+The author implementation inspected for the coefficient map is
+`/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CN_Axiverse_code/ks_axiverse_python_collaborator/src/cytools_catastrophe_scan.py`,
+SHA-256
+`d820dd3e19d2833bac0691d74c2f99d2461c8eb0ef1620062f70d3daffd3bcf4`.
+The other archived author paths named by the earlier ledger were not present
+at their recorded locations during this review, so no claim below depends on
+those files.
 
-It then recomputes the leading and pair/cross instanton coefficients from
-`tau(k)`, `Kinv(k)`, `CY_vol`, and the charges. The zero-phase convention
-is explicit in the scan. This establishes that the generic deformation is not
-mathematically underdetermined in the author's model.
+## Current scientific decision
 
-It does **not** authorize relabelling the historical homotopy outputs as
-physical. The
-author implementation keeps `CY_vol` fixed in `geometric_quantities`, while
-the source calls `k` a uniform divisor-volume/overall-volume path and the
-potential contains an explicit `V_CY^-2` factor. Under the homogeneous
-overall Kähler scaling implied by `tau -> k*tau`, the expected geometric
-volume scaling is `V_CY -> k^(3/2)*V_CY`, unless the author has a separately
-documented Einstein-frame convention that cancels or replaces it. The archive
-does not document that convention or validate the resulting absolute
-normalization.
-
-The revised decision is therefore:
-
-1. A **candidate physical-model path exists** in the author code and is
-   reproduced coefficient-wise by the pilot.
-2. The generic pilot now defaults to `scale_status=physical` with
-   `volume_normalization=full`.
-3. The author's fixed-`CY_vol` convention remains available explicitly with
-   `volume_normalization=fixed`; `homotopy_only` remains available for
-   reproducing historical diagnostics.
-4. No broad physical inflation claim is made until Kähler-cone/EFT domain
-   checks and a bounded physical scan are separately approved.
-
-## Decision
-
-The pilot now contains a validated coefficient/path implementation and
-defaults to `scale_status=physical, volume_normalization=full`. Physical-mode
-rows must not be treated as an inflation-candidate or trajectory sample
-without the separate domain and bounded-scan gate.
-
-The uncommitted pilot is therefore **not approved for integration as a
-physical volume scan**. It may be preserved and integrated only as a bounded
-mathematical-homotopy diagnostic, with its existing status labels, resource
-limits, and claim boundary unchanged.
-
-## Source-supported physical path
-
-The supplied *Catastrophic Inflation in the Axiverse* source defines the
-intended control path by uniformly scaling the divisor volumes,
+The owner selected the homogeneous overall Kähler convention
 
 ```text
-tau_i(k) = k * tau_i(k=1).
+V_CY(k) = k^(3/2) V_CY(1),
+tau(k)  = k tau(1),
+K(k)    = k^(-2) K(1),
+Kinv(k) = k^2 Kinv(1),
+Q(k)    = Q(1).
 ```
 
-In the source conventions, `tau_i` are divisor volumes, `K` is the axion
-kinetic metric, and the potential coefficients depend on divisor volumes and
-the Calabi--Yau volume. The source also states that the saxions are held fixed
-while the axion effective theory is studied and that self-consistent Kähler
-modulus stabilization at the tuned values is not established. Thus the path
-is a source-level effective-theory control path, not by itself a proof that
-the tuned point is dynamically realized.
+This resolves the earlier fixed-volume versus full-volume choice for the
+physical path. The exponent `3/2` is the owner's homogeneous geometric
+selection: scaling the four-cycle volumes by `k` corresponds to scaling the
+two-cycle coordinates by `sqrt(k)` and the cubic Calabi--Yau volume by
+`k^(3/2)`. The paper explicitly supplies the divisor-volume path in Eq. (25)
+but does not print this exponent as a separate equation. Therefore the
+homogeneous law is recorded as an owner decision, not misquoted as a direct
+paper equation.
 
-For the potential construction used by the geometry-generation scripts, a
-generic physical implementation would have to reconstruct and apply, at
-minimum, the following joint transformation:
+The owner also selected the exact scientific unit contract
 
-| quantity | required transformation under the source path | present pilot |
+    M_s=M_Pl;k=dimensionless
+
+The typed certificate requires this exact two-clause string: the first clause
+sets the string scale equal to the Planck scale, and the second keeps the
+continuation parameter k dimensionless.
+An arbitrary nonempty units label is out_of_model; missing or empty units
+remain missing_evidence. The string records the implementation convention
+without assigning Planck units to k. It does not remove the paper's
+distinction between geometric string-unit control cuts and the M_Pl factors
+printed in the inflation equations.
+
+The fixed-`V_CY` path remains an author-code comparison diagnostic only. It
+must not emit `scale_status=physical`. Historical logarithmic stretching
+remains `scale_status=homotopy_only`; it must not be relabelled by this
+decision.
+
+This decision does not establish moduli stabilization. The paper states that
+it does not undertake moduli stabilization, uses fixed saxion values, and
+leaves dynamical stabilization at those points open (printed p. 6, PDF page 7,
+after Eq. (16); printed p. 25, PDF page 26, Conclusions). The implementation
+must retain `moduli_status=not_established` unless separate evidence proves
+otherwise.
+
+## Full-paper equations and qualifications
+
+The source evidence reviewed for the normalization and domain boundary is:
+
+| source location | evidence used | implementation consequence |
 | --- | --- | --- |
-| divisor volumes `tau` | `tau -> k * tau` | physical mode |
-| Calabi--Yau volume `V` | fixed or `V -> k^(3/2)*V` | `fixed|full` option |
-| inverse kinetic metric | `Kinv -> k^2 * Kinv`, equivalently `K -> k^(-2) * K` | physical mode |
-| leading amplitudes | reconstruct the prefactor and `exp(-2*pi*q*tau)` dependence | physical mode |
-| pair/cross amplitudes | reconstruct both `q_i^T*Kinv*q_j` and `(q_i+q_j)*tau` terms | physical mode |
-| charges `Q` | unchanged in the fixed divisor basis | unchanged |
-| phases | retain a documented fixed phase convention or transform it | not persisted by the generic potential API |
-| normalization | retain the selected volume convention | recorded in output |
-| domain | check positive effective-divisor/curve volumes, positive-definite `K`, stretched-cone and EFT-control conditions | not checked by continuation |
+| printed p. 6 (PDF p. 7), Eqs. (16)--(19) | `J` is in the Kähler cone; the Mori/effective divisor cones determine curve and instanton data; Eq. (19) contains `V_CY^(-2)`, divisor-volume exponentials, `Kinv` cross terms, integer effective-divisor charges, and phases from `W0`/`A_alpha` | Reconstruct coefficients from `tau`, `Kinv`, `V_CY`, `Q`, and phases. Do not scale composed logarithms. Require explicit cone/effective-divisor evidence. |
+| printed p. 7 (PDF p. 8), Eqs. (20)--(21) and perturbative-control text | Prime toric divisor volumes must exceed one for the instanton expansion; potent Mori-cone curve volumes must exceed one as the stated proxy; additional corrections may remain | Record divisor/curve control evidence and fail closed when it is absent. |
+| printed p. 8 (PDF p. 9), Eqs. (22)--(24) | `K_ij` is the axion kinetic metric derived from the Kähler potential; canonical fields depend on `K^(1/2)`; generic slow-roll parameters are large without cancellations | Compute the generalized Hessian in one declared basis and preserve the kinetic-metric convention. |
+| printed p. 9 (PDF p. 10), Eq. (25) | The control path is `tau_i(k)=k tau_i(k=1)` from the stretched-cone tip; a change in critical-point count is a catastrophe diagnostic only after the path/domain checks | Keep scale, fixed-point, trajectory, and coverage statuses independent. |
+| printed p. 10 (PDF p. 11), Eq. (26) and assumptions 1--7 | Slow-roll flow is `d phi_i/dN ~= -M_Pl^2 V^(-1) dV/dphi_i`; the examples assume heavy saxions, adjustable phases, prime-toric instantons, approximate de Sitter, negligible unknown corrections, and freely chosen initial conditions | Preserve assumptions as metadata. Do not turn them into a proof of stabilization, a measure, or a physical population claim. |
+| printed pp. 13--14 (PDF pp. 14--15), Eqs. (31)--(37) | The N=5 example has `V_CY^(-2)` restored in its amplitude; its quoted density amplitudes are far below observation for zero phases, while nonzero phases unfold the cusp | Keep phase convention and absolute normalization explicit; benchmark numbers are not a generic physical validation. |
+| printed pp. 18--23 (PDF pp. 19--24), Eqs. (38)--(40), Figs. 9--17 | The N=8 example quotes control checks, multifield slow-roll trajectories, turning, tilt, and `delta_H`; a phase `delta=0.04` changes the catastrophe scale and amplitude | A trajectory result requires its own status, tolerances, units, phase, and normalization; it is not implied by a fixed-point result. |
+| printed p. 26 (PDF p. 27), Eqs. (49)--(51) | `delta_H ~= V^(3/2)/(5 sqrt(3 pi) M_Pl^3 |V'|)` and the quartic form explicitly depend on the absolute potential scale | A common potential factor `c` leaves normalized stationary/Hessian signs unchanged but changes `delta_H` by `c^(1/2)` when the shape and kinetic metric are held fixed. |
+| printed pp. 29--31 (PDF pp. 30--32), Eqs. (86)--(89), (94)--(97), Table 1 | N=5 and N=8 benchmark geometries give explicit volumes, divisor data, curve ranges, charges, and kinetic eigenvalues | Use these as named benchmark evidence only; do not claim generic geometry validation from them. |
 
-The scaling entries above are implemented in `pilot_scaled_inputs`. The
-physical mode validates the stored coefficient map on a generic reference
-case; it does not by itself establish Kähler-cone/EFT validity or authorize a
-production physical scan.
+## Transformation table for the selected convention
 
-## Provenance
+The following table separates paper equations from the owner-selected
+homogeneous law:
 
-The source statements used here are equations (19), (21), (22), and (24) of
-the supplied PDF `/Users/vmehta/Downloads/KS_axiverse_inflation (3).pdf`.
-The generic coefficient construction is in
-`scripts/generate_geometric_data.py` and
-`scripts/generate_geometric_data_multitriangulation.py`; the latter stores
-`divisor_volumes`, `CY_volume`, `Kinv`, and `effective_cone` in the
-geometry HDF5 files. The legacy path reads only `read.oriented_potential`
-(`Q`, `L`, and `K`) and applies `pilot_homotopy_scale`; physical mode
-additionally reads `read.geometry` and applies `pilot_scaled_inputs`. The
-benchmark-only physical helpers in `src/paper_benchmarks/` remain fixed-example
-evidence, not the generic map.
-
-The re-evaluation additionally inspected
-`/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CN_Axiverse_code/ks_axiverse_python_collaborator/src/cytools_catastrophe_scan.py`
-(`geometric_quantities`, `solve_at_k`) and
-`Camcode_full_2.py` (`dim_reductor`, `generate_charges_2`), plus
-`poly102_efolds_vs_k/poly102_core.wl` and
-`poly102_efolds_vs_k/poly102_settings.wl` for the author's trajectory and
-normalization convention.
-
-## Why the current pilot is a homotopy
-
-The legacy homotopy applies exactly
-
-```text
-L[2, :] -> k * L[2, :]
-```
-
-to the base-10 logarithms of already-composed amplitudes while leaving `K`
-and all other inputs unchanged. This is not equivalent to scaling divisor
-volumes. In physical mode, the pilot reconstructs the leading and pair
-coefficients from `tau`, `Kinv`, and the selected volume law, and uses
-`K -> K/k^2` for the generalized Hessian.
-
-The source and generator code motivated the geometry-level implementation.
-The physical mode records the selected normalization and provenance in its
-CSV rows, while historical homotopy outputs remain clearly labelled. The
-benchmark-specific N=5/N=8 scale functions are still not generalized merely
-because they reproduce the fixed examples.
-
-The author archive narrows this gap: its `geometric_base` records
-`cy_vol`, divisor volumes, effective-cone/GLSM charge rows, and `kinv`, while
-`geometric_quantities` applies the `tau` and `kinv` transformations before
-`dim_reductor` rebuilds the coefficients. This is evidence for a concrete
-follow-up implementation, not validation of the archive's physical
-normalization. In particular, the fixed-`CY_vol` choice must be reconciled
-with the source equation for the potential before the result can be labelled
-`physical`.
-
-## Interpretation of the pilot results
-
-The report tested the explicit grid
-`0.90, 0.95, 0.99, 1.00, 1.01, 1.05, 1.10`; this is a bounded diagnostic
-window, not a complete scale path.
-
-| search | result | authorized interpretation |
+| quantity | selected physical path | source or qualification |
 | --- | --- | --- |
-| complete all-branch rows | `(8,544,1)` has sign-changing generalized-Hessian brackets; no screen-passing corrected branch | `near_catastrophe` under the homotopy only |
-| complete all-branch rows | weak `(8,1,1)` has no crossing signal | no crossing in the tested homotopy window |
-| `1:1` low-index search | 8 corrected branches pass the numerical screen | `screen_candidate` under an incomplete homotopy search; not a physical or refined candidate |
-| `1:2` low-index search | 80 corrected branches pass the numerical screen | `screen_candidate` under an incomplete homotopy search; not a physical or refined candidate |
-| weak `(13,1,1)` low-index rows | screen rows occur at homotopy scales `1.01` and `1.10` | detuned numerical screen hits; no reference-scale or physical candidate |
+| two-cycle coordinates `t` | `t(k)=sqrt(k) t(1)` | homogeneous consequence of the owner choice; not printed separately in the paper |
+| divisor volumes `tau` | `k tau(1)` | paper Eq. (25) |
+| `V_CY` | `k^(3/2) V_CY(1)` | owner-selected homogeneous convention; Eq. (19) supplies the explicit `V_CY^(-2)` factor |
+| `K` and `Kinv` | `K -> k^(-2) K`, `Kinv -> k^2 Kinv` | selected metric convention; Eq. (23) defines the metric, and the scale law must be verified by the implementation |
+| charges `Q` | unchanged integer columns in the fixed basis | Eq. (19) identifies integer effective-divisor charges |
+| leading coefficient | reconstruct `V_CY^(-2) (q dot tau) exp(-2 pi q dot tau)` | Eq. (19); the exponential changes with `k`, so it is not a simple log stretch |
+| pair/cross coefficient | reconstruct `V_CY^(-2) [pi q_i^T Kinv q_j + (q_i+q_j) dot tau] exp[-2 pi (q_i+q_j) dot tau]` | Eq. (19); the two terms in the bracket have different homogeneous powers before the common volume factor |
+| phases | unchanged only when the selected phase convention says so; record zero or supplied nonzero phases | Eq. (19), assumptions on printed p. 10, and Appendix B Eq. (75) |
+| Planck/string conversion | exact metadata contract is `M_s=M_Pl;k=dimensionless`; keep k dimensionless and do not infer an additional conversion from the paper's dimensionless fields | Eq. (26) and Eqs. (49)--(51) use `M_Pl`, while the geometric control cuts are in string units |
+| scalar amplitude | recompute from the scaled potential and kinetic metric | Eqs. (49)--(51); absolute amplitude is not fixed by shape-only diagnostics |
 
-The existing ten-geometry calibration rows remain `homotopy_only`. No row is a
-`refined_candidate` or a `trajectory_candidate`; no generic trajectory
-refinement was authorized. The existing fixed-potential calibration remains
-`0/0`, so candidate recall is unmeasured rather than zero or complete.
+At the same non-unit `k`, the selected full-volume and author fixed-volume
+coefficient maps use the same `tau`, `Kinv`, `Q`, and phase data. Because every
+term in Eq. (19) has the common `V_CY^(-2)` prefactor, their potential,
+gradient, and Hessian amplitudes differ by `k^(-3)` when only the volume law is
+changed. Dimensionless stationary-point locations and Hessian inertia are
+unchanged by that common factor, but Eq. (49) gives a scalar-amplitude ratio
+`delta_H(full)/delta_H(fixed)=k^(-3/2)` at the same shape and kinetic metric.
+This comparison does not remove the separate changes from the `tau` and
+`Kinv` path relative to `k=1`.
 
-The strong `(8,544,1)` crossing is evidence that the numerical deformation
-changes the corrected branch/Hessian structure. It is not evidence for a
-change of Calabi--Yau volume, moduli, axion dynamics, or inflationary
-trajectory.
+## Numeric representation audit
 
-## Release claim
+The bounded existing-data sample
+/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data/h11_015/np_0000001/cy_0000001/cyax.h5
+has SHA-256
+fa29501f512a1d9c00437b26d6d4f5acd42c8e9b638edb5f6c48be0d35d9fc9e.
+Read-only HDF5 inspection reports float64 for
+cytools/geometric/CY_volume, cytools/geometric/divisor_volumes,
+cytools/geometric/Kinv, and cytools/potential/L; the stored Q dataset
+in this artifact is also float64, although charges are semantically
+integer. The Julia reader assigns the geometric fields to Float64 at
+src/read.jl:32-59, reads potential L/Kinv through Float64 bindings at
+src/read.jl:240-258, and returns Float64 L/K at
+src/read.jl:385-424; the corresponding typed package structs are
+Float64 at src/structs.jl:23-39. The downstream structured evaluator and
+its workspaces are explicitly Float64 at src/generate.jl:100-142 and
+src/generate.jl:245-273.
+The inflation persistence writer separately stores BigFloat flow values as
+decimal strings with precision-bit sidecars at
+scripts/build_orientifold_vacua_inflation.jl:258-287; that path does not
+introduce a new Float64 narrowing.
 
-> The bounded ten-geometry study finds reproducible corrected
-> Hessian-crossing and screening structure under an explicitly documented
-> `L[2,:]` mathematical homotopy. The pilot also reproduces the author's
-> generic coefficient map with selectable fixed/full volume laws, but no physical
-> inflation candidate or trajectory has been established.
+The certificate still evaluates the homogeneous law in BigFloat. The only
+conversion to the existing evaluator is now an explicit audited boundary in
+scripts/inflation_scale_continuation.jl:218-334 and
+scripts/inflation_scale_continuation.jl:762-816. It records source type and
+bits, target Float64 and 53 bits, per-field round-trip error bounds, the
+declared reference/metric/relative tolerances, and field-by-field comparison.
+It fails closed as numerical_failure/scale_status=unsupported when the
+conversion is unsafe. For the inspected source representation, Float64
+(53 bits) is the actual stored precision; no generalization of the
+downstream evaluator was required. The boundary does not claim that
+arbitrary-precision source values are lossless: it permits conversion only
+when the measured bound is within the recorded tolerance.
 
-## Claims not authorized
+## Physical-domain and claim boundary
 
-The current evidence does not authorize any statement that:
+An output may receive `scale_status=physical` only after a certificate at the
+same `k` records and passes all applicable items:
 
-- the pilot is a physical scan of the overall Calabi--Yau volume;
-- a crossing is a realizable catastrophe in a stabilized compactification;
-- any homotopy screen hit is a physical, refined, or trajectory candidate;
-- the ten geometries represent the KS population or provide a candidate rate;
-- the tested grid is complete or excludes crossings outside its window;
-- the fixed benchmarks validate the generic transformation of `L` and `K`;
-- the `0/0` fixed-point result measures candidate-recovery efficiency;
-- a production high-`h11` scan should proceed before the physical map and
-  resource budget are approved.
+- finite positive divisor and Calabi--Yau volumes;
+- Kähler-cone interior membership and a numerical margin;
+- positive effective curve/divisor volumes, with the potent-ray rule used by
+  the paper;
+- symmetric positive-definite `K` with its tolerance;
+- fixed basis and charge orientation, including a verified `Q/L` reference at
+  `k=1`;
+- instanton truncation and perturbative-control conditions;
+- visible-sector/QCD status when the geometry claims it;
+- the exact phase convention;
+- `moduli_status=not_established` unless independently proven; and
+- complete units, normalization, source identity, configuration, and
+  precision metadata.
 
-## Integration and next-step gate
+Terminal domain results must distinguish `passed`, `domain_failure`,
+`missing_evidence`, `numerical_failure`, and `out_of_model`. Missing data is
+never a pass and never a fallback to `homotopy_only`.
 
-**SCI-01 integration decision: no for production physical inflation
-integration.** The pilot implementation is acceptable as a bounded diagnostic
-with physical/full default, explicit `fixed|full` provenance, and no placement
-of its rows in a physical candidate sample.
+The records must also retain independent `fixed_point_status`,
+`trajectory_status`, and `coverage_status`. A saddle is not a catastrophe; a
+Hessian sign change is not stabilized physical continuation; a screen hit is
+not a refined candidate; a refined stationary point is not a trajectory; and
+zero found rows is not a population exclusion.
 
-The next scientific step is to extend the geometry-level continuation record
-with effective-cone/EFT domain checks and a bounded physical calibration. It
-must pass the benchmark and generic reference checks for units, joint scaling,
-positivity, generalized-Hessian behavior, and complete input provenance before
-any generic physical continuation is reported as a scientific result.
+## Historical diagnostic evidence
 
-The author code should be the starting reference for that follow-up. The
-minimum reconciliation test is:
+The earlier bounded pilot and its existing output rows remain mathematical
+diagnostics. Its historical logarithmic path is explicitly
+`L[2,:] -> k L[2,:]` with `K` and other inputs held fixed; this is not a
+divisor-volume continuation. Any earlier screen/crossing rows therefore stay
+`scale_status=homotopy_only` and cannot support a physical candidate, rate, or
+null claim. The repaired persistence driver
+`scripts/build_orientifold_vacua_inflation.jl` currently writes this status.
+The fails-closed certificate boundary is now implemented in
+`scripts/inflation_scale_continuation.jl` and covered by narrow synthetic
+checks; this does not relabel historical rows or authorize a production run.
 
-```text
-author path:    tau -> k*tau, Kinv -> k^2*Kinv, CY_vol held fixed
-source-derived: tau -> k*tau, Kinv -> k^2*Kinv,
-                V_CY -> k^(3/2)*V_CY for homogeneous overall scaling
-```
+## Release decision and stop state
 
-At `k != 1`, the two coefficient normalizations differ by the common
-`k^(-3)` volume factor for the leading term (and the corresponding factor for
-the cross terms). Although a common factor does not change normalized
-critical-point signs, it does change absolute inflationary observables such as
-the scalar-amplitude normalization. That difference must be resolved before a
-physical release claim.
+The owner-selected homogeneous normalization resolves the prior convention
+choice. It does not authorize a physical-scale production calculation. The
+current release claim is:
 
-Owner approval: Viraf M. Mehta — approved in the project discussion on
-2026-08-10. The approved release claim remains bounded diagnostic evidence;
-generic physical rows are not an inflation-candidate or trajectory sample.
+> The project has a primary-source-backed owner decision for the homogeneous
+> volume law and a documented distinction between fixed-volume comparison and
+> historical homotopy diagnostics. No physical inflation candidate,
+> trajectory, stabilized moduli point, population rate, or physical null has
+> been established.
+
+Production remains blocked pending target-geometry certificate evidence,
+independent statuses, the named benchmark ladder, and bounded resource gates.
+No scale, trajectory, geometry, population, database, or production run is
+part of this ledger update.
+
+Owner decision: Viraf M. Mehta — homogeneous convention selected in the
+2026-08-25 project instruction. Version impact: scientific behavior and
+physical-status contract change; package-version bump is deferred to the
+reviewed release boundary.

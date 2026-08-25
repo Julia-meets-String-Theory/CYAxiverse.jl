@@ -48,9 +48,11 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 isdefined(@__MODULE__, :scan_geometry_for_inflation) ||
     include(joinpath(@__DIR__, "inflation_candidate_refinement.jl"))
 
-const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.1"
+const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.2"
 const INFLATION_LEGACY_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-1.0"
 const INFLATION_FLOW_ENCODING_SCHEMA_VERSION = "cyaxiverse-inflation-flow-decimal-string-1.0"
+const INFLATION_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-1"
+const INFLATION_PHYSICAL_UNITS_CONTRACT = "M_s=M_Pl;k=dimensionless"
 
 """Hash the complete Pipeline 2 configuration contract."""
 _phase3_config_digest(value) = bytes2hex(sha256(repr(value)))
@@ -91,8 +93,17 @@ end
 function _has_inflation_group(path; config_digest=nothing)
     isfile(path) || return false
     h5open(path, "r") do file
-        haskey(file, "inflation/status") || return false
+        required = ("schema_version", "status", "terminal_status",
+            "configuration_digest", "git_revision", "domain_certificate_version",
+            "scale_status", "domain_status", "fixed_point_status",
+            "trajectory_status", "coverage_status", "moduli_status",
+            "phase_convention", "units", "physical_units_contract",
+            "normalization", "source_identity",
+            "precision_bits")
+        all(name -> haskey(file, "inflation/$name"), required) || return false
         read(file["inflation/status"]) == "completed" || return false
+        read(file["inflation/physical_units_contract"]) ==
+            INFLATION_PHYSICAL_UNITS_CONTRACT || return false
         config_digest === nothing && return true
         haskey(file, "inflation/configuration_digest") || return false
         read(file["inflation/configuration_digest"]) == config_digest
@@ -129,6 +140,11 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
     temporary = string(target, ".inflation.tmp-", getpid(), "-", time_ns())
     phase3_status = catastrophe_outcome.status == :success &&
         efold_outcome.status == :success ? "completed" : "failed"
+    phase3_coverage_status = efold_outcome.status == :success ?
+        string(efold_outcome.result.refinement.search.coverage_status) :
+        string(efold_outcome.status)
+    phase3_source_identity = string("scripts/build_orientifold_vacua_inflation.jl@",
+        _phase3_git_commit())
     cp(target, temporary; force=true)
     try
         h5open(temporary, "r+") do file
@@ -142,13 +158,39 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             group["git_revision"] = _phase3_git_commit()
             group["completed_at"] = string(Dates.now())
             group["scale_status"] = "homotopy_only"
+            group["domain_certificate_version"] = INFLATION_DOMAIN_CERTIFICATE_VERSION
+            group["domain_status"] = "out_of_model"
+            group["fixed_point_status"] = catastrophe_outcome.status == :success ?
+                "homotopy_only" : "not_run"
+            group["trajectory_status"] = efold_outcome.status == :success ?
+                "homotopy_only" : "not_run"
+            group["coverage_status"] = phase3_coverage_status
+            group["moduli_status"] = "not_established"
+            group["phase_convention"] = "not_persisted"
+            group["units"] = "not_persisted"
+            group["physical_units_contract"] = INFLATION_PHYSICAL_UNITS_CONTRACT
+            group["normalization"] = "homotopy_only"
+            group["source_identity"] = phase3_source_identity
+            group["precision_bits"] = Int(efold_settings.precision_bits)
             group["claim_boundary"] =
-                "bounded fixed-geometry-null diagnostics only; physical continuation not implemented"
+                "homotopy-only diagnostics; physical domain certificate not passed"
 
             catastrophes = create_group(group, "catastrophes")
             catastrophes["method"] = "leading_critical_branch_hessian_classification"
             catastrophes["source"] = "scripts/inflation_scan_common.jl:run_geometry"
+            catastrophes["domain_certificate_version"] = INFLATION_DOMAIN_CERTIFICATE_VERSION
             catastrophes["scale_status"] = "homotopy_only"
+            catastrophes["domain_status"] = "out_of_model"
+            catastrophes["fixed_point_status"] = "homotopy_only"
+            catastrophes["trajectory_status"] = "not_run"
+            catastrophes["coverage_status"] = "not_applicable"
+            catastrophes["moduli_status"] = "not_established"
+            catastrophes["phase_convention"] = "not_persisted"
+            catastrophes["units"] = "not_persisted"
+            catastrophes["physical_units_contract"] = INFLATION_PHYSICAL_UNITS_CONTRACT
+            catastrophes["normalization"] = "homotopy_only"
+            catastrophes["source_identity"] = phase3_source_identity
+            catastrophes["precision_bits"] = Int(efold_settings.precision_bits)
             if catastrophe_outcome.status == :success
                 r = catastrophe_outcome.result
                 catastrophes["status"] = "completed"
@@ -196,7 +238,19 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             efolds["method"] = "bounded_stationary_point_refinement_then_gradient_flow"
             efolds["source"] =
                 "scripts/inflation_candidate_refinement.jl:scan_geometry_for_inflation"
+            efolds["domain_certificate_version"] = INFLATION_DOMAIN_CERTIFICATE_VERSION
             efolds["scale_status"] = "homotopy_only"
+            efolds["domain_status"] = "out_of_model"
+            efolds["fixed_point_status"] = "homotopy_only"
+            efolds["trajectory_status"] = efold_outcome.status == :success ?
+                "homotopy_only" : "not_run"
+            efolds["moduli_status"] = "not_established"
+            efolds["phase_convention"] = "not_persisted"
+            efolds["units"] = "not_persisted"
+            efolds["physical_units_contract"] = INFLATION_PHYSICAL_UNITS_CONTRACT
+            efolds["normalization"] = "homotopy_only"
+            efolds["source_identity"] = phase3_source_identity
+            efolds["precision_bits"] = Int(efold_settings.precision_bits)
             if efold_outcome.status == :success
                 scan = efold_outcome.result
                 efolds["search_status"] = string(scan.refinement.search.search_status)
@@ -317,8 +371,11 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
     vacua_config = _pipeline_config(; threshold=0.5, starts=10_000,
         residual_tolerance=1e-10, merge_tolerance=1e-7, max_iterations=200,
         method=:auto, max_branches=1_000_000)
+    source_identity = _phase3_git_commit()
     pipeline_config_digest = _phase3_config_digest((; h11, vacua_config,
-        catastrophe_settings, efold_settings))
+        catastrophe_settings, efold_settings, source_identity,
+        inflation_schema=INFLATION_GROUP_SCHEMA_VERSION,
+        domain_certificate_version=INFLATION_DOMAIN_CERTIFICATE_VERSION))
 
     results = NamedTuple[]
     skipped_count = 0

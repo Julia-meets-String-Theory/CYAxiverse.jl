@@ -76,35 +76,125 @@ end
     @test_throws ArgumentError pilot_homotopy_scale(L, 1.0;
         scale_status=:physical)
 
-    # The physical generic path follows the author laws:
-    # tau -> k tau, Kinv -> k^2 Kinv, and either fixed or full CY volume.
+    # The homogeneous path is physical only with complete same-scale evidence.
+    # The fixed-volume comparison is explicit nonphysical diagnostic output.
     base_Q = Int[1 0 1 -1 0 1; 0 1 1 1 1 0]
-    base_geometry = (; τ_volumes=[1.0, 2.0], kinv=Matrix{Float64}(I, 2, 2),
-        cy_volume=10.0)
+    base_geometry = (; τ_volumes=BigFloat[1, 2], kinv=Matrix{BigFloat}(I, 2, 2),
+        cy_volume=BigFloat(10), prime_divisor_volumes=BigFloat[2, 3],
+        effective_divisor_volumes=BigFloat[2, 3], curve_volumes=BigFloat[1, 2],
+        potent_curve_volumes=BigFloat[2, 3], kahler_margin=BigFloat(1),
+        basis_identity="fixture-glsm-basis-v1",
+        charge_orientation="effective-divisor-columns",
+        phase_convention="zero_phases",
+        units=PILOT_PHYSICAL_UNITS,
+        normalization=PILOT_PHYSICAL_NORMALIZATION,
+        source_identity="catastrophicKS.pdf:b0f5539b",
+        configuration_digest="fixture-config-sha256",
+        moduli_status=:not_established, instanton_control=:passed,
+        perturbative_control=:passed, visible_sector_status=:not_applicable,
+        spd_tolerance=BigFloat("1e-12"), precision_bits=256)
     base_L = _pilot_author_potential(base_Q, base_geometry.τ_volumes,
         base_geometry.kinv, base_geometry.cy_volume)
-    cross_coefficient = (8π / base_geometry.cy_volume^2) *
+    cross_coefficient = (BigFloat(8) * BigFloat(π) / base_geometry.cy_volume^2) *
         (π * dot(base_Q[:, 1], base_geometry.kinv * base_Q[:, 2]) +
          dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes))
     @test base_L[2, 4] ≈ log10(abs(cross_coefficient)) -
-        2π * log10(exp(1.0)) *
+        BigFloat(2) * BigFloat(π) * log10(exp(BigFloat(1))) *
         dot(base_Q[:, 1] + base_Q[:, 2], base_geometry.τ_volumes)
-    base_K = Matrix{Float64}(I, 2, 2)
+    base_K = Matrix{BigFloat}(I, 2, 2)
+    scale = parse(BigFloat, "0.9")
     fixed = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
-        scale_status=:physical, geometry=base_geometry,
+        scale_status=:unsupported, geometry=base_geometry,
         volume_normalization=:fixed)
-    full = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
+    full = pilot_scaled_inputs(base_Q, base_L, base_K, scale;
         scale_status=:physical, geometry=base_geometry,
         volume_normalization=:full)
-    @test fixed.volume ≈ 10.0
-    @test full.volume ≈ 10.0 * 0.9^(3 / 2)
-    @test log(full.volume) - log(fixed.volume) ≈ (3 / 2) * log(0.9)
-    @test fixed.tau ≈ 0.9 .* base_geometry.τ_volumes
-    @test fixed.kinv ≈ 0.9^2 .* base_geometry.kinv
-    @test fixed.K ≈ base_K / 0.9^2
+    @test fixed.volume ≈ BigFloat(10)
+    @test full.volume ≈ BigFloat(10) * scale^(BigFloat(3) / 2)
+    @test log(full.volume) - log(fixed.volume) ≈ (BigFloat(3) / 2) * log(scale)
+    @test full.tau ≈ scale .* base_geometry.τ_volumes
+    @test full.kinv ≈ scale^2 .* base_geometry.kinv
+    @test full.K ≈ base_K / scale^2
     @test fixed.L != full.L
-    @test fixed.scale_status == :physical
+    @test fixed.scale_status == :unsupported
+    @test fixed.domain_status == :out_of_model
     @test fixed.volume_normalization == :fixed
+    @test fixed.scale_source == "author_fixed_volume_diagnostic"
+    @test fixed.normalization == "fixed_CY_volume_comparison"
+    @test fixed.conversion_status == :not_attempted
+    @test fixed.target_numeric_type == PILOT_TARGET_NUMERIC_TYPE
+    @test endswith(fixed.source_identity,
+        "cytools_catastrophe_scan.py@sha256:d820dd3e19d2833bac0691d74c2f99d2461c8eb0ef1620062f70d3daffd3bcf4")
+    @test full.scale_status == :physical
+    @test full.domain_certificate.status == :passed
+    @test full.domain_status == :passed
+    @test full.moduli_status == :not_established
+    @test full.precision_bits == 256
+    @test full.units == PILOT_PHYSICAL_UNITS
+    @test full.source_numeric_type == "BigFloat"
+    @test full.source_precision_bits == 256
+    @test full.target_numeric_type == PILOT_TARGET_NUMERIC_TYPE
+    @test full.target_precision_bits == PILOT_TARGET_PRECISION_BITS
+    @test full.conversion_status == :passed
+    @test full.domain_certificate.conversion_status == :passed
+    @test _pilot_numeric_type_precision(Float64[1.0]).source_numeric_type ==
+        "Float64"
+    @test _pilot_numeric_type_precision(Float64[1.0]).source_precision_bits == 53
+    @test full.conversion_comparison.K == :passed
+    @test eltype(full.L) == Float64
+    @test eltype(full.K) == Float64
+    @test eltype(full.tau) == BigFloat
+    wrong_units = merge(base_geometry, (; units="arbitrary_nonempty_units"))
+    @test pilot_physical_domain_certificate(wrong_units, base_Q, base_L,
+        base_K, scale).status == :out_of_model
+    overflow_conversion = _pilot_convert_float64(
+        parse(BigFloat, "1e10000"), "overflow fixture")
+    @test overflow_conversion.failure !== nothing
+    unsafe_geometry = merge(base_geometry, (; spd_tolerance=BigFloat("1e-30")))
+    unsafe_error = try
+        pilot_scaled_inputs(base_Q, base_L, base_K, scale;
+            scale_status=:physical, geometry=unsafe_geometry,
+            volume_normalization=:full)
+        nothing
+    catch error
+        error
+    end
+    @test unsafe_error isa PilotPhysicalDomainError
+    @test unsafe_error.certificate.status == :numerical_failure
+    @test unsafe_error.certificate.scale_status == :unsupported
+    @test unsafe_error.certificate.conversion_status == :unsafe
+    homotopy = pilot_scaled_inputs(base_Q, base_L, base_K, 0.9;
+        scale_status=:homotopy_only, geometry=base_geometry,
+        volume_normalization=:full)
+    @test homotopy.scale_status == :homotopy_only
+    @test homotopy.domain_status == :out_of_model
+    @test homotopy.normalization == "homotopy_only"
+    @test homotopy.source_identity ==
+        "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"
+    @test homotopy.precision_bits == 0
+    @test homotopy.conversion_status == :not_attempted
+    @test homotopy.target_numeric_type == PILOT_TARGET_NUMERIC_TYPE
+    @test_throws ArgumentError pilot_scaled_inputs(base_Q, base_L, base_K, scale;
+        scale_status=:physical, geometry=base_geometry,
+        volume_normalization=:fixed)
+
+    incomplete_geometry = (; τ_volumes=BigFloat[1, 2],
+        kinv=Matrix{BigFloat}(I, 2, 2), cy_volume=BigFloat(10))
+    incomplete_certificate = pilot_physical_domain_certificate(
+        incomplete_geometry, base_Q, base_L, base_K, scale)
+    @test incomplete_certificate.status == :missing_evidence
+    @test_throws PilotPhysicalDomainError pilot_scaled_inputs(base_Q, base_L,
+        base_K, scale; scale_status=:physical, geometry=incomplete_geometry,
+        volume_normalization=:full)
+    bad_K = BigFloat[1 0; 0 -1]
+    bad_certificate = pilot_physical_domain_certificate(base_geometry, base_Q,
+        base_L, bad_K, scale)
+    @test bad_certificate.status == :domain_failure
+    empty_evidence = merge(base_geometry, (; curve_volumes=BigFloat[]))
+    @test pilot_physical_domain_certificate(empty_evidence, base_Q, base_L,
+        base_K, scale).status == :missing_evidence
+    @test pilot_physical_domain_certificate(base_geometry, base_Q, base_L,
+        nothing, scale).status == :missing_evidence
 
     # A common amplitude normalization rescales derivatives but cannot move
     # their zeros or change Hessian signatures in the N=5 potential.
@@ -931,6 +1021,21 @@ end
                 @test read(trajectories["flow_numeric_encoding"]) == "decimal_string"
                 @test read(file["inflation/terminal_status"]) == "completed"
                 @test read(file["inflation/configuration_digest"]) == "fixture-digest"
+                @test read(file["inflation/schema_version"]) ==
+                    "cyaxiverse-phase3-orientifold-inflation-2.2"
+                @test read(file["inflation/domain_certificate_version"]) ==
+                    "physical-domain-certificate-1"
+                @test read(file["inflation/scale_status"]) == "homotopy_only"
+                @test read(file["inflation/domain_status"]) == "out_of_model"
+                @test read(file["inflation/fixed_point_status"]) == "homotopy_only"
+                @test read(file["inflation/trajectory_status"]) == "homotopy_only"
+                @test read(file["inflation/moduli_status"]) == "not_established"
+                @test read(file["inflation/normalization"]) == "homotopy_only"
+                @test read(file["inflation/physical_units_contract"]) ==
+                    "M_s=M_Pl;k=dimensionless"
+                @test startswith(read(file["inflation/source_identity"]),
+                    "scripts/build_orientifold_vacua_inflation.jl@")
+                @test read(file["inflation/precision_bits"]) == 256
             end
             @test_throws ArgumentError write_inflation_group!(geom_idx, catastrophe, efolds;
                 catastrophe_settings=(; max_branches=10),
