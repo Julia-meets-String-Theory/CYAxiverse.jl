@@ -34,6 +34,7 @@ import numpy as np
 
 from generate_geometric_data_multitriangulation import (
     OrientifoldValidationFailure,
+    _exact_h2_action_from_glsm,
     validate_orientifold,
 )
 from glimmers_raw_frst import compute_polytope_normal_form_id, stable_hash
@@ -288,6 +289,27 @@ class EnumeratePolytopeInvolutionsTests(unittest.TestCase):
         fan_rays = {tuple(ray) for cone in fan for ray in cone["rays"]}
         self.assertIn((1, 1, 0, 0), fan_rays)
         self.assertIn((0, 0, 1, 0), fan_rays)
+
+
+class ExactGLSMH2ContractTests(unittest.TestCase):
+    """Check the exact ``M Q = Q P`` quotient-action contract."""
+
+    def test_exact_action_has_zero_residual_and_involution_proof(self):
+        charge_matrix = np.array(
+            [[1, 0, 1, 0], [0, 1, 0, 1]], dtype=int
+        )
+        matrix, proof = _exact_h2_action_from_glsm(
+            charge_matrix, [1, 0, 3, 2]
+        )
+        np.testing.assert_array_equal(matrix, [[0, 1], [1, 0]])
+        self.assertEqual(proof["equation"], "M Q = Q P")
+        self.assertTrue(proof["exact_residual_zero"])
+        self.assertTrue(proof["involution_verified_exactly"])
+
+    def test_nonintegral_relation_solution_fails_closed(self):
+        charge_matrix = np.array([[2, 0, 1], [0, 1, 0]], dtype=int)
+        with self.assertRaisesRegex(ValueError, "nonintegral"):
+            _exact_h2_action_from_glsm(charge_matrix, [1, 0, 2])
 
 
 class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
@@ -1697,7 +1719,7 @@ class PolytopeNormalFormIdentityTests(unittest.TestCase):
     def test_candidate_records_carry_normal_form_identity(self):
         poly = _FakePoly(BASIS_POINTS)
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 
