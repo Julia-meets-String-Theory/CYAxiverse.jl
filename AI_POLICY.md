@@ -79,3 +79,36 @@ repository, not to any single vendor. It is referenced from `AGENTS.md`,
 `.copilot/AGENTS.md`, `.github/copilot-instructions.md`, and `CLAUDE.md` so
 that every agent operating here — and every contributor directing one —
 sees it.
+
+## Context checkpoints and continuation
+
+Use a checkpoint when the runtime signals compaction or context pressure, when
+the user requests one, or when a long task reaches a natural handoff boundary.
+Do not invent an 85% context measurement when the runtime does not expose one.
+
+Before handing work to a continuation, stop substantive work and write one
+valid JSON object to a Markdown file outside the Git checkout. Use a
+collision-resistant path such as
+`../checkpoints/YYYY-MM-DD/HHMMSS-agent-checkpoint.md`. Include these keys:
+
+- `completed_work`
+- `current_state`
+- `in_progress`
+- `next_steps`
+- `constraints`
+- `critical_context`
+
+The continuation must read and parse the checkpoint before taking action. If
+the runtime cannot start a continuation or perform native compaction, report
+the checkpoint path and end the turn. Do not claim that writing the file
+replaced hidden context, and do not continue substantive work between writing
+the checkpoint and the handoff.
+
+## Artifact compression
+
+- Use `deflate=9` for HDF5.
+- Use `zstd -19` for machine-readable JSON and JSONL artifacts.
+- Keep human-readable Markdown handoffs uncompressed when readability is
+  required.
+- If compression is inappropriate, record the reason and request permission
+  for a lower-compression or uncompressed artifact.

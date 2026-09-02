@@ -23,6 +23,7 @@ hard-coded matrices:
 """
 
 import json
+from fractions import Fraction
 import tempfile
 import unittest
 from fractions import Fraction
@@ -53,6 +54,7 @@ from inherited_orientifold_candidates import (
     enumerate_projected_lattice_representatives,
     write_candidate_manifest,
     _component_key,
+    _fixed_component_records,
     _fraction_vector_to_json,
     _general_fixed_surface_n_s_table,
     _integer_coordinates,
@@ -64,6 +66,7 @@ from inherited_orientifold_candidates import (
     _sublattice_is_saturated,
     facets_with_non_smooth_cones,
 )
+import orientifold_general_l_geometry as general_l
 
 
 class AmbientAnticanonicalCartierDataTests(unittest.TestCase):
@@ -167,6 +170,7 @@ class _FakeTriangulation:
 def _topology(prime_toric_divisors, h11):
     return {
         "basis_matrix": np.eye(h11, dtype=int),
+        "glsm": np.eye(h11, dtype=int),
         "prime_toric_divisors": np.asarray(prime_toric_divisors, dtype=int),
         "h11": h11,
     }
@@ -295,7 +299,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         # A single top-dimensional simplex spanning every point is invariant
         # under any permutation of {1,2,3,4}.
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 
@@ -360,7 +364,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
     def test_h11_minus_zero_filter_keeps_only_the_identity(self):
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         records = enumerate_orientifold_candidates(
             poly, triangulation, topology, h11_minus_target=0
@@ -391,7 +395,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         # {1,2,3} -- 1 identity + 3 transpositions = 4 preserving candidates,
         # the other 10 - 4 = 6 move point 4 and must fail FRST preservation.
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
 
@@ -439,7 +443,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         # _fixed_point_set_description's labelling.
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
         records = enumerate_orientifold_candidates(poly, triangulation, topology)
         identity_zero_shift = [
             record
@@ -475,7 +479,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
     def test_candidate_ids_are_stable_across_repeated_calls(self):
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
 
         first = enumerate_orientifold_candidates(poly, triangulation, topology)
         second = enumerate_orientifold_candidates(poly, triangulation, topology)
@@ -513,7 +517,7 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
     def test_hand_constructed_non_preserving_matrix_reports_polytope_stage(self):
         poly = self._poly()
         triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
-        topology = _topology([1, 2, 3, 4], h11=5)
+        topology = _topology([1, 2, 3, 4], h11=4)
         # Shear e1 -> e1 + e2, not among the polytope's own points.
         shear = np.array(
             [[1, 0, 0, 0], [1, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=int
@@ -522,6 +526,28 @@ class EnumerateOrientifoldCandidatesTests(unittest.TestCase):
         with self.assertRaises(OrientifoldValidationFailure) as context:
             validate_orientifold(poly, triangulation, topology, config)
         self.assertEqual(context.exception.stage, "polytope_not_preserved")
+
+    def test_exact_glsm_h2_solver_rejects_prior_basis_selector_false_nonintegrality(self):
+        """Use ``M Q = Q P`` even when the selector basis is non-unimodular.
+
+        With ``Q=I`` and a transposition ``P``, the exact H2 action is the
+        integral transposition.  The old selector calculation with
+        ``basis_matrix=diag(2,1,1,1)`` produced a spurious half-integer entry.
+        """
+        poly = self._poly()
+        triangulation = _FakeTriangulation(BASIS_POINTS, [[0, 1, 2, 3, 4]])
+        topology = _topology([1, 2, 3, 4], h11=4)
+        topology["basis_matrix"] = np.diag([2, 1, 1, 1]).astype(int)
+        matrix = np.eye(4, dtype=int)
+        matrix[[0, 1]] = matrix[[1, 0]]
+        result = validate_orientifold(
+            poly, triangulation, topology, _lattice_matrix_config(matrix, "O3/O7")
+        )
+        expected = matrix.copy()
+        np.testing.assert_array_equal(result["h2_involution_matrix"], expected)
+        self.assertEqual(result["h2_action_proof"]["equation"], "M Q = Q P")
+        self.assertTrue(result["h2_action_proof"]["exact_residual_zero"])
+        self.assertTrue(result["h2_action_proof"]["integral_solution"])
 
 
 class ClassifySmoothnessNsPolarityTests(unittest.TestCase):
@@ -1022,6 +1048,47 @@ class GeneralFixedSurfaceMachineryTests(unittest.TestCase):
             "missing_full_dimensional_auxiliary_cone",
         )
         self.assertEqual(len(result["surface_diagnostics"][0]["fixed_components"]), 4)
+
+
+class FixedComponentKernelDelegationTests(unittest.TestCase):
+    """Keep the legacy helper bound to the exact general-L implementation."""
+
+    def test_compatibility_helper_delegates_without_a_nonsmooth_shortcut(self):
+        matrix = np.eye(4, dtype=int)
+        nonsmooth_ray = (2, 0, 0, 0)
+        fixed_cone_keys = ((nonsmooth_ray,),)
+        auxiliary_fan = [
+            {
+                "rays": [list(nonsmooth_ray)],
+                "dimension": 1,
+                "simplicial": True,
+                "ambient_cones": [],
+            }
+        ]
+        delegated = _fixed_component_records(
+            auxiliary_fan,
+            matrix,
+            (0, 0, 0, 0),
+            0,
+            fixed_cone_keys=fixed_cone_keys,
+            half_ray_cache={fixed_cone_keys[0]: (True, "stale_cache_entry")},
+        )
+        direct = general_l._fixed_component_records(
+            auxiliary_fan,
+            matrix,
+            (0, 0, 0, 0),
+            0,
+            fixed_cone_keys=fixed_cone_keys,
+        )
+        self.assertEqual(delegated, direct)
+        self.assertTrue(delegated)
+        self.assertEqual(
+            {
+                row["fixed_component_integrality"]["method"]
+                for row in delegated
+            },
+            {"general_quotient_lattice_eq_4.30"},
+        )
 
 
 class WriteCandidateManifestTests(unittest.TestCase):

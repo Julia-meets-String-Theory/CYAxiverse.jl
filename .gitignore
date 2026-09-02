@@ -24,3 +24,10 @@ jlm_python/one_dim_phase_fraction.py
 /.github/agents/
 /.github/instructions/
 /.github/skills/
+/.github/copilot-instructions.md
+/validation/*
+!/validation/orientifold_exact_action_formula_ledger_20260822.md
+!/validation/mpcp_refinement_ledger_20260823.md
+.copilot/
+CLAUDE.md
+AGENTS.md

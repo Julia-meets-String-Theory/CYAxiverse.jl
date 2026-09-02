@@ -307,7 +307,9 @@ function _stage5_run(data_dir, output_dir, geometries, threads, starts)
                     data_dir; threshold=0.5, starts, method=:reduced_jlm, save=false)
                 search = result["search"]
                 status = "completed"
-                verification = search.search_classification == "exact_determinant_branch" ? "verified" : "not_applicable"
+                verification = search.search_classification in
+                        ("square_reduced_potential_determinant_count",
+                         "exact_determinant_branch") ? "verified" : "not_applicable"
                 solver_status = search.search_status
                 estimate_status = "estimated"
                 nmin = string(result["vacua_estimate"].vac)

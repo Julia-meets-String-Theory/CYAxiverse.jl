@@ -315,9 +315,11 @@ function h11lst(h11min=0,h11max=100)
 end
 
 """
-    h11lst(h11list::Vector)
+    h11lst(h11list::Vector; geometric_data::Bool = false)
 
-TBW
+Return the geometry file paths for every ``h^{1,1}`` value in `h11list`, together
+with the number of geometries found at each value. Set `geometric_data = true` to
+keep only geometries whose `cyax.h5` geometric datasets are present on disk.
 """
 function h11lst(h11list::Vector; geometric_data::Bool = false)
     file_list = []

@@ -29,8 +29,8 @@ include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
 include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
+include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
 include(joinpath(@__DIR__, "axion_photon.jl"))
 
 @testset "Data directory resolution" begin
@@ -914,6 +914,15 @@ end
 end
 
 @testset "Vacua pipeline persistence and validation" begin
+    migrated_metadata = _normalize_vacua_search_metadata((
+        search_classification="exact_determinant_branch", search_method="reduced_jlm"))
+    @test migrated_metadata.search_classification ==
+        "square_reduced_potential_determinant_count"
+    @test migrated_metadata.legacy_search_classification ==
+        "exact_determinant_branch"
+    @test migrated_metadata.classification_schema_version ==
+        "cyaxiverse-vacua-classification-2"
+
     mktempdir() do root
         geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
         mkpath(geom_dir)
@@ -952,7 +961,7 @@ end
                 threshold=0.5, starts=17, residual_tolerance=1e-9,
                 merge_tolerance=1e-6, max_iterations=12, force=false,
                 search_metadata=(search_method="legacy",
-                    search_classification="finite_search_lower_bound",
+                    search_classification="finite_multistart_minimum_lower_bound",
                     minimum_count=3, multiplicity=1.0, critical_count=-1,
                     branch_count=-1, det_Qtilde=-1, search_status="completed"))
 
@@ -1005,10 +1014,46 @@ end
             @test pipeline_data.metadata.method == "legacy"
             @test pipeline_data.metadata.verification_status == "not_applicable"
             @test pipeline_data.metadata.search_method == "legacy"
+            @test pipeline_data.metadata.search_classification ==
+                "finite_multistart_minimum_lower_bound"
+            @test pipeline_data.metadata.legacy_search_classification ==
+                "finite_search_lower_bound"
+            @test pipeline_data.metadata.classification_schema_version ==
+                "cyaxiverse-vacua-classification-2"
+            @test pipeline_data.metadata.model_scope ==
+                "hierarchy_truncated_axion_potential"
+            @test pipeline_data.metadata.full_potential_status == "not_validated"
             @test_throws ArgumentError save_axion_data(geom_idx, spectrum, estimate, identified;
                 threshold=0.5, force=false)
             save_axion_data(geom_idx, spectrum, estimate, identified;
                 threshold=0.5, force=true)
+
+            # A failed terminal record is explicit persisted state. Repairing
+            # it requires the same explicit force acknowledgement as a
+            # completed record.
+            h5open(path, "r+") do file
+                HDF5.delete_object(file, "vacua_pipeline/metadata/status")
+                file["vacua_pipeline/metadata/status"] = "failed"
+                HDF5.delete_object(file, "vacua_pipeline/metadata/terminal_status")
+                file["vacua_pipeline/metadata/terminal_status"] = "failed"
+            end
+            @test !_has_pipeline_result(path)
+            @test !_has_pipeline_group(path)
+            @test_throws ArgumentError save_axion_data(geom_idx, spectrum, estimate, identified;
+                threshold=0.5, starts=17, residual_tolerance=1e-9,
+                merge_tolerance=1e-6, max_iterations=12, force=false,
+                search_metadata=(search_method="legacy",
+                    search_classification="finite_multistart_minimum_lower_bound",
+                    minimum_count=3, multiplicity=1.0, critical_count=-1,
+                    branch_count=-1, det_Qtilde=-1, search_status="completed"))
+            save_axion_data(geom_idx, spectrum, estimate, identified;
+                threshold=0.5, starts=17, residual_tolerance=1e-9,
+                merge_tolerance=1e-6, max_iterations=12, force=true,
+                search_metadata=(search_method="legacy",
+                    search_classification="finite_multistart_minimum_lower_bound",
+                    minimum_count=3, multiplicity=1.0, critical_count=-1,
+                    branch_count=-1, det_Qtilde=-1, search_status="completed"))
+            @test _has_pipeline_result(path)
 
             bad_potential = (Q=zeros(Int, 3, 4), L=zeros(2, 4),
                 K=Hermitian(Matrix{Float64}(I, 2, 2)))
@@ -1020,7 +1065,7 @@ end
     end
 end
 
-@testset "Inflation persistence requires explicit force and preserves precision" begin
+@testset "Orientifold inflation persistence preserves precision and requires force" begin
     previous_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
     try
         mktempdir() do data_dir
@@ -1147,9 +1192,14 @@ end
 end
 
 @testset "Physical spectrum batch persistence" begin
+    @test _fpert_log10([18.0], [4.0]) ≈ [7.0]
+    # Non-empty λ31/λ22 (one cross-quartic term each) so the round-trip
+    # below actually exercises the new lambda_31_*/lambda_22_* datasets,
+    # not just their empty-array degenerate case.
     spectrum = CYAxiverse.structs.PhysicalAxionSpectrum(
         [1.0, 2.0], [0, 1], zeros(2, 2), [1, -1], [3.0, 4.0],
-        zeros(Int, 4, 0), Int[], Float64[], zeros(Int, 4, 0), Int[], Float64[],
+        reshape([1, 1, 1, 2], 4, 1), [1], [0.5],
+        reshape([1, 1, 2, 2], 4, 1), [-1], [0.7],
         -30.0, 200)
     geom_idx = CYAxiverse.structs.GeometryIndex(2, 3, 4)
     output_dir = mktempdir()
@@ -1160,17 +1210,37 @@ end
     end
     _write_result(output_path, geom_idx, spectrum; prec=200, threshold_log10=-30.0,
         quartics=true, runtime_seconds=0.1, provisional=false, fK=[5.0, 6.0])
+    completed_config = _physical_spectrum_config(; prec=200,
+        threshold_log10=-30.0, quartics=true)
+    @test _has_physical_spectrum(output_path; config=completed_config)
+    @test !_has_physical_spectrum(output_path; config=_physical_spectrum_config(
+        prec=201, threshold_log10=-30.0, quartics=true))
     HDF5.h5open(output_path, "r") do file
         @test HDF5.haskey(file, "spectrum/physical/m")
         @test read(file["spectrum/physical/fK_log10"]) == [5.0, 6.0]
-        @test read(file["spectrum/physical/fpert_log10"]) ≈ [-0.5, 0.0]
+        @test read(file["spectrum/physical/fpert_log10"]) ≈ [-9.5, -9.0]
+        @test read(file["spectrum/physical/metadata/mass_log10_unit"]) == "eV"
+        @test read(file["spectrum/physical/metadata/fpert_log10_unit"]) == "GeV"
+        @test read(file["spectrum/physical/metadata/fpert_formula"]) ==
+            "log10(fpert/GeV)=log10(m/eV)-9-0.5*log10(abs(lambda_self))"
+        @test read(file["spectrum/physical/metadata/log_domain_policy"]) ==
+            "not_recorded_for_fixture"
+        @test read(file["spectrum/physical/lambda_31_sign"]) == [1]
+        @test read(file["spectrum/physical/lambda_31_log10"]) == [0.5]
+        @test read(file["spectrum/physical/lambda_31_indices"]) == reshape([1, 1, 1, 2], 4, 1)
+        @test read(file["spectrum/physical/lambda_22_sign"]) == [-1]
+        @test read(file["spectrum/physical/lambda_22_log10"]) == [0.7]
+        @test read(file["spectrum/physical/lambda_22_indices"]) == reshape([1, 1, 2, 2], 4, 1)
     end
     old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
     ENV["CYAXIVERSE_DATA_DIR"] = output_dir
     try
         loaded = CYAxiverse.read.physical_spectrum(geom_idx)
         @test loaded.m == spectrum.m
-        @test loaded.fpert ≈ [-0.5, 0.0]
+        @test loaded.fpert ≈ [-9.5, -9.0]
+        @test loaded.schema_version == "cyaxiverse-physical-spectrum-3"
+        @test loaded.fpert_log10_unit == "GeV"
+        @test loaded.fpert_convention == "lambda_self_abs_log10"
         @test loaded.mass_signs_or_inertia == Int[]
     finally
         old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
@@ -1184,6 +1254,12 @@ end
         @test !HDF5.haskey(file, "spectrum/physical/lambda_self_sign")
         @test !HDF5.haskey(file, "spectrum/physical/lambda_self_log10")
         @test !HDF5.haskey(file, "spectrum/physical/fpert_log10")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_31_sign")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_31_log10")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_31_indices")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_22_sign")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_22_log10")
+        @test !HDF5.haskey(file, "spectrum/physical/lambda_22_indices")
         @test read(file["spectrum/physical/metadata/quartics"]) == false
     end
 
@@ -2504,6 +2580,44 @@ end
         Float64[1.0 1.0 1.0; 1.0 -1.0 -1.0e6]; gap_log10=10.0)
     @test all(isfinite, extreme.inter_block_gaps)
     @test all(isfinite, extreme.sorted_log_scales)
+    precision_audit = CYAxiverse.generate.instanton_scale_precision_diagnostics(
+        Float64[1.0 1.0 1.0; 0.0 -10.0 -1.0e6];
+        linear_boundary_precision_digits=160)
+    @test precision_audit.policy ==
+        "log_domain_with_arbitrary_precision_linear_boundaries"
+    @test precision_audit.truncated_count == 1
+    @test precision_audit.status == "truncated_with_log_bound"
+    @test precision_audit.truncation_bound_log10 < -300.0
+    @test precision_audit.linear_boundary_precision_digits == 160
+
+    # Sub-floor Float64 seed terms are zero, rather than multiple fabricated
+    # floatmin weights. The arbitrary-precision physical selection retains
+    # the terms and therefore agrees with the reference leading set.
+    seed_C = Matrix{Float64}(I, 2, 2)
+    subfloor_Q = Int[1 0 1;
+                     0 1 1]
+    subfloor_L = Float64[1.0 1.0 1.0;
+                         0.0 -400.0 -401.0]
+    subfloor_W = CYAxiverse.generate.leading_hessian_matrix_float64_scaled(
+        seed_C, subfloor_L, subfloor_Q)
+    @test subfloor_W[1, 1] == 1.0
+    @test subfloor_W[1, 2] == 0.0
+    @test subfloor_W[2, 2] == 0.0
+    seed_Q = Int[1 0 1 0;
+                 0 1 0 1]
+    seed_L = Float64[1.0 1.0 1.0 1.0;
+                     0.0 -20.0 -21.0 -400.0]
+    seed_W = CYAxiverse.generate.leading_hessian_matrix_float64_scaled(
+        seed_C, seed_L, seed_Q)
+    @test seed_W[2, 2] == 10.0^-20
+    @test seed_W[1, 1] == 1.0
+    @test seed_W[1, 2] == 0.0
+    reference_pq = CYAxiverse.generate.pq_spectrum(Hermitian(seed_C), seed_L[:, 1:3],
+        seed_Q[:, 1:3]; mixing_correction=:high_precision, prec=200)
+    extended_pq = CYAxiverse.generate.pq_spectrum(Hermitian(seed_C), seed_L, seed_Q;
+        mixing_correction=:high_precision, prec=200)
+    @test extended_pq.msign == reference_pq.msign
+    @test extended_pq.m ≈ reference_pq.m atol=1e-10
 
     K = Hermitian(Matrix{Float64}(I, 2, 2))
     mixed_Q = Int[1 1 0; 0 0 1]
@@ -3384,5 +3498,348 @@ end
             # a rationally dependent column.
             @test rank(Matrix{Rational{BigInt}}(fast_Q)) == size(fast_Q, 2)
         end
+    end
+end
+
+@testset "Orientifold axiverse database bridge (Phase 1, h11=2)" begin
+    # A synthetic malformed-dimension geometry must be rejected rather than
+    # silently accepted: Q's instanton count disagrees with L's, and K's
+    # axion count disagrees with Q's, exercising the two DimensionMismatch
+    # guards `oriented_potential` places at the read boundary before any
+    # numerical code sees the arrays.
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        path = joinpath(geom_dir, "cyax.h5")
+        h5open(path, "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            # Q has 3 instanton columns; L has 4: an instanton-count mismatch
+            # that no orientation-guessing transpose can repair (2 rows each,
+            # so neither candidate transpose changes the column counts).
+            potential["Q"] = Int[1 0 1; 0 1 1]
+            potential["L"] = Float64[1.0 1.0 1.0 1.0; -5.0 -10.0 -1.0 -2.0]
+            geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+        end
+        geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            @test_throws DimensionMismatch CYAxiverse.read.oriented_potential(geom_idx)
+        finally
+            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        end
+    end
+
+    # K built from a non-square Kinv must also be rejected.
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        path = joinpath(geom_dir, "cyax.h5")
+        h5open(path, "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            potential["Q"] = Int[1 0; 0 1]
+            potential["L"] = Float64[1.0 1.0; -5.0 -10.0]
+            geometric["Kinv"] = Float64[1.0 0.0 0.0; 0.0 1.0 0.0]
+        end
+        geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            @test_throws DimensionMismatch CYAxiverse.read.oriented_potential(geom_idx)
+        finally
+            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        end
+    end
+
+    # Round-trip one real, ledger-verified h11=2 trilayer geometry written by
+    # scripts/build_orientifold_axion_database.py, when that database is
+    # present on this machine.  The database lives under the workspace
+    # parent's `data/` directory (outside the package Git checkout, per
+    # `.github/copilot-instructions.md`'s documentation-placement rule), so
+    # this test skips gracefully -- rather than failing -- wherever that
+    # local data is not present, e.g. in CI.
+    db_root = normpath(joinpath(@__DIR__, "..", "..", "data",
+        "orientifold_axiverse_database_20260821"))
+    h11_dir = joinpath(db_root, "h11_002")
+    if isdir(h11_dir)
+        np_dirs = sort(filter(name -> startswith(name, "np_"), readdir(h11_dir)))
+        @test !isempty(np_dirs)
+        if !isempty(np_dirs)
+            np_index = parse(Int, np_dirs[1][4:end])
+            np_dir = joinpath(h11_dir, np_dirs[1])
+            cy_dirs = sort(filter(name -> startswith(name, "cy_"), readdir(np_dir)))
+            @test !isempty(cy_dirs)
+            cy_index = parse(Int, cy_dirs[1][4:end])
+            geom_idx = CYAxiverse.structs.GeometryIndex(2, np_index, cy_index)
+
+            old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+            ENV["CYAXIVERSE_DATA_DIR"] = db_root
+            try
+                # cytools/geometric round-trip.
+                geometry = CYAxiverse.read.geometry(geom_idx)
+                @test geometry.h21 > 0
+                @test length(geometry.τ_volumes) == 2
+                @test size(geometry.kinv) == (2, 2)
+                @test geometry.cy_volume > 0
+
+                # cytools/potential round-trip, both raw and orientation-safe.
+                raw = CYAxiverse.read.potential(geom_idx)
+                normalised = CYAxiverse.read.oriented_potential(geom_idx)
+                @test size(normalised.Q, 1) == 2
+                @test size(normalised.L, 1) == 2
+                @test size(normalised.Q, 2) == size(normalised.L, 2)
+                # Confirm the boundary handles whichever raw HDF5.jl
+                # orientation this cross-language (h5py -> HDF5.jl) artifact
+                # produced: either raw already matches the canonical
+                # (h11, N)/(2, N) shape, or its transpose does.
+                raw_or_transposed_matches = (
+                    (size(raw.Q, 1) == 2 && size(raw.L, 1) == 2) ||
+                    (size(raw.Q, 2) == 2 && size(raw.L, 2) == 2)
+                )
+                @test raw_or_transposed_matches
+
+                # Kinetic matrix K = (1/2) g must be symmetric positive-definite.
+                @test isposdef(normalised.K)
+                @test issymmetric(Matrix(normalised.K))
+
+                # Visible-sector QCD divisor volume must be normalized to 40
+                # under the homogeneous-qcd-volume-40-v1 convention.
+                visible = CYAxiverse.read.visible_sector(geom_idx)
+                @test visible !== nothing
+                @test isapprox(visible.qcd_divisor_volume, 40.0; atol=1e-6)
+                @test visible.qcd_invariant
+
+                # orientifold/ provenance group: every required key present
+                # and non-empty.
+                h5open(CYAxiverse.filestructure.cyax_file(geom_idx), "r") do file
+                    @test haskey(file, "orientifold")
+                    group = file["orientifold"]
+                    for name in ("h2_involution_matrix", "lattice_matrix",
+                            "torus_shift_numerator", "torus_shift_denominator",
+                            "lambda_f", "h11_minus", "h11_plus", "h21_plus")
+                        @test haskey(group, name)
+                    end
+                    group_attrs = HDF5.attributes(group)
+                    for name in ("polytope_normal_form_id", "frst_hash",
+                            "source_ledger_path", "source_ledger_sha256",
+                            "source_commit", "cytools_version",
+                            "normalization_map_version",
+                            "orientifold_provenance_schema_version",
+                            "bridge_schema_version")
+                        @test haskey(group_attrs, name)
+                        @test !isempty(String(HDF5.read(group_attrs[name])))
+                    end
+                    @test Bool(HDF5.read(HDF5.attributes(file)["orientifold_provenance_complete"]))
+                end
+            finally
+                old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                    (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+            end
+        end
+    else
+        @info "skipping orientifold axiverse database round-trip test: " *
+            "$h11_dir not present on this machine"
+    end
+end
+
+@testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary" begin
+    # A minimal synthetic geometry: 1 axion, 3 instantons (enough for
+    # `LQtilde`/`run_geometry`/`scan_geometry_for_inflation` to have a
+    # well-posed reduced problem), mirroring the "Visible-sector metadata
+    # roundtrip" / "Vacua pipeline persistence" synthetic-fixture pattern
+    # used elsewhere in this file rather than depending on real CYTools data.
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        path = joinpath(geom_dir, "cyax.h5")
+        h5open(path, "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            # 2 axions, 3 instantons: `_validate_potential` requires strictly
+            # more instantons than axions, matching the real orientifold
+            # geometries' (h11, N)=(2, 6)-shaped potentials in miniature.
+            potential["Q"] = Int[1 0 1; 0 1 1]
+            potential["L"] = Float64[1.0 1.0 1.0; -1.0 -2.0 -3.0]
+            geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
+        end
+        geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+        ENV["CYAXIVERSE_DATA_DIR"] = root
+        try
+            # 1. The established vacua_pipeline engine, called with
+            # method=:auto (this test's own guard against ever silently
+            # reverting to the :legacy default this driver was built to
+            # avoid).
+            vacua_result = compute_vacua_data(geom_idx, root; method=:auto,
+                save=true, starts=64)
+            @test vacua_result["search"].search_status == "completed"
+
+            catastrophe_outcome = (; status=:success,
+                result=run_geometry(geom_idx; max_branches=1_000))
+            efold_outcome = (; status=:success,
+                result=scan_geometry_for_inflation(geom_idx; max_branches=1_000,
+                    precision_bits=128, float_tolerance=1e-10,
+                    high_tolerance=1e-25, max_points=100, min_efolds=0.01,
+                    max_efolds=0.05, flow_step=1e-3, flow_displacement=1e-3))
+
+            # 2. Round-trip: write once, then read every field back.
+            write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
+                catastrophe_settings=(; max_branches=1_000),
+                efold_settings=(; max_branches=1_000, precision_bits=128,
+                    float_tolerance=1e-10, high_tolerance=1e-25,
+                    max_points=100, min_efolds=0.01, max_efolds=0.05,
+                    flow_step=1e-3, flow_displacement=1e-3))
+
+            pv = CYAxiverse.read.pipeline_vacua(geom_idx)
+            @test pv.metadata.status == "completed"
+            @test pv.metadata.method == "auto"
+
+            h5open(path, "r") do file
+                @test haskey(file, "inflation")
+                @test haskey(file, "vacua_pipeline")
+                @test String(HDF5.read(file["inflation/scale_status"])) == "homotopy_only"
+                @test String(HDF5.read(file["inflation/claim_boundary"])) ==
+                    "homotopy-only diagnostics; physical domain certificate not passed"
+                cat = file["inflation/catastrophes"]
+                @test String(HDF5.read(cat["status"])) == "completed"
+                @test HDF5.read(cat["leading_minima_count"]) ==
+                    catastrophe_outcome.result.leading_minima_count
+                @test HDF5.read(cat["leading_branch_saddle_count"]) ==
+                    catastrophe_outcome.result.saddle_count
+                @test HDF5.read(cat["leading_branch_saddles_present"]) ==
+                    Int(catastrophe_outcome.result.saddle_count > 0)
+                @test HDF5.read(cat["legacy_v1/saddle_count"]) ==
+                    catastrophe_outcome.result.saddle_count
+                @test HDF5.read(cat["legacy_v1/catastrophes_present"]) ==
+                    Int(catastrophe_outcome.result.saddle_count > 0)
+
+                ef = file["inflation/efolds"]
+                @test String(HDF5.read(ef["search_status"])) ==
+                    string(efold_outcome.result.refinement.search.search_status)
+                @test HDF5.read(ef["n_candidates"]) ==
+                    length(efold_outcome.result.refinement.candidates)
+                @test HDF5.read(ef["n_qualified"]) == efold_outcome.result.flow.qualified
+            end
+
+            # 3. No-overwrite guard: a second write without force=true is
+            # rejected rather than silently replacing the first result.
+            @test_throws ArgumentError write_inflation_group!(geom_idx,
+                catastrophe_outcome, efold_outcome;
+                catastrophe_settings=(; max_branches=1_000),
+                efold_settings=(; max_branches=1_000, precision_bits=128,
+                    float_tolerance=1e-10, high_tolerance=1e-25,
+                    max_points=100, min_efolds=0.01, max_efolds=0.05,
+                    flow_step=1e-3, flow_displacement=1e-3))
+
+            # The rejected retry must not have touched the file: the original
+            # result is still exactly what is on disk.
+            h5open(path, "r") do file
+                cat = file["inflation/catastrophes"]
+                @test HDF5.read(cat["leading_branch_saddle_count"]) ==
+                    catastrophe_outcome.result.saddle_count
+            end
+
+            # 4. A failed upstream stage is recorded with explicit sentinel
+            # values and its error message, not silently skipped or
+            # confused with a genuine zero/completed result.
+            failed_catastrophe = (; status=:failed, message="synthetic failure for testing")
+            failed_efold = (; status=:failed, message="synthetic failure for testing")
+            write_inflation_group!(geom_idx, failed_catastrophe, failed_efold;
+                catastrophe_settings=(; max_branches=1_000),
+                efold_settings=(; max_branches=1_000, precision_bits=128,
+                    float_tolerance=1e-10, high_tolerance=1e-25,
+                    max_points=100, min_efolds=0.01, max_efolds=0.05,
+                    flow_step=1e-3, flow_displacement=1e-3), force=true)
+            h5open(path, "r") do file
+                cat = file["inflation/catastrophes"]
+                @test String(HDF5.read(cat["status"])) == "failed"
+                @test HDF5.read(cat["leading_branch_saddle_count"]) == -1
+                @test HDF5.read(cat["legacy_v1/saddle_count"]) == -1
+                @test String(HDF5.read(cat["error"])) == "synthetic failure for testing"
+                ef = file["inflation/efolds"]
+                @test String(HDF5.read(ef["search_status"])) == "failed"
+                @test HDF5.read(ef["n_candidates"]) == -1
+            end
+            @test !_has_inflation_group(path)
+            @test !_pipeline2_complete(path)
+            @test _inflation_write_blocked(path)
+            # Failed terminal records are explicit persisted state. Replacing
+            # one requires the same explicit force acknowledgement as a
+            # completed record.
+            @test_throws ArgumentError write_inflation_group!(geom_idx,
+                catastrophe_outcome, efold_outcome;
+                catastrophe_settings=(; max_branches=1_000),
+                efold_settings=(; max_branches=1_000, precision_bits=128,
+                    float_tolerance=1e-10, high_tolerance=1e-25,
+                    max_points=100, min_efolds=0.01, max_efolds=0.05,
+                    flow_step=1e-3, flow_displacement=1e-3))
+            write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
+                catastrophe_settings=(; max_branches=1_000),
+                efold_settings=(; max_branches=1_000, precision_bits=128,
+                    float_tolerance=1e-10, high_tolerance=1e-25,
+                    max_points=100, min_efolds=0.01, max_efolds=0.05,
+                    flow_step=1e-3, flow_displacement=1e-3), force=true)
+            @test _has_inflation_group(path)
+
+            # 5. A geometry file that does not exist yet is rejected outright
+            # -- this writer never creates a geometry, only appends to one.
+            missing_idx = CYAxiverse.structs.GeometryIndex(2, 2, 1)
+            @test_throws ArgumentError write_inflation_group!(missing_idx,
+                catastrophe_outcome, efold_outcome;
+                catastrophe_settings=(; max_branches=1_000),
+                efold_settings=(; max_branches=1_000, precision_bits=128,
+                    float_tolerance=1e-10, high_tolerance=1e-25,
+                    max_points=100, min_efolds=0.01, max_efolds=0.05,
+                    flow_step=1e-3, flow_displacement=1e-3))
+        finally
+            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        end
+    end
+
+    # Real-data round-trip, when the h11=2 orientifold database is present
+    # on this machine (mirrors the Phase 1 skip-gracefully pattern above).
+    db_root = normpath(joinpath(@__DIR__, "..", "..", "data",
+        "orientifold_axiverse_database_20260821"))
+    h11_dir = joinpath(db_root, "h11_002")
+    if isdir(h11_dir)
+        np_dirs = sort(filter(name -> startswith(name, "np_"), readdir(h11_dir)))
+        if !isempty(np_dirs)
+            np_index = parse(Int, np_dirs[1][4:end])
+            np_dir = joinpath(h11_dir, np_dirs[1])
+            cy_dirs = sort(filter(name -> startswith(name, "cy_"), readdir(np_dir)))
+            if !isempty(cy_dirs)
+                cy_index = parse(Int, cy_dirs[1][4:end])
+                geom_idx = CYAxiverse.structs.GeometryIndex(2, np_index, cy_index)
+                old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+                ENV["CYAXIVERSE_DATA_DIR"] = db_root
+                try
+                    pv = CYAxiverse.read.pipeline_vacua(geom_idx)
+                    @test pv.metadata.status == "completed"
+                    @test pv.metadata.method == "auto"
+                    @test pv.estimate >= 0
+                    h5open(CYAxiverse.filestructure.cyax_file(geom_idx), "r") do file
+                        @test haskey(file, "inflation")
+                        @test haskey(file, "inflation/catastrophes")
+                        @test haskey(file, "inflation/efolds")
+                        @test String(HDF5.read(file["inflation/catastrophes/status"])) ==
+                            "completed"
+                    end
+                finally
+                    old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+                        (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+                end
+            end
+        end
+    else
+        @info "skipping Pipeline 2 real-data round-trip test: " *
+            "$h11_dir not present on this machine"
     end
 end

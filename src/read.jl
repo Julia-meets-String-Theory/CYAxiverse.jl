@@ -237,6 +237,14 @@ function _validate_kinetic_matrix(K::Hermitian{Float64, Matrix{Float64}},
         "small indicates cond(Kinv) beyond Float64 resolution."))
 end
 
+"""
+    potential(geom_idx::GeometryIndex; hilbert=false, validate=true)
+
+Read the signed, log-scaled instanton potential and kinetic matrix for one
+geometry. The returned `AxionPotential` preserves the raw HDF5 orientation;
+use [`oriented_potential`](@ref) when a canonical axion-by-instanton layout
+is required.
+"""
 function potential(geom_idx::GeometryIndex; hilbert = false, validate::Bool = true)
     if hilbert
         L::Matrix{Float64}, Q::Matrix{Int}, Kinv::Matrix{Float64} =
@@ -614,6 +622,24 @@ function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
             λselfsign = haskey(physical, "lambda_self_sign") ? _read_dataset(physical, "lambda_self_sign") : Int[],
             λself = haskey(physical, "lambda_self_log10") ? _read_dataset(physical, "lambda_self_log10") : Float64[],
             fpert = haskey(physical, "fpert_log10") ? _read_dataset(physical, "fpert_log10") : Float64[],
+            schema_version = haskey(metadata, "schema_version") ?
+                _read_dataset(metadata, "schema_version") : nothing,
+            mass_log10_unit = haskey(metadata, "mass_log10_unit") ?
+                _read_dataset(metadata, "mass_log10_unit") : nothing,
+            fpert_log10_unit = haskey(metadata, "fpert_log10_unit") ?
+                _read_dataset(metadata, "fpert_log10_unit") : nothing,
+            fpert_formula = haskey(metadata, "fpert_formula") ?
+                _read_dataset(metadata, "fpert_formula") : nothing,
+            fpert_convention = haskey(metadata, "fpert_convention") ?
+                _read_dataset(metadata, "fpert_convention") : nothing,
+            log_domain_policy = haskey(metadata, "log_domain_policy") ?
+                _read_dataset(metadata, "log_domain_policy") : nothing,
+            linear_boundary_truncated_count = haskey(metadata,
+                "linear_boundary_truncated_count") ?
+                _read_dataset(metadata, "linear_boundary_truncated_count") : nothing,
+            linear_boundary_truncation_bound_log10 = haskey(metadata,
+                "linear_boundary_truncation_bound_log10") ?
+                _read_dataset(metadata, "linear_boundary_truncation_bound_log10") : nothing,
             threshold_log10 = _read_dataset(metadata, "threshold_log10"),
             prec = _read_dataset(metadata, "prec"),
             provisional = _read_dataset(metadata, "provisional"),
