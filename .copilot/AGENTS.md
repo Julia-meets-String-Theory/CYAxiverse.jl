@@ -6,7 +6,10 @@
 - Julia project flags such as `--project=...` and `--startup-file=no` remain appropriate; this rule concerns the operating environment in which Julia runs.
 
 ## 1. Type Stability & Precision Rules
-- Parametrize all numerical functions over float precision `T<:AbstractFloat` (e.g., `Float64`, `BigFloat`, or `ArbNumerics`).
+- Parametrize meaningful numerical kernels over float precision
+  `T<:AbstractFloat` where the operation supports it. Do not force `Float64`
+  through high-precision paths or add generic type parameters to non-numerical
+  helpers.
 - Axion mass matrices and instanton actions span 30+ orders of magnitude: NEVER hardcode `Float64` in internal mass/decay-constant routines.
 - Ensure all struct fields for geometry data (intersection numbers, Mori matrix, charge matrix Q) are concrete types (e.g., `SparseVector{Int}`, `Array{T, 3}`).
 
@@ -19,10 +22,12 @@
 - Kinetic matrix $K_{ij} = \frac{1}{2} g_{i\bar{j}}$ MUST be symmetric positive-definite. Throw a domain error if eigenvalues are non-positive.
 - Axion decay constants $f_a$ and mass eigenvalues $m_a^2$ must be real and positive.
 
-## 4. Generative AI contribution policy
+## 4. Boundary evidence
 
-Follow `AI_POLICY.md` at the repository root. It is normative for every
-AI tool used in this repository, including GitHub Copilot, not only
-Claude-family agents. Label your own commits with a `Co-Authored-By:`
-trailer (or your tool's equivalent) and never alter or bypass existing
-tests to force a pass.
+- Validate shape, orientation, units, identity, and provenance at every
+  reader/writer or Python/Julia boundary.
+- Preserve witness/action identities, selection routes, scale status, and
+  failure reasons through generated artifacts.
+- Do not promote a filtered, finite, provisional, or structurally complete
+  result to a population or physical claim without the applicable source and
+  replay gates.

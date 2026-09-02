@@ -36,12 +36,18 @@ Requires the local CYTools conda env, same as
 
 import unittest
 
+import numpy as np
 from cytools import Polytope
+import inherited_orientifold_candidates as ioc
 
 from reproduce_fuzzy_axions_h11_4 import (
     _frst_classes,
     _h21_plus_zero_diagnostic,
     _trilayer_candidate,
+)
+from build_orientifold_axion_database import (
+    exact_action_h21_diagnostic,
+    find_accepted_o3o7_witness,
 )
 
 # Moritz eq. (4.2): the 4D reflexive polytope points, given as columns of
@@ -82,6 +88,32 @@ class H21PlusZeroFixedLocusTest(unittest.TestCase):
         # paper states (h^{1,1}_+,h^{1,1}_-,h^{2,1}_+,h^{2,1}_-)=(2,0,0,132).
         self.assertAlmostEqual(result["h21_plus"], 0.0, places=6)
         self.assertAlmostEqual(result["h21_minus"], 132.0, places=6)
+
+        witness = {
+            "lattice_matrix": np.eye(4, dtype=int).tolist(),
+            "torus_shift": {
+                "numerator": np.asarray(trilayer["p0"], dtype=int).tolist(),
+                "denominator": 2,
+            },
+            "lambda_f": 1,
+            "h11_minus": 0,
+            "smoothness": {"status": "smooth"},
+            "fixed_surface_n_s_evidence": ioc.identity_fixed_surface_n_s_table(
+                ioc._triangulation_cones(poly, classes[0]), classes[0]
+            ),
+        }
+        exact = exact_action_h21_diagnostic(poly, classes[0], witness)
+        self.assertEqual(exact["status"], "validated")
+        self.assertEqual(exact["chi_fixed_locus"], 272)
+        self.assertEqual(
+            (exact["h11_plus"], exact["h11_minus"], exact["h21_plus"], exact["h21_minus"]),
+            (2, 0, 0, 132),
+        )
+        self.assertAlmostEqual(exact["h21_plus"], result["h21_plus"], places=6)
+
+        live_witnesses = find_accepted_o3o7_witness(poly, classes[0])
+        self.assertEqual(len(live_witnesses), 1)
+        self.assertEqual(live_witnesses[0]["torus_shift"], witness["torus_shift"])
 
 
 if __name__ == "__main__":

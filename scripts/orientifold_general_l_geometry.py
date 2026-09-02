@@ -1,54 +1,29 @@
-"""Enumerate inherited Calabi--Yau orientifold candidates.
+"""Source-validated exact general-L fixed-component geometry.
 
-The candidate datum is the source-paper triple ``(L, t, lambda_f)``.  The
-existing ``validate_orientifold`` function remains the gate for polytope,
-FRST, prime-divisor, and integral H2 preservation.  This module adds the
-finite projected-lattice searches, the auxiliary fan from source eq. (4.26),
-fixed-component integrality from eq. (4.35), the coefficient parity datum,
-and conservative smoothness classification from Sec. 4.6.
-
-The implementation deliberately reports ``smoothness_verification_unavailable``
-when the supplied topology does not contain the evidence needed for a
-sufficient claim.  Only ``accepted_verified_orientifold`` records carry a
-verified acceptance status.  The identity ``L=I, t=0`` is retained as the
-explicit task-level sanity contract for both parity choices; those records are
-labelled ``identity_sanity_contract`` rather than being presented as a
-generic nontrivial hypersurface proof.
+This is the reviewed dependency closure ported from sibling commit
+a2018d98bd558ff9903c2296d7e8e122c84c1434. It implements Moritz
+arXiv:2305.06363v1 Secs. 4.4--4.6 with exact arithmetic.
 """
-
 from fractions import Fraction
 import itertools
 import json
 import math
-import os
-import time
 
 import numpy as np
 try:
     from scipy.optimize import linprog as _linprog
-except ImportError:  # pragma: no cover - the cytools environment supplies scipy
+except ImportError:  # pragma: no cover
     _linprog = None
 from sympy import Matrix as _SympyMatrix
 from sympy.matrices.normalforms import hermite_normal_form as _hermite_normal_form
 from sympy.polys.matrices import DomainMatrix as _DomainMatrix
-from sympy.polys.matrices.normalforms import (
-    smith_normal_decomp as _smith_normal_decomp,
-)
+from sympy.polys.matrices.normalforms import smith_normal_decomp as _smith_normal_decomp
 
-from generate_geometric_data_multitriangulation import (
-    OrientifoldValidationFailure,
-    validate_orientifold,
-)
-import orientifold_general_l_geometry as _general_l
-from glimmers_raw_frst import (
-    compute_polytope_id,
-    compute_polytope_normal_form_id,
-    compute_triangulation_hash,
-    stable_hash,
-)
-
-CANDIDATE_SCHEMA_VERSION = "cyaxiverse-inherited-orientifold-candidate-3.0"
-
+IDENTITY = np.eye(4, dtype=int)
+_EXTRA_VERTEX_EVIDENCE_NOT_REQUESTED = object()
+_BASE_HNF_CACHE = {}
+POSITIVE_COMPONENT_MAX_DIMENSION = 3
+MAX_SECTION_LATTICE_POINTS = 100_000
 GENERAL_FIXED_SURFACE_REASON_CODES = (
     "nonsaturated_fixed_cone_lattice",
     "missing_full_dimensional_auxiliary_cone",
@@ -62,33 +37,22 @@ GENERAL_FIXED_SURFACE_REASON_CODES = (
     "nonintegral_final_n_s",
 )
 
-TERMINAL_STATUSES = (
-    "matrix_validation_passed",
-    "numerical_geometry_failure",
-    "polytope_not_preserved",
-    "frst_not_preserved",
-    "prime_divisor_set_not_preserved",
-    "nonintegral_h2_action",
-    "h2_action_not_involution",
-    "torus_shift_not_involution",
-    "orientifold_h11_minus_filter_rejection",
-    "torus_shift_not_involution",
-    "torus_shift_search_exhausted",
-    "fixed_point_set_non_smooth",
-    "smoothness_verification_unavailable",
-    "accepted_verified_orientifold",
-    # Kept in the vocabulary for consumers of the earlier matrix-only schema.
-    "accepted_inherited_candidate",
-)
 
-IDENTITY = np.eye(4, dtype=int)
-# Distinguish an omitted optional extension check from an explicitly failed
-# extraction.  The latter must remain unavailable evidence, not an empty set.
-_EXTRA_VERTEX_EVIDENCE_NOT_REQUESTED = object()
-# Cache of base Hermite normal forms keyed by generator columns (finding F6).
-# Keys are 4x4 integer tuples; the set of distinct generators in a run is small.
-_BASE_HNF_CACHE = {}
+def _integer_lattice_index(generators):
+    """Return the exact index of a ray sublattice in its saturated span."""
 
+    array = np.asarray(generators, dtype=int)
+    if array.ndim != 2:
+        raise ValueError("lattice generators must be a two-dimensional array")
+    if array.shape[1] == 0:
+        return 1
+    rank = _exact_rank(array)
+    if rank != array.shape[1]:
+        return 0
+    minors = []
+    for rows in itertools.combinations(range(array.shape[0]), array.shape[1]):
+        minors.append(_exact_determinant(array[np.ix_(rows, range(array.shape[1]))]))
+    return abs(math.gcd(*minors))
 
 def _exact_rank(matrix):
     """Return the rank of an integer matrix without floating-point rounding.
@@ -132,7 +96,6 @@ def _exact_rank(matrix):
             break
     return rank
 
-
 def _exact_determinant(matrix):
     """Return the exact determinant of an integer matrix.
 
@@ -173,119 +136,8 @@ def _exact_determinant(matrix):
         previous_pivot = pivot
     return sign * entries[size - 1][size - 1]
 
-
-def _select_basis_indices(points):
-    """Return 4 indices into ``points`` spanning the rank-four lattice."""
-    basis_rows = []
-    chosen = []
-    for index, point in enumerate(points):
-        candidate_rows = basis_rows + [point]
-        if _exact_rank(np.asarray(candidate_rows, dtype=int)) == len(candidate_rows):
-            basis_rows = candidate_rows
-            chosen.append(index)
-        if len(chosen) == 4:
-            return chosen
-    raise ValueError("points do not span a rank-4 lattice; cannot select a basis")
-
-
-def _involution_sort_key(matrix):
-    return tuple(int(value) for value in np.asarray(matrix, dtype=int).flatten())
-
-
-def _preserves_point_set(matrix, point_set):
-    return all(
-        tuple(int(value) for value in (matrix @ np.asarray(point, dtype=int)).tolist())
-        in point_set
-        for point in point_set
-    )
-
-
-def _polytope_involutions_from_automorphisms(poly, point_set):
-    """Fast exact involutions via the CYTools polytope automorphism group.
-
-    ``poly.automorphisms(square_to_one=True, action='left')`` returns exactly
-    the ``SL^pm(4, Z)`` matrices ``L`` with ``L^2 = I`` that leave the polytope
-    -- hence its whole lattice point set -- invariant, acting on column vectors
-    by ``L @ point`` (the convention used throughout this module). Verified
-    equal to the brute-force product search on real KS h11=4 polytopes and
-    ~120x faster (see validation/2026-08_orientifold_performance_review.md,
-    finding F2); the determinant, involution, and point-set guards below make
-    the fast path self-validating so a future convention change cannot silently
-    admit a wrong matrix.
-    """
-
-    involutions = {}
-    for candidate in poly.automorphisms(square_to_one=True, action="left"):
-        matrix = np.asarray(candidate, dtype=int)
-        if matrix.shape != (4, 4):
-            continue
-        if _exact_determinant(matrix) not in (-1, 1):
-            continue
-        if not np.array_equal(matrix @ matrix, IDENTITY):
-            continue
-        if not _preserves_point_set(matrix, point_set):
-            continue
-        involutions[_involution_sort_key(matrix)] = matrix
-    involutions.setdefault(_involution_sort_key(IDENTITY), IDENTITY)
-    return [involutions[key] for key in sorted(involutions)]
-
-
-def _enumerate_polytope_involutions_bruteforce(points, point_set):
-    """Reference brute-force involution search over the raw point set.
-
-    Retained for callers that supply a bare point array without a CYTools
-    object (the fixture tests) and as an executable specification for
-    ``_polytope_involutions_from_automorphisms``.
-    """
-
-    basis_indices = _select_basis_indices(points)
-    basis_points = points[basis_indices]
-    basis_matrix = _SympyMatrix(basis_points.T.tolist())
-    basis_inverse = basis_matrix.inv()
-
-    involutions = {tuple(IDENTITY.flatten().tolist()): IDENTITY}
-    candidate_points = sorted(point_set)
-    for image_tuple in itertools.product(candidate_points, repeat=4):
-        image_matrix = np.asarray(image_tuple, dtype=int).T
-        if _exact_determinant(image_matrix) == 0:
-            continue
-        candidate = _SympyMatrix(image_matrix.tolist()) * basis_inverse
-        if any(getattr(value, "q", 1) != 1 for value in candidate):
-            continue
-        matrix = np.asarray(candidate, dtype=int)
-        determinant = _exact_determinant(matrix)
-        if determinant not in (-1, 1):
-            continue
-        if not np.array_equal(matrix @ matrix, IDENTITY):
-            continue
-        if not all(tuple((matrix @ point).tolist()) in point_set for point in points):
-            continue
-        involutions[tuple(matrix.flatten().tolist())] = matrix
-
-    return [involutions[key] for key in sorted(involutions)]
-
-
-def enumerate_polytope_involutions(points, *, poly=None):
-    """Enumerate deterministic integer involutions preserving a 4d point set.
-
-    When a CYTools ``poly`` is supplied (the production path) use its
-    automorphism group; otherwise fall back to the brute-force product search
-    over the supplied point array. Both return the same sorted list of integer
-    involution matrices acting on column vectors by ``matrix @ point``.
-    """
-    points = np.asarray(points, dtype=int)
-    if points.ndim != 2 or points.shape[1] != 4:
-        raise ValueError("points must be an (n, 4) integer array")
-
-    point_set = {tuple(int(value) for value in row) for row in points}
-    if poly is not None and hasattr(poly, "automorphisms"):
-        return _polytope_involutions_from_automorphisms(poly, point_set)
-    return _enumerate_polytope_involutions_bruteforce(points, point_set)
-
-
 def _fraction_vector(vector):
     return tuple(Fraction(value) for value in vector)
-
 
 def _fraction_vector_to_json(vector):
     """Encode a rational vector without introducing floating-point ambiguity."""
@@ -299,7 +151,6 @@ def _fraction_vector_to_json(vector):
         numerator = [value // divisor for value in numerator]
         denominator //= divisor
     return {"numerator": numerator, "denominator": int(denominator)}
-
 
 def _fraction_vector_from_json(value):
     """Decode the exact common-denominator representation of a vector."""
@@ -315,7 +166,6 @@ def _fraction_vector_from_json(value):
         raise ValueError("fraction vector denominator must be nonzero")
     return tuple(Fraction(int(item), denominator) for item in numerator)
 
-
 def _fraction_sum(vectors):
     result = [Fraction(0) for _ in range(4)]
     for vector in vectors:
@@ -323,14 +173,11 @@ def _fraction_sum(vectors):
             result[index] += Fraction(value)
     return tuple(result)
 
-
 def _is_integral(vector):
     return all(Fraction(value).denominator == 1 for value in vector)
 
-
 def _integer_vector(vector):
     return [int(Fraction(value)) for value in vector]
-
 
 def _integer_lattice_membership(generator_columns, target):
     """Test whether ``target`` lies in the Z-span of ``generator_columns``.
@@ -369,7 +216,6 @@ def _integer_lattice_membership(generator_columns, target):
     augmented_hnf = _hermite_normal_form(generator_matrix.row_join(target_vector))
     return base_hnf == augmented_hnf
 
-
 def _same_projected_class(left, right, projector_numerator):
     """Test equality modulo twice the projected lattice, exactly.
 
@@ -384,7 +230,6 @@ def _same_projected_class(left, right, projector_numerator):
     difference = np.asarray(left, dtype=int) - np.asarray(right, dtype=int)
     generator_columns = 2 * np.asarray(projector_numerator, dtype=int)
     return _integer_lattice_membership(generator_columns, difference)
-
 
 def _vector_in_rational_span(vector, generators):
     """Test exact membership in the rational span of integer generators."""
@@ -401,7 +246,6 @@ def _vector_in_rational_span(vector, generators):
     )
     return generator_matrix.rank() == augmented.rank()
 
-
 def _nu_equal_mod_span(left, right, sigma_rays):
     """Test exact phase-label equality modulo ``span_Q(sigma)``.
 
@@ -416,7 +260,6 @@ def _nu_equal_mod_span(left, right, sigma_rays):
     right = tuple(Fraction(value) for value in right)
     difference = tuple(a - b for a, b in zip(left, right))
     return _vector_in_rational_span(difference, sigma_rays)
-
 
 def _quotient_lattice_coordinates(vector, sigma_rays):
     """Return exact coordinates in the quotient lattice dual to ``sigma``.
@@ -437,7 +280,6 @@ def _quotient_lattice_coordinates(vector, sigma_rays):
     vector = tuple(Fraction(value) for value in vector)
     coordinates = tuple(_fraction_dot(row, vector) for row in annihilator)
     return annihilator, coordinates
-
 
 def enumerate_projected_lattice_representatives(matrix, sign):
     """Enumerate representatives of ``P_sign(N)/(2 P_sign(N))``.
@@ -469,57 +311,6 @@ def enumerate_projected_lattice_representatives(matrix, sign):
         )
     return sorted(representatives, key=lambda item: tuple(item["vector"]))
 
-
-def _lattice_matrix_config(matrix, involution_type=None):
-    """Build a ``load_orientifold``-shaped config for one candidate matrix."""
-    return {
-        "requested": True,
-        "status": "input_loaded",
-        "source_file": None,
-        "lattice_matrix": np.asarray(matrix, dtype=int),
-        "involution_type": involution_type,
-        "coefficient_constraints": {},
-        "label": None,
-    }
-
-
-def _to_jsonable(value):
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, Fraction):
-        return _fraction_vector_to_json((value,))
-    if isinstance(value, dict):
-        return {key: _to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(item) for item in value]
-    return value
-
-
-def _point_tuple(point):
-    return tuple(int(value) for value in np.asarray(point, dtype=int))
-
-
-def _triangulation_cones(poly, triangulation):
-    """Return unique ambient fan cones as tuples of nonzero lattice rays."""
-    poly_points = np.asarray(poly.points(), dtype=int)
-    point_lookup = {_point_tuple(point): point for point in poly_points}
-    local_points = np.asarray(triangulation.points(), dtype=int)
-    local_to_global = [point_lookup[_point_tuple(point)] for point in local_points]
-    raw_simplices = np.asarray(triangulation.simplices(as_indices=True), dtype=int)
-    cones = set()
-    for simplex in raw_simplices:
-        rays = {
-            _point_tuple(local_to_global[int(index)])
-            for index in simplex
-            if _point_tuple(local_to_global[int(index)]) != (0, 0, 0, 0)
-        }
-        if rays:
-            cones.add(tuple(sorted(rays)))
-    return sorted(cones)
-
-
 def _primitive_integer_from_exact(vector):
     """Convert an exact rational ray direction to a primitive integer vector."""
 
@@ -534,7 +325,6 @@ def _primitive_integer_from_exact(vector):
     if divisor > 1:
         integer //= divisor
     return tuple(int(value) for value in integer)
-
 
 def _intersection_rays(cone, matrix):
     """Find extreme rays of a simplicial cone intersected with ``Fix(matrix)``.
@@ -576,14 +366,12 @@ def _intersection_rays(cone, matrix):
                 generators.add(primitive)
     return tuple(sorted(generators))
 
-
 def _all_cone_faces(rays):
     rays = tuple(sorted(rays))
     faces = set()
     for size in range(len(rays) + 1):
         faces.update(tuple(sorted(face)) for face in itertools.combinations(rays, size))
     return faces
-
 
 def build_auxiliary_fan(triangulation_cones, matrix):
     """Construct the finite auxiliary fan ``Sigma_L`` from source eq. (4.26)."""
@@ -613,7 +401,6 @@ def build_auxiliary_fan(triangulation_cones, matrix):
         )
     return records
 
-
 def _pointwise_invariant_cone_keys(triangulation_cones, matrix):
     """Return original-fan faces whose rays are individually fixed by ``L``.
 
@@ -622,6 +409,7 @@ def _pointwise_invariant_cone_keys(triangulation_cones, matrix):
     additional intersection rays and must not be used as the component-label
     universe.
     """
+
     matrix = np.asarray(matrix, dtype=int)
     fixed = set()
     for ambient_cone in triangulation_cones:
@@ -632,7 +420,6 @@ def _pointwise_invariant_cone_keys(triangulation_cones, matrix):
             ):
                 fixed.add(tuple(sorted(tuple(int(value) for value in ray) for ray in face)))
     return tuple(sorted(fixed))
-
 
 def _half_ray_shortcut_proof(auxiliary_fan, matrix, sigma_rays):
     """Return whether eq. (4.35) is proven for one fixed component.
@@ -675,7 +462,6 @@ def _half_ray_shortcut_proof(auxiliary_fan, matrix, sigma_rays):
                 return False, "non_smooth_ambient_normal_direction"
     return True, "smooth_sigma_and_normal_directions_certified"
 
-
 def _fixed_component_is_contained_in(component, container):
     """Test source containment from a larger cone to its proper face.
 
@@ -694,8 +480,7 @@ def _fixed_component_is_contained_in(component, container):
         tuple(container_rays),
     )
 
-
-def _legacy_fixed_component_records(
+def _fixed_component_records(
     auxiliary_fan,
     matrix,
     torus_shift,
@@ -703,6 +488,9 @@ def _legacy_fixed_component_records(
     *,
     fixed_cone_keys,
     half_ray_cache=None,
+    dual_points=None,
+    ambient_rays=None,
+    fan_cones=None,
 ):
     """Enumerate source eq. (4.30)--(4.35) fixed components.
 
@@ -715,7 +503,9 @@ def _legacy_fixed_component_records(
     Reduce phase labels modulo the exact rational span of ``sigma`` and remove
     a component when it is contained in a component labelled by a proper
     face.  All three operations use exact rational or Smith-normal-form
-    arithmetic.
+    arithmetic.  Every component also retains its exact Cox alpha/lattice
+    witness and, when dual lattice points are supplied, its invariant
+    restricted monomial support.
     """
     nu_representatives = enumerate_projected_lattice_representatives(matrix, -1)
     # The connected fixed torus has the +1 eigenspace of L.  Keep the
@@ -742,6 +532,12 @@ def _legacy_fixed_component_records(
             )
             if half_ray_cache is not None:
                 half_ray_cache[half_ray_key] = (use_half_ray, shortcut_reason)
+        # A cache is an optimization, not a smoothness certificate.  Keep the
+        # source boundary fail-closed even when a caller supplies stale or
+        # malformed cache contents for a nonsmooth original cone.
+        if use_half_ray and not _cone_is_smooth_in_lattice(rays, 4):
+            use_half_ray = False
+            shortcut_reason = "sigma_cone_not_smooth"
         integrality_method = (
             "smooth_half_ray_eq_4.35"
             if use_half_ray
@@ -769,11 +565,48 @@ def _legacy_fixed_component_records(
             ambient_dimension = fixed_subspace_dimension - sigma_dimension
             if ambient_dimension < 0:
                 continue
-            vanishes_identically = (sigma_dimension + int(lambda_f)) % 2 == 1
+            phase_vector = _fraction_sum([torus_shift, nu])
+            cox_witness = _cox_alpha_lattice_witness(rays, phase_vector)
+            sigma_lattice_matrix = (
+                np.asarray(rays, dtype=int).T
+                if rays else np.empty((4, 0), dtype=int)
+            )
+            lattice_index = _integer_lattice_index(sigma_lattice_matrix)
+            support = invariant_restricted_monomial_support(
+                dual_points,
+                ambient_rays if ambient_rays is not None else tuple(
+                    tuple(int(value) for value in ray)
+                    for cone in (fan_cones or ())
+                    for ray in cone
+                ),
+                rays,
+                matrix,
+                torus_shift,
+                lambda_f,
+                fan_cones=fan_cones,
+                invariant_basis=_integer_kernel_basis(np.eye(4, dtype=int) - matrix),
+            )
+            if use_half_ray:
+                vanishes_identically = (sigma_dimension + int(lambda_f)) % 2 == 1
+                containment_method = "eq_4.46_after_smooth_half_ray_eq_4.35"
+            elif support.get("status") == "certified":
+                vanishes_identically = bool(support["restriction_identically_zero"])
+                containment_method = "exact_eq_4.42_invariant_restricted_support"
+            elif ambient_dimension == 0 and np.array_equal(
+                np.asarray(matrix, dtype=int), np.eye(4, dtype=int)
+            ):
+                # For the identity action, the source parity rule is exact at
+                # a zero-dimensional toric stratum even when the optional dual
+                # lattice-point payload is absent.  Keep this narrow fallback
+                # so missing general-L support evidence remains fail-closed.
+                vanishes_identically = (sigma_dimension + int(lambda_f)) % 2 == 1
+                containment_method = "eq_4.46_identity_zero_dimensional_parity"
+            else:
+                vanishes_identically = None
+                containment_method = "invariant_restricted_support_unavailable"
             # A non-vanishing section has no zero-dimensional hypersurface
-            # component; do not persist the empty intersection as a fixed
-            # component record.
-            if ambient_dimension == 0 and not vanishes_identically:
+            # component.  Do not persist an empty fixed intersection.
+            if ambient_dimension == 0 and vanishes_identically is False:
                 continue
             admissible.append(
                 {
@@ -800,15 +633,46 @@ def _legacy_fixed_component_records(
                             else [_fraction_to_json(value) for value in quotient_coordinates]
                         ),
                     },
+                    "cox_phase_witness": {
+                        "status": cox_witness["status"],
+                        "equation": cox_witness.get(
+                            "equation", "t + nu + sum(alpha_p p) = n in N"
+                        ),
+                        "alpha": cox_witness.get("alpha"),
+                        "lattice_vector": cox_witness.get("lattice_vector"),
+                        "phase_vector": _fraction_vector_to_json(phase_vector),
+                    },
+                    "fixed_cone_lattice": {
+                        "rank": int(sigma_dimension),
+                        "index": int(lattice_index),
+                        "saturated": bool(lattice_index == 1),
+                        "stabilizer_order": int(lattice_index),
+                        "method": "exact_gcd_of_maximal_minors",
+                    },
+                    "invariant_restricted_support": support,
+                    "containment_method": containment_method,
                     "fixed_toric_dimension": ambient_dimension,
-                    "f_vanishes_identically": bool(vanishes_identically),
+                    "f_vanishes_identically": vanishes_identically,
                     "hypersurface_component_dimension": (
-                        ambient_dimension
+                        None
+                        if vanishes_identically is None
+                        else ambient_dimension
                         if vanishes_identically
                         else max(ambient_dimension - 1, 0)
                     ),
                 }
             )
+            if (
+                vanishes_identically is True
+                and ambient_dimension == 0
+            ):
+                admissible[-1][
+                    "zero_dimensional_local_smoothness_cartier_evidence"
+                ] = _derive_zero_dimensional_local_evidence(
+                    auxiliary_fan,
+                    matrix,
+                    admissible[-1],
+                )
 
     # First keep one deterministic representative for each phase class modulo
     # span(sigma).  The first record is deterministic because the projected
@@ -849,113 +713,6 @@ def _legacy_fixed_component_records(
             tuple(item["nu"]["numerator"]),
         ),
     )
-
-
-def _fixed_component_records(
-    auxiliary_fan,
-    matrix,
-    torus_shift,
-    lambda_f,
-    *,
-    fixed_cone_keys,
-    half_ray_cache=None,
-    dual_points=None,
-    ambient_rays=None,
-    fan_cones=None,
-):
-    """Delegate fixed-component construction to the exact general-L kernel.
-
-    The legacy in-module implementation remains available for historical
-    diagnostics, but all production callers use the split exact kernel.  The
-    explicit source-cone labels prevent auxiliary intersection rays from being
-    mistaken for component labels.
-    """
-    return _general_l._fixed_component_records(
-        auxiliary_fan,
-        matrix,
-        torus_shift,
-        lambda_f,
-        fixed_cone_keys=fixed_cone_keys,
-        half_ray_cache=half_ray_cache,
-        dual_points=dual_points,
-        ambient_rays=ambient_rays,
-        fan_cones=fan_cones,
-    )
-
-
-def _extract_dual_vertices(poly, dual_polytope=None):
-    if dual_polytope is None:
-        try:
-            dual_polytope = poly.dual()
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            return None
-    for method_name in ("vertices", "points"):
-        method = getattr(dual_polytope, method_name, None)
-        if method is not None:
-            try:
-                values = np.asarray(method(), dtype=int)
-            except (RuntimeError, TypeError, ValueError):
-                continue
-            if values.ndim == 2 and values.shape[1] == 4:
-                return values
-    return None
-
-
-def _extract_dual_lattice_points(poly, dual_polytope=None):
-    """Read all exact dual lattice points, preferring CYTools ``points``."""
-
-    if dual_polytope is None:
-        try:
-            dual_polytope = poly.dual()
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            return None
-    for method_name in ("points", "vertices"):
-        method = getattr(dual_polytope, method_name, None)
-        if method is not None:
-            try:
-                values = np.asarray(method(), dtype=int)
-            except (RuntimeError, TypeError, ValueError):
-                continue
-            if values.ndim == 2 and values.shape[1] == 4 and values.shape[0] > 0:
-                if len({tuple(int(value) for value in row) for row in values.tolist()}) == values.shape[0]:
-                    return values
-    return None
-
-
-def facets_with_non_smooth_cones(poly, triangulation):
-    """Dual vertices q (arXiv:2305.06363's ``Delta``) whose dual facet of
-    ``Delta_circ`` intersects a non-simplicial and/or non-smooth cone of the
-    triangulation's fan (line ~629, the second clause of eq. (4.45): "We
-    impose the same constraint for all vertices dual to facets of
-    Delta_circ that intersect non-simplicial and/or non-smooth cones of the
-    Z2 symmetric toric fan Sigma").
-
-    A facet of ``Delta_circ`` dual to vertex ``q`` is
-    ``{m in Delta_circ : <q,m> = -1}`` (the standard reflexive-polytope
-    facet/vertex pairing, the same convention already used by
-    ``_trilayer_candidate`` in ``reproduce_fuzzy_axions_h11_4.py``). A cone
-    of the fan geometrically intersects that facet when at least one boundary
-    ray satisfies this equality. Requiring every ray to pair ``-1`` misses
-    cones that meet the facet along a proper face. Checked for cone dimensions
-    2-4 (dimension <=1 cones are trivially both simplicial and smooth).
-    """
-
-    dual_vertices = _extract_dual_vertices(poly)
-    if dual_vertices is None:
-        return None
-    fan = triangulation.fan()
-    flagged = set()
-    for dimension in (2, 3, 4):
-        for cone in fan.cones(dim=dimension, formal=True):
-            rays = np.asarray(cone.rays(), dtype=int)
-            is_simplicial = rays.shape[0] == dimension
-            if is_simplicial and bool(cone.is_smooth()):
-                continue
-            for vertex in dual_vertices:
-                if np.any(rays @ vertex == -1):
-                    flagged.add(tuple(int(value) for value in vertex))
-    return flagged
-
 
 def _dual_vertex_parity_evidence(
     matrix,
@@ -1028,85 +785,6 @@ def _dual_vertex_parity_evidence(
         "condition": "(2*t.q + lambda_f) mod 2 == 0",
     }
 
-
-def _ambient_intersection_tensor(triangulation):
-    """Return the toric fourfold intersection tensor.
-
-    CYTools includes the canonical divisor as index zero and the nonzero fan
-    rays as indices one onward.  The frozen-conifold/nodal-point formula
-    below uses only the latter, so the convention is retained explicitly in
-    the caller.
-    """
-
-    tensor = np.asarray(
-        triangulation.fan().intersection_numbers(as_np_array=True), dtype=float
-    )
-    if tensor.ndim != 4 or tensor.shape[0] != tensor.shape[1]:
-        raise ValueError(f"unexpected ambient intersection tensor shape {tensor.shape}")
-    return tensor
-
-
-def _n_s_for_two_ray_cone(tensor, vectors, ray_points):
-    """Evaluate ``n^S_{df=0} = int_S c2(K_V^-1|_S (x) N^*S)`` for a smooth
-    2-dimensional cone generated by rays ``ray_points`` (Moritz,
-    arXiv:2305.06363, eq. around line 649: ``n^S_{df=0} =
-    int_S c2(O(K_V^-1)|_S (x) N^*S)``, expanding
-    ``K_V^-1 = sum_r D_r`` gives ``D_p.D_q.(K_V^-1-D_p).(K_V^-1-D_q)``, term
-    for term). Returns ``None`` if the rays cannot be uniquely matched to
-    fan-vector indices (evidence unavailable, not a formula failure)."""
-
-    ray_indices = []
-    for point in ray_points:
-        matches = np.flatnonzero(np.all(vectors == np.asarray(point, dtype=int), axis=1))
-        if matches.size != 1:
-            return None
-        ray_indices.append(int(matches[0]) + 1)
-    p_index, q_index = ray_indices
-    # Vectorised over the fan rays (indices 1..n_rays; index 0 is the canonical
-    # divisor and is excluded, as in the original double loop). The tensor
-    # entries are exact small integers stored as floats, so the numpy sums are
-    # exactly equal to the sequential Python sums before rounding (finding F4).
-    block = tensor[p_index, q_index]
-    l2 = block[1:, 1:].sum()
-    l_dp = block[1:, p_index].sum()
-    l_dq = block[1:, q_index].sum()
-    dpdq = block[p_index, q_index]
-    return int(round(l2 - l_dp - l_dq + dpdq))
-
-
-def _cone_has_smooth_star(fan, sigma_rays):
-    """Is ``S = D_p . D_q`` (the toric surface dual to the 2-cone
-    ``sigma=(p,q)``) itself smooth?
-
-    ``sigma`` being a smooth (unimodular) 2-cone is not sufficient: cone
-    multiplicity is multiplicative across a smooth sub-face's star (choose
-    lattice coordinates with ``p,q`` as the first two basis vectors -- any
-    cone ``tau ⊇ sigma`` then has block-triangular generator matrix, so
-    ``mult(tau) = mult(sigma) * mult(star_image(tau)) = mult(star_image(tau))``
-    since ``mult(sigma)=1``), so ``tau`` is smooth iff its star image in
-    ``N/Z{p,q}`` is -- and that star image *is* the local toric structure of
-    ``S`` itself. So ``sigma`` being a face of any non-simplicial-or-non-
-    smooth cone elsewhere in the fan means ``S`` has a genuine orbifold
-    point there, independent of whether ``sigma`` itself looks smooth in
-    isolation. Verified directly (not just cited) against real fan data in
-    validation/fuzzy_axions_2412_12012_n_s_orbifold_contamination_20260819.md
-    Sec. 4: the star-image determinant matched ``cone.is_smooth()`` for the
-    containing cone exactly, with zero exceptions.
-    """
-
-    sigma_set = set(tuple(int(value) for value in ray) for ray in sigma_rays)
-    for dimension in (3, 4):
-        for cone in fan.cones(dim=dimension, formal=True):
-            rays = np.asarray(cone.rays(), dtype=int)
-            ray_set = set(tuple(int(value) for value in ray) for ray in rays)
-            if not sigma_set.issubset(ray_set):
-                continue
-            is_simplicial = rays.shape[0] == dimension
-            if not (is_simplicial and bool(cone.is_smooth())):
-                return False
-    return True
-
-
 def _integer_kernel_basis(matrix):
     """Return an integer basis for the kernel of an integer matrix."""
 
@@ -1127,7 +805,6 @@ def _integer_kernel_basis(matrix):
     )
     return np.asarray(right.to_Matrix()[:, rank:], dtype=int)
 
-
 def _integer_coordinates(basis, vector):
     """Express ``vector`` in the columns of ``basis`` over the integers."""
 
@@ -1144,7 +821,6 @@ def _integer_coordinates(basis, vector):
         values.append(int(value))
     return np.asarray(values, dtype=int)
 
-
 def _sublattice_is_saturated(generators):
     """Check that a sublattice has no finite-index saturation defect."""
 
@@ -1158,7 +834,6 @@ def _sublattice_is_saturated(generators):
     for rows in itertools.combinations(range(rank), count):
         minors.append(_exact_determinant(generators[np.ix_(rows, range(count))]))
     return abs(math.gcd(*minors)) == 1
-
 
 def _surface_divisor_intersection(left, right, rays, cones):
     """Intersect two toric divisors on a smooth complete surface fan."""
@@ -1194,7 +869,6 @@ def _surface_divisor_intersection(left, right, rays, cones):
         result += left[next_ray] * right[ray]
     return result
 
-
 def _ambient_cartier_data(ambient_cone, divisor_point):
     """Return the local support function for one ambient toric divisor."""
 
@@ -1207,7 +881,6 @@ def _ambient_cartier_data(ambient_cone, divisor_point):
     solution = _SympyMatrix(rays.tolist()).inv() * _SympyMatrix(target.tolist())
     return tuple(solution)
 
-
 def _fraction_to_json(value):
     """Encode one exact rational as an integer or numerator/denominator pair."""
 
@@ -1215,11 +888,6 @@ def _fraction_to_json(value):
     if value.denominator == 1:
         return int(value)
     return {"numerator": int(value.numerator), "denominator": int(value.denominator)}
-
-
-POSITIVE_COMPONENT_MAX_DIMENSION = 3
-MAX_SECTION_LATTICE_POINTS = 100_000
-
 
 def _exact_fraction(value):
     """Convert an exact SymPy or Python rational to ``Fraction``."""
@@ -1231,7 +899,6 @@ def _exact_fraction(value):
     if numerator is not None and denominator is not None:
         return Fraction(int(numerator), int(denominator))
     return Fraction(value)
-
 
 def _ambient_anticanonical_cartier_data(ambient_cone):
     """Return exact local Cartier data for ``-K_V`` on a simplicial cone.
@@ -1254,7 +921,6 @@ def _ambient_anticanonical_cartier_data(ambient_cone):
         return None
     return tuple(_exact_fraction(value) for value in solution)
 
-
 def _rational_coordinates(basis, vector):
     """Express a rational vector in a full-column-rank rational basis."""
 
@@ -1268,7 +934,6 @@ def _rational_coordinates(basis, vector):
         return None
     return tuple(_exact_fraction(value) for value in solution)
 
-
 def _fraction_dot(left, right):
     """Take an exact dot product."""
 
@@ -1277,6 +942,311 @@ def _fraction_dot(left, right):
         for left_value, right_value in zip(left, right)
     )
 
+
+def _phase_json(value):
+    """Encode a phase exponent in the exact common scalar format."""
+
+    return _fraction_to_json(Fraction(value))
+
+
+def _cox_alpha_lattice_witness(sigma_rays, vector):
+    """Solve the exact Cox phase equation for one fixed component.
+
+    The witness is the rational solution of
+
+    ``vector + sum(alpha_p * p) = n``
+
+    with ``n`` in the ambient lattice.  The quotient-lattice condition from
+    Moritz eq. (4.30) guarantees that the displayed system has a solution;
+    setting all free parameters to zero gives a deterministic representative.
+    Keep both ``alpha`` and ``n`` because the latter is the lattice witness,
+    not a floating-point reconstruction of the phase.
+    """
+
+    sigma_rays = tuple(tuple(int(value) for value in ray) for ray in sigma_rays)
+    vector = tuple(Fraction(value) for value in vector)
+    rank = _exact_rank(np.asarray(sigma_rays, dtype=int)) if sigma_rays else 0
+    if rank != len(sigma_rays):
+        return {
+            "status": "unavailable",
+            "reason_code": "nonsaturated_fixed_cone_lattice",
+            "reason": "fixed-cone generators are linearly dependent",
+            "alpha": None,
+            "lattice_vector": None,
+        }
+    if not sigma_rays:
+        if not _is_integral(vector):
+            return {
+                "status": "unavailable",
+                "reason_code": "phase_not_in_ambient_lattice",
+                "reason": "the empty-cone phase has no integral lattice witness",
+                "alpha": [],
+                "lattice_vector": None,
+            }
+        return {
+            "status": "certified",
+            "equation": "t + nu + sum(alpha_p p) = n in N",
+            "alpha": [],
+            "lattice_vector": _integer_vector(vector),
+        }
+
+    ray_matrix = _SympyMatrix(np.asarray(sigma_rays, dtype=int).T.tolist())
+    identity = _SympyMatrix.eye(4)
+    rhs = _SympyMatrix([
+        -_SympyMatrix([value.numerator for value in vector])[index, 0]
+        / vector[index].denominator
+        for index in range(4)
+    ])
+    system = ray_matrix.row_join(-identity)
+    try:
+        solution, parameters = system.gauss_jordan_solve(rhs)
+    except (ValueError, TypeError):
+        return {
+            "status": "unavailable",
+            "reason_code": "cox_phase_witness_unavailable",
+            "reason": "the exact Cox phase system has no rational solution",
+            "alpha": None,
+            "lattice_vector": None,
+        }
+    substitutions = {parameter: 0 for parameter in parameters}
+    solution = [value.subs(substitutions) for value in solution]
+    alpha = tuple(_exact_fraction(value) for value in solution[: len(sigma_rays)])
+    # ``system`` is ``[A | -I] [alpha; n] = -vector``, so the second
+    # solution block is already the ambient lattice witness ``n``.  Negating
+    # it would record ``-n`` and no longer certify
+    # ``vector + A*alpha = n`` in Eq. (4.30).
+    lattice_vector = tuple(
+        _exact_fraction(value) for value in solution[len(sigma_rays) :]
+    )
+    if not _is_integral(lattice_vector):
+        return {
+            "status": "unavailable",
+            "reason_code": "cox_phase_lattice_witness_nonintegral",
+            "reason": "the exact Cox phase solution does not end at an ambient lattice point",
+            "alpha": [_fraction_to_json(value) for value in alpha],
+            "lattice_vector": [_fraction_to_json(value) for value in lattice_vector],
+        }
+    return {
+        "status": "certified",
+        "equation": "t + nu + sum(alpha_p p) = n in N",
+        "alpha": [_fraction_to_json(value) for value in alpha],
+        "lattice_vector": _integer_vector(lattice_vector),
+    }
+
+
+def _quotient_character_coordinates(q, invariant_basis, quotient_annihilator):
+    """Express a restricted dual point in exact quotient-lattice coordinates."""
+
+    q = tuple(Fraction(value) for value in q)
+    basis = _SympyMatrix(np.asarray(invariant_basis, dtype=int).tolist())
+    annihilator = _SympyMatrix(np.asarray(quotient_annihilator, dtype=int).T.tolist())
+    target = basis.T * _SympyMatrix([_exact_fraction(value) for value in q])
+    try:
+        solution = annihilator.gauss_jordan_solve(target)[0]
+    except (ValueError, TypeError):
+        return None
+    if any(getattr(value, "free_symbols", set()) for value in solution):
+        return None
+    return tuple(_exact_fraction(value) for value in solution)
+
+
+def _component_chart_evidence(sigma_rays, fan_cones, ambient_rays, stabilizer_order):
+    """Record an exact Cox chart for the fixed toric orbit."""
+
+    sigma = frozenset(tuple(int(value) for value in ray) for ray in sigma_rays)
+    fan_cone_rows = fan_cones if fan_cones is not None else ()
+    fan_cones = tuple(
+        frozenset(tuple(int(value) for value in ray) for ray in cone)
+        for cone in fan_cone_rows
+    )
+    chart_exists = any(sigma.issubset(cone) for cone in fan_cones)
+    ambient_ray_rows = ambient_rays if ambient_rays is not None else ()
+    ambient_rays = tuple(
+        tuple(int(value) for value in ray) for ray in ambient_ray_rows
+    )
+    return {
+        "status": "certified" if chart_exists else "unavailable",
+        "reason_code": None if chart_exists else "cox_chart_unavailable",
+        "reason": None if chart_exists else "the fixed cone is absent from the supplied fan",
+        "chart_cone": [list(ray) for ray in sorted(sigma)],
+        "cox_coordinates": {
+            str(ray): (0 if ray in sigma else 1) for ray in sorted(ambient_rays)
+        },
+        "nonzero_coordinate_rays": [list(ray) for ray in sorted(set(ambient_rays) - sigma)],
+        "irrelevant_ideal_avoided": bool(chart_exists),
+        "stabilizer_order": int(stabilizer_order),
+        "stabilizer_method": "exact_gcd_of_maximal_cone_minors",
+    }
+
+
+def invariant_restricted_monomial_support(
+    dual_points,
+    ambient_rays,
+    sigma_rays,
+    matrix,
+    torus_shift,
+    lambda_f,
+    *,
+    fan_cones=None,
+    invariant_basis=None,
+    quotient_annihilator=None,
+):
+    """Compute the exact covariant monomials surviving on one fixed component.
+
+    Use all exact dual lattice points, the Cox monomial
+    ``s_q = prod_p x_p^(<p,q>+1)``, and the coefficient covariance in Moritz
+    eq. (4.42).  This is the owner-approved derived implementation for the
+    nonsmooth branch: a restriction is identically zero exactly when this
+    invariant support is empty.  No complete restricted line system is
+    reconstructed.
+    """
+
+    if dual_points is None:
+        return {
+            "status": "unavailable",
+            "reason_code": "dual_lattice_points_unavailable",
+            "reason": "exact dual lattice points are required for invariant support",
+            "support": [],
+            "newton_face": [],
+            "restriction_identically_zero": None,
+        }
+    try:
+        dual = np.asarray(dual_points, dtype=int)
+        rays = tuple(tuple(int(value) for value in ray) for ray in ambient_rays)
+        sigma = tuple(tuple(int(value) for value in ray) for ray in sigma_rays)
+        if dual.ndim != 2 or dual.shape[1] != 4 or not len(dual):
+            raise ValueError("dual lattice points must have shape (n, 4)")
+        if len(set(tuple(int(value) for value in row) for row in dual.tolist())) != len(dual):
+            raise ValueError("dual lattice points must be unique")
+        if not rays or any(len(ray) != 4 for ray in rays):
+            raise ValueError("ambient ray data is unavailable")
+        matrix = np.asarray(matrix, dtype=int)
+        torus_shift = tuple(Fraction(value) for value in torus_shift)
+        if len(torus_shift) != 4:
+            raise ValueError("torus shift must have rank four")
+    except (TypeError, ValueError, OverflowError) as exc:
+        return {
+            "status": "unavailable",
+            "reason_code": "invalid_exact_support_input",
+            "reason": str(exc),
+            "support": [],
+            "newton_face": [],
+            "restriction_identically_zero": None,
+        }
+
+    point_rows = [tuple(int(value) for value in row) for row in dual.tolist()]
+    point_set = set(point_rows)
+    mapped = {
+        point: tuple(int(value) for value in (matrix.T @ np.asarray(point, dtype=int)).tolist())
+        for point in point_rows
+    }
+    if any(image not in point_set for image in mapped.values()):
+        return {
+            "status": "unavailable",
+            "reason_code": "dual_lattice_action_not_preserved",
+            "reason": "the exact dual lattice point set is not preserved by L",
+            "support": [],
+            "newton_face": [],
+            "restriction_identically_zero": None,
+        }
+    if invariant_basis is None:
+        invariant_basis = _integer_kernel_basis(np.eye(4, dtype=int) - matrix)
+    if quotient_annihilator is None:
+        sigma_matrix = np.asarray(sigma, dtype=int).T if sigma else np.empty((4, 0), dtype=int)
+        sigma_coordinates = (
+            _integer_coordinates(invariant_basis, ray)
+            for ray in sigma
+        )
+        coordinates = [value for value in sigma_coordinates if value is not None]
+        sigma_matrix = (
+            np.column_stack(coordinates)
+            if coordinates
+            else np.empty((invariant_basis.shape[1], 0), dtype=int)
+        )
+        quotient_annihilator = _integer_kernel_basis(sigma_matrix.T).T
+
+    support = []
+    reference_q = None
+    covariance = []
+    for q in point_rows:
+        image = mapped[q]
+        phase = _fraction_dot(torus_shift, q) + Fraction(int(lambda_f), 2)
+        exponent = tuple(_fraction_dot(ray, q) + 1 for ray in rays)
+        if any(value.denominator != 1 or value < 0 for value in exponent):
+            return {
+                "status": "unavailable",
+                "reason_code": "invalid_anticanonical_monomial_exponent",
+                "reason": "a dual lattice point produced a nonintegral or negative Cox exponent",
+                "support": [],
+                "newton_face": [],
+                "restriction_identically_zero": None,
+            }
+        survives_chart = all(
+            exponent[rays.index(ray)] == 0 for ray in sigma
+        )
+        fixed_q = image == q
+        coefficient_allowed = (phase.denominator == 1) if fixed_q else True
+        covariance.append({
+            "q": list(q),
+            "image_q": list(image),
+            "fixed_dual_point": bool(fixed_q),
+            "phase_exponent": _phase_json(phase),
+            "coefficient_allowed": bool(coefficient_allowed),
+            "equation": "psi[L(q)] = exp(2*pi*i*(<t,q> + lambda_f/2))*psi[q]",
+        })
+        if not survives_chart or not coefficient_allowed:
+            continue
+        if reference_q is None:
+            reference_q = q
+        character = _quotient_character_coordinates(
+            tuple(left - right for left, right in zip(q, reference_q)),
+            invariant_basis,
+            quotient_annihilator,
+        )
+        if character is None:
+            return {
+                "status": "unavailable",
+                "reason_code": "restricted_character_coordinates_unavailable",
+                "reason": "a surviving dual point has no exact quotient-character coordinate",
+                "support": [],
+                "newton_face": [],
+                "restriction_identically_zero": None,
+            }
+        support.append({
+            "q": list(q),
+            "orbit_q": [list(q), list(image)] if image != q else [list(q)],
+            "image_q": list(image),
+            "cox_exponents": [int(value) for value in exponent],
+            "restricted_character": [_fraction_to_json(value) for value in character],
+            "phase_exponent": _phase_json(phase),
+            "chart_nonzero": True,
+        })
+    unique_support = {}
+    for item in support:
+        orbit_key = tuple(sorted(tuple(point) for point in item["orbit_q"]))
+        unique_support.setdefault(orbit_key, item)
+    support = [unique_support[key] for key in sorted(unique_support)]
+    return {
+        "status": "certified",
+        "reason_code": None,
+        "reason": None,
+        "method": "exact_dual_lattice_monomials_and_eq_4.42_covariance",
+        "source_anchor": "Moritz KS_orientifolds.tex lines 285-296 and 587-601",
+        "dual_point_count": int(len(point_rows)),
+        "dual_point_source": "CYTools dual.points/vertices exact integer fallback",
+        "ambient_rays": [list(ray) for ray in rays],
+        "covariance": covariance,
+        "support": support,
+        "newton_face": [item["restricted_character"] for item in support],
+        "restriction_identically_zero": not support,
+        "chart": _component_chart_evidence(
+            sigma,
+            fan_cones,
+            rays,
+            _integer_lattice_index(np.asarray(sigma, dtype=int).T if sigma else np.empty((4, 0), dtype=int)),
+        ),
+        "restriction_statement": "restriction is identically zero iff invariant support is empty",
+    }
 
 def _primitive_quotient_vector(vector):
     """Return a primitive quotient ray and its positive integral scale."""
@@ -1287,7 +1257,6 @@ def _primitive_quotient_vector(vector):
         return None
     primitive = tuple(int(value // divisor) for value in vector)
     return primitive, divisor
-
 
 def _cone_is_smooth_in_lattice(cone, dimension):
     """Test smoothness of a simplicial cone in ``Z^dimension`` exactly."""
@@ -1308,7 +1277,6 @@ def _cone_is_smooth_in_lattice(cone, dimension):
         )
     return math.gcd(*minors) == 1
 
-
 def _cone_facet_normals(cone):
     """Return exact facet covectors for a full-dimensional simplicial cone."""
 
@@ -1318,7 +1286,6 @@ def _cone_facet_normals(cone):
         tuple(_exact_fraction(value) for value in row)
         for row in inverse.tolist()
     )
-
 
 def _intersection_cone_extreme_rays(left, right, dimension):
     """Return the exact extreme rays of two full-dimensional cones.
@@ -1350,7 +1317,6 @@ def _intersection_cone_extreme_rays(left, right, dimension):
             ):
                 intersection_rays.add(_primitive_integer_from_exact(candidate))
     return tuple(sorted(intersection_rays))
-
 
 def _strict_positive_hull_certificate(rays, dimension):
     """Check that the origin is strictly inside the convex hull of ``rays``.
@@ -1385,7 +1351,6 @@ def _strict_positive_hull_certificate(rays, dimension):
         method="highs",
     )
     return bool(result.success and result.x[-1] > 1e-9)
-
 
 def _complete_simplicial_fan(maximal_cones, dimension):
     """Check completeness, intersections, and simplicity of a finite fan.
@@ -1464,7 +1429,6 @@ def _complete_simplicial_fan(maximal_cones, dimension):
                 return False
     return True
 
-
 def _toric_section_lattice_points(rays, coefficients, dimension):
     """Enumerate lattice points of a bounded toric divisor polytope exactly."""
 
@@ -1536,8 +1500,428 @@ def _toric_section_lattice_points(rays, coefficients, dimension):
         "vertices": tuple(sorted(vertices)),
     }
 
+def _derive_zero_dimensional_local_evidence(auxiliary_fan, matrix, component):
+    """Derive the exact local certificate for a contained point.
 
-def _positive_component_section_certificate(auxiliary_fan, matrix, component):
+    Use the invariant lattice of ``matrix`` for the local cone, and use the
+    auxiliary-fan ambient provenance for the restriction of ``-K_V``.  The
+    returned record is evidence, not an acceptance shortcut: a nonsmooth
+    local cone or missing/inconsistent Cartier provenance remains explicit so
+    ``_zero_dimensional_component_local_certificate`` can fail closed.
+    """
+
+    schema = "cyaxiverse-zero-dimensional-local-evidence-1.0"
+    matrix = np.asarray(matrix, dtype=int)
+    sigma_rays = tuple(
+        tuple(int(value) for value in ray)
+        for ray in component.get("sigma_rays", [])
+    )
+    sigma_dimension = int(component.get("sigma_dimension", len(sigma_rays)))
+    invariant_basis = _integer_kernel_basis(np.eye(4, dtype=int) - matrix)
+    fixed_rank = int(invariant_basis.shape[1])
+    base = {
+        "local_evidence_schema": schema,
+        "method": "exact_invariant_lattice_and_auxiliary_fan_provenance",
+        "source_anchor": (
+            "Moritz KS_orientifolds.tex lines 631-657; "
+            "owner-approved zero-dimensional local certificate contract"
+        ),
+        "fixed_lattice_basis": np.asarray(invariant_basis, dtype=int).tolist(),
+        "sigma_rays": [list(ray) for ray in sigma_rays],
+        "sigma_dimension": sigma_dimension,
+        "fixed_lattice_rank": fixed_rank,
+    }
+
+    def unavailable(reason_code, reason, **extra):
+        return {
+            **base,
+            **extra,
+            "status": "unavailable",
+            "reason_code": reason_code,
+            "reason": reason,
+        }
+
+    if fixed_rank != sigma_dimension or fixed_rank < 1:
+        return unavailable(
+            "zero_dimensional_local_cone_unavailable",
+            (
+                "the contained point has no positive-rank full-dimensional "
+                "local cone in the invariant lattice"
+            ),
+        )
+    if len(sigma_rays) != fixed_rank:
+        return unavailable(
+            "zero_dimensional_local_cone_unavailable",
+            "the local fixed cone is not simplicial and full-dimensional",
+        )
+
+    sigma_coordinates = []
+    for ray in sigma_rays:
+        coordinates = _integer_coordinates(invariant_basis, ray)
+        if coordinates is None:
+            return unavailable(
+                "zero_dimensional_local_cone_unavailable",
+                "a fixed-cone ray has no integral coordinate in the invariant lattice",
+            )
+        sigma_coordinates.append(coordinates)
+    local_matrix = np.column_stack(sigma_coordinates)
+    determinant = abs(_exact_determinant(local_matrix))
+    local_cone = {
+        "rays": [list(ray) for ray in sigma_rays],
+        "coordinates": [coordinates.tolist() for coordinates in sigma_coordinates],
+        "determinant": int(determinant),
+    }
+
+    containing_cones = []
+    sigma_set = set(sigma_rays)
+    for cone in auxiliary_fan or ():
+        rays = tuple(
+            tuple(int(value) for value in ray)
+            for ray in cone.get("rays", [])
+        )
+        if int(cone.get("dimension", -1)) != fixed_rank:
+            continue
+        if not sigma_set.issubset(set(rays)):
+            continue
+        if not bool(cone.get("simplicial")) or len(rays) != fixed_rank:
+            return unavailable(
+                "zero_dimensional_local_cone_unavailable",
+                "the containing auxiliary local cone is not simplicial",
+                local_cone=local_cone,
+            )
+        containing_cones.append((cone, rays))
+    if not containing_cones:
+        return unavailable(
+            "zero_dimensional_local_cone_unavailable",
+            "no full-dimensional auxiliary local cone has been identified",
+            local_cone=local_cone,
+        )
+
+    restricted_supports = []
+    ambient_determinants = []
+    provenance = []
+    for cone, rays in containing_cones:
+        ambient_cones = cone.get("ambient_cones", [])
+        if not ambient_cones:
+            return unavailable(
+                "zero_dimensional_restricted_cartier_unavailable",
+                "the auxiliary local cone has no selected-fan provenance",
+                local_cone=local_cone,
+            )
+        for ambient in ambient_cones:
+            ambient_rays = tuple(
+                tuple(int(value) for value in ray)
+                for ray in ambient
+            )
+            ambient_array = np.asarray(ambient_rays, dtype=int)
+            if ambient_array.shape != (4, 4):
+                return unavailable(
+                    "zero_dimensional_ambient_provenance_unavailable",
+                    "selected-fan provenance is not a full-dimensional ambient cone",
+                    local_cone=local_cone,
+                    ambient_cone_provenance=provenance,
+                    ambient_cone_determinants=ambient_determinants,
+                )
+            ambient_determinant = abs(_exact_determinant(ambient_array))
+            ambient_determinants.append(int(ambient_determinant))
+            ambient_data = _ambient_anticanonical_cartier_data(ambient_rays)
+            if ambient_data is None:
+                reason_code = (
+                    "zero_dimensional_ambient_provenance_cone_not_smooth"
+                    if ambient_determinant != 1
+                    else "zero_dimensional_restricted_cartier_unavailable"
+                )
+                reason = (
+                    "selected-fan provenance contains a non-unimodular ambient cone"
+                    if ambient_determinant != 1
+                    else (
+                        "selected-fan provenance has no integral local "
+                        "anticanonical Cartier support"
+                    )
+                )
+                return unavailable(
+                    reason_code,
+                    reason,
+                    local_cone=local_cone,
+                    ambient_cone_provenance=provenance,
+                    ambient_cone_determinants=ambient_determinants,
+                )
+            restricted = tuple(
+                sum(
+                    int(invariant_basis[row, column])
+                    * _exact_fraction(ambient_data[row])
+                    for row in range(4)
+                )
+                for column in range(fixed_rank)
+            )
+            if any(value.denominator != 1 for value in restricted):
+                reason_code = (
+                    "zero_dimensional_ambient_provenance_cone_not_smooth"
+                    if ambient_determinant != 1
+                    else "zero_dimensional_restricted_cartier_unavailable"
+                )
+                reason = (
+                    "selected-fan provenance contains a non-unimodular ambient cone"
+                    if ambient_determinant != 1
+                    else "the restricted anticanonical Cartier support is not integral"
+                )
+                return unavailable(
+                    reason_code,
+                    reason,
+                    local_cone=local_cone,
+                    ambient_cone_provenance=provenance,
+                    ambient_cone_determinants=ambient_determinants,
+                )
+            restricted_supports.append(restricted)
+            provenance.append(
+                {
+                    "auxiliary_cone": [list(ray) for ray in rays],
+                    "ambient_cone": [list(ray) for ray in ambient_rays],
+                    "ambient_cone_determinant": int(ambient_determinant),
+                    "ambient_cone_smooth_unimodular": ambient_determinant == 1,
+                    "ambient_cartier_support": [
+                        _fraction_to_json(value) for value in ambient_data
+                    ],
+                    "restricted_cartier_support": [
+                        _fraction_to_json(value) for value in restricted
+                    ],
+                }
+            )
+
+    if any(support != restricted_supports[0] for support in restricted_supports[1:]):
+        return unavailable(
+            "zero_dimensional_restricted_cartier_unavailable",
+            "selected-fan provenance gives inconsistent restricted Cartier support",
+            local_cone=local_cone,
+            ambient_cone_provenance=provenance,
+            ambient_cone_determinants=ambient_determinants,
+        )
+
+    smooth = determinant == 1
+    ambient_smooth = bool(ambient_determinants) and all(
+        value == 1 for value in ambient_determinants
+    )
+    evidence_certified = ambient_smooth and smooth
+    evidence_reason_code = (
+        None
+        if evidence_certified
+        else "zero_dimensional_ambient_provenance_cone_not_smooth"
+        if not ambient_smooth
+        else "zero_dimensional_local_fan_not_smooth"
+    )
+    evidence_reason = (
+        None
+        if evidence_certified
+        else (
+            "selected-FRST ambient provenance contains a non-unimodular cone: "
+            f"determinants={ambient_determinants}"
+        )
+        if not ambient_smooth
+        else (
+            "the invariant fixed-cone determinant is non-unimodular: "
+            f"determinant={determinant}"
+        )
+    )
+    return {
+        **base,
+        "status": "certified" if evidence_certified else "unavailable",
+        "reason_code": evidence_reason_code,
+        "reason": evidence_reason,
+        "local_cone_determinant": int(determinant),
+        "ambient_cone_determinants": ambient_determinants,
+        "ambient_provenance_smoothness": {
+            "status": "certified" if ambient_smooth else "rejected",
+            "all_unimodular": ambient_smooth,
+            "method": "exact_selected_frst_provenance_cone_determinants",
+            "determinants": ambient_determinants,
+        },
+        "local_cone": local_cone,
+        "local_smoothness": {
+            "status": "certified" if smooth else "rejected",
+            "smooth": smooth,
+            "method": "exact_unimodular_local_cone_determinant",
+            "determinant": int(determinant),
+        },
+        "restricted_cartier": {
+            "status": "certified",
+            "integral": True,
+            "method": "exact_restriction_of_anticanonical_cartier_support",
+            "support": [
+                _fraction_to_json(value) for value in restricted_supports[0]
+            ],
+            "provenance": provenance,
+        },
+    }
+
+
+def _zero_dimensional_component_local_certificate(auxiliary_fan, matrix, component):
+    """Require explicit local smoothness and Cartier evidence for a point.
+
+    A contained zero-dimensional component is not certified by its dimension
+    alone.  Callers must supply a local certificate with integral restricted
+    Cartier data, smooth selected-FRST ambient provenance cones, and a
+    unimodular invariant local cone.  Determinant-two and determinant-four
+    ambient or invariant cones remain unavailable; no ordinary-Euler point
+    contribution is inferred for them.
+    """
+    evidence = component.get("zero_dimensional_local_smoothness_cartier_evidence")
+    base = {
+        "fixed_toric_dimension": 0,
+        "local_evidence_schema": "cyaxiverse-zero-dimensional-local-evidence-1.0",
+    }
+    if not isinstance(evidence, dict):
+        return {
+            **base,
+            "status": "unavailable",
+            "reason_code": "missing_zero_dimensional_local_evidence",
+            "reason": (
+                "contained zero-dimensional component requires explicit local "
+                "smoothness and Cartier evidence"
+            ),
+        }
+    if evidence.get("status") != "certified":
+        return {
+            **base,
+            "status": "unavailable",
+            "reason_code": evidence.get(
+                "reason_code", "zero_dimensional_local_evidence_unavailable"
+            ),
+            "reason": evidence.get(
+                "reason", "local smoothness/Cartier evidence is not certified"
+            ),
+            "local_evidence": evidence,
+    }
+
+    # Production-generated evidence carries separate ambient provenance
+    # determinants and the invariant fixed-cone determinant.  Keep the
+    # legacy scalar fallback for the hand-authored unit fixtures, whose
+    # contract predates this provenance split and intentionally supplies only
+    # one local-certificate determinant.
+    generated_provenance = "ambient_cone_determinants" in evidence
+    if not generated_provenance and auxiliary_fan:
+        return {
+            **base,
+            "status": "unavailable",
+            "reason_code": "zero_dimensional_ambient_provenance_unavailable",
+            "reason": (
+                "production zero-dimensional evidence lacks exact ambient "
+                "selected-FRST provenance determinants"
+            ),
+            "local_evidence": evidence,
+        }
+    if generated_provenance:
+        ambient_determinants = evidence.get("ambient_cone_determinants")
+        if not isinstance(ambient_determinants, (list, tuple)) or not ambient_determinants:
+            return {
+                **base,
+                "status": "unavailable",
+                "reason_code": "zero_dimensional_ambient_provenance_unavailable",
+                "reason": (
+                    "contained zero-dimensional component lacks exact ambient "
+                    "selected-FRST provenance determinants"
+                ),
+                "local_evidence": evidence,
+            }
+        parsed_ambient_determinants = []
+        for value in ambient_determinants:
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+                return {
+                    **base,
+                    "status": "unavailable",
+                    "reason_code": "zero_dimensional_ambient_provenance_unavailable",
+                    "reason": "ambient provenance determinant is not an exact integer",
+                    "local_evidence": evidence,
+                }
+            parsed_ambient_determinants.append(abs(int(value)))
+        ambient_smoothness = evidence.get("ambient_provenance_smoothness", {})
+        if any(value != 1 for value in parsed_ambient_determinants):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason_code": "zero_dimensional_ambient_provenance_cone_not_smooth",
+                "reason": (
+                    "selected-FRST ambient provenance contains a non-unimodular "
+                    f"local cone: determinants={parsed_ambient_determinants}"
+                ),
+                "local_evidence": evidence,
+            }
+        if (
+            not isinstance(ambient_smoothness, dict)
+            or ambient_smoothness.get("status") != "certified"
+            or ambient_smoothness.get("all_unimodular") is not True
+            or ambient_smoothness.get("determinants") != parsed_ambient_determinants
+        ):
+            return {
+                **base,
+                "status": "unavailable",
+                "reason_code": "zero_dimensional_ambient_provenance_unavailable",
+                "reason": "ambient provenance smoothness evidence is incomplete",
+                "local_evidence": evidence,
+            }
+        determinant = evidence.get("local_cone_determinant")
+    else:
+        determinant = evidence.get("ambient_cone_determinant")
+    if isinstance(determinant, bool) or not isinstance(
+        determinant, (int, np.integer)
+    ):
+        determinant = None
+    else:
+        determinant = abs(int(determinant))
+    if determinant != 1:
+        return {
+            **base,
+            "status": "unavailable",
+            "reason_code": "zero_dimensional_local_fan_not_smooth",
+            "reason": (
+                "contained zero-dimensional component lacks a unimodular local "
+                "cone; singular quotient points are unavailable"
+            ),
+            "local_evidence": evidence,
+        }
+    smoothness = evidence.get("local_smoothness", {})
+    cartier = evidence.get("restricted_cartier", {})
+    if (
+        not isinstance(smoothness, dict)
+        or smoothness.get("status") != "certified"
+        or smoothness.get("smooth") is not True
+    ):
+        return {
+            **base,
+            "status": "unavailable",
+            "reason_code": "zero_dimensional_local_smoothness_unavailable",
+            "reason": "the local fixed stratum is not certified smooth",
+            "local_evidence": evidence,
+        }
+    if (
+        not isinstance(cartier, dict)
+        or cartier.get("status") != "certified"
+        or cartier.get("integral") is not True
+    ):
+        return {
+            **base,
+            "status": "unavailable",
+            "reason_code": "zero_dimensional_restricted_cartier_unavailable",
+            "reason": "the local restricted Cartier data is not certified integral",
+            "local_evidence": evidence,
+        }
+    return {
+        **base,
+        "status": "certified",
+        "reason_code": None,
+        "reason": None,
+        "local_evidence": evidence,
+        "fixed_cone_lattice": {
+            "source_ray_sublattice_saturated": True,
+            "local_cone_determinant": int(determinant),
+            "smooth_unimodular": True,
+        },
+    }
+
+
+def _positive_component_section_certificate(
+    auxiliary_fan, matrix, component, *, restricted_support=None,
+    allow_contained=False,
+):
     """Certify Sec. 4.6 for a positive-dimensional non-vanishing component.
 
     The component is the toric orbit closure of ``sigma`` in the auxiliary
@@ -1549,9 +1933,9 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
       restricted divisor polytope, equivalently the support function is
       convex on the complete fan;
     * orbifold avoidance: for each non-smooth cone with positive-dimensional
-      orbit, the restricted section polytope face has exactly one lattice
-      point.  More than one point gives a non-monomial Laurent restriction,
-      which generically has a zero on that orbit.
+      orbit, the **actual invariant restricted support** face has exactly one
+      lattice point.  More than one point gives a non-monomial Laurent
+      restriction, which generically has a zero on that orbit.
 
     Missing provenance, non-Cartier data, incomplete fans, unsupported
     dimensions, and bounded-search limits are unavailable rather than
@@ -1573,6 +1957,9 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
         "fixed_toric_dimension": component_dimension,
         "fixed_lattice_basis": np.asarray(invariant_basis, dtype=int).tolist(),
     }
+
+    if restricted_support is None:
+        restricted_support = component.get("invariant_restricted_support")
 
     def unavailable(reason_code, reason, **extra):
         return {
@@ -1614,6 +2001,19 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
                 f"certificate supports dimensions 1 through {POSITIVE_COMPONENT_MAX_DIMENSION}"
             ),
         )
+    if not isinstance(restricted_support, dict) or restricted_support.get("status") != "certified":
+        return unavailable(
+            "missing_invariant_restricted_support",
+            "transverse nondegeneracy requires the exact invariant restricted support",
+            restricted_support=restricted_support,
+        )
+    contained_support = restricted_support.get("restriction_identically_zero") is True
+    if contained_support and not allow_contained:
+        return unavailable(
+            "component_is_contained_in_hypersurface",
+            "a contained component cannot use the transverse section certificate",
+            restricted_support=restricted_support,
+        )
     if sigma_dimension != len(sigma_rays):
         return unavailable(
             "nonsaturated_fixed_cone_lattice",
@@ -1647,11 +2047,12 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
         if sigma_coordinates
         else np.empty((fixed_rank, 0), dtype=int)
     )
-    if not _sublattice_is_saturated(sigma_matrix):
-        return unavailable(
-            "nonsaturated_fixed_cone_lattice",
-            "the fixed-cone rays generate a proper finite-index sublattice of the invariant lattice",
-        )
+    source_cone_sublattice_saturated = _sublattice_is_saturated(sigma_matrix)
+    # The orbit closure uses the saturated real span of sigma.  Its character
+    # lattice is therefore the exact integer annihilator below, even when the
+    # source simplicial cone has a finite quotient index.  This does not make
+    # a contained component smooth; callers retain the separate smooth-only
+    # boundary for that branch.
     quotient_annihilator = _integer_kernel_basis(sigma_matrix.T).T
     if quotient_annihilator.shape != (component_dimension, fixed_rank):
         return unavailable(
@@ -1826,8 +2227,35 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
         "support_inequality_margins": support_inequality_margins,
         "witnesses": nef_witnesses,
     }
+    anchor_record = maximal_records[0]
+    anchor_matrix = _SympyMatrix([list(ray) for ray in anchor_record["rays"]])
+    anchor_rhs = _SympyMatrix([
+        -_exact_fraction(coefficients[ray]) for ray in anchor_record["rays"]
+    ])
+    newton_origin = tuple(
+        _exact_fraction(value)
+        for value in (anchor_matrix.inv() * anchor_rhs)
+    )
+    actual_newton_face = []
+    for item in restricted_support.get("newton_face", []):
+        actual_newton_face.append([
+            _fraction_to_json(
+                newton_origin[index] + _exact_fraction(value)
+            )
+            for index, value in enumerate(item)
+        ])
+    restricted_support_with_origin = dict(restricted_support)
+    restricted_support_with_origin["newton_face"] = actual_newton_face
+    restricted_support_with_origin["newton_origin"] = [
+        _fraction_to_json(value) for value in newton_origin
+    ]
     fan_data = {
         **base,
+        "fixed_cone_lattice": {
+            "source_ray_sublattice_saturated": source_cone_sublattice_saturated,
+            "quotient_character_lattice_saturated": True,
+            "method": "exact_integer_annihilator_of_saturated_real_span",
+        },
         "quotient_annihilator": np.asarray(quotient_annihilator, dtype=int).tolist(),
         "quotient_rays": [list(ray) for ray in sorted(coefficients)],
         "quotient_maximal_cones": [
@@ -1837,7 +2265,98 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
             {"ray": list(ray), "coefficient": _fraction_to_json(coefficients[ray])}
             for ray in sorted(coefficients)
         ],
+        "restricted_support": restricted_support_with_origin,
+        "section_genericity": {
+            "status": "certified",
+            "scope": "generic_member_of_actual_invariant_restricted_support",
+            "nondegeneracy": "required_on_each_full_dimensional_orbit_newton_face",
+            "method": "exact_support_face_plus_eq_4.42_coefficient_covariance",
+            "support_count": len(restricted_support.get("support", [])),
+            "newton_face": actual_newton_face,
+        },
     }
+    if allow_contained:
+        # Contained components need only their exact toric fan/Cartier data
+        # for the smooth Chern/Eq. (4.50) branch.  They must never trigger a
+        # reconstructed complete section line system.
+        contained_singular_cones = []
+        all_faces = {frozenset()}
+        for record in maximal_records:
+            rays = record["rays"]
+            for size in range(1, component_dimension + 1):
+                all_faces.update(
+                    frozenset(face)
+                    for face in itertools.combinations(rays, size)
+                )
+        contained_singular_cones = [
+            tuple(sorted(cone))
+            for cone in all_faces
+            if cone and not _cone_is_smooth_in_lattice(
+                tuple(cone), component_dimension
+            )
+        ]
+        fan_data["section_genericity"] = {
+            "status": "not_applicable",
+            "scope": "contained_component_toric_fan_only",
+            "reason": "Eq. (4.42) support is empty; no transverse section is evaluated",
+        }
+        if contained_singular_cones:
+            return {
+                **fan_data,
+                "status": "unavailable",
+                "reason_code": "singular_contained_component_fan",
+                "reason": "a contained component requires a smooth toric fan",
+                "nefness": nefness,
+                "orbifold_intersection": {
+                    "status": "unavailable",
+                    "reason_code": "singular_contained_component_fan",
+                    "reason": "a contained component requires a smooth toric fan",
+                    "singular_cones": [
+                        [list(ray) for ray in cone]
+                        for cone in contained_singular_cones
+                    ],
+                },
+            }
+        return {
+            **fan_data,
+            "status": "certified",
+            "reason_code": None,
+            "reason": None,
+            "nefness": nefness,
+            "orbifold_intersection": {
+                "status": "not_applicable",
+                "avoided": None,
+                "method": "contained_component_smooth_fan_gate",
+            },
+        }
+    support_points = tuple(
+        tuple(_exact_fraction(value) for value in item)
+        for item in actual_newton_face
+    )
+    if not support_points:
+        return {
+            **fan_data,
+            "status": "unavailable",
+            "reason_code": "empty_invariant_restricted_support",
+            "reason": "a transverse component has no invariant restricted monomial",
+            "nefness": nefness,
+            "orbifold_intersection": {
+                "status": "unavailable",
+                "reason_code": "empty_invariant_restricted_support",
+                "reason": "a transverse component has no invariant restricted monomial",
+            },
+        }
+    restricted_support_coefficients = {
+        ray: -min(_fraction_dot(point, ray) for point in support_points)
+        for ray in coefficients
+    }
+    fan_data["restricted_support_coefficients"] = [
+        {
+            "ray": list(ray),
+            "coefficient": _fraction_to_json(restricted_support_coefficients[ray]),
+        }
+        for ray in sorted(restricted_support_coefficients)
+    ]
     if nef_witnesses:
         return {
             **fan_data,
@@ -1890,30 +2409,26 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
             },
         }
 
-    section_points = _toric_section_lattice_points(
-        tuple(coefficients), coefficients, component_dimension
-    )
-    if section_points["status"] != "certified":
-        return {
-            **fan_data,
-            "status": "unavailable",
-            "reason_code": section_points["reason_code"],
-            "reason": section_points["reason"],
-            "nefness": nefness,
-            "orbifold_intersection": {
-                "status": "unavailable",
-                "reason_code": section_points["reason_code"],
-                "reason": section_points["reason"],
-            },
+    section_points = support_points
+    restricted_support_coefficients = {
+        ray: -min(_fraction_dot(point, ray) for point in section_points)
+        for ray in coefficients
+    }
+    fan_data["restricted_support_coefficients"] = [
+        {
+            "ray": list(ray),
+            "coefficient": _fraction_to_json(restricted_support_coefficients[ray]),
         }
-    all_section_points = section_points["points"]
+        for ray in sorted(restricted_support_coefficients)
+    ]
+    all_section_points = section_points
     singular_strata = []
     for cone in positive_dimensional_singular_cones:
         face_points = tuple(
             point
             for point in all_section_points
             if all(
-                _fraction_dot(point, ray) == -coefficients[ray]
+                _fraction_dot(point, ray) == -restricted_support_coefficients[ray]
                 for ray in cone
             )
         )
@@ -1921,7 +2436,7 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
             {
                 "cone": [list(ray) for ray in cone],
                 "orbit_dimension": component_dimension - len(cone),
-                "face_lattice_point_count": len(face_points),
+                    "face_lattice_point_count": len(face_points),
                 "face_lattice_points": [
                     [_fraction_to_json(value) for value in point]
                     for point in face_points
@@ -1959,7 +2474,6 @@ def _positive_component_section_certificate(auxiliary_fan, matrix, component):
             "singular_strata": singular_strata,
         },
     }
-
 
 def _general_fixed_surface_n_s_table(
     triangulation_cones,
@@ -2523,67 +3037,11 @@ def _general_fixed_surface_n_s_table(
 
     return finish()
 
-
-def identity_fixed_surface_n_s_table(triangulation_cones, triangulation):
-    """Populate ``n^S_{df=0}`` evidence for ``L=identity``'s 2-dimensional
-    fixed components, keyed for ``classify_smoothness``'s
-    ``topology["fixed_surface_n_s"]`` lookup (via ``_component_key``).
-
-    Restricted to ``L=identity``: its ``nu`` coset ``H_-^L`` is always
-    trivial (``P_-^{id}(N)`` is the zero space, since the identity has no
-    ``-1`` eigenspace -- confirmed empirically, not just asserted), and its
-    auxiliary fan ``Sigma_L`` reduces exactly to the ambient fan itself
-    (confirmed empirically), so every 2-dimensional fixed component is a
-    2-cone ``(p, q)`` of the ambient fan directly, matching Moritz eq.
-    around line 572-574 (``t + (1/2) sum(sigma(1)) in N``) exactly -- the
-    same case ``reproduce_fuzzy_axions_h11_4.py``'s
-    ``_frozen_conifold_diagnostic`` already validates end to end against
-    the paper's own Table 1 numbers, just for one specific shift
-    (the trilayer's ``t=p0/2``) instead of every shift. Not extended to
-    ``L != identity``: there, a fixed component's own toric structure is
-    generally more involved than a direct 2-divisor intersection (Sec. 4.4
-    of arXiv:2305.06363), and applying this same formula there has not been
-    independently derived or verified.
-
-    ``(p, q)`` being simplicial does *not* mean ``S = D_p.D_q`` is smooth --
-    see ``_cone_has_smooth_star``. Source line 656-657 separately requires
-    ``S`` itself to be smooth (on top of ``n_S=0``); when it isn't, no table
-    entry is written, so ``classify_smoothness``'s existing
-    ``_lookup_surface_n_s -> None`` path reports
-    ``"eq. (4.50) requires fixed-surface n_S evidence"`` in
-    ``unavailable_reasons`` rather than trusting a computed ``n_S`` whose
-    own precondition (a smooth complete intersection with a split normal
-    bundle) does not hold.
-    """
-
-    auxiliary_fan = build_auxiliary_fan(triangulation_cones, IDENTITY)
-    tensor = _ambient_intersection_tensor(triangulation)
-    fan = triangulation.fan()
-    vectors = np.asarray(fan.vectors(), dtype=int)
-    if tensor.shape[0] != vectors.shape[0] + 1:
-        return {}
-    zero_nu_vector = enumerate_projected_lattice_representatives(IDENTITY, -1)[0]["vector"]
-    zero_nu = _fraction_vector_to_json(zero_nu_vector)
-    table = {}
-    for cone in auxiliary_fan:
-        if cone["dimension"] != 2 or len(cone["rays"]) != 2:
-            continue
-        if not _cone_has_smooth_star(fan, cone["rays"]):
-            continue
-        n_s = _n_s_for_two_ray_cone(tensor, vectors, cone["rays"])
-        if n_s is None:
-            continue
-        component = {"sigma_rays": cone["rays"], "nu": zero_nu}
-        table[_component_key(component)] = n_s
-    return table
-
-
 def _component_key(component):
     return json.dumps(
         {"sigma_rays": component["sigma_rays"], "nu": component["nu"]},
         sort_keys=True,
     )
-
 
 def _lookup_surface_n_s(topology, component):
     evidence = topology.get("fixed_surface_n_s", {})
@@ -2593,7 +3051,6 @@ def _lookup_surface_n_s(topology, component):
     if value is None:
         value = evidence.get(str(component["sigma_rays"]))
     return None if value is None else int(value)
-
 
 def classify_smoothness(
     matrix,
@@ -2644,6 +3101,7 @@ def classify_smoothness(
     non_smooth_reasons = []
     unavailable_reasons = []
     positive_component_checks = []
+    zero_dimensional_component_checks = []
     if not parity["available"]:
         unavailable_reasons.append(
             "source eq. (4.45) dual-vertex parity evidence is unavailable"
@@ -2730,6 +3188,24 @@ def classify_smoothness(
                 # fuzzy_axions_2412_12012_h11_3_h11_5_table1_verification_20260818.md
                 # Sec. 6). n_S==0 was the prior (backwards) condition here.
                 non_smooth_reasons.append(f"eq. (4.50) gives n_S = {n_s} != 0")
+        elif component["fixed_toric_dimension"] == 0:
+            local_check = _zero_dimensional_component_local_certificate(
+                auxiliary_fan, matrix, component
+            )
+            zero_dimensional_component_checks.append({
+                **local_check,
+                "component": {
+                    "sigma_rays": component["sigma_rays"],
+                    "sigma_dimension": component["sigma_dimension"],
+                    "nu": component["nu"],
+                },
+            })
+            if local_check["status"] != "certified":
+                unavailable_reasons.append(
+                    "contained zero-dimensional fixed component requires "
+                    "local smoothness/Cartier evidence "
+                    f"[{local_check['reason_code']}]: {local_check['reason']}"
+                )
         elif component["fixed_toric_dimension"] > 0:
             unavailable_reasons.append(
                 "no source smoothness certificate was supplied for this fixed component"
@@ -2743,6 +3219,7 @@ def classify_smoothness(
             "reasons": non_smooth_reasons,
             "dual_vertex_parity": parity,
             "positive_component_checks": positive_component_checks,
+            "zero_dimensional_component_checks": zero_dimensional_component_checks,
         }
     if unavailable_reasons:
         return {
@@ -2752,6 +3229,7 @@ def classify_smoothness(
             "reasons": sorted(set(unavailable_reasons)),
             "dual_vertex_parity": parity,
             "positive_component_checks": positive_component_checks,
+            "zero_dimensional_component_checks": zero_dimensional_component_checks,
         }
     return {
         "status": "smooth",
@@ -2760,468 +3238,5 @@ def classify_smoothness(
         "reasons": [],
         "dual_vertex_parity": parity,
         "positive_component_checks": positive_component_checks,
+        "zero_dimensional_component_checks": zero_dimensional_component_checks,
     }
-
-
-def _fixed_point_set_description(matrix, torus_shift, fixed_components, smoothness):
-    """Describe the fixed-point set; the whole-CY label must agree with
-    ``classify_smoothness``'s own verdict rather than re-deriving it, so the
-    two cannot fall out of sync (see ``classify_smoothness``'s lambda_f=0
-    restriction on the identity/zero-shift case)."""
-    if (
-        np.array_equal(matrix, IDENTITY)
-        and all(value == 0 for value in torus_shift)
-        and smoothness["status"] == "smooth"
-    ):
-        return {
-            "description": "whole_calabi_yau",
-            "component_count": len(fixed_components),
-            "construction": "identity_sanity_contract",
-        }
-    if not fixed_components:
-        return {
-            "description": "empty_fixed_point_set",
-            "component_count": 0,
-            "construction": "auxiliary_fan_eq_4.26_and_integrality_eq_4.35",
-        }
-    return {
-        "description": "finite_union_of_toric_fixed_components",
-        "component_count": len(fixed_components),
-        "construction": "auxiliary_fan_eq_4.26_and_integrality_eq_4.35",
-        "smoothness_status": smoothness["status"],
-    }
-
-
-def _base_record(polytope_id, polytope_normal_form_id, frst_hash, matrix, candidate_id):
-    return {
-        "candidate_id": candidate_id,
-        "matrix_id": candidate_id,
-        "polytope_id": polytope_id,
-        "polytope_normal_form_id": polytope_normal_form_id,
-        "frst_hash": frst_hash,
-        "schema_version": CANDIDATE_SCHEMA_VERSION,
-        "record_kind": "matrix_validation",
-        "lattice_matrix": np.asarray(matrix, dtype=int).tolist(),
-        "involution_type": None,
-        "lambda_f": None,
-        "torus_shift": None,
-        "fixed_point_set": None,
-    }
-
-
-def _not_evaluated_fixed_component_evidence(reason):
-    """Record an explicit proof boundary before fixed components are evaluated."""
-
-    return {
-        "status": "not_evaluated",
-        "reason": str(reason),
-    }
-
-
-def enumerate_orientifold_candidates(
-    poly,
-    triangulation,
-    topology,
-    *,
-    h11_minus_target=None,
-    dual_polytope=None,
-    general_fixed_surface_diagnostics=None,
-    record_sink=None,
-):
-    """Enumerate every matrix, shift, and coefficient-parity candidate."""
-    points = np.asarray(poly.points(), dtype=int)
-    polytope_id = compute_polytope_id(points)
-    # Geometry-unique identity: the affine normal form is invariant under
-    # GL(4, Z) and translation, so it distinguishes lattice-inequivalent
-    # polytopes that share the same index-combinatorial triangulation hash.
-    normal_form_points = np.asarray(poly.normal_form(), dtype=int)
-    polytope_normal_form_id = compute_polytope_normal_form_id(normal_form_points)
-    simplices = np.asarray(triangulation.simplices(), dtype=int)
-    frst_hash = compute_triangulation_hash(simplices)
-    triangulation_cones = _triangulation_cones(poly, triangulation)
-    dual_vertices = _extract_dual_vertices(poly, dual_polytope)
-    dual_points = _extract_dual_lattice_points(poly, dual_polytope)
-    ambient_rays = sorted({ray for cone in triangulation_cones for ray in cone})
-    class _RecordCollection(list):
-        def append(self, record):
-            if (
-                record_sink is not None
-                and record.get("record_kind") != "lattice_matrix_search_summary"
-            ):
-                record_sink(dict(record))
-            super().append(record)
-
-    records = _RecordCollection()
-
-    for matrix in enumerate_polytope_involutions(points, poly=poly):
-        fixed_cone_keys = _pointwise_invariant_cone_keys(triangulation_cones, matrix)
-        matrix_tuple = tuple(int(value) for value in matrix.flatten())
-        matrix_id = stable_hash([polytope_id, frst_hash, matrix_tuple])
-        base = _base_record(
-            polytope_id, polytope_normal_form_id, frst_hash, matrix, matrix_id
-        )
-        try:
-            # The supplied H2 validator requires a concrete type string even
-            # though the type is assigned after lambda_f is selected.
-            validated = validate_orientifold(
-                poly,
-                triangulation,
-                topology,
-                _lattice_matrix_config(matrix, "O3/O7"),
-            )
-        except OrientifoldValidationFailure as exc:
-            record = dict(base)
-            record.update(
-                {
-                    "terminal_status": exc.stage or "numerical_geometry_failure",
-                    "terminal_reason": str(exc),
-                    "terminal_reason_code": exc.stage or "numerical_geometry_failure",
-                    "torus_shift_search_status": "not_started",
-                    "h11_parity": {
-                        "status": "unavailable",
-                        "reason": "matrix validation did not produce an H2 parity decomposition",
-                    },
-                    "fixed_component_evidence": _not_evaluated_fixed_component_evidence(
-                        "matrix validation failed before fixed-component evaluation"
-                    ),
-                }
-            )
-            records.append(record)
-            continue
-
-        if record_sink is not None:
-            matrix_success = dict(base)
-            matrix_success.update(
-                {
-                    "record_kind": "matrix_validation",
-                    "matrix_id": matrix_id,
-                    "terminal_status": "matrix_validation_passed",
-                    "terminal_reason": "polytope, FRST, divisor, and H2 validation passed",
-                    "terminal_reason_code": "matrix_validation_passed",
-                    "h11_plus": validated["h11_plus"],
-                    "h11_minus": validated["h11_minus"],
-                    "fixed_component_evidence": _not_evaluated_fixed_component_evidence(
-                        "matrix validation passed; no torus-shift fixed component was evaluated"
-                    ),
-                    "h2_involution_matrix": _to_jsonable(
-                        validated["h2_involution_matrix"]
-                    ),
-                }
-            )
-            record_sink(matrix_success)
-
-        auxiliary_fan = _general_l.build_auxiliary_fan(triangulation_cones, matrix)
-        fixed_cone_keys = _general_l._pointwise_invariant_cone_keys(
-            triangulation_cones, matrix
-        )
-        fixed_surface_n_s = topology.get("fixed_surface_n_s", {})
-        if topology.get("compute_general_fixed_surface_n_s") and not np.array_equal(
-            matrix, IDENTITY
-        ):
-            n_s_result = _general_fixed_surface_n_s_table(
-                triangulation_cones,
-                triangulation,
-                matrix,
-                auxiliary_fan,
-                fixed_cone_keys=fixed_cone_keys,
-                return_diagnostics=general_fixed_surface_diagnostics is not None,
-            )
-            if general_fixed_surface_diagnostics is not None:
-                fixed_surface_n_s = n_s_result["evidence"]
-                general_fixed_surface_diagnostics[matrix_id] = {
-                    "matrix_id": matrix_id,
-                    "lattice_matrix": matrix.tolist(),
-                    "surface_diagnostics": n_s_result["surface_diagnostics"],
-                    "global_reasons": n_s_result["global_reasons"],
-                }
-            else:
-                fixed_surface_n_s = n_s_result
-        matrix_topology = dict(topology)
-        matrix_topology["fixed_surface_n_s"] = fixed_surface_n_s
-        shifts = enumerate_projected_lattice_representatives(matrix, +1)
-        if not shifts:
-            record = dict(base)
-            record.update(
-                {
-                    "matrix_id": matrix_id,
-                    "record_kind": "matrix_validation",
-                    "terminal_status": "torus_shift_search_exhausted",
-                    "terminal_reason": "no representatives were generated",
-                    "terminal_reason_code": "torus_shift_search_exhausted",
-                    "torus_shift_search_status": "exhausted",
-                    "h11_plus": validated["h11_plus"],
-                    "h11_minus": validated["h11_minus"],
-                    "fixed_component_evidence": _not_evaluated_fixed_component_evidence(
-                        "no torus-shift representative was generated"
-                    ),
-                }
-            )
-            records.append(record)
-            continue
-
-        matrix_records = []
-        # Per-matrix memo caches: the half-ray shortcut proof and the
-        # positive-component section certificate are invariant across this
-        # matrix's torus shifts and lambda_f values (finding F3).
-        half_ray_cache = {}
-        section_cache = {}
-        for shift in shifts:
-            # ``shift["vector"]`` is a representative of source eq. (4.34)'s
-            # H_+^L = P_+^L(N)/(2 P_+^L(N)), whose elements are explicitly
-            # labelled "[2t]" there -- it IS 2t, not t.
-            two_t = shift["vector"]
-            # Source eq. (4.34) derivation (KS_orientifolds.tex line ~426-428):
-            # a Z2 involution ``L o phi_[t]`` squares to ``phi_[2t]``, so it is
-            # an involution *only if* ``2t in N``. For a non-identity ``L``,
-            # ``enumerate_projected_lattice_representatives`` returns cosets of
-            # ``H_+^L`` whose representative ``2t`` need not be integral (e.g.
-            # ``2t=(1/2,1/2,0,0)`` for a coordinate-swap ``L``); those are not
-            # Z2 involutions at all and must be excluded here, before any
-            # smoothness/parity evaluation -- a non-integral ``2t`` also makes
-            # eq. (4.45)'s ``<2t,q>`` parity ill-defined. Identity ``L`` never
-            # triggers this (its ``2t`` is always integral), which is exactly
-            # why identity-only validation never surfaced it.
-            if any(Fraction(value).denominator != 1 for value in two_t):
-                record = dict(base)
-                shift_candidate_id = stable_hash(
-                    [matrix_id, tuple(shift["numerator"]), "noninvolution"]
-                )
-                record.update(
-                    {
-                        "record_kind": "candidate",
-                        "matrix_id": matrix_id,
-                        "candidate_id": shift_candidate_id,
-                        "attempt_kind": "torus_shift_rejected_noninvolution",
-                        "matrix_candidate_id": matrix_id,
-                        "terminal_status": "torus_shift_not_involution",
-                        "terminal_reason": (
-                            "source eq. (4.34)/line ~428 requires 2t in N for "
-                            "L o phi_[t] to be an involution; this H_+^L coset "
-                            "representative 2t is not integral"
-                        ),
-                        "terminal_reason_code": "torus_shift_not_involution",
-                        "torus_shift_binary_source": shift["binary_source"],
-                        "torus_shift_search_status": "rejected_noninvolution",
-                        "h11_plus": validated["h11_plus"],
-                        "h11_minus": validated["h11_minus"],
-                        "fixed_component_evidence": _not_evaluated_fixed_component_evidence(
-                            "torus shift was rejected before fixed-component evaluation"
-                        ),
-                    }
-                )
-                records.append(record)
-                matrix_records.append(record)
-                continue
-            # Downstream consumers (eq. 4.45's dual-vertex parity, eq. 4.33's
-            # fixed-component integrality condition) use ``t`` directly, so the
-            # integral ``2t`` is halved once more here. Confirmed empirically
-            # for L=identity against CYTools' own poly.inequivalent_Z2_actions()
-            # (t in {0, 1/2}^4, not {0, 1}^4 as enumerate_projected_lattice_
-            # representatives' "vector" gives before this correction).
-            torus_shift = tuple(value / 2 for value in shift["vector"])
-            for lambda_f in (0, 1):
-                involution_type = "O3/O7" if lambda_f == 1 else "O5/O9"
-                candidate_id = stable_hash(
-                    [matrix_id, tuple(shift["numerator"]), int(lambda_f)]
-                )
-                record = _base_record(
-                    polytope_id,
-                    polytope_normal_form_id,
-                    frst_hash,
-                    matrix,
-                    candidate_id,
-                )
-                record.update(
-                    {
-                        "record_kind": "candidate",
-                        "matrix_id": matrix_id,
-                        "matrix_candidate_id": matrix_id,
-                        "matrix_id": matrix_id,
-                        "involution_type": involution_type,
-                        "lambda_f": int(lambda_f),
-                        "lambda_f_convention": (
-                            "lambda_f=1 gives O3/O7 (I*[Omega]=-Omega); "
-                            "lambda_f=0 gives O5/O9 (I*[Omega]=+Omega)"
-                        ),
-                        "torus_shift": _fraction_vector_to_json(torus_shift),
-                        "torus_shift_binary_source": shift["binary_source"],
-                        "h11_plus": int(validated["h11_plus"]),
-                        "h11_minus": int(validated["h11_minus"]),
-                    }
-                )
-                try:
-                    fixed_components = _fixed_component_records(
-                        auxiliary_fan,
-                        matrix,
-                        torus_shift,
-                        lambda_f,
-                        fixed_cone_keys=fixed_cone_keys,
-                        half_ray_cache=half_ray_cache,
-                        dual_points=dual_points,
-                        ambient_rays=ambient_rays,
-                        fan_cones=triangulation_cones,
-                    )
-                    smoothness = _general_l.classify_smoothness(
-                        matrix,
-                        torus_shift,
-                        lambda_f,
-                        auxiliary_fan,
-                        fixed_components,
-                        matrix_topology,
-                        dual_vertices,
-                        section_cache=section_cache,
-                    )
-                except Exception as exc:
-                    record.update(
-                        {
-                            "terminal_status": "numerical_geometry_failure",
-                            "terminal_reason": (
-                                "fixed-component construction or smoothness evaluation "
-                                f"failed: {type(exc).__name__}: {exc}"
-                            ),
-                            "terminal_reason_code": "candidate_geometry_evaluation_failure",
-                            "fixed_component_evidence": {
-                                "status": "unavailable",
-                                "reason": (
-                                    "fixed-component construction or smoothness evaluation "
-                                    f"failed: {type(exc).__name__}: {exc}"
-                                ),
-                            },
-                        }
-                    )
-                    records.append(record)
-                    matrix_records.append(record)
-                    continue
-                record.update(
-                    {
-                        "auxiliary_fan": auxiliary_fan,
-                        "pointwise_invariant_cones": [
-                            cone
-                            for cone in auxiliary_fan
-                            if cone["pointwise_L_invariant"]
-                        ],
-                        "fixed_point_components": fixed_components,
-                        "fixed_surface_n_s_evidence": fixed_surface_n_s,
-                        "fixed_point_set": _fixed_point_set_description(
-                            matrix, torus_shift, fixed_components, smoothness
-                        ),
-                        "smoothness": smoothness,
-                        "h2_involution_matrix": _to_jsonable(
-                            validated["h2_involution_matrix"]
-                        ),
-                        "h2_action_proof": _to_jsonable(
-                            validated["h2_action_proof"]
-                        ),
-                        "invariant_kaehler_basis": _to_jsonable(
-                            validated["invariant_kahler_basis"]
-                        ),
-                        "anti_invariant_h2_basis": _to_jsonable(
-                            validated["anti_invariant_h2_basis"]
-                        ),
-                        "prime_divisor_image_indices": _to_jsonable(
-                            validated["prime_divisor_image_indices"]
-                        ),
-                        "prime_divisor_invariant_indices": _to_jsonable(
-                            validated["prime_divisor_invariant_indices"]
-                        ),
-                        "torus_shift_search_status": "exhaustive",
-                    }
-                )
-                if smoothness["status"] != "smooth":
-                    record["terminal_status"] = smoothness["status"]
-                    record["terminal_reason"] = "; ".join(
-                        smoothness.get("reasons", [])
-                    )
-                    record["terminal_reason_code"] = (
-                        smoothness.get("reason_code")
-                        or smoothness["status"]
-                    )
-                elif h11_minus_target is not None and int(validated["h11_minus"]) != int(
-                    h11_minus_target
-                ):
-                    record["terminal_status"] = "orientifold_h11_minus_filter_rejection"
-                    record["terminal_reason"] = (
-                        f"h11_minus={validated['h11_minus']} does not match requested "
-                        f"target {h11_minus_target}"
-                    )
-                    record["terminal_reason_code"] = "orientifold_h11_minus_filter_rejection"
-                else:
-                    record["terminal_status"] = "accepted_verified_orientifold"
-                    record["terminal_reason"] = None
-                    record["terminal_reason_code"] = "accepted_verified_orientifold"
-                records.append(record)
-                matrix_records.append(record)
-        if matrix_records and not any(
-            item["terminal_status"] == "accepted_verified_orientifold"
-            for item in matrix_records
-        ):
-            for item in matrix_records:
-                item["torus_shift_search_status"] = "exhausted_no_accepted_triple"
-            summary_record = dict(base)
-            summary_record.update(
-                {
-                    "record_kind": "lattice_matrix_search_summary",
-                    "terminal_status": "torus_shift_search_exhausted",
-                    "terminal_reason": (
-                        "all enumerated torus shifts and lambda_f values were "
-                        "checked without an accepted verified triple"
-                    ),
-                    "torus_shift_search_status": "exhausted_no_accepted_triple",
-                    "attempted_triple_count": len(matrix_records),
-                    "attempted_candidate_ids": [
-                        item["candidate_id"] for item in matrix_records
-                    ],
-                }
-            )
-            records.append(summary_record)
-
-    return records
-
-
-def write_candidate_manifest(path, records, *, provenance):
-    """Atomically write JSONL candidate records and an additive summary."""
-    absolute_path = os.path.abspath(path)
-    os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
-    summary_path = f"{absolute_path}.summary.json"
-
-    status_counts = {status: 0 for status in TERMINAL_STATUSES}
-    for record in records:
-        status = record["terminal_status"]
-        status_counts[status] = status_counts.get(status, 0) + 1
-
-    accepted_frst_ids = {
-        (record["polytope_id"], record["frst_hash"])
-        for record in records
-        if record["terminal_status"] == "accepted_verified_orientifold"
-    }
-    summary = {
-        "schema_version": CANDIDATE_SCHEMA_VERSION,
-        "provenance": provenance,
-        "candidate_count": len(records),
-        "status_counts": status_counts,
-        "accepted_candidate_count": status_counts["accepted_verified_orientifold"],
-        "distinct_accepted_frst_count": len(accepted_frst_ids),
-        "search_completeness": (
-            "exhaustive_over_lattice_involutions_and_projected_torus_shifts; "
-            "both_lambda_f_values; supplied_frst_only; fixed_components_and_"
-            "smoothness_evidence_recorded"
-        ),
-        "verification_boundary": (
-            "accepted_verified_orientifold requires concrete L,t,lambda_f, "
-            "fixed_point_set, and smoothness=smooth; unavailable evidence is "
-            "not promoted to acceptance"
-        ),
-    }
-
-    temporary_manifest = f"{absolute_path}.tmp-{os.getpid()}-{time.time_ns()}"
-    with open(temporary_manifest, "w", encoding="utf-8") as stream:
-        for record in records:
-            stream.write(json.dumps(_to_jsonable(record), sort_keys=True))
-            stream.write("\n")
-    os.replace(temporary_manifest, absolute_path)
-
-    temporary_summary = f"{summary_path}.tmp-{os.getpid()}-{time.time_ns()}"
-    with open(temporary_summary, "w", encoding="utf-8") as stream:
-        json.dump(_to_jsonable(summary), stream, sort_keys=True, indent=2)
-    os.replace(temporary_summary, summary_path)
-    return summary

@@ -7,3 +7,7 @@ carrying out work. Also read the supplemental standards in
 The release and versioning policy in `AGENTS.md` is normative. In particular,
 feature branches record version impact, while the reviewed integration or
 release boundary updates `Project.toml` with the appropriate SemVer bump.
+
+Use the policy version in `AGENTS.md` as the worktree freshness check. Preserve
+dirty worktrees and do not switch branches or discard changes without explicit
+user approval.

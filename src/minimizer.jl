@@ -429,9 +429,14 @@ GC.gc()
 end
 
 """
-    grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
+    grad_std(h11::Int, tri::Int, cy::Int, LV::Vector, QV::Matrix)
 
-TBW
+Return the per-component standard deviation of the axion-potential gradient
+``\\partial_i V = \\sum_a \\Lambda_a Q_{a,i} \\sin(Q_a \\cdot x)`` sampled over
+field space for geometry ``(h^{1,1}, \\mathrm{tri}, \\mathrm{cy})``, evaluated at
+`ArbFloat` precision. `LV` is the vector of linear instanton scales
+``\\Lambda_a`` and `QV` the charge matrix. Use it to gauge the gradient scale
+before minimization.
 """
 function grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
     T = typeof(ArbFloat(0))
@@ -452,9 +457,12 @@ function grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
 end
 
 """
-    grad_std(LV::Vector,QV::Matrix)
+    grad_std(LV::Vector, QV::Matrix)
 
-TBW
+Return the per-component standard deviation of the axion-potential gradient for
+the linear instanton scales `LV` (``\\Lambda_a``) and charge matrix `QV`,
+sampled over field space. See [`grad_std(h11, tri, cy, LV, QV)`](@ref) for the
+geometry-indexed form.
 """
 function grad_std(LV::Vector,QV::Matrix)
     if @isdefined h11 
@@ -485,9 +493,12 @@ end
 
 
 """
-    minimize(LV::Vector,QV::Matrix,x0::Vector)
+    minimize(LV::Vector, QV, x0::Vector)
 
-TBW
+Minimize the axion potential
+``V(x) = \\sum_a \\Lambda_a (1 - \\cos(Q_a \\cdot x))`` from the initial point
+`x0`, where `LV` holds the linear instanton scales ``\\Lambda_a`` and `QV` is the
+charge matrix. Return the located stationary point in field coordinates.
 """
 function minimize(LV::Vector, QV, x0::Vector)
 	if @isdefined h11
@@ -627,9 +638,12 @@ function id_minimize(LV::Vector, QV::Vector; ftol = eps(), iterations = 1_000)
 end
 
 """
-    id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000))
+    id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000)
 
-TBW
+Identify the distinct minima of the axion potential defined by the linear
+instanton scales `LV` (``\\Lambda_a``) and charge matrix `QV`. `ftol` sets the
+convergence tolerance and `iterations` caps the optimizer iterations. Return the
+distinct minimum coordinates found.
 """
 function id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000)
     if @isdefined h11
@@ -679,9 +693,12 @@ end
 # end
 
 """
-minima_lattice(v::Matrix{Float64})
+    minima_lattice(v::Matrix{Float64})
 
-TBW
+Extract a lattice basis from the columns of `v`, a set of minima coordinate
+vectors. Keep a maximal linearly independent set (columns whose Gram matrix has
+a positive smallest eigenvalue) and discard near-zero columns. Return the matrix
+of lattice basis vectors.
 """
 function minima_lattice(v::Matrix{Float64})
     lattice_vectors = zeros(size(v, 1), 1)

@@ -85,7 +85,7 @@ exceed the allocated physical cores:
 julia --project=. scripts/batch_vacua_pipeline.jl \
     --data-dir /path/to/data --h11 4 --workers 4 --blas-threads 2 \
     --batch-size 16 \
-    --starts 2048 --method reduced_jlm \
+     --starts 2048 --method auto \
     --summary /path/to/logs/vacua_h11_004.csv
 ```
 
@@ -141,7 +141,7 @@ julia --project=. scripts/batch_physical_spectrum.jl \
 ```
 
 The quartic batch mode computes only diagonal self-couplings and derives
-`fpert_log10 = m - 0.5 * lambda_self_log10`; mixed quartic arrays and
+`fpert_log10 = m - 9 - 0.5 * lambda_self_log10` in GeV; mixed quartic arrays and
 eigenvectors are not persisted. Existing output is skipped unless `--force` is
 given, and per-geometry failures are recorded without stopping the batch.
 

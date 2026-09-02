@@ -28,13 +28,19 @@ import math
 import os
 import platform
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 from collections import Counter
+import time
 from pathlib import Path
 from typing import Any
 
-import h5py
+try:
+    import h5py
+except ImportError:  # Candidate-only replay does not perform HDF5 model writes.
+    h5py = None
 import numpy as np
 
 from generate_geometric_data_multitriangulation import (
@@ -55,6 +61,11 @@ from inherited_orientifold_candidates import (
     identity_fixed_surface_n_s_table,
 )
 from orientifold_terminal_ledger import TerminalLedgerWriter
+from trilayer_involutions import (
+    enumerate_source_trilayer_candidates,
+    reconstruct_trilayer_actions,
+)
+from orientifold_population_preflight import run_population_preflight
 
 
 PAPER_TARGETS_BY_H11 = {
@@ -460,35 +471,32 @@ def _frst_classes(poly):
 
 
 def _trilayer_candidate(poly):
-    """Return the source [21] trilayer candidate, if one exists.
+    """Return the first exact source-authorized trilayer action.
 
-    For a primal vertex p0, the dual facet is q.p0=-1.  The special source
-    construction requires the dual polytope to be the convex hull of that
-    facet and one vertex q0 outside it, with q0.p0=+1.  The associated data are
-    L=I, t=p0/2, and lambda_f=1.
+    The population driver retains this compatibility shape, but the source
+    reconstruction itself is performed by
+    :func:`trilayer_involutions.enumerate_source_trilayer_candidates`, which
+    examines every primal vertex and records all structural terminal reasons.
+    The separate exact-action path consumes the complete candidate manifest;
+    this helper is only the historical single-candidate API.
     """
-
-    primal_vertices = _as_int_rows(poly.vertices())
-    dual = poly.dual()
-    dual_vertices = _as_int_rows(dual.vertices())
-    for p0 in primal_vertices:
-        heights = dual_vertices @ p0
-        outside = np.flatnonzero(heights > -1)
-        if outside.size != 1:
+    records = enumerate_source_trilayer_candidates(poly)
+    for record in records:
+        if record.get("terminal_status") != "structurally_reconstructed":
             continue
-        q0_index = int(outside[0])
-        if int(heights[q0_index]) != 1:
-            continue
-        if np.any(heights < -1):
-            continue
+        action = record["action"]
+        shift = action["torus_shift"]
         return {
-            "p0": p0.tolist(),
-            "q0": dual_vertices[q0_index].tolist(),
-            "lattice_matrix": np.eye(4, dtype=int).tolist(),
-            "torus_shift_numerator": p0.tolist(),
-            "torus_shift_denominator": 2,
-            "lambda_f": 1,
-            "criterion": "Moritz eqs. (4.64)-(4.66), trilayer sufficient condition",
+            "p0": record["p0"],
+            "q0": record["q0"],
+            "lattice_matrix": action["lattice_matrix"],
+            "torus_shift_numerator": shift["numerator"],
+            "torus_shift_denominator": shift["denominator"],
+            "lambda_f": int(action["lambda_f"]),
+            "criterion": "Moritz eqs. (4.64)-(4.66), exact source-gauge reconstruction",
+            "reconstruction_schema_version": record["schema_version"],
+            "reconstruction_rule_version": record["reconstruction_rule_version"],
+            "action_digest": record["action_digest"],
         }
     return None
 
@@ -743,36 +751,58 @@ def _h21_plus_zero_diagnostic(poly, triangulation, p0):
     h^{2,1}_-(X,I) = (chi(F_I) - chi(X))/4 - 1, and h^{2,1}_+ = h^{2,1}(X)
     - h^{2,1}_-(X,I).  Independently validated against the paper's own
     h11=2 worked example (Sec. 4.2.1, eq. 4.2): reproduces the stated
-    (h^{1,1}_+,h^{1,1}_-,h^{2,1}_+,h^{2,1}_-) = (2,0,0,132) exactly, and
-    reproduces the paper's 267-class h11=4 population target exactly when
-    applied across all trilayer FRST classes.  See
-    validation/fuzzy_axions_2412_12012_h21_plus_fixed_locus_20260818.md.
+    (h^{1,1}_+,h^{1,1}_-,h^{2,1}_+,h^{2,1}_-) = (2,0,0,132) exactly. The
+    exact action, fan, GLSM, parity, fixed-component, and smoothness evidence
+    is reconstructed by ``trilayer_involutions``; population counts remain a
+    separate bounded task.
     """
 
-    result = _fixed_locus_euler_characteristic(poly, triangulation, p0)
-    if result["status"] != "computed":
+    # Reconstruct the source trilayer action from the polytope itself and run
+    # the exact fan/GLSM/parity/fixed-locus contract. The historical
+    # Float64-only fixed-locus helper remains available as a non-gating
+    # diagnostic, but is no longer the population acceptance computation.
+    topology = dict(extract_topology(triangulation.get_cy(), triangulation))
+    triangulation_cones = _triangulation_cones(poly, triangulation)
+    topology["fixed_surface_n_s"] = identity_fixed_surface_n_s_table(
+        triangulation_cones, triangulation
+    )
+    expected_p0 = tuple(int(value) for value in p0)
+    reconstructed = reconstruct_trilayer_actions(poly, triangulation, topology)
+    matching = [
+        record
+        for record in reconstructed["candidates"]
+        if tuple(record.get("p0", ())) == expected_p0
+    ]
+    if not matching:
         return {
             "status": "unavailable",
-            "reasons": result["reasons"],
+            "reasons": ["requested p0 is not a source-reconstructed trilayer action"],
             "chi_F_I": None,
             "h21_minus": None,
             "h21_plus": None,
-            "components": result["components"],
+            "components": [],
         }
-    cy = triangulation.get_cy()
-    chi_X = cy.chi()
-    h21_X = cy.h21()
-    chi_FI = result["chi_F_I"]
-    h21_minus = (chi_FI - chi_X) / 4.0 - 1.0
-    h21_plus = h21_X - h21_minus
-    is_zero = abs(h21_plus) < 1e-6
+    exact = matching[0]
+    fixed_euler = exact.get("fixed_locus_euler", {})
+    hodge = exact.get("hodge_split", {})
+    if exact.get("terminal_status") != "accepted_exact_trilayer_action":
+        return {
+            "status": "unavailable",
+            "reasons": [exact.get("reason") or exact.get("terminal_status")],
+            "chi_F_I": fixed_euler.get("chi_F_I"),
+            "h21_minus": hodge.get("h21_minus"),
+            "h21_plus": hodge.get("h21_plus"),
+            "components": fixed_euler.get("components", []),
+            "exact_action": exact,
+        }
     return {
-        "status": "h21_plus_zero" if is_zero else "h21_plus_nonzero",
-        "reasons": result["reasons"],
-        "chi_F_I": chi_FI,
-        "h21_minus": h21_minus,
-        "h21_plus": h21_plus,
-        "components": result["components"],
+        "status": "h21_plus_zero" if hodge.get("h21_plus") == 0 else "h21_plus_nonzero",
+        "reasons": [],
+        "chi_F_I": fixed_euler.get("chi_F_I"),
+        "h21_minus": hodge.get("h21_minus"),
+        "h21_plus": hodge.get("h21_plus"),
+        "components": fixed_euler.get("components", []),
+        "exact_action": exact,
     }
 
 
@@ -1316,7 +1346,14 @@ def _orientifold_reason_diagnostics_summary(
     }
 
 
-def reproduce(args):
+def _legacy_reproduce(args):
+    # Higher-h11 runs are replay runs.  Read the prior population handoffs and
+    # verify their durable compressed artifacts before importing any parquet
+    # rows or constructing a CYTools geometry.  The preflight is deliberately
+    # mandatory for both bounded and full h11=4/5 invocations.
+    population_preflight = run_population_preflight(
+        Path(__file__).resolve().parents[1], args.h11
+    )
     targets = PAPER_TARGETS_BY_H11.get(args.h11)
     all_records = load_mirror_polytopes(
         args.parquet_dir,
@@ -1608,6 +1645,7 @@ def reproduce(args):
                 "expected_favorable_polytopes"
             ],
         },
+        "population_preflight": population_preflight,
         "counts": {
             "favorable_polytopes": len(records),
             "raw_frsts": total_raw,
@@ -1693,125 +1731,1207 @@ def _shard_suffix_path(path, shard_index, shard_count):
     path = Path(path)
     tag = f"shard{int(shard_index):03d}-of-{int(shard_count):03d}"
     return path.with_name(f"{path.stem}.{tag}{path.suffix}")
+REPLAY_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-exact-replay-3.0"
+REPLAY_CHECKPOINT_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-exact-replay-checkpoint-1.0"
+MAX_REPLAY_WORKERS = 4
 
 
-def _parse_args(argv=None):
+class ReplayConfigurationError(ValueError):
+    """Raise when a replay request is unsafe or scientifically ambiguous."""
+
+
+class ReplayResumeError(RuntimeError):
+    """Raise when a checkpoint cannot be resumed under its frozen contract."""
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(_jsonable(value), sort_keys=True, separators=(",", ":"))
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _source_input_hash(parquet_dir: Path) -> str:
+    """Hash the selected source directory without loading any geometry."""
+    entries = []
+    for path in sorted(parquet_dir.glob("polytopes-4d-*-vertices.parquet")):
+        entries.append({"path": str(path.resolve()), "sha256": _sha256_file(path)})
+    if not entries:
+        entries = [{"path": str(parquet_dir.resolve()), "exists": parquet_dir.is_dir()}]
+    return _sha256_bytes(_canonical_json(entries).encode("utf-8"))
+
+
+def _code_hash() -> str:
+    """Hash the replay driver and exact candidate modules used by it."""
+    names = (
+        "reproduce_fuzzy_axions_h11_4.py",
+        "inherited_orientifold_candidates.py",
+        "trilayer_involutions.py",
+        "geometry_charge_conventions.py",
+        "orientifold_general_l_geometry.py",
+        "toric_fixed_component_euler.py",
+        "orientifold_population_preflight.py",
+        "generate_geometric_data_multitriangulation.py",
+        "mpcp_bounded_analysis.py",
+        "mpcp_immutable_source.py",
+    )
+    payload = []
+    root = Path(__file__).resolve().parent
+    for name in names:
+        path = root / name
+        payload.append({"name": name, "sha256": _sha256_file(path)})
+    return _sha256_bytes(_canonical_json(payload).encode("utf-8"))
+
+
+def _handoff_hash(preflight: dict[str, Any]) -> str:
+    return _sha256_bytes(_canonical_json(preflight.get("handoffs", [])).encode("utf-8"))
+
+
+def _runtime_versions() -> dict[str, str]:
+    versions = {
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "numpy": np.__version__,
+        "cytools": "unavailable",
+        "zstd": "unavailable",
+    }
+    try:
+        import cytools
+
+        versions["cytools"] = str(getattr(cytools, "__version__", "unknown"))
+    except ImportError:
+        pass
+    zstd = shutil.which("zstd")
+    if zstd:
+        try:
+            completed = subprocess.run(
+                [zstd, "--version"], check=False, capture_output=True, text=True
+            )
+            versions["zstd"] = (completed.stdout or completed.stderr).strip()
+        except OSError:
+            pass
+    return versions
+
+
+def _freeze_replay_config(args: argparse.Namespace, preflight: dict[str, Any]) -> dict[str, Any]:
+    h11 = getattr(args, "h11", None)
+    if h11 not in (4, 5):
+        raise ReplayConfigurationError("exact replay requires explicit --h11 4 or --h11 5")
+    workers = int(getattr(args, "workers", 1))
+    if not 1 <= workers <= MAX_REPLAY_WORKERS:
+        raise ReplayConfigurationError(
+            f"--workers must be between 1 and {MAX_REPLAY_WORKERS}"
+        )
+    shard_count = int(getattr(args, "shard_count", 1))
+    shard_index = int(getattr(args, "shard_index", 0))
+    if not 1 <= shard_count <= MAX_REPLAY_WORKERS:
+        raise ReplayConfigurationError(
+            f"--shard-count must be between 1 and {MAX_REPLAY_WORKERS}"
+        )
+    if not 0 <= shard_index < shard_count:
+        raise ReplayConfigurationError("--shard-index must be in [0, --shard-count)")
+    max_rows = int(getattr(args, "max_rows", 0))
+    if max_rows < 0:
+        raise ReplayConfigurationError("--max-rows must be non-negative")
+    checkpoint_interval = int(getattr(args, "checkpoint_interval", 32))
+    if checkpoint_interval < 1:
+        raise ReplayConfigurationError("--checkpoint-interval must be positive")
+    parquet_dir = Path(args.parquet_dir).expanduser().resolve()
+    source_contract = preflight.get("source_contract")
+    if isinstance(source_contract, dict):
+        declared_path = Path(str(source_contract.get("source_path", ""))).resolve()
+        if parquet_dir != declared_path:
+            raise ReplayConfigurationError(
+                "source path does not match the implementation-handoff declaration"
+            )
+        observed_partitions = sorted(
+            path.name for path in parquet_dir.glob("polytopes-4d-*-vertices.parquet")
+        )
+        expected_partitions = sorted(source_contract.get("required_partitions", ()))
+        if observed_partitions != expected_partitions:
+            raise ReplayConfigurationError(
+                f"source partitions must be exactly 05..10; observed {observed_partitions}"
+            )
+    source_input_sha256 = _source_input_hash(parquet_dir)
+    enrichment_arg = getattr(args, "enrichment", None)
+    enrichment_contract = None
+    if enrichment_arg is not None:
+        enrichment_path = Path(enrichment_arg).expanduser().resolve()
+        if not enrichment_path.is_file():
+            raise ReplayConfigurationError(f"enrichment artifact is missing: {enrichment_path}")
+        enrichment_contract = {
+            "path": str(enrichment_path),
+            "sha256": _sha256_file(enrichment_path),
+        }
+    return {
+        "schema_version": REPLAY_SCHEMA_VERSION,
+        "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+        "requested_h11": int(h11),
+        "selection_query": {
+            "mirror_h12_equals": int(h11),
+            "favorable": True,
+            "physical_h11_verification": "CYTools Polytope.h11 equals requested_h11",
+            "target_selected_acceptance": False,
+        },
+        "source_path": str(parquet_dir),
+        "source_input_sha256": source_input_sha256,
+        "enrichment": enrichment_contract,
+        "source_contract": source_contract,
+        "source_partition_hashes": (
+            {
+                row["partition"]: {
+                    "expected": row.get("expected_sha256"),
+                    "observed": row.get("observed_sha256"),
+                }
+                for row in source_contract.get("partitions", [])
+            }
+            if isinstance(source_contract, dict)
+            else {}
+        ),
+        "source_code_sha256": _code_hash(),
+        "population_handoff_sha256": _handoff_hash(preflight),
+        "max_rows": max_rows,
+        "checkpoint_interval": checkpoint_interval,
+        "workers": workers,
+        "shard_count": shard_count,
+        "shard_index": shard_index,
+        "orientifold_reason_diagnostics": bool(
+            getattr(args, "orientifold_reason_diagnostics", False)
+        ),
+        "labels": {
+            "validity": "not_validated",
+            "selection": "candidate-only",
+            "representativeness": "nonrepresentative",
+            "execution_mode": "infrastructure_smoke_only",
+            "scientific_result": "no_scientific_result",
+        },
+        "resource_settings": {
+            "blas_threads": os.environ.get("OPENBLAS_NUM_THREADS"),
+            "omp_threads": os.environ.get("OMP_NUM_THREADS"),
+            "mkl_threads": os.environ.get("MKL_NUM_THREADS"),
+            "worker_policy": "sequential unless explicitly requested; hard maximum four",
+        },
+        "runtime_versions": _runtime_versions(),
+        "artifact_contract": _artifact_contract(preflight),
+        "preflight": preflight,
+    }
+
+
+def _config_digest(config: dict[str, Any]) -> str:
+    return _sha256_bytes(_canonical_json(config).encode("utf-8"))
+
+
+def _artifact_contract(preflight: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Return the explicitly manifest-bound merged and gap artifact digests."""
+
+    artifacts = preflight.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ReplayConfigurationError("preflight has no artifact digest contract")
+    declared = artifacts.get("artifact_digests")
+    if not isinstance(declared, dict):
+        raise ReplayConfigurationError(
+            "preflight must explicitly hash merged and gap artifacts"
+        )
+    contract: dict[str, dict[str, str]] = {}
+    for name in ("merged_artifact", "gap_analysis_artifact"):
+        record = declared.get(name)
+        if not isinstance(record, dict):
+            raise ReplayConfigurationError(f"preflight has no explicit hash for {name}")
+        path = record.get("path")
+        digest = record.get("sha256")
+        if not isinstance(path, str) or not isinstance(digest, str) or len(digest) != 64:
+            raise ReplayConfigurationError(f"preflight hash entry for {name} is invalid")
+        expected_path = artifacts.get(name)
+        if not isinstance(expected_path, str) or Path(path).resolve() != Path(expected_path).resolve():
+            raise ReplayConfigurationError(f"preflight hash path does not bind {name}")
+        contract[name] = {"path": str(Path(path).resolve()), "sha256": digest}
+    return contract
+
+
+def _select_ledger_candidates(
+    merged: dict[str, Any],
+    *,
+    requested_h11: int,
+    declared_source_digest: str | None,
+    max_rows: int,
+) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """Build a deterministic candidate list from the merged terminal ledger."""
+
+    if merged.get("requested_h11") != int(requested_h11):
+        raise ReplayConfigurationError("merged candidate ledger physical h11 does not match request")
+    funnel = merged.get("terminal_ledger", {}).get("class_funnel")
+    if not isinstance(funnel, list):
+        raise ReplayConfigurationError("merged candidate ledger has no terminal class funnel")
+    selected = []
+    identities: set[str] = set()
+    for entry in funnel:
+        if not isinstance(entry, dict):
+            continue
+        # Keep the complete funnel in the merged source artifact for class
+        # accounting, but only the source writer's authoritative acceptance
+        # predicate enters the replay candidate identity set.
+        if entry.get("accepted_for_table_1") is not True:
+            continue
+        witness = entry.get("accepted_witness")
+        if not isinstance(witness, dict):
+            continue
+        source = {
+            "declared_source_digest": declared_source_digest,
+            "source_digest": declared_source_digest,
+            "canonical_polytope_id": entry.get("polytope_id"),
+            "polytope_id": entry.get("polytope_id"),
+            "global_coordinates": entry.get("global_points") or witness.get("global_points"),
+            "global_points": entry.get("global_points") or witness.get("global_points"),
+            # The merged ledger's polytope_index is an upstream scan index,
+            # not the row number in the durable 05--10 Parquet partitions.
+            # The immutable input certificate supplies the latter after the
+            # exact source join.
+            "source_row": None,
+            "population_polytope_index": entry.get("polytope_index"),
+            "frst_hash": entry.get("frst_hash"),
+            "mirror_h12": int(requested_h11),
+        }
+        witness_digest = _sha256_bytes(_canonical_json(witness).encode("utf-8"))
+        action_digest = entry.get("action_digest") or witness.get("action_digest") or witness_digest
+        candidate = dict(entry)
+        candidate["action_digest"] = action_digest
+        candidate["witness_digest"] = witness_digest
+        identity = _row_identity(
+            source,
+            int(entry.get("frst_class_index", 0)),
+            {
+                "frst_hash": entry.get("frst_hash"),
+                "action_digest": action_digest,
+                "witness_digest": witness_digest,
+                "accepted_witness": witness,
+            },
+        )
+        if identity in identities:
+            raise ReplayConfigurationError(
+                f"duplicate authoritative candidate identity in merged ledger: {identity}"
+            )
+        identities.add(identity)
+        selected.append((identity, source, candidate))
+    selected.sort(key=lambda row: row[0])
+    return selected[:max_rows]
+
+
+def _read_merged_ledger(
+    path: Path, *, expected_sha256: str, requested_h11: int
+) -> dict[str, Any]:
+    """Rehash the frozen merged artifact immediately before decoding it."""
+
+    observed_sha256 = _sha256_file(path)
+    if observed_sha256 != expected_sha256:
+        raise ReplayConfigurationError(
+            f"merged artifact changed after preflight: expected {expected_sha256}, got {observed_sha256}"
+        )
+    zstd = shutil.which("zstd")
+    if zstd is None:
+        raise ReplayConfigurationError("zstd is required for merged candidate ledger replay")
+    completed = subprocess.run([zstd, "-dcq", str(path)], check=False, capture_output=True)
+    if completed.returncode != 0:
+        raise ReplayConfigurationError(f"cannot read merged candidate ledger: {path}")
+    try:
+        value = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise ReplayConfigurationError(f"merged candidate ledger is invalid JSON: {path}") from exc
+    if not isinstance(value, dict) or value.get("requested_h11") != int(requested_h11):
+        raise ReplayConfigurationError("merged candidate ledger physical h11 does not match request")
+    funnel = value.get("terminal_ledger", {}).get("class_funnel")
+    if not isinstance(funnel, list):
+        raise ReplayConfigurationError("merged candidate ledger has no terminal class funnel")
+    return value
+
+
+def _read_enrichment_rows(path: Path, expected_sha256: str | None = None) -> dict[str, dict[str, Any]]:
+    """Read immutable source/input certificates keyed by replay row identity."""
+    if not path.is_file():
+        raise ReplayConfigurationError(f"declared enrichment artifact is missing: {path}")
+    if expected_sha256 is not None and _sha256_file(path) != expected_sha256:
+        raise ReplayConfigurationError(f"enrichment artifact changed after preflight: {path}")
+    rows = _zstd_jsonl_read(path)
+    indexed: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if row.get("record_type") != "row":
+            continue
+        identity = row.get("row_identity")
+        if not isinstance(identity, str) or not identity:
+            raise ReplayConfigurationError("enrichment row has no canonical replay row_identity")
+        if identity in indexed:
+            raise ReplayConfigurationError(f"duplicate enrichment row identity: {identity}")
+        indexed[identity] = row
+    return indexed
+
+
+def _attach_enrichment(
+    candidate_rows: list[tuple[str, dict[str, Any], dict[str, Any]]],
+    enrichment: dict[str, dict[str, Any]],
+) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """Join source/input certificates without changing the candidate set."""
+    attached = []
+    for identity, source, candidate in candidate_rows:
+        evidence = enrichment.get(identity)
+        if evidence is not None:
+            candidate = dict(candidate)
+            candidate["source_record"] = evidence.get("source_record")
+            candidate["mpcp_certificate"] = evidence.get("mpcp_certificate")
+        attached.append((identity, source, candidate))
+    return attached
+
+
+def _zstd_jsonl_read(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    zstd = shutil.which("zstd")
+    if zstd is None:
+        raise ReplayConfigurationError("zstd is required for replay checkpoints")
+    completed = subprocess.run(
+        [zstd, "-dcq", str(path)], check=False, capture_output=True
+    )
+    if completed.returncode != 0:
+        raise ReplayResumeError(
+            f"cannot read checkpoint {path}: "
+            f"{completed.stderr.decode('utf-8', errors='replace').strip()}"
+        )
+    rows = []
+    for line_number, line in enumerate(completed.stdout.splitlines(), 1):
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ReplayResumeError(f"invalid checkpoint JSON at line {line_number}") from exc
+        if not isinstance(value, dict):
+            raise ReplayResumeError(f"checkpoint line {line_number} is not an object")
+        rows.append(value)
+    return rows
+
+
+def _zstd_jsonl_write_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Write a zstd level-19 JSONL checkpoint with atomic replacement."""
+    zstd = shutil.which("zstd")
+    if zstd is None:
+        raise ReplayConfigurationError("zstd is required for replay checkpoints")
+    path = path.expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path = path.with_name(f".{path.name}.raw-{os.getpid()}-{time.time_ns()}")
+    compressed_path = path.with_name(f".{path.name}.zst-{os.getpid()}-{time.time_ns()}")
+    try:
+        with raw_path.open("x", encoding="utf-8") as stream:
+            for row in rows:
+                stream.write(_canonical_json(row) + "\n")
+        completed = subprocess.run(
+            [zstd, "-19", "-q", "-f", "-o", str(compressed_path), str(raw_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            raise ReplayConfigurationError(
+                f"zstd checkpoint compression failed: {completed.stderr.strip()}"
+            )
+        os.replace(compressed_path, path)
+    finally:
+        raw_path.unlink(missing_ok=True)
+        compressed_path.unlink(missing_ok=True)
+
+
+def _checkpoint_state(path: Path, config: dict[str, Any], *, resume: bool) -> tuple[list[dict[str, Any]], set[str]]:
+    rows = _zstd_jsonl_read(path)
+    if not rows:
+        if resume:
+            raise ReplayResumeError(f"cannot resume missing or empty checkpoint: {path}")
+        header = {
+            "record_type": "header",
+            "checkpoint_schema_version": REPLAY_CHECKPOINT_SCHEMA_VERSION,
+            "config": config,
+            "config_sha256": _config_digest(config),
+            "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        return [header], set()
+    header = rows[0]
+    if header.get("record_type") != "header" or header.get("checkpoint_schema_version") != REPLAY_CHECKPOINT_SCHEMA_VERSION:
+        raise ReplayResumeError("checkpoint header schema is not supported")
+    expected = _config_digest(config)
+    if header.get("config_sha256") != expected or header.get("config") != config:
+        raise ReplayResumeError("checkpoint frozen config/input/code/handoff hashes do not match")
+    identities: set[str] = set()
+    for row in rows[1:]:
+        if row.get("record_type") != "row" or row.get("row_identity") is None:
+            continue
+        identity = str(row["row_identity"])
+        if identity in identities:
+            raise ReplayResumeError(f"checkpoint contains duplicate row identity: {identity}")
+        identities.add(identity)
+    return rows, identities
+
+
+def _row_identity(source: dict[str, Any], class_index: int, action: dict[str, Any]) -> str:
+    """Return an identity independent of enumeration order or class index."""
+
+    witness = action.get("accepted_witness") or action.get("witness") or action.get("action")
+    witness_digest = action.get("witness_digest")
+    if witness_digest is None and isinstance(witness, dict):
+        witness_digest = _sha256_bytes(_canonical_json(witness).encode("utf-8"))
+    action_digest = action.get("action_digest") or action.get("digest") or witness_digest
+    if not isinstance(action_digest, str) or not action_digest:
+        raise ReplayConfigurationError(
+            "candidate action identity requires an action digest or complete accepted_witness"
+        )
+    frst_hash = action.get("frst_hash") or source.get("frst_hash")
+    payload = {
+        "declared_source_digest": source.get(
+            "declared_source_digest", source.get("source_digest")
+        ),
+        "canonical_polytope_id": source.get(
+            "canonical_polytope_id", source.get("polytope_id")
+        ),
+        "global_coordinates": source.get(
+            "global_coordinates", source.get("global_points")
+        ),
+        "frst_hash": frst_hash,
+        "action_digest": action_digest,
+        "witness_digest": witness_digest,
+    }
+    return _sha256_bytes(_canonical_json(payload).encode("utf-8"))
+
+
+def _live_replay_evidence(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Retain complete live exact-kernel evidence separate from input identity."""
+    names = (
+        "fixed_components",
+        "smoothness",
+        "fixed_locus_euler",
+        "h2_action",
+        "eq_4_45_parity",
+        "hodge_split",
+        "action_involution",
+        "fan_preservation",
+    )
+    return {name: candidate.get(name) for name in names if name in candidate}
+
+
+def _select_certificate_action(
+    candidates: Any, certificate: dict[str, Any]
+) -> dict[str, Any]:
+    """Select exactly one live action matching the immutable input witness."""
+    witness = certificate.get("action", {}).get("witness")
+    if not isinstance(witness, dict):
+        raise ReplayConfigurationError("input certificate action witness is missing")
+    if not isinstance(candidates, (list, tuple)):
+        raise ReplayConfigurationError("exact replay returned no candidate list")
+
+    def matches(candidate: Any) -> bool:
+        if not isinstance(candidate, dict) or not isinstance(candidate.get("action"), dict):
+            return False
+        action = candidate["action"]
+        for field in ("lattice_matrix", "torus_shift", "lambda_f"):
+            if action.get(field) != witness.get(field):
+                return False
+        for field in ("matrix_id", "candidate_id"):
+            observed = action.get(field)
+            if observed is not None and observed != witness.get(field):
+                return False
+        return True
+
+    matching = [candidate for candidate in candidates if matches(candidate)]
+    if len(matching) != 1:
+        raise ReplayConfigurationError(
+            "input certificate action has "
+            f"{len(matching)} exact live matches; expected one"
+        )
+    selected = dict(matching[0])
+    selected_action = dict(selected["action"])
+    if not selected.get("action_digest"):
+        selected["action_digest"] = certificate["action"].get("digest")
+    selected["action"] = selected_action
+    return selected
+
+
+def _verify_replay_row(poly: Any, source: dict[str, Any], requested_h11: int) -> None:
+    if int(source.get("mirror_h12", -1)) != int(requested_h11):
+        raise ReplayConfigurationError("source mirror_h12 does not equal requested physical h11")
+    poly_h11 = getattr(poly, "h11", None)
+    if not callable(poly_h11) or int(poly_h11()) != int(requested_h11):
+        raise ReplayConfigurationError("CYTools Polytope.h11 does not equal requested physical h11")
+
+
+def _validate_enriched_evidence(
+    source: dict[str, Any],
+    candidate: dict[str, Any],
+    source_record: Any,
+    mpcp_certificate: Any,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
+    """Validate optional immutable source and action-keyed MPCP evidence."""
+
+    if not isinstance(source_record, dict) or not isinstance(mpcp_certificate, dict):
+        return None, None, "schema-valid source_record and mpcp_certificate are both required"
+    record_source = source_record.get("source")
+    if not isinstance(record_source, dict):
+        return None, None, "source_record.source is not a schema-valid mapping"
+    required_source = ("source_row", "polytope_id", "global_points")
+    if any(record_source.get(field) in (None, "") for field in required_source):
+        return None, None, "immutable source_record is missing required identity fields"
+    source_digest = record_source.get("source_sha256", record_source.get("parquet_sha256"))
+    if not isinstance(source_digest, str) or not source_digest:
+        return None, None, "immutable source_record has no source SHA-256"
+    if record_source.get("polytope_id") != source.get("canonical_polytope_id"):
+        return None, None, "immutable source_record polytope_id does not match candidate"
+    if source.get("source_row") is not None and record_source.get("source_row") != source.get("source_row"):
+        return None, None, "immutable source_record source_row does not match candidate"
+    for field in ("source_directory_sha256", "source_input_sha256"):
+        observed = source_record.get(field, record_source.get(field))
+        if observed not in (None, source.get("declared_source_digest")):
+            return None, None, f"immutable source_record {field} does not match source contract"
+    certificate_source = mpcp_certificate.get("source")
+    certificate_frst = mpcp_certificate.get("frst")
+    certificate_action = mpcp_certificate.get("action")
+    if not all(isinstance(value, dict) for value in (certificate_source, certificate_frst, certificate_action)):
+        return None, None, "mpcp_certificate identity sections are incomplete"
+    if certificate_source.get("source_sha256") != source_digest:
+        return None, None, "mpcp_certificate source digest does not match source_record"
+    if certificate_source.get("polytope_id") != record_source.get("polytope_id"):
+        return None, None, "mpcp_certificate polytope_id does not match source_record"
+    if certificate_source.get("global_points") != record_source.get("global_points"):
+        return None, None, "mpcp_certificate coordinates do not match source_record"
+    if certificate_frst.get("frst_hash") != source.get("frst_hash"):
+        return None, None, "mpcp_certificate FRST hash does not match candidate"
+    selected_frst = source_record.get("selected_frst")
+    if mpcp_certificate.get("certificate_schema_version") == "cyaxiverse-population-mpcp-certificate-1.0":
+        if not isinstance(selected_frst, dict):
+            return None, None, "population certificate requires immutable selected_frst evidence"
+        for field in ("points", "simplices", "simplices_index_space"):
+            if certificate_frst.get(field) != selected_frst.get(field):
+                return None, None, f"population certificate FRST {field} does not match source_record"
+    witness = candidate.get("accepted_witness")
+    witness_digest = _sha256_bytes(_canonical_json(witness).encode("utf-8")) if isinstance(witness, dict) else None
+    input_certificate = mpcp_certificate.get("certificate_schema_version") == "cyaxiverse-population-input-certificate-1.0"
+    if input_certificate:
+        action_witness = certificate_action.get("witness")
+        if not isinstance(action_witness, dict):
+            return None, None, "population input certificate action witness is missing"
+        for field in ("matrix_id", "candidate_id", "torus_shift", "lambda_f"):
+            if field in witness and action_witness.get(field) != witness.get(field):
+                return None, None, f"population input action {field} does not match ledger witness"
+    else:
+        expected_action_digest = candidate.get("action_digest") or witness_digest
+        if certificate_action.get("digest") != expected_action_digest:
+            return None, None, "mpcp_certificate action key does not match candidate"
+    try:
+        from mpcp_bounded_analysis import validate_replay_certificate
+        validator_source = {
+            **record_source,
+            "source_sha256": source_digest,
+            "parquet_sha256": source_digest,
+        }
+        if mpcp_certificate.get("certificate_schema_version") == "cyaxiverse-population-input-certificate-1.0":
+            from mpcp_bounded_analysis import validate_population_input_certificate
+
+            validation = validate_population_input_certificate(
+                mpcp_certificate,
+                source=validator_source,
+                frst_hash=source.get("frst_hash"),
+                action=certificate_action.get("witness"),
+                requested_h11=int(source.get("mirror_h12")),
+            )
+        elif mpcp_certificate.get("certificate_schema_version") == "cyaxiverse-population-mpcp-certificate-1.0":
+            from mpcp_bounded_analysis import validate_population_replay_certificate
+
+            validation = validate_population_replay_certificate(
+                mpcp_certificate,
+                source=validator_source,
+                frst_hash=source.get("frst_hash"),
+                action=certificate_action.get("witness"),
+                requested_h11=int(source.get("mirror_h12")),
+            )
+        else:
+            from mpcp_bounded_analysis import validate_replay_certificate
+
+            validation = validate_replay_certificate(
+                mpcp_certificate,
+                source=validator_source,
+                frst_hash=source.get("frst_hash"),
+                action=certificate_action.get("witness"),
+            )
+    except (ImportError, TypeError, ValueError) as exc:
+        return None, None, f"mpcp_certificate validator unavailable: {exc}"
+    if not isinstance(validation, dict) or validation.get("status") != "valid":
+        reasons = validation.get("reasons", []) if isinstance(validation, dict) else []
+        detail = "; ".join(str(reason) for reason in reasons) or "certificate validation failed"
+        return None, None, detail
+    return source_record, mpcp_certificate, None
+
+
+def _load_replay_geometry(
+    source: dict[str, Any],
+    candidate: dict[str, Any],
+    source_record: dict[str, Any],
+    mpcp_certificate: dict[str, Any],
+    requested_h11: int,
+) -> tuple[Any | None, Any | None, str | None]:
+    """Construct and verify the immutable Polytope and selected FRST.
+
+    A certificate is a witness, not a geometry serialization.  The source
+    record must therefore carry the exact global lattice coordinates and the
+    selected FRST's local coordinates and simplices.  Reconstructing the
+    FRST from an identity, a class index, or a certificate summary would
+    silently choose a different triangulation and is rejected.
+    """
+
+    try:
+        from mpcp_bounded_analysis import (
+            _construct_polytope,
+            _construct_selected_triangulation,
+            point_identity,
+            triangulation_identity,
+        )
+    except (ImportError, AttributeError) as exc:
+        return None, None, f"CYTools replay loader is unavailable: {type(exc).__name__}: {exc}"
+
+    record_source = source_record.get("source")
+    selected_frst = source_record.get("selected_frst")
+    if not isinstance(record_source, dict):
+        return None, None, "immutable source_record.source is required for geometry reconstruction"
+    if not isinstance(selected_frst, dict):
+        return None, None, "immutable source_record.selected_frst is required for geometry reconstruction"
+    if selected_frst.get("simplices") is None or selected_frst.get("points") is None:
+        return None, None, "selected_frst must include exact local points and simplices"
+    if selected_frst.get("simplices_index_space") != "triangulation_local":
+        return None, None, "selected_frst must declare triangulation_local simplices"
+
+    global_points = record_source.get("global_points")
+    polytope_id = record_source.get("polytope_id")
+    source_row = record_source.get("source_row")
+    source_sha256 = record_source.get("source_sha256", record_source.get("parquet_sha256"))
+    if global_points is None or polytope_id in (None, "") or source_row in (None, ""):
+        return None, None, "immutable source_record is missing global coordinates or source row identity"
+    if not isinstance(source_sha256, str) or not source_sha256:
+        return None, None, "immutable source_record is missing the source Parquet SHA-256"
+    if polytope_id != source.get("canonical_polytope_id"):
+        return None, None, "source_record polytope_id does not match the candidate ledger"
+    certificate_source = mpcp_certificate.get("source", {})
+    if certificate_source.get("source_sha256") != source_sha256:
+        return None, None, "certificate source SHA-256 does not match source_record"
+    if certificate_source.get("polytope_id") != polytope_id:
+        return None, None, "certificate polytope_id does not match source_record"
+    if certificate_source.get("global_points") != global_points:
+        return None, None, "certificate global coordinates do not match source_record"
+    if source.get("source_row") is not None and record_source.get("source_row") != source.get("source_row"):
+        return None, None, "source_record source row does not match the candidate ledger"
+    for field in ("source_directory_sha256", "source_input_sha256"):
+        observed = source_record.get(field, record_source.get(field))
+        if observed not in (None, source.get("declared_source_digest")):
+            return None, None, f"source_record {field} does not match the frozen source contract"
+
+    try:
+        expected_polytope_id = f"lattice-points-sha256:{point_identity(global_points)}"
+    except (TypeError, ValueError) as exc:
+        return None, None, f"source global coordinates are invalid: {exc}"
+    if expected_polytope_id != polytope_id:
+        return None, None, "source polytope_id does not match canonical global coordinates"
+
+    source_evidence = {
+        "status": "source_identity_ready",
+        "terminal": False,
+        "polytope_id": polytope_id,
+        "source_row": source_row,
+        "source_sha256": source_sha256,
+        "global_points": global_points,
+        "global_point_count": len(global_points),
+    }
+    record = {"source": record_source, "selected_frst": selected_frst}
+    try:
+        poly, poly_status = _construct_polytope(record, source_evidence)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        return None, None, f"CYTools Polytope construction failed: {type(exc).__name__}: {exc}"
+    if poly is None:
+        return None, None, str(poly_status.get("reason", "CYTools Polytope construction unavailable"))
+    try:
+        _verify_replay_row(poly, {"mirror_h12": requested_h11}, requested_h11)
+    except (TypeError, ValueError, ReplayConfigurationError) as exc:
+        return None, None, f"physical h11 verification failed: {exc}"
+
+    try:
+        triangulation, tri_status = _construct_selected_triangulation(poly, record)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        return None, None, f"selected FRST reconstruction failed: {type(exc).__name__}: {exc}"
+    if triangulation is None:
+        return None, None, str(tri_status.get("reason", "selected FRST reconstruction unavailable"))
+    try:
+        actual_frst_hash = triangulation_identity(triangulation)
+    except (TypeError, ValueError, AttributeError) as exc:
+        return None, None, f"selected FRST identity is unavailable: {exc}"
+    expected_frst_hash = candidate.get("frst_hash")
+    certificate_frst_hash = mpcp_certificate.get("frst", {}).get("frst_hash")
+    if expected_frst_hash != actual_frst_hash:
+        return None, None, "reconstructed selected FRST hash does not match the candidate ledger"
+    if certificate_frst_hash != actual_frst_hash:
+        return None, None, "reconstructed selected FRST hash does not match the MPCP certificate"
+    return poly, triangulation, None
+
+
+def _replay_candidate_rows(
+    poly: Any,
+    source: dict[str, Any],
+    class_index: int,
+    triangulation: Any,
+    *,
+    source_record: dict[str, Any] | None = None,
+    mpcp_certificate: dict[str, Any] | None = None,
+    ledger_candidate: dict[str, Any] | None = None,
+    geometry_error: str | None = None,
+) -> list[dict[str, Any]]:
+    """Evaluate one ledger candidate with explicit immutable evidence.
+
+    A missing source record or action-keyed bounded certificate is a terminal
+    unsupported result.  It never enters the exact kernels and cannot be
+    promoted by a summary or population count.
+    """
+    started = time.perf_counter()
+    started_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    candidate = ledger_candidate or {}
+    supplied_source_record = source_record
+    supplied_certificate = mpcp_certificate
+    source_record = source_record if source_record is not None else source
+    common = {
+        "source": source,
+        "source_record": source_record,
+        "frst_class_index": int(class_index),
+        "frst_hash": candidate.get("frst_hash") or source.get("frst_hash"),
+        "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+        "candidate": candidate,
+        "formula_gate": {
+            "status": "not_reached",
+            "eq_4_46": "requires explicit Eq.4.35 certificate",
+            "eq_4_50": "requires exact containment",
+        },
+        "resource_limit_reason": None,
+        "attempt": 1,
+        "started_utc": started_utc,
+    }
+    common["replay_output_evidence"] = {}
+    common["replay_output_evidence_digest"] = _sha256_bytes(b"{}")
+    action = candidate.get("accepted_witness") or candidate.get("action") or {}
+    action_digest = candidate.get("action_digest") or action.get("action_digest")
+    witness_digest = candidate.get("witness_digest")
+    if witness_digest is None and isinstance(action, dict):
+        witness_digest = _sha256_bytes(_canonical_json(action).encode("utf-8"))
+    identity_action = {
+        "frst_hash": common["frst_hash"],
+        "action_digest": action_digest or witness_digest,
+        "witness_digest": witness_digest,
+        "action": action,
+    }
+    common["row_identity"] = _row_identity(source, class_index, identity_action)
+    if geometry_error is not None:
+        return [{
+            **common,
+            "terminal_status": "exact_geometry_unavailable",
+            "reason": geometry_error,
+            "mpcp_certificate_status": "valid",
+            "elapsed_seconds": time.perf_counter() - started,
+        }]
+    validated_source, validated_certificate, evidence_error = _validate_enriched_evidence(
+        source, candidate, supplied_source_record, supplied_certificate
+    )
+    if evidence_error is not None:
+        row = {
+            **common,
+            "terminal_status": "exact_certificate_unavailable",
+            "reason": evidence_error,
+            "mpcp_certificate_status": "invalid" if supplied_certificate is not None else "unavailable",
+            "elapsed_seconds": time.perf_counter() - started,
+        }
+        return [row]
+    try:
+        topology = dict(extract_topology(triangulation.get_cy(), triangulation))
+        cones = _triangulation_cones(poly, triangulation)
+        topology["fixed_surface_n_s"] = identity_fixed_surface_n_s_table(cones, triangulation)
+        topology["compute_general_fixed_surface_n_s"] = True
+        topology["non_smooth_facet_dual_vertices"] = facets_with_non_smooth_cones(poly, triangulation)
+        if validated_certificate is not None:
+            # The input certificate names the authoritative inherited action.
+            # Reconstructing the generic trilayer identity-action population
+            # here would silently replace it with a different witness.
+            from trilayer_involutions import evaluate_exact_trilayer_action
+
+            certificate_action = validated_certificate["action"]["witness"]
+            structural = {
+                "schema_version": CANDIDATE_SCHEMA_VERSION,
+                "terminal_status": "structurally_reconstructed",
+                "polytope_id": source.get("canonical_polytope_id"),
+                "frst_hash": common["frst_hash"],
+                "action": dict(certificate_action),
+            }
+            reconstruction = {
+                "candidates": [
+                    evaluate_exact_trilayer_action(
+                        poly,
+                        triangulation,
+                        topology,
+                        structural,
+                        source_record=validated_source,
+                        mpcp_certificate=validated_certificate,
+                    )
+                ]
+            }
+        else:
+            reconstruction = reconstruct_trilayer_actions(
+                poly,
+                triangulation,
+                topology,
+                source_record=validated_source,
+                mpcp_certificate=validated_certificate,
+            )
+    except BaseException as exc:
+        return [{
+            **common,
+            "terminal_status": "candidate_evaluation_failed",
+            "failure_category": "exact_reconstruction_failure",
+            "exception": f"{type(exc).__name__}: {exc}",
+            "resource_limit_reason": "downstream exact kernel failure; fail closed",
+            "elapsed_seconds": time.perf_counter() - started,
+        }]
+    candidates = reconstruction.get("candidates", [])
+    if validated_certificate is not None:
+        try:
+            selected = _select_certificate_action(candidates, validated_certificate)
+        except ReplayConfigurationError as exc:
+            return [{
+                **common,
+                "terminal_status": "exact_certificate_unavailable",
+                "reason": str(exc),
+                "mpcp_certificate_status": "valid",
+                "elapsed_seconds": time.perf_counter() - started,
+            }]
+        candidates = [selected]
+    rows = []
+    for candidate in candidates:
+        action = candidate.get("action", {}) if isinstance(candidate, dict) else {}
+        live_evidence = _live_replay_evidence(candidate)
+        rows.append(
+            {
+                "source": source,
+                "source_record": source_record,
+                "frst_class_index": int(class_index),
+                "frst_hash": candidate.get("frst_hash"),
+                "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+                "candidate": candidate,
+                "replay_output_evidence": live_evidence,
+                "replay_output_evidence_digest": _sha256_bytes(_canonical_json(live_evidence).encode("utf-8")),
+                "terminal_status": candidate.get("terminal_status", "candidate_evaluation_failed"),
+                # The input certificate row is the immutable replay identity;
+                # downstream kernel metadata must not create a second row on
+                # resume merely because its action digest has extra fields.
+                "row_identity": common["row_identity"] if validated_certificate is not None else _row_identity(source, class_index, candidate),
+                "formula_gate": {
+                    "eq_4_46": "conditional on Eq.4.35 certificate; otherwise actual invariant/Newton support",
+                    "eq_4_50": "only after exact containment",
+                    "status": "kernel_enforced",
+                },
+                "resource_limit_reason": None,
+                "attempt": 1,
+                "started_utc": started_utc,
+                "elapsed_seconds": time.perf_counter() - started,
+            }
+        )
+    if not rows:
+        rows.append(
+            {
+                "source": source,
+                "frst_class_index": int(class_index),
+                "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+                "terminal_status": "no_source_candidate",
+                "row_identity": _row_identity(source, class_index, {
+                    "frst_hash": common["frst_hash"], "action_digest": action_digest or "unavailable",
+                }),
+                "candidate": None,
+                "formula_gate": {"status": "not_reached"},
+                "resource_limit_reason": None,
+                "attempt": 1,
+                "started_utc": started_utc,
+                "elapsed_seconds": time.perf_counter() - started,
+            }
+        )
+    return rows
+
+
+def exact_replay(args: argparse.Namespace) -> dict[str, Any]:
+    """Replay only deterministic candidates declared by the merged ledger."""
+    workers = int(getattr(args, "workers", 1))
+    if workers > MAX_REPLAY_WORKERS:
+        raise ReplayConfigurationError(f"hard worker maximum is {MAX_REPLAY_WORKERS}")
+    parquet_dir = Path(args.parquet_dir).expanduser().resolve()
+    preflight = run_population_preflight(
+        Path(__file__).resolve().parents[1], args.h11, parquet_dir
+    )
+    if not isinstance(preflight, dict) or preflight.get("status") != "passed":
+        raise ReplayConfigurationError("successful five-handoff population preflight is required")
+    config = _freeze_replay_config(args, preflight)
+    max_rows = int(config["max_rows"])
+    checkpoint_arg = getattr(args, "checkpoint", None) or getattr(args, "terminal_ledger", None)
+    output_arg = getattr(args, "output", None)
+    checkpoint = Path(checkpoint_arg or (str(output_arg) + ".checkpoint.jsonl.zst" if output_arg else "exact-replay.checkpoint.jsonl.zst"))
+    resume = bool(getattr(args, "resume", False))
+    if checkpoint.exists() and not resume:
+        raise ReplayConfigurationError(f"refusing implicit checkpoint overwrite: {checkpoint}")
+    if max_rows == 0 or bool(getattr(args, "dry_run", False)):
+        rows, identities = _checkpoint_state(checkpoint, config, resume=resume)
+        summary = {
+            "schema_version": REPLAY_SCHEMA_VERSION,
+            "status": "dry_run",
+            "config": config,
+            "checkpoint": str(checkpoint.resolve()),
+            "rows_evaluated": 0,
+            "terminal_status_counts": {},
+            "duplicate_count": 0,
+            "database_writes": 0,
+            "scientific_labels": config["labels"],
+        }
+        if not checkpoint.exists():
+            _zstd_jsonl_write_atomic(checkpoint, rows)
+        return summary
+
+    merged_contract = config["artifact_contract"]["merged_artifact"]
+    merged_path = Path(merged_contract["path"])
+    if not merged_path.is_file():
+        raise ReplayConfigurationError(f"declared merged candidate ledger is missing: {merged_path}")
+    merged = _read_merged_ledger(
+        merged_path,
+        expected_sha256=merged_contract["sha256"],
+        requested_h11=int(args.h11),
+    )
+    source_contract = preflight.get("source_contract", {})
+    declared_digest = source_contract.get("expected_directory_digest")
+    # The cap is deliberately applied after canonical sorting of candidate
+    # identities. It never limits source polytopes or invokes FRST discovery.
+    candidate_rows = _select_ledger_candidates(
+        merged,
+        requested_h11=int(args.h11),
+        declared_source_digest=declared_digest,
+        max_rows=max_rows,
+    )
+    enrichment_contract = config.get("enrichment")
+    if isinstance(enrichment_contract, dict):
+        enrichment_rows = _read_enrichment_rows(
+            Path(enrichment_contract["path"]), enrichment_contract["sha256"]
+        )
+        candidate_rows = _attach_enrichment(candidate_rows, enrichment_rows)
+
+    valid_evidence = 0
+    for _, source, candidate in candidate_rows:
+        _, _, evidence_error = _validate_enriched_evidence(
+            source,
+            candidate,
+            candidate.get("source_record"),
+            candidate.get("mpcp_certificate"),
+        )
+        if evidence_error is None:
+            valid_evidence += 1
+    all_unavailable = valid_evidence == 0
+    if all_unavailable:
+        allow_smoke = bool(getattr(args, "allow_terminal_only_smoke", False))
+        if not allow_smoke or max_rows > 2:
+            raise ReplayConfigurationError(
+                "no schema-valid certificates are available; full execution is blocked "
+                "(pass --allow-terminal-only-smoke with --max-rows <= 2 for plumbing smoke)"
+            )
+    else:
+        config["labels"] = {
+            **config["labels"],
+            "execution_mode": "schema_validated_replay",
+            "scientific_result": "not_established",
+        }
+    rows, identities = _checkpoint_state(checkpoint, config, resume=resume)
+
+    status_counts: dict[str, int] = {}
+    for existing in rows[1:]:
+        if existing.get("record_type") == "row":
+            status = str(existing.get("terminal_status"))
+            status_counts[status] = status_counts.get(status, 0) + 1
+    source_ledger = merged.get("terminal_ledger", {})
+    funnel = source_ledger.get("class_funnel", [])
+    source_accounting = {
+        "class_funnel_count": len(funnel) if isinstance(funnel, list) else 0,
+        "authoritative_candidate_count": sum(
+            isinstance(entry, dict)
+            and entry.get("accepted_for_table_1") is True
+            and isinstance(entry.get("accepted_witness"), dict)
+            for entry in funnel
+        ) if isinstance(funnel, list) else 0,
+        "rejected_or_noncandidate_count": sum(
+            not (
+                isinstance(entry, dict)
+                and entry.get("accepted_for_table_1") is True
+                and isinstance(entry.get("accepted_witness"), dict)
+            )
+            for entry in funnel
+        ) if isinstance(funnel, list) else 0,
+    }
+    duplicate_count = int(
+        source_ledger.get("duplicate_count", source_ledger.get("duplicates", 0)) or 0
+    )
+    evaluated = 0
+    since_checkpoint = 0
+    cursor = 0
+    for identity, source, candidate in candidate_rows:
+        if cursor % int(config["shard_count"]) != int(config["shard_index"]):
+            cursor += 1
+            continue
+        cursor += 1
+        if identity in identities:
+            # Resume skips are not source-ledger duplicates and are never
+            # appended as duplicate rows.
+            continue
+        source_record = candidate.get("source_record")
+        mpcp_certificate = candidate.get("mpcp_certificate")
+        poly = triangulation = None
+        geometry_error = None
+        if source_record is not None and mpcp_certificate is not None:
+            poly, triangulation, geometry_error = _load_replay_geometry(
+                source,
+                candidate,
+                source_record,
+                mpcp_certificate,
+                int(args.h11),
+            )
+        candidate_row = _replay_candidate_rows(
+            poly,
+            source,
+            int(candidate.get("frst_class_index", 0)),
+            triangulation,
+            source_record=source_record,
+            mpcp_certificate=mpcp_certificate,
+            ledger_candidate=candidate,
+            geometry_error=geometry_error,
+        )[0]
+        candidate_row["record_type"] = "row"
+        candidate_row["cursor"] = cursor
+        rows.append(candidate_row)
+        identities.add(identity)
+        evaluated += 1
+        since_checkpoint += 1
+        status = str(candidate_row.get("terminal_status"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if since_checkpoint >= int(config["checkpoint_interval"]):
+            _zstd_jsonl_write_atomic(checkpoint, rows)
+            since_checkpoint = 0
+    if since_checkpoint or not checkpoint.exists():
+        _zstd_jsonl_write_atomic(checkpoint, rows)
+    summary = {
+        "schema_version": REPLAY_SCHEMA_VERSION,
+        "status": "completed",
+        "config": config,
+        "checkpoint": str(checkpoint.resolve()),
+        "rows_evaluated": evaluated,
+        "terminal_status_counts": status_counts,
+        "duplicate_count": duplicate_count,
+        "database_writes": 0,
+        "scientific_labels": config["labels"],
+        "execution_mode": "infrastructure_smoke_only" if all_unavailable else "schema_validated_replay",
+        "scientific_result": "no_scientific_result" if all_unavailable else "not_established",
+        "source_ledger_accounting": source_accounting,
+    }
+    if output_arg:
+        output = Path(output_arg).expanduser().resolve()
+        if output.exists():
+            raise ReplayConfigurationError(f"refusing to overwrite replay output: {output}")
+        _zstd_jsonl_write_atomic(output, rows + [{"record_type": "summary", **summary}])
+    return summary
+
+
+def reproduce(args):
+    """Run the bounded replay or the legacy population audit.
+
+    The two entry points use distinct argument namespaces.  This preserves
+    the established audit API while making the schema-3.0 replay available as
+    the default for callers created by ``build_argument_parser``.
+    """
+    if any(
+        hasattr(args, name)
+        for name in ("dry_run", "max_rows", "workers", "checkpoint", "enrichment")
+    ):
+        return exact_replay(args)
+    return _legacy_reproduce(args)
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    """Build the bounded schema-3.0 replay CLI parser."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parquet-dir", required=True)
     parser.add_argument(
         "--h11",
         type=int,
-        default=4,
-        help="Physical h11 to reproduce from arXiv:2412.12012 Table 1 (tab:ScanData); "
-        "3, 4, and 5 have recorded paper targets, others run as diagnostic-only.",
+        required=True,
+        choices=(4, 5),
+        help="Explicit physical h11 selected by mirror_h12 and checked with CYTools.",
     )
+    parser.add_argument(
+        "--max-rows", "--limit", dest="max_rows", type=int, default=0,
+        help="Maximum favorable source rows to evaluate; 0 performs a bounded dry run.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Run preflight and freeze provenance without loading geometry rows.")
+    parser.add_argument("--workers", type=int, default=1, help="Sequential worker setting (hard maximum 4).")
+    parser.add_argument("--shard-count", type=int, default=1, help="Deterministic source-row shard count (maximum 4).")
+    parser.add_argument("--shard-index", type=int, default=0, help="Zero-based deterministic shard index.")
+    parser.add_argument("--checkpoint", type=Path, help="Append-only zstd level-19 JSONL checkpoint.")
+    parser.add_argument("--terminal-ledger", type=Path, help="Compatibility alias for the append-only terminal checkpoint.")
+    parser.add_argument("--resume", action="store_true", help="Resume only when frozen config and hashes match.")
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=32,
+        help="Atomically rewrite the zstd checkpoint after this many new rows.",
+    )
+    parser.add_argument(
+        "--allow-terminal-only-smoke",
+        action="store_true",
+        help="Allow at most two terminal-only rows for infrastructure plumbing validation.",
+    )
+    parser.add_argument("--orientifold-reason-diagnostics", action="store_true", help="Retain exact-kernel reason diagnostics (schema-3.0 compatibility flag).")
+    parser.add_argument("--orientifold-audit", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--enrichment",
+        type=Path,
+        help="zstd JSONL source/input-certificate artifact produced by the bounded enrichment runner.",
+    )
+    return parser
+
+
+def _parse_args(argv=None):
+    """Parse the established source-matched audit-driver arguments."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--parquet-dir", required=True)
+    parser.add_argument("--h11", type=int, default=4)
     parser.add_argument("--limit", type=int, default=10**9)
-    parser.add_argument(
-        "--shard-count",
-        type=int,
-        default=1,
-        help=(
-            "Total number of parallel shards. The favorable-polytope population "
-            "is partitioned deterministically (strided by global index) across "
-            "shards so each shard processes a disjoint subset. A sharded run is "
-            "always a partial run; combine the per-shard outputs with "
-            "scripts/merge_orientifold_shards.py to recover population totals and "
-            "completeness. Default 1 (no sharding, behaviour unchanged)."
-        ),
-    )
-    parser.add_argument(
-        "--shard-index",
-        type=int,
-        default=0,
-        help="0-based index of this shard in [0, --shard-count).",
-    )
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--progress", type=int, default=50)
     parser.add_argument("--keep-details", action="store_true")
     parser.add_argument("--orientifold-audit", action="store_true")
-    parser.add_argument(
-        "--terminal-ledger",
-        type=Path,
-        help=(
-            "Write the lossless orientifold terminal ledger to this JSONL path. "
-            "When omitted with --output, use <output-stem>.terminal-ledger.jsonl."
-        ),
-    )
-    parser.add_argument(
-        "--orientifold-reason-diagnostics",
-        action="store_true",
-        help=(
-            "Record machine-readable general-L fixed-surface reason rows and "
-            "certified Chern-class terms. Requires --orientifold-audit."
-        ),
-    )
-    parser.add_argument(
-        "--export-kaehler-points",
-        action="store_true",
-        help=(
-            "Export the Algorithm-1 canonical-tip Kahler point (cy_volume, "
-            "prime_divisor_volumes, inverse_metric, GLSM charge matrix Q) for "
-            "every h21_plus_zero-accepted FRST class. Requires --keep-details "
-            "to appear in the output."
-        ),
-    )
-    parser.add_argument(
-        "--model-stage",
-        action="store_true",
-        help=(
-            "Run priority 4: per h21_plus_zero-accepted FRST class, export the "
-            "Algorithm-1 canonical-tip Kahler point (implies --export-kaehler-points) "
-            "and enumerate (QCD divisor, fuzzy axion) models via "
-            "CYAxiverse.paper_benchmarks.enumerate_fuzzy_axion_models (bridged through "
-            "Julia via HDF5), comparing the total model count against the paper's "
-            "target of 3,348 under the acceptance-test discipline in "
-            "validation/fuzzy_axions_2412_12012_kaehler_qcd_model_count_scope_20260818.md "
-            "Sec. 6."
-        ),
-    )
-    parser.add_argument(
-        "--gs",
-        type=float,
-        default=0.5,
-        help="String coupling used for the prefactor P = gs^4/128 (eq. 3.28-3.29); "
-        "the paper's stated main-analysis value is 0.5.",
-    )
-    parser.add_argument(
-        "--w0-real",
-        type=float,
-        default=1.0,
-        help="Real part of the flux superpotential W0 (eq. 3.12); no ensemble-specific "
-        "value is given in the source, so this defaults to the paper's own Sec. 4.2.1 "
-        "hand-worked-example convention W0=1.",
-    )
+    parser.add_argument("--terminal-ledger", type=Path)
+    parser.add_argument("--orientifold-reason-diagnostics", action="store_true")
+    parser.add_argument("--export-kaehler-points", action="store_true")
+    parser.add_argument("--model-stage", action="store_true")
+    parser.add_argument("--gs", type=float, default=0.5)
+    parser.add_argument("--w0-real", type=float, default=1.0)
     parser.add_argument("--w0-imag", type=float, default=0.0)
     parser.add_argument(
         "--qcd-divisor-domain",
         choices=("all_prime", "leading_nonself"),
         default="all_prime",
-        help=(
-            "Which prime toric divisors Algorithm 1's 'for D' loop ranges over. "
-            "all_prime (default) is the paper's literal text: all h11+4 of them, "
-            "self-pairing included. leading_nonself opts into the candidate "
-            "restriction to the h11 leading-instanton divisors minus the fuzzy "
-            "axion's own -- the only one of 48 screened restrictions that survives "
-            "Table 1's h11=2 row and predicts h11=4 and 5 to within 10%% "
-            "(validation/fuzzy_axions_2412_12012_sampler_reverse_engineering_20260818.md). "
-            "It forces model_count claim_status to diagnostic_only, and it undershoots "
-            "Table 1 at h11>=3 by construction; do not tune towards Table 1 to close that."
-        ),
     )
-    parser.add_argument(
-        "--julia-binary",
-        default="julia",
-        help="Julia executable used to run scripts/fuzzy_axion_model_stage_driver.jl.",
-    )
-    parser.add_argument(
-        "--julia-project",
-        type=Path,
-        default=None,
-        help="Julia --project path for the model-stage driver; defaults to this "
-        "repository's root (the parent of scripts/).",
-    )
+    parser.add_argument("--julia-binary", default="julia")
+    parser.add_argument("--julia-project", type=Path, default=None)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     if args.shard_count < 1:
@@ -1819,8 +2939,6 @@ def _parse_args(argv=None):
     if not 0 <= args.shard_index < args.shard_count:
         parser.error("--shard-index must be in [0, --shard-count)")
     if args.shard_count > 1:
-        # Give each shard distinct output/ledger paths so the immutability
-        # guards below apply per shard and shards never collide on disk.
         if args.output is not None:
             args.output = _shard_suffix_path(args.output, args.shard_index, args.shard_count)
         if args.terminal_ledger is not None:
@@ -1830,9 +2948,7 @@ def _parse_args(argv=None):
     if args.orientifold_reason_diagnostics and not args.orientifold_audit:
         parser.error("--orientifold-reason-diagnostics requires --orientifold-audit")
     if args.orientifold_audit and args.output is None and args.terminal_ledger is None:
-        parser.error(
-            "--orientifold-audit requires --terminal-ledger when --output is absent"
-        )
+        parser.error("--orientifold-audit requires --terminal-ledger when --output is absent")
     if args.output is not None and args.output.exists():
         parser.error(f"refusing to overwrite existing output: {args.output}")
     if args.terminal_ledger is not None and (
@@ -1844,7 +2960,26 @@ def _parse_args(argv=None):
 
 
 def main(argv=None):
-    args = _parse_args(argv)
+    """Run either the bounded replay CLI or the established audit CLI."""
+    values = list(sys.argv[1:] if argv is None else argv)
+    replay_flags = {
+        "--dry-run",
+        "--workers",
+        "--checkpoint",
+        "--enrichment",
+        "--max-rows",
+        "--allow-terminal-only-smoke",
+    }
+    if any(flag in values for flag in replay_flags):
+        parser = build_argument_parser()
+        args = parser.parse_args(values)
+        try:
+            result = reproduce(args)
+        except (ReplayConfigurationError, ReplayResumeError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+    args = _parse_args(values)
     result = reproduce(args)
     encoded = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output is None:

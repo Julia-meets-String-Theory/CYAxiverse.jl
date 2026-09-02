@@ -11,6 +11,7 @@ from qed_divisor_assignment import (
     QEDAssignmentFailure,
     classify_qed_leading_status,
     compute_leading_rank_order,
+    normalize_qcd_assignment,
     prime_divisor_intersection_graph,
     select_qed_divisor,
     write_visible_sector_hdf5,
@@ -176,6 +177,58 @@ class QEDAssignmentTests(unittest.TestCase):
                     visible["candidate_pool_labels"][()],
                     np.asarray([self.stable[index] for index in [1, 2]]),
                 )
+
+
+class NormalizeQcdAssignmentTests(unittest.TestCase):
+    """Regression coverage for the h11-agnostic prime/effective shape fix.
+
+    `prime_volumes` (one per prime toric divisor) and `effective_volumes`
+    (one per distinct effective-cone extremal ray, after
+    `canonicalize_unique_charge_rows` dedup) are legitimately
+    different-length arrays -- e.g. a real h11=2 geometry with 6 prime
+    toric divisors and only 3 distinct effective-cone rays.  Before this
+    fix, `normalize_qcd_assignment` rejected every such geometry outright
+    via a spurious `effective.shape == prime.shape` requirement, even
+    though `effective` is only ever scaled and min-checked, never indexed
+    parallel to `prime`.
+    """
+
+    def test_unequal_length_prime_and_effective_succeeds(self):
+        prime = np.asarray([1.0, 1.0, 4.0, 4.0, 12.0, 2.0])  # 6 prime divisors
+        effective = np.asarray([1.0, 4.0, 12.0])  # 3 distinct effective-cone rays
+        result = normalize_qcd_assignment(prime, effective, 0, target=40.0)
+        self.assertAlmostEqual(result["qcd_volume"], 40.0, places=9)
+        self.assertTrue(result["qcd_volume_exact"])
+        self.assertAlmostEqual(result["volume_scale"], 40.0, places=9)
+        np.testing.assert_allclose(
+            result["prime_volumes"], (result["volume_scale"] * prime).tolist()
+        )
+        np.testing.assert_allclose(
+            result["effective_volumes"], (result["volume_scale"] * effective).tolist()
+        )
+        self.assertEqual(len(result["prime_volumes"]), prime.size)
+        self.assertEqual(len(result["effective_volumes"]), effective.size)
+
+    def test_infeasible_exact_40_still_raises_with_unequal_lengths(self):
+        # Scaling divisor 0 to exactly 40 forces volume_scale=40, which
+        # drives the second prime-divisor volume below the min_prime=1.0
+        # floor: still a hard rejection, not silently accepted.
+        prime = np.asarray([1.0, 0.01, 4.0])
+        effective = np.asarray([1.0, 4.0])  # deliberately a different length
+        with self.assertRaises(ValueError) as context:
+            normalize_qcd_assignment(prime, effective, 0, target=40.0)
+        self.assertIn("below one", str(context.exception))
+
+    def test_equal_length_inputs_are_unaffected(self):
+        # The pre-fix behavior for the common equal-length case (e.g. the
+        # approved h11=491 EFT path) is unchanged.
+        prime = np.asarray([1.0, 4.0, 12.0])
+        effective = np.asarray([1.0, 4.0, 12.0])
+        result = normalize_qcd_assignment(prime, effective, 1, target=40.0)
+        self.assertAlmostEqual(result["qcd_volume"], 40.0, places=9)
+        self.assertAlmostEqual(result["volume_scale"], 10.0, places=9)
+        np.testing.assert_allclose(result["prime_volumes"], [10.0, 40.0, 120.0])
+        np.testing.assert_allclose(result["effective_volumes"], [10.0, 40.0, 120.0])
 
 
 if __name__ == "__main__":
