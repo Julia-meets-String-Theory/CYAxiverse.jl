@@ -28,6 +28,32 @@ once in `AI_POLICY.md`; do not duplicate them here.
   ```
 - No formatter or linter is configured. GitHub Actions runs package tests on Julia 1.12 and builds the documentation with Julia 1.12.
 
+## Agent verification
+
+Use `scripts/agent_verify.py` as the compact verification entry point. It emits
+one JSON summary line on stdout and retains full logs outside the checkout.
+
+Intended tiers, from lightest to heaviest:
+
+1. **Inspection** — `python3 scripts/agent_verify.py snapshot` or `diff-check`
+   for read-only audits and mid-work checks.
+2. **Focused command** — `python3 scripts/agent_verify.py run -- <command>` to
+   run an explicitly assigned focused check during implementation.
+3. **Full package tests** — `python3 scripts/agent_verify.py package` before
+   handoff when the task scope requires it. This runs the same `Pkg.test()` path
+   as CI and must execute in the approved regular local host environment, never a
+   sandbox or container.
+4. **GitHub CI** — the authoritative clean-checkout gate. Runs on pull requests,
+   pushes to main, tags, and manual dispatch.
+
+Inspect concise JSON summaries first. Open the retained full log (path in the
+JSON output) only when a check fails or a warning needs investigation.
+
+The full `Pkg.test()` command remains required for applicable scope:
+```sh
+julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
 ## Documentation placement
 
 - Handoffs, planning notes, operational guides, and user-facing Markdown that
