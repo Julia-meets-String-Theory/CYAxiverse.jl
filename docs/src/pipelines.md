@@ -209,6 +209,27 @@ homogeneous dilation to volume 40 keeps every other divisor volume ≥ 1). The
 visible-sector assignment records the QCD divisor and flags a compatible QED
 divisor when one is present; QED presence is informational, not a gate.
 
+For the higher-`h11` replay paths (`h11 = 4` and `h11 = 5`), run the
+read-only population preflight before geometry loading:
+
+```sh
+python scripts/orientifold_population_preflight.py --h11 4
+python scripts/orientifold_population_preflight.py --h11 5
+```
+
+The builder calls this preflight before it loads the KS mirror. Higher-`h11`
+runs also require a validated, compressed MPCP certificate input keyed by
+`(polytope_id, frst_hash)`:
+
+```sh
+--mpcp-certificates /path/to/certificates.json.zst
+```
+
+Pass `--report` with a `.json.zst` path. Reports use maximum zstd compression,
+are written atomically, and refuse an implicit replacement. A missing or
+mismatched certificate is terminal; the replay never promotes an uncertified
+class to the population.
+
 Because the QCD-volume-40 point makes every instanton action large, the
 instanton scales `L` are deeply suppressed (`log10|Λ|` of order −100 to −650).
 This is the regime that requires `method = :auto` in pipeline 2 (Section 4).

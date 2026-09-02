@@ -237,6 +237,14 @@ function _validate_kinetic_matrix(K::Hermitian{Float64, Matrix{Float64}},
         "small indicates cond(Kinv) beyond Float64 resolution."))
 end
 
+"""
+    potential(geom_idx::GeometryIndex; hilbert=false, validate=true)
+
+Read the signed, log-scaled instanton potential and kinetic matrix for one
+geometry. The returned `AxionPotential` preserves the raw HDF5 orientation;
+use [`oriented_potential`](@ref) when a canonical axion-by-instanton layout
+is required.
+"""
 function potential(geom_idx::GeometryIndex; hilbert = false, validate::Bool = true)
     if hilbert
         L::Matrix{Float64}, Q::Matrix{Int}, Kinv::Matrix{Float64} =
@@ -713,7 +721,9 @@ function pipeline_vacua(h11::Int, tri::Int, cy::Int=1)
                critical_count = read_metadata("critical_count"),
                branch_count = read_metadata("branch_count"),
                det_Qtilde = read_metadata("det_Qtilde"),
-               search_status = read_metadata("search_status"))
+               search_status = read_metadata("search_status"),
+               terminal_status = read_metadata("terminal_status"),
+               configuration_digest = read_metadata("configuration_digest"))
         else
             nothing
         end

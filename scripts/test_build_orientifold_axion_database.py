@@ -28,6 +28,7 @@ from build_orientifold_axion_database import (
     exact_hodge_split_from_euler,
     find_exact_trilayer_witnesses,
     find_accepted_o3o7_witness,
+    load_mpcp_certificates,
     load_ledger_accepted_classes,
     main,
     orientifold_action_digest,
@@ -36,6 +37,7 @@ from build_orientifold_axion_database import (
     require_clean_git_source,
     require_exact_action_h21_plus_validation,
     _witness_matches_ledger,
+    write_json_report,
     write_run_manifest,
 )
 from glimmers_raw_frst import stable_hash
@@ -645,10 +647,11 @@ class LoadLedgerAcceptedClassesTests(unittest.TestCase):
             "provenance": {"schema_version": "fixture"},
             "candidates": [candidate],
         }
+        certificate = {"certificate_schema_version": "fixture"}
         with mock.patch(
             "build_orientifold_axion_database.reconstruct_trilayer_actions",
             return_value=reconstruction,
-        ), mock.patch(
+        ) as reconstruct, mock.patch(
             "build_orientifold_axion_database.compute_polytope_id",
             return_value="poly",
         ), mock.patch(
@@ -658,8 +661,15 @@ class LoadLedgerAcceptedClassesTests(unittest.TestCase):
             witnesses = find_exact_trilayer_witnesses(
                 mock.Mock(points=lambda: np.zeros((1, 4), dtype=int)),
                 mock.Mock(simplices=lambda: np.zeros((1, 5), dtype=int)),
-                frst_class_index=0,
+                frst_class_index=0, mpcp_certificate=certificate,
+                source_record={"source": {"polytope_id": "poly"}},
             )
+        reconstruction_kwargs = reconstruct.call_args.kwargs
+        self.assertIs(reconstruction_kwargs["mpcp_certificate"], certificate)
+        self.assertEqual(
+            reconstruction_kwargs["source_record"],
+            {"source": {"polytope_id": "poly"}},
+        )
         self.assertEqual(len(witnesses), 1)
         witness = witnesses[0]
         self.assertEqual(witness["involution_type"], "O3/O7")
@@ -818,6 +828,36 @@ class LoadLedgerAcceptedClassesTests(unittest.TestCase):
             self.assertEqual(reference["manifest_file_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
             self.assertEqual(reference["manifest_payload_sha256"], payload["manifest_payload_sha256"])
             self.assertEqual(write_run_manifest(path, payload), reference)
+
+    def test_report_is_json_zst_level19_and_refuses_changed_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            path = Path(directory_name) / "report.json.zst"
+            report = {"h11": 2, "status": "selected"}
+            reference = write_json_report(path, report)
+            decoded = subprocess.run(
+                ["zstd", "-dc", str(path)], check=True, capture_output=True
+            ).stdout
+            self.assertEqual(
+                json.loads(decoded)["schema_version"],
+                "cyaxiverse-orientifold-bridge-report-1.0",
+            )
+            self.assertEqual(reference["file_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(write_json_report(path, report), reference)
+            with self.assertRaisesRegex(FileExistsError, "refusing to overwrite"):
+                write_json_report(path, {"h11": 2, "status": "changed"})
+
+    def test_higher_h11_selection_requires_certificates_before_loading_geometry(self):
+        with mock.patch(
+            "build_orientifold_axion_database.EXACT_ACTION_H21_PLUS_STATUS",
+            "validated",
+        ), mock.patch(
+            "build_orientifold_axion_database.mg.load_mirror_polytopes"
+        ) as load_mirror:
+            with self.assertRaisesRegex(RuntimeError, "certificate input is required"):
+                from build_orientifold_axion_database import select_and_verify_trilayer_population
+
+                select_and_verify_trilayer_population(4, "/missing", [])
+            load_mirror.assert_not_called()
 
     def test_default_manifest_path_is_configuration_specific(self):
         common = dict(

@@ -268,6 +268,7 @@ struct ProjectedQ
 end
 
 
+"""Canonical reduced charge basis with no retained effective subleading terms."""
 struct CanonicalQBasis
     Qhat::Matrix{Int}
     Qbar::Matrix{Int}
@@ -275,6 +276,7 @@ struct CanonicalQBasis
     Lbar ::Matrix{Float64}
 end
 
+"""Canonical reduced charge basis with retained effective subleading terms."""
 struct Canonicalα
     Qhat::Matrix{Int}
     Qbar::Matrix{Int}
