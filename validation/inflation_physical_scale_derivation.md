@@ -1,8 +1,9 @@
 # SCI-01: physical-scale derivation and release decision
 
 Date: 2026-08-25
-Status: owner-selected convention and fails-closed physical-domain certificate
-implemented; physical-scale production authorization remains pending
+Status: owner-selected convention and independent fails-closed physical scaling
+and physical control gates implemented; physical-scale production authorization
+remains pending
 Program: KS axiverse inflation only
 
 ## Authoritative source identity
@@ -72,6 +73,34 @@ leaves dynamical stabilization at those points open (printed p. 6, PDF page 7,
 after Eq. (16); printed p. 25, PDF page 26, Conclusions). The implementation
 must retain `moduli_status=not_established` unless separate evidence proves
 otherwise.
+
+## Independent physical gates
+
+The implementation now records two separate gates in every scale result,
+branch row, summary row, and persisted inflation group. The gate statuses are
+not inferred from one another, and only the literal status `passed` is a pass.
+
+`physical_scaling_gate` must be `passed` before any physical scale calculation.
+It covers complete geometry and domain evidence, the exact unit contract,
+normalization, phase convention, basis and charge orientation, replayable
+source/configuration provenance, numeric precision and conversion audit,
+declared symmetry/inverse/SPD policy, positive volumes, and Kähler-domain
+checks. A failed or missing scaling gate raises the existing fail-closed
+physical-domain error; it cannot fall back to a diagnostic calculation.
+
+`physical_control_gate` is an independent post/domain qualification gate. It
+records potent-ray evidence, instanton control, perturbative control, moduli
+control or stabilization, and visible-sector applicability. The diagnostic
+pilot may record `not_established` and may calculate after a passed scaling
+gate. This does not make the output physically viable, production-qualified,
+or a validated candidate. A control status other than `passed` blocks all such
+labels. A screen hit with both gates passed is recorded only as
+`eligible_not_validated`; it is not a candidate proof.
+
+Historical `homotopy_only` and fixed-volume comparison paths retain their
+nonphysical statuses. Their two physical gates are explicitly
+`not_applicable`, with reason and provenance, and those paths are not changed
+into physical calculations by the new schema.
 
 ## Full-paper equations and qualifications
 
@@ -154,22 +183,33 @@ when the measured bound is within the recorded tolerance.
 
 ## Physical-domain and claim boundary
 
-An output may receive `scale_status=physical` only after a certificate at the
-same `k` records and passes all applicable items:
+An output may receive `scale_status=physical` only after the same-`k`
+certificate records and passes the `physical_scaling_gate`. Its required
+items are:
 
 - finite positive divisor and Calabi--Yau volumes;
-- Kähler-cone interior membership and a numerical margin;
-- positive effective curve/divisor volumes, with the potent-ray rule used by
-  the paper;
-- symmetric positive-definite `K` with its tolerance;
+- Kähler-cone interior membership, positive effective curve/divisor volumes,
+  and a numerical margin;
+- symmetric positive-definite `K` and `Kinv`, reciprocal residual, and the
+  declared SPD tolerance policy;
 - fixed basis and charge orientation, including a verified `Q/L` reference at
   `k=1`;
-- instanton truncation and perturbative-control conditions;
-- visible-sector/QCD status when the geometry claims it;
-- the exact phase convention;
-- `moduli_status=not_established` unless independently proven; and
-- complete units, normalization, source identity, configuration, and
-  precision metadata.
+- the exact phase convention, units, normalization, source identity,
+  configuration identity, precision metadata, and the audited conversion to
+  the evaluator's numeric type.
+
+The independent `physical_control_gate` records, but does not silently fold
+into the scaling gate:
+
+- potent-ray evidence and instanton control;
+- perturbative-control evidence;
+- moduli control or stabilization; and
+- visible-sector/QCD applicability.
+
+The control gate may be `not_established` for a diagnostic calculation. It
+must be `passed` before any physical viability, production qualification, or
+validated-candidate statement. `moduli_status=not_established` remains the
+default absent separate stabilization evidence.
 
 Terminal domain results must distinguish `passed`, `domain_failure`,
 `missing_evidence`, `numerical_failure`, and `out_of_model`. Missing data is
@@ -190,9 +230,10 @@ divisor-volume continuation. Any earlier screen/crossing rows therefore stay
 `scale_status=homotopy_only` and cannot support a physical candidate, rate, or
 null claim. The repaired persistence driver
 `scripts/build_orientifold_vacua_inflation.jl` currently writes this status.
-The fails-closed certificate boundary is now implemented in
-`scripts/inflation_scale_continuation.jl` and covered by narrow synthetic
-checks; this does not relabel historical rows or authorize a production run.
+The fails-closed certificate boundary and the independent gate contract are
+implemented in `scripts/inflation_scale_continuation.jl` and covered by narrow
+synthetic checks; this does not relabel historical rows or authorize a
+production run.
 
 ## Release decision and stop state
 
@@ -201,13 +242,15 @@ choice. It does not authorize a physical-scale production calculation. The
 current release claim is:
 
 > The project has a primary-source-backed owner decision for the homogeneous
-> volume law and a documented distinction between fixed-volume comparison and
-> historical homotopy diagnostics. No physical inflation candidate,
-> trajectory, stabilized moduli point, population rate, or physical null has
-> been established.
+> volume law, separate fail-closed scaling and control gates, and a documented
+> distinction between fixed-volume comparison and historical homotopy
+> diagnostics. No physical inflation candidate, trajectory, stabilized moduli
+> point, population rate, or physical null has been established.
 
-Production remains blocked pending target-geometry certificate evidence,
-independent statuses, the named benchmark ladder, and bounded resource gates.
+Production remains blocked pending complete target-geometry scaling
+certificates, independent control evidence, the named benchmark ladder, and
+bounded resource gates. The diagnostic permission for a passed scaling gate
+with `physical_control_gate=not_established` does not relax that boundary.
 No scale, trajectory, geometry, population, database, or production run is
 part of this ledger update.
 

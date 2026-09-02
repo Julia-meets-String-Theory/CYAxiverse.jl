@@ -46,7 +46,9 @@ No commit will be made for this task.
   fields plus phase, units, normalization, source, configuration, and
   precision provenance in scale rows at
   `scripts/inflation_scale_continuation.jl:1162-1241`.
-- Updated persistence to schema `cyaxiverse-phase3-orientifold-inflation-2.2`
+- Earlier checkpoint updated persistence to schema
+  `cyaxiverse-phase3-orientifold-inflation-2.2`; the separate-gate update below
+  advances it to `cyaxiverse-phase3-orientifold-inflation-2.3`.
   and required top-level status/provenance fields in
   `scripts/build_orientifold_vacua_inflation.jl:51-105`; homotopy-only
   top-level and nested groups retain the independent statuses and provenance
@@ -183,6 +185,61 @@ No commit will be made for this task.
   src/generate.jl:245-246; the new certificate boundary converts only after
   its BigFloat error audit and fails closed when unsafe. Production is not
   authorized.
+
+## Separate physical-gate policy decision
+
+User decision recorded 2026-08-25: use separate gates for the diagnostic
+pilot. The implementation is on the existing uncommitted worktree at required
+commit `9f31d716eaab8d63d3f76826a40de5ae38c7015d`; no commit was made and the
+four untracked physical-evidence audit artifacts were preserved.
+
+`physical_scaling_gate` is the precondition for every physical scale
+calculation. It remains fail-closed and covers complete geometry/domain
+evidence, the exact `M_s=M_Pl;k=dimensionless` unit contract, normalization,
+phase convention, basis and charge orientation, replayable source/config
+provenance, precision/conversion audit, symmetry/inverse/SPD policy, positive
+volumes, and Kähler-domain checks. A non-passed scaling status blocks physical
+calculation.
+
+`physical_control_gate` is independent and records potent-ray evidence,
+instanton control, perturbative control, moduli control/stabilization, and
+visible-sector applicability. It may be `not_established` for a diagnostic
+calculation after the scaling gate passes. It blocks every physical viability,
+production-qualified, or validated-candidate label unless it is `passed`.
+With both gates passed, an existing screen hit is only
+`eligible_not_validated`; it is not proof of a candidate. Malformed or missing
+gate statuses fail closed. Every scale result, branch row, summary row, and
+persisted inflation group keeps status, reason, and provenance for both gates.
+Historical homotopy/fixed-volume diagnostics remain nonphysical and carry
+`not_applicable` physical gates.
+
+Current implementation hashes: `scripts/inflation_scale_continuation.jl`
+`fa2fd5833d972179ac89eaf55f3affca229767d33093c425d0bf863173182a72`,
+`scripts/build_orientifold_vacua_inflation.jl`
+`052d6f68fd4a5ddcd834f515df1f58fe8af9f221513d40887d29bf51aa8ce1e0`, and
+`test/runtests.jl`
+`3162165807033f6df5596c47171ee7a11add492652b5e4adc552cbb187bab90e`.
+
+### Remaining mandatory scaling-gate decisions
+
+The fixed 18-input audit still supplies no complete physical scaling
+certificate sidecars. The following remain mandatory before a physical pilot:
+
+- canonical artifact/source configuration identity;
+- artifact-level normalization mapping;
+- explicit phase convention;
+- source/environment identity sufficient for replay;
+- declared SPD tolerance policy (the raw `Kinv` asymmetry diagnostic is not a
+  tolerance or a pass);
+- source-backed units declaration under the exact owner contract; and
+- precision/conversion acceptance for the Float64 evaluator, including a
+  declared tolerance and evidence that the source precision is adequate.
+
+Potent-ray, instanton, perturbative, moduli, and visible-sector gaps now belong
+to the independent control gate. They may remain `not_established` for the
+diagnostic calculation but still block all physical viability or production
+claims. No scale, inflation, trajectory, orientifold, geometry, population,
+database, or production work was performed for this policy change.
 
 ## Replacement-agent current-code verification
 

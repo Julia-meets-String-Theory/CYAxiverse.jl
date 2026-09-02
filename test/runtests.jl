@@ -127,6 +127,10 @@ end
         "cytools_catastrophe_scan.py@sha256:d820dd3e19d2833bac0691d74c2f99d2461c8eb0ef1620062f70d3daffd3bcf4")
     @test full.scale_status == :physical
     @test full.domain_certificate.status == :passed
+    @test full.physical_scaling_gate_status == :passed
+    @test full.domain_certificate.physical_scaling_gate_status == :passed
+    @test full.physical_control_gate_status == :not_established
+    @test full.physical_viability_status == :not_evaluated
     @test full.domain_status == :passed
     @test full.moduli_status == :not_established
     @test full.precision_bits == 256
@@ -137,6 +141,29 @@ end
     @test full.target_precision_bits == PILOT_TARGET_PRECISION_BITS
     @test full.conversion_status == :passed
     @test full.domain_certificate.conversion_status == :passed
+    # Kinv uses the owner-approved mixed boundary: either the absolute metric
+    # bound or the relative bound is sufficient. L and K keep their existing
+    # absolute bounds, while divisor volumes and CY volume keep the relative
+    # bound. This synthetic value has an absolute Float64 round-trip error
+    # above 1e-12 but a relative error far below 1e-12.
+    boundary_value = parse(BigFloat, "1000000000000.123456789")
+    boundary_certificate = (; reference_tolerance=BigFloat("1e-12"),
+        checks=(; spd_tolerance=BigFloat("1e-12")),
+        K=reshape([boundary_value], 1, 1),
+        kinv=reshape([boundary_value], 1, 1),
+        tau=BigFloat[boundary_value], volume=boundary_value,
+        source_numeric_type="BigFloat", source_precision_bits=256)
+    boundary_audit = _pilot_float64_conversion_audit(
+        boundary_certificate, reshape([boundary_value], 1, 1))
+    @test boundary_audit.conversion_error_bound.kinv_absolute > BigFloat("1e-12")
+    @test boundary_audit.conversion_error_bound.kinv_relative < BigFloat("1e-12")
+    @test boundary_audit.conversion_comparison.kinv == :passed
+    @test boundary_audit.conversion_comparison.K == :unsafe
+    @test boundary_audit.conversion_comparison.L == :unsafe
+    @test boundary_audit.conversion_comparison.tau == :passed
+    @test boundary_audit.conversion_comparison.volume == :passed
+    @test boundary_audit.conversion_policy_version ==
+        PILOT_CONVERSION_POLICY_VERSION
     @test _pilot_numeric_type_precision(Float64[1.0]).source_numeric_type ==
         "Float64"
     @test _pilot_numeric_type_precision(Float64[1.0]).source_precision_bits == 53
@@ -183,9 +210,29 @@ end
     incomplete_certificate = pilot_physical_domain_certificate(
         incomplete_geometry, base_Q, base_L, base_K, scale)
     @test incomplete_certificate.status == :missing_evidence
+    @test incomplete_certificate.physical_scaling_gate_status == :missing_evidence
     @test_throws PilotPhysicalDomainError pilot_scaled_inputs(base_Q, base_L,
         base_K, scale; scale_status=:physical, geometry=incomplete_geometry,
         volume_normalization=:full)
+
+    # Control evidence is independent: a passed scaling gate permits a
+    # diagnostic physical calculation, but does not establish viability.
+    control_not_established_geometry = merge(base_geometry, (;
+        potent_curve_volumes=nothing, instanton_control=nothing,
+        perturbative_control=nothing, moduli_status=nothing,
+        visible_sector_status=nothing))
+    control_certificate = pilot_physical_domain_certificate(
+        control_not_established_geometry, base_Q, base_L, base_K, scale)
+    @test control_certificate.status == :passed
+    @test control_certificate.physical_scaling_gate_status == :passed
+    @test control_certificate.physical_control_gate_status == :not_established
+    control_scaled = pilot_scaled_inputs(base_Q, base_L, base_K, scale;
+        scale_status=:physical, geometry=control_not_established_geometry,
+        volume_normalization=:full)
+    @test control_scaled.scale_status == :physical
+    @test control_scaled.physical_scaling_gate_status == :passed
+    @test control_scaled.physical_control_gate_status == :not_established
+    @test control_scaled.physical_viability_status == :not_evaluated
     bad_K = BigFloat[1 0; 0 -1]
     bad_certificate = pilot_physical_domain_certificate(base_geometry, base_Q,
         base_L, bad_K, scale)
@@ -234,7 +281,27 @@ end
         residual_tolerance=1e-10, max_iterations=20, duplicate_tolerance=1e-7,
         scale_status=:physical)
     @test all(record -> record.candidate_status == :none, physical_records)
-    @test any(occursin("withheld", record.candidate_reason) for record in physical_records)
+    @test any(occursin("status is missing", record.candidate_reason)
+        for record in physical_records)
+
+    screen_hit = (; value=1.0, negative_modes=1, epsilon=0.1, min_eta=0.5)
+    control_blocked = _pilot_physical_viability(:physical, screen_hit;
+        physical_scaling_gate_status=:passed,
+        physical_control_gate_status=:not_established)
+    @test control_blocked.candidate_status == :none
+    @test control_blocked.physical_viability_status == :not_established
+    @test !occursin("viable", control_blocked.candidate_reason)
+    eligible_only = _pilot_physical_viability(:physical, screen_hit;
+        physical_scaling_gate_status=:passed, physical_control_gate_status=:passed)
+    @test eligible_only.candidate_status == :physical_candidate_eligible
+    @test eligible_only.physical_viability_status == :eligible_not_validated
+    @test !occursin("validated", eligible_only.physical_viability_reason)
+    @test_throws ArgumentError _pilot_normalize_gate_status("bogus", "physical_control_gate")
+    @test_throws ArgumentError _pilot_normalize_gate_status(nothing, "physical_scaling_gate")
+    malformed = _pilot_physical_viability(:physical, screen_hit;
+        physical_scaling_gate_status="bogus", physical_control_gate_status=:passed)
+    @test malformed.candidate_status == :none
+    @test malformed.physical_viability_status == :blocked_scaling_gate
     _pilot_init_branch_ids!(below)
     matches = pilot_match_records!(below, above; matching_tolerance=0.1)
     @test length(matches) == 1
@@ -1022,9 +1089,9 @@ end
                 @test read(file["inflation/terminal_status"]) == "completed"
                 @test read(file["inflation/configuration_digest"]) == "fixture-digest"
                 @test read(file["inflation/schema_version"]) ==
-                    "cyaxiverse-phase3-orientifold-inflation-2.2"
+                    "cyaxiverse-phase3-orientifold-inflation-2.3"
                 @test read(file["inflation/domain_certificate_version"]) ==
-                    "physical-domain-certificate-1"
+                    "physical-domain-certificate-2"
                 @test read(file["inflation/scale_status"]) == "homotopy_only"
                 @test read(file["inflation/domain_status"]) == "out_of_model"
                 @test read(file["inflation/fixed_point_status"]) == "homotopy_only"
@@ -1033,10 +1100,30 @@ end
                 @test read(file["inflation/normalization"]) == "homotopy_only"
                 @test read(file["inflation/physical_units_contract"]) ==
                     "M_s=M_Pl;k=dimensionless"
+                @test read(file["inflation/physical_scaling_gate_status"]) ==
+                    "not_applicable"
+                @test occursin("does not evaluate", read(file[
+                    "inflation/physical_scaling_gate_reason"]))
+                @test startswith(read(file["inflation/physical_scaling_gate_provenance"]),
+                    "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale")
+                @test read(file["inflation/physical_control_gate_status"]) ==
+                    "not_applicable"
+                @test read(file["inflation/physical_viability_status"]) ==
+                    "not_applicable"
+                @test read(file["inflation/catastrophes/physical_scaling_gate_status"]) ==
+                    "not_applicable"
+                @test read(file["inflation/catastrophes/physical_control_gate_status"]) ==
+                    "not_applicable"
+                @test read(file["inflation/efolds/physical_viability_status"]) ==
+                    "not_applicable"
                 @test startswith(read(file["inflation/source_identity"]),
                     "scripts/build_orientifold_vacua_inflation.jl@")
                 @test read(file["inflation/precision_bits"]) == 256
             end
+            h5open(path, "r+") do file
+                write(file["inflation/physical_control_gate_status"], "bogus")
+            end
+            @test !_has_inflation_group(path; config_digest="fixture-digest")
             @test_throws ArgumentError write_inflation_group!(geom_idx, catastrophe, efolds;
                 catastrophe_settings=(; max_branches=10),
                 efold_settings=(; max_branches=10, precision_bits=256,
@@ -1051,6 +1138,7 @@ end
                     max_points=10, min_efolds=50, max_efolds=60,
                     flow_step=1e-3, flow_displacement=1e-8),
                 pipeline_config_digest="fixture-digest", force=true)
+            @test _has_inflation_group(path; config_digest="fixture-digest")
         end
     finally
         previous_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :

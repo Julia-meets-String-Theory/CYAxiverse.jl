@@ -48,11 +48,18 @@ include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 isdefined(@__MODULE__, :scan_geometry_for_inflation) ||
     include(joinpath(@__DIR__, "inflation_candidate_refinement.jl"))
 
-const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.2"
+const INFLATION_GROUP_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-2.3"
 const INFLATION_LEGACY_SCHEMA_VERSION = "cyaxiverse-phase3-orientifold-inflation-1.0"
 const INFLATION_FLOW_ENCODING_SCHEMA_VERSION = "cyaxiverse-inflation-flow-decimal-string-1.0"
-const INFLATION_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-1"
+const INFLATION_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-2"
 const INFLATION_PHYSICAL_UNITS_CONTRACT = "M_s=M_Pl;k=dimensionless"
+const INFLATION_GATE_STATUS_VALUES = Set((
+    "passed", "failed", "not_established", "not_applicable",
+    "missing_evidence", "numerical_failure", "out_of_model"))
+const INFLATION_VIABILITY_STATUS_VALUES = Set((
+    "not_applicable", "not_evaluated", "blocked_scaling_gate",
+    "not_established", "not_candidate", "eligible_not_validated",
+    "near_catastrophe_not_validated"))
 
 """Hash the complete Pipeline 2 configuration contract."""
 _phase3_config_digest(value) = bytes2hex(sha256(repr(value)))
@@ -99,11 +106,21 @@ function _has_inflation_group(path; config_digest=nothing)
             "trajectory_status", "coverage_status", "moduli_status",
             "phase_convention", "units", "physical_units_contract",
             "normalization", "source_identity",
-            "precision_bits")
+            "precision_bits", "physical_scaling_gate_status",
+            "physical_scaling_gate_reason", "physical_scaling_gate_provenance",
+            "physical_control_gate_status", "physical_control_gate_reason",
+            "physical_control_gate_provenance", "physical_viability_status",
+            "physical_viability_reason")
         all(name -> haskey(file, "inflation/$name"), required) || return false
         read(file["inflation/status"]) == "completed" || return false
         read(file["inflation/physical_units_contract"]) ==
             INFLATION_PHYSICAL_UNITS_CONTRACT || return false
+        for name in ("physical_scaling_gate_status", "physical_control_gate_status")
+            String(read(file["inflation/$name"])) in
+                INFLATION_GATE_STATUS_VALUES || return false
+        end
+        String(read(file["inflation/physical_viability_status"])) in
+            INFLATION_VIABILITY_STATUS_VALUES || return false
         config_digest === nothing && return true
         haskey(file, "inflation/configuration_digest") || return false
         read(file["inflation/configuration_digest"]) == config_digest
@@ -174,6 +191,19 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             group["precision_bits"] = Int(efold_settings.precision_bits)
             group["claim_boundary"] =
                 "homotopy-only diagnostics; physical domain certificate not passed"
+            group["physical_scaling_gate_status"] = "not_applicable"
+            group["physical_scaling_gate_reason"] =
+                "historical homotopy diagnostic does not evaluate physical scaling"
+            group["physical_scaling_gate_provenance"] =
+                "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"
+            group["physical_control_gate_status"] = "not_applicable"
+            group["physical_control_gate_reason"] =
+                "historical homotopy diagnostic does not qualify physical controls"
+            group["physical_control_gate_provenance"] =
+                "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"
+            group["physical_viability_status"] = "not_applicable"
+            group["physical_viability_reason"] =
+                "homotopy-only diagnostic is not a physical viability result"
 
             catastrophes = create_group(group, "catastrophes")
             catastrophes["method"] = "leading_critical_branch_hessian_classification"
@@ -191,6 +221,19 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             catastrophes["normalization"] = "homotopy_only"
             catastrophes["source_identity"] = phase3_source_identity
             catastrophes["precision_bits"] = Int(efold_settings.precision_bits)
+            catastrophes["physical_scaling_gate_status"] = "not_applicable"
+            catastrophes["physical_scaling_gate_reason"] =
+                "historical homotopy diagnostic does not evaluate physical scaling"
+            catastrophes["physical_scaling_gate_provenance"] =
+                "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"
+            catastrophes["physical_control_gate_status"] = "not_applicable"
+            catastrophes["physical_control_gate_reason"] =
+                "historical homotopy diagnostic does not qualify physical controls"
+            catastrophes["physical_control_gate_provenance"] =
+                "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"
+            catastrophes["physical_viability_status"] = "not_applicable"
+            catastrophes["physical_viability_reason"] =
+                "homotopy-only diagnostic is not a physical viability result"
             if catastrophe_outcome.status == :success
                 r = catastrophe_outcome.result
                 catastrophes["status"] = "completed"
@@ -251,6 +294,19 @@ function write_inflation_group!(geom_idx, catastrophe_outcome, efold_outcome;
             efolds["normalization"] = "homotopy_only"
             efolds["source_identity"] = phase3_source_identity
             efolds["precision_bits"] = Int(efold_settings.precision_bits)
+            efolds["physical_scaling_gate_status"] = "not_applicable"
+            efolds["physical_scaling_gate_reason"] =
+                "historical homotopy diagnostic does not evaluate physical scaling"
+            efolds["physical_scaling_gate_provenance"] =
+                "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"
+            efolds["physical_control_gate_status"] = "not_applicable"
+            efolds["physical_control_gate_reason"] =
+                "historical homotopy diagnostic does not qualify physical controls"
+            efolds["physical_control_gate_provenance"] =
+                "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"
+            efolds["physical_viability_status"] = "not_applicable"
+            efolds["physical_viability_reason"] =
+                "homotopy-only diagnostic is not a physical viability result"
             if efold_outcome.status == :success
                 scan = efold_outcome.result
                 efolds["search_status"] = string(scan.refinement.search.search_status)

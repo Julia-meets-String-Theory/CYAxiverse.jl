@@ -17,11 +17,13 @@ using LinearAlgebra
 using NLsolve
 using Printf
 using Statistics
+using HDF5
+using SHA
 
 include(joinpath(@__DIR__, "inflation_scan_common.jl"))
 
-const PILOT_SCHEMA_VERSION = "4"
-const PILOT_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-1"
+const PILOT_SCHEMA_VERSION = "6"
+const PILOT_DOMAIN_CERTIFICATE_VERSION = "physical-domain-certificate-3"
 const PILOT_PHYSICAL_NORMALIZATION = "homogeneous_full_volume_k32"
 const PILOT_PHYSICAL_UNITS = "M_s=M_Pl;k=dimensionless"
 const PILOT_STORED_NUMERIC_TYPE = "Float64"
@@ -29,27 +31,44 @@ const PILOT_STORED_PRECISION_BITS = 53
 const PILOT_TARGET_NUMERIC_TYPE = "Float64"
 const PILOT_TARGET_PRECISION_BITS = 53
 const PILOT_CONVERSION_TOLERANCE = "1e-12"
+const PILOT_CONVERSION_POLICY_VERSION = "kinv-mixed-tolerance-v1"
+const PILOT_KINV_CONVERSION_RULE =
+    "max_absolute_error <= 1e-12 OR max_relative_error <= 1e-12"
 const PILOT_AUTHOR_SOURCE_IDENTITY =
     "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CN_Axiverse_code/" *
     "ks_axiverse_python_collaborator/src/cytools_catastrophe_scan.py@sha256:" *
     "d820dd3e19d2833bac0691d74c2f99d2461c8eb0ef1620062f70d3daffd3bcf4"
 const PILOT_HOMOTOPY_SOURCE_IDENTITY =
     "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"
+const PILOT_GATE_STATUS_VALUES = (
+    :passed, :failed, :not_established, :not_applicable, :missing_evidence,
+    :numerical_failure, :out_of_model)
+const PILOT_VIABILITY_STATUS_VALUES = (
+    :not_applicable, :not_evaluated, :blocked_scaling_gate,
+    :not_established, :not_candidate, :eligible_not_validated,
+    :near_catastrophe_not_validated)
 const PILOT_DEFAULT_SCALE_GRID = (0.90, 0.95, 0.99, 1.00, 1.01, 1.05, 1.10)
 const PILOT_DEFAULT_REPORT = "/private/tmp/inflation-scale-continuation/report.csv"
 const PILOT_DEFAULT_SHARDS = "/private/tmp/inflation-scale-continuation/shards"
+const PILOT_DEFAULT_CERTIFICATE_DIR = ""
+const PILOT_DEFAULT_CHECKPOINT_DIR = ""
 
 const PILOT_COMMON_FIELDS = (
     :row_type, :schema_version, :run_id, :data_root, :geometry_path,
     :h11, :polytope, :frst, :reference_scale, :sampled_scale,
     :scale_grid, :scale_source, :scale_status, :volume_normalization,
     :domain_certificate_version, :domain_status, :domain_reason,
+    :physical_scaling_gate_status, :physical_scaling_gate_reason,
+    :physical_scaling_gate_provenance,
+    :physical_control_gate_status, :physical_control_gate_reason,
+    :physical_control_gate_provenance,
+    :physical_viability_status, :physical_viability_reason,
     :fixed_point_status, :trajectory_status, :coverage_status,
     :moduli_status, :phase_convention, :units, :normalization,
     :source_identity, :precision_bits, :source_numeric_type,
     :source_precision_bits, :target_numeric_type, :target_precision_bits,
     :conversion_status, :conversion_error_bound, :conversion_tolerance,
-    :conversion_comparison,
+    :conversion_comparison, :conversion_policy_version,
     :stored_reference_max_log10_error, :stored_reference_sign_mismatches,
     :leading_log_gap, :log_scale_span,
     :strong_hierarchy, :search_mode, :branch_coverage_status,
@@ -67,7 +86,7 @@ const PILOT_COMMON_FIELDS = (
     :candidate_reason, :seed_count, :corrected_count, :matched_count,
     :lost_count, :new_count, :duplicate_count, :correction_failed_count,
     :near_catastrophe_brackets, :screen_candidate_count,
-    :corrected_candidate_count, :minima_count, :wall_seconds,
+    :corrected_candidate_count, :physical_eligible_count, :minima_count, :wall_seconds,
     :allocated_bytes, :output_bytes, :failure)
 
 const PILOT_SUMMARY_FIELDS = PILOT_COMMON_FIELDS
@@ -308,7 +327,8 @@ function _pilot_float64_conversion_audit(certificate, scaled_L)
         K=converted_K.failure === nothing &&
             converted_K.max_absolute_error <= metric_tolerance ? :passed : :unsafe,
         kinv=converted_kinv.failure === nothing &&
-            converted_kinv.max_absolute_error <= metric_tolerance ? :passed : :unsafe,
+            (converted_kinv.max_absolute_error <= metric_tolerance ||
+             converted_kinv.max_relative_error <= relative_tolerance) ? :passed : :unsafe,
         tau=converted_tau.failure === nothing &&
             converted_tau.max_relative_error <= relative_tolerance ? :passed : :unsafe,
         volume=converted_volume.failure === nothing &&
@@ -321,37 +341,125 @@ function _pilot_float64_conversion_audit(certificate, scaled_L)
        source_precision_bits=certificate.source_precision_bits,
        target_numeric_type=PILOT_TARGET_NUMERIC_TYPE,
        target_precision_bits=PILOT_TARGET_PRECISION_BITS,
+       conversion_policy_version=PILOT_CONVERSION_POLICY_VERSION,
        conversion_error_bound=(; L=converted_L.max_absolute_error,
            K=converted_K.max_absolute_error, kinv=converted_kinv.max_absolute_error,
+           kinv_absolute=converted_kinv.max_absolute_error,
+           kinv_relative=converted_kinv.max_relative_error,
            tau=converted_tau.max_relative_error,
            volume=converted_volume.max_relative_error),
        conversion_tolerance=(; absolute_L=reference_tolerance,
-           absolute_metric=metric_tolerance, relative=relative_tolerance),
+           absolute_metric=metric_tolerance, relative=relative_tolerance,
+           kinv_rule=PILOT_KINV_CONVERSION_RULE),
        conversion_comparison=comparison,
        L=converted_L.value, K=converted_K.value, tau=converted_tau.value,
        kinv=converted_kinv.value, volume=converted_volume.value)
 end
 
-function _pilot_control_passed(value; allow_not_applicable::Bool=false)
-    value === true && return true
-    value === false && return false
+function _pilot_normalize_gate_status(value, label::AbstractString)
+    value === nothing && throw(ArgumentError("$label status is missing"))
     text = lowercase(strip(string(value)))
-    text in ("passed", "validated", "complete", "completed") && return true
-    allow_not_applicable && text in ("not_applicable", "not applicable")
+    text = replace(text, ' ' => '_', '-' => '_')
+    status = Symbol(startswith(text, ":") ? text[2:end] : text)
+    status in PILOT_GATE_STATUS_VALUES ||
+        throw(ArgumentError("malformed $label status: $value"))
+    status
 end
+
+function _pilot_certificate_gate_status(status::Symbol)
+    status == :passed && return :passed
+    status == :missing_evidence && return :missing_evidence
+    status == :out_of_model && return :out_of_model
+    status == :numerical_failure && return :numerical_failure
+    status == :domain_failure && return :failed
+    :failed
+end
+
+function _pilot_normalize_viability_status(value)
+    value === nothing && throw(ArgumentError("physical_viability status is missing"))
+    text = lowercase(strip(string(value)))
+    text = replace(text, ' ' => '_', '-' => '_')
+    status = Symbol(startswith(text, ":") ? text[2:end] : text)
+    status in PILOT_VIABILITY_STATUS_VALUES ||
+        throw(ArgumentError("malformed physical_viability status: $value"))
+    status
+end
+
+function _pilot_control_status(values)
+    statuses = Symbol[]
+    for (value, label, allow_not_applicable) in values
+        if value === nothing
+            push!(statuses, :not_established)
+            continue
+        end
+        if label == "potent_curve_volumes" && value isa AbstractArray
+            if isempty(value)
+                push!(statuses, :not_established)
+            elseif all(entry -> entry isa Real && isfinite(entry), value) &&
+                    minimum(value) > 1
+                push!(statuses, :passed)
+            else
+                push!(statuses, :failed)
+            end
+            continue
+        end
+        text = lowercase(strip(string(value)))
+        text = replace(text, ' ' => '_', '-' => '_')
+        if text in ("passed", "validated", "complete", "completed", "true")
+            push!(statuses, :passed)
+        elseif allow_not_applicable && text in ("not_applicable", "not applicable")
+            push!(statuses, :passed)
+        elseif text in ("not_established", "unknown", "missing", "not_recorded", "none")
+            push!(statuses, :not_established)
+        elseif text in ("failed", "false", "out_of_model", "numerical_failure")
+            push!(statuses, :failed)
+        else
+            push!(statuses, :failed)
+        end
+    end
+    _pilot_control_aggregate(statuses)
+end
+
+function _pilot_control_aggregate(statuses::AbstractVector{<:Symbol})
+    status = any(value -> value == :failed, statuses) ? :failed :
+        all(value -> value == :passed, statuses) ? :passed : :not_established
+    (; status, component_statuses=Tuple(statuses))
+end
+
+const PILOT_NONPHYSICAL_SCALING_REASON =
+    "physical scaling gate is not applicable to a nonphysical diagnostic path"
+const PILOT_NONPHYSICAL_CONTROL_REASON =
+    "physical control gate is not applicable to a nonphysical diagnostic path"
+const PILOT_NONPHYSICAL_VIABILITY_REASON =
+    "nonphysical diagnostic output is not a physical viability result"
 
 function _pilot_domain_result(status::Symbol, reason::AbstractString;
         scale=big(0), precision_bits::Int=0, tau=nothing, kinv=nothing,
         volume=nothing, K=nothing, phase_convention="missing", units="missing",
         normalization="missing", source_identity="missing",
         configuration_digest="missing", moduli_status=:not_established,
+        physical_scaling_gate_status=status,
+        physical_scaling_gate_reason=reason,
+        physical_scaling_gate_provenance="scripts/inflation_scale_continuation.jl::pilot_physical_domain_certificate",
+        physical_control_gate_status=:not_established,
+        physical_control_gate_reason="physical control evidence was not evaluated",
+        physical_control_gate_provenance="scripts/inflation_scale_continuation.jl::pilot_physical_domain_certificate",
+        physical_viability_status=:not_evaluated,
+        physical_viability_reason="physical viability was not evaluated",
         reference_diagnostic=nothing, checks=nothing,
         reference_tolerance=BigFloat("1e-10"),
         source_numeric_type="not_recorded", source_precision_bits::Int=0,
         target_numeric_type=PILOT_TARGET_NUMERIC_TYPE,
         target_precision_bits::Int=PILOT_TARGET_PRECISION_BITS,
         conversion_status=:not_attempted, conversion_error_bound=nothing,
-        conversion_tolerance=nothing, conversion_comparison=:not_attempted)
+        conversion_tolerance=nothing, conversion_comparison=:not_attempted,
+        conversion_policy_version=PILOT_CONVERSION_POLICY_VERSION)
+    scaling_status = _pilot_normalize_gate_status(
+        _pilot_certificate_gate_status(Symbol(physical_scaling_gate_status)),
+        "physical_scaling_gate")
+    control_status = _pilot_normalize_gate_status(physical_control_gate_status,
+        "physical_control_gate")
+    viability_status = _pilot_normalize_viability_status(physical_viability_status)
     (; certificate_version=PILOT_DOMAIN_CERTIFICATE_VERSION, status,
        scale_status=status == :passed ? :physical : :unsupported,
        domain_status=status, domain_reason=String(reason),
@@ -362,9 +470,17 @@ function _pilot_domain_result(status::Symbol, reason::AbstractString;
        phase_convention, units, normalization, source_identity,
        configuration_digest, precision_bits, tau, kinv, volume, K,
        reference_diagnostic, checks, reference_tolerance,
+       physical_scaling_gate_status=scaling_status,
+       physical_scaling_gate_reason=String(physical_scaling_gate_reason),
+       physical_scaling_gate_provenance=String(physical_scaling_gate_provenance),
+       physical_control_gate_status=control_status,
+       physical_control_gate_reason=String(physical_control_gate_reason),
+       physical_control_gate_provenance=String(physical_control_gate_provenance),
+       physical_viability_status=viability_status,
+       physical_viability_reason=String(physical_viability_reason),
        source_numeric_type, source_precision_bits, target_numeric_type,
        target_precision_bits, conversion_status, conversion_error_bound,
-       conversion_tolerance, conversion_comparison)
+       conversion_tolerance, conversion_comparison, conversion_policy_version)
 end
 
 function _pilot_domain_missing_result(missing; scale=big(0), precision_bits::Int=0,
@@ -422,50 +538,64 @@ function _pilot_physical_domain_certificate_big(geometry, Q, L, K, scale,
     found_spd, raw_spd = _pilot_get_field(geometry,
         (:spd_tolerance, :kinetic_spd_tolerance))
 
+    control = _pilot_control_status((
+        (found_potent ? raw_potent : nothing, "potent_curve_volumes", false),
+        (found_instanton ? raw_instanton : nothing, "instanton_control", false),
+        (found_perturbative ? raw_perturbative : nothing, "perturbative_control", false),
+        (found_moduli ? raw_moduli : nothing, "moduli_status", false),
+        (found_visible ? raw_visible : nothing, "visible_sector_status", true)))
+    control_provenance =
+        "geometry metadata: potent_curve_volumes, instanton_control, " *
+        "perturbative_control, moduli_status, visible_sector_status"
+    control_reason = string("control evidence status=", control.status,
+        "; components=", control.component_statuses)
+
     missing = String[]
     for (found, label) in ((found_tau, "divisor_volumes"),
             (found_volume, "cy_volume"), (found_kinv, "kinv"),
             (found_prime, "prime_divisor_volumes"),
             (found_effective, "effective_divisor_volumes"),
             (found_curves, "curve_volumes"),
-            (found_potent, "potent_curve_volumes"),
             (found_margin, "kahler_margin"), (found_basis, "basis_identity"),
             (found_orientation, "charge_orientation"),
             (found_phase, "phase_convention"), (found_units, "units"),
             (found_normalization, "normalization"),
             (found_source, "source_identity"),
             (found_config, "configuration_digest"),
-            (found_moduli, "moduli_status"),
-            (found_instanton, "instanton_control"),
-            (found_perturbative, "perturbative_control"),
-            (found_visible, "visible_sector_status"),
             (found_spd, "spd_tolerance"))
         found || push!(missing, label)
     end
-    isempty(missing) || return _pilot_domain_missing_result(missing;
-        scale=scale, precision_bits, phase_convention=raw_phase, units=raw_units,
-        normalization=raw_normalization, source_identity=raw_source,
-        configuration_digest=raw_config, moduli_status=raw_moduli)
+    isempty(missing) || return _pilot_domain_result(:missing_evidence,
+        string("required physical-domain evidence is missing: ",
+            join(sort!(unique(String.(missing))), ", ")); scale, precision_bits,
+        phase_convention=raw_phase, units=raw_units, normalization=raw_normalization,
+        source_identity=raw_source, configuration_digest=raw_config,
+        moduli_status=raw_moduli,
+        physical_control_gate_status=control.status,
+        physical_control_gate_reason=control_reason,
+        physical_control_gate_provenance=control_provenance)
 
     for (value, label) in ((raw_tau, "divisor_volumes"),
             (raw_volume, "cy_volume"), (raw_kinv, "kinv"),
             (raw_prime, "prime_divisor_volumes"),
             (raw_effective, "effective_divisor_volumes"),
             (raw_curves, "curve_volumes"),
-            (raw_potent, "potent_curve_volumes"), (raw_margin, "kahler_margin"),
+            (raw_margin, "kahler_margin"),
             (raw_basis, "basis_identity"), (raw_orientation, "charge_orientation"),
             (raw_phase, "phase_convention"), (raw_units, "units"),
             (raw_normalization, "normalization"), (raw_source, "source_identity"),
-            (raw_config, "configuration_digest"), (raw_moduli, "moduli_status"),
-            (raw_instanton, "instanton_control"),
-            (raw_perturbative, "perturbative_control"),
-            (raw_visible, "visible_sector_status"), (raw_spd, "spd_tolerance"))
+            (raw_config, "configuration_digest"), (raw_spd, "spd_tolerance"))
         _pilot_nonempty_metadata(value) || push!(missing, label)
     end
-    isempty(missing) || return _pilot_domain_missing_result(missing;
-        scale=scale, precision_bits, phase_convention=raw_phase, units=raw_units,
-        normalization=raw_normalization, source_identity=raw_source,
-        configuration_digest=raw_config, moduli_status=raw_moduli)
+    isempty(missing) || return _pilot_domain_result(:missing_evidence,
+        string("required physical-domain evidence is missing: ",
+            join(sort!(unique(String.(missing))), ", ")); scale, precision_bits,
+        phase_convention=raw_phase, units=raw_units, normalization=raw_normalization,
+        source_identity=raw_source, configuration_digest=raw_config,
+        moduli_status=raw_moduli,
+        physical_control_gate_status=control.status,
+        physical_control_gate_reason=control_reason,
+        physical_control_gate_provenance=control_provenance)
 
     source_provenance = _pilot_source_numeric_provenance(
         (raw_tau, raw_kinv, raw_volume, L, K))
@@ -475,7 +605,10 @@ function _pilot_physical_domain_certificate_big(geometry, Q, L, K, scale,
                 configuration_digest=raw_config, moduli_status=raw_moduli,
                 reference_tolerance,
                 source_numeric_type=source_provenance.source_numeric_type,
-                source_precision_bits=source_provenance.source_precision_bits),
+                source_precision_bits=source_provenance.source_precision_bits,
+                physical_control_gate_status=control.status,
+                physical_control_gate_reason=control_reason,
+                physical_control_gate_provenance=control_provenance),
             (; kwargs...))...)
 
     _pilot_nonempty_metadata(raw_basis) ||
@@ -507,28 +640,6 @@ function _pilot_physical_domain_certificate_big(geometry, Q, L, K, scale,
             "physical mode requires the owner-selected homogeneous normalization";
             scale, precision_bits, normalization=raw_normalization,
             source_identity=raw_source, configuration_digest=raw_config)
-    string(raw_moduli) in ("not_established", ":not_established") ||
-        return cert_result(:out_of_model,
-            "moduli_status must remain not_established without separate proof";
-            scale, precision_bits, normalization=raw_normalization,
-            source_identity=raw_source, configuration_digest=raw_config,
-            moduli_status=raw_moduli)
-    _pilot_control_passed(raw_instanton) ||
-        return cert_result(:domain_failure,
-            "instanton-control evidence did not pass"; scale, precision_bits,
-            normalization=raw_normalization, source_identity=raw_source,
-            configuration_digest=raw_config)
-    _pilot_control_passed(raw_perturbative) ||
-        return cert_result(:domain_failure,
-            "perturbative-control evidence did not pass"; scale, precision_bits,
-            normalization=raw_normalization, source_identity=raw_source,
-            configuration_digest=raw_config)
-    _pilot_control_passed(raw_visible; allow_not_applicable=true) ||
-        return cert_result(:domain_failure,
-            "visible-sector/QCD status did not pass"; scale, precision_bits,
-            normalization=raw_normalization, source_identity=raw_source,
-            configuration_digest=raw_config)
-
     try
         k = BigFloat(scale)
         isfinite(k) && k > 0 || return cert_result(:domain_failure,
@@ -538,13 +649,22 @@ function _pilot_physical_domain_certificate_big(geometry, Q, L, K, scale,
         prime = BigFloat.(collect(raw_prime))
         effective = BigFloat.(collect(raw_effective))
         curves = BigFloat.(collect(raw_curves))
-        potent = BigFloat.(collect(raw_potent))
+        potent = if found_potent
+            try
+                BigFloat.(collect(raw_potent))
+            catch
+                BigFloat[]
+            end
+        else
+            BigFloat[]
+        end
         volume = BigFloat(raw_volume)
         margin = BigFloat(raw_margin)
         spd_tolerance = BigFloat(raw_spd)
-        all(isfinite, tau) && all(isfinite, kinv) && all(isfinite, prime) &&
+            all(isfinite, tau) && all(isfinite, kinv) && all(isfinite, prime) &&
             all(isfinite, effective) && all(isfinite, curves) &&
-            all(isfinite, potent) && isfinite(volume) && isfinite(margin) &&
+            all(isfinite, potent) &&
+            isfinite(volume) && isfinite(margin) &&
             isfinite(spd_tolerance) || return cert_result(
                 :domain_failure, "physical-domain values are non-finite";
                 scale=k, precision_bits, normalization=raw_normalization,
@@ -572,20 +692,29 @@ function _pilot_physical_domain_certificate_big(geometry, Q, L, K, scale,
         scaled_curves = sqrt(k) .* curves
         scaled_potent = sqrt(k) .* potent
         scaled_margin = sqrt(k) * margin
-        minimum(scaled_prime) > 1 || return cert_result(
-            :domain_failure, "prime divisor volumes are outside instanton control";
-            scale=k, precision_bits, tau=scaled_tau, kinv=scaled_kinv,
-            volume=scaled_volume, phase_convention=raw_phase, units=raw_units,
-            normalization=raw_normalization, source_identity=raw_source,
-            configuration_digest=raw_config)
-        minimum(scaled_effective) > 0 && minimum(scaled_curves) > 0 &&
-            minimum(scaled_potent) > 1 && scaled_margin > 0 ||
+        minimum(scaled_prime) > 0 && minimum(scaled_effective) > 0 &&
+            minimum(scaled_curves) > 0 &&
+            scaled_margin > 0 ||
             return cert_result(:domain_failure,
                 "effective-curve/divisor or Kähler-cone evidence failed";
                 scale=k, precision_bits, tau=scaled_tau, kinv=scaled_kinv,
                 volume=scaled_volume, phase_convention=raw_phase, units=raw_units,
                 normalization=raw_normalization, source_identity=raw_source,
                 configuration_digest=raw_config)
+
+        control_components = collect(control.component_statuses)
+        potent_status = _pilot_control_status((
+            (found_potent ? scaled_potent : nothing, "potent_curve_volumes", false),))
+        control_components[1] = potent_status.component_statuses[1]
+        instanton_status = control_components[2]
+        if instanton_status == :passed && minimum(scaled_prime) <= 1
+            instanton_status = :failed
+        end
+        control_components[2] = instanton_status
+        control = _pilot_control_aggregate(control_components)
+        control_reason = string("control evidence status=", control.status,
+            "; components=", control.component_statuses,
+            "; scale-dependent volume checks evaluated at k=", k)
 
         base_K = BigFloat.(Matrix(K))
         size(base_K) == (h11, h11) || return cert_result(
@@ -658,8 +787,7 @@ function _pilot_physical_domain_certificate_big(geometry, Q, L, K, scale,
                 kahler_margin=scaled_margin,
                 minimum_prime_divisor_volume=minimum(scaled_prime),
                 minimum_effective_divisor_volume=minimum(scaled_effective),
-                minimum_curve_volume=minimum(scaled_curves),
-                minimum_potent_curve_volume=minimum(scaled_potent)))
+                minimum_curve_volume=minimum(scaled_curves)))
     catch error
         cert_result(:numerical_failure,
             string("physical-domain certificate evaluation failed: ",
@@ -727,6 +855,14 @@ function _pilot_fixed_volume_diagnostic(Q, L, K, scale::Real, geometry)
        domain_certificate_version=PILOT_DOMAIN_CERTIFICATE_VERSION,
        domain_status=:out_of_model,
        domain_reason="fixed CY-volume comparison is not the selected physical path",
+       physical_scaling_gate_status=:not_applicable,
+       physical_scaling_gate_reason=PILOT_NONPHYSICAL_SCALING_REASON,
+       physical_scaling_gate_provenance="scripts/inflation_scale_continuation.jl::_pilot_fixed_volume_diagnostic",
+       physical_control_gate_status=:not_applicable,
+       physical_control_gate_reason=PILOT_NONPHYSICAL_CONTROL_REASON,
+       physical_control_gate_provenance="scripts/inflation_scale_continuation.jl::_pilot_fixed_volume_diagnostic",
+       physical_viability_status=:not_applicable,
+       physical_viability_reason=PILOT_NONPHYSICAL_VIABILITY_REASON,
        fixed_point_status=:not_run, trajectory_status=:not_run,
        coverage_status=:not_started, moduli_status=:not_established,
        phase_convention="not_recorded", units="not_recorded",
@@ -738,6 +874,7 @@ function _pilot_fixed_volume_diagnostic(Q, L, K, scale::Real, geometry)
        target_precision_bits=PILOT_TARGET_PRECISION_BITS,
        conversion_status=:not_attempted, conversion_error_bound=nothing,
        conversion_tolerance=nothing, conversion_comparison=:not_attempted,
+       conversion_policy_version=PILOT_CONVERSION_POLICY_VERSION,
        domain_certificate=nothing)
 end
 
@@ -757,6 +894,14 @@ function pilot_scaled_inputs(Q::AbstractMatrix{<:Integer}, L::AbstractMatrix{<:R
             domain_certificate_version=PILOT_DOMAIN_CERTIFICATE_VERSION,
             domain_status=:out_of_model,
             domain_reason="historical logarithmic homotopy is outside the physical domain",
+            physical_scaling_gate_status=:not_applicable,
+            physical_scaling_gate_reason=PILOT_NONPHYSICAL_SCALING_REASON,
+            physical_scaling_gate_provenance=PILOT_HOMOTOPY_SOURCE_IDENTITY,
+            physical_control_gate_status=:not_applicable,
+            physical_control_gate_reason=PILOT_NONPHYSICAL_CONTROL_REASON,
+            physical_control_gate_provenance=PILOT_HOMOTOPY_SOURCE_IDENTITY,
+            physical_viability_status=:not_applicable,
+            physical_viability_reason=PILOT_NONPHYSICAL_VIABILITY_REASON,
             fixed_point_status=:not_run, trajectory_status=:not_run,
             coverage_status=:not_started, moduli_status=:not_established,
             phase_convention="not_applicable", units="not_applicable",
@@ -768,6 +913,7 @@ function pilot_scaled_inputs(Q::AbstractMatrix{<:Integer}, L::AbstractMatrix{<:R
             target_precision_bits=PILOT_TARGET_PRECISION_BITS,
             conversion_status=:not_attempted, conversion_error_bound=nothing,
             conversion_tolerance=nothing, conversion_comparison=:not_attempted,
+            conversion_policy_version=PILOT_CONVERSION_POLICY_VERSION,
             domain_certificate=nothing)
     end
     if scale_status == :unsupported && volume_normalization == :fixed
@@ -782,7 +928,9 @@ function pilot_scaled_inputs(Q::AbstractMatrix{<:Integer}, L::AbstractMatrix{<:R
     certificate = pilot_physical_domain_certificate(geometry, Q, L, K, scale;
         source_identity, configuration_digest, phase_convention, units,
         normalization, precision_bits)
-    certificate.status == :passed || throw(PilotPhysicalDomainError(certificate))
+    certificate.status == :passed &&
+        certificate.physical_scaling_gate_status == :passed ||
+        throw(PilotPhysicalDomainError(certificate))
     scaled_L = _pilot_author_potential(Q, certificate.tau, certificate.kinv,
         certificate.volume)
     conversion = _pilot_float64_conversion_audit(certificate, scaled_L)
@@ -811,6 +959,14 @@ function pilot_scaled_inputs(Q::AbstractMatrix{<:Integer}, L::AbstractMatrix{<:R
        domain_certificate_version=certificate.domain_certificate_version,
        domain_status=certificate.domain_status,
        domain_reason=certificate.domain_reason,
+       physical_scaling_gate_status=certificate.physical_scaling_gate_status,
+       physical_scaling_gate_reason=certificate.physical_scaling_gate_reason,
+       physical_scaling_gate_provenance=certificate.physical_scaling_gate_provenance,
+       physical_control_gate_status=certificate.physical_control_gate_status,
+       physical_control_gate_reason=certificate.physical_control_gate_reason,
+       physical_control_gate_provenance=certificate.physical_control_gate_provenance,
+       physical_viability_status=:not_evaluated,
+       physical_viability_reason="branch viability is evaluated only after scale calculation",
        fixed_point_status=certificate.fixed_point_status,
        trajectory_status=certificate.trajectory_status,
        coverage_status=certificate.coverage_status,
@@ -828,6 +984,7 @@ function pilot_scaled_inputs(Q::AbstractMatrix{<:Integer}, L::AbstractMatrix{<:R
        conversion_error_bound=conversion.conversion_error_bound,
        conversion_tolerance=conversion.conversion_tolerance,
        conversion_comparison=conversion.conversion_comparison,
+       conversion_policy_version=conversion.conversion_policy_version,
        domain_certificate=certified_certificate)
 end
 
@@ -1063,11 +1220,68 @@ mutable struct _PilotBranchRecord
     catastrophe_reason::String
     candidate_status::Symbol
     candidate_reason::String
+    physical_viability_status::Symbol
+    physical_viability_reason::String
     failure::String
 end
 
+function _pilot_physical_viability(scale_status::Symbol, classification;
+        physical_scaling_gate_status=nothing,
+        physical_control_gate_status=nothing)
+    screen = classification !== nothing && _pilot_screen_pass(classification)
+    if scale_status == :homotopy_only || scale_status == :unsupported
+        return (; candidate_status=scale_status == :homotopy_only && screen ?
+                :corrected_candidate : :none,
+            candidate_reason=scale_status == :homotopy_only && screen ?
+                "corrected point passes existing Float64 screen in a nonphysical homotopy" :
+                "nonphysical diagnostic output is not a physical candidate",
+            physical_viability_status=:not_applicable,
+            physical_viability_reason=PILOT_NONPHYSICAL_VIABILITY_REASON)
+    end
+    scale_status == :physical || return (; candidate_status=:none,
+        candidate_reason="unknown scale status; candidate classification is blocked",
+        physical_viability_status=:blocked_scaling_gate,
+        physical_viability_reason="malformed scale status blocks physical viability")
+    scaling = try
+        _pilot_normalize_gate_status(physical_scaling_gate_status,
+            "physical_scaling_gate")
+    catch error
+        return (; candidate_status=:none,
+            candidate_reason=sprint(showerror, error),
+            physical_viability_status=:blocked_scaling_gate,
+            physical_viability_reason=sprint(showerror, error))
+    end
+    scaling == :passed || return (; candidate_status=:none,
+        candidate_reason="physical scaling gate is not passed; candidate classification is blocked",
+        physical_viability_status=:blocked_scaling_gate,
+        physical_viability_reason="physical_scaling_gate_status=$scaling")
+    control = try
+        _pilot_normalize_gate_status(physical_control_gate_status,
+            "physical_control_gate")
+    catch error
+        return (; candidate_status=:none,
+            candidate_reason=sprint(showerror, error),
+            physical_viability_status=:not_established,
+            physical_viability_reason=sprint(showerror, error))
+    end
+    control == :passed || return (; candidate_status=:none,
+        candidate_reason="physical control gate is not passed; candidate classification is blocked",
+        physical_viability_status=:not_established,
+        physical_viability_reason="physical_control_gate_status=$control")
+    screen ? (; candidate_status=:physical_candidate_eligible,
+        candidate_reason="screen eligibility only; not a validated or physically viable candidate",
+        physical_viability_status=:eligible_not_validated,
+        physical_viability_reason="both gates passed and the existing Float64 screen passed") :
+        (; candidate_status=:none,
+        candidate_reason="corrected point does not pass existing Float64 screen",
+        physical_viability_status=:not_candidate,
+        physical_viability_reason="screen eligibility was not met")
+end
+
 function _pilot_records(seeds, modes, Q, L, factor; residual_tolerance,
-        max_iterations, duplicate_tolerance, scale_status::Symbol=:homotopy_only)
+        max_iterations, duplicate_tolerance, scale_status::Symbol=:homotopy_only,
+        physical_scaling_gate_status=nothing,
+        physical_control_gate_status=nothing)
     evaluator = CYAxiverse.generate.structured_charge_evaluator(Q, L)
     records = _PilotBranchRecord[]
     for index in eachindex(seeds)
@@ -1093,22 +1307,15 @@ function _pilot_records(seeds, modes, Q, L, factor; residual_tolerance,
             _pilot_periodic_distance(record.corrected_theta, corrected.theta) <=
                 duplicate_tolerance, records)
         status = duplicate && status == :converged ? :duplicate : status
-        candidate = scale_status == :homotopy_only && classification !== nothing &&
-            _pilot_screen_pass(classification)
-        candidate_reason = if candidate
-            "corrected point passes existing Float64 screen"
-        elseif classification !== nothing && _pilot_screen_pass(classification) &&
-                scale_status == :physical
-            "physical-mode screen hit withheld from candidate classification"
-        else
-            "corrected point does not pass existing Float64 screen"
-        end
+        viability = _pilot_physical_viability(scale_status, classification;
+            physical_scaling_gate_status, physical_control_gate_status)
         push!(records, _PilotBranchRecord(index, modes[index], copy(seeds[index]),
             copy(corrected.theta), status, corrected.residual, corrected.iterations,
             corrected.seconds, string("seed-", lpad(index, 8, '0')),
             string("branch-", lpad(index, 8, '0')), :unmatched, classification,
-            false, "", "", candidate ? :corrected_candidate : :none,
-            candidate_reason, failure))
+            false, "", "", viability.candidate_status,
+            viability.candidate_reason, viability.physical_viability_status,
+            viability.physical_viability_reason, failure))
     end
     records
 end
@@ -1175,8 +1382,14 @@ function _pilot_mark_crossings!(previous, current, matches, scale_left, scale_ri
             record.near_catastrophe = true
             record.catastrophe_bracket = string("bracket-", lpad(bracket_number, 4, '0'))
             record.catastrophe_reason = reason
-            _pilot_screen_pass(record.classification) ||
-                (record.candidate_status = :near_catastrophe_only)
+            if !_pilot_screen_pass(record.classification) &&
+                    record.physical_viability_status == :not_applicable
+                record.candidate_status = :near_catastrophe_only
+            elseif record.physical_viability_status == :eligible_not_validated
+                record.physical_viability_status = :near_catastrophe_not_validated
+                record.physical_viability_reason =
+                    "screen-eligible point lies in a flagged catastrophe bracket"
+            end
             record.candidate_reason = reason
         end
     end
@@ -1316,6 +1529,8 @@ function _pilot_branch_row(record, context; wall_seconds=record.correction_secon
         catastrophe_reason=record.catastrophe_reason,
         candidate_status=record.candidate_status,
         candidate_reason=record.candidate_reason,
+        physical_viability_status=record.physical_viability_status,
+        physical_viability_reason=record.physical_viability_reason,
         wall_seconds, failure))
 end
 
@@ -1327,7 +1542,30 @@ function _pilot_summary_row(context, records, seed_info; bracket_count=0,
     new = count(record -> record.matching_status == :new, records)
     duplicates = count(record -> record.correction_status == :duplicate, records)
     failed = count(record -> !(record.correction_status in (:converged, :duplicate)), records)
-    candidates = count(record -> record.candidate_status == :corrected_candidate, records)
+    corrected_candidates = count(record -> record.candidate_status ==
+        :corrected_candidate, records)
+    candidates = count(record -> record.candidate_status in
+        (:corrected_candidate, :physical_candidate_eligible), records)
+    physical_eligible = count(record -> record.candidate_status ==
+        :physical_candidate_eligible, records)
+    summary_viability_status = context.physical_viability_status
+    summary_viability_reason = context.physical_viability_reason
+    if context.scale_status == :physical
+        if context.physical_scaling_gate_status != :passed
+            summary_viability_status = :blocked_scaling_gate
+            summary_viability_reason = "physical scaling gate is not passed"
+        elseif context.physical_control_gate_status != :passed
+            summary_viability_status = :not_established
+            summary_viability_reason = "physical control gate is not passed"
+        elseif physical_eligible > 0
+            summary_viability_status = :eligible_not_validated
+            summary_viability_reason =
+                "one or more branches passed the screen; no validated candidate claim"
+        else
+            summary_viability_status = :not_candidate
+            summary_viability_reason = "no branch passed the existing Float64 screen"
+        end
+    end
     minima = count(record -> record.classification !== nothing &&
         record.classification.negative_modes == 0, records)
     merge(context, (; row_type=:scale, branch_seed_index=nothing,
@@ -1343,12 +1581,16 @@ function _pilot_summary_row(context, records, seed_info; bracket_count=0,
         catastrophe_bracket=bracket_count == 0 ? "" : "count=$bracket_count",
         catastrophe_reason=bracket_count == 0 ? "" : "matched branch bracket flagged",
         candidate_status=nothing, candidate_reason=nothing,
+        physical_viability_status=summary_viability_status,
+        physical_viability_reason=summary_viability_reason,
         seed_count=length(seed_info.seeds), corrected_count=length(converged),
         matched_count=matched, lost_count=lost, new_count=new,
         duplicate_count=duplicates, correction_failed_count=failed,
         near_catastrophe_brackets=bracket_count,
         screen_candidate_count=candidates,
-        corrected_candidate_count=candidates, minima_count=minima,
+        corrected_candidate_count=corrected_candidates,
+        physical_eligible_count=physical_eligible,
+        minima_count=minima,
         wall_seconds, allocated_bytes, output_bytes, failure))
 end
 
@@ -1388,6 +1630,20 @@ function _pilot_context(geom, data_dir, geometry_path, scale, hierarchy,
     end
     metadata(name, default) = provenance !== nothing && hasproperty(provenance, name) ?
         getproperty(provenance, name) : default
+    default_gate_status = options[:scale_status] == :physical ?
+        :missing_evidence : :not_applicable
+    scaling_gate_status = _pilot_normalize_gate_status(
+        metadata(:physical_scaling_gate_status, default_gate_status),
+        "physical_scaling_gate")
+    control_gate_status = _pilot_normalize_gate_status(
+        metadata(:physical_control_gate_status,
+            options[:scale_status] == :physical ? :not_established : :not_applicable),
+        "physical_control_gate")
+    viability_default = actual_scale_status == :physical ? :not_evaluated :
+        actual_scale_status in (:homotopy_only, :unsupported) ? :not_applicable :
+        :blocked_scaling_gate
+    viability_status = _pilot_normalize_viability_status(
+        metadata(:physical_viability_status, viability_default))
     coverage_status = seed_info.status == :completed ?
         (stream.search_classification == :complete_enumeration ?
          :complete : :partial_index_range) : seed_info.status
@@ -1405,6 +1661,22 @@ function _pilot_context(geom, data_dir, geometry_path, scale, hierarchy,
            actual_scale_status == :physical ? :full : :none),
        domain_certificate_version=PILOT_DOMAIN_CERTIFICATE_VERSION,
        domain_status, domain_reason,
+       physical_scaling_gate_status=scaling_gate_status,
+       physical_scaling_gate_reason=metadata(:physical_scaling_gate_reason,
+           scaling_gate_status == :not_applicable ? PILOT_NONPHYSICAL_SCALING_REASON :
+           "physical scaling gate status=$scaling_gate_status"),
+       physical_scaling_gate_provenance=metadata(:physical_scaling_gate_provenance,
+           "scripts/inflation_scale_continuation.jl::pilot_physical_domain_certificate"),
+       physical_control_gate_status=control_gate_status,
+       physical_control_gate_reason=metadata(:physical_control_gate_reason,
+           control_gate_status == :not_applicable ? PILOT_NONPHYSICAL_CONTROL_REASON :
+           "physical control gate status=$control_gate_status"),
+       physical_control_gate_provenance=metadata(:physical_control_gate_provenance,
+           "scripts/inflation_scale_continuation.jl::pilot_physical_domain_certificate"),
+       physical_viability_status=viability_status,
+       physical_viability_reason=metadata(:physical_viability_reason,
+           viability_status == :not_applicable ? PILOT_NONPHYSICAL_VIABILITY_REASON :
+           "physical viability status=$viability_status"),
        fixed_point_status=metadata(:fixed_point_status, :not_run),
        trajectory_status=metadata(:trajectory_status, :not_run),
        coverage_status,
@@ -1424,6 +1696,8 @@ function _pilot_context(geom, data_dir, geometry_path, scale, hierarchy,
        conversion_error_bound=metadata(:conversion_error_bound, nothing),
        conversion_tolerance=metadata(:conversion_tolerance, nothing),
        conversion_comparison=metadata(:conversion_comparison, :not_attempted),
+       conversion_policy_version=metadata(:conversion_policy_version,
+           PILOT_CONVERSION_POLICY_VERSION),
        stored_reference_max_log10_error=get(options,
            :stored_reference_max_log10_error, nothing),
        stored_reference_sign_mismatches=get(options,
@@ -1460,7 +1734,9 @@ function _pilot_scale_records(geom, data_dir, geometry_path, Q, L, K, hierarchy,
         residual_tolerance=options[:correction_tolerance],
         max_iterations=options[:correction_iterations],
         duplicate_tolerance=options[:duplicate_tolerance],
-        scale_status=scaled.scale_status)
+        scale_status=scaled.scale_status,
+        physical_scaling_gate_status=scaled.physical_scaling_gate_status,
+        physical_control_gate_status=scaled.physical_control_gate_status)
     if previous === nothing
         _pilot_init_branch_ids!(records)
         matches = Tuple{Int, Int, Float64}[]
@@ -1741,6 +2017,22 @@ function run_scale_continuation(options)
                 options[:physical_domain_certificate] = reference.domain_certificate
                 options[:domain_status] = reference.domain_status
                 options[:domain_reason] = reference.domain_reason
+                options[:physical_scaling_gate_status] =
+                    reference.physical_scaling_gate_status
+                options[:physical_scaling_gate_reason] =
+                    reference.physical_scaling_gate_reason
+                options[:physical_scaling_gate_provenance] =
+                    reference.physical_scaling_gate_provenance
+                options[:physical_control_gate_status] =
+                    reference.physical_control_gate_status
+                options[:physical_control_gate_reason] =
+                    reference.physical_control_gate_reason
+                options[:physical_control_gate_provenance] =
+                    reference.physical_control_gate_provenance
+                options[:physical_viability_status] =
+                    reference.physical_viability_status
+                options[:physical_viability_reason] =
+                    reference.physical_viability_reason
                 options[:stored_reference_max_log10_error] =
                     reference.reference_diagnostic.max_log10_error
                 options[:stored_reference_sign_mismatches] =
@@ -1803,6 +2095,30 @@ function run_scale_continuation(options)
             fallback_scale_source = fallback_scale_status == :unsupported ?
                 "physical_domain_certificate_failure" :
                 "generic_log10_amplitude_exponent_stretch"
+            fallback_scaling_gate_status = certificate === nothing ?
+                (options[:scale_status] == :physical ? :missing_evidence : :not_applicable) :
+                certificate.physical_scaling_gate_status
+            fallback_control_gate_status = certificate === nothing ?
+                (options[:scale_status] == :physical ? :not_established : :not_applicable) :
+                certificate.physical_control_gate_status
+            fallback_scaling_gate_reason = certificate === nothing ?
+                "physical scaling gate was not evaluated: $message" :
+                certificate.physical_scaling_gate_reason
+            fallback_control_gate_reason = certificate === nothing ?
+                "physical control gate was not evaluated" :
+                certificate.physical_control_gate_reason
+            fallback_viability_status = if options[:scale_status] != :physical
+                :not_applicable
+            elseif fallback_scaling_gate_status == :passed
+                :not_evaluated
+            else
+                :blocked_scaling_gate
+            end
+            fallback_viability_reason = fallback_viability_status == :not_applicable ?
+                PILOT_NONPHYSICAL_VIABILITY_REASON :
+                fallback_viability_status == :not_evaluated ?
+                "physical viability was not evaluated after the geometry-level failure" :
+                "physical scaling gate is not passed"
             for scale in options[:scale_grid]
                 key = (geom.h11, geom.polytope, geom.frst, scale)
                 key in completed && continue
@@ -1818,6 +2134,18 @@ function run_scale_continuation(options)
                     domain_certificate_version=PILOT_DOMAIN_CERTIFICATE_VERSION,
                     domain_status=fallback_domain_status,
                     domain_reason=fallback_domain_reason,
+                    physical_scaling_gate_status=fallback_scaling_gate_status,
+                    physical_scaling_gate_reason=fallback_scaling_gate_reason,
+                    physical_scaling_gate_provenance=certificate === nothing ?
+                        "scripts/inflation_scale_continuation.jl::pilot_physical_domain_certificate" :
+                        certificate.physical_scaling_gate_provenance,
+                    physical_control_gate_status=fallback_control_gate_status,
+                    physical_control_gate_reason=fallback_control_gate_reason,
+                    physical_control_gate_provenance=certificate === nothing ?
+                        "scripts/inflation_scale_continuation.jl::pilot_physical_domain_certificate" :
+                        certificate.physical_control_gate_provenance,
+                    physical_viability_status=fallback_viability_status,
+                    physical_viability_reason=fallback_viability_reason,
                     fixed_point_status=:not_run, trajectory_status=:not_run,
                     coverage_status=:not_started, moduli_status=:not_established,
                     phase_convention=certificate === nothing ? "not_recorded" :
@@ -1844,6 +2172,9 @@ function run_scale_continuation(options)
                         certificate.conversion_tolerance,
                     conversion_comparison=certificate === nothing ? :not_attempted :
                         certificate.conversion_comparison,
+                    conversion_policy_version=certificate === nothing ?
+                        PILOT_CONVERSION_POLICY_VERSION :
+                        certificate.conversion_policy_version,
                     leading_log_gap=NaN,
                     log_scale_span=NaN, strong_hierarchy=false,
                     search_mode=:unsupported, branch_coverage_status=:failed,
