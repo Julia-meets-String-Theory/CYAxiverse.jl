@@ -28,6 +28,7 @@ jlm_python/one_dim_phase_fraction.py
 /validation/*
 !/validation/orientifold_exact_action_formula_ledger_20260822.md
 !/validation/mpcp_refinement_ledger_20260823.md
+!/validation/orientifold_unaffected_projection_ledger_20260824.md
 .copilot/
 CLAUDE.md
 AGENTS.md
