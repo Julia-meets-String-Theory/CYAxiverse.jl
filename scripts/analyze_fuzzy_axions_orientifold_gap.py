@@ -41,7 +41,7 @@ import sys
 from typing import Any, Iterable
 
 from orientifold_terminal_ledger import (
-    LEDGER_SCHEMA_VERSION,
+    READABLE_LEDGER_SCHEMA_VERSIONS,
     TerminalLedgerError,
     iter_terminal_ledger,
     validate_source_provenance,
@@ -306,7 +306,7 @@ def _resolve_ledger_sidecar(
     ledger = data.get("terminal_ledger")
     if not isinstance(ledger, dict):
         raise ArtifactError(f"{source_path}: terminal_ledger metadata is missing")
-    if ledger.get("schema_version") != LEDGER_SCHEMA_VERSION:
+    if ledger.get("schema_version") not in READABLE_LEDGER_SCHEMA_VERSIONS:
         raise ArtifactError(
             f"{source_path}: unsupported terminal ledger schema "
             f"{ledger.get('schema_version')!r}"

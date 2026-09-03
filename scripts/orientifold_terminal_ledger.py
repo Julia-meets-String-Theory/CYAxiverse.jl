@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-LEDGER_SCHEMA_VERSION = "cyaxiverse-orientifold-terminal-ledger-1.1"
+LEDGER_SCHEMA_VERSION = "cyaxiverse-orientifold-terminal-ledger-1.2"
+LEGACY_LEDGER_SCHEMA_VERSION = "cyaxiverse-orientifold-terminal-ledger-1.1"
+READABLE_LEDGER_SCHEMA_VERSIONS = {
+    LEGACY_LEDGER_SCHEMA_VERSION,
+    LEDGER_SCHEMA_VERSION,
+}
 LEDGER_TERMINAL_STATUSES = (
     "matrix_validation_passed",
     "numerical_geometry_failure",
@@ -30,6 +35,8 @@ LEDGER_TERMINAL_STATUSES = (
     "fixed_point_set_non_smooth",
     "smoothness_verification_unavailable",
     "accepted_verified_orientifold",
+    "h21_plus_nonzero",
+    "exact_action_h21_evidence_unavailable",
 )
 
 
@@ -53,6 +60,11 @@ def _jsonable(value: Any) -> Any:
 def _required_record(record: dict[str, Any]) -> dict[str, Any]:
     """Normalize and validate one terminal row."""
     row = _jsonable(dict(record))
+    if row.get("ledger_schema_version") not in (None, LEDGER_SCHEMA_VERSION):
+        raise TerminalLedgerError(
+            "new terminal-ledger outputs require schema "
+            f"{LEDGER_SCHEMA_VERSION}"
+        )
     row.setdefault("ledger_schema_version", LEDGER_SCHEMA_VERSION)
     row.setdefault("record_kind", "candidate")
     row.setdefault("polytope_normal_form_id", None)
@@ -87,9 +99,6 @@ def _required_record(record: dict[str, Any]) -> dict[str, Any]:
             "h11_plus": row.pop("h11_plus"),
             "h11_minus": row.pop("h11_minus"),
         }
-    else:
-        row.pop("h11_plus", None)
-        row.pop("h11_minus", None)
     if not isinstance(parity, dict):
         raise TerminalLedgerError("h11_parity must be an object")
     if "h11_plus" in parity or "h11_minus" in parity:
@@ -123,11 +132,6 @@ def _required_record(record: dict[str, Any]) -> dict[str, Any]:
                 "fixed_surface_n_s_evidence", None
             ),
         }
-    else:
-        row.pop("fixed_point_components", None)
-        row.pop("fixed_point_set", None)
-        row.pop("smoothness", None)
-        row.pop("fixed_surface_n_s_evidence", None)
     if not isinstance(fixed_evidence, dict):
         raise TerminalLedgerError("fixed_component_evidence must be an object")
     if {
@@ -364,7 +368,7 @@ def iter_terminal_ledger(path: str | os.PathLike[str]) -> Iterable[dict[str, Any
                 raise TerminalLedgerError(
                     f"invalid JSON at {path}:{line_number}: {exc}"
                 ) from exc
-            if row.get("ledger_schema_version") != LEDGER_SCHEMA_VERSION:
+            if row.get("ledger_schema_version") not in READABLE_LEDGER_SCHEMA_VERSIONS:
                 raise TerminalLedgerError(
                     f"unsupported ledger schema at {path}:{line_number}"
                 )

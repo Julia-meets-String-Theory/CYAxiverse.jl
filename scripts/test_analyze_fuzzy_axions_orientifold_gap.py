@@ -108,6 +108,19 @@ def _terminal_fixture(rows, class_count):
 
 
 class GapClassifierUnitTests(unittest.TestCase):
+    def test_terminal_funnel_reads_legacy_ledger_summary_schema(self):
+        rows = [_matrix_row(0)]
+        directory, data = _terminal_fixture(rows, class_count=1)
+        self.addCleanup(directory.cleanup)
+        data["terminal_ledger"]["schema_version"] = (
+            "cyaxiverse-orientifold-terminal-ledger-1.1"
+        )
+        ledger, sidecar, _ = gap._resolve_ledger_sidecar(
+            data, Path(directory.name) / "artifact.json"
+        )
+        self.assertEqual(ledger["schema_version"], "cyaxiverse-orientifold-terminal-ledger-1.1")
+        self.assertEqual(sidecar, Path(ledger["sidecar_path"]).resolve())
+
     def test_terminal_funnel_uses_only_lambda_f_one_candidates(self):
         rows = [
             _matrix_row(0),

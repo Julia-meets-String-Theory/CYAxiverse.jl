@@ -19,7 +19,7 @@ from run_general_l_action_replacement_bounded import (
     execute_bounded, terminal_identity, terminal_digest, validate_resume,
     repository_revision, CAPS, _witness_rows, load_json, refingerprint_manifest,
     input_manifest_digest, next_class, CANDIDATE_SCHEMA, GLOBAL_LIMITS,
-    REQUIRED_SOURCE_FILES,
+    REQUIRED_SOURCE_FILES, create_approval_bound_manifest,
 )
 
 
@@ -185,6 +185,78 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), hashlib.sha256(b"one").hexdigest())
             with self.assertRaises(FileExistsError): atomic_create(path, b"two")
 
+    def test_approval_binding_is_deterministic_and_non_circular(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = {
+                "schema": "cyaxiverse-general-l-action-replacement-input-1.0",
+                **{
+                    field: {
+                        "limits": {},
+                        "global_limits": {},
+                    }.get(field, f"{field}-fixture")
+                    for field in (
+                        "task_id", "program", "h11_values", "counting_unit",
+                        "selection_route", "action_conventions", "terminal_conventions",
+                        "limits", "global_limits", "seed", "dependency_manifest_sha256",
+                        "project_toml_sha256", "manifest_toml_sha256", "runtime_versions",
+                        "relevant_environment_variables", "environment_revision",
+                        "source_file_digests", "source_commit", "tree_sha256",
+                        "working_tree_diff_sha256", "configuration_digest", "output_root",
+                        "checkpoint_root", "production_gate", "scale_status", "no_overwrite",
+                    )
+                },
+            }
+            manifest.update({
+                "h11_values": [2, 3, 4, 5], "limits": CAPS,
+                "global_limits": GLOBAL_LIMITS, "seed": 0,
+                "runtime_versions": {"python_version": "fixture", "julia_version": "fixture", "cytools_version": "fixture"},
+                "relevant_environment_variables": {}, "source_file_digests": {},
+                "output_root": str(root / "published"),
+                "checkpoint_root": str(root / "checkpoints"),
+                "production_gate": "not_validated", "scale_status": "not_applicable",
+                "no_overwrite": True,
+            })
+            manifest["input_manifest_sha256"] = input_manifest_digest(manifest)
+            approval = {
+                "status": "owner_approved", "approval_id": "fixture-approval",
+                "approval_date": "2026-09-02", "new_bounded_run_authorized": True,
+                **manifest,
+                "schema": "cyaxiverse-general-l-action-replacement-approval-1.0",
+            }
+            approval_path = root / "approval.json"
+            approval_path.write_bytes(canonical_bytes(approval))
+            bound_one = create_approval_bound_manifest(
+                manifest, approval, approval_path=approval_path,
+                output_manifest_path=root / "bound-one.json.zst",
+            )
+            bound_two = create_approval_bound_manifest(
+                manifest, approval, approval_path=approval_path,
+                output_manifest_path=root / "bound-two.json.zst",
+            )
+            self.assertEqual(bound_one, bound_two)
+            self.assertEqual(
+                bound_one["input_manifest_sha256"], input_manifest_digest(bound_one)
+            )
+            self.assertEqual(
+                load_json(root / "bound-one.json.zst"),
+                json.loads(json.dumps(bound_one)),
+            )
+            bad_approval_path = root / "bad-approval.json"
+            bad_approval = dict(approval)
+            bad_approval["approval_id"] = "different"
+            bad_approval_path.write_bytes(canonical_bytes(bad_approval))
+            with self.assertRaisesRegex(ContractError, "approval content mismatch"):
+                create_approval_bound_manifest(
+                    manifest, approval, approval_path=bad_approval_path,
+                    output_manifest_path=root / "bad-bound.json.zst",
+                )
+            with self.assertRaises(ContractError):
+                create_approval_bound_manifest(
+                    bound_one, approval, approval_path=approval_path,
+                    output_manifest_path=root / "bound-three.json.zst",
+                )
+
     def test_tiny_approved_fixture_executes_and_publishes_all_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); output = root / "published"; checkpoint = root / "checkpoints"
@@ -216,7 +288,7 @@ class ContractTests(unittest.TestCase):
             bindings = {"task_id": "general-l-action-replacement-bounded-run-h11-2-5", "program": "source-compatible inherited-orientifold general-L action validation",
                         "h11_values": [2, 3, 4, 5], "counting_unit": "favorable CY FRST class keyed by polytope_id::frst_hash",
                         "selection_route": "synthetic_fixture", "action_conventions": "exact (L,t,lambda_f), contragredient L, source order frozen",
-                        "terminal_conventions": "schema-1.1 identity and complete-record digest", "limits": CAPS, "global_limits": GLOBAL_LIMITS, "seed": 0,
+                        "terminal_conventions": "schema-1.2 identity and complete-record digest", "limits": CAPS, "global_limits": GLOBAL_LIMITS, "seed": 0,
                         **revision, "dependency_manifest_sha256": "synthetic-dependencies",
                         "project_toml_sha256": hashlib.sha256((repo_root / "Project.toml").read_bytes()).hexdigest(),
                         "manifest_toml_sha256": hashlib.sha256((repo_root / "Manifest.toml").read_bytes()).hexdigest(),
@@ -237,6 +309,17 @@ class ContractTests(unittest.TestCase):
             # stringified object keys in the limits map.
             manifest = json.loads(json.dumps(manifest))
             approval = json.loads(json.dumps(approval))
+            approval_path = root / "approval.json"
+            approval_path.write_text(
+                json.dumps(approval, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            manifest = create_approval_bound_manifest(
+                manifest,
+                approval,
+                approval_path=approval_path,
+                output_manifest_path=root / "bound-input-manifest.json.zst",
+            )
             result = execute_bounded(approval, manifest, output, repo_root=repo_root)
             self.assertEqual(result["production_gate"], "not_validated")
             self.assertEqual(result["scale_status"], "not_applicable")
