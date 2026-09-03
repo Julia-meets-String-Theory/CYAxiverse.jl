@@ -4188,7 +4188,9 @@ def load_polytope_manifest(path):
     return {"source": manifest.get("source"), "by_h11": by_h11}
 
 
-def load_mirror_polytopes(parquet_dir, h11, limit, favorable):
+def load_mirror_polytopes(
+    parquet_dir, h11, limit, favorable, *, partitions=None, stream=False
+):
     """Read favorable N-lattice polytopes from the KS Parquet mirror."""
     try:
         import pyarrow as pa
@@ -4205,47 +4207,51 @@ def load_mirror_polytopes(parquet_dir, h11, limit, favorable):
         glob.glob(os.path.join(parquet_dir, "polytopes-4d-*-vertices.parquet")),
         key=lambda path: int(os.path.basename(path).split("-")[2]),
     )
+    if partitions is not None:
+        allowed = {int(partition) for partition in partitions}
+        paths = [
+            path
+            for path in paths
+            if int(os.path.basename(path).split("-")[2]) in allowed
+        ]
     if not paths:
         raise RuntimeError(
             "No polytopes-4d-*-vertices.parquet files found in mirror directory "
             f"{parquet_dir}."
         )
 
-    records = []
-    for path in paths:
-        # Predicate pushdown on the physical-h11 (mirror h12) column: decode
-        # only the small h12 column first, skip any partition with no matching
-        # rows, and materialize only the matching rows. The high-vertex KS
-        # partitions hold tens of millions of rows and zero low-h11 polytopes;
-        # the previous unconditional ``table.to_pylist()`` over every row cost
-        # minutes and tens of GB of Python objects per such partition. Row
-        # indices stay the original per-partition positions, so provenance and
-        # outputs are byte-for-byte unchanged.
-        h12_column = parquet.read_table(path, columns=["h12"]).column("h12")
-        match_positions = np.flatnonzero(
-            h12_column.to_numpy(zero_copy_only=False) == int(h11)
-        )
-        if match_positions.size == 0:
-            continue
-        table = parquet.read_table(
-            path, columns=["vertices", "vertex_count", "h11", "h12"]
-        ).take(pa.array(match_positions))
-        for row_index, row in zip(match_positions.tolist(), table.to_pylist()):
-            # The published mirror uses the dual Hodge-label convention:
-            # physical h11 is the mirror h12 column (== h11 here by pushdown).
-            physical_h11 = int(row["h12"])
-            vertices = np.asarray(row["vertices"], dtype=int)
-            poly = Polytope(vertices, deterministic_glsm_basis=True)
-            if int(poly.h11()) != int(h11):
-                raise RuntimeError(
-                    "KS mirror Hodge-label convention check failed: "
-                    f"{os.path.basename(path)} row {row_index} has requested "
-                    f"h11={h11}, but CYTools constructed h11={poly.h11()}."
-                )
-            if favorable is not None and bool(poly.is_favorable(lattice="N")) != favorable:
+    def iter_records():
+        records_seen = 0
+        for path in paths:
+            # Predicate pushdown on the physical-h11 (mirror h12) column: decode
+            # only the small h12 column first, skip any partition with no matching
+            # rows, and materialize only the matching rows. Row indices stay the
+            # original per-partition positions, so provenance is unchanged.
+            h12_column = parquet.read_table(path, columns=["h12"]).column("h12")
+            match_positions = np.flatnonzero(
+                h12_column.to_numpy(zero_copy_only=False) == int(h11)
+            )
+            if match_positions.size == 0:
                 continue
-            records.append(
-                (
+            table = parquet.read_table(
+                path, columns=["vertices", "vertex_count", "h11", "h12"]
+            ).take(pa.array(match_positions))
+            for row_index, row in zip(match_positions.tolist(), table.to_pylist()):
+                # The published mirror uses the dual Hodge-label convention:
+                # physical h11 is the mirror h12 column (== h11 here by pushdown).
+                physical_h11 = int(row["h12"])
+                vertices = np.asarray(row["vertices"], dtype=int)
+                poly = Polytope(vertices, deterministic_glsm_basis=True)
+                if int(poly.h11()) != int(h11):
+                    raise RuntimeError(
+                        "KS mirror Hodge-label convention check failed: "
+                        f"{os.path.basename(path)} row {row_index} has requested "
+                        f"h11={h11}, but CYTools constructed h11={poly.h11()}."
+                    )
+                if favorable is not None and bool(poly.is_favorable(lattice="N")) != favorable:
+                    continue
+                records_seen += 1
+                yield (
                     poly,
                     {
                         "source_kind": "huggingface_parquet_mirror",
@@ -4263,10 +4269,12 @@ def load_mirror_polytopes(parquet_dir, h11, limit, favorable):
                         ),
                     },
                 )
-            )
-            if len(records) >= limit:
-                return records
-    return records
+                if records_seen >= limit:
+                    return
+
+    if stream:
+        return iter_records()
+    return list(iter_records())
 
 
 def plan_tasks(
