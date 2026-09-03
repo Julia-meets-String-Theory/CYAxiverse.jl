@@ -27,10 +27,11 @@ from typing import Any, Iterable, Mapping
 
 RUN_SCHEMA = "cyaxiverse-general-l-action-replacement-run-1.0"
 WITNESS_SCHEMA = "cyaxiverse-exact-action-witness-manifest-1.1"
-TERMINAL_SCHEMA = "cyaxiverse-orientifold-terminal-ledger-1.1"
+TERMINAL_SCHEMA = "cyaxiverse-orientifold-terminal-ledger-1.2"
 VALIDATION_SCHEMA = "cyaxiverse-general-l-action-replacement-validation-1.0"
 CANDIDATE_SCHEMA = "cyaxiverse-inherited-orientifold-candidate-3.0"
 CHECKPOINT_SCHEMA = "cyaxiverse-general-l-action-replacement-checkpoint-1.0"
+APPROVAL_SCHEMA = "cyaxiverse-general-l-action-replacement-approval-1.0"
 TERMINAL_KINDS = {"matrix_validation", "candidate", "lattice_matrix_search_summary"}
 STATUS_VOCABULARY = {
     "matrix_validation_passed", "numerical_geometry_failure", "polytope_not_preserved",
@@ -39,6 +40,7 @@ STATUS_VOCABULARY = {
     "orientifold_h11_minus_filter_rejection", "torus_shift_search_exhausted",
     "fixed_point_set_non_smooth", "smoothness_verification_unavailable",
     "accepted_verified_orientifold", "accepted_inherited_candidate",
+    "h21_plus_nonzero", "exact_action_h21_evidence_unavailable",
 }
 CAPS = {
     2: {"max_favorable_polytopes": 36, "max_frst_classes": 36, "max_actions_per_class": 128, "max_action_attempts": 4608, "max_terminal_rows": 100_000, "max_wall_seconds": 7200, "max_new_output_bytes": 536870912},
@@ -62,9 +64,20 @@ REQUIRED_SOURCE_FILES = {
     "scripts/toric_fixed_component_euler.py",
     "scripts/generate_geometric_data_multitriangulation.py",
     "scripts/glimmers_raw_frst.py",
+    "scripts/reproduce_fuzzy_axions_h11_4.py",
     "validation/orientifold_exact_action_formula_ledger_20260822.md",
     "scripts/run_general_l_action_replacement_bounded.py",
 }
+APPROVAL_BINDING_FIELDS = (
+    "task_id", "program", "h11_values", "counting_unit", "selection_route",
+    "action_conventions", "terminal_conventions", "limits", "global_limits", "seed",
+    "dependency_manifest_sha256", "project_toml_sha256", "manifest_toml_sha256",
+    "runtime_versions", "relevant_environment_variables", "environment_revision",
+    "source_file_digests", "source_commit", "tree_sha256",
+    "working_tree_diff_sha256", "configuration_digest", "output_root",
+    "checkpoint_root", "production_gate", "scale_status", "no_overwrite",
+    "input_manifest_sha256",
+)
 COUNTER_NAMES = (
     "source_rows_seen", "favorable_polytopes_seen", "frst_classes_seen",
     "source_action_candidates", "matrix_validation_attempts", "candidate_action_attempts",
@@ -99,9 +112,15 @@ def sha256_json(value: Any) -> str:
 
 
 def input_manifest_digest(manifest: Mapping[str, Any]) -> str:
-    """Hash the complete input manifest without its self-referential digest."""
+    """Hash the input manifest without self- or approval-binding fields.
+
+    The owner approval is created after this digest is known.  Its file
+    fingerprint is then added to a copy of the manifest, so including that
+    fingerprint here would make the approval binding circular.
+    """
     payload = dict(manifest)
     payload.pop("input_manifest_sha256", None)
+    payload.pop("approval_fingerprint", None)
     return sha256_json(payload)
 
 
@@ -518,6 +537,95 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _approval_file_fingerprint(path: Path) -> dict[str, Any]:
+    """Return the exact immutable identity used by the execution CLI."""
+    path = Path(path).expanduser().resolve()
+    if not path.is_file():
+        raise ContractError("blocked_on_evidence: owner approval file is missing")
+    return {
+        "path": str(path),
+        "size_bytes": path.stat().st_size,
+        "sha256": _file_sha256(path),
+    }
+
+
+def create_approval_bound_manifest(
+    manifest: Mapping[str, Any],
+    approval: Mapping[str, Any],
+    *,
+    approval_path: str | os.PathLike[str],
+    output_manifest_path: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Create an approval-bound manifest without modifying either input.
+
+    The input manifest digest excludes only ``input_manifest_sha256`` and the
+    later ``approval_fingerprint`` field.  The owner first approves that
+    digest, then this create-only operation binds the approval file bytes to a
+    new manifest.  The execution CLI can therefore verify the approval file
+    exactly without a self-referential hash.
+    """
+    if manifest.get("schema") != "cyaxiverse-general-l-action-replacement-input-1.0":
+        raise ContractError("schema_mismatch")
+    if approval.get("schema") != APPROVAL_SCHEMA:
+        raise ContractError("schema_mismatch")
+    if manifest.get("approval_fingerprint") is not None:
+        raise ContractError("provenance_mismatch: manifest is already approval-bound")
+    if approval.get("status") not in {"approved", "owner_approved"}:
+        raise ContractError("blocked_on_evidence: new owner approval is required")
+    if any(
+        key not in manifest or key not in approval or approval[key] != manifest[key]
+        for key in APPROVAL_BINDING_FIELDS
+    ):
+        raise ContractError("provenance_mismatch")
+    if any(
+        key not in approval
+        for key in ("approval_id", "approval_date", "new_bounded_run_authorized")
+    ):
+        raise ContractError("blocked_on_evidence: new owner approval is required")
+    if (
+        approval["new_bounded_run_authorized"] is not True
+        or not isinstance(approval["approval_id"], str)
+        or not approval["approval_id"]
+        or not isinstance(approval["approval_date"], str)
+        or not approval["approval_date"]
+        or approval["input_manifest_sha256"] != input_manifest_digest(manifest)
+    ):
+        raise ContractError("provenance_mismatch")
+    output = Path(output_manifest_path).expanduser().resolve()
+    approval_file = Path(approval_path).expanduser().resolve()
+    if output == approval_file:
+        raise ContractError("provenance_mismatch: approval and output paths must differ")
+    try:
+        approval_on_disk = load_json(approval_file)
+    except (ContractError, OSError) as exc:
+        raise ContractError("input_fingerprint_mismatch: malformed approval") from exc
+    if canonical_bytes(approval_on_disk) != canonical_bytes(approval):
+        raise ContractError("input_fingerprint_mismatch: approval content mismatch")
+    bound = dict(manifest)
+    bound["approval_fingerprint"] = _approval_file_fingerprint(approval_file)
+    if _path_exists(output):
+        raise FileExistsError(f"refusing to overwrite approval-bound manifest: {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    # ``write_json_zst`` and ``atomic_create`` are defined below and resolved
+    # when this function is called after module initialization.
+    write_json_zst(output, bound)
+    return bound
+
+
+def create_approval_bound_manifest_from_files(
+    manifest_path: str | os.PathLike[str],
+    approval_path: str | os.PathLike[str],
+    output_manifest_path: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Load owner inputs and create an immutable approval-bound manifest."""
+    return create_approval_bound_manifest(
+        load_json(Path(manifest_path).expanduser().resolve()),
+        load_json(Path(approval_path).expanduser().resolve()),
+        approval_path=approval_path,
+        output_manifest_path=output_manifest_path,
+    )
+
+
 def _verify_file_fingerprint(path: Path, size_bytes: Any, expected_sha256: Any) -> None:
     """Verify one immutable file identity without accepting a path fallback."""
     if (
@@ -539,6 +647,8 @@ def refingerprint_manifest(
     """Recompute every immutable input and source-code fingerprint."""
     if manifest.get("schema") != "cyaxiverse-general-l-action-replacement-input-1.0":
         raise ContractError("schema_mismatch")
+    if manifest.get("input_manifest_sha256") != input_manifest_digest(manifest):
+        raise ContractError("input_fingerprint_mismatch")
     entries = manifest.get("inputs")
     if not isinstance(entries, list) or not entries:
         raise ContractError("input_fingerprint_mismatch")
@@ -647,19 +757,12 @@ def _validate_binding(approval: Mapping[str, Any], manifest: Mapping[str, Any], 
         raise ContractError("schema_mismatch")
     if approval.get("status") not in {"approved", "owner_approved"}:
         raise ContractError("blocked_on_evidence: new owner approval is required")
-    required = (
-        "task_id", "program", "h11_values", "counting_unit", "selection_route",
-        "action_conventions", "terminal_conventions", "limits", "global_limits", "seed",
-        "dependency_manifest_sha256", "project_toml_sha256", "manifest_toml_sha256",
-        "runtime_versions", "relevant_environment_variables", "environment_revision",
-        "source_file_digests", "source_commit", "tree_sha256",
-        "working_tree_diff_sha256", "configuration_digest", "output_root",
-        "checkpoint_root", "production_gate", "scale_status", "no_overwrite",
-        "input_manifest_sha256",
-    )
-    for key in required:
+    for key in APPROVAL_BINDING_FIELDS:
         if key not in approval or key not in manifest or approval[key] != manifest[key]:
             raise ContractError("provenance_mismatch")
+    approval_fingerprint = manifest.get("approval_fingerprint")
+    if not isinstance(approval_fingerprint, Mapping):
+        raise ContractError("input_fingerprint_mismatch: approval fingerprint is required")
     if any(key not in approval for key in ("approval_id", "approval_date", "new_bounded_run_authorized")):
         raise ContractError("blocked_on_evidence: new owner approval is required")
     if (
@@ -821,10 +924,16 @@ def execute_bounded(approval: Mapping[str, Any], manifest: Mapping[str, Any], ou
         raise ContractError("provenance_mismatch")
     refingerprint_manifest(manifest, repo_root=repo_root)
     approval_fingerprint = manifest.get("approval_fingerprint")
-    if approval_fingerprint:
-        approval_path = Path(approval_fingerprint["path"])
-        if not approval_path.is_file() or approval_path.stat().st_size != approval_fingerprint.get("size_bytes") or _file_sha256(approval_path) != approval_fingerprint.get("sha256"):
-            raise ContractError("input_fingerprint_mismatch")
+    if not isinstance(approval_fingerprint, Mapping):
+        raise ContractError("input_fingerprint_mismatch: approval fingerprint is required")
+    try:
+        observed_approval_fingerprint = _approval_file_fingerprint(
+            Path(str(approval_fingerprint["path"]))
+        )
+    except (KeyError, TypeError, ContractError) as exc:
+        raise ContractError("input_fingerprint_mismatch: approval fingerprint") from exc
+    if dict(approval_fingerprint) != observed_approval_fingerprint:
+        raise ContractError("input_fingerprint_mismatch: approval fingerprint")
     if resume is not None: validate_resume(resume, manifest)
     output.parent.mkdir(parents=True, exist_ok=True)
     partitions = _source_entries(manifest)
@@ -1066,12 +1175,36 @@ def bounded_gate(h11: int, counters: Mapping[str, Any], *, fingerprints_match: b
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--approval", required=True)
-    parser.add_argument("--input-manifest", required=True)
-    parser.add_argument("--output-root", required=True)
+    parser.add_argument("--approval")
+    parser.add_argument("--input-manifest")
+    parser.add_argument("--output-root")
+    parser.add_argument(
+        "--output-manifest",
+        help="Create-only output path for --bind-approval-manifest.",
+    )
+    parser.add_argument(
+        "--bind-approval-manifest",
+        action="store_true",
+        help="Bind an owner approval file to a new manifest and exit.",
+    )
     parser.add_argument("--resume")
     args = parser.parse_args(argv)
     try:
+        if args.bind_approval_manifest:
+            if not args.approval or not args.input_manifest or not args.output_manifest:
+                raise ContractError(
+                    "--bind-approval-manifest requires --approval, --input-manifest, "
+                    "and --output-manifest"
+                )
+            bound = create_approval_bound_manifest_from_files(
+                args.input_manifest, args.approval, args.output_manifest
+            )
+            print(json.dumps(bound, sort_keys=True, indent=2))
+            return 0
+        if not args.approval or not args.input_manifest or not args.output_root:
+            raise ContractError(
+                "execution requires --approval, --input-manifest, and --output-root"
+            )
         approval_path = Path(args.approval).expanduser().resolve()
         manifest_path = Path(args.input_manifest).expanduser().resolve()
         approval = load_json(approval_path)

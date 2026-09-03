@@ -89,7 +89,12 @@ class TerminalLedgerTests(unittest.TestCase):
                     "terminal_reason_code": "matrix_validation_passed",
                 }
             )
-            writer.write(_row("candidate-a", "accepted_verified_orientifold"))
+            retained = _row("candidate-a", "accepted_verified_orientifold")
+            retained["h11_parity"] = {"h11_plus": 2, "h11_minus": 0}
+            retained["fixed_component_evidence"] = {
+                "status": "verified", "reason": "fixture evidence retained"
+            }
+            writer.write(retained)
             writer.write(
                 _row(
                     "candidate-b",
@@ -109,9 +114,15 @@ class TerminalLedgerTests(unittest.TestCase):
             rows = read_terminal_ledger(path)
             self.assertEqual(len(rows), 4)
             self.assertEqual(summary["schema_version"], LEDGER_SCHEMA_VERSION)
+            self.assertEqual(
+                LEDGER_SCHEMA_VERSION,
+                "cyaxiverse-orientifold-terminal-ledger-1.2",
+            )
             self.assertEqual(summary["record_count"], 4)
             self.assertEqual(summary["class_count"], 2)
             self.assertEqual(summary["sidecar_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(rows[1]["h11_plus"], 2)
+            self.assertIn("fixed_point_components", rows[1])
             self.assertTrue(summary["class_funnel"][0]["accepted_for_table_1"])
             self.assertFalse(summary["class_funnel"][1]["accepted_for_table_1"])
             verify_terminal_ledger(path, summary["sidecar_sha256"])
@@ -120,6 +131,19 @@ class TerminalLedgerTests(unittest.TestCase):
             self.assertEqual(json.loads(summary_path.read_text())["record_count"], 4)
             with self.assertRaises(FileExistsError):
                 TerminalLedgerWriter(path, provenance=_provenance())
+
+            legacy_path = Path(directory) / "legacy-ledger.jsonl"
+            legacy_path.write_text(
+                path.read_text().replace(
+                    "cyaxiverse-orientifold-terminal-ledger-1.2",
+                    "cyaxiverse-orientifold-terminal-ledger-1.1",
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(len(read_terminal_ledger(legacy_path)), 4)
+            verify_terminal_ledger(
+                legacy_path, hashlib.sha256(legacy_path.read_bytes()).hexdigest()
+            )
 
     def test_class_key_prefers_normal_form_identity(self):
         with tempfile.TemporaryDirectory(prefix="cyax-terminal-ledger-") as directory:
