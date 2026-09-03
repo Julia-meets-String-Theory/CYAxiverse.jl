@@ -112,7 +112,8 @@ of h11=2,3,4,5. Each JSONL row must include `h11`, integer `source_row`,
 and reason, `schema_version` equal to
 `cyaxiverse-inherited-orientifold-candidate-3.0`, and complete exact action
 fields for candidate rows. Matrix and search-summary rows use JSON `null` for
-`candidate_id` and `action_digest`, and retain a structural
+`candidate_id`, `action_digest`, `lattice_matrix`, `torus_shift`, and
+`lambda_f`; their structural action evidence remains in the
 `source_trilayer_candidate` fallback. The manifest also includes an
 `approval_fingerprint` object for the approval file after binding; the
 create-only binder adds this object after owner approval and the CLI checks it

@@ -115,6 +115,86 @@ def _source_manifest_fixture(root: Path) -> dict:
     return manifest
 
 
+def _multi_record_class_rows() -> list[dict]:
+    """Build one class with structural attempts and two distinct actions."""
+    common = {
+        "schema_version": CANDIDATE_SCHEMA,
+        "h11": 2,
+        "source_row": 1,
+        "polytope_id": "p-multi",
+        "frst_hash": "f-multi",
+        "frst_class_index": 0,
+    }
+    matrix = build_witness_record(
+        {
+            **common,
+            "record_kind": "matrix_validation",
+            "candidate_id": None,
+            "lattice_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+            "matrix_id": "matrix-1",
+        },
+        None,
+        {
+            "record_kind": "matrix_validation",
+            "terminal_status": "matrix_validation_passed",
+            "terminal_reason_code": "matrix_validation_passed",
+            "fixed_component_evidence": {"status": "not_evaluated"},
+        },
+    )
+    summary = build_witness_record(
+        {
+            **common,
+            "record_kind": "lattice_matrix_search_summary",
+            "candidate_id": None,
+            "matrix_id": "matrix-1",
+        },
+        None,
+        {
+            "record_kind": "lattice_matrix_search_summary",
+            "terminal_status": "torus_shift_search_exhausted",
+            "terminal_reason_code": "torus_shift_search_exhausted",
+        },
+    )
+    exact_hodge = {
+        "schema_version": "cyaxiverse-exact-action-hodge-evidence-3.0",
+        "status": "validated",
+        "h11_plus": 2,
+        "h11_minus": 0,
+        "h21_plus": 0,
+        "h21_minus": 132,
+        "chi_fixed_locus": 272,
+        "chi_x": -260,
+    }
+    candidates = []
+    for candidate_id, shift in (
+        ("c1", {"numerator": [0, 0, 0, 0], "denominator": 1}),
+        ("c2", {"numerator": [1, 0, 0, 0], "denominator": 2}),
+    ):
+        candidates.append(
+            build_witness_record(
+                {
+                    **common,
+                    "record_kind": "candidate",
+                    "candidate_id": candidate_id,
+                    "h11_minus": 0,
+                    "fixed_component_evidence": {"status": "verified"},
+                    "exact_action_h21_evidence": exact_hodge,
+                },
+                {
+                    "lattice_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+                    "torus_shift": shift,
+                    "lambda_f": 1,
+                },
+                {
+                    "terminal_status": "accepted_verified_orientifold",
+                    "terminal_reason_code": "accepted_verified_orientifold",
+                    "smoothness": {"status": "smooth"},
+                },
+            )
+        )
+    return [matrix, summary, *candidates]
+
+
 class ContractTests(unittest.TestCase):
     def test_malformed_json_and_nonfinite_are_rejected(self):
         with self.assertRaises((json.JSONDecodeError, ValueError)): json.loads("{")
@@ -167,6 +247,103 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(counts["selected_class_count"], 1)
         self.assertEqual(counts["representative_action_digest_by_class"], {"p1::f1": rows[0]["action_digest"]})
         self.assertEqual(compare_witnesses([rows[0]], [rows[0]])["equal"], True)
+
+    def test_repeated_class_attempts_preserve_structural_rows_and_gate_contract(self):
+        rows = _multi_record_class_rows()
+        normalized = _witness_rows(copy.deepcopy(rows), 2)
+        by_kind = {row["record_kind"]: row for row in normalized}
+        for kind in ("matrix_validation", "lattice_matrix_search_summary"):
+            for field in ("lattice_matrix", "torus_shift", "lambda_f", "action_digest"):
+                self.assertIsNone(by_kind[kind][field])
+        self.assertEqual(
+            by_kind["matrix_validation"]["source_trilayer_candidate"]["matrix_id"],
+            "matrix-1",
+        )
+        comparison = compare_witnesses(normalized, copy.deepcopy(normalized))
+        self.assertTrue(comparison["equal"])
+        self.assertTrue(comparison["class"]["live_duplicates"])
+        self.assertEqual(comparison["class"]["live_duplicates"], ["p-multi::f-multi"])
+        counts = account_terminal_rows(normalized)
+        self.assertEqual(counts["terminal_rows"], 4)
+        self.assertEqual(counts["duplicate_class_count"], 3)
+        self.assertEqual(counts["duplicate_action_count"], 0)
+        self.assertEqual(counts["duplicate_terminal_identity_count"], 0)
+        self.assertEqual(
+            bounded_gate(2, counts, witness_comparison=comparison)["status"],
+            "passed",
+        )
+
+        partial_candidate = copy.deepcopy(normalized[-1])
+        partial_candidate["torus_shift"] = None
+        with self.assertRaisesRegex(ContractError, "action triple is incomplete"):
+            _witness_rows([partial_candidate], 2)
+
+        duplicate_action = copy.deepcopy(normalized[-1])
+        duplicate_action["candidate_id"] = "c3"
+        duplicate_action["source_candidate"]["candidate_id"] = "c3"
+        duplicate_action["terminal_record_identity"] = terminal_identity(duplicate_action)
+        duplicate_action["terminal_record_digest"] = terminal_digest(duplicate_action)
+        duplicate_action_rows = normalized + [duplicate_action]
+        duplicate_action_counts = account_terminal_rows(duplicate_action_rows)
+        duplicate_action_comparison = compare_witnesses(
+            duplicate_action_rows, normalized
+        )
+        self.assertEqual(duplicate_action_counts["duplicate_action_count"], 1)
+        self.assertEqual(
+            bounded_gate(
+                2,
+                duplicate_action_counts,
+                witness_comparison=duplicate_action_comparison,
+            )["status"],
+            "blocked_on_evidence",
+        )
+
+        duplicate_terminal_rows = normalized + [copy.deepcopy(normalized[0])]
+        duplicate_terminal_counts = account_terminal_rows(duplicate_terminal_rows)
+        duplicate_terminal_comparison = compare_witnesses(
+            duplicate_terminal_rows, normalized
+        )
+        self.assertEqual(
+            duplicate_terminal_counts["duplicate_terminal_identity_count"], 1
+        )
+        self.assertEqual(
+            bounded_gate(
+                2,
+                duplicate_terminal_counts,
+                witness_comparison=duplicate_terminal_comparison,
+            )["status"],
+            "blocked_on_evidence",
+        )
+
+        multiplicity_comparison = compare_witnesses(normalized[:-1], normalized)
+        self.assertFalse(multiplicity_comparison["class"]["equal"])
+        self.assertEqual(
+            bounded_gate(
+                2,
+                account_terminal_rows(normalized[:-1]),
+                witness_comparison=multiplicity_comparison,
+            )["status"],
+            "blocked_on_evidence",
+        )
+
+        wrong_class = copy.deepcopy(normalized[-1])
+        wrong_class["polytope_id"] = "p-other"
+        wrong_class["source_candidate"]["polytope_id"] = "p-other"
+        wrong_class["terminal_record_identity"] = terminal_identity(wrong_class)
+        wrong_class["terminal_record_digest"] = terminal_digest(wrong_class)
+        membership_comparison = compare_witnesses(
+            normalized[:-1] + [wrong_class], normalized
+        )
+        self.assertFalse(membership_comparison["class"]["equal"])
+        self.assertTrue(membership_comparison["class"]["live_minus_ledger"])
+        self.assertEqual(
+            bounded_gate(
+                2,
+                account_terminal_rows(normalized[:-1] + [wrong_class]),
+                witness_comparison=membership_comparison,
+            )["status"],
+            "blocked_on_evidence",
+        )
 
     def test_complete_witness_and_missing_digest_is_counted(self):
         record = build_witness_record({"polytope_id": "p1", "frst_hash": "f1", "candidate_id": "c1"},
@@ -565,6 +742,7 @@ class ContractTests(unittest.TestCase):
                                                        "h11_minus": 0, "h21_plus": 0, "h21_minus": 132, "h11_plus": h11,
                                                        "chi_fixed_locus": 272, "chi_x": -260},
                        "terminal_evidence": {"smoothness": {"status": "smooth"}}}
+                raw["action_digest"] = action_digest(raw)
                 for role in ("source_rows", "terminal_ledger"):
                     path = source_output / f"{h11}-{role}.jsonl"; path.write_text(json.dumps(raw) + "\n", encoding="utf-8")
                     entries.append({"h11": h11, "role": role, "path": str(path), "size_bytes": path.stat().st_size,
