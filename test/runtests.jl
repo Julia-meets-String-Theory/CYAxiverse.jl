@@ -23,6 +23,11 @@ end
 
 include(joinpath(@__DIR__, "optional_plotting.jl"))
 
+# The bounded synthetic geometry-flow test below exercises this helper in both
+# fast and full modes. Keep the implementation boundary available without
+# loading the other full-mode drivers.
+include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
+
 if _FULL
     include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
     include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
@@ -31,7 +36,6 @@ if _FULL
     include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
     include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
     include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
-    include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
     include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
     include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
     include(joinpath(@__DIR__, "axion_photon.jl"))
@@ -3654,7 +3658,8 @@ end
     end
 end
 
-@testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary" begin
+# Pipeline 2 invokes the full vacua and inflation drivers above.
+if _FULL; @testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary" begin
     # A minimal synthetic geometry: 1 axion, 3 instantons (enough for
     # `LQtilde`/`run_geometry`/`scan_geometry_for_inflation` to have a
     # well-posed reduced problem), mirroring the "Visible-sector metadata
@@ -3848,4 +3853,5 @@ end
         @info "skipping Pipeline 2 real-data round-trip test: " *
             "$h11_dir not present on this machine"
     end
+end
 end
