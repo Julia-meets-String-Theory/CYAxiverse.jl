@@ -6,6 +6,8 @@ using Test
 using HDF5
 using ArbNumerics: ArbFloat, precision, setprecision
 
+const _FULL = get(ENV, "CYAXIVERSE_TEST_FULL", "1") == "1"
+
 @testset "Core plotting API stays optional" begin
     @test Base.get_extension(CYAxiverse, :CYAxiverseCairoMakieExt) === nothing
     @test isempty(methods(CYAxiverse.plotting.scatterplot))
@@ -21,17 +23,23 @@ end
 
 include(joinpath(@__DIR__, "optional_plotting.jl"))
 
-include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "inflation_refinement_common.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
+# The bounded synthetic geometry-flow test below exercises this helper in both
+# fast and full modes. Keep the implementation boundary available without
+# loading the other full-mode drivers.
 include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
-include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
-include(joinpath(@__DIR__, "axion_photon.jl"))
+
+if _FULL
+    include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
+    include(joinpath(@__DIR__, "..", "scripts", "batch_vacua_pipeline.jl"))
+    include(joinpath(@__DIR__, "..", "scripts", "batch_physical_spectrum.jl"))
+    include(joinpath(@__DIR__, "..", "scripts", "inflation_refinement_common.jl"))
+    include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_prep.jl"))
+    include(joinpath(@__DIR__, "..", "scripts", "inflation_scan_pilot.jl"))
+    include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
+    include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
+    include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
+    include(joinpath(@__DIR__, "axion_photon.jl"))
+end
 
 @testset "Data directory resolution" begin
     filestructure = CYAxiverse.filestructure
@@ -63,7 +71,7 @@ include(joinpath(@__DIR__, "axion_photon.jl"))
     end
 end
 
-@testset "Scale-continuation pilot diagnostics" begin
+if _FULL; @testset "Scale-continuation pilot diagnostics" begin
     Q = Int[1 2]
     L = Float64[1.0 1.0; 0.0 log10(0.25)]
     K = reshape([1.0], 1, 1)
@@ -344,7 +352,7 @@ end
         @test_throws ArgumentError pilot_prepare_csv(path, PILOT_SUMMARY_FIELDS)
         @test_throws ArgumentError pilot_prepare_csv(path, (:wrong_schema,); append=true)
     end
-end
+end; end
 
 @testset "Generic inflation point correction and precision boundary" begin
     Q = Int[1 0; 0 1]
@@ -541,7 +549,7 @@ end
     end
 end
 
-@testset "Kinetic matrix construction and section-3 positive-definiteness invariant" begin
+if _FULL; @testset "Kinetic matrix construction and section-3 positive-definiteness invariant" begin
     # `.copilot/AGENTS.md` section 3 requires the kinetic matrix
     # K = 1/2 g to be symmetric positive-definite, throwing a domain error
     # when it is not. `read.potential` previously built K as
@@ -671,7 +679,7 @@ end
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
-end
+end; end
 
 @testset "Log-shifted derivative workspace" begin
     Q = Int[1 0 1; 0 1 1]
@@ -748,7 +756,7 @@ end
     @test fallback_derivatives.hessian == expected_fallback.hessian
 end
 
-@testset "Cached screening Hessian eigensolver" begin
+if _FULL; @testset "Cached screening Hessian eigensolver" begin
     for dimension in (3, 8)
         matrix = randn(dimension, dimension)
         matrix = (matrix + matrix') / 2
@@ -899,6 +907,7 @@ end
         @test occursin("mean_allocated_bytes", read(report_path, String))
     end
 end
+end
 
 @testset "CYAxiverse.jl" begin
     @testset "core" begin
@@ -913,7 +922,7 @@ end
     end
 end
 
-@testset "Vacua pipeline persistence and validation" begin
+if _FULL; @testset "Vacua pipeline persistence and validation" begin
     migrated_metadata = _normalize_vacua_search_metadata((
         search_classification="exact_determinant_branch", search_method="reduced_jlm"))
     @test migrated_metadata.search_classification ==
@@ -1960,6 +1969,7 @@ end
         end
     end
 end
+end
 
 @testset "HP spectrum: one-axion analytic mass" begin
     # V = 10^-20 * (1 - cos(3θ)); second instanton is exactly absent.
@@ -2809,7 +2819,7 @@ end
     @test all(alignment.residuals .< 1e-100)
 end
 
-@testset "PQ vacua-pipeline spectrum persistence" begin
+if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
     K = Hermitian([4.0 0.0;
                    0.0 9.0])
     Q = [3 0 0;
@@ -3084,9 +3094,9 @@ end
                 method=:FBDF)
         end
     end
-end
+end; end
 
-@testset "analyze_inflation_candidates: whitened point classification" begin
+if _FULL; @testset "analyze_inflation_candidates: whitened point classification" begin
     # The script defines `derivatives`, `classify_point` and `main`, names that
     # would collide with the scan scripts already included at top level, so it
     # is loaded into its own module.
@@ -3204,7 +3214,7 @@ end
             end
         end
     end
-end
+end; end
 
 @testset "spectrum_mode_counts partitions a symmetric spectrum" begin
     counts = CYAxiverse.generate.spectrum_mode_counts
@@ -3291,7 +3301,7 @@ end
     end
 end
 
-@testset "Quartic index migration: relabel old two-dimensional order" begin
+if _FULL; @testset "Quartic index migration: relabel old two-dimensional order" begin
     # The pre-fix `hp_spectrum` built its quartic index lists with a
     # two-dimensional comprehension, which iterates column-major, while the
     # fused accumulation loop that fills the corresponding values runs the
@@ -3439,7 +3449,7 @@ end
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
-end
+end; end
 
 @testset "Tier-A optimisations preserve values" begin
     # A2: _quartic_index_matrix replaces `hcat(collect.(idx)...) .- 1`.
@@ -3648,7 +3658,8 @@ end
     end
 end
 
-@testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary" begin
+# Pipeline 2 invokes the full vacua and inflation drivers above.
+if _FULL; @testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary" begin
     # A minimal synthetic geometry: 1 axion, 3 instantons (enough for
     # `LQtilde`/`run_geometry`/`scan_geometry_for_inflation` to have a
     # well-posed reduced problem), mirroring the "Visible-sector metadata
@@ -3842,4 +3853,5 @@ end
         @info "skipping Pipeline 2 real-data round-trip test: " *
             "$h11_dir not present on this machine"
     end
+end
 end

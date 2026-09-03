@@ -5,6 +5,68 @@ bounded run. It consumes immutable source fixtures. It does not run a
 population calculation, replay CYTools, write the production database, or
 change the `not_validated` gate.
 
+## Post-PR-108 continuation
+
+PR #108 merged at `fd1467721ab3e04b91af3cc232cc9cf42644947f`. Freeze that
+tree, including its source commit/tree/diff and dependency and environment
+revisions, before generating or executing any continuation input. The pilot
+artifacts from 20260902 are immutable stale evidence from before PR #108; do
+not use them as source rows, terminal-ledger rows, manifests, checkpoints, or
+approval evidence.
+
+Treat the continuation as these separate, ordered gates:
+
+1. **Freeze and prepare paths.** Define fresh v2 source output and checkpoint
+   roots, fresh bounded output and checkpoint roots, and fresh manifests.
+   Every path must be absolute, canonical, absent before creation, distinct
+   from every other path, and non-overlapping. Keep the manifests and approval
+   file outside all source and bounded roots. All writes are create-only:
+   never replace an existing root, manifest, checkpoint, or published artifact.
+2. **Generate the bounded source pilot.** Use the source-generation command
+   below with `--limit 1`. This pilot still reads all nine frozen partitions
+   `05` through `13` for each of `h11=2,3,4,5`; `--limit 1` limits the
+   generated FRST-class work, not the frozen partition set. Record the
+   observed source and terminal-ledger counts rather than assuming complete
+   counts.
+3. **Re-fingerprint and reconcile witnesses.** Independently fingerprint the
+   source and terminal-ledger files, then compare class, action, and terminal
+   identity-plus-digest membership in both directions, including multiplicity.
+   Check `terminal_rows` against the matrix-validation, candidate-attempt, and
+   `lattice_matrix_search_summary` counters. Blank, malformed, missing,
+   duplicated, or unaccounted-for rows fail closed.
+4. **Prepare the bounded manifest.** Run `--prepare-bounded-manifest` only
+   against the fresh source manifest. Preparation must bind the original
+   source-generation roots and the two fresh bounded roots and must pass the
+   self-digest, file fingerprints, pilot scope, and path checks. Preparation is
+   not owner approval.
+5. **Obtain and bind owner approval.** The owner approval must repeat every
+   binding exactly: task and program, h11 scope and counting unit, selection
+   route, action and terminal conventions, limits, seed, source commit/tree/diff,
+   dependency and environment revisions, configuration digest, all four roots,
+   and the prepared `input_manifest_sha256`. The approval must have status
+   `approved` or `owner_approved`. Create the approval-bound manifest with
+   `--bind-approval-manifest`; do not edit either input. Approval binding is a
+   separate gate from preparation.
+6. **Run the bounded pilot.** Execute only the approval-bound manifest, with the
+   exact approval path, byte count, and SHA-256. The driver must re-fingerprint
+   inputs immediately before processing, verify the checkpoint boundary on
+   resume, and publish only after all witness and terminal-accounting checks
+   pass. A mismatch, stale or tampered checkpoint, existing output, root
+   overlap, or any attempted database write fails closed.
+7. **Perform the independent pre-scale review.** After the bounded pilot, the
+   main agent must independently review the frozen-tree identity, path and
+   create-only evidence, exact approval bindings, witness membership and
+   multiplicity, terminal accounting, and observed counts. Complete source
+   generation is permitted only after this review passes. Until then, do not
+   scale, infer completeness, or make a population claim.
+
+The source-generation command for the pilot is the existing command in the
+next section with `--limit 1` added; keep its nine-partition inputs and fresh
+v2 roots. No continuation artifact or run is implied by this procedure.
+Whether the pilot is later accepted or fails closed, preserve
+`production_gate=not_validated`, `scale_status=not_applicable`, zero database
+writes, and no inflation run or population/completeness claim.
+
 ## Generate Source Inputs
 
 Use this order: generate the immutable source inputs, prepare fresh bounded
