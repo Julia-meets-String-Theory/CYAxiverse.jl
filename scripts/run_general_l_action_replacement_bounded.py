@@ -440,7 +440,13 @@ def action_key(row: Mapping[str, Any]) -> str:
 
 
 def compare_witnesses(live: Iterable[Mapping[str, Any]], ledger: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Compare class, action, and terminal sets in both directions."""
+    """Compare class, action, and terminal witnesses in both directions.
+
+    A class can occur on multiple terminal attempts.  Compare class keys as a
+    multiset so expected repeated attempts remain valid, while retaining the
+    duplicate diagnostics.  Action keys and terminal identities remain
+    unique-witness sets and therefore still fail closed on duplicates.
+    """
     live, ledger = list(live), list(ledger)
     for row in live + ledger:
         verify_terminal(row)
@@ -453,10 +459,14 @@ def compare_witnesses(live: Iterable[Mapping[str, Any]], ledger: Iterable[Mappin
         left_rows = [row for row in live if name != "action" or row.get("action_digest") is not None]
         right_rows = [row for row in ledger if name != "action" or row.get("action_digest") is not None]
         left, left_dupes = sets(left_rows, key); right, right_dupes = sets(right_rows, key)
+        if name == "class":
+            equal = dict(left_dupes) == dict(right_dupes)
+        else:
+            equal = left == right and not any(n > 1 for _, n in left_dupes + right_dupes)
         result[name] = {"live_minus_ledger": sorted(left - right), "ledger_minus_live": sorted(right - left),
                         "live_duplicates": [k for k, n in left_dupes if n > 1],
                         "ledger_duplicates": [k for k, n in right_dupes if n > 1],
-                        "equal": left == right and not any(n > 1 for _, n in left_dupes + right_dupes)}
+                        "equal": equal}
     result["equal"] = all(result[name]["equal"] for name in ("class", "action", "terminal"))
     result["missing_action_digest_count"] = sum(
         row.get("action_digest") is None
@@ -1094,20 +1104,31 @@ def _source_entries(manifest: Mapping[str, Any]) -> dict[int, dict[str, dict[str
 
 
 def _witness_rows(rows: list[dict[str, Any]], h11: int) -> list[dict[str, Any]]:
+    """Normalize source rows without turning structural rows into actions."""
     witnesses = []
     for row in rows:
         if not isinstance(row, Mapping):
             raise ContractError("malformed source JSON")
         if "h11" not in row or row["h11"] != h11:
             raise ContractError("source row h11 mismatch")
+        record_kind = row.get("record_kind", "candidate")
+        if record_kind not in TERMINAL_KINDS:
+            raise ContractError("unknown terminal record kind")
+        action_fields = ("lattice_matrix", "torus_shift", "lambda_f")
+        if record_kind == "candidate":
+            if any(key not in row or row[key] is None for key in action_fields):
+                raise ContractError("candidate action triple is incomplete")
+            if row.get("action_digest") is None:
+                raise ContractError("missing action_digest")
+            action = {key: row[key] for key in action_fields}
+            action["action_digest"] = row["action_digest"]
+        else:
+            if any(row.get(key) is not None for key in action_fields):
+                raise ContractError("structural terminal rows must not carry an action triple")
+            action = None
         if "source_candidate" in row:
             candidate = row["source_candidate"]
             evidence = row.get("terminal_evidence", {})
-            action = {key: row[key] for key in ("lattice_matrix", "torus_shift", "lambda_f") if key in row}
-            if "action_digest" in row:
-                action["action_digest"] = row["action_digest"]
-            if not all(key in action for key in ("lattice_matrix", "torus_shift", "lambda_f")):
-                action = None
         else:
             candidate = row
             evidence = row.get("terminal_evidence")
@@ -1117,9 +1138,6 @@ def _witness_rows(rows: list[dict[str, Any]], h11: int) -> list[dict[str, Any]]:
                     for key, value in row.items()
                     if key not in {"terminal_record_identity", "terminal_record_digest"}
                 }
-            action = ({key: row[key] for key in ("lattice_matrix", "torus_shift", "lambda_f", "action_digest") if key in row}
-                      if row.get("record_kind", "candidate") == "candidate" else None)
-            if len(action) < 3: action = None
         if not isinstance(candidate, Mapping) or not isinstance(evidence, Mapping):
             raise ContractError("source candidate and terminal evidence must be objects")
         candidate = dict(candidate)
@@ -1130,8 +1148,6 @@ def _witness_rows(rows: list[dict[str, Any]], h11: int) -> list[dict[str, Any]]:
             raise ContractError("schema_mismatch: unsupported candidate schema")
         if candidate.get("candidate_id") is None and row.get("candidate_id") is not None:
             candidate["candidate_id"] = row["candidate_id"]
-        if action is None and candidate.get("candidate_id") is None:
-            candidate.setdefault("source_trilayer_candidate", dict(candidate))
         witness = build_witness_record(candidate, action, evidence)
         if "terminal_record_identity" in row and (row["terminal_record_identity"] != witness["terminal_record_identity"] or row.get("terminal_record_digest") != witness["terminal_record_digest"]):
             raise ContractError("terminal_record_digest_mismatch")
@@ -1248,7 +1264,12 @@ def execute_bounded(approval: Mapping[str, Any], manifest: Mapping[str, Any], ou
             )
             counters["live_minus_ledger"] = len(comparison["class"]["live_minus_ledger"]) + len(comparison["action"]["live_minus_ledger"])
             counters["ledger_minus_live"] = len(comparison["class"]["ledger_minus_live"]) + len(comparison["action"]["ledger_minus_live"])
-            summary = bounded_gate(h11, counters, fingerprints_match=True); summary["comparison"] = comparison
+            summary = bounded_gate(
+                h11,
+                counters,
+                fingerprints_match=True,
+                witness_comparison=comparison,
+            ); summary["comparison"] = comparison
             if source_bad or ledger_bad or source_blank or ledger_blank:
                 summary["status"] = "blocked_on_evidence"
                 summary["failure_reasons"].append("malformed_or_blank_source_rows") if source_bad or ledger_bad else None
@@ -1406,7 +1427,13 @@ def next_class(
     ]
 
 
-def bounded_gate(h11: int, counters: Mapping[str, Any], *, fingerprints_match: bool = True) -> dict[str, Any]:
+def bounded_gate(
+    h11: int,
+    counters: Mapping[str, Any],
+    *,
+    fingerprints_match: bool = True,
+    witness_comparison: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return a fail-closed validation summary for one bounded h11 value."""
     cap = CAPS.get(int(h11))
     if cap is None: raise ContractError("unsupported h11")
@@ -1430,10 +1457,12 @@ def bounded_gate(h11: int, counters: Mapping[str, Any], *, fingerprints_match: b
         failures.append("malformed_rows")
     if counters.get("blank_rows", 0):
         failures.append("blank_rows")
+    if witness_comparison is not None and not witness_comparison.get("equal", False):
+        failures.append("witness_mismatch")
     if any(
         counters.get(name, 0)
         for name in (
-            "duplicate_class_count", "duplicate_action_count",
+            "duplicate_action_count",
             "duplicate_terminal_identity_count", "orphan_class_count",
             "live_minus_ledger", "ledger_minus_live",
         )
