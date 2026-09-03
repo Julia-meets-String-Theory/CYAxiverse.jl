@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -20,6 +21,7 @@ from run_general_l_action_replacement_bounded import (
     repository_revision, CAPS, _witness_rows, load_json, refingerprint_manifest,
     input_manifest_digest, next_class, CANDIDATE_SCHEMA, GLOBAL_LIMITS,
     REQUIRED_SOURCE_FILES, create_approval_bound_manifest,
+    prepare_bounded_manifest, main,
 )
 
 
@@ -41,6 +43,76 @@ def _row(**changes):
                     "torus_shift": None, "lambda_f": None})
     if row["action_digest"] is None and row["record_kind"] == "candidate": row["action_digest"] = action_digest(row)
     return finalize_terminal(row)
+
+
+def _source_manifest_fixture(root: Path) -> dict:
+    """Build a small unbound source manifest for preparation tests."""
+    source_output = root / "source"
+    source_checkpoint = root / "source-checkpoints"
+    source_output.mkdir()
+    source_checkpoint.mkdir()
+    entries = []
+    for h11 in (2, 3, 4, 5):
+        for role in ("source_rows", "terminal_ledger"):
+            path = source_output / f"h11-{h11}-{role}.jsonl"
+            path.write_bytes(b"{}\n")
+            entries.append({
+                "h11": h11,
+                "role": role,
+                "path": str(path),
+                "size_bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "file_type": "jsonl",
+                "source_row_or_partition_identity": f"h11={h11},row=1",
+                "selection_route": "synthetic_fixture",
+                "counting_unit": "synthetic class",
+                "output_root": str(source_output),
+            })
+    manifest = {
+        "schema": "cyaxiverse-general-l-action-replacement-input-1.0",
+        "task_id": "synthetic-task",
+        "program": "synthetic-program",
+        "h11_values": [2, 3, 4, 5],
+        "counting_unit": "synthetic class",
+        "selection_route": "synthetic_fixture",
+        "action_conventions": "synthetic actions",
+        "terminal_conventions": "schema-1.2",
+        "limits": CAPS,
+        "global_limits": GLOBAL_LIMITS,
+        "seed": 0,
+        "dependency_manifest_sha256": "synthetic-dependencies",
+        "runtime_versions": {
+            "python_version": platform.python_version(),
+            "julia_version": "1.12",
+            "cytools_version": "not-used",
+        },
+        "relevant_environment_variables": {},
+        "environment_revision": "synthetic-environment",
+        "configuration_digest": "synthetic-configuration",
+        "run_scope": "pilot",
+        "output_root": str(source_output),
+        "checkpoint_root": str(source_checkpoint),
+        "production_gate": "not_validated",
+        "scale_status": "not_applicable",
+        "no_overwrite": True,
+        "inputs": entries,
+    }
+    repo_root = Path(__file__).resolve().parent.parent
+    manifest.update({
+        **repository_revision(repo_root),
+        "project_toml_sha256": hashlib.sha256(
+            (repo_root / "Project.toml").read_bytes()
+        ).hexdigest(),
+        "manifest_toml_sha256": hashlib.sha256(
+            (repo_root / "Manifest.toml").read_bytes()
+        ).hexdigest(),
+        "source_file_digests": {
+            name: hashlib.sha256((repo_root / name).read_bytes()).hexdigest()
+            for name in REQUIRED_SOURCE_FILES
+        },
+    })
+    manifest["input_manifest_sha256"] = input_manifest_digest(manifest)
+    return manifest
 
 
 class ContractTests(unittest.TestCase):
@@ -185,9 +257,193 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), hashlib.sha256(b"one").hexdigest())
             with self.assertRaises(FileExistsError): atomic_create(path, b"two")
 
+    def test_prepare_manifest_is_create_only_and_rejects_stale_or_aliased_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = _source_manifest_fixture(root)
+            source_snapshot = copy.deepcopy(source)
+            prepared_path = root / "prepared.json.zst"
+            bounded_output = root / "bounded-output"
+            bounded_checkpoint = root / "bounded-checkpoints"
+            prepared = prepare_bounded_manifest(
+                source,
+                output_root=bounded_output,
+                checkpoint_root=bounded_checkpoint,
+                output_manifest_path=prepared_path,
+            )
+            self.assertEqual(source, source_snapshot)
+            self.assertEqual(
+                prepared["source_generation_output_root"], source["output_root"]
+            )
+            self.assertEqual(
+                prepared["source_generation_checkpoint_root"], source["checkpoint_root"]
+            )
+            self.assertEqual(prepared["output_root"], str(bounded_output.resolve()))
+            self.assertEqual(prepared["checkpoint_root"], str(bounded_checkpoint.resolve()))
+            self.assertTrue(all(
+                entry["output_root"] == str(bounded_output.resolve())
+                and entry["checkpoint_root"] == str(bounded_checkpoint.resolve())
+                for entry in prepared["inputs"]
+            ))
+            self.assertEqual(
+                prepared["input_manifest_sha256"], input_manifest_digest(prepared)
+            )
+            self.assertEqual(load_json(prepared_path), prepared)
+
+            for index, run_root in enumerate(
+                (Path(source["output_root"]), Path(source["checkpoint_root"])),
+                1,
+            ):
+                with self.assertRaises(ContractError):
+                    prepare_bounded_manifest(
+                        source,
+                        output_root=root / f"source-overlap-output-{index}",
+                        checkpoint_root=root / f"source-overlap-checkpoint-{index}",
+                        output_manifest_path=run_root / f"nested-{index}.json.zst",
+                    )
+            for index, run_root in enumerate(
+                (root / "nested-output-root", root / "nested-checkpoint-root"),
+                1,
+            ):
+                with self.assertRaises(ContractError):
+                    prepare_bounded_manifest(
+                        source,
+                        output_root=root / "nested-output-root",
+                        checkpoint_root=root / "nested-checkpoint-root",
+                        output_manifest_path=run_root / f"nested-{index}.json.zst",
+                    )
+
+            bounded_output.mkdir()
+            with self.assertRaises(FileExistsError):
+                prepare_bounded_manifest(
+                    source,
+                    output_root=bounded_output,
+                    checkpoint_root=root / "other-checkpoints",
+                    output_manifest_path=root / "second-prepared.json.zst",
+                )
+            with self.assertRaises(ContractError):
+                prepare_bounded_manifest(
+                    source,
+                    output_root="relative-output",
+                    checkpoint_root=root / "other-checkpoints",
+                    output_manifest_path=root / "third-prepared.json.zst",
+                )
+            with self.assertRaises(ContractError):
+                prepare_bounded_manifest(
+                    source,
+                    output_root=root / "other-output",
+                    checkpoint_root=root / "other-output",
+                    output_manifest_path=root / "fourth-prepared.json.zst",
+                )
+            alias_target = root / "alias-target"
+            alias_root = root / "alias-root"
+            alias_root.symlink_to(alias_target, target_is_directory=True)
+            with self.assertRaises(ContractError):
+                prepare_bounded_manifest(
+                    source,
+                    output_root=alias_root,
+                    checkpoint_root=root / "alias-checkpoints",
+                    output_manifest_path=root / "alias-prepared.json.zst",
+                )
+            with self.assertRaises(ContractError):
+                prepare_bounded_manifest(
+                    {**source, "input_manifest_sha256": "stale"},
+                    output_root=root / "fifth-output",
+                    checkpoint_root=root / "fifth-checkpoints",
+                    output_manifest_path=root / "fifth-prepared.json.zst",
+                )
+            with self.assertRaises(ContractError):
+                prepare_bounded_manifest(
+                    {**source, "approval_fingerprint": {"sha256": "bound"}},
+                    output_root=root / "sixth-output",
+                    checkpoint_root=root / "sixth-checkpoints",
+                    output_manifest_path=root / "sixth-prepared.json.zst",
+                )
+
+    def test_prepare_manifest_cli_uses_explicit_preparation_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = _source_manifest_fixture(root)
+            source_path = root / "source-manifest.json.zst"
+            from run_general_l_action_replacement_bounded import write_json_zst
+            write_json_zst(source_path, source)
+            output = root / "bounded-output"
+            checkpoint = root / "bounded-checkpoints"
+            prepared_path = root / "prepared-manifest.json.zst"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    os.fspath(Path(__file__).resolve().parent / "run_general_l_action_replacement_bounded.py"),
+                    "--prepare-bounded-manifest",
+                    "--input-manifest",
+                    os.fspath(source_path),
+                    "--output-root",
+                    os.fspath(output),
+                    "--checkpoint-root",
+                    os.fspath(checkpoint),
+                    "--output-manifest",
+                    os.fspath(prepared_path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn('"source_generation_output_root"', result.stdout)
+            prepared = load_json(prepared_path)
+            self.assertEqual(prepared["output_root"], str(output.resolve()))
+            with self.assertRaisesRegex(SystemExit, "mutually exclusive"):
+                main([
+                    "--prepare-bounded-manifest",
+                    "--bind-approval-manifest",
+                ])
+            with self.assertRaisesRegex(SystemExit, "mutually exclusive"):
+                main([
+                    "--prepare-bounded-manifest",
+                    "--output-root",
+                    "/tmp/a",
+                    "--bounded-output-root",
+                    "/tmp/b",
+                ])
+            with self.assertRaisesRegex(SystemExit, "mutually exclusive"):
+                main([
+                    "--prepare-bounded-manifest",
+                    "--checkpoint-root",
+                    "/tmp/a",
+                    "--bounded-checkpoint-root",
+                    "/tmp/b",
+                ])
+            with self.assertRaisesRegex(SystemExit, "execution-only"):
+                main([
+                    "--bind-approval-manifest",
+                    "--output-root",
+                    "/tmp/output",
+                ])
+            with self.assertRaisesRegex(SystemExit, "execution-only"):
+                main([
+                    "--bind-approval-manifest",
+                    "--resume",
+                    "/tmp/resume.json",
+                ])
+            with self.assertRaisesRegex(SystemExit, "--output-manifest requires"):
+                main([
+                    "--approval",
+                    "/tmp/approval.json",
+                    "--input-manifest",
+                    "/tmp/input-manifest.json.zst",
+                    "--output-root",
+                    "/tmp/output",
+                    "--output-manifest",
+                    "/tmp/ignored-manifest.json.zst",
+                ])
+
     def test_approval_binding_is_deterministic_and_non_circular(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            source_output = root / "source"
+            source_checkpoint = root / "source-checkpoints"
+            source_output.mkdir()
+            source_checkpoint.mkdir()
             manifest = {
                 "schema": "cyaxiverse-general-l-action-replacement-input-1.0",
                 **{
@@ -214,6 +470,8 @@ class ContractTests(unittest.TestCase):
                 "relevant_environment_variables": {}, "source_file_digests": {},
                 "output_root": str(root / "published"),
                 "checkpoint_root": str(root / "checkpoints"),
+                "source_generation_output_root": str(source_output),
+                "source_generation_checkpoint_root": str(source_checkpoint),
                 "production_gate": "not_validated", "scale_status": "not_applicable",
                 "no_overwrite": True,
             })
@@ -242,6 +500,34 @@ class ContractTests(unittest.TestCase):
                 load_json(root / "bound-one.json.zst"),
                 json.loads(json.dumps(bound_one)),
             )
+            for index, run_root in enumerate((source_output, source_checkpoint), 1):
+                with self.assertRaises(ContractError):
+                    create_approval_bound_manifest(
+                        manifest,
+                        approval,
+                        approval_path=approval_path,
+                        output_manifest_path=run_root / f"nested-bound-{index}.json.zst",
+                    )
+            for index, run_root in enumerate(
+                (Path(manifest["output_root"]), Path(manifest["checkpoint_root"])),
+                1,
+            ):
+                with self.assertRaises(ContractError):
+                    create_approval_bound_manifest(
+                        manifest,
+                        approval,
+                        approval_path=approval_path,
+                        output_manifest_path=run_root / f"nested-bound-{index}.json.zst",
+                    )
+            approval_in_source_root = source_output / "approval.json"
+            approval_in_source_root.write_bytes(approval_path.read_bytes())
+            with self.assertRaises(ContractError):
+                create_approval_bound_manifest(
+                    manifest,
+                    approval,
+                    approval_path=approval_in_source_root,
+                    output_manifest_path=root / "safe-bound.json.zst",
+                )
             bad_approval_path = root / "bad-approval.json"
             bad_approval = dict(approval)
             bad_approval["approval_id"] = "different"
@@ -259,7 +545,13 @@ class ContractTests(unittest.TestCase):
 
     def test_tiny_approved_fixture_executes_and_publishes_all_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); output = root / "published"; checkpoint = root / "checkpoints"
+            root = Path(directory)
+            source_output = root / "source"
+            source_checkpoint = root / "source-checkpoints"
+            output = root / "published"
+            checkpoint = root / "checkpoints"
+            source_output.mkdir()
+            source_checkpoint.mkdir()
             entries = []
             for h11 in (2, 3, 4, 5):
                 raw = {"schema_version": CANDIDATE_SCHEMA, "h11": h11, "source_row": 1, "polytope_id": f"p{h11}", "frst_hash": f"f{h11}",
@@ -274,7 +566,7 @@ class ContractTests(unittest.TestCase):
                                                        "chi_fixed_locus": 272, "chi_x": -260},
                        "terminal_evidence": {"smoothness": {"status": "smooth"}}}
                 for role in ("source_rows", "terminal_ledger"):
-                    path = root / f"{h11}-{role}.jsonl"; path.write_text(json.dumps(raw) + "\n", encoding="utf-8")
+                    path = source_output / f"{h11}-{role}.jsonl"; path.write_text(json.dumps(raw) + "\n", encoding="utf-8")
                     entries.append({"h11": h11, "role": role, "path": str(path), "size_bytes": path.stat().st_size,
                                     "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "file_type": "jsonl",
                                     "source_row_or_partition_identity": f"h11={h11},row=1", "selection_route": "synthetic_fixture",
@@ -294,17 +586,25 @@ class ContractTests(unittest.TestCase):
                         "manifest_toml_sha256": hashlib.sha256((repo_root / "Manifest.toml").read_bytes()).hexdigest(),
                         "runtime_versions": {"python_version": platform.python_version(), "julia_version": "1.12", "cytools_version": "not-used"},
                         "relevant_environment_variables": {name: os.environ.get(name) for name in ("PYTHONHASHSEED", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")}, "environment_revision": "synthetic-python",
-                        "source_file_digests": source_file_digests, "configuration_digest": "fixture", "output_root": str(output),
-                        "checkpoint_root": str(checkpoint), "production_gate": "not_validated", "scale_status": "not_applicable",
+                        "source_file_digests": source_file_digests, "configuration_digest": "fixture", "output_root": str(source_output),
+                        "checkpoint_root": str(source_checkpoint), "run_scope": "pilot",
+                        "production_gate": "not_validated", "scale_status": "not_applicable",
                         "no_overwrite": True}
             for entry in entries:
                 entry.update({key: bindings[key] for key in ("source_commit", "tree_sha256", "working_tree_diff_sha256", "environment_revision", "configuration_digest", "seed", "limits", "global_limits", "output_root")})
             manifest = {"schema": "cyaxiverse-general-l-action-replacement-input-1.0", **bindings, "inputs": entries}
             manifest["input_manifest_sha256"] = input_manifest_digest(manifest)
-            bindings["input_manifest_sha256"] = manifest["input_manifest_sha256"]
-            approval = {"schema": "cyaxiverse-general-l-action-replacement-approval-1.0", "status": "approved",
+            manifest = prepare_bounded_manifest(
+                manifest,
+                output_root=output,
+                checkpoint_root=checkpoint,
+                output_manifest_path=root / "prepared-input-manifest.json.zst",
+                repo_root=repo_root,
+            )
+            approval = {"status": "approved",
                         "approval_id": "synthetic-approval", "approval_date": "2026-09-02",
-                        "new_bounded_run_authorized": True, **bindings}
+                        "new_bounded_run_authorized": True, **manifest,
+                        "schema": "cyaxiverse-general-l-action-replacement-approval-1.0"}
             # Exercise the JSON representation used by the CLI, including
             # stringified object keys in the limits map.
             manifest = json.loads(json.dumps(manifest))

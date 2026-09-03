@@ -8,6 +8,7 @@ The public helpers are also useful for validating small, immutable fixtures.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -75,7 +76,9 @@ APPROVAL_BINDING_FIELDS = (
     "runtime_versions", "relevant_environment_variables", "environment_revision",
     "source_file_digests", "source_commit", "tree_sha256",
     "working_tree_diff_sha256", "configuration_digest", "output_root",
-    "checkpoint_root", "production_gate", "scale_status", "no_overwrite",
+    "checkpoint_root", "source_generation_output_root",
+    "source_generation_checkpoint_root", "production_gate", "scale_status",
+    "no_overwrite",
     "input_manifest_sha256",
 )
 COUNTER_NAMES = (
@@ -549,6 +552,241 @@ def _approval_file_fingerprint(path: Path) -> dict[str, Any]:
     }
 
 
+def _canonical_absolute_path(value: Any, *, name: str) -> Path:
+    """Return a canonical absolute path and reject relative aliases."""
+    if not isinstance(value, (str, os.PathLike)):
+        raise ContractError(f"path_mismatch: {name} must be an absolute path")
+    raw = Path(os.fspath(value))
+    if not raw.is_absolute():
+        raise ContractError(f"path_mismatch: {name} must be an absolute path")
+    if any(part in {".", ".."} for part in raw.parts):
+        raise ContractError(f"path_mismatch: {name} must be a canonical path")
+    if raw.is_symlink():
+        raise ContractError(f"path_mismatch: {name} must not be a symlink alias")
+    resolved = raw.resolve(strict=False)
+    return resolved
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    """Return whether two canonical paths are equal or nested."""
+    try:
+        left.relative_to(right)
+        return True
+    except ValueError:
+        pass
+    try:
+        right.relative_to(left)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_source_manifest_for_preparation(
+    manifest: Mapping[str, Any], *, repo_root: Path | None = None
+) -> tuple[Path, Path]:
+    """Validate an unbound source manifest before assigning bounded roots."""
+    if not isinstance(manifest, Mapping):
+        raise ContractError("schema_mismatch: source manifest must be an object")
+    if manifest.get("schema") != "cyaxiverse-general-l-action-replacement-input-1.0":
+        raise ContractError("schema_mismatch")
+    if "approval_fingerprint" in manifest and manifest["approval_fingerprint"] is not None:
+        raise ContractError("provenance_mismatch: source manifest is already bound")
+    if manifest.get("input_manifest_sha256") != input_manifest_digest(manifest):
+        raise ContractError("input_fingerprint_mismatch: stale source manifest")
+    if manifest.get("run_scope") != "pilot":
+        raise ContractError("provenance_mismatch: source manifest is not a pilot")
+    required_fields = set(APPROVAL_BINDING_FIELDS) - {
+        "source_generation_output_root",
+        "source_generation_checkpoint_root",
+        "input_manifest_sha256",
+    }
+    if any(field not in manifest for field in required_fields):
+        raise ContractError("input_fingerprint_mismatch: incomplete source bindings")
+    if (
+        manifest.get("h11_values") != [2, 3, 4, 5]
+        or manifest.get("seed") != 0
+        or _normalized_limits(manifest.get("limits")) != CAPS
+        or manifest.get("global_limits") != GLOBAL_LIMITS
+        or manifest.get("production_gate") != "not_validated"
+        or manifest.get("scale_status") != "not_applicable"
+        or manifest.get("no_overwrite") is not True
+        or not isinstance(manifest.get("source_file_digests"), Mapping)
+    ):
+        raise ContractError("provenance_mismatch: source bindings are not bounded")
+    source_output = _canonical_absolute_path(
+        manifest.get("output_root"), name="source-generation output_root"
+    )
+    source_checkpoint = _canonical_absolute_path(
+        manifest.get("checkpoint_root"), name="source-generation checkpoint_root"
+    )
+    if not _path_exists(source_output) or not source_output.is_dir():
+        raise ContractError("input_fingerprint_mismatch: stale source output root")
+    if not _path_exists(source_checkpoint) or not source_checkpoint.is_dir():
+        raise ContractError("input_fingerprint_mismatch: stale source checkpoint root")
+    if source_output == source_checkpoint or _paths_overlap(source_output, source_checkpoint):
+        raise ContractError("provenance_mismatch: source roots must be distinct")
+    entries = manifest.get("inputs")
+    if not isinstance(entries, list) or not entries:
+        raise ContractError("input_fingerprint_mismatch: source inputs are missing")
+    seen: set[tuple[int, str]] = set()
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise ContractError("input_fingerprint_mismatch: malformed source input")
+        role = entry.get("role")
+        h11 = entry.get("h11")
+        if role not in {"source_rows", "terminal_ledger"} or h11 not in {2, 3, 4, 5}:
+            raise ContractError("schema_mismatch: malformed source input")
+        key = (int(h11), str(role))
+        if key in seen:
+            raise ContractError("input_fingerprint_mismatch: duplicate source input")
+        seen.add(key)
+        if entry.get("output_root") != manifest.get("output_root"):
+            raise ContractError("input_fingerprint_mismatch: stale source input binding")
+    if seen != {(h11, role) for h11 in (2, 3, 4, 5) for role in ("source_rows", "terminal_ledger")}:
+        raise ContractError("input_fingerprint_mismatch: incomplete source inputs")
+    refingerprint_manifest(manifest, repo_root=repo_root)
+    if repo_root is not None:
+        revision = repository_revision(repo_root.resolve())
+        if any(
+            manifest.get(key) != revision.get(key)
+            for key in ("source_commit", "tree_sha256", "working_tree_diff_sha256")
+        ):
+            raise ContractError("provenance_mismatch: stale source revision")
+    return source_output, source_checkpoint
+
+
+def prepare_bounded_manifest(
+    manifest: Mapping[str, Any],
+    *,
+    output_root: str | os.PathLike[str],
+    checkpoint_root: str | os.PathLike[str],
+    output_manifest_path: str | os.PathLike[str],
+    repo_root: Path | None = None,
+) -> dict[str, Any]:
+    """Create a bounded manifest from an immutable source manifest.
+
+    Preserve the source-generation bindings and source-file fingerprints while
+    assigning two fresh, canonical roots for a later bounded execution. Do
+    not modify the source manifest or overwrite any output.
+    """
+    source_output, source_checkpoint = _validate_source_manifest_for_preparation(
+        manifest, repo_root=repo_root
+    )
+    if "source_generation_output_root" in manifest or "source_generation_checkpoint_root" in manifest:
+        raise ContractError("provenance_mismatch: manifest is already prepared")
+    bounded_output = _canonical_absolute_path(output_root, name="bounded output_root")
+    bounded_checkpoint = _canonical_absolute_path(
+        checkpoint_root, name="bounded checkpoint_root"
+    )
+    output_manifest = _canonical_absolute_path(
+        output_manifest_path, name="output manifest"
+    )
+    if _path_exists(bounded_output):
+        raise FileExistsError(f"refusing to overwrite bounded output root: {bounded_output}")
+    if _path_exists(bounded_checkpoint):
+        raise FileExistsError(
+            f"refusing to overwrite bounded checkpoint root: {bounded_checkpoint}"
+        )
+    if bounded_output == bounded_checkpoint or _paths_overlap(bounded_output, bounded_checkpoint):
+        raise ContractError("provenance_mismatch: bounded roots must be distinct")
+    if _paths_overlap(bounded_output, source_output) or _paths_overlap(
+        bounded_output, source_checkpoint
+    ) or _paths_overlap(bounded_checkpoint, source_output) or _paths_overlap(
+        bounded_checkpoint, source_checkpoint
+    ):
+        raise ContractError("provenance_mismatch: bounded roots alias source roots")
+    if _path_exists(output_manifest):
+        raise FileExistsError(f"refusing to overwrite prepared manifest: {output_manifest}")
+    if any(
+        _paths_overlap(output_manifest, root)
+        for root in (
+            source_output,
+            source_checkpoint,
+            bounded_output,
+            bounded_checkpoint,
+        )
+    ):
+        raise ContractError("provenance_mismatch: manifest path aliases a run root")
+
+    prepared = copy.deepcopy(dict(manifest))
+    # Retain the exact source-manifest spellings as immutable provenance. The
+    # validation helpers canonicalize them only for comparison and safety.
+    prepared["source_generation_output_root"] = manifest["output_root"]
+    prepared["source_generation_checkpoint_root"] = manifest["checkpoint_root"]
+    prepared["output_root"] = str(bounded_output)
+    prepared["checkpoint_root"] = str(bounded_checkpoint)
+    prepared.pop("approval_fingerprint", None)
+    for entry in prepared["inputs"]:
+        entry["output_root"] = str(bounded_output)
+        entry["checkpoint_root"] = str(bounded_checkpoint)
+    # Match the JSON representation returned by ``load_json``. In particular,
+    # JSON object keys such as the h11 limits are strings after serialization.
+    prepared = json.loads(canonical_bytes(prepared))
+    prepared["input_manifest_sha256"] = input_manifest_digest(prepared)
+    write_json_zst(output_manifest, prepared)
+    return prepared
+
+
+def prepare_bounded_manifest_from_files(
+    manifest_path: str | os.PathLike[str],
+    output_root: str | os.PathLike[str],
+    checkpoint_root: str | os.PathLike[str],
+    output_manifest_path: str | os.PathLike[str],
+    *,
+    repo_root: Path | None = None,
+) -> dict[str, Any]:
+    """Load an unbound source manifest and create a prepared copy."""
+    source_path = _canonical_absolute_path(manifest_path, name="source manifest")
+    destination = _canonical_absolute_path(output_manifest_path, name="output manifest")
+    if source_path == destination:
+        raise ContractError("provenance_mismatch: source and output manifests must differ")
+    return prepare_bounded_manifest(
+        load_json(source_path),
+        output_root=output_root,
+        checkpoint_root=checkpoint_root,
+        output_manifest_path=destination,
+        repo_root=repo_root,
+    )
+
+
+def _validate_prepared_roots(manifest: Mapping[str, Any]) -> tuple[Path, Path]:
+    """Validate the source and fresh bounded roots in a prepared manifest."""
+    source_output = _canonical_absolute_path(
+        manifest.get("source_generation_output_root"),
+        name="source-generation output_root",
+    )
+    source_checkpoint = _canonical_absolute_path(
+        manifest.get("source_generation_checkpoint_root"),
+        name="source-generation checkpoint_root",
+    )
+    bounded_output = _canonical_absolute_path(
+        manifest.get("output_root"), name="bounded output_root"
+    )
+    bounded_checkpoint = _canonical_absolute_path(
+        manifest.get("checkpoint_root"), name="bounded checkpoint_root"
+    )
+    if not source_output.is_dir() or not source_checkpoint.is_dir():
+        raise ContractError("input_fingerprint_mismatch: stale source-generation root")
+    if (
+        source_output == source_checkpoint
+        or _paths_overlap(source_output, source_checkpoint)
+        or bounded_output == bounded_checkpoint
+        or _paths_overlap(bounded_output, bounded_checkpoint)
+        or _paths_overlap(bounded_output, source_output)
+        or _paths_overlap(bounded_output, source_checkpoint)
+        or _paths_overlap(bounded_checkpoint, source_output)
+        or _paths_overlap(bounded_checkpoint, source_checkpoint)
+    ):
+        raise ContractError("provenance_mismatch: prepared roots are aliased")
+    if _path_exists(bounded_output):
+        raise FileExistsError(f"refusing to overwrite bounded output root: {bounded_output}")
+    if _path_exists(bounded_checkpoint):
+        raise FileExistsError(
+            f"refusing to overwrite bounded checkpoint root: {bounded_checkpoint}"
+        )
+    return bounded_output, bounded_checkpoint
+
+
 def create_approval_bound_manifest(
     manifest: Mapping[str, Any],
     approval: Mapping[str, Any],
@@ -570,6 +808,14 @@ def create_approval_bound_manifest(
         raise ContractError("schema_mismatch")
     if manifest.get("approval_fingerprint") is not None:
         raise ContractError("provenance_mismatch: manifest is already approval-bound")
+    if not all(
+        isinstance(manifest.get(key), str)
+        for key in (
+            "source_generation_output_root",
+            "source_generation_checkpoint_root",
+        )
+    ):
+        raise ContractError("provenance_mismatch: manifest is not prepared")
     if approval.get("status") not in {"approved", "owner_approved"}:
         raise ContractError("blocked_on_evidence: new owner approval is required")
     if any(
@@ -591,10 +837,31 @@ def create_approval_bound_manifest(
         or approval["input_manifest_sha256"] != input_manifest_digest(manifest)
     ):
         raise ContractError("provenance_mismatch")
-    output = Path(output_manifest_path).expanduser().resolve()
-    approval_file = Path(approval_path).expanduser().resolve()
+    _validate_prepared_roots(manifest)
+    output = _canonical_absolute_path(output_manifest_path, name="output manifest")
+    approval_file = _canonical_absolute_path(approval_path, name="approval file")
     if output == approval_file:
         raise ContractError("provenance_mismatch: approval and output paths must differ")
+    source_roots = (
+        _canonical_absolute_path(
+            manifest["source_generation_output_root"],
+            name="source-generation output_root",
+        ),
+        _canonical_absolute_path(
+            manifest["source_generation_checkpoint_root"],
+            name="source-generation checkpoint_root",
+        ),
+    )
+    bounded_roots = (
+        _canonical_absolute_path(manifest["output_root"], name="bounded output_root"),
+        _canonical_absolute_path(
+            manifest["checkpoint_root"], name="bounded checkpoint_root"
+        ),
+    )
+    if any(_paths_overlap(output, root) for root in (*source_roots, *bounded_roots)):
+        raise ContractError("provenance_mismatch: output manifest aliases a run root")
+    if any(_paths_overlap(approval_file, root) for root in (*source_roots, *bounded_roots)):
+        raise ContractError("provenance_mismatch: approval file aliases a run root")
     try:
         approval_on_disk = load_json(approval_file)
     except (ContractError, OSError) as exc:
@@ -798,9 +1065,12 @@ def _validate_binding(approval: Mapping[str, Any], manifest: Mapping[str, Any], 
                 raise ContractError("provenance_mismatch")
         elif os.environ.get(str(name)) != str(expected):
             raise ContractError("provenance_mismatch")
-    if Path(approval["output_root"]).resolve() != output.resolve():
+    bounded_output, bounded_checkpoint = _validate_prepared_roots(manifest)
+    if bounded_output != output.resolve():
         raise ContractError("provenance_mismatch")
-    if Path(approval["output_root"]).resolve() == Path(approval["checkpoint_root"]).resolve():
+    if bounded_checkpoint != _canonical_absolute_path(
+        approval["checkpoint_root"], name="bounded checkpoint_root"
+    ):
         raise ContractError("provenance_mismatch")
 
 
@@ -810,7 +1080,8 @@ def _source_entries(manifest: Mapping[str, Any]) -> dict[int, dict[str, dict[str
         for field in (
             "source_commit", "tree_sha256", "working_tree_diff_sha256",
             "environment_revision", "configuration_digest", "seed", "limits",
-            "global_limits", "output_root", "selection_route", "counting_unit",
+            "global_limits", "output_root", "checkpoint_root", "selection_route",
+            "counting_unit",
         ):
             if entry.get(field) != manifest.get(field): raise ContractError("input_fingerprint_mismatch")
         if entry.get("role") not in {"source_rows", "terminal_ledger"} or entry.get("h11") not in entries:
@@ -1179,8 +1450,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input-manifest")
     parser.add_argument("--output-root")
     parser.add_argument(
+        "--checkpoint-root",
+        help="Bounded checkpoint root for --prepare-bounded-manifest.",
+    )
+    parser.add_argument(
+        "--bounded-output-root",
+        help="Fresh bounded output root for --prepare-bounded-manifest.",
+    )
+    parser.add_argument(
+        "--bounded-checkpoint-root",
+        help="Fresh bounded checkpoint root for --prepare-bounded-manifest.",
+    )
+    parser.add_argument(
         "--output-manifest",
-        help="Create-only output path for --bind-approval-manifest.",
+        help="Create-only output path for preparation or approval binding.",
+    )
+    parser.add_argument(
+        "--prepare-bounded-manifest",
+        action="store_true",
+        help=(
+            "Create a fresh bounded manifest from an unbound source manifest; "
+            "run this before --bind-approval-manifest."
+        ),
     )
     parser.add_argument(
         "--bind-approval-manifest",
@@ -1190,6 +1481,59 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume")
     args = parser.parse_args(argv)
     try:
+        if args.prepare_bounded_manifest and args.bind_approval_manifest:
+            raise ContractError(
+                "--prepare-bounded-manifest and --bind-approval-manifest "
+                "are mutually exclusive"
+            )
+        if args.output_root is not None and args.bounded_output_root is not None:
+            raise ContractError(
+                "--output-root and --bounded-output-root are mutually exclusive"
+            )
+        if args.checkpoint_root is not None and args.bounded_checkpoint_root is not None:
+            raise ContractError(
+                "--checkpoint-root and --bounded-checkpoint-root are mutually exclusive"
+            )
+        if args.bind_approval_manifest and any(
+            value is not None
+            for value in (
+                args.checkpoint_root,
+                args.bounded_output_root,
+                args.bounded_checkpoint_root,
+            )
+        ):
+            raise ContractError(
+                "bounded preparation roots require --prepare-bounded-manifest"
+            )
+        if args.bind_approval_manifest and (
+            args.output_root is not None or args.resume is not None
+        ):
+            raise ContractError(
+                "--output-root and --resume are execution-only and are not "
+                "valid with --bind-approval-manifest"
+            )
+        if args.prepare_bounded_manifest:
+            if args.approval or args.resume or not args.input_manifest or not args.output_manifest:
+                raise ContractError(
+                    "--prepare-bounded-manifest requires --input-manifest, "
+                    "--output-manifest, and fresh bounded roots only"
+                )
+            bounded_output = args.bounded_output_root or args.output_root
+            bounded_checkpoint = args.bounded_checkpoint_root or args.checkpoint_root
+            if not bounded_output or not bounded_checkpoint:
+                raise ContractError(
+                    "--prepare-bounded-manifest requires --output-root and "
+                    "--checkpoint-root (or the --bounded-* aliases)"
+                )
+            prepared = prepare_bounded_manifest_from_files(
+                args.input_manifest,
+                bounded_output,
+                bounded_checkpoint,
+                args.output_manifest,
+                repo_root=Path(__file__).resolve().parent.parent,
+            )
+            print(json.dumps(prepared, sort_keys=True, indent=2))
+            return 0
         if args.bind_approval_manifest:
             if not args.approval or not args.input_manifest or not args.output_manifest:
                 raise ContractError(
@@ -1201,6 +1545,22 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(bound, sort_keys=True, indent=2))
             return 0
+        if any(
+            value is not None
+            for value in (
+                args.checkpoint_root,
+                args.bounded_output_root,
+                args.bounded_checkpoint_root,
+            )
+        ):
+            raise ContractError(
+                "bounded preparation roots require --prepare-bounded-manifest"
+            )
+        if args.output_manifest is not None:
+            raise ContractError(
+                "--output-manifest requires --prepare-bounded-manifest or "
+                "--bind-approval-manifest"
+            )
         if not args.approval or not args.input_manifest or not args.output_root:
             raise ContractError(
                 "execution requires --approval, --input-manifest, and --output-root"

@@ -7,8 +7,15 @@ change the `not_validated` gate.
 
 ## Generate Source Inputs
 
-Use this order: generate the immutable source inputs, obtain owner approval,
-bind the approval to the generated manifest, then run the bounded driver.
+Use this order: generate the immutable source inputs, prepare fresh bounded
+roots, obtain owner approval, bind the approval to the prepared manifest, then
+run the bounded driver. The complete sequence is:
+
+```text
+source manifest -> prepared bounded manifest -> owner approval
+    -> approval-bound manifest -> bounded pilot
+```
+
 Generate the source and terminal-ledger JSONL inputs before requesting owner
 approval:
 
@@ -27,18 +34,41 @@ the physical Hodge mapping, enumerates paper-equivalent FRST classes, and
 preserves terminal records from the exact `(L,t,lambda_f)` search. It writes
 zstd level-19 source and ledger files, a bounded-driver-compatible
 `input-manifest.json.zst`, and `SHA256SUMS.txt` with create-only output
-behavior. The generated manifest still requires a new owner approval before
-the bounded driver can execute.
+behavior. The generated manifest still requires preparation and a new owner
+approval before the bounded driver can execute.
 
-The initial manifest is intentionally unbound. The owner must review it and
-create an approval that repeats its `input_manifest_sha256`. After that owner
-decision, create the bound copy with:
+Prepare the generated source manifest with fresh, absolute, distinct output
+and checkpoint roots. Both bounded roots must be absent; the source output and
+checkpoint roots remain unchanged and are recorded explicitly in the prepared
+manifest. The command creates one new manifest and never modifies the source
+manifest:
+
+```sh
+python3 -B scripts/run_general_l_action_replacement_bounded.py \
+  --prepare-bounded-manifest \
+  --input-manifest /fresh/general-l-source/input-manifest.json.zst \
+  --output-root /fresh/general-l-bounded-pilot \
+  --checkpoint-root /fresh/general-l-bounded-checkpoints \
+  --output-manifest /owner/prepared-input-manifest.json.zst
+```
+
+The preparation step checks the source manifest self-digest, all source file
+fingerprints, the pilot scope, and the original roots. It rejects a bound or
+stale manifest, malformed or relative paths, existing roots, and roots that
+are equal to or aliased with each other or the source roots. Every per-input
+bounded-run `output_root` and `checkpoint_root` binding is updated together.
+
+The prepared manifest is intentionally unbound. The owner must review it and
+create an approval that repeats its complete binding, including
+`source_generation_output_root`, `source_generation_checkpoint_root`,
+`output_root`, `checkpoint_root`, and `input_manifest_sha256`. After that owner
+decision, create the approval-bound copy with:
 
 ```sh
 python3 -B scripts/run_general_l_action_replacement_bounded.py \
   --bind-approval-manifest \
   --approval /owner/approval.json \
-  --input-manifest /fresh/general-l-source/input-manifest.json.zst \
+  --input-manifest /owner/prepared-input-manifest.json.zst \
   --output-manifest /owner/approval-bound-input-manifest.json.zst
 ```
 
@@ -46,7 +76,9 @@ The binder verifies that the approval file decodes to the supplied approval,
 writes one new manifest, and never modifies either input. The bound manifest
 excludes only `approval_fingerprint` from its digest. The execution CLI still
 requires an exact approval path, byte count, and SHA-256 match, so this binding
-is not circular.
+is not circular. Keep both the approval file and approval-bound manifest
+outside the source-generation and bounded-run roots; the binder rejects any
+overlap to keep those roots immutable and create-only.
 
 ## Fixture input schema
 
@@ -55,19 +87,22 @@ The input manifest is JSON (or zstd JSON) with schema
 approval bindings (`task_id`, `program`, `h11_values`, `counting_unit`,
 `selection_route`, exact action/terminal conventions, `limits`, `global_limits`,
 `seed`, source commit/tree/diff, dependency and environment revisions,
-configuration digest, output root, and separate
-checkpoint root) plus this list:
+configuration digest, the original source-generation output and checkpoint
+roots, the fresh bounded output root, and separate bounded checkpoint root)
+plus this list:
 
 ```json
 {"inputs":[
   {"h11":2,"role":"source_rows","path":"/absolute/source.jsonl",
    "size_bytes":123,"sha256":"...","file_type":"jsonl",
    "source_row_or_partition_identity":"h11=2,row=1",
-   "selection_route":"synthetic_fixture","counting_unit":"favorable CY FRST class"},
+   "selection_route":"synthetic_fixture","counting_unit":"favorable CY FRST class",
+   "output_root":"/fresh/bounded-output","checkpoint_root":"/fresh/bounded-checkpoints"},
   {"h11":2,"role":"terminal_ledger","path":"/absolute/ledger.jsonl",
    "size_bytes":456,"sha256":"...","file_type":"jsonl",
    "source_row_or_partition_identity":"h11=2,row=1",
-   "selection_route":"synthetic_fixture","counting_unit":"favorable CY FRST class"}
+   "selection_route":"synthetic_fixture","counting_unit":"favorable CY FRST class",
+   "output_root":"/fresh/bounded-output","checkpoint_root":"/fresh/bounded-checkpoints"}
 ]}
 ```
 
@@ -79,9 +114,11 @@ and reason, `schema_version` equal to
 fields for candidate rows. Matrix and search-summary rows use JSON `null` for
 `candidate_id` and `action_digest`, and retain a structural
 `source_trilayer_candidate` fallback. The manifest also includes an
-`approval_fingerprint` object for the approval file; the create-only binder
-adds this object after owner approval and the CLI checks it before processing
-any source row.
+`approval_fingerprint` object for the approval file after binding; the
+create-only binder adds this object after owner approval and the CLI checks it
+before processing any source row. The prepared manifest records the original
+source-generation roots as `source_generation_output_root` and
+`source_generation_checkpoint_root`.
 The source and ledger files use the same row schema; they are compared as
 independent witnesses. Blank or malformed input is counted and blocks
 publication.
@@ -109,11 +146,13 @@ spooling, and before publication.
 
 ## Required gates
 
-Before execution, an owner must provide a new approval record and an immutable
-input manifest. The manifest must bind each absolute source path, byte count,
-SHA-256, source row or partition identity, code revision, environment revision,
-configuration, seed, limits, and a fresh output root. The driver re-fingerprints
-the files and refuses a mismatch. Existing final artifacts are never replaced.
+Before execution, prepare the generated source manifest as described above.
+Then an owner must provide a new approval record for that prepared manifest.
+The manifest must bind each absolute source path, byte count, SHA-256, source
+row or partition identity, code revision, environment revision, configuration,
+seed, limits, the original source-generation roots, and two fresh bounded roots.
+The driver re-fingerprints the files and refuses a mismatch. Existing final
+artifacts are never replaced.
 
 The approval JSON must have `status` equal to `approved` or `owner_approved`
 and must repeat every manifest binding exactly. The manifest
