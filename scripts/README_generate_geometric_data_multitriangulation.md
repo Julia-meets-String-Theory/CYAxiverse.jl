@@ -1,15 +1,117 @@
 # KS-to-CY3 geometry generator
 
 [`generate_geometric_data_multitriangulation.py`](./generate_geometric_data_multitriangulation.py)
-is the CYTools-backed preprocessing step for the CYAxiverse geometry database.
-It fetches Kreuzer-Skarke (KS) polytopes, constructs fine regular star
-triangulations (FRSTs), builds the corresponding Calabi-Yau threefold
-hypersurfaces, selects a controlled point in the toric Kahler cone, and writes a
-versioned HDF5 artifact for the Julia pipeline.
+is the CYTools-backed geometry implementation used by the CYAxiverse geometry
+database. The schema-1.1 workflow is intentionally split into two commands:
+`generate_stage1_raw_frsts.py` collects the approved raw FRST population, and
+`generate_stage2_eft_reference.py` reconstructs only those retained FRSTs and
+applies the geometry/EFT checks. The older combined `--eft` route is retired.
 
 Schema 1.1 adds a compact, geometry-level factorized charge contract and an
-opt-in `--eft` reference-row layer. The latter is an adapted finite model-reuse
-diagnostic, not a reproduction of the Glimmers model ensemble.
+adapted finite model-reuse diagnostic, not a reproduction of the Glimmers model
+ensemble.
+
+## Independent stage runs
+
+Stage 1 writes serializable raw FRST artifacts and, when topology extraction
+succeeds, an optional compressed topology cache inside each raw-FRST HDF5 file.
+The cache contains the Hodge, intersection, divisor-basis, Mori-cone, and
+face-restriction data that are independent of the later physical filters. For
+`h11=491` only, Stage 1 additionally evaluates the CYTools canonical
+stretched-cone tip as an observational preflight; it does not choose a
+physical Kähler point, apply divisor-volume cuts, or construct EFT rows:
+
+```bash
+python scripts/generate_stage1_raw_frsts.py \
+  --h11-plan 50:500,100:500,200:300,491:100 \
+  --outdir /path/to/stage1_raw_frsts
+```
+
+For `h11=491` only, Stage 1 also runs a compact CYTools canonical-tip
+preflight while the sampled triangulation is still in memory. It uses
+`tip_of_stretched_cone(1)` and records the solver, cone-array shapes, point
+hash, cone slack, CY/curve/metric checks, basis/prime/effective divisor-volume
+minima, and divisor-convention checks in each retained raw-FRST record under
+`canonical_tip_preflight`. The prime-volume convention check uses
+`calabi_yau.polytope().glsm_charge_matrix(include_origin=False).T @ tau_basis`.
+The `divisor_basis(as_matrix=True)` result is recorded separately as a
+basis-selection matrix; it is not a prime charge matrix. MOSEK is preferred when configured; otherwise
+the CYTools default solver is recorded. This is an annotation, not a Stage-1
+acceptance filter: a valid FRST with a canonical-tip divisor shortfall remains
+`retained_raw_frst` and is classified separately as
+`canonical_tip_divisor_volume_shortfall`. The diagnostic checks only the
+canonical point and does not establish that no other Kähler point can work.
+The run manifest summarizes these classifications under
+`canonical_tip_preflight_classification_count_by_h11`.
+
+The h11=491 preflight does not use
+`CalabiYau.intersection_numbers(in_basis=True, format='coo')` to reconstruct
+divisor volumes or to gate the result. CYTools warns that this reconstruction
+can be unreliable at large h11, so the intersection calculation is omitted
+from the preflight and marked non-authoritative. The direct GLSM prime-volume
+check and the effective-ray check are the authoritative convention checks;
+the basis-selection matrix is retained separately for provenance.
+
+Stage 2 takes that output as a fixed input population. It never generates a
+replacement FRST; missing or corrupt raw files are recorded as unavailable in
+the separate `stage2_input_ledger.jsonl`:
+
+```bash
+python scripts/generate_stage2_eft_reference.py \
+  --stage1-root /path/to/stage1_raw_frsts \
+  --outdir /path/to/stage2_eft \
+  --orientifold-file /path/to/orientifold.json \
+  --eft
+```
+
+The geometry writer is safe by default: an existing `cyax.h5` is an output
+collision. Replacing one requires the explicit
+`--allow-overwrite-existing-geometry` flag (or the identically named API
+argument). The replacement records the prior artifact hash and identity, the
+flag, and the overwrite event in HDF5 construction metadata and run status.
+The final file is published only after the temporary HDF5 handle is closed;
+failed temporary artifacts are deleted after their failure is recorded.
+
+Use `--dry-run` for a deterministic input-ledger probe. Stage-2 filters may
+reduce the number of accepted geometries, but they never replenish or alter the
+stage-1 FRST population.
+
+Before a production stage-2 run, confirm the remaining orientifold, divisor,
+visible-sector, QCD/QED-pool, potential, and EFT stopping choices. The command
+records these choices and any deferrals in `run_manifest.json`; it does not turn
+an unconfirmed choice into a physical claim.
+
+The production Stage-2 reference policy is `canonical_qcd`, matching the
+Glimmers-style stretched-cone construction but using a new deterministic
+minimal-dilation selection rule: retain the stretched-cone tip, discard
+non-positive/non-finite candidates and candidates whose tip volume exceeds 40,
+then order the remaining prime divisors by descending positive tip volume and
+ascending divisor index. The generator tries candidates in that order until
+the final prime/effective divisor lower bounds pass, and dilates the selected
+QCD divisor to volume 40.0 within absolute tolerance `1e-9`. The radial factor
+therefore satisfies `m >= 1` by default. An explicit
+`--qcd-divisor-index` remains a singleton override and is never reordered.
+The Stage-2 `--allow-m-below-one` flag is an explicit conservative opt-in to
+the legacy contraction behavior: candidates above 40 are admitted but the
+caller-provided/index order is retained rather than applying the new default
+ordering. The chosen policy and fallback behavior are recorded in run and HDF5
+construction metadata.
+`adaptive` remains available only as an explicitly labelled randomized Kähler
+diagnostic with a 100-point budget, including the canonical tip.
+
+The stage-2 reconstruction also writes `stage2_topology_diagnostics.jsonl` and
+`stage2_kaehler_point_diagnostics.jsonl`.
+It contains a compact structural audit for every input: polytope dimensions and
+reflexivity, FRST checks, smoothness, CYTools Hodge data, basis convention, and
+the shapes/finiteness of intersection, Chern, Mori, and Kähler-cone arrays.
+It records the ledger, raw-dataset, and reconstructed-CYTools triangulation
+hashes separately. Any disagreement is terminal `input_identity_mismatch`.
+
+The reference run uses `--orientifold-kaehler-policy none`: it validates and
+records the orientifold action but does not require an orientifold-even Kähler
+subspace intersection. Use `require_even_subspace` for a separate run that
+requires that physical orientifold constraint; an infeasible intersection then
+terminates as `kaehler_tip_failure`.
 
 The implementation is deliberately CYTools-first: polytope construction,
 triangulation, cone extraction, intersection data, and geometric validation are
@@ -64,7 +166,9 @@ The construction choices are:
 9. If an explicit orientifold is supplied, validate its lattice involution,
    polytope preservation, FRST preservation, induced integral H2 action, and
    invariant Kaehler-cone intersection.
-10. Write atomically to `cyax.h5`; incomplete temporary files are not retained.
+10. Write atomically to `cyax.h5`; incomplete temporary files are deleted after
+    their failure is recorded. Existing files require the explicit
+    `--allow-overwrite-existing-geometry` authorization.
 
 ### Literature basis
 
@@ -224,7 +328,7 @@ sample is needed.
 | `--outdir PATH` | `.` | Root directory for the generated database. |
 | `--cores INT` | all available | Number of worker processes. Use `1` for debugging and deterministic logs. |
 | `--seed INT` | `0` | Base seed. Worker and candidate seeds are derived from it and recorded in construction metadata. |
-| output collision policy | no overwrite | Every run requires a fresh output root; existing geometry or manifest paths are terminal collisions. |
+| output collision policy | no overwrite | Every run requires a fresh output root; existing geometry or manifest paths are terminal collisions unless the explicit `--allow-overwrite-existing-geometry` authorization is supplied. |
 | `--verbose` | off | Print per-worker stages and elapsed times. Recommended for high `h11`. |
 
 For a reproducible rerun, keep the same CYTools version, database endpoint
@@ -309,11 +413,14 @@ polytope.
 
 ### Schema 1.1 compact EFT-reference mode
 
-`--eft` is an explicit opt-in model layer. It requires the approved geometry
-plan `50:500,100:500,200:300,491:100`, `ntfe_fast` with the native controls
+Stage 1 uses the approved raw-FRST plan
+`50:500,100:500,200:300,491:100`. Stage 2's `--eft` mode requires the approved
+`canonical_qcd`, validated intersecting-D7 toy policy, and inclusive QED bound
+`Vol(D_QED) <= 127.5`. The h11-specific sampler controls belong to stage 1:
+the lower slices use the approved biased fast path, while h11=491 uses native
+`ntfe_fast` with the native controls
 `N=100`, `max_npts=17`, `N_face_triangs=1000`, `as_generator=True`, and the
-`cgal` backend. It also requires `canonical_qcd`, the validated intersecting-D7
-toy policy, and the strict QED bound `Vol(D_QED) < 127.5`.
+`cgal` backend.
 
 Within that fixed plan, the lower slices use the approved biased
 `random_triangulations_fast` path with 10 proposals per polytope; only the
@@ -323,17 +430,52 @@ silently applying NTFE to the lower slices.
 
 The sampling unit is one accepted geometry plus one ordered `(QCD, QED)` pair
 from that geometry's complete eligible pool. The pool is persisted before row
-sampling and requires distinct divisors, recorded nonzero intersection, exact
-QCD normalization to `Vol(D_QCD)=40.0`, every effective and prime-divisor
-volume at least one, and strict QED volume below `127.5`. For each geometry,
-rows are sampled uniformly without replacement using deterministic row seeds.
-After exactly 1400 geometries, the quota allocator assigns 142 rows to 200
-geometries and 143 rows to 1200 geometries, ordered by stable geometry-ID
-hashes, for exactly 200000 rows. A smaller pool is a model-target shortfall,
-not a reason to duplicate assignments.
+sampling and requires distinct divisors, recorded nonzero intersection, QCD
+normalization to `Vol(D_QCD)=40.0` within absolute tolerance `1e-9`, every effective and prime-divisor
+volume at least one, and inclusive QED volume at most `127.5`. For each geometry,
+rows are sampled uniformly with replacement using deterministic draw seeds.
+The row identity remains the geometry identity plus the ordered assignment;
+therefore a duplicate draw is collapsed rather than emitted as a second row.
+The quota allocator supplies a requested unique-row count ``k_g`` for each
+geometry. A row-construction failure draws again from that same accepted
+geometry, with a deterministic per-geometry cap ``M_g = 10 * k_g``. The
+manifest records the cap, total draws, accepted unique rows, duplicate draws,
+failed draws, and any cap-induced capacity shortfall. Stage 12 computes
+validated capacity from the distinct ordered assignments that produce
+schema-valid rows, then reconciles that capacity with rows written, the
+requested target (`--eft-maximum-rows`, default `200000`), and the requested
+minimum (`--eft-minimum-rows`, default `100000`). The target is never met by
+duplicating assignment identities.
+
+When the requested target is reached, the Parquet table is labelled
+`production_complete`. If validated capacity or row generation falls short,
+the table is still written atomically and labelled `diagnostic_partial`; its
+manifest and Parquet metadata retain `model_target_shortfall`, the true
+validated capacity, rows written, target, minimum, and all draw accounting.
+Such a result is diagnostically successful but is not production-complete,
+including when the count is below the requested minimum.
+
+`--eft-minimum-rows` and `--eft-maximum-rows` default to the approved schema
+1.1 values (`100000` and `200000`) but are genuine, freely adjustable CLI
+options, not fixed constants; pass smaller values for a bounded exploratory
+or validation run where reaching the full defaults is not the goal.
+
+EFT finalization validates every persisted assignment-pool entry before
+sampling, and the per-geometry cost of that validation (reconstructing the
+bounded potential and classifying the leading-rank status of every QED
+candidate) is cached once per geometry and reused across the rest of that
+geometry's pool; it is not recomputed per row. Because that per-geometry
+setup cost grows with `h11` and every accepted geometry's pool is independent
+of every other geometry's pool, finalization runs one worker process per
+geometry via `--eft-workers` (default: all available cores, matching
+`--cores` elsewhere in this codebase; pass `1` to force strictly sequential
+execution). Parallel and sequential execution produce identical output; only
+wall-clock time differs. At `h11=491`, the geometry-only setup is the
+dominant cost per accepted geometry, so a population with many `h11=491`
+geometries benefits the most from more workers.
 
 Each row contains only scalar/index/reference metadata: geometry path/hash,
-stable divisor labels and indices, pool rank/size, assignment hash, row seed,
+stable divisor labels and indices, pool rank/size, assignment hash, draw seed,
 normalization and volume scalars, and schema versions. It contains no dense
 `Q`, `L`, `Kinv`, volume vector, or potential array. The single compressed
 Parquet table path can be set with `--eft-output-path`; `pyarrow` is required.
@@ -344,25 +486,44 @@ reuse. It is not an exact reproduction of arXiv:2309.13145, its undocumented
 generator does not run GNN, PyTorch, axion-photon, cosmology, or inflation
 analysis.
 
-The external accounting artifacts written under the fresh output root are
-`polytope_manifest.json`, `candidate_terminal_statuses.jsonl`, `run_manifest.json`,
-`summary_by_h11_and_status.json`, `storage_estimate.json`, and
-`charge_factorized_manifest.json`; `--eft` additionally writes
-`model_terminal_statuses.jsonl` and `eft_models.parquet`. Terminal categories
+Stage 1 writes `frst_candidates/` (with optional `topology_cache` groups inside
+the raw-FRST HDF5 files), `frst_terminal_statuses.jsonl`, `polytope_manifest.json`,
+and `run_manifest.json`. Stage 2 writes
+`stage2_input_ledger.jsonl`, `stage2_terminal_statuses.jsonl`,
+`stage2_topology_diagnostics.jsonl`,
+`charge_factorized_manifest.json`, `polytope_manifest.json`,
+`summary_by_h11_and_status.json`, `storage_estimate.json`, and the geometry
+artifacts; `--eft` additionally writes `model_terminal_statuses.jsonl` and
+`eft_models.parquet`. The Stage-1 raw-FRST population is frozen at its
+completed `1400`-geometry plan: Stage 2 never replenishes it or changes its
+identities to repair row capacity. Terminal categories
 remain separate for sampler, FRST, topology/cone, Kähler, normalization,
 divisor, QED-pool, numerical, I/O, model, and storage failures. The manifest
-also records proposal/retry/duplicate counts and output-collision status.
+also records the fixed stage boundary, raw identities, proposal/retry/duplicate
+counts, output-collision status, and the production-only
+`qcd_qed_prefilter_shortfall` status when no candidate has an eligible
+candidate-specific QED neighbor.
+
+The optional raw-FRST cache uses lossless gzip level 9 with HDF5 shuffle. The
+divisor-basis matrix is stored as CSR (`data`, `indices`, `indptr`, `shape`),
+and the sparse intersection tensor is stored as COO (`indices`, `values`,
+`shape`). Cache metadata records the raw geometry identity, CYTools version,
+triangulation backend, and numerical conventions. Stage 2 validates those
+fields before using the cache; a missing, incompatible, or malformed cache is
+reported and recomputed from the reconstructed CYTools objects.
 
 Relevant options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--eft` | off | Enable the exact schema 1.1 compact EFT-reference layer. |
-| `--eft-geometry-plan TEXT` | `50:500,100:500,200:300,491:100` | Approved h11-to-geometry allocation; other plans are rejected in EFT mode. |
-| `--eft-target-rows INT` | `200000` | Exact adapted row target; other targets are rejected in EFT mode. |
-| `--eft-output-format parquet` | `parquet` | One compressed columnar table. |
+| `generate_stage1_raw_frsts.py --h11-plan TEXT` | `50:500,100:500,200:300,491:100` | Approved h11-to-raw-FRST allocation. |
+| `generate_stage2_eft_reference.py --eft` | off | Build compact EFT-reference rows after stage-2 geometry acceptance. |
+| `--eft-minimum-rows INT` | `100000` | Minimum accepted EFT-reference rows for `production_complete`; configurable, e.g. for a bounded validation run. |
+| `--eft-maximum-rows INT` | `200000` | EFT row target/ceiling; configurable, e.g. for a bounded validation run. |
 | `--eft-output-path PATH` | `OUTDIR/eft_models.parquet` | Explicit table path inside the fresh output root. |
-| `--materialize-dense-potential` | off | Explicit compatibility opt-in for dense geometry-level `Q/L`; never used by EFT rows. |
+| `--eft-workers INT` | all available cores | Worker processes for per-geometry EFT finalization; pass `1` for strictly sequential execution. Does not change output, only wall-clock time. |
+| `--materialize-dense-potential` | off | Legacy compatibility flag; schema 1.1 rejects dense materialization in production HDF5. |
+| `generate_stage2_eft_reference.py --volume-backend {fan,historical_sparse_coo,auto}` | `fan` | Select the current CYTools Fan contractions, the explicit h11=491 historical sparse-COO compatibility path, or `auto` (Fan below h11=491 and historical sparse COO at h11=491); the selected backend is recorded per geometry. |
 
 To balance the sample across polytopes, use `--frsts-per-polytope`. For
 example, the following requests ten favorable polytopes and ten accepted FRSTs
@@ -423,13 +584,12 @@ sampler controls, FRST checks, triangulation hash, timing, and (when requested)
 CY Hodge/smoothness checks. It is a performance/validity probe, not an HDF5
 production run or fairness demonstration.
 
-Schema 1.1 stores the direct charge matrix once per geometry and represents
-pairwise terms with `pair_i`, `pair_j`, and the deterministic convention
+Schema 1.1 stores geometry references and represents pairwise terms with
+`pair_i`, `pair_j`, and the deterministic convention
 `Q_pair[:,k] = Q_direct[:,pair_j[k]] - Q_direct[:,pair_i[k]]`. Coefficient and
-geometry-reference `L` metadata are stored beside those indices. Dense `Q/L`
-materialization is absent by default and is available only through the explicit
-`--materialize-dense-potential` compatibility option; it is never repeated in
-EFT rows.
+geometry-reference `L` metadata are reconstructed during EFT-row generation.
+Dense `Q/L` materialization is rejected for production HDF5 and is never
+repeated in EFT rows.
 
 For a single full geometry artifact, retain the manifest and sampler controls,
 start with one worker and a fresh output root, and let the existing physical
@@ -514,9 +674,11 @@ needs the Kähler-cone hyperplanes for its current stretched-cone optimization
 and validation, while CYTools' dual-ray enumeration can become very slow once
 the cone dimension is moderately large (CYTools warns around dimensions above
 12 and considers it likely impractical above roughly 18). Use
-`--export-kahler-rays` only for a downstream analysis that explicitly requires
+`--export-kaehler-rays` only for a downstream analysis that explicitly requires
 cone generators; it is normally unnecessary for small-geometry smoke tests and
-should not be enabled casually in high-`h11` scans.
+should not be enabled casually in high-`h11` scans. The effective-cone rays,
+stored under `cytools/geometric/effective_cone`, are distinct and are required
+for the direct instanton charge matrix `Q`.
 
 Finally, use a new, empty output directory for every run. Schema 1.1 never
 overwrites existing geometry files or accounting artifacts; an output collision
@@ -527,15 +689,16 @@ is a terminal error.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--max-kaehler-attempts INT` | `100` | Number of stretched-cone/angular Kahler points tested per FRST, including the canonical tip. |
-| `--min-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every exported effective-cone ray after rescaling. |
-| `--min-prime-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every raw prime toric divisor. |
+| `--min-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every exported effective-cone ray at the final rescaled point. |
+| `--min-prime-divisor-volume FLOAT` | `1.0` | Minimum allowed volume for every raw prime toric divisor at the final rescaled point. |
 | `--qcd-volume-min FLOAT` | `25.0` | Lower edge of the QCD-visible prime-divisor volume window. |
 | `--qcd-volume-max FLOAT` | `40.0` | Upper edge of the QCD-visible prime-divisor volume window. |
 | `--moduli-policy {adaptive,canonical_qcd}` | `adaptive` | Use randomized angular Kähler points with a QCD window, or the canonical stretched-cone ray with radial QCD normalization. |
+| `--allow-m-below-one` | off | Stage-2 `canonical_qcd` only: explicitly allow radial contraction (`m < 1`); disabled by default and recorded in metadata. |
 | `--qcd-volume-target FLOAT` | `40.0` | Target prime-divisor volume for `canonical_qcd`. |
-| `--qcd-divisor-index INT` | random member | Optional zero-based CYTools prime-toric-divisor index for `canonical_qcd`; the sampled intersecting triple is restricted to triples containing it. Without it, QCD is chosen uniformly from the sampled triple. |
+| `--qcd-divisor-index INT` | minimal-dilation policy | Optional zero-based CYTools prime-toric-divisor index override for `canonical_qcd`; without it, eligible candidates at or below the target are tried from largest tip volume to smallest, with ascending index as the tie-break. |
 | `--orientifold-file PATH` | off | JSON file containing an explicit lattice involution and O3/O7 or O5/O9 metadata. |
-| `--export-kahler-rays` | off | Enumerate and store Kähler-cone rays; expensive at large `h11`. |
+| `--export-kaehler-rays` | off | Enumerate and store Kähler-cone rays; expensive at large `h11`. The legacy `--export-kahler-rays` spelling remains accepted. |
 | `--max-m FLOAT` | `1_000_000` | Maximum radial prefactor for `canonical_qcd`, or upper bound for the adaptive potential-control search. |
 
 The canonical stretched-cone tip is found by minimizing the Euclidean norm
@@ -545,6 +708,62 @@ For randomized angular projections, licensed MOSEK is tried first; other
 qpsolvers backends are fallback candidates. The actual tip and projection
 solvers are recorded per artifact.
 
+#### Canonical QCD normalization and filter order
+
+For `--moduli-policy canonical_qcd`, the canonical stretched-cone tip is the
+angular direction, not the final radial point. Let `J_tip` be the point returned
+by `tip_of_stretched_cone(1.0)`. For a selected prime toric QCD divisor, set
+
+`m = sqrt(40 / Vol(D_QCD)_tip)`
+
+and `J_final = m J_tip`. By default, candidates with `m < 1` are skipped;
+`--allow-m-below-one` explicitly permits contraction. Divisor volumes scale as
+`m^2`, so the homogeneous scaling sets `Vol(D_QCD)=40.0` within the recorded
+tolerance. The CY volume scales as `m^3` and is not normalized to `1`; only the
+selected QCD divisor is normalized to `40.0`.
+
+The pre-dilation tip evaluation is a diagnostic and precondition stage. It
+requires finite coordinates and cone membership, positive finite CY and curve
+volumes, a finite positive-definite inverse metric, and finite positive divisor
+data. A positive scaling factor cannot repair a negative or non-finite divisor
+volume, so those cases fail before normalization. These diagnostics are kept
+separate from the final normalized-point checks.
+
+The divisor `>= 1` lower-bound checks are authoritative after scaling. At
+`J_final`, validate every raw prime-toric-divisor volume and every exported
+effective-cone divisor volume. A failed pre-dilation precondition remains a
+Kähler-stage terminal status such as `kaehler_tip_failure` or
+`kaehler_point_shortfall`; a failed post-dilation target, lower-bound, or final
+domain check is recorded as `qcd_normalization_failure`.
+
+#### Production EFT QED-aware QCD prefilter
+
+The QED-aware QCD prefilter is active only when all three production settings
+are enabled: `--eft`, `--moduli-policy canonical_qcd`, and
+`--visible-sector-policy intersecting_d7`. For each QCD candidate, compute
+
+`m = sqrt(qcd_volume_target / prime_tau0[qcd_idx])`
+
+under the existing `m >= 1` default and `--allow-m-below-one` opt-in policy.
+Keep the candidate only when at least one distinct intersecting neighbor is
+orientifold-invariant and satisfies the inclusive final-volume condition
+
+`m^2 * prime_tau0[qed_idx] <= effective_qed_volume_max`
+
+with `effective_qed_volume_max=127.5` by default. The deterministic
+minimal-dilation candidate ordering remains in force, and
+`--qcd-divisor-index` remains a singleton override. A candidate that fails the
+prefilter is rejected before normalization selection so the next ordered
+candidate can be tried. If all candidates fail, Stage 2 records
+`qcd_qed_prefilter_shortfall` and candidate-level prefilter metadata rather
+than reporting a generic QCD-volume failure.
+
+This is an early volume/neighbor filter, not a replacement for assignment
+validation. `enumerate_assignment_pool` still normalizes every candidate and
+the complete ordered pool remains the authoritative final gate. The prefilter
+is inactive for non-EFT runs, geometry-only output, and
+`visible_sector_policy=none`; those paths retain their existing behavior.
+
 At large `h11`, the fallback HiGHS solver may report a SciPy
 `SparseConversionWarning` if a caller supplies dense quadratic-program
 constraints. The generator constructs these constraints as CSC sparse matrices
@@ -553,12 +772,23 @@ different dependency path, it is a performance warning rather than a failed
 geometry; check the selected solver and runtime before changing acceptance
 parameters.
 
+The divisor-volume contract uses lower bounds of `1.0` by default. The named
+divisor lower-bound tolerance is `1e-8`; the QCD target tolerance is `1e-9`.
+Both are recorded in `construction_metadata_json` and
+`divisor_volume_evidence`; neither is used to clip, substitute, or rescale a
+failed volume vector. The evidence group preserves the prime-divisor labels and
+indices, effective-cone rays and indices, basis order, and final/pre-
+normalization volume vectors. In `canonical_qcd`, the lower-bound rejection is
+authoritative at the final rescaled point. Adaptive candidates retain their
+separate pre-normalization lower-bound check and are checked again after radial
+rescaling. Any failed final check is recorded as `qcd_normalization_failure`.
+
 With `--moduli-policy adaptive`, candidate acceptance requires:
 
 - a valid FRST and smooth generic CY hypersurface;
 - finite topology and cone data;
 - a positive physical CY volume and positive curve volumes;
-- positive effective-divisor volumes;
+- every effective-cone divisor volume at least `--min-divisor-volume`;
 - every prime toric divisor volume at least `--min-prime-divisor-volume`;
 - at least one prime toric divisor volume in
   `[--qcd-volume-min, --qcd-volume-max]`;
@@ -569,22 +799,28 @@ Rejected candidates are discarded and replaced until the requested count or
 the attempt budget is exhausted.
 
 With `--moduli-policy canonical_qcd`, the same FRST and Kähler cone are used,
-but the angular sampling loop is skipped. Before the tip solve, the generator
-builds the prime-divisor intersection graph from triangulated two-faces and
-reservoir-samples one unordered triangle whose three pairs intersect. One
-member is selected uniformly as QCD, unless `--qcd-divisor-index` fixes the QCD
-member and restricts the triangle sample accordingly. The final Kähler form is
-then `J = m J_tip`, where `m = sqrt(target / tau_QCD)` for that selected prime
-divisor. This gives `tau ∝ m²`, `Kinv ∝ m⁴`, and `Vol(CY) ∝ m³`; the exact
-assignment and scale are recorded in `construction_metadata_json` and
-`cytools/geometric/standard_model`.
+but the angular sampling loop is skipped. Unless
+`--qcd-divisor-index` is supplied, eligible prime-divisor candidates at or
+below `40` are ordered by descending positive finite tip volume, then
+ascending divisor index. This chooses the smallest allowed dilation. Each
+candidate is tested through the final prime/effective divisor lower-bound
+contract, so a candidate that fails is followed by the next smaller tip
+volume. An explicit index remains a singleton override and is not reordered.
+A candidate whose tip volume exceeds `40` is skipped by default so that
+`m >= 1`; the Stage-2 `--allow-m-below-one` opt-in admits those candidates but
+retains the legacy caller-provided/index order. The selected point is then
+`J_final = m J_tip`, with `m = sqrt(40 / Vol(D_QCD)_tip)`.
 
-The generator does not impose `m >= 1` as a separate pre-filter: the target
-determines the homogeneous scale, after which the final prime-divisor,
-effective-cone, curve-volume, and cone-slack checks are applied. The adaptive
-potential-control search is not applied in this mode. This is a radial
-normalization of an existing geometry, not a new FRST or a claim that a QCD
-divisor has been constructed from a brane model.
+At the final point, prime-divisor, effective-cone, curve-volume, cone-slack,
+metric, QCD-target, and divisor-lower-bound checks are applied directly. The
+canonical selector falls back to the next candidate only when the final
+lower-bound contract rejects the current candidate; it performs no clipping,
+hidden rescaling, or substitution. The adaptive potential-control search is
+not applied in this mode.
+The exact assignment and scale are recorded in `construction_metadata_json` and
+`cytools/geometric/standard_model`. This is a radial normalization of an
+existing geometry, not a new FRST or a claim that a QCD divisor has been
+constructed from a brane model.
 
 ## Useful command recipes
 
@@ -713,12 +949,16 @@ derives the integral H2 action in the exported divisor basis, computes
 that the orientifold-even Kaehler subspace intersects the Kaehler cone. O3/O7
 versus O5/O9 and coefficient constraints remain explicit metadata; fixed-locus
 topology, tadpole cancellation, fluxes, and phenomenology are downstream
-calculations.
+calculations. A supplied orientifold that fails polytope, FRST, divisor-image,
+or induced-action preservation is a terminal
+`orientifold_invariance_failure`; the stage-1 FRST is not replaced.
 
 For the paper-style visible-sector pilot, add
 `--visible-sector-policy intersecting_d7`. This requires the orientifold file
-to describe an O3/O7 involution with `h11_minus=0`, matching the paper's
-all-C₄-axion assumption. The generator then retains only QCD candidates
+to describe a validated O3/O7 involution. The generator records the computed
+`h11_plus`/`h11_minus` split but does not reject a nonzero `h11_minus`; the
+reference EFT separately records the paper-style all-C₄-axion assumption.
+The generator then retains only QCD candidates
 with an invariant intersecting prime divisor, chooses an invariant QED divisor
 (the lowest-volume eligible one unless `--qed-divisor-index` is supplied), and
 records the QCD/QED image map, intersection, divisor-basis charges, and QED
@@ -755,16 +995,18 @@ cytools/geometric/
   glsm
   basis, basis_matrix
   prime_toric_divisors
-  prime_divisor_charges
   tip, tip_prefactor
   CY_volume
-  divisor_volumes, prime_divisor_volumes, curve_volumes
-  Kinv
+  divisor_volume_evidence/
+    basis_order
+    prime_divisor_indices, prime_divisor_labels
+    effective_cone_ray_indices, effective_cone_rays
+    volume counts, hashes, minima, and validation attributes
   kappa
   c2
   effective_cone
   mori_cone
-  kahler_cone (only with --export-kahler-rays)
+  kahler_cone (only with --export-kaehler-rays; legacy HDF5 name)
   kahler_hyperplanes
   standard_model/ (only with --moduli-policy canonical_qcd)
     divisor_indices
@@ -774,9 +1016,10 @@ cytools/geometric/
     h2_involution_matrix
     invariant_kahler_basis
     anti_invariant_h2_basis
-    invariant_kahler_point
+    invariant_kahler_point (only when the kaehler subspace check is required)
     prime_divisor_image_indices
     prime_divisor_invariant_indices
+    h2_action_proof_json (exact GLSM quotient/relation residual evidence)
   visible_sector/ (only with --visible-sector-policy intersecting_d7)
     qcd_divisor_index, qed_divisor_index
     qcd_image_index, qed_image_index
@@ -784,21 +1027,29 @@ cytools/geometric/
     qcd_charge, qed_charge, em_charge
     qed_instanton_index, qed_log10_lambda4
     qcd_qed_intersection, qcd_invariant, qed_invariant
-  assignment_pool/ (with canonical_qcd + intersecting_d7; required by --eft)
+  assignment_pool/ (with canonical_qcd + intersecting_d7; required by stage-2 --eft)
     pool_rank, qcd_divisor_index, qed_divisor_index
     qcd/qed stable labels, normalization/volume scalars, assignment_hash
     intersection_evidence_json
-  tip_pre_normalization, divisor/prime/effective/curve volumes_pre_normalization
-  CY_volume_pre_normalization, Kinv_pre_normalization
+    rejection summary attributes (counts/reasons only)
+  tip_pre_normalization, tip_prefactor, CY_volume_pre_normalization
 cytools/potential/
-  factorized/
-    Q_direct, pair_i, pair_j, direct/pair coefficient metadata
-    L_direct, L_pairwise (geometry-reference sign/log-scale metadata)
-  L, Q (only with --materialize-dense-potential)
+  reconstruction attributes only: charge orientation, pair convention,
+  source counts/hashes, replay tolerances, and source dataset names
 construction_metadata/
   canonical_lattice_points
   face_restriction_dim2
 ```
+
+Geometry-artifact acceptance is explicit in both the HDF5 metadata and stage-2
+status records:
+
+- `geometry_only` permits a geometry-only artifact before assignment-pool
+  construction.
+- `accepted_geometry` is reserved for EFT-mode artifacts with a complete,
+  validated, deterministically hashed ordered assignment pool.
+- `pool_pending` records an EFT attempt that has not reached that pool gate; it
+  is not an accepted EFT artifact and does not produce a final `cyax.h5`.
 
 Important conventions:
 
@@ -808,44 +1059,54 @@ Important conventions:
 - `basis_matrix` is `h11 × n_points`; a prime-divisor charge is a selected
   lattice-point column, while `prime_divisor_charges` stores those charges as
   one row per prime divisor.
-- `L_direct`/`L_pairwise` retain the CYAxiverse sign/mantissa and base-10
-  exponent representation for the immutable geometry reference. `Q_direct` is
-  stored once as `h11 × N_direct`; pairwise charges are reconstructed as
-  `Q_direct[:, pair_j] - Q_direct[:, pair_i]`.
-- Dense `Q`/`L` is absent by default and only appears with the explicit
-  `--materialize-dense-potential` compatibility option. EFT rows never contain
-  these arrays.
-- The current Julia `read.potential` API still expects dense
-  `cytools/potential/Q` and `L`. Until a separately reviewed reader adapter
-  reconstructs the factorized representation in bounded chunks, Julia
-  consumers that need that legacy API must use
-  `--materialize-dense-potential`; the schema 1.1 EFT table remains compact.
+- The orientifold H2 action is solved exactly from the full GLSM
+  quotient/relation matrix by `M Q = Q P`; `basis_matrix` is a divisor-slot
+  selector and is not used for this action. The persisted proof records the
+  selected nonzero minor, exact integer solution, zero residual, and involution
+  check.
+- `Q` is reconstructed as `h11 × N_instanton`, with charge vectors as columns;
+  pairwise charges use `Q_direct[:, pair_j] - Q_direct[:, pair_i]`. The HDF5
+  artifact stores the source datasets, indices, conventions, hashes, and replay
+  tolerances, not the dense charge or coefficient arrays.
+- Potential construction is deferred to EFT-row generation. A bounded
+  reconstruction uses `kappa`, `basis_matrix`, `prime_toric_divisors`,
+  `effective_cone`, and the accepted `tip`, then validates the stored source
+  hashes and conventions.
+- Production schema 1.1 stores no dense `Q`, `L`, `Kinv`, volume, or potential
+  arrays in HDF5 or EFT rows. The legacy `--materialize-dense-potential` flag is
+  retained only for explicit compatibility detection and is rejected by the
+  production writer.
 - The potential charge basis uses unique effective-cone rays. Exact duplicate
   rows returned by CYTools are removed before the stretched-cone control,
   pairwise-term construction, and HDF5 write. The raw GLSM dataset remains
   available for provenance, while `construction_metadata_json` records the
   raw/canonical ray counts and the number removed.
 - `tip`, `divisor_volumes`, `Kinv`, `curve_volumes`, and `CY_volume` refer to the
-  same final rescaled Kahler point.
+  same final rescaled Kähler point. `tip_pre_normalization` and
+  `CY_volume_pre_normalization` preserve the corresponding pre-dilation
+  diagnostics. `CY_volume` is the computed final CY volume, not a unit-
+  normalized value; under canonical homogeneous scaling it is
+  `m^3 * CY_volume_pre_normalization`.
 - `prime_divisor_volumes` follows the order of CYTools
   `prime_toric_divisors()` and is the vector used for the QCD filter. The
   corresponding `prime_toric_divisors` index array is exported explicitly;
   the recorded QCD divisor index is zero-based.
-- `prime_divisor_charges` has one divisor-basis charge row per entry of
-  `prime_toric_divisors`. Visible-sector divisor indices and image indices are
-  zero-based in HDF5. `qed_instanton_index` is zero-based in the logical
-  factorized potential stream; a dense `Q`/`L` column exists only with the
-  explicit compatibility option.
+- Visible-sector divisor indices and image indices are zero-based in HDF5.
+  `qed_instanton_index` is zero-based in the logical reconstructed potential
+  stream; its source charge is recovered from the persisted geometry references.
 - `assignment_pool/` is the complete eligible ordered QCD-QED pool, not one
   permanent QED choice. Its ranks and hashes are the source for deterministic
-  EFT row sampling.
+  EFT row sampling. The QED volume filter is inclusive: `Vol(D_QED) <= 127.5`.
+  Detailed candidate-pair rejection records are written to the stage-2
+  `stage2_assignment_pool_rejections.jsonl` sidecar; HDF5 stores aggregate
+  rejection counts and reasons only.
 - `standard_model/divisor_indices` contains the three zero-based prime-divisor
   indices selected by `canonical_qcd`; all three pairs are edges of the
   triangulated two-face intersection graph. `standard_model/qcd_divisor_index`
   identifies the member whose final volume is normalized to the target.
 - `kahler_hyperplanes` is always exported and is sufficient for the generator's
   stretched-cone optimization and physical validation. Use
-  `--export-kahler-rays` only when a downstream sampler explicitly requires a
+  `--export-kaehler-rays` only when a downstream sampler explicitly requires a
   generator representation of the Kähler cone.
 - `construction_metadata_json` is stored both as a root attribute and as an
   attribute of the `construction_metadata` group.

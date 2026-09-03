@@ -89,10 +89,10 @@ md"""
 * **Axion Mass Spectra ($\log_{10}$ eV):**
   `$(res.spec["m"])`
 
-* **Kinetic Decay Constants $f_K$ ($\log_{10} M_{Planck}$):**
+* **Kinetic Decay Constants $f_K$ ($\log_{10}$ GeV):**
   `$(res.spec["fK"])`
 
-* **Perturbative Decay Constants $f_{pert}$:**
+* **Perturbative Decay Constants $f_{pert}$ ($\log_{10}$ GeV):**
   `$(res.spec["fpert"])`
 """
 

@@ -151,28 +151,29 @@ def default_sampler_by_h11():
 
 
 def approved_parity_convention():
-    """Return the user-approved identity O3/O7 and full CYTools basis rule."""
-    identity = [
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1],
-    ]
+    """Return the paper-style full-basis C4 modeling convention.
+
+    This manifest does not supply or infer a physical orientifold involution.
+    The all-C4 statement is therefore an explicit modeling assumption, while
+    any computed orientifold parity split belongs to the later geometry stage.
+    """
     return {
         "involution_type": "O3/O7",
-        "identity_involution": True,
-        "lattice_matrix": identity,
-        "h11_plus": "h11",
-        "h11_minus": 0,
-        "equations": {"h11_plus": "h11_plus=h11", "h11_minus": "h11_minus=0"},
-        "axion_basis_convention": "user-approved-full-cytools-h11-c4-even",
+        "orientifold_specification_status": "not_supplied",
+        "computed_h11_plus": None,
+        "computed_h11_minus": None,
+        "assumed_h11_plus": "h11",
+        "assumed_h11_minus": 0,
+        "all_h11_c4_assumption": True,
+        "axion_basis_convention": "full_cytools_h11_declared_all_c4_assumption",
         "basis_statement": (
-            "Use the full CYTools h11-dimensional basis as the C4-axion sector; "
-            "apply no additional parity projection."
+            "Use the full CYTools h11-dimensional basis as the C4-axion sector "
+            "under a declared all-C4 modeling assumption; apply no additional "
+            "parity projection."
         ),
         "provenance": (
-            "User-approved convention; the identity encodes the run convention "
-            "and is not an independently inferred physical orientifold."
+            "Paper-style modeling convention; it is not an independently inferred "
+            "physical orientifold or measured h11 parity split."
         ),
     }
 
@@ -451,11 +452,13 @@ def _normalise_seeds(derived_seeds):
 
 def _normalise_parity(parity_convention):
     parity = approved_parity_convention() if parity_convention is None else _copy(parity_convention)
-    if parity.get("involution_type") != "O3/O7" or parity.get("identity_involution") is not True:
-        _fail("user_decision_required", "only the approved identity O3/O7 convention is allowed")
-    if parity.get("h11_plus") != "h11" or parity.get("h11_minus") != 0:
-        _fail("user_decision_required", "parity metadata must preserve h11_plus=h11 and h11_minus=0")
-    if parity.get("axion_basis_convention") != "user-approved-full-cytools-h11-c4-even":
+    if parity.get("involution_type") != "O3/O7":
+        _fail("user_decision_required", "the declared parity convention must be O3/O7")
+    if parity.get("all_h11_c4_assumption") is not True:
+        _fail("user_decision_required", "the full-basis all-C4 assumption must remain explicit")
+    if parity.get("assumed_h11_plus") != "h11" or parity.get("assumed_h11_minus") != 0:
+        _fail("user_decision_required", "the declared all-C4 assumption must record assumed h11_minus=0")
+    if parity.get("axion_basis_convention") != "full_cytools_h11_declared_all_c4_assumption":
         _fail("user_decision_required", "the full CYTools axion-basis convention must remain explicit")
     return parity
 

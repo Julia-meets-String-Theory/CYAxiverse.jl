@@ -7,6 +7,7 @@ evidence, volumes, and validated orientifold image map.
 
 from __future__ import annotations
 
+from collections import Counter
 from fractions import Fraction
 
 import hashlib
@@ -17,6 +18,8 @@ import numpy as np
 
 TERMINAL_FAILURE_CATEGORIES = (
     "qcd_normalization_failure",
+    "qcd_qed_prefilter_shortfall",
+    "assignment_pool_shortfall",
     "no_eligible_qed_divisor",
     "invalid_explicit_index",
     "orientifold_invariance_failure",
@@ -31,6 +34,8 @@ TERMINAL_FAILURE_CATEGORIES = (
 )
 
 QCD_VOLUME_TARGET = 40.0
+QCD_VOLUME_TOLERANCE = 1e-9
+DIVISOR_VOLUME_TOLERANCE = 1e-8
 QED_VOLUME_MAX = 127.5
 NORMALIZATION_MAP_VERSION = "homogeneous-qcd-volume-40-v1"
 
@@ -42,12 +47,20 @@ class AssignmentPool(list):
         super().__init__(assignments)
         self.terminal_records = list(terminal_records)
         self.pool_hash = str(pool_hash)
+        self.rejection_records = [
+            record
+            for record in self.terminal_records
+            if record.get("terminal_status") != "accepted_assignment"
+        ]
+        self.rejection_summary = summarize_assignment_pool_rejections(
+            self.rejection_records
+        )
 
     def serializable(self):
-        """Return accepted rows and rejected candidates as JSON-compatible data."""
+        """Return accepted rows and aggregate rejection data as JSON-compatible data."""
         return {
             "accepted_assignments": list(self),
-            "terminal_records": list(self.terminal_records),
+            "rejection_summary": dict(self.rejection_summary),
             "pool_hash": self.pool_hash,
             "pool_status": "complete_eligible_ordered_pool",
         }
@@ -63,6 +76,105 @@ class QEDAssignmentFailure(RuntimeError):
         self.category = category
         self.reason = str(reason)
         self.record = {} if record is None else record
+
+
+def summarize_assignment_pool_rejections(records):
+    """Aggregate assignment-pool rejection statuses and reasons for HDF5 metadata."""
+    status_counts = Counter()
+    reason_counts = Counter()
+    for record in records:
+        if record.get("terminal_status") == "accepted_assignment":
+            continue
+        status = str(record.get("terminal_status", "unknown"))
+        reason = str(record.get("terminal_reason", "unknown"))
+        status_counts[status] += 1
+        reason_counts[reason] += 1
+    return {
+        "total_rejections": int(sum(status_counts.values())),
+        "status_counts": dict(sorted(status_counts.items())),
+        "reason_counts": dict(sorted(reason_counts.items())),
+    }
+
+
+def validate_assignment_pool(pool):
+    """Validate non-empty ordered-pool integrity before geometry acceptance."""
+    if not isinstance(pool, (list, AssignmentPool)) or not pool:
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "the complete eligible ordered assignment pool is empty",
+        )
+    required = {
+        "assignment_hash",
+        "pool_rank",
+        "qcd_divisor_index",
+        "qed_divisor_index",
+        "qcd_divisor_label",
+        "qed_divisor_label",
+        "qcd_volume",
+        "qed_volume",
+        "terminal_status",
+    }
+    pairs = []
+    hashes = []
+    ordering = []
+    for assignment in pool:
+        missing = sorted(required.difference(assignment))
+        if missing:
+            raise QEDAssignmentFailure(
+                "assignment_pool_shortfall",
+                "assignment pool entry is missing required fields: "
+                + ", ".join(missing),
+            )
+        if assignment["terminal_status"] != "accepted_assignment":
+            raise QEDAssignmentFailure(
+                "assignment_pool_shortfall",
+                "assignment pool contains a non-accepted entry",
+            )
+        pair = (
+            int(assignment["qcd_divisor_index"]),
+            int(assignment["qed_divisor_index"]),
+        )
+        if pair in pairs:
+            raise QEDAssignmentFailure(
+                "assignment_pool_shortfall",
+                f"assignment pool contains duplicate ordered pair {pair}",
+            )
+        pairs.append(pair)
+        hashes.append(str(assignment["assignment_hash"]))
+        ordering.append(
+            (
+                tuple(int(value) for value in assignment["qcd_divisor_label"]),
+                tuple(int(value) for value in assignment["qed_divisor_label"]),
+                pair[0],
+                pair[1],
+            )
+        )
+    if [int(assignment["pool_rank"]) for assignment in pool] != list(range(len(pool))):
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "assignment pool ranks are not contiguous and zero-based",
+        )
+    if len(set(hashes)) != len(hashes):
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "assignment pool hashes are not unique",
+        )
+    if ordering != sorted(ordering):
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "assignment pool ordering is not deterministic",
+        )
+    expected_hash = stable_hash(list(pool))
+    if isinstance(pool, AssignmentPool) and pool.pool_hash != expected_hash:
+        raise QEDAssignmentFailure(
+            "assignment_pool_shortfall",
+            "assignment pool hash does not match its accepted entries",
+        )
+    return {
+        "pool_status": "complete_eligible_ordered_pool",
+        "pool_size": len(pool),
+        "pool_hash": expected_hash,
+    }
 
 
 def _integer_array(values, name):
@@ -167,13 +279,11 @@ def _orientifold_mask(orientifold, divisor_count):
         raise QEDAssignmentFailure(
             "orientifold_invariance_failure", "intersecting_d7 requires an orientifold input"
         )
-    if orientifold.get("status") != "validated" or orientifold.get("involution_type") != "O3/O7":
+    if orientifold.get("status") not in {"fan_invariant", "validated"} or orientifold.get(
+        "involution_type"
+    ) != "O3/O7":
         raise QEDAssignmentFailure(
-            "orientifold_invariance_failure", "intersecting_d7 requires a validated O3/O7 involution"
-        )
-    if orientifold.get("h11_minus", 0) != 0:
-        raise QEDAssignmentFailure(
-            "orientifold_invariance_failure", "intersecting_d7 requires h11_minus=0"
+            "orientifold_invariance_failure", "intersecting_d7 requires a validated O3/O7 lattice action"
         )
     images = np.asarray(orientifold.get("prime_divisor_image_indices", []), dtype=int).reshape(-1)
     if images.shape != (divisor_count,) or np.any((images < 0) | (images >= divisor_count)):
@@ -191,7 +301,8 @@ def normalize_qcd_assignment(
     target=40.0,
     min_prime=1.0,
     min_effective=1.0,
-    atol=1e-9,
+    qcd_volume_tolerance=QCD_VOLUME_TOLERANCE,
+    divisor_volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
 ):
     """Normalize one QCD assignment and validate its volume-domain contract.
 
@@ -209,14 +320,20 @@ def normalize_qcd_assignment(
     target = float(target)
     min_prime = float(min_prime)
     min_effective = float(min_effective)
-    atol = float(atol)
+    qcd_volume_tolerance = float(qcd_volume_tolerance)
+    divisor_volume_tolerance = float(divisor_volume_tolerance)
     if not np.isfinite(qcd_scalar) or qcd_scalar != int(qcd_scalar):
         raise ValueError("qcd_index must be a finite integer")
     qcd_index = int(qcd_scalar)
+    # `prime` (one entry per prime toric divisor) and `effective` (one entry
+    # per distinct effective-cone extremal ray, after
+    # `canonicalize_unique_charge_rows` dedup) are legitimately different-
+    # length divisor sets; `effective` is only ever scaled and min-checked
+    # below, never indexed parallel to `prime`, so no shape relationship
+    # between them is required.
     if (
         prime.size == 0
         or effective.size == 0
-        or effective.shape != prime.shape
         or not np.all(np.isfinite(prime))
         or not np.all(np.isfinite(effective))
         or not np.isfinite(qcd_scalar)
@@ -231,8 +348,10 @@ def normalize_qcd_assignment(
         or not np.isfinite(min_effective)
         or min_prime < 1.0
         or min_effective < 1.0
-        or not np.isfinite(atol)
-        or atol < 0.0
+        or not np.isfinite(qcd_volume_tolerance)
+        or qcd_volume_tolerance < 0.0
+        or not np.isfinite(divisor_volume_tolerance)
+        or divisor_volume_tolerance < 0.0
     ):
         raise ValueError("normalization targets and tolerances must be finite and valid")
     if target != 40.0:
@@ -245,19 +364,18 @@ def normalize_qcd_assignment(
         volume_scale = float(radial_scale**2)
         normalized_prime = volume_scale * prime
         normalized_effective = volume_scale * effective
-    # Keep the serialized QCD value exactly at the approved decimal target,
-    # rather than exposing a one-ulp square/root round-trip difference.
-    normalized_prime[qcd_index] = target
-    qcd_volume = float(target)
+    qcd_volume = float(normalized_prime[qcd_index])
     minimum_prime = float(np.min(normalized_prime))
     minimum_effective = float(np.min(normalized_effective))
     if not np.all(np.isfinite(normalized_prime)) or not np.all(np.isfinite(normalized_effective)):
         raise ValueError("post-normalization volumes are not finite")
-    if not np.isclose(qcd_volume, target, rtol=0.0, atol=atol):
+    if not np.isclose(
+        qcd_volume, target, rtol=0.0, atol=qcd_volume_tolerance
+    ):
         raise ValueError("post-normalization QCD volume is not exactly the target")
-    if minimum_prime < min_prime - atol:
+    if minimum_prime < min_prime - divisor_volume_tolerance:
         raise ValueError("post-normalization prime-divisor minimum is below one")
-    if minimum_effective < min_effective - atol:
+    if minimum_effective < min_effective - divisor_volume_tolerance:
         raise ValueError("post-normalization effective-divisor minimum is below one")
     return {
         "qcd_index": qcd_index,
@@ -269,8 +387,13 @@ def normalize_qcd_assignment(
         "minimum_prime_volume": minimum_prime,
         "minimum_effective_volume": minimum_effective,
         "target": target,
+        "qcd_volume_tolerance": qcd_volume_tolerance,
+        "divisor_volume_tolerance": divisor_volume_tolerance,
+        "qcd_volume_residual": abs(qcd_volume - target),
         "normalization_map_version": NORMALIZATION_MAP_VERSION,
-        "qcd_volume_exact": True,
+        "qcd_volume_exact": bool(
+            np.isclose(qcd_volume, target, rtol=0.0, atol=qcd_volume_tolerance)
+        ),
     }
 
 
@@ -286,6 +409,8 @@ def enumerate_assignment_pool(
     qcd_volume_target=40.0,
     min_prime_volume=1.0,
     min_effective_volume=1.0,
+    qcd_volume_tolerance=QCD_VOLUME_TOLERANCE,
+    divisor_volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
     qed_volume_max=127.5,
     terminal_records=None,
 ):
@@ -410,6 +535,8 @@ def enumerate_assignment_pool(
                 target=qcd_volume_target,
                 min_prime=min_prime_volume,
                 min_effective=min_effective_volume,
+                qcd_volume_tolerance=qcd_volume_tolerance,
+                divisor_volume_tolerance=divisor_volume_tolerance,
             )
         except (FloatingPointError, OverflowError, ValueError) as exc:
             _emit("qcd_normalization_failure", str(exc), qcd_index)
@@ -483,10 +610,10 @@ def enumerate_assignment_pool(
                 )
                 continue
             qed_volume = float(normalized_prime[qed_index])
-            if not qed_volume < qed_volume_max:
+            if not qed_volume <= qed_volume_max:
                 _emit(
                     "qed_volume_rejection",
-                    "normalized QED divisor volume is not strictly below the upper bound",
+                    "normalized QED divisor volume exceeds the inclusive upper bound",
                     qcd_index,
                     qed_index,
                     qed_volume=qed_volume,
@@ -510,6 +637,9 @@ def enumerate_assignment_pool(
                 "qcd_radial_scale": float(normalization["radial_scale"]),
                 "qcd_volume_scale": float(normalization["volume_scale"]),
                 "qcd_volume_target": float(normalization["target"]),
+                "qcd_volume_tolerance": float(normalization["qcd_volume_tolerance"]),
+                "divisor_volume_tolerance": float(normalization["divisor_volume_tolerance"]),
+                "qcd_volume_residual": float(normalization["qcd_volume_residual"]),
                 "qcd_volume": float(normalization["qcd_volume"]),
                 "qcd_divisor_volume": float(normalization["qcd_volume"]),
                 "qed_volume": qed_volume,
@@ -530,11 +660,11 @@ def enumerate_assignment_pool(
                 },
                 "normalization_data_hash": normalization_data_hash,
                 "normalization_map_version": normalization_map_version,
-                "qcd_volume_exact": True,
+                "qcd_volume_exact": bool(normalization["qcd_volume_exact"]),
                 "all_divisor_minimums_valid": True,
-                "qed_volume_filter": "strictly_less_than_127.5",
+                "qed_volume_filter": "less_than_or_equal_to_127.5",
                 "qed_volume_upper_bound": float(qed_volume_max),
-                "qed_volume_comparison": "strictly_less_than",
+                "qed_volume_comparison": "less_than_or_equal_to",
                 "qcd_qed_intersection": True,
                 "intersection_evidence": serial_evidence,
                 "intersection_evidence_convention": (
@@ -542,7 +672,7 @@ def enumerate_assignment_pool(
                 ),
                 "assignment_policy": "ordered_qcd_qed_complete_pool",
                 "orientifold_invariance_convention": (
-                    "identity_O3/O7_h11_plus_equals_h11_h11_minus_equals_0"
+                    "explicit_validated_O3/O7_prime_divisor_image_map"
                 ),
                 "qcd_invariant": True,
                 "qed_invariant": True,
@@ -588,7 +718,10 @@ def enumerate_assignment_pool(
         record["pool_rank"] = int(assignment["pool_rank"])
     assignment_pool_type = globals().get("AssignmentPool")
     if assignment_pool_type is not None:
-        return assignment_pool_type(pool, collected_terminal_records, _stable_hash(pool))
+        result = assignment_pool_type(pool, collected_terminal_records, _stable_hash(pool))
+        if result:
+            validate_assignment_pool(result)
+        return result
     return pool
 
 
@@ -613,7 +746,11 @@ def select_qed_divisor(
         return None
     if policy != "intersecting_d7":
         raise QEDAssignmentFailure("no_eligible_qed_divisor", f"unsupported visible-sector policy {policy!r}")
-    if selection_policy not in {"uniform_eligible", "explicit"}:
+    if selection_policy not in {
+        "uniform_eligible",
+        "uniform_eligible_with_fallback",
+        "explicit",
+    }:
         raise ValueError(f"unsupported QED selection policy {selection_policy!r}")
 
     labels = np.asarray(prime_toric_divisors, dtype=int).reshape(-1)
@@ -645,6 +782,8 @@ def select_qed_divisor(
         "candidate_pool_ordering": "stable_lattice_point_label_lexicographic",
         "qed_volume_upper_bound": None if qed_volume_max is None else float(qed_volume_max),
         "qed_volume_filter_status": "disabled" if qed_volume_max is None else "pending",
+        "orientifold_h11_plus": orientifold.get("h11_plus"),
+        "orientifold_h11_minus": orientifold.get("h11_minus"),
     }
     eligible_before_charge_filter = sorted(
         {
@@ -685,7 +824,10 @@ def select_qed_divisor(
         explicit = int(qed_divisor_index_user) - 1
     if selection_policy == "explicit" and explicit is None:
         raise QEDAssignmentFailure("invalid_explicit_index", "explicit QED selection requires an index", record)
-    if selection_policy == "uniform_eligible" and explicit is not None:
+    if (
+        selection_policy in {"uniform_eligible", "uniform_eligible_with_fallback"}
+        and explicit is not None
+    ):
         raise QEDAssignmentFailure("invalid_explicit_index", "an explicit index requires explicit selection", record)
     if selection_policy == "explicit":
         if explicit not in eligible:
@@ -699,76 +841,152 @@ def select_qed_divisor(
                 category, reason = "intersection_failure", "explicit QED divisor does not intersect QCD"
             record["terminal_status"], record["terminal_reason"] = category, reason
             raise QEDAssignmentFailure(category, reason, record)
-        selected, rank = explicit, eligible.index(explicit) + 1
+        try_order = [explicit]
+    elif selection_policy == "uniform_eligible_with_fallback":
+        # A full seeded permutation keeps the first pick's distribution
+        # identical to "uniform_eligible"'s single draw, while giving an
+        # unbiased (not lexicographic-first-biased) order to fall back
+        # through if that first pick fails a per-candidate check below.
+        permutation = np.random.default_rng(int(effective_seed)).permutation(len(eligible))
+        try_order = [eligible[int(position)] for position in permutation]
     else:
         rank = int(np.random.default_rng(int(effective_seed)).integers(len(eligible))) + 1
-        selected = eligible[rank - 1]
-    record.update(
-        {
-            "qed_divisor_index": int(selected),
-            "qed_divisor_index_base": 0,
-            "qed_divisor_index_user": int(selected) + 1,
-            "qed_divisor_index_user_base": 1,
-            "selection_rank": int(rank),
-            "qed_divisor_label": list(stable[selected]),
-            "qed_image_index": int(images[selected]),
-            "qed_invariant": bool(invariant[selected]),
-            "qed_charge": charges[selected].copy(),
-            "em_charge": charges[selected].copy(),
-            "qed_charge_hash": charge_hash(charges[selected]),
-            "em_charge_hash": charge_hash(charges[selected]),
-            "qed_divisor_volume": float(volumes[selected]),
-        }
-    )
-    if qed_volume_max is not None and float(volumes[selected]) > float(qed_volume_max):
-        record.update({"qed_volume_filter_status": "rejected"})
-        record["terminal_status"] = "qed_volume_rejection"
-        record["terminal_reason"] = "selected eligible QED divisor exceeds the volume upper bound"
-        raise QEDAssignmentFailure("qed_volume_rejection", record["terminal_reason"], record)
-    pair = tuple(sorted((qcd_index, selected)))
-    record.update(
-        {
-            "qed_divisor_index": int(selected),
-            "qed_divisor_index_base": 0,
-            "qed_divisor_index_user": int(selected) + 1,
-            "qed_divisor_index_user_base": 1,
-            "selection_rank": int(rank),
-            "qed_divisor_label": list(stable[selected]),
-            "qed_image_index": int(images[selected]),
-            "qed_invariant": bool(invariant[selected]),
-            "qed_charge": charges[selected].copy(),
-            "em_charge": charges[selected].copy(),
-            "qed_charge_hash": charge_hash(charges[selected]),
-            "em_charge_hash": charge_hash(charges[selected]),
-            "qed_divisor_volume": float(volumes[selected]),
-            "qcd_qed_intersection": True,
-            "intersection_evidence": [list(face) for face in intersection_evidence.get(pair, [])],
-            "intersection_evidence_convention": "triangulated_two_face_lattice_point_labels",
-            "charge_convention": "CYTools divisor_basis(as_matrix=True) column selected by prime label",
-            "qed_selection": selection_policy,
-            "qed_volume_filter_status": "passed" if qed_volume_max is not None else "disabled",
-        }
-    )
-    if not record["intersection_evidence"]:
-        record["terminal_status"] = "intersection_failure"
-        record["terminal_reason"] = "no face-level intersection evidence was retained"
-        raise QEDAssignmentFailure("intersection_failure", record["terminal_reason"], record)
-    return record
+        try_order = [eligible[rank - 1]]
+
+    fallback_attempted_candidates = []
+    for attempt_index, selected in enumerate(try_order):
+        rank = eligible.index(selected) + 1
+        candidate = dict(record)
+        candidate.update(
+            {
+                "qed_divisor_index": int(selected),
+                "qed_divisor_index_base": 0,
+                "qed_divisor_index_user": int(selected) + 1,
+                "qed_divisor_index_user_base": 1,
+                "selection_rank": int(rank),
+                "qed_divisor_label": list(stable[selected]),
+                "qed_image_index": int(images[selected]),
+                "qed_invariant": bool(invariant[selected]),
+                "qed_charge": charges[selected].copy(),
+                "em_charge": charges[selected].copy(),
+                "qed_charge_hash": charge_hash(charges[selected]),
+                "em_charge_hash": charge_hash(charges[selected]),
+                "qed_divisor_volume": float(volumes[selected]),
+            }
+        )
+        rejection_category = None
+        rejection_reason = None
+        if qed_volume_max is not None and float(volumes[selected]) > float(qed_volume_max):
+            candidate["qed_volume_filter_status"] = "rejected"
+            rejection_category = "qed_volume_rejection"
+            rejection_reason = "selected eligible QED divisor exceeds the volume upper bound"
+        else:
+            pair = tuple(sorted((qcd_index, selected)))
+            candidate.update(
+                {
+                    "qcd_qed_intersection": True,
+                    "intersection_evidence": [list(face) for face in intersection_evidence.get(pair, [])],
+                    "intersection_evidence_convention": "triangulated_two_face_lattice_point_labels",
+                    "charge_convention": "CYTools divisor_basis(as_matrix=True) column selected by prime label",
+                    "qed_selection": selection_policy,
+                    "qed_volume_filter_status": "passed" if qed_volume_max is not None else "disabled",
+                }
+            )
+            if not candidate["intersection_evidence"]:
+                rejection_category = "intersection_failure"
+                rejection_reason = "no face-level intersection evidence was retained"
+
+        if rejection_category is None:
+            if selection_policy == "uniform_eligible_with_fallback":
+                candidate["fallback_used"] = attempt_index > 0
+                candidate["fallback_attempted_candidates"] = fallback_attempted_candidates
+            return candidate
+
+        fallback_attempted_candidates.append(
+            {
+                "qed_divisor_index": int(selected),
+                "rejection_category": rejection_category,
+                "rejection_reason": rejection_reason,
+            }
+        )
+        if attempt_index == len(try_order) - 1:
+            # Every eligible candidate has now been tried (a single candidate,
+            # for "explicit"/"uniform_eligible"; the whole pool, for
+            # "uniform_eligible_with_fallback"). Report by a fixed category
+            # precedence rather than the last-tried candidate's category,
+            # which would otherwise be an arbitrary artifact of permutation
+            # order.
+            final_category = (
+                "qed_volume_rejection"
+                if any(
+                    entry["rejection_category"] == "qed_volume_rejection"
+                    for entry in fallback_attempted_candidates
+                )
+                else "intersection_failure"
+            )
+            final_reason = next(
+                entry["rejection_reason"]
+                for entry in fallback_attempted_candidates
+                if entry["rejection_category"] == final_category
+            )
+            record.update(candidate)
+            record["terminal_status"] = final_category
+            record["terminal_reason"] = final_reason
+            if selection_policy == "uniform_eligible_with_fallback":
+                record["fallback_attempted_candidates"] = fallback_attempted_candidates
+            raise QEDAssignmentFailure(final_category, final_reason, record)
 
 
-def _rank(rows):
+def _reduce_against_basis(vector, basis):
+    """Reduce one integer vector against a persistent exact-fraction basis.
+
+    ``basis`` maps pivot column -> reduced row and is updated in place when
+    ``vector`` is independent of it. Returns the new pivot index, or ``None``
+    when ``vector`` is already in the basis's span.
+    """
+    work = [Fraction(int(value)) for value in vector]
+    for pivot, row in sorted(basis.items()):
+        factor = work[pivot]
+        if factor:
+            work = [value - factor * row[index] for index, value in enumerate(work)]
+    pivot = next((index for index, value in enumerate(work) if value), None)
+    if pivot is not None:
+        scale = work[pivot]
+        basis[pivot] = tuple(value / scale for value in work)
+    return pivot
+
+
+def compute_leading_rank_order(charges, scales):
+    """Rank potential-term columns by exact-rational incremental elimination.
+
+    Walks columns in descending physical-scale priority and greedily grows an
+    exact-fraction basis, exactly as the previous per-column
+    ``_rank(selected + [candidate])`` design did -- but ``_rank`` rebuilt and
+    re-reduced the *entire* accepted basis from scratch on every candidate,
+    turning an O(rank) reduction into an O(rank^2) one repeated once per
+    column. Reducing each candidate against a basis carried across
+    iterations keeps the same greedy selection and final rank while cutting
+    that per-candidate cost by a factor of the running basis size. Once the
+    basis reaches full row rank, every further column is provably dependent
+    (rank cannot exceed the row dimension), so the scan stops there without
+    changing ``selected`` or ``rank``.
+
+    Returns geometry-only data (independent of any one QED assignment): the
+    full priority ``order``, the ``selected`` leading-column indices in the
+    order they entered the basis, and the achieved ``rank``.
+    """
+    q = charges
+    full_rank = q.shape[0]
+    order = sorted(range(q.shape[1]), key=lambda index: (-float(scales[index]), index))
     basis = {}
-    for vector in rows:
-        work = [Fraction(int(value)) for value in vector]
-        for pivot, row in sorted(basis.items()):
-            factor = work[pivot]
-            if factor:
-                work = [value - factor * row[index] for index, value in enumerate(work)]
-        pivot = next((index for index, value in enumerate(work) if value), None)
+    selected = []
+    for index in order:
+        pivot = _reduce_against_basis(q[:, index], basis)
         if pivot is not None:
-            scale = work[pivot]
-            basis[pivot] = tuple(value / scale for value in work)
-    return len(basis)
+            selected.append(index)
+        if len(basis) == full_rank:
+            break
+    return {"order": order, "selected": selected, "rank": len(basis)}
 
 
 def record_potential_match(q, l, qed_charge, direct_count, source_index):
@@ -789,25 +1007,39 @@ def record_potential_match(q, l, qed_charge, direct_count, source_index):
     }
 
 
-def classify_qed_leading_status(charges, scales, source_index):
-    """Classify leading rank using exact integer row-rank increments."""
+def classify_qed_leading_status(charges, scales, source_index, *, leading_rank_order=None):
+    """Classify leading rank using exact integer row-rank increments.
+
+    ``leading_rank_order`` is an optional precomputed
+    :func:`compute_leading_rank_order` result. It depends only on ``charges``
+    and ``scales``, never on ``source_index``, so a caller working through a
+    geometry's whole assignment pool one QED index at a time can compute it
+    once per geometry and pass it in on every call for that geometry instead
+    of paying the exact-rational elimination cost per assignment.
+    """
     q = _integer_array(charges, "potential charge matrix")
     l = np.asarray(scales, dtype=float)
     if l.shape != (2, q.shape[1]) or not 0 <= int(source_index) < q.shape[1]:
         raise QEDAssignmentFailure("potential_term_mismatch", "potential arrays have incompatible shapes")
-    order = sorted(range(q.shape[1]), key=lambda index: (-float(l[1, index]), index))
-    selected = []
-    rank = 0
-    for index in order:
-        next_rank = _rank([q[:, selected_index] for selected_index in selected] + [q[:, index]])
-        if next_rank > rank:
-            selected.append(index)
-            rank = next_rank
+    if leading_rank_order is None:
+        leading_rank_order = compute_leading_rank_order(q, l[1, :])
+    elif len(leading_rank_order.get("order", ())) != q.shape[1]:
+        raise QEDAssignmentFailure(
+            "potential_term_mismatch",
+            "leading_rank_order was computed for a different potential term count",
+        )
+    selected = leading_rank_order["selected"]
+    rank = leading_rank_order["rank"]
     status = "leading" if int(source_index) in selected else "dependent"
+    # ordered_source_indices (the full priority order over every potential
+    # term -- up to ~10^5 entries at large h11) is deliberately not part of
+    # this certificate. It is identical for every row drawn from the same
+    # geometry and fully reconstructible from the geometry's Q/L, so storing
+    # it per row would redundantly duplicate geometry-level data into every
+    # assignment's persisted record.
     return {
         "status": status,
         "selected_source_indices": [int(index) for index in selected],
-        "ordered_source_indices": [int(index) for index in order],
         "selected_rank": int(rank),
         "method": "exact_rational_incremental_rank",
     }
@@ -824,7 +1056,10 @@ def write_visible_sector_hdf5(group, assignment):
     ):
         if name in assignment and assignment[name] is not None:
             group.create_dataset(name, data=assignment[name])
-    for name in ("qcd_charge", "qed_charge", "em_charge", "candidate_pool_indices"):
+    for name in (
+        "qcd_charge", "qed_charge", "em_charge", "candidate_pool_indices",
+        "candidate_pool_labels", "qcd_divisor_label", "qed_divisor_label",
+    ):
         if name in assignment:
             group.create_dataset(name, data=np.asarray(assignment[name], dtype=np.int64))
     for name in ("qcd_invariant", "qed_invariant", "qcd_qed_intersection", "qed_charge_exact_match"):

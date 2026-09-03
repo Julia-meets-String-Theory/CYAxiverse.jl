@@ -3,6 +3,7 @@ using HDF5
 using LinearAlgebra
 using Printf
 using Dates
+using SHA
 
 # This file is included by both the test harness and the batch runner.  Keep
 # the helper definitions behind a module-local guard so a second include is a
@@ -10,6 +11,40 @@ using Dates
 if !isdefined(@__MODULE__, :VACUA_PIPELINE_VERSION)
 
 const VACUA_PIPELINE_VERSION = "1"
+const VACUA_CLASSIFICATION_SCHEMA_VERSION = "cyaxiverse-vacua-classification-2"
+const VACUA_CLASSIFICATION_LEGACY_ALIASES = Dict(
+    "exact_determinant_branch" => "square_reduced_potential_determinant_count",
+    "certified_selected_branch_set" => "complete_selected_leading_branch_count",
+    "finite_search_lower_bound" => "finite_multistart_minimum_lower_bound",
+)
+
+"""Return the approved public classification for a legacy or current label."""
+function _canonical_vacua_classification(label)
+    value = string(label)
+    get(VACUA_CLASSIFICATION_LEGACY_ALIASES, value, value)
+end
+
+"""Return the pre-schema-2 alias for a current classification, when known."""
+function _legacy_vacua_classification(label)
+    value = string(label)
+    for (legacy, current) in VACUA_CLASSIFICATION_LEGACY_ALIASES
+        current == value && return legacy
+    end
+    value
+end
+
+"""Normalize persisted vacuum-search metadata and record legacy aliases."""
+function _normalize_vacua_search_metadata(search_metadata)
+    search_metadata === nothing && return nothing
+    hasproperty(search_metadata, :search_classification) || return search_metadata
+    classification = _canonical_vacua_classification(
+        getproperty(search_metadata, :search_classification))
+    merge(search_metadata, (; search_classification=classification,
+        legacy_search_classification=_legacy_vacua_classification(classification),
+        classification_schema_version=VACUA_CLASSIFICATION_SCHEMA_VERSION,
+        model_scope="hierarchy_truncated_axion_potential",
+        full_potential_status="not_validated"))
+end
 
 """Return the short Git revision for provenance metadata."""
 function _git_revision()
@@ -53,14 +88,21 @@ function _pipeline_config(; threshold, starts, residual_tolerance, merge_toleran
        max_branches, branch_method=string(method))
 end
 
+"""Hash a persisted vacua configuration for stale-result detection."""
+_pipeline_config_digest(config) = bytes2hex(sha256(repr(config)))
+
 """Return whether a completed result matches an optional saved configuration."""
 function _has_pipeline_result(path; config=nothing)
     isfile(path) || return false
     h5open(path, "r") do file
         haskey(file, "vacua_pipeline/metadata/status") || return false
         read(file["vacua_pipeline/metadata/status"]) == "completed" || return false
+        haskey(file, "vacua_pipeline/metadata/terminal_status") || return false
+        read(file["vacua_pipeline/metadata/terminal_status"]) == "completed" || return false
         config === nothing && return true
         metadata = file["vacua_pipeline/metadata"]
+        haskey(metadata, "configuration_digest") || return false
+        read(metadata["configuration_digest"]) == _pipeline_config_digest(config) || return false
         required = (("pipeline_version", config.pipeline_version),
             ("threshold", config.threshold), ("starts", config.starts),
             ("residual_tolerance", config.residual_tolerance),
@@ -71,11 +113,22 @@ function _has_pipeline_result(path; config=nothing)
     end
 end
 
-"""Return whether an HDF5 geometry file contains a vacua pipeline group."""
-function _has_pipeline_group(path)
+"""Return whether a geometry file contains any persisted vacua group."""
+function _pipeline_group_exists(path)
     isfile(path) || return false
     h5open(path, "r") do file
         haskey(file, "vacua_pipeline")
+    end
+end
+
+"""Return whether an HDF5 geometry file contains a vacua pipeline group."""
+function _has_pipeline_group(path; config=nothing)
+    isfile(path) || return false
+    h5open(path, "r") do file
+        haskey(file, "vacua_pipeline") || return false
+        haskey(file, "vacua_pipeline/metadata/status") || return false
+        read(file["vacua_pipeline/metadata/status"]) == "completed" || return false
+        config === nothing ? true : _has_pipeline_result(path; config)
     end
 end
 
@@ -88,6 +141,8 @@ function _write_metadata!(group, config; status, estimate_status, verification_s
         metadata[string(name)] = value
     end
     metadata["status"] = status
+    metadata["terminal_status"] = status
+    metadata["configuration_digest"] = _pipeline_config_digest(config)
     metadata["solver_status"] = solver_status
     metadata["estimate_status"] = estimate_status
     metadata["verification_status"] = verification_status
@@ -96,8 +151,9 @@ function _write_metadata!(group, config; status, estimate_status, verification_s
     metadata["runtime_seconds"] = runtime_seconds
     metadata["completed_at"] = string(Dates.now())
     metadata["error"] = error_message
-    if search_metadata !== nothing
-        for (name, value) in pairs(search_metadata)
+    normalized_search_metadata = _normalize_vacua_search_metadata(search_metadata)
+    if normalized_search_metadata !== nothing
+        for (name, value) in pairs(normalized_search_metadata)
             metadata[string(name)] = value
         end
     end
@@ -123,7 +179,12 @@ end
 function _legacy_vacua_search(geom_idx, Q, L; threshold, starts)
     estimate = CYAxiverse.generate.vacua_estimate(geom_idx; threshold=threshold)
     locations = CYAxiverse.generate.vacua_id(L, Q; threshold=threshold, runs=starts)
-    search = (; search_method="legacy", search_classification="finite_search_lower_bound",
+    search = (; search_method="legacy",
+        search_classification="finite_multistart_minimum_lower_bound",
+        legacy_search_classification="finite_search_lower_bound",
+        classification_schema_version=VACUA_CLASSIFICATION_SCHEMA_VERSION,
+        model_scope="hierarchy_truncated_axion_potential",
+        full_potential_status="not_validated",
         minimum_count=locations["vac"], multiplicity=1.0,
         critical_count=-1, branch_count=-1, det_Qtilde=-1,
         search_status="completed")
@@ -143,7 +204,11 @@ function _leading_branch_search(Q, L; max_branches)
     end
     locations = Dict{String, Int}("vac" => branches.leading_minima_count)
     search = (; search_method="leading_branches",
-        search_classification="certified_selected_branch_set",
+        search_classification="complete_selected_leading_branch_count",
+        legacy_search_classification="certified_selected_branch_set",
+        classification_schema_version=VACUA_CLASSIFICATION_SCHEMA_VERSION,
+        model_scope="hierarchy_truncated_axion_potential",
+        full_potential_status="not_validated",
         minimum_count=branches.leading_minima_count, multiplicity=1.0,
         critical_count=branches.branch_count, branch_count=branches.branch_count,
         det_Qtilde=branches.det_Qtilde, search_status="completed")
@@ -161,8 +226,13 @@ function _reduced_problem_search(problem; starts, residual_tolerance,
         (; vac=minimum.N_min, issquare=0, extrarows=minimum.extra_rows)
     locations = Dict{String, Int}("vac" => minimum.N_min)
     search = (; search_method="reduced_jlm",
-        search_classification=square ? "exact_determinant_branch" :
+        search_classification=square ? "square_reduced_potential_determinant_count" :
+            "finite_multistart_minimum_lower_bound",
+        legacy_search_classification=square ? "exact_determinant_branch" :
             "finite_search_lower_bound",
+        classification_schema_version=VACUA_CLASSIFICATION_SCHEMA_VERSION,
+        model_scope="hierarchy_truncated_axion_potential",
+        full_potential_status="not_validated",
         minimum_count=minimum.N_min, multiplicity=problem.multiplicity,
         critical_count=-1, branch_count=-1, det_Qtilde=minimum.det_QTilde,
         search_status="completed")
@@ -237,7 +307,7 @@ function save_axion_data(geom_idx, spectrum, vac_est, vac_id; threshold::Float64
     isfile(target) || throw(ArgumentError("geometry file does not exist: $target"))
     config = _pipeline_config(; threshold, starts, residual_tolerance,
         merge_tolerance, max_iterations, method, max_branches)
-    !_has_pipeline_group(target) || force ||
+    !_pipeline_group_exists(target) || force ||
         throw(ArgumentError("vacua_pipeline already exists; pass force=true to replace $target"))
 
     temporary = string(target, ".vacua-pipeline.tmp-", getpid(), "-", time_ns())
@@ -254,9 +324,13 @@ function save_axion_data(geom_idx, spectrum, vac_est, vac_id; threshold::Float64
             end
             verification_status = if search_metadata === nothing
                 haskey(vac_id, "vac") ? "verified" : "not_applicable"
-            elseif search_metadata.search_classification == "exact_determinant_branch"
+            elseif search_metadata.search_classification in
+                    ("square_reduced_potential_determinant_count",
+                     "exact_determinant_branch")
                 "verified"
-            elseif search_metadata.search_classification == "certified_selected_branch_set"
+            elseif search_metadata.search_classification in
+                    ("complete_selected_leading_branch_count",
+                     "certified_selected_branch_set")
                 "verified_selected_branch_set"
             else
                 "not_applicable"

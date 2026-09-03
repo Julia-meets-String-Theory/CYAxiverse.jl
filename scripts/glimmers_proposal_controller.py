@@ -34,6 +34,7 @@ TERMINAL_STATUSES = (
     "invalid_frst",
     "kahler_cone_failure",
     "kahler_tip_failure",
+    "kaehler_point_shortfall",
     "volume_filter_rejection",
     "numerical_geometry_failure",
     "assignment_pool_shortfall",

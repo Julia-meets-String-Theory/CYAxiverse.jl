@@ -237,6 +237,14 @@ function _validate_kinetic_matrix(K::Hermitian{Float64, Matrix{Float64}},
         "small indicates cond(Kinv) beyond Float64 resolution."))
 end
 
+"""
+    potential(geom_idx::GeometryIndex; hilbert=false, validate=true)
+
+Read the signed, log-scaled instanton potential and kinetic matrix for one
+geometry. The returned `AxionPotential` preserves the raw HDF5 orientation;
+use [`oriented_potential`](@ref) when a canonical axion-by-instanton layout
+is required.
+"""
 function potential(geom_idx::GeometryIndex; hilbert = false, validate::Bool = true)
     if hilbert
         L::Matrix{Float64}, Q::Matrix{Int}, Kinv::Matrix{Float64} =
@@ -257,6 +265,39 @@ function potential(geom_idx::GeometryIndex; hilbert = false, validate::Bool = tr
         validate && _validate_kinetic_matrix(Kmat, Kinv, geom_idx)
         AxionPotential(L, Q, Kmat)
     end
+end
+
+"""
+    potential_factored(geom_idx::GeometryIndex; hilbert=false)
+
+Read a potential together with the inverse kinetic metric and its Cholesky
+factor.  Return `C` such that `Kinv ≈ C * C'`; callers that whiten a Hessian
+can therefore form `C' * H * C` without explicitly constructing `inv(Kinv)`.
+"""
+function potential_factored(geom_idx::GeometryIndex; hilbert = false)
+    L, Q, Kinv = h5open(cyax_file(geom_idx), "r") do file
+        if hilbert
+            HDF5.read(file, "cytools/hilbert/potential/L"),
+            HDF5.read(file, "cytools/hilbert/potential/Q"),
+            HDF5.read(file, "cytools/hilbert/geometric/Kinv")
+        else
+            HDF5.read(file, "cytools/potential/L"),
+            HDF5.read(file, "cytools/potential/Q"),
+            HDF5.read(file, "cytools/geometric/Kinv")
+        end
+    end
+    L = Matrix{Float64}(L)
+    Q = Matrix{Int}(Q)
+    Kinv = Matrix{Float64}(Kinv)
+    size(Kinv, 1) == size(Kinv, 2) ||
+        throw(DimensionMismatch("Kinv must be square"))
+    Kinv = (Kinv + transpose(Kinv)) / 2
+    C = Matrix(cholesky(Symmetric(Kinv)).L)
+    (; L, Q, Kinv, C)
+end
+
+function potential_factored(h11::Int, tri::Int, cy::Int=1; hilbert=false)
+    potential_factored(GeometryIndex(h11, tri, cy); hilbert)
 end
 
 """Remove redundant repeated leading charge rows from a generated potential.
@@ -425,10 +466,12 @@ function L_arb(h11::Int,tri::Int,cy::Int=1)
     end
     # L is stored 2 × N: row 1 is the sign/mantissa, row 2 the log10 scale,
     # one instanton per column.
-    Ltemp::Vector{ArbFloat} = zeros(ArbFloat, size(L, 2))
+    T = typeof(ArbFloat(0))
+    Ltemp::Vector{T} = zeros(T, size(L, 2))
+    ten = T(10)
     @inbounds for i in axes(L, 2)
-        mantissa = ArbFloat(L[1, i])
-        exponent = ArbFloat(10.) ^ ArbFloat(L[2, i])
+        mantissa = T(L[1, i])
+        exponent = ten ^ T(L[2, i])
         Ltemp[i] = mantissa * exponent
     end
     return Ltemp
@@ -579,6 +622,24 @@ function physical_spectrum(h11::Int, tri::Int, cy::Int=1)
             λselfsign = haskey(physical, "lambda_self_sign") ? _read_dataset(physical, "lambda_self_sign") : Int[],
             λself = haskey(physical, "lambda_self_log10") ? _read_dataset(physical, "lambda_self_log10") : Float64[],
             fpert = haskey(physical, "fpert_log10") ? _read_dataset(physical, "fpert_log10") : Float64[],
+            schema_version = haskey(metadata, "schema_version") ?
+                _read_dataset(metadata, "schema_version") : nothing,
+            mass_log10_unit = haskey(metadata, "mass_log10_unit") ?
+                _read_dataset(metadata, "mass_log10_unit") : nothing,
+            fpert_log10_unit = haskey(metadata, "fpert_log10_unit") ?
+                _read_dataset(metadata, "fpert_log10_unit") : nothing,
+            fpert_formula = haskey(metadata, "fpert_formula") ?
+                _read_dataset(metadata, "fpert_formula") : nothing,
+            fpert_convention = haskey(metadata, "fpert_convention") ?
+                _read_dataset(metadata, "fpert_convention") : nothing,
+            log_domain_policy = haskey(metadata, "log_domain_policy") ?
+                _read_dataset(metadata, "log_domain_policy") : nothing,
+            linear_boundary_truncated_count = haskey(metadata,
+                "linear_boundary_truncated_count") ?
+                _read_dataset(metadata, "linear_boundary_truncated_count") : nothing,
+            linear_boundary_truncation_bound_log10 = haskey(metadata,
+                "linear_boundary_truncation_bound_log10") ?
+                _read_dataset(metadata, "linear_boundary_truncation_bound_log10") : nothing,
             threshold_log10 = _read_dataset(metadata, "threshold_log10"),
             prec = _read_dataset(metadata, "prec"),
             provisional = _read_dataset(metadata, "provisional"),
@@ -651,12 +712,18 @@ function pipeline_vacua(h11::Int, tri::Int, cy::Int=1)
                error = read_metadata("error"),
                search_method = read_metadata("search_method"),
                search_classification = read_metadata("search_classification"),
+               legacy_search_classification = read_metadata("legacy_search_classification"),
+               classification_schema_version = read_metadata("classification_schema_version"),
+               model_scope = read_metadata("model_scope"),
+               full_potential_status = read_metadata("full_potential_status"),
                minimum_count = read_metadata("minimum_count"),
                multiplicity = read_metadata("multiplicity"),
                critical_count = read_metadata("critical_count"),
                branch_count = read_metadata("branch_count"),
                det_Qtilde = read_metadata("det_Qtilde"),
-               search_status = read_metadata("search_status"))
+               search_status = read_metadata("search_status"),
+               terminal_status = read_metadata("terminal_status"),
+               configuration_digest = read_metadata("configuration_digest"))
         else
             nothing
         end

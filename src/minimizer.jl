@@ -41,31 +41,56 @@ function _radical_inverse(index::Int, base::Int)
     result
 end
 
-function _legacy_qx(QV::AbstractMatrix, x::AbstractVector)
-    qx = zeros(ArbFloat, size(QV, 1))
+function _legacy_qx_typed(QV::AbstractMatrix{T}, x::AbstractVector{T}) where {T<:AbstractFloat}
+    qx = zeros(T, size(QV, 1))
     for c in axes(QV, 1), i in axes(QV, 2)
-        qx[c] += ArbFloat(QV[c, i]) * ArbFloat(x[i])
+        qx[c] += QV[c, i] * x[i]
     end
     qx
 end
 
-function _legacy_gradient(LV::AbstractVector, QV::AbstractMatrix, x::AbstractVector)
-    qx = _legacy_qx(QV, x)
-    gradient = zeros(ArbFloat, size(QV, 2))
+function _legacy_qx(QV::AbstractMatrix, x::AbstractVector)
+    T = typeof(ArbFloat(0))
+    _legacy_qx_typed(T.(QV), T.(x))
+end
+
+function _legacy_gradient_typed(LV::AbstractVector{T}, QV::AbstractMatrix{T}, x::AbstractVector{T}) where {T<:AbstractFloat}
+    qx = _legacy_qx_typed(QV, x)
+    gradient = zeros(T, size(QV, 2))
     for i in axes(QV, 2), c in axes(QV, 1)
-        gradient[i] += ArbFloat(LV[c]) * ArbFloat(QV[c, i]) * sin(qx[c])
+        gradient[i] += LV[c] * QV[c, i] * sin(qx[c])
     end
     gradient
 end
 
-function _legacy_hessian(LV::AbstractVector, QV::AbstractMatrix, x::AbstractVector)
-    qx = _legacy_qx(QV, x)
-    hessian = zeros(ArbFloat, size(QV, 2), size(QV, 2))
+function _legacy_gradient(LV::AbstractVector, QV::AbstractMatrix, x::AbstractVector)
+    T = typeof(ArbFloat(0))
+    _legacy_gradient_typed(T.(LV), T.(QV), T.(x))
+end
+
+function _legacy_hessian_typed(LV::AbstractVector{T}, QV::AbstractMatrix{T}, x::AbstractVector{T}) where {T<:AbstractFloat}
+    qx = _legacy_qx_typed(QV, x)
+    hessian = zeros(T, size(QV, 2), size(QV, 2))
     for i in axes(QV, 2), j in axes(QV, 2), c in axes(QV, 1)
-        hessian[i, j] += ArbFloat(LV[c]) * ArbFloat(QV[c, i]) *
-            ArbFloat(QV[c, j]) * cos(qx[c])
+        hessian[i, j] += LV[c] * QV[c, i] * QV[c, j] * cos(qx[c])
     end
     Hermitian(hessian)
+end
+
+function _legacy_hessian(LV::AbstractVector, QV::AbstractMatrix, x::AbstractVector)
+    T = typeof(ArbFloat(0))
+    _legacy_hessian_typed(T.(LV), T.(QV), T.(x))
+end
+
+function _phase_hessian!(hessian::AbstractMatrix, LV::AbstractVector,
+        QV::AbstractMatrix, cosine_phases)
+    for i in axes(QV, 1), j in axes(QV, 1)
+        if i >= j
+            hessian[i, j] = sum(LV' *
+                (@view(QV[i, :]) .* @view(QV[j, :]) .* cosine_phases))
+        end
+    end
+    hessian
 end
 
 
@@ -215,21 +240,25 @@ end
 
 function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,θparalleltest::Matrix,Qtilde::Matrix,algo,prec)
     setprecision(ArbFloat,digits=prec)
+    T = typeof(ArbFloat(0))
+    LV_t = T.(LV)
+    QV_t = T.(QV)
+    x0 = T.(x0)
     Arb0 = ArbFloat(0.)
     Arb1 = ArbFloat(1.)
     Arb2π = ArbFloat(2π)
     threshold = 0.01
-    QX(x::Vector) = _legacy_qx(QV, x)
+    QX(x::Vector) = _legacy_qx_typed(QV_t, x)
     function fitness(x::Vector)
-        V = dot(LV,(Arb1 .- cos.(QX(x))))
+        V = dot(LV_t,(Arb1 .- cos.(QX(x))))
         return V
     end
     function grad!(gradient::Vector, x::Vector)
-        gradient .= _legacy_gradient(LV, QV, x)
+        gradient .= _legacy_gradient_typed(LV_t, QV_t, x)
     end
-    hess(x::Vector) = _legacy_hessian(LV, QV, x)
-    hess!(hessian::Matrix, x::Vector) = (hessian .= _legacy_hessian(LV, QV, x))
-    grad(x) = _legacy_gradient(LV, QV, x)
+    hess(x::Vector) = _legacy_hessian_typed(LV_t, QV_t, x)
+    hess!(hessian::Matrix, x::Vector) = (hessian .= _legacy_hessian_typed(LV_t, QV_t, x))
+    grad(x) = _legacy_gradient_typed(LV_t, QV_t, x)
     res = optimize(fitness,grad!,hess!,
                 x0, algo,
                 Optim.Options(x_tol =minimum(abs.(LV)),g_tol =minimum(threshold .* abs.(gradσ))))
@@ -237,8 +266,8 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
     xmin = Optim.minimizer(res)
     GC.gc()
     if Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) < -prec && sum(Float64.(log10.(abs.(grad(xmin)))) .< log10.(abs.(threshold .* gradσ))) == (h11 - size(gradσ[gradσ .== 0.],1))
-        a = mod.(((ArbFloat.(θparalleltest) * xmin)/Arb2π),Arb1)
-        atilde = ArbFloat.(Qtilde) * xmin/Arb2π
+        a = mod.(((T.(θparalleltest) * xmin)/Arb2π),Arb1)
+        atilde = T.(Qtilde) * xmin/Arb2π
         a_sign = Int.(sign.(a))
         a_log = Float64.(log10.(abs.(a)))
         atilde_sign = Int.(sign.(atilde))
@@ -257,25 +286,29 @@ end
 
 function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,algo,prec)
     setprecision(ArbFloat; digits=prec)
+    T = typeof(ArbFloat(0))
+    LV_t = T.(LV)
+    QV_t = T.(QV)
+    x0 = T.(x0)
     Arb0 = ArbFloat(0.)
     Arb1 = ArbFloat(1.)
     Arb2π = ArbFloat(2π)
     threshold = 0.01
-    QX(x::Vector) = _legacy_qx(QV, x)
+    QX(x::Vector) = _legacy_qx_typed(QV_t, x)
     function fitness(x::Vector)
-        V = dot(LV,(Arb1 .- cos.(QX(x))))
+        V = dot(LV_t,(Arb1 .- cos.(QX(x))))
         return V
     end
     function grad!(gradient::Vector, x::Vector)
-        gradient .= _legacy_gradient(LV, QV, x)
+        gradient .= _legacy_gradient_typed(LV_t, QV_t, x)
     end
     function hess(x::Vector)
-        hessfull = _legacy_hessian(LV, QV, x)
+        hessfull = _legacy_hessian_typed(LV_t, QV_t, x)
     end
     function hess!(hessian::Matrix, x::Vector)
-        hessian .= _legacy_hessian(LV, QV, x)
+        hessian .= _legacy_hessian_typed(LV_t, QV_t, x)
     end
-    grad(x) = _legacy_gradient(LV, QV, x)
+    grad(x) = _legacy_gradient_typed(LV_t, QV_t, x)
     res = optimize(fitness,grad!,hess!,
                 x0, algo,
                 Optim.Options(x_tol =minimum(abs.(LV)),g_tol =minimum(threshold .* abs.(gradσ))))
@@ -301,21 +334,25 @@ end
 
 function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gradσ::Matrix,Qtilde::Matrix,algo,prec)
     setprecision(ArbFloat,digits=prec)
+    T = typeof(ArbFloat(0))
+    LV_t = T.(LV)
+    QV_t = T.(QV)
+    x0 = T.(x0)
     Arb0 = ArbFloat(0.)
     Arb1 = ArbFloat(1.)
     Arb2π = ArbFloat(2π)
     threshold = 0.01
-    QX(x::Vector) = _legacy_qx(QV, x)
+    QX(x::Vector) = _legacy_qx_typed(QV_t, x)
     function fitness(x::Vector)
-        V = dot(LV,(Arb1 .- cos.(QX(x))))
+        V = dot(LV_t,(Arb1 .- cos.(QX(x))))
         return V
     end
     function grad!(gradient::Vector, x::Vector)
-        gradient .= _legacy_gradient(LV, QV, x)
+        gradient .= _legacy_gradient_typed(LV_t, QV_t, x)
     end
-    hess(x::Vector) = _legacy_hessian(LV, QV, x)
-    hess!(hessian::Matrix, x::Vector) = (hessian .= _legacy_hessian(LV, QV, x))
-    grad(x) = _legacy_gradient(LV, QV, x)
+    hess(x::Vector) = _legacy_hessian_typed(LV_t, QV_t, x)
+    hess!(hessian::Matrix, x::Vector) = (hessian .= _legacy_hessian_typed(LV_t, QV_t, x))
+    grad(x) = _legacy_gradient_typed(LV_t, QV_t, x)
     res = optimize(fitness,grad!,hess!,
                 x0, algo,
                 Optim.Options(x_tol =minimum(abs.(LV)),g_tol =minimum(threshold .* abs.(gradσ))))
@@ -323,7 +360,7 @@ function minimize(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix,x0::Vector,gra
     xmin = Optim.minimizer(res)
     GC.gc()
     if Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) < -prec && sum(Float64.(log10.(abs.(grad(xmin)))) .< log10.(abs.(threshold .* gradσ))) == (h11 - size(gradσ[gradσ .== 0.],1))
-        atilde = ArbFloat.(Qtilde) * xmin/Arb2π
+        atilde = T.(Qtilde) * xmin/Arb2π
         atilde_sign = Int.(sign.(atilde))
         atilde_log = Float64.(log10.(abs.(atilde)))
         Vmin_sign = Int(sign(Vmin))
@@ -392,29 +429,40 @@ GC.gc()
 end
 
 """
-    grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
+    grad_std(h11::Int, tri::Int, cy::Int, LV::Vector, QV::Matrix)
 
-TBW
+Return the per-component standard deviation of the axion-potential gradient
+``\\partial_i V = \\sum_a \\Lambda_a Q_{a,i} \\sin(Q_a \\cdot x)`` sampled over
+field space for geometry ``(h^{1,1}, \\mathrm{tri}, \\mathrm{cy})``, evaluated at
+`ArbFloat` precision. `LV` is the vector of linear instanton scales
+``\\Lambda_a`` and `QV` the charge matrix. Use it to gauge the gradient scale
+before minimization.
 """
 function grad_std(h11::Int,tri::Int,cy::Int,LV::Vector,QV::Matrix)
-    Arb0 = ArbFloat(0.)
-    Arb1 = ArbFloat(1.)
-    Arb2π = ArbFloat(2π)
-    QX(x::Vector) = _legacy_qx(QV, x)
-    grad(x) = _legacy_gradient(LV, QV, x)
+    T = typeof(ArbFloat(0))
+    LV_t = T.(LV)
+    QV_t = T.(QV)
+    Arb0 = T(0.)
+    Arb1 = T(1.)
+    Arb2π = T(2π)
+    QX(x::Vector) = _legacy_qx_typed(QV_t, x)
+    grad(x::Vector) = _legacy_gradient_typed(LV_t, QV_t, x)
     n=100
     grad_all = zeros(h11,n)
     for j=1:n
-        x0 = ArbFloat.(rand(Uniform(0,2π),h11)) .* rand(ArbFloat,h11)
+        x0 = T.(rand(Uniform(0,2π),h11)) .* rand(T,h11)
         grad_all[:,j] = grad(x0)
     end
-    return ArbFloat.(std(grad_all, dims=2))
+    return T.(std(grad_all, dims=2))
 end
 
 """
-    grad_std(LV::Vector,QV::Matrix)
+    grad_std(LV::Vector, QV::Matrix)
 
-TBW
+Return the per-component standard deviation of the axion-potential gradient for
+the linear instanton scales `LV` (``\\Lambda_a``) and charge matrix `QV`,
+sampled over field space. See [`grad_std(h11, tri, cy, LV, QV)`](@ref) for the
+geometry-indexed form.
 """
 function grad_std(LV::Vector,QV::Matrix)
     if @isdefined h11 
@@ -436,17 +484,21 @@ end
 
 function grad_std(h11::Int, tri::Int, cy::Int)
     pot_data = potential(h11,tri,cy)
-    QV::Matrix{ArbFloat} = ArbFloat.(pot_data.Q)
+    T = typeof(ArbFloat(0))
+    QV::Matrix{T} = T.(pot_data.Q)
     LV::Matrix{Float64} = pot_data.L
-    Lfull::Vector{ArbFloat} = ArbFloat.(LV[:,1]) .* ArbFloat(10.) .^ ArbFloat.(LV[:,2])
+    Lfull::Vector{T} = T.(LV[:,1]) .* T(10.) .^ T.(LV[:,2])
     grad_std(h11,tri,cy,Lfull,QV)
 end
 
 
 """
-    minimize(LV::Vector,QV::Matrix,x0::Vector)
+    minimize(LV::Vector, QV, x0::Vector)
 
-TBW
+Minimize the axion potential
+``V(x) = \\sum_a \\Lambda_a (1 - \\cos(Q_a \\cdot x))`` from the initial point
+`x0`, where `LV` holds the linear instanton scales ``\\Lambda_a`` and `QV` is the
+charge matrix. Return the located stationary point in field coordinates.
 """
 function minimize(LV::Vector, QV, x0::Vector)
 	if @isdefined h11
@@ -463,20 +515,14 @@ function minimize(LV::Vector, QV, x0::Vector)
         gradient .= sum(grad_temp, dims = 2)
     end
     function hess!(hessian::Matrix, x::Vector)
-        for i in axes(QV, 1), j in axes(QV, 1)
-            if i>=j
-                hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
-            end
-        end
+        cosine_phases = cos.(x' * QV)
+        _phase_hessian!(hessian, LV, QV, cosine_phases)
         hessian .= hessian + hessian' - Diagonal(hessian)
     end
     function hess(x::Vector)
         hessian = zeros(size(x, 1), size(x, 1))
-        for i in axes(QV, 1), j in axes(QV, 1)
-            if i>=j
-                hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
-            end
-        end
+		cosine_phases = cos.(x' * QV)
+		_phase_hessian!(hessian, LV, QV, cosine_phases)
 		hessian + hessian' - Diagonal(hessian)
     end
     function grad(x::Vector)
@@ -523,11 +569,8 @@ function id_minimize(LV::Vector, QV::Matrix; ftol = eps(), iterations = 1_000)
 	end
 	function hess(x::Vector)
 		hessian = zeros(size(x,1), size(x,1))
-		for i in axes(QV, 1), j in axes(QV, 1)
-			if i>=j
-				hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
-			end
-		end
+		cosine_phases = cos.(x' * QV)
+		_phase_hessian!(hessian, LV, QV, cosine_phases)
 		hessian = hessian + hessian' - Diagonal(hessian)
 	end
     if maximum(denominator.(QV)) == 1
@@ -568,11 +611,8 @@ function id_minimize(LV::Vector, QV::Vector; ftol = eps(), iterations = 1_000)
 	end
 	function hess(x::Vector)
 		hessian = zeros(size(x,1), size(x,1))
-		for i in axes(QV, 1), j in axes(QV, 1)
-			if i>=j
-				hessian[i, j] = sum(LV' * (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
-			end
-		end
+		cosine_phases = cos.(x' * QV)
+		_phase_hessian!(hessian, LV, QV, cosine_phases)
 		hessian = hessian + hessian' - Diagonal(hessian)
 	end
     if maximum(denominator.(QV)) == 1
@@ -598,9 +638,12 @@ function id_minimize(LV::Vector, QV::Vector; ftol = eps(), iterations = 1_000)
 end
 
 """
-    id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000))
+    id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000)
 
-TBW
+Identify the distinct minima of the axion potential defined by the linear
+instanton scales `LV` (``\\Lambda_a``) and charge matrix `QV`. `ftol` sets the
+convergence tolerance and `iterations` caps the optimizer iterations. Return the
+distinct minimum coordinates found.
 """
 function id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000)
     if @isdefined h11
@@ -650,9 +693,12 @@ end
 # end
 
 """
-minima_lattice(v::Matrix{Float64})
+    minima_lattice(v::Matrix{Float64})
 
-TBW
+Extract a lattice basis from the columns of `v`, a set of minima coordinate
+vectors. Keep a maximal linearly independent set (columns whose Gram matrix has
+a positive smallest eigenvalue) and discard near-zero columns. Return the matrix
+of lattice basis vectors.
 """
 function minima_lattice(v::Matrix{Float64})
     lattice_vectors = zeros(size(v, 1), 1)

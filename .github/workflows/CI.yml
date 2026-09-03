@@ -11,6 +11,9 @@ on:
       - 'scripts/**'
       - 'Project.toml'
       - 'Manifest.toml'
+  workflow_dispatch:
+permissions:
+  contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
@@ -23,6 +26,11 @@ jobs:
       CYAXIVERSE_TEST_FULL: '0'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check package version bump
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: python3 scripts/check_version_bump.py --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}" --require-bump
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.12'
@@ -36,10 +44,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check package version bump
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: python3 scripts/check_version_bump.py --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}" --require-bump
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.12'
           arch: x64
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+      - name: Run package tests
+        uses: julia-actions/julia-runtest@v1
+      - name: Job summary
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          | Field | Value |
+          |-------|-------|
+          | Julia | 1.12 |
+          | Runner | ubuntu-latest-x64 |
+          | Event | ${{ github.event_name }} |
+          | Commit | \`${{ github.sha }}\` |
+          | Status | \`${{ job.status }}\` |
+          EOF

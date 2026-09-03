@@ -18,6 +18,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "User guide" => "userguide.md",
+        "Pipelines" => "pipelines.md",
         "Local axion-photon scan" => "axion_photon.md",
         "Examples" => "examples.md",
         "API" => "api.md"
@@ -31,7 +32,7 @@ if get(ENV, "CI", "false") == "true"
     deploydocs(
         branch = "gh-pages",
         repo = "github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
-        devbranch = "dev",
+        devbranch = "vmm",
         target = "build",
         deps = nothing,
         make = nothing,

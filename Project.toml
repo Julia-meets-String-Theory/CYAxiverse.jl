@@ -1,6 +1,6 @@
 name = "CYAxiverse"
 uuid = "e5e45d93-5055-4eab-878b-2e484be3f951"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Viraf M. Mehta <viraf.mehta@itp.uni-hannover.de>"]
 
 [deps]
@@ -22,6 +22,7 @@ NormalForms = "109d20d8-9763-411c-9b60-7eb2a068657f"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
@@ -71,6 +72,7 @@ OrdinaryDiffEq = "7.3.0"
 Printf = "1"
 PyCall = "1"
 Random = "1"
+SHA = "0.7, 1"
 SparseArrays = "1"
 StaticArrays = "1.5"
 Statistics = "1"
