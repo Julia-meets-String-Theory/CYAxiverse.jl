@@ -1234,10 +1234,12 @@ def execute_bounded(approval: Mapping[str, Any], manifest: Mapping[str, Any], ou
             source_rows, source_blank, source_bad = load_jsonl(Path(partitions[h11]["source_rows"]["path"]))
             ledger_rows, ledger_blank, ledger_bad = load_jsonl(Path(partitions[h11]["terminal_ledger"]["path"]))
             live = _witness_rows(source_rows, h11); ledger = _witness_rows(ledger_rows, h11)
+            del ledger_rows
             comparison = compare_witnesses(live, ledger)
             counters = account_terminal_rows(live)
             ledger_counters = account_terminal_rows(ledger)
             counters["source_rows_seen"] = len(source_rows)
+            del source_rows
             counters["blank_rows"] = source_blank + ledger_blank
             counters["malformed_rows"] = source_bad + ledger_bad
             counters["source_action_candidates"] = sum(
