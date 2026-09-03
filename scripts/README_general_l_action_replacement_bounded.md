@@ -5,6 +5,49 @@ bounded run. It consumes immutable source fixtures. It does not run a
 population calculation, replay CYTools, write the production database, or
 change the `not_validated` gate.
 
+## Generate Source Inputs
+
+Use this order: generate the immutable source inputs, obtain owner approval,
+bind the approval to the generated manifest, then run the bounded driver.
+Generate the source and terminal-ledger JSONL inputs before requesting owner
+approval:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 OMP_NUM_THREADS=1 \
+OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python -B \
+  scripts/generate_general_l_action_source.py \
+  --parquet-dir /frozen/calabi-yau-data/polytopes-4d \
+  --output-root /fresh/general-l-source \
+  --checkpoint-root /fresh/general-l-checkpoints
+```
+
+The generator requires all nine frozen partitions `05` through `13`, checks
+the physical Hodge mapping, enumerates paper-equivalent FRST classes, and
+preserves terminal records from the exact `(L,t,lambda_f)` search. It writes
+zstd level-19 source and ledger files, a bounded-driver-compatible
+`input-manifest.json.zst`, and `SHA256SUMS.txt` with create-only output
+behavior. The generated manifest still requires a new owner approval before
+the bounded driver can execute.
+
+The initial manifest is intentionally unbound. The owner must review it and
+create an approval that repeats its `input_manifest_sha256`. After that owner
+decision, create the bound copy with:
+
+```sh
+python3 -B scripts/run_general_l_action_replacement_bounded.py \
+  --bind-approval-manifest \
+  --approval /owner/approval.json \
+  --input-manifest /fresh/general-l-source/input-manifest.json.zst \
+  --output-manifest /owner/approval-bound-input-manifest.json.zst
+```
+
+The binder verifies that the approval file decodes to the supplied approval,
+writes one new manifest, and never modifies either input. The bound manifest
+excludes only `approval_fingerprint` from its digest. The execution CLI still
+requires an exact approval path, byte count, and SHA-256 match, so this binding
+is not circular.
+
 ## Fixture input schema
 
 The input manifest is JSON (or zstd JSON) with schema
@@ -36,16 +79,33 @@ and reason, `schema_version` equal to
 fields for candidate rows. Matrix and search-summary rows use JSON `null` for
 `candidate_id` and `action_digest`, and retain a structural
 `source_trilayer_candidate` fallback. The manifest also includes an
-`approval_fingerprint` object for the approval file; the CLI checks it before
-processing any source row.
+`approval_fingerprint` object for the approval file; the create-only binder
+adds this object after owner approval and the CLI checks it before processing
+any source row.
 The source and ledger files use the same row schema; they are compared as
 independent witnesses. Blank or malformed input is counted and blocks
 publication.
 
 The manifest must fingerprint the bounded driver and the source formula chain,
-including the existing candidate, geometry, ledger, digest, and formula-ledger
-files used by the program, plus this driver. It must also bind the global
-limits: RSS at most 2 GiB, one worker, one thread, and zero database writes.
+including the existing candidate, geometry, ledger, digest, formula-ledger,
+and `reproduce_fuzzy_axions_h11_4.py` files used by the program, plus this
+driver. It must also bind the global limits: RSS at most 2 GiB, one worker, one
+thread, and zero database writes.
+
+Without `--limit`, the generator is a complete run and requires these exact
+source counts: h11=2 has 36 favorable polytopes and 36 FRST classes; h11=3
+has 243 and 274; h11=4 has 1185 and 1760; h11=5 has 4897 and 11713. A failed
+FRST classifier cannot be represented by a pseudo class to satisfy a complete
+count. Supplying `--limit N` labels the run as a `pilot`; expected complete
+counts are recorded as not required and are not enforced.
+
+The generator writes one immutable source/ledger segment and metadata file per
+FRST class under `checkpoint_root`. A resumed run verifies both segment files,
+their recorded size and SHA-256, class identity, and schema before skipping
+the class. A partial or tampered pair fails closed. Source and ledger streams
+are concatenated and compressed incrementally; RSS and the declared temporary
+and per-h11 output ceilings are checked before loading each h11, before class
+spooling, and before publication.
 
 ## Required gates
 
@@ -60,13 +120,13 @@ and must repeat every manifest binding exactly. The manifest
 `approval_fingerprint` object binds the approval file path, byte count, and
 SHA-256. The CLI checks it immediately before execution.
 
-Use the bounded command only after those inputs exist:
+Use the bound manifest produced by the binder:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 OMP_NUM_THREADS=1 \
 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 -B scripts/run_general_l_action_replacement_bounded.py \
   --approval /owner/approval.json \
-  --input-manifest /owner/input-manifest.json \
+  --input-manifest /owner/approval-bound-input-manifest.json.zst \
   --output-root /owner/fresh-output-root \
   [--resume /owner/checkpoints/checkpoint.json]
 ```
@@ -108,8 +168,12 @@ provenance-bound or fail-closed bounded result with `production_gate` set to
 
 Published files are `run-manifest.json.zst`, five files per h11 using the
 `h11-002` through `h11-005` names, and `SHA256SUMS.txt`. The checksum file
-lists only the published artifacts and is itself not listed. JSON and JSONL
-compression uses zstd level 19.
+lists only the published artifacts and is itself not listed.
+
+The terminal-ledger writer emits schema
+`cyaxiverse-orientifold-terminal-ledger-1.2`. The reader also accepts legacy
+1.1 sidecars for migration and audit; new writers and bounded witnesses require
+1.2. JSON and JSONL compression uses zstd level 19.
 
 ## Focused checks
 
@@ -118,4 +182,6 @@ PYTHONDONTWRITEBYTECODE=1 python3 -B -m py_compile \
   scripts/run_general_l_action_replacement_bounded.py \
   scripts/test_run_general_l_action_replacement_bounded.py
 PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_run_general_l_action_replacement_bounded.py
+PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_generate_general_l_action_source.py
+PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_orientifold_terminal_ledger.py
 ```
