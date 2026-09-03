@@ -927,10 +927,10 @@ if _FULL; @testset "Vacua pipeline persistence and validation" begin
         search_classification="exact_determinant_branch", search_method="reduced_jlm"))
     @test migrated_metadata.search_classification ==
         "square_reduced_potential_determinant_count"
-   @test migrated_metadata.legacy_search_classification ==
-       "exact_determinant_branch"
-   @test migrated_metadata.classification_schema_version ==
-       "cyaxiverse-vacua-classification-2"
+    @test migrated_metadata.legacy_search_classification ==
+        "exact_determinant_branch"
+    @test migrated_metadata.classification_schema_version ==
+        "cyaxiverse-vacua-classification-2"
 
     mktempdir() do root
         geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
