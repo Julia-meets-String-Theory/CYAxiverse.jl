@@ -16,6 +16,17 @@ population.
 The orientifold and model stages are intentionally represented as explicit
 diagnostic records.  A count is labelled ``exact`` only when the implementation
 has the corresponding source criterion and complete input evidence.
+
+The opt-in ``--sample-kaehler-points`` path is a bounded Kähler-moduli
+diagnostic: it attempts the canonical tip and three seeded projected-cone
+proposals per accepted FRST class.  It is not a representative moduli sample
+or a paper-reproduction claim.
+
+The explicit ``--production-kaehler-search`` path is a finite frequentist
+search. It runs deterministic multi-start constrained optimization separately
+for every leading axion and prime QCD divisor, and passes only converged,
+deduplicated optimized tensors to the optional model stage. It is a new
+production search, not a reproduction of the paper's canonical-ray scan.
 """
 
 from __future__ import annotations
@@ -43,6 +54,11 @@ except ImportError:  # Candidate-only replay does not perform HDF5 model writes.
     h5py = None
 import numpy as np
 
+try:
+    from scipy.optimize import minimize as scipy_minimize
+except ImportError:  # The canonical/ray path does not require SciPy.
+    scipy_minimize = None
+
 from generate_geometric_data_multitriangulation import (
     DIVISOR_VOLUME_TOLERANCE,
     configure_mosek_license,
@@ -52,6 +68,7 @@ from generate_geometric_data_multitriangulation import (
     sample_stretched_kaehler_points,
 )
 from geometry_charge_conventions import canonicalize_unique_charge_rows
+from glimmers_schema11 import stable_seed
 from inherited_orientifold_candidates import (
     CANDIDATE_SCHEMA_VERSION,
     _ambient_intersection_tensor,
@@ -119,7 +136,7 @@ PAPER_TARGETS_BY_H11 = {
     },
 }
 
-REPRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.1"
+REPRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-h11-4-reproduction-1.2"
 DEPRECATED_COUNT_ALIASES = {
     "counts.source_vertex_evidence_inherited_orientifold_cys": (
         "counts.source_evidence_inherited_orientifold_cys"
@@ -1022,7 +1039,1267 @@ def _orientifold_action_audit(
     return result
 
 
-def _export_kaehler_point(triangulation):
+KAEHLER_CANONICAL_POLICY = "canonical_tip_only"
+KAEHLER_DIAGNOSTIC_POLICY = (
+    "bounded_four_point_canonical_tip_plus_three_seeded_projected_cone_proposals"
+)
+KAEHLER_DIAGNOSTIC_ATTEMPTS = 4
+KAEHLER_OPTIMIZER_POLICY = "diagnostic_only_scipy_slsqp_from_existing_point"
+KAEHLER_PRODUCTION_POLICY = "finite_deterministic_multistart_pairwise_slsqp"
+KAEHLER_PRODUCTION_SCHEMA_VERSION = "cyaxiverse-fuzzy-axions-kaehler-production-1.0"
+KAEHLER_PRODUCTION_DEFAULT_SEED = 0
+KAEHLER_PRODUCTION_DEFAULT_STARTS = 8
+KAEHLER_PRODUCTION_MAX_STARTS = 32
+KAEHLER_PRODUCTION_DEFAULT_FTOL = 1e-10
+KAEHLER_PRODUCTION_DEFAULT_MAXITER = 200
+KAEHLER_PRODUCTION_DEFAULT_MASS_TOLERANCE_LOG10 = 1e-8
+KAEHLER_PRODUCTION_DEFAULT_VOLUME_TOLERANCE = 1e-8
+FUZZY_AXION_MASS_TARGET_EV = 1e-18
+FUZZY_AXION_QCD_VOLUME_MIN = 25.0
+FUZZY_AXION_QCD_VOLUME_MAX = 40.0
+KAEHLER_OPTIMIZER_DEFAULT_FTOL = 1e-10
+KAEHLER_OPTIMIZER_DEFAULT_MAXITER = 200
+KAEHLER_OPTIMIZER_DEFAULT_MASS_TOLERANCE_LOG10 = 1e-7
+KAEHLER_OPTIMIZER_DEFAULT_VOLUME_TOLERANCE = 1e-7
+
+
+def _fuzzy_axion_mass_log10(
+    values,
+    glsm_charge_matrix,
+    *,
+    axion_index,
+    gs=0.5,
+    w0=1.0 + 0.0j,
+):
+    """Compute one leading-instanton mass in the model-stage convention.
+
+    Keep this evaluator local to the diagnostic optimizer.  The canonical
+    model-stage path remains the Julia implementation and all-prime-divisor
+    selection.
+    """
+    tau = np.asarray(values["prime_divisor_volumes"], dtype=float).reshape(-1)
+    inverse_metric = np.asarray(values["inverse_metric"], dtype=float)
+    charge_matrix = np.asarray(glsm_charge_matrix, dtype=int)
+    cy_volume = float(values["cy_volume"])
+    if tau.size == 0 or charge_matrix.shape != (inverse_metric.shape[0], tau.size):
+        raise ValueError("optimizer mass inputs have inconsistent Q, tau, and metric shapes")
+    if not np.all(np.isfinite(tau)) or np.any(tau <= 0.0):
+        raise ValueError("optimizer mass inputs require positive finite divisor volumes")
+    if not np.isfinite(cy_volume) or cy_volume <= 0.0:
+        raise ValueError("optimizer mass inputs require a positive finite CY volume")
+    if not np.isfinite(gs) or gs <= 0.0:
+        raise ValueError("optimizer mass inputs require a positive finite gs")
+
+    metric = 0.5 * (inverse_metric + inverse_metric.T)
+    try:
+        cholesky = np.linalg.cholesky(metric)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("optimizer mass inputs require a positive-definite inverse metric") from exc
+
+    prefactor = float(gs) ** 4 / 128.0
+    superpotential = complex(w0) + np.exp(-2.0 * np.pi * tau).sum()
+    gravitino_mass_planck = np.sqrt(prefactor) * abs(superpotential) / cy_volume
+    if not np.isfinite(gravitino_mass_planck) or gravitino_mass_planck <= 0.0:
+        raise ValueError("optimizer mass prefactor is non-finite or non-positive")
+    log10_prefactor = (
+        np.log10(8.0 * np.pi)
+        + 0.5 * np.log10(prefactor)
+        + np.log10(gravitino_mass_planck)
+        - np.log10(cy_volume)
+    )
+    scale_logs = np.log10(tau) - 2.0 * np.pi * tau * np.log10(np.e)
+    scale_logs = scale_logs + log10_prefactor
+    order = np.argsort(-scale_logs, kind="stable")
+
+    h11 = charge_matrix.shape[0]
+    selected = []
+    orthogonal = []
+    for column_index in order:
+        direction = charge_matrix[:, int(column_index)].astype(float)
+        original_norm_squared = float(direction @ direction)
+        if original_norm_squared == 0.0:
+            continue
+        residual = direction.copy()
+        for _ in range(2):
+            for basis_vector in orthogonal:
+                residual -= float(residual @ basis_vector) * basis_vector
+        residual_norm_squared = float(residual @ residual)
+        if residual_norm_squared > np.finfo(float).eps * original_norm_squared:
+            selected.append(int(column_index))
+            orthogonal.append(residual / np.sqrt(residual_norm_squared))
+            if len(selected) == h11:
+                break
+    if len(selected) != h11:
+        raise ValueError("optimizer mass charge matrix has fewer than h11 independent columns")
+    if not 1 <= int(axion_index) <= h11:
+        raise ValueError(f"axion_index must be in [1, {h11}]")
+
+    qleading = charge_matrix[:, selected].T @ cholesky
+    pq_basis = []
+    mass_logs = []
+    for row_index, row in enumerate(qleading):
+        direction = row.copy()
+        for basis_vector in pq_basis:
+            direction -= float(direction @ basis_vector) * basis_vector
+        direction_norm = float(np.linalg.norm(direction))
+        if direction_norm == 0.0:
+            raise ValueError("optimizer mass charge rows are linearly dependent")
+        pq_basis.append(direction / direction_norm)
+        f_log10 = np.log10(1.0 / (2.0 * np.pi * direction_norm**2))
+        mass_logs.append(
+            0.5
+            * (
+                scale_logs[selected[row_index]]
+                - f_log10
+                - np.log10(2.0 * np.pi)
+            )
+            + 9.0
+            + np.log10(2.435e18)
+            + np.log10(2.0 * np.pi)
+        )
+    return float(mass_logs[int(axion_index) - 1])
+
+
+def _diagnostic_constrained_kaehler_optimizer(
+    initial_point,
+    *,
+    evaluate_point,
+    mass_log10_evaluator,
+    qcd_divisor_index,
+    kahler_hyperplanes=None,
+    mass_target_ev=FUZZY_AXION_MASS_TARGET_EV,
+    min_prime_divisor_volume=1.0,
+    qcd_volume_min=FUZZY_AXION_QCD_VOLUME_MIN,
+    qcd_volume_max=FUZZY_AXION_QCD_VOLUME_MAX,
+    ftol=KAEHLER_OPTIMIZER_DEFAULT_FTOL,
+    maxiter=KAEHLER_OPTIMIZER_DEFAULT_MAXITER,
+    mass_tolerance_log10=KAEHLER_OPTIMIZER_DEFAULT_MASS_TOLERANCE_LOG10,
+    volume_tolerance=KAEHLER_OPTIMIZER_DEFAULT_VOLUME_TOLERANCE,
+):
+    """Optimize a Kähler point under the fuzzy-axion diagnostic constraints.
+
+    Use SLSQP only when SciPy is available.  ``evaluate_point`` must return a
+    mapping with ``prime_divisor_volumes`` and ``mass_log10_evaluator`` must
+    return the exact leading-instanton mass convention used by the model
+    stage.  The returned record is diagnostic-only and never changes the
+    canonical/ray model-stage input.
+    """
+    result = {
+        "diagnostic_only": True,
+        "policy": KAEHLER_OPTIMIZER_POLICY,
+        "solver": "scipy.optimize.minimize",
+        "method": "SLSQP",
+        "settings": {
+            "ftol": float(ftol),
+            "maxiter": int(maxiter),
+            "mass_tolerance_log10": float(mass_tolerance_log10),
+            "volume_tolerance": float(volume_tolerance),
+        },
+        "mass_target_ev": float(mass_target_ev),
+        "mass_target_log10_ev": float(np.log10(float(mass_target_ev))),
+        "qcd_volume_window": [float(qcd_volume_min), float(qcd_volume_max)],
+        "qcd_divisor_selection_policy": (
+            "all_prime_divisors; explicit one-based selected index"
+        ),
+        "selected_qcd_divisor_index": (
+            None if qcd_divisor_index is None else int(qcd_divisor_index)
+        ),
+        "status": "failed",
+        "converged": False,
+        "failure_reasons": [],
+    }
+    if scipy_minimize is None:
+        result["failure_reasons"].append("scipy_unavailable")
+        result["message"] = "SciPy is not installed; diagnostic optimizer was not run"
+        return result
+    try:
+        x0 = np.asarray(initial_point, dtype=float).reshape(-1)
+        if x0.size == 0 or not np.all(np.isfinite(x0)):
+            raise ValueError("initial Kähler point is empty or non-finite")
+        qcd_index = int(qcd_divisor_index)
+        if qcd_index < 1:
+            raise ValueError("selected QCD divisor index must be one-based and positive")
+        scale = max(1.0, float(np.linalg.norm(x0)))
+        target_log10 = float(np.log10(float(mass_target_ev)))
+        hyperplanes = None
+        if kahler_hyperplanes is not None:
+            hyperplanes = np.asarray(kahler_hyperplanes, dtype=float)
+            if hyperplanes.ndim != 2 or hyperplanes.shape[1] != x0.size:
+                raise ValueError("Kähler-cone hyperplanes have the wrong shape")
+        cache = {}
+        constraint_size = [None]
+
+        def evaluate(candidate):
+            key = tuple(float(value) for value in np.asarray(candidate, dtype=float))
+            if key not in cache:
+                try:
+                    data = evaluate_point(np.asarray(candidate, dtype=float))
+                    tau = np.asarray(data["prime_divisor_volumes"], dtype=float).reshape(-1)
+                    mass = float(mass_log10_evaluator(np.asarray(candidate, dtype=float), data))
+                    cache[key] = (data, tau, mass, None)
+                except Exception as exc:
+                    cache[key] = (None, None, np.nan, f"{type(exc).__name__}: {exc}")
+            return cache[key]
+
+        def objective(candidate):
+            delta = (np.asarray(candidate, dtype=float) - x0) / scale
+            return 0.5 * float(delta @ delta)
+
+        def mass_constraint(candidate):
+            _, _, mass, error = evaluate(candidate)
+            return 1e6 if error is not None or not np.isfinite(mass) else mass - target_log10
+
+        def inequality_constraint(candidate):
+            _, tau, _, error = evaluate(candidate)
+            if error is not None or tau is None or not np.all(np.isfinite(tau)):
+                size = constraint_size[0]
+                if size is None:
+                    size = 2 + (0 if hyperplanes is None else hyperplanes.shape[0])
+                return np.full(size, -1e6)
+            if not 1 <= qcd_index <= tau.size:
+                size = constraint_size[0]
+                if size is None:
+                    size = 2 + tau.size + (0 if hyperplanes is None else hyperplanes.shape[0])
+                return np.full(size, -1e6)
+            constraints = [
+                *(tau - float(min_prime_divisor_volume) + float(volume_tolerance)),
+                float(tau[qcd_index - 1]) - float(qcd_volume_min) + float(volume_tolerance),
+                float(qcd_volume_max) - float(tau[qcd_index - 1]) + float(volume_tolerance),
+            ]
+            if hyperplanes is not None:
+                constraints.extend(
+                    (hyperplanes @ np.asarray(candidate, dtype=float))
+                    - 1.0
+                    + float(volume_tolerance)
+                )
+            return np.asarray(constraints, dtype=float)
+
+        # Validate the index before entering SciPy so malformed requests have a
+        # deterministic failure record and do not trigger repeated callbacks.
+        initial_data, initial_tau, _, initial_error = evaluate(x0)
+        if initial_error is not None:
+            result["failure_reasons"].append(f"initial_point_invalid: {initial_error}")
+            return result
+        if initial_tau is None or not 1 <= qcd_index <= initial_tau.size:
+            result["failure_reasons"].append("selected_qcd_divisor_index_out_of_range")
+            return result
+        constraint_size[0] = initial_tau.size + 2 + (
+            0 if hyperplanes is None else hyperplanes.shape[0]
+        )
+        constraints = [
+            {"type": "eq", "fun": mass_constraint},
+            {"type": "ineq", "fun": inequality_constraint},
+        ]
+        solver_result = scipy_minimize(
+            objective,
+            x0,
+            method="SLSQP",
+            constraints=constraints,
+            options={"ftol": float(ftol), "maxiter": int(maxiter), "disp": False},
+        )
+        candidate = np.asarray(getattr(solver_result, "x", x0), dtype=float).reshape(-1)
+        data, tau, mass, error = evaluate(candidate)
+        result["iterations"] = getattr(solver_result, "nit", None)
+        result["function_evaluations"] = getattr(solver_result, "nfev", None)
+        result["solver_status"] = getattr(solver_result, "status", None)
+        result["message"] = str(getattr(solver_result, "message", ""))
+        result["solver_success"] = bool(getattr(solver_result, "success", False))
+        result["initial_point"] = x0.tolist()
+        result["point"] = candidate.tolist()
+        if error is not None or data is None or tau is None or not np.isfinite(mass):
+            result["failure_reasons"].append(
+                f"optimized_point_invalid: {error or 'non-finite optimizer output'}"
+            )
+            return result
+        cone_residuals = (
+            []
+            if hyperplanes is None
+            else (hyperplanes @ candidate - 1.0).astype(float).tolist()
+        )
+        residuals = {
+            "mass_log10": float(mass - target_log10),
+            "mass_relative": float(10.0 ** (mass - target_log10) - 1.0),
+            "minimum_prime_divisor_volume": float(
+                np.min(tau) - float(min_prime_divisor_volume)
+            ),
+            "selected_qcd_volume_lower": float(
+                tau[qcd_index - 1] - float(qcd_volume_min)
+            ),
+            "selected_qcd_volume_upper": float(
+                float(qcd_volume_max) - tau[qcd_index - 1]
+            ),
+            "kaehler_cone": cone_residuals,
+        }
+        result["residuals"] = residuals
+        result["mass_log10_ev"] = float(mass)
+        result["prime_divisor_volumes"] = tau.tolist()
+        result["selected_qcd_volume"] = float(tau[qcd_index - 1])
+        if "cy_volume" in data:
+            result["cy_volume"] = float(data["cy_volume"])
+        result["converged"] = bool(
+            result["solver_success"]
+            and abs(residuals["mass_log10"]) <= float(mass_tolerance_log10)
+            and residuals["minimum_prime_divisor_volume"] >= -float(volume_tolerance)
+            and residuals["selected_qcd_volume_lower"] >= -float(volume_tolerance)
+            and residuals["selected_qcd_volume_upper"] >= -float(volume_tolerance)
+            and all(
+                residual >= -float(volume_tolerance)
+                for residual in cone_residuals
+            )
+        )
+        if result["converged"]:
+            result["status"] = "converged"
+        else:
+            result["failure_reasons"].append("constraint_residual_tolerance_not_met")
+        return result
+    except Exception as exc:
+        result["failure_reasons"].append(f"{type(exc).__name__}: {exc}")
+        result["message"] = "diagnostic optimizer setup failed"
+        return result
+
+
+def _kaehler_tensor_digest(values, *, decimals=12):
+    """Return a stable identity for optimized Kähler tensors."""
+    if not isinstance(values, dict):
+        return None
+    arrays = {}
+    for name in (
+        "point",
+        "prime_divisor_volumes",
+        "inverse_metric",
+        "cy_volume",
+    ):
+        value = values.get(name)
+        if value is None:
+            continue
+        array = np.asarray(value, dtype=float)
+        if not np.all(np.isfinite(array)):
+            return None
+        arrays[name] = np.round(array, decimals=int(decimals)).tolist()
+    if "point" not in arrays:
+        return None
+    return _sha256_bytes(_canonical_json(arrays).encode("utf-8"))
+
+
+def _production_constrained_kaehler_optimizer(
+    initial_point,
+    *,
+    evaluate_point,
+    mass_log10_evaluator,
+    axion_index,
+    qcd_divisor_index,
+    start_index,
+    start_seed,
+    requested_starts,
+    kahler_hyperplanes=None,
+    mass_target_ev=FUZZY_AXION_MASS_TARGET_EV,
+    min_prime_divisor_volume=1.0,
+    qcd_volume_min=FUZZY_AXION_QCD_VOLUME_MIN,
+    qcd_volume_max=FUZZY_AXION_QCD_VOLUME_MAX,
+    ftol=KAEHLER_PRODUCTION_DEFAULT_FTOL,
+    maxiter=KAEHLER_PRODUCTION_DEFAULT_MAXITER,
+    mass_tolerance_log10=KAEHLER_PRODUCTION_DEFAULT_MASS_TOLERANCE_LOG10,
+    volume_tolerance=KAEHLER_PRODUCTION_DEFAULT_VOLUME_TOLERANCE,
+    optimizer="SLSQP",
+):
+    """Run one finite production-search start for one axion/QCD pair.
+
+    Keep the fuzzy mass as an equality constraint in ``log10(mass / eV)``.
+    The callback must evaluate the full Kähler tensors at a candidate point;
+    lower-bound checks are repeated here so an optimizer cannot promote a
+    point merely because the geometry evaluator accepted it provisionally.
+    """
+    target_log10 = float(np.log10(float(mass_target_ev)))
+    optimizer_name = str(optimizer).upper()
+    result = {
+        "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+        "mode": "production",
+        "statistical_framework": "frequentist",
+        "diagnostic_only": False,
+        "policy": KAEHLER_PRODUCTION_POLICY,
+        "optimizer": optimizer_name,
+        "method": optimizer_name,
+        "start_index": int(start_index),
+        "start_seed": int(start_seed),
+        "requested_starts": int(requested_starts),
+        "pair": {
+            "axion_index": int(axion_index),
+            "qcd_divisor_index": int(qcd_divisor_index),
+        },
+        "settings": {
+            "ftol": float(ftol),
+            "maxiter": int(maxiter),
+            "mass_tolerance_log10": float(mass_tolerance_log10),
+            "volume_tolerance": float(volume_tolerance),
+            "minimum_prime_divisor_volume": float(min_prime_divisor_volume),
+            "qcd_volume_window": [float(qcd_volume_min), float(qcd_volume_max)],
+        },
+        "mass_target_ev": float(mass_target_ev),
+        "mass_target_log10_ev": target_log10,
+        "status": "failed",
+        "converged": False,
+        "failure_reasons": [],
+    }
+    if optimizer_name != "SLSQP":
+        result["failure_reasons"].append("unsupported_optimizer")
+        result["message"] = "production search supports only SLSQP"
+        return result
+    if scipy_minimize is None:
+        result["failure_reasons"].append("scipy_unavailable")
+        result["message"] = "SciPy is required for the production Kähler search"
+        return result
+
+    try:
+        x0 = np.asarray(initial_point, dtype=float).reshape(-1)
+        if x0.size == 0 or not np.all(np.isfinite(x0)):
+            raise ValueError("initial Kähler point is empty or non-finite")
+        qcd_index = int(qcd_divisor_index)
+        if qcd_index < 1:
+            raise ValueError("QCD divisor index must be one-based and positive")
+        hyperplanes = None
+        if kahler_hyperplanes is not None:
+            hyperplanes = np.asarray(kahler_hyperplanes, dtype=float)
+            if hyperplanes.ndim != 2 or hyperplanes.shape[1] != x0.size:
+                raise ValueError("Kähler-cone hyperplanes have the wrong shape")
+            if not np.all(np.isfinite(hyperplanes)):
+                raise ValueError("Kähler-cone hyperplanes are non-finite")
+        scale = max(1.0, float(np.linalg.norm(x0)))
+        cache = {}
+        constraint_size = [None]
+
+        def evaluate(candidate):
+            candidate = np.asarray(candidate, dtype=float).reshape(-1)
+            key = tuple(float(value) for value in candidate)
+            if key not in cache:
+                try:
+                    data = evaluate_point(candidate)
+                    tau = np.asarray(
+                        data["prime_divisor_volumes"], dtype=float
+                    ).reshape(-1)
+                    mass = float(mass_log10_evaluator(candidate, data))
+                    cache[key] = (data, tau, mass, None)
+                except Exception as exc:
+                    cache[key] = (
+                        None,
+                        None,
+                        np.nan,
+                        f"{type(exc).__name__}: {exc}",
+                    )
+            return cache[key]
+
+        def objective(candidate):
+            delta = (np.asarray(candidate, dtype=float) - x0) / scale
+            return 0.5 * float(delta @ delta)
+
+        def mass_constraint(candidate):
+            _, _, mass, error = evaluate(candidate)
+            return (
+                1e6
+                if error is not None or not np.isfinite(mass)
+                else mass - target_log10
+            )
+
+        def inequality_constraint(candidate):
+            _, tau, _, error = evaluate(candidate)
+            if error is not None or tau is None or not np.all(np.isfinite(tau)):
+                count = constraint_size[0]
+                if count is None:
+                    count = 2 + (0 if hyperplanes is None else hyperplanes.shape[0])
+                return np.full(count, -1e6)
+            if not 1 <= qcd_index <= tau.size:
+                count = constraint_size[0] or (
+                    tau.size
+                    + 2
+                    + (0 if hyperplanes is None else hyperplanes.shape[0])
+                )
+                return np.full(count, -1e6)
+            constraints = [
+                *(tau - float(min_prime_divisor_volume)),
+                float(tau[qcd_index - 1]) - float(qcd_volume_min),
+                float(qcd_volume_max) - float(tau[qcd_index - 1]),
+            ]
+            if hyperplanes is not None:
+                constraints.extend(
+                    hyperplanes @ np.asarray(candidate, dtype=float) - 1.0
+                )
+            return np.asarray(constraints, dtype=float)
+
+        initial_data, initial_tau, _, initial_error = evaluate(x0)
+        if initial_error is not None:
+            result["failure_reasons"].append(f"initial_point_invalid: {initial_error}")
+            return result
+        if initial_tau is None or not 1 <= qcd_index <= initial_tau.size:
+            result["failure_reasons"].append("selected_qcd_divisor_index_out_of_range")
+            return result
+        constraint_size[0] = initial_tau.size + 2 + (
+            0 if hyperplanes is None else hyperplanes.shape[0]
+        )
+
+        solver_result = scipy_minimize(
+            objective,
+            x0,
+            method="SLSQP",
+            constraints=[
+                {"type": "eq", "fun": mass_constraint},
+                {"type": "ineq", "fun": inequality_constraint},
+            ],
+            options={"ftol": float(ftol), "maxiter": int(maxiter), "disp": False},
+        )
+        candidate = np.asarray(
+            getattr(solver_result, "x", x0), dtype=float
+        ).reshape(-1)
+        data, tau, mass, error = evaluate(candidate)
+        result.update(
+            {
+                "solver_success": bool(getattr(solver_result, "success", False)),
+                "solver_status": getattr(solver_result, "status", None),
+                "message": str(getattr(solver_result, "message", "")),
+                "iterations": getattr(solver_result, "nit", None),
+                "function_evaluations": getattr(solver_result, "nfev", None),
+                "initial_point": x0.tolist(),
+                "point": candidate.tolist(),
+                "objective_value": float(objective(candidate)),
+            }
+        )
+        if error is not None or data is None or tau is None or not np.isfinite(mass):
+            result["failure_reasons"].append(
+                f"optimized_point_invalid: {error or 'non-finite optimizer output'}"
+            )
+            return result
+        if tau.size == 0 or not np.all(np.isfinite(tau)):
+            result["failure_reasons"].append("prime_divisor_volumes_invalid")
+            return result
+        cone_slack = (
+            []
+            if hyperplanes is None
+            else (hyperplanes @ candidate - 1.0).astype(float).tolist()
+        )
+        mass_residual = float(mass - target_log10)
+        qcd_volume = float(tau[qcd_index - 1])
+        relative_log = np.log(10.0) * mass_residual
+        mass_relative = (
+            math.inf
+            if relative_log > np.log(np.finfo(float).max)
+            else -1.0
+            if relative_log < np.log(np.finfo(float).tiny)
+            else float(np.expm1(relative_log))
+        )
+        residuals = {
+            "mass_log10": mass_residual,
+            "mass_relative": mass_relative,
+            "prime_divisor_volumes": (
+                tau - float(min_prime_divisor_volume)
+            ).astype(float).tolist(),
+            "minimum_prime_divisor_volume": float(
+                np.min(tau) - float(min_prime_divisor_volume)
+            ),
+            "qcd_volume_lower": qcd_volume - float(qcd_volume_min),
+            "qcd_volume_upper": float(qcd_volume_max) - qcd_volume,
+            "selected_qcd_volume_lower": qcd_volume - float(qcd_volume_min),
+            "selected_qcd_volume_upper": float(qcd_volume_max) - qcd_volume,
+            "kaehler_cone": cone_slack,
+        }
+        constraints = {
+            "mass_log10": {
+                "type": "equality",
+                "target": target_log10,
+                "value": float(mass),
+                "residual": mass_residual,
+                "tolerance": float(mass_tolerance_log10),
+                "satisfied": bool(abs(mass_residual) <= float(mass_tolerance_log10)),
+            },
+            "prime_divisor_volumes": {
+                "type": "lower_bound",
+                "bound": float(min_prime_divisor_volume),
+                "residuals": residuals["prime_divisor_volumes"],
+                "satisfied": bool(
+                    np.all(
+                        np.asarray(residuals["prime_divisor_volumes"])
+                        >= -float(volume_tolerance)
+                    )
+                ),
+            },
+            "qcd_volume": {
+                "type": "interval",
+                "bounds": [float(qcd_volume_min), float(qcd_volume_max)],
+                "value": qcd_volume,
+                "residual_lower": residuals["qcd_volume_lower"],
+                "residual_upper": residuals["qcd_volume_upper"],
+                "satisfied": bool(
+                    residuals["qcd_volume_lower"] >= -float(volume_tolerance)
+                    and residuals["qcd_volume_upper"] >= -float(volume_tolerance)
+                ),
+            },
+            "kaehler_cone": {
+                "type": "lower_bound",
+                "bound": 1.0,
+                "residuals": cone_slack,
+                "satisfied": bool(
+                    all(
+                        value >= -float(volume_tolerance)
+                        for value in cone_slack
+                    )
+                ),
+            },
+        }
+        result.update(
+            {
+                "residuals": residuals,
+                "constraints": constraints,
+                "mass_log10_ev": float(mass),
+                "prime_divisor_volumes": tau.tolist(),
+                "selected_qcd_volume": qcd_volume,
+                "optimized_tensors": {
+                    "point": candidate.tolist(),
+                    "prime_divisor_volumes": tau.tolist(),
+                    "inverse_metric": np.asarray(
+                        data["inverse_metric"], dtype=float
+                    ).tolist(),
+                    "cy_volume": float(data["cy_volume"]),
+                },
+                "_optimized_values": data,
+            }
+        )
+        result["converged"] = bool(
+            result["solver_success"]
+            and constraints["mass_log10"]["satisfied"]
+            and constraints["prime_divisor_volumes"]["satisfied"]
+            and constraints["qcd_volume"]["satisfied"]
+            and constraints["kaehler_cone"]["satisfied"]
+        )
+        if result["converged"]:
+            result["status"] = "converged"
+        else:
+            result["failure_reasons"].append(
+                "constraint_residual_tolerance_not_met"
+            )
+        return result
+    except Exception as exc:
+        result["failure_reasons"].append(f"{type(exc).__name__}: {exc}")
+        result["message"] = "production optimizer setup failed"
+        return result
+
+
+def _production_start_points(triangulation, canonical_record, *, seed, starts):
+    """Generate a finite, deterministic list of feasible production starts."""
+    starts = int(starts)
+    if starts < 1:
+        raise ValueError("production Kähler start count must be positive")
+    if starts > KAEHLER_PRODUCTION_MAX_STARTS:
+        raise ValueError(
+            f"production Kähler start count must be <= {KAEHLER_PRODUCTION_MAX_STARTS}"
+        )
+    if canonical_record.get("status") != "accepted":
+        return [], [{"reason": "canonical_kaehler_point_not_accepted"}]
+    canonical_point = np.asarray(canonical_record["point"], dtype=float)
+    proposals = [
+        {
+            "start_index": 1,
+            "start_seed": stable_seed(
+                "fuzzy-axions-h11-4-kaehler-production-start", seed, 1
+            ),
+            "point_kind": "canonical_tip",
+            "point": canonical_point,
+        }
+    ]
+    diagnostics = []
+    if starts == 1:
+        return proposals, diagnostics
+    try:
+        cy = triangulation.get_cy()
+        kahler_cone = cy.toric_kahler_cone()
+        sampler_proposals = sample_stretched_kaehler_points(
+            kahler_cone,
+            canonical_point,
+            np.random.default_rng(int(seed)),
+            starts,
+            lambda message: None,
+            point_seed=int(seed),
+            diagnostics=diagnostics,
+            include_metadata=True,
+        )
+        for proposal in sampler_proposals:
+            attempt = int(proposal.get("attempt_index", 0))
+            if not 2 <= attempt <= starts:
+                continue
+            point = np.asarray(proposal.get("point"), dtype=float)
+            if point.size == 0 or not np.all(np.isfinite(point)):
+                diagnostics.append(
+                    {
+                        "attempt_index": attempt,
+                        "point_status": "skipped",
+                        "failure_reason": "production start was non-finite",
+                    }
+                )
+                continue
+            proposals.append(
+                {
+                    "start_index": attempt,
+                    "start_seed": int(
+                        proposal.get(
+                            "point_seed",
+                            stable_seed(
+                                "fuzzy-axions-h11-4-kaehler-production-start",
+                                seed,
+                                attempt,
+                            ),
+                        )
+                    ),
+                    "point_kind": str(
+                        proposal.get("point_kind", "randomized_projection")
+                    ),
+                    "point": point,
+                }
+            )
+    except Exception as exc:
+        diagnostics.append(
+            {
+                "point_status": "failed",
+                "failure_reason": f"{type(exc).__name__}: {exc}",
+            }
+        )
+    unique = {}
+    proposal_count = len(proposals)
+    for proposal in proposals:
+        key = tuple(np.asarray(proposal["point"], dtype=float).tolist())
+        unique.setdefault(key, proposal)
+    proposals = sorted(unique.values(), key=lambda proposal: proposal["start_index"])
+    duplicate_count = proposal_count - len(proposals)
+    if duplicate_count:
+        diagnostics.append(
+            {
+                "point_status": "deduplicated",
+                "duplicate_count": duplicate_count,
+                "failure_reason": "duplicate production start",
+            }
+        )
+    return proposals, diagnostics
+
+
+def _production_kaehler_search(
+    triangulation, canonical_record, args, *, seed=KAEHLER_PRODUCTION_DEFAULT_SEED
+):
+    """Search every leading-axion/prime-QCD pair with finite deterministic starts."""
+    requested_starts = int(
+        getattr(args, "kaehler_production_starts", KAEHLER_PRODUCTION_DEFAULT_STARTS)
+    )
+    optimizer = str(
+        getattr(args, "kaehler_production_optimizer", "SLSQP")
+    ).upper()
+    summary = {
+        "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+        "mode": "production",
+        "statistical_framework": "frequentist",
+        "finite_search_status": "not_run",
+        "policy": KAEHLER_PRODUCTION_POLICY,
+        "seed": int(seed),
+        "requested_starts": requested_starts,
+        "start_count": 0,
+        "optimizer": {
+            "name": optimizer,
+            "method": optimizer,
+            "ftol": float(
+                getattr(
+                    args,
+                    "kaehler_production_ftol",
+                    KAEHLER_PRODUCTION_DEFAULT_FTOL,
+                )
+            ),
+            "maxiter": int(
+                getattr(
+                    args,
+                    "kaehler_production_maxiter",
+                    KAEHLER_PRODUCTION_DEFAULT_MAXITER,
+                )
+            ),
+        },
+        "pairing": {
+            "policy": "every leading axion and every prime QCD divisor",
+            "qcd_divisor_domain": "all_prime",
+            "index_base": 1,
+        },
+        "pair_count": 0,
+        "converged_pair_count": 0,
+        "pairs": [],
+        "failures": [],
+        "deduplication": {
+            "policy": "rounded optimized tensor identity; retain one model-stage record",
+            "candidate_count": 0,
+            "unique_count": 0,
+            "duplicate_count": 0,
+            "duplicate_pairs": [],
+        },
+        "records": [],
+    }
+    if requested_starts < 1 or requested_starts > KAEHLER_PRODUCTION_MAX_STARTS:
+        summary["failures"].append("invalid_production_start_count")
+        return summary
+    if optimizer != "SLSQP":
+        summary["failures"].append("unsupported_optimizer")
+        return summary
+    if canonical_record.get("status") != "accepted":
+        summary["failures"].append("canonical_kaehler_point_not_accepted")
+        return summary
+
+    try:
+        cy = triangulation.get_cy()
+        topology = dict(extract_topology(cy, triangulation))
+        kahler_cone = cy.toric_kahler_cone()
+        qprime_raw = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
+        qprime, _ = canonicalize_unique_charge_rows(qprime_raw)
+        qprime = np.asarray(qprime, dtype=np.int64)
+        glsm = np.asarray(canonical_record["glsm_charge_matrix"], dtype=int)
+        h11 = int(topology["h11"])
+        prime_count = int(np.asarray(canonical_record["prime_divisor_volumes"]).size)
+        if glsm.shape != (h11, prime_count):
+            raise ValueError("production Q, h11, and prime-divisor dimensions disagree")
+        volume_context = {
+            "volume_backend": "fan",
+            "kappa": topology["kappa"],
+            "glsm_charge_matrix": glsm,
+            "mori_cone": topology["mori_cone"],
+        }
+        production_starts, start_diagnostics = _production_start_points(
+            triangulation,
+            canonical_record,
+            seed=int(seed),
+            starts=requested_starts,
+        )
+        summary["start_generation"] = {
+            "requested": requested_starts,
+            "returned": len(production_starts),
+            "diagnostics": start_diagnostics,
+            "deduplication": {
+                "duplicate_count": sum(
+                    int(diagnostic.get("duplicate_count", 0))
+                    for diagnostic in start_diagnostics
+                ),
+            },
+            "seed_derivation": (
+                "stable_seed('fuzzy-axions-h11-4-kaehler-production-start', seed, start_index)"
+            ),
+        }
+        summary["failures"].extend(
+            {
+                "stage": "start_generation",
+                "reason": diagnostic.get(
+                    "failure_reason", "production start was not returned"
+                ),
+                "diagnostic": diagnostic,
+            }
+            for diagnostic in start_diagnostics
+            if diagnostic.get("point_status") != "deduplicated"
+        )
+        summary["start_count"] = len(production_starts)
+        if not production_starts:
+            summary["failures"].append("no_production_starts")
+            return summary
+
+        def evaluate_point(point):
+            diagnostic, values = evaluate_kaehler_point(
+                cy,
+                kahler_cone,
+                qprime,
+                point,
+                attempt_index=0,
+                point_kind="production_optimized",
+                point_seed=None,
+                solver=optimizer,
+                min_prime_divisor_volume=1.0,
+                min_divisor_volume=1.0,
+                volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
+                enforce_divisor_volume_lower_bounds=False,
+                **volume_context,
+            )
+            if values is None:
+                raise ValueError(
+                    diagnostic.get("failure_reason", "Kähler point evaluation failed")
+                )
+            return values
+
+        tensor_records = {}
+        for axion_index in range(1, h11 + 1):
+            for qcd_index in range(1, prime_count + 1):
+                pair_result = {
+                    "pair": {
+                        "axion_index": axion_index,
+                        "qcd_divisor_index": qcd_index,
+                    },
+                    "status": "failed",
+                    "requested_starts": requested_starts,
+                    "attempted_starts": 0,
+                    "converged_starts": [],
+                    "failures": [],
+                    "starts": [],
+                }
+                for start in production_starts:
+                    pair_result["attempted_starts"] += 1
+                    optimizer_result = _production_constrained_kaehler_optimizer(
+                        start["point"],
+                        evaluate_point=evaluate_point,
+                        mass_log10_evaluator=lambda point, values, ai=axion_index: _fuzzy_axion_mass_log10(
+                            values,
+                            glsm,
+                            axion_index=ai,
+                            gs=float(getattr(args, "gs", 0.5)),
+                            w0=complex(
+                                float(getattr(args, "w0_real", 1.0)),
+                                float(getattr(args, "w0_imag", 0.0)),
+                            ),
+                        ),
+                        axion_index=axion_index,
+                        qcd_divisor_index=qcd_index,
+                        start_index=int(start["start_index"]),
+                        start_seed=int(start["start_seed"]),
+                        requested_starts=requested_starts,
+                        kahler_hyperplanes=topology.get("kahler_cone_hyperplanes"),
+                        ftol=summary["optimizer"]["ftol"],
+                        maxiter=summary["optimizer"]["maxiter"],
+                        mass_tolerance_log10=float(
+                            getattr(
+                                args,
+                                "kaehler_production_mass_tolerance_log10",
+                                KAEHLER_PRODUCTION_DEFAULT_MASS_TOLERANCE_LOG10,
+                            )
+                        ),
+                        volume_tolerance=float(
+                            getattr(
+                                args,
+                                "kaehler_production_volume_tolerance",
+                                KAEHLER_PRODUCTION_DEFAULT_VOLUME_TOLERANCE,
+                            )
+                        ),
+                        optimizer=optimizer,
+                    )
+                    optimized_values = optimizer_result.pop("_optimized_values", None)
+                    if optimized_values is None:
+                        optimized_values = optimizer_result.get("optimized_tensors")
+                    if (
+                        isinstance(optimized_values, dict)
+                        and "point" not in optimized_values
+                        and optimizer_result.get("point") is not None
+                    ):
+                        optimized_values = dict(optimized_values)
+                        optimized_values["point"] = optimizer_result["point"]
+                    public_result = _jsonable(optimizer_result)
+                    pair_result["starts"].append(public_result)
+                    if optimizer_result.get("converged") is True:
+                        pair_result["converged_starts"].append(
+                            int(start["start_index"])
+                        )
+                        digest = _kaehler_tensor_digest(optimized_values)
+                        if digest is None:
+                            pair_result["failures"].append(
+                                "converged_result_has_invalid_tensor_identity"
+                            )
+                            continue
+                        tensor_entry = tensor_records.setdefault(
+                            digest,
+                            {
+                                "values": optimized_values,
+                                "optimizer": optimizer_result,
+                                "pair": {
+                                    "axion_index": axion_index,
+                                    "qcd_divisor_index": qcd_index,
+                                },
+                                "pairs": [],
+                            },
+                        )
+                        pair_identity = {
+                            "axion_index": axion_index,
+                            "qcd_divisor_index": qcd_index,
+                        }
+                        if pair_identity not in tensor_entry["pairs"]:
+                            tensor_entry["pairs"].append(pair_identity)
+                    else:
+                        pair_result["failures"].extend(
+                            optimizer_result.get("failure_reasons", [])
+                        )
+                if pair_result["converged_starts"]:
+                    pair_result["status"] = "converged"
+                    pair_result["selected_start_index"] = min(
+                        pair_result["converged_starts"]
+                    )
+                else:
+                    pair_result["failures"] = sorted(
+                        set(pair_result["failures"])
+                    )
+                    summary["failures"].append(
+                        {
+                            "pair": pair_result["pair"],
+                            "reason": "no_start_converged",
+                            "failure_reasons": pair_result["failures"],
+                        }
+                    )
+                summary["pairs"].append(pair_result)
+                summary["pair_count"] = len(summary["pairs"])
+                summary["converged_pair_count"] = sum(
+                    pair["status"] == "converged"
+                    for pair in summary["pairs"]
+                )
+
+        records = []
+        for digest, entry in tensor_records.items():
+            values = entry["values"]
+            pair = entry["pair"]
+            provenance = {
+                "sampler_policy": KAEHLER_PRODUCTION_POLICY,
+                "attempt_budget": requested_starts,
+                "attempt_index": int(
+                    entry["optimizer"].get("start_index", 0)
+                ),
+                "proposal_index": int(
+                    entry["optimizer"].get("start_index", 0)
+                ),
+                "proposal_kind": "production_multistart",
+                "point_kind": "production_optimized",
+                "sampler_seed": int(seed),
+                "point_seed": int(entry["optimizer"].get("start_seed", seed)),
+                "proposal_seed": int(entry["optimizer"].get("start_seed", seed)),
+                "seed_derivation": (
+                    "stable_seed('fuzzy-axions-h11-4-kaehler-production-start', seed, start_index)"
+                ),
+                "optimizer": optimizer,
+                "pair": pair,
+                "associated_pairs": entry["pairs"],
+            }
+            diagnostic = {
+                "point_status": "accepted",
+                "point_kind": "production_optimized",
+                "checks": {
+                    "mass_target_log10": bool(
+                        entry["optimizer"]["constraints"]["mass_log10"]["satisfied"]
+                    ),
+                    "prime_divisor_volume_lower_bound": bool(
+                        entry["optimizer"]["constraints"][
+                            "prime_divisor_volumes"
+                        ]["satisfied"]
+                    ),
+                    "qcd_volume_window": bool(
+                        entry["optimizer"]["constraints"]["qcd_volume"][
+                            "satisfied"
+                        ]
+                    ),
+                    "kaehler_cone": bool(
+                        entry["optimizer"]["constraints"]["kaehler_cone"][
+                            "satisfied"
+                        ]
+                    ),
+                },
+                "production_constraints": entry["optimizer"]["constraints"],
+            }
+            record = _kaehler_export_record(
+                diagnostic=diagnostic,
+                values=values,
+                topology=topology,
+                glsm=glsm,
+                point_provenance=provenance,
+            )
+            record.update(
+                {
+                    "polytope_index": getattr(args, "polytope_index", None),
+                    "frst_class_index": getattr(args, "frst_class_index", None),
+                    "qcd_divisor_domain": "all_prime",
+                    "kaehler_search_mode": "production",
+                    "kaehler_production_status": "converged",
+                    "kaehler_production_seed": int(seed),
+                    "kaehler_production_pair": pair,
+                    "kaehler_production_pairs": entry["pairs"],
+                    "kaehler_production_optimizer": entry["optimizer"],
+                    "kaehler_tensor_digest": digest,
+                }
+            )
+            records.append(record)
+        records.sort(
+            key=lambda record: (
+                int(record["kaehler_production_pair"]["axion_index"]),
+                int(record["kaehler_production_pair"]["qcd_divisor_index"]),
+            )
+        )
+        summary["records"] = records
+        summary["deduplication"]["candidate_count"] = sum(
+            len(pair["converged_starts"]) for pair in summary["pairs"]
+        )
+        summary["deduplication"]["unique_count"] = len(records)
+        summary["deduplication"]["duplicate_count"] = (
+            summary["deduplication"]["candidate_count"] - len(records)
+        )
+        summary["deduplication"]["duplicate_pairs"] = [
+            pair
+            for entry in tensor_records.values()
+            if len(entry["pairs"]) > 1
+            for pair in entry["pairs"][1:]
+        ]
+        summary["converged_pair_count"] = sum(
+            pair["status"] == "converged" for pair in summary["pairs"]
+        )
+        summary["pair_count"] = len(summary["pairs"])
+        summary["finite_search_status"] = (
+            "completed"
+            if not summary["failures"]
+            else "completed_with_failures"
+        )
+        summary["status"] = summary["finite_search_status"]
+        return summary
+    except Exception as exc:
+        summary["finite_search_status"] = "failed"
+        summary["failures"].append(f"{type(exc).__name__}: {exc}")
+        return summary
+
+
+def _optimize_exported_kaehler_point(triangulation, point_record, args):
+    """Run the opt-in optimizer from one already exported Kähler point."""
+    if point_record.get("status") != "accepted":
+        return {
+            "diagnostic_only": True,
+            "policy": KAEHLER_OPTIMIZER_POLICY,
+            "status": "failed",
+            "converged": False,
+            "failure_reasons": ["existing_kaehler_point_not_accepted"],
+        }
+    try:
+        cy = triangulation.get_cy()
+        topology = extract_topology(cy, triangulation)
+        kahler_cone = cy.toric_kahler_cone()
+        qprime_raw = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
+        qprime, _ = canonicalize_unique_charge_rows(qprime_raw)
+        qprime = np.asarray(qprime, dtype=np.int64)
+        glsm = np.asarray(point_record["glsm_charge_matrix"], dtype=int)
+        volume_context = {
+            "volume_backend": "fan",
+            "kappa": topology["kappa"],
+            "glsm_charge_matrix": glsm,
+            "mori_cone": topology["mori_cone"],
+        }
+
+        def evaluate_point(point):
+            diagnostic, values = evaluate_kaehler_point(
+                cy,
+                kahler_cone,
+                qprime,
+                point,
+                attempt_index=0,
+                point_kind="diagnostic_constrained_optimizer",
+                point_seed=None,
+                solver="scipy.optimize.minimize",
+                min_prime_divisor_volume=1.0,
+                min_divisor_volume=1.0,
+                volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
+                enforce_divisor_volume_lower_bounds=False,
+                **volume_context,
+            )
+            if values is None:
+                raise ValueError(
+                    diagnostic.get("failure_reason", "Kähler point evaluation failed")
+                )
+            return values
+
+        return _diagnostic_constrained_kaehler_optimizer(
+            point_record["point"],
+            evaluate_point=evaluate_point,
+            mass_log10_evaluator=lambda _point, values: _fuzzy_axion_mass_log10(
+                values,
+                glsm,
+                axion_index=int(args.kaehler_optimizer_axion_index),
+                gs=float(args.gs),
+                w0=complex(float(args.w0_real), float(args.w0_imag)),
+            ),
+            qcd_divisor_index=args.kaehler_optimizer_qcd_divisor_index,
+            kahler_hyperplanes=topology["kahler_cone_hyperplanes"],
+        )
+    except Exception as exc:
+        return {
+            "diagnostic_only": True,
+            "policy": KAEHLER_OPTIMIZER_POLICY,
+            "solver": "scipy.optimize.minimize",
+            "method": "SLSQP",
+            "status": "failed",
+            "converged": False,
+            "failure_reasons": [f"{type(exc).__name__}: {exc}"],
+        }
+
+
+def _kaehler_point_provenance(
+    proposal,
+    *,
+    sampler_policy,
+    sampler_seed,
+    attempt_budget,
+    seed_metadata=None,
+):
+    """Build serializable provenance for one attempted Kähler point."""
+    attempt_index = int(proposal["attempt_index"])
+    point_kind = str(proposal.get("point_kind", "unknown"))
+    canonical = attempt_index == 1 and point_kind == "canonical_tip"
+    point_seed = proposal.get("point_seed")
+    point_seed = None if point_seed is None else int(point_seed)
+    sampler_seed = None if sampler_seed is None else int(sampler_seed)
+    metadata = {
+        "sampler_policy": str(sampler_policy),
+        "attempt_budget": int(attempt_budget),
+        "attempt_index": attempt_index,
+        "proposal_index": 0 if canonical else attempt_index - 1,
+        "proposal_kind": "canonical_tip" if canonical else "seeded_projected_cone",
+        "point_kind": point_kind,
+        "sampler_seed": sampler_seed,
+        "point_seed": point_seed,
+        "proposal_seed": None if canonical else point_seed,
+        "seed_derivation": (
+            "canonical reference tip; no random proposal"
+            if canonical
+            else "stable_seed('kaehler-point-attempt', sampler_seed, attempt_index)"
+        ),
+        "solver": proposal.get("solver"),
+    }
+    if seed_metadata:
+        metadata.update(_jsonable(seed_metadata))
+    return metadata
+
+
+def _kaehler_export_record(
+    *,
+    diagnostic,
+    values,
+    topology,
+    glsm,
+    point_provenance,
+):
+    record = {
+        "status": "accepted" if values is not None else "rejected",
+        "attempt_index": point_provenance["attempt_index"],
+        "point_kind": point_provenance["point_kind"],
+        "point_seed": point_provenance["point_seed"],
+        "proposal_index": point_provenance["proposal_index"],
+        "proposal_seed": point_provenance["proposal_seed"],
+        "proposal_kind": point_provenance["proposal_kind"],
+        "sampler_seed": point_provenance["sampler_seed"],
+        "attempt_budget": point_provenance["attempt_budget"],
+        "sampler_policy": point_provenance["sampler_policy"],
+        "point_provenance": point_provenance,
+        "diagnostic": diagnostic,
+    }
+    if values is None:
+        record["reason"] = diagnostic.get(
+            "failure_reason", "Kähler point failed the domain checks"
+        )
+        return record
+    record.update(
+        {
+            "h11": int(topology["h11"]),
+            "point": values["point"].tolist(),
+            "cy_volume": float(values["cy_volume"]),
+            "prime_divisor_volumes": values["prime_divisor_volumes"].tolist(),
+            "inverse_metric": values["inverse_metric"].tolist(),
+            "glsm_charge_matrix": glsm.tolist(),
+            "potential_matrix_convention": {
+                "Q": "h11 x N; instanton charges are columns; N indexes all h11+4 prime toric divisors",
+            },
+        }
+    )
+    return record
+
+
+def _export_kaehler_point(triangulation, *, point_seed=None):
     """Export the Algorithm-1 reference point t0 for one accepted FRST.
 
     ``t0`` is the tip of the stretched Kähler cone (arXiv:2412.12012 Sec.
@@ -1092,10 +2369,10 @@ def _export_kaehler_point(triangulation):
         sample_stretched_kaehler_points(
             kahler_cone,
             reference_tip,
-            np.random.default_rng(),
+            np.random.default_rng(point_seed),
             1,
             lambda message: None,
-            point_seed=None,
+            point_seed=point_seed,
             diagnostics=None,
             include_metadata=True,
         )
@@ -1109,6 +2386,7 @@ def _export_kaehler_point(triangulation):
         point,
         attempt_index=1,
         point_kind="canonical_tip",
+        point_seed=tip_proposal.get("point_seed"),
         solver=tip_solver,
         min_prime_divisor_volume=1.0,
         min_divisor_volume=1.0,
@@ -1116,27 +2394,208 @@ def _export_kaehler_point(triangulation):
         enforce_divisor_volume_lower_bounds=False,
         **volume_context,
     )
+    point_provenance = _kaehler_point_provenance(
+        tip_proposal,
+        sampler_policy=KAEHLER_CANONICAL_POLICY,
+        sampler_seed=point_seed,
+        attempt_budget=1,
+    )
     if values is None:
-        return {
-            "status": "rejected",
-            "reason": diagnostic.get(
-                "failure_reason", "canonical tip failed the Kähler-point domain checks"
-            ),
-            "diagnostic": diagnostic,
-        }
-    return {
-        "status": "accepted",
-        "h11": int(topology["h11"]),
-        "point": values["point"].tolist(),
-        "cy_volume": float(values["cy_volume"]),
-        "prime_divisor_volumes": values["prime_divisor_volumes"].tolist(),
-        "inverse_metric": values["inverse_metric"].tolist(),
-        "glsm_charge_matrix": glsm.tolist(),
-        "potential_matrix_convention": {
-            "Q": "h11 x N; instanton charges are columns; N indexes all h11+4 prime toric divisors",
+        return _kaehler_export_record(
+            diagnostic=diagnostic,
+            values=None,
+            topology=topology,
+            glsm=glsm,
+            point_provenance=point_provenance,
+        )
+    return _kaehler_export_record(
+        diagnostic=diagnostic,
+        values=values,
+        topology=topology,
+        glsm=glsm,
+        point_provenance=point_provenance,
+    )
+
+
+def _export_kaehler_points(
+    triangulation,
+    *,
+    point_seed=None,
+    attempts=KAEHLER_DIAGNOSTIC_ATTEMPTS,
+    sampler_policy=KAEHLER_DIAGNOSTIC_POLICY,
+    seed_metadata=None,
+):
+    """Export a bounded canonical-tip plus projected-cone point set."""
+    attempts = int(attempts)
+    if attempts < 1:
+        raise ValueError("Kähler-point attempt budget must be positive")
+    canonical = _export_kaehler_point(triangulation, point_seed=point_seed)
+    if attempts == 1:
+        return [canonical]
+
+    canonical_provenance = _kaehler_point_provenance(
+        {
+            "attempt_index": 1,
+            "point_kind": "canonical_tip",
+            "point_seed": point_seed,
+            "solver": canonical.get("diagnostic", {}).get("solver"),
         },
-        "diagnostic": diagnostic,
+        sampler_policy=sampler_policy,
+        sampler_seed=point_seed,
+        attempt_budget=attempts,
+        seed_metadata=seed_metadata,
+    )
+    canonical.update(
+        {
+            "attempt_index": 1,
+            "point_kind": "canonical_tip",
+            "point_seed": canonical_provenance["point_seed"],
+            "proposal_index": 0,
+            "proposal_seed": None,
+            "sampler_policy": str(sampler_policy),
+            "sampler_seed": canonical_provenance["sampler_seed"],
+            "attempt_budget": canonical_provenance["attempt_budget"],
+            "point_provenance": canonical_provenance,
+        }
+    )
+    records = [canonical]
+
+    cy = triangulation.get_cy()
+    topology = extract_topology(cy, triangulation)
+    kahler_cone = cy.toric_kahler_cone()
+    qprime_raw = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
+    qprime, _ = canonicalize_unique_charge_rows(qprime_raw)
+    qprime = np.asarray(qprime, dtype=np.int64)
+    glsm = np.asarray(cy.glsm_charge_matrix(include_origin=False), dtype=int)
+    volume_context = {
+        "volume_backend": "fan",
+        "kappa": topology["kappa"],
+        "glsm_charge_matrix": glsm,
+        "mori_cone": topology["mori_cone"],
     }
+    if canonical.get("point") is not None:
+        reference_tip = np.asarray(canonical["point"], dtype=float)
+    else:
+        reference_tip = np.asarray(
+            kahler_cone.tip_of_stretched_cone(1.0), dtype=float
+        )
+
+    sampler_diagnostics = []
+    proposals = []
+    sampler_error = None
+    try:
+        proposals = list(
+            sample_stretched_kaehler_points(
+                kahler_cone,
+                reference_tip,
+                np.random.default_rng(point_seed),
+                attempts,
+                lambda message: None,
+                point_seed=point_seed,
+                diagnostics=sampler_diagnostics,
+                include_metadata=True,
+            )
+        )
+    except Exception as exc:
+        sampler_error = f"{type(exc).__name__}: {exc}"
+
+    evaluated_attempts = {1}
+    for proposal in proposals:
+        attempt_index = int(proposal["attempt_index"])
+        if (
+            attempt_index == 1
+            or attempt_index in evaluated_attempts
+            or not 1 <= attempt_index <= attempts
+        ):
+            continue
+        evaluated_attempts.add(attempt_index)
+        point_provenance = _kaehler_point_provenance(
+            proposal,
+            sampler_policy=sampler_policy,
+            sampler_seed=point_seed,
+            attempt_budget=attempts,
+            seed_metadata=seed_metadata,
+        )
+        diagnostic, values = evaluate_kaehler_point(
+            cy,
+            kahler_cone,
+            qprime,
+            np.asarray(proposal["point"], dtype=float),
+            attempt_index=attempt_index,
+            point_kind=proposal.get("point_kind", "randomized_projection"),
+            point_seed=proposal.get("point_seed"),
+            solver=proposal.get("solver"),
+            min_prime_divisor_volume=1.0,
+            min_divisor_volume=1.0,
+            volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
+            enforce_divisor_volume_lower_bounds=False,
+            **volume_context,
+        )
+        records.append(
+            _kaehler_export_record(
+                diagnostic=diagnostic,
+                values=values,
+                topology=topology,
+                glsm=glsm,
+                point_provenance=point_provenance,
+            )
+        )
+
+    skipped_by_attempt = {
+        int(diagnostic["attempt_index"]): diagnostic
+        for diagnostic in sampler_diagnostics
+        if "attempt_index" in diagnostic
+    }
+    for attempt_index in range(2, attempts + 1):
+        skipped_by_attempt.setdefault(
+            attempt_index,
+            {
+                "attempt_index": attempt_index,
+                "point_kind": "randomized_projection",
+                "point_seed": stable_seed(
+                    "kaehler-point-attempt", point_seed, attempt_index
+                ),
+                "attempted": True,
+                "point_status": "skipped",
+                "solver": None,
+                "failure_reason": (
+                    f"bounded sampler unavailable: {sampler_error}"
+                    if sampler_error is not None
+                    else "bounded sampler did not return a proposal"
+                ),
+            },
+        )
+    for attempt_index, diagnostic in skipped_by_attempt.items():
+        if (
+            attempt_index in evaluated_attempts
+            or not 1 <= attempt_index <= attempts
+        ):
+            continue
+        proposal = {
+            "attempt_index": attempt_index,
+            "point_kind": diagnostic.get("point_kind", "randomized_projection"),
+            "point_seed": diagnostic.get("point_seed"),
+            "solver": diagnostic.get("solver"),
+        }
+        point_provenance = _kaehler_point_provenance(
+            proposal,
+            sampler_policy=sampler_policy,
+            sampler_seed=point_seed,
+            attempt_budget=attempts,
+            seed_metadata=seed_metadata,
+        )
+        records.append(
+            _kaehler_export_record(
+                diagnostic=diagnostic,
+                values=None,
+                topology=topology,
+                glsm=glsm,
+                point_provenance=point_provenance,
+            )
+        )
+
+    records.sort(key=lambda record: int(record["attempt_index"]))
+    return records
 
 
 MODEL_STAGE_DRIVER = Path(__file__).resolve().parent / "fuzzy_axion_model_stage_driver.jl"
@@ -1157,9 +2616,49 @@ def _write_model_stage_input(records: list[dict], path: Path) -> None:
 
     with h5py.File(path, "w") as file:
         file.create_dataset("record_count", data=len(records))
+        file.attrs["record_metadata_schema"] = "kaehler-point-provenance-1"
+        file.attrs["qcd_divisor_domain"] = (
+            str(records[0].get("qcd_divisor_domain", "all_prime"))
+            if records
+            else "all_prime"
+        )
         for index, record in enumerate(records):
             group = file.create_group(f"records/{index}")
+            point_provenance = record.get("point_provenance", {})
+            group.attrs["point_provenance"] = _canonical_json(point_provenance)
+            if record.get("kaehler_production_pair") is not None:
+                group.attrs["kaehler_production_pair"] = _canonical_json(
+                    record["kaehler_production_pair"]
+                )
+            if record.get("kaehler_production_search") is not None:
+                group.attrs["kaehler_production_search"] = _canonical_json(
+                    record["kaehler_production_search"]
+                )
+            for key in (
+                "polytope_index",
+                "frst_class_index",
+                "qcd_divisor_domain",
+                "sampler_policy",
+                "attempt_index",
+                "proposal_index",
+                "point_kind",
+                "point_seed",
+                "proposal_seed",
+                "proposal_kind",
+                "sampler_seed",
+                "attempt_budget",
+                "kaehler_search_mode",
+                "kaehler_production_status",
+                "kaehler_production_seed",
+            ):
+                value = record.get(key)
+                if value is not None:
+                    group.attrs[key] = value
             group.create_dataset("Q", data=np.array(record["glsm_charge_matrix"], dtype=np.int64))
+            if record.get("kaehler_search_mode") == "production":
+                group.create_dataset(
+                    "point", data=np.array(record["point"], dtype=np.float64)
+                )
             group.create_dataset("tau", data=np.array(record["prime_divisor_volumes"], dtype=np.float64))
             group.create_dataset("cy_volume", data=float(record["cy_volume"]))
             group.create_dataset(
@@ -1176,8 +2675,45 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
     Sec. 6, "Acceptance tests for the 3,348 comparison").
     """
 
+    diagnostic_sampler = bool(getattr(args, "sample_kaehler_points", False)) or any(
+        record.get("sampler_policy") == KAEHLER_DIAGNOSTIC_POLICY for record in records
+    )
+    production_search = bool(
+        getattr(args, "production_kaehler_search", False)
+        or getattr(args, "kaehler_search_mode", None) == "production"
+        or any(
+            record.get("sampler_policy") == KAEHLER_PRODUCTION_POLICY
+            or record.get("kaehler_search_mode") == "production"
+            for record in records
+        )
+    )
     convention = {
         "qcd_divisor_domain": args.qcd_divisor_domain,
+        "kaehler_point_sampling_policy": (
+            KAEHLER_PRODUCTION_POLICY
+            if production_search
+            else KAEHLER_DIAGNOSTIC_POLICY
+            if diagnostic_sampler
+            else KAEHLER_CANONICAL_POLICY
+        ),
+        "kaehler_point_sampling_attempt_budget": (
+            int(
+                getattr(
+                    args,
+                    "kaehler_production_starts",
+                    KAEHLER_PRODUCTION_DEFAULT_STARTS,
+                )
+            )
+            if production_search
+            else KAEHLER_DIAGNOSTIC_ATTEMPTS if diagnostic_sampler else 1
+        ),
+        "kaehler_point_sampling_status": (
+            "finite_production_search"
+            if production_search
+            else "bounded_diagnostic_only"
+            if diagnostic_sampler
+            else "canonical_reference"
+        ),
         "qcd_divisor_domain_justification": (
             "all_prime is Algorithm 1's literal 'for D in the h11+4 prime toric divisors'; "
             "leading_nonself is the opt-in candidate restriction to the h11 leading-instanton "
@@ -1204,6 +2740,13 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
             "3,348 target"
         ),
     }
+    if production_search:
+        convention.update(
+            {
+                "kaehler_production_search": True,
+                "kaehler_production_search_policy": KAEHLER_PRODUCTION_POLICY,
+            }
+        )
 
     if not records:
         return {
@@ -1259,6 +2802,11 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
                         "lambda": float(lam[i]),
                         "mass_reference_log10_ev": float(mass_reference_log10_ev[i]),
                         "tau_reference": float(tau_reference[i]),
+                        "point_provenance": (
+                            records[int(record_index[i])].get("point_provenance")
+                            if 0 <= int(record_index[i]) < len(records)
+                            else None
+                        ),
                     }
                     for i in range(len(record_index))
                 ]
@@ -1416,7 +2964,32 @@ def _legacy_reproduce(args):
     orientifold_h11_zero_count = 0
     kaehler_export_accepted_count = 0
     kaehler_export_rejected_count = 0
-    export_kaehler_points = args.export_kaehler_points or args.model_stage
+    kaehler_export_attempted_count = 0
+    kaehler_optimizer_attempted_count = 0
+    kaehler_optimizer_converged_count = 0
+    kaehler_production_pair_attempted_count = 0
+    kaehler_production_pair_converged_count = 0
+    kaehler_production_start_attempted_count = 0
+    kaehler_production_duplicate_count = 0
+    kaehler_production_searches = []
+    diagnostic_kaehler_sampler = bool(
+        getattr(args, "sample_kaehler_points", False)
+    )
+    diagnostic_kaehler_optimizer = bool(
+        getattr(args, "diagnostic_kaehler_optimizer", False)
+    )
+    production_kaehler_search = bool(
+        getattr(args, "production_kaehler_search", False)
+        or getattr(args, "kaehler_search_mode", None) == "production"
+    )
+    kaehler_sampler_seed = int(getattr(args, "kaehler_sampler_seed", 0))
+    export_kaehler_points = (
+        args.export_kaehler_points
+        or args.model_stage
+        or diagnostic_kaehler_sampler
+        or diagnostic_kaehler_optimizer
+        or production_kaehler_search
+    )
     model_stage_records = [] if args.model_stage else None
     details = []
     reason_surface_attempts = []
@@ -1495,6 +3068,7 @@ def _legacy_reproduce(args):
                 reason_unresolved_components.extend(diagnostics["unresolved_components"])
                 reason_certified_surfaces.extend(diagnostics["certified_surfaces"])
         kaehler_export_per_class = None
+        kaehler_production_search_per_class = None
         if export_kaehler_points and h21_per_class is not None:
             # Only the classes actually accepted by the h21_plus_zero
             # population gate (Algorithm 1's model-stage input population,
@@ -1502,27 +3076,121 @@ def _legacy_reproduce(args):
             # section 6) get a live-CYTools export; the rest stay `None` so
             # index alignment with `h21_per_class` is preserved.
             kaehler_export_per_class = []
+            if production_kaehler_search:
+                kaehler_production_search_per_class = []
             for class_index, triangulation in enumerate(classes):
                 if h21_per_class[class_index]["status"] != "h21_plus_zero":
                     kaehler_export_per_class.append(None)
+                    if production_kaehler_search:
+                        kaehler_production_search_per_class.append(None)
                     continue
-                record = _export_kaehler_point(triangulation)
-                kaehler_export_per_class.append(record)
-                if record["status"] == "accepted":
-                    kaehler_export_accepted_count += 1
-                    if args.model_stage:
-                        model_stage_records.append(
-                            {
-                                "polytope_index": poly_index,
-                                "frst_class_index": class_index,
-                                "glsm_charge_matrix": record["glsm_charge_matrix"],
-                                "prime_divisor_volumes": record["prime_divisor_volumes"],
-                                "cy_volume": record["cy_volume"],
-                                "inverse_metric": record["inverse_metric"],
-                            }
+                if production_kaehler_search:
+                    try:
+                        point_record = _export_kaehler_point(triangulation)
+                    except Exception as exc:
+                        point_record = {
+                            "status": "rejected",
+                            "reason": f"{type(exc).__name__}: {exc}",
+                        }
+                    production_seed = stable_seed(
+                        "fuzzy-axions-h11-4-kaehler-production",
+                        int(
+                            getattr(
+                                args,
+                                "kaehler_production_seed",
+                                KAEHLER_PRODUCTION_DEFAULT_SEED,
+                            )
+                        ),
+                        poly_index,
+                        class_index,
+                    )
+                    production_result = _production_kaehler_search(
+                        triangulation,
+                        point_record,
+                        args,
+                        seed=production_seed,
+                    )
+                    point_records = production_result.pop("records", [])
+                    for record in point_records:
+                        record["polytope_index"] = poly_index
+                        record["frst_class_index"] = class_index
+                    kaehler_production_searches.append(production_result)
+                    kaehler_production_search_per_class.append(production_result)
+                    kaehler_production_pair_attempted_count += int(
+                        production_result.get("pair_count", 0)
+                    )
+                    kaehler_production_pair_converged_count += int(
+                        production_result.get("converged_pair_count", 0)
+                    )
+                    kaehler_production_start_attempted_count += int(
+                        production_result.get("start_count", 0)
+                    ) * int(production_result.get("pair_count", 0))
+                    kaehler_production_duplicate_count += int(
+                        production_result.get("deduplication", {}).get(
+                            "duplicate_count", 0
                         )
+                    )
+                elif diagnostic_kaehler_sampler:
+                    point_seed = stable_seed(
+                        "fuzzy-axions-h11-4-kaehler-diagnostic",
+                        kaehler_sampler_seed,
+                        poly_index,
+                        class_index,
+                    )
+                    point_records = _export_kaehler_points(
+                        triangulation,
+                        point_seed=point_seed,
+                        attempts=KAEHLER_DIAGNOSTIC_ATTEMPTS,
+                        sampler_policy=KAEHLER_DIAGNOSTIC_POLICY,
+                        seed_metadata={
+                            "master_seed": kaehler_sampler_seed,
+                            "seed_scope": "global_favorable_polytope_and_frst_class_index",
+                        },
+                    )
                 else:
-                    kaehler_export_rejected_count += 1
+                    point_records = [_export_kaehler_point(triangulation)]
+                kaehler_export_per_class.append(
+                    point_records
+                    if diagnostic_kaehler_sampler or production_kaehler_search
+                    else point_records[0]
+                )
+                kaehler_export_attempted_count += len(point_records)
+                for record in point_records:
+                    if diagnostic_kaehler_optimizer and not production_kaehler_search:
+                        optimizer_record = _optimize_exported_kaehler_point(
+                            triangulation,
+                            record,
+                            args,
+                        )
+                        record["kaehler_constrained_optimizer"] = optimizer_record
+                        kaehler_optimizer_attempted_count += 1
+                        if optimizer_record.get("converged") is True:
+                            kaehler_optimizer_converged_count += 1
+                    if record["status"] == "accepted":
+                        kaehler_export_accepted_count += 1
+                        if args.model_stage:
+                            model_stage_records.append(
+                                {
+                                    "polytope_index": poly_index,
+                                    "frst_class_index": class_index,
+                                    "glsm_charge_matrix": record["glsm_charge_matrix"],
+                                    "prime_divisor_volumes": record["prime_divisor_volumes"],
+                                    "cy_volume": record["cy_volume"],
+                                    "inverse_metric": record["inverse_metric"],
+                                    "point_provenance": record.get("point_provenance"),
+                                    "qcd_divisor_domain": record.get(
+                                        "qcd_divisor_domain", args.qcd_divisor_domain
+                                    ),
+                                    "kaehler_production_pair": record.get(
+                                        "kaehler_production_pair"
+                                    ),
+                                    "kaehler_production_search": record.get(
+                                        "kaehler_production_optimizer"
+                                    ),
+                                }
+                            )
+                    else:
+                        kaehler_export_rejected_count += 1
         details.append(
             {
                 "polytope_index": poly_index,
@@ -1539,6 +3207,9 @@ def _legacy_reproduce(args):
                 "identity_valid_o3o7_action_numerators": valid_actions.tolist(),
                 "orientifold_action_audit": orientifold,
                 "kaehler_point_export_per_class": kaehler_export_per_class,
+                "kaehler_production_search_per_class": (
+                    kaehler_production_search_per_class
+                ),
             }
         )
         if args.progress and (poly_index + 1) % args.progress == 0:
@@ -1588,6 +3259,16 @@ def _legacy_reproduce(args):
     model_stage_is_literal_algorithm = args.qcd_divisor_domain == "all_prime"
     if model_stage is not None and model_stage["diagnostic_reason"] is None:
         reasons = []
+        if production_kaehler_search:
+            reasons.append(
+                "finite deterministic pairwise Kähler optimization is a new "
+                "production search and is not a paper-reproduction claim"
+            )
+        if diagnostic_kaehler_sampler:
+            reasons.append(
+                "bounded four-point Kähler-moduli sampling is an opt-in diagnostic "
+                "policy; sampled model counts are not a paper-reproduction claim"
+            )
         if not model_stage_is_literal_algorithm:
             reasons.append(
                 f"--qcd-divisor-domain={args.qcd_divisor_domain} is an opt-in candidate reading "
@@ -1703,6 +3384,8 @@ def _legacy_reproduce(args):
                         "benchmark_match_candidate"
                         if population_exact_target
                         and model_stage_is_literal_algorithm
+                        and not diagnostic_kaehler_sampler
+                        and not production_kaehler_search
                         and model_stage["total_model_count"] == targets["models"]
                         else "diagnostic_only"
                     )
@@ -1723,6 +3406,210 @@ def _legacy_reproduce(args):
         "terminal_ledger": terminal_ledger_summary,
         "details": details if args.keep_details else None,
     }
+    if production_kaehler_search:
+        summary["counts"].update(
+            {
+                "kaehler_production_pair_attempted_count": (
+                    kaehler_production_pair_attempted_count
+                ),
+                "kaehler_production_pair_converged_count": (
+                    kaehler_production_pair_converged_count
+                ),
+                "kaehler_production_start_attempted_count": (
+                    kaehler_production_start_attempted_count
+                ),
+                "kaehler_production_duplicate_count": (
+                    kaehler_production_duplicate_count
+                ),
+            }
+        )
+    if export_kaehler_points:
+        summary["counts"]["kaehler_point_export_attempted_count"] = (
+            kaehler_export_attempted_count
+        )
+        summary["kaehler_point_sampling"] = {
+            "enabled": diagnostic_kaehler_sampler,
+            "policy": (
+                KAEHLER_DIAGNOSTIC_POLICY
+                if diagnostic_kaehler_sampler
+                else KAEHLER_CANONICAL_POLICY
+            ),
+            "attempt_budget_per_accepted_frst": (
+                KAEHLER_DIAGNOSTIC_ATTEMPTS
+                if diagnostic_kaehler_sampler
+                else 1
+            ),
+            "projected_cone_proposals_per_accepted_frst": (
+                KAEHLER_DIAGNOSTIC_ATTEMPTS - 1
+                if diagnostic_kaehler_sampler
+                else 0
+            ),
+            "master_seed": kaehler_sampler_seed
+            if diagnostic_kaehler_sampler
+            else None,
+            "seed_derivation": (
+                "stable_seed('fuzzy-axions-h11-4-kaehler-diagnostic', "
+                "master_seed, global_polytope_index, frst_class_index)"
+                if diagnostic_kaehler_sampler
+                else None
+            ),
+            "attempted_point_count": kaehler_export_attempted_count,
+            "accepted_point_count": kaehler_export_accepted_count,
+            "rejected_point_count": kaehler_export_rejected_count,
+            "target_population": (
+                "FRST classes accepted by the existing h21_plus_zero gate"
+            ),
+            "realised_sample": (
+                "bounded diagnostic point attempts; not a population-representative "
+                "Kähler-moduli sample"
+                if diagnostic_kaehler_sampler
+                else "canonical stretched-cone tip per accepted FRST class"
+            ),
+            "claim_status": (
+                "diagnostic_only" if diagnostic_kaehler_sampler else "reference_export"
+            ),
+        }
+        if production_kaehler_search:
+            summary["kaehler_point_sampling"].update(
+                {
+                    "enabled": True,
+                    "policy": KAEHLER_PRODUCTION_POLICY,
+                    "attempt_budget_per_accepted_frst": int(
+                        getattr(
+                            args,
+                            "kaehler_production_starts",
+                            KAEHLER_PRODUCTION_DEFAULT_STARTS,
+                        )
+                    ),
+                    "projected_cone_proposals_per_accepted_frst": max(
+                        0,
+                        int(
+                            getattr(
+                                args,
+                                "kaehler_production_starts",
+                                KAEHLER_PRODUCTION_DEFAULT_STARTS,
+                            )
+                        )
+                        - 1,
+                    ),
+                    "master_seed": int(
+                        getattr(
+                            args,
+                            "kaehler_production_seed",
+                            KAEHLER_PRODUCTION_DEFAULT_SEED,
+                        )
+                    ),
+                    "seed_derivation": (
+                        "stable_seed('fuzzy-axions-h11-4-kaehler-production', "
+                        "master_seed, global_polytope_index, frst_class_index)"
+                    ),
+                    "realised_sample": (
+                        "finite deterministic multi-start constrained optimization "
+                        "over Kähler coordinates"
+                    ),
+                    "target_population": (
+                        "leading axion and prime QCD-divisor pairs on "
+                        "h21_plus_zero-accepted FRST classes"
+                    ),
+                    "claim_status": "production_finite_search",
+                }
+            )
+        if diagnostic_kaehler_optimizer:
+            summary["kaehler_constrained_optimizer"] = {
+                "enabled": True,
+                "diagnostic_only": True,
+                "policy": KAEHLER_OPTIMIZER_POLICY,
+                "solver": "scipy.optimize.minimize",
+                "method": "SLSQP",
+                "mass_target_ev": FUZZY_AXION_MASS_TARGET_EV,
+                "qcd_volume_window": [
+                    FUZZY_AXION_QCD_VOLUME_MIN,
+                    FUZZY_AXION_QCD_VOLUME_MAX,
+                ],
+                "selected_qcd_divisor_index": args.kaehler_optimizer_qcd_divisor_index,
+                "selected_axion_index": args.kaehler_optimizer_axion_index,
+                "qcd_divisor_selection_policy": (
+                    "all_prime_divisors; explicit one-based selected index"
+                ),
+                "attempted_point_count": kaehler_optimizer_attempted_count,
+                "converged_point_count": kaehler_optimizer_converged_count,
+                "claim_boundary": (
+                    "diagnostic_only; optimized points are not used to claim "
+                    "reproduction of arXiv:2412.12012"
+                ),
+            }
+        if production_kaehler_search:
+            summary["kaehler_constrained_optimizer"] = {
+                "enabled": False,
+                "diagnostic_only": False,
+                "policy": KAEHLER_PRODUCTION_POLICY,
+                "claim_boundary": (
+                    "production_finite_search; results are not a "
+                    "paper-reproduction claim"
+                ),
+            }
+            summary["kaehler_production_search"] = {
+                "schema_version": KAEHLER_PRODUCTION_SCHEMA_VERSION,
+                "mode": "production",
+                "statistical_framework": "frequentist",
+                "policy": KAEHLER_PRODUCTION_POLICY,
+                "seed": int(
+                    getattr(
+                        args,
+                        "kaehler_production_seed",
+                        KAEHLER_PRODUCTION_DEFAULT_SEED,
+                    )
+                ),
+                "requested_starts": int(
+                    getattr(
+                        args,
+                        "kaehler_production_starts",
+                        KAEHLER_PRODUCTION_DEFAULT_STARTS,
+                    )
+                ),
+                "optimizer": str(
+                    getattr(args, "kaehler_production_optimizer", "SLSQP")
+                ).upper(),
+                "mass_target_ev": FUZZY_AXION_MASS_TARGET_EV,
+                "mass_target_log10_ev": float(
+                    np.log10(FUZZY_AXION_MASS_TARGET_EV)
+                ),
+                "minimum_prime_divisor_volume": 1.0,
+                "qcd_volume_window": [
+                    FUZZY_AXION_QCD_VOLUME_MIN,
+                    FUZZY_AXION_QCD_VOLUME_MAX,
+                ],
+                "pairing": (
+                    "every leading axion and every prime QCD divisor"
+                ),
+                "finite_search_status": (
+                    (
+                        "completed"
+                        if all(
+                            search.get("finite_search_status") == "completed"
+                            for search in kaehler_production_searches
+                        )
+                        else "completed_with_failures"
+                    )
+                    if kaehler_production_searches
+                    else "no_accepted_h21_plus_zero_frst_classes"
+                ),
+                "pair_attempted_count": kaehler_production_pair_attempted_count,
+                "pair_converged_count": kaehler_production_pair_converged_count,
+                "start_attempted_count": kaehler_production_start_attempted_count,
+                "duplicate_count": kaehler_production_duplicate_count,
+                "per_class": kaehler_production_searches,
+                "failure_policy": (
+                    "record every failed start and pair; never fall back to "
+                    "canonical or diagnostic tensors"
+                ),
+            }
+        else:
+            summary["kaehler_constrained_optimizer"] = {
+                "enabled": False,
+                "diagnostic_only": True,
+                "policy": KAEHLER_OPTIMIZER_POLICY,
+            }
     return _jsonable(summary)
 
 
@@ -1777,6 +3664,7 @@ def _code_hash() -> str:
         "inherited_orientifold_candidates.py",
         "trilayer_involutions.py",
         "geometry_charge_conventions.py",
+        "glimmers_schema11.py",
         "orientifold_general_l_geometry.py",
         "toric_fixed_component_euler.py",
         "orientifold_population_preflight.py",
@@ -2920,7 +4808,121 @@ def _parse_args(argv=None):
     parser.add_argument("--orientifold-audit", action="store_true")
     parser.add_argument("--terminal-ledger", type=Path)
     parser.add_argument("--orientifold-reason-diagnostics", action="store_true")
-    parser.add_argument("--export-kaehler-points", action="store_true")
+    parser.add_argument(
+        "--export-kaehler-points",
+        action="store_true",
+        help=(
+            "Export the canonical stretched-cone tip for each accepted FRST "
+            "class; combine with --sample-kaehler-points for the bounded "
+            "four-point diagnostic policy."
+        ),
+    )
+    parser.add_argument(
+        "--sample-kaehler-points",
+        "--diagnostic-kaehler-sampler",
+        dest="sample_kaehler_points",
+        action="store_true",
+        help=(
+            "Opt in to the bounded diagnostic Kähler-moduli policy: attempt "
+            "four points per h21_plus_zero-accepted FRST (the canonical tip "
+            "plus three seeded projected-cone proposals). This is not a "
+            "population-representative sample or a paper-reproduction claim."
+        ),
+    )
+    parser.add_argument(
+        "--kaehler-search-mode",
+        "--kaehler-mode",
+        choices=("canonical", "diagnostic", "production"),
+        default=None,
+        help=(
+            "Select canonical, bounded diagnostic, or explicit production "
+            "Kähler search mode. Legacy flags remain unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--production-kaehler-search",
+        "--kaehler-production-search",
+        dest="production_kaehler_search",
+        action="store_true",
+        help=(
+            "Run the finite deterministic multi-start production search for "
+            "every leading-axion/prime-QCD-divisor pair."
+        ),
+    )
+    parser.add_argument(
+        "--kaehler-production-seed",
+        "--production-kaehler-seed",
+        dest="kaehler_production_seed",
+        type=int,
+        default=KAEHLER_PRODUCTION_DEFAULT_SEED,
+        help="Master seed for the deterministic production Kähler search.",
+    )
+    parser.add_argument(
+        "--kaehler-production-starts",
+        "--production-kaehler-starts",
+        dest="kaehler_production_starts",
+        type=int,
+        default=KAEHLER_PRODUCTION_DEFAULT_STARTS,
+        help=(
+            "Finite number of deterministic production starts per "
+            "axion/QCD-divisor pair."
+        ),
+    )
+    parser.add_argument(
+        "--kaehler-production-optimizer",
+        "--production-kaehler-optimizer",
+        dest="kaehler_production_optimizer",
+        type=lambda value: str(value).upper(),
+        choices=("SLSQP",),
+        default="SLSQP",
+        help="Production optimizer; unsupported optimizers fail explicitly.",
+    )
+    parser.add_argument(
+        "--kaehler-production-ftol",
+        type=float,
+        default=KAEHLER_PRODUCTION_DEFAULT_FTOL,
+    )
+    parser.add_argument(
+        "--kaehler-production-maxiter",
+        type=int,
+        default=KAEHLER_PRODUCTION_DEFAULT_MAXITER,
+    )
+    parser.add_argument(
+        "--kaehler-production-mass-tolerance-log10",
+        type=float,
+        default=KAEHLER_PRODUCTION_DEFAULT_MASS_TOLERANCE_LOG10,
+    )
+    parser.add_argument(
+        "--kaehler-production-volume-tolerance",
+        type=float,
+        default=KAEHLER_PRODUCTION_DEFAULT_VOLUME_TOLERANCE,
+    )
+    parser.add_argument(
+        "--diagnostic-kaehler-optimizer",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--kaehler-optimizer-axion-index",
+        type=int,
+        default=1,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--kaehler-optimizer-qcd-divisor-index",
+        type=int,
+        default=1,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--kaehler-sampler-seed",
+        type=int,
+        default=0,
+        help=(
+            "Master seed for --sample-kaehler-points; per-FRST seeds are "
+            "derived deterministically from this value and global indices."
+        ),
+    )
     parser.add_argument("--model-stage", action="store_true")
     parser.add_argument("--gs", type=float, default=0.5)
     parser.add_argument("--w0-real", type=float, default=1.0)
@@ -2947,6 +4949,47 @@ def _parse_args(argv=None):
             )
     if args.orientifold_reason_diagnostics and not args.orientifold_audit:
         parser.error("--orientifold-reason-diagnostics requires --orientifold-audit")
+    if args.kaehler_search_mode == "production":
+        args.production_kaehler_search = True
+    elif args.kaehler_search_mode == "diagnostic":
+        if args.production_kaehler_search:
+            parser.error("--kaehler-search-mode conflicts with production mode")
+        args.sample_kaehler_points = True
+    elif args.kaehler_search_mode == "canonical":
+        if args.production_kaehler_search or args.sample_kaehler_points:
+            parser.error("--kaehler-search-mode=canonical conflicts with another Kähler mode")
+    if args.production_kaehler_search:
+        # Production search results are meaningful only when passed through
+        # the model stage, so make that output path explicit and automatic.
+        args.model_stage = True
+        if args.sample_kaehler_points:
+            parser.error(
+                "production Kähler search cannot be combined with diagnostic sampling"
+            )
+        if args.diagnostic_kaehler_optimizer:
+            parser.error(
+                "production Kähler search cannot be combined with diagnostic optimization"
+            )
+        if args.qcd_divisor_domain != "all_prime":
+            parser.error(
+                "production Kähler search requires --qcd-divisor-domain=all_prime"
+            )
+        if not 1 <= args.kaehler_production_starts <= KAEHLER_PRODUCTION_MAX_STARTS:
+            parser.error(
+                f"--kaehler-production-starts must be between 1 and {KAEHLER_PRODUCTION_MAX_STARTS}"
+            )
+        if args.kaehler_production_maxiter < 1:
+            parser.error("--kaehler-production-maxiter must be positive")
+        if args.kaehler_production_ftol <= 0:
+            parser.error("--kaehler-production-ftol must be positive")
+        if args.kaehler_production_mass_tolerance_log10 <= 0:
+            parser.error(
+                "--kaehler-production-mass-tolerance-log10 must be positive"
+            )
+        if args.kaehler_production_volume_tolerance < 0:
+            parser.error(
+                "--kaehler-production-volume-tolerance must be non-negative"
+            )
     if args.orientifold_audit and args.output is None and args.terminal_ledger is None:
         parser.error("--orientifold-audit requires --terminal-ledger when --output is absent")
     if args.output is not None and args.output.exists():

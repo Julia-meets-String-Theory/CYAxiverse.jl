@@ -9,9 +9,16 @@ import json
 from types import SimpleNamespace
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+import numpy as np
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 import reproduce_fuzzy_axions_h11_4 as driver
 replay = driver
@@ -163,6 +170,307 @@ class ReproduceFuzzyAxionsDriverTest(unittest.TestCase):
             "--orientifold-reason-diagnostics requires --orientifold-audit",
             stderr.getvalue(),
         )
+
+    def test_bounded_kaehler_sampler_cli_is_explicit_and_seeded(self):
+        args = driver._parse_args(
+            [
+                "--parquet-dir",
+                "unused",
+                "--sample-kaehler-points",
+                "--kaehler-sampler-seed",
+                "42",
+            ]
+        )
+        self.assertTrue(args.sample_kaehler_points)
+        self.assertEqual(args.kaehler_sampler_seed, 42)
+        self.assertEqual(args.qcd_divisor_domain, "all_prime")
+
+    def test_production_kaehler_mode_is_explicit_and_fail_closed(self):
+        args = driver._parse_args(
+            [
+                "--parquet-dir",
+                "unused",
+                "--kaehler-search-mode",
+                "production",
+                "--kaehler-production-seed",
+                "23",
+                "--kaehler-production-starts",
+                "3",
+            ]
+        )
+        self.assertTrue(args.production_kaehler_search)
+        self.assertEqual(args.kaehler_production_seed, 23)
+        self.assertEqual(args.kaehler_production_starts, 3)
+        self.assertEqual(args.kaehler_production_optimizer, "SLSQP")
+        self.assertTrue(args.model_stage)
+
+        stderr = StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            driver._parse_args(
+                [
+                    "--parquet-dir",
+                    "unused",
+                    "--production-kaehler-search",
+                    "--qcd-divisor-domain",
+                    "leading_nonself",
+                ]
+            )
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("requires --qcd-divisor-domain=all_prime", stderr.getvalue())
+
+    def test_bounded_kaehler_sampler_exports_four_reproducible_attempts(self):
+        class FakeCalabiYau:
+            def toric_kahler_cone(self):
+                return object()
+
+            def toric_effective_cone(self):
+                return SimpleNamespace(rays=lambda: [[1]])
+
+            def glsm_charge_matrix(self, include_origin=False):
+                return [[1]]
+
+        class FakeTriangulation:
+            def get_cy(self):
+                return FakeCalabiYau()
+
+        seed = 17
+
+        def canonical(_triangulation, *, point_seed=None):
+            return {
+                "status": "accepted",
+                "point": [1.0],
+                "diagnostic": {"solver": "tip"},
+                "point_seed": point_seed,
+            }
+
+        def proposals(*_args, point_seed=None, **_kwargs):
+            return iter(
+                [
+                    {
+                        "attempt_index": 1,
+                        "point_kind": "canonical_tip",
+                        "point_seed": point_seed,
+                        "solver": None,
+                        "point": np.asarray([1.0]),
+                    },
+                    *[
+                        {
+                            "attempt_index": attempt,
+                            "point_kind": "randomized_projection",
+                            "point_seed": driver.stable_seed(
+                                "kaehler-point-attempt", point_seed, attempt
+                            ),
+                            "solver": "test",
+                            "point": np.asarray([float(attempt)]),
+                        }
+                        for attempt in (2, 3, 4)
+                    ],
+                ]
+            )
+
+        def evaluate(_cy, _cone, _qprime, point, *, attempt_index, **_kwargs):
+            return (
+                {
+                    "attempt_index": attempt_index,
+                    "point_kind": "canonical_tip"
+                    if attempt_index == 1
+                    else "randomized_projection",
+                    "point_seed": _kwargs.get("point_seed"),
+                    "solver": _kwargs.get("solver"),
+                },
+                {
+                    "point": np.asarray(point),
+                    "cy_volume": 1.0,
+                    "prime_divisor_volumes": np.asarray([1.0]),
+                    "inverse_metric": np.asarray([[1.0]]),
+                },
+            )
+
+        with patch.object(driver, "_export_kaehler_point", side_effect=canonical), patch.object(
+            driver, "extract_topology", return_value={"h11": 1, "kappa": [[1]], "mori_cone": [[1]]}
+        ), patch.object(
+            driver, "canonicalize_unique_charge_rows", return_value=([[1]], {})
+        ), patch.object(
+            driver, "sample_stretched_kaehler_points", side_effect=proposals
+        ), patch.object(driver, "evaluate_kaehler_point", side_effect=evaluate):
+            first = driver._export_kaehler_points(
+                FakeTriangulation(),
+                point_seed=seed,
+                attempts=driver.KAEHLER_DIAGNOSTIC_ATTEMPTS,
+                seed_metadata={"master_seed": 9},
+            )
+            second = driver._export_kaehler_points(
+                FakeTriangulation(),
+                point_seed=seed,
+                attempts=driver.KAEHLER_DIAGNOSTIC_ATTEMPTS,
+                seed_metadata={"master_seed": 9},
+            )
+
+        self.assertEqual(len(first), 4)
+        self.assertEqual([record["attempt_index"] for record in first], [1, 2, 3, 4])
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first[0]["point_provenance"]["proposal_kind"], "canonical_tip"
+        )
+        self.assertTrue(all(record["sampler_seed"] == seed for record in first))
+        self.assertTrue(all(record["attempt_budget"] == 4 for record in first))
+        self.assertTrue(
+            all(
+                record["point_provenance"]["proposal_kind"] == "seeded_projected_cone"
+                for record in first[1:]
+            )
+        )
+        self.assertEqual(
+            [record["proposal_seed"] for record in first[1:]],
+            [
+                driver.stable_seed("kaehler-point-attempt", seed, attempt)
+                for attempt in (2, 3, 4)
+            ],
+        )
+
+    def test_production_optimizer_enforces_log_mass_and_volume_constraints(self):
+        target_log10 = np.log10(driver.FUZZY_AXION_MASS_TARGET_EV)
+        values = {
+            "point": np.asarray([2.0]),
+            "prime_divisor_volumes": np.asarray([30.0]),
+            "inverse_metric": np.asarray([[1.0]]),
+            "cy_volume": 1.0,
+        }
+
+        def evaluate(_point):
+            return values
+
+        def mass(_point, _values):
+            return target_log10
+
+        def fake_minimize(objective, x0, *, method, constraints, options):
+            self.assertEqual(method, "SLSQP")
+            self.assertAlmostEqual(constraints[0]["fun"](x0), 0.0)
+            self.assertTrue(np.all(constraints[1]["fun"](x0) >= 0.0))
+            self.assertEqual(options["maxiter"], 3)
+            return SimpleNamespace(
+                x=np.asarray([2.0]),
+                success=True,
+                status=0,
+                message="mock converged",
+                nit=1,
+                nfev=2,
+            )
+
+        with patch.object(driver, "scipy_minimize", side_effect=fake_minimize):
+            result = driver._production_constrained_kaehler_optimizer(
+                [2.0],
+                evaluate_point=evaluate,
+                mass_log10_evaluator=mass,
+                axion_index=1,
+                qcd_divisor_index=1,
+                start_index=1,
+                start_seed=7,
+                requested_starts=2,
+                kahler_hyperplanes=np.asarray([[1.0]]),
+                maxiter=3,
+            )
+
+        self.assertTrue(result["converged"])
+        self.assertEqual(result["constraints"]["mass_log10"]["type"], "equality")
+        self.assertEqual(result["constraints"]["qcd_volume"]["bounds"], [25.0, 40.0])
+        self.assertTrue(result["constraints"]["prime_divisor_volumes"]["satisfied"])
+        self.assertIn("optimized_tensors", result)
+
+    def test_production_search_runs_each_pair_and_deduplicates_tensors(self):
+        class FakeCone:
+            def hyperplanes(self):
+                return np.asarray([[1.0, 0.0], [0.0, 1.0]])
+
+        class FakeEffectiveCone:
+            def rays(self):
+                return np.asarray([[1, 0], [0, 1]])
+
+        class FakeCalabiYau:
+            def toric_kahler_cone(self):
+                return FakeCone()
+
+            def toric_effective_cone(self):
+                return FakeEffectiveCone()
+
+        class FakeTriangulation:
+            def get_cy(self):
+                return FakeCalabiYau()
+
+        values = {
+            "point": np.asarray([2.0, 2.0]),
+            "prime_divisor_volumes": np.asarray([30.0, 31.0, 32.0]),
+            "inverse_metric": np.eye(2),
+            "cy_volume": 8.0,
+        }
+        canonical = {
+            "status": "accepted",
+            "point": [1.0, 1.0],
+            "glsm_charge_matrix": [[1, 0, 1], [0, 1, 1]],
+            "prime_divisor_volumes": [1.0, 1.0, 1.0],
+        }
+        starts = [
+            {"start_index": 1, "start_seed": 11, "point": np.asarray([1.0, 1.0])},
+            {"start_index": 2, "start_seed": 12, "point": np.asarray([1.2, 1.2])},
+        ]
+        constraints = {
+            "mass_log10": {"satisfied": True},
+            "prime_divisor_volumes": {"satisfied": True},
+            "qcd_volume": {"satisfied": True},
+            "kaehler_cone": {"satisfied": True},
+        }
+
+        def fake_optimizer(initial_point, **kwargs):
+            return {
+                "converged": True,
+                "status": "converged",
+                "start_index": kwargs["start_index"],
+                "start_seed": kwargs["start_seed"],
+                "constraints": constraints,
+                "residuals": {},
+                "optimized_tensors": values,
+                "_optimized_values": values,
+            }
+
+        args = SimpleNamespace(
+            kaehler_production_starts=2,
+            kaehler_production_optimizer="SLSQP",
+            kaehler_production_ftol=1e-10,
+            kaehler_production_maxiter=10,
+            kaehler_production_mass_tolerance_log10=1e-8,
+            kaehler_production_volume_tolerance=1e-8,
+            gs=0.5,
+            w0_real=1.0,
+            w0_imag=0.0,
+        )
+        topology = {
+            "h11": 2,
+            "kappa": np.zeros((2, 2, 2)),
+            "mori_cone": np.eye(2),
+            "kahler_cone_hyperplanes": np.eye(2),
+        }
+        with patch.object(driver, "extract_topology", return_value=topology), patch.object(
+            driver, "_production_start_points", return_value=(starts, [])
+        ), patch.object(
+            driver,
+            "_production_constrained_kaehler_optimizer",
+            side_effect=fake_optimizer,
+        ):
+            result = driver._production_kaehler_search(
+                FakeTriangulation(), canonical, args, seed=19
+            )
+
+        self.assertEqual(result["finite_search_status"], "completed")
+        self.assertEqual(result["pair_count"], 6)
+        self.assertEqual(result["converged_pair_count"], 6)
+        self.assertEqual(result["deduplication"]["candidate_count"], 12)
+        self.assertEqual(result["deduplication"]["unique_count"], 1)
+        self.assertEqual(result["deduplication"]["duplicate_count"], 11)
+        self.assertEqual(len(result["records"]), 1)
+        self.assertEqual(result["records"][0]["qcd_divisor_domain"], "all_prime")
+        self.assertEqual(result["records"][0]["kaehler_search_mode"], "production")
+
+
 class _Poly:
     def __init__(self, h11):
         self._h11 = h11
