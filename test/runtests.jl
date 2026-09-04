@@ -1964,6 +1964,47 @@ end
                 tau_h11_3[restricted.qcd_divisor_index], restricted.lambda)
         end
     end
+
+    # Tests divisor selection and leading-instanton count against the paper's
+    # hand-worked Sec. 4.2.1 example at the dilated Kahler point.
+    # Mass comparison is deferred: mass_log10_ev_reference is the
+    # instanton-only mass (eq. 3.18), while the paper reports QCD-mixed
+    # physical masses. The fuzzy axion reference mass matches the paper
+    # to 0.18 dex (validated by the companion script), but the QCD axion
+    # reference mass is structurally different from its physical mass.
+    @testset "Sec 4.2.1 h11=2 hand-example structural validation" begin
+        PB_h = CYAxiverse.paper_benchmarks
+
+        Q_h = Int[7 1 1 2 3 0;
+                  2 0 0 0 1 1]
+        tau_h = Float64[312.28056480059246, 34.041122071663615, 34.041122071663615,
+                        68.08224414332723, 139.11972136446443, 36.99635514947357]
+        cy_volume_h = 222.48322433885366
+        inverse_metric_h = Float64[2238.718569786352    -2617.525402950724;
+                                   -2617.525402950724   28440.2666884343]
+        gs_paper = 0.5
+        W0_h = 1.0
+
+        prefactor_P_h = PB_h.fuzzy_axion_prefactor_P(gs_paper)
+        kahler_pot_h = PB_h.fuzzy_axion_kahler_potential(cy_volume_h)
+        superpotential_h = PB_h.fuzzy_axion_flux_superpotential(
+            W0_h, exp.(-2π .* tau_h))
+        gravitino_mass_h = PB_h.fuzzy_axion_gravitino_mass(
+            prefactor_P_h, kahler_pot_h, superpotential_h; mplanck_ev=1.0)
+
+        reference_h = PB_h.leading_axion_reference_data(
+            Q_h, tau_h, cy_volume_h, prefactor_P_h, gravitino_mass_h,
+            inverse_metric_h)
+
+        # Exactly 2 leading axions for h11=2.
+        @test length(reference_h.tau_reference) == 2
+
+        # LQtilde selects column 2 first (D2, charge [1,0]; D3 is identical
+        # but ranked second by stable sortperm, then rejected as linearly
+        # dependent) and column 6 (D6, charge [0,1]).
+        @test reference_h.divisor_index[1] == 2
+        @test reference_h.divisor_index[2] == 6
+    end
 end
 end
 
