@@ -1062,6 +1062,13 @@ KAEHLER_OPTIMIZER_DEFAULT_MAXITER = 200
 KAEHLER_OPTIMIZER_DEFAULT_MASS_TOLERANCE_LOG10 = 1e-7
 KAEHLER_OPTIMIZER_DEFAULT_VOLUME_TOLERANCE = 1e-7
 
+KAEHLER_VOLUME_POLICY = "volume_uniform_hit_and_run"
+KAEHLER_VOLUME_DEFAULT_POINTS = 50
+KAEHLER_VOLUME_DEFAULT_SEED = 42
+KAEHLER_VOLUME_DEFAULT_BURNIN = 100
+KAEHLER_VOLUME_DEFAULT_THIN = 5
+KAEHLER_VOLUME_DEFAULT_RADIUS_FACTOR = 10.0
+
 
 def _fuzzy_axion_mass_log10(
     values,
@@ -2417,6 +2424,224 @@ def _export_kaehler_point(triangulation, *, point_seed=None):
     )
 
 
+def _volume_sample_kaehler_points(
+    kahler_cone,
+    reference_tip,
+    n_points,
+    *,
+    seed=KAEHLER_VOLUME_DEFAULT_SEED,
+    burnin=KAEHLER_VOLUME_DEFAULT_BURNIN,
+    thin=KAEHLER_VOLUME_DEFAULT_THIN,
+    radius_factor=KAEHLER_VOLUME_DEFAULT_RADIUS_FACTOR,
+):
+    """Sample points uniformly from the bounded stretched Kahler cone via hit-and-run.
+
+    The bounded polytope is {t : H*t >= 1} intersected with {||t|| <= R * ||t0||},
+    where H is the Kahler cone hyperplane matrix, t0 is the reference tip, and
+    R is ``radius_factor``.  Hit-and-run picks a random direction at each step,
+    finds the feasible chord, and draws uniformly along it.
+    """
+    H = np.asarray(kahler_cone.hyperplanes(), dtype=float)
+    t0 = np.asarray(reference_tip, dtype=float)
+    h11 = t0.shape[0]
+    rng = np.random.default_rng(seed)
+    R_sq = (radius_factor * np.linalg.norm(t0)) ** 2
+
+    total_steps = burnin + n_points * thin
+    samples = []
+    x = t0.copy()
+
+    for step in range(1, total_steps + 1):
+        d = rng.standard_normal(h11)
+        d /= np.linalg.norm(d)
+
+        Hx = H @ x
+        Hd = H @ d
+
+        lam_lo = -np.inf
+        lam_hi = np.inf
+
+        for i in range(H.shape[0]):
+            if abs(Hd[i]) < 1e-14:
+                continue
+            bound = (1.0 - Hx[i]) / Hd[i]
+            if Hd[i] > 0:
+                lam_lo = max(lam_lo, bound)
+            else:
+                lam_hi = min(lam_hi, bound)
+
+        # Ball constraint: ||x + lam*d||^2 <= R_sq.
+        # Expand: lam^2 + 2*lam*(x.d) + ||x||^2 - R_sq <= 0
+        xd = np.dot(x, d)
+        x_sq = np.dot(x, x)
+        disc = xd * xd - (x_sq - R_sq)
+        if disc > 0:
+            sqrt_disc = math.sqrt(disc)
+            ball_lo = -xd - sqrt_disc
+            ball_hi = -xd + sqrt_disc
+            lam_lo = max(lam_lo, ball_lo)
+            lam_hi = min(lam_hi, ball_hi)
+
+        if lam_lo >= lam_hi:
+            continue
+
+        lam = rng.uniform(lam_lo, lam_hi)
+        x = x + lam * d
+
+        if step > burnin and (step - burnin) % thin == 0:
+            sample_index = len(samples)
+            point_seed_val = int(seed) ^ (sample_index + 1)
+            samples.append(
+                {
+                    "point": x.copy(),
+                    "attempt_index": sample_index + 2,  # 1-indexed; tip is 1
+                    "point_kind": "volume_sample",
+                    "point_seed": point_seed_val,
+                }
+            )
+
+    # Validate all returned points satisfy H*t >= 1 within tolerance
+    for s in samples:
+        slack = H @ s["point"]
+        if np.any(slack < 1.0 - 1e-6):
+            raise ValueError(
+                f"volume sample violates cone constraint: min slack = {slack.min():.8e}"
+            )
+
+    return samples
+
+
+def _export_volume_sampled_kaehler_points(
+    triangulation,
+    *,
+    n_points=KAEHLER_VOLUME_DEFAULT_POINTS,
+    seed=KAEHLER_VOLUME_DEFAULT_SEED,
+    burnin=KAEHLER_VOLUME_DEFAULT_BURNIN,
+    thin=KAEHLER_VOLUME_DEFAULT_THIN,
+    radius_factor=KAEHLER_VOLUME_DEFAULT_RADIUS_FACTOR,
+):
+    """Sample Kahler points via hit-and-run and evaluate each one.
+
+    Returns a list of export records: the canonical tip first, then each
+    volume sample.  This is a diagnostic mode for empirical enrichment
+    characterisation, not a reproduction claim.
+    """
+    cy = triangulation.get_cy()
+    topology = extract_topology(cy, triangulation)
+    kahler_cone = cy.toric_kahler_cone()
+    mosek_license = configure_mosek_license()
+    tip_solver = "cytools-default"
+    if mosek_license["activated"]:
+        try:
+            reference_tip = np.asarray(
+                kahler_cone.tip_of_stretched_cone(1.0, backend="mosek"), dtype=float
+            )
+            tip_solver = "mosek"
+        except Exception:
+            reference_tip = np.asarray(
+                kahler_cone.tip_of_stretched_cone(1.0), dtype=float
+            )
+            tip_solver = "cytools-default-after-mosek-failure"
+    else:
+        reference_tip = np.asarray(
+            kahler_cone.tip_of_stretched_cone(1.0), dtype=float
+        )
+
+    qprime_raw = np.asarray(cy.toric_effective_cone().rays(), dtype=float)
+    qprime, _ = canonicalize_unique_charge_rows(qprime_raw)
+    qprime = np.asarray(qprime, dtype=np.int64)
+    glsm = np.asarray(cy.glsm_charge_matrix(include_origin=False), dtype=int)
+    volume_context = {
+        "volume_backend": "fan",
+        "kappa": topology["kappa"],
+        "glsm_charge_matrix": glsm,
+        "mori_cone": topology["mori_cone"],
+    }
+
+    # Always include the canonical tip as the first record
+    tip_proposal = {
+        "attempt_index": 1,
+        "point_kind": "canonical_tip",
+        "point_seed": int(seed),
+        "solver": tip_solver,
+    }
+    tip_diagnostic, tip_values = evaluate_kaehler_point(
+        cy,
+        kahler_cone,
+        qprime,
+        reference_tip,
+        attempt_index=1,
+        point_kind="canonical_tip",
+        point_seed=int(seed),
+        solver=tip_solver,
+        min_prime_divisor_volume=1.0,
+        min_divisor_volume=1.0,
+        volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
+        enforce_divisor_volume_lower_bounds=False,
+        **volume_context,
+    )
+    tip_provenance = _kaehler_point_provenance(
+        tip_proposal,
+        sampler_policy=KAEHLER_VOLUME_POLICY,
+        sampler_seed=int(seed),
+        attempt_budget=n_points + 1,
+    )
+    records = [
+        _kaehler_export_record(
+            diagnostic=tip_diagnostic,
+            values=tip_values,
+            topology=topology,
+            glsm=glsm,
+            point_provenance=tip_provenance,
+        )
+    ]
+
+    volume_samples = _volume_sample_kaehler_points(
+        kahler_cone,
+        reference_tip,
+        n_points,
+        seed=seed,
+        burnin=burnin,
+        thin=thin,
+        radius_factor=radius_factor,
+    )
+
+    for sample in volume_samples:
+        point = np.asarray(sample["point"], dtype=float)
+        diagnostic, values = evaluate_kaehler_point(
+            cy,
+            kahler_cone,
+            qprime,
+            point,
+            attempt_index=sample["attempt_index"],
+            point_kind=sample["point_kind"],
+            point_seed=sample["point_seed"],
+            solver=tip_solver,
+            min_prime_divisor_volume=1.0,
+            min_divisor_volume=1.0,
+            volume_tolerance=DIVISOR_VOLUME_TOLERANCE,
+            enforce_divisor_volume_lower_bounds=False,
+            **volume_context,
+        )
+        provenance = _kaehler_point_provenance(
+            sample,
+            sampler_policy=KAEHLER_VOLUME_POLICY,
+            sampler_seed=int(seed),
+            attempt_budget=n_points + 1,
+        )
+        records.append(
+            _kaehler_export_record(
+                diagnostic=diagnostic,
+                values=values,
+                topology=topology,
+                glsm=glsm,
+                point_provenance=provenance,
+            )
+        )
+
+    return records
+
+
 def _export_kaehler_points(
     triangulation,
     *,
@@ -2687,17 +2912,24 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
             for record in records
         )
     )
+    volume_sampling_mode = bool(getattr(args, "volume_sampling", False)) or any(
+        record.get("sampler_policy") == KAEHLER_VOLUME_POLICY for record in records
+    )
     convention = {
         "qcd_divisor_domain": args.qcd_divisor_domain,
         "kaehler_point_sampling_policy": (
-            KAEHLER_PRODUCTION_POLICY
+            KAEHLER_VOLUME_POLICY
+            if volume_sampling_mode
+            else KAEHLER_PRODUCTION_POLICY
             if production_search
             else KAEHLER_DIAGNOSTIC_POLICY
             if diagnostic_sampler
             else KAEHLER_CANONICAL_POLICY
         ),
         "kaehler_point_sampling_attempt_budget": (
-            int(
+            int(getattr(args, "volume_sampling_points", KAEHLER_VOLUME_DEFAULT_POINTS)) + 1
+            if volume_sampling_mode
+            else int(
                 getattr(
                     args,
                     "kaehler_production_starts",
@@ -2708,7 +2940,9 @@ def _run_model_stage(records: list[dict], args) -> dict[str, Any]:
             else KAEHLER_DIAGNOSTIC_ATTEMPTS if diagnostic_sampler else 1
         ),
         "kaehler_point_sampling_status": (
-            "finite_production_search"
+            "volume_uniform_hit_and_run_diagnostic"
+            if volume_sampling_mode
+            else "finite_production_search"
             if production_search
             else "bounded_diagnostic_only"
             if diagnostic_sampler
@@ -2900,7 +3134,7 @@ def _legacy_reproduce(args):
     # rows or constructing a CYTools geometry.  The preflight is deliberately
     # mandatory for both bounded and full h11=4/5 invocations.
     population_preflight = run_population_preflight(
-        Path(__file__).resolve().parents[1], args.h11
+        Path(__file__).resolve().parents[1], args.h11, args.parquet_dir
     )
     targets = PAPER_TARGETS_BY_H11.get(args.h11)
     all_records = load_mirror_polytopes(
@@ -2982,6 +3216,7 @@ def _legacy_reproduce(args):
         getattr(args, "production_kaehler_search", False)
         or getattr(args, "kaehler_search_mode", None) == "production"
     )
+    volume_sampling = bool(getattr(args, "volume_sampling", False))
     kaehler_sampler_seed = int(getattr(args, "kaehler_sampler_seed", 0))
     export_kaehler_points = (
         args.export_kaehler_points
@@ -2989,6 +3224,7 @@ def _legacy_reproduce(args):
         or diagnostic_kaehler_sampler
         or diagnostic_kaehler_optimizer
         or production_kaehler_search
+        or volume_sampling
     )
     model_stage_records = [] if args.model_stage else None
     details = []
@@ -3130,6 +3366,21 @@ def _legacy_reproduce(args):
                             "duplicate_count", 0
                         )
                     )
+                elif volume_sampling:
+                    volume_seed = stable_seed(
+                        "fuzzy-axions-volume-sampling",
+                        int(getattr(args, "volume_sampling_seed", KAEHLER_VOLUME_DEFAULT_SEED)),
+                        poly_index,
+                        class_index,
+                    )
+                    point_records = _export_volume_sampled_kaehler_points(
+                        triangulation,
+                        n_points=int(getattr(args, "volume_sampling_points", KAEHLER_VOLUME_DEFAULT_POINTS)),
+                        seed=volume_seed,
+                        burnin=int(getattr(args, "volume_sampling_burnin", KAEHLER_VOLUME_DEFAULT_BURNIN)),
+                        thin=int(getattr(args, "volume_sampling_thin", KAEHLER_VOLUME_DEFAULT_THIN)),
+                        radius_factor=float(getattr(args, "volume_sampling_radius_factor", KAEHLER_VOLUME_DEFAULT_RADIUS_FACTOR)),
+                    )
                 elif diagnostic_kaehler_sampler:
                     point_seed = stable_seed(
                         "fuzzy-axions-h11-4-kaehler-diagnostic",
@@ -3151,7 +3402,7 @@ def _legacy_reproduce(args):
                     point_records = [_export_kaehler_point(triangulation)]
                 kaehler_export_per_class.append(
                     point_records
-                    if diagnostic_kaehler_sampler or production_kaehler_search
+                    if diagnostic_kaehler_sampler or production_kaehler_search or volume_sampling
                     else point_records[0]
                 )
                 kaehler_export_attempted_count += len(point_records)
@@ -3178,6 +3429,7 @@ def _legacy_reproduce(args):
                                     "cy_volume": record["cy_volume"],
                                     "inverse_metric": record["inverse_metric"],
                                     "point_provenance": record.get("point_provenance"),
+                                    "sampler_policy": record.get("sampler_policy"),
                                     "qcd_divisor_domain": record.get(
                                         "qcd_divisor_domain", args.qcd_divisor_domain
                                     ),
@@ -4923,6 +5175,21 @@ def _parse_args(argv=None):
             "derived deterministically from this value and global indices."
         ),
     )
+    parser.add_argument(
+        "--volume-sampling",
+        action="store_true",
+        help=(
+            "Sample uniformly from the bounded stretched Kahler cone via "
+            "hit-and-run. Produces multiple Kahler points per accepted FRST "
+            "class for empirical enrichment characterization. This is a "
+            "diagnostic mode, not a reproduction claim."
+        ),
+    )
+    parser.add_argument("--volume-sampling-points", type=int, default=KAEHLER_VOLUME_DEFAULT_POINTS)
+    parser.add_argument("--volume-sampling-seed", type=int, default=KAEHLER_VOLUME_DEFAULT_SEED)
+    parser.add_argument("--volume-sampling-burnin", type=int, default=KAEHLER_VOLUME_DEFAULT_BURNIN)
+    parser.add_argument("--volume-sampling-thin", type=int, default=KAEHLER_VOLUME_DEFAULT_THIN)
+    parser.add_argument("--volume-sampling-radius-factor", type=float, default=KAEHLER_VOLUME_DEFAULT_RADIUS_FACTOR)
     parser.add_argument("--model-stage", action="store_true")
     parser.add_argument("--gs", type=float, default=0.5)
     parser.add_argument("--w0-real", type=float, default=1.0)
@@ -4990,6 +5257,22 @@ def _parse_args(argv=None):
             parser.error(
                 "--kaehler-production-volume-tolerance must be non-negative"
             )
+    if args.volume_sampling:
+        args.model_stage = True
+        args.export_kaehler_points = True
+        args.keep_details = True
+        if args.production_kaehler_search:
+            parser.error("volume sampling cannot be combined with production Kahler search")
+        if args.sample_kaehler_points:
+            parser.error("volume sampling cannot be combined with diagnostic sampling")
+        if args.volume_sampling_points < 1:
+            parser.error("--volume-sampling-points must be positive")
+        if args.volume_sampling_burnin < 0:
+            parser.error("--volume-sampling-burnin must be non-negative")
+        if args.volume_sampling_thin < 1:
+            parser.error("--volume-sampling-thin must be positive")
+        if args.volume_sampling_radius_factor <= 1.0:
+            parser.error("--volume-sampling-radius-factor must be > 1.0")
     if args.orientifold_audit and args.output is None and args.terminal_ledger is None:
         parser.error("--orientifold-audit requires --terminal-ledger when --output is absent")
     if args.output is not None and args.output.exists():

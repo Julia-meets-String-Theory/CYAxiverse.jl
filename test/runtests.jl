@@ -1971,6 +1971,42 @@ end
 end
 end
 
+@testset "Fuzzy-axion h11=2 source-corrected role validation" begin
+    PB = CYAxiverse.paper_benchmarks
+    # Literal values from validation/fuzzy_axions_supp/h11_2_reference_export.json.
+    Q = Int[7 1 1 2 3 0; 2 0 0 0 1 1]
+    tau = Float64[312.28056480059246, 34.041122071663615, 34.041122071663615,
+        68.08224414332723, 139.11972136446443, 36.99635514947357]
+    cy_volume = 222.48322433885366
+    inverse_metric = Float64[2238.718569786352 -2617.525402950724;
+        -2617.525402950724 28440.2666884343]
+    w0 = 1.0
+    gs = 0.5029733
+    prefactor = PB.fuzzy_axion_prefactor_P(gs)
+    kahler_potential = PB.fuzzy_axion_kahler_potential(cy_volume)
+    gravitino_mass = PB.fuzzy_axion_gravitino_mass(
+        prefactor, kahler_potential, w0; mplanck_ev=1.0)
+    reference = PB.leading_axion_reference_data(
+        Q, tau, cy_volume, prefactor, gravitino_mass, inverse_metric)
+
+    # Paper Sec. 4.2.1: D2 is fuzzy and D6 is QCD. Only D2 uses the
+    # selector's stringy mass; the D6 quoted mass uses Eq. 2.6 below.
+    @test reference.divisor_index == [2, 6]
+    fuzzy_slot, qcd_slot = 1, 2
+    @test reference.divisor_index[fuzzy_slot] == 2
+    @test reference.divisor_index[qcd_slot] == 6
+    @test fuzzy_slot != qcd_slot
+    stringy_fuzzy_mass_ev = 10.0 ^ reference.mass_log10_ev_reference[fuzzy_slot]
+    @test abs(log10(stringy_fuzzy_mass_ev / 5.0e-20)) <= 0.5
+
+    # Eq. 2.6: m_QCD(T=0) = 5.7e-10 eV * (1e16 GeV / f_QCD).
+    f_qcd_gev = 3.2e15
+    qcd_mass_ev = 5.7e-10 * (1.0e16 / f_qcd_gev)
+    @test isapprox(qcd_mass_ev, 1.8e-9; rtol=0.02)
+    stringy_qcd_mass_ev = 10.0 ^ reference.mass_log10_ev_reference[qcd_slot]
+    @test abs(log10(qcd_mass_ev / stringy_qcd_mass_ev)) > 10.0
+end
+
 @testset "HP spectrum: one-axion analytic mass" begin
     # V = 10^-20 * (1 - cos(3θ)); second instanton is exactly absent.
     K = Hermitian(reshape([4.0], 1, 1))

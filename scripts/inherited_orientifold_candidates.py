@@ -1161,7 +1161,7 @@ def _sublattice_is_saturated(generators):
 
 
 def _surface_divisor_intersection(left, right, rays, cones):
-    """Intersect two toric divisors on a smooth complete surface fan."""
+    """Intersect two toric divisors on a complete surface fan."""
 
     left = {tuple(ray): value for ray, value in left.items()}
     right = {tuple(ray): value for ray, value in right.items()}
@@ -1182,24 +1182,33 @@ def _surface_divisor_intersection(left, right, rays, cones):
         next_denominator = _exact_determinant(
             np.column_stack((current, following))
         )
-        if abs(denominator) != 1 or abs(next_denominator) != 1:
-            raise ValueError("surface fan contains a non-smooth two-cone")
-        self_intersection = -_exact_determinant(
-            np.column_stack((previous, following))
+        if denominator == 0 or next_denominator == 0:
+            raise ValueError("surface fan contains a degenerate two-cone")
+        # Orbifold self-intersection: Fulton Ch. 2, Cox-Little-Schenck Thm. 10.5.4
+        self_intersection = Fraction(
+            -_exact_determinant(np.column_stack((previous, following))),
+            denominator * next_denominator,
         )
         result += self_intersection * left[ray] * right[ray]
         if frozenset((ray, next_ray)) not in cone_set:
             raise ValueError("surface fan is not complete around a ray")
-        result += left[ray] * right[next_ray]
-        result += left[next_ray] * right[ray]
+        cross = Fraction(1, abs(next_denominator))
+        result += cross * left[ray] * right[next_ray]
+        result += cross * left[next_ray] * right[ray]
     return result
 
 
 def _ambient_cartier_data(ambient_cone, divisor_point):
-    """Return the local support function for one ambient toric divisor."""
+    """Return the local support function for one ambient toric divisor.
+
+    On a non-unimodular simplicial cone the support function has rational
+    entries with denominators dividing the cone multiplicity.  The downstream
+    n_S formula handles rational intermediates; integrality of the final
+    result is checked separately.
+    """
 
     rays = np.asarray(ambient_cone, dtype=int)
-    if rays.shape != (4, 4) or abs(_exact_determinant(rays)) != 1:
+    if rays.shape != (4, 4) or _exact_determinant(rays) == 0:
         return None
     target = np.asarray(
         [-int(np.array_equal(ray, divisor_point)) for ray in rays], dtype=int
@@ -2200,11 +2209,11 @@ def _general_fixed_surface_n_s_table(
                 break
             if any(
                 len(ambient) != 4
-                or abs(_exact_determinant(np.asarray(ambient, dtype=int))) != 1
+                or _exact_determinant(np.asarray(ambient, dtype=int)) == 0
                 for ambient in ambient_cones
             ):
                 failure_code = "non_smooth_ambient_cone"
-                failure_reason = "a containing ambient cone is not a smooth unimodular four-cone"
+                failure_reason = "a containing ambient cone is degenerate (zero determinant) or not four-dimensional"
                 break
             for ambient in ambient_cones:
                 ambient_key = tuple(
@@ -2314,7 +2323,7 @@ def _general_fixed_surface_n_s_table(
             message = str(exc)
             reason_code = (
                 "non_smooth_surface_fan"
-                if "non-smooth" in message
+                if "non-smooth" in message or "degenerate" in message
                 else "incomplete_quotient_surface_fan"
             )
             record_surface_reason(sigma_rays, sigma_dimension, reason_code, message)
@@ -2374,11 +2383,7 @@ def _general_fixed_surface_n_s_table(
                                         difference, ambient_ray
                                     )
                                 ) / boundary_scales[quotient_ray]
-                                if coefficient.q != 1:
-                                    raise ValueError(
-                                        "non-integral restricted Cartier coefficient"
-                                    )
-                                coefficient = Fraction(int(coefficient))
+                                coefficient = _exact_fraction(coefficient)
                                 previous = coefficients.get(quotient_ray)
                                 if previous is not None and previous != coefficient:
                                     raise ValueError(
@@ -2421,7 +2426,7 @@ def _general_fixed_surface_n_s_table(
                 reason_code = "inconsistent_restricted_cartier_data"
             elif "missing" in message or "incomplete" in message:
                 reason_code = "missing_restricted_cartier_data"
-            elif "non-smooth" in message:
+            elif "degenerate" in message:
                 reason_code = "non_smooth_surface_fan"
             else:
                 reason_code = "missing_restricted_cartier_data"

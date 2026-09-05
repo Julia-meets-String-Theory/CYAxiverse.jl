@@ -25,6 +25,34 @@ replay = driver
 
 
 class ReproduceFuzzyAxionsDriverTest(unittest.TestCase):
+    def test_legacy_preflight_receives_caller_selected_parquet_dir(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            args = driver._parse_args(
+                ["--parquet-dir", str(source), "--h11", "4", "--limit", "0"]
+            )
+            preflight = {"status": "passed", "source_contract": {}}
+            with patch.object(
+                driver, "run_population_preflight", return_value=preflight
+            ) as mocked_preflight, patch.object(
+                driver, "load_mirror_polytopes", return_value=[]
+            ):
+                summary = driver._legacy_reproduce(args)
+
+        mocked_preflight.assert_called_once_with(
+            driver._repository_root(), 4, str(source)
+        )
+        self.assertEqual(summary["population_preflight"], preflight)
+
+    def test_population_preflight_preserves_unsupported_h11_behavior(self):
+        self.assertIsNone(
+            driver.run_population_preflight(
+                Path("/unavailable/repository"),
+                2,
+                Path("/unavailable/parquet-source"),
+            )
+        )
+
     def test_known_table_population_requires_matching_favorable_count(self):
         complete = driver._population_completion_status(2, 36)
         self.assertTrue(complete["complete"])
