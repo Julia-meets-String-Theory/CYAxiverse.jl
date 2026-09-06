@@ -1401,12 +1401,18 @@ def _candidate_terminal_status(exc):
 
 def _triangulation_hashes(triangulation):
     """Return full and two-face identities without retaining live CYTools data."""
-    full_hash = stable_hash(np.asarray(triangulation.simplices()).tolist())
+    full_simplices = sorted(
+        tuple(int(v) for v in row)
+        for row in np.asarray(triangulation.simplices()).tolist()
+    )
+    full_hash = stable_hash(full_simplices)
     two_face_hash = None
     try:
-        two_face_hash = stable_hash(
-            np.asarray(triangulation.simplices(on_faces_dim=2), dtype=object).tolist()
+        two_face_simplices = sorted(
+            tuple(int(v) for v in row)
+            for row in np.asarray(triangulation.simplices(on_faces_dim=2), dtype=object).tolist()
         )
+        two_face_hash = stable_hash(two_face_simplices)
     except Exception:
         pass
     return full_hash, two_face_hash
@@ -3659,10 +3665,9 @@ def triangulation_candidates(
 ):
     """Yield bounded FRST candidates with an explicit sampling contract.
 
-    ``ntfe_fast`` draws fine 2-face triangulations and uses CYTools' direct
-    NTFE extension algorithm.  It avoids repeatedly constructing CY data for
-    FRSTs that differ only away from the two-faces, but its finite 2-face pools
-    define a deliberately restricted, non-uniform proposal distribution.
+    ``ntfe_fast`` pre-computes per-face FRTs (respecting ``max_npts``), derives
+    CPL inequalities, then uses DFS enumeration with incremental LP pruning to
+    find feasible NTFE combinations.  Yields up to ``max_tip_attempts`` NTFEs.
     Schema 1.1 permits only the package-native ``ntfe_frts`` path with the
     ``fast`` two-face sampler.  Learned/GNN proposals are intentionally not
     exposed by this generator.
@@ -3692,31 +3697,33 @@ def triangulation_candidates(
             raise ValueError("schema 1.1 ntfe_fast requires triang_method='fast'")
         if not ntfe_as_generator:
             raise ValueError("schema 1.1 ntfe_fast requires as_generator=True")
-        yield from poly.ntfe_frts(
-            N=max_tip_attempts,
-            make_star=True,
-            seed=seed,
+        face_triangs = poly.face_triangs(
+            dim=2,
+            only_regular=True,
             max_npts=ntfe_max_face_points,
             N_face_triangs=ntfe_face_pool_size,
             triang_method="fast",
-            as_generator=True,
-            backend=backend,
-            verbosity=0,
-        )
-        return
-
-    if sampling_scheme == "ntfe_fast":
-        yield from poly.ntfe_frts(
-            N=max_tip_attempts,
-            make_star=True,
             seed=seed,
-            max_npts=ntfe_max_face_points,
-            N_face_triangs=ntfe_face_pool_size,
-            triang_method=ntfe_face_sampler,
+            verbosity=0,
+        )
+        face_ineqs = poly.triangface_ineqs(
+            face_triangs=face_triangs,
+            require_star=False,
+            verbosity=0,
+        )
+        count = 0
+        for frst in poly.ntfe_frts(
+            N=None,
+            face_ineqs=face_ineqs,
+            make_star=True,
             as_generator=True,
             backend=backend,
             verbosity=0,
-        )
+        ):
+            yield frst
+            count += 1
+            if count >= max_tip_attempts:
+                break
         return
 
     if sampling_scheme == "gnn_ntfe":

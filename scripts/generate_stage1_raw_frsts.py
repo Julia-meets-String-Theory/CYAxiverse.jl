@@ -31,7 +31,7 @@ from glimmers_raw_frst import (
     compute_triangulation_hash,
     write_raw_frst_artifact,
 )
-from glimmers_schema11 import atomic_json_dump, atomic_jsonl_dump, ensure_fresh_output_root
+from glimmers_schema11 import atomic_json_dump, atomic_jsonl_dump, ensure_fresh_output_root, stable_seed
 
 
 APPROVED_PLAN = {50: 500, 100: 500, 200: 300, 491: 100}
@@ -454,7 +454,7 @@ def collect_raw_frsts_for_polytope(
         proposal_budget,
         arguments.retry_budget,
         arguments.backend,
-        arguments.seed + h11 + polytope_index,
+        stable_seed("stage1-triangulation-candidate", arguments.seed, h11, polytope_index),
         None,
         None,
         None,
