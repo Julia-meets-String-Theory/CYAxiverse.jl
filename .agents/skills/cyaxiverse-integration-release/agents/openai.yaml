@@ -1,0 +1,4 @@
+interface:
+  display_name: "CYAxiverse Integration & Release"
+  short_description: "Integrate approved work with release gates"
+  default_prompt: "Use $cyaxiverse-integration-release to prepare this CYAxiverse branch for integration."

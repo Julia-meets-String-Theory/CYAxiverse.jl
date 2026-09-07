@@ -6,10 +6,35 @@ jlm_python/one_dim_phase_fraction.py
 .DS_Store
 /scripts/__pycache__/
 
-# Local AI agent configuration and skills
-/.agents/
-/.codex/
-/.claude/
+# Local AI tooling and personal agent state. The five tracked CYAxiverse skills
+# and their Claude/Codex symlinks are explicit exceptions below.
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/cyaxiverse-julia-quality/
+!/.agents/skills/cyaxiverse-scientific-reproduction/
+!/.agents/skills/cyaxiverse-ks-geometry-sampling/
+!/.agents/skills/cyaxiverse-vacua-pipeline/
+!/.agents/skills/cyaxiverse-integration-release/
+
+/.codex/*
+!/.codex/skills/
+/.codex/skills/*
+!/.codex/skills/cyaxiverse-julia-quality
+!/.codex/skills/cyaxiverse-scientific-reproduction
+!/.codex/skills/cyaxiverse-ks-geometry-sampling
+!/.codex/skills/cyaxiverse-vacua-pipeline
+!/.codex/skills/cyaxiverse-integration-release
+
+/.claude/*
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/cyaxiverse-julia-quality
+!/.claude/skills/cyaxiverse-scientific-reproduction
+!/.claude/skills/cyaxiverse-ks-geometry-sampling
+!/.claude/skills/cyaxiverse-vacua-pipeline
+!/.claude/skills/cyaxiverse-integration-release
+
 /.cursor/
 /.gemini/
 /.windsurf/
@@ -18,17 +43,14 @@ jlm_python/one_dim_phase_fraction.py
 /.roo/
 /.kiro/
 /.amazonq/
-/CLAUDE.md
 /GEMINI.md
 /COPILOT.md
 /.github/agents/
 /.github/instructions/
 /.github/skills/
-/.github/copilot-instructions.md
+
+# Validation artifacts are normally local unless explicitly allow-listed.
 /validation/*
 !/validation/orientifold_exact_action_formula_ledger_20260822.md
 !/validation/mpcp_refinement_ledger_20260823.md
 !/validation/orientifold_unaffected_projection_ledger_20260824.md
-.copilot/
-CLAUDE.md
-AGENTS.md

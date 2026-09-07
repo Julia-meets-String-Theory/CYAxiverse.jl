@@ -1,0 +1,4 @@
+interface:
+  display_name: "CYAxiverse Julia Quality"
+  short_description: "Safeguard Julia numerical code quality"
+  default_prompt: "Use $cyaxiverse-julia-quality to implement and verify this CYAxiverse Julia change."

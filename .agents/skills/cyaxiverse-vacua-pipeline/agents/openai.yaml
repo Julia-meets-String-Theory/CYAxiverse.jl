@@ -1,0 +1,4 @@
+interface:
+  display_name: "CYAxiverse Vacua Pipeline"
+  short_description: "Build auditable vacuum data pipelines"
+  default_prompt: "Use $cyaxiverse-vacua-pipeline to safely implement this CYAxiverse minima pipeline change."
