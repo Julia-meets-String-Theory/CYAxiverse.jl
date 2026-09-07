@@ -1,0 +1,4 @@
+interface:
+  display_name: "CYAxiverse Scientific Reproduction"
+  short_description: "Reproduce science with scope control"
+  default_prompt: "Use $cyaxiverse-scientific-reproduction to reproduce this CYAxiverse result with complete provenance."

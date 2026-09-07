@@ -1,0 +1,4 @@
+interface:
+  display_name: "CYAxiverse KS Sampling"
+  short_description: "Benchmark defensible geometry sampling"
+  default_prompt: "Use $cyaxiverse-ks-geometry-sampling to investigate this CYTools sampling workflow."

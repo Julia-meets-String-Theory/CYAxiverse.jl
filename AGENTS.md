@@ -1,82 +1,123 @@
-# CYAxiverse.jl Codex Agent Instructions
+# CYAxiverse.jl Agent Contract
 
-Policy version: 2026-08-23. Treat this file as the canonical routing and
-safety policy for every agent. Read both required supplemental instruction
-files below; read only additional skills or handoffs that match the request.
+This file is the canonical repository instruction set for AI coding agents.
+Tool-specific adapters may point here, but must not redefine project policy.
+Read additional skills or handoffs only when they are relevant to the task.
 
-Before planning or carrying out any work in this repository, read and follow
-both of these repository instruction files:
+## 1. Work safely
 
-- `.copilot/AGENTS.md`
-- `.github/copilot-instructions.md`
+- Inspect the current branch and working tree before editing. Preserve unrelated
+  user changes; do not reset, clean, stash, switch branches, or overwrite work
+  unless the user explicitly authorizes it.
+- Keep changes scoped to the requested deliverable. Do not silently expand a
+  bug fix into a redesign or a scientific investigation into a new model.
+- Ordinary durable state belongs in Git: issue (when useful), branch, commits,
+  PR, tests, and concise PR notes. Use long continuation handoffs only for
+  genuinely long investigations or context-compaction boundaries.
+- Prefer one branch/worktree per deliverable. Subagents normally work toward
+  the same deliverable; do not create a new branch/worktree for every reasoning
+  step.
 
-Treat those files as normative supplemental instructions for all Codex agents
-and delegated subagents working in this repository. In particular, Julia
-commands for CYAxiverse.jl package development must run directly in the
-regular local host environment, not in a sandbox, container, Docker image, or
-other isolated environment. If the execution tool defaults to a sandbox,
-request approved local/unsandboxed execution before running Julia.
+## 2. Environment and verification
 
-## Generative AI contribution policy
+- Target Julia 1.12 as declared by the project and CI.
+- For local package development, run Julia in the regular host environment,
+  not in Docker or an isolated sandbox that changes filesystem, Python, BLAS,
+  or database behavior. Repository CI remains the clean-checkout gate.
+- Use `scripts/agent_verify.py` as the compact verification entry point when
+  applicable:
+  - `python3 scripts/agent_verify.py snapshot`
+  - `python3 scripts/agent_verify.py diff-check`
+  - `python3 scripts/agent_verify.py run -- <focused-command>`
+  - `python3 scripts/agent_verify.py package`
+- Run focused checks first, then the broader package/audit/docs checks required
+  by the change. Report commands actually run, exit status, observed result,
+  warnings, and unavailable checks. Never claim a check from expected output or
+  source comments alone.
 
-Every AI coding tool used against this repository — Codex, Claude Code,
-GitHub Copilot, or any other agent — and every contributor directing one
-must follow `AI_POLICY.md`. It is normative for all agents equally; no
-tool is exempt. In particular, label your own commits with a
-`Co-Authored-By:` trailer (or your tool's equivalent) rather than
-submitting AI-assisted work unlabelled, and do not alter or bypass
-existing tests to force a pass.
+## 3. Julia and persisted-data invariants
 
-## Persistent coding workflow
+- Preserve precision intentionally. Do not force `Float64` through existing
+  high-precision, exact-rational, `BigInt`, or `ArbFloat` paths.
+- Keep numerical hot paths type-stable and avoid unnecessary allocations;
+  preserve sparse handling of large intersection data.
+- Validate reader/writer boundaries for shape, orientation, units, identity,
+  and schema. Preserve established HDF5 paths and compression (`deflate=9`)
+  unless a reviewed schema change requires otherwise.
+- Keep Python/CYTools optional for core Julia package import. Do not make
+  `using CYAxiverse` depend on a live Python object or an optional scientific
+  environment.
+- Physical-domain checks apply where the mathematical object is required to be
+  physical. In particular, Kähler volumes and kinetic metrics must satisfy the
+  applicable domain constraints. Do not impose positivity on Hessian/mass
+  directions when the code is intentionally studying saddles or tachyonic
+  modes; preserve the distinction between physical minima and diagnostic
+  critical points.
 
-- Apply the Code Foundations workflow from `https://github.com/ryanthedev/code-foundations` to every coding task in this repository.
-- For non-trivial work, clarify the requirement, identify the affected scope, write an implementation plan, and map each requirement to verification before editing.
-- Keep implementation changes scoped. Preserve unrelated working-tree changes, avoid destructive Git operations, and stop before expanding into an unrequested feature.
-- Verify each coherent change with focused checks, then run the applicable package tests and review the final diff for correctness, scope, and whitespace errors.
-- Report the exact verification commands and their observed outcomes, including warnings and any checks that could not run.
-- For read-only audits or explanations, do not edit files, switch branches, or run expensive tests unless the user requests them.
-- Preserve a dirty worktree. Do not switch branches, create a branch, reset, clean, stash, commit, or overwrite user-owned changes unless the user explicitly authorizes that action.
+## 4. Scientific claim boundary
 
-## Evidence and claim contract
+For scientific, numerical, sampling, benchmark, or persisted-data changes:
 
-- Label substantive claims as `source fact`, `implementation fact`,
-  `empirical verification`, `owner-approved extension`, or `inference`.
-- For scientific, numerical, or persisted-data changes, record the source
-  identity, selection filters, counting unit, units, witness/action identity,
-  schema version, code revision, and environment revision.
-- Validate in order: analytic or synthetic fixture, named source fixture,
-  bounded end-to-end replay, then population execution. Stop when an earlier
-  gate fails.
-- Never report a verification unless the command completed and its output was
-  inspected. Report the exact command, exit status, observed result, warnings,
-  and unavailable checks.
-- Treat expected counts as gates only when they are source-verified. Equal
-  aggregate counts do not prove equal populations; require a bidirectional
-  membership or witness comparison.
+- Distinguish source facts, implementation facts, empirical verification,
+  owner-approved extensions, and inference.
+- Record enough identity to replay the result: source/revision, selection
+  route, counting unit, geometry/witness identity, units, schema, code revision,
+  and relevant environment/tool versions.
+- Validate progressively: analytic/synthetic fixture -> named source fixture ->
+  bounded replay -> population execution. Stop when an earlier gate fails.
+- Expected aggregate counts are gates only when source-verified. Matching
+  counts do not establish matching populations; compare identities/witnesses
+  when equality of populations matters.
+- Do not promote finite, filtered, provisional, homotopy-only, or structurally
+  complete results into population-level or physical claims without the
+  required evidence and scientific-owner approval.
+- Stop for owner direction before changing a physical normalization, scientific
+  acceptance criterion, mass/tachyon interpretation, basis convention,
+  reported observable, population definition, or scientific schema when the
+  intended convention is ambiguous.
 
-## Always-on project skill
+## 5. Tests, compatibility, and version impact
 
-- At the start of every new Codex run in this project, read and apply `.codex/skills/i-have-adhd/SKILL.md` before responding or acting.
-- Keep the `i-have-adhd` output mode active for every response in this project. It may be disabled only when the user says `stop adhd mode` or `normal mode`; a new chat starts with it enabled again.
+- Add regression coverage appropriate to the changed layer. Julia changes often
+  belong in `test/`; Python/CYTools tooling may require its existing Python test
+  harness instead. Do not alter or bypass tests merely to force a pass.
+- Preserve compatibility unless the task intentionally changes a public API,
+  reader/writer contract, persisted schema, supported environment, or scientific
+  behavior. State any intentional compatibility break explicitly.
+- `Project.toml` is the package version source of truth. Feature branches state
+  version impact but normally do not bump it. Apply the reviewed release bump at
+  the `vmm -> main` integration boundary. Keep scientific artifact/schema
+  versions separate from the package version.
 
-## Versioning and release policy
+## 6. Git, PRs, and agent delegation
 
-- Treat the `version` field in `Project.toml` as the package version source of truth. Use three-part SemVer and release tags of the form `vMAJOR.MINOR.PATCH`; do not create tags such as `v-0.1`.
-- Before `1.0.0`, use Julia's package-versioning convention: increment the patch number for compatible bug fixes and the minor number for breaking changes. After `1.0.0`, breaking changes require a major-version increment and new public API requires a minor-version increment.
-- Before changing package implementation code, classify the version impact. A major development includes a public API change, a reader/writer or persisted-data contract change, a required Julia or dependency support change, or a scientific behavior change that can alter published results.
-- Feature branches and worktrees must state their version impact but should not independently bump `Project.toml`; parallel branches must not all claim the same release version. Apply the actual bump on the reviewed integration or release boundary, normally the `vmm` to `main` release PR. At that boundary, use at least a patch bump for a compatible behavior change and a minor bump for a breaking change while the package is below `1.0.0`.
-- Keep scientific artifact and database schema versions separate from the package version. Record those schema versions, the package version, the source commit, Julia version, dependency manifest, and relevant external-tool versions in generated artifacts when possible.
-- In the final handoff, state the version impact and whether the bump is included or deferred to the release boundary. The release pull-request version check enforces the final bump; TagBot remains responsible for creating release tags after registration.
+- Prefer an issue for work that benefits from a durable problem statement,
+  acceptance criteria, or backlog visibility. Tiny fixes do not require one.
+- Create a focused branch from the intended base before implementation.
+- Opening a draft PR relatively early is useful when you want CI, a stable
+  review URL, or visibility into the evolving diff. Otherwise open the PR once
+  the first coherent change exists. Mark it ready only after the deliverable
+  and required verification are complete.
+- The main agent owns scope, scientific interpretation, integration, final diff
+  review, PR state, and handoff. Delegate to a subagent only when bounded
+  implementation, parallel investigation, or independent verification has real
+  value.
+- AI-assisted commits should retain an appropriate `Co-Authored-By:` trailer
+  when the tool authors the commit. The human submitter remains responsible for
+  reviewing the contribution.
 
-## Data file creation
-- Use maximum compression for generated machine-readable data: `deflate=9`
-  for HDF5 and `zstd -19` for JSON or JSONL artifacts.
-- Human-readable Markdown handoffs are exempt when readability is required.
-- If compression is inappropriate, state the reason and request permission for
-  a lower-compression or uncompressed artifact.
+## 7. Project skills
 
-## git practices
-- use github best practices (sources below) for commits, pushes, PRs, etc
-  - https://dev.to/_d7eb1c1703182e3ce1782/git-workflow-best-practices-the-developers-guide-for-2026-4gl0
-  - https://www.jamesrossjr.com/blog/github-best-practices
-  - https://docs.github.com/en/repositories/creating-and-managing-repositories/best-practices-for-repositories (upto and including "Work with files" section)
+Project-specific reusable workflows live under `.agents/skills/` and are
+mirrored to tool-specific skill directories by tracked symlinks. Use only the
+skill relevant to the task; they are not mandatory pre-reading for every run:
+
+- `cyaxiverse-julia-quality`
+- `cyaxiverse-scientific-reproduction`
+- `cyaxiverse-ks-geometry-sampling`
+- `cyaxiverse-vacua-pipeline`
+- `cyaxiverse-integration-release`
+
+Generic/personal skills, plugin settings, permissions, response-style
+preferences, and experimental agent tooling are local user configuration, not
+repository policy.
