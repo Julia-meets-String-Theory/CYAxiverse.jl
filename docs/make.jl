@@ -1,8 +1,6 @@
 push!(LOAD_PATH,"../src/")
 using Documenter
-using CairoMakie
 using CYAxiverse
-using ColorSchemes
 
 makedocs(
     sitename = "CYAxiverse.jl",
@@ -25,10 +23,7 @@ makedocs(
     ]
 )
 
-# Documenter can also automatically deploy documentation to gh-pages.
-# See "Hosting Documentation" and deploydocs() in the Documenter manual
-# for more information.
-if get(ENV, "CI", "false") == "true"
+if get(ENV, "DOCS_DEPLOY", "false") == "true"
     deploydocs(
         branch = "gh-pages",
         repo = "github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
