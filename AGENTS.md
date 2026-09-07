@@ -94,10 +94,10 @@ For scientific, numerical, sampling, benchmark, or persisted-data changes:
 - Prefer an issue for work that benefits from a durable problem statement,
   acceptance criteria, or backlog visibility. Tiny fixes do not require one.
 - Create a focused branch from the intended base before implementation.
-- Open a draft PR early when CI, visibility, collaboration, or a reviewable
-  evolving diff is useful. Otherwise open the PR once the first coherent change
-  exists. Mark it ready only after the deliverable and required verification are
-  complete.
+- Opening a draft PR relatively early is useful when you want CI, a stable
+  review URL, or visibility into the evolving diff. Otherwise open the PR once
+  the first coherent change exists. Mark it ready only after the deliverable
+  and required verification are complete.
 - The main agent owns scope, scientific interpretation, integration, final diff
   review, PR state, and handoff. Delegate to a subagent only when bounded
   implementation, parallel investigation, or independent verification has real
