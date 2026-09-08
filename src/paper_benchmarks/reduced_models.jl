@@ -13,7 +13,7 @@ end
 The eight-term, five-axion potential in Eqs. (32)--(39) of the inflation
 draft. The returned fields are `Q`, `L`, and `qdotτ`.
 """
-function n5_potential(; k::Real=1.0)
+function n5_potential(; k::Real=1.0, phases=nothing)
     charges = Int[
         1 0 0 0 0
         0 0 0 0 1
@@ -25,8 +25,11 @@ function n5_potential(; k::Real=1.0)
         7 5 -3 3 2
     ]
     qdotτ = Float64[6, 6.25, 24, 26, 31.875, 32, 36.125, 162.125]
+    phase = phases === nothing ? zeros(length(qdotτ)) : Float64.(phases)
+    length(phase) == length(qdotτ) ||
+        throw(DimensionMismatch("one phase is required per instanton"))
     (; Q=Matrix(charges'), L=instanton_scales(qdotτ, k), qdotτ,
-       coefficient_model=:leading_diagonal_terms)
+       phases=phase, coefficient_model=:leading_diagonal_terms)
 end
 
 """
@@ -34,7 +37,7 @@ end
 
 The twelve-term, eight-axion potential in Table 1 of the inflation draft.
 """
-function _n8_potential(; k::Real=1.0)
+function _n8_potential(; k::Real=1.0, phases=nothing)
     charges = Int[
         -1  1  1  0  0  0  0  1
          0  0  0  1  0  0  0  0
@@ -50,13 +53,17 @@ function _n8_potential(; k::Real=1.0)
          1  0  0  0  0  0  0  0
     ]
     qdotτ = Float64[14, 14.5, 14.5, 15.5, 15.5, 15.5, 15.5, 16, 17, 17, 25, 45]
+    phase = phases === nothing ? zeros(length(qdotτ)) : Float64.(phases)
+    length(phase) == length(qdotτ) ||
+        throw(DimensionMismatch("one phase is required per instanton"))
     (; Q=Matrix(charges'), L=instanton_scales(qdotτ, k), qdotτ,
-       coefficient_model=:leading_diagonal_terms)
+       phases=phase, coefficient_model=:leading_diagonal_terms)
 end
 
-function n8_potential(; k::Real=1.0, trajectory::Bool=false)
-    trajectory && return author_inflation.n8_potential(k=k, trajectory=true)
-    _n8_potential(k=k)
+function n8_potential(; k::Real=1.0, trajectory::Bool=false, phases=nothing)
+    trajectory && return author_inflation.n8_potential(
+        k=k, trajectory=true, phases=phases)
+    _n8_potential(k=k, phases=phases)
 end
 
 """
@@ -66,10 +73,11 @@ Complete equation-(19) potential from the 12 diagonal and 66 cross terms.
 The `:full` convention scales the Calabi--Yau volume as `k^(3/2)`;
 `:fixed` retains the reference volume for the explicit prefactor.
 """
-function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full)
+function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full,
+        phases=nothing)
     volume_normalization in (:full, :fixed) ||
         throw(ArgumentError("volume_normalization must be :full or :fixed"))
-    diagonal = _n8_potential(k=k)
+    diagonal = _n8_potential(k=k, phases=phases)
     qprime = Matrix{Int}(diagonal.Q')
     geometry = n8_geometry()
     tau = Float64(k) .* geometry.divisor_volumes
@@ -94,8 +102,14 @@ function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full)
     for (column, charge) in enumerate(charges)
         qmatrix[:, column] = charge
     end
+    diagonal_phases = diagonal.phases
+    cross_phases = [
+        diagonal_phases[j] - diagonal_phases[i]
+        for i in 1:(size(qprime, 1) - 1), j in (i + 1):size(qprime, 1)
+    ]
     (; Q=qmatrix, L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
-       volume, volume_normalization, diagonal_count=12, cross_count=66)
+       phases=vcat(diagonal_phases, cross_phases), volume,
+       volume_normalization, diagonal_count=12, cross_count=66)
 end
 
 """
@@ -170,9 +184,10 @@ the leading-charge basis. The Hessian equation uses the same symmetric
 hierarchy rescaling as the critical-point finder.
 """
 function n8_degenerate_point(initial_theta::AbstractVector{<:Real};
-        k0::Real=0.67162, tolerance::Float64=1e-11, max_iterations::Int=1_000)
+        k0::Real=0.67162, tolerance::Float64=1e-11, max_iterations::Int=1_000,
+        phases=nothing)
     length(initial_theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
-    reference = _n8_potential(k=k0)
+    reference = _n8_potential(k=k0, phases=phases)
     selected = LQtilde(reference.Q, reference.L)
     Qordered = hcat(selected.Qtilde, selected.Qbar)
     qcanonical = Matrix{Float64}(selected.Qtilde) \ Matrix{Float64}(Qordered)
@@ -180,6 +195,8 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real};
     # Recover q⋅τ in the same selected/bar order. Table 1 columns are unique.
     original_columns = collect(eachcol(reference.Q))
     ordered_qdotτ = [reference.qdotτ[findfirst(==(column), original_columns)] for column in eachcol(Qordered)]
+    ordered_phases = [reference.phases[findfirst(==(column), original_columns)]
+        for column in eachcol(Qordered)]
     n = size(qcanonical, 1)
 
     function scaled_quantities(theta, k)
@@ -187,7 +204,7 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real};
         logs = vec(L[2, :])
         amplitudes = vec(L[1, :]) .* 10.0 .^ (logs .- maximum(logs))
         row_scales = amplitudes[1:n]
-        arguments = 2π .* (qcanonical' * theta)
+        arguments = 2π .* (qcanonical' * theta) .+ ordered_phases
         gradient_value = 2π .* qcanonical * (amplitudes .* sin.(arguments))
         hessian_value = (2π)^2 .* qcanonical *
             Diagonal(amplitudes .* cos.(arguments)) * qcanonical'
@@ -229,10 +246,12 @@ The paper's catastrophe search and inflation trajectories use the truncated
 potential of equations (20) and (25), so the 12-term potential is the default.
 """
 function _n8_potential_derivatives(theta::AbstractVector{<:Real}, q::AbstractMatrix{<:Real},
-        L::AbstractMatrix{<:Real})
+        L::AbstractMatrix{<:Real}; phases=zeros(size(q, 2)))
     qfloat = Matrix{Float64}(q)
     amplitudes = vec(L[1, :]) .* 10.0 .^ vec(L[2, :])
-    arguments = 2π .* (qfloat' * Float64.(theta))
+    length(phases) == size(q, 2) ||
+        throw(DimensionMismatch("one phase is required per instanton"))
+    arguments = 2π .* (qfloat' * Float64.(theta)) .+ Float64.(phases)
     value = sum(amplitudes .* (1 .- cos.(arguments)))
     gradient = 2π .* qfloat * (amplitudes .* sin.(arguments))
     hessian = (2π)^2 .* qfloat * Diagonal(amplitudes .* cos.(arguments)) * qfloat'
@@ -241,18 +260,20 @@ end
 
 function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
         full::Bool=false, volume_normalization::Symbol=:full,
-        trajectory::Bool=false)
+        trajectory::Bool=false, phases=nothing)
     trajectory && return author_inflation.n8_potential_derivatives(
-        theta, k; trajectory=true, full=full)
+        theta, k; trajectory=true, full=full, phases=phases)
     length(theta) == 8 || throw(DimensionMismatch("the N=8 benchmark needs eight coordinates"))
     k > 0 || throw(ArgumentError("k must be positive"))
     if full
         benchmark = n8_full_potential(k=k,
-            volume_normalization=volume_normalization)
-        return _n8_potential_derivatives(theta, benchmark.Q, benchmark.L)
+            volume_normalization=volume_normalization, phases=phases)
+        return _n8_potential_derivatives(theta, benchmark.Q, benchmark.L;
+            phases=benchmark.phases)
     else
-        benchmark = _n8_potential(k=k)
-        return _n8_potential_derivatives(theta, benchmark.Q, benchmark.L)
+        benchmark = _n8_potential(k=k, phases=phases)
+        return _n8_potential_derivatives(theta, benchmark.Q, benchmark.L;
+            phases=benchmark.phases)
     end
 end
 
