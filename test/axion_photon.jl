@@ -631,3 +631,43 @@ end
         end
     end
 end
+
+@testset "Axion-photon HDF5 object boundaries" begin
+    axion_photon = CYAxiverse.axion_photon
+    mktempdir() do root
+        path = _write_axion_photon_test_geometry(joinpath(root, "h11_002",
+            "np_0000001", "cy_0000001", "cyax.h5"))
+        original = axion_photon._run_local_scan(path)
+        @test axion_photon._has_axion_photon(path) === false
+        h5open(path, "r+") do file
+            file["spectrum"] = 1
+            @test axion_photon._has_axion_photon(file) === false
+            HDF5.delete_object(file, "spectrum")
+            spectrum = create_group(file, "spectrum")
+            try
+                spectrum["axion_photon"] = 1
+                @test axion_photon._has_axion_photon(file) === false
+            finally
+                close(spectrum)
+            end
+        end
+        @test axion_photon._has_axion_photon(path) === false
+        axion_photon.write_axion_photon_result(path, original)
+        @test axion_photon._has_axion_photon(path) === true
+        h5open(path, "r+") do file
+            @test axion_photon._has_axion_photon(file) === true
+            group = file["spectrum/axion_photon"]
+            try
+                HDF5.delete_object(group, "em_divisor_index")
+                close(create_group(group, "em_divisor_index"))
+                @test_throws ArgumentError axion_photon._required_axion_photon_dataset(
+                    group, "em_divisor_index")
+                @test axion_photon._has_axion_photon(file) === false
+            finally
+                close(group)
+            end
+        end
+        @test_throws ArgumentError axion_photon.read_axion_photon_result(path)
+        @test axion_photon._has_axion_photon(path) === false
+    end
+end

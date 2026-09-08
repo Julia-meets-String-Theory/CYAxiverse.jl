@@ -1268,10 +1268,10 @@ function _run_local_scan(path::AbstractString;
         light_threshold_eV, qed_threshold_policy, signed_scale_policy)
     geometry_data, potential_data, geometry_digest, potential_digest =
         h5open(path, "r") do file
-            geometry_data = _load_geometry(file, path, index, T)
-            potential_data = _load_potential(file, T)
-            geometry_digest, potential_digest = _input_identity_digests(file)
-            geometry_data, potential_data, geometry_digest, potential_digest
+            loaded_geometry = _load_geometry(file, path, index, T)
+            loaded_potential = _load_potential(file, T)
+            raw_geometry_digest, raw_potential_digest = _input_identity_digests(file)
+            loaded_geometry, loaded_potential, raw_geometry_digest, raw_potential_digest
         end
     hierarchy_data = leading_hierarchy(potential_data, geometry_data.kinv; T=T,
         signed_scale_policy=signed_scale_policy)
@@ -1817,7 +1817,7 @@ function _publish_axion_photon_group!(file::HDF5.File, source::HDF5.File)
 
         stage_name = _axion_photon_link_name(spectrum, "__axion_photon_stage-")
         HDF5.copy_object(source, "axion_photon", spectrum, stage_name)
-        staged_group = spectrum[stage_name]
+        staged_group = _required_axion_photon_group(spectrum, stage_name)
         try
             _validate_axion_photon_group(staged_group) || throw(ArgumentError(
                 "staged axion-photon result failed validation"))
@@ -1832,7 +1832,7 @@ function _publish_axion_photon_group!(file::HDF5.File, source::HDF5.File)
         end
         HDF5.move_link(spectrum, stage_name, spectrum, "axion_photon")
         new_moved = true
-        published_group = spectrum["axion_photon"]
+        published_group = _required_axion_photon_group(spectrum, "axion_photon")
         try
             _validate_axion_photon_group(published_group) ||
                 throw(ArgumentError("published axion-photon result failed validation"))
@@ -1840,7 +1840,7 @@ function _publish_axion_photon_group!(file::HDF5.File, source::HDF5.File)
             close(published_group)
         end
 
-        if old_moved
+        if old_moved && backup_name !== nothing
             HDF5.delete_object(spectrum, backup_name)
             old_moved = false
         end
@@ -1911,30 +1911,30 @@ function read_axion_photon_result(path::AbstractString;
         _assert_persisted_identity_matches!(file, path, identity)
         stored_T = _configuration_precision_type(identity.configuration.precision)
 
-        em_divisor_index = Int(HDF5.read(ap["em_divisor_index"]))
-        em_divisor_volume = T(HDF5.read(ap["em_divisor_volume"]))
-        em_charge_source = Symbol(String(HDF5.read(ap["em_charge_source"])))
-        light_threshold_policy = Symbol(String(HDF5.read(ap["light_threshold_policy"])))
-        status = Symbol(String(HDF5.read(ap["status"])))
+        em_divisor_index = Int(_required_axion_photon_dataset(ap, "em_divisor_index"))
+        em_divisor_volume = T(_required_axion_photon_dataset(ap, "em_divisor_volume"))
+        em_charge_source = Symbol(String(_required_axion_photon_dataset(ap, "em_charge_source")))
+        light_threshold_policy = Symbol(String(_required_axion_photon_dataset(ap, "light_threshold_policy")))
+        status = Symbol(String(_required_axion_photon_dataset(ap, "status")))
 
         hg = ap["hierarchy"]::HDF5.Group
-        selected_indices = Vector{Int}(HDF5.read(hg["selected_indices"]))
-        dependent_indices = Vector{Int}(HDF5.read(hg["dependent_indices"]))
-        Q_reduced = Matrix{Int}(HDF5.read(hg["Q_reduced"]))
-        log10_lambda4 = Vector{T}(HDF5.read(hg["log10_lambda4"]))
-        coefficient_signs = Vector{Int}(HDF5.read(hg["coefficient_signs"]))
-        q = Matrix{T}(HDF5.read(hg["q"]))
-        theta_from_canonical = Matrix{T}(HDF5.read(hg["theta_from_canonical"]))
-        log10_f_GeV = Vector{T}(HDF5.read(hg["log10_f_GeV"]))
-        log10_mass_eV = Vector{T}(HDF5.read(hg["log10_mass_eV"]))
-        m_planck_GeV = T(HDF5.read(hg["m_planck_GeV"]))
-        triangular_residual = T(HDF5.read(hg["triangular_residual"]))
-        metric_residual = T(HDF5.read(hg["metric_residual"]))
+        selected_indices = Vector{Int}(_required_axion_photon_dataset(hg, "selected_indices"))
+        dependent_indices = Vector{Int}(_required_axion_photon_dataset(hg, "dependent_indices"))
+        Q_reduced = Matrix{Int}(_required_axion_photon_dataset(hg, "Q_reduced"))
+        log10_lambda4 = Vector{T}(_required_axion_photon_dataset(hg, "log10_lambda4"))
+        coefficient_signs = Vector{Int}(_required_axion_photon_dataset(hg, "coefficient_signs"))
+        q = Matrix{T}(_required_axion_photon_dataset(hg, "q"))
+        theta_from_canonical = Matrix{T}(_required_axion_photon_dataset(hg, "theta_from_canonical"))
+        log10_f_GeV = Vector{T}(_required_axion_photon_dataset(hg, "log10_f_GeV"))
+        log10_mass_eV = Vector{T}(_required_axion_photon_dataset(hg, "log10_mass_eV"))
+        m_planck_GeV = T(_required_axion_photon_dataset(hg, "m_planck_GeV"))
+        triangular_residual = T(_required_axion_photon_dataset(hg, "triangular_residual"))
+        metric_residual = T(_required_axion_photon_dataset(hg, "metric_residual"))
 
         rg = hg["rank_certificate"]::HDF5.Group
-        algorithm = String(HDF5.read(rg["algorithm"]))
-        matrix_shape = Tuple(Vector{Int}(HDF5.read(rg["matrix_shape"])))
-        selected_determinant = parse(BigInt, String(HDF5.read(rg["selected_determinant"])))
+        algorithm = String(_required_axion_photon_dataset(rg, "algorithm"))
+        matrix_shape = Tuple(Vector{Int}(_required_axion_photon_dataset(rg, "matrix_shape")))
+        selected_determinant = parse(BigInt, String(_required_axion_photon_dataset(rg, "selected_determinant")))
 
         rank_cert = RationalRankCertificate(
             algorithm,
@@ -1963,16 +1963,16 @@ function read_axion_photon_result(path::AbstractString;
         theta = mixing_matrix(hierarchy)
 
         pg = ap["photons"]::HDF5.Group
-        n_em = Vector{T}(HDF5.read(pg["n_em"]))
-        Cgamma = Vector{T}(HDF5.read(pg["Cgamma"]))
-        log10_g_GeVinv = Vector{T}(HDF5.read(pg["log10_g_GeVinv"]))
-        log10_g_effective_GeVinv = Vector{T}(HDF5.read(pg["log10_g_effective_GeVinv"]))
-        log10_photon_width_GeV = Vector{T}(HDF5.read(pg["log10_photon_width_GeV"]))
-        log10_quartic_width_GeV = Vector{T}(HDF5.read(pg["log10_quartic_width_GeV"]))
-        light_threshold_eV = T(HDF5.read(pg["light_threshold_eV"]))
-        log10_light_threshold_eV = T(HDF5.read(pg["log10_light_threshold_eV"]))
-        light_mode_count = Int(HDF5.read(pg["light_mode_count"]))
-        charge_residual = T(HDF5.read(pg["charge_residual"]))
+        n_em = Vector{T}(_required_axion_photon_dataset(pg, "n_em"))
+        Cgamma = Vector{T}(_required_axion_photon_dataset(pg, "Cgamma"))
+        log10_g_GeVinv = Vector{T}(_required_axion_photon_dataset(pg, "log10_g_GeVinv"))
+        log10_g_effective_GeVinv = Vector{T}(_required_axion_photon_dataset(pg, "log10_g_effective_GeVinv"))
+        log10_photon_width_GeV = Vector{T}(_required_axion_photon_dataset(pg, "log10_photon_width_GeV"))
+        log10_quartic_width_GeV = Vector{T}(_required_axion_photon_dataset(pg, "log10_quartic_width_GeV"))
+        light_threshold_eV = T(_required_axion_photon_dataset(pg, "light_threshold_eV"))
+        log10_light_threshold_eV = T(_required_axion_photon_dataset(pg, "log10_light_threshold_eV"))
+        light_mode_count = Int(_required_axion_photon_dataset(pg, "light_mode_count"))
+        charge_residual = T(_required_axion_photon_dataset(pg, "charge_residual"))
 
         photons = AxionPhotonObservables{T}(
             n_em,
@@ -2014,40 +2014,35 @@ function read_axion_photon_result(index::GeometryIndex;
 end
 
 function _has_axion_photon(file::HDF5.File; expected_index=nothing, path=nothing)
-    haskey(file, "spectrum") || return false
-    spectrum = file["spectrum"]
-    spectrum isa HDF5.Group || begin
-        close(spectrum)
-        return false
-    end
+    opened_groups = HDF5.Group[]
     try
-        haskey(spectrum, "axion_photon") || return false
-        group = spectrum["axion_photon"]
-        group isa HDF5.Group || begin
-            close(group)
+        haskey(file, "spectrum") || return false
+        spectrum = file["spectrum"]
+        spectrum isa HDF5.Group || begin
+            close(spectrum)
             return false
         end
-        try
-            _validate_axion_photon_group(group) || return false
-            identity = _read_axion_photon_identity(group)
-            expected_index === nothing || identity.geometry_index == expected_index || return false
-            geometry_digest, potential_digest = _input_identity_digests(file)
-            identity.geometry_digest == geometry_digest || return false
-            identity.potential_digest == potential_digest || return false
-            if path !== nothing
-                try
-                    _assert_snapshot_identity_matches!(file, path, identity)
-                catch err
-                    err isa InterruptException && rethrow()
-                    return false
-                end
-            end
-            true
-        finally
+        push!(opened_groups, spectrum)
+        haskey(spectrum, "axion_photon") || return false
+        group = _required_axion_photon_group(spectrum, "axion_photon")
+        push!(opened_groups, group)
+        _validate_axion_photon_group(group) || return false
+        identity = _read_axion_photon_identity(group)
+        expected_index === nothing || identity.geometry_index == expected_index || return false
+        geometry_digest, potential_digest = _input_identity_digests(file)
+        identity.geometry_digest == geometry_digest || return false
+        identity.potential_digest == potential_digest || return false
+        if path !== nothing
+            _assert_snapshot_identity_matches!(file, path, identity)
+        end
+        return true
+    catch err
+        err isa InterruptException && rethrow()
+        return false
+    finally
+        for group in reverse(opened_groups)
             close(group)
         end
-    finally
-        close(spectrum)
     end
 end
 
@@ -2061,8 +2056,17 @@ function _has_axion_photon(path::AbstractString; configuration=nothing)
     try
         h5open(path, "r") do file
             _has_axion_photon(file; expected_index=expected_index, path=path) || return false
-            identity = _read_axion_photon_identity(file["spectrum/axion_photon"])
-            configuration === nothing || identity.configuration == configuration
+            group = file["spectrum/axion_photon"]
+            group isa HDF5.Group || begin
+                close(group)
+                return false
+            end
+            try
+                identity = _read_axion_photon_identity(group)
+                return configuration === nothing || identity.configuration == configuration
+            finally
+                close(group)
+            end
         end
     catch err
         err isa InterruptException && rethrow()
