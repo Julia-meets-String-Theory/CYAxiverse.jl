@@ -36,6 +36,7 @@ to the child solver without reading or copying the license contents.
 import argparse
 import glob
 import hashlib
+import io
 import itertools
 import json
 import math
@@ -4195,10 +4196,93 @@ def load_polytope_manifest(path):
     return {"source": manifest.get("source"), "by_h11": by_h11}
 
 
+class CachedHTTPRangeFile(io.RawIOBase):
+    """File-like object supporting seek/read over HTTP range requests with chunk caching."""
+
+    def __init__(self, url, block_size=256 * 1024):
+        import requests
+        self.url = url
+        resp = requests.head(url, allow_redirects=True)
+        resp.raise_for_status()
+        self.url = resp.url
+        content_len = resp.headers.get("content-length")
+        if content_len is not None and content_len.isdigit():
+            self.size = int(content_len)
+        else:
+            r_range = requests.get(self.url, headers={"Range": "bytes=0-0"})
+            cr = r_range.headers.get("Content-Range", "")
+            if "/" in cr:
+                self.size = int(cr.split("/")[1])
+            else:
+                self.size = len(r_range.content)
+        self.pos = 0
+        self.block_size = block_size
+        self.cache = {}
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        if whence == io.SEEK_SET:
+            self.pos = offset
+        elif whence == io.SEEK_CUR:
+            self.pos += offset
+        elif whence == io.SEEK_END:
+            self.pos = self.size + offset
+        else:
+            raise ValueError(f"Invalid whence: {whence}")
+        return self.pos
+
+    def tell(self):
+        return self.pos
+
+    def readinto(self, b):
+        import requests
+        size = len(b)
+        if size == 0 or self.pos >= self.size:
+            return 0
+        end = min(self.pos + size, self.size)
+        start_block = self.pos // self.block_size
+        end_block = (end - 1) // self.block_size
+        missing = [blk for blk in range(start_block, end_block + 1) if blk not in self.cache]
+        if missing:
+            range_start = min(missing) * self.block_size
+            range_end = min((max(missing) + 1) * self.block_size - 1, self.size - 1)
+            resp = requests.get(self.url, headers={"Range": f"bytes={range_start}-{range_end}"})
+            resp.raise_for_status()
+            data = resp.content
+            for blk in range(min(missing), max(missing) + 1):
+                b_start = (blk - min(missing)) * self.block_size
+                b_end = min(b_start + self.block_size, len(data))
+                if b_start < len(data):
+                    self.cache[blk] = data[b_start:b_end]
+
+        out = bytearray()
+        for blk in range(start_block, end_block + 1):
+            blk_data = self.cache.get(blk, b"")
+            blk_start = blk * self.block_size
+            blk_end = blk_start + len(blk_data)
+            seg_start = max(self.pos, blk_start)
+            seg_end = min(end, blk_end)
+            if seg_start < seg_end:
+                out.extend(blk_data[seg_start - blk_start : seg_end - blk_start])
+        b[:len(out)] = out
+        self.pos += len(out)
+        return len(out)
+
+
 def load_mirror_polytopes(
     parquet_dir, h11, limit, favorable, *, partitions=None, stream=False
 ):
-    """Read favorable N-lattice polytopes from the KS Parquet mirror."""
+    """Read favorable N-lattice polytopes from the KS Parquet mirror.
+
+    If ``parquet_dir`` is None, empty, or a remote URL, streams directly from
+    the Hugging Face Parquet mirror using HTTP range requests without requiring
+    a local clone of the dataset.
+    """
     try:
         import pyarrow as pa
         import pyarrow.parquet as parquet
@@ -4207,77 +4291,172 @@ def load_mirror_polytopes(
             "The Parquet mirror source requires pyarrow in the CYTools environment."
         ) from exc
 
-    parquet_dir = os.path.abspath(os.fspath(parquet_dir))
-    if not os.path.isdir(parquet_dir):
-        raise RuntimeError(f"Parquet mirror directory does not exist: {parquet_dir}")
-    paths = sorted(
-        glob.glob(os.path.join(parquet_dir, "polytopes-4d-*-vertices.parquet")),
-        key=lambda path: int(os.path.basename(path).split("-")[2]),
-    )
-    if partitions is not None:
-        allowed = {int(partition) for partition in partitions}
-        paths = [
-            path
-            for path in paths
-            if int(os.path.basename(path).split("-")[2]) in allowed
-        ]
-    if not paths:
-        raise RuntimeError(
-            "No polytopes-4d-*-vertices.parquet files found in mirror directory "
-            f"{parquet_dir}."
+    is_remote = (
+        parquet_dir is None
+        or (
+            isinstance(parquet_dir, (str, os.PathLike))
+            and (
+                str(parquet_dir).startswith(("http://", "https://", "hf://"))
+                or str(parquet_dir) in ("huggingface", "mirror", "stream")
+            )
         )
+    )
+
+    if not is_remote:
+        parquet_dir = os.path.abspath(os.fspath(parquet_dir))
+        if not os.path.isdir(parquet_dir):
+            raise RuntimeError(f"Parquet mirror directory does not exist: {parquet_dir}")
+        paths = sorted(
+            glob.glob(os.path.join(parquet_dir, "polytopes-4d-*-vertices.parquet")),
+            key=lambda path: int(os.path.basename(path).split("-")[2]),
+        )
+        if partitions is not None:
+            allowed = {int(partition) for partition in partitions}
+            paths = [
+                path
+                for path in paths
+                if int(os.path.basename(path).split("-")[2]) in allowed
+            ]
+        if not paths:
+            raise RuntimeError(
+                "No polytopes-4d-*-vertices.parquet files found in mirror directory "
+                f"{parquet_dir}."
+            )
+    else:
+        hf_base = "https://huggingface.co/datasets/calabi-yau-data/polytopes-4d/resolve/main"
+        partition_filenames = [
+            f"polytopes-4d-{v:02d}-vertices.parquet"
+            for v in (
+                5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 36,
+            )
+        ]
+        if partitions is not None:
+            allowed = {int(partition) for partition in partitions}
+            partition_filenames = [
+                fn for fn in partition_filenames
+                if int(fn.split("-")[2]) in allowed
+            ]
+        paths = [f"{hf_base}/{fn}" for fn in partition_filenames]
 
     def iter_records():
         records_seen = 0
         for path in paths:
-            # Predicate pushdown on the physical-h11 (mirror h12) column: decode
-            # only the small h12 column first, skip any partition with no matching
-            # rows, and materialize only the matching rows. Row indices stay the
-            # original per-partition positions, so provenance is unchanged.
-            h12_column = parquet.read_table(path, columns=["h12"]).column("h12")
-            match_positions = np.flatnonzero(
-                h12_column.to_numpy(zero_copy_only=False) == int(h11)
-            )
-            if match_positions.size == 0:
-                continue
-            table = parquet.read_table(
-                path, columns=["vertices", "vertex_count", "h11", "h12"]
-            ).take(pa.array(match_positions))
-            for row_index, row in zip(match_positions.tolist(), table.to_pylist()):
-                # The published mirror uses the dual Hodge-label convention:
-                # physical h11 is the mirror h12 column (== h11 here by pushdown).
-                physical_h11 = int(row["h12"])
-                vertices = np.asarray(row["vertices"], dtype=int)
-                poly = Polytope(vertices, deterministic_glsm_basis=True)
-                if int(poly.h11()) != int(h11):
-                    raise RuntimeError(
-                        "KS mirror Hodge-label convention check failed: "
-                        f"{os.path.basename(path)} row {row_index} has requested "
-                        f"h11={h11}, but CYTools constructed h11={poly.h11()}."
+            if is_remote:
+                f = CachedHTTPRangeFile(path)
+                pf = parquet.ParquetFile(f)
+                h12_col_idx = None
+                for i in range(pf.metadata.num_columns):
+                    if pf.metadata.row_group(0).column(i).path_in_schema == "h12":
+                        h12_col_idx = i
+                        break
+                rg_offset = 0
+                for rg_idx in range(pf.num_row_groups):
+                    rg = pf.metadata.row_group(rg_idx)
+                    if (
+                        h12_col_idx is not None
+                        and rg.column(h12_col_idx).statistics
+                        and rg.column(h12_col_idx).statistics.has_min_max
+                    ):
+                        min_val = rg.column(h12_col_idx).statistics.min
+                        max_val = rg.column(h12_col_idx).statistics.max
+                        if not (min_val <= int(h11) <= max_val):
+                            rg_offset += rg.num_rows
+                            continue
+                    h12_table = pf.read_row_group(rg_idx, columns=["h12"])
+                    match_positions = np.flatnonzero(
+                        h12_table.column("h12").to_numpy(zero_copy_only=False) == int(h11)
                     )
-                if favorable is not None and bool(poly.is_favorable(lattice="N")) != favorable:
-                    continue
-                records_seen += 1
-                yield (
-                    poly,
-                    {
-                        "source_kind": "huggingface_parquet_mirror",
-                        "dataset": KS_MIRROR_DATASET,
-                        "dataset_url": KS_MIRROR_DATASET_URL,
-                        "parquet_file": os.path.abspath(path),
-                        "row_index": int(row_index),
-                        "mirror_h11": int(row["h11"]),
-                        "mirror_h12": int(row["h12"]),
-                        "physical_h11": physical_h11,
-                        "physical_h21": int(row["h11"]),
-                        "vertex_count": int(row["vertex_count"]),
-                        "favorable_checked_by": (
-                            "CYTools Polytope.is_favorable(lattice='N')"
-                        ),
-                    },
+                    if match_positions.size == 0:
+                        rg_offset += rg.num_rows
+                        continue
+                    table = pf.read_row_group(
+                        rg_idx, columns=["vertices", "vertex_count", "h11", "h12"]
+                    ).take(pa.array(match_positions))
+                    for local_idx, row in zip(match_positions.tolist(), table.to_pylist()):
+                        row_index = rg_offset + local_idx
+                        physical_h11 = int(row["h12"])
+                        vertices = np.asarray(row["vertices"], dtype=int)
+                        poly = Polytope(vertices, deterministic_glsm_basis=True)
+                        if int(poly.h11()) != int(h11):
+                            raise RuntimeError(
+                                "KS mirror Hodge-label convention check failed: "
+                                f"{path} row {row_index} has requested "
+                                f"h11={h11}, but CYTools constructed h11={poly.h11()}."
+                            )
+                        if favorable is not None and bool(poly.is_favorable(lattice="N")) != favorable:
+                            continue
+                        records_seen += 1
+                        yield (
+                            poly,
+                            {
+                                "source_kind": "huggingface_parquet_mirror",
+                                "dataset": KS_MIRROR_DATASET,
+                                "dataset_url": KS_MIRROR_DATASET_URL,
+                                "parquet_file": path,
+                                "row_index": int(row_index),
+                                "mirror_h11": int(row["h11"]),
+                                "mirror_h12": int(row["h12"]),
+                                "physical_h11": physical_h11,
+                                "physical_h21": int(row["h11"]),
+                                "vertex_count": int(row["vertex_count"]),
+                                "favorable_checked_by": (
+                                    "CYTools Polytope.is_favorable(lattice='N')"
+                                ),
+                            },
+                        )
+                        if records_seen >= limit:
+                            return
+                    rg_offset += rg.num_rows
+            else:
+                # Predicate pushdown on the physical-h11 (mirror h12) column: decode
+                # only the small h12 column first, skip any partition with no matching
+                # rows, and materialize only the matching rows. Row indices stay the
+                # original per-partition positions, so provenance is unchanged.
+                h12_column = parquet.read_table(path, columns=["h12"]).column("h12")
+                match_positions = np.flatnonzero(
+                    h12_column.to_numpy(zero_copy_only=False) == int(h11)
                 )
-                if records_seen >= limit:
-                    return
+                if match_positions.size == 0:
+                    continue
+                table = parquet.read_table(
+                    path, columns=["vertices", "vertex_count", "h11", "h12"]
+                ).take(pa.array(match_positions))
+                for row_index, row in zip(match_positions.tolist(), table.to_pylist()):
+                    # The published mirror uses the dual Hodge-label convention:
+                    # physical h11 is the mirror h12 column (== h11 here by pushdown).
+                    physical_h11 = int(row["h12"])
+                    vertices = np.asarray(row["vertices"], dtype=int)
+                    poly = Polytope(vertices, deterministic_glsm_basis=True)
+                    if int(poly.h11()) != int(h11):
+                        raise RuntimeError(
+                            "KS mirror Hodge-label convention check failed: "
+                            f"{os.path.basename(path)} row {row_index} has requested "
+                            f"h11={h11}, but CYTools constructed h11={poly.h11()}."
+                        )
+                    if favorable is not None and bool(poly.is_favorable(lattice="N")) != favorable:
+                        continue
+                    records_seen += 1
+                    yield (
+                        poly,
+                        {
+                            "source_kind": "huggingface_parquet_mirror",
+                            "dataset": KS_MIRROR_DATASET,
+                            "dataset_url": KS_MIRROR_DATASET_URL,
+                            "parquet_file": os.path.abspath(path),
+                            "row_index": int(row_index),
+                            "mirror_h11": int(row["h11"]),
+                            "mirror_h12": int(row["h12"]),
+                            "physical_h11": physical_h11,
+                            "physical_h21": int(row["h11"]),
+                            "vertex_count": int(row["vertex_count"]),
+                            "favorable_checked_by": (
+                                "CYTools Polytope.is_favorable(lattice='N')"
+                            ),
+                        },
+                    )
+                    if records_seen >= limit:
+                        return
 
     if stream:
         return iter_records()
@@ -4331,6 +4510,8 @@ def plan_tasks(
     volume_backend=None,
     proposal_budget=None,
     retry_budget=None,
+    database_source="cytools",
+    parquet_dir=None,
 ):
     """Fetch favorable polytopes and assign each its FRST output target.
 
@@ -4345,29 +4526,39 @@ def plan_tasks(
     if proposal_budget < 1 or retry_budget < 0:
         raise ValueError("proposal_budget must be positive and retry_budget cannot be negative")
     if polytope_manifest is None:
-        polytopes = list(
-            fetch_polytopes(
+        if database_source == "mirror":
+            mirror_records = load_mirror_polytopes(
+                parquet_dir,
                 h11=h11,
                 limit=fetch_limit,
-                lattice="N",
                 favorable=favorable,
-                deterministic_glsm_basis=True,
             )
-        )
-        polytope_sources = [
-            {
-                "source_kind": "cytools_fetch_polytopes",
-                "query": {
-                    "h11": int(h11),
-                    "lattice": "N",
-                    "favorable": favorable,
-                    "limit": fetch_limit,
-                    "deterministic_glsm_basis": True,
-                },
-                "selection_index": index,
-            }
-            for index, _ in enumerate(polytopes, start=1)
-        ]
+            polytopes = [poly for poly, _ in mirror_records]
+            polytope_sources = [source for _, source in mirror_records]
+        else:
+            polytopes = list(
+                fetch_polytopes(
+                    h11=h11,
+                    limit=fetch_limit,
+                    lattice="N",
+                    favorable=favorable,
+                    deterministic_glsm_basis=True,
+                )
+            )
+            polytope_sources = [
+                {
+                    "source_kind": "cytools_fetch_polytopes",
+                    "query": {
+                        "h11": int(h11),
+                        "lattice": "N",
+                        "favorable": favorable,
+                        "limit": fetch_limit,
+                        "deterministic_glsm_basis": True,
+                    },
+                    "selection_index": index,
+                }
+                for index, _ in enumerate(polytopes, start=1)
+            ]
     else:
         polytopes = []
         for vertices in polytope_manifest["by_h11"].get(h11, []):
@@ -4528,6 +4719,8 @@ def run_batch(
     volume_backend=None,
     proposal_budget=None,
     retry_budget=None,
+    database_source="cytools",
+    parquet_dir=None,
 ):
     tasks = plan_tasks(
         h11,
@@ -4574,6 +4767,8 @@ def run_batch(
         volume_backend=volume_backend,
         proposal_budget=proposal_budget,
         retry_budget=retry_budget,
+        database_source=database_source,
+        parquet_dir=parquet_dir,
     )
     if not tasks:
         print(f"No favorable N-lattice polytopes found for h11={h11}.")
@@ -4674,6 +4869,8 @@ def run_batches(
     collect_records=False,
     proposal_budget=None,
     retry_budget=None,
+    database_source="cytools",
+    parquet_dir=None,
 ):
     """Plan all h11 values into one pool, without an h11 completion barrier.
 
@@ -4765,6 +4962,8 @@ def run_batches(
                 retry_budget=(
                     planning_max_retries if retry_budget is None else retry_budget
                 ),
+                database_source=database_source,
+                parquet_dir=parquet_dir,
             )
             replacement_tasks_by_h11[h11] = replacement_tasks
             if not tasks:
@@ -6497,8 +6696,6 @@ def main():
     if args.h11_interval < 1:
         parser.error("--h11_interval must be positive")
     if args.database_source == "mirror":
-        if args.parquet_dir is None:
-            parser.error("--database-source mirror requires --parquet-dir")
         if args.polytope_manifest is not None:
             parser.error("--parquet-dir and --polytope-manifest are mutually exclusive")
     elif args.database_source == "manifest":
@@ -6548,6 +6745,17 @@ def main():
         args.ks_database_version = (
             f"local polytope manifest: {os.path.abspath(args.polytope_manifest)}"
         )
+    elif args.database_source == "mirror" and args.ks_database_version == (
+        "CYTools fetch_polytopes endpoint (version not exposed)"
+    ):
+        if args.parquet_dir is not None:
+            args.ks_database_version = (
+                f"local KS Parquet mirror: {os.path.abspath(args.parquet_dir)}"
+            )
+        else:
+            args.ks_database_version = (
+                f"Hugging Face KS Parquet mirror: {KS_MIRROR_DATASET_URL}"
+            )
     provenance_record = None
     source_query = None
     if args.eft:
@@ -6636,6 +6844,8 @@ def main():
         collect_records=True,
         proposal_budget=(None if args.proposal_budget is None else proposal_budget),
         retry_budget=(None if args.retry_budget is None else retry_budget),
+        database_source=args.database_source,
+        parquet_dir=args.parquet_dir,
     )
     candidate_records = []
     for result in batch_result["results"]:

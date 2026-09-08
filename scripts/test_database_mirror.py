@@ -41,7 +41,16 @@ def main():
         assert source["mirror_h12"] == 1
         assert source["row_index"] == 0
         assert Path(source["parquet_file"]).resolve() == parquet_path.resolve()
-    print("KS Parquet mirror adapter test passed")
+    print("KS Parquet local mirror adapter test passed")
+
+    # Test Hugging Face remote streaming
+    remote_records = load_mirror_polytopes(None, h11=10, limit=1, favorable=True)
+    assert len(remote_records) == 1
+    r_poly, r_source = remote_records[0]
+    assert int(r_poly.h11()) == 10
+    assert r_source["source_kind"] == "huggingface_parquet_mirror"
+    assert "huggingface.co" in r_source["parquet_file"]
+    print("KS Parquet Hugging Face streaming adapter test passed")
 
 
 if __name__ == "__main__":
