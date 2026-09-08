@@ -52,6 +52,11 @@ function benchmark_manifest()
             charges=:axions_are_rows_in_package_Q,
         ),
         volume_scaling=VOLUME_SCALING_CONVENTION,
+        diagnostic_tolerances=(
+            gradient=1e-8, hessian=1e-8, derivative=1e-8,
+            precision_bits=53,
+        ),
+        precision_rerun=(enabled=true, precision_bits=120),
         examples=(
             n5=(h11=n5.h11, h21=n5.h21, euler=n5.euler,
                 volume=n5.volume, vertices=copy(n5.vertices),
@@ -117,7 +122,7 @@ function _catastrophe_impl(theta, charges, amplitudes, metric, phases;
     issymmetric(g) || throw(ArgumentError("kinetic metric must be symmetric"))
 
     metric_eigen = eigen(Symmetric(g))
-    all(>(zero(T), metric_eigen.values)) ||
+    all(>(zero(T)), metric_eigen.values) ||
         throw(ArgumentError("kinetic metric must be positive definite"))
     canonical_to_raw = metric_eigen.vectors *
         Diagonal(inv.(sqrt.(metric_eigen.values))) * metric_eigen.vectors'
@@ -130,7 +135,8 @@ function _catastrophe_impl(theta, charges, amplitudes, metric, phases;
     gradient = canonical_to_raw' * gradient_raw
     hessian = canonical_to_raw' * hessian_raw * canonical_to_raw
     hessian_eigen = eigen(Symmetric(hessian))
-    hessian_scale = max(one(T), maximum(abs, hessian_eigen.values))
+    hessian_scale = max(maximum(abs, a), maximum(abs, hessian_eigen.values))
+    hessian_scale = hessian_scale == zero(T) ? eps(T) : hessian_scale
     null_cutoff = T(hessian_tolerance) * hessian_scale
     near_null_indices = findall(abs.(hessian_eigen.values) .<= null_cutoff)
     index = if null_direction === nothing
@@ -157,8 +163,10 @@ function _catastrophe_impl(theta, charges, amplitudes, metric, phases;
     projected_third = -sum(a .* sine .* projected_charge.^3)
     projected_fourth = -sum(a .* cosine .* projected_charge.^4)
     canonical_gradient_residual = norm(gradient, Inf)
-    derivative_scale = max(one(T), abs(value), maximum(abs, hessian_eigen.values),
-        abs(projected_third), abs(projected_fourth))
+    derivative_scale = max(maximum(abs, a), abs(value),
+        maximum(abs, hessian_eigen.values), abs(projected_third),
+        abs(projected_fourth))
+    derivative_scale = derivative_scale == zero(T) ? eps(T) : derivative_scale
     derivative_cutoff = T(derivative_tolerance) * derivative_scale
     stationary = canonical_gradient_residual <=
         T(gradient_tolerance) * derivative_scale
@@ -249,17 +257,18 @@ end
 const catastrophe_diagnostic = local_catastrophe_diagnostic
 const classify_catastrophe = local_catastrophe_diagnostic
 
-function n5_catastrophe_diagnostic(; k::Real=n5_critical_scale(),
+function n5_catastrophe_diagnostic(; k::Real=author_inflation.n5_critical_scale(),
         theta::AbstractVector{<:Real}=[π], phases=nothing,
         precision_bits::Int=53, tolerance::Real=1e-8,
         derivative_tolerance::Real=tolerance)
     phase = phases === nothing ? zeros(2) : phases
-    ratio = n5_reduced_ratio(k)
+    ratio = author_inflation.n5_reduced_ratio(k)
     result = local_catastrophe_diagnostic(theta, reshape([1, 2], 1, 2),
         [1.0, ratio], reshape([1.0], 1, 1);
         phases=phase, argument_scale=1, precision_bits, tolerance,
         derivative_tolerance)
-    merge(result, (; example=:n5, k=Float64(k), kc=n5_critical_scale(),
+    merge(result, (; example=:n5, k=Float64(k),
+        kc=author_inflation.n5_critical_scale(),
         source_identity=PAPER_SOURCE_IDENTITY.identifier))
 end
 
@@ -293,9 +302,9 @@ alone does not identify a complete phase vector; callers may therefore provide
 the published vector or use the documented single-instanton probe.
 """
 function phase_fixture(example::Symbol; delta::Real=0.04, phases=nothing,
-        instanton::Int=1)
+        instanton::Int=1, trajectory::Bool=false)
     count = example === :n5 ? length(N5_QDOTTAU) :
-        example === :n8 ? length(N8_TAU) :
+        example === :n8 ? (trajectory ? length(N8_TAU_TRAJECTORY) : length(N8_TAU)) :
         throw(ArgumentError("example must be :n5 or :n8"))
     values = if phases === nothing
         1 <= instanton <= count ||
@@ -308,7 +317,7 @@ function phase_fixture(example::Symbol; delta::Real=0.04, phases=nothing,
     end
     length(values) == count ||
         throw(DimensionMismatch("one phase is required per instanton"))
-    (; example, delta=Float64(delta), phases=values,
+    (; example, trajectory, delta=Float64(delta), phases=values,
         assignment=phases === nothing ? :single_instanton_probe : :published_vector,
         phase_convention=:additive_argument_radians,
         source_identity=PAPER_SOURCE_IDENTITY.identifier)

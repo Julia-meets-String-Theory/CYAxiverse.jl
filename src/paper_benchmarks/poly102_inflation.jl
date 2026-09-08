@@ -514,8 +514,7 @@ function n8_hilltop_probe(delta_k::Real; displacement::Real=1e-8,
         theta = N8_BEST_X .+ (x / displacement) .* (initial.theta - N8_BEST_X)
         state = _n8_canonical_state(
             n8_coordinate_maps(k).raw_to_canonical * theta, k)
-        push!(samples, (n=n, theta=copy(theta), epsilon=state.epsilon,
-            eta_parallel=state.eta_parallel, potential=state.value))
+        push!(samples, merge((n=n,), _trajectory_sample(state)))
     end
     (; k, delta_k=Float64(delta_k), efolds=total, entered_slow_roll=true,
        end_event=:local_normal_form, steps=sample_count, samples, initial,
@@ -535,6 +534,18 @@ function _n8_canonical_state(chi::AbstractVector{<:Real}, k::Real,
     eta_parallel = gradient_squared == 0 ? Inf : dot(tangent, hessian * tangent) / d.value
     (; theta, value=d.value, gradient, hessian, epsilon, eta_parallel,
        tangent, spectral_scale=opnorm(hessian) / max(abs(d.value), eps(Float64)))
+end
+
+function _trajectory_sample(state)
+    epsilon = state.epsilon
+    potential = state.value
+    delta_H = epsilon > zero(epsilon) && potential > zero(potential) ?
+        sqrt(potential) / (5sqrt(6π * epsilon)) : oftype(potential, NaN)
+    (; theta=copy(state.theta), tangent=copy(state.tangent), potential,
+       epsilon, eta_parallel=state.eta_parallel,
+       n_s=1 - 6epsilon + 2state.eta_parallel,
+       delta_H, scalar_amplitude=delta_H,
+       scalar_amplitude_convention=:paper_delta_H)
 end
 
 """
@@ -570,8 +581,7 @@ function n8_slow_roll_trajectory(delta_k::Real; displacement::Real=1e-8,
     while n < max_efolds && steps < 2_000_000
         state = _n8_canonical_state(chi, k, maps)
         if length(samples) < sample_count
-            push!(samples, (n=n, theta=copy(state.theta), epsilon=state.epsilon,
-                eta_parallel=state.eta_parallel, potential=state.value))
+            push!(samples, merge((n=n,), _trajectory_sample(state)))
         end
         inflating = state.epsilon < 1 && abs(state.eta_parallel) < 1
         if inflating && !entered
@@ -714,8 +724,9 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
         k = T(N8_KC) + T(delta_k)
         q = T.(Matrix(N8_Q_TRAJECTORY'))
         tau = T.(N8_TAU_TRAJECTORY)
-        phase64 = _phase_vector(phases, length(tau))
-        phase = T.(phase64)
+        phase = phases === nothing ? zeros(T, length(tau)) : T.(phases)
+        length(phase) == length(tau) ||
+            throw(DimensionMismatch("one phase is required per instanton"))
         metric = T.(N8_K_RAW) / k^2
         raw_to_canonical = _n8_big_symmetric_power(metric, 1 / 2)
         canonical_to_raw = _n8_big_symmetric_power(metric, -1 / 2)
@@ -857,9 +868,7 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
             state = _n8_big_state(
                 view(solution(sample_time), 1:8), k, q, tau,
                 canonical_to_raw, phase)
-            push!(samples, (n=target_n, theta=state.theta,
-                epsilon=state.epsilon, eta_parallel=state.eta_parallel,
-                potential=state.value))
+            push!(samples, merge((n=target_n,), _trajectory_sample(state)))
         end
         (; delta_k=T(delta_k), k, entered_slow_roll=true,
             entry_n, end_n, efolds=end_n,

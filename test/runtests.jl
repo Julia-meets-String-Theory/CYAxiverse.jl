@@ -3286,6 +3286,9 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         @test appendix.qdotτ[end-1:end] == [25.0, 45.0]
 
         geometry = benchmark.n8_geometry()
+        @test length(geometry.divisor_volumes) == 8
+        @test length(geometry.instanton_actions) == 12
+        @test geometry.divisor_volumes != geometry.instanton_actions
         expected_metric_eigenvalues = sort([
             8.20e-4, 6.35e-4, 5.97e-4, 3.13e-4,
             1.24e-4, 9.15e-5, 8.30e-5, 5.84e-5,
@@ -3360,6 +3363,12 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         n8_probe = poly102.n8_hilltop_normal_form(1e-7; sample_count=5)
         @test n8_probe.end_event == :local_normal_form
         @test length(n8_probe.samples) == 5
+        probe_observables = benchmark.trajectory_observables(n8_probe)
+        @test probe_observables.scalar_amplitude_convention == :paper_delta_H
+        @test isfinite(probe_observables.n_s)
+        @test all(hasproperty(sample, :tangent) &&
+            hasproperty(sample, :n_s) &&
+            hasproperty(sample, :scalar_amplitude) for sample in n8_probe.samples)
         @test isapprox(n8_probe.efolds, poly102.n8_hilltop_normal_form_efolds(1e-7).efolds)
         mass_trajectory = poly102.n8_efold_gradient_flow(
             1e-7; basis=:mass_eigenbasis, max_efolds=0)
@@ -3367,6 +3376,44 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         @test mass_trajectory.steps == 0
         @test isapprox(poly102.n5_hilltop_normal_form_efolds(1e-7).efolds, 27349.0; rtol=1e-10)
         @test isapprox(poly102.n5_hilltop_normal_form_efolds(6.65e-5).efolds, 60.0; rtol=0.02)
+
+        manifest = benchmark.benchmark_manifest()
+        @test manifest.schema_version == "catastrophic-inflation-benchmark-v1"
+        @test manifest.source.identifier == "arXiv:2608.14780v1"
+        @test length(manifest.examples.n8.divisor_volumes) == 8
+        @test length(manifest.examples.n8.instanton_actions) == 12
+        @test length(manifest.examples.n8.phases_trajectory) == 10
+        @test manifest.volume_scaling.cy_volume == :three_halves
+        @test manifest.precision_rerun == (enabled=true, precision_bits=120)
+        @test manifest.claim_boundary.fixed_saxions
+        @test manifest.claim_boundary.moduli_stabilization == :not_established
+
+        cusp = benchmark.n5_catastrophe_diagnostic(precision_bits=120)
+        @test cusp.classification == :cusp
+        @test cusp.normal_form == :quartic_hilltop
+        @test cusp.precision_bits == 120
+        @test cusp.projected_derivatives.third isa BigFloat
+        @test cusp.projected_derivatives.fourth < 0
+        fold = benchmark.local_catastrophe_diagnostic(
+            [0.0], reshape([1, 2], 1, 2), [2.0, 1.0], reshape([1.0], 1, 1);
+            phases=[π / 2, -π / 2], tolerance=1e-10)
+        @test fold.classification == :fold
+        @test fold.normal_form == :cubic_shoulder
+        @test abs(fold.projected_derivatives.third) > 1
+        @test_throws DimensionMismatch benchmark.n8_potential(
+            k=benchmark.N8_KC; phases=zeros(11))
+        phase = benchmark.phase_fixture(:n8; delta=0.04, trajectory=true)
+        @test phase.assignment == :single_instanton_probe
+        @test length(phase.phases) == 10
+        phased = benchmark.n8_potential(
+            k=benchmark.N8_KC; trajectory=true, phases=phase.phases)
+        unphased_derivatives = poly102.n8_potential_derivatives(
+            poly102.N8_BEST_X, benchmark.N8_KC; trajectory=true)
+        phased_derivatives = poly102.n8_potential_derivatives(
+            poly102.N8_BEST_X, benchmark.N8_KC;
+            trajectory=true, phases=phase.phases)
+        @test phased.phases == phase.phases
+        @test phased_derivatives.value != unphased_derivatives.value
 
         @testset "inflation trajectory contracts" begin
             maps = poly102.n8_coordinate_maps(k_detuned)

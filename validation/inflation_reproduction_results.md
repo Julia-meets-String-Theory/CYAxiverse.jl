@@ -57,6 +57,35 @@ geometry, metric, and K-normalized light direction. No independent author
 eight-field physical N=5 trajectory is present, so these e-fold numbers must
 not be described as a full eight-term trajectory reproduction.
 
+## Frozen paper inputs and local catastrophe diagnostics
+
+The replay manifest is returned by
+`CYAxiverse.axion_benchmarks.benchmark_manifest()`. It records the source as
+`arXiv:2608.14780v1` (SHA-256
+`b0f5539bf0fb40e401d93b8cfcbe3e725ba8849efdde2519646103d5f004d2e6`), the
+named geometry witnesses, the integer charge basis, the divisor-volume/action
+separation, and an input digest. The convention is
+`tau_divisor ∝ k`, `V_CY ∝ k^(3/2)`, and `G ∝ k^(-2)`. The fixtures are
+fixed-saxion benchmarks; they do not establish dynamical moduli stabilization
+or a complete nonperturbative superpotential.
+
+`local_catastrophe_diagnostic` identifies the canonical near-null direction,
+projects the second, third, and fourth derivatives, and reports transverse
+Hessian modes, precision, and tolerances. A stationary point with one
+near-null mode and a nonzero projected cubic is classified as
+`:fold`/`:cubic_shoulder`; a negligible cubic with a nonzero quartic is
+classified as `:cusp`/`:quartic_hilltop`; unresolved or higher-dimensional
+cases remain `:unresolved`. The serialized fixtures include both the default
+and 120-bit diagnostic reruns.
+
+Nonzero phase assignments are explicit inputs. The paper's scalar
+`delta=0.04` does not by itself specify a complete per-instanton vector, so
+`phase_fixture(:n8)` labels its deterministic single-instanton probe rather
+than claiming a source-matched vector. Trajectory samples persist `epsilon`,
+`eta_parallel`, `n_s = 1 - 6epsilon + 2eta_parallel`, cumulative turning, and
+the paper convention
+`delta_H = sqrt(V)/(5*sqrt(6*pi*epsilon))`.
+
 ## Bounded scalability pilot
 
 Command:
