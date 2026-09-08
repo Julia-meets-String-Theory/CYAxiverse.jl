@@ -3565,6 +3565,103 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
     end
 end; end
 
+@testset "CatastrophicInflationPopulationStudy (Issue #133)" begin
+    include(joinpath(@__DIR__, "..", "scripts", "catastrophic_inflation_population_study.jl"))
+    using .CatastrophicInflationPopulationStudy
+
+    # 1. Precondition evaluation and fail-closed gate enforcement
+    preconds = evaluate_preconditions()
+    @test preconds.ensemble_contract_status === :blocked_unvalidated
+    @test preconds.recall_calibration_status === :uncalibrated
+    @test preconds.classification_stability_status === :stable
+    @test preconds.scale_status === :homotopy_only
+    @test preconds.physical_control_gate === :not_established
+    @test !preconds.can_execute_production
+    @test preconds.can_execute_diagnostic
+    @test length(preconds.blocking_reasons) >= 3
+
+    # Asserting preconditions in production mode must fail closed
+    @test_throws ErrorException assert_preconditions(preconds; allow_diagnostic_mode=false)
+    # Asserting preconditions in diagnostic mode succeeds
+    @test assert_preconditions(preconds; allow_diagnostic_mode=true)
+
+    # 2. Denominator accounting and conservation laws
+    acc = create_empty_accounting(:zero_phase)
+    @test acc.stratum === :zero_phase
+    @test acc.total_geometries_attempted == 0
+    @test acc.catastrophes_found == 0
+    @test ismissing(acc.sixty_efolds_count)
+    @test acc.search_recall_attached == "0/0 (uncalibrated)"
+    @test acc.physical_stabilized_models == 0
+    @test verify_accounting_integrity(acc)
+
+    record_search_outcome!(acc, :geometry_attempted)
+    record_search_outcome!(acc, :geometry_loaded)
+    record_search_outcome!(acc, :triangulation_attempted)
+    record_search_outcome!(acc, :triangulation_valid)
+    record_search_outcome!(acc, :search_evaluated)
+    record_search_outcome!(acc, :cusp)
+    @test acc.catastrophes_found == 1
+    @test acc.cusp_count == 1
+    @test verify_accounting_integrity(acc)
+
+    # Corrupting accounting violates conservation
+    acc.catastrophes_found = 5
+    @test_throws ArgumentError verify_accounting_integrity(acc)
+
+    # 3. Stratified preflight result and claim boundaries
+    result = run_population_preflight()
+    @test result.schema_version == SCHEMA_VERSION
+    @test result.task_id == TASK_ID
+    @test result.status === :blocked_by_preconditions
+    @test result.ensemble.target_ensemble === :Uniform_FRST
+    @test :ntfe in result.ensemble.comparison_ensembles
+    @test haskey(result.strata_accounting, :zero_phase)
+    @test haskey(result.strata_accounting, :specified_random_phases)
+    @test haskey(result.strata_accounting, :deliberately_optimized_phases)
+    @test result.claim_boundary.scale_status === :homotopy_only
+    @test result.claim_boundary.physical_control_gate === :not_established
+    @test result.claim_boundary.authoritative_population_claims === :prohibited_pending_preconditions
+
+    # 4. Bounded diagnostic on reference models
+    poly102 = CYAxiverse.paper_benchmarks.poly102_inflation
+    kc5 = poly102.n5_critical_scale()
+    ratio5 = poly102.n5_reduced_ratio(kc5)
+    refs = [
+        (
+            theta=[π],
+            Q=reshape([1, 2], 1, 2),
+            amplitudes=[1.0, ratio5],
+            metric=reshape([1.0], 1, 1),
+            phases=zeros(2),
+        ),
+        (
+            theta=[0.0],
+            Q=reshape([1, 2], 1, 2),
+            amplitudes=[2.0, 1.0],
+            metric=reshape([1.0], 1, 1),
+            phases=[π / 2, -π / 2],
+        )
+    ]
+    diag_result = run_bounded_diagnostic(refs)
+    zacc = diag_result.strata_accounting[:zero_phase]
+    @test zacc.total_geometries_attempted == 2
+    @test zacc.searches_evaluated == 2
+    @test zacc.catastrophes_found == 2
+    @test zacc.cusp_count == 1
+    @test zacc.fold_count == 1
+    @test zacc.unresolved_count == 0
+    @test zacc.physical_stabilized_models == 0
+    @test verify_accounting_integrity(zacc)
+
+    # 5. JSON serialization roundtrip sanity
+    json_str = json_value(diag_result)
+    @test occursin("catastrophic-inflation-population-study", json_str)
+    @test occursin("blocked_by_preconditions", json_str)
+    @test occursin("0/0 (uncalibrated)", json_str)
+    @test occursin("canonical_two_face_dedup", json_str)
+end
+
 if _FULL; @testset "analyze_inflation_candidates: whitened point classification" begin
     # The script defines `derivatives`, `classify_point` and `main`, names that
     # would collide with the scan scripts already included at top level, so it
