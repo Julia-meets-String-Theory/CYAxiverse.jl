@@ -920,6 +920,32 @@ end
             include(joinpath(@__DIR__, "..", "scripts", "cytools_wrapper_repro.jl"))
         end
     end
+
+    @testset "phase and volume detuning scan" begin
+        include(joinpath(@__DIR__, "..", "scripts", "phase_volume_detuning_scan.jl"))
+        S = Main.PhaseVolumeDetuningScan
+        Q = [1.0 0.0; 0.0 1.0]
+        L = [1.0 0.0; 1.0 0.0]
+        phases = S.phase_vectors(2; values=(-0.25, 0.25), pair_limit=4)
+        @test length(phases) == 9
+        @test phases[1] == [0.0, 0.0]
+        @test S.potential([0.0, 0.0], Q, L, phases[1]) ≈ 0
+        @test S.hessian([0.0, 0.0], Q, L, phases[1]) ≈
+            4π^2 * Matrix{Float64}(I, 2, 2)
+        @test_throws ArgumentError S.scan([0.0, 0.0], Q, L; k_grid=[1.0, 0.5])
+
+        # A two-instanton phase detuning has a reproducible zero of the
+        # one-dimensional Hessian as the relative hierarchy is varied.
+        q1 = reshape([1.0, 1.0], 2, 1)
+        l1 = [2.0 -1.0; 1.0 1.0]
+        result = S.scan([0.0], q1, l1;
+            k_grid=range(0.05, 0.2; length=4),
+            phases=[[0.4, 0.0]], tolerance=big"1e-20")
+        @test length(result) == 1
+        @test all(candidate.scale_status == :homotopy_only for candidate in result)
+        @test result[1].k_low < result[1].k_c < result[1].k_high
+        @test result[1].n_e === missing
+    end
 end
 
 if _FULL; @testset "Vacua pipeline persistence and validation" begin
