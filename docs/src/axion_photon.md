@@ -261,6 +261,24 @@ Such rows are marked `adapted_absolute_scale`. This option takes absolute
 values only for the scale used in the hierarchy; the original coefficient
 signs remain in `InstantonData.coefficient_signs`.
 
+## Persisted results and precision
+
+`write_axion_photon_result` stores an identity record with the geometry index,
+raw `cytools/geometric` and `cytools/potential` digests, retained in-memory
+snapshots, and the computation configuration. Readers and batch scans reject
+legacy result groups without this identity and recompute them. `force=true`
+allows a valid newly computed result to replace an existing group; it does not
+skip identity or input checks.
+
+The `AxionPhotonResult` constructor requires an `AxionPhotonIdentity` and its
+complete `AxionPhotonConfiguration`. Callers cannot construct a compatible
+legacy result by omitting or fabricating configuration fields.
+
+`read_axion_photon_result(path; T=...)` validates retained snapshots at the
+stored computation precision, then converts the returned arrays to `T`. A
+result read at a different `T` is therefore suitable for analysis, but its
+converted retained snapshots cannot be written back as a new persisted result.
+
 ## Scope boundary
 
 The current scan is intended to answer bounded numerical questions such as:
