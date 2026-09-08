@@ -339,7 +339,7 @@ function geometries_generate(h11,cy; rational_Q = false)
     basis = cy.divisor_basis()
     #Find tip of SKC
     n,m = 1.0,1.0
-    tip = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
+    tip0 = cy.toric_kahler_cone().tip_of_stretched_cone(sqrt(n))
     #Generate list of Q matrices -- only $h11+4 directions
     if rational_Q
         min_points = Int(round(h11^2))
@@ -349,13 +349,13 @@ function geometries_generate(h11,cy; rational_Q = false)
         qprime = cy.toric_effective_cone().rays()
     end
     #PTD volumes at tip
-    tau0 = cy.compute_divisor_volumes(tip)[basis]
+    tau0 = cy.compute_divisor_volumes(tip0)[basis]
     nq = size(qprime, 1)
     rhs_constraint = Vector{Float64}(undef, nq)
     lhs_constraint = Matrix{Float64}(undef, nq, nq)
     use_legacy_kinv = cytools_version() < "0.8.0"
-    Kinv0 = use_legacy_kinv ? cy.compute_Kinv(tip) :
-                            cy.compute_inverse_kahler_metric(tip)
+    Kinv0 = use_legacy_kinv ? cy.compute_Kinv(tip0) :
+                            cy.compute_inverse_kahler_metric(tip0)
     Kinv0 = Hermitian(0.5 * Kinv0 + Kinv0')
     tau  = copy(tau0)
     Kinv = copy(Kinv0)
@@ -387,16 +387,15 @@ function geometries_generate(h11,cy; rational_Q = false)
         tau  = m2 .* tau0
         Kinv = m4 .* Kinv0
     end
-    if (minimum(tau) > 1.)
-    else
+    if minimum(tau) <= 1.
         n = 1. / minimum(tau)
-        tip = sqrt(n) .* tip
-        #PTD volumes at tip
-        tau = cy.compute_divisor_volumes(tip)[basis]
-        #Kinv at tip -- save this or save K?
-        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
-        Kinv = Hermitian(1/2 * Kinv + Kinv')
     end
+    tip = (m * sqrt(n)) .* tip0
+    #PTD volumes at the final point
+    tau = cy.compute_divisor_volumes(tip)[basis]
+    #Kinv at the final point -- save this or save K?
+    Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
+    Kinv = Hermitian(0.5 * Kinv + Kinv')
     tip_prefactor = [sqrt(n),m]
     #Volume of CY3 at tip
     V = cy.compute_cy_volume(tip)

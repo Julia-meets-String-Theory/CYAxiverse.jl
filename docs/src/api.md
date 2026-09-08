@@ -81,6 +81,8 @@ CYAxiverse.axion_photon.RationalRankCertificate
 CYAxiverse.axion_photon.LeadingAxionHierarchy
 CYAxiverse.axion_photon.AxionPhotonObservables
 CYAxiverse.axion_photon.AxionPhotonResult
+CYAxiverse.axion_photon.AxionPhotonIdentity
+CYAxiverse.axion_photon.AxionPhotonConfiguration
 CYAxiverse.axion_photon.geometry_path
 CYAxiverse.axion_photon.local_geometry_indices
 CYAxiverse.axion_photon.rank_certificate_payload
@@ -93,6 +95,9 @@ CYAxiverse.axion_photon.qed_instanton_log10_threshold_eV
 CYAxiverse.axion_photon.qed_instanton_threshold_eV
 CYAxiverse.axion_photon.run_local_scan
 CYAxiverse.axion_photon.write_scan_csv
+CYAxiverse.axion_photon.read_axion_photon_result
+CYAxiverse.axion_photon.write_axion_photon_result
+CYAxiverse.axion_photon.run_batch_axion_photon
 ```
 
 ## Inflation benchmark bases

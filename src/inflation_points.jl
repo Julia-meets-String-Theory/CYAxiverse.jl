@@ -132,6 +132,13 @@ function prepare_context(Q::AbstractMatrix{Int}, L::AbstractMatrix{<:Real},
     end
 end
 
+function _with_context_precision(f::F, context::PointContext{T}) where {F, T<:AbstractFloat}
+    T === BigFloat || return f()
+    setprecision(BigFloat, context.precision_bits) do
+        f()
+    end
+end
+
 function _periodic(theta::AbstractVector{T}) where {T<:AbstractFloat}
     mod.(theta, one(T))
 end
@@ -144,16 +151,7 @@ function _mass_hessian(context::PointContext{T}, hessian::AbstractMatrix{<:Real}
     lower \ T.(hessian) / transpose(lower)
 end
 
-"""
-    mass_eigenbasis(context, data; vectors=false)
-
-Solve the physical generalized-Hessian problem at a corrected point.  The
-returned eigenvalues are ordered increasingly and are the dimensionless
-mass-squared eigenvalues of `H*v = m²*K*v`.  With `vectors=true`, also return
-raw-coordinate eigenvectors that are `K`-orthonormal.  Vector materialization
-is deliberately opt-in because it costs `O(h11^2)` storage.
-"""
-function mass_eigenbasis(context::PointContext{T}, data::PointDerivatives{T};
+function _mass_eigenbasis(context::PointContext{T}, data::PointDerivatives{T};
         vectors::Bool=false) where {T}
     mass_hessian = _mass_hessian(context, data.hessian)
     if !vectors
@@ -170,9 +168,27 @@ function mass_eigenbasis(context::PointContext{T}, data::PointDerivatives{T};
            context.K * raw_eigenvectors * Diagonal(eigensystem.values)))
 end
 
+"""
+    mass_eigenbasis(context, data; vectors=false)
+
+Solve the physical generalized-Hessian problem at a corrected point.  The
+returned eigenvalues are ordered increasingly and are the dimensionless
+mass-squared eigenvalues of `H*v = m²*K*v`.  With `vectors=true`, also return
+raw-coordinate eigenvectors that are `K`-orthonormal.  Vector materialization
+is deliberately opt-in because it costs `O(h11^2)` storage.
+"""
+function mass_eigenbasis(context::PointContext{T}, data::PointDerivatives{T};
+        vectors::Bool=false) where {T}
+    _with_context_precision(context) do
+        _mass_eigenbasis(context, data; vectors)
+    end
+end
+
 function mass_eigenbasis(context::PointContext, theta::AbstractVector{<:Real};
         vectors::Bool=false)
-    mass_eigenbasis(context, derivatives(context, theta); vectors=vectors)
+    _with_context_precision(context) do
+        _mass_eigenbasis(context, _derivatives(context, theta); vectors)
+    end
 end
 
 """Load one geometry into the SCI-02 periodic/string-basis context."""
@@ -184,8 +200,7 @@ function prepare_geometry_context(geom_idx::GeometryIndex;
        context=prepare_context(loaded.Q, loaded.L, loaded.K; precision_bits))
 end
 
-"""Evaluate a prepared log-shifted potential without mutating the context."""
-function derivatives(context::PointContext{T}, theta::AbstractVector{<:Real}) where {T}
+function _derivatives(context::PointContext{T}, theta::AbstractVector{<:Real}) where {T}
     length(theta) == size(context.Q, 1) ||
         throw(DimensionMismatch("theta must have one entry per axion"))
     x = T.(theta)
@@ -218,11 +233,21 @@ function derivatives(context::PointContext{T}, theta::AbstractVector{<:Real}) wh
     PointDerivatives(value, gradient, hessian, context.log_shift)
 end
 
-"""Diagnose a point using the generalized Hessian `H v = m² K v`."""
-function diagnose(context::PointContext{T}, theta::AbstractVector{<:Real};
+"""
+    derivatives(context, theta)
+
+Evaluate a prepared log-shifted potential without mutating the context.
+"""
+function derivatives(context::PointContext{T}, theta::AbstractVector{<:Real}) where {T}
+    _with_context_precision(context) do
+        _derivatives(context, theta)
+    end
+end
+
+function _diagnose(context::PointContext{T}, theta::AbstractVector{<:Real};
         zero_tolerance::Real=1e-10) where {T}
-    data = derivatives(context, theta)
-    eigenvalues = mass_eigenbasis(context, data).eigenvalues
+    data = _derivatives(context, theta)
+    eigenvalues = _mass_eigenbasis(context, data).eigenvalues
     lower = context.factor.L
     inverse_metric_gradient = transpose(lower) \ (lower \ data.gradient)
     gradient_norm = sqrt(max(dot(data.gradient, inverse_metric_gradient), zero(T)))
@@ -240,10 +265,22 @@ function diagnose(context::PointContext{T}, theta::AbstractVector{<:Real};
         threshold, :mass_eigenbasis)
 end
 
+"""
+    diagnose(context, theta; zero_tolerance=1e-10)
+
+Diagnose a point using the generalized Hessian `H v = m² K v`.
+"""
+function diagnose(context::PointContext{T}, theta::AbstractVector{<:Real};
+        zero_tolerance::Real=1e-10) where {T}
+    _with_context_precision(context) do
+        _diagnose(context, theta; zero_tolerance)
+    end
+end
+
 function _flow_state(context::PointContext{T}, chi::AbstractVector{<:Real}) where {T}
     lower = context.factor.L
     theta = transpose(lower) \ T.(chi)
-    data = derivatives(context, theta)
+    data = _derivatives(context, theta)
     gradient = lower \ data.gradient
     hessian = lower \ data.hessian / transpose(lower)
     value = data.value
@@ -275,26 +312,7 @@ function _flow_mode_index(eigenvalues::AbstractVector, mode::Symbol)
     throw(ArgumentError("unsupported mass mode: $mode"))
 end
 
-"""
-    gradient_flow(context, hilltop; kwargs...)
-
-Run a bounded generic slow-roll flow from a physical mass-mode displacement.
-The potential is evaluated in the periodic/string basis, while the state is
-integrated in the reusable canonical numerical chart `chi = L' * theta` for
-`K = L * L'`.  The selected initial direction is a raw-coordinate,
-`K`-normalized mass eigenvector.  E-folds are the independent variable, so
-the result does not depend on the arbitrary overall normalization of the
-stored log-shifted potential.  Pass `mass_basis` from
-`mass_eigenbasis(...; vectors=true)` and `mode_index` when evaluating multiple
-physical modes; this reuses the eigensystem instead of allocating it for every
-displacement direction.
-
-This is a candidate-level diagnostic, not a claim of stabilized geometry,
-Kähler-cone validity, or a production population scan.  The fixed-step RK4
-integrator is intentionally bounded and records a `:max_efolds` status when
-the requested horizon is reached without a finite exit.
-"""
-function gradient_flow(context::PointContext{T}, hilltop::AbstractVector{<:Real};
+function _gradient_flow(context::PointContext{T}, hilltop::AbstractVector{<:Real};
         displacement::Real=1e-8, displacement_sign::Real=-1,
         mode::Symbol=:most_negative, mode_index::Union{Nothing, Int}=nothing,
         mass_basis::Union{Nothing, NamedTuple}=nothing,
@@ -376,6 +394,36 @@ function gradient_flow(context::PointContext{T}, hilltop::AbstractVector{<:Real}
        max_efolds=horizon, step=step_size)
 end
 
+"""
+    gradient_flow(context, hilltop; kwargs...)
+
+Run a bounded generic slow-roll flow from a physical mass-mode displacement.
+The potential is evaluated in the periodic/string basis, while the state is
+integrated in the reusable canonical numerical chart `chi = L' * theta` for
+`K = L * L'`.  The selected initial direction is a raw-coordinate,
+`K`-normalized mass eigenvector.  E-folds are the independent variable, so
+the result does not depend on the arbitrary overall normalization of the
+stored log-shifted potential.  Pass `mass_basis` from
+`mass_eigenbasis(...; vectors=true)` and `mode_index` when evaluating multiple
+physical modes; this reuses the eigensystem instead of allocating it for every
+displacement direction.
+
+This is a candidate-level diagnostic, not a claim of stabilized geometry,
+Kähler-cone validity, or a production population scan.  The fixed-step RK4
+integrator is intentionally bounded and records a `:max_efolds` status when
+the requested horizon is reached without a finite exit.
+"""
+function gradient_flow(context::PointContext{T}, hilltop::AbstractVector{<:Real};
+        displacement::Real=1e-8, displacement_sign::Real=-1,
+        mode::Symbol=:most_negative, mode_index::Union{Nothing, Int}=nothing,
+        mass_basis::Union{Nothing, NamedTuple}=nothing,
+        max_efolds::Real=60, step::Real=1e-3) where {T}
+    _with_context_precision(context) do
+        _gradient_flow(context, hilltop; displacement, displacement_sign, mode,
+            mode_index, mass_basis, max_efolds, step)
+    end
+end
+
 """Run [`gradient_flow`](@ref) after loading one `GeometryIndex`."""
 function gradient_flow(geom_idx::GeometryIndex, hilltop::AbstractVector{<:Real};
         precision_bits::Union{Nothing, Int}=nothing, kwargs...)
@@ -386,7 +434,7 @@ function gradient_flow(geom_idx::GeometryIndex, hilltop::AbstractVector{<:Real};
 end
 
 function _newton_step(context::PointContext{T}, theta::Vector{T}) where {T}
-    data = derivatives(context, theta)
+    data = _derivatives(context, theta)
     step = try
         -(Symmetric(data.hessian) \ data.gradient)
     catch error
@@ -396,14 +444,7 @@ function _newton_step(context::PointContext{T}, theta::Vector{T}) where {T}
     data, step
 end
 
-"""
-    correct_stationary_point(context, seed; kwargs...)
-
-Run a bounded damped Newton correction of a retained branch seed.  The result
-is labelled `:converged` only when the coordinate-gradient infinity norm meets
-`residual_tolerance`; otherwise it records an explicit failure status.
-"""
-function correct_stationary_point(context::PointContext{T}, seed::AbstractVector{<:Real};
+function _correct_stationary_point(context::PointContext{T}, seed::AbstractVector{<:Real};
         residual_tolerance::Real=1e-10, max_iterations::Int=100,
         max_line_search::Int=12) where {T}
     max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
@@ -414,7 +455,7 @@ function correct_stationary_point(context::PointContext{T}, seed::AbstractVector
     started = time_ns()
     residual = T(Inf)
     for iteration in 0:max_iterations
-        data = derivatives(context, theta)
+        data = _derivatives(context, theta)
         residual = norm(data.gradient, Inf)
         if isfinite(residual) && residual <= tolerance
             return CorrectionResult(theta, :converged, residual, iteration,
@@ -437,7 +478,7 @@ function correct_stationary_point(context::PointContext{T}, seed::AbstractVector
         damping = one(T)
         for _ in 0:max_line_search
             trial = _periodic(theta .+ damping .* step)
-            trial_residual = norm(derivatives(context, trial).gradient, Inf)
+            trial_residual = norm(_derivatives(context, trial).gradient, Inf)
             if isfinite(trial_residual) && trial_residual < current
                 theta = trial
                 accepted = true
@@ -453,6 +494,22 @@ function correct_stationary_point(context::PointContext{T}, seed::AbstractVector
     CorrectionResult(theta, :max_iterations, residual, max_iterations,
         (time_ns() - started) / 1e9, "stationary correction did not converge",
         :periodic_string)
+end
+
+"""
+    correct_stationary_point(context, seed; kwargs...)
+
+Run a bounded damped Newton correction of a retained branch seed.  The result
+is labelled `:converged` only when the coordinate-gradient infinity norm meets
+`residual_tolerance`; otherwise it records an explicit failure status.
+"""
+function correct_stationary_point(context::PointContext{T}, seed::AbstractVector{<:Real};
+        residual_tolerance::Real=1e-10, max_iterations::Int=100,
+        max_line_search::Int=12) where {T}
+    _with_context_precision(context) do
+        _correct_stationary_point(context, seed; residual_tolerance,
+            max_iterations, max_line_search)
+    end
 end
 
 function _screen_pass(diagnostic::PointDiagnostics)

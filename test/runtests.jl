@@ -401,6 +401,190 @@ end; end
     @test_throws DimensionMismatch points.prepare_context(Q, L[:, 1:1], K)
 end
 
+@testset "Inflation point APIs honor context precision" begin
+    points = CYAxiverse.inflation_points
+    Q = Int[1 0; 0 1]
+    source_L = setprecision(BigFloat, 512) do
+        [BigFloat("1.0") BigFloat("-0.1"); BigFloat("0.0") BigFloat("0.0")]
+    end
+    source_K = setprecision(BigFloat, 512) do
+        [BigFloat("2.0") BigFloat("0.3"); BigFloat("0.3") BigFloat("1.0")]
+    end
+    theta = setprecision(BigFloat, 512) do
+        BigFloat[BigFloat("1.37"), BigFloat("-0.41")]
+    end
+    correction_kwargs = (; residual_tolerance=BigFloat("1e-40"),
+        max_iterations=100, max_line_search=12)
+
+    flow_Q = reshape(Int[1, 2], 1, 2)
+    flow_L = setprecision(BigFloat, 512) do
+        [BigFloat("1.0") BigFloat("1.0"); BigFloat("0.0") log10(BigFloat("0.25"))]
+    end
+    flow_K = reshape([BigFloat("1.0")], 1, 1)
+    flow_hilltop = BigFloat[BigFloat("0.5")]
+    flow_kwargs = (; displacement=BigFloat("0.01"),
+        max_efolds=BigFloat("0.02"), step=BigFloat("0.01"))
+
+    for (context_bits, ambient_bits) in ((512, 256), (256, 512))
+        context = points.prepare_context(Q, source_L, source_K;
+            precision_bits=context_bits)
+        flow_context = points.prepare_context(flow_Q, flow_L, flow_K;
+            precision_bits=context_bits)
+
+        expected = setprecision(BigFloat, context_bits) do
+            data = points.derivatives(context, theta)
+            (; derivatives=data,
+               diagnostics=points.diagnose(context, theta),
+               scalar_basis=points.mass_eigenbasis(context, theta),
+               scalar_data_basis=points.mass_eigenbasis(context, data),
+               vector_basis=points.mass_eigenbasis(context, theta; vectors=true),
+               vector_data_basis=points.mass_eigenbasis(context, data; vectors=true),
+               correction=points.correct_stationary_point(context, theta;
+                   correction_kwargs...),
+               flow=points.gradient_flow(flow_context, flow_hilltop;
+                   flow_kwargs...))
+        end
+        ambient_before = precision(BigFloat)
+        actual = setprecision(BigFloat, ambient_bits) do
+            data = points.derivatives(context, theta)
+            @test precision(BigFloat) == ambient_bits
+            diagnostics = points.diagnose(context, theta)
+            @test precision(BigFloat) == ambient_bits
+            scalar_basis = points.mass_eigenbasis(context, theta)
+            @test precision(BigFloat) == ambient_bits
+            scalar_data_basis = points.mass_eigenbasis(context, data)
+            @test precision(BigFloat) == ambient_bits
+            vector_basis = points.mass_eigenbasis(context, theta; vectors=true)
+            @test precision(BigFloat) == ambient_bits
+            vector_data_basis = points.mass_eigenbasis(context, data; vectors=true)
+            @test precision(BigFloat) == ambient_bits
+            correction = points.correct_stationary_point(context, theta;
+                correction_kwargs...)
+            @test precision(BigFloat) == ambient_bits
+            flow = points.gradient_flow(flow_context, flow_hilltop;
+                flow_kwargs...)
+            @test precision(BigFloat) == ambient_bits
+            (; derivatives=data, diagnostics, scalar_basis, scalar_data_basis,
+               vector_basis, vector_data_basis, correction, flow)
+        end
+        @test precision(BigFloat) == ambient_before
+
+        actual_derivatives = actual.derivatives
+        expected_derivatives = expected.derivatives
+        @test actual_derivatives.value == expected_derivatives.value
+        @test actual_derivatives.gradient == expected_derivatives.gradient
+        @test actual_derivatives.hessian == expected_derivatives.hessian
+        @test precision(actual_derivatives.value) == context_bits
+        @test all(x -> precision(x) == context_bits, actual_derivatives.gradient)
+        @test all(x -> precision(x) == context_bits, actual_derivatives.hessian)
+        expected_two_pi = setprecision(BigFloat, context_bits) do
+            BigFloat(2) * BigFloat(π)
+        end
+        expected_amplitudes = setprecision(BigFloat, context_bits) do
+            BigFloat[BigFloat("1.0"), BigFloat("-0.1")]
+        end
+        expected_value = setprecision(BigFloat, context_bits) do
+            sum(expected_amplitudes .* (one(BigFloat) .-
+                cos.(expected_two_pi .* theta)))
+        end
+        @test actual_derivatives.value ≈ expected_value atol=BigFloat("1e-45")
+
+        actual_diagnostics = actual.diagnostics
+        expected_diagnostics = expected.diagnostics
+        @test actual_diagnostics.value == expected_diagnostics.value
+        @test actual_diagnostics.gradient_norm == expected_diagnostics.gradient_norm
+        @test actual_diagnostics.epsilon == expected_diagnostics.epsilon
+        @test actual_diagnostics.eta_values == expected_diagnostics.eta_values
+        @test actual_diagnostics.hessian_eigenvalues ==
+            expected_diagnostics.hessian_eigenvalues
+        @test actual_diagnostics.negative_modes == expected_diagnostics.negative_modes
+        @test precision(actual_diagnostics.value) == context_bits
+        @test precision(actual_diagnostics.epsilon) == context_bits
+        @test all(x -> precision(x) == context_bits,
+            actual_diagnostics.hessian_eigenvalues)
+
+        actual_scalar = actual.scalar_basis
+        expected_scalar = expected.scalar_basis
+        @test actual_scalar.eigenvalues == expected_scalar.eigenvalues
+        @test all(x -> precision(x) == context_bits, actual_scalar.eigenvalues)
+        @test actual.scalar_data_basis.eigenvalues == actual_scalar.eigenvalues
+        @test actual.scalar_data_basis.eigenvalues == expected.scalar_data_basis.eigenvalues
+        @test all(x -> precision(x) == context_bits,
+            actual.scalar_data_basis.eigenvalues)
+
+        actual_vectors = actual.vector_basis
+        expected_vectors = expected.vector_basis
+        @test actual_vectors.eigenvalues == expected_vectors.eigenvalues
+        @test actual_vectors.raw_eigenvectors == expected_vectors.raw_eigenvectors
+        @test actual_vectors.metric_residual == expected_vectors.metric_residual
+        @test actual_vectors.generalized_residual == expected_vectors.generalized_residual
+        @test precision(actual_vectors.metric_residual) == context_bits
+        @test all(x -> precision(x) == context_bits,
+            actual_vectors.raw_eigenvectors)
+        @test actual.vector_data_basis.eigenvalues == actual_vectors.eigenvalues
+        @test actual.vector_data_basis.raw_eigenvectors == actual_vectors.raw_eigenvectors
+        @test actual.vector_data_basis.metric_residual == actual_vectors.metric_residual
+        @test actual.vector_data_basis.generalized_residual ==
+            actual_vectors.generalized_residual
+        @test all(x -> precision(x) == context_bits,
+            actual.vector_data_basis.raw_eigenvectors)
+
+        actual_correction = actual.correction
+        expected_correction = expected.correction
+        @test actual_correction.status == :converged
+        @test actual_correction.status == expected_correction.status
+        @test actual_correction.theta == expected_correction.theta
+        @test actual_correction.residual == expected_correction.residual
+        @test actual_correction.iterations == expected_correction.iterations
+        @test precision(actual_correction.residual) == context_bits
+        @test all(x -> precision(x) == context_bits, actual_correction.theta)
+
+        actual_flow = actual.flow
+        expected_flow = expected.flow
+        @test actual_flow.status == expected_flow.status
+        @test actual_flow.status in (:completed, :max_efolds, :no_slow_roll_window)
+        @test actual_flow.mass_eigenvalue == expected_flow.mass_eigenvalue
+        @test actual_flow.theta_initial == expected_flow.theta_initial
+        @test actual_flow.theta_final == expected_flow.theta_final
+        @test actual_flow.efolds == expected_flow.efolds
+        @test actual_flow.steps == expected_flow.steps
+        @test actual_flow.windows == expected_flow.windows
+        @test precision(actual_flow.mass_eigenvalue) == context_bits
+        @test precision(actual_flow.efolds) == context_bits
+        @test precision(actual_flow.theta_initial[1]) == context_bits
+        @test precision(actual_flow.theta_final[1]) == context_bits
+        @test actual_flow.steps > 0
+        @test actual_flow.efolds ≈ BigFloat("0.02") atol=BigFloat("1e-45")
+
+        validation_ambient_before = precision(BigFloat)
+        setprecision(BigFloat, ambient_bits) do
+            points.derivatives(context, theta)
+            @test precision(BigFloat) == ambient_bits
+            @test_throws DimensionMismatch points.derivatives(context, theta[1:1])
+            @test precision(BigFloat) == ambient_bits
+            @test_throws ArgumentError points.correct_stationary_point(context, theta;
+                residual_tolerance=0)
+            @test precision(BigFloat) == ambient_bits
+            @test_throws ArgumentError points.gradient_flow(flow_context,
+                flow_hilltop; max_efolds=0)
+            @test precision(BigFloat) == ambient_bits
+        end
+        @test precision(BigFloat) == validation_ambient_before
+    end
+
+    float_context = points.prepare_context(Q, Float64.(source_L), Float64.(source_K))
+    float_theta = Float64.(theta)
+    float_reference = points.derivatives(float_context, float_theta)
+    float_under_high_precision = setprecision(BigFloat, 512) do
+        points.derivatives(float_context, float_theta)
+    end
+    @test float_under_high_precision.value == float_reference.value
+    @test float_under_high_precision.gradient == float_reference.gradient
+    @test float_under_high_precision.hessian == float_reference.hessian
+    @test eltype(float_under_high_precision.gradient) == Float64
+    @test eltype(float_under_high_precision.hessian) == Float64
+end
+
 @testset "Generic geometry mass-basis gradient flow" begin
     points = CYAxiverse.inflation_points
     Q = reshape(Int[1, 2], 1, 2)
@@ -907,6 +1091,141 @@ end
         @test occursin("mean_allocated_bytes", read(report_path, String))
     end
 end
+end
+
+function _load_geometries_generate_fixture()
+    source_path = joinpath(@__DIR__, "..", "add_functions", "cytools_wrapper.jl")
+    source = read(source_path, String)
+    function find_definition(expression)
+        expression isa Expr || return nothing
+        if expression.head === :function
+            signature = expression.args[1]
+            if signature isa Expr && signature.head === :call &&
+                    signature.args[1] === :geometries_generate
+                return expression
+            end
+        end
+        for argument in expression.args
+            definition = find_definition(argument)
+            definition === nothing || return definition
+        end
+        nothing
+    end
+
+    expression = find_definition(Meta.parseall(source))
+    expression === nothing && error("geometries_generate definition not found in $source_path")
+    fixture_module = Module(:GeometriesGenerateFixture)
+    Core.eval(fixture_module, :(using LinearAlgebra))
+    Core.eval(fixture_module, :(cytools_version() = "0.8.0"))
+    Core.eval(fixture_module, expression)
+    return Base.invokelatest(getproperty, fixture_module, :geometries_generate)
+end
+
+struct _SyntheticKahlerCone
+    tip::Vector{Float64}
+end
+
+function Base.getproperty(cone::_SyntheticKahlerCone, name::Symbol)
+    name === :tip_of_stretched_cone && return _ -> copy(getfield(cone, :tip))
+    getfield(cone, name)
+end
+
+struct _SyntheticEffectiveCone
+    charges::Matrix{Float64}
+end
+
+function Base.getproperty(cone::_SyntheticEffectiveCone, name::Symbol)
+    name === :rays && return () -> copy(getfield(cone, :charges))
+    getfield(cone, name)
+end
+
+struct _SyntheticCY
+    tau_coefficient::Float64
+    metric_coefficient::Float64
+    divisor_points::Vector{Vector{Float64}}
+    metric_points::Vector{Vector{Float64}}
+    volume_points::Vector{Vector{Float64}}
+end
+
+function Base.getproperty(cy::_SyntheticCY, name::Symbol)
+    name === :h21 && return () -> 0
+    name === :glsm_charge_matrix && return (; include_origin=false) -> reshape([1], 1, 1)
+    name === :divisor_basis && return () -> [1]
+    name === :toric_kahler_cone && return () -> _SyntheticKahlerCone([1.0])
+    name === :toric_effective_cone &&
+        return () -> _SyntheticEffectiveCone(reshape([-1.0, 2.0], 2, 1))
+    if name === :compute_divisor_volumes
+        return point -> begin
+            push!(getfield(cy, :divisor_points), copy(point))
+            [getfield(cy, :tau_coefficient) * point[1]^2]
+        end
+    end
+    if name === :compute_inverse_kahler_metric || name === :compute_Kinv
+        return point -> begin
+            push!(getfield(cy, :metric_points), copy(point))
+            reshape([getfield(cy, :metric_coefficient) * point[1]^4], 1, 1)
+        end
+    end
+    if name === :compute_cy_volume
+        return point -> begin
+            push!(getfield(cy, :volume_points), copy(point))
+            point[1]^3
+        end
+    end
+    getfield(cy, name)
+end
+
+@testset "CYTools geometry fields share the final evaluation point" begin
+    geometries_generate_fixture = _load_geometries_generate_fixture()
+    cases = (
+        (name="unscaled", tau=2.0, metric=1.0, expect_m=false, expect_n=false),
+        (name="m scaling", tau=2.0, metric=1e-8, expect_m=true, expect_n=false),
+        (name="m then n scaling", tau=0.1, metric=1e-2, expect_m=true, expect_n=true),
+    )
+    for case in cases
+        divisor_points = Vector{Float64}[]
+        metric_points = Vector{Float64}[]
+        volume_points = Vector{Float64}[]
+        cy = _SyntheticCY(case.tau, case.metric, divisor_points,
+            metric_points, volume_points)
+        result = geometries_generate_fixture(1, cy)
+        radial_scale = prod(result["tip_prefactor"])
+        final_tip = result["tip"]
+        tau = result["PTD_volumes"]
+        Kinv = result["Kinv"]
+        volume = result["CY_volume"]
+
+        @testset "$(case.name)" begin
+            @test (result["tip_prefactor"][2] > 1.0) == case.expect_m
+            @test (result["tip_prefactor"][1] > 1.0) == case.expect_n
+            @test final_tip ≈ [radial_scale]
+            @test divisor_points[end] ≈ final_tip
+            @test metric_points[end] ≈ final_tip
+            @test volume_points[end] ≈ final_tip
+            @test tau ≈ [case.tau * radial_scale^2]
+            @test Kinv ≈ reshape([1.5 * case.metric * radial_scale^4], 1, 1)
+            @test volume ≈ radial_scale^3
+
+            # Use simple algebraic charges to exercise the potential formula;
+            # these are not an effective-cone scientific fixture.
+            qprime = reshape([-1.0, 2.0], 2, 1)
+            expected_coefficients = [
+                (8pi / volume^2) * dot(qprime[1, :], tau),
+                (8pi / volume^2) * dot(qprime[2, :], tau),
+                (pi * dot(qprime[1, :], Kinv * qprime[2, :]) +
+                    dot(qprime[1, :] + qprime[2, :], tau)) * 8pi / volume^2,
+            ]
+            expected_exponents = [
+                -2log10(exp(1)) * pi * dot(qprime[1, :], tau),
+                -2log10(exp(1)) * pi * dot(qprime[2, :], tau),
+                -2log10(exp(1)) * pi *
+                    (dot(qprime[1, :], tau) + dot(qprime[2, :], tau)),
+            ]
+            expected_L = hcat(sign.(expected_coefficients),
+                log10.(abs.(expected_coefficients)) .+ expected_exponents)
+            @test result["L"] ≈ expected_L
+        end
+    end
 end
 
 @testset "CYAxiverse.jl" begin
