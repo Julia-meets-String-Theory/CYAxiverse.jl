@@ -6,6 +6,11 @@ shared by the one-geometry contract probe and the scan-prep driver without
 introducing a package-level scan API.
 """
 
+using CYAxiverse
+using LinearAlgebra
+using Statistics
+using Printf
+
 # The scan-prep and pilot CLIs share this file. Keep repeated `include` calls
 # idempotent when the CLIs are loaded together by the package test suite.
 if !isdefined(@__MODULE__, :INFLATION_SCAN_COMMON_LOADED)
@@ -14,10 +19,6 @@ const INFLATION_SCAN_COMMON_LOADED = true
 if !isdefined(@__MODULE__, :INFLATION_DIAGNOSTIC_SCHEMA_VERSION)
     include(joinpath(@__DIR__, "inflation_diagnostics_common.jl"))
 end
-
-using CYAxiverse
-using LinearAlgebra
-using Statistics
 
 const GeometryIndex = CYAxiverse.structs.GeometryIndex
 const INFLATION_SCAN_CONTRACT_VERSION = "4"

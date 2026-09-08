@@ -8,14 +8,14 @@ summaries, append-only shard persistence, and a conservative resume check.  It
 does not run trajectory refinement, create workers, or write geometry files.
 """
 
+using Printf
+
 # The pilot and shard-merge CLIs include this driver. Keep repeated includes
 # idempotent when those entry points are loaded together in tests.
 if !isdefined(@__MODULE__, :INFLATION_SCAN_PREP_LOADED)
 const INFLATION_SCAN_PREP_LOADED = true
 
 include(joinpath(@__DIR__, "inflation_scan_common.jl"))
-
-using Printf
 
 const SCAN_PREP_FIELDS = (
     :contract_version, :diagnostic_schema_version, :measurement_scope,

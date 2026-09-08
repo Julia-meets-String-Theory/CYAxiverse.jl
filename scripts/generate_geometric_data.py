@@ -8,6 +8,7 @@ import h5py
 from cytools import fetch_polytopes, Polytope
 from concurrent.futures import ProcessPoolExecutor
 from geometry_charge_conventions import canonicalize_unique_charge_rows
+from generate_geometric_data_multitriangulation import load_mirror_polytopes
 
 def generate_and_save_geometry(h11, cy, poly_points, simplices, filepath):
     # --- 1. Basic Geometric Quantities ---
@@ -163,8 +164,12 @@ def process_single_polytope(args):
     except Exception as e:
         return f"Error on np_{tri_idx+1:07d}: {e}"
     
-def run_batch(h11, n_polytopes, base_dir, n_cores=None):
-    poly_list = fetch_polytopes(h11, limit=n_polytopes * 8, lattice="N", favorable=True)
+def run_batch(h11, n_polytopes, base_dir, n_cores=None, database_source="cytools", parquet_dir=None):
+    if database_source == "mirror":
+        records = load_mirror_polytopes(parquet_dir, h11=h11, limit=n_polytopes, favorable=True)
+        poly_list = [p for p, _ in records]
+    else:
+        poly_list = list(fetch_polytopes(h11, limit=n_polytopes * 8, lattice="N", favorable=True))
     if not poly_list:
         print(f"No favorable polytopes found for h11={h11}")
         return
@@ -188,7 +193,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate CYTools geometry data for Julia.")
     parser.add_argument("--h11_min", type=int, default=4, help="Starting h11 value.")
     parser.add_argument("--h11_max", type=int, default=4, help="Ending h11 value (inclusive).")
+    parser.add_argument("--h11_step", "--h11_interval", dest="h11_step", type=int, default=1, help="Step between h11 values.")
     parser.add_argument("--n", type=int, default=1, help="Number of polytopes to process per h11.")
+    parser.add_argument("--database-source", choices=("cytools", "mirror"), default="cytools", help="Polytope source: live cytools (default) or HF Parquet mirror.")
+    parser.add_argument("--parquet-dir", type=str, default=None, help="Directory containing KS Parquet files. If omitted with mirror, streams from Hugging Face.")
     parser.add_argument("--outdir", type=str, default=".", help="Base directory to save the data.")
     parser.add_argument("--cores", type=int, default=None, help="Number of CPU cores to use (default: all).")
     args = parser.parse_args()
@@ -198,15 +206,15 @@ if __name__ == "__main__":
         args.h11_max = args.h11_min
         
     os.makedirs(args.outdir, exist_ok=True)
-    print(f"Starting generation for h11 in range [{args.h11_min}, {args.h11_max}], n={args.n} each. Saving to: {args.outdir}")
+    print(f"Starting generation for h11 in range [{args.h11_min}, {args.h11_max}] step {args.h11_step}, n={args.n} each. Saving to: {args.outdir}")
     
     tracemalloc.start()
     start_time = time.perf_counter()
     
     # Loop over the range of h11 values
-    for h in range(args.h11_min, args.h11_max + 1):
+    for h in range(args.h11_min, args.h11_max + 1, args.h11_step):
         print(f"\n>>> Processing h11 = {h} <<<")
-        run_batch(h11=h, n_polytopes=args.n, base_dir=args.outdir, n_cores=args.cores)
+        run_batch(h11=h, n_polytopes=args.n, base_dir=args.outdir, n_cores=args.cores, database_source=args.database_source, parquet_dir=args.parquet_dir)
         
     end_time = time.perf_counter()
     current_mem, peak_mem = tracemalloc.get_traced_memory()
