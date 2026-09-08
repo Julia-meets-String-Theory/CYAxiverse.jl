@@ -10,6 +10,7 @@ module paper_benchmarks
 using LinearAlgebra
 using NLsolve
 using Optim
+using SHA
 using ..generate: LQtilde, reduced_critical_points, constants, pq_canonical_frame
 
 include(joinpath(@__DIR__, "paper_benchmarks", "reduced_models.jl"))
@@ -17,5 +18,6 @@ include(joinpath(@__DIR__, "paper_benchmarks", "poly102_inflation.jl"))
 include(joinpath(@__DIR__, "paper_benchmarks", "compatibility.jl"))
 include(joinpath(@__DIR__, "paper_benchmarks", "fuzzy_axions_mass_scale.jl"))
 include(joinpath(@__DIR__, "paper_benchmarks", "fuzzy_axions_model_stage.jl"))
+include(joinpath(@__DIR__, "paper_benchmarks", "catastrophe_diagnostics.jl"))
 
 end

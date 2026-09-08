@@ -10,6 +10,21 @@ const N8_BEST_X = Float64[
     6.252347153425956, 4.774065287891951, 4.71238898069045, 0
 ]
 const N8_TAU = Float64[14, 14.5, 14.5, 15.5, 15.5, 15.5, 15.5, 16, 17, 17, 25, 45]
+const N8_INSTANTON_ACTIONS = N8_TAU
+const N8_DIVISOR_VOLUMES = Float64[45, 17, 17, 14.5, 14.5, 15.5, 15.5, 25]
+const N8_VERTICES = Int[
+     0  0  0  1
+     1  0  0  0
+    -1 -1  1  0
+    -1  1 -1  0
+     1 -1 -1 -1
+     1  1  1 -1
+     0 -1  0  0
+     0  0 -1  0
+     0  0  1  0
+     0  1  0  0
+]
+const N8_VOLUME = 126.0
 const N8_Q = Int[
     -1 1 1 0 0 0 0 1
      0 0 0 1 0 0 0 0
@@ -78,10 +93,18 @@ function instanton_scales(qdotτ::AbstractVector{<:Real}, k::Real)
     vcat(ones(1, length(q)), reshape(log10.(scaled) .- 2π .* scaled .* log10(exp(1)), 1, :))
 end
 
+function _phase_vector(phases, count::Int)
+    values = phases === nothing ? zeros(count) : Float64.(phases)
+    length(values) == count ||
+        throw(DimensionMismatch("one phase is required per instanton"))
+    values
+end
+
 """The N=5 charge matrix and eight leading instanton rows from Eq. (32)."""
-function n5_potential(; k::Real=1.0)
+function n5_potential(; k::Real=1.0, phases=nothing)
+    phase = _phase_vector(phases, length(N5_QDOTTAU))
     (; Q=Matrix(N5_Q'), L=instanton_scales(N5_QDOTTAU, k),
-       qdotτ=copy(N5_QDOTTAU), phases=zeros(8), coefficient_model=:leading_terms)
+       qdotτ=copy(N5_QDOTTAU), phases=phase, coefficient_model=:leading_terms)
 end
 
 """Appendix-B N=5 geometry reconstructed with native CYTools."""
@@ -106,17 +129,26 @@ function n5_light_direction(k::Real=n5_critical_scale())
 end
 
 """Appendix C Table 1, with twelve instanton rows and zero phases."""
-function n8_potential(; k::Real=1.0, trajectory::Bool=false)
+function n8_potential(; k::Real=1.0, trajectory::Bool=false, phases=nothing)
     q = trajectory ? N8_Q_TRAJECTORY : N8_Q
     tau = trajectory ? N8_TAU_TRAJECTORY : N8_TAU
+    phase = _phase_vector(phases, length(tau))
     (; Q=Matrix(q'), L=instanton_scales(tau, k), qdotτ=copy(tau),
-       phases=zeros(length(tau)), coefficient_model=trajectory ? :author_trajectory : :table_1)
+       phases=phase, coefficient_model=trajectory ? :author_trajectory : :table_1)
 end
 
-"""Appendix C geometry and the author Mathematica kinetic matrix."""
+"""Appendix C geometry and the author Mathematica kinetic matrix.
+
+`N8_TAU` is the twelve-entry instanton-action list, not the eight divisor
+volumes.  Keep those source quantities separate so a replay cannot silently
+use an action list as a Kähler point.
+"""
 function n8_geometry()
-    (; h11=8, h21=28, euler=-40, volume=126.0,
-       divisor_volumes=copy(N8_TAU), kinetic=Hermitian(copy(N8_K_RAW)),
+    (; h11=8, h21=28, euler=-40, volume=N8_VOLUME,
+       vertices=copy(N8_VERTICES),
+       divisor_volumes=copy(N8_DIVISOR_VOLUMES),
+       instanton_actions=copy(N8_INSTANTON_ACTIONS),
+       kinetic=Hermitian(copy(N8_K_RAW)),
        metric_convention=:raw_angles_radians)
 end
 
@@ -150,11 +182,12 @@ end
 
 """Evaluate a potential and its raw-coordinate derivatives."""
 function _derivatives(theta::AbstractVector{<:Real}, q::AbstractMatrix{<:Real},
-        qdotτ::AbstractVector{<:Real}, k::Real; phases=zeros(length(qdotτ)))
+        qdotτ::AbstractVector{<:Real}, k::Real; phases=nothing)
     length(theta) == size(q, 1) || throw(DimensionMismatch("theta and Q dimensions differ"))
+    phase = _phase_vector(phases, length(qdotτ))
     weights = Float64.(qdotτ) .* exp.(-2π * Float64(k) .* Float64.(qdotτ))
     weights ./= maximum(abs, weights)
-    args = Float64.(q)' * Float64.(theta) .+ Float64.(phases)
+    args = Float64.(q)' * Float64.(theta) .+ phase
     value = sum(weights .* (1 .- cos.(args)))
     gradient = Float64.(q) * (weights .* sin.(args))
     hessian = Float64.(q) * Diagonal(weights .* cos.(args)) * Float64.(q)'
@@ -170,15 +203,15 @@ diagnostic and adds all pairwise difference rows from the equation-(19)
 reconstruction.
 """
 function n8_potential_derivatives(theta::AbstractVector{<:Real}, k::Real;
-        trajectory::Bool=false, full::Bool=false)
-    full && return n8_full_derivatives(theta, k)
-    p = n8_potential(k=k, trajectory=trajectory)
+        trajectory::Bool=false, full::Bool=false, phases=nothing)
+    full && return n8_full_derivatives(theta, k; phases=phases)
+    p = n8_potential(k=k, trajectory=trajectory, phases=phases)
     _derivatives(theta, p.Q, p.qdotτ, k; phases=p.phases)
 end
 
 """Reconstruct the optional 12 diagonal plus 66 cross-term potential."""
-function n8_full_potential(; k::Real=1.0)
-    p = n8_potential(k=k)
+function n8_full_potential(; k::Real=1.0, phases=nothing)
+    p = n8_potential(k=k, phases=phases)
     qrows = Matrix(p.Q')
     tau = Float64(k) .* N8_TAU
     kinv = Float64(k)^2 .* inv(N8_K_RAW)
@@ -203,15 +236,19 @@ function n8_full_potential(; k::Real=1.0)
         push!(logs, log10(abs(coeff)) - 2π * qτ * log10(exp(1)))
     end
     (; Q=hcat(rows...), L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
-       qdotτ=nothing, phases=zeros(length(signs)), diagonal_count=12, cross_count=66)
+       qdotτ=nothing, phases=vcat(p.phases, [
+           p.phases[j] - p.phases[i]
+           for i in 1:(size(qrows, 1) - 1), j in (i + 1):size(qrows, 1)
+       ]), diagonal_count=12, cross_count=66)
 end
 
-function n8_full_derivatives(theta::AbstractVector{<:Real}, k::Real)
-    p = n8_full_potential(k=k)
+function n8_full_derivatives(theta::AbstractVector{<:Real}, k::Real;
+       phases=nothing)
+    p = n8_full_potential(k=k, phases=phases)
     q = Float64.(p.Q)
     weights = vec(p.L[1, :]) .* 10.0 .^ vec(p.L[2, :])
     weights ./= maximum(abs, weights)
-    args = q' * Float64.(theta)
+    args = q' * Float64.(theta) .+ Float64.(p.phases)
     (; value=sum(weights .* (1 .- cos.(args))),
        gradient=q * (weights .* sin.(args)),
        hessian=q * Diagonal(weights .* cos.(args)) * q',
@@ -250,13 +287,14 @@ Return the author's refined poly-102 cusp by solving the augmented
 gradient/Hessian-null equations from the supplied starting point.
 """
 function n8_degenerate_point(initial_theta::AbstractVector{<:Real}=N8_BEST_X;
-        k0::Real=N8_KC, tolerance::Real=1e-11, max_iterations::Int=1_000)
+        k0::Real=N8_KC, tolerance::Real=1e-11, max_iterations::Int=1_000,
+        phases=nothing)
     length(initial_theta) == 8 || throw(DimensionMismatch("poly-102 needs eight coordinates"))
     tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
     max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
     theta₀ = Float64.(initial_theta)
     k₀ = Float64(k0)
-    d₀ = n8_potential_derivatives(theta₀, k₀; trajectory=true)
+    d₀ = n8_potential_derivatives(theta₀, k₀; trajectory=true, phases=phases)
     maps₀ = n8_coordinate_maps(k₀)
     hcanonical₀ = maps₀.canonical_to_raw' * d₀.hessian * maps₀.canonical_to_raw
     null₀ = eigen(Symmetric(hcanonical₀)).vectors[:, 1]
@@ -265,7 +303,8 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real}=N8_BEST_X;
         theta = @view state[1:8]
         null = @view state[9:16]
         k = state[17]
-        derivatives = n8_potential_derivatives(theta, k; trajectory=true)
+        derivatives = n8_potential_derivatives(theta, k;
+            trajectory=true, phases=phases)
         maps = n8_coordinate_maps(k)
         hcanonical = maps.canonical_to_raw' * derivatives.hessian * maps.canonical_to_raw
         out[1:8] .= derivatives.gradient
@@ -278,7 +317,8 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real}=N8_BEST_X;
     theta = mod.(result.zero[1:8], 2π)
     null = result.zero[9:16]
     k = result.zero[17]
-    derivatives = n8_potential_derivatives(theta, k; trajectory=true)
+    derivatives = n8_potential_derivatives(theta, k;
+        trajectory=true, phases=phases)
     maps = n8_coordinate_maps(k)
     hcanonical = maps.canonical_to_raw' * derivatives.hessian * maps.canonical_to_raw
     eigensystem = eigen(Symmetric(hcanonical))
@@ -474,8 +514,7 @@ function n8_hilltop_probe(delta_k::Real; displacement::Real=1e-8,
         theta = N8_BEST_X .+ (x / displacement) .* (initial.theta - N8_BEST_X)
         state = _n8_canonical_state(
             n8_coordinate_maps(k).raw_to_canonical * theta, k)
-        push!(samples, (n=n, theta=copy(theta), epsilon=state.epsilon,
-            eta_parallel=state.eta_parallel, potential=state.value))
+        push!(samples, merge((n=n,), _trajectory_sample(state)))
     end
     (; k, delta_k=Float64(delta_k), efolds=total, entered_slow_roll=true,
        end_event=:local_normal_form, steps=sample_count, samples, initial,
@@ -495,6 +534,18 @@ function _n8_canonical_state(chi::AbstractVector{<:Real}, k::Real,
     eta_parallel = gradient_squared == 0 ? Inf : dot(tangent, hessian * tangent) / d.value
     (; theta, value=d.value, gradient, hessian, epsilon, eta_parallel,
        tangent, spectral_scale=opnorm(hessian) / max(abs(d.value), eps(Float64)))
+end
+
+function _trajectory_sample(state)
+    epsilon = state.epsilon
+    potential = state.value
+    delta_H = epsilon > zero(epsilon) && potential > zero(potential) ?
+        sqrt(potential) / (5sqrt(6π * epsilon)) : oftype(potential, NaN)
+    (; theta=copy(state.theta), tangent=copy(state.tangent), potential,
+       epsilon, eta_parallel=state.eta_parallel,
+       n_s=1 - 6epsilon + 2state.eta_parallel,
+       delta_H, scalar_amplitude=delta_H,
+       scalar_amplitude_convention=:paper_delta_H)
 end
 
 """
@@ -530,8 +581,7 @@ function n8_slow_roll_trajectory(delta_k::Real; displacement::Real=1e-8,
     while n < max_efolds && steps < 2_000_000
         state = _n8_canonical_state(chi, k, maps)
         if length(samples) < sample_count
-            push!(samples, (n=n, theta=copy(state.theta), epsilon=state.epsilon,
-                eta_parallel=state.eta_parallel, potential=state.value))
+            push!(samples, merge((n=n,), _trajectory_sample(state)))
         end
         inflating = state.epsilon < 1 && abs(state.eta_parallel) < 1
         if inflating && !entered
@@ -576,9 +626,10 @@ function _n8_big_symmetric_power(a::AbstractMatrix{BigFloat}, power::Real)
 end
 
 function _n8_big_derivatives(theta::AbstractVector{BigFloat}, k::BigFloat,
-        q::AbstractMatrix{BigFloat}, tau::AbstractVector{BigFloat})
+        q::AbstractMatrix{BigFloat}, tau::AbstractVector{BigFloat},
+        phases::AbstractVector{BigFloat})
     weights = (14k)^2 .* (tau ./ 14) .* exp.(-2π * k .* (tau .- 14))
-    arguments = q' * theta
+    arguments = q' * theta .+ phases
     value = sum(weights .* (1 .- cos.(arguments)))
     gradient = q * (weights .* sin.(arguments))
     hessian = q * Diagonal(weights .* cos.(arguments)) * q'
@@ -587,9 +638,10 @@ end
 
 function _n8_big_state(chi::AbstractVector{BigFloat}, k::BigFloat,
         q::AbstractMatrix{BigFloat}, tau::AbstractVector{BigFloat},
-        canonical_to_raw::AbstractMatrix{BigFloat})
+        canonical_to_raw::AbstractMatrix{BigFloat},
+        phases::AbstractVector{BigFloat})
     theta = canonical_to_raw * chi
-    derivatives = _n8_big_derivatives(theta, k, q, tau)
+    derivatives = _n8_big_derivatives(theta, k, q, tau, phases)
     gradient = canonical_to_raw' * derivatives.gradient
     hessian = canonical_to_raw' * derivatives.hessian * canonical_to_raw
     gradient_squared = dot(gradient, gradient)
@@ -605,8 +657,10 @@ end
 
 function _n8_big_event(sol, time::BigFloat, k::BigFloat,
         q::AbstractMatrix{BigFloat}, tau::AbstractVector{BigFloat},
-        canonical_to_raw::AbstractMatrix{BigFloat})
-    state = _n8_big_state(view(sol(time), 1:8), k, q, tau, canonical_to_raw)
+        canonical_to_raw::AbstractMatrix{BigFloat},
+        phases::AbstractVector{BigFloat})
+    state = _n8_big_state(view(sol(time), 1:8), k, q, tau,
+        canonical_to_raw, phases)
     max(state.epsilon, abs(state.eta_parallel)) - 1
 end
 
@@ -651,6 +705,7 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
         method::Symbol=:Rodas5P,
         basis::Symbol=:canonical_hessian,
         basis_theta::AbstractVector{<:Real}=N8_BEST_X,
+        phases=nothing,
         precision_bits::Int=100, reltol=nothing, abstol=nothing,
         maxiters::Int=10^8)
     delta_k > 0 || throw(ArgumentError("delta_k must be positive"))
@@ -666,15 +721,17 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
     precision_bits >= 64 || throw(ArgumentError("precision_bits must be at least 64"))
     setprecision(BigFloat, precision_bits) do
         T = BigFloat
-        k64 = Float64(N8_KC + Float64(delta_k))
-        k = T(k64)
+        k = T(N8_KC) + T(delta_k)
         q = T.(Matrix(N8_Q_TRAJECTORY'))
         tau = T.(N8_TAU_TRAJECTORY)
+        phase = phases === nothing ? zeros(T, length(tau)) : T.(phases)
+        length(phase) == length(tau) ||
+            throw(DimensionMismatch("one phase is required per instanton"))
         metric = T.(N8_K_RAW) / k^2
         raw_to_canonical = _n8_big_symmetric_power(metric, 1 / 2)
         canonical_to_raw = _n8_big_symmetric_power(metric, -1 / 2)
         hilltop = T.(basis_theta)
-        hilltop_derivatives = _n8_big_derivatives(hilltop, k, q, tau)
+        hilltop_derivatives = _n8_big_derivatives(hilltop, k, q, tau, phase)
         hilltop_hessian = canonical_to_raw' * hilltop_derivatives.hessian *
             canonical_to_raw
         eigensystem = eigen(Symmetric(hilltop_hessian))
@@ -686,27 +743,28 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
             raw_direction = -raw_direction
             canonical_direction = -canonical_direction
         end
-        theta_initial = hilltop .+
-            T(displacement_sign * Float64(displacement)) .* raw_direction
+        theta_initial = hilltop .+ T(displacement_sign) * T(displacement) .* raw_direction
         chi_initial = raw_to_canonical * theta_initial
         initial_state = _n8_big_state(
-            chi_initial, k, q, tau, canonical_to_raw)
+            chi_initial, k, q, tau, canonical_to_raw, phase)
         initial_vector = vcat(chi_initial, zero(T))
         rhs!(du, u, _parameters, _time) = begin
-            state = _n8_big_state(view(u, 1:8), k, q, tau, canonical_to_raw)
+            state = _n8_big_state(
+                view(u, 1:8), k, q, tau, canonical_to_raw, phase)
             du[1:8] .= -state.gradient
             du[9] = state.value
             nothing
         end
         jac!(jacobian, u, _parameters, _time) = begin
-            state = _n8_big_state(view(u, 1:8), k, q, tau, canonical_to_raw)
+            state = _n8_big_state(
+                view(u, 1:8), k, q, tau, canonical_to_raw, phase)
             fill!(jacobian, zero(T))
             jacobian[1:8, 1:8] .= -state.hessian
             jacobian[9, 1:8] .= state.gradient
             nothing
         end
         tgrad!(gradient, u, _parameters, _time) = fill!(gradient, zero(T))
-        tmax = T(Float64(max_time))
+        tmax = T(max_time)
         problem = ODEProblem(ODEFunction(rhs!; jac=jac!, tgrad=tgrad!,
                 jac_prototype=zeros(T, 9, 9)),
             initial_vector, (zero(T), tmax))
@@ -718,13 +776,13 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
             linsolve=GenericLUFactorization())
         solution = solve(problem, algorithm;
             reltol=used_reltol, abstol=used_abstol,
-            dt=min(tmax, T(Float64(initial_step))),
-            dtmax=min(tmax, T(Float64(max_step))), maxiters,
+            dt=min(tmax, T(initial_step)),
+            dtmax=min(tmax, T(max_step)), maxiters,
             save_everystep=true, dense=true)
         solution.retcode == ReturnCode.Failure &&
             throw(ErrorException("author trajectory solver failed: $(solution.retcode)"))
         event(time) = _n8_big_event(
-            solution, time, k, q, tau, canonical_to_raw)
+            solution, time, k, q, tau, canonical_to_raw, phase)
         end_time = solution.t[end]
         # There can be short transient slow-roll windows before the final
         # inflationary interval. Retain every completed window and select the
@@ -737,7 +795,7 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
         previous_time = solution.t[1]
         previous_value = begin
             state = _n8_big_state(
-                view(solution.u[1], 1:8), k, q, tau, canonical_to_raw)
+                view(solution.u[1], 1:8), k, q, tau, canonical_to_raw, phase)
             max(state.epsilon, abs(state.eta_parallel)) - 1
         end
         if previous_value <= 0
@@ -751,7 +809,8 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
             next_time = solution.t[index]
             next_value = begin
                 state = _n8_big_state(
-                    view(solution.u[index], 1:8), k, q, tau, canonical_to_raw)
+                    view(solution.u[index], 1:8), k, q, tau,
+                    canonical_to_raw, phase)
                 max(state.epsilon, abs(state.eta_parallel)) - 1
             end
             if entry_time === nothing
@@ -763,7 +822,8 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
                 exit_time = _n8_big_bisect(
                     event, previous_time, next_time)
                 exit_state = _n8_big_state(
-                    view(solution(exit_time), 1:8), k, q, tau, canonical_to_raw)
+                    view(solution(exit_time), 1:8), k, q, tau,
+                    canonical_to_raw, phase)
                 exit_event = abs(exit_state.eta_parallel) >= exit_state.epsilon ?
                     :eta_parallel : :epsilon
                 push!(completed_windows, (entry_time, exit_time, exit_event))
@@ -779,12 +839,13 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
             completed_windows
         end
         if isempty(windows)
-            return (; delta_k=T(Float64(delta_k)), k, entered_slow_roll=false,
+            return (; delta_k=T(delta_k), k, entered_slow_roll=false,
                 end_event=:no_slow_roll_window, efolds=zero(T),
                 slow_roll_efolds=zero(T),
                 terminated=false,
                 samples=NamedTuple[], initial=initial_state,
                 basis, basis_theta=copy(hilltop), basis_k=k,
+                phases=copy(phase),
                 precision_bits,
                 solver=(method, reltol=used_reltol, abstol=used_abstol,
                     retcode=solution.retcode,
@@ -805,23 +866,22 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
                 time -> solution(time)[9] - target_n,
                 entry_time, exit_time)
             state = _n8_big_state(
-                view(solution(sample_time), 1:8), k, q, tau, canonical_to_raw)
-            push!(samples, (n=target_n, theta=state.theta,
-                epsilon=state.epsilon, eta_parallel=state.eta_parallel,
-                potential=state.value))
+                view(solution(sample_time), 1:8), k, q, tau,
+                canonical_to_raw, phase)
+            push!(samples, merge((n=target_n,), _trajectory_sample(state)))
         end
-        (; delta_k=T(Float64(delta_k)), k, entered_slow_roll=true,
+        (; delta_k=T(delta_k), k, entered_slow_roll=true,
             entry_n, end_n, efolds=end_n,
             slow_roll_efolds=end_n - entry_n, end_event=exit_event,
             terminated=exit_event != :tmax,
-            samples, initial=initial_state, basis,
+            samples, initial=initial_state, basis, phases=copy(phase),
             basis_theta=copy(hilltop), basis_k=k, basis_eigenvalues=eigensystem.values,
             basis_raw_direction=raw_direction,
             basis_canonical_direction=canonical_direction, precision_bits,
             solver=(method, reltol=used_reltol,
-                abstol=used_abstol, scan_step=T(Float64(scan_step)),
-                max_step=T(Float64(max_step)),
-                initial_step=T(Float64(initial_step)),
+                abstol=used_abstol, scan_step=T(scan_step),
+                max_step=T(max_step),
+                initial_step=T(initial_step),
                 retcode=solution.retcode, accepted_steps=solution.stats.naccept,
                 rejected_steps=solution.stats.nreject, rhs_evaluations=solution.stats.nf,
                 jacobian_evaluations=solution.stats.njacs))

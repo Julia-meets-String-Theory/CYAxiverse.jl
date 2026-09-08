@@ -9,6 +9,8 @@ using Printf
 
 const Bench = CYAxiverse.axion_benchmarks
 const Poly102 = Bench.poly102_inflation
+const Source = Bench.benchmark_source_identity()
+const Manifest = Bench.benchmark_manifest()
 
 function n8_fixture(delta_k)
     k = Bench.N8_KC + delta_k
@@ -22,6 +24,11 @@ function n8_fixture(delta_k)
         initial.theta, k; trajectory=true)
     initial_canonical_gradient = maps.canonical_to_raw' * initial_derivatives.gradient
     probe = Poly102.n8_hilltop_normal_form(delta_k; sample_count=20)
+    catastrophe = Bench.n8_catastrophe_diagnostic(
+        theta=critical.theta, k=critical.k; trajectory=true)
+    catastrophe_high_precision = Bench.n8_catastrophe_diagnostic(
+        theta=critical.theta, k=critical.k; trajectory=true,
+        precision_bits=120, tolerance=1e-20, derivative_tolerance=1e-12)
     audit = Poly102.n8_basis_directions(k)
     basis_initial_conditions = Dict{Symbol,Any}(
        label => Poly102.n8_inflation_initial_condition(k; direction_raw=direction)
@@ -35,8 +42,13 @@ function n8_fixture(delta_k)
     )
     basis_probes[:E_mass_eigenbasis] =
        Poly102.n8_hilltop_normal_form(delta_k; basis=:mass_eigenbasis)
-    (; example=:n8_poly102, Q=potential.Q, phases=potential.phases,
-       tau=potential.qdotτ, V_CY=126.0, k, kc=Bench.N8_KC,
+    (; example=:n8_poly102, source_identity=Source, source_manifest=Manifest,
+       scale_status=Manifest.volume_scaling.scale_status,
+       claim_boundary=Manifest.claim_boundary,
+       Q=potential.Q, phases=potential.phases,
+       tau=potential.qdotτ,
+       divisor_volumes=Bench.n8_geometry().divisor_volumes .* k,
+       V_CY=126.0 * k^(3 / 2), k, kc=Bench.N8_KC,
        amplitudes=derivatives.amplitudes, K=kinetic,
        critical_point=critical.theta, hessian=derivatives.hessian,
        initial_point=initial.theta, initial_tangent=initial.initial_tangent,
@@ -46,7 +58,10 @@ function n8_fixture(delta_k)
        canonical_norm=initial.canonical_norm,
        end_thresholds=(eta=1.0, epsilon=1.0),
        solver=(rtol=1e-6, atol=1e-9, max_step=5.0, tmax=1e6),
+       phase_input=Bench.phase_fixture(:n8; trajectory=true),
+       catastrophe, catastrophe_high_precision,
        trajectory_probe=probe,
+       trajectory_observables=Bench.trajectory_observables(probe),
        basis_audit=(directions=audit.directions, overlap=audit.overlap,
            metric_eigenvalues=audit.metric_eigenvalues,
            draft_kinetic_index=audit.draft_kinetic_index,
@@ -70,8 +85,16 @@ function n5_fixture(delta_k)
     ratio = Poly102.n5_reduced_ratio(k)
     geometry = Poly102.n5_geometry()
     light = Poly102.n5_light_direction(k)
-    (; example=:n5, Q=reshape(Int[1, 2], 1, 2), phases=zeros(2),
-       tau=Float64[31.875, 32.0], raw_Q=raw.Q, raw_tau=raw.qdotτ,
+    catastrophe = Bench.n5_catastrophe_diagnostic(k=Poly102.n5_critical_scale())
+    catastrophe_high_precision = Bench.n5_catastrophe_diagnostic(
+        k=Poly102.n5_critical_scale(), precision_bits=120, tolerance=1e-20)
+    (; example=:n5, source_identity=Source, source_manifest=Manifest,
+        scale_status=Manifest.volume_scaling.scale_status,
+        claim_boundary=Manifest.claim_boundary,
+        Q=reshape(Int[1, 2], 1, 2), phases=zeros(2),
+       tau=Float64[31.875, 32.0],
+       divisor_volumes=geometry.divisor_volumes .* k,
+       raw_Q=raw.Q, raw_tau=raw.qdotτ,
        V_CY=geometry.volume * k^(3 / 2), k,
        kc=Poly102.n5_critical_scale(),
        amplitudes=Float64[1.0, ratio], K=Matrix(Poly102.n5_kinetic_matrix(k)),
@@ -82,6 +105,8 @@ function n5_fixture(delta_k)
        canonical_norm=1e-8,
        end_thresholds=(eta=1.0, epsilon=1.0),
        solver=(rtol=1e-6, atol=1e-9, max_step=5.0, tmax=1e6),
+       phase_input=Bench.phase_fixture(:n5),
+       catastrophe, catastrophe_high_precision,
        reference=Poly102.n5_hilltop_normal_form_efolds(delta_k).efolds)
 end
 
@@ -97,6 +122,9 @@ function write_fixture(path)
                 tangent=(:raw_angle, :radian, :physical_tangent),
                 potential="sum(Aᵢ * (1 - cos(Qᵢ⋅theta + phaseᵢ)))",
                 metric="G(k) = G(kc) * (kc/k)^2",
+                volume_scaling=Manifest.volume_scaling,
+                scalar_amplitude="delta_H = sqrt(V)/(5*sqrt(6*pi*epsilon))",
+                scalar_amplitude_convention=:paper_delta_H,
                 mass_basis="H_theta * v = m² * K * v, fixed at the hilltop",
                 trajectory_basis="do not recompute mass eigenvectors along the path",
             ),
