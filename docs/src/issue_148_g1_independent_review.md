@@ -319,3 +319,145 @@ fresh independent G1 review passes.
 Re-review totals: Standards 3 findings, worst is incomplete reproducibility
 identity/tolerance evidence; Spec 2 findings, worst is the unenforced
 Hessian-zero tolerance.
+
+## Final re-review at code commit 6014c4d
+
+Final re-review recommendation: **FAIL** at code commit
+`6014c4d9a909baa36f9b8e0e6e9a1930b4cb89b8`, with tracked evidence commit
+`e880fd22ff46711826967191da90c69aaafcf6b6`, against accepted G0 base
+`62c5a6135de9ddc8208a1530f50640d666f33cfd`.
+
+The source formula, ordinary sign-change event refinement, mixed precision,
+concrete result type, non-finite control checks, and tracked replay identity
+are repaired. The replay grid omits the analytic critical scale and recovers
+`k=1.7700681325633121`, with source-oracle error `4.768e-11`, gradient
+`4.586e-27`, and Hessian `3.745e-11`. Independent 256-bit checks gave zero
+observed error for both the direct source ratio and the typed source critical
+scale. Three adversarial acceptance failures remain.
+
+### Final material findings
+
+1. **FAIL — the `:pi` branch identity remains a fixed seed-window label.**
+   `_n5_validate_zero_phase_seed` assigns `:pi` to every seed within `0.01`
+   radians of `pi` without checking which stationary branch the corrected
+   state occupies (`src/paper_benchmarks/poly102_inflation.jl`, lines
+   268--277). At `k=k_c-1e-5`, the analytic satellite
+   `acos(-1/(4a(k)))` is only `0.0039633221` from `pi`. Supplying that exact
+   satellite returns the same theta, `gradient=8.67e-19`, negative Hessian
+   `-1.5708e-5`, `converged=true`, and `branch=:pi`. The farther satellite at
+   `k_c-1e-3` is rejected only because it lies outside the chosen window;
+   that regression (`test/runtests.jl`, lines 3441--3446) cannot establish an
+   intrinsic identity at the branch collision. Canonicalize the selected
+   regular branch or validate the corrected stationary state itself, then
+   cover satellites arbitrarily close to the cusp.
+
+2. **FAIL — a failed continuation can still certify a catastrophe.** Event
+   detection uses the analytic branch anchor and endpoint Hessians but never
+   requires either the preceding or current continuation step to have
+   converged (`poly102_inflation.jl`, lines 437--468). For
+   `[k_c-1e-3,k_c]`, `seed_theta=pi+1e-3`, `max_iterations=1`, and
+   `gradient_tolerance=1e-16`, the two continuation statuses were
+   `[false,true]`, the first gradient was `1.003e-9`, yet both records were
+   marked `catastrophe_detected=true` through adjacent-record propagation.
+   The committed non-convergence test uses `[0.1,1.0]` and therefore misses
+   this near-event failure boundary (`test/runtests.jl`, lines 3432--3438).
+   Require the continuation states that establish an event to be converged,
+   and add this near-cusp failure regression.
+
+3. **FAIL — two declared tolerance contracts have bypasses.** First, the
+   endpoint paths in both the refiner and public continuation assign
+   `scale_error=0` whenever an endpoint Hessian is within
+   `hessian_tolerance`, without enforcing `event_scale_tolerance`
+   (`poly102_inflation.jl`, lines 299--307 and 439--451). With an endpoint at
+   `k_c+1e-11`, `hessian_tolerance=1e-10`, and
+   `event_scale_tolerance=1e-14`, the implementation reports an event at that
+   endpoint although its source-oracle scale error is `1.0000e-11`. Second,
+   the docstring says `gradient_tolerance` applies to `|g|`, but convergence
+   multiplies it by a Hessian/amplitude scale (lines 410--428). At `k=0.1`,
+   a returned step was `converged=true` with gradient `1.3562e-10` for an
+   advertised `1e-10` tolerance. Enforce the literal residual and event-scale
+   contracts in every exit path, or explicitly define and test different
+   tolerance semantics before accepting them.
+
+The tracked regression suite does not contain those adversarial cases. Its
+standalone replay also prints `invalid_satellite_seed_rejected=true`
+unconditionally: the closure returns `false` both after an unexpected success
+and after the catch path (`scripts/issue_148_g1_replay_checks.jl`, lines
+17--25 and 108--113). The `@test_throws` regression remains genuine for the
+single farther satellite, but the replay line is not independent evidence.
+
+### Final Standards axis
+
+Five findings (three hard, two judgement calls):
+
+1. **Hard — branch identity remains heuristic near the cusp.** The fixed
+   `0.01` seed region admits source satellites that approach `pi`; the test
+   covers only a farther satellite. This conflicts with the scientific
+   identity and reproducibility requirements.
+2. **Hard — the replay's invalid-seed claim is vacuous.** The replay emits
+   success for both rejection and unexpected acceptance, although the
+   separate regression assertion is genuine.
+3. **Hard — `n5_reduced_critical_points` still narrows generic high-precision
+   inputs.** It constructs `Float64[0,pi]` at lines 224--233; a BigFloat input
+   therefore returns `Vector{Float64}` theta values alongside a BigFloat
+   ratio. The continuation and source-formula paths themselves now preserve
+   mixed and high precision.
+4. **Judgement — dead residue and a misspelled name remain.** The unused
+   `N5_REDUCED_CRITICAL_SCALE`, unused `_n5_catastrophe_root`, and
+   `N5_REDUCED_CATASROPHE_REFINE_ITERATIONS` remain at lines 88, 280--285,
+   and 93/290.
+5. **Judgement — production N5 reduced-model logic remains duplicated**
+   between `reduced_models.jl` and `poly102_inflation.jl`. Independent oracle
+   duplication in replay code is appropriate.
+
+The evidence statement that there were “no public API edits” is imprecise:
+G1 changes qualified N5 behavior and adds the continuation entry point. No
+persisted schema, N8 behavior, units, phase, coordinate, metric, or physical
+convention change was found.
+
+### Final Spec axis
+
+Two findings:
+
+1. **FAIL — near-cusp satellite seeds still receive the regular `:pi`
+   identity.** This violates G0's requirement to carry known regular branch
+   identity in continuation state (`issue_148_g0_baseline_audit.md`, lines
+   297--301).
+2. **FAIL — catastrophe detection can succeed despite a failed continuation
+   step.** This violates the required documented continuation failure boundary
+   (`issue_148_g0_baseline_audit.md`, lines 305--306).
+
+The source `k_c`, independent ratio oracle, ordinary bisection event,
+off-critical minima change, final-update status, homogeneous and mixed
+precision continuation, concrete typing, and tracked source/revision evidence
+are resolved. No scope expansion was found.
+
+### Final exact checks and outcomes
+
+1. The tracked replay script exited 0 and reproduced the reported four-record
+   continuation and event. Raw output:
+   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_nefpd_f0/run.stdout.log`.
+2. The tracked focused regression script exited 0 with 24/24 assertions.
+   Raw output:
+   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_olmcx1fv/run.stdout.log`.
+3. Independent adversarial replay exited 0 and produced the branch, failed
+   continuation event, endpoint-scale, absolute-gradient, precision, and
+   non-finite-control results above. Script:
+   `/tmp/issue148_g1_final_rereview_checks.jl`; raw output:
+   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_934vulah/run.stdout.log`.
+4. `git diff --check
+   62c5a6135de9ddc8208a1530f50640d666f33cfd...e880fd22ff46711826967191da90c69aaafcf6b6`
+   passed. The worktree was clean before this review artifact was appended.
+5. The broader audit's JET `i` findings are pre-existing N8 limitations:
+   `reduced_models.jl` has no diff from G0, and the `poly102_inflation.jl`
+   diff has no N8 functional hunk. The audit log is
+   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_e5hy0bcu/run.stdout.log`;
+   its unrelated N8 result and subsequent EMFILE/Revise limitations do not
+   alter this G1 verdict.
+
+Return only these bounded N5 corrections to the implementation worker. Do not
+begin G2 until a fresh independent G1 review passes.
+
+Final re-review totals: Standards 5 findings; Spec 2 findings. The scientific
+gate fails on intrinsic branch identity, failed-step event certification, and
+literal tolerance enforcement.
