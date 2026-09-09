@@ -24,6 +24,10 @@ description: Investigate or improve CYAxiverse Kreuzer-Skarke/CYTools geometry g
 6. Add regression coverage for deterministic identifiers, interchange round
    trips, validity checks, failure accounting, and cache invariants. Keep bulk
    generated data outside Git unless it is an intentionally reviewed fixture.
+7. When delegated, own ordinary sampling diagnostics, implementation
+   corrections, and retests. Keep detailed missingness, coverage, rejection,
+   and selection diagnostics in durable artifacts while returning a compact
+   manager-facing summary with references.
 
 Finish with a measured recommendation stating target population, realized
 sample, source fingerprint, selection effects, runtime/resources, coverage,

@@ -106,12 +106,36 @@ For scientific, numerical, sampling, benchmark, or persisted-data changes:
   when the tool authors the commit. The human submitter remains responsible for
   reviewing the contribution.
 
+### Delegated-task lifecycle
+
+Give each delegated worker one bounded objective, observable acceptance
+criteria, relevant files/artifacts/inputs, material constraints, and explicit
+escalation conditions. A delegated implementation worker normally owns the
+diagnose -> edit -> test -> correct -> retest loop. Do not replace a worker for
+an initial failure, a failed test, or an ordinary implementation correction.
+
+Normal worker terminal returns are `DONE`, `BLOCKED`, and `FAILED`. A
+long-running task may use one predeclared health `CHECKPOINT`. Prefer
+completion-driven waiting over repeated progress polling; elapsed silence alone
+does not establish a stall. Stall recovery is bounded: inspect one checkpoint;
+if concrete progress exists, extend once; otherwise issue one recovery
+instruction; if recovery also fails, interrupt or replace the worker from
+durable state.
+
+Manager-visible handoffs should be concise and evidence-oriented: result/status;
+changed files or artifacts; exact checks and observed outcomes; relevant
+scientific assumptions, conventions, or decisions; unresolved blockers; and
+durable Git/SHA/path/artifact references. Keep raw logs, full transcripts, and
+large derivations in files or artifacts unless they are needed to resolve a
+specific contradiction.
+
 ## 7. Project skills
 
 Project-specific reusable workflows live under `.agents/skills/` and are
 mirrored to tool-specific skill directories by tracked symlinks. Use only the
 skill relevant to the task; they are not mandatory pre-reading for every run:
 
+- `cyaxiverse-agent-orchestration` (delegated multi-agent work only)
 - `cyaxiverse-julia-quality`
 - `cyaxiverse-scientific-reproduction`
 - `cyaxiverse-ks-geometry-sampling`

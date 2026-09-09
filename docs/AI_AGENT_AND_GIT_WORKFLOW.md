@@ -149,6 +149,10 @@ Use the more capable/main agent as owner of:
 - PR description and handoff;
 - deciding whether a subagent is useful.
 
+The manager is a decision owner, not a continuous progress monitor. Before a
+continuation, ask whether the manager needs to make a decision now. If not,
+continue waiting for completion or a declared checkpoint.
+
 ### Subagent
 
 Delegate only a bounded job, for example:
@@ -158,6 +162,12 @@ Delegate only a bounded job, for example:
 - resolve a conflict under explicit constraints;
 - independently reproduce a scientific/numerical result;
 - perform an adversarial review of a completed diff.
+
+After assignment, the worker normally owns the diagnose -> edit -> test ->
+correct -> retest loop. Routine debugging and failed tests are part of that
+work, not automatic reasons to escalate or replace the worker. The worker
+should return a concise evidence packet and leave large logs or derivations in
+durable artifacts.
 
 Do not spawn a subagent automatically for every task. The extra context and
 coordination are worthwhile only when parallelism, isolation, or independent
@@ -170,7 +180,63 @@ normally contributes toward the main deliverable unless it is genuinely
 producing an independently mergeable change. This reduces the branch/worktree
 sprawl seen during the August/September development burst.
 
-## 5. Issues, branches, PRs, and handoffs: what each is for
+## 5. Long-running subagents, supervision, and stall recovery
+
+Frequent manager resumptions can be expensive. A continuation with "low
+reasoning" is not necessarily cheap when it carries a very large manager
+context. The useful optimisation is to reduce unnecessary wake-ups and keep
+ordinary correction loops with the worker, while preserving scientific
+verification and independent review where they add evidence.
+
+Give each worker a bounded task packet with one objective, observable
+acceptance criteria, relevant inputs, material constraints, worker-owned
+failure handling, escalation conditions, and an expected task lease. Supervise
+completion-first: wait for a terminal result instead of repeatedly asking if a
+healthy worker is still running. A long-running task may use one health
+checkpoint when its lease expires.
+
+At lease expiry, inspect one checkpoint. If it shows concrete progress, extend
+the lease once and return to waiting. If progress is absent, circular, or no
+longer narrowing, issue one recovery instruction. If recovery also fails,
+interrupt or replace the worker from its durable checkpoint/state. Do not infer
+a stall solely from elapsed time.
+
+Evidence of a slow but healthy worker includes changed test state, a new
+artifact or verified output, a narrowed diagnosis, a successful command that
+advances the task, an eliminated scientific hypothesis, a smaller remaining
+search space, or a concrete evidence-based next action. Probable stall evidence
+includes repeated identical failures without narrowing, rereading without new
+evidence, no changed artifact/test/diagnosis across the lease, circular
+uncertainty without a decision criterion, retries without meaningful state
+change, or no activity plus failure to answer the checkpoint.
+
+Prefer the same implementation worker for implementation -> test -> diagnose ->
+correction -> retest. A fresh worker is useful for a demonstrable stall, a
+clean restart, independently mergeable work, deliberate independent reasoning,
+or independent scientific verification that materially strengthens a claim.
+Do not remove independent scientific review only to reduce agent count.
+
+Keep manager context small. Normally pass status/result, changed files or
+artifacts, exact checks and observed outcomes, relevant scientific assumptions,
+an unresolved decision, and durable Git/SHA/path/artifact references. Keep raw
+logs, full transcripts, large derivations, and repeated historical context in
+files unless they are needed to resolve a contradiction. The manager should
+know where evidence is, not carry all of it in active context.
+
+Initial lease heuristics are:
+
+- `MECHANICAL` or check-only: about 5 minutes;
+- bounded `IMPLEMENTATION`: about 10–15 minutes;
+- substantial implementation or verification: about 15–20 minutes;
+- deep `SCIENTIFIC` reproduction or reasoning: about 20–30 minutes.
+
+Use judgment: some healthy scientific workers need longer, and a longer lease
+is preferable to frequent expensive manager resumptions. Classify each task as
+`MECHANICAL`, `IMPLEMENTATION`, `SCIENTIFIC`, or `INDEPENDENT_REVIEW`; the class
+can guide effort/model choice, lease, escalation rules, and reviewer
+requirements. These are operating heuristics, not correctness criteria.
+
+## 6. Issues, branches, PRs, and handoffs: what each is for
 
 | Object | Use it for | Do not use it as |
 | --- | --- | --- |
@@ -186,7 +252,7 @@ continue later. If a continuation record is necessary, keep it concise unless
 there is genuinely machine-readable state that cannot be reconstructed from
 Git/artifacts.
 
-## 6. How to use the project skills
+## 7. How to use the project skills
 
 Skills are **on demand**, not prerequisites for every run.
 
@@ -201,6 +267,9 @@ Skills are **on demand**, not prerequisites for every run.
   accounting.
 - Use `cyaxiverse-vacua-pipeline` for minima/vacuum batch pipelines, resumable
   HDF5-backed jobs, no-overwrite behavior, and persistence contracts.
+- Use `cyaxiverse-agent-orchestration` only when spawning, supervising,
+  recovering, or integrating delegated work; it is not needed for ordinary
+  single-agent implementation.
 - Use `cyaxiverse-integration-release` for conflict resolution, branch
   sequencing, integration review, worktree consolidation, and the `vmm -> main`
   release boundary.
@@ -210,7 +279,7 @@ or autoresearch may still be valuable. Keep them local and invoke them
 explicitly when the task benefits from them rather than imposing them on every
 repository interaction.
 
-## 7. Relationship to the repository consolidation plan
+## 8. Relationship to the repository consolidation plan
 
 Treat this AI cleanup as the **control-plane** track, not a separate management
 system.
@@ -231,7 +300,7 @@ Do not create another always-on ledger unless the current GitHub state cannot
 answer the question. If a lightweight active-work index is introduced, it
 should summarize GitHub state rather than become a competing source of truth.
 
-## 8. Local migration after this PR merges
+## 9. Local migration after this PR merges
 
 Your uploaded working tree had local modifications. Before pulling the merged
 cleanup, inspect them rather than blindly updating:
@@ -281,7 +350,7 @@ git status --short
 Your personal settings should be ignored and the tracked project files should
 be clean.
 
-## 9. Suggested working rhythm
+## 10. Suggested working rhythm
 
 For a normal piece of work:
 
