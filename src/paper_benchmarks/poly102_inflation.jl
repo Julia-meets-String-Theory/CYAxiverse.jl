@@ -85,7 +85,6 @@ const N5_K_RAW = Float64[
 ]
 const N5_LIGHT_DIRECTION = Float64[0, 0, 1, 2, 0]
 const N5_REDUCED_DELTA_Q = 32 - 255 / 8
-const N5_REDUCED_RATIO_AT_CATASTROPHE = 1 / 4
 const N5_REDUCED_CRITICAL_SCALE = 4 / π * log(1024 / 255)
 const N5_REDUCED_CATASTROPHE_K_NUMERATOR = 1024
 const N5_REDUCED_CATASTROPHE_K_DENOMINATOR = 255
@@ -199,7 +198,7 @@ n8_kinetic_matrix(k::Real) = Hermitian(N8_K_RAW / Float64(k)^2)
             convert(T, N5_REDUCED_CATASTROPHE_K_DENOMINATOR))
 end
 
-@inline function _n5_reduced_zero_phase_ratio_at_critical(::Type{T}) where {T<:Real}
+@inline function _n5_reduced_zero_phase_ratio_prefactor(::Type{T}) where {T<:Real}
     convert(T, 32) / (convert(T, 255) / convert(T, 8))
 end
 
@@ -209,18 +208,16 @@ n5_critical_scale() = _n5_reduced_zero_phase_critical_scale(Float64)
 """Exact reduced N=5 coefficient ratio, `a(k)=(32/(255/8)) exp[-2πk(32-255/8)]`."""
 function n5_reduced_ratio(k::Real)
     T = promote_type(typeof(k), Float64)
-    ratio_at_critical = _n5_reduced_zero_phase_ratio_at_critical(T)
-    critical_scale = _n5_reduced_zero_phase_critical_scale(T)
-    ratio_at_critical * exp(-2 * convert(T, π) *
-        convert(T, k - critical_scale) *
+    ratio_prefactor = _n5_reduced_zero_phase_ratio_prefactor(T)
+    ratio_prefactor * exp(-2 * convert(T, π) *
+        convert(T, k) *
         convert(T, N5_REDUCED_DELTA_Q))
 end
 
 """Exact reduced-model exponent implied by the N=5 draft charge data."""
 function n5_reduced_exponent(k::Real)
     T = promote_type(typeof(k), Float64)
-    critical_scale = _n5_reduced_zero_phase_critical_scale(T)
-    -2 * convert(T, π) * convert(T, k - critical_scale) *
+    -2 * convert(T, π) * convert(T, k) *
         convert(T, N5_REDUCED_DELTA_Q)
 end
 
@@ -458,7 +455,7 @@ function n5_reduced_zero_phase_continuation(k_values::AbstractVector{<:Real};
                     gradient_tolerance=gradient_tolerance,
                     hessian_tolerance=hessian_tolerance,
                     event_scale_tolerance=event_scale_tolerance,
-                    max_iterations=N5_REDUCED_CATASROPHE_REFINE_ITERATIONS)
+                    max_iterations=max_iterations)
             else
                 nothing
             end
