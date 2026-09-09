@@ -339,14 +339,19 @@ if _FULL; @testset "Scale-continuation pilot diagnostics" begin
         rtol=0.0, atol=1e-12)
     @test benchmark.n5_kc_residual < 1e-12
     @test benchmark.n5_ratio ≈ 0.25 atol=1e-12
-    @test length(benchmark.n5_continuation) == 5
+    @test length(benchmark.n5_continuation) == 4
     @test all(step.branch == :pi for step in benchmark.n5_continuation)
     @test all(step.converged for step in benchmark.n5_continuation)
-    @test isapprox(benchmark.n5_continuation[3].hessian, 0.0; atol=1e-10)
+    @test benchmark.n5_catastrophe_index !== nothing
+    @test isapprox(benchmark.n5_continuation[benchmark.n5_catastrophe_index].theta,
+        π; atol=2e-7)
     @test all(isapprox(benchmark.n5_continuation[index].theta,
-        benchmark.n5_continuation[3].theta; atol=2e-7) for index in 1:2)
-    @test all(isapprox(benchmark.n5_continuation[index].theta,
-        benchmark.n5_continuation[3].theta; atol=2e-7) for index in 4:5)
+        benchmark.n5_continuation[benchmark.n5_catastrophe_index].theta;
+        atol=2e-7) for index in eachindex(benchmark.n5_continuation))
+    @test any(step -> step.catastrophe_detected, benchmark.n5_continuation)
+    @test all(step.gradient <= 1e-10 for step in benchmark.n5_continuation)
+    @test benchmark.n5_continuation[1].hessian > 0
+    @test benchmark.n5_continuation[end].hessian < 0
     @test benchmark.n8_zero_mode
     @test benchmark.n8_positive_heavy_modes
     @test benchmark.n8_detuned_negative_modes == 1
@@ -3384,16 +3389,47 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         n8_sixty = poly102.n8_hilltop_normal_form_efolds(1.5320548620798324e-3).efolds
         @test isapprox(n8_sixty, 60.0; rtol=0.08)
 
-        @test isapprox(poly102.n5_critical_scale(), 4 / π * log(1024 / 255); atol=1e-15)
-        @test isapprox(poly102.n5_reduced_ratio(poly102.n5_critical_scale()), 0.25; atol=1e-15)
-        n5_kc_path = poly102.n5_reduced_zero_phase_continuation(
-            [poly102.n5_critical_scale() - 1e-3, poly102.n5_critical_scale(),
-             poly102.n5_critical_scale() + 1e-3])
-        @test n5_kc_path[2].converged
-        @test n5_kc_path[2].near_catastrophe
-        @test n5_kc_path[1].branch == :pi
-        @test n5_kc_path[3].branch == :pi
-        @test all(entry.gradient <= 1e-9 for entry in n5_kc_path)
+        n5_kc = poly102.n5_critical_scale()
+        n5_ratio_formula(k::Real) = 1 / 4 * exp(-2π * (k - n5_kc) * (32 - 255 / 8))
+        n5_kc_path = poly102.n5_reduced_zero_phase_continuation([
+            n5_kc - 1e-3,
+            n5_kc - 2e-4,
+            n5_kc + 2e-4,
+            n5_kc + 1e-3]; seed_theta=π + 1.0e-3,
+            max_iterations=64, gradient_tolerance=1e-10,
+            hessian_tolerance=1e-10)
+        @test isapprox(poly102.n5_reduced_ratio(n5_kc), 0.25; atol=1e-15)
+        @test all(isapprox(step.ratio, n5_ratio_formula(step.k); rtol=1e-15, atol=1e-18)
+            for step in n5_kc_path)
+        @test all(step.branch == :pi for step in n5_kc_path)
+        @test all(step.converged for step in n5_kc_path)
+        @test all(abs(step.gradient) <= 1e-9 for step in n5_kc_path)
+        catastrophe_index = findfirst(step -> step.catastrophe_detected, n5_kc_path)
+        @test catastrophe_index !== nothing
+        @test isapprox(n5_kc_path[catastrophe_index].catastrophe_k, n5_kc; atol=5e-7)
+        @test isapprox(n5_kc_path[catastrophe_index].catastrophe_theta, π; atol=1e-10)
+        n5_below = poly102.n5_reduced_critical_points(n5_kc - 1e-3)
+        n5_above = poly102.n5_reduced_critical_points(n5_kc + 1e-3)
+        n5_below_pi_idx = argmin(abs.(n5_below.theta .- π))
+        n5_above_pi_idx = argmin(abs.(n5_above.theta .- π))
+        @test n5_below.minima == 2
+        @test n5_above.minima == 1
+        @test n5_below.hessian_sign[n5_below_pi_idx] == 1
+        @test n5_above.hessian_sign[n5_above_pi_idx] == -1
+        n5_kc_path_final = poly102.n5_reduced_zero_phase_continuation(
+            [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=π + 1e-3,
+            max_iterations=1, gradient_tolerance=1e-8)
+        @test n5_kc_path_final[1].converged
+        @test n5_kc_path_final[1].iterations == 1
+        @test all(isfinite.([point.k for point in n5_kc_path_final]))
+        n5_big_kc_path = poly102.n5_reduced_zero_phase_continuation(
+            BigFloat.([n5_kc - 1e-3, n5_kc + 1e-3]); seed_theta=big(π) + 1e-3)
+        @test typeof(first(n5_big_kc_path).k) == BigFloat
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=1.0)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [1.0, 2.0]; max_iterations=0)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(Float64[])
         n5_geometry = poly102.n5_geometry()
         @test n5_geometry.h11 == 5
         @test n5_geometry.h21 == 75

@@ -88,6 +88,36 @@ const N5_REDUCED_DELTA_Q = 32 - 255 / 8
 const N5_REDUCED_RATIO_AT_CATASTROPHE = 1 / 4
 const N5_REDUCED_CRITICAL_SCALE = 4 / π * log(1024 / 255)
 
+const N5_ZERO_PHASE_BRANCH_PI = :pi
+const N5_ZERO_PHASE_BRANCH_SECONDARY = :zero
+
+@inline function _n5_type_of_collection(collection::AbstractVector)
+    T = Float64
+    for value in collection
+        T = promote_type(T, typeof(value))
+    end
+    return T
+end
+
+struct N5ReducedZeroPhaseContinuationStep{T}
+    k::T
+    theta::T
+    ratio::T
+    residual::T
+    gradient::T
+    hessian::T
+    hessian_magnitude::T
+    converged::Bool
+    iterations::Int
+    branch::Symbol
+    near_catastrophe::Bool
+    catastrophe_k::T
+    catastrophe_theta::T
+    catastrophe_residual::T
+    catastrophe_hessian::T
+    catastrophe_detected::Bool
+end
+
 """Convert `q⋅tau` data to the package's signed/log10 amplitude layout."""
 function instanton_scales(qdotτ::AbstractVector{<:Real}, k::Real)
     k > 0 || throw(ArgumentError("k must be positive"))
@@ -163,13 +193,17 @@ n5_critical_scale() = N5_REDUCED_CRITICAL_SCALE
 
 """Exact reduced N=5 coefficient ratio, `a(k)=(32/(255/8)) exp[-2πk(32-255/8)]`."""
 function n5_reduced_ratio(k::Real)
-    N5_REDUCED_RATIO_AT_CATASTROPHE *
-        exp(-2π * Float64(k - n5_critical_scale()) * N5_REDUCED_DELTA_Q)
+    T = promote_type(typeof(k), Float64)
+    T(N5_REDUCED_RATIO_AT_CATASTROPHE) * exp(-2 * convert(T, π) *
+        convert(T, k - n5_critical_scale()) *
+        convert(T, N5_REDUCED_DELTA_Q))
 end
 
 """Exact reduced-model exponent implied by the N=5 draft charge data."""
 function n5_reduced_exponent(k::Real)
-    -2π * Float64(k - n5_critical_scale()) * N5_REDUCED_DELTA_Q
+    T = promote_type(typeof(k), Float64)
+    -2 * convert(T, π) * convert(T, k - n5_critical_scale()) *
+        convert(T, N5_REDUCED_DELTA_Q)
 end
 
 function n5_reduced_critical_points(k::Real; atol::Real=64eps(Float64))
@@ -185,25 +219,63 @@ function n5_reduced_critical_points(k::Real; atol::Real=64eps(Float64))
 end
 
 function _n5_reduced_zero_phase_gradient(theta::Real, k::Real)
-    ratio = n5_reduced_ratio(k)
-    sin(Float64(theta)) + 2 * ratio * sin(2 * Float64(theta))
+    T = promote_type(typeof(theta), typeof(k), Float64)
+    ratio = n5_reduced_ratio(T(k))
+    sin(T(theta)) + 2 * ratio * sin(2 * T(theta))
 end
 
 function _n5_reduced_zero_phase_hessian(theta::Real, k::Real)
-    ratio = n5_reduced_ratio(k)
-    cos(Float64(theta)) + 4 * ratio * cos(2 * Float64(theta))
+    T = promote_type(typeof(theta), typeof(k), Float64)
+    ratio = n5_reduced_ratio(T(k))
+    cos(T(theta)) + 4 * ratio * cos(2 * T(theta))
 end
 
 function _n5_reduced_zero_phase_predictor(theta::Real, k_prev::Real, k_next::Real)
-    dk = Float64(k_next - k_prev)
-    a = n5_reduced_ratio(k_prev)
+    T = promote_type(typeof(theta), typeof(k_prev), typeof(k_next), Float64)
+    dk = T(k_next - k_prev)
     dgdθ = _n5_reduced_zero_phase_hessian(theta, k_prev)
-    abs(dgdθ) < 1e-12 && return Float64(theta)
-    da_dk = -2π * N5_REDUCED_DELTA_Q * a
+    abs(dgdθ) < 1e-12 && return T(theta)
+    ratio = n5_reduced_ratio(T(k_prev))
+    da_dk = -T(2) * π * T(N5_REDUCED_DELTA_Q) * ratio
     dgdθ_inv = 1 / dgdθ
-    correction = -dk * (2 * sin(2 * Float64(theta)) * da_dk) * dgdθ_inv
+    correction = -dk * (2 * sin(2 * T(theta)) * da_dk) * dgdθ_inv
     correction = clamp(correction, -π / 4, π / 4)
-    mod(Float64(theta) + correction, 2π)
+    mod(T(theta) + correction, T(2) * π)
+end
+
+@inline function _n5_periodic_distance(left::T, right::T) where {T<:Real}
+    distance = abs(left - right)
+    two_pi = T(2) * π
+    distance = mod(distance, two_pi)
+    distance > π ? two_pi - distance : distance
+end
+
+function _n5_validate_zero_phase_seed(seed_theta::Real)
+    T = promote_type(typeof(seed_theta), Float64)
+    theta = mod(seed_theta, convert(T, 2) * convert(T, π))
+    if _n5_periodic_distance(theta, T(π)) <= T(π) / 3
+        return (branch=N5_ZERO_PHASE_BRANCH_PI, theta=theta)
+    end
+    if _n5_periodic_distance(theta, zero(T)) <= T(π) / 6
+        return (branch=N5_ZERO_PHASE_BRANCH_SECONDARY, theta=theta)
+    end
+    throw(ArgumentError("seed_theta must be near 0 or π for the documented zero-phase branch"))
+end
+
+@inline function _n5_catastrophe_root(k_low::T, hessian_low::T, k_high::T, hessian_high::T) where {T<:Real}
+    denominator = hessian_high - hessian_low
+    abs(denominator) <= eps(T) && return (k_low + k_high) / 2
+    t = -hessian_low / denominator
+    return clamp(k_low + t * (k_high - k_low), min(k_low, k_high), max(k_low, k_high))
+end
+
+@inline function _n5_zero_phase_anchor(branch::Symbol, ::Type{T}) where {T<:Real}
+    if branch == N5_ZERO_PHASE_BRANCH_PI
+        return T(π)
+    elseif branch == N5_ZERO_PHASE_BRANCH_SECONDARY
+        return zero(T)
+    end
+    throw(ArgumentError("unsupported branch: $branch"))
 end
 
 """
@@ -212,8 +284,7 @@ end
 
 Track the zero-phase branch `sin(θ)+2a(k)sin(2θ)=0` across ordered scales
 `k_values` by one-step implicit predictor-correction. `seed_theta` selects the
-branch; the `:pi` branch is the regular source fold branch, with `hessian->0` at
-`k_c`.
+branch. `:pi` is the regular source fold branch, with `hessian->0` at `k_c`.
 
 Residual and near-catastrophe tolerances are explicit:
 `gradient_tolerance` is applied to `|g(θ,k)|`, and `hessian_tolerance`
@@ -226,53 +297,123 @@ function n5_reduced_zero_phase_continuation(k_values::AbstractVector{<:Real};
         seed_theta::Real=π, gradient_tolerance::Real=1e-10,
         hessian_tolerance::Real=1e-10, max_iterations::Int=64)
     isempty(k_values) && throw(ArgumentError("k_values must not be empty"))
-    ks = Float64.(k_values)
+    k_type = _n5_type_of_collection(k_values)
+    max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+    gradient_tolerance > 0 || throw(ArgumentError("gradient_tolerance must be positive"))
+    hessian_tolerance > 0 || throw(ArgumentError("hessian_tolerance must be positive"))
+    ks = k_type.(k_values)
     all(isfinite.(ks)) || throw(ArgumentError("all k values must be finite"))
-    all(>(0), ks) || throw(ArgumentError("all k values must be positive"))
-    results = Vector{NamedTuple}(undef, length(ks))
-    theta = Float64(mod(seed_theta, 2π))
-    previous_k = first(ks)
+    all(>(zero(k_type)), ks) || throw(ArgumentError("all k values must be positive"))
+    seed = _n5_validate_zero_phase_seed(seed_theta)
+    T = k_type
+    theta = mod(seed.theta, T(2) * π)
+    branch = seed.branch
+    results = Vector{N5ReducedZeroPhaseContinuationStep{T}}(undef, length(ks))
+    previous_step = nothing
+    previous_k = ks[1]
     for (index, k) in enumerate(ks)
-        prediction = index == 1 ? theta : _n5_reduced_zero_phase_predictor(
-            theta, previous_k, k)
-        current = Float64(mod(prediction, 2π))
+        k_t = T(k)
+        prediction = index == 1 ? theta : _n5_reduced_zero_phase_predictor(theta,
+            previous_k, k_t)
+        current = mod(prediction, T(2) * π)
         converged = false
         iterations = 0
-        residual = _n5_reduced_zero_phase_gradient(current, k)
-        scale = max(1.0, abs(_n5_reduced_zero_phase_hessian(current, k)),
-            abs(n5_reduced_ratio(k)))
-        residual_tol = Float64(gradient_tolerance) * scale
+        residual = _n5_reduced_zero_phase_gradient(current, k_t)
+        hessian = _n5_reduced_zero_phase_hessian(current, k_t)
+        scale = max(one(T), abs(hessian), abs(n5_reduced_ratio(k_t)))
+        residual_tol = T(gradient_tolerance) * scale
         for iteration in 1:Int(max_iterations)
             iterations = iteration
             if abs(residual) <= residual_tol
                 converged = true
                 break
             end
-            jacobian = _n5_reduced_zero_phase_hessian(current, k)
-            if abs(jacobian) <= Float64(hessian_tolerance)
+            jacobian = hessian
+            if abs(jacobian) <= T(hessian_tolerance)
                 break
             end
-            current = mod(current - residual / jacobian, 2π)
-            residual = _n5_reduced_zero_phase_gradient(current, k)
-            scale = max(scale, abs(jacobian), 1.0)
-            residual_tol = Float64(gradient_tolerance) * scale
+            current = mod(current - residual / jacobian, T(2) * π)
+            residual = _n5_reduced_zero_phase_gradient(current, k_t)
+            hessian = _n5_reduced_zero_phase_hessian(current, k_t)
+            scale = max(scale, abs(jacobian), one(T))
+            residual_tol = T(gradient_tolerance) * scale
         end
-        hessian = _n5_reduced_zero_phase_hessian(current, k)
-        ratio = n5_reduced_ratio(k)
-        results[index] = (;
-            k=Float64(k),
-            theta=current,
+        converged = converged || abs(residual) <= T(gradient_tolerance) * max(scale, one(T))
+        ratio = n5_reduced_ratio(k_t)
+        hessian_abs = abs(hessian)
+        near_catastrophe = hessian_abs <= T(hessian_tolerance)
+        catastrophe_k = T(NaN)
+        catastrophe_theta = T(NaN)
+        catastrophe_residual = T(NaN)
+        catastrophe_hessian = T(NaN)
+        catastrophe_detected = false
+        if branch == N5_ZERO_PHASE_BRANCH_PI && previous_step !== nothing
+            catastrophe_candidate = if abs(previous_step.hessian) <= T(hessian_tolerance)
+                previous_step.k
+            elseif abs(hessian) <= T(hessian_tolerance)
+                k_t
+            elseif sign(previous_step.hessian) != sign(hessian)
+                _n5_catastrophe_root(previous_step.k, previous_step.hessian,
+                    k_t, hessian)
+            else
+                nothing
+            end
+            if catastrophe_candidate !== nothing
+                catastrophe_k = catastrophe_candidate
+                catastrophe_detected = true
+                catastrophe_theta = _n5_zero_phase_anchor(branch, T)
+                catastrophe_residual = abs(_n5_reduced_zero_phase_gradient(
+                    catastrophe_theta, catastrophe_k))
+                catastrophe_hessian = _n5_reduced_zero_phase_hessian(
+                    catastrophe_theta, catastrophe_k)
+            end
+        elseif branch == N5_ZERO_PHASE_BRANCH_PI
+            catastrophe_detected = false
+        end
+
+        step = N5ReducedZeroPhaseContinuationStep(
+            k_t,
+            current,
             ratio,
-            residual=residual,
-            gradient=abs(residual),
-            hessian=hessian,
-            hessian_magnitude=abs(hessian),
+            residual,
+            abs(residual),
+            hessian,
+            hessian_abs,
             converged,
             iterations,
-            branch=:pi,
-            near_catastrophe=abs(hessian) <= Float64(hessian_tolerance))
+            branch,
+            near_catastrophe,
+            catastrophe_k,
+            catastrophe_theta,
+            catastrophe_residual,
+            catastrophe_hessian,
+            catastrophe_detected
+        )
+
+        if catastrophe_detected && previous_step !== nothing
+            previous_event = previous_step.catastrophe_detected || false
+            if !previous_event
+                step = N5ReducedZeroPhaseContinuationStep(
+                    step.k, step.theta, step.ratio, step.residual,
+                    abs(step.residual), step.hessian, step.hessian_magnitude,
+                    step.converged, step.iterations, step.branch, step.near_catastrophe,
+                    catastrophe_k, catastrophe_theta, catastrophe_residual,
+                    catastrophe_hessian, true)
+                results[index - 1] = N5ReducedZeroPhaseContinuationStep(
+                    previous_step.k, previous_step.theta, previous_step.ratio,
+                    previous_step.residual, previous_step.gradient, previous_step.hessian,
+                    previous_step.hessian_magnitude, previous_step.converged,
+                    previous_step.iterations, previous_step.branch,
+                    previous_step.near_catastrophe,
+                    catastrophe_k, catastrophe_theta, catastrophe_residual,
+                    catastrophe_hessian, true)
+            end
+        end
+
+        results[index] = step
+        previous_step = step
         theta = current
-        previous_k = k
+        previous_k = k_t
     end
     return results
 end
