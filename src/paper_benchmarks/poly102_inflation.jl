@@ -84,6 +84,9 @@ const N5_K_RAW = Float64[
      0.00039473769626437  0.00029473708426704 -0.00023802467059592  0.00018048121758762  0.00027970559183445
 ]
 const N5_LIGHT_DIRECTION = Float64[0, 0, 1, 2, 0]
+const N5_REDUCED_DELTA_Q = 32 - 255 / 8
+const N5_REDUCED_RATIO_AT_CATASTROPHE = 1 / 4
+const N5_REDUCED_CRITICAL_SCALE = 4 / π * log(1024 / 255)
 
 """Convert `q⋅tau` data to the package's signed/log10 amplitude layout."""
 function instanton_scales(qdotτ::AbstractVector{<:Real}, k::Real)
@@ -155,17 +158,18 @@ end
 """The metric used by the author code at volume scale `k`."""
 n8_kinetic_matrix(k::Real) = Hermitian(N8_K_RAW / Float64(k)^2)
 
-"""The supplied cusp value.  The draft's printed closed form is numerically inconsistent with it."""
-n5_critical_scale() = N8_KC
+"""Exact source value of the zero-phase reduced N5 catastrophe scale."""
+n5_critical_scale() = N5_REDUCED_CRITICAL_SCALE
 
-"""The reduced N=5 coefficient ratio, normalized to `a(k_c)=1/4`."""
+"""Exact reduced N=5 coefficient ratio, `a(k)=(32/(255/8)) exp[-2πk(32-255/8)]`."""
 function n5_reduced_ratio(k::Real)
-    0.25 * exp(-2π * (Float64(k) - n5_critical_scale()) * (32 - 255 / 8))
+    N5_REDUCED_RATIO_AT_CATASTROPHE *
+        exp(-2π * Float64(k - n5_critical_scale()) * N5_REDUCED_DELTA_Q)
 end
 
 """Exact reduced-model exponent implied by the N=5 draft charge data."""
 function n5_reduced_exponent(k::Real)
-    -2π * (Float64(k) - n5_critical_scale()) * (32 - 255 / 8)
+    -2π * Float64(k - n5_critical_scale()) * N5_REDUCED_DELTA_Q
 end
 
 function n5_reduced_critical_points(k::Real; atol::Real=64eps(Float64))
@@ -178,6 +182,99 @@ function n5_reduced_critical_points(k::Real; atol::Real=64eps(Float64))
         abs(value) <= atol ? 0 : (value > 0 ? 1 : -1)
     end
     (; theta=points, hessian_sign=signs, minima=count(==(1), signs), ratio=a)
+end
+
+function _n5_reduced_zero_phase_gradient(theta::Real, k::Real)
+    ratio = n5_reduced_ratio(k)
+    sin(Float64(theta)) + 2 * ratio * sin(2 * Float64(theta))
+end
+
+function _n5_reduced_zero_phase_hessian(theta::Real, k::Real)
+    ratio = n5_reduced_ratio(k)
+    cos(Float64(theta)) + 4 * ratio * cos(2 * Float64(theta))
+end
+
+function _n5_reduced_zero_phase_predictor(theta::Real, k_prev::Real, k_next::Real)
+    dk = Float64(k_next - k_prev)
+    a = n5_reduced_ratio(k_prev)
+    dgdθ = _n5_reduced_zero_phase_hessian(theta, k_prev)
+    abs(dgdθ) < 1e-12 && return Float64(theta)
+    da_dk = -2π * N5_REDUCED_DELTA_Q * a
+    dgdθ_inv = 1 / dgdθ
+    correction = -dk * (2 * sin(2 * Float64(theta)) * da_dk) * dgdθ_inv
+    correction = clamp(correction, -π / 4, π / 4)
+    mod(Float64(theta) + correction, 2π)
+end
+
+"""
+    n5_reduced_zero_phase_continuation(k_values; seed_theta=π, gradient_tolerance=1e-10,
+    hessian_tolerance=1e-10, max_iterations=64)
+
+Track the zero-phase branch `sin(θ)+2a(k)sin(2θ)=0` across ordered scales
+`k_values` by one-step implicit predictor-correction. `seed_theta` selects the
+branch; the `:pi` branch is the regular source fold branch, with `hessian->0` at
+`k_c`.
+
+Residual and near-catastrophe tolerances are explicit:
+`gradient_tolerance` is applied to `|g(θ,k)|`, and `hessian_tolerance`
+detects the fold in a numerically stable way without switching conventions.
+
+The method is continuous in branch identity by construction: each corrected
+critical point seeds the next scale.
+"""
+function n5_reduced_zero_phase_continuation(k_values::AbstractVector{<:Real};
+        seed_theta::Real=π, gradient_tolerance::Real=1e-10,
+        hessian_tolerance::Real=1e-10, max_iterations::Int=64)
+    isempty(k_values) && throw(ArgumentError("k_values must not be empty"))
+    ks = Float64.(k_values)
+    all(isfinite.(ks)) || throw(ArgumentError("all k values must be finite"))
+    all(>(0), ks) || throw(ArgumentError("all k values must be positive"))
+    results = Vector{NamedTuple}(undef, length(ks))
+    theta = Float64(mod(seed_theta, 2π))
+    previous_k = first(ks)
+    for (index, k) in enumerate(ks)
+        prediction = index == 1 ? theta : _n5_reduced_zero_phase_predictor(
+            theta, previous_k, k)
+        current = Float64(mod(prediction, 2π))
+        converged = false
+        iterations = 0
+        residual = _n5_reduced_zero_phase_gradient(current, k)
+        scale = max(1.0, abs(_n5_reduced_zero_phase_hessian(current, k)),
+            abs(n5_reduced_ratio(k)))
+        residual_tol = Float64(gradient_tolerance) * scale
+        for iteration in 1:Int(max_iterations)
+            iterations = iteration
+            if abs(residual) <= residual_tol
+                converged = true
+                break
+            end
+            jacobian = _n5_reduced_zero_phase_hessian(current, k)
+            if abs(jacobian) <= Float64(hessian_tolerance)
+                break
+            end
+            current = mod(current - residual / jacobian, 2π)
+            residual = _n5_reduced_zero_phase_gradient(current, k)
+            scale = max(scale, abs(jacobian), 1.0)
+            residual_tol = Float64(gradient_tolerance) * scale
+        end
+        hessian = _n5_reduced_zero_phase_hessian(current, k)
+        ratio = n5_reduced_ratio(k)
+        results[index] = (;
+            k=Float64(k),
+            theta=current,
+            ratio,
+            residual=residual,
+            gradient=abs(residual),
+            hessian=hessian,
+            hessian_magnitude=abs(hessian),
+            converged,
+            iterations,
+            branch=:pi,
+            near_catastrophe=abs(hessian) <= Float64(hessian_tolerance))
+        theta = current
+        previous_k = k
+    end
+    return results
 end
 
 """Evaluate a potential and its raw-coordinate derivatives."""

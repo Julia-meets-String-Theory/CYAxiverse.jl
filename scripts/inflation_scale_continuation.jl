@@ -1831,11 +1831,17 @@ function pilot_benchmark_regression()
     benchmark = CYAxiverse.paper_benchmarks.poly102_inflation
     n5_kc = benchmark.n5_critical_scale()
     n5_at = benchmark.n5_reduced_critical_points(n5_kc)
+    n5_continuation = benchmark.n5_reduced_zero_phase_continuation(
+        Float64[n5_kc - 1.0e-3, n5_kc - 1.0e-5, n5_kc, n5_kc + 1.0e-5, n5_kc + 1.0e-3])
+    n5_closed_form_kc = 4 / π * log(1024 / 255)
     n8_seed = copy(benchmark.N8_BEST_X)
     n8 = benchmark.n8_degenerate_point(n8_seed)
     detuned = CYAxiverse.paper_benchmarks.n8_hilltop(n8.k + 1e-7)
     (; n5_critical_scale=n5_kc,
        n5_ratio=benchmark.n5_reduced_ratio(n5_kc),
+       n5_continuation=n5_continuation,
+       n5_closed_form_kc=n5_closed_form_kc,
+       n5_kc_residual=abs(n5_kc - n5_closed_form_kc),
        n5_zero_curvature=n5_at.hessian_sign[2] == 0,
        n8_critical_scale=n8.k,
        n8_gradient_residual=n8.gradient_residual,
@@ -1844,9 +1850,12 @@ function pilot_benchmark_regression()
        n8_positive_heavy_modes=all(>(0), n8.eigenvalues[2:end]),
        n8_detuned_negative_modes=count(<(0), detuned.eigenvalues),
        n8_detuned_eigenvalues=detuned.eigenvalues,
-       passed=isapprox(n5_kc, 0.674506370003365; atol=1e-12) &&
+       passed=isapprox(n5_kc, n5_closed_form_kc; atol=1e-12) &&
            isapprox(benchmark.n5_reduced_ratio(n5_kc), 0.25; atol=1e-12) &&
-           n5_at.hessian_sign[2] == 0 && isapprox(n8.k, n5_kc; atol=1e-9) &&
+           all(entry -> entry.branch == :pi && entry.converged, n5_continuation) &&
+           all(entry -> isapprox(entry.theta, π; atol=4e-8), n5_continuation) &&
+           all(entry -> entry.gradient <= 1e-10, n5_continuation) &&
+           n5_at.hessian_sign[2] == 0 && isapprox(n8.k, benchmark.N8_KC; atol=1e-9) &&
            n8.gradient_residual < 1e-10 && n8.null_residual < 1e-10 &&
            abs(n8.eigenvalues[1]) < 1e-9 && all(>(0), n8.eigenvalues[2:end]) &&
            count(<(0), detuned.eigenvalues) == 1)
