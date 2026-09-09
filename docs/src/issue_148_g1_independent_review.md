@@ -146,10 +146,12 @@ is only decoupled from the repaired N=5 value.
    `python3 scripts/agent_verify.py diff-check`, and
    `git diff --check 62c5a6135de9ddc8208a1530f50640d666f33cfd...2a4e495ccdd838cc5b1e884fbac136115a7d433f`
    passed before this review artifact was added.
-5. The full local package test remains unavailable because its optional
-   CairoMakie test dependency is absent. This routine environment limitation
-   does not affect the FAIL recommendation. Draft PR 149 had Fast tests and
-   build pending, with the Full test suite skipped, when checked.
+5. The full local package test was initially unavailable because its optional
+   CairoMakie test dependency was absent. This routine environment limitation
+   did not affect the first FAIL recommendation. Draft PR 149's first
+   documentation build failed on G0 audit links; commit `f976500` later fixed
+   those links. Fast tests were pending and the Full test suite was skipped at
+   the time of the first review.
 
 ## Bounded correction target
 
@@ -161,3 +163,159 @@ off-critical source-ratio and minima-change tests; concrete result typing; and
 a tracked replay record with source/revision/environment identity and justified
 tolerances. Re-run focused checks and applicable CI before fresh independent
 review.
+
+## Re-review at corrected commit b35cb74
+
+Re-review recommendation: **FAIL** at
+`b35cb74781513601cc4079e37060bf75a3e39e0e` against the same accepted G0 base
+`62c5a6135de9ddc8208a1530f50640d666f33cfd`.
+
+The correction now estimates a catastrophe from a sign change between
+continued samples whose grid omits the analytic `k_c`. It also corrects the
+last-update convergence check, labels the zero seed as `:zero`, uses a concrete
+continuation-step vector, adds off-critical ratio and minima checks, and tracks
+the repair evidence. Four acceptance gaps remain; they are ordinary bounded
+implementation/evidence corrections and require no scientific-owner decision.
+
+### Re-review material findings
+
+1. **FAIL — a detected event need not satisfy the declared Hessian
+   tolerance.** `_n5_catastrophe_root` performs one linear interpolation of
+   the endpoint Hessians (`src/paper_benchmarks/poly102_inflation.jl`, lines
+   265--269), and lines 350--369 mark the result as detected without refining
+   it or checking `abs(catastrophe_hessian) <= hessian_tolerance`. On the
+   committed regression grid at `test/runtests.jl` lines 3394--3400, the event
+   is at `1.7700681483189589`, only `1.57e-8` from the Float64 oracle, but its
+   Hessian is `-1.2337005306228832e-8`, more than 100 times the declared
+   `1e-10` Hessian tolerance. A coarser valid bracket still reported
+   `catastrophe_detected=true` with `k` error `2.3565e-6` and Hessian
+   `-1.8508e-6`. The tests assert only a `5e-7` `k` comparison and the analytic
+   anchor theta; no event tolerance exists in the API, and no test checks the
+   returned event Hessian. Recover the Hessian zero by a bounded root refiner
+   to a declared event/bracket tolerance, and require its gradient and Hessian
+   residuals in acceptance.
+
+2. **FAIL — branch identity remains a seed-region label rather than the
+   corrected branch's identity.** `_n5_validate_zero_phase_seed` labels every
+   seed within `pi/3` of `pi` as `:pi` (lines 253--263). At
+   `k=k_c-1e-3`, the distinct analytic satellite critical point
+   `theta=acos(-1/(4a))=3.101964568393247` lies only `0.0396281` from `pi`.
+   Supplying that exact stationary seed returns the same satellite point with
+   `branch=:pi`. Exhaustive branch support is not required, but unsupported
+   seeds must fail rather than acquire the source-fold identity. Validate the
+   corrected state against the selected branch or restrict the seed contract
+   enough to exclude the neighboring branches, then test this boundary.
+
+3. **FAIL — the advertised precision path is incomplete and has a mixed-type
+   error.** Homogeneous BigFloat `k_values` now produce a concrete
+   `N5ReducedZeroPhaseContinuationStep{BigFloat}`, but
+   `N5_REDUCED_CRITICAL_SCALE` remains a Float64 constant and the ratio is
+   anchored to it (lines 87--89 and 195--206). At 256-bit precision the exact
+   source formula gives
+   `k_c=1.770068132610995629125239519150256394...`; the stored constant differs
+   by `8.56e-17`, and `n5_reduced_ratio(k_c)` differs from the direct source
+   ratio by `1.68e-17`, far above BigFloat roundoff. Also, Float64 `k_values`
+   with a BigFloat `seed_theta` raise a `MethodError` constructing the typed
+   step because the result type is selected from `k_values` alone (lines
+   300--311). Compute the source expression in the promoted working type and
+   include the seed/tolerance types in promotion, or explicitly restrict and
+   document the accepted input types.
+
+4. **FAIL — failure and reproducibility evidence remain partial, and the
+   tolerance rationale does not describe the implemented gate.** The tracked
+   `issue_148_g1_repair_evidence.md` records parent `f976500`, not corrected
+   `b35cb74`, and two commands depend on untracked `/tmp` scripts (lines
+   9--28). Its tolerance section says the `1e-10` controls were “selected” but
+   supplies no roundoff, grid-spacing, or event-error argument; it omits the
+   actual `5e-7` test and `5e-6` benchmark event tolerances and does not report
+   event Hessians (lines 51--54). The tests cover invalid arguments and a
+   successful one-iteration correction, but neither the docstring nor tests
+   state and exercise a non-converged corrector result. Non-finite tolerances
+   are also accepted: setting both tolerances to `Inf` marks the first regular
+   sample as a detected catastrophe. Record the final revision and replayable
+   commands, justify all four numerical tolerances, document non-convergence,
+   and reject non-finite controls.
+
+### Initial-finding resolution
+
+| Initial finding at 2a4e495 | Re-review at b35cb74 |
+|---|---|
+| Analytic `k_c` supplied in grid | Partially resolved: sign-change event is estimated, but not refined to Hessian/event tolerance |
+| Hard-coded `branch=:pi` | Partially resolved: zero branch is labeled, but nearby satellite branches are still mislabeled `:pi` |
+| No failure test; final-update status bug | Final-update bug and basic input guards resolved; numerical non-convergence and non-finite tolerance contract remain |
+| Exact-`pi`, at-`k_c` circular validation | Resolved for the Float64 path with a perturbed seed, off-critical ratio check, and two-to-one minima check |
+| Evidence untracked/incomplete | Tracked, but final revision, replayable scripts, event residuals, and tolerance justification remain incomplete |
+| Float64 narrowing and abstract result vector | Concrete vector resolved; homogeneous BigFloat type retained, but source precision and mixed-type behavior remain defective |
+
+### Re-review standards axis
+
+Three findings (two hard, one judgement call):
+
+1. **Hard — reproducibility evidence identity/tolerances.** The evidence records
+   `f976500`, two untracked `/tmp` scripts, and selected rather than justified
+   tolerances. This violates `AGENTS.md` section 4 and
+   `cyaxiverse-scientific-reproduction` sections 3 and 6.
+2. **Hard — incomplete solver failure regression.** Tests cover invalid
+   arguments and a successful one-iteration case, but not a non-converged
+   corrector or its documented result contract. This violates
+   `cyaxiverse-julia-quality` section 6 and `AGENTS.md` section 5.
+3. **Judgement — Duplicated Code.** N=5 reduced-model helpers remain duplicated
+   between `reduced_models.jl` and `poly102_inflation.jl`. Repetition of the
+   source expression in a validation oracle is justified; duplicate production
+   implementations still risk drift.
+
+The original abstract-container finding is resolved. Homogeneous BigFloat
+inputs retain their outer type, although the independent precision checks above
+show that the underlying source constant is still Float64 and mixed inputs
+fail. No N=8, units, phase, metric, persisted schema, or implicit physical
+convention change was found.
+
+### Re-review spec axis
+
+Two findings:
+
+1. **Partial — Hessian-zero tolerance is not enforced.** The committed
+   regression event has Hessian about `-1.23e-8` while the requested
+   `hessian_tolerance` is `1e-10`; event detection neither refines nor checks
+   that residual.
+2. **Partial — replay identity and tolerances are incomplete.** The evidence
+   names the parent revision, depends on untracked scripts, and omits a
+   justification for event-location and Hessian tolerances and a statement of
+   effective arithmetic precision.
+
+The supplied-`k_c`, final-update, Float64 off-critical oracle/minima, and
+abstract-container findings are resolved. Seed labels now persist in state,
+but the independent satellite-seed replay above shows that the branch-selection
+boundary is not yet truthful. No scope creep was found.
+
+### Re-review exact checks and outcomes
+
+1. The benchmarks-only command from the tracked repair evidence exited 0 with
+   `passed=true`, event `k=1.7700681326502656`, error `3.93e-11`, gradient
+   `3.78e-27`, and Hessian `-3.08e-11`. Its fine symmetric bracket happens to
+   meet `1e-10`; the implementation does not enforce that result.
+2. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=/tmp/julia-depot:/Users/vmehta/.julia julia --startup-file=no --project=. /tmp/issue148_g1_rereview_checks.jl`
+   exited 0 and produced the event, branch, precision, type, and failure results
+   above. Raw output:
+   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_183jehj6/run.stdout.log`.
+3. The reported full-suite failure is pre-existing at the accepted base. The
+   `phase_volume_detuning_scan.jl` blob is identical at base and corrected SHA
+   (`cd861aa8a257ae36c9dadef6486449a0497c35a4`), and the base test contains the
+   same `4pi^2 I` assertion. A direct replay returned `2pi^2 I`, not `4pi^2 I`.
+   Raw output:
+   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_dwjdviy8/run.stdout.log`.
+   This unrelated existing failure does not change the G1 verdict.
+4. `git diff --check 62c5a6135de9ddc8208a1530f50640d666f33cfd...b35cb74781513601cc4079e37060bf75a3e39e0e`
+   passed. PR 149's documentation build passed; Fast tests were pending and the
+   Full test suite was skipped when checked.
+
+Return the same implementation worker a bounded correction: refine the
+sign-changing Hessian event to declared tolerances; make branch selection
+truthful at neighboring source branches; preserve real source precision and
+mixed input types; and complete the failure/tolerance/replay evidence. Keep the
+N=5 zero-phase scope and all established conventions. Do not begin G2 before a
+fresh independent G1 review passes.
+
+Re-review totals: Standards 3 findings, worst is incomplete reproducibility
+identity/tolerance evidence; Spec 2 findings, worst is the unenforced
+Hessian-zero tolerance.
