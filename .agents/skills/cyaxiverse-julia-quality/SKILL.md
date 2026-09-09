@@ -29,3 +29,6 @@ description: Implement, debug, refactor, or audit Julia code in CYAxiverse.jl, e
 Report exact commands and observed outcomes, including warnings and unavailable
 checks. Use `cyaxiverse-scientific-reproduction` whenever a numerical change
 could alter a benchmark, scientific interpretation, or population claim.
+When delegated, own routine diagnose/debug/correct/retest loops. Return a
+concise result summary with exact command outcomes and references to raw logs
+or detailed artifacts where those are useful.

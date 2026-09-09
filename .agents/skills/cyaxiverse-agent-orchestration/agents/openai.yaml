@@ -1,0 +1,4 @@
+interface:
+  display_name: "CYAxiverse Agent Orchestration"
+  short_description: "Coordinate bounded multi-agent CYAxiverse work"
+  default_prompt: "Use $cyaxiverse-agent-orchestration to coordinate bounded CYAxiverse subagent work with completion-driven waiting and bounded recovery."

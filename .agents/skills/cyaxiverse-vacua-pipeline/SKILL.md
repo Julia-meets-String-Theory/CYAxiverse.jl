@@ -25,6 +25,10 @@ description: Build, repair, validate, or run CYAxiverse vacuum/minima pipelines 
 6. Add focused tests for every changed boundary, including malformed dimensions,
    orientation, legacy layouts, metadata round trips, and a minimal fixture.
 7. Run focused reproduction first, then the applicable package/audit/diff gates.
+8. When delegated, routine operational retries, debugging, normal test
+   failures, and implementation corrections belong to the worker unless they
+   cross an existing scientific, schema, or contract boundary. Return concise
+   command/result evidence and references to detailed logs or artifacts.
 
 Report commands/outcomes, schema compatibility, source/input fingerprint,
 resource impact, warnings, and any scientific decision deliberately deferred.

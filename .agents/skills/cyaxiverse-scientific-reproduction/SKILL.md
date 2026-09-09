@@ -28,6 +28,12 @@ description: Reproduce or extend CYAxiverse scientific results involving Kreuzer
    physical map, candidate classification, population definition, or reported
    estimand is ambiguous. Never tune acceptance logic merely to reproduce an
    expected count.
+8. When delegated, continue ordinary investigation, debugging, correction, and
+   retest loops without escalation. Escalate only at an existing
+   scientific-owner or claim boundary. Final scientific evidence may be as
+   detailed as required; the roughly 150-word limit applies only to a health
+   `CHECKPOINT`. Keep large derivations and diagnostics in durable artifacts and
+   return a concise manager-facing evidence packet with references.
 
 Before handoff, run the applicable focused checks and broader repository gates,
 and state exact commands/outcomes, claim boundary, source fingerprint,
