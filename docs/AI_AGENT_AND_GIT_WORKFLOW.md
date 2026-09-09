@@ -36,12 +36,13 @@ boundary.
 ### Kept and consolidated
 
 - `AGENTS.md` is the only normative repository-wide agent contract.
-- Five CYAxiverse-specific skills are tracked:
+- Six CYAxiverse-specific skills are tracked:
   - `cyaxiverse-julia-quality`
   - `cyaxiverse-scientific-reproduction`
   - `cyaxiverse-ks-geometry-sampling`
   - `cyaxiverse-vacua-pipeline`
   - `cyaxiverse-integration-release`
+  - `cyaxiverse-agent-orchestration`
 - Claude and Codex receive those skills through tracked symlinks pointing to
   `.agents/skills/`, so there is only one editable copy.
 - `scripts/agent_verify.py` remains the preferred compact verification entry

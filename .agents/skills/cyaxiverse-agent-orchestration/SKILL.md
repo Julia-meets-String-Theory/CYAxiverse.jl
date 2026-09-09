@@ -100,6 +100,16 @@ The detailed final scientific evidence may be as long as required; the roughly
 Prefer long, completion-driven waiting. Do not repeatedly wake the manager just
 to ask whether a worker is still running.
 
+Use two clocks:
+
+- A **TASK LEASE** is the interval after which one `CHECKPOINT` is expected.
+- A `wait_agent` **TOOL TIMEOUT** is the maximum block time for one wait call
+  when no worker state change is observed.
+
+When supported, set `timeout_ms` to a substantial interval matched to the task
+and tool-supported bounds. Do not rely on a short default timeout for long-run
+work. A wait still returns immediately on worker completion/failure.
+
 At lease expiry:
 
 1. Obtain or inspect one `CHECKPOINT`.
@@ -108,6 +118,9 @@ At lease expiry:
    instruction.
 4. If recovery also fails, interrupt or replace the worker from its durable
    checkpoint/state.
+
+Apply this `CHECKPOINT` sequence only when the lease has actually expired or
+there is concrete stall evidence beyond a timeout-only wait return.
 
 Evidence of a slow but healthy worker includes changed test state, a new
 artifact, a new verified output, a narrowed error diagnosis, a successful
@@ -119,6 +132,11 @@ repeated rereading with no new evidence, no changed artifact/test/diagnosis
 across the lease, circular uncertainty without a decision criterion, repeated
 retries without meaningful state change, or no activity plus failure to respond
 to the health checkpoint.
+
+Timeout-only returns from `wait_agent` that report no state change are not
+`CHECKPOINT`s and should not trigger substantive manager reasoning. If this
+occurs before lease expiry and nothing changed, continue waiting with the same
+completion-first posture instead of converting into short polling.
 
 **Do not infer a stall solely from elapsed time.** A healthy scientific worker
 may be quiet while performing a bounded, expensive computation; use evidence
