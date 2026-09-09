@@ -114,6 +114,36 @@ n5_closed_form_kc(T) = convert(T, 4) / convert(T, π) * log(convert(T, 1024) / c
         @test abs(sat_hp - BigFloat(π)) < BigFloat("1e-5")
     end
 
+    setprecision(BigFloat, 256) do
+        local_kc = n5_closed_form_kc(BigFloat)
+        k_close = local_kc - BigFloat("1e-40")
+        a_close = poly102.n5_reduced_ratio(k_close)
+        cp_close = poly102.n5_reduced_critical_points(k_close; atol=zero(BigFloat))
+        @test length(cp_close.theta) == 4
+        @test cp_close.minima == 2
+        lower_analytic = acos(BigFloat(-1) / (BigFloat(4) * a_close))
+        upper_analytic = BigFloat(2) * BigFloat(π) - lower_analytic
+        lower_offset = lower_analytic - BigFloat(π)
+        upper_offset = upper_analytic - BigFloat(π)
+        @test isapprox(lower_offset, -upper_offset; rtol=BigFloat("1e-60"))
+        @test any(isapprox(t, lower_analytic; atol=BigFloat("1e-70")) for t in cp_close.theta)
+        @test any(isapprox(t, upper_analytic; atol=BigFloat("1e-70")) for t in cp_close.theta)
+        grad(t) = sin(t) + BigFloat(2) * a_close * sin(BigFloat(2) * t)
+        for t in cp_close.theta
+            @test abs(grad(t)) < BigFloat("1e-70")
+        end
+    end
+
+    r_rational = poly102.n5_reduced_ratio(177 // 100)
+    @test r_rational isa BigFloat
+    @test isapprox(Float64(r_rational), poly102.n5_reduced_ratio(1.77); atol=1e-14)
+    e_rational = poly102.n5_reduced_exponent(177 // 100)
+    @test e_rational isa BigFloat
+    cp_rational = poly102.n5_reduced_critical_points(177 // 100)
+    @test cp_rational.theta[1] isa BigFloat
+    r_ratbig = poly102.n5_reduced_ratio(big(177) // big(100))
+    @test r_ratbig isa BigFloat
+
     n5_big_kc_path = poly102.n5_reduced_zero_phase_continuation(
         BigFloat.([n5_kc - 1e-3, n5_kc + 1e-3]); seed_theta=big(π) + 1e-3)
     @test typeof(first(n5_big_kc_path).k) == BigFloat

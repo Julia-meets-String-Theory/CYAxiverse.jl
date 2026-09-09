@@ -95,10 +95,14 @@ const N5_REDUCED_CATASROPHE_REFINE_ITERATIONS = N5_REDUCED_CATASTROPHE_REFINE_IT
 const N5_ZERO_PHASE_BRANCH_PI = :pi
 const N5_ZERO_PHASE_BRANCH_SECONDARY = :zero
 
+@inline _n5_numeric_type(::Type{T}) where {T<:AbstractFloat} = T
+@inline _n5_numeric_type(::Type{<:Rational}) = BigFloat
+@inline _n5_numeric_type(::Type{T}) where {T<:Real} = promote_type(T, Float64)
+
 @inline function _n5_type_of_collection(collection::AbstractVector)
     T = Float64
     for value in collection
-        T = promote_type(T, typeof(value))
+        T = promote_type(T, _n5_numeric_type(typeof(value)))
     end
     return T
 end
@@ -207,7 +211,7 @@ n5_critical_scale() = _n5_reduced_zero_phase_critical_scale(Float64)
 
 """Exact reduced N=5 coefficient ratio, `a(k)=(32/(255/8)) exp[-2πk(32-255/8)]`."""
 function n5_reduced_ratio(k::Real)
-    T = promote_type(typeof(k), Float64)
+    T = _n5_numeric_type(typeof(k))
     ratio_prefactor = _n5_reduced_zero_phase_ratio_prefactor(T)
     ratio_prefactor * exp(-2 * convert(T, π) *
         convert(T, k) *
@@ -216,16 +220,17 @@ end
 
 """Exact reduced-model exponent implied by the N=5 draft charge data."""
 function n5_reduced_exponent(k::Real)
-    T = promote_type(typeof(k), Float64)
+    T = _n5_numeric_type(typeof(k))
     -2 * convert(T, π) * convert(T, k) *
         convert(T, N5_REDUCED_DELTA_Q)
 end
 
-function n5_reduced_critical_points(k::Real; atol::Real=64eps(typeof(float(k))))
+function n5_reduced_critical_points(k::Real; atol::Real=64eps(_n5_numeric_type(typeof(k))))
     a = n5_reduced_ratio(k)
-    T = promote_type(typeof(k), Float64)
+    T = _n5_numeric_type(typeof(k))
+    two_pi = convert(T, 2) * convert(T, π)
     points = T[zero(T), T(π)]
-    a > 1 / 4 + atol && append!(points, (acos(-1 / (4a)), 2π - acos(-1 / (4a))))
+    a > 1 / 4 + atol && append!(points, (acos(-1 / (4a)), two_pi - acos(-1 / (4a))))
     sort!(points)
     curvature = cos.(points) .+ 4a .* cos.(2 .* points)
     signs = map(curvature) do value
@@ -287,19 +292,19 @@ end
 end
 
 function _n5_reduced_zero_phase_gradient(theta::Real, k::Real)
-    T = promote_type(typeof(theta), typeof(k), Float64)
+    T = promote_type(_n5_numeric_type(typeof(theta)), _n5_numeric_type(typeof(k)))
     ratio = n5_reduced_ratio(T(k))
     sin(T(theta)) + 2 * ratio * sin(2 * T(theta))
 end
 
 function _n5_reduced_zero_phase_hessian(theta::Real, k::Real)
-    T = promote_type(typeof(theta), typeof(k), Float64)
+    T = promote_type(_n5_numeric_type(typeof(theta)), _n5_numeric_type(typeof(k)))
     ratio = n5_reduced_ratio(T(k))
     cos(T(theta)) + 4 * ratio * cos(2 * T(theta))
 end
 
 function _n5_reduced_zero_phase_predictor(theta::Real, k_prev::Real, k_next::Real)
-    T = promote_type(typeof(theta), typeof(k_prev), typeof(k_next), Float64)
+    T = promote_type(_n5_numeric_type(typeof(theta)), _n5_numeric_type(typeof(k_prev)), _n5_numeric_type(typeof(k_next)))
     dk = T(k_next - k_prev)
     dgdθ = _n5_reduced_zero_phase_hessian(theta, k_prev)
     abs(dgdθ) < 1e-12 && return T(theta)
@@ -319,7 +324,7 @@ end
 end
 
 function _n5_validate_zero_phase_seed(seed_theta::Real)
-    T = promote_type(typeof(seed_theta), Float64)
+    T = _n5_numeric_type(typeof(seed_theta))
     theta = mod(seed_theta, convert(T, 2) * convert(T, π))
     if _n5_periodic_distance(theta, T(π)) <= T(N5_ZERO_PHASE_BRANCH_PI_TOLERANCE)
         return (branch=N5_ZERO_PHASE_BRANCH_PI, theta=theta)

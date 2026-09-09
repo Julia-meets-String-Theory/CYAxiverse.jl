@@ -240,4 +240,31 @@ setprecision(BigFloat, 256) do
     end
 end
 
+# 256-bit coordinate and stationarity at kc-1e-40
+setprecision(BigFloat, 256) do
+    kc_hp = BigFloat(4) / BigFloat(π) * log(BigFloat(1024) / BigFloat(255))
+    k_close = kc_hp - BigFloat("1e-40")
+    a_close = poly102.n5_reduced_ratio(k_close)
+    cp_close = poly102.n5_reduced_critical_points(k_close; atol=zero(BigFloat))
+    lower = acos(BigFloat(-1) / (BigFloat(4) * a_close))
+    upper = BigFloat(2) * BigFloat(π) - lower
+    grad(t) = sin(t) + BigFloat(2) * a_close * sin(BigFloat(2) * t)
+    @printf("hp_256_kc_minus_1e40_points=%d\n", length(cp_close.theta))
+    @printf("hp_256_kc_minus_1e40_minima=%d\n", cp_close.minima)
+    @printf("hp_256_kc_minus_1e40_lower_offset=%.6e\n", Float64(lower - BigFloat(π)))
+    @printf("hp_256_kc_minus_1e40_upper_offset=%.6e\n", Float64(upper - BigFloat(π)))
+    @printf("hp_256_kc_minus_1e40_symmetry_error=%.6e\n", Float64(abs((lower - BigFloat(π)) + (upper - BigFloat(π)))))
+    @printf("hp_256_kc_minus_1e40_upper_found=%s\n", any(isapprox(t, upper; atol=BigFloat("1e-70")) for t in cp_close.theta))
+    @printf("hp_256_kc_minus_1e40_lower_found=%s\n", any(isapprox(t, lower; atol=BigFloat("1e-70")) for t in cp_close.theta))
+    max_grad = maximum(abs(grad(t)) for t in cp_close.theta)
+    @printf("hp_256_kc_minus_1e40_max_gradient=%.6e\n", Float64(max_grad))
+end
+
+# rational input
+r_rat = poly102.n5_reduced_ratio(177 // 100)
+@printf("rational_int_ratio_type=%s\n", typeof(r_rat))
+@printf("rational_int_agrees=%s\n", isapprox(Float64(r_rat), poly102.n5_reduced_ratio(1.77); atol=1e-14))
+cp_rat = poly102.n5_reduced_critical_points(177 // 100)
+@printf("rational_int_crit_type=%s\n", typeof(cp_rat.theta[1]))
+
 println("validation_checks_complete=true")
