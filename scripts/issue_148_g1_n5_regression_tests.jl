@@ -8,6 +8,8 @@ n5_kc = poly102.n5_critical_scale()
 n5_ratio_formula(k::Real) =
     (32 / (255 / 8)) * exp(-2π * k * (32 - 255 / 8))
 
+n5_closed_form_kc(T) = convert(T, 4) / convert(T, π) * log(convert(T, 1024) / convert(T, 255))
+
 @testset "N5 reduced zero-phase regression checks" begin
     n5_kc_path = poly102.n5_reduced_zero_phase_continuation(
         [n5_kc - 1e-3, n5_kc - 2e-4, n5_kc + 2e-4, n5_kc + 1e-3];
@@ -44,16 +46,48 @@ n5_ratio_formula(k::Real) =
     @test n5_nonconverged_path[1].iterations == 1
     @test !n5_nonconverged_path[1].catastrophe_detected
 
+    n5_near_event_nonconvergence = poly102.n5_reduced_zero_phase_continuation(
+        [n5_kc - 1e-3, n5_kc]; seed_theta=π + 1e-3, max_iterations=1,
+        gradient_tolerance=1e-16, hessian_tolerance=1e-10, event_scale_tolerance=1e-14)
+    @test !n5_near_event_nonconvergence[1].converged
+    @test !n5_near_event_nonconvergence[1].catastrophe_detected
+    @test !n5_near_event_nonconvergence[2].catastrophe_detected
+
+    n5_endpoint_scale_check = poly102.n5_reduced_zero_phase_continuation(
+        [n5_kc, n5_kc + 1e-11]; seed_theta=π + 1e-3,
+        gradient_tolerance=1e-10, hessian_tolerance=1e-10,
+        event_scale_tolerance=1e-14, max_iterations=2)
+    @test !any(step -> step.catastrophe_detected, n5_endpoint_scale_check)
+
     n5_zero_seed_path = poly102.n5_reduced_zero_phase_continuation(
         [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=1e-3)
     @test all(step.branch == :zero for step in n5_zero_seed_path)
     @test all(!step.catastrophe_detected for step in n5_zero_seed_path)
 
     @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
-        [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=3.101964568393247)
+        [n5_kc - 1e-5, n5_kc - 1e-4]; seed_theta=3.101964568393247)
 
     @test poly102.n5_reduced_zero_phase_continuation([1e-3, 2e-3];
         seed_theta=1.0e-3, hessian_tolerance=1e-8)[1].branch == :zero
+
+    for bit_precision in (128, 256)
+        setprecision(BigFloat, bit_precision) do
+            local_kc = n5_closed_form_kc(BigFloat)
+            local_path = poly102.n5_reduced_zero_phase_continuation(
+                [local_kc - BigFloat("1.0e-3"), local_kc + BigFloat("1.0e-3")];
+                seed_theta=big(π) + BigFloat("1e-3"),
+                gradient_tolerance=BigFloat("1e-10"),
+                hessian_tolerance=BigFloat("1e-10"),
+                event_scale_tolerance=BigFloat("1e-10"))
+            local_idx = findfirst(step -> step.catastrophe_detected, local_path)
+            @test local_idx !== nothing
+            @test isapprox(local_path[local_idx].catastrophe_k, local_kc; rtol=1e-10)
+            @test abs(local_path[local_idx].catastrophe_hessian) <= BigFloat("1e-10")
+            @test local_path[local_idx].catastrophe_residual <= BigFloat("1e-10")
+            @test local_path[2].k isa BigFloat
+            @test typeof(first(local_path).theta) == BigFloat
+        end
+    end
 
     n5_big_kc_path = poly102.n5_reduced_zero_phase_continuation(
         BigFloat.([n5_kc - 1e-3, n5_kc + 1e-3]); seed_theta=big(π) + 1e-3)
