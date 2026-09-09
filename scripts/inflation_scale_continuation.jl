@@ -1841,8 +1841,18 @@ function pilot_benchmark_regression()
     n5_catastrophe_index = findfirst(step -> step.catastrophe_detected, n5_continuation)
     n5_catastrophe_k = n5_catastrophe_index === nothing ? NaN :
         n5_continuation[n5_catastrophe_index].catastrophe_k
+    n5_catastrophe_hessian = n5_catastrophe_index === nothing ? NaN :
+        n5_continuation[n5_catastrophe_index].catastrophe_hessian
+    n5_catastrophe_residual = n5_catastrophe_index === nothing ? NaN :
+        n5_continuation[n5_catastrophe_index].catastrophe_residual
+    n5_catastrophe_scale_error = n5_catastrophe_index === nothing ? NaN :
+        abs(n5_continuation[n5_catastrophe_index].catastrophe_k - n5_closed_form_kc)
     n5_catastrophe_matched = n5_catastrophe_index !== nothing &&
         isfinite(n5_catastrophe_k) &&
+        isfinite(n5_catastrophe_hessian) &&
+        isfinite(n5_catastrophe_residual) &&
+        abs(n5_catastrophe_hessian) <= 1e-10 &&
+        n5_catastrophe_residual <= 1e-10 &&
         isapprox(n5_catastrophe_k, n5_closed_form_kc; atol=5e-6)
     n5_reference_theta = n5_catastrophe_index === nothing ? π :
         n5_continuation[n5_catastrophe_index].catastrophe_theta
@@ -1857,6 +1867,9 @@ function pilot_benchmark_regression()
        n5_continuation=n5_continuation,
        n5_catastrophe_k=n5_catastrophe_k,
        n5_catastrophe_index=n5_catastrophe_index,
+       n5_catastrophe_scale_error=n5_catastrophe_scale_error,
+       n5_catastrophe_hessian=n5_catastrophe_hessian,
+       n5_catastrophe_residual=n5_catastrophe_residual,
        n5_kc_residual=abs(n5_kc - n5_closed_form_kc),
        n5_zero_curvature=n5_zero_curvature,
        n5_minima_below=n5_at_below.minima,
