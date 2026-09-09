@@ -221,7 +221,7 @@ function n5_reduced_exponent(k::Real)
         convert(T, N5_REDUCED_DELTA_Q)
 end
 
-function n5_reduced_critical_points(k::Real; atol::Real=64eps(Float64))
+function n5_reduced_critical_points(k::Real; atol::Real=64eps(typeof(float(k))))
     a = n5_reduced_ratio(k)
     T = promote_type(typeof(k), Float64)
     points = T[zero(T), T(π)]
@@ -281,9 +281,9 @@ end
     end
 
     expected_index = _n5_periodic_index(T, points, anchor)
-    closest_index, closest_distance = _n5_nearest_critical_distance(points, theta)
+    expected_distance = abs(_n5_periodic_distance(points[expected_index], theta))
     tolerance = _n5_branch_tolerance(points, expected_index)
-    return closest_index == expected_index || closest_distance <= tolerance
+    return expected_distance <= tolerance
 end
 
 function _n5_reduced_zero_phase_gradient(theta::Real, k::Real)

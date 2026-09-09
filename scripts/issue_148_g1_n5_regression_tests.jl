@@ -67,6 +67,19 @@ n5_closed_form_kc(T) = convert(T, 4) / convert(T, π) * log(convert(T, 1024) / c
     @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
         [n5_kc - 1e-5, n5_kc - 1e-4]; seed_theta=3.101964568393247)
 
+    k_near_cusp = n5_kc - 1e-5
+    a_near_cusp = poly102.n5_reduced_ratio(k_near_cusp)
+    sat_theta_near_cusp = acos(-1 / (4 * a_near_cusp))
+    @test abs(sat_theta_near_cusp - π) < 0.01
+    @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+        [k_near_cusp]; seed_theta=sat_theta_near_cusp)
+
+    pi_near_cusp_path = poly102.n5_reduced_zero_phase_continuation(
+        [k_near_cusp]; seed_theta=π + 1e-3)
+    @test pi_near_cusp_path[1].branch == :pi
+    @test pi_near_cusp_path[1].converged
+    @test abs(pi_near_cusp_path[1].theta - π) < abs(sat_theta_near_cusp - π) / 2
+
     @test poly102.n5_reduced_zero_phase_continuation([1e-3, 2e-3];
         seed_theta=1.0e-3, hessian_tolerance=1e-8)[1].branch == :zero
 
@@ -87,6 +100,18 @@ n5_closed_form_kc(T) = convert(T, 4) / convert(T, π) * log(convert(T, 1024) / c
             @test local_path[2].k isa BigFloat
             @test typeof(first(local_path).theta) == BigFloat
         end
+    end
+
+    setprecision(BigFloat, 256) do
+        local_kc = n5_closed_form_kc(BigFloat)
+        k_hp = local_kc - BigFloat("1e-20")
+        cp_default = poly102.n5_reduced_critical_points(k_hp)
+        @test length(cp_default.theta) == 4
+        @test cp_default.minima == 2
+        a_hp = poly102.n5_reduced_ratio(k_hp)
+        sat_hp = acos(BigFloat(-1) / (4 * a_hp))
+        @test abs(sat_hp - BigFloat(π)) > 0
+        @test abs(sat_hp - BigFloat(π)) < BigFloat("1e-5")
     end
 
     n5_big_kc_path = poly102.n5_reduced_zero_phase_continuation(

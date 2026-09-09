@@ -130,6 +130,29 @@ if far_satellite_err !== nothing
     println("invalid_farsatellite_err=$(typeof(far_satellite_err))")
 end
 
+# true near-cusp satellite: compute acos(-1/(4a)) at k=kc-1e-5
+k_near_cusp = n5_kc - 1e-5
+a_near_cusp = poly102.n5_reduced_ratio(k_near_cusp)
+sat_theta_near_cusp = acos(-1 / (4 * a_near_cusp))
+@printf("near_cusp_satellite_theta=%.20f\n", sat_theta_near_cusp)
+@printf("near_cusp_satellite_distance_from_pi=%.20f\n", abs(π - sat_theta_near_cusp))
+near_cusp_sat_rejected, near_cusp_sat_err = capture() do
+    poly102.n5_reduced_zero_phase_continuation(
+        [k_near_cusp]; seed_theta=sat_theta_near_cusp)
+    :not_raised
+end
+println("near_cusp_satellite_rejected=$(near_cusp_sat_rejected === nothing)")
+if near_cusp_sat_err !== nothing
+    println("near_cusp_satellite_err=$(typeof(near_cusp_sat_err))")
+end
+
+# perturbed pi seed must still converge to pi at same near-cusp scale
+pi_near_cusp_path = poly102.n5_reduced_zero_phase_continuation(
+    [k_near_cusp]; seed_theta=π + 1e-3)
+@printf("pi_near_cusp_branch=%s\n", pi_near_cusp_path[1].branch)
+@printf("pi_near_cusp_converged=%s\n", pi_near_cusp_path[1].converged)
+@printf("pi_near_cusp_theta=%.20f\n", Float64(pi_near_cusp_path[1].theta))
+
 # Nonconverged near-event boundary: should not propagate catastrophe
 near_event_nonconv, near_event_err = capture() do
     path = poly102.n5_reduced_zero_phase_continuation(
@@ -200,6 +223,20 @@ for bits in (0, 128, 256)
         @printf("precision_ladder_%d_event_scale_error=%.3e\n", bits, Float64(abs(step.catastrophe_k - n5_closed_form_kc())))
         @printf("precision_ladder_%d_event_gradient=%.3e\n", bits, Float64(step.catastrophe_residual))
         @printf("precision_ladder_%d_event_hessian=%.3e\n", bits, Float64(step.catastrophe_hessian))
+    end
+end
+
+# high-precision critical-point classification at kc-1e-20
+setprecision(BigFloat, 256) do
+    kc_hp = BigFloat(4) / BigFloat(π) * log(BigFloat(1024) / BigFloat(255))
+    k_hp = kc_hp - BigFloat("1e-20")
+    cp_hp = poly102.n5_reduced_critical_points(k_hp)
+    @printf("hp_256_kc_minus_1e20_points=%d\n", length(cp_hp.theta))
+    @printf("hp_256_kc_minus_1e20_minima=%d\n", cp_hp.minima)
+    if length(cp_hp.theta) >= 3
+        a_hp = poly102.n5_reduced_ratio(k_hp)
+        sat_hp = acos(BigFloat(-1) / (4 * a_hp))
+        @printf("hp_256_satellite_offset=%.6e\n", Float64(abs(sat_hp - BigFloat(π))))
     end
 end
 
