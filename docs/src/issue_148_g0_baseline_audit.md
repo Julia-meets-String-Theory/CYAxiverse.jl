@@ -29,7 +29,7 @@ G1 must supply source-faithful regression coverage for the corrected behavior.
 - Source PDF SHA-256:
   `b0f5539bf0fb40e401d93b8cfcbe3e725ba8849efdde2519646103d5f004d2e6`.
   This equals `PAPER_SOURCE_IDENTITY.source_sha256` in
-  [`catastrophe_diagnostics.jl`](../../src/paper_benchmarks/catastrophe_diagnostics.jl).
+  [`catastrophe_diagnostics.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/src/paper_benchmarks/catastrophe_diagnostics.jl).
 - Julia: 1.12.6, Darwin arm64.  The project was instantiated before the
   focused checks; the generated `Manifest.toml` is ignored and is not part of
   this evidence.
@@ -78,12 +78,12 @@ The following are facts about repository state at the audited commit.
 
 ### Benchmarks and augmented solvers
 
-- [`reduced_models.jl`](../../src/paper_benchmarks/reduced_models.jl) implements
+- [`reduced_models.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/src/paper_benchmarks/reduced_models.jl) implements
   the source N=5 ratio and closed-form critical scale.  Its N=8 augmented
   solve uses the 12 Table-1 terms, leading-charge period-one coordinates, and
   solves `grad V=0`, `H v=0`, and `v'v=1` with a hierarchy-scaled residual.
   It reproduces the N=8 source value.
-- [`poly102_inflation.jl`](../../src/paper_benchmarks/poly102_inflation.jl)
+- [`poly102_inflation.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/src/paper_benchmarks/poly102_inflation.jl)
   implements the executable-author-code N=8 convention: 10 retained terms,
   raw GLSM angles in radians, `K(k)=K(1)/k^2`, and the canonical Hessian.  Its
   augmented N=8 solve also reproduces the source value.
@@ -92,24 +92,24 @@ The following are facts about repository state at the audited commit.
   `0.25 exp[-2pi(k-k_c)(32-255/8)]`.  That reanchoring creates an artificial
   N=5 cusp at the N=8 value and is not the ratio obtained from its own N=5
   actions.
-- [`compatibility.jl`](../../src/paper_benchmarks/compatibility.jl) does not alias
+- [`compatibility.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/src/paper_benchmarks/compatibility.jl) does not alias
   the root N=5 critical-scale and ratio functions to the `poly102_inflation`
   versions.  Consequently, two public namespaces return different values:
   the root namespace returns the paper value and `poly102_inflation` returns
   the N=8 value.
-- [`inflation_scale_continuation.jl`](../../scripts/inflation_scale_continuation.jl)
+- [`inflation_scale_continuation.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/scripts/inflation_scale_continuation.jl)
   selects `poly102_inflation` in `pilot_benchmark_regression` and declares the
   N=5 check successful only when its critical scale equals the N=8 value.
-  [`inflation_reproduction.jl`](../../scripts/inflation_reproduction.jl),
-  [`catastrophe_diagnostics.jl`](../../src/paper_benchmarks/catastrophe_diagnostics.jl),
-  and [`catastrophic_inflation_population_study.jl`](../../scripts/catastrophic_inflation_population_study.jl)
+  [`inflation_reproduction.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/scripts/inflation_reproduction.jl),
+  [`catastrophe_diagnostics.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/src/paper_benchmarks/catastrophe_diagnostics.jl),
+  and [`catastrophic_inflation_population_study.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/scripts/catastrophic_inflation_population_study.jl)
   inherit this synthetic N=5 fixture.  The existing reproduction result
   therefore reports 0.674506 for N=5.
 
 ### Current continuation and matching behavior
 
 - The generic physical scale path in
-  [`inflation_scale_continuation.jl`](../../scripts/inflation_scale_continuation.jl)
+  [`inflation_scale_continuation.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/scripts/inflation_scale_continuation.jl)
   applies `tau -> k tau`, `Kinv -> k^2 Kinv`, full-normalization
   `V_CY -> k^(3/2) V_CY`, and recomputes coefficients.  The fixed-volume path
   is explicitly diagnostic/unsupported.  A scaling certificate is required.
@@ -129,7 +129,7 @@ The following are facts about repository state at the audited commit.
   solves the package-coordinate gradient, a scaled raw `H v`, and Euclidean
   `v'v=1`.  It reports generalized eigenvalues with `K`.  It is not integrated
   into automatic branch continuation.
-- [`phase_volume_detuning_scan.jl`](../../scripts/phase_volume_detuning_scan.jl)
+- [`phase_volume_detuning_scan.jl`](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/blob/3a5b034fbbabce6638607373e682cbd6f66f6aaa/scripts/phase_volume_detuning_scan.jl)
   has another homotopy parameter:
   `A_i(k)=L[i,1] 10^(k L[i,2])`.  Its phases are cycles inside
   `2pi(Q theta+phase)`.  Its `refine_catastrophe` bisects a Hessian zero at a
