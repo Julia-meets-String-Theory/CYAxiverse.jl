@@ -21,6 +21,9 @@
   produced/reviewed it is historically complete.
 - Scientific G3 tasks are blocked until GitHub Issue #148 records an explicit
   G2 PASS under the approved migrated contract.
+- Exact higher-precision bit depths in current tasks are implementation/evidence
+  choices; the governing spec requires a genuine target-constructed
+  higher-precision stability path without canonically fixing those bit depths.
 
 ## Migration-cutoff evidence state
 
@@ -34,7 +37,9 @@ Brownfield reconstruction cutoff:
 - G2: not accepted; first candidate rejected, later repair candidate awaiting
   fresh independent scientific review at the cutoff
 - G3: not started
-- optional G4: not started
+- optional G4: not started; applicable only if G3 PASS yields a suitable
+  off-ray catastrophe locus and the existing physical model remains usable
+  unchanged
 
 Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
 
@@ -146,7 +151,9 @@ Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
     scales agree below `1e-30`; source12/author10 and P96/A96 paths are labelled
     separately; focused G1 replay remains 63/63.
   - Boundary: this checkbox means a reviewable repair candidate/evidence package
-    exists. It does **not** mean G2 is accepted.
+    exists. The 128/256-bit choice records the current implementation/evidence
+    plan; it is not a canonical requirement. This task does **not** mean G2 is
+    accepted.
 
 - [ ] **T212 [R-003, R-005, R-006, R-007, R-012, R-014, G2] Freshly and independently review the repaired G2 candidate**
   - Input: freeze the exact repaired code/evidence revision to be reviewed; do
@@ -158,8 +165,8 @@ Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
       branch-continuation claim;
     - the old matcher is independently exercised rather than fed continuation
       identities;
-    - 128/256-bit event solves construct source quantities at target precision
-      and genuinely establish event stability;
+    - the current 128/256-bit event solves construct source quantities at target
+      precision and genuinely establish event stability;
     - P96/A96 comparisons are like-for-like and source12/author10 remain
       distinct;
     - conditioning/status/failure/tolerance claims are justified by the replay;
@@ -254,14 +261,15 @@ G2 PASS under the approved specification.
 
 ## Optional G4 — Bounded physical probe
 
-Run only after G3 PASS and only if the existing physical model can be used
-without a new normative choice.
+Run only after G3 PASS, only if G3 yields a suitable off-ray catastrophe locus,
+and only if the existing physical model can be used without a new normative
+choice. If G3 yields no such locus, G4 is N/A.
 
-- [ ] **T401 [R-002, R-016, G4] Select a small bounded set of validated off-ray witnesses for an exploratory physical probe**
-  - Verify: selection is derived from the G3 result and does not imply a
+- [ ] **T401 [R-002, R-016, G4] Select a small bounded set of points along the validated off-ray catastrophe locus for an exploratory physical probe**
+  - Verify: selection is derived from the G3 locus and does not imply a
     probability/population claim.
 
-- [ ] **T402 [R-002, R-012, R-016, G4] Apply existing detuning/inflationary diagnostics and record exploratory evidence**
+- [ ] **T402 [R-002, R-012, R-016, G4] Apply existing detuning/inflationary diagnostics along the selected locus points and record exploratory evidence**
   - Verify: the probe is explicitly separated from the validated G3
     continuation/discriminant claim and makes no unsupported stabilization or
     prevalence claim.
