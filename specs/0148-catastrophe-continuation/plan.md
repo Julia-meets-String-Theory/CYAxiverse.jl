@@ -6,8 +6,8 @@ Canonical specification:
 `specs/0148-catastrophe-continuation/spec.md`
 
 Spec revision used to derive this plan:
-`d0054c410fa5c196549456752d07275c4a1a9e40` (corrected brownfield migration
-revision).
+`eff7798ca65f932a0c6cf635bca7f49f4c5d4517` (P96-fidelity-corrected brownfield
+migration revision).
 
 Approval state: **draft / owner approval pending**. This plan does not authorize
 new scientific behavior while the governing S2 specification remains draft.
@@ -30,7 +30,7 @@ execution.
 | R-002 Claim boundary | Preserve local/replayable continuation claims and explicit non-claims | Issue #148 claim boundary; G0 audit; per-gate review |
 | R-003 Source/representation identity | Track paper radial `k`, period-one source coordinates, source12/P96 vs author10/A96, homotopy-only controls | `issue_148_g0_baseline_audit.md`; `issue_148_n8_metric_boundary_audit.md`; evidence provenance fields |
 | R-004 N=5 source continuation/precision | Existing accepted G1 implementation in `poly102_inflation.jl` plus focused G1 scripts/tests | G1 tested code `792a02f...`; 63/63 focused review; 128/256-bit replay; manager decision `1eef936...` |
-| R-005 P96 N=8 metric | P96 scientific path in N8 diagnostics; A96 retained as labelled reproduction | Owner comment `5623902670`; `issue_148_n8_approved_metric_contract.md` at `d1a0b70...`; like-for-like checks |
+| R-005 P96 N=8 metric | P96 scientific path in N8 diagnostics; `M96` reconstructed in the relevant GLSM basis with reconstruction/source identity verified at working precision; any other-basis representation uses explicit metric congruence transformation; A96 retained as labelled reproduction | Owner comment `5623902670`; `issue_148_n8_approved_metric_contract.md` at `d1a0b70...`; working-precision reconstruction/source-identity checks; explicit basis-transform checks where applicable; like-for-like P96/A96 checks |
 | R-006 Well-posed N8 continuation | `src/paper_benchmarks/n8_continuation.jl` plus radial evidence script; repaired bordered/fallback semantics are a current candidate, not yet accepted | First candidate independent FAIL `091cc9c...`; repair candidate `5b8daff...`; fresh independent re-review still required at migration cutoff |
 | R-007 N8 independent validation/precision | Twelve-term augmented comparison, actual matcher comparison, status/conditioning/failure evidence, target-constructed 128/256-bit event solves | Current repair evidence `docs/src/issue_148_g2_repair_evidence.md`; acceptance depends on fresh independent review, not worker replay alone |
 | R-008 Valid non-radial deformation | Future G3: cone-adapted/two-cycle parameterization, consistent recomputation of dependent quantities | Preflight geometry/Kahler checks; representative-point replay; independent review |
@@ -40,7 +40,7 @@ execution.
 | R-012 Replayable provenance | Existing G0/G1/G2 evidence pattern; extend to G3 geometry/source/code/environment identity | Exact commands, revisions, source SHA, precision, tolerances, geometry/witness IDs in durable evidence |
 | R-013 Scientific ambiguity stop | Manager/worker must stop on unresolved normalization/basis/acceptance/physical interpretation | Owner-decision record when needed; no silent implementation choice |
 | R-014 Gate sequencing/evidence status | G0/G1 accepted; G2 earlier candidate rejected; repair candidate pending independent review; G3 blocked until G2 PASS | GitHub Issue #148 gate records + review artifacts; live state remains in GitHub |
-| R-015 Negative outcomes valid | G3 completion is outcome-neutral within the claim/control boundary | Scientific review of whichever local discriminant outcome is observed |
+| R-015 Negative outcomes valid | G3 completion is outcome-neutral within the claim boundary | Scientific review of whichever local discriminant outcome is observed |
 | R-016 Optional physical probe separation | Optional G4 only after G3 PASS if G3 yields a suitable off-ray catastrophe locus and the existing physical model can be used unchanged | Separate exploratory evidence from selected points along that locus; otherwise G4 is N/A |
 | G0 | Historical baseline and contract audit | PASS: `docs/src/issue_148_g0_baseline_audit.md`, audit script, Issue comment `5608088958` |
 | G1 | Historical N=5 bug repair + genuine continuation + precision/failure validation | PASS: code `792a02f...`, evidence `668ef25...`, final independent acceptance and manager decision `1eef936...` |
@@ -112,9 +112,13 @@ claims.
 
 The N=8 canonical metric boundary is resolved. Scientific N8 outputs use
 period-one GLSM coordinates with `K_theta=M96/k^2`; raw-radian equivalence uses
-`M96/[k^2(2pi)^2]`. Eq.96/CYTools matrix authority is deliberate and the
-factor-two displayed-equation discrepancy remains documented. Author raw-radian
-`M96/k^2` is A96 reproduction-only.
+`M96/[k^2(2pi)^2]`. `M96` is the precise reconstructed Eq.96/CYTools reference
+metric in the relevant GLSM basis, and its reconstruction/source identity must
+be verified at working precision. Any representation in another basis must use
+the corresponding explicit metric congruence transformation. Eq.96/CYTools
+matrix authority is deliberate and the factor-two displayed-equation
+discrepancy remains documented. Author raw-radian `M96/k^2` is A96
+reproduction-only.
 
 ### Rejected and current G2 work
 
@@ -152,7 +156,10 @@ not move scientific implementation onto the SDD migration branch.
 
 1. Freeze the exact repaired revision for review.
 2. Have a fresh independent scientific reviewer replay and inspect the repaired
-   implementation against R-003/R-005/R-006/R-007/R-012/R-014 and G2.
+   implementation against R-003/R-005/R-006/R-007/R-012/R-014 and G2,
+   including explicit verification that reconstructed `M96` and its source
+   identity are correct at working precision and that any other-basis metric
+   representation uses the corresponding explicit congruence transformation.
 3. Correct any concrete implementation/evidence defects found by that review on
    the same scientific deliverable branch.
 4. Record the eventual gate decision durably on Issue #148. Only a durable PASS
@@ -256,7 +263,9 @@ Use progressive verification under `AGENTS.md`:
 1. **G1 historical oracle:** analytic N5 source fixture and its accepted focused
    replay remain the regression baseline for the N5 changes.
 2. **G2 source fixture:** published N8 source12 radial benchmark under the P96
-   contract.
+   contract, including working-precision verification of the reconstructed
+   `M96` metric/source identity and explicit metric congruence transformation
+   for any other-basis representation.
 3. **Mechanism checks:** prove the continuation/matcher/precision mechanism
    being claimed, not just the final catastrophe number.
 4. **Precision:** source-construct target precision; disclose source-precision
