@@ -5,7 +5,7 @@ issue: 148
 class: S2
 status: draft
 workstream: Inflation
-parent: CYAX-0151
+parent: null
 depends_on: []
 created: 2026-09-10
 last_reviewed: 2026-09-10
@@ -205,8 +205,8 @@ This specification includes:
 - one controlled, physically valid non-radial Kahler deformation;
 - determination of the local fate of the radial catastrophe under that
   deformation;
-- an optional, bounded physical probe after G3 passes if no model change is
-  required.
+- an optional, bounded physical probe after G3 passes only if G3 yields a
+  suitable off-ray catastrophe locus and no model change is required.
 
 ## Non-scope
 
@@ -338,9 +338,10 @@ adequacy near the catastrophe is demonstrated rather than assumed.
 N=8 G2 evidence SHALL include an independent augmented catastrophe comparison,
 intrinsic branch identity, an actual comparison with the existing post-hoc
 matching machinery, explicit failure/status/tolerance/conditioning evidence,
-and a genuine Float64-discovery to target-constructed BigFloat
-refinement/stability path. Projected higher-derivative diagnostics SHALL be
-reported without forcing a classification.
+and a genuine Float64-discovery to target-constructed higher-precision
+refinement/stability path sufficient to establish numerical stability.
+Projected higher-derivative diagnostics SHALL be reported without forcing a
+classification.
 
 ### R-008 — Physically valid non-radial deformation
 
@@ -412,11 +413,14 @@ fate of the radial catastrophe under the chosen deformation within the agreed
 claim/control boundary. Failure of the desired inflationary or persistence
 hypothesis is not automatically failure of the research/software task.
 
-### R-016 — Optional physical probe remains separate
+### R-016 — Optional physical probe remains separate and locus-conditional
 
 Any post-G3 bounded physical probe SHALL remain explicitly exploratory and
-separate from the validated continuation/discriminant claim, and SHALL run only
-if it does not require changing the agreed physical model.
+separate from the validated continuation/discriminant claim. It SHALL run only
+if G3 yields a suitable off-ray catastrophe locus from which well-defined
+points can be selected, and only if the probe does not require changing the
+agreed physical model. If G3 yields no such locus, optional G4 is not
+applicable.
 
 ## Acceptance gates
 
@@ -475,8 +479,10 @@ catastrophic-inflation construction along the source radial control direction.
    keep A96/source12/author10 comparisons explicitly separated;
 5. verify gradient, null-vector, normalization, canonical Hessian,
    conditioning/status/failure behavior, and justified numerical tolerances;
-6. run a genuine target-constructed 128/256-bit event/refinement stability
-   ladder with no hidden Float64 narrowing or widening-as-source-precision;
+6. run a genuine target-constructed higher-precision event/refinement
+   stability ladder from Float64 discovery, with no hidden Float64 narrowing or
+   widening-as-source-precision, sufficient to demonstrate stability as
+   precision increases;
 7. compare intrinsic continuation identity with the actual existing post-hoc
    periodic-distance matcher and report any disagreements;
 8. report projected higher-derivative classification honestly, including
@@ -528,11 +534,15 @@ is an admissible scientific result, not by itself a stop/failure condition.
 
 ### Optional G4 — Bounded physical probe
 
-Run only after G3 passes and only if it does not require changing the agreed
-physical model. Select a small number of well-defined points/witnesses from the
-validated off-ray result, detune them using the existing catastrophic-inflation
-construction where meaningful, and evaluate existing inflationary diagnostics.
-Keep this exploratory probe separate from the validated continuation claim.
+G4 is applicable only if G3 passes **and** yields a suitable off-ray
+catastrophe locus. If G3 establishes termination, unfolding, or another outcome
+without such a locus, G4 is not applicable.
+
+Where applicable, run G4 only if it does not require changing the agreed
+physical model. Select a small number of well-defined points along the validated
+off-ray catastrophe locus, detune them using the existing catastrophic-inflation
+construction, and evaluate existing inflationary diagnostics. Keep this
+exploratory probe separate from the validated continuation claim.
 
 ## Verification requirements
 
@@ -593,14 +603,8 @@ claim, or gate criterion.
 
 ## Completion criterion
 
-Issue #148 is scientifically complete when either:
+This Goal is complete when G0-G3 have passed with durable evidence and
+independent scientific review, or when a documented failed gate establishes
+that the proposed continuation route is not currently viable.
 
-1. G0-G3 are accepted with durable evidence and the required independent
-   scientific review; or
-2. an independently reviewed failed gate establishes, within the agreed
-   scientific contract, that the proposed continuation route is not currently
-   viable and the failure itself is durably documented.
-
-A failed implementation candidate that remains repairable does not by itself
-satisfy the second condition. Generic adaptive Kahler-cone exploration remains
-a separate follow-on goal.
+Generic adaptive Kahler-cone exploration is a separate follow-on Goal.
