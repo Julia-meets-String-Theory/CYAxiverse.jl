@@ -1,5 +1,10 @@
 # Issue 148 N=8 metric-normalization boundary audit
 
+Historical audit disposition: the owner subsequently approved P96, including
+the Eq.96 matrix authority, on 2026-09-10. See the
+[approved contract](issue_148_n8_approved_metric_contract.md). The unresolved
+status below records the audit's original finding, not the current decision.
+
 ## Status: BLOCKED on one combined scientific-owner contract
 
 Manager disposition: accept this Sol/xhigh audit as evidence of an unresolved
