@@ -106,11 +106,16 @@ Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
 - [x] **T202 [R-005, R-013, G2] Obtain durable scientific-owner P96 approval**
   - Outcome: scientific N8 outputs use period-one
     `K_theta=M96/k^2`; equivalent raw-radian metric is
-    `M96/[k^2(2pi)^2]`; Eq.96/CYTools matrix authority is selected; unconverted
+    `M96/[k^2(2pi)^2]`; `M96` is the precise reconstructed Eq.96/CYTools
+    reference metric in the relevant GLSM basis; its reconstruction/source
+    identity must be verified at working precision; any representation in
+    another basis must use the corresponding explicit metric congruence
+    transformation; Eq.96/CYTools matrix authority is selected; unconverted
     author raw-radian `M96/k^2` remains A96 reproduction-only.
   - Evidence: Issue #148 comment `5623902670` and
     `docs/src/issue_148_n8_approved_metric_contract.md` at `d1a0b70...`.
-  - Verify: no worker is left to infer coordinate or matrix authority.
+  - Verify: no worker is left to infer coordinate, matrix, reconstruction,
+    source-identity, or basis-transformation authority.
 
 ## G2 — N=8 radial multifield validation
 
@@ -167,6 +172,10 @@ Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
       identities;
     - the current 128/256-bit event solves construct source quantities at target
       precision and genuinely establish event stability;
+    - reconstructed `M96` and its source identity are verified at working
+      precision in the relevant GLSM basis;
+    - any P96 metric represented in another basis is obtained through the
+      corresponding explicit congruence transformation;
     - P96/A96 comparisons are like-for-like and source12/author10 remain
       distinct;
     - conditioning/status/failure/tolerance claims are justified by the replay;
