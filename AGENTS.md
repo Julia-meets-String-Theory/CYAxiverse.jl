@@ -14,6 +14,16 @@ Read additional skills or handoffs only when they are relevant to the task.
 - Ordinary durable state belongs in Git: issue (when useful), branch, commits,
   PR, tests, and concise PR notes. Use long continuation handoffs only for
   genuinely long investigations or context-compaction boundaries.
+- Treat private chats, local agent sessions, local filesystem context, connected
+  applications, and private attachments as non-public by default. Before any
+  durable GitHub write derived from them, deliberately sanitize the material.
+  Unless the owner explicitly approves the exact datum for publication, do not
+  publish private conversation/share URLs or transcript dumps; absolute local
+  filesystem/home-directory paths; local usernames, hostnames, machine/device
+  identifiers; local Codex/agent/workspace/session paths; private attachment or
+  connector-local locations; secrets; credentials; or tokens. Refer to
+  repository content with repository-relative paths. If publication safety is
+  uncertain, omit the datum and stop for owner direction.
 - Prefer one branch/worktree per deliverable. Subagents normally work toward
   the same deliverable; do not create a new branch/worktree for every reasoning
   step.
