@@ -333,10 +333,10 @@ Do not create another always-on ledger. The GitHub Project introduced by SDD is
 a visual/state view over Issues and PRs; it does not supersede `AGENTS.md`,
 feature specs, Git history, or evidence artifacts.
 
-## 9. Local migration after control-plane changes merge
+## 9. Local migration after this PR merges
 
-Before pulling process/control-plane changes, inspect local edits rather than
-blindly updating:
+Your uploaded working tree had local modifications. Before pulling the merged
+cleanup, inspect them rather than blindly updating:
 
 ```sh
 git switch vmm
@@ -345,22 +345,43 @@ git diff --stat
 git diff
 ```
 
-If local edits are valuable, commit them to their proper feature branch or save
-a reversible patch/stash according to normal workflow. Then update `vmm`:
+If the local edits are valuable, either commit them to their proper feature
+branch or save a reversible patch/stash according to your normal workflow.
+Then update `vmm`:
 
 ```sh
 git fetch origin
 git pull --ff-only origin vmm
 ```
 
-Personal settings removed from tracking remain local/Git-ignored. After
-updating, verify tracked project skill links:
+If you want to keep personal settings that this PR removes from tracking, copy
+or recreate them **after** the pull. They will remain ignored by Git.
+
+Example local Claude plugin settings:
+
+```json
+{
+  "enabledPlugins": {
+    "code-foundations@rtd": true,
+    "what@rtd": true
+  }
+}
+```
+
+Place that in `.claude/settings.json` locally if you still want those plugins.
+Likewise, install or copy the ADHD skill into a local/global Codex skill area if
+you want that response style; it is no longer an invariant of CYAxiverse.jl.
+
+After updating, verify the tracked project skill links:
 
 ```sh
 ls -l .codex/skills/cyaxiverse-*
 ls -l .claude/skills/cyaxiverse-*
 git status --short
 ```
+
+Your personal settings should be ignored and the tracked project files should
+be clean.
 
 ## 10. Suggested working rhythm
 
