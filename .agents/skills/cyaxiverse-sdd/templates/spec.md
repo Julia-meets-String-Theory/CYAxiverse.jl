@@ -9,6 +9,8 @@ parent: null
 depends_on: []
 created: YYYY-MM-DD
 last_reviewed: YYYY-MM-DD
+review_required: <role or N/A>
+approval_ref: <durable approval reference or N/A while draft>
 ---
 
 # <Title>
@@ -30,6 +32,8 @@ Distinguish where relevant:
 - Existing empirical evidence
 - Owner-approved conventions
 - Open inference / hypothesis
+
+For brownfield work, also record a concise chronological decision/supersession history when later durable approvals modify earlier Issue wording. Canonical migrated intent is the latest durably owner-approved, non-superseded normative intent.
 
 Link source papers, prior specs, Issues, PRs, and durable validation artifacts.
 
@@ -59,7 +63,7 @@ Record only feature-relevant conventions. Do not duplicate `AGENTS.md`.
 
 ## Requirements
 
-Requirement IDs are immutable once referenced by implementation.
+Requirement IDs are immutable once referenced by implementation. For brownfield migration, do not imply newly introduced IDs governed historical work.
 
 ### R-001 — <name>
 
@@ -100,6 +104,8 @@ Use native GitHub dependencies for actual work blocking where appropriate.
 ## Open owner decisions
 
 List unresolved normative decisions. S2/S3 implementation must not guess them.
+
+If classification ambiguity could affect scientific meaning or a durable scientific/contract boundary, treat the work as provisional S2 until clarified.
 
 ## Completion criterion
 

@@ -8,6 +8,8 @@
 - Routine diagnose -> edit -> test -> correct -> retest stays with the implementation worker.
 - Escalate only material conditions named by the task/spec.
 - Tasks do not automatically become GitHub Issues.
+- `tasks.md` is execution/evidence-readiness decomposition, not authoritative PR merge, Issue closure, Kanban, or current review state.
+- Prefer ending the task list at deliverable/evidence readiness (for example PR ready for required review) rather than adding a self-referential task whose completion depends on merging the same PR that carries this file.
 
 ## Phase 1 — Baseline / prerequisites
 
@@ -34,3 +36,5 @@
 Add correction tasks when final spec/code/evidence review identifies an unmet requirement.
 
 - [ ] **TC01 [R-...] <remaining work>**
+
+Once the deliverable/evidence boundary is satisfied, subsequent merge/close/current-workflow state is tracked in GitHub Issue/PR/Project rather than by requiring another update to this task file.
