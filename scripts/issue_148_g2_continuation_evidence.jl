@@ -104,6 +104,7 @@ end
 cat_results_below = filter(r -> r.status == :catastrophe_detected, results_from_below)
 @info @sprintf("  Branches from below with catastrophe: %d / %d",
     length(cat_results_below), length(results_from_below))
+@test length(cat_results_below) >= 1
 
 # ── 5. Catastrophe localization ────────────────────────────────────────────
 @info "── Step 5: Catastrophe localization by bisection ──"
@@ -131,12 +132,13 @@ end
 cond_evidence = [(s.k, s.canonical_hessian_min, s.gradient_residual, s.iterations)
     for s in best_cat.steps if s.converged]
 approaching = filter(t -> abs(t[1] - augmented.k) < 0.01, cond_evidence)
-if length(approaching) >= 2
-    @test abs(approaching[end][2]) < abs(approaching[1][2])
-    @info "  Hessian eigenvalue converging to zero: CONFIRMED"
-end
+@test length(approaching) >= 2
+@test all(isfinite(t[2]) && isfinite(t[3]) for t in approaching)
+@test abs(approaching[end][2]) < abs(approaching[1][2])
+@info "  Hessian eigenvalue converging to zero: CONFIRMED"
 step_failures = filter(s -> !s.converged, best_cat.steps)
 @info @sprintf("  Step failures near singularity: %d", length(step_failures))
+@test isempty(step_failures)
 
 # ── 7. Tangent direction / pseudo-arclength diagnostics ────────────────────
 @info "── Step 7: Tangent / pseudo-arclength verification ──"
@@ -186,6 +188,9 @@ if aug_big.converged
         1.0 .- abs.(Float64.(aug_big.theta) .- localized.theta)))
     @info @sprintf("  max|θ_big - θ_aug_f64| = %.3e", theta_diff)
     @test theta_diff < 1e-6
+    @test aug_big.gradient_residual < BigFloat("1e-60")
+    @test aug_big.null_residual < BigFloat("1e-60")
+    @test isapprox(norm(aug_big.null_vector), BigFloat(1); atol=BigFloat("1e-60"))
 end
 
 # ── 10. P96 classification at the catastrophe ──────────────────────────────
@@ -223,6 +228,7 @@ ratio_4th = diag_p96.projected_derivatives.fourth / diag_a96.projected_derivativ
 @test length(diag_p96.near_null_eigenvalues) == 1
 trans_positive = all(>(0), diag_p96.transverse_hessian_eigenvalues)
 @info @sprintf("  All transverse eigenvalues positive: %s", trans_positive)
+@test trans_positive
 
 # ── 12. Normalization / coordinate verification ───────────────────────────
 @info "── Step 12: Normalization and coordinate verification ──"
@@ -262,6 +268,7 @@ if !isempty(cat_results)
         matcher_comparison.n_continuation, matcher_comparison.n_matcher,
         matcher_comparison.n_disagreements)
     @test matcher_comparison.n_matcher > 0
+    @test matcher_comparison.n_disagreements == 0
 end
 
 # ── 14. Merger/degeneracy evidence ─────────────────────────────────────────
