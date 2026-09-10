@@ -129,6 +129,26 @@ durable Git/SHA/path/artifact references. Keep raw logs, full transcripts, and
 large derivations in files or artifacts unless they are needed to resolve a
 specific contradiction.
 
+### Specification-driven work
+
+Classify substantial work as S0–S3 using `cyaxiverse-sdd`. S0 work remains
+lightweight; for S1–S3 work, locate the governing feature specification before
+changing intended behavior, or draft one if none exists.
+
+For S2/S3 work, do not implement consequential behavior while the governing
+spec is still draft. Do not infer unresolved scientific normalization, basis,
+population/counting, acceptance, physical-interpretation, or schema choices;
+return them to the scientific owner. If investigation changes intended behavior,
+update and re-review the spec before continuing the affected work.
+
+Treat an approved `spec.md` as feature intent below this repository contract;
+`plan.md` and `tasks.md` are subordinate implementation artifacts. Before
+claiming S2 completion, reconcile spec, plan, tasks, implementation,
+tests/evidence, and PR scope. GitHub Issues/Projects track work state but do not
+supersede the governing spec. Do not create a GitHub issue for every task; use
+sub-issues only for independently durable, blocked, mergeable/reviewable, or
+owner-decision-bearing work.
+
 ## 7. Project skills
 
 Project-specific reusable workflows live under `.agents/skills/` and are
@@ -136,6 +156,7 @@ mirrored to tool-specific skill directories by tracked symlinks. Use only the
 skill relevant to the task; they are not mandatory pre-reading for every run:
 
 - `cyaxiverse-agent-orchestration` (delegated multi-agent work only)
+- `cyaxiverse-sdd` (S1–S3 specification/planning/convergence work)
 - `cyaxiverse-julia-quality`
 - `cyaxiverse-scientific-reproduction`
 - `cyaxiverse-ks-geometry-sampling`
