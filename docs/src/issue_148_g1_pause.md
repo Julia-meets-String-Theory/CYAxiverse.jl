@@ -1,5 +1,9 @@
 # Issue 148 G1 pause checkpoint — 2026-09-09
 
+Historical checkpoint: the user subsequently resumed this work. G1 is now
+accepted in the [manager decision](issue_148_g1_manager_decision.md); the
+instructions below preserve the earlier paused state and are not current.
+
 Paused at the user's request before a location change. Do not resume until the
 user asks. G0 is accepted PASS. G1 is not accepted; the independent review of
 `b35cb74781513601cc4079e37060bf75a3e39e0e` recommends FAIL with bounded
