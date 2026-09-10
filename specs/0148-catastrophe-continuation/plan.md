@@ -41,12 +41,12 @@ execution.
 | R-013 Scientific ambiguity stop | Manager/worker must stop on unresolved normalization/basis/acceptance/physical interpretation | Owner-decision record when needed; no silent implementation choice |
 | R-014 Gate sequencing/evidence status | G0/G1 accepted; G2 earlier candidate rejected; repair candidate pending independent review; G3 blocked until G2 PASS | GitHub Issue #148 gate records + review artifacts; live state remains in GitHub |
 | R-015 Negative outcomes valid | G3 completion is outcome-neutral within the claim/control boundary | Scientific review of whichever local discriminant outcome is observed |
-| R-016 Optional physical probe separation | Optional G4 only after G3 PASS and without model change | Separate exploratory evidence clearly labelled non-core |
+| R-016 Optional physical probe separation | Optional G4 only after G3 PASS if G3 yields a suitable off-ray catastrophe locus and the existing physical model can be used unchanged | Separate exploratory evidence from selected points along that locus; otherwise G4 is N/A |
 | G0 | Historical baseline and contract audit | PASS: `docs/src/issue_148_g0_baseline_audit.md`, audit script, Issue comment `5608088958` |
 | G1 | Historical N=5 bug repair + genuine continuation + precision/failure validation | PASS: code `792a02f...`, evidence `668ef25...`, final independent acceptance and manager decision `1eef936...` |
 | G2 | Current radial N8 continuation/validation work on PR #149 | First candidate FAIL; later repair candidate at `5b8daff...` with evidence through frozen head `e991495...`; fresh independent review required before any PASS |
 | G3 | Future first non-radial discriminant investigation | Blocked on explicit G2 PASS; no G3 implementation present at migration cutoff |
-| G4 | Optional bounded physical probe | Not started; conditional on G3 PASS and unchanged physical model |
+| G4 | Optional bounded physical probe | Not started; applicable only if G3 PASS yields a suitable off-ray catastrophe locus and the physical model remains unchanged |
 
 ## Existing architecture
 
@@ -198,12 +198,16 @@ and the geometry/sensitivity preflight establish the actual local problem.
 Technical choices may evolve without spec re-approval if R-001/R-008-R-012 and
 the scientific claim boundary remain unchanged.
 
-### Phase C — Optional G4 physical probe
+### Phase C — Optional G4 physical probe when a locus exists
 
-Only after G3 PASS, and only if no physical-model change is needed, select a
-small number of well-defined off-ray witnesses and apply the existing
-catastrophic-inflation detuning/diagnostics. Keep the evidence labelled
-exploratory and separate from the G3 discriminant claim.
+G4 is applicable only if G3 passes and yields a suitable off-ray catastrophe
+locus. If G3 instead establishes termination, unfolding, or another outcome
+without such a locus, G4 is N/A under the current contract.
+
+Where applicable, and only if no physical-model change is needed, select a
+small number of well-defined points along the validated off-ray catastrophe
+locus and apply the existing catastrophic-inflation detuning/diagnostics. Keep
+the evidence labelled exploratory and separate from the G3 discriminant claim.
 
 ## Alternatives considered
 
@@ -257,7 +261,8 @@ Use progressive verification under `AGENTS.md`:
    being claimed, not just the final catastrophe number.
 4. **Precision:** source-construct target precision; disclose source-precision
    boundaries such as the reconstructed 53-bit P96 metric input where
-   applicable.
+   applicable. The current G2 repair plan uses 128/256-bit stages as an
+   implementation choice, not as immutable canonical intent.
 5. **Failure/conditioning:** retain truthful status, rejected-step, rank,
    condition and fallback behavior and test bounded failures.
 6. **G3 geometry preflight:** validate cone-adapted coordinates, independent
@@ -315,7 +320,7 @@ specification.
 - the current G2 repaired implementation/evidence candidate from the still
   required independent review/acceptance boundary;
 - future G3 work blocked on G2 PASS;
-- conditional G4 work.
+- conditional, locus-only G4 work when applicable.
 
 Tasks end at observable implementation/evidence/review-readiness boundaries.
 Current gate, PR merge and Project workflow state remain in GitHub.
