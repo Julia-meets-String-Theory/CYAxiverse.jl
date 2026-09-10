@@ -36,13 +36,14 @@ boundary.
 ### Kept and consolidated
 
 - `AGENTS.md` is the only normative repository-wide agent contract.
-- Six CYAxiverse-specific skills are tracked:
+- Seven CYAxiverse-specific skills are tracked:
   - `cyaxiverse-julia-quality`
   - `cyaxiverse-scientific-reproduction`
   - `cyaxiverse-ks-geometry-sampling`
   - `cyaxiverse-vacua-pipeline`
   - `cyaxiverse-integration-release`
   - `cyaxiverse-agent-orchestration`
+  - `cyaxiverse-sdd`
 - Claude and Codex receive those skills through tracked symlinks pointing to
   `.agents/skills/`, so there is only one editable copy.
 - `scripts/agent_verify.py` remains the preferred compact verification entry
@@ -100,9 +101,11 @@ Prefer:
 
 ```text
 issue / scoped problem statement
+  -> governing spec when S1–S3
   -> branch from vmm
   -> (optional) draft PR early
   -> implementation + evidence
+  -> convergence / review
   -> PR ready for review
   -> merge to vmm
 ```
@@ -111,6 +114,30 @@ Create an issue first when it helps record motivation, acceptance criteria,
 scientific questions, dependencies, or backlog status independently of a
 particular implementation. This is especially useful if the work may be
 paused, delegated, or split into multiple PRs.
+
+### Specification-driven work
+
+CYAxiverse uses lightweight, risk-tiered SDD for substantial work. `AGENTS.md`
+remains the repository constitution; an approved `specs/<id>-<name>/spec.md`
+records feature/scientific intent beneath it, while `plan.md` and `tasks.md`
+record realization and execution. GitHub Issues and Projects remain the work
+coordination/visual layer rather than a competing source of truth.
+
+Use `cyaxiverse-sdd` and its templates for S1–S3 work:
+
+- **S0:** trivial/local work; no specification required.
+- **S1:** bounded engineering change; compact spec, plan/tasks as useful.
+- **S2:** scientific or durable contract change; approved spec before
+  consequential implementation, requirement/evidence traceability, and final
+  convergence.
+- **S3:** research programme; use a shallow roadmap of independently testable
+  S1/S2 slices rather than one indefinitely expanding spec.
+
+For scientific S2/S3 work, unresolved normalization, basis, population,
+acceptance, physical-interpretation, or schema choices return to the scientific
+owner rather than being inferred by an implementation agent. A well-evidenced
+negative research result can satisfy a specification when its completion
+criterion allows it.
 
 ### When to open a draft PR early
 
@@ -237,26 +264,30 @@ is preferable to frequent expensive manager resumptions. Classify each task as
 can guide effort/model choice, lease, escalation rules, and reviewer
 requirements. These are operating heuristics, not correctness criteria.
 
-## 6. Issues, branches, PRs, and handoffs: what each is for
+## 6. Issues, branches, PRs, specs, and handoffs: what each is for
 
 | Object | Use it for | Do not use it as |
 | --- | --- | --- |
-| Issue | problem statement, acceptance criteria, backlog, scientific question | a transcript of every agent action |
+| Issue | intake, problem statement, discussion, dependencies, backlog | a duplicate of a completed spec or transcript of every agent action |
+| Feature spec | approved feature/scientific intent, requirements, claim boundary | repository-wide policy or implementation scratchpad |
+| Plan/tasks | technical realization and bounded execution units | a competing source of feature intent |
 | Branch | isolated implementation state for one deliverable | permanent project memory |
 | Draft PR | evolving review/CI/coordination surface | a substitute for a scoped branch |
 | Ready PR | coherent, reviewable integration proposal with evidence | a scratchpad |
 | PR description/comments | concise implementation and verification handoff | a huge machine-state dump |
 | Long handoff/checkpoint | context compaction or genuinely long scientific investigation | mandatory ceremony for small changes |
 
-For ordinary work, the PR plus commit history and tests should be enough to
-continue later. If a continuation record is necessary, keep it concise unless
-there is genuinely machine-readable state that cannot be reconstructed from
-Git/artifacts.
+For ordinary work, the governing spec (when applicable), PR, commit history and
+tests should be enough to continue later. If a continuation record is necessary,
+keep it concise unless genuinely machine-readable state cannot be reconstructed
+from Git/artifacts.
 
 ## 7. How to use the project skills
 
 Skills are **on demand**, not prerequisites for every run.
 
+- Use `cyaxiverse-sdd` for S1–S3 specification drafting, clarification, planning,
+  tasking, brownfield migration, requirement traceability, and convergence.
 - Use `cyaxiverse-julia-quality` for Julia numerical kernels, HDF5 readers,
   package regressions, type/precision issues, optional Python boundaries, and
   audit/test hygiene.
@@ -282,8 +313,8 @@ repository interaction.
 
 ## 8. Relationship to the repository consolidation plan
 
-Treat this AI cleanup as the **control-plane** track, not a separate management
-system.
+Treat SDD as an extension of the existing **control plane**, not a separate
+management system.
 
 The broader consolidation should continue to use these principles:
 
@@ -292,19 +323,20 @@ The broader consolidation should continue to use these principles:
 - prune stale/prunable worktrees and superseded branches only after confirming
   their commits are merged or intentionally abandoned;
 - let issues represent outstanding work, not obsolete historical states;
+- use feature specs for approved intent where SDD applies;
 - use PRs as the durable integration record;
 - validate current `vmm` before declaring cleanup complete;
 - keep scientific work gated separately from mechanical repository cleanup;
 - retain `vmm -> main` as the deliberate release/integration boundary.
 
-Do not create another always-on ledger unless the current GitHub state cannot
-answer the question. If a lightweight active-work index is introduced, it
-should summarize GitHub state rather than become a competing source of truth.
+Do not create another always-on ledger. The GitHub Project introduced by SDD is
+a visual/state view over Issues and PRs; it does not supersede `AGENTS.md`,
+feature specs, Git history, or evidence artifacts.
 
-## 9. Local migration after this PR merges
+## 9. Local migration after control-plane changes merge
 
-Your uploaded working tree had local modifications. Before pulling the merged
-cleanup, inspect them rather than blindly updating:
+Before pulling process/control-plane changes, inspect local edits rather than
+blindly updating:
 
 ```sh
 git switch vmm
@@ -313,34 +345,16 @@ git diff --stat
 git diff
 ```
 
-If the local edits are valuable, either commit them to their proper feature
-branch or save a reversible patch/stash according to your normal workflow.
-Then update `vmm`:
+If local edits are valuable, commit them to their proper feature branch or save
+a reversible patch/stash according to normal workflow. Then update `vmm`:
 
 ```sh
 git fetch origin
 git pull --ff-only origin vmm
 ```
 
-If you want to keep personal settings that this PR removes from tracking, copy
-or recreate them **after** the pull. They will remain ignored by Git.
-
-Example local Claude plugin settings:
-
-```json
-{
-  "enabledPlugins": {
-    "code-foundations@rtd": true,
-    "what@rtd": true
-  }
-}
-```
-
-Place that in `.claude/settings.json` locally if you still want those plugins.
-Likewise, install or copy the ADHD skill into a local/global Codex skill area if
-you want that response style; it is no longer an invariant of CYAxiverse.jl.
-
-After updating, verify the tracked project skill links:
+Personal settings removed from tracking remain local/Git-ignored. After
+updating, verify tracked project skill links:
 
 ```sh
 ls -l .codex/skills/cyaxiverse-*
@@ -348,28 +362,29 @@ ls -l .claude/skills/cyaxiverse-*
 git status --short
 ```
 
-Your personal settings should be ignored and the tracked project files should
-be clean.
-
 ## 10. Suggested working rhythm
 
 For a normal piece of work:
 
 1. Check `vmm` is current and clean enough for the intended branch point.
-2. Create an issue if the work benefits from durable scope/acceptance criteria.
-3. Create one feature/fix branch from `vmm`.
-4. Ask the main agent to inspect, scope, and implement; delegate only bounded
+2. Create an issue if the work benefits from durable scope, scientific questions,
+   dependencies or backlog visibility.
+3. Classify substantial work S0–S3. For S1–S3, locate or draft the governing
+   spec and obtain the approval required by its class before consequential work.
+4. Create one feature/fix branch from `vmm`.
+5. Ask the main agent to inspect, scope, and implement; delegate only bounded
    subproblems.
-5. Make coherent commits with evidence.
-6. Open a draft PR after the first coherent commit when CI/review visibility is
+6. Make coherent commits with evidence.
+7. Open a draft PR after the first coherent commit when CI/review visibility is
    useful; otherwise open it when ready.
-7. Run focused verification, then applicable package/audit/docs/CI gates.
-8. Review the final diff and scientific claim boundary.
-9. Mark the PR ready and merge to `vmm`.
-10. Periodically consolidate/prune stale branches and worktrees; do not leave
+8. Run focused verification, then applicable package/audit/docs/CI gates.
+9. For S2 work, converge spec, plan, tasks, implementation, evidence and PR scope.
+10. Review the final diff and scientific claim boundary.
+11. Mark the PR ready and merge to `vmm`.
+12. Periodically consolidate/prune stale branches and worktrees; do not leave
     every historical agent branch alive forever.
-11. When a coherent release is ready, review the aggregate version impact and
-    open the `vmm -> main` release PR.
+13. When a coherent release is ready, review aggregate version impact and open
+    the `vmm -> main` release PR.
 
 This gives agents enough structure to work safely without turning process files
 into a second codebase.
