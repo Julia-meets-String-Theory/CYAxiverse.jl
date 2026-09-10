@@ -2,7 +2,7 @@
 
 This replay records the bounded N=8 radial continuation run for the approved
 P96 contract. The implementation and replay script were tested at commit
-`9bc532995e3c2bbc5fb9b95a5f0f7ad8df60e053` on Julia `1.12.6`
+`9fe32eb0bebc4d9ad99fb761357c604674e3681a` on Julia `1.12.6`
 (`arm64-apple-darwin24.0.0`). The source is arXiv `2608.14780v1`, Appendix D,
 Table 1, with source PDF SHA-256
 `b0f5539bf0fb40e401d93b8cfcbe3e725ba8849efdde2519646103d5f004d2e6`.
@@ -28,7 +28,7 @@ JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
 
 Observed exit status: `0`. The run used `Random.seed!(148)` for the bounded
 regular-seed discovery. The tested output is retained at
-`/private/tmp/issue148-g2-run-9bc5329.log`.
+`/private/tmp/issue148-g2-run-9fe32eb.log`.
 
 ## Observed results
 
@@ -72,10 +72,11 @@ reports `:unresolved`. This result supports a verified radial degeneracy and
 nullity classification without promoting the current cutoff to a cusp/fold
 claim. The Eq.96 metric spectrum matched all eight published values within 2%.
 
-The focused replay contains 321 asserted regression checks covering source and
-metric conventions, regular seeds, continuation event recovery, precision,
-intrinsic branch identity, and the independent augmented reference. Existing
-baseline package failures (the unrelated phase-volume normalization mismatch
+The focused replay contains 321 checks in its named regression testsets plus
+explicit top-level assertions for the observed diagnostics. These checks cover
+source and metric conventions, regular seeds, continuation event recovery,
+precision, intrinsic branch identity, and the independent augmented reference.
+Existing baseline package failures (the unrelated phase-volume normalization mismatch
 and the known N8 JET/ReviseEMFILE environment issue) were not modified or
 used as G2 evidence.
 
