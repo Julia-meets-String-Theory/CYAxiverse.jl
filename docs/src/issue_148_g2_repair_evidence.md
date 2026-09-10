@@ -86,6 +86,15 @@ true. Its canonical metric records `metric_source_precision_bits=53` and
 canonical metric claim is made. The source potential and derivatives retain
 target-precision exact data.
 
+The replay uses `1e-8` for the normalized bordered corrector because the
+accepted event trace reaches a bordered condition estimate of `1.1e10`; the
+independent fixed-k localization then uses `1e-12` in the Float64 scale
+coordinate. BigFloat augmented convergence uses the existing absolute
+`1e-40` residual criterion and the replay requires residuals below `1e-60`.
+The matcher tolerance `0.05` is far above the independent correction residual
+and below the observed inter-branch separations. These scales are recorded so
+the checks do not fit the expected catastrophe value.
+
 ## Higher derivatives and normalization
 
 The source12 P96 diagnostic reports one near-null eigenvalue, positive
