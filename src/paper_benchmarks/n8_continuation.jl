@@ -22,6 +22,10 @@ struct N8ContinuationStep{T<:AbstractFloat}
     branch_id::Int
     step_index::Int
     conditioned_hessian_min::T
+    corrector_method::Symbol
+    bordered_rank::Int
+    bordered_condition::T
+    rejected_steps::Int
 end
 
 struct N8ContinuationResult{T<:AbstractFloat}
@@ -219,10 +223,11 @@ function n8_pseudo_arclength_continuation(
     push!(steps, N8ContinuationStep{T}(copy(theta_glsm), k, grad_res,
         minimum(can_eig), copy(can_eig), true, 0,
         copy(tangent_theta_glsm), tangent_k, zero(T), branch_id, 0,
-        minimum(cond_eig)))
+        minimum(cond_eig), :initial, rank(J), T(NaN), 0))
 
     current_ds = T(ds)
     failure_encountered = false
+    termination_reason = :running
     catastrophe_bracket = nothing
     catastrophe_k = T(NaN)
     catastrophe_theta = nothing
@@ -232,6 +237,7 @@ function n8_pseudo_arclength_continuation(
         k_pred = k + current_ds * tangent_k
 
         if k_pred < T(k_bounds[1]) || k_pred > T(k_bounds[2])
+            termination_reason = :bounds_reached
             break
         end
 
@@ -242,6 +248,10 @@ function n8_pseudo_arclength_continuation(
         residual = T(Inf)
         bordered = Matrix{T}(undef, n + 1, n + 1)
         rhs = Vector{T}(undef, n + 1)
+        bordered_rank = 0
+        bordered_condition = T(Inf)
+        rejected_steps = 0
+        corrector_method = :bordered
 
         for iter in 1:max_corrector_iterations
             iters = iter
@@ -253,7 +263,9 @@ function n8_pseudo_arclength_continuation(
             bordered[n+1, n+1] = tangent_k / k_arc_scale
             rhs[1:n] .= .-sys_try.gradient
             rhs[n+1] = -dot(tangent_phi, phi_try .- phi_pred) -
-                (tangent_k / k_arc_scale) * (k_try - k_pred)
+                (tangent_k / k_arc_scale) * ((k_try - k_pred) / k_arc_scale)
+            bordered_rank = rank(bordered)
+            bordered_condition = cond(bordered)
             correction = try
                 bordered \ rhs
             catch
@@ -271,10 +283,10 @@ function n8_pseudo_arclength_continuation(
             candidate_residual = old_residual
             while alpha >= T(2.0)^(-12)
                 phi_candidate .= phi_try .+ alpha .* correction[1:n]
-                k_candidate = k_try + alpha * correction[end]
+                k_candidate = k_try + alpha * correction[end] * k_arc_scale
                 trust_radius = max(T(10) * abs(current_ds), T(1e-3))
                 local_step_norm = sqrt(sum(abs2, phi_candidate .- phi_pred) +
-                    (k_candidate - k_pred)^2)
+                    ((k_candidate - k_pred) / k_arc_scale)^2)
                 if local_step_norm > trust_radius
                     alpha *= T(0.5)
                     continue
@@ -282,7 +294,7 @@ function n8_pseudo_arclength_continuation(
                 sys_candidate = _n8_preconditioned_system(phi_candidate, k_candidate,
                     setup.qcanonical, setup.ordered_qdotτ, setup.phases)
                 arc_candidate = dot(tangent_phi, phi_candidate .- phi_pred) +
-                    (tangent_k / k_arc_scale) * (k_candidate - k_pred)
+                    (tangent_k / k_arc_scale) * ((k_candidate - k_pred) / k_arc_scale)
                 candidate_residual = max(norm(sys_candidate.gradient, Inf),
                     abs(arc_candidate))
                 if candidate_residual <= old_residual * (one(T) - T(1e-4) * alpha) ||
@@ -290,9 +302,11 @@ function n8_pseudo_arclength_continuation(
                     accepted = true
                     break
                 end
+                rejected_steps += 1
                 alpha *= T(0.5)
             end
             if !accepted
+                rejected_steps += 1
                 converged = false
                 residual = old_residual
                 break
@@ -349,6 +363,7 @@ function n8_pseudo_arclength_continuation(
                     end
                 end
                 if fallback_ok
+                    corrector_method = :fixed_k_fallback
                     phi_try .= phi_fallback
                     k_try = k_fallback
                     residual = fallback_residual
@@ -362,12 +377,14 @@ function n8_pseudo_arclength_continuation(
             current_ds *= T(ds_shrink)
             if abs(current_ds) < T(min_ds)
                 failure_encountered = true
+                termination_reason = :step_failed
                 theta_glsm_try = _n8_leading_to_theta(phi_try, setup.Qtilde)
                 push!(steps, N8ContinuationStep{T}(
                     copy(theta_glsm_try), k_try, T(residual),
                     T(NaN), T[], false, iters,
                     _n8_leading_to_theta(tangent_phi, setup.Qtilde),
-                    tangent_k, current_ds, branch_id, step_idx, T(NaN)))
+                    tangent_k, current_ds, branch_id, step_idx, T(NaN),
+                    :failed, bordered_rank, bordered_condition, rejected_steps))
                 break
             end
             continue
@@ -401,7 +418,8 @@ function n8_pseudo_arclength_continuation(
         push!(steps, N8ContinuationStep{T}(copy(theta_glsm), k,
             norm(sys.gradient, Inf), minimum(can_eig), copy(can_eig),
             converged, iters, copy(tangent_theta_glsm), tangent_k,
-            current_ds, branch_id, step_idx, minimum(cond_eig)))
+            current_ds, branch_id, step_idx, minimum(cond_eig),
+            corrector_method, bordered_rank, bordered_condition, rejected_steps))
 
         if catastrophe_bracket === nothing && length(steps) >= 2
             prev = steps[end-1]
@@ -421,9 +439,10 @@ function n8_pseudo_arclength_continuation(
         end
     end
 
+    termination_reason == :running && (termination_reason = :max_attempts)
     status = catastrophe_bracket !== nothing ? :catastrophe_detected :
         (failure_encountered ? :step_failed :
-            (length(steps) >= n_steps ? :max_steps : :completed))
+            (length(steps) >= n_steps ? :max_steps : termination_reason))
 
     N8ContinuationResult{T}(steps, branch_id, catastrophe_bracket,
         catastrophe_k, catastrophe_theta, status)
@@ -705,6 +724,39 @@ function n8_bigfloat_augmented_solve(theta_seed::AbstractVector{<:Real},
             hessian_eigenvalues=copy(hess_eig_f),
             hessian_min_eigenvalue=minimum(abs.(hess_eig_f)),
             converged=false, iterations=max_iterations, precision_bits)
+    end
+end
+
+"""
+    n8_bigfloat_p96_diagnostic(theta, k; precision_bits=256)
+
+Evaluate the P96 projected diagnostic with exact twelve-term source data.
+The reconstructed P96 metric is currently a Float64 witness, so the result
+records that 53-bit metric boundary instead of implying a high-precision
+canonical metric.
+"""
+function n8_bigfloat_p96_diagnostic(theta_seed::AbstractVector{<:Real},
+        k_seed::Real; precision_bits::Int=256,
+        tolerance::Real=BigFloat("1e-8"))
+    precision_bits >= 128 || throw(ArgumentError("precision_bits must be >= 128"))
+    setprecision(BigFloat, precision_bits) do
+        T = BigFloat
+        Q, qdottau_exact = _n8_exact_source_data(T)
+        k = T(k_seed)
+        amplitudes = (k .* qdottau_exact) .*
+            exp.(T(-2) * T(π) .* k .* qdottau_exact)
+        # n8_geometry() is the exact-intersection reconstruction rounded at
+        # the repository's Float64 boundary. Preserve that provenance in the
+        # returned certificate while evaluating the potential at target bits.
+        metric = T.(Matrix(n8_geometry().kinetic)) ./ k^2
+        result = local_catastrophe_diagnostic(T.(theta_seed), Q, amplitudes, metric;
+            phases=zeros(T, 12), argument_scale=T(2) * T(π), precision_bits,
+            tolerance=T(tolerance), gradient_tolerance=T(tolerance),
+            hessian_tolerance=T(tolerance), derivative_tolerance=T(tolerance))
+        merge(result, (; metric_source_precision_bits=53,
+            metric_precision_boundary=:float64_reconstructed,
+            source_data=:exact_integer_rational_table1,
+            coordinate_contract=:P96))
     end
 end
 

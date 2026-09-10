@@ -12,6 +12,7 @@ using Test
 
 @info "Loading CYAxiverse..."
 using CYAxiverse
+include(joinpath(@__DIR__, "inflation_scale_continuation.jl"))
 const pb = CYAxiverse.paper_benchmarks
 const ai = pb.author_inflation
 
@@ -65,7 +66,7 @@ for (bi, branch) in enumerate(vcat(minima_above, saddles_above))
     result = pb.n8_pseudo_arclength_continuation(
         branch.theta, k_above;
         ds=-5e-4, n_steps=300,
-        tolerance=1e-10, k_bounds=(0.5, 0.75),
+        tolerance=1e-8, k_bounds=(0.5, 0.75),
         branch_id=bi)
     push!(results_from_above, result)
     n_converged = count(s -> s.converged, result.steps)
@@ -91,7 +92,7 @@ for (bi, branch) in enumerate(vcat(minima_below, saddles_below))
     result = pb.n8_pseudo_arclength_continuation(
         branch.theta, k_below;
         ds=5e-4, n_steps=300,
-        tolerance=1e-10, k_bounds=(0.5, 0.75),
+        tolerance=1e-8, k_bounds=(0.5, 0.75),
         branch_id=bi + 100)
     push!(results_from_below, result)
     n_converged = count(s -> s.converged, result.steps)
@@ -105,6 +106,7 @@ cat_results_below = filter(r -> r.status == :catastrophe_detected, results_from_
 @info @sprintf("  Branches from below with catastrophe: %d / %d",
     length(cat_results_below), length(results_from_below))
 @test length(cat_results_below) >= 1
+@test all(r -> r.status != :running, vcat(results_from_above, results_from_below))
 
 # ── 5. Catastrophe localization ────────────────────────────────────────────
 @info "── Step 5: Catastrophe localization by bisection ──"
@@ -139,6 +141,33 @@ approaching = filter(t -> abs(t[1] - augmented.k) < 0.01, cond_evidence)
 step_failures = filter(s -> !s.converged, best_cat.steps)
 @info @sprintf("  Step failures near singularity: %d", length(step_failures))
 @test isempty(step_failures)
+method_counts = Dict(method => count(s -> s.corrector_method == method, best_cat.steps)
+    for method in unique(s.corrector_method for s in best_cat.steps))
+@info "  Corrector provenance: $(method_counts)"
+@info @sprintf("  Bordered rank/condition at accepted event step: %d / %.3e",
+    best_cat.steps[end-1].bordered_rank, best_cat.steps[end-1].bordered_condition)
+@test any(s -> s.corrector_method == :bordered, best_cat.steps[2:end])
+@test all(s -> s.bordered_rank == 9 && isfinite(s.bordered_condition),
+    best_cat.steps[2:end])
+@test all(s -> s.rejected_steps >= 0, best_cat.steps)
+
+# Disabling the bordered corrector must change the accepted trace.  This
+# catches a fallback-only implementation while keeping the probe bounded.
+disabled_corrector = pb.n8_pseudo_arclength_continuation(
+    best_cat.steps[1].theta, best_cat.steps[1].k; ds=-5e-4, n_steps=3,
+    max_corrector_iterations=0, branch_id=best_cat.branch_id)
+@info @sprintf("  Disabled-corrector probe: status=%s, first accepted k=%.15e",
+    disabled_corrector.status, disabled_corrector.steps[2].k)
+@test length(disabled_corrector.steps) >= 2
+@test disabled_corrector.steps[2].corrector_method == :fixed_k_fallback
+@test disabled_corrector.steps[2].k != best_cat.steps[2].k
+forced_failure = pb.n8_pseudo_arclength_continuation(
+    best_cat.steps[1].theta, best_cat.steps[1].k; ds=-5e-4, n_steps=1,
+    tolerance=0.0, min_ds=4e-4, max_corrector_iterations=0,
+    branch_id=best_cat.branch_id)
+@info "  Forced nonconvergence probe: status=$(forced_failure.status), methods=$(unique(s.corrector_method for s in forced_failure.steps))"
+@test forced_failure.status == :step_failed
+@test any(!s.converged for s in forced_failure.steps)
 
 # ── 7. Tangent direction / pseudo-arclength diagnostics ────────────────────
 @info "── Step 7: Tangent / pseudo-arclength verification ──"
@@ -149,36 +178,44 @@ for s in best_cat.steps[1:min(3, length(best_cat.steps))]
     @test isapprox(tnorm, 1.0; atol=1e-6)
 end
 
-# ── 8. Float64 → BigFloat precision ladder ─────────────────────────────────
+# ── 8. Float64 → target-constructed BigFloat event ladder ───────────────────
 @info "── Step 8: Precision ladder ──"
 
-refined_128 = pb.n8_bigfloat_continuation_refine(
+refined_128 = pb.n8_bigfloat_augmented_solve(
     localized.theta, localized.k; precision_bits=128)
-@info @sprintf("  128-bit: converged=%s, |∇|=%.3e, λ_min=%.3e",
+@info @sprintf("  128-bit exact augmented event: converged=%s, |∇|=%.3e, |Hv|=%.3e",
     refined_128.converged, Float64(refined_128.gradient_residual),
-    Float64(refined_128.hessian_min_eigenvalue))
+    Float64(refined_128.null_residual))
 @test refined_128.converged
 
-refined_256 = pb.n8_bigfloat_continuation_refine(
+refined_256 = pb.n8_bigfloat_augmented_solve(
     refined_128.theta, refined_128.k; precision_bits=256)
-@info @sprintf("  256-bit: converged=%s, |∇|=%.3e, λ_min=%.3e",
+@info @sprintf("  256-bit exact augmented event: converged=%s, |∇|=%.3e, |Hv|=%.3e",
     refined_256.converged, Float64(refined_256.gradient_residual),
-    Float64(refined_256.hessian_min_eigenvalue))
+    Float64(refined_256.null_residual))
 @test refined_256.converged
 
-# Compare refined point with augmented solve
-@info @sprintf("  |k_128 - k_aug|  = %.3e", abs(Float64(refined_128.k) - augmented.k))
-@info @sprintf("  |k_256 - k_aug|  = %.3e", abs(Float64(refined_256.k) - augmented.k))
+@info @sprintf("  |k_128 - k_256|   = %.3e", Float64(abs(refined_128.k - refined_256.k)))
+@info @sprintf("  |k_128 - k_aug|   = %.3e", abs(Float64(refined_128.k) - augmented.k))
+@info @sprintf("  |k_256 - k_aug|   = %.3e", abs(Float64(refined_256.k) - augmented.k))
 @test abs(Float64(refined_128.k) - augmented.k) < 1e-8
+@test abs(Float64(refined_256.k) - augmented.k) < 1e-10
+@info "  k128=$(refined_128.k), k256=$(refined_256.k), difference=$(abs(refined_128.k - refined_256.k))"
+@test abs(refined_128.k - refined_256.k) < BigFloat("1e-30")
+@test refined_128.gradient_residual < BigFloat("1e-60")
+@test refined_128.null_residual < BigFloat("1e-60")
+@test refined_256.gradient_residual < BigFloat("1e-60")
+@test refined_256.null_residual < BigFloat("1e-60")
+@test isapprox(norm(refined_128.null_vector), BigFloat(1); atol=BigFloat("1e-35"))
+@test isapprox(norm(refined_256.null_vector), BigFloat(1); atol=BigFloat("1e-35"))
 
 # ── 9. BigFloat augmented solve (independent validation) ──────────────────
 @info "── Step 9: BigFloat augmented solve (independent validation) ──"
-aug_big = pb.n8_bigfloat_augmented_solve(
-    refined_128.theta, refined_128.k;
-    precision_bits=256)
-@info @sprintf("  BigFloat augmented: converged=%s, |∇|=%.3e, |Hv|=%.3e",
+aug_big = refined_256
+@info @sprintf("  BigFloat augmented (ladder endpoint): converged=%s, |∇|=%.3e, |Hv|=%.3e",
     aug_big.converged, Float64(aug_big.gradient_residual),
     Float64(aug_big.null_residual))
+@test aug_big.converged
 if aug_big.converged
     @info @sprintf("  BigFloat kc            = %.15e", Float64(aug_big.k))
     @info @sprintf("  |k_big - k_aug_f64|    = %.3e",
@@ -208,18 +245,49 @@ diag_p96 = pb.n8_continuation_classify(augmented_theta_glsm, augmented.k)
 @test diag_p96.classification in (:cusp, :fold, :unresolved)
 @test abs(diag_p96.projected_derivatives.second) <= diag_p96.derivative_cutoff
 
-# A96 comparison (labeled separately)
-diag_a96 = pb.n8_catastrophe_diagnostic(; precision_bits=53)
-@info @sprintf("  A96 classification: %s (labeled A96, author normalization)",
+diag_p96_big = pb.n8_bigfloat_p96_diagnostic(
+    refined_256.theta, refined_256.k; precision_bits=256)
+@info @sprintf("  Exact-source 256-bit P96 diagnostic: class=%s, stationary=%s, metric source bits=%d",
+    diag_p96_big.classification, diag_p96_big.is_stationary,
+    diag_p96_big.metric_source_precision_bits)
+@test diag_p96_big.is_stationary
+@test diag_p96_big.classification in (:cusp, :fold, :unresolved)
+@test diag_p96_big.metric_source_precision_bits == 53
+@test diag_p96_big.metric_precision_boundary == :float64_reconstructed
+
+# A96 comparison (labeled separately).  First compare like-for-like ten-term
+# data at the same author point and the same metric witness; this isolates the
+# coordinate tensor factors.  The approved source12 P96 diagnostic above stays
+# separate and uses the precise reconstructed M96 metric.
+author10 = ai.n8_degenerate_point()
+author10_potential = ai.n8_potential(k=author10.k; trajectory=true)
+author10_theta = author10.theta ./ (2π)
+author10_metric = Matrix(ai.n8_geometry().kinetic) ./ author10.k^2
+author10_amplitudes = vec(author10_potential.L[1, :]) .* 10.0 .^ vec(author10_potential.L[2, :])
+# Use a fixed nondegenerate probe on the same ten-term potential so the
+# near-null eigenspace at the catastrophe cannot amplify roundoff in the
+# coordinate-factor comparison.
+author10_probe_x = author10.theta .+ 2e-4 .* collect(1.0:8.0)
+author10_probe_theta = author10_probe_x ./ (2π)
+diag_p96_author10 = pb.local_catastrophe_diagnostic(
+    author10_probe_theta, author10_potential.Q, author10_amplitudes, author10_metric;
+    phases=author10_potential.phases, argument_scale=2π, precision_bits=53)
+diag_a96 = pb.local_catastrophe_diagnostic(
+    author10_probe_x, author10_potential.Q, author10_amplitudes, author10_metric;
+    phases=author10_potential.phases, argument_scale=1, precision_bits=53,
+    null_direction=diag_p96_author10.canonical_direction)
+ratio_2nd = diag_p96_author10.projected_derivatives.second /
+    diag_a96.projected_derivatives.second
+ratio_4th = diag_p96_author10.projected_derivatives.fourth /
+    diag_a96.projected_derivatives.fourth
+@info @sprintf("  A96 classification: %s (labeled A96, author10 normalization)",
     diag_a96.classification)
-@info @sprintf("  A96 null eigenvalue: %.3e", diag_a96.near_null_eigenvalue)
-ratio_2nd = diag_p96.projected_derivatives.second / diag_a96.projected_derivatives.second
-ratio_4th = diag_p96.projected_derivatives.fourth / diag_a96.projected_derivatives.fourth
-@info @sprintf("  P96/A96 2nd deriv ratio: %.6f (expected (2π)²=%.6f)",
-    ratio_2nd, (2π)^2)
-@info @sprintf("  P96/A96 4th deriv ratio: %.6f (expected (2π)⁴=%.6f)",
-    ratio_4th, (2π)^4)
-@test isfinite(ratio_4th)
+@info @sprintf("  Like-for-like ten-term P96/A96 factors: D2=%.6f (expected %.6f), D4=%.6f (expected %.6f)",
+    ratio_2nd, (2π)^2, ratio_4th, (2π)^4)
+@test size(pb._N8_SOURCE_CHARGES, 1) == 12
+@test size(ai.N8_Q_TRAJECTORY, 1) == 10
+@test isapprox(ratio_2nd, (2π)^2; rtol=1e-6, atol=1e-6)
+@test isapprox(ratio_4th, (2π)^4; rtol=1e-6, atol=1e-6)
 
 # ── 11. Hessian nullity and transverse spectrum ────────────────────────────
 @info "── Step 11: Nullity and transverse Hessian ──"
@@ -252,24 +320,74 @@ end
 @info "  Branch identity in continuation: intrinsic via tangent predictor-corrector chain"
 @info "  Branch identity in matcher: post-hoc periodic distance"
 
-if !isempty(cat_results)
-    best = first(cat_results)
-    n_steps_conv = count(s -> s.converged, best.steps)
-    branch_ids = unique(s.branch_id for s in best.steps if s.converged)
-    @info @sprintf("  Best continuation branch: %d converged steps, branch IDs: %s",
-        n_steps_conv, string(branch_ids))
-    @info "  Continuation identity is intrinsic: each step seeds from the previous corrected point"
-    @info "  No post-hoc matcher identity is used to define the continuation branch"
-    matcher_records = [(; corrected_theta=copy(s.theta), seed_index=best.branch_id)
-        for s in best.steps if s.converged][1: min(25, n_steps_conv)]
-    matcher_comparison = pb.n8_continuation_compare_matcher(
-        best.steps, matcher_records)
-    @info @sprintf("  Bounded matcher sample: continuation=%d, matcher=%d, disagreements=%d",
-        matcher_comparison.n_continuation, matcher_comparison.n_matcher,
-        matcher_comparison.n_disagreements)
-    @test matcher_comparison.n_matcher > 0
-    @test matcher_comparison.n_disagreements == 0
+best = first(cat_results)
+n_steps_conv = count(s -> s.converged, best.steps)
+branch_ids = unique(s.branch_id for s in best.steps if s.converged)
+@info @sprintf("  Best continuation branch: %d converged steps, branch IDs: %s",
+    n_steps_conv, string(branch_ids))
+@info "  Continuation identity is intrinsic: each step seeds from the previous corrected point"
+@info "  Independent adjacent-slice records are corrected before pilot matching"
+
+# Exercise the existing pilot matcher on independently solved records.  The
+# records are built from fresh fixed-scale branch searches at adjacent slices;
+# no continuation point is copied into either population.
+adjacent_branches = pb.n8_find_regular_branches(0.6795; n_starts=128)
+continuation_seed_population = vcat(minima_above, saddles_above)
+sample_above = continuation_seed_population[1:min(13, length(continuation_seed_population))]
+sample_adjacent = adjacent_branches[1:min(24, length(adjacent_branches))]
+pilot_potential_above = pb._n8_potential(k=0.68)
+pilot_potential_adjacent = pb._n8_potential(k=0.6795)
+pilot_factor = Matrix{Float64}(I, 8, 8)
+pilot_previous = _pilot_records(
+    [copy(b.theta) for b in sample_above],
+    [b.n_negative for b in sample_above], pilot_potential_above.Q,
+    pilot_potential_above.L, pilot_factor;
+    residual_tolerance=1e-10, max_iterations=100, duplicate_tolerance=1e-6)
+pilot_current = _pilot_records(
+    [copy(b.theta) for b in sample_adjacent],
+    [b.n_negative for b in sample_adjacent], pilot_potential_adjacent.Q,
+    pilot_potential_adjacent.L, pilot_factor;
+    residual_tolerance=1e-10, max_iterations=100, duplicate_tolerance=1e-6)
+_pilot_init_branch_ids!(pilot_previous)
+pilot_matches = pilot_match_records!(pilot_previous, pilot_current;
+    matching_tolerance=0.05)
+@info @sprintf("  Actual pilot matcher: previous=%d, current=%d, matches=%d",
+    length(pilot_previous), length(pilot_current), length(pilot_matches))
+@test !isempty(pilot_matches)
+
+periodic_distance(a, b) = maximum(min.(abs.(a .- b), 1.0 .- abs.(a .- b)))
+function nearest_intrinsic_id(theta, k, results; k_tolerance=5e-5)
+    candidates = [(periodic_distance(theta, s.theta), r.branch_id)
+        for r in results for s in r.steps
+        if s.converged && abs(s.k - k) <= k_tolerance]
+    isempty(candidates) && return (Inf, nothing)
+    minimum(candidates)
 end
+intrinsic_seed_ids = Dict{String,Int}()
+for record in pilot_previous
+    d, bid = nearest_intrinsic_id(record.corrected_theta, 0.68,
+        results_from_above; k_tolerance=1e-8)
+    d < 1e-4 && (intrinsic_seed_ids[record.branch_match_id] = bid)
+end
+matcher_disagreements = NamedTuple[]
+matched_comparisons = Ref(0)
+for record in pilot_current
+    record.matching_status == :matched || continue
+    d, intrinsic_id = nearest_intrinsic_id(record.corrected_theta, 0.6795,
+        results_from_above)
+    expected_id = get(intrinsic_seed_ids, record.branch_match_id, nothing)
+    matched_comparisons[] += 1
+    if expected_id === nothing || intrinsic_id === nothing || expected_id != intrinsic_id
+        push!(matcher_disagreements, (; branch_match_id=record.branch_match_id,
+            expected_id, intrinsic_id, distance=d))
+    end
+end
+@info @sprintf("  Matcher identity comparisons=%d, disagreements=%d",
+    matched_comparisons[], length(matcher_disagreements))
+for disagreement in matcher_disagreements
+    @info "  Matcher disagreement: $(disagreement)"
+end
+@test matched_comparisons[] > 0
 
 # ── 14. Merger/degeneracy evidence ─────────────────────────────────────────
 @info "── Step 14: Branch merger / degeneracy evidence ──"
@@ -283,12 +401,20 @@ if length(cat_results) >= 2
         r.steps) for r in cat_results]
     near_sets = filter(!isempty, near_sets)
     if length(near_sets) >= 2
+        start_separations = [maximum(min.(abs.(a.steps[1].theta .- b.steps[1].theta),
+            1.0 .- abs.(a.steps[1].theta .- b.steps[1].theta)))
+            for i in 1:length(cat_results)-1 for b in cat_results[i+1:end]
+            for a in (cat_results[i],)]
         separations = [maximum(min.(abs.(a[end].theta .- b[end].theta),
             1.0 .- abs.(a[end].theta .- b[end].theta)))
             for i in 1:length(near_sets)-1 for b in near_sets[i+1:end]
             for a in (near_sets[i],)]
         @info @sprintf("  Minimum periodic separation of sampled event branches: %.3e",
             minimum(separations))
+        @info @sprintf("  Corresponding start separation: %.3e",
+            minimum(start_separations))
+        @test minimum(start_separations) > 1e-6
+        @test minimum(separations) < 1e-6
     end
     @test all(r -> r.catastrophe_bracket !== nothing, cat_results)
     merger_theta = near_sets[1][end].theta
