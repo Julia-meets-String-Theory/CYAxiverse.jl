@@ -1,5 +1,12 @@
 # Issue 148 G2 continuation evidence
 
+**Rejected candidate evidence.** Independent review found material gaps in
+the continuation, matcher comparison, precision ladder, and canonical
+comparison claims below. G2 is FAIL; see
+`issue_148_g2_independent_review_9fe32eb.md` and
+`issue_148_g2_manager_decision.md`. This revision-specific replay record is
+retained for traceability and must not be read as accepted G2 evidence.
+
 This replay records the bounded N=8 radial continuation run for the approved
 P96 contract. The implementation and replay script were tested at commit
 `9fe32eb0bebc4d9ad99fb761357c604674e3681a` on Julia `1.12.6`
