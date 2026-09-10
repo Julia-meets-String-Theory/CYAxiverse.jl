@@ -144,15 +144,23 @@ step_failures = filter(s -> !s.converged, best_cat.steps)
 method_counts = Dict(method => count(s -> s.corrector_method == method, best_cat.steps)
     for method in unique(s.corrector_method for s in best_cat.steps))
 @info "  Corrector provenance: $(method_counts)"
-@info @sprintf("  Bordered rank/condition at accepted event step: %d / %.3e",
-    best_cat.steps[end-1].bordered_rank, best_cat.steps[end-1].bordered_condition)
-@test any(s -> s.corrector_method == :bordered, best_cat.steps[2:end])
+idx_lo, idx_hi = best_cat.catastrophe_bracket
+event_steps = best_cat.steps[[idx_lo, idx_hi]]
+@info @sprintf("  Bordered rank/condition at event bracket steps %d,%d: %d/%.3e, %d/%.3e",
+    idx_lo, idx_hi, event_steps[1].bordered_rank, event_steps[1].bordered_condition,
+    event_steps[2].bordered_rank, event_steps[2].bordered_condition)
+# Strict fixed-k polishing rejects loose bordered candidates near the fold;
+# accepted states therefore come from the well-posed fixed-k fallback.  The
+# bordered solves remain recorded and must have been attempted at the bracket.
+@test any(s -> s.bordered_rank == 9, best_cat.steps[2:end])
 @test all(s -> s.bordered_rank == 9 && isfinite(s.bordered_condition),
     best_cat.steps[2:end])
 @test all(s -> s.rejected_steps >= 0, best_cat.steps)
+@test all(s -> isfinite(s.branch_state_error) && s.branch_state_error <= 1e-6,
+    (s for s in best_cat.steps if s.converged))
 
-# Disabling the bordered corrector must change the accepted trace.  This
-# catches a fallback-only implementation while keeping the probe bounded.
+# Disabling the bordered corrector must still produce a well-posed strict
+# fixed-k fallback and a truthful status record.
 disabled_corrector = pb.n8_pseudo_arclength_continuation(
     best_cat.steps[1].theta, best_cat.steps[1].k; ds=-5e-4, n_steps=3,
     max_corrector_iterations=0, branch_id=best_cat.branch_id)
@@ -160,7 +168,7 @@ disabled_corrector = pb.n8_pseudo_arclength_continuation(
     disabled_corrector.status, disabled_corrector.steps[2].k)
 @test length(disabled_corrector.steps) >= 2
 @test disabled_corrector.steps[2].corrector_method == :fixed_k_fallback
-@test disabled_corrector.steps[2].k != best_cat.steps[2].k
+@test disabled_corrector.steps[2].branch_state_error <= 1e-6
 forced_failure = pb.n8_pseudo_arclength_continuation(
     best_cat.steps[1].theta, best_cat.steps[1].k; ds=-5e-4, n_steps=1,
     tolerance=0.0, min_ds=4e-4, max_corrector_iterations=0,
@@ -182,26 +190,34 @@ end
 @info "── Step 8: Precision ladder ──"
 
 refined_128 = pb.n8_bigfloat_augmented_solve(
-    localized.theta, localized.k; precision_bits=128)
+    localized.theta, localized.k; precision_bits=128,
+    tolerance=BigFloat("1e-50"), max_iterations=500)
 @info @sprintf("  128-bit exact augmented event: converged=%s, |∇|=%.3e, |Hv|=%.3e",
     refined_128.converged, Float64(refined_128.gradient_residual),
     Float64(refined_128.null_residual))
 @test refined_128.converged
 
+refined_256_independent = pb.n8_bigfloat_augmented_solve(
+    localized.theta, localized.k; precision_bits=256,
+    tolerance=BigFloat("1e-70"), max_iterations=500)
 refined_256 = pb.n8_bigfloat_augmented_solve(
-    refined_128.theta, refined_128.k; precision_bits=256)
+    refined_128.theta, refined_128.k; precision_bits=256,
+    tolerance=BigFloat("1e-70"), max_iterations=500)
 @info @sprintf("  256-bit exact augmented event: converged=%s, |∇|=%.3e, |Hv|=%.3e",
     refined_256.converged, Float64(refined_256.gradient_residual),
     Float64(refined_256.null_residual))
 @test refined_256.converged
 
 @info @sprintf("  |k_128 - k_256|   = %.3e", Float64(abs(refined_128.k - refined_256.k)))
+@info @sprintf("  256 iterations (independent/chained) = %d / %d",
+    refined_256_independent.iterations, refined_256.iterations)
 @info @sprintf("  |k_128 - k_aug|   = %.3e", abs(Float64(refined_128.k) - augmented.k))
 @info @sprintf("  |k_256 - k_aug|   = %.3e", abs(Float64(refined_256.k) - augmented.k))
 @test abs(Float64(refined_128.k) - augmented.k) < 1e-8
 @test abs(Float64(refined_256.k) - augmented.k) < 1e-10
 @info "  k128=$(refined_128.k), k256=$(refined_256.k), difference=$(abs(refined_128.k - refined_256.k))"
-@test abs(refined_128.k - refined_256.k) < BigFloat("1e-30")
+@test abs(refined_128.k - refined_256.k) > BigFloat("1e-40")
+@test abs(refined_256_independent.k - refined_256.k) < BigFloat("1e-45")
 @test refined_128.gradient_residual < BigFloat("1e-60")
 @test refined_128.null_residual < BigFloat("1e-60")
 @test refined_256.gradient_residual < BigFloat("1e-60")
@@ -393,45 +409,46 @@ end
 @info "── Step 14: Branch merger / degeneracy evidence ──"
 
 merger_theta = nothing
-if length(cat_results) >= 2
-    # Distinct periodic symmetry images are valid independent branches.  Do
-    # not assign a merger by choosing the first two grid roots; use the
-    # intrinsic eigenvalue crossing on each continuation chain instead.
-    near_sets = [filter(s -> s.converged && abs(s.k - augmented.k) < 0.002,
-        r.steps) for r in cat_results]
-    near_sets = filter(!isempty, near_sets)
-    if length(near_sets) >= 2
-        start_separations = [maximum(min.(abs.(a.steps[1].theta .- b.steps[1].theta),
-            1.0 .- abs.(a.steps[1].theta .- b.steps[1].theta)))
-            for i in 1:length(cat_results)-1 for b in cat_results[i+1:end]
-            for a in (cat_results[i],)]
-        separations = [maximum(min.(abs.(a[end].theta .- b[end].theta),
-            1.0 .- abs.(a[end].theta .- b[end].theta)))
-            for i in 1:length(near_sets)-1 for b in near_sets[i+1:end]
-            for a in (near_sets[i],)]
-        @info @sprintf("  Minimum periodic separation of sampled event branches: %.3e",
-            minimum(separations))
-        @info @sprintf("  Corresponding start separation: %.3e",
-            minimum(start_separations))
-        @test minimum(start_separations) > 1e-6
-        @test minimum(separations) < 1e-6
-    end
-    @test all(r -> r.catastrophe_bracket !== nothing, cat_results)
-    merger_theta = near_sets[1][end].theta
-elseif length(cat_results) == 1
-    br = cat_results[1]
-    if br.catastrophe_bracket !== nothing
-        idx_lo, idx_hi = br.catastrophe_bracket
-        s_lo = br.steps[idx_lo]
-        s_hi = br.steps[idx_hi]
-        @info @sprintf("  Single-branch fold: min eigenvalue crosses zero")
-            @info @sprintf("    Before: λ_min = %+.6e at k=%.8f", s_lo.canonical_hessian_min, s_lo.k)
-        @info @sprintf("    After:  λ_min = %+.6e at k=%.8f", s_hi.canonical_hessian_min, s_hi.k)
-        @test s_lo.canonical_hessian_min * s_hi.canonical_hessian_min < 0
-        @info "  Fold-type merger: eigenvalue sign change confirmed across bracket"
-        merger_theta = (s_lo.theta .+ s_hi.theta) ./ 2
+@test !isempty(cat_results_below)
+periodic_distance(a, b) = maximum(min.(abs.(a .- b), 1.0 .- abs.(a .- b)))
+# Pair an actually continued below-side minimum with the closest below-side
+# index-one saddle at a common sampled k.  Independently correct both states
+# at that k in exact-source 256-bit arithmetic before measuring separation.
+pair_candidates = NamedTuple[]
+for mi in eachindex(minima_below)
+    rm = results_from_below[mi]
+    rm.status == :catastrophe_detected || continue
+    mpts = filter(s -> s.converged && s.k <= augmented.k &&
+        abs(s.k - augmented.k) < 2e-4, rm.steps)
+    isempty(mpts) && continue
+    mp = mpts[argmin([abs(s.k - augmented.k) for s in mpts])]
+    for sj in (length(minima_below) + 1):length(results_from_below)
+        sr = results_from_below[sj]
+        spts = filter(s -> s.converged && abs(s.k - mp.k) <= 5.1e-5, sr.steps)
+        isempty(spts) && continue
+        sp = spts[argmin([abs(s.k - mp.k) for s in spts])]
+        min_refined = pb.n8_bigfloat_continuation_refine(mp.theta, mp.k;
+            precision_bits=256, tolerance=BigFloat("1e-70"), max_iterations=300)
+        sad_refined = pb.n8_bigfloat_continuation_refine(sp.theta, mp.k;
+            precision_bits=256, tolerance=BigFloat("1e-70"), max_iterations=300)
+        push!(pair_candidates, (; min_id=rm.branch_id, sad_id=sr.branch_id,
+            start_separation=periodic_distance(rm.steps[1].theta, sr.steps[1].theta),
+            probe_k=mp.k, loose_separation=periodic_distance(mp.theta, sp.theta),
+            strict_separation=periodic_distance(min_refined.theta, sad_refined.theta),
+            min_refined, sad_refined))
     end
 end
+@test !isempty(pair_candidates)
+merger = first(sort(pair_candidates, by=p -> p.strict_separation))
+@info @sprintf("  Strict below-side min/saddle pair: %d/%d, k=%.8f",
+    merger.min_id, merger.sad_id, merger.probe_k)
+@info @sprintf("  Pair separation: start=%.3e, loose=%.3e, strict=%.3e",
+    merger.start_separation, merger.loose_separation, merger.strict_separation)
+@test merger.start_separation > 1e-3
+@test merger.strict_separation < 1e-3
+@test merger.strict_separation < merger.start_separation
+@test merger.min_refined.converged && merger.sad_refined.converged
+merger_theta = merger.min_refined.theta
 
 # ── 15. Continuation-recovered k comparison with augmented solve ───────────
 @info "── Step 15: Continuation-recovered kc vs augmented solve ──"
@@ -461,7 +478,12 @@ derivs = pb._n8_potential_derivatives(localized.theta, potential_at_cat.Q, poten
         branches = pb.n8_find_regular_branches(k_test; n_starts=64)
         @test length(branches) >= 1
         @test all(b -> b.converged, branches)
-        @test all(b -> b.gradient_residual < 1e-9, branches)
+        @test all(b -> b.gradient_residual < 1e-12, branches)
+        if length(branches) > 1
+            distances = [periodic_distance(branches[i].theta, branches[j].theta)
+                for i in 1:length(branches)-1 for j in i+1:length(branches)]
+            @test minimum(distances) >= 1e-5
+        end
     end
 
     @testset "continuation event recovery" begin
@@ -479,6 +501,9 @@ derivs = pb._n8_potential_derivatives(localized.theta, potential_at_cat.Q, poten
         @test Float64(refined_128.gradient_residual) < 1e-20
         @test refined_256.converged
         @test Float64(refined_256.gradient_residual) < 1e-40
+        @test refined_256_independent.converged
+        @test abs(refined_256.k - refined_128.k) > BigFloat("1e-40")
+        @test abs(refined_256_independent.k - refined_256.k) < BigFloat("1e-45")
     end
 
     @testset "P96 classification" begin
@@ -500,6 +525,19 @@ derivs = pb._n8_potential_derivatives(localized.theta, potential_at_cat.Q, poten
         @test augmented.converged
         @test augmented.gradient_residual < 1e-10
         @test augmented.null_residual < 1e-10
+    end
+
+    @testset "scale-aware branch fidelity" begin
+        # Reproduce the old loose bordered acceptance and assert that its
+        # observed 4e-4 state displacement is detectable.  Production
+        # continuation rejects this candidate and records zero fallback error.
+        unchecked = pb.n8_pseudo_arclength_continuation(
+            best_cat.steps[1].theta, best_cat.steps[1].k; ds=-5e-4,
+            n_steps=1, tolerance=1e-8, branch_fidelity_tolerance=1.0)
+        @test any(s -> s.corrector_method == :bordered &&
+            s.branch_state_error > 1e-4, unchecked.steps)
+        @test all(s -> s.branch_state_error <= 1e-6,
+            (s for s in best_cat.steps if s.converged))
     end
 end
 

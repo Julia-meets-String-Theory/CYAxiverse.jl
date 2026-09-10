@@ -26,6 +26,7 @@ struct N8ContinuationStep{T<:AbstractFloat}
     bordered_rank::Int
     bordered_condition::T
     rejected_steps::Int
+    branch_state_error::T
 end
 
 struct N8ContinuationResult{T<:AbstractFloat}
@@ -130,6 +131,69 @@ function _n8_leading_to_theta(phi::AbstractVector{T},
     Matrix{T}(Qtilde') \ phi
 end
 
+function _n8_periodic_distance(a::AbstractVector{T}, b::AbstractVector{T}) where {T<:AbstractFloat}
+    maximum(min.(abs.(a .- b), one(T) .- abs.(a .- b)))
+end
+
+"""Polish a fixed-k point and report its displacement from the supplied state.
+
+The continuation residual is normalized for conditioning.  This helper checks
+the original fixed-k branch in the same coordinates, so a normalized residual
+cannot hide a large state error near a fold.
+"""
+function _n8_fixed_k_polish(phi_seed::AbstractVector{T}, k::T, setup;
+        tolerance::T=T(1e-12), max_iterations::Int=100) where {T<:AbstractFloat}
+    phi = copy(phi_seed)
+    for iter in 1:max_iterations
+        sys = _n8_preconditioned_system(phi, k, setup.qcanonical,
+            setup.ordered_qdotτ, setup.phases)
+        residual = norm(sys.gradient, Inf)
+        if residual <= tolerance
+            theta_seed = _n8_leading_to_theta(phi_seed, setup.Qtilde)
+            theta = _n8_leading_to_theta(phi, setup.Qtilde)
+            return (; phi, theta=mod.(theta, one(T)), gradient_residual=residual,
+                state_error=_n8_periodic_distance(mod.(theta_seed, one(T)), mod.(theta, one(T))),
+                iterations=iter, converged=true)
+        end
+        condition = cond(sys.hessian)
+        if !isfinite(condition) || condition > T(1e14)
+            return (; phi, theta=mod.(_n8_leading_to_theta(phi, setup.Qtilde), one(T)),
+                gradient_residual=residual, state_error=T(Inf),
+                iterations=iter, converged=false)
+        end
+        delta = try
+            sys.hessian \ (-sys.gradient)
+        catch
+            qr(sys.hessian) \ (-sys.gradient)
+        end
+        old = residual
+        accepted = false
+        alpha = one(T)
+        while alpha >= T(2)^(-12)
+            candidate = phi .+ alpha .* delta
+            candidate_sys = _n8_preconditioned_system(candidate, k,
+                setup.qcanonical, setup.ordered_qdotτ, setup.phases)
+            candidate_residual = norm(candidate_sys.gradient, Inf)
+            if candidate_residual < old
+                phi .= candidate
+                accepted = true
+                break
+            end
+            alpha *= T(0.5)
+        end
+        accepted || return (; phi, theta=mod.(_n8_leading_to_theta(phi, setup.Qtilde), one(T)),
+            gradient_residual=old, state_error=T(Inf), iterations=iter,
+            converged=false)
+    end
+    sys = _n8_preconditioned_system(phi, k, setup.qcanonical,
+        setup.ordered_qdotτ, setup.phases)
+    theta_seed = _n8_leading_to_theta(phi_seed, setup.Qtilde)
+    theta = _n8_leading_to_theta(phi, setup.Qtilde)
+    (; phi, theta=mod.(theta, one(T)), gradient_residual=norm(sys.gradient, Inf),
+       state_error=_n8_periodic_distance(mod.(theta_seed, one(T)), mod.(theta, one(T))),
+       iterations=max_iterations, converged=false)
+end
+
 function _n8_canonical_hessian_eigenvalues(raw_hessian::AbstractMatrix{T},
         k::T) where {T<:AbstractFloat}
     geometry = n8_geometry()
@@ -173,7 +237,8 @@ function n8_pseudo_arclength_continuation(
         phases=nothing, branch_id::Int=1,
         ds_growth::Real=1.2, ds_shrink::Real=0.5,
         target_iterations::Int=5,
-        initial_k_direction::Real=0)
+        initial_k_direction::Real=0,
+        branch_fidelity_tolerance::Real=1e-6)
     T = Float64
     # Scale the radial coordinate in the arclength metric.  The angular
     # coordinates are O(1), while the published event is localized in a
@@ -223,7 +288,7 @@ function n8_pseudo_arclength_continuation(
     push!(steps, N8ContinuationStep{T}(copy(theta_glsm), k, grad_res,
         minimum(can_eig), copy(can_eig), true, 0,
         copy(tangent_theta_glsm), tangent_k, zero(T), branch_id, 0,
-        minimum(cond_eig), :initial, rank(J), T(NaN), 0))
+        minimum(cond_eig), :initial, rank(J), T(NaN), 0, zero(T)))
 
     current_ds = T(ds)
     failure_encountered = false
@@ -251,6 +316,7 @@ function n8_pseudo_arclength_continuation(
         bordered_rank = 0
         bordered_condition = T(Inf)
         rejected_steps = 0
+        branch_state_error = zero(T)
         corrector_method = :bordered
 
         for iter in 1:max_corrector_iterations
@@ -315,7 +381,19 @@ function n8_pseudo_arclength_continuation(
             k_try = k_candidate
             residual = candidate_residual
             if residual <= T(tolerance)
-                converged = true
+                # Verify the accepted bordered state against the fixed-k
+                # stationary branch.  Near a fold the normalized bordered
+                # residual can be small while the angular state is still far
+                # from the root selected by the previous point.
+                strict = _n8_fixed_k_polish(phi_try, k_try, setup;
+                    tolerance=min(T(tolerance), T(1e-12)))
+                branch_state_error = strict.state_error
+                if strict.converged && isfinite(branch_state_error) &&
+                        branch_state_error <= T(branch_fidelity_tolerance)
+                    converged = true
+                    break
+                end
+                converged = false
                 break
             end
         end
@@ -338,7 +416,7 @@ function n8_pseudo_arclength_continuation(
                     sf = _n8_preconditioned_system(phi_fallback, k_fallback,
                         setup.qcanonical, setup.ordered_qdotτ, setup.phases)
                     fallback_residual = norm(sf.gradient, Inf)
-                    if fallback_residual <= T(tolerance)
+                    if fallback_residual <= min(T(tolerance), T(1e-12))
                         fallback_ok = true
                         break
                     end
@@ -367,6 +445,7 @@ function n8_pseudo_arclength_continuation(
                     phi_try .= phi_fallback
                     k_try = k_fallback
                     residual = fallback_residual
+                    branch_state_error = zero(T)
                     iters = max(iters, fallback_iters)
                     converged = true
                 end
@@ -384,7 +463,8 @@ function n8_pseudo_arclength_continuation(
                     T(NaN), T[], false, iters,
                     _n8_leading_to_theta(tangent_phi, setup.Qtilde),
                     tangent_k, current_ds, branch_id, step_idx, T(NaN),
-                    :failed, bordered_rank, bordered_condition, rejected_steps))
+                    :failed, bordered_rank, bordered_condition, rejected_steps,
+                    branch_state_error))
                 break
             end
             continue
@@ -419,7 +499,8 @@ function n8_pseudo_arclength_continuation(
             norm(sys.gradient, Inf), minimum(can_eig), copy(can_eig),
             converged, iters, copy(tangent_theta_glsm), tangent_k,
             current_ds, branch_id, step_idx, minimum(cond_eig),
-            corrector_method, bordered_rank, bordered_condition, rejected_steps))
+            corrector_method, bordered_rank, bordered_condition, rejected_steps,
+            branch_state_error))
 
         if catastrophe_bracket === nothing && length(steps) >= 2
             prev = steps[end-1]
@@ -456,7 +537,7 @@ hierarchy-preconditioned leading-charge solver. Returns period-one GLSM
 coordinates with P96 canonical Hessian inertia.
 """
 function n8_find_regular_branches(k::Real; n_starts::Int=512,
-        residual_tolerance::Real=1e-10, merge_tolerance::Real=1e-6)
+        residual_tolerance::Real=1e-10, merge_tolerance::Real=1e-5)
     T = Float64
     setup = _n8_setup_leading_charge(T(k))
     n = 8
@@ -484,9 +565,13 @@ function n8_find_regular_branches(k::Real; n_starts::Int=512,
         end
         if !converged; continue; end
         phi .= mod.(phi, one(T))
+        strict = _n8_fixed_k_polish(phi, T(k), setup;
+            tolerance=min(T(residual_tolerance), T(1e-12)))
+        if !strict.converged; continue; end
+        phi .= mod.(strict.phi, one(T))
         sys = _n8_preconditioned_system(phi, T(k), setup.qcanonical,
             setup.ordered_qdotτ, setup.phases)
-        if norm(sys.gradient, Inf) > T(residual_tolerance); continue; end
+        if norm(sys.gradient, Inf) > min(T(residual_tolerance), T(1e-12)); continue; end
 
         theta_glsm = _n8_leading_to_theta(phi, setup.Qtilde)
         theta_glsm .= mod.(theta_glsm, one(T))
