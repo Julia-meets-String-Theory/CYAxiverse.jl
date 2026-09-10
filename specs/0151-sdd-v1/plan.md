@@ -8,7 +8,9 @@ Status: **Approved**
 
 Owner approval: 2026-09-10, durably recorded on GitHub Issue #151.
 
-The first implementation change materializes the approved specification as a tracked repository file. No repository changes preceded the approved planning stage.
+Approved peer-review clarification: `specs/0151-sdd-v1/clarification-a.md`, with approval provenance on Issue #151 comment `5624347708`. Where that clarification conflicts with earlier wording in `spec.md`, the clarification controls while earlier wording remains historical context.
+
+The first implementation change materialized the approved specification as a tracked repository file. No repository changes preceded the approved planning stage.
 
 ## 2. Implementation strategy
 
@@ -18,10 +20,10 @@ Implement CYAX-0151 as independently reviewable gates:
 G0  Approve SDD contract              PASS
  |
  v
-G1  Repository SDD layer              process-only PR
+G1  Repository SDD layer              PASS via PR #152
  |
  v
-G2  GitHub Project                    project configuration
+G2  GitHub Project                    project configuration + active-work reconciliation
  |
  v
 G3  #148/#149 migration               separate process-only PR
@@ -30,7 +32,7 @@ G3  #148/#149 migration               separate process-only PR
 G4  Six-week development backfill     Project metadata/reconciliation
  |
  v
-G5  Usage evaluation                  after 6–8 weeks
+G5  Usage evaluation                  after 6–8 weeks + sufficient real samples
 ```
 
 This keeps the control-plane change small and prevents the SDD pilot or historical backfill from becoming prerequisites for landing the core templates.
@@ -42,158 +44,140 @@ This keeps the control-plane change small and prevents the SDD pilot or historic
 | R-001 Constitution precedence | Minimal SDD section in `AGENTS.md`; SDD skill explicitly defers to it | Diff review for duplicated/conflicting policy |
 | R-002 Spec precedence | `AGENTS.md`, SDD skill, spec template and PR convergence checklist | Cross-artifact review |
 | R-003 No competing ledger | No active-work `specs/README`; Project is live map | Repository/file review |
-| R-004 Risk beats line count | S0–S3 rules in skill + intake form | Template/skill inspection |
+| R-004 Risk beats line count | S0–S3 rules in skill + intake form; classification ambiguity affecting scientific/contract meaning fails closed to provisional S2 | Template/skill inspection |
 | R-005 Intent changes are spec changes | Agent stop/re-review rules | Skill + AGENTS review |
-| R-006 Tasks not automatically Issues | Explicit task/sub-issue policy | Skill/template review |
+| R-006 Tasks not automatically Issues | Explicit task/sub-issue policy; tasks are not live merge/status state | Skill/template review |
 | R-007 Scientific claim boundary | Required S2/S3 spec-template section | Template inspection |
 | R-008 Normative ambiguity | Explicit escalation rule | AGENTS + skill review |
 | R-009 Negative results | Scientific completion guidance | Spec template + skill |
-| R-010 Partial gate PRs | PR template supports requirement/gate subsets | PR-template inspection |
+| R-010 Partial gate PRs | PR template supports requirement/gate subsets and S0 N/A/omission path | PR-template inspection |
 | R-011 Unmet requirements visible | Convergence checklist/process | PR template + skill |
 | R-012 Minimal AGENTS amendment | Small normative section only | Diff-size/content review |
 | R-013 On-demand SDD skill | New canonical skill + existing adapter pattern | Symlink/content verification |
-| R-014 Preserve #148 contract | Dedicated migration after G1/G2 | Manual scientific diff/convergence |
-| R-015 Preserve gate history | G0/G1 represented retrospectively, not rewritten | #148/#149 migration review |
+| R-014 Preserve #148 contract | Dedicated migration after G1/G2 using chronological decision/supersession record | Manual scientific diff/convergence |
+| R-015 Preserve gate history | G0/G1 represented retrospectively, not rewritten; new IDs not projected backward | #148/#149 migration review |
 | R-016 No pilot science changes | Process-only #148 migration | Changed-file + semantic review |
 
 ## 4. G1 — Repository SDD layer
 
-### 4.1 Branch boundary
+G1 is complete via PR #152 and remains accepted. The peer-review clarification does not reopen or invalidate it.
 
-Create one focused process branch from the then-current `vmm`:
+The merged G1 layer established:
 
-`chore/sdd-v1-151`
+- `specs/0151-sdd-v1/{spec.md,plan.md,tasks.md}`;
+- canonical `.agents/skills/cyaxiverse-sdd` plus tracked Claude/Codex symlink mirrors;
+- minimal SDD language in `AGENTS.md`;
+- `.github/ISSUE_TEMPLATE/sdd_work.yml` while retaining bug-report intake;
+- `.github/pull_request_template.md`;
+- concise SDD guidance in `docs/AI_AGENT_AND_GIT_WORKFLOW.md`.
 
-The branch SHALL contain only control-plane/process artifacts.
-
-No `src/`, scientific implementation, persisted-data, dependency or package-version change belongs in this PR.
-
-### 4.2 Materialize the approved specification
-
-Add:
-
-```text
-specs/0151-sdd-v1/
-├── spec.md
-├── plan.md
-└── tasks.md
-```
-
-`spec.md` SHALL contain the owner-approved CYAX-0151 contract with `status: approved` and otherwise preserve its normative meaning.
-
-### 4.3 Add the canonical SDD skill
-
-Add:
-
-```text
-.agents/skills/cyaxiverse-sdd/
-├── SKILL.md
-├── agents/openai.yaml
-└── templates/
-    ├── spec.md
-    ├── plan.md
-    └── tasks.md
-```
-
-The skill SHALL be concise and procedural. It SHALL cover S0–S3 classification, discovery of an existing spec, drafting/clarification, owner-approval boundaries, requirement IDs, scientific claim boundaries, plan/task derivation, escalation, consistency analysis, convergence and GitHub coordination.
-
-It SHALL NOT restate the full Julia/scientific/release policies already owned by `AGENTS.md` and existing specialist skills.
-
-### 4.4 Preserve the consolidated skill architecture
-
-PR #128 established `.agents/skills/` as the single editable source for project skills, mirrored into tool-specific directories with tracked symlinks. The new SDD skill SHALL follow that architecture.
-
-Add:
-
-```text
-.codex/skills/cyaxiverse-sdd
-.claude/skills/cyaxiverse-sdd
-```
-
-as tracked symlinks to the canonical `.agents/skills/cyaxiverse-sdd` directory.
-
-### 4.5 Amend `AGENTS.md`
-
-Add only the minimal normative SDD boundary:
-
-- substantial work is classified S0–S3;
-- S1–S3 work looks for a governing spec;
-- S2/S3 consequential implementation requires approved intent;
-- unresolved normative scientific choices return to the owner;
-- changed intent returns to the spec;
-- completion requires convergence;
-- Issues/Projects do not supersede the spec;
-- tasks do not automatically become Issues.
-
-Detailed procedure remains in `cyaxiverse-sdd`.
-
-### 4.6 Replace the generic feature intake
-
-Add `.github/ISSUE_TEMPLATE/sdd_work.yml` for substantial new work and keep the bug-report path.
-
-Retire the generic `feature_request.md` once the SDD form provides its replacement, so contributors do not see competing feature-entry routes.
-
-The form SHALL collect intake information only; it SHALL NOT require a completed specification at issue creation.
-
-### 4.7 Add the PR traceability template
-
-Add `.github/pull_request_template.md` with governing Issue, spec path/revision, requirement/gate coverage, concise change, non-scope, scientific/API/schema/version impact, evidence matrix, convergence checklist and remaining work.
-
-The template SHALL explicitly support partial-gate PRs.
-
-### 4.8 Update the human workflow guide
-
-Update `docs/AI_AGENT_AND_GIT_WORKFLOW.md` only enough to explain the new layer:
-
-```text
-AGENTS.md
-    ↓
-feature spec
-    ↓
-plan/tasks
-    ↓
-branch/PR/evidence
-```
-
-and point users to the SDD skill/templates. Do not duplicate the complete SDD handbook in the human guide.
-
-### 4.9 G1 verification
-
-Required checks:
-
-1. `git diff --check`
-2. `python3 scripts/agent_verify.py diff-check`
-3. inspect changed-file scope;
-4. validate Issue-form YAML syntax;
-5. inspect all new skill mirrors as tracked symlinks to `.agents/skills/cyaxiverse-sdd`;
-6. confirm no package/scientific/runtime files changed;
-7. compare final `AGENTS.md` amendment against CYAX-0151 for contradiction or duplicated policy;
-8. compare all templates against R-001–R-013;
-9. final diff review before PR-ready state.
-
-Package tests are not intrinsically required for process-only files that cannot affect package execution; remote CI remains the clean-checkout gate. If changed paths unexpectedly trigger or affect package behaviour, use the broader verification required by `AGENTS.md`.
-
-### 4.10 G1 PR
-
-Open one focused PR to `vmm`.
-
-The PR SHALL reference #151 and state G0 approved, G1 is the PR's scope, G2–G5 remain future work, process-only/no version impact, and no #148 scientific migration occurs in this PR.
+G1 verification and the transparently unavailable local `git diff --check`/wrapper execution remain recorded in the historical `tasks.md` and Issue/PR evidence. No retrospective rerun is required by Clarification A.
 
 ## 5. G2 — GitHub Project
 
-After G1 lands, create **CYAxiverse Research & Development** and configure the approved workflow, fields, WIP policy, views and low-risk automation. Project state must remain a view over Issues/PRs rather than a competing project database.
+Create **CYAxiverse Research & Development** and configure the approved Project semantics.
+
+### 5.1 Primary item model
+
+For S1–S3, the governing Issue is the primary Project item. Linked PRs provide implementation/integration/evidence and should not normally become duplicate WIP cards on the main workflow board.
+
+For S0, an Issue remains optional and a PR-only change may itself be the Project item.
+
+A dedicated PR / Integration view may expose linked PRs without counting them as duplicate spec-level WIP.
+
+### 5.2 Workflow
+
+Use:
+
+```text
+Backlog
+→ Specifying
+→ Spec Review
+→ Ready
+→ Implementing
+→ Verification
+→ Done
+```
+
+Do not force every S0/S1 item through every state. S2 normally follows the full specification/review path. Keep blocked work in its true workflow state and use native GitHub dependency/blocking semantics rather than a permanent Blocked column.
+
+### 5.3 Fields
+
+Configure the approved small field set, with **Next review** replacing the earlier `Review gate` wording:
+
+- Workstream
+- Spec class
+- Priority
+- Next review
+- Work cycle
+- Target release
+
+Prefer native GitHub metadata/relationships over duplicate custom fields.
+
+### 5.4 WIP policy
+
+Start with advisory/experimental WIP limits:
+
+- Specifying = 2
+- Implementing = 2
+- Verification = 2
+
+The WIP unit is the governing spec-level Issue, not subagents or linked implementation PRs.
+
+### 5.5 Views and automation
+
+Create the approved views:
+
+- Current Flow
+- Research Map
+- Now / Next
+- Verification Queue
+- Development History
+- PR / Integration View
+
+Automate only low-risk mechanical state. Do not automate scientific-owner approval or other consequential review transitions.
+
+### 5.6 Active-work reconciliation
+
+Before declaring G2 complete, add/reconcile enough **current active work** that the board is immediately useful. This may identify active Issues/PRs, obvious parent/child relationships, blockers, duplicates and superseded items.
+
+This is not the historical six-week backfill. Do not turn G2 into G4.
+
+### 5.7 G2 convergence
+
+Confirm that:
+
+- one S1–S3 work item has one obvious primary main-board card;
+- linked PRs do not double-count WIP;
+- `Next review` represents the next required review rather than the full review lifecycle;
+- the workflow remains useful for S0/S1 without unnecessary ceremony;
+- Project state is navigational and does not become a competing authority.
 
 ## 6. G3 — #148/#149 pilot migration
 
-After the SDD repository layer exists, use a separate focused branch/PR to create `specs/0148-catastrophe-continuation/{spec.md,plan.md,tasks.md}`. Preserve historical evidence and gate boundaries; do not rewrite history or alter the scientific contract.
+After G2, use a separate focused branch/PR to create `specs/0148-catastrophe-continuation/{spec.md,plan.md,tasks.md}`.
+
+Before drafting the canonical migrated spec, construct a concise chronological decision/supersession record from the original Issue, later owner comments, accepted gate records, PRs and durable scientific decision artifacts.
+
+Canonical migrated intent means the **latest durably owner-approved, non-superseded normative intent**. Preserve older wording as history. Do not rewrite history or imply newly introduced requirement IDs governed historical work.
+
+For #148, preserve at minimum historical G0/G1 evidence, later precision/tolerance clarification, the owner-approved P96 N=8 metric contract, revised outcome-neutral G3 semantics, and any later durable owner decisions present at migration time.
+
+Any ambiguity that could change scientific meaning is a stop condition for owner clarification.
 
 ## 7. G4 — Six-week Project backfill
 
-Backfill approximately 2026-07-30 through 2026-09-10. Classify recent merged PRs for history, reconcile active work/dependencies/duplicates, and create only strategically useful migration specs.
+After the #148 pilot, backfill approximately 2026-07-30 through 2026-09-10. Classify recent merged PRs for history, reconcile remaining historical relationships/duplicates, and create only strategically useful migration specs.
+
+Do not reverse-spec routine completed maintenance merely for completeness.
 
 ## 8. G5 — Evaluation
 
-After approximately 6–8 weeks of real use, assess traceability, Project usability, agent continuation burden, PR evidence mapping, stale/duplicate work, owner-review bottlenecks, specification overhead and S0 burden. Only then consider additional SDD automation.
+Evaluate after approximately 6–8 weeks **and** enough real SDD usage to make the assessment meaningful.
+
+Where practical, the sample should include several completed S1/S2 deliverables, at least one completed or substantially progressed S2 scientific/contract deliverable, at least one modest newly started S1 deliverable, and enough routine S0 work to test whether the lightweight path stayed lightweight.
+
+Assess traceability, Project usability, agent continuation burden, PR evidence mapping, stale/duplicate work, owner-review bottlenecks, specification overhead and S0 burden. If elapsed time passes without adequate samples, defer the evaluation rather than drawing conclusions from the calendar alone. Only then consider additional SDD automation.
 
 ## 9. Compatibility
 
@@ -201,6 +185,8 @@ No changes are planned to scientific behaviour, numerical behaviour, package API
 
 ## 10. Implementation stop conditions
 
-Return to CYAX-0151 before continuing if implementation would require changing S0–S3 semantics, the authority hierarchy, task→Issue policy, scientific-owner approval semantics, the #148 scientific contract, the Project's non-authoritative role, or adopting Spec Kit wholesale; or if it would introduce scientific/package behaviour changes.
+Return to CYAX-0151 before continuing if implementation would require changing the authority hierarchy, scientific-owner approval semantics, the Project's non-authoritative role, adopting Spec Kit wholesale, or introducing scientific/package behaviour changes.
 
-Ordinary formatting, template wording and technical layout choices that preserve the approved contract do not require re-approval.
+Classification ambiguity that might alter scientific/durable contract meaning fails closed to provisional S2 pending clarification.
+
+Ordinary formatting, template wording and technical layout choices that preserve the approved contract and Clarification A do not require re-approval.
