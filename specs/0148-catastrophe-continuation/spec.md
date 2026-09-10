@@ -274,10 +274,14 @@ This specification does not include:
 - Scientific N=8 canonical outputs use P96:
   `K_theta(k)=M96/k^2` in period-one GLSM coordinates. In raw radians
   `x=2pi theta`, use `G_x(k)=M96/[k^2(2pi)^2]`.
-- `M96` is the reconstructed Eq.96/CYTools benchmark matrix. The documented
-  factor-two discrepancy with literal displayed Eqs.17/23 remains a source
-  inconsistency; do not describe M96 as derived from that displayed
-  normalization.
+- `M96` is the precise reconstructed Eq.96/CYTools reference metric in the
+  relevant GLSM basis. Its reconstruction and source identity must be verified
+  at working precision.
+- Any representation of the P96 metric in another basis must carry the metric
+  through the corresponding explicit congruence transformation.
+- The documented factor-two discrepancy with literal displayed Eqs.17/23
+  remains a source inconsistency; do not describe M96 as derived from that
+  displayed normalization.
 - The author raw-radian `M96/k^2` convention is A96 reproduction-only and must
   remain explicitly labelled.
 - The twelve-term published N=8 potential and ten-term author truncation are
@@ -323,8 +327,12 @@ increased precision.
 ### R-005 — P96 N=8 scientific metric contract
 
 Scientific N=8 canonical diagnostics SHALL use the owner-approved P96
-coordinate/matrix contract. A96 MAY be retained only as explicitly labelled
-author reproduction.
+coordinate/matrix contract. `M96` SHALL be the precise reconstructed Eq.96/
+CYTools reference metric in the relevant GLSM basis, with its reconstruction
+and source identity verified at working precision. Any representation in
+another basis SHALL apply the corresponding explicit metric congruence
+transformation. A96 MAY be retained only as explicitly labelled author
+reproduction.
 
 ### R-006 — Well-posed N=8 near-singular continuation
 
@@ -475,8 +483,10 @@ catastrophic-inflation construction along the source radial control direction.
    substituting post-hoc matching for continuation;
 3. recover an event consistent with the independent twelve-term augmented
    catastrophe solve;
-4. use the approved P96 scientific metric contract for canonical outputs and
-   keep A96/source12/author10 comparisons explicitly separated;
+4. use the approved P96 scientific metric contract for canonical outputs,
+   verify the reconstructed `M96` metric/source identity at working precision,
+   apply explicit congruence transformation for any other-basis representation,
+   and keep A96/source12/author10 comparisons explicitly separated;
 5. verify gradient, null-vector, normalization, canonical Hessian,
    conditioning/status/failure behavior, and justified numerical tolerances;
 6. run a genuine target-constructed higher-precision event/refinement
