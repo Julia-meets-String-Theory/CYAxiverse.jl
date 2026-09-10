@@ -116,4 +116,5 @@ carried into the target-precision diagnostic result.
 This revision covers radial N8 G2 continuation only. It does not change the
 classifier cutoff, promote the result to a cusp claim, add G3 work, alter N5,
 change public schemas, or repair unrelated baseline failures. G1 remains
-preserved.
+preserved; the focused G1 replay passed 63/63 at the repaired tree (log:
+`/private/tmp/issue148-g1-after-g2-repair.log`).
