@@ -56,4 +56,3 @@ The actual post-hoc matcher is run on fresh same-scale bounded samples: 5
 records are compared and all 5 `branch_match_id` identities agree with the
 continuation identities. The source12 and author10 paths remain separate, and
 the like-for-like P96/A96 tensor factors are `(2pi)^2` and `(2pi)^4`.
-

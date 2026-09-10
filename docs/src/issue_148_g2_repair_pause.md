@@ -1,3 +1,6 @@
+Historical pause record; work resumed and final G2 acceptance is recorded in
+`issue_148_g2_final_manager_decision.md`.
+
 Issue 148 G2 repair pause record (2026-09-10)
 
 Phase: bounded implementation repair after independent review FAIL. Worktree is at clean HEAD e1b35fb before repair edits; no new commit made. Current uncommitted edits are limited to src/paper_benchmarks/n8_continuation.jl and scripts/issue_148_g2_continuation_evidence.jl.

@@ -1,5 +1,8 @@
 # Issue 148 G2 manager decision
 
+Historical FAIL for the candidate identified below. Superseded for the final
+repair by `issue_148_g2_final_manager_decision.md`; retained for traceability.
+
 **G2: FAIL** on 2026-09-10. G0 and G1 remain accepted PASS. G3 must not
 start. The approved P96 metric contract remains authoritative and unchanged.
 
