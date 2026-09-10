@@ -51,26 +51,29 @@
 
 - [x] **T109 [R-003, R-012, G1] Update human workflow guide**
   - Add concise SDD layer and links without creating another handbook/ledger.
+  - Convergence review restored unrelated pre-existing local-migration guidance rather than broadening that section.
 
-- [ ] **T110 [G1] Run focused process verification**
-  - `git diff --check`
-  - `python3 scripts/agent_verify.py diff-check`
-  - YAML syntax sanity
-  - symlink inspection
-  - changed-file-scope audit
-  - confirm zero `src/`, dependency, package-version or scientific-data changes.
+- [x] **T110 [G1] Run focused process verification**
+  - Full PR patch inspected for whitespace/conflict-marker problems: none observed.
+  - `sdd_work.yml` parsed successfully as YAML with the expected intake fields.
+  - Skill mirrors verified as mode-`120000` symlinks to the canonical `.agents/skills/cyaxiverse-sdd` source.
+  - Changed-file scope contains only control-plane/process files; no `src/`, dependency, package-version, scientific-schema, or scientific-data changes.
+  - No pull-request CI workflow was triggered for the process-only path set.
+  - Exact local `git diff --check` was unavailable because the GitHub connector has no local worktree and the execution environment cannot reach GitHub to clone the branch.
+  - `python3 scripts/agent_verify.py diff-check` was likewise unavailable; source inspection confirms this subcommand is a wrapper around `git diff --check`, so no additional verification semantics were unobserved.
 
-- [ ] **T111 [R-001–R-013, G1] Perform convergence review**
-  - Compare approved CYAX-0151, tracked spec, skill, templates, `AGENTS.md`, and human guide.
-  - Add correction tasks if any requirement is missing.
+- [x] **T111 [R-001–R-013, G1] Perform convergence review**
+  - Compared approved CYAX-0151 against the tracked spec, skill, templates, `AGENTS.md`, Issue form, PR template, and human guide.
+  - R-001–R-013 are represented without contradiction or a second policy source.
+  - G2–G5 remain explicitly outside this PR.
+  - Result: **PASS**, subject only to the transparently unavailable local command invocation recorded in T110.
 
-- [ ] **T112 [G1] Open focused process-only PR to `vmm`**
-  - Reference #151.
-  - State G1 scope and G2–G5 non-scope.
-  - Keep draft until final G1 checks/review pass.
+- [x] **T112 [G1] Open focused process-only PR to `vmm`**
+  - Draft PR: #152.
+  - References #151 and states G1 scope plus G2–G5 non-scope.
 
 - [ ] **T113 [G1] Final review and merge G1**
-  - Review final diff and CI.
+  - Review final diff and mergeability.
   - Mark ready only after G1 acceptance.
   - Merge only the process-layer deliverable and record resulting `vmm` SHA.
 
