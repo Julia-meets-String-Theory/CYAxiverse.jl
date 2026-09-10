@@ -6,7 +6,7 @@ Canonical specification:
 `specs/0148-catastrophe-continuation/spec.md`
 
 Spec revision used to derive this plan:
-`81ff48c460eec6d4d7dcbb87a739fddcdb0dd075` (draft brownfield migration
+`d0054c410fa5c196549456752d07275c4a1a9e40` (corrected brownfield migration
 revision).
 
 Approval state: **draft / owner approval pending**. This plan does not authorize
