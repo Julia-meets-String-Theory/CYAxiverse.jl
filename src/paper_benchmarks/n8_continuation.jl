@@ -33,6 +33,25 @@ struct N8ContinuationResult{T<:AbstractFloat}
     status::Symbol
 end
 
+# Immutable source data used by the high-precision validation path.  Keeping
+# the charges as integers and the actions as rationals prevents a Float64
+# literal from being widened and mislabeled as recovered precision.
+const _N8_SOURCE_CHARGES = Int[
+    -1  1  1  0  0  0  0  1;  0  0  0  1  0  0  0  0
+     0  0  0  0  1  0  0  0;  0  0  0  0  0  1  0  0
+     0  0  0  0  0  0  1  0;  0 -1  1 -1  1  0  1  0
+     0  1 -1 -1  1  1  0  0;  1  0  0 -1 -1  0  0  0
+     0  0  1  0  0  0  0  0;  0  1  0  0  0  0  0  0
+     0  0  0  0  0  0  0  1;  1  0  0  0  0  0  0  0
+]
+const _N8_SOURCE_ACTIONS = (
+    14//1, 29//2, 29//2, 31//2, 31//2, 31//2,
+    31//2, 16//1, 17//1, 17//1, 25//1, 45//1)
+
+function _n8_exact_source_data(::Type{T}) where {T<:AbstractFloat}
+    Matrix{T}(_N8_SOURCE_CHARGES'), T[T(a) for a in _N8_SOURCE_ACTIONS]
+end
+
 function _n8_amplitudes_and_dk(qdottau_ref::AbstractVector{T}, k::T) where {T<:AbstractFloat}
     scaled = k .* qdottau_ref
     amplitudes = scaled .* exp.(T(-2) * T(π) .* scaled)
@@ -203,6 +222,7 @@ function n8_pseudo_arclength_continuation(
         minimum(cond_eig)))
 
     current_ds = T(ds)
+    failure_encountered = false
     catastrophe_bracket = nothing
     catastrophe_k = T(NaN)
     catastrophe_theta = nothing
@@ -341,6 +361,7 @@ function n8_pseudo_arclength_continuation(
         if !converged
             current_ds *= T(ds_shrink)
             if abs(current_ds) < T(min_ds)
+                failure_encountered = true
                 theta_glsm_try = _n8_leading_to_theta(phi_try, setup.Qtilde)
                 push!(steps, N8ContinuationStep{T}(
                     copy(theta_glsm_try), k_try, T(residual),
@@ -401,7 +422,8 @@ function n8_pseudo_arclength_continuation(
     end
 
     status = catastrophe_bracket !== nothing ? :catastrophe_detected :
-        (length(steps) >= n_steps ? :max_steps : :completed)
+        (failure_encountered ? :step_failed :
+            (length(steps) >= n_steps ? :max_steps : :completed))
 
     N8ContinuationResult{T}(steps, branch_id, catastrophe_bracket,
         catastrophe_k, catastrophe_theta, status)
@@ -570,17 +592,7 @@ function n8_bigfloat_continuation_refine(theta_seed::AbstractVector{<:Real},
     setprecision(BigFloat, precision_bits) do
         T = BigFloat
         two_pi = T(2) * T(π)
-        charges = Int[
-            -1  1  1  0  0  0  0  1;  0  0  0  1  0  0  0  0
-             0  0  0  0  1  0  0  0;  0  0  0  0  0  1  0  0
-             0  0  0  0  0  0  1  0;  0 -1  1 -1  1  0  1  0
-             0  1 -1 -1  1  1  0  0;  1  0  0 -1 -1  0  0  0
-             0  0  1  0  0  0  0  0;  0  1  0  0  0  0  0  0
-             0  0  0  0  0  0  0  1;  1  0  0  0  0  0  0  0
-        ]
-        Q = Matrix(charges')
-        qdottau_exact = T[14, 29//2, 29//2, 31//2, 31//2, 31//2, 31//2,
-                          16, 17, 17, 25, 45]
+        Q, qdottau_exact = _n8_exact_source_data(T)
         phase = zeros(T, 12)
         theta = T.(theta_seed)
         k = T(k_seed)
@@ -592,7 +604,6 @@ function n8_bigfloat_continuation_refine(theta_seed::AbstractVector{<:Real},
             gradient = two_pi .* qfloat * (amplitudes .* sin.(arguments))
             hessian = two_pi^2 .* qfloat * Diagonal(amplitudes .* cos.(arguments)) * qfloat'
             grad_norm = norm(gradient, Inf)
-            amp_scale = maximum(abs, amplitudes)
             # This residual is evaluated from amplitudes that are already
             # source-normalized by the target construction.  Apply the
             # declared absolute BigFloat tolerance; multiplying by the
@@ -634,17 +645,7 @@ function n8_bigfloat_augmented_solve(theta_seed::AbstractVector{<:Real},
     setprecision(BigFloat, precision_bits) do
         T = BigFloat
         two_pi = T(2) * T(π)
-        charges = Int[
-            -1  1  1  0  0  0  0  1;  0  0  0  1  0  0  0  0
-             0  0  0  0  1  0  0  0;  0  0  0  0  0  1  0  0
-             0  0  0  0  0  0  1  0;  0 -1  1 -1  1  0  1  0
-             0  1 -1 -1  1  1  0  0;  1  0  0 -1 -1  0  0  0
-             0  0  1  0  0  0  0  0;  0  1  0  0  0  0  0  0
-             0  0  0  0  0  0  0  1;  1  0  0  0  0  0  0  0
-        ]
-        Q = Matrix(charges')
-        qdottau_exact = T[14, 29//2, 29//2, 31//2, 31//2, 31//2, 31//2,
-                          16, 17, 17, 25, 45]
+        Q, qdottau_exact = _n8_exact_source_data(T)
         phase = zeros(T, 12)
         n = 8
         qfloat = T.(Q)
