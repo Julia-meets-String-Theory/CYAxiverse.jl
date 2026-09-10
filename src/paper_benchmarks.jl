@@ -19,5 +19,6 @@ include(joinpath(@__DIR__, "paper_benchmarks", "compatibility.jl"))
 include(joinpath(@__DIR__, "paper_benchmarks", "fuzzy_axions_mass_scale.jl"))
 include(joinpath(@__DIR__, "paper_benchmarks", "fuzzy_axions_model_stage.jl"))
 include(joinpath(@__DIR__, "paper_benchmarks", "catastrophe_diagnostics.jl"))
+include(joinpath(@__DIR__, "paper_benchmarks", "n8_continuation.jl"))
 
 end
