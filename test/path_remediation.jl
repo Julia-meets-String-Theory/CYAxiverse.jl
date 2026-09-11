@@ -73,6 +73,13 @@ function _run_notebook_initialization_smoke(path::AbstractString, source::Abstra
         synthetic_scipy = repr("""
         from . import optimize
         """)
+        synthetic_numpy = repr("""
+        from . import linalg
+        """)
+        synthetic_numpy_linalg = repr("""
+        def matrix_rank(*args, **kwargs):
+            raise RuntimeError("synthetic numpy.linalg.matrix_rank must not run during initialization")
+        """)
         synthetic_integrate = repr("""
         def solve_ivp(*args, **kwargs):
             raise RuntimeError("synthetic scipy.solve_ivp must not run during initialization")
@@ -85,13 +92,17 @@ function _run_notebook_initialization_smoke(path::AbstractString, source::Abstra
         mktempdir() do synthetic_python_root
             synthetic_cytools_dir = joinpath(synthetic_python_root, "cytools")
             synthetic_scipy_dir = joinpath(synthetic_python_root, "scipy")
+            synthetic_numpy_dir = joinpath(synthetic_python_root, "numpy")
             mkpath(synthetic_cytools_dir)
             mkpath(synthetic_scipy_dir)
+            mkpath(synthetic_numpy_dir)
             write(joinpath(synthetic_cytools_dir, "config.py"), $synthetic_config)
             write(joinpath(synthetic_cytools_dir, "__init__.py"), $synthetic_package)
             write(joinpath(synthetic_scipy_dir, "__init__.py"), $synthetic_scipy)
             write(joinpath(synthetic_scipy_dir, "integrate.py"), $synthetic_integrate)
             write(joinpath(synthetic_scipy_dir, "optimize.py"), $synthetic_optimize)
+            write(joinpath(synthetic_numpy_dir, "__init__.py"), $synthetic_numpy)
+            write(joinpath(synthetic_numpy_dir, "linalg.py"), $synthetic_numpy_linalg)
             ENV["PYTHONPATH"] = string(
                 synthetic_python_root,
                 Sys.iswindows() ? ";" : ":",
