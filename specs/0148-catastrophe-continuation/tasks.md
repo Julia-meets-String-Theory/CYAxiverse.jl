@@ -19,8 +19,8 @@
   ownership.
 - Rejected evidence remains explicitly rejected even when the task that
   produced/reviewed it is historically complete.
-- Scientific G3 tasks are blocked until GitHub Issue #148 records an explicit
-  G2 PASS under the approved migrated contract.
+- G2 PASS has been recorded; G3 proceeded and is now also PASS. The earlier
+  G3-blocked-on-G2 constraint is satisfied.
 - Exact higher-precision bit depths in current tasks are implementation/evidence
   choices; the governing spec requires a genuine target-constructed
   higher-precision stability path without canonically fixing those bit depths.
@@ -34,12 +34,22 @@ Brownfield reconstruction cutoff:
 - G0: PASS
 - G1: PASS
 - P96 N8 metric decision: approved
-- G2: not accepted; first candidate rejected, later repair candidate awaiting
-  fresh independent scientific review at the cutoff
-- G3: not started
-- optional G4: not started; applicable only if G3 PASS yields a suitable
-  off-ray catastrophe locus and the existing physical model remains usable
-  unchanged
+- G2: not accepted at the original cutoff; first candidate rejected, later
+  repair candidate awaiting fresh independent scientific review
+- G3: not started at the original cutoff
+- optional G4: not started
+
+Post-cutoff accepted evidence (from PR #149 branch):
+
+- G2: **PASS** — implementation `cc8ac73...`, independent review, durable
+  acceptance `f9b04ed...`
+- G3: **PASS** — implementation `4abd9c3...`, evidence `c6d2291...`,
+  independent review, durable acceptance `f33ba76...`
+- optional G4: not started; applicable because G3 yielded a suitable off-ray
+  catastrophe locus
+
+Current scientific gate state:
+**G0 PASS · G1 PASS · G2 PASS · G3 PASS**; optional G4 not started.
 
 Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
 
@@ -136,11 +146,11 @@ Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
     augmented convergence, preserved G1, and the honest `:unresolved`
     higher-derivative classification.
 
-### Post-FAIL repair candidate at migration cutoff
+### Post-FAIL repair and acceptance
 
 - [x] **T211 [R-003, R-005, R-006, R-007, R-012, G2] Produce a bounded G2 repair candidate and revision-specific replay evidence**
-  - Implementation candidate: `5b8daffd732ba307ed1980615b9f049a95b92c2c`.
-  - Evidence state continues through migration-frozen PR head
+  - Initial repair candidate: `5b8daffd732ba307ed1980615b9f049a95b92c2c`.
+  - Evidence state at original migration cutoff continued through
     `e991495f1bb58edd7a7043dfc90771b6666c717c`.
   - Expected correction scope from the failed review: bordered-coordinate
     consistency and provenance, actual old-matcher exercise, genuine
@@ -156,123 +166,122 @@ Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
     scales agree below `1e-30`; source12/author10 and P96/A96 paths are labelled
     separately; focused G1 replay remains 63/63.
   - Boundary: this checkbox means a reviewable repair candidate/evidence package
-    exists. The 128/256-bit choice records the current implementation/evidence
-    plan; it is not a canonical requirement. This task does **not** mean G2 is
-    accepted.
+    existed. A further repair at `cc8ac73...` was the revision ultimately
+    accepted (see T212).
 
-- [ ] **T212 [R-003, R-005, R-006, R-007, R-012, R-014, G2] Freshly and independently review the repaired G2 candidate**
-  - Input: freeze the exact repaired code/evidence revision to be reviewed; do
-    not review a moving branch head.
-  - Verify independently:
-    - the bordered/pseudo-arclength mechanism is genuinely exercised and
-      adequate near singularity;
-    - fallback is explicit, bounded and does not invalidate the scientific
-      branch-continuation claim;
-    - the old matcher is independently exercised rather than fed continuation
-      identities;
-    - the current 128/256-bit event solves construct source quantities at target
-      precision and genuinely establish event stability;
-    - reconstructed `M96` and its source identity are verified at working
-      precision in the relevant GLSM basis;
-    - any P96 metric represented in another basis is obtained through the
-      corresponding explicit congruence transformation;
-    - P96/A96 comparisons are like-for-like and source12/author10 remain
-      distinct;
-    - conditioning/status/failure/tolerance claims are justified by the replay;
-    - projected higher-derivative output is reported without changing cutoffs
-      or forcing a cusp label;
-    - G1 remains preserved and no G3/API/schema expansion occurred.
-  - Expected output: a new revision-specific independent scientific review with
-    explicit PASS/FAIL recommendation and exact commands/observations.
-  - Escalate if: a remaining question requires changing P96, another physical
-    convention, catastrophe acceptance semantics, or the scientific claim
-    boundary. Concrete implementation defects stay with the worker correction
-    loop.
+- [x] **T212 [R-003, R-005, R-006, R-007, R-012, R-014, G2] Freshly and independently review the repaired G2 candidate**
+  - Reviewed revision: `cc8ac73668ac488a492dd16008c0b790a4e4ef3b` (further
+    repair beyond T211's initial candidate).
+  - Evidence: `docs/src/issue_148_g2_final_independent_review_cc8ac73.md`,
+    `docs/src/issue_148_g2_final_repair_evidence.md`.
+  - Verified independently: bordered/pseudo-arclength mechanism genuinely
+    exercised near singularity; halving radial step changes event by `7.57e-13`;
+    fallback explicit and bounded; old matcher independently exercised with five
+    comparisons and zero disagreements; 128/256-bit event solves construct
+    source quantities at target precision with agreement below `1e-30` and
+    nontrivial iterations; `M96` reconstruction and source identity verified at
+    working precision; P96/A96 like-for-like; source12/author10 distinct;
+    conditioning/status/failure/tolerance justified; projected higher-derivative
+    output reported without forcing a cusp label (`:unresolved` retained); G1
+    preserved; no G3/API/schema expansion.
+  - Verified result: **PASS recommendation** from fresh independent reviewer.
+    Manager acceptance at `f9b04ed74bc30cc8e0071fcbe18179a4f85016e2`.
 
-- [ ] **T213 [R-006, R-007, R-012, R-014, G2] Reach G2 evidence readiness after independent review**
-  - Outcome: all concrete findings from T212 are either corrected and
-    independently rechecked, or explicitly block G2; the evidence package is
-    sufficient for manager gate adjudication.
-  - Verify: accepted mechanism/evidence is mapped to every G2 acceptance item,
-    with no reliance on worker DONE status or raw test count.
-  - Boundary: the eventual PASS/FAIL gate decision itself is recorded on
-    GitHub Issue #148, not treated as authoritative state in this task file.
+- [x] **T213 [R-006, R-007, R-012, R-014, G2] Reach G2 evidence readiness after independent review**
+  - Outcome: all concrete findings from T212 were corrected through the repair
+    loop; the evidence package was accepted by the manager.
+  - Verified result: **G2 PASS** — accepted mechanism/evidence mapped to every
+    G2 acceptance item. Durable decision at `f9b04ed...`.
+  - Accepted scientific boundary: bounded zero-phase, fixed-saxion,
+    source-twelve radial N8 one-null degeneracy under P96; positive transverse
+    modes; projected classifier `:unresolved`; no stronger catastrophe
+    classification.
 
 ## G3 — First off-ray Kahler discriminant investigation
 
-All G3 tasks below are blocked until Issue #148 records explicit scientific
-G2 PASS under the approved specification.
+G2 PASS unblocked G3. All G3 tasks below are now complete with accepted
+evidence.
 
-- [ ] **T301 [R-003, R-008, R-009, R-012, G3] Freeze the accepted radial witness and Kahler-coordinate geometry**
-  - Inputs: accepted G2 catastrophe witness/revision, benchmark geometry/source
-    identity, cone-adapted Kahler/two-cycle representation and control checks.
-  - Expected output: replayable geometry/control packet defining the radial
-    origin of the non-radial investigation.
-  - Verify: paper radial `k`, Kahler coordinates and all basis/metric mappings
-    are explicit; no unconstrained independent four-cycle perturbation is used.
-  - Escalate if: coordinate interpretation or physical normalization is
-    ambiguous.
+- [x] **T301 [R-003, R-008, R-009, R-012, G3] Freeze the accepted radial witness and Kahler-coordinate geometry**
+  - Inputs: accepted G2 catastrophe witness at `cc8ac73...`, benchmark
+    geometry/source identity, cone-adapted Kahler/two-cycle representation.
+  - Evidence: `docs/src/issue_148_g3_control_audit.md`,
+    `scripts/audit_issue_148_g3_controls.jl` at `b562780...`.
+  - Verified result: exact source geometry reconstructed with 64 intersection
+    entries, 39 Mori generators, exact two-cycle tip
+    `t_ref=(1,4,4,-2,4,3,3,3)`, source actions
+    `(14,29/2,29/2,31/2,31/2,31/2,31/2,16,17,17,25,45)`; paper radial `k` and
+    Kahler coordinates explicit; no unconstrained four-cycle perturbation used.
 
-- [ ] **T302 [R-008, R-009, R-012, G3] Compute local Kahler-to-potential sensitivity/rank and choose one independent non-radial direction**
-  - Outcome: evaluate an appropriate local map such as
-    `partial log|Lambda_I^4| / partial t^a` and demonstrate that the chosen
-    direction supplies control independent of radial rescaling.
-  - Verify: rank/sensitivity, direction `u`, normalization and allowed bounded
-    neighborhood are recorded with geometry/source identity.
-  - Escalate if: no usable independent direction exists within the validated
-    local cone/control region.
+- [x] **T302 [R-008, R-009, R-012, G3] Compute local Kahler-to-potential sensitivity/rank and choose one independent non-radial direction**
+  - Outcome: rank two for both `[log(k),alpha]` action controls and
+    row-centered full-log-amplitude controls, with singular values
+    `(56.0275,8.14452)` and `(158.439,42.2188)`. Off-ray action derivative has
+    relative residual `0.317` after best radial fit.
+  - Evidence: `issue_148_g3_control_audit.md`, G3 independent review.
+  - Verified result: direction `u=(0,1,2,-1,1,1,1,1)` supplies genuinely
+    independent non-radial control; `MORI*u >= 0` verified; positive volume
+    and metric over the certified slice.
 
-- [ ] **T303 [R-008, R-012, G3] Implement/assemble the bounded cone-valid deformation map**
-  - Outcome: vary the selected cone-adapted Kahler coordinate and consistently
-    recompute dependent divisor volumes, total volume, kinetic metric,
-    instanton actions, potential coefficients and applicable control
-    diagnostics.
-  - Verify: every accepted point satisfies the applicable Kahler-cone and
-    physical-domain checks; deformation is not radial rescaling in disguise.
-  - Escalate if: implementation would require a new scientific normalization,
-    schema or physical-model decision.
+- [x] **T303 [R-008, R-012, G3] Implement/assemble the bounded cone-valid deformation map**
+  - Outcome: `t(k,alpha)=sqrt(k)(t_ref+alpha*u)` with `0 <= alpha <= 1/20`;
+    divisor volumes, total volume, kinetic metric, instanton actions, potential
+    coefficients, and control diagnostics recomputed consistently from exact
+    integer/rational source data at every geometry evaluation.
+  - Evidence: `issue_148_g3_control_audit.md`, `issue_148_g3_repair_evidence.md`.
+  - Verified result: every accepted point satisfies Kahler-cone and
+    physical-domain checks; deformation is not radial rescaling.
 
-- [ ] **T304 [R-001, R-010, R-012, R-015, G3] Determine the local discriminant fate without imposing persistence**
+- [x] **T304 [R-001, R-010, R-012, R-015, G3] Determine the local discriminant fate without imposing persistence**
   - Input: accepted radial catastrophe and validated deformation from T301-T303.
-  - Outcome: reproducibly determine whether the relevant structure persists,
-    terminates, splits/unfolds, changes class, develops additional nullity, or
-    exhibits another evidence-supported local discriminant outcome.
-  - Verify: use appropriate augmented/local continuation analysis and retain
-    truthful termination/failure states rather than forcing a curve.
-  - Escalate if: observed behavior requires changing the agreed acceptance
-    semantics rather than only technical realization.
+  - Outcome: the source-twelve, zero-phase, fixed-saxion P96 degeneracy
+    persists from the radial event onto one positive-alpha branch; 46 stored
+    states (one seed + 45 accepted predictor/corrector transitions) reaching
+    approximately `alpha=1.435e-4`, `k=0.5007`; stops at imposed scale guard
+    with `:k_bounds_reached`.
+  - Evidence: `issue_148_g3_repair_evidence.md`,
+    `issue_148_g3_final_independent_review_4abd9c3.md`.
+  - Verified result: persistence to a numerical boundary, not physical
+    termination; opposing-seed failure does not establish absence of another
+    branch; no curve was forced.
 
-- [ ] **T305 [R-011, R-012, G3] Test zero-phase cubic symmetry behavior and higher-derivative/transverse diagnostics**
-  - Outcome: test rather than assume whether the symmetry-protected cubic
-    normal-form coefficient remains zero along the legitimate Kahler
-    deformation; report projected D3/D4, transverse Hessian, nullity and other
-    relevant catastrophe diagnostics.
-  - Verify: calculations are like-for-like in source/model/metric convention and
-    retain declared precision/source-precision boundaries.
-  - Escalate if: classification requires a normative cutoff/interpretation not
-    fixed by the spec.
+- [x] **T305 [R-011, R-012, G3] Test zero-phase cubic symmetry behavior and higher-derivative/transverse diagnostics**
+  - Outcome: zero-phase cubic cancellation tested and not protected along this
+    control direction. Projected D3/D4, transverse Hessian, nullity diagnostics
+    reported at representative points.
+  - Evidence: `issue_148_g3_repair_evidence.md`, G3 independent review.
+  - Verified result: all stored states retain one near-null canonical mode and
+    positive transverse spectrum; minimum transverse eigenvalue `0.0105284`;
+    segment minimum P96 metric eigenvalue `1.2876e-4`.
 
-- [ ] **T306 [R-008, R-010, R-011, R-012, G3] Independently verify representative off-ray points or fate witnesses**
-  - Outcome: independent checks of stationarity/degeneracy or the relevant
-    termination/splitting witness, plus cone/geometric/EFT controls.
-  - Verify: representative results can be replayed from recorded
-    source/geometry/code/environment/precision identity.
+- [x] **T306 [R-008, R-010, R-011, R-012, G3] Independently verify representative off-ray points or fate witnesses**
+  - Outcome: independent/chained 128/256-bit solves verified four exact rational
+    off-ray controls; independent probes verified derivative signs, full Hessian
+    factor, normalization, continuity, accounting, and invalid-state statuses.
+  - Evidence: G3 independent review (373 independent-probe assertions passed),
+    prerequisite audit (79 assertions passed), G1 replay and diff checks passed.
+  - Verified result: representative results replayable from recorded identity.
 
-- [ ] **T307 [R-002, R-008-R-012, R-014, R-015, G3] Complete fresh independent scientific G3 review**
-  - Outcome: adversarial review of the claimed local discriminant result against
-    the approved spec, including claim boundary, outcome neutrality, geometry,
-    precision and evidence sufficiency.
-  - Verify: a negative persistence result is evaluated as a legitimate
-    scientific outcome rather than treated as failure solely because it is
-    negative.
-  - Boundary: gate adjudication/current workflow state remains on GitHub Issue
-    #148 / Project.
+- [x] **T307 [R-002, R-008-R-012, R-014, R-015, G3] Complete fresh independent scientific G3 review**
+  - Outcome: fresh independent adversarial review of the claimed local
+    discriminant result against the approved spec, including claim boundary,
+    outcome neutrality, geometry, precision and evidence sufficiency.
+  - Evidence: `docs/src/issue_148_g3_final_independent_review_4abd9c3.md`,
+    manager decision `docs/src/issue_148_g3_manager_decision.md` at
+    `f33ba768f53fee749352a82c04aedc09919d1053`.
+  - Verified result: **G3 PASS**. The earlier G3 FAIL review is
+    revision-specific and superseded by this decision. No owner decision
+    required.
+  - Accepted scientific boundary: persistence only along the accepted audited
+    positive-alpha off-radial direction and bounded segment; no global
+    continuation, physical termination, exclusion of other branches; opposing-
+    seed failure remains inconclusive.
 
 ## Optional G4 — Bounded physical probe
 
-Run only after G3 PASS, only if G3 yields a suitable off-ray catastrophe locus,
-and only if the existing physical model can be used without a new normative
-choice. If G3 yields no such locus, G4 is N/A.
+G3 PASS yielded a bounded off-ray catastrophe locus (46 stored states along the
+positive-alpha branch). G4 is therefore applicable in principle, provided it
+does not require changing the agreed physical model. G4 is not started.
 
 - [ ] **T401 [R-002, R-016, G4] Select a small bounded set of points along the validated off-ray catastrophe locus for an exploratory physical probe**
   - Verify: selection is derived from the G3 locus and does not imply a

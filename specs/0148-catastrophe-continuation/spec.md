@@ -8,7 +8,7 @@ workstream: Inflation
 parent: null
 depends_on: []
 created: 2026-09-10
-last_reviewed: 2026-09-10
+last_reviewed: 2026-09-11
 review_required: scientific-owner-after-independent-scientific-review
 approval_ref: N/A while draft
 version_impact: no feature-branch bump
@@ -82,6 +82,37 @@ this document.
   a recorded FAIL, with a later repair candidate/evidence awaiting fresh
   independent scientific review; G3 not started; optional G4 not started.
 
+### Post-cutoff accepted scientific evidence
+
+After the original migration cutoff, PR #149 continued scientific work and
+reached durable acceptance of both G2 and G3. The accepted evidence is
+recorded on the PR #149 branch and is summarized here for spec-plan-tasks
+consistency. The current scientific gate state is:
+**G0 PASS · G1 PASS · G2 PASS · G3 PASS**; optional G4 not started.
+
+- **G2 PASS:** implementation `cc8ac73668ac488a492dd16008c0b790a4e4ef3b`,
+  fresh independent scientific review, durable acceptance commit
+  `f9b04ed74bc30cc8e0071fcbe18179a4f85016e2`. This supersedes the earlier
+  G2 FAIL for its explicitly identified older revision. Accepted scientific
+  result: bounded zero-phase, fixed-saxion, source-twelve radial N8 one-null
+  degeneracy under P96; positive transverse modes; projected higher-derivative
+  diagnostic reports `:unresolved`; no numerically resolved quartic-cusp label
+  accepted; no stronger catastrophe classification.
+- **G3 PASS:** implementation `4abd9c31aba1d387bac27769730c4e0dc7d0c4a0`,
+  evidence `c6d2291e5c90c8890f48a9574343c14808a5a507`, fresh independent
+  scientific review, durable acceptance commit
+  `f33ba768f53fee749352a82c04aedc09919d1053`. Accepted scientific result:
+  one source-twelve, zero-phase, fixed-saxion N8 one-null degeneracy persists
+  away from the radial ray on the audited positive-alpha two-cycle slice
+  `t=sqrt(k)(t_ref+alpha*u)` with `u=(0,1,2,-1,1,1,1,1)`; 46 stored states
+  reaching approximately `alpha=1.435e-4`, `k=0.5007`, stopping at the imposed
+  scale guard; persistence to a numerical boundary, not physical termination;
+  opposing-seed failure does not establish absence of another branch; zero-phase
+  cubic cancellation tested and not protected along this control; all stored
+  states retain one near-null canonical mode and positive transverse spectrum;
+  no global continuation, exhaustive-branch, G4, inflation, stabilized-moduli,
+  population, or resolved G2 cusp claim is established.
+
 ### Source facts
 
 The durable G0 audit identifies the scientific source as *Catastrophic
@@ -122,14 +153,14 @@ critical scale and added genuine N=5 branch continuation and source-constructed
 high-precision validation.
 
 The first G2 candidate was rejected after independent review. A later repair
-candidate exists at `5b8daffd732ba307ed1980615b9f049a95b92c2c`, with subsequent
-revision-specific evidence recorded through the migration-frozen PR head. The
-repair evidence reports corrected bordered-coordinate semantics, actual
-post-hoc matcher exercise, target-constructed 128/256-bit augmented event
-solves, explicit fallback/failure provenance, and like-for-like normalization
-diagnostics. At the migration cutoff this repair had **not** received durable
-fresh independent scientific acceptance, so it does not change the recorded
-G2 gate state.
+candidate at `5b8daffd732ba307ed1980615b9f049a95b92c2c` addressed those
+findings. A further repair at `cc8ac73668ac488a492dd16008c0b790a4e4ef3b`
+received fresh independent scientific review and was accepted (G2 PASS at
+`f9b04ed74bc30cc8e0071fcbe18179a4f85016e2`). The G3 implementation at
+`4abd9c31aba1d387bac27769730c4e0dc7d0c4a0` with evidence at
+`c6d2291e5c90c8890f48a9574343c14808a5a507` subsequently received fresh
+independent scientific review and was accepted (G3 PASS at
+`f33ba768f53fee749352a82c04aedc09919d1053`).
 
 ### Empirical evidence already accepted
 
@@ -146,7 +177,18 @@ Historical accepted evidence includes:
 
 The first G2 candidate evidence is retained as revision-specific historical
 evidence but not as acceptance evidence. The independent rejection and manager
-decision at `091cc9c...` control the status of that candidate.
+decision at `091cc9c...` control the status of that candidate and are
+explicitly superseded by the later G2 PASS at `f9b04ed...`.
+
+Post-cutoff accepted evidence also includes:
+
+- G2 accepted implementation `cc8ac73668ac488a492dd16008c0b790a4e4ef3b`,
+  independent review `issue_148_g2_final_independent_review_cc8ac73.md`,
+  manager decision `f9b04ed74bc30cc8e0071fcbe18179a4f85016e2`;
+- G3 accepted implementation `4abd9c31aba1d387bac27769730c4e0dc7d0c4a0`,
+  evidence `c6d2291e5c90c8890f48a9574343c14808a5a507`, independent review
+  `issue_148_g3_final_independent_review_4abd9c3.md`, manager decision
+  `f33ba768f53fee749352a82c04aedc09919d1053`.
 
 ### Chronological decision / supersession record
 
@@ -181,9 +223,34 @@ decision at `091cc9c...` control the status of that candidate.
    projected higher-derivative classification remained honestly `:unresolved`
    and was not promoted to a cusp claim.
 8. **Post-FAIL G2 repair candidate — migration-frozen PR head `e991495...`.**
-   Repair implementation/evidence exists, but no later durable independent
-   review or manager PASS was present at the migration cutoff. Therefore G2
-   remains not accepted in this migrated baseline.
+   Repair implementation/evidence existed at the original migration cutoff but
+   had not yet received durable fresh independent scientific acceptance.
+   *(Superseded by item 9.)*
+9. **G2 PASS — durable acceptance `f9b04ed...`.** Fresh independent scientific
+   review of the further-repaired implementation at `cc8ac73...` with evidence
+   at `62a88ca...`. Accepted result: bounded zero-phase, fixed-saxion,
+   source-twelve radial N8 one-null degeneracy under P96; positive transverse
+   modes; projected higher-derivative diagnostic `:unresolved`; no numerically
+   resolved quartic-cusp label accepted. This supersedes the G2 FAIL for
+   its explicitly identified older revision. No owner decision required.
+10. **G3 scientific work — implementation `4abd9c3...`, evidence `c6d2291...`.**
+    After G2 PASS, the G3 investigation established geometric control and
+    sensitivity (`b562780...`), implemented bounded local-control continuation
+    (`1c57ed2...`), underwent an initial independent review that identified
+    corrections (`17d28b9...`), and was repaired (`4abd9c3...`) with updated
+    evidence (`c6d2291...`).
+11. **G3 PASS — durable acceptance `f33ba76...`.** Fresh independent scientific
+    review of the repaired G3 implementation at `4abd9c3...`. Accepted result:
+    the source-twelve, zero-phase, fixed-saxion P96 degeneracy persists from
+    the radial event onto one positive-alpha branch on the audited two-cycle
+    slice; 46 stored states through approximately `alpha=1.435e-4`,
+    `k=0.5007`; stops at the imposed scale guard (persistence to a numerical
+    boundary, not physical termination); opposing-seed failure does not
+    establish absence of another branch; zero-phase cubic cancellation tested
+    and not protected along this control; all stored states retain one near-null
+    canonical mode and positive transverse spectrum. No G4, inflation,
+    stabilized-moduli, population, global-cone, negative-alpha,
+    exhaustive-branch, or resolved G2 cusp claim is authorized.
 
 Later durable owner decisions supersede earlier wording only where their scope
 actually conflicts. Historical wording and failed-review evidence remain part
@@ -503,9 +570,15 @@ Kahler direction until G2 is explicitly accepted with an agreed scientific
 interpretation.
 
 **Migration-cutoff historical state:** The first candidate was FAIL after fresh
-independent review. A post-FAIL repair candidate/evidence exists at the frozen
-PR head but was not yet independently accepted; therefore G2 remains not
-accepted at the migration cutoff.
+independent review. A post-FAIL repair candidate/evidence existed at the
+original migration-frozen PR head but was not yet independently accepted at
+that cutoff.
+
+**Post-cutoff result:** PASS. Implementation `cc8ac73...` accepted after fresh
+independent scientific review; durable acceptance at `f9b04ed...`. Accepted
+scientific boundary: bounded zero-phase, fixed-saxion, source-twelve radial N8
+one-null degeneracy under P96; positive transverse modes; projected classifier
+`:unresolved`; no stronger catastrophe classification.
 
 ### G3 — First off-ray Kahler discriminant continuation
 
@@ -542,6 +615,17 @@ physical interpretation, or acceptance criteria that could change scientific
 meaning returns to the scientific owner. A failure of catastrophe persistence
 is an admissible scientific result, not by itself a stop/failure condition.
 
+**Post-cutoff result:** PASS. Implementation `4abd9c3...` with evidence
+`c6d2291...` accepted after fresh independent scientific review; durable
+acceptance at `f33ba76...`. Accepted scientific boundary: persistence only
+along the accepted audited positive-alpha off-radial direction and bounded
+segment (46 stored states, approximately `alpha=1.435e-4`, `k=0.5007`); stops
+at imposed scale guard, not physical termination; opposing-seed failure remains
+inconclusive; no global continuation, exhaustive-branch enumeration, or
+physical termination claim; zero-phase cubic not protected along this control;
+all stored states retain one near-null canonical mode and positive transverse
+spectrum.
+
 ### Optional G4 — Bounded physical probe
 
 G4 is applicable only if G3 passes **and** yields a suitable off-ray
@@ -553,6 +637,11 @@ physical model. Select a small number of well-defined points along the validated
 off-ray catastrophe locus, detune them using the existing catastrophic-inflation
 construction, and evaluate existing inflationary diagnostics. Keep this
 exploratory probe separate from the validated continuation claim.
+
+**Current status:** G3 PASS yielded a bounded off-ray catastrophe locus (46
+stored states along the positive-alpha branch). G4 is therefore applicable in
+principle, provided it does not require changing the agreed physical model. G4
+is not started.
 
 ## Verification requirements
 
@@ -591,10 +680,10 @@ claimed mechanism and use like-for-like source/model/metric conventions.
 
 ## Dependencies and blockers
 
-- Scientific G3 is blocked by explicit acceptance of scientific G2.
-- At the migration cutoff, G2 has a repair candidate awaiting fresh independent
-  scientific review; the earlier FAIL remains the controlling gate decision
-  until superseded by a durable later adjudication.
+- Scientific G3 was blocked by explicit acceptance of scientific G2. G2 is now
+  PASS (`f9b04ed...`), and G3 has subsequently passed (`f33ba76...`).
+- Optional G4 requires that G3 yield a suitable off-ray catastrophe locus (it
+  did) and that the existing physical model be usable unchanged.
 - Generic adaptive Kahler-cone exploration is a separate follow-on goal and is
   not a dependency for this pilot.
 
@@ -602,14 +691,13 @@ Use GitHub Issue/Project relationships for live blocking/current-state tracking.
 
 ## Open owner decisions
 
-At the migration cutoff, the earlier N=8 metric-normalization boundary has been
-resolved by the P96 approval. No new owner decision is required merely to
-review the current G2 repair candidate.
+The earlier N=8 metric-normalization boundary has been resolved by the P96
+approval. The G2 and G3 acceptance decisions required no new owner decision.
 
-If a scientifically valid G2 repair still leaves catastrophe classification or
-another normative interpretation ambiguous, return the smallest remaining
-question to the scientific owner before changing a cutoff, normalization,
-claim, or gate criterion.
+If optional G4 or any future extension requires changing a physical
+normalization, basis, acceptance criterion, catastrophe classification, or
+reported observable, return the smallest remaining question to the scientific
+owner before proceeding.
 
 ## Completion criterion
 
