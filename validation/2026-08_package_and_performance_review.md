@@ -160,7 +160,7 @@ Result groups written by Julia: `spectrum/masses`, `spectrum/decay`, `spectrum/q
 |---|---|---|
 | `CYAXIVERSE_DATA_DIR` | `filestructure.resolve_data_dir` (`src/filestructure.jl:85`) | preferred data root (28 call sites) |
 | `newARGS` | same, `_LEGACY_DATA_DIRS` | legacy deployment aliases (`docker`, `vacua_0323`, …) |
-| `PYTHON` | `src/init_python.jl`, PyCall ext | interpreter containing CYTools |
+| `CYAXIVERSE_PYTHON` | `src/init_python.jl`, PyCall ext | desired interpreter containing CYTools; checked against the interpreter compiled into PyCall |
 | `SLURM_JOB_ID` / `SLURM_ARRAY_TASK_ID` / `SLURM_NPROCS` / `MAX_JOB` | `src/slurm.jl` | HPC dispatch |
 | `MOSEKLM_LICENSE_FILE` | Python generator | QP solver for stretched-cone tips (path only, never contents) |
 | `CYAXIVERSE_AUDIT_CACHE` | `bin/audit.jl` | Aqua/JET audit env cache |

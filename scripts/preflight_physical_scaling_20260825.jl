@@ -8,6 +8,14 @@ performed.  A physical calculation is authorized only when all 18 sidecars
 and their independently replayed reference-domain checks pass.
 """
 
+# The implementation below is retained only to preserve the historical record.
+# It must not recreate evidence under the withdrawn v1 identity.
+error("""
+The 2026-08-25 physical-scaling v1 evidence workflow is retired and cannot be run.
+See validation/RETIRED_physical_scaling_evidence_20260825.md. Any replacement
+must use a new, path-safe evidence version.
+""")
+
 using HDF5
 using LinearAlgebra
 using SHA

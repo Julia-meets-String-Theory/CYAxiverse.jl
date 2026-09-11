@@ -7,12 +7,14 @@ using InteractiveUtils
 begin
     import Pkg
     Pkg.activate(@__DIR__)
-    cyaxiverse_python = strip(get(ENV, "CYAXIVERSE_PYTHON", ""))
-    isempty(cyaxiverse_python) || (ENV["PYTHON"] = cyaxiverse_python)
     using LinearAlgebra
     using HDF5
     using CYAxiverse
-    import CYAxiverse.cytools_wrapper as cw
+    using PyCall
+    const CYTools = Base.get_extension(CYAxiverse, :CYAxiversePyCallExt)
+    CYTools === nothing && error("The optional CYAxiverse PyCall extension did not load.")
+    CYTools.enable_cytools!()
+    const cw = CYTools.cytools_wrapper
     import CYAxiverse.read as read_mod
     import CYAxiverse.minimizer as minimizer_mod
 end

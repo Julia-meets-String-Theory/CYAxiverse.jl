@@ -5,6 +5,10 @@ Issue: #157
 Spec class: S1
 Version impact: none
 
+Implementation status: PR #158 remediates the reviewed working-tree surfaces,
+but R-005 remains open until every surviving public branch is scanned and
+classified. PR #158 must not auto-close Issue #157 at this stage.
+
 ## Objective
 
 Remove confirmed personal or machine-local filesystem disclosures from current
@@ -87,7 +91,7 @@ has identified the genuine history-only residue.
 | R-002, R-004 | Replace tracked personal defaults in `src/`, scripts, notebooks, and docs with explicit arguments, environment variables, or repository-relative resolution | Focused data-directory, Slurm-log, CLI, and optional-Python tests; notebook smoke checks; docs build |
 | R-003 | Preserve hashes and scientific identifiers; regenerate any path-bearing, hash-bound evidence as one consistent set | Diff review of scientific values and schemas; bounded replay where an executable scientific driver changes configuration |
 | R-003 owner-approved fallback | Retire the complete unavailable 2026-08-25 bound evidence set and add path-free Markdown and JSON retirement ledgers | Verify the ledger covers every removed artifact, reproduces its pre-retirement SHA-256 and Git blob identity, and makes no active scientific claim |
-| R-005 | Scan every current public branch and discussion surface, then classify stale refs before deletion | Branch reachability/PR-status inventory plus a clean post-remediation live-surface scan |
+| R-005 | Scan every current public branch and discussion surface, then classify stale refs before deletion; this remains an explicit post-PR #158 completion gate | Branch reachability/PR-status inventory plus a clean post-remediation live-surface scan |
 
 ## Acceptance
 

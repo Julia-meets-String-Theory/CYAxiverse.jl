@@ -19,7 +19,7 @@ end
 # ╔═╡ 4f3cf4dd-0d6d-4f78-9648-739e6bd7ee15
 begin
     using Pkg
-    Pkg.activate(joinpath(@__DIR__, "..", "notebooks"))
+    Pkg.activate(@__DIR__)
 end
 
 # ╔═╡ c6de49b0-685c-4a80-8ff4-5d8e8e7ce8ed
@@ -227,7 +227,7 @@ print(json.dumps(payload, allow_nan=True, separators=(",", ":")))
         python = parquet_python()
         python === nothing && return (
             rows=Dict{String,Any}[],
-            message="No Python executable was found. Set CYAXIVERSE_PYTHON to the cytools Python executable.",
+            message="No Python executable was found. Set CYAXIVERSE_PYTHON to an executable with PyArrow.",
         )
         try
             output = read(`$python -c $PARQUET_READER $path $(join(EFT_COLUMNS, ","))`, String)
