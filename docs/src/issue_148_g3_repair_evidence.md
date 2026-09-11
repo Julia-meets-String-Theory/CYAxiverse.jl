@@ -60,7 +60,8 @@ is absent.
 Across all 46 stored states, the canonical spectrum has exactly one reported
 near-null mode and positive transverse minimum.  The minimum transverse
 eigenvalue is `0.0105283777`; the minimum P96 metric eigenvalue is
-`2.328173e-4`; the minimum source action is `7.009883`.  The final state keeps
+`1.2875523e-4` (independently verified; `2.328173e-4` is the endpoint
+value); the minimum source action is `7.009883`.  The final state keeps
 positive volume, curve controls, and full-factor diagnostics.
 
 ## Precision evidence at exact controls
