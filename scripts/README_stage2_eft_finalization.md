@@ -83,12 +83,12 @@ input population before and after: identical `accepted_geometries`,
 ## Running the full population
 
 ```bash
-cd /Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl
+# From the repository root:
 conda run --no-capture-output -n cytools python scripts/generate_stage2_eft_reference.py \
   --stage1-root /private/tmp/cyaxiverse-glimmers-geometry-staged-20260814-luna4 \
   --outdir /private/tmp/cyax-stage2-full-population-20260817 \
   --eft \
-  --orientifold-file /Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl/o3_o7_involution.json \
+  --orientifold-file ./o3_o7_involution.json \
   --volume-backend auto \
   --seed 20260816 \
   --max-kaehler-attempts 1 \

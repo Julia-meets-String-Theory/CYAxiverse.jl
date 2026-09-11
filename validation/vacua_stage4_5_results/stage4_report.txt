@@ -1,4 +1,4 @@
-data_dir=/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data
+data_dir=$CYAXIVERSE_DATA_DIR
 git_revision=3cec2df
 julia=1.12.6
 source_data_written=false

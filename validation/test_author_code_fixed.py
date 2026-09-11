@@ -38,14 +38,12 @@ def install_import_stubs():
 
 
 def load_fixed_module():
-    fixed_dir = Path(
-        os.environ.get(
-            "CYAXIVERSE_AUTHOR_FIXED_DIR",
-            "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/"
-            "CN_Axiverse_code/ks_axiverse_python_collaborator/"
-            "validation/cyaxiverse_fixed",
+    fixed_value = os.environ.get("CYAXIVERSE_AUTHOR_FIXED_DIR", "").strip()
+    if not fixed_value:
+        raise RuntimeError(
+            "CYAXIVERSE_AUTHOR_FIXED_DIR must name the archived author source"
         )
-    ).expanduser().resolve()
+    fixed_dir = Path(fixed_value).expanduser().resolve()
     install_import_stubs()
     sys.path.insert(0, str(fixed_dir))
     import Camcode_full_2 as author_code

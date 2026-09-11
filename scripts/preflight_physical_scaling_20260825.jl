@@ -8,14 +8,29 @@ performed.  A physical calculation is authorized only when all 18 sidecars
 and their independently replayed reference-domain checks pass.
 """
 
+# The implementation below is retained only to preserve the historical record.
+# It must not recreate evidence under the withdrawn v1 identity.
+error("""
+The 2026-08-25 physical-scaling v1 evidence workflow is retired and cannot be run.
+See validation/RETIRED_physical_scaling_evidence_20260825.md. Any replacement
+must use a new, path-safe evidence version.
+""")
+
 using HDF5
 using LinearAlgebra
 using SHA
 using Printf
 
-const WORKTREE = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl.worktrees/physical-scale-inflation-20260825"
-const DATA_ROOT = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data"
-const MANIFEST = "/private/tmp/cyax-inflation-physical-scale-pilot-20260825/selection_manifest.json"
+function _preflight_required_path(variable::AbstractString)
+    value = strip(get(ENV, variable, ""))
+    isempty(value) && error("$variable must name an existing input path")
+    normpath(abspath(expanduser(value)))
+end
+
+const WORKTREE = normpath(abspath(get(
+    ENV, "CYAXIVERSE_AUDIT_REPOSITORY", joinpath(@__DIR__, ".."))))
+const DATA_ROOT = _preflight_required_path("CYAXIVERSE_DATA_DIR")
+const MANIFEST = _preflight_required_path("CYAXIVERSE_AUDIT_MANIFEST")
 const MANIFEST_SHA256 = "a6df5dca258c11724d4162477cdee7cc34e5802f2f3f296a7ea64b55f23c3247"
 const REQUIRED_COMMIT = "9f31d716eaab8d63d3f76826a40de5ae38c7015d"
 const REQUIRED_BRANCH = "agents/physical-scale-inflation-20260825"
