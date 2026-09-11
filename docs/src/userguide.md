@@ -36,6 +36,17 @@ Set `CYAXIVERSE_DATA_DIR` when the database is stored elsewhere:
 export CYAXIVERSE_DATA_DIR=/path/to/data
 ```
 
+Personal legacy aliases no longer contain tracked deployment paths. Configure
+one with its named environment variable, for example:
+
+```sh
+export newARGS=vacua_test
+export CYAXIVERSE_DATA_DIR_VACUA_TEST=/path/to/vacua-testing
+```
+
+The portable `docker` alias continues to resolve to the container database
+root. Prefer `CYAXIVERSE_DATA_DIR` or an explicit `--data-dir` for new runs.
+
 The resolver does not create a missing data directory or silently fall back to
 the current working directory. Use `--data-dir` for a different database or
 for an isolated output copy.

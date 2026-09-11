@@ -13,9 +13,16 @@ using LinearAlgebra
 using SHA
 using Printf
 
-const WORKTREE = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl.worktrees/physical-scale-inflation-20260825"
-const DATA_ROOT = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data"
-const MANIFEST = "/private/tmp/cyax-inflation-physical-scale-pilot-20260825/selection_manifest.json"
+function _sidecar_required_path(variable::AbstractString)
+    value = strip(get(ENV, variable, ""))
+    isempty(value) && error("$variable must name an existing input path")
+    normpath(abspath(expanduser(value)))
+end
+
+const WORKTREE = normpath(abspath(get(
+    ENV, "CYAXIVERSE_AUDIT_REPOSITORY", joinpath(@__DIR__, ".."))))
+const DATA_ROOT = _sidecar_required_path("CYAXIVERSE_DATA_DIR")
+const MANIFEST = _sidecar_required_path("CYAXIVERSE_AUDIT_MANIFEST")
 const MANIFEST_SHA256 = "a6df5dca258c11724d4162477cdee7cc34e5802f2f3f296a7ea64b55f23c3247"
 const REQUIRED_COMMIT = "9f31d716eaab8d63d3f76826a40de5ae38c7015d"
 const REQUIRED_BRANCH = "agents/physical-scale-inflation-20260825"
@@ -395,7 +402,8 @@ function sidecar_for(entry, source_hash_map, complete_diff_hash, common_digest)
             "h11" => h11, "polytope" => polytope, "frst" => frst,
             "polytope_id" => entry["polytope_id"], "triangulation_id" => entry["triangulation_id"],
             "orientifold_requested" => false),
-        "selection_manifest" => Dict{String,Any}("path" => MANIFEST, "sha256" => MANIFEST_SHA256),
+        "selection_manifest" => Dict{String,Any}(
+            "path" => basename(MANIFEST), "sha256" => MANIFEST_SHA256),
         "audit_evidence" => Dict{String,Any}("jsonl_path" => AUDIT_JSONL, "jsonl_sha256" => sha256_file(AUDIT_JSONL), "report_path" => AUDIT_MD, "report_sha256" => sha256_file(AUDIT_MD)),
         "field_classifications" => classify_fields(),
         "approved_conventions" => Dict{String,Any}("units" => UNITS, "normalization" => NORMALIZATION, "phase_convention" => PHASE, "spd_tolerance" => SPD_TOLERANCE, "certificate_precision_bits" => CERTIFICATE_PRECISION_BITS, "source_numeric_type" => SOURCE_NUMERIC_TYPE, "source_precision_bits" => SOURCE_PRECISION_BITS, "target_numeric_type" => TARGET_NUMERIC_TYPE, "target_precision_bits" => TARGET_PRECISION_BITS, "relative_conversion_tolerance" => CONVERSION_TOLERANCE, "absolute_metric_conversion_tolerance" => CONVERSION_TOLERANCE, "conversion_policy_version" => CONVERSION_POLICY_VERSION, "kinv_conversion_acceptance" => KINV_CONVERSION_RULE, "stored_QL_reference_tolerance" => QL_TOLERANCE),
@@ -486,7 +494,7 @@ function main()
     complete_diff_hash = sha256_bytes(read(`git -C $WORKTREE diff --binary HEAD`))
     common_payload = policy_payload(source_hash_map, complete_diff_hash)
     common_digest = sha256_bytes(Vector{UInt8}(codeunits(json_value(common_payload))))
-    policy = Dict{String,Any}("schema" => "physical-scaling-pilot-policy-v1", "policy_version" => GATE_POLICY_VERSION, "created_at_utc" => "2026-08-25", "common_configuration_payload" => common_payload, "common_configuration_digest_sha256" => common_digest, "source_identity" => Dict("required_commit" => REQUIRED_COMMIT, "required_branch" => REQUIRED_BRANCH, "current_complete_git_diff_sha256" => complete_diff_hash, "source_file_hashes" => source_hash_map, "historical_generator_sha256" => HISTORICAL_GENERATOR_SHA256, "selection_manifest_sha256" => MANIFEST_SHA256, "audit_jsonl_sha256" => sha256_file(AUDIT_JSONL), "audit_report_sha256" => sha256_file(AUDIT_MD)), "fixed_inputs" => Dict("selection_manifest" => MANIFEST, "selection_manifest_sha256" => MANIFEST_SHA256, "geometry_count" => 18, "h11_values" => [5,6,7,8,9,10], "polytopes_per_h11" => 3, "orientifold_requested" => false, "scale_grid" => ["0.9","0.95","0.99","1.0","1.01","1.05","1.1"]), "resource_limits" => Dict("maximum_resident_bytes" => 2000000000, "maximum_new_output_bytes" => 2000000000, "one_geometry_at_a_time" => true, "atomic_checkpoint_after_each_geometry" => true, "idempotent_resume" => true), "field_classification_policy" => "legacy audit statuses are preserved verbatim in every sidecar; approved pilot conventions are recorded in a separate object", "control_gate_policy" => "not_established is allowed for diagnostic calculation but blocks viability/production/validated-candidate claims", "scale_calculation_started" => false)
+    policy = Dict{String,Any}("schema" => "physical-scaling-pilot-policy-v1", "policy_version" => GATE_POLICY_VERSION, "created_at_utc" => "2026-08-25", "common_configuration_payload" => common_payload, "common_configuration_digest_sha256" => common_digest, "source_identity" => Dict("required_commit" => REQUIRED_COMMIT, "required_branch" => REQUIRED_BRANCH, "current_complete_git_diff_sha256" => complete_diff_hash, "source_file_hashes" => source_hash_map, "historical_generator_sha256" => HISTORICAL_GENERATOR_SHA256, "selection_manifest_sha256" => MANIFEST_SHA256, "audit_jsonl_sha256" => sha256_file(AUDIT_JSONL), "audit_report_sha256" => sha256_file(AUDIT_MD)), "fixed_inputs" => Dict("selection_manifest" => basename(MANIFEST), "selection_manifest_sha256" => MANIFEST_SHA256, "geometry_count" => 18, "h11_values" => [5,6,7,8,9,10], "polytopes_per_h11" => 3, "orientifold_requested" => false, "scale_grid" => ["0.9","0.95","0.99","1.0","1.01","1.05","1.1"]), "resource_limits" => Dict("maximum_resident_bytes" => 2000000000, "maximum_new_output_bytes" => 2000000000, "one_geometry_at_a_time" => true, "atomic_checkpoint_after_each_geometry" => true, "idempotent_resume" => true), "field_classification_policy" => "legacy audit statuses are preserved verbatim in every sidecar; approved pilot conventions are recorded in a separate object", "control_gate_policy" => "not_established is allowed for diagnostic calculation but blocks viability/production/validated-candidate claims", "scale_calculation_started" => false)
     policy_json = json_value(policy) * "\n"
     atomic_write(POLICY_PATH, policy_json)
     atomic_write(POLICY_SHA_PATH, string(bytes2hex(sha256(Vector{UInt8}(codeunits(policy_json)))), "  ", basename(POLICY_PATH), "\n"))

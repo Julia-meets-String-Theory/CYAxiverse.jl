@@ -84,7 +84,7 @@ approval:
 ```sh
 PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 OMP_NUM_THREADS=1 \
 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python -B \
+"$CYAXIVERSE_PYTHON" -B \
   scripts/generate_general_l_action_source.py \
   --parquet-dir /frozen/calabi-yau-data/polytopes-4d \
   --output-root /fresh/general-l-source \

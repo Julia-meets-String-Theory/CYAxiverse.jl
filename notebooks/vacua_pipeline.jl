@@ -19,8 +19,9 @@ end
 # ╔═╡ 24cd43c0-d41a-435a-8328-587ae4141bc1
 begin
     using Pkg
-    Pkg.activate(joinpath(@__DIR__, "..", "notebooks"))
-    ENV["PYTHON"] = "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python"
+    Pkg.activate(@__DIR__)
+    cyaxiverse_python = strip(get(ENV, "CYAXIVERSE_PYTHON", ""))
+    isempty(cyaxiverse_python) || (ENV["PYTHON"] = cyaxiverse_python)
 end
 
 # ╔═╡ 3fcb377e-8cf6-11f1-be4d-5518d6c7b2b0

@@ -41,14 +41,72 @@ if _FULL
     include(joinpath(@__DIR__, "axion_photon.jl"))
 end
 
+@testset "Slurm log directory resolution" begin
+    old_job_id = get(ENV, "SLURM_JOB_ID", nothing)
+    old_array_id = get(ENV, "SLURM_ARRAY_TASK_ID", nothing)
+    old_submit_dir = get(ENV, "SLURM_SUBMIT_DIR", nothing)
+    old_log_dir = get(ENV, "CYAXIVERSE_SLURM_LOG_DIR", nothing)
+    try
+        ENV["SLURM_JOB_ID"] = "42"
+        delete!(ENV, "SLURM_ARRAY_TASK_ID")
+        delete!(ENV, "SLURM_SUBMIT_DIR")
+        delete!(ENV, "CYAXIVERSE_SLURM_LOG_DIR")
+        wrapper = Module(:SlurmPathResolutionTest)
+        Base.include(wrapper, joinpath(@__DIR__, "..", "src", "slurm.jl"))
+        slurm_module = getfield(wrapper, :slurm)
+        @test_throws ArgumentError Base.invokelatest(slurm_module.slurm_log_dir)
+        mktempdir() do root
+            ENV["SLURM_SUBMIT_DIR"] = root
+            @test Base.invokelatest(slurm_module.slurm_log_dir) == root
+            first_path = Base.invokelatest(slurm_module.writeslurm, 7, "first\n")
+            @test first_path == joinpath(root, "slurm-7.out")
+            @test read(first_path, String) == "first\n"
+
+            configured = joinpath(root, "configured")
+            ENV["CYAXIVERSE_SLURM_LOG_DIR"] = configured
+            second_path = Base.invokelatest(slurm_module.writeslurm, "7_2", "second\n")
+            @test second_path == joinpath(configured, "slurm-7_2.out")
+            @test read(second_path, String) == "second\n"
+        end
+    finally
+        old_job_id === nothing ? delete!(ENV, "SLURM_JOB_ID") :
+            (ENV["SLURM_JOB_ID"] = old_job_id)
+        old_array_id === nothing ? delete!(ENV, "SLURM_ARRAY_TASK_ID") :
+            (ENV["SLURM_ARRAY_TASK_ID"] = old_array_id)
+        old_submit_dir === nothing ? delete!(ENV, "SLURM_SUBMIT_DIR") :
+            (ENV["SLURM_SUBMIT_DIR"] = old_submit_dir)
+        old_log_dir === nothing ? delete!(ENV, "CYAXIVERSE_SLURM_LOG_DIR") :
+            (ENV["CYAXIVERSE_SLURM_LOG_DIR"] = old_log_dir)
+    end
+end
+
+if _FULL; @testset "Phase-3 driver data-directory configuration" begin
+    old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
+    try
+        delete!(ENV, "CYAXIVERSE_DATA_DIR")
+        @test_throws ArgumentError _phase3_cli_data_dir(String[])
+        @test_throws ArgumentError _phase3_cli_data_dir(["one", "two"])
+        mktempdir() do root
+            @test _phase3_cli_data_dir([root]) == root
+            ENV["CYAXIVERSE_DATA_DIR"] = root
+            @test _phase3_cli_data_dir(String[]) == root
+        end
+    finally
+        old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
+            (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+    end
+end; end
+
 @testset "Data directory resolution" begin
     filestructure = CYAxiverse.filestructure
     expected_default = normpath(joinpath(@__DIR__, "..", "..", "data"))
     old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
     old_newargs = get(ENV, "newARGS", nothing)
+    old_vacua_test = get(ENV, "CYAXIVERSE_DATA_DIR_VACUA_TEST", nothing)
     try
         delete!(ENV, "CYAXIVERSE_DATA_DIR")
         delete!(ENV, "newARGS")
+        delete!(ENV, "CYAXIVERSE_DATA_DIR_VACUA_TEST")
         @test filestructure.default_data_dir() == expected_default
         @test filestructure.resolve_data_dir() == expected_default
 
@@ -63,11 +121,17 @@ end
         @test_throws ArgumentError filestructure.resolve_data_dir()
         ENV["newARGS"] = "docker"
         @test filestructure.resolve_data_dir() == "/scratch/database"
+        ENV["newARGS"] = "vacua_test"
+        @test_throws ArgumentError filestructure.resolve_data_dir()
+        ENV["CYAXIVERSE_DATA_DIR_VACUA_TEST"] = "/tmp/vacua-testing"
+        @test filestructure.resolve_data_dir() == "/tmp/vacua-testing"
     finally
         old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
             (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         old_newargs === nothing ? delete!(ENV, "newARGS") :
             (ENV["newARGS"] = old_newargs)
+        old_vacua_test === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR_VACUA_TEST") :
+            (ENV["CYAXIVERSE_DATA_DIR_VACUA_TEST"] = old_vacua_test)
     end
 end
 

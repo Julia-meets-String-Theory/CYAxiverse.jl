@@ -29,11 +29,9 @@ inherited-orientifold trilayer sector, `h11₋ = 0` and `h21₊ = 0`.
   ```
 
 - Loading `CYAxiverse` for the Julia spectrum, vacua, and inflation paths does
-  **not** require Python. Set `ENV["PYTHON"]` to a CYTools-enabled interpreter
-  only for the optional CYTools/PyCall geometry-generation front half. On a
-  typical macOS install the CYTools interpreter is a dedicated conda
-  environment, for example
-  `/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python`.
+  **not** require Python. Set `CYAXIVERSE_PYTHON` to the Python executable in a
+  CYTools-enabled environment only for the optional CYTools/PyCall geometry-
+  generation front half. Do not commit a machine-specific interpreter path.
 
 - Select the geometry database with `CYAXIVERSE_DATA_DIR` (or the `--data-dir`
   option that the batch scripts accept). See the
@@ -177,7 +175,7 @@ sector counts of Sheridan et al. (arXiv:2412.12012), Table 1: 11, 66, 267, and
 
 ```sh
 # Step A–C: build the geometry files for one physical h11
-/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python \
+"$CYAXIVERSE_PYTHON" \
     scripts/build_orientifold_axion_database.py --h11 3 \
     --parquet-dir /path/to/ks-mirror \
     --ledger-population-dir /path/to/preserved_population \

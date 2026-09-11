@@ -209,7 +209,6 @@ print(json.dumps(payload, allow_nan=True, separators=(",", ":")))
         choices = String[]
         configured = get(ENV, "CYAXIVERSE_PYTHON", "")
         isempty(configured) || push!(choices, configured)
-        push!(choices, "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python")
         push!(choices, "python3")
         for choice in choices
             try

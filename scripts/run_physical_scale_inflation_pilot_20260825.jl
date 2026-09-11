@@ -35,10 +35,19 @@ const OLD_QUARANTINE_FAILURE_REASON =
 const CURRENT_QUARANTINE_FAILURE_REASON =
     "uncheckpointed header-only partial from lazy-transpose array-hash failure"
 
-const WORKTREE = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl.worktrees/physical-scale-inflation-20260825"
-const DATA_ROOT = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data"
-const PROJECT_ROOT = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl"
-const SELECTION_MANIFEST = "/private/tmp/cyax-inflation-physical-scale-pilot-20260825/selection_manifest.json"
+function _physical_pilot_required_path(variable::AbstractString)
+    value = strip(get(ENV, variable, ""))
+    isempty(value) && error("$variable must name an existing input path")
+    normpath(abspath(expanduser(value)))
+end
+
+const WORKTREE = normpath(abspath(get(
+    ENV, "CYAXIVERSE_PILOT_REPOSITORY", joinpath(@__DIR__, ".."))))
+const DATA_ROOT = _physical_pilot_required_path("CYAXIVERSE_DATA_DIR")
+const PROJECT_ROOT = normpath(abspath(get(
+    ENV, "CYAXIVERSE_PROJECT_ROOT", WORKTREE)))
+const SELECTION_MANIFEST = _physical_pilot_required_path(
+    "CYAXIVERSE_PHYSICAL_SCALE_MANIFEST")
 const SELECTION_SHA256 = "a6df5dca258c11724d4162477cdee7cc34e5802f2f3f296a7ea64b55f23c3247"
 const REQUIRED_COMMIT = "9f31d716eaab8d63d3f76826a40de5ae38c7015d"
 const REQUIRED_BRANCH = "agents/physical-scale-inflation-20260825"

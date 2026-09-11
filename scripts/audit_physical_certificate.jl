@@ -7,7 +7,7 @@ streams one HDF5 file at a time, verifies the fixed selection identity, checks
 the stored potential orientation/formula, reconstructs only algebraic fields
 whose source formula is explicit, and writes an atomic JSONL audit report.
 
-The audit uses HDF5 only for inspection.  The worktree's uninstantiated
+The audit uses HDF5 only for inspection.  The repository's uninstantiated
 Project.toml is not modified and no dependency is installed or fetched.
 """
 
@@ -16,15 +16,24 @@ using LinearAlgebra
 using SHA
 using Printf
 
-const WORKTREE = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl.worktrees/physical-scale-inflation-20260825"
-const DATA_ROOT = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data"
-const MANIFEST = "/private/tmp/cyax-inflation-physical-scale-pilot-20260825/selection_manifest.json"
+function required_path_environment(variable::AbstractString)
+    value = strip(get(ENV, variable, ""))
+    isempty(value) && error("$variable must name an existing audit input path")
+    normpath(abspath(expanduser(value)))
+end
+
+const WORKTREE = normpath(abspath(get(
+    ENV, "CYAXIVERSE_AUDIT_REPOSITORY", joinpath(@__DIR__, ".."))))
+const DATA_ROOT = required_path_environment("CYAXIVERSE_DATA_DIR")
+const MANIFEST = required_path_environment("CYAXIVERSE_AUDIT_MANIFEST")
 const MANIFEST_SHA256 = "a6df5dca258c11724d4162477cdee7cc34e5802f2f3f296a7ea64b55f23c3247"
 const REQUIRED_COMMIT = "9f31d716eaab8d63d3f76826a40de5ae38c7015d"
 const REQUIRED_BRANCH = "agents/physical-scale-inflation-20260825"
-const OUTPUT_JSONL = joinpath(WORKTREE, "validation/physical_evidence_audit_20260825.jsonl")
-const OUTPUT_ZST = joinpath(WORKTREE, "validation/physical_evidence_audit_20260825.jsonl.zst")
-const OUTPUT_MD = joinpath(WORKTREE, "validation/physical_evidence_audit_20260825.md")
+const OUTPUT_DIR = normpath(abspath(get(
+    ENV, "CYAXIVERSE_AUDIT_OUTPUT_DIR", joinpath(WORKTREE, "validation"))))
+const OUTPUT_JSONL = joinpath(OUTPUT_DIR, "physical_evidence_audit_20260825.jsonl")
+const OUTPUT_ZST = joinpath(OUTPUT_DIR, "physical_evidence_audit_20260825.jsonl.zst")
+const OUTPUT_MD = joinpath(OUTPUT_DIR, "physical_evidence_audit_20260825.md")
 const ALLOWED_UNTRACKED = Set([
     "scripts/audit_physical_certificate.jl",
     "validation/physical_evidence_audit_20260825.jsonl",
@@ -243,11 +252,22 @@ function parse_selection_manifest()
 end
 
 function expected_relative_path(path::AbstractString)
-    path = String(path)
-    prefix = string(DATA_ROOT, "/")
-    startswith(path, prefix) || error("manifest path is outside the data root: $path")
-    relative = path[length(prefix) + 1:end]
-    normpath(joinpath(DATA_ROOT, relative)) == path || error("manifest path is not canonical: $path")
+    supplied = String(path)
+    if isabspath(supplied)
+        canonical = normpath(supplied)
+        prefix = string(DATA_ROOT, Base.Filesystem.path_separator)
+        startswith(canonical, prefix) || error(
+            "manifest path is outside the configured data root")
+        relative = relpath(canonical, DATA_ROOT)
+    else
+        relative = normpath(supplied)
+    end
+    isabspath(relative) && error("manifest path must resolve beneath the data root")
+    (relative == ".." || startswith(
+        relative, string("..", Base.Filesystem.path_separator))) &&
+        error("manifest path escapes the configured data root")
+    normpath(joinpath(DATA_ROOT, relative)) != DATA_ROOT ||
+        error("manifest path must identify an input below the data root")
     relative
 end
 
@@ -268,6 +288,7 @@ function validate_selection_manifest(metadata, entries)
         entry["h11"] == expected_h11 || error("manifest h11 mismatch for $relative")
         entry["polytope"] == expected_polytope || error("manifest polytope index mismatch for $relative")
         entry["orientifold_requested"] == false || error("manifest input is not explicitly non-orientifold: $relative")
+        entry["path"] = relative
         by_relative[relative] = entry
     end
     Set(keys(by_relative)) == Set(keys(EXPECTED_SHA256)) || error("manifest paths do not exactly match the fixed input set")
@@ -377,10 +398,12 @@ end
 
 function audit_one(relative_path, expected_hash, manifest_entry, repository_state)
     path = joinpath(DATA_ROOT, relative_path)
-    manifest_entry["path"] == path || error("manifest path binding mismatch for $relative_path")
+    manifest_entry["path"] == relative_path || error("manifest path binding mismatch for $relative_path")
     actual_hash = sha256_file(path)
-    actual_hash == expected_hash || error("input hash mismatch for $path: $actual_hash != $expected_hash")
-    manifest_entry["sha256"] == actual_hash || error("manifest artifact hash binding mismatch for $path")
+    actual_hash == expected_hash || error(
+        "input hash mismatch for $relative_path: $actual_hash != $expected_hash")
+    manifest_entry["sha256"] == actual_hash || error(
+        "manifest artifact hash binding mismatch for $relative_path")
     bytes = filesize(path)
     h11 = parse(Int, match(r"h11_(\d+)", relative_path).captures[1])
     polytope = parse(Int, match(r"np_(\d+)", relative_path).captures[1])
@@ -391,7 +414,7 @@ function audit_one(relative_path, expected_hash, manifest_entry, repository_stat
 
     record = Dict{String,Any}(
         "audit_schema" => "cyaxiverse-physical-evidence-audit-1",
-        "geometry_path" => path,
+        "geometry_path" => relative_path,
         "relative_path" => relative_path,
         "h11" => h11,
         "polytope_index" => polytope,
@@ -583,6 +606,7 @@ function main()
         mv(temporary, path; force=true)
     end
     jsonl = join((json_value(record) for record in records), "\n") * "\n"
+    mkpath(OUTPUT_DIR)
     atomic_write(OUTPUT_JSONL, jsonl)
     atomic_zstd(OUTPUT_JSONL, OUTPUT_ZST)
     elapsed_seconds = time() - started
@@ -647,7 +671,7 @@ function main()
     println(summary, "- Historical generator source SHA-256 at `770b09b7e503ccf01202b1ec2212149c7bd50a5`: `", HISTORICAL_GENERATOR_SHA256, "`.")
     println(summary, "- Committed continuation source SHA-256: `", CONTINUATION_SOURCE_SHA256, "`.")
     println(summary, "- Derivation ledger SHA-256: `", DERIVATION_LEDGER_SHA256, "`.")
-    println(summary, "- Reproduction command: `julia --startup-file=no --project=/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl scripts/audit_physical_certificate.jl`.")
+    println(summary, "- Reproduction command: `CYAXIVERSE_DATA_DIR=/path/to/data CYAXIVERSE_AUDIT_MANIFEST=/path/to/selection_manifest.json julia --startup-file=no --project=. scripts/audit_physical_certificate.jl`.")
     println(summary, "- Verification passed: repository HEAD/branch/tracked-status guard; strict manifest parsing and 18-entry binding; 18/18 artifact hashes; HDF5 dataset/metadata checks; raw Kinv asymmetry measurement before symmetrization; effective-volume and Kähler-margin reconstructions; charge orientation and pair-order checks; Q/L diagnostics with explicit `1e-10` existing tolerance and statuses; canonical basis values/hashes; JSONL parsing; `gzip -t`; and `git diff --check`.")
     println(summary, "- The run read the neighboring cached Julia environment only; it did not install or fetch dependencies, write source/input files, evaluate inflation or scales, compute orientifolds, generate geometry, expand the population, or create a database.")
     println(summary)

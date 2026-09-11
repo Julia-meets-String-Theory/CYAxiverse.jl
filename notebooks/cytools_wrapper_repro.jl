@@ -6,8 +6,9 @@ using InteractiveUtils
 # ╔═╡ 8ef9d8b7-f1eb-4b0d-8c7a-4dd40391d7de
 begin
     import Pkg
-    Pkg.activate(joinpath(@__DIR__, "..", "notebooks"))
-    ENV["PYTHON"] = "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python"
+    Pkg.activate(@__DIR__)
+    cyaxiverse_python = strip(get(ENV, "CYAXIVERSE_PYTHON", ""))
+    isempty(cyaxiverse_python) || (ENV["PYTHON"] = cyaxiverse_python)
     using LinearAlgebra
     using HDF5
     using CYAxiverse
