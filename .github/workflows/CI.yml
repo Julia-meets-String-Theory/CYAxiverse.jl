@@ -11,6 +11,7 @@ on:
       - 'ext/**'
       - 'test/**'
       - 'scripts/**'
+      - 'notebooks/**'
       - 'add_functions/**'
       - 'jlm_python/**'
       - 'bin/**'
@@ -43,6 +44,8 @@ jobs:
           arch: x64
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
+      - name: Instantiate notebook environment
+        run: julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
       - uses: julia-actions/julia-runtest@v1
 
   full:
@@ -64,6 +67,8 @@ jobs:
           arch: x64
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
+      - name: Instantiate notebook environment
+        run: julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
       - name: Run package tests
         uses: julia-actions/julia-runtest@v1
       - name: Job summary

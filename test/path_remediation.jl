@@ -70,12 +70,28 @@ function _run_notebook_initialization_smoke(path::AbstractString, source::Abstra
         class Cone:
             pass
         """)
+        synthetic_scipy = repr("""
+        from . import optimize
+        """)
+        synthetic_integrate = repr("""
+        def solve_ivp(*args, **kwargs):
+            raise RuntimeError("synthetic scipy.solve_ivp must not run during initialization")
+        """)
+        synthetic_optimize = repr("""
+        def root(*args, **kwargs):
+            raise RuntimeError("synthetic scipy.optimize.root must not run during initialization")
+        """)
         """
         mktempdir() do synthetic_python_root
             synthetic_cytools_dir = joinpath(synthetic_python_root, "cytools")
+            synthetic_scipy_dir = joinpath(synthetic_python_root, "scipy")
             mkpath(synthetic_cytools_dir)
+            mkpath(synthetic_scipy_dir)
             write(joinpath(synthetic_cytools_dir, "config.py"), $synthetic_config)
             write(joinpath(synthetic_cytools_dir, "__init__.py"), $synthetic_package)
+            write(joinpath(synthetic_scipy_dir, "__init__.py"), $synthetic_scipy)
+            write(joinpath(synthetic_scipy_dir, "integrate.py"), $synthetic_integrate)
+            write(joinpath(synthetic_scipy_dir, "optimize.py"), $synthetic_optimize)
             ENV["PYTHONPATH"] = string(
                 synthetic_python_root,
                 Sys.iswindows() ? ";" : ":",
