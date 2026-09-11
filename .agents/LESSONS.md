@@ -365,8 +365,10 @@ Root cause: The packet lacked explicit operational bounds and fallback triggers.
 
 Preventive rule / check: Reject a packet that omits any required contract field.
 Verify that its fallback policy is ordered and product-neutral without encoding a
-concrete/current sequence. Renew authorization only when the task boundary,
-topology, or impact scope changes.
+concrete/current sequence. Renew owner authorization only for a material change
+to any authorized scope or term. Ordinary diagnose/edit/check/correct/recheck
+loops and use of an already approved fallback or worker-reuse policy remain
+authorized.
 
 Applicability / exceptions: Applies to multi-agent and handoff-based work where
 worker-level reuse is expected. Single-agent work without handoff may use a lighter
@@ -410,10 +412,11 @@ Applicability / exceptions: Applies to workflows using explicit worker return
 contracts and observed execution results. Internal planning notes may be prepared
 before execution and do not by themselves move execution state.
 
-Evidence / durable reference: Repository sources, including `AGENTS.md` section 6
-and orchestration sections 2, 5, 7, and 8, cover adjacent downstream
-orchestration mechanisms only. This sanitized candidate has no cited public
-incident proof.
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration section 3
+provide adjacent support only for the later phase-2 `DONE`, `BLOCKED`, `FAILED`
+worker-return contract. These sources do not prove the phase-1 incident or
+define handoff-operation result semantics. This sanitized candidate has no
+cited public incident proof.
 
 Superseded by: N/A
 Promotion status: not promoted
