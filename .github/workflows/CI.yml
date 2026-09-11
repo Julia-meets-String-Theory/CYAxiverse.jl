@@ -45,7 +45,11 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - name: Instantiate notebook environment
-        run: julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
+          git diff --exit-code -- notebooks/Project.toml notebooks/Manifest.toml
       - uses: julia-actions/julia-runtest@v1
 
   full:
@@ -68,7 +72,11 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - name: Instantiate notebook environment
-        run: julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
+          git diff --exit-code -- notebooks/Project.toml notebooks/Manifest.toml
       - name: Run package tests
         uses: julia-actions/julia-runtest@v1
       - name: Job summary
