@@ -5,10 +5,11 @@
 Canonical specification:
 `specs/0148-catastrophe-continuation/spec.md`
 
-Spec revision used to derive this plan: originally
+Spec revision used to derive this plan:
+`c013d4c7dae14b21c1bac7b7a40bac7dd8aab304` (G2/G3 acceptance refresh).
+Original migration-cutoff spec revision:
 `eff7798ca65f932a0c6cf635bca7f49f4c5d4517` (P96-fidelity-corrected brownfield
-migration revision); updated to incorporate post-cutoff G2 and G3 acceptance
-evidence from PR #149.
+migration revision).
 
 Approval state: **draft / owner approval pending**. This plan does not authorize
 new scientific behavior while the governing S2 specification remains draft.
