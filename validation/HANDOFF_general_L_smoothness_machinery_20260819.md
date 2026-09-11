@@ -198,8 +198,7 @@ counts — run the fixture, read the number, comment the physics/source line).
 ## 7. Setup, run, gotchas
 
 ```bash
-cd /Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse-orientifold-overcount
-source /opt/homebrew/Caskroom/miniforge/base/etc/profile.d/conda.sh
+cd /path/to/CYAxiverse.jl
 conda activate cytools     # use `python`, NOT python3; pytest not installed, use `python -m unittest`
 ```
 
@@ -207,7 +206,7 @@ conda activate cytools     # use `python`, NOT python3; pytest not installed, us
 python scripts/reproduce_fuzzy_axions_h11_4.py --h11 3 \
   --parquet-dir /private/tmp/cyax-ks-mirror-h11-4 \
   --orientifold-audit --keep-details \
-  --julia-binary /Users/vmehta/.juliaup/bin/julia --output out.json
+  --julia-binary "$(command -v julia)" --output out.json
 ```
 
 - Runtimes (full pop): h11=2 ~20 s, h11=3 ~70 s, h11=4 ~2 min, h11=5 ~5 min.

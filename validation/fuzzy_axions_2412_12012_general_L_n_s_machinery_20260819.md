@@ -65,10 +65,10 @@ h11=5 was not run in this validation pass.
 Focused checks:
 
 ```text
-source /opt/homebrew/Caskroom/miniforge/base/etc/profile.d/conda.sh && conda activate cytools && PYTHONDONTWRITEBYTECODE=1 python scripts/test_inherited_orientifold_candidates.py
+conda activate cytools && PYTHONDONTWRITEBYTECODE=1 python scripts/test_inherited_orientifold_candidates.py
 Ran 21 tests in 1.519s — OK
 
-source /opt/homebrew/Caskroom/miniforge/base/etc/profile.d/conda.sh && conda activate cytools && PYTHONDONTWRITEBYTECODE=1 python scripts/test_h21_plus_zero_fixed_locus.py
+conda activate cytools && PYTHONDONTWRITEBYTECODE=1 python scripts/test_h21_plus_zero_fixed_locus.py
 Ran 1 test in 0.808s — OK
 ```
 
@@ -80,7 +80,7 @@ python scripts/reproduce_fuzzy_axions_h11_4.py --h11 3 ... --orientifold-audit .
 python scripts/reproduce_fuzzy_axions_h11_4.py --h11 4 ... --orientifold-audit ...
 ```
 
-Each CYTools process emitted the same non-fatal exit warning while trying to save its cache under `/Users/vmehta/Library/Caches/CYTools/`; the sandbox denied that cache write. The audit JSON files were successfully written to `/private/tmp` and their counts were read after completion.
+Each CYTools process emitted the same non-fatal exit warning while trying to save its local cache; the sandbox denied that cache write. The audit JSON files were successfully written to the configured temporary output directory and their counts were read after completion.
 
 ## Residual and next boundary
 

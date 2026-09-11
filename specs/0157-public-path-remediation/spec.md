@@ -43,6 +43,14 @@ When a path string participates in a manifest or generated evidence digest,
 the artifact must be regenerated and its dependent hashes reconciled rather
 than hand-edited. Path-only digest changes must be identified as such.
 
+If faithful regeneration is impossible because a required bound input is no
+longer available, the scientific owner may approve retirement of the complete
+bound evidence set. Retirement must remove the set from the current validation
+surface, preserve path-free artifact identities and hashes in a ledger, mark
+the scientific claims as withdrawn, and require a new evidence version for any
+future replacement. The owner approved this route on 2026-09-10 for the
+2026-08-25 physical-scaling evidence set.
+
 ### R-004 — Preserve operational compatibility deliberately
 
 Legacy data aliases may remain, but personal values must move to deployment-
@@ -78,6 +86,7 @@ has identified the genuine history-only residue.
 | R-001 | Edit the confirmed Issue, PR, and comment bodies using the approved path-free wording | Read back every edited GitHub object and run a path-pattern scan over its current text |
 | R-002, R-004 | Replace tracked personal defaults in `src/`, scripts, notebooks, and docs with explicit arguments, environment variables, or repository-relative resolution | Focused data-directory, Slurm-log, CLI, and optional-Python tests; notebook smoke checks; docs build |
 | R-003 | Preserve hashes and scientific identifiers; regenerate any path-bearing, hash-bound evidence as one consistent set | Diff review of scientific values and schemas; bounded replay where an executable scientific driver changes configuration |
+| R-003 owner-approved fallback | Retire the complete unavailable 2026-08-25 bound evidence set and add path-free Markdown and JSON retirement ledgers | Verify the ledger covers every removed artifact, reproduces its pre-retirement SHA-256 and Git blob identity, and makes no active scientific claim |
 | R-005 | Scan every current public branch and discussion surface, then classify stale refs before deletion | Branch reachability/PR-status inventory plus a clean post-remediation live-surface scan |
 
 ## Acceptance

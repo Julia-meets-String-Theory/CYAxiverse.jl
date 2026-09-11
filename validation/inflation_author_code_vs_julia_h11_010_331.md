@@ -15,7 +15,7 @@ implementations:
 The replay command is:
 
 ```sh
-CYAXIVERSE_DATA_DIR=/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data \
+CYAXIVERSE_DATA_DIR=/path/to/data \
 julia --project=. validation/inflation_author_code_vs_julia_h11_010_331.jl
 ```
 

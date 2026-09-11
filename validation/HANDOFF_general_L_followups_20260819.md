@@ -155,8 +155,7 @@ Run the following gates after each coherent change:
 Use the local `cytools` environment and `python`, not `python3` or pytest:
 
 ```bash
-cd /Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse-orientifold-overcount
-source /opt/homebrew/Caskroom/miniforge/base/etc/profile.d/conda.sh
+cd /path/to/CYAxiverse.jl
 conda activate cytools
 PYTHONDONTWRITEBYTECODE=1 python scripts/test_inherited_orientifold_candidates.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/test_h21_plus_zero_fixed_locus.py
@@ -164,7 +163,7 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/reproduce_fuzzy_axions_h11_4.py \
   --h11 3 \
   --parquet-dir /private/tmp/cyax-ks-mirror-h11-4 \
   --orientifold-audit --keep-details \
-  --julia-binary /Users/vmehta/.juliaup/bin/julia \
+  --julia-binary "$(command -v julia)" \
   --output /private/tmp/cyax-orientifold-followup-h11-3.json
 ```
 
