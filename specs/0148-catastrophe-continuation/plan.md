@@ -6,6 +6,9 @@ Canonical specification:
 `specs/0148-catastrophe-continuation/spec.md`
 
 Spec revision used to derive this plan:
+`87cec4d3bb26e7e8c3d2f74321219078a8935e06` (G2 candidate sequence and G3
+file-attribution corrections).
+Prior refreshed spec revision:
 `c013d4c7dae14b21c1bac7b7a40bac7dd8aab304` (G2/G3 acceptance refresh).
 Original migration-cutoff spec revision:
 `eff7798ca65f932a0c6cf635bca7f49f4c5d4517` (P96-fidelity-corrected brownfield
