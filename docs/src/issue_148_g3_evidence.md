@@ -1,5 +1,9 @@
 # Issue 148 G3 local-control evidence
 
+> **Superseded.** The numerical diagnostics and status language in this
+> revision were corrected by `docs/src/issue_148_g3_repair_evidence.md` at the
+> repair implementation recorded there.
+
 This record covers the bounded G3 implementation after the prerequisite audit.
 It is revision-specific evidence for fresh review; it does not promote the
 accepted G2 radial event to `:fold` or `:cusp`, and it does not make a global
