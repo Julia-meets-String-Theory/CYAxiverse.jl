@@ -29,23 +29,30 @@ a diary, transcript archive, or second authority system.
 
 `AGENTS.md` is the repository constitution. CYAX-0151 and its approved
 amendments define the SDD contract, while CYAX-0155 defines the privacy boundary
-for durable material derived from private or local context. The registry is
-subordinate to those sources:
+for durable material derived from private or local context. CYAX-0151's
+authority order remains unchanged:
 
 ```text
-AGENTS.md
+AGENTS.md + relevant CYAxiverse skill
     ↓
-approved governing spec.md
+approved feature spec.md
     ↓
-applicable validated lessons
+plan.md
     ↓
-plan.md / tasks.md / implementation workflow
+tasks.md
+    ↓
+GitHub Issue / Project
+    ↓
+implementation
 ```
 
-Candidate lessons are advisory proposals. No lesson can override `AGENTS.md` or
-an approved governing spec, and the registry does not own GitHub merge, Issue,
-Project, review, or scientific-acceptance state. This draft does not assert an
-approval reference; Issue #159 is the governing intake object.
+Applicable validated lessons are cross-cutting advisory inputs consulted after
+the governing sources are known and before planning or implementation; they are
+not another authority tier. Candidate lessons are advisory proposals. No lesson
+can override any artifact in the approved hierarchy, and the registry does not
+own GitHub merge, Issue, Project, review, or scientific-acceptance state. This
+draft does not assert an approval reference; Issue #159 is the governing intake
+object.
 
 ## Scope
 
@@ -65,7 +72,7 @@ No `plan.md` or `tasks.md` is required for this bounded S1 slice.
 
 | Requirement | Implementation | Acceptance evidence |
 | --- | --- | --- |
-| R-001 Authority and purpose | Registry states the precedence chain, candidate non-authority, GitHub status boundary, and no-diary/no-archive/no-second-ledger limits. | Read `.agents/LESSONS.md`; verify no lesson overrides `AGENTS.md` or an approved spec. |
+| R-001 Authority and purpose | Registry preserves the CYAX-0151 precedence chain, treats validated lessons as advisory inputs, states candidate non-authority, and keeps the GitHub status and no-diary/no-archive/no-second-ledger boundaries. | Read `.agents/LESSONS.md`; verify lessons form no authority tier and override no artifact in the approved hierarchy. |
 | R-002 Durable schema and lifecycle | Each entry uses ID, status, date, type, scope/tags, failure, correction, root cause, preventive check, applicability, evidence, supersession, and promotion fields; lifecycle is candidate → validated → superseded. | Inspect the schema and all six entries; verify candidates are not presented as validated policy. |
 | R-003 Seed lessons | Add exactly L-0001 through L-0006, all `candidate`, dated 2026-09-11, using only durable public repository/GitHub references. | Count six registry entries and review their evidence references and sanitized wording. |
 | R-004 SDD hooks | Applicable S1–S3 work reads applicable validated lessons at start; during work considers sanitized candidates for reusable corrections; close records one of four outcomes while keeping S0 lightweight. | Inspect the canonical skill diff and confirm `.codex/skills/cyaxiverse-sdd` remains its existing symlink mirror. |
@@ -75,13 +82,16 @@ No `plan.md` or `tasks.md` is required for this bounded S1 slice.
 
 ## Registry lifecycle and promotion
 
-The registry stores knowledge only. A candidate becomes validated only after a
-review confirms generalizability, durable evidence, privacy safety, and no
-conflict with higher authority. A superseded lesson remains for historical
-traceability and names its replacement when applicable. Stable or high-impact
-validated lessons may be separately promoted through normal review into
-`AGENTS.md`, the SDD skill, or another normative source; promotion is never
-automatic and does not erase the historical entry.
+The registry stores advisory knowledge only. A candidate becomes validated only
+after a review confirms generalizability, durable evidence, privacy safety, and
+no conflict with the approved hierarchy. A superseded lesson remains for
+historical traceability and names its replacement when applicable. Stable or
+high-impact validated lessons may be separately promoted through normal review
+into `AGENTS.md`, the SDD skill, or another normative source; promotion is never
+automatic. When promotion is approved, the lesson becomes `superseded`, records
+the repository-relative normative destination plus its reviewed revision or
+approval reference, and is no longer applied independently. A narrower lesson
+may replace it if only part of its guidance was promoted.
 
 ## Privacy boundary
 

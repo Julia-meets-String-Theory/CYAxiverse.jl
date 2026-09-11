@@ -8,24 +8,33 @@ to it.
 
 ## Authority and use
 
-The authority order is:
+CYAX-0151's authority order remains unchanged:
 
 ```text
-AGENTS.md
+AGENTS.md + relevant CYAxiverse skill
     ↓
-approved governing spec.md
+approved feature spec.md
     ↓
-applicable validated lessons
+plan.md
     ↓
-plan.md / tasks.md / implementation workflow
+tasks.md
+    ↓
+GitHub Issue / Project
+    ↓
+implementation
 ```
 
-Lessons never override `AGENTS.md` or an approved governing specification. If
-a lesson conflicts with higher authority, the higher authority wins and the
-lesson should be corrected or superseded. Candidate lessons are proposals,
-not authority, and are not a source of merge, Issue, Project, review, or
-scientific-acceptance state. GitHub Issues, pull requests, and Projects retain
-their existing roles for live work and status.
+Validated lessons are cross-cutting advisory inputs consulted after the
+governing sources are known and before planning or implementation. They are not
+an additional authority tier. Lessons never override `AGENTS.md`, a relevant
+normative skill, an approved governing specification, or another artifact in
+the approved hierarchy. If a lesson conflicts with an authoritative artifact,
+do not silently follow the lesson: reconcile the conflict against the higher
+sources and correct or supersede the lesson or update the appropriate artifact
+through its normal review. Candidate lessons are proposals, not authority, and
+are not a source of merge, Issue, Project, review, or scientific-acceptance
+state. GitHub Issues, pull requests, and Projects retain their existing roles
+for live work and status.
 
 Read only applicable `validated` lessons for the task. Do not require every
 agent to read the complete historical registry.
@@ -44,15 +53,19 @@ candidate → validated → superseded
   represented, privacy-safe, and supported by durable evidence. Validation does
   not promote the lesson into a normative policy.
 - **superseded** retains historical traceability after a reviewed correction,
-  narrower rule, or changed context replaces the lesson. Set `Superseded by`
-  when a replacement exists.
+  narrower lesson, changed context, or normative promotion replaces the
+  lesson. Set `Superseded by` to the replacement lesson or normative source.
 
 The promotion ladder is local observation or correction → candidate → reviewed
 validated lesson → repeated, stable, or high-impact rule → separately
 reviewed promotion to `AGENTS.md`, the SDD skill, or another normative source.
 Promotion requires the normal review and approval for the destination artifact;
-it is never automatic. Keep the lesson's historical entry and update its
-`Promotion status` and lifecycle status when a normative rule is adopted.
+it is never automatic. When a normative source adopts the rule, mark the lesson
+`superseded`, record that repository-relative source and its reviewed revision
+or approval reference in `Superseded by` and `Promotion status`, and stop
+applying the lesson independently. If only part is promoted, replace the
+original with a narrower candidate or validated lesson for any remaining
+guidance. The historical entry remains traceable but inactive.
 
 Owner redirections, private corrections, and local observations are first
 sanitized and abstracted before becoming a candidate. Do not copy raw chat
@@ -77,8 +90,8 @@ Root cause: ... (when known)
 Preventive rule / check: ...
 Applicability / exceptions: ...
 Evidence / durable reference: ...
-Superseded by: L-xxxx | N/A
-Promotion status: not promoted | promoted to <normative source> | N/A
+Superseded by: L-xxxx | <repository-relative normative source + section> | N/A
+Promotion status: not promoted | promoted to <source> at <revision/approval ref>
 ```
 
 ## Seed lessons
