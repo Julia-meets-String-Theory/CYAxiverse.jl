@@ -1830,13 +1830,50 @@ end
 function pilot_benchmark_regression()
     benchmark = CYAxiverse.paper_benchmarks.poly102_inflation
     n5_kc = benchmark.n5_critical_scale()
-    n5_at = benchmark.n5_reduced_critical_points(n5_kc)
+    n5_closed_form_kc = 4 / π * log(1024 / 255)
+    n5_delta_q = 32 - 255 / 8
+    n5_ratio_formula(k::Real) = 1 / 4 * exp(-2π * (k - n5_closed_form_kc) * n5_delta_q)
+    n5_continuation = benchmark.n5_reduced_zero_phase_continuation(
+        Float64[n5_kc - 1.0e-3, n5_kc - 1.0e-5, n5_kc + 1.0e-5, n5_kc + 1.0e-3];
+        seed_theta=Float64(π + 1.0e-3))
+    n5_at_below = benchmark.n5_reduced_critical_points(n5_kc - 1.0e-3)
+    n5_at_above = benchmark.n5_reduced_critical_points(n5_kc + 1.0e-3)
+    n5_catastrophe_index = findfirst(step -> step.catastrophe_detected, n5_continuation)
+    n5_catastrophe_k = n5_catastrophe_index === nothing ? NaN :
+        n5_continuation[n5_catastrophe_index].catastrophe_k
+    n5_catastrophe_hessian = n5_catastrophe_index === nothing ? NaN :
+        n5_continuation[n5_catastrophe_index].catastrophe_hessian
+    n5_catastrophe_residual = n5_catastrophe_index === nothing ? NaN :
+        n5_continuation[n5_catastrophe_index].catastrophe_residual
+    n5_catastrophe_scale_error = n5_catastrophe_index === nothing ? NaN :
+        abs(n5_continuation[n5_catastrophe_index].catastrophe_k - n5_closed_form_kc)
+    n5_catastrophe_matched = n5_catastrophe_index !== nothing &&
+        isfinite(n5_catastrophe_k) &&
+        isfinite(n5_catastrophe_hessian) &&
+        isfinite(n5_catastrophe_residual) &&
+        abs(n5_catastrophe_hessian) <= 1e-10 &&
+        n5_catastrophe_residual <= 1e-10 &&
+        isapprox(n5_catastrophe_k, n5_closed_form_kc; atol=5e-6)
+    n5_reference_theta = n5_catastrophe_index === nothing ? π :
+        n5_continuation[n5_catastrophe_index].catastrophe_theta
+    n5_zero_curvature = (n5_at_below.hessian_sign[argmin(abs.(n5_at_below.theta .- π))] == 1 &&
+        n5_at_above.hessian_sign[argmin(abs.(n5_at_above.theta .- π))] == -1)
     n8_seed = copy(benchmark.N8_BEST_X)
     n8 = benchmark.n8_degenerate_point(n8_seed)
     detuned = CYAxiverse.paper_benchmarks.n8_hilltop(n8.k + 1e-7)
     (; n5_critical_scale=n5_kc,
        n5_ratio=benchmark.n5_reduced_ratio(n5_kc),
-       n5_zero_curvature=n5_at.hessian_sign[2] == 0,
+       n5_closed_form_kc=n5_closed_form_kc,
+       n5_continuation=n5_continuation,
+       n5_catastrophe_k=n5_catastrophe_k,
+       n5_catastrophe_index=n5_catastrophe_index,
+       n5_catastrophe_scale_error=n5_catastrophe_scale_error,
+       n5_catastrophe_hessian=n5_catastrophe_hessian,
+       n5_catastrophe_residual=n5_catastrophe_residual,
+       n5_kc_residual=abs(n5_kc - n5_closed_form_kc),
+       n5_zero_curvature=n5_zero_curvature,
+       n5_minima_below=n5_at_below.minima,
+       n5_minima_above=n5_at_above.minima,
        n8_critical_scale=n8.k,
        n8_gradient_residual=n8.gradient_residual,
        n8_null_residual=n8.null_residual,
@@ -1844,9 +1881,17 @@ function pilot_benchmark_regression()
        n8_positive_heavy_modes=all(>(0), n8.eigenvalues[2:end]),
        n8_detuned_negative_modes=count(<(0), detuned.eigenvalues),
        n8_detuned_eigenvalues=detuned.eigenvalues,
-       passed=isapprox(n5_kc, 0.674506370003365; atol=1e-12) &&
-           isapprox(benchmark.n5_reduced_ratio(n5_kc), 0.25; atol=1e-12) &&
-           n5_at.hessian_sign[2] == 0 && isapprox(n8.k, n5_kc; atol=1e-9) &&
+       passed=isapprox(n5_kc, n5_closed_form_kc; atol=1e-12) &&
+           isapprox(n5_ratio_formula(n5_kc), 0.25; atol=1e-12) &&
+           isapprox(benchmark.n5_reduced_ratio(n5_kc - 1.0e-3),
+               n5_ratio_formula(n5_kc - 1.0e-3); atol=5e-13) &&
+           all(entry -> entry.branch == :pi && entry.converged, n5_continuation) &&
+           all(entry -> isapprox(entry.theta, n5_reference_theta, atol=2e-7), n5_continuation) &&
+           all(entry -> entry.gradient <= 1e-10, n5_continuation) &&
+           n5_catastrophe_matched &&
+           n5_at_below.minima == 2 && n5_at_above.minima == 1 &&
+           n5_zero_curvature &&
+           isapprox(n8.k, benchmark.N8_KC; atol=1e-9) &&
            n8.gradient_residual < 1e-10 && n8.null_residual < 1e-10 &&
            abs(n8.eigenvalues[1]) < 1e-9 && all(>(0), n8.eigenvalues[2:end]) &&
            count(<(0), detuned.eigenvalues) == 1)
