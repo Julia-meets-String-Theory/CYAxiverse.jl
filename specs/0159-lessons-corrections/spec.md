@@ -3,7 +3,7 @@ spec_id: CYAX-0159
 title: Lessons & Corrections
 issue: 159
 class: S1
-status: draft
+status: approved
 workstream: Infrastructure
 parent: null
 depends_on:
@@ -12,7 +12,7 @@ depends_on:
 created: 2026-09-11
 last_reviewed: 2026-09-11
 review_required: repository-owner review and independent Sol/High adversarial review before merge
-approval_ref: N/A while draft
+approval_ref: PR #160 comment 5636316397
 ---
 
 # CYAX-0159 — Lessons & Corrections
@@ -50,15 +50,15 @@ Applicable validated lessons are cross-cutting advisory inputs consulted after
 the governing sources are known and before planning or implementation; they are
 not another authority tier. Candidate lessons are advisory proposals. No lesson
 can override any artifact in the approved hierarchy, and the registry does not
-own GitHub merge, Issue, Project, review, or scientific-acceptance state. This
-draft does not assert an approval reference; Issue #159 is the governing intake
-object.
+own GitHub merge, Issue, Project, review, or scientific-acceptance state.
+Issue #159 is the governing intake object. PR #160 comment `5636316397` records
+repository-owner approval of this specification and the six seed validations.
 
 ## Scope
 
 This bounded S1 change adds or updates only:
 
-1. `.agents/LESSONS.md`, a compact registry with six sanitized candidate seed
+1. `.agents/LESSONS.md`, a compact registry with six sanitized validated seed
    lessons and a candidate → validated → superseded knowledge lifecycle;
 2. lightweight task-start, during-work, and convergence hooks in the canonical
    `.agents/skills/cyaxiverse-sdd/SKILL.md`;
@@ -73,8 +73,8 @@ No `plan.md` or `tasks.md` is required for this bounded S1 slice.
 | Requirement | Implementation | Acceptance evidence |
 | --- | --- | --- |
 | R-001 Authority and purpose | Registry preserves the CYAX-0151 precedence chain, treats validated lessons as advisory inputs, states candidate non-authority, and keeps the GitHub status and no-diary/no-archive/no-second-ledger boundaries. | Read `.agents/LESSONS.md`; verify lessons form no authority tier and override no artifact in the approved hierarchy. |
-| R-002 Durable schema and lifecycle | Each entry uses ID, status, date, type, scope/tags, failure, correction, root cause, preventive check, applicability, evidence, supersession, and promotion fields; lifecycle is candidate → validated → superseded. | Inspect the schema and all six entries; verify candidates are not presented as validated policy. |
-| R-003 Seed lessons | Add exactly L-0001 through L-0006, all `candidate`, dated 2026-09-11, using only durable public repository/GitHub references. | Count six registry entries and review their evidence references and sanitized wording. |
+| R-002 Durable schema and lifecycle | Each entry uses ID, status, date, type, scope/tags, failure, correction, root cause, preventive check, applicability, evidence, supersession, and promotion fields; lifecycle is candidate → validated → superseded. | Inspect the schema and all six entries; verify candidates remain non-authoritative and validated entries remain advisory. |
+| R-003 Seed lessons | Add exactly L-0001 through L-0006, all `validated`, dated 2026-09-11, using only durable public repository/GitHub references and the review/owner-approval record. | Count six registry entries and review their evidence references, validation record, and sanitized wording. |
 | R-004 SDD hooks | Applicable S1–S3 work reads applicable validated lessons at start; during work considers sanitized candidates for reusable corrections; close records one of four outcomes while keeping S0 lightweight. | Inspect the canonical skill diff and confirm `.codex/skills/cyaxiverse-sdd` remains its existing symlink mirror. |
 | R-005 PR convergence prompt | PR template asks the four compact Lessons / corrections questions and permits S0 omission/`N/A`. | Inspect `.github/pull_request_template.md`. |
 | R-006 Privacy and owner redirections | Redirections are abstracted, not copied; no private URLs, transcripts, resolver/local identifiers, or machine-local paths are stored; uncertain publication fails closed. | Diff review and repository-relative-reference scan of the registry/spec. |
@@ -105,8 +105,9 @@ or hash references. If safety is uncertain, omit the datum and ask the owner.
 
 ## Seed set and durable provenance
 
-The six initial candidates are deliberately limited to evidence already
-available in durable public context:
+The six initial validated lessons are deliberately limited to evidence already
+available in durable public context and were approved in PR #160 comment
+`5636316397`:
 
 - L-0001: candidate/repaired evidence versus scientific acceptance — Issue #148
   / PR #149 gate history.
@@ -161,7 +162,7 @@ spec ↔ skill ↔ PR-template ↔ registry convergence.
 ## Completion criterion
 
 CYAX-0159 is complete for this slice when the four bounded artifacts converge
-with this specification, all six candidates are present and sanitized, the
-requested checks pass, and the independent review result and any unresolved
-owner decision are recorded in the PR. Normative promotion and future lesson
-validation remain separate reviewed work.
+with this specification, all six validated lessons are present and sanitized,
+the requested checks pass, and the independent review result and any unresolved
+owner decision are recorded in the PR. Normative promotion and additional
+lesson validation remain separate reviewed work.

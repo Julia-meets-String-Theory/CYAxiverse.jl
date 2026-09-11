@@ -96,14 +96,15 @@ Promotion status: not promoted | promoted to <source> at <revision/approval ref>
 
 ## Seed lessons
 
-All initial entries are candidates. They are deliberately limited to patterns
-supported by durable repository or public GitHub history; they do not assert
-private conversation details.
+The six initial entries were validated through the independent review and
+repository-owner approval recorded in PR #160 comment `5636316397`. They are
+deliberately limited to patterns supported by durable repository or public
+GitHub history; they do not assert private conversation details.
 
 ## L-0001 — Candidate or repaired evidence is not scientific acceptance
 
 ID: L-0001
-Status: candidate
+Status: validated
 Date: 2026-09-11
 Type: scientific-error
 Scope / tags: scientific acceptance, candidate evidence, gate review, Issue #148
@@ -138,7 +139,7 @@ Promotion status: not promoted
 ## L-0002 — Namespace nested gates explicitly
 
 ID: L-0002
-Status: candidate
+Status: validated
 Date: 2026-09-11
 Type: owner-redirection
 Scope / tags: gate namespacing, semantic drift, SDD, scientific review, Issue #151
@@ -171,7 +172,7 @@ Promotion status: not promoted
 ## L-0003 — Brownfield migration preserves supersession chronology
 
 ID: L-0003
-Status: candidate
+Status: validated
 Date: 2026-09-11
 Type: workflow
 Scope / tags: brownfield migration, supersession, SDD, historical traceability
@@ -207,7 +208,7 @@ Promotion status: not promoted
 ## L-0004 — `tasks.md` is not authoritative live status
 
 ID: L-0004
-Status: candidate
+Status: validated
 Date: 2026-09-11
 Type: state/provenance
 Scope / tags: tasks, GitHub status, Project, merge state, SDD
@@ -239,7 +240,7 @@ Promotion status: not promoted
 ## L-0005 — Do not falsify workflow state for advisory WIP limits
 
 ID: L-0005
-Status: candidate
+Status: validated
 Date: 2026-09-11
 Type: workflow
 Scope / tags: WIP, GitHub Project, state integrity, SDD G2
@@ -273,7 +274,7 @@ Promotion status: not promoted
 ## L-0006 — Machine-local paths are not scientific provenance
 
 ID: L-0006
-Status: candidate
+Status: validated
 Date: 2026-09-11
 Type: privacy
 Scope / tags: scientific provenance, privacy, reproducibility, public paths
