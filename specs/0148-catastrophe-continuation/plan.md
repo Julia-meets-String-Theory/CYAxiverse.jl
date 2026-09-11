@@ -34,20 +34,20 @@ execution.
 | R-003 Source/representation identity | Track paper radial `k`, period-one source coordinates, source12/P96 vs author10/A96, homotopy-only controls | `issue_148_g0_baseline_audit.md`; `issue_148_n8_metric_boundary_audit.md`; evidence provenance fields |
 | R-004 N=5 source continuation/precision | Existing accepted G1 implementation in `poly102_inflation.jl` plus focused G1 scripts/tests | G1 tested code `792a02f...`; 63/63 focused review; 128/256-bit replay; manager decision `1eef936...` |
 | R-005 P96 N=8 metric | P96 scientific path in N8 diagnostics; `M96` reconstructed in the relevant GLSM basis with reconstruction/source identity verified at working precision; any other-basis representation uses explicit metric congruence transformation; A96 retained as labelled reproduction | Owner comment `5623902670`; `issue_148_n8_approved_metric_contract.md` at `d1a0b70...`; working-precision reconstruction/source-identity checks; explicit basis-transform checks where applicable; like-for-like P96/A96 checks |
-| R-006 Well-posed N8 continuation | `src/paper_benchmarks/n8_continuation.jl` plus radial evidence script; repaired bordered/fallback semantics accepted at `cc8ac73...` | First candidate FAIL `091cc9c...`; repair candidate `5b8daff...`; further repair `cc8ac73...`; independent review and G2 PASS at `f9b04ed...` |
+| R-006 Well-posed N8 continuation | `src/paper_benchmarks/n8_continuation.jl` plus radial evidence script; repaired bordered/fallback semantics accepted at `cc8ac73...` | First candidate FAIL `091cc9c...`; second candidate `5b8daff...` FAIL `3c33205...`; further repair `cc8ac73...`; independent review and G2 PASS at `f9b04ed...` |
 | R-007 N8 independent validation/precision | Twelve-term augmented comparison, actual matcher comparison, status/conditioning/failure evidence, target-constructed 128/256-bit event solves | `issue_148_g2_final_independent_review_cc8ac73.md`; `issue_148_g2_final_repair_evidence.md`; G2 PASS `f9b04ed...` |
 | R-008 Valid non-radial deformation | G3 two-cycle parameterization `t=sqrt(k)(t_ref+alpha*u)` with `u=(0,1,2,-1,1,1,1,1)`, consistent recomputation of all dependent quantities | `issue_148_g3_control_audit.md`; `issue_148_g3_repair_evidence.md`; G3 PASS `f33ba76...` |
 | R-009 Independent-control sensitivity | G3 rank diagnostic: rank two for `[log(k),alpha]` action controls and full-log-amplitude controls; off-ray action derivative has relative residual `0.317` after best radial fit | `audit_issue_148_g3_controls.jl`; `issue_148_g3_control_audit.md`; G3 independent review `f33ba76...` |
 | R-010 Local discriminant fate | G3 determines persistence along one positive-alpha branch; 46 stored states through `alpha≈1.435e-4`, `k≈0.5007`; stops at scale guard; opposing-seed failure inconclusive | `issue_148_g3_repair_evidence.md`; `issue_148_g3_final_independent_review_4abd9c3.md`; G3 PASS `f33ba76...` |
 | R-011 Symmetry/higher derivatives | G3 tested zero-phase cubic; not protected along this control; projected D3/D4, transverse Hessian/nullity diagnostics reported | `issue_148_g3_repair_evidence.md`; G3 independent review `f33ba76...` |
-| R-012 Replayable provenance | Existing G0/G1/G2 evidence pattern; extend to G3 geometry/source/code/environment identity | Exact commands, revisions, source SHA, precision, tolerances, geometry/witness IDs in durable evidence |
+| R-012 Replayable provenance | G0/G1/G2/G3 evidence records geometry/source/code/environment identity | Exact commands, revisions, source SHA, precision, tolerances, geometry/witness IDs in durable evidence per gate |
 | R-013 Scientific ambiguity stop | Manager/worker must stop on unresolved normalization/basis/acceptance/physical interpretation | Owner-decision record when needed; no silent implementation choice |
-| R-014 Gate sequencing/evidence status | G0/G1 accepted; G2 first candidate rejected, later repair accepted (PASS `f9b04ed...`); G3 accepted (PASS `f33ba76...`) | GitHub Issue #148 gate records + review artifacts; live state remains in GitHub |
+| R-014 Gate sequencing/evidence status | G0/G1 accepted; G2 first candidate `9fe32eb...` rejected `091cc9c...`, second candidate `5b8daff...` rejected `3c33205...`, further repair `cc8ac73...` accepted (PASS `f9b04ed...`); G3 accepted (PASS `f33ba76...`) | GitHub Issue #148 gate records + review artifacts; live state remains in GitHub |
 | R-015 Negative outcomes valid | G3 completion is outcome-neutral within the claim boundary | Scientific review of whichever local discriminant outcome is observed |
 | R-016 Optional physical probe separation | Optional G4 only after G3 PASS if G3 yields a suitable off-ray catastrophe locus and the existing physical model can be used unchanged | Separate exploratory evidence from selected points along that locus; otherwise G4 is N/A |
 | G0 | Historical baseline and contract audit | PASS: `docs/src/issue_148_g0_baseline_audit.md`, audit script, Issue comment `5608088958` |
 | G1 | Historical N=5 bug repair + genuine continuation + precision/failure validation | PASS: code `792a02f...`, evidence `668ef25...`, final independent acceptance and manager decision `1eef936...` |
-| G2 | Radial N8 continuation/validation on PR #149 | PASS: first candidate FAIL `091cc9c...`; repair at `5b8daff...`; further repair `cc8ac73...` accepted after fresh independent review; durable acceptance `f9b04ed...` |
+| G2 | Radial N8 continuation/validation on PR #149 | PASS: first candidate `9fe32eb...` FAIL `091cc9c...`; second candidate `5b8daff...` FAIL `3c33205...`; further repair `cc8ac73...` accepted after fresh independent review; durable acceptance `f9b04ed...` |
 | G3 | First non-radial discriminant investigation on PR #149 | PASS: implementation `4abd9c3...`, evidence `c6d2291...`, fresh independent review, durable acceptance `f33ba76...` |
 | G4 | Optional bounded physical probe | Not started; applicable because G3 yielded a suitable off-ray catastrophe locus; requires that the existing physical model be usable unchanged |
 
@@ -61,10 +61,15 @@ execution.
   reuse defect and added accepted continuation behavior.
 
 `src/paper_benchmarks/n8_continuation.jl`
-: Contains the N=8 radial and off-radial continuation machinery developed for
-  G2 and G3, including pseudo-arclength/bordered-corrector and target-precision
-  support. The accepted G2 revision is `cc8ac73...`; the accepted G3 revision
-  is `4abd9c3...`.
+: Contains the N=8 radial continuation machinery developed for G2, including
+  pseudo-arclength/bordered-corrector and target-precision support. The
+  accepted G2 revision is `cc8ac73...`.
+
+`src/paper_benchmarks/n8_g3_control.jl`
+: Contains the accepted off-radial G3 local-control continuation machinery,
+  including geometry reconstruction, cone-adapted deformation, sensitivity/rank
+  diagnostics, and bounded off-ray predictor/corrector. The accepted G3
+  revision is `4abd9c3...`.
 
 `src/paper_benchmarks.jl`
 : Integrates benchmark submodules/functions into the package benchmark surface.
@@ -135,11 +140,22 @@ coverage was inadequate. The independent review and manager decision at
 `091cc9c...` therefore supersede any candidate-language implying G2 acceptance
 for that revision.
 
-A repair at `5b8daff...` addressed those findings, and a further repair at
-`cc8ac73668ac488a492dd16008c0b790a4e4ef3b` received fresh independent
-scientific review and was accepted. The durable G2 PASS decision at
-`f9b04ed74bc30cc8e0071fcbe18179a4f85016e2` explicitly supersedes the earlier
-FAIL for the older revision. The accepted G2 scientific boundary: bounded
+A repair at `5b8daff...` addressed several findings from the first review, but
+a subsequent durable independent review at
+`3c332053d8feaecd6f0bad9836444a1efd26ecff` rejected it for: the asserted branch
+merger was a duplicate-root artifact; the 256-bit event stage was a no-op
+(inherited residual below tolerance, exiting on iteration 1 unchanged); and
+the default trace accepted materially off-branch bordered points. These are
+implementation/validation failures, not scientific-owner blocks.
+
+A further repair at `cc8ac73668ac488a492dd16008c0b790a4e4ef3b` corrected
+branch-fidelity with strict minimum/saddle pair tracking, genuine
+higher-precision event refinement with nontrivial iterations, and scale-aware
+continuation tolerance. It received fresh independent scientific review and was
+accepted. The durable G2 PASS decision at
+`f9b04ed74bc30cc8e0071fcbe18179a4f85016e2` explicitly supersedes both earlier
+FAILs for their identified older revisions. The accepted G2 scientific
+boundary: bounded
 zero-phase, fixed-saxion, source-twelve radial N8 one-null degeneracy under
 P96; positive transverse modes; projected classifier `:unresolved`; no
 numerically resolved quartic-cusp label or stronger catastrophe classification.
@@ -147,11 +163,12 @@ numerically resolved quartic-cusp label or stronger catastrophe classification.
 ### Accepted G3 work
 
 After G2 PASS, the G3 investigation established geometric control and
-sensitivity (`b562780...`), implemented bounded local-control continuation
-(`1c57ed2...`), underwent an initial independent review identifying corrections
-(`17d28b9...`), and was repaired at `4abd9c31aba1d387bac27769730c4e0dc7d0c4a0`
-with evidence at `c6d2291e5c90c8890f48a9574343c14808a5a507`. Fresh independent
-scientific review accepted the result, with durable G3 PASS at
+sensitivity (`b562780...`), implemented bounded local-control continuation in
+`src/paper_benchmarks/n8_g3_control.jl` (`1c57ed2...`), underwent an initial
+independent review identifying corrections (`17d28b9...`), and was repaired at
+`4abd9c31aba1d387bac27769730c4e0dc7d0c4a0` with evidence at
+`c6d2291e5c90c8890f48a9574343c14808a5a507`. Fresh independent scientific review
+accepted the result, with durable G3 PASS at
 `f33ba768f53fee749352a82c04aedc09919d1053`.
 
 The accepted G3 scientific boundary: the source-twelve, zero-phase, fixed-saxion
@@ -228,8 +245,8 @@ additional nullity are all admissible scientific outcomes.
 - No persisted scientific schema change is planned or authorized.
 - G1 corrected N5 scientific benchmark behavior and added continuation
   capability; no intentional compatibility break was approved.
-- G2/G3 should preserve existing public/persisted interfaces unless the
-  scientific task demonstrates a reviewed need for change.
+- G2/G3 preserved existing public/persisted interfaces; no reviewed need for
+  change was identified. Any future G4 work should maintain this.
 - P96 scientific diagnostics and A96 author reproduction must remain explicitly
   distinguishable; do not silently change legacy A96 behavior.
 - No dependency change is planned by this migrated specification.
@@ -260,8 +277,9 @@ Use progressive verification under `AGENTS.md`:
 7. **G3 local evidence:** stationarity/degeneracy plus D3/D4/transverse
    diagnostics and cone/EFT controls at representative points/witnesses.
 8. **Focused regression first**, then applicable package/audit/docs/CI checks.
-9. **Fresh independent scientific review** before G2/G3 acceptance. A worker's
-   DONE state or a large passing-test count is insufficient.
+9. **Fresh independent scientific review** before gate acceptance (completed for
+   G2 and G3). A worker's DONE state or a large passing-test count is
+   insufficient.
 
 ## Migration / compatibility
 

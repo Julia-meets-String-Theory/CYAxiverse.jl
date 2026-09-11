@@ -93,7 +93,8 @@ consistency. The current scientific gate state is:
 - **G2 PASS:** implementation `cc8ac73668ac488a492dd16008c0b790a4e4ef3b`,
   fresh independent scientific review, durable acceptance commit
   `f9b04ed74bc30cc8e0071fcbe18179a4f85016e2`. This supersedes the earlier
-  G2 FAIL for its explicitly identified older revision. Accepted scientific
+  G2 FAILs (`091cc9c...` for `9fe32eb...`; `3c33205...` for `5b8daff...`)
+  for their explicitly identified older revisions. Accepted scientific
   result: bounded zero-phase, fixed-saxion, source-twelve radial N8 one-null
   degeneracy under P96; positive transverse modes; projected higher-derivative
   diagnostic reports `:unresolved`; no numerically resolved quartic-cusp label
@@ -139,7 +140,8 @@ Relevant source facts preserved by this specification include:
 The Issue #148 branch/PR introduces and/or changes the principal paths:
 
 - `src/paper_benchmarks/poly102_inflation.jl`;
-- `src/paper_benchmarks/n8_continuation.jl`;
+- `src/paper_benchmarks/n8_continuation.jl` (G2 radial);
+- `src/paper_benchmarks/n8_g3_control.jl` (G3 off-radial);
 - `src/paper_benchmarks.jl`;
 - `scripts/inflation_scale_continuation.jl`;
 - `scripts/issue_148_g1_n5_regression_tests.jl`;
@@ -152,12 +154,18 @@ G1 repaired a pre-existing N=5 fixture/validation defect that reused the N=8
 critical scale and added genuine N=5 branch continuation and source-constructed
 high-precision validation.
 
-The first G2 candidate was rejected after independent review. A later repair
-candidate at `5b8daffd732ba307ed1980615b9f049a95b92c2c` addressed those
-findings. A further repair at `cc8ac73668ac488a492dd16008c0b790a4e4ef3b`
-received fresh independent scientific review and was accepted (G2 PASS at
+The first G2 candidate (`9fe32eb...`) was rejected after independent review
+(decision `091cc9c...`). A repair candidate at
+`5b8daffd732ba307ed1980615b9f049a95b92c2c` addressed those findings but was
+itself rejected by a subsequent durable independent review at
+`3c332053d8feaecd6f0bad9836444a1efd26ecff`, which identified duplicate-root
+merger evidence, a no-op 256-bit refinement stage, and materially off-branch
+bordered points. A further repair at
+`cc8ac73668ac488a492dd16008c0b790a4e4ef3b` received fresh independent
+scientific review and was accepted (G2 PASS at
 `f9b04ed74bc30cc8e0071fcbe18179a4f85016e2`). The G3 implementation at
-`4abd9c31aba1d387bac27769730c4e0dc7d0c4a0` with evidence at
+`4abd9c31aba1d387bac27769730c4e0dc7d0c4a0` (primarily
+`src/paper_benchmarks/n8_g3_control.jl`) with evidence at
 `c6d2291e5c90c8890f48a9574343c14808a5a507` subsequently received fresh
 independent scientific review and was accepted (G3 PASS at
 `f33ba768f53fee749352a82c04aedc09919d1053`).
@@ -175,10 +183,12 @@ Historical accepted evidence includes:
   `d1a0b709b69aa680b9bca4223739366c3bfdf8b6` and Issue #148 comment
   `5623902670`.
 
-The first G2 candidate evidence is retained as revision-specific historical
-evidence but not as acceptance evidence. The independent rejection and manager
-decision at `091cc9c...` control the status of that candidate and are
-explicitly superseded by the later G2 PASS at `f9b04ed...`.
+The first G2 candidate evidence (`9fe32eb...`) and the second candidate
+evidence (`5b8daff...`) are retained as revision-specific historical evidence
+but not as acceptance evidence. The independent rejections at `091cc9c...` and
+`3c332053d8feaecd6f0bad9836444a1efd26ecff` respectively control the status of
+those candidates and are explicitly superseded by the later G2 PASS at
+`f9b04ed...`.
 
 Post-cutoff accepted evidence also includes:
 
@@ -222,24 +232,37 @@ Post-cutoff accepted evidence also includes:
    event precision ladder, or like-for-like canonical comparisons. The
    projected higher-derivative classification remained honestly `:unresolved`
    and was not promoted to a cusp claim.
-8. **Post-FAIL G2 repair candidate — migration-frozen PR head `e991495...`.**
-   Repair implementation/evidence existed at the original migration cutoff but
-   had not yet received durable fresh independent scientific acceptance.
-   *(Superseded by item 9.)*
-9. **G2 PASS — durable acceptance `f9b04ed...`.** Fresh independent scientific
-   review of the further-repaired implementation at `cc8ac73...` with evidence
-   at `62a88ca...`. Accepted result: bounded zero-phase, fixed-saxion,
-   source-twelve radial N8 one-null degeneracy under P96; positive transverse
-   modes; projected higher-derivative diagnostic `:unresolved`; no numerically
-   resolved quartic-cusp label accepted. This supersedes the G2 FAIL for
-   its explicitly identified older revision. No owner decision required.
-10. **G3 scientific work — implementation `4abd9c3...`, evidence `c6d2291...`.**
+8. **Post-FAIL G2 repair candidate `5b8daff...` — migration-frozen PR head
+   `e991495...`.** Repair implementation/evidence existed at the original
+   migration cutoff but had not yet received durable fresh independent
+   scientific acceptance. *(Superseded by item 9.)*
+9. **Second G2 candidate rejected — durable independent review
+   `3c33205...`.** Fresh independent review of the `5b8daff...` repair
+   candidate rejected it for: the asserted branch merger was a duplicate-root
+   artifact (two representations of one root above the deduplication margin);
+   the 256-bit event stage was a no-op (inherited residual below the
+   precision-independent tolerance, exiting on iteration 1 unchanged); and
+   the default continuation trace accepted materially off-branch bordered
+   points (`4.08e-4` displacement under strict correction). These are
+   implementation/validation failures, not scientific-owner blocks.
+   *(Superseded by item 10.)*
+10. **G2 PASS — durable acceptance `f9b04ed...`.** Fresh independent scientific
+    review of the further-repaired implementation at `cc8ac73...` with evidence
+    at `62a88ca...`. The further repair corrected branch-fidelity with strict
+    minimum/saddle pair tracking, genuine higher-precision event refinement with
+    nontrivial iterations, and scale-aware continuation tolerance. Accepted
+    result: bounded zero-phase, fixed-saxion, source-twelve radial N8 one-null
+    degeneracy under P96; positive transverse modes; projected higher-derivative
+    diagnostic `:unresolved`; no numerically resolved quartic-cusp label
+    accepted. This supersedes both earlier G2 FAILs for their explicitly
+    identified older revisions. No owner decision required.
+11. **G3 scientific work — implementation `4abd9c3...`, evidence `c6d2291...`.**
     After G2 PASS, the G3 investigation established geometric control and
     sensitivity (`b562780...`), implemented bounded local-control continuation
-    (`1c57ed2...`), underwent an initial independent review that identified
-    corrections (`17d28b9...`), and was repaired (`4abd9c3...`) with updated
-    evidence (`c6d2291...`).
-11. **G3 PASS — durable acceptance `f33ba76...`.** Fresh independent scientific
+    in `src/paper_benchmarks/n8_g3_control.jl` (`1c57ed2...`), underwent an
+    initial independent review that identified corrections (`17d28b9...`), and
+    was repaired (`4abd9c3...`) with updated evidence (`c6d2291...`).
+12. **G3 PASS — durable acceptance `f33ba76...`.** Fresh independent scientific
     review of the repaired G3 implementation at `4abd9c3...`. Accepted result:
     the source-twelve, zero-phase, fixed-saxion P96 degeneracy persists from
     the radial event onto one positive-alpha branch on the audited two-cycle

@@ -34,15 +34,17 @@ Brownfield reconstruction cutoff:
 - G0: PASS
 - G1: PASS
 - P96 N8 metric decision: approved
-- G2: not accepted at the original cutoff; first candidate rejected, later
-  repair candidate awaiting fresh independent scientific review
+- G2: not accepted at the original cutoff; first candidate `9fe32eb...`
+  rejected `091cc9c...`; repair candidate `5b8daff...` awaiting fresh
+  independent scientific review at that cutoff
 - G3: not started at the original cutoff
 - optional G4: not started
 
 Post-cutoff accepted evidence (from PR #149 branch):
 
-- G2: **PASS** — implementation `cc8ac73...`, independent review, durable
-  acceptance `f9b04ed...`
+- G2: second candidate `5b8daff...` rejected `3c33205...`; further repair
+  `cc8ac73...` **PASS** after independent review, durable acceptance
+  `f9b04ed...`
 - G3: **PASS** — implementation `4abd9c3...`, evidence `c6d2291...`,
   independent review, durable acceptance `f33ba76...`
 - optional G4: not started; applicable because G3 yielded a suitable off-ray
@@ -146,13 +148,13 @@ Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
     augmented convergence, preserved G1, and the honest `:unresolved`
     higher-derivative classification.
 
-### Post-FAIL repair and acceptance
+### First repair candidate and second rejection
 
 - [x] **T211 [R-003, R-005, R-006, R-007, R-012, G2] Produce a bounded G2 repair candidate and revision-specific replay evidence**
-  - Initial repair candidate: `5b8daffd732ba307ed1980615b9f049a95b92c2c`.
+  - Implementation candidate: `5b8daffd732ba307ed1980615b9f049a95b92c2c`.
   - Evidence state at original migration cutoff continued through
     `e991495f1bb58edd7a7043dfc90771b6666c717c`.
-  - Expected correction scope from the failed review: bordered-coordinate
+  - Expected correction scope from the first FAIL review: bordered-coordinate
     consistency and provenance, actual old-matcher exercise, genuine
     target-constructed event precision ladder, source-precision disclosure,
     like-for-like P96/A96 checks, and stronger status/failure/tolerance
@@ -166,30 +168,60 @@ Live state after this cutoff belongs in GitHub Issue #148 / PR #149 / Project.
     scales agree below `1e-30`; source12/author10 and P96/A96 paths are labelled
     separately; focused G1 replay remains 63/63.
   - Boundary: this checkbox means a reviewable repair candidate/evidence package
-    existed. A further repair at `cc8ac73...` was the revision ultimately
-    accepted (see T212).
+    existed. This candidate was subsequently rejected (see T211a) and a further
+    repair at `cc8ac73...` was the revision ultimately accepted (see T212).
 
-- [x] **T212 [R-003, R-005, R-006, R-007, R-012, R-014, G2] Freshly and independently review the repaired G2 candidate**
+- [x] **T211a [R-006, R-007, R-014, G2] Independently evaluate the `5b8daff` repair candidate**
+  - Reviewed revision: `5b8daffd732ba307ed1980615b9f049a95b92c2c`, evidence
+    through `e991495f1bb58edd7a7043dfc90771b6666c717c`.
+  - Evidence: `docs/src/issue_148_g2_repair_independent_review_5b8daff.md` at
+    `3c332053d8feaecd6f0bad9836444a1efd26ecff`.
+  - Verified result: **candidate rejected / G2 FAIL**. The review identified:
+    - the asserted branch merger was a duplicate-root artifact (two
+      representations of one root separated by `1.18e-6`, just above the `1e-6`
+      deduplication cutoff; strict 256-bit correction collapses them to
+      `4.20e-48` apart);
+    - the 256-bit event stage was a no-op (inherited residual below the
+      precision-independent `1e-40` tolerance, exiting on iteration 1
+      unchanged; the displayed extra digits are widening, not recovered source
+      precision);
+    - the default continuation trace accepted materially off-branch bordered
+      points (`4.08e-4` displacement under strict correction at the same `k`).
+  - Preserve: the independent review identified viable routes to genuine
+    merger evidence (minimum/saddle pair tracking) and genuine precision
+    refinement (strict tolerance requiring nontrivial iterations).
+  - These are implementation/validation failures, not scientific-owner blocks.
+
+### Further repair and acceptance
+
+- [x] **T212 [R-003, R-005, R-006, R-007, R-012, R-014, G2] Freshly and independently review the further-repaired G2 candidate**
   - Reviewed revision: `cc8ac73668ac488a492dd16008c0b790a4e4ef3b` (further
-    repair beyond T211's initial candidate).
+    repair beyond the rejected `5b8daff...` candidate, correcting branch-
+    fidelity with strict minimum/saddle pair tracking, genuine higher-precision
+    event refinement with nontrivial iterations, and scale-aware continuation
+    tolerance).
   - Evidence: `docs/src/issue_148_g2_final_independent_review_cc8ac73.md`,
     `docs/src/issue_148_g2_final_repair_evidence.md`.
   - Verified independently: bordered/pseudo-arclength mechanism genuinely
     exercised near singularity; halving radial step changes event by `7.57e-13`;
-    fallback explicit and bounded; old matcher independently exercised with five
-    comparisons and zero disagreements; 128/256-bit event solves construct
-    source quantities at target precision with agreement below `1e-30` and
-    nontrivial iterations; `M96` reconstruction and source identity verified at
-    working precision; P96/A96 like-for-like; source12/author10 distinct;
+    a strictly distinct minimum/index-one saddle pair retains inertias 0/1 as
+    separation shrinks from `2.021e-3` to `1.733e-6`; fallback explicit and
+    bounded; old matcher independently exercised with five comparisons and zero
+    disagreements; 128/256-bit event solves construct source quantities at
+    target precision with agreement below `1e-30` and nontrivial iterations;
+    `M96` reconstruction and source identity verified at working precision;
+    P96/A96 like-for-like; source12/author10 distinct;
     conditioning/status/failure/tolerance justified; projected higher-derivative
     output reported without forcing a cusp label (`:unresolved` retained); G1
     preserved; no G3/API/schema expansion.
   - Verified result: **PASS recommendation** from fresh independent reviewer.
     Manager acceptance at `f9b04ed74bc30cc8e0071fcbe18179a4f85016e2`.
 
-- [x] **T213 [R-006, R-007, R-012, R-014, G2] Reach G2 evidence readiness after independent review**
-  - Outcome: all concrete findings from T212 were corrected through the repair
-    loop; the evidence package was accepted by the manager.
+- [x] **T213 [R-006, R-007, R-012, R-014, G2] Record G2 gate acceptance**
+  - Outcome: the T212 PASS review and the manager decision at `f9b04ed...`
+    accepted the `cc8ac73...` implementation. This supersedes both earlier G2
+    FAILs (`091cc9c...` for `9fe32eb...`; `3c33205...` for `5b8daff...`) for
+    their explicitly identified older revisions.
   - Verified result: **G2 PASS** — accepted mechanism/evidence mapped to every
     G2 acceptance item. Durable decision at `f9b04ed...`.
   - Accepted scientific boundary: bounded zero-phase, fixed-saxion,
