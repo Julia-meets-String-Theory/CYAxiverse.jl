@@ -79,6 +79,10 @@ branch = PB.n8_g3_predictor_corrector(seed_minus.theta, seed_minus.null_vector,
     branch.steps)
 @test all(s -> s.metric_min_eigenvalue > 0 && s.full_factor_scale > 0,
     branch.steps)
+@test all(s -> s.canonical_null_count == 1 && s.transverse_min_eigenvalue > 0,
+    branch.steps)
+@test all(s -> s.augmented_residual < 1e-10 &&
+    s.full_gradient_residual >= 0 && s.full_null_residual >= 0, branch.steps)
 @test all(s -> s.corrector_method == :predictor_corrector || s.corrector_method == :initial,
     branch.steps)
 @test any(s -> s.rejected_steps >= 0, branch.steps)
@@ -86,6 +90,7 @@ branch = PB.n8_g3_predictor_corrector(seed_minus.theta, seed_minus.null_vector,
     branch.steps[end].alpha, branch.steps[end].k,
     branch.steps[end].metric_min_eigenvalue, branch.steps[end].min_prime_divisor,
     branch.attempted_steps, branch.rejected_steps)
+@info "  stored states=$(length(branch.steps)), accepted transitions=$(branch.accepted_steps), min transverse eigenvalue=$(minimum(s.transverse_min_eigenvalue for s in branch.steps))"
 
 # This is a maintained failure boundary: disabling the corrector cannot be
 # mistaken for a completed branch.
@@ -95,6 +100,26 @@ failure = PB.n8_g3_predictor_corrector(seed_minus.theta, seed_minus.null_vector,
 @test failure.status == :step_failed
 @test length(failure.steps) == 1
 @info "  disabled-corrector boundary: status=$(failure.status), termination=$(failure.termination_reason)"
+
+# An invalid initial augmented state must be rejected before any continuation
+# status is reported.  This guards the false-success zero-step boundary.
+invalid_initial = PB.n8_g3_predictor_corrector(g2_theta_f64 .+ 0.01,
+    g2_null_f64, g2_k_f64; alpha0=1e-8, ds=1e-8, n_steps=0,
+    alpha_bounds=(0, ALPHA_MAX), k_bounds=(0.5, 0.9), tolerance=1e-10)
+@test invalid_initial.status == :invalid_initial_state
+@test invalid_initial.termination_reason == :invalid_initial_state
+@test length(invalid_initial.steps) == 1
+@test !invalid_initial.steps[1].converged
+@test invalid_initial.steps[1].augmented_residual > 1e-4
+@info "  invalid-initial boundary: status=$(invalid_initial.status), augmented residual=$(invalid_initial.steps[1].augmented_residual)"
+
+limited = PB.n8_g3_predictor_corrector(seed_minus.theta, seed_minus.null_vector,
+    seed_minus.k; alpha0=seed_minus.alpha, ds=1e-8, n_steps=0,
+    alpha_bounds=(0, ALPHA_MAX), k_bounds=(0.5, 0.9), tolerance=1e-10)
+@test limited.status == :max_steps
+@test limited.termination_reason == :max_steps
+@test limited.accepted_steps == 0 && limited.attempted_steps == 0
+@info "  max-steps boundary: status=$(limited.status), termination=$(limited.termination_reason)"
 
 @info "── 4. Independent 128/256 exact-source refinement ──"
 ref128 = PB.n8_g3_bigfloat_augmented_solve(seed_minus.theta, seed_minus.null_vector,
@@ -120,6 +145,33 @@ ref256_chained = PB.n8_g3_bigfloat_augmented_solve(ref128.theta, ref128.null_vec
 @test ref256_chained.source_precision_bits == 256
 @test ref256_chained.full_factor
 
+@info "── 4b. Independent precision at representative exact controls ──"
+representative_alpha = (1//100000000, 1//1000000, 1//100000, 1//10000)
+representative_refinements = NamedTuple[]
+for alpha_rat in representative_alpha
+    nearest = branch.steps[argmin(abs.(getfield.(branch.steps, :alpha) .- Float64(alpha_rat)))]
+    rep128 = PB.n8_g3_bigfloat_augmented_solve(nearest.theta, nearest.null_vector,
+        nearest.k, alpha_rat; precision_bits=128,
+        tolerance=BigFloat("1e-30"), max_iterations=500)
+    rep256 = PB.n8_g3_bigfloat_augmented_solve(nearest.theta, nearest.null_vector,
+        nearest.k, alpha_rat; precision_bits=256,
+        tolerance=BigFloat("1e-70"), max_iterations=500)
+    rep256_chain = PB.n8_g3_bigfloat_augmented_solve(rep128.theta, rep128.null_vector,
+        rep128.k, alpha_rat; precision_bits=256,
+        tolerance=BigFloat("1e-70"), max_iterations=500)
+    @info "  alpha=$(alpha_rat): 128/256/chained iterations=$(rep128.iterations)/$(rep256.iterations)/$(rep256_chain.iterations), independent-chained k=$(rep256.k-rep256_chain.k)"
+    @test rep128.converged && rep256.converged && rep256_chain.converged
+    @test rep128.source_precision_bits == 128
+    @test rep256.source_precision_bits == 256
+    @test rep256_chain.source_precision_bits == 256
+    @test rep128.canonical_null_count == 1 && rep256.canonical_null_count == 1
+    @test rep256_chain.canonical_null_count == 1
+    @test rep128.transverse_min_eigenvalue > 0 && rep256.transverse_min_eigenvalue > 0
+    @test rep256_chain.transverse_min_eigenvalue > 0
+    @test abs(rep256.k - rep256_chain.k) < BigFloat("1e-60")
+    push!(representative_refinements, (; alpha=alpha_rat, rep128, rep256, rep256_chain))
+end
+
 @info "── 5. Independent equations, geometry, and local derivative evidence ──"
 final_diag = PB.n8_g3_local_diagnostics(ref256_chained.theta,
     ref256_chained.null_vector, ref256_chained.k, ref256_chained.alpha;
@@ -135,10 +187,33 @@ final_diag = PB.n8_g3_local_diagnostics(ref256_chained.theta,
 @test final_diag.normalization_residual < BigFloat("1e-60")
 @test final_diag.min_curve_volume > 0 && final_diag.min_prime_divisor > 1
 @test final_diag.metric_min_eigenvalue > 0
+@test final_diag.canonical_null_count == 1
+@test final_diag.transverse_min_eigenvalue > 0
 @test length(final_diag.action_vector) == 12 && length(final_diag.amplitudes) == 12
 @test final_diag.source_data == :exact_integer_rational_table1
 @test final_diag.metric_contract == :P96_CYTools
 @test final_diag.alpha > 0 && final_diag.alpha < BigFloat(ALPHA_MAX)
+
+# Direct differentiation cross-checks the stored D4 sign and the full
+# period-one Hessian coefficient independently of the normalized system.
+final_geom = final_diag.trial_geometry
+final_args = BigFloat(2) * BigFloat(π) .* (final_geom.Q' * final_diag.theta)
+final_metric_norm = sqrt(dot(final_diag.null_vector,
+    final_diag.metric * final_diag.null_vector))
+final_vmetric = final_diag.null_vector ./ final_metric_norm
+final_qv = final_geom.Q' * final_vmetric
+direct_d4 = -(BigFloat(2) * BigFloat(π))^4 *
+    sum(final_diag.amplitudes .* cos.(final_args) .* final_qv.^4)
+direct_full_hessian = (BigFloat(2) * BigFloat(π))^2 * final_geom.Q *
+    Diagonal(final_diag.amplitudes .* cos.(final_args)) * final_geom.Q'
+direct_full_null = norm(direct_full_hessian * final_diag.null_vector, Inf)
+half_full_hessian = (BigFloat(2) * BigFloat(π)^2) * final_geom.Q *
+    Diagonal(final_diag.amplitudes .* cos.(final_args)) * final_geom.Q'
+@test isapprox(final_diag.projected_d4, direct_d4; rtol=BigFloat("1e-60"), atol=BigFloat("1e-90"))
+@test isapprox(final_diag.full_null_residual, direct_full_null;
+    rtol=BigFloat("1e-60"), atol=BigFloat("1e-90"))
+@test direct_full_null > norm(half_full_hessian * final_diag.null_vector, Inf) * BigFloat("1.9")
+@info "  direct D4=$(direct_d4), full null=$(direct_full_null), half-factor null=$(norm(half_full_hessian * final_diag.null_vector, Inf))"
 
 # Re-evaluate the audited partial cubic control sensitivity at the accepted
 # radial event using a one-sided exact shape perturbation.  This is the local
@@ -181,12 +256,13 @@ fd_cubic_alpha = (shift_d3_normalized - radial_d3_normalized) / delta_alpha
 @test abs(fd_cubic_alpha - cubic_alpha) < abs(cubic_alpha) * BigFloat("1e-5")
 
 @info "=== G3 evidence summary ==="
-@info "  fate=positive-alpha branch terminates at k lower bound after genuine predictor/corrector steps"
+@info "  fate=positive-alpha branch persists across the traced segment, then stops at the imposed k lower bound"
 @info "  opposing signed seed at positive alpha fails conservatively; no negative-alpha claim"
 @info "  G2 radial classification preserved as unresolved"
 println("Issue 148 G3 local-control evidence: PASS")
 println("positive_branch_status=", branch.status)
 println("positive_branch_termination=", branch.termination_reason)
-println("positive_branch_steps=", length(branch.steps))
+println("positive_branch_stored_states=", length(branch.steps))
+println("positive_branch_accepted_transitions=", branch.accepted_steps)
 println("opposing_seed_status=", seed_plus.status)
 println("g2_classification_preserved=unresolved")

@@ -113,6 +113,9 @@ struct G3ContinuationStep{T<:AbstractFloat}
     alpha::T
     gradient_residual::T
     null_residual::T
+    augmented_residual::T
+    full_gradient_residual::T
+    full_null_residual::T
     normalization_residual::T
     metric_null_norm::T
     metric_min_eigenvalue::T
@@ -124,12 +127,15 @@ struct G3ContinuationStep{T<:AbstractFloat}
     max_full_amplitude::T
     projected_d3::T
     projected_d4::T
+    canonical_hessian_eigenvalues::Vector{T}
+    canonical_null_count::Int
+    transverse_min_eigenvalue::T
     converged::Bool
     iterations::Int
     ds::T
     branch_id::Int
     step_index::Int
-    bordered_condition::T
+    corrector_condition::T
     rejected_steps::Int
     corrector_method::Symbol
 end
@@ -256,14 +262,40 @@ function _g3_step_diagnostics(theta, null_vector, k, alpha, geometry, system)
     qv = geometry.Q' * vmetric
     two_pi = eltype(theta)(2) * eltype(theta)(π)
     projected_d3 = -(two_pi)^3 * sum(geometry.full_amplitudes .* system.sine .* qv.^3)
-    projected_d4 = (two_pi)^4 * sum(geometry.full_amplitudes .* system.cosine .* qv.^4)
+    projected_d4 = -(two_pi)^4 * sum(geometry.full_amplitudes .* system.cosine .* qv.^4)
+    normalized_gradient_residual = norm(system.gradient, Inf)
+    normalized_null_residual = norm(system.hessian * null_vector, Inf)
+    normalized_augmented_residual = norm(system.residual, Inf)
+    full_gradient = two_pi .* geometry.Q * (geometry.full_amplitudes .* system.sine)
+    full_hessian = two_pi^2 .* geometry.Q *
+        Diagonal(geometry.full_amplitudes .* system.cosine) * geometry.Q'
+    full_gradient_residual = norm(full_gradient, Inf)
+    full_null_residual = norm(full_hessian * null_vector, Inf)
+    metric_factor = cholesky(Symmetric(geometry.metric))
+    canonical_hessian = metric_factor.L \ system.hessian / metric_factor.U
+    canonical_hessian = (canonical_hessian + canonical_hessian') / eltype(theta)(2)
+    canonical_hessian_eigenvalues = eigvals(Symmetric(canonical_hessian))
+    # Use a precision-aware reporting floor.  The Float64 continuation has
+    # residual-scale near-null eigenvalues around 1e-9, while high-precision
+    # refinements drive the same eigenvalue below the working epsilon.  The
+    # fourth-root floor separates that mode from the observed O(1e-2)
+    # transverse spectrum at both precisions.
+    canonical_null_cutoff = max(eltype(theta)(4) * sqrt(eps(eltype(theta))),
+        sqrt(sqrt(eps(eltype(theta)))))
+    canonical_null_count = count(abs.(canonical_hessian_eigenvalues) .<= canonical_null_cutoff)
+    transverse = canonical_hessian_eigenvalues[
+        abs.(canonical_hessian_eigenvalues) .> canonical_null_cutoff]
+    transverse_min_eigenvalue = isempty(transverse) ? zero(eltype(theta)) : minimum(transverse)
     (; metric_min_eigenvalue=minimum(metric_eigenvalues), metric_null_norm,
        volume=geometry.volume, min_curve_volume=minimum(geometry.curves),
        min_prime_divisor=minimum(geometry.prime_divisors),
        full_factor_scale=geometry.full_factor_scale,
        min_action=minimum(geometry.actions),
        max_full_amplitude=maximum(geometry.full_amplitudes), projected_d3,
-       projected_d4)
+       projected_d4, normalized_gradient_residual, normalized_null_residual,
+       normalized_augmented_residual, full_gradient_residual,
+       full_null_residual, canonical_hessian_eigenvalues, canonical_null_count,
+       canonical_null_cutoff, transverse_min_eigenvalue)
 end
 
 """Continue the local augmented degeneracy equations by alpha predictor/corrector.
@@ -281,24 +313,48 @@ function n8_g3_predictor_corrector(theta0::AbstractVector{<:Real},
     T = Float64
     k, alpha = T(k0), T(alpha0)
     theta, null_vector = T.(theta0), T.(null0)
+    lower_k, upper_k = T(k_bounds[1]), T(k_bounds[2])
+    lower_alpha, upper_alpha = T(alpha_bounds[1]), T(alpha_bounds[2])
+    if !all(isfinite, theta) || !all(isfinite, null_vector) ||
+            !isfinite(k) || !isfinite(alpha) || norm(null_vector) == 0 ||
+            k <= 0 || alpha < lower_alpha || alpha > upper_alpha ||
+            k < lower_k || k > upper_k
+        return G3ContinuationResult{T}(G3ContinuationStep{T}[], branch_id,
+            :invalid_initial_state, :invalid_initial_state, 0, 0, 0,
+            :exact_integer_rational_table1, :P96_CYTools, :source12_positive_alpha)
+    end
     null_vector ./= norm(null_vector)
     geometry = _g3_geometry(k, alpha)
     derivatives = _g3_geometry_derivatives(k, alpha, geometry)
     initial = _g3_augmented_system(theta, null_vector, k, alpha, geometry, derivatives)
-    tangent_z = -(initial.jacobian[:, 1:17] \ initial.jacobian[:, 18])
-    direction = initial_direction == 0 ? one(T) : sign(T(initial_direction))
-    tangent_z .*= direction
     diagnostics = _g3_step_diagnostics(theta, null_vector, k, alpha, geometry, initial)
+    initial_condition = try cond(initial.jacobian[:, 1:17]) catch; T(Inf) end
+    initial_converged = diagnostics.normalized_augmented_residual <= T(tolerance)
     steps = G3ContinuationStep{T}[]
     push!(steps, G3ContinuationStep{T}(copy(theta), copy(null_vector), k, alpha,
         norm(initial.gradient, Inf), norm(initial.hessian * null_vector, Inf),
+        diagnostics.normalized_augmented_residual,
+        diagnostics.full_gradient_residual, diagnostics.full_null_residual,
         abs(initial.residual[end]), diagnostics.metric_null_norm,
         diagnostics.metric_min_eigenvalue, diagnostics.volume,
         diagnostics.min_curve_volume, diagnostics.min_prime_divisor,
         diagnostics.full_factor_scale, diagnostics.min_action,
         diagnostics.max_full_amplitude,
-        diagnostics.projected_d3, diagnostics.projected_d4, true, 0, zero(T),
-        branch_id, 0, cond(initial.jacobian[:, 1:17]), 0, :initial))
+        diagnostics.projected_d3, diagnostics.projected_d4,
+        copy(diagnostics.canonical_hessian_eigenvalues),
+        diagnostics.canonical_null_count, diagnostics.transverse_min_eigenvalue,
+        initial_converged, 0, zero(T),
+        branch_id, 0, initial_condition, 0, :initial))
+
+    if !initial_converged
+        return G3ContinuationResult{T}(steps, branch_id, :invalid_initial_state,
+            :invalid_initial_state, 0, 0, 0,
+            :exact_integer_rational_table1, :P96_CYTools, :source12_positive_alpha)
+    end
+
+    tangent_z = -(initial.jacobian[:, 1:17] \ initial.jacobian[:, 18])
+    direction = initial_direction == 0 ? one(T) : sign(T(initial_direction))
+    tangent_z .*= direction
 
     current_ds = direction * abs(T(ds))
     termination_reason = :running
@@ -307,11 +363,11 @@ function n8_g3_predictor_corrector(theta0::AbstractVector{<:Real},
     for step_index in 1:n_steps
         attempted_steps = step_index
         target_alpha = alpha + current_ds
-        if target_alpha < T(alpha_bounds[1]) || target_alpha > T(alpha_bounds[2])
+        if target_alpha < lower_alpha || target_alpha > upper_alpha
             termination_reason = :bounds_reached
             break
         end
-        if k <= T(k_bounds[1]) + T(1e-3) || k >= T(k_bounds[2]) - T(1e-3)
+        if k <= lower_k + T(1e-3) || k >= upper_k - T(1e-3)
             termination_reason = :k_bounds_reached
             break
         end
@@ -345,7 +401,7 @@ function n8_g3_predictor_corrector(theta0::AbstractVector{<:Real},
             step = one(T)
             while step >= T(2)^(-12)
                 candidate = state .+ step .* correction
-                if candidate[17] < T(k_bounds[1]) || candidate[17] > T(k_bounds[2])
+                if candidate[17] < lower_k || candidate[17] > upper_k
                     step *= T(0.5); rejected += 1; continue
                 end
                 cgeom = _g3_geometry(candidate[17], target_alpha)
@@ -378,24 +434,28 @@ function n8_g3_predictor_corrector(theta0::AbstractVector{<:Real},
         diagnostics = _g3_step_diagnostics(theta, null_vector, k, alpha, geom, sys)
         push!(steps, G3ContinuationStep{T}(copy(theta), copy(null_vector), k, alpha,
             norm(sys.gradient, Inf), norm(sys.hessian * null_vector, Inf),
+            norm(sys.residual, Inf), diagnostics.full_gradient_residual,
+            diagnostics.full_null_residual,
             abs(sys.residual[end]), diagnostics.metric_null_norm,
             diagnostics.metric_min_eigenvalue, diagnostics.volume,
             diagnostics.min_curve_volume, diagnostics.min_prime_divisor,
             diagnostics.full_factor_scale, diagnostics.min_action,
             diagnostics.max_full_amplitude,
-            diagnostics.projected_d3, diagnostics.projected_d4, true, iterations,
+            diagnostics.projected_d3, diagnostics.projected_d4,
+            copy(diagnostics.canonical_hessian_eigenvalues),
+            diagnostics.canonical_null_count, diagnostics.transverse_min_eigenvalue,
+            true, iterations,
             current_ds, branch_id, step_index, condition, rejected, :predictor_corrector))
         iterations <= 5 && (current_ds = direction * min(abs(current_ds) * 1.2, T(0.01)))
     end
     termination_reason == :running && (termination_reason = :max_steps)
-    status = termination_reason in (:bounds_reached, :k_bounds_reached) ? termination_reason :
-        (termination_reason == :step_failed ? :step_failed : :completed)
+    status = termination_reason in (:bounds_reached, :k_bounds_reached,
+        :step_failed, :invalid_initial_state, :max_steps) ? termination_reason :
+        :max_steps
     G3ContinuationResult{T}(steps, branch_id, status, termination_reason,
         attempted_steps, length(steps) - 1, total_rejected,
         :exact_integer_rational_table1, :P96_CYTools, :source12_positive_alpha)
 end
-
-const n8_g3_pseudoarclength_continuation = n8_g3_predictor_corrector
 
 """Refine one fixed-alpha augmented solution with exact source geometry."""
 function n8_g3_bigfloat_augmented_solve(theta_seed::AbstractVector{<:Real},
@@ -419,16 +479,11 @@ function n8_g3_bigfloat_augmented_solve(theta_seed::AbstractVector{<:Real},
             if residual <= T(tolerance)
                 diagnostics = _g3_step_diagnostics(theta, null_vector, k, alpha_b,
                     geometry, system)
-                full_gradient = T(2) * T(π) * geometry.Q *
-                    (geometry.full_amplitudes .* system.sine)
-                full_hessian = T(2) * T(π)^2 * geometry.Q *
-                    Diagonal(geometry.full_amplitudes .* system.cosine) * geometry.Q'
                 return merge(diagnostics, (; theta=mod.(copy(theta), one(T)),
                     null_vector=copy(null_vector), k, alpha=alpha_b,
-                    gradient_residual=residual,
-                    null_residual=norm(system.hessian * null_vector, Inf),
-                    full_gradient_residual=norm(full_gradient, Inf),
-                    full_null_residual=norm(full_hessian * null_vector, Inf),
+                    gradient_residual=diagnostics.normalized_gradient_residual,
+                    null_residual=diagnostics.normalized_null_residual,
+                    augmented_residual=diagnostics.normalized_augmented_residual,
                     normalization_residual=abs(system.residual[end]),
                     converged=true, iterations=iter, precision_bits,
                     source_precision_bits=precision_bits,
@@ -472,8 +527,9 @@ function n8_g3_bigfloat_augmented_solve(theta_seed::AbstractVector{<:Real},
         diagnostics = _g3_step_diagnostics(theta, null_vector, k, alpha_b,
             geometry, system)
         merge(diagnostics, (; theta=mod.(copy(theta), one(T)), null_vector=copy(null_vector),
-            k, alpha=alpha_b, gradient_residual=norm(system.residual, Inf),
-            null_residual=norm(system.hessian * null_vector, Inf),
+            k, alpha=alpha_b, gradient_residual=diagnostics.normalized_gradient_residual,
+            null_residual=diagnostics.normalized_null_residual,
+            augmented_residual=diagnostics.normalized_augmented_residual,
             normalization_residual=abs(system.residual[end]), converged=false,
             iterations=max_iterations, precision_bits,
             source_precision_bits=precision_bits,
@@ -493,8 +549,9 @@ function n8_g3_local_diagnostics(theta::AbstractVector{<:Real}, null_vector::Abs
         system = _g3_augmented_system(theta_b, null_b, T(k), T(alpha), geometry, derivatives)
         diagnostics = _g3_step_diagnostics(theta_b, null_b, T(k), T(alpha), geometry, system)
         merge(diagnostics, (; theta=mod.(theta_b, one(T)), null_vector=copy(null_b),
-            k=T(k), alpha=T(alpha), gradient_residual=norm(system.gradient, Inf),
-            null_residual=norm(system.hessian * null_b, Inf),
+            k=T(k), alpha=T(alpha), gradient_residual=diagnostics.normalized_gradient_residual,
+            null_residual=diagnostics.normalized_null_residual,
+            augmented_residual=diagnostics.normalized_augmented_residual,
             normalization_residual=abs(system.residual[end]),
             source_precision_bits=precision_bits, source_data=:exact_integer_rational_table1,
             metric_contract=:P96_CYTools, full_factor=true,
