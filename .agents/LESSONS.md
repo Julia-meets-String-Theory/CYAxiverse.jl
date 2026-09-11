@@ -396,8 +396,8 @@ wrong phase.
 
 Correction: Use the immediate handoff operation result as the phase-1 launch
 decision. Only success creates or attaches new execution task/worker state.
-Decline, cancellation, or failure creates no new worker state, leaves prior state
-unchanged, and is not silently retried. After successful launch, later worker
+Decline, cancellation, or failure creates no new task/worker state, leaves prior
+state unchanged, and is not silently retried. After successful launch, later worker
 terminal states (`DONE`, `BLOCKED`, `FAILED`) are a separate phase-2 downstream
 contract.
 
