@@ -307,3 +307,72 @@ Issue #157 / PR #158 public-path remediation history.
 
 Superseded by: N/A
 Promotion status: not promoted
+
+## L-0007 — Handoff draft is not launch authorization
+
+ID: L-0007
+Status: candidate
+Date: 2026-09-11
+Type: owner-redirection
+Scope / tags: delegation launch, authorization semantics, state/provenance
+
+Observed failure: A delegated packet that only refined the execution plan was treated as permission to execute; work and state were advanced before explicit owner authorization.
+
+Correction: Treat packet refinement as advisory only until a final, explicit owner authorization is given. Before each material post-authorization change, request renewed authorization and re-handoff terms.
+
+Root cause: Ownership and authorization checkpoints were conflated with planning updates.
+
+Preventive rule / check: Require a distinct authorization checkpoint before launch, and require that execution state references that checkpoint.
+
+Applicability / exceptions: Applies to owner-redirection and delegated workflows with explicit owner-governed execution. Does not replace existing scientific or merge gates already governed by higher authority.
+
+Evidence / durable reference: `AGENTS.md` delegated-workflow guidance in section 6; `.agents/skills/cyaxiverse-agent-orchestration/SKILL.md` sections 2 and 3 (delegation packet and worker return states); and issue/PR provenance context (`Issue #159` / `PR #160`) for owner-redirection sequencing.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0008 — Delegation contract must name capability and budget
+
+ID: L-0008
+Status: candidate
+Date: 2026-09-11
+Type: workflow
+Scope / tags: delegation packet, capacity planning, escalation policy
+
+Observed failure: A delegated task was launched with implicit model, reasoning, and cost/effort expectations, which reduced convergence quality and increased review churn.
+
+Correction: State role, capability target, fallback policy, effort budget/lease, escalation conditions, and worker-reuse expectations in the packet before launch.
+
+Root cause: The delegation contract lacked explicit operational constraints needed for bounded execution.
+
+Preventive rule / check: Reject a delegated packet that omits any required contract field; require updates before each reuse of the same worker in a new bounded phase.
+
+Applicability / exceptions: Applies to multi-agent or handoff-based implementation work; local single-agent edits with no downstream worker handoff may use a lighter form.
+
+Evidence / durable reference: `AGENTS.md` delegated-task lifecycle in section 6; `.agents/skills/cyaxiverse-agent-orchestration/SKILL.md` sections 2 and 5 (delegation packet fields, task class and worker reuse).
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0009 — Handoff state follows observed execution outcome
+
+ID: L-0009
+Status: candidate
+Date: 2026-09-11
+Type: state/provenance
+Scope / tags: handoff state, status integrity, orchestration
+
+Observed failure: A handoff outcome was recorded as if downstream work had started, despite delegation being declined, failed, or not yet returned.
+
+Correction: Create or change execution state only after a successful handoff return state or accepted worker output; failed or declined handoff leaves prior state unchanged until manager re-issues direction.
+
+Root cause: State bookkeeping used intent rather than observed execution result.
+
+Preventive rule / check: Map worker returns to explicit states (`DONE`, `BLOCKED`, `FAILED`) and require a durable return artifact or result before recording downstream work-state updates.
+
+Applicability / exceptions: Applies to workflows with explicit worker return contracts and observed execution results. Does not stop internal planning notes from being prepared before execution.
+
+Evidence / durable reference: `.agents/skills/cyaxiverse-agent-orchestration/SKILL.md` sections 3 and 4 (worker return states, managed state progression); `AGENTS.md` section 6 (delegated-task lifecycle and manager handoff ownership).
+
+Superseded by: N/A
+Promotion status: not promoted
