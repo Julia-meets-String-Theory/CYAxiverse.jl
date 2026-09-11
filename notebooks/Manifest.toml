@@ -254,7 +254,7 @@ uuid = "4e9b3aee-d8a1-5a3d-ad8b-7d824db253f0"
 version = "1.0.1+0"
 
 [[deps.CYAxiverse]]
-deps = ["AbstractTrees", "ArbNumerics", "Dates", "Distributed", "Distributions", "GenericLinearAlgebra", "HDF5", "IntervalArithmetic", "LineSearches", "LinearAlgebra", "LinearSolve", "LoopVectorization", "NLsolve", "Nemo", "NormalForms", "Optim", "OrdinaryDiffEq", "Random", "SparseArrays", "StaticArrays", "TimerOutputs", "Tullio"]
+deps = ["AbstractTrees", "ArbNumerics", "Dates", "Distributed", "Distributions", "GenericLinearAlgebra", "HDF5", "IntervalArithmetic", "LineSearches", "LinearAlgebra", "LinearSolve", "LoopVectorization", "NLsolve", "Nemo", "NormalForms", "Optim", "OrdinaryDiffEq", "Random", "SHA", "SparseArrays", "StaticArrays", "TimerOutputs", "Tullio"]
 path = ".."
 uuid = "e5e45d93-5055-4eab-878b-2e484be3f951"
 version = "0.2.0"

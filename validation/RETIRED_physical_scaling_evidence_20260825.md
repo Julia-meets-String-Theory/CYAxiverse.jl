@@ -8,10 +8,11 @@ The hashes below preserve content identity without republishing the private path
 
 A replacement evidence set must be generated from explicit, path-safe configuration, use a new evidence version, and pass the repository's scientific validation gates before it is cited.
 
-The historical audit, sidecar-generation, preflight, and pilot-runner entry
-points are retained for source archaeology but fail closed before loading
-dependencies, resolving local inputs, or writing output. They cannot recreate
-evidence under the retired v1 identity.
+The historical audit, sidecar-generation, preflight, pilot-runner, and dated
+Python checkpoint/sidecar test and validation entry points are retained for
+source archaeology but fail closed before loading dependencies, resolving
+local inputs, or writing output. They cannot recreate evidence under the
+retired v1 identity.
 
 | Retired artifact | SHA-256 | Git blob | Bytes |
 | --- | --- | --- | ---: |
