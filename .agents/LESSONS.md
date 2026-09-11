@@ -307,3 +307,116 @@ Issue #157 / PR #158 public-path remediation history.
 
 Superseded by: N/A
 Promotion status: not promoted
+
+## L-0007 — Handoff draft is not launch authorization
+
+ID: L-0007
+Status: candidate
+Date: 2026-09-11
+Type: owner-redirection
+Scope / tags: delegation launch, authorization semantics, state/provenance
+
+Observed failure: Discussion or refinement of a proposed delegation packet was
+treated as launch authorization, and work/state advanced before explicit owner
+authorization.
+
+Correction: Treat discussion and refinement of a proposed packet as advisory, not
+authorization. Present the final packet and obtain explicit owner authorization
+before launch. After approval, ordinary already-authorized worker
+diagnose/edit/check/correct/recheck work remains covered by that authorization.
+Only a material post-approval change to authorized scope or terms requires
+renewed approval.
+
+Root cause: Plan updates were conflated with owner-governed launch authorization.
+
+Preventive rule / check: Require a distinct pre-launch authorization checkpoint.
+Treat packet edits as planning detail unless they materially change authorized
+scope or terms; require renewed approval before applying such a change.
+
+Applicability / exceptions: Applies to owner-redirection and delegated workflows
+with explicit owner-governed execution. It does not replace scientific or merge
+gates already governed by higher sources.
+
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration section 2
+provide adjacent delegation mechanisms only. This sanitized candidate has no
+cited public incident proof.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0008 — Delegation contract must name capability and budget
+
+ID: L-0008
+Status: candidate
+Date: 2026-09-11
+Type: workflow
+Scope / tags: delegation packet, capacity planning, escalation policy
+
+Observed failure: A delegated task was launched with implicit role, capability,
+and effort assumptions, which reduced contract clarity and made fallback behavior
+ambiguous.
+
+Correction: Before delegation, state the role, model/capability target, reasoning
+target, topology, ordered product-neutral fallback policy, effort budget/lease,
+escalation conditions, and worker-reuse expectations. Do not encode a
+concrete/current fallback sequence or model list.
+
+Root cause: The packet lacked explicit operational bounds and fallback triggers.
+
+Preventive rule / check: Reject a packet that omits any required contract field.
+Verify that its fallback policy is ordered and product-neutral without encoding a
+concrete/current sequence. Renew owner authorization only for a material change
+to any authorized scope or term. Ordinary diagnose/edit/check/correct/recheck
+loops and use of an already approved fallback or worker-reuse policy remain
+authorized.
+
+Applicability / exceptions: Applies to multi-agent and handoff-based work where
+worker-level reuse is expected. Single-agent work without handoff may use a lighter
+form.
+
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration sections
+2, 5, 7, and 8 provide only partial, adjacent mechanism support for packet
+fields and worker reuse. This sanitized candidate has no cited public incident
+proof.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0009 — Handoff state follows observed execution outcome
+
+ID: L-0009
+Status: candidate
+Date: 2026-09-11
+Type: state/provenance
+Scope / tags: handoff state, status integrity, orchestration
+
+Observed failure: Handoff bookkeeping conflated the immediate operation result
+with the later worker terminal return, so launch state could be inferred from the
+wrong phase.
+
+Correction: Use the immediate handoff operation result as the phase-1 launch
+decision. Only success creates or attaches new execution task/worker state.
+Decline, cancellation, or failure creates no new task/worker state, leaves prior
+state unchanged, and is not silently retried. After successful launch, later worker
+terminal states (`DONE`, `BLOCKED`, `FAILED`) are a separate phase-2 downstream
+contract.
+
+Root cause: State bookkeeping mixed handoff operation status with downstream return
+state.
+
+Preventive rule / check: Record phase 1 from the operation result and phase 2 from
+the later worker terminal return. Do not make phase-2 evidence a prerequisite for
+the phase-1 success transition; apply phase-2 checks only after successful launch.
+
+Applicability / exceptions: Applies to workflows using explicit worker return
+contracts and observed execution results. Internal planning notes may be prepared
+before execution and do not by themselves move execution state.
+
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration section 3
+provide adjacent support only for the later phase-2 `DONE`, `BLOCKED`, `FAILED`
+worker-return contract. These sources do not prove the phase-1 incident or
+define handoff-operation result semantics. This sanitized candidate has no
+cited public incident proof.
+
+Superseded by: N/A
+Promotion status: not promoted
