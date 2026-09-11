@@ -36,6 +36,16 @@ What remains outside this PR/spec gate. N/A for trivial S0 changes when there is
 
 Include exact commands and observed results where material. Keep large evidence in durable artifacts rather than the PR body.
 
+## Lessons / corrections
+
+- Reusable failure mode discovered: Yes / No / N/A
+- Owner redirection that should persist: Yes / No / N/A
+- Lesson added/updated: L-____ / N/A
+- Normative rule change required: Yes / No / N/A
+
+For S0 work, omit this section or mark all fields `N/A` when lessons and
+corrections are irrelevant.
+
 ## Convergence
 
 - [ ] Implementation checked against the approved `spec.md`/amendments where SDD applies, or N/A for S0.
