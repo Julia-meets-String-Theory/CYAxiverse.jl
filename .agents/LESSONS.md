@@ -316,17 +316,30 @@ Date: 2026-09-11
 Type: owner-redirection
 Scope / tags: delegation launch, authorization semantics, state/provenance
 
-Observed failure: A delegated packet that only refined the execution plan was treated as permission to execute; work and state were advanced before explicit owner authorization.
+Observed failure: Discussion or refinement of a proposed delegation packet was
+treated as launch authorization, and work/state advanced before explicit owner
+authorization.
 
-Correction: Treat packet refinement as advisory only until a final, explicit owner authorization is given. Before each material post-authorization change, request renewed authorization and re-handoff terms.
+Correction: Treat discussion and refinement of a proposed packet as advisory, not
+authorization. Present the final packet and obtain explicit owner authorization
+before launch. After approval, ordinary already-authorized worker
+diagnose/edit/check/correct/recheck work remains covered by that authorization.
+Only a material post-approval change to authorized scope or terms requires
+renewed approval.
 
-Root cause: Ownership and authorization checkpoints were conflated with planning updates.
+Root cause: Plan updates were conflated with owner-governed launch authorization.
 
-Preventive rule / check: Require a distinct authorization checkpoint before launch, and require that execution state references that checkpoint.
+Preventive rule / check: Require a distinct pre-launch authorization checkpoint.
+Treat packet edits as planning detail unless they materially change authorized
+scope or terms; require renewed approval before applying such a change.
 
-Applicability / exceptions: Applies to owner-redirection and delegated workflows with explicit owner-governed execution. Does not replace existing scientific or merge gates already governed by higher authority.
+Applicability / exceptions: Applies to owner-redirection and delegated workflows
+with explicit owner-governed execution. It does not replace scientific or merge
+gates already governed by higher sources.
 
-Evidence / durable reference: `AGENTS.md` delegated-workflow guidance in section 6; `.agents/skills/cyaxiverse-agent-orchestration/SKILL.md` sections 2 and 3 (delegation packet and worker return states); and issue/PR provenance context (`Issue #159` / `PR #160`) for owner-redirection sequencing.
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration section 2
+provide adjacent delegation mechanisms only. This sanitized candidate has no
+cited public incident proof.
 
 Superseded by: N/A
 Promotion status: not promoted
@@ -339,17 +352,30 @@ Date: 2026-09-11
 Type: workflow
 Scope / tags: delegation packet, capacity planning, escalation policy
 
-Observed failure: A delegated task was launched with implicit model, reasoning, and cost/effort expectations, which reduced convergence quality and increased review churn.
+Observed failure: A delegated task was launched with implicit role, capability,
+and effort assumptions, which reduced contract clarity and made fallback behavior
+ambiguous.
 
-Correction: State role, capability target, fallback policy, effort budget/lease, escalation conditions, and worker-reuse expectations in the packet before launch.
+Correction: Before delegation, state the role, model/capability target, reasoning
+target, topology, ordered product-neutral fallback policy, effort budget/lease,
+escalation conditions, and worker-reuse expectations. Do not encode a
+concrete/current fallback sequence or model list.
 
-Root cause: The delegation contract lacked explicit operational constraints needed for bounded execution.
+Root cause: The packet lacked explicit operational bounds and fallback triggers.
 
-Preventive rule / check: Reject a delegated packet that omits any required contract field; require updates before each reuse of the same worker in a new bounded phase.
+Preventive rule / check: Reject a packet that omits any required contract field.
+Verify that its fallback policy is ordered and product-neutral without encoding a
+concrete/current sequence. Renew authorization only when the task boundary,
+topology, or impact scope changes.
 
-Applicability / exceptions: Applies to multi-agent or handoff-based implementation work; local single-agent edits with no downstream worker handoff may use a lighter form.
+Applicability / exceptions: Applies to multi-agent and handoff-based work where
+worker-level reuse is expected. Single-agent work without handoff may use a lighter
+form.
 
-Evidence / durable reference: `AGENTS.md` delegated-task lifecycle in section 6; `.agents/skills/cyaxiverse-agent-orchestration/SKILL.md` sections 2 and 5 (delegation packet fields, task class and worker reuse).
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration sections
+2, 5, 7, and 8 provide only partial, adjacent mechanism support for packet
+fields and worker reuse. This sanitized candidate has no cited public incident
+proof.
 
 Superseded by: N/A
 Promotion status: not promoted
@@ -362,17 +388,32 @@ Date: 2026-09-11
 Type: state/provenance
 Scope / tags: handoff state, status integrity, orchestration
 
-Observed failure: A handoff outcome was recorded as if downstream work had started, despite delegation being declined, failed, or not yet returned.
+Observed failure: Handoff bookkeeping conflated the immediate operation result
+with the later worker terminal return, so launch state could be inferred from the
+wrong phase.
 
-Correction: Create or change execution state only after a successful handoff return state or accepted worker output; failed or declined handoff leaves prior state unchanged until manager re-issues direction.
+Correction: Use the immediate handoff operation result as the phase-1 launch
+decision. Only success creates or attaches new execution task/worker state.
+Decline, cancellation, or failure creates no new worker state, leaves prior state
+unchanged, and is not silently retried. After successful launch, later worker
+terminal states (`DONE`, `BLOCKED`, `FAILED`) are a separate phase-2 downstream
+contract.
 
-Root cause: State bookkeeping used intent rather than observed execution result.
+Root cause: State bookkeeping mixed handoff operation status with downstream return
+state.
 
-Preventive rule / check: Map worker returns to explicit states (`DONE`, `BLOCKED`, `FAILED`) and require a durable return artifact or result before recording downstream work-state updates.
+Preventive rule / check: Record phase 1 from the operation result and phase 2 from
+the later worker terminal return. Do not make phase-2 evidence a prerequisite for
+the phase-1 success transition; apply phase-2 checks only after successful launch.
 
-Applicability / exceptions: Applies to workflows with explicit worker return contracts and observed execution results. Does not stop internal planning notes from being prepared before execution.
+Applicability / exceptions: Applies to workflows using explicit worker return
+contracts and observed execution results. Internal planning notes may be prepared
+before execution and do not by themselves move execution state.
 
-Evidence / durable reference: `.agents/skills/cyaxiverse-agent-orchestration/SKILL.md` sections 3 and 4 (worker return states, managed state progression); `AGENTS.md` section 6 (delegated-task lifecycle and manager handoff ownership).
+Evidence / durable reference: Repository sources, including `AGENTS.md` section 6
+and orchestration sections 2, 5, 7, and 8, cover adjacent downstream
+orchestration mechanisms only. This sanitized candidate has no cited public
+incident proof.
 
 Superseded by: N/A
 Promotion status: not promoted
