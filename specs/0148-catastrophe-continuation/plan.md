@@ -14,8 +14,9 @@ Original migration-cutoff spec revision:
 `eff7798ca65f932a0c6cf635bca7f49f4c5d4517` (P96-fidelity-corrected brownfield
 migration revision).
 
-Approval state: **draft / owner approval pending**. This plan does not authorize
-new scientific behavior while the governing S2 specification remains draft.
+Approval state: **approved**. Owner approval recorded at Issue #148 comment
+`5642390659`, approving spec revision `87cec4d` at reviewed PR head `5081a6d`,
+after independent review PASS (Issue #148 comment `5641962990`).
 
 Migration context: CYAX-0151 G3 reconstructs Issue #148/PR #149 as SDD without
 changing scientific intent. The migration base is

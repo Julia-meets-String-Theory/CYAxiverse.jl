@@ -3,14 +3,14 @@ spec_id: CYAX-0148
 title: Continue catastrophic-inflation structures away from the radial Kahler ray
 issue: 148
 class: S2
-status: draft
+status: approved
 workstream: Inflation
 parent: null
 depends_on: []
 created: 2026-09-10
 last_reviewed: 2026-09-11
 review_required: scientific-owner-after-independent-scientific-review
-approval_ref: N/A while draft
+approval_ref: "Issue #148 comment 5642390659 — approves spec revision 87cec4d"
 version_impact: no feature-branch bump
 ---
 
