@@ -51,7 +51,16 @@ winner is declared.
 - The source search proves only absence within its frozen scope and time.
 - Contexts were manually curated before deterministic rendering.
 - Blind artifacts used opaque IDs, but the manager who launched runs was not epistemically blind to the mapping.
+- Blindness was incomplete: S2 retained relational labels such as `A01` and
+  `A02`, so a scorer could identify it as Condition A.
+- Exact dispatched prompts were not preserved. Actual per-run input hashes,
+  sizes, parity, freshness/tool non-use, and zero reopenings are manager-attested
+  rather than independently replayable.
 - No statistical-significance claim is made.
+
+Freeze sequence: responses `fd8d9313d61445e430fb796cc7a3e2935b7886a9`;
+nominal scorecards `2d9d14c79c9d66d1d1058730917834b59380c892`;
+result candidate `51c67ef183cfc55a7d4010b2c622e80ca1dad722`.
 
 ## Conservative interpretation and next gate
 
@@ -65,3 +74,6 @@ reviewed source/context identities or a newly frozen equivalent, dispatch exact
 prompt-plus-context bytes to six fresh GPT-5.6 Sol/high subjects, record input
 hashes at launch, and repeat blind scoring. Do not select a backend or begin the
 fuzzy/Table-1 stress test.
+
+No score, error rate, efficiency, representation, or backend inference is drawn
+from these six contaminated runs.
