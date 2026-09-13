@@ -3,14 +3,14 @@ spec_id: CYAX-0163
 title: Temporal provenance for durable agent memory
 issue: 163
 class: S3
-status: draft
+status: approved
 workstream: Infrastructure
 parent: 162
 depends_on: []
 created: 2026-09-12
 last_reviewed: 2026-09-13
 review_required: repository-owner review and independent architecture/evidence review before production adoption
-approval_ref: null
+approval_ref: "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/163#issuecomment-5655482027"
 ---
 
 # CYAX-0163 — Temporal provenance for durable agent memory
@@ -22,7 +22,7 @@ structured context assembly help a genuinely fresh agent reconstruct current
 CYAxiverse state more reliably and with less context than direct reconstruction
 from unstructured historical artifacts.
 
-The working architecture under this draft is:
+The working architecture under this approved specification is:
 
 ```text
 authoritative durable sources
@@ -37,13 +37,12 @@ their durable revision history remain authoritative.
 
 ## Status and approval boundary
 
-This is a draft research specification. It does not approve a graph backend,
-production memory service, automatic extraction pipeline, scientific ontology,
-or change to repository authority. The backend-independent prototypes may
-collect evidence while this specification is draft because they change no
-package, scientific, or production-memory behavior. Production adoption needs
-an explicitly reviewed specification revision and repository-owner approval;
-`approval_ref` remains `null`.
+This research specification is approved by the repository owner in Issue #163
+comment `5655482027`, for the independently reviewed PR #164 line at exact
+revision `3e4e5f104c5f15c90b77ae7739d52d426fa521fd`. Approval does not select or
+approve a graph backend, production memory service, automatic extraction
+pipeline, scientific ontology, or change to repository authority. Production
+adoption and PR integration remain separate owner decisions.
 
 The current direction supersedes the initial graph-oriented hypothesis without
 rewriting its history:
@@ -73,7 +72,7 @@ history only.
 | R-005 Clean pilot | Use a bounded work item with a known answer and a decision/work-item/requirement/implementation/verification/outcome chain; do not begin with fuzzy/Table-1 history. | Frozen CYAX-0159 ledger and canonical source manifest. |
 | R-006 Cold-start comparison | Give comparable fresh agents the same reconstruction task and frozen source snapshot. Compare an unstructured source condition with a concise structured provenance/context condition. Record sources opened, context consumed, dimension scores, and automatic failures. | CYAX-0159 pilot and frozen responses/scorecards. |
 | R-007 Adversarial repair | Classify failed executions, repair the dispatch/infrastructure defect rather than coach the same agent, and preserve the failed run as inadmissible. A repaired execution must record exact inputs, identities, hashes, and independent review. | CYAX-0155 contamination record, exact-input rerun, final result, and methodology review. |
-| R-008 Decision and graph evidence gate | Use the reliability/efficiency threshold and a held-out comparison against an equally concise non-graph structured context. Introduce graph infrastructure only after a future preregistered use case demonstrates a representation-specific need and material benefit that concise structured provenance cannot satisfy. Backend enthusiasm or storage convenience is not evidence. | CYAX-0157 ablation, CYAX-0155 exact-input rerun, and future owner-reviewed representation-specific evidence; no backend is selected in this draft. |
+| R-008 Decision and graph evidence gate | Use the reliability/efficiency threshold and a held-out comparison against an equally concise non-graph structured context. Introduce graph infrastructure only after a future preregistered use case demonstrates a representation-specific need and material benefit that concise structured provenance cannot satisfy. Backend enthusiasm or storage convenience is not evidence. | CYAX-0157 ablation, CYAX-0155 exact-input rerun, and future owner-reviewed representation-specific evidence; no backend is selected by this specification. |
 | R-009 Scientific stress boundary | Start a complex scientific pilot only after the clean pilot, ablation, and adversarial gates pass. Never allow one extractor interpretation to become authoritative. | Separate reviewed slice with frozen sources, conflicting interpretations, negative evidence, explicit abstention, and a defined approval boundary. |
 
 ## Preserved semantic principles
@@ -225,13 +224,13 @@ The initial investigation does not:
 - make any derived graph, index, ledger, or context irreplaceable; or
 - start fuzzy/Table-1 testing or modify CYAX-0162 private-memory infrastructure.
 
-## Compatibility, version impact, and remaining approval work
+## Compatibility, version impact, and remaining integration work
 
 Research/prototype compatibility impact is **none**. No package behavior,
 dependency, public API, persisted schema, or package version changes under this
-draft.
+approved research specification.
 
-Before production adoption, obtain repository-owner and independent
-architecture/evidence review of a revised specification and decide whether a
-separate implementation work item under #162 should begin. The next owner gate
-is not a backend selection or implementation start.
+Before production adoption, obtain a separate repository-owner integration or
+implementation decision and decide whether a separate work item under #162
+should begin. Specification approval does not mark PR #164 ready, authorize its
+merge, select a backend, or start implementation.

@@ -4,7 +4,7 @@ This directory is the backend-independent research prototype for Issue
 [#163](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/163),
 under the durable-memory programme in Issue
 [#162](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/162).
-The draft research contract is
+The approved research specification is
 [`specs/0163-temporal-provenance-memory/spec.md`](../../specs/0163-temporal-provenance-memory/spec.md).
 
 The prototype tests one question: does deterministic provenance-aware
@@ -372,8 +372,8 @@ budget, large-scale cascading dependency invalidation where graph operations
 materially outperform simpler structures, multi-hop reconstruction whose
 correctness or efficiency degrades without relational topology, or another
 explicit representation-specific advantage. The completed held-out ablation
-and exact-input adversarial rerun do not select a backend or approve the draft
-specification.
+and exact-input adversarial rerun do not select a backend or authorize
+production adoption.
 
 ## Frozen CYAX-0157 held-out ablation result
 
@@ -434,9 +434,11 @@ Existing experiments support concise structured provenance/context assembly as
 the default Issue #163 direction. They do not currently demonstrate an
 incremental benefit from graph-shaped representation. Graph infrastructure is
 optional, downstream, and evidence-gated. No backend is selected, and the
-CYAX-0163 specification remains draft and unapproved.
+CYAX-0163 specification is approved by the repository owner in Issue #163
+comment `5655482027`, for exact reviewed revision
+`3e4e5f104c5f15c90b77ae7739d52d426fa521fd`.
 
-The next gate is owner/Control Desk review of the consolidated evidence and
-draft specification. Do not run another representation experiment, start
+The next gate is the separate owner/Control Desk PR #164 readiness and
+integration decision. Do not run another representation experiment, start
 fuzzy/Table-1 testing, evaluate a backend, alter #162 private-memory
-infrastructure, or merge either research PR from this result alone.
+infrastructure, or merge either research PR from specification approval alone.
