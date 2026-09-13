@@ -519,6 +519,12 @@ def validate_no_contexts():
         "answer_key.md",
         "source_snapshot.json",
         "validate_snapshot.py",
+        "common_subject_prompt.md",
+        "condition_a_context.md",
+        "condition_b_context.md",
+        "condition_a_ledger.jsonl",
+        "phase2_context_builder.py",
+        "phase2_manifest.json",
     }
     prohibited_patterns = (
         r"(^|_)(context|condition|response|scorecard)",
@@ -534,7 +540,7 @@ def validate_no_contexts():
                 continue
             if any(re.search(pat, filename, re.IGNORECASE) for pat in prohibited_patterns):
                 fail(f"unexpected context/reconstruction artifact exists: {rel}")
-    ok("no reconstruction context or response files found")
+    ok("authorized Phase 2 context-construction artifacts are present; no responses or scores found")
 
 
 if __name__ == "__main__":
