@@ -1,0 +1,59 @@
+## Authoritative current state
+
+CYAX-0155 is currently recorded as **Closed / Completed**, and its Project item is **Done**. Under the repository’s workflow semantics, GitHub Issues and Projects are the authority for live work state, so this is the authoritative tracker state. (`issue-155-current`; `sdd-contract-at-merge`)
+
+This does **not**, by itself, prove that every previously stated workflow condition was satisfied.
+
+## Current observations
+
+- Issue #155 is Closed with state reason Completed; Project Status is Done. (`issue-155-current`)
+- PR #156 was merged into `vmm` on 2026-09-11 at commit `f0013552cd69a93221464e9c8ccfd56339f39052`. (`pr-156`; `pr-156-merge-commit`)
+- A human actor, `vmmhep`, later closed the issue. The closure event contains no explanation or associated commit. (`issue-155-closure-event`)
+
+## Historical instruction and unresolved condition
+
+After the merge, the durable checkpoint explicitly instructed:
+
+> Keep #155 open until the Research & Chats saved Project view/filter is configured.
+
+At that time, the available connector could neither configure nor directly verify a Projects-v2 saved view, and the checkpoint did not claim completion of that action. (`issue-155-checkpoint`)
+
+PR #156 also treated saved-view configuration as a separate Project mutation outside the repository diff and made no claim that it had occurred. (`pr-156`)
+
+## Implementation evidence
+
+The merged commit added the repository-side privacy and checkpoint rules across `AGENTS.md`, the SDD, the human guide, and the approved specification. (`pr-156-merge-commit`)
+
+This supports implementation of the repository control-plane requirements, including sanitized publication, summaries instead of transcripts, preservation of the existing lifecycle, use of Research & Chats as a view rather than a second authority layer, and fail-closed handling when publication safety is uncertain. (`spec-0155`; `agents-contract-at-merge`; `sdd-contract-at-merge`; `checkpoint-guide-at-merge`)
+
+It does **not** prove that a concrete Research & Chats saved view/filter was configured. The guide describes how such a view works but does not report an actual instance. (`checkpoint-guide-at-merge`)
+
+## Authority and inference
+
+- The Issue and Project state are authoritative for the **current recorded work state**. (`issue-155-current`; `sdd-contract-at-merge`)
+- The approved specification is authoritative for **feature intent and acceptance**, not live work state. Its acceptance language says a saved view *can be configured* without creating a second ledger. (`spec-0155`)
+- The checkpoint is durable evidence of the **historical keep-open instruction**. (`issue-155-checkpoint`)
+- The later closure proves only that the issue was closed. It does not explain why. (`issue-155-closure-event`)
+
+It would be an unsupported inference to treat closure alone as proof that the saved view was configured or that the keep-open condition was explicitly superseded.
+
+## Unknowns and abstention
+
+The frozen evidence contains no durable artifact confirming saved-view configuration and no explicit statement superseding the checkpoint condition. The finite search found none within its captured scope, but it cannot establish universal absence. (`closure-search`)
+
+Therefore, I abstain from concluding:
+
+- that the saved view/filter was configured;
+- that the historical condition remained binding at closure;
+- that an authorized decision superseded or waived it; or
+- why `vmmhep` closed the issue.
+
+## Next valid verification or action
+
+Directly inspect the CYAxiverse Research & Development Project through an interface capable of reading saved views and filters.
+
+- If the Research & Chats view exists with the prescribed normal Status field and sanitized metadata, add a durable Issue comment recording that verification.
+- If it does not exist, configure it and record completion; if the historical keep-open condition is still controlling, reopen #155 until that is done.
+- If the condition was intentionally waived or superseded, record the responsible authority and rationale durably on #155.
+
+Until one of those records exists, the tracker says **Completed**, while fulfillment or supersession of the saved-view condition remains unproven.

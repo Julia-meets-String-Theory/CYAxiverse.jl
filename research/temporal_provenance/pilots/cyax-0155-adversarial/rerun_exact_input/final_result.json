@@ -1,0 +1,44 @@
+{
+  "schema": "cyax-0163-clean-rerun-final-v1",
+  "status": "DONE",
+  "result": "B_MATCHES_A",
+  "frozen": {
+    "source_snapshot": "cyax-0155-adversarial-20260913T043555Z",
+    "preregistration_commit": "44937a83cc039805d072bd0263517d8dfef03a10",
+    "reviewed_context_revision": "cc9545ff7bdecb44f3c5bf39d9eed3405c7ddc42",
+    "common_prompt_sha256": "cf9b6aec4c7e232a9c2462e2f100dcefb6e49ea67422ce7670c4f85e66f3c52a",
+    "condition_a_context_sha256": "aedd1350bef5389be90d2608318f7b9675f94aad0a50a8d5d59499fb017bc780",
+    "condition_b_context_sha256": "33c61ad16a5228a557ae59f0ac80834674e40aae5b77a0a9e0044e82c1b2237c",
+    "condition_a_input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f",
+    "condition_b_input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f"
+  },
+  "runs": {
+    "A1": {"input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f", "output_sha256": "8adf61d6cc26c76eec28bb049609ba6c383320940cbd75b41fa402080549fef0", "output_bytes": 4482, "total": 12, "conflict_critical": 5, "admissible": true},
+    "A2": {"input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f", "output_sha256": "456ba1fe60a14465c5794f910ba9a74a04529592ac6a3a891cbb928e4e33bbe2", "output_bytes": 3764, "total": 12, "conflict_critical": 5, "admissible": true},
+    "A3": {"input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f", "output_sha256": "e9272dcf24d6b208b001098c62bf641a20f766dfeb1580d3ca54429aa2330c3d", "output_bytes": 4247, "total": 12, "conflict_critical": 5, "admissible": true},
+    "B1": {"input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f", "output_sha256": "1f518c93e978176e1a22fd6a700756c09f19833eb178a558e1eb375acc8488ab", "output_bytes": 4115, "total": 12, "conflict_critical": 5, "admissible": true},
+    "B2": {"input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f", "output_sha256": "178aada6be7c756f88d01914ff0a45d17c538a92e3670d219abede697036260c", "output_bytes": 4071, "total": 12, "conflict_critical": 5, "admissible": true},
+    "B3": {"input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f", "output_sha256": "fd24565fb69cd51cb6410c8637ffc04e205f6ccf2d23ac7d088cb2910cb055cf", "output_bytes": 4760, "total": 12, "conflict_critical": 5, "admissible": true}
+  },
+  "common_metrics": {
+    "automatic_failures": 0,
+    "unsupported_assertions": 0,
+    "authority_errors": 0,
+    "temporal_errors": 0,
+    "supersession_errors": 0,
+    "unjustified_inferences": 0,
+    "correct_abstentions_per_run": 1,
+    "incorrect_abstentions": 0,
+    "next_action_errors": 0,
+    "source_reopenings": 0
+  },
+  "blindness": "PASS",
+  "independent_review": "PASS",
+  "interpretation": "Structured provenance/context assembly is the default Issue #163 direction; explicit graph infrastructure remains behind a new evidence threshold.",
+  "limitations": [
+    "One historical work item and three runs per condition do not establish statistical or general representation equivalence.",
+    "The frozen source search establishes absence only within its recorded scope and observation time.",
+    "The contexts were manually curated before deterministic rendering."
+  ],
+  "next_gate": "Return to owner and Control Desk before any further representation experiment, fuzzy/Table-1 test, backend evaluation, merge, approval, or private-memory infrastructure change."
+}
