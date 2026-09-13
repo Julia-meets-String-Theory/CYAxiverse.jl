@@ -1,0 +1,22 @@
+[
+  {
+    "id": "IC_kwDOH3RaMs8AAAABT-VIRg",
+    "author": {
+      "login": "vmmhep"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "Independent re-review requested against exact head 1ed97e181e3203524d5435c43f58c1a3ff03d813. Please re-check the retired v1 workflow guard, historical replay contract, optional PyCall interpreter contract and notebook coverage, and the explicit R-005 deferral.",
+    "createdAt": "2026-09-11T13:49:52Z",
+    "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/pull/158#issuecomment-5635393606"
+  },
+  {
+    "id": "IC_kwDOH3RaMs8AAAABUDLL4A",
+    "author": {
+      "login": "vmmhep"
+    },
+    "authorAssociation": "MEMBER",
+    "body": "Independent re-review requested against exact head `8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45`, incorporating current `vmm` base `856012f015a866bf7ff352bc50e8d10c250855e6`.\n\nPlease verify the clean-checkout notebook-environment setup and 10/10 runtime initialization smoke, the fail-closed optional `CYAXIVERSE_PYTHON` contract, all eight retired-entrypoint guards, scientific non-impact, and the explicitly deferred R-005 gate.\n\nExact-head Fast CI passed every new #157/#158 test before reaching only the unchanged Hessian expectation mismatch at `test/runtests.jl:1317`.\n",
+    "createdAt": "2026-09-11T20:50:22Z",
+    "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/pull/158#issuecomment-5640473568"
+  }
+]

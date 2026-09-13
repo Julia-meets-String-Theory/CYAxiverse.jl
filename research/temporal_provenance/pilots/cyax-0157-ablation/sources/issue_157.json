@@ -1,0 +1,19 @@
+{
+  "number": 157,
+  "title": "Remove current machine-local path disclosures",
+  "state": "OPEN",
+  "labels": [],
+  "milestone": null,
+  "projectItems": [
+    {
+      "status": {
+        "optionId": "0615a79e",
+        "name": "Verification"
+      },
+      "title": "CYAxiverse Research & Development"
+    }
+  ],
+  "body": "# Remove current machine-local path disclosures\n\n## Problem\n\nCurrent public repository and discussion surfaces contain machine-local filesystem details that are not scientific provenance. Publicly useful identifiers—source filenames, hashes, commits, and branch names—should remain, while checkout, cache, archive, account-specific HPC, and interpreter paths should be removed.\n\n## Scope\n\n- Sanitize the confirmed Issue, PR, and comment bodies without changing their scientific meaning.\n- Replace tracked personal path defaults with explicit arguments, documented environment variables, or repository-relative resolution.\n- Preserve scientific algorithms, values, units, identities, and persisted schemas.\n- Add focused coverage for changed path-resolution behavior.\n- Inventory stale public branches as a separate live-reference class.\n\n## Acceptance criteria\n\n- Current public prose no longer contains the confirmed personal paths.\n- The remediation branch contains no personal home path, private HPC username, named local worktree/archive location, or fixed machine-specific interpreter path.\n- Changed executable boundaries fail clearly when required configuration is absent.\n- Focused path-resolution tests pass.\n- Branch deletion and history rewriting remain separate, evidence-backed phases; no unique work is discarded.\n\n## Verification note\n\nAt PR #158 head `8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45`, clean notebook-environment instantiation and all new #157/#158 tests pass: optional Python 9/9, notebook static checks 20/20, notebook runtime initialization 10/10, retired-entrypoint guards 54/54, Slurm-log resolution 6/6, and data-directory resolution 10/10. The wider Fast package suite then reaches the unchanged pre-existing Hessian expectation mismatch at `test/runtests.jl:1317` (`19.739208802178716` observed versus `39.47841760435743` expected).\n\nR-005 remains open and deferred: surviving public branches still require the separate read-only privacy scan and preservation/reachability classification. PR #158 does not close this issue.\n",
+  "createdAt": "2026-09-11T02:06:26Z",
+  "updatedAt": "2026-09-11T20:50:02Z"
+}

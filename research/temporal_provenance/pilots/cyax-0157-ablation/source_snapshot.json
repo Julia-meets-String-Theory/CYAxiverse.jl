@@ -9,7 +9,9 @@
     "project_status": "Verification",
     "created_at": "2026-09-11T02:06:26Z",
     "updated_at": "2026-09-11T20:50:02Z",
-    "body_sha256": "409b589cbee9bbc5bd1abfe78ec19edf492c5ec4c8241971c7ab07ebf9bba2fd"
+    "body_sha256": "409b589cbee9bbc5bd1abfe78ec19edf492c5ec4c8241971c7ab07ebf9bba2fd",
+    "captured_fixture": "sources/issue_157.json",
+    "captured_fixture_sha256": "12e109785f9f58d4428ee2adc7d4e9705a59bb074062c38a66ce3e5ceaef016b"
   },
   "supporting_pr": {
     "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158",
@@ -27,44 +29,14 @@
     "created_at": "2026-09-11T02:06:37Z",
     "updated_at": "2026-09-11T20:50:22Z",
     "body_sha256": "4dd0e8559cf7d0b7a696db7acc9e311b51bf337e2d72aea8fa42eaf83883c565",
-    "reviews": [],
-    "comments": [
-      {
-        "id": "IC_kwDOH3RaMs8AAAABT-VIRg",
-        "author": "vmmhep",
-        "created_at": "2026-09-11T13:49:52Z",
-        "summary": "Independent re-review requested against prior head 1ed97e181e3203524d5435c43f58c1a3ff03d813"
-      },
-      {
-        "id": "IC_kwDOH3RaMs8AAAABUDLL4A",
-        "author": "vmmhep",
-        "created_at": "2026-09-11T20:50:22Z",
-        "summary": "Independent re-review requested against current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, incorporating current vmm base 856012f015a866bf7ff352bc50e8d10c250855e6"
-      }
-    ],
-    "status_checks": [
-      {
-        "name": "Fast tests",
-        "workflow": "CI",
-        "status": "COMPLETED",
-        "conclusion": "FAILURE",
-        "completed_at": "2026-09-11T19:27:09Z"
-      },
-      {
-        "name": "build",
-        "workflow": "Documentation",
-        "status": "COMPLETED",
-        "conclusion": "SUCCESS",
-        "completed_at": "2026-09-11T18:36:05Z"
-      },
-      {
-        "name": "Full test suite",
-        "workflow": "CI",
-        "status": "COMPLETED",
-        "conclusion": "SKIPPED",
-        "completed_at": "2026-09-11T18:34:40Z"
-      }
-    ]
+    "captured_fixture": "sources/pr_158.json",
+    "captured_fixture_sha256": "0fa9dbedae8428f86a2d70bab5b82b6b1174a8921e906524eaee622cc877193b",
+    "reviews_fixture": "sources/pr_158_reviews.json",
+    "reviews_fixture_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "comments_fixture": "sources/pr_158_comments.json",
+    "comments_fixture_sha256": "edb8326c9a0e2d161f7515b8873c2a2922c11daae8e02b5c040e3dee200ddbd2",
+    "checks_fixture": "sources/pr_158_checks.json",
+    "checks_fixture_sha256": "27727c6b2f496ca51458393f844471d93f056a017622c5ffd2ab4e5ce19cd3c2"
   },
   "repository_artifacts_at_head": [
     {
@@ -100,7 +72,7 @@
     "R-005": "Surviving public branches require read-only privacy scan and preservation/reachability classification. No branch deleted, force-pushed, or rewritten. Deferred from PR #158."
   },
   "integrity": {
-    "method": "Each content_sha256 is SHA-256 of the UTF-8 file content piped through shasum -a 256. Each body_sha256 is SHA-256 of the GitHub API JSON body field value with trailing newline from gh CLI. Git blob SHAs are standard Git blob object identifiers.",
+    "method": "Each content_sha256 is SHA-256 of the UTF-8 file content piped through shasum -a 256. Each body_sha256 is SHA-256 of the GitHub API JSON body field value with a trailing newline appended (as produced by gh CLI -q '.body'). Each captured_fixture_sha256 is SHA-256 of the fixture file bytes. Git blob SHAs are standard Git blob object identifiers.",
     "deterministic": true,
     "snapshot_frozen_before_contexts": true
   }
