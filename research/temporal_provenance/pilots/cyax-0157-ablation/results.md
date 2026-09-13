@@ -38,3 +38,19 @@ Condition B matched Condition A on every preregistered reliability item with sim
 The supported conclusion is narrower: the earlier clean-pilot benefit is currently attributable to curated structured context and provenance, not specifically to graph-shaped representation. This does not show that relational structure has no value in more adversarial conflict or supersession cases.
 
 No graph backend is selected. The result narrows CYAX-0163 toward structured provenance/context assembly and requires stronger evidence before investment in graph infrastructure.
+
+## Independent review and limitations
+
+The independent methodology/evidence review of score freeze
+`c52c4e0de711b55f824bd16c1fbfc438b5007a79` returned PASS. It reproduced the
+freeze chronology, parity accounting, response hashes, blind mapping, score
+totals, and privacy boundary. See `methodology_review.md` for the durable audit
+record.
+
+The experiment covers one work item with two runs per condition and a ceiling
+score in both groups. It supports “no observed graph-shape benefit here,” not
+statistical equivalence or general ineffectiveness. Static manifests record the
+fresh-agent, launch-order, and zero-reopening controls but cannot independently
+prove runtime isolation. The scorecard and mapping also share one commit; the
+independent scorer attested to blind scoring, but Git alone does not establish
+the reveal order.

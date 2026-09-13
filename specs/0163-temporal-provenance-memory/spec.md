@@ -112,6 +112,37 @@ Recording this ablation does not approve the draft specification or any
 production adoption. The pilot, contexts, and scoring remain experimental
 evidence under the existing draft status.
 
+### Frozen CYAX-0157 result
+
+The pre-registered held-out ablation is now frozen as a finite experimental
+result: four fresh subjects ran in ABBA order A1, B1, B2, A2 with identical
+`gpt-5.6-sol` / `high` settings and zero source reopening. Condition A was the
+provenance-aware temporal relational context and Condition B was an equally
+capable concise non-graph structured summary. All four runs scored 12/12 on
+the twelve binary K items, with no automatic failures. After blind scoring was
+frozen and the opaque mapping was revealed, A mean was 12.0/12, B mean was
+12.0/12, and the difference was 0.0 points. B matched A.
+
+This finite result provides no evidence that graph-shaped representation adds
+reliability beyond the shared curated structured context and provenance. The
+supported attribution is therefore to curated structured context/provenance,
+not graph shape; it is not evidence that relational representations have no
+value in harder conflict, supersession, or scientific tasks. No backend is
+selected, and this result does not approve production adoption while the spec
+is draft and `approval_ref: null`.
+
+Flow remains only a revision-pinned pattern/reference source. Retain its
+useful patterns of revision-pinned reads, evidence cards, an append-only
+journal, project isolation, and compare-and-swap document revisions. Reject
+its mutable in-place updates, hard-delete or cascading deletion, and
+recency/strength semantics as authority for durable CYAxiverse memory.
+
+The next gate must use stronger independently reviewed evidence, with a
+pre-registered adversarial conflict/supersession slice and explicit authority
+and abstention checks. Do not start the #155 pilot here; it remains a separate
+follow-up requiring its own reviewed gate and must not be used as the next
+step of this frozen result.
+
 ## Remaining approval and evidence work
 
 - Obtain repository-owner and independent review of this draft before any

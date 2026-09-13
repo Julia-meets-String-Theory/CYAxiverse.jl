@@ -299,5 +299,39 @@ prototype. Continue only if the paired cold-start test shows a material benefit
 that cannot be explained by simply writing a good hand-curated summary. A later
 ablation should compare this relational context against an equally concise
 non-graph structured summary; otherwise the experiment measures curation, not
-graph structure. The next experiment should run that ablation before any graph
-backend decision, then use Issue #155 as the first adversarial conflict pilot.
+graph structure. The frozen CYAX-0157 ablation below now provides that
+comparison before any backend decision. Issue #155 must not be started from
+this result or this worktree; it remains a separate follow-up after a stronger
+evidence gate.
+
+## Frozen CYAX-0157 held-out ablation result
+
+The pre-registered CYAX-0157 ablation tested whether the reliability signal
+could be attributed to relational graph shape. Four fresh runs used the ABBA
+order A1, B1, B2, A2, the same `gpt-5.6-sol` / `high` subject setting, a frozen
+context revision, and zero source reopening. Condition A was the
+provenance-aware temporal relational context; Condition B was an equally
+capable concise structured summary without graph-shaped representation. Every
+run scored 12/12 on the twelve binary K items, with no automatic failures.
+After the blind scorecard was frozen, mapping gave A a mean of 12.0/12 and B a
+mean of 12.0/12, for a difference of 0.0 points. B matched A.
+
+This result does not show that graph-shaped representations have no value. It
+shows, for this finite held-out task and these matched contexts, no incremental
+reliability benefit from graph-shaped representation beyond the curated
+structured context, provenance, authority scopes, uncertainty, and
+current/stale distinctions shared by both conditions. The conservative
+interpretation is that the earlier benefit is attributable to curated
+structured context and provenance, not to graph shape. No backend is selected
+from this result.
+
+Flow remains only a revision-pinned pattern/reference source. Its useful
+patterns remain revision-pinned reads, evidence cards, an append-only journal,
+project isolation, and compare-and-swap document revisions. Its mutable
+in-place updates, hard-delete or cascading deletion, and recency/strength
+semantics as authority remain rejected for CYAxiverse durable memory.
+
+The next gate requires stronger, independently reviewed evidence, such as a
+pre-registered adversarial conflict and supersession slice with explicit
+authority and abstention checks. It must not start Issue #155 here; that pilot
+remains a separately reviewed follow-up after the stronger evidence gate.
