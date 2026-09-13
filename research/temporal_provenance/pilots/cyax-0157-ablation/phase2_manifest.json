@@ -1,0 +1,88 @@
+{
+  "artifact_contract": {
+    "max_ab_ratio": 0.05,
+    "required_facts": 12,
+    "required_questions": 12,
+    "word_max": 2500,
+    "word_min": 2300
+  },
+  "coverage": {
+    "distinct_source_references": 10,
+    "evidence_items": 26,
+    "fact_map": "Q1:F01, Q2:F02, Q3:F03, Q4:F04, Q5:F05, Q6:F06, Q7:F07, Q8:F08, Q9:F09, Q10:F10, Q11:F11, Q12:F12"
+  },
+  "fact_ids": [
+    "F01",
+    "F02",
+    "F03",
+    "F04",
+    "F05",
+    "F06",
+    "F07",
+    "F08",
+    "F09",
+    "F10",
+    "F11",
+    "F12"
+  ],
+  "fixtures": {
+    "checks_fixture": "sources/pr_158_checks.json",
+    "comments_fixture": "sources/pr_158_comments.json",
+    "hashes": {
+      "sources/issue_157.json": "12e109785f9f58d4428ee2adc7d4e9705a59bb074062c38a66ce3e5ceaef016b",
+      "sources/pr_158.json": "0fa9dbedae8428f86a2d70bab5b82b6b1174a8921e906524eaee622cc877193b",
+      "sources/pr_158_checks.json": "27727c6b2f496ca51458393f844471d93f056a017622c5ffd2ab4e5ce19cd3c2",
+      "sources/pr_158_comments.json": "edb8326c9a0e2d161f7515b8873c2a2922c11daae8e02b5c040e3dee200ddbd2",
+      "sources/pr_158_reviews.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    "issue_fixture": "sources/issue_157.json",
+    "pr_fixture": "sources/pr_158.json",
+    "reviews_fixture": "sources/pr_158_reviews.json"
+  },
+  "observation_time": "2026-09-13T01:22:00Z",
+  "outputs": {
+    "condition_a_context": {
+      "byte_count": 18861,
+      "path": "condition_a_context.md",
+      "sha256": "c2ecd5d092188222edaf73cbc94d9f77b5bc624f9a2973fd8f6366cde6f2fff4",
+      "word_count": 2314
+    },
+    "condition_a_ledger": {
+      "byte_count": 7436,
+      "line_count": 14,
+      "path": "condition_a_ledger.jsonl",
+      "sha256": "741bed51dabb230ff6ade3a17f3dee7e0c35e04016f628ad2e9f7b13c58587e4"
+    },
+    "condition_b_context": {
+      "byte_count": 16788,
+      "path": "condition_b_context.md",
+      "sha256": "a10d4313cdde3bbe99945e4c4a5c27a87e44d5a4c83530952396377e4790c1bc",
+      "word_count": 2305
+    },
+    "prompt": {
+      "byte_count": 1603,
+      "path": "common_subject_prompt.md",
+      "sha256": "5b0d6dfd031776fa158e0642695aa38b430f71f8d1eee68bb30501b42812e5dd",
+      "word_count": 264
+    }
+  },
+  "phase": 2,
+  "pilot": "CYAX-0157",
+  "question_to_fact": {
+    "1": "F01",
+    "10": "F10",
+    "11": "F11",
+    "12": "F12",
+    "2": "F02",
+    "3": "F03",
+    "4": "F04",
+    "5": "F05",
+    "6": "F06",
+    "7": "F07",
+    "8": "F08",
+    "9": "F09"
+  },
+  "snapshot_id": "cyax-0157-ablation-20260913T0122Z",
+  "snapshot_sha256": "596e0b3322a3b1fe363ad7f716f2ca7480059009dd77fe65ef7a1867b4b6049e",
+  "source_reopening": "exactly_zero"
+}
