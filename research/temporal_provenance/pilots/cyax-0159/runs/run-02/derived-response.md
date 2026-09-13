@@ -7,46 +7,37 @@ integration boundary is:
   (`[workflow_state]`).
 - Accepted PR #160 implementation head:
   `bd3e866537b0115a4cb76cbae31b3768da3de724` (`[implementation_evidence]`).
-- Default `main` has diverged and does not contain the accepted merge.
+- Default `main` has diverged and does not contain merge `856012f`
+  (`github:compare:856012f-main`, `[workflow_state]`). Do not treat `main` as
+  containing CYAX-0159.
 
-Authority comes from Issue #159 for the work item's objective and requirements,
-the approved CYAX-0159 specification for R-001–R-007 and non-scope, PR #160
-owner-approval comment `5636316397` for the owner decision, Git commits for
-implementation state, and Issue/PR/Project surfaces for workflow state.
-Validated lessons are advisory only and do not create another authority tier.
+Authority comes from the approved specification `repo:spec:0159`
+(`[approved_spec]`) and owner approval `github:pr:160:owner-approval`
+(`[owner_decision]`). Implementation and merge claims come from the cited
+repository and workflow artifacts; the supplied `context.md` is only a curated,
+non-authoritative view.
 
-PR implementation revision history is separate from lesson lifecycle:
+L-0001–L-0006 are each `validated`, `unpromoted`, and have `Superseded: N/A`.
+This lesson lifecycle is distinct from PR implementation revision history. The
+code revisions are: initial `2b9b056` → review-repair `f965dc6` → accepted
+status/provenance head `bd3e866`. That supersession chain does not supersede or
+alter the six lessons.
 
-- `2b9b056` was the initial PR implementation. A reported adversarial review
-  rejected its ready-for-acceptance claim.
-- `f965dc6` superseded that implementation with authority and lifecycle repairs.
-- `bd3e866` superseded `f965dc6` with the approved-status and provenance update.
-- The accepted L-0001–L-0006 are `validated`, `not promoted`, and each has
-  `Superseded by: N/A`; the PR commit sequence does not semantically supersede
-  those lessons.
-- PR #161 at `e1288cfe6a259d1f3f3c2d2c90e20bcf8d483b56` is open and unmerged. Its
-  L-0007–L-0009 remain candidates and are not part of CYAX-0159's accepted
-  six-lesson state.
+PR #161 remains open at `e1288cfe...`; L-0007–L-0009 are unmerged candidates
+with no owner merge or validation. They are not part of CYAX-0159's current
+state.
 
-The material durable anchors are the approved specification for R-001–R-007 and
-the completion criterion; `.agents/LESSONS.md` at `bd3e866` for the six lesson
-states; the PR #160 owner-approval comment for approval and validation; commits
-`2b9b056`, `f965dc6`, `bd3e866`, and merge `856012f` for revision history and
-integration; the Issue #159 close comment for completion on `vmm`; PR #161 for
-the candidate boundary; and the `856012f...main` comparison for branch
-divergence.
+PR #160 reports independent adversarial, standards/spec, and focused checks as
+passing. However, the observed GitHub PR surface exposed no formal review or
+check records (`github:pr:160:observed-surface`, observed
+2026-09-13T01:20Z). Treat the PASS claims as reported workflow evidence, not
+independently visible formal records; absence is not proof that checks failed.
 
-Two evidence boundaries remain. First, CYAX-0159 is integrated on `vmm`, not on
-divergent `main`; a release to `main` is separate work. Second, PR #160 reports
-independent review and focused-check PASS results, but the observed public PR
-surface exposed no formal review or check records. Treat those results as
-reported, not formally verified. No implementation, review, or owner decision
-remains open for #159 itself.
-
-No action is required for #159. Any new lesson, validation, or normative
-promotion needs separate reviewed work. If release to `main` is required, use a
-separate explicit integration action.
+Unresolved items are the separate `vmm`-to-`main` release boundary and the
+formal-review/check evidence limitation. The next valid action is none for
+#159; any lesson promotion or new lesson requires separate reviewed work. If
+release to `main` is desired, handle that as a separate integration action.
 
 Inputs opened: `reconstruction_prompt.md`, `graph_manifest.json`, and
-`context.md`. Canonical artifacts opened: none—the context resolved all material
-ambiguities. Approximate words consumed: 2,359.
+`context.md`. Canonical artifacts opened: none—context resolved all material
+ambiguities. Approximate words consumed: 2,359. No files edited.
