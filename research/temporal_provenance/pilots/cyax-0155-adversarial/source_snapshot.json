@@ -1,0 +1,102 @@
+{
+  "snapshot_id": "cyax-0155-adversarial-20260913T043555Z",
+  "observation_time": "2026-09-13T04:35:55Z",
+  "repository": "Julia-meets-String-Theory/CYAxiverse.jl",
+  "ancestry": {
+    "branch": "research/cyax-0163-adversarial-supersession",
+    "base_commit": "ec22874c3daeb6167cc957ed187f403ac86bdd22",
+    "base_description": "exact frozen/reviewed head of draft PR #164"
+  },
+  "sources": [
+    {
+      "id": "issue-155-current",
+      "kind": "github_issue_observation",
+      "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/155",
+      "observed_at": "2026-09-13T04:35:55Z",
+      "fixture": "sources/issue_155.json",
+      "facts": {"state": "CLOSED", "state_reason": "COMPLETED", "closed_at": "2026-09-11T01:09:18Z", "project": "CYAxiverse Research & Development", "project_status": "Done"}
+    },
+    {
+      "id": "issue-155-checkpoint",
+      "kind": "github_issue_comment",
+      "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/155#issuecomment-5627189023",
+      "created_at": "2026-09-11T00:01:47Z",
+      "author": "vmmhep",
+      "author_association": "MEMBER",
+      "fixture": "sources/issue_155.json",
+      "durable_statements": [
+        "The repository-side privacy boundary is active on vmm after PR #156.",
+        "Keep #155 open until the Research & Chats saved Project view/filter is configured.",
+        "The available connector could not configure or directly verify the Projects-v2 view.",
+        "The comment did not claim the Project configuration was complete."
+      ]
+    },
+    {
+      "id": "issue-155-closure-event",
+      "kind": "github_timeline_event",
+      "fixture": "sources/issue_155_timeline.json",
+      "event": "closed",
+      "created_at": "2026-09-11T01:09:18Z",
+      "actor": "vmmhep",
+      "commit_id": null,
+      "performed_via_github_app": null,
+      "scope_note": "The event proves who closed the Issue and when; it contains no rationale."
+    },
+    {
+      "id": "pr-156",
+      "kind": "github_pull_request_observation",
+      "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/pull/156",
+      "fixture": "sources/pr_156.json",
+      "facts": {"state": "MERGED", "merged_at": "2026-09-11T00:01:20Z", "merge_commit": "f0013552cd69a93221464e9c8ccfd56339f39052", "base_ref": "vmm"},
+      "remaining_action_statement": "Creating/configuring the Research & Chats saved view requires Projects-v2 write capability, is separate from the repository diff, and was not claimed complete."
+    },
+    {
+      "id": "spec-0155",
+      "kind": "approved_spec",
+      "path": "specs/0155-private-safe-chat-checkpoints/spec.md",
+      "git_blob": "b686c91baa6353600f6f258ea1b1cbe2057acd34",
+      "content_sha256": "4e010cd612eae44cb75eb729078c92a73476d2ec6989b04c5112854977d43363",
+      "status": "Approved for S1 implementation",
+      "acceptance_excerpt": "Issue #155 provides the first durable Project-facing item for this change; a saved Research & Chats view can be configured without introducing a second ledger."
+    },
+    {
+      "id": "agents-contract-at-merge",
+      "kind": "repository_authority",
+      "path": "AGENTS.md",
+      "git_blob": "e7ece2c1e28a321e0971ed743cd666938bb39cb7",
+      "content_sha256": "b213b788da72e703363810be998352fdf5e91a28991a8bcbeb7860213f642e32",
+      "authority_excerpt": "Ordinary durable state belongs in Git; the main agent owns scope, interpretation, integration, final diff review, PR state, and handoff."
+    },
+    {
+      "id": "sdd-contract-at-merge",
+      "kind": "repository_authority",
+      "path": ".agents/skills/cyaxiverse-sdd/SKILL.md",
+      "git_blob": "dce649c6ac9c9f1de56bac7614c8a6f5e4912aa1",
+      "content_sha256": "235a0d4d16a0545af6af34e2b26b7f996e186e2816c6aef134a5bf7cb897784b",
+      "authority_excerpt": "The governing Issue is the primary Project item; linked PRs normally provide implementation/integration/evidence. GitHub Issues and Projects track live work state; an approved spec is feature intent."
+    },
+    {
+      "id": "checkpoint-guide-at-merge",
+      "kind": "implementation_artifact",
+      "path": "docs/PRIVACY_AND_CONVERSATION_CHECKPOINTS.md",
+      "git_blob": "f39c27044a765b31f5e9adcef228258336d7c6b7",
+      "content_sha256": "c7f4bc8242b29928ded4762317c52ee7a0a10eb9f7260d0098c886297397214f"
+    },
+    {
+      "id": "pr-156-merge-commit",
+      "kind": "implementation_evidence",
+      "git_commit": "f0013552cd69a93221464e9c8ccfd56339f39052",
+      "fixture": "sources/pr_156_merge.json",
+      "facts": {"parent_count": 1, "files_changed": 4, "insertions": 177, "deletions": 0, "auto_close_keyword_for_155": false}
+    },
+    {
+      "id": "closure-search",
+      "kind": "mechanical_absence_record",
+      "path": "closure_search_log.md",
+      "result": "No later public artifact was found that proves the saved view was configured or states that the checkpoint condition was superseded."
+    }
+  ],
+  "source_count": 10,
+  "privacy": "public durable GitHub and repository material only",
+  "post_freeze_access_rule": "No live GitHub, web, chats, Control Desk memory, repository browsing, or source reopening during scored runs."
+}
