@@ -67,9 +67,12 @@ AUTHORITY_CLASSES = {
     "workflow_state",
 }
 REVIEW_STATUSES = {"unreviewed", "curator_checked", "independently_reviewed"}
+ACCEPTED_REVIEW_STATUSES = {"curator_checked", "independently_reviewed"}
+CANDIDATE_EPISTEMIC_STATUSES = {"extracted", "unresolved"}
 RELATION_EFFECTS = {"disputes", "refutes"}
 DEPENDENCY_STRENGTHS = {"context", "required", "supporting"}
 INACTIVE_DISPOSITIONS = {
+    "candidate",
     "contradicted",
     "dependency_stale",
     "disputed",
@@ -272,24 +275,47 @@ def _validate_supersession_cycles(assertions: dict[str, dict[str, Any]]) -> None
         visit(node)
 
 
-def _active_relation_ids(assertions: list[dict[str, Any]]) -> set[str]:
-    """Return relation assertions that are initially eligible for evaluation.
-
-    Final activity is resolved in :func:`derive_dispositions`, because a
-    relation can itself be the target of another relation or become stale
-    through a required dependency.  Rejected assertions are excluded at the
-    start; all other activity is resolved fail-closed by the fixed point.
-    """
+def _candidate_relation_ids(assertions: list[dict[str, Any]]) -> set[str]:
+    """Return preserved relations that lack state-changing authority."""
 
     return {
         assertion["id"]
         for assertion in assertions
+        if assertion.get("epistemic_status") in CANDIDATE_EPISTEMIC_STATUSES
+        or (
+            assertion.get("epistemic_status") != "rejected"
+            and assertion.get("curation", {}).get("review_status")
+            not in ACCEPTED_REVIEW_STATUSES
+        )
+    }
+
+
+def _active_relation_ids(assertions: list[dict[str, Any]]) -> set[str]:
+    """Return relation assertions that are initially eligible for evaluation.
+
+    A relation may derive state only after curation review has accepted it for
+    use and its epistemic state is no longer extracted, unresolved, or
+    rejected.  Candidate relations remain in the ledger and rendered context,
+    but cannot gain state-changing authority merely by being materialized.
+
+    Final activity is resolved in :func:`derive_dispositions`, because a
+    relation can itself be the target of another relation or become stale
+    through a required dependency.  Later activity is resolved fail-closed by
+    the fixed point.
+    """
+
+    candidates = _candidate_relation_ids(assertions)
+    return {
+        assertion["id"]
+        for assertion in assertions
         if assertion.get("epistemic_status") != "rejected"
+        and assertion["id"] not in candidates
     }
 
 
 def derive_dispositions(records: list[dict[str, Any]]) -> dict[str, set[str]]:
     assertions = [record for record in records if record["record_type"] == "assertion"]
+    candidate_relations = _candidate_relation_ids(assertions)
     active_relations = _active_relation_ids(assertions)
     while True:
         dispositions: dict[str, set[str]] = defaultdict(lambda: {"current"})
@@ -300,6 +326,9 @@ def derive_dispositions(records: list[dict[str, Any]]) -> dict[str, set[str]]:
             if assertion.get("epistemic_status") == "rejected":
                 dispositions[assertion["id"]].discard("current")
                 dispositions[assertion["id"]].add("rejected")
+            elif assertion["id"] in candidate_relations:
+                dispositions[assertion["id"]].discard("current")
+                dispositions[assertion["id"]].add("candidate")
 
         for assertion in assertions:
             if assertion["id"] not in active_relations:

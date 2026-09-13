@@ -183,10 +183,13 @@ without changing their identifiers or semantics.
 - Currentness is derived. A current `supersedes` relation makes its target
   historical without declaring the historical state false. A `contradicts`
   assertion explicitly says whether it disputes or refutes the target.
-- Only active relationship assertions affect dispositions. Rejected relations,
-  and relations that are themselves superseded, disputed, contradicted,
-  resolved, or stale through a required dependency, are ignored. Activity is
-  resolved to a fixed point so an inactive relation cannot change its target.
+- Only reviewed, non-candidate relationship assertions affect dispositions.
+  `curator_checked` or `independently_reviewed` curation is required, and the
+  epistemic state must no longer be `extracted`, `unresolved`, or `rejected`.
+  Unreviewed or unresolved extractions remain inspectable candidates but are
+  inert. Relations that are themselves superseded, disputed, contradicted,
+  resolved, or stale through a required dependency are also ignored. Activity
+  is resolved to a fixed point so an inactive relation cannot change its target.
 - Required dependency staleness propagates only through explicit `depends_on`
   assertions. It is not inferred from chronology or semantic similarity.
 - Supersession cycles, missing references, non-canonical provenance, invalid

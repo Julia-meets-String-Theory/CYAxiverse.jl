@@ -66,7 +66,7 @@ history only.
 
 | Requirement | Required behavior | Initial evidence gate |
 | --- | --- | --- |
-| R-001 Authority boundary | Canonical artifacts keep their existing authority and scope. Every derived material relationship cites a canonical source and anchor. Retrieval order, frequency, recency, and confidence do not increase authority. | Validator rejects assertions without canonical provenance; generated context labels itself disposable. |
+| R-001 Authority boundary | Canonical artifacts keep their existing authority and scope. Every derived material relationship cites a canonical source and anchor. Retrieval order, frequency, recency, and confidence do not increase authority. An extracted relationship may affect derived state only after `curator_checked` or `independently_reviewed` curation and after its epistemic state is no longer `extracted`, `unresolved`, or `rejected`; otherwise it remains an inspectable, inert candidate. | Validator rejects assertions without canonical provenance; generated context labels itself disposable; focused tests prove candidate relations cannot change target disposition or propagate required-dependency staleness. |
 | R-002 Minimal semantic model | Use the smallest backend-independent structured provenance/materialization vocabulary that can represent a selected pilot. Extracted assertions/resources have stable identities, explicit source anchors, recording time, and epistemic/curation state. Materialization is deterministic and rebuildable; do not create a repository-wide or scientific ontology. | Versioned records, source manifests, schema/validators, hash checks, and generated view/regeneration tests. |
 | R-003 Time and state | Keep domain-validity time, observation/recording time, epistemic status, source authority, supersession, contradiction/dispute, and retrieval salience distinct. Preserve historical state rather than overwrite it. | Focused tests cover time shape, supersession, disputes, required dependency staleness, and forbidden stored salience. |
 | R-004 Safety and privacy | Do not ingest private transcripts or machine-local locators. Fail closed when publication safety is uncertain. State the multi-writer safety boundary. | Diff/privacy checks and explicit prototype limitations. |
@@ -85,9 +85,11 @@ history only.
   distinct.
 - Provenance and source anchors survive context compression.
 - Abstention is a valid result when evidence is insufficient.
-- Only active relationship assertions may derive dispositions; rejected,
-  superseded, disputed, resolved, contradicted, or dependency-stale relations
-  cannot change the state of their targets.
+- Only reviewed, non-candidate relationship assertions may derive dispositions.
+  Both review acceptance (`curator_checked` or `independently_reviewed`) and a
+  non-`extracted`, non-`unresolved`, non-`rejected` epistemic state are required.
+  Candidate, superseded, disputed, resolved, contradicted, or dependency-stale
+  relations remain inspectable but cannot change the state of their targets.
 - Temporal validity and observation/recording time remain distinct where
   materially relevant.
 - Corrections and supersession append durable history; they do not silently

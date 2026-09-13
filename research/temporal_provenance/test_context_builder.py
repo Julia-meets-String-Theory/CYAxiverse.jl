@@ -35,6 +35,7 @@ class PilotLedgerTests(unittest.TestCase):
         predicate,
         target,
         epistemic_status="accepted",
+        review_status="curator_checked",
         qualifiers=None,
     ):
         template = next(
@@ -51,6 +52,7 @@ class PilotLedgerTests(unittest.TestCase):
             epistemic_status=epistemic_status,
             qualifiers=qualifiers or {},
         )
+        relation["curation"]["review_status"] = review_status
         records.append(relation)
 
     def test_pilot_validates_and_has_unique_ids(self):
@@ -86,6 +88,68 @@ class PilotLedgerTests(unittest.TestCase):
         dispositions = derive_dispositions(records)
         self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
         self.assertEqual(dispositions["assert:rejected-supersession"], {"rejected"})
+
+    def test_unreviewed_extracted_relationship_is_inspectable_but_inert(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:candidate-supersession",
+            predicate="supersedes",
+            target="impl:pr160@bd3e866",
+            epistemic_status="extracted",
+            review_status="unreviewed",
+        )
+        dispositions = derive_dispositions(records)
+        rendered = render_context(records)
+        self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
+        self.assertEqual(dispositions["assert:candidate-supersession"], {"candidate"})
+        self.assertIn("(extracted; candidate)", rendered)
+
+    def test_review_does_not_promote_an_extracted_relationship(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:reviewed-extraction",
+            predicate="supersedes",
+            target="impl:pr160@bd3e866",
+            epistemic_status="extracted",
+            review_status="independently_reviewed",
+        )
+        dispositions = derive_dispositions(records)
+        self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
+        self.assertEqual(dispositions["assert:reviewed-extraction"], {"candidate"})
+
+    def test_epistemic_acceptance_does_not_bypass_review(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:unreviewed-accepted-supersession",
+            predicate="supersedes",
+            target="impl:pr160@bd3e866",
+            epistemic_status="accepted",
+            review_status="unreviewed",
+        )
+        dispositions = derive_dispositions(records)
+        self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
+        self.assertEqual(
+            dispositions["assert:unreviewed-accepted-supersession"],
+            {"candidate"},
+        )
+
+    def test_unresolved_required_dependency_does_not_propagate_staleness(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:unresolved-dependency",
+            predicate="depends_on",
+            target="impl:pr160@2b9b056",
+            epistemic_status="unresolved",
+            review_status="independently_reviewed",
+            qualifiers={"strength": "required"},
+        )
+        dispositions = derive_dispositions(records)
+        self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
+        self.assertEqual(dispositions["assert:unresolved-dependency"], {"candidate"})
 
     def test_superseded_relationship_does_not_change_target(self):
         records = copy.deepcopy(self.records)
