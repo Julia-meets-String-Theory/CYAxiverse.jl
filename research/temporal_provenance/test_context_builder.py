@@ -27,6 +27,32 @@ class PilotLedgerTests(unittest.TestCase):
     def setUp(self):
         self.records = load_ledger(LEDGER)
 
+    def _add_relation(
+        self,
+        records,
+        *,
+        identifier,
+        predicate,
+        target,
+        epistemic_status="accepted",
+        qualifiers=None,
+    ):
+        template = next(
+            record
+            for record in records
+            if record["record_type"] == "assertion"
+        )
+        relation = copy.deepcopy(template)
+        relation.update(
+            id=identifier,
+            subject="impl:pr160@bd3e866",
+            predicate=predicate,
+            object={"ref": target},
+            epistemic_status=epistemic_status,
+            qualifiers=qualifiers or {},
+        )
+        records.append(relation)
+
     def test_pilot_validates_and_has_unique_ids(self):
         identifiers = [record["id"] for record in self.records]
         self.assertEqual(len(identifiers), len(set(identifiers)))
@@ -47,6 +73,65 @@ class PilotLedgerTests(unittest.TestCase):
         dispositions = derive_dispositions(self.records)
         self.assertEqual(dispositions["impl:pr160@2b9b056"], {"superseded"})
         self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
+
+    def test_rejected_relationship_does_not_change_target(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:rejected-supersession",
+            predicate="supersedes",
+            target="impl:pr160@bd3e866",
+            epistemic_status="rejected",
+        )
+        dispositions = derive_dispositions(records)
+        self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
+        self.assertEqual(dispositions["assert:rejected-supersession"], {"rejected"})
+
+    def test_superseded_relationship_does_not_change_target(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:retire-supersession",
+            predicate="supersedes",
+            target="assert:f965-supersedes-2b9",
+        )
+        dispositions = derive_dispositions(records)
+        self.assertEqual(dispositions["impl:pr160@2b9b056"], {"current"})
+        self.assertEqual(
+            dispositions["assert:f965-supersedes-2b9"],
+            {"superseded"},
+        )
+
+    def test_disputed_relationship_does_not_change_target(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:dispute-supersession",
+            predicate="contradicts",
+            target="assert:f965-supersedes-2b9",
+            qualifiers={"effect": "disputes"},
+        )
+        dispositions = derive_dispositions(records)
+        self.assertEqual(dispositions["impl:pr160@2b9b056"], {"current"})
+        self.assertEqual(
+            dispositions["assert:f965-supersedes-2b9"],
+            {"disputed"},
+        )
+
+    def test_resolved_relationship_does_not_change_target(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:resolve-supersession",
+            predicate="resolves",
+            target="assert:f965-supersedes-2b9",
+        )
+        dispositions = derive_dispositions(records)
+        self.assertEqual(dispositions["impl:pr160@2b9b056"], {"current"})
+        self.assertEqual(
+            dispositions["assert:f965-supersedes-2b9"],
+            {"resolved"},
+        )
 
     def test_required_dependency_propagates_staleness(self):
         records = copy.deepcopy(self.records)

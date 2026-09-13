@@ -69,6 +69,14 @@ AUTHORITY_CLASSES = {
 REVIEW_STATUSES = {"unreviewed", "curator_checked", "independently_reviewed"}
 RELATION_EFFECTS = {"disputes", "refutes"}
 DEPENDENCY_STRENGTHS = {"context", "required", "supporting"}
+INACTIVE_DISPOSITIONS = {
+    "contradicted",
+    "dependency_stale",
+    "disputed",
+    "rejected",
+    "resolved",
+    "superseded",
+}
 
 
 class LedgerError(ValueError):
@@ -264,40 +272,76 @@ def _validate_supersession_cycles(assertions: dict[str, dict[str, Any]]) -> None
         visit(node)
 
 
+def _active_relation_ids(assertions: list[dict[str, Any]]) -> set[str]:
+    """Return relation assertions that are initially eligible for evaluation.
+
+    Final activity is resolved in :func:`derive_dispositions`, because a
+    relation can itself be the target of another relation or become stale
+    through a required dependency.  Rejected assertions are excluded at the
+    start; all other activity is resolved fail-closed by the fixed point.
+    """
+
+    return {
+        assertion["id"]
+        for assertion in assertions
+        if assertion.get("epistemic_status") != "rejected"
+    }
+
+
 def derive_dispositions(records: list[dict[str, Any]]) -> dict[str, set[str]]:
     assertions = [record for record in records if record["record_type"] == "assertion"]
-    dispositions: dict[str, set[str]] = defaultdict(lambda: {"current"})
-    for record in records:
-        dispositions[record["id"]]
+    active_relations = _active_relation_ids(assertions)
+    while True:
+        dispositions: dict[str, set[str]] = defaultdict(lambda: {"current"})
+        for record in records:
+            dispositions[record["id"]]
 
-    for assertion in assertions:
-        target = assertion["object"]["ref"]
-        if assertion["predicate"] == "supersedes":
-            dispositions[target].discard("current")
-            dispositions[target].add("superseded")
-        elif assertion["predicate"] == "contradicts":
-            dispositions[target].discard("current")
-            effect = assertion.get("qualifiers", {}).get("effect")
-            dispositions[target].add("contradicted" if effect == "refutes" else "disputed")
-        elif assertion["predicate"] == "resolves":
-            dispositions[target].discard("current")
-            dispositions[target].add("resolved")
-
-    changed = True
-    while changed:
-        changed = False
         for assertion in assertions:
-            if assertion["predicate"] != "depends_on":
+            if assertion.get("epistemic_status") == "rejected":
+                dispositions[assertion["id"]].discard("current")
+                dispositions[assertion["id"]].add("rejected")
+
+        for assertion in assertions:
+            if assertion["id"] not in active_relations:
                 continue
-            if assertion.get("qualifiers", {}).get("strength") != "required":
-                continue
-            subject = assertion["subject"]
-            dependency = assertion["object"]["ref"]
-            if "current" not in dispositions[dependency] and "dependency_stale" not in dispositions[subject]:
-                dispositions[subject].discard("current")
-                dispositions[subject].add("dependency_stale")
-                changed = True
-    return dispositions
+            target = assertion["object"]["ref"]
+            if assertion["predicate"] == "supersedes":
+                dispositions[target].discard("current")
+                dispositions[target].add("superseded")
+            elif assertion["predicate"] == "contradicts":
+                dispositions[target].discard("current")
+                effect = assertion.get("qualifiers", {}).get("effect")
+                dispositions[target].add("contradicted" if effect == "refutes" else "disputed")
+            elif assertion["predicate"] == "resolves":
+                dispositions[target].discard("current")
+                dispositions[target].add("resolved")
+
+        changed = True
+        while changed:
+            changed = False
+            for assertion in assertions:
+                if assertion["id"] not in active_relations:
+                    continue
+                if assertion["predicate"] != "depends_on":
+                    continue
+                if assertion.get("qualifiers", {}).get("strength") != "required":
+                    continue
+                subject = assertion["subject"]
+                dependency = assertion["object"]["ref"]
+                if "current" not in dispositions[dependency] and "dependency_stale" not in dispositions[subject]:
+                    dispositions[subject].discard("current")
+                    dispositions[subject].add("dependency_stale")
+                    changed = True
+
+        inactive_relations = {
+            assertion["id"]
+            for assertion in assertions
+            if assertion["id"] in active_relations
+            and dispositions[assertion["id"]] & INACTIVE_DISPOSITIONS
+        }
+        if not inactive_relations:
+            return dispositions
+        active_relations -= inactive_relations
 
 
 def _citation_text(assertion: dict[str, Any], resources: dict[str, dict[str, Any]]) -> str:

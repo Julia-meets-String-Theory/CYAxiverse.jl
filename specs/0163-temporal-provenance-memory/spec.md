@@ -73,7 +73,7 @@ history only.
 | R-005 Clean pilot | Use a bounded work item with a known answer and a decision/work-item/requirement/implementation/verification/outcome chain; do not begin with fuzzy/Table-1 history. | Frozen CYAX-0159 ledger and canonical source manifest. |
 | R-006 Cold-start comparison | Give comparable fresh agents the same reconstruction task and frozen source snapshot. Compare an unstructured source condition with a concise structured provenance/context condition. Record sources opened, context consumed, dimension scores, and automatic failures. | CYAX-0159 pilot and frozen responses/scorecards. |
 | R-007 Adversarial repair | Classify failed executions, repair the dispatch/infrastructure defect rather than coach the same agent, and preserve the failed run as inadmissible. A repaired execution must record exact inputs, identities, hashes, and independent review. | CYAX-0155 contamination record, exact-input rerun, final result, and methodology review. |
-| R-008 Decision and graph evidence gate | Use the reliability/efficiency threshold and a held-out comparison against an equally concise non-graph structured context. Introduce graph infrastructure only after a future preregistered use case demonstrates material benefit from graph-specific structure that bounded structured provenance/context cannot satisfy. Backend enthusiasm or storage convenience is not evidence. | CYAX-0157 ablation, CYAX-0155 exact-input rerun, and future owner-reviewed representation-specific evidence; no backend is selected in this draft. |
+| R-008 Decision and graph evidence gate | Use the reliability/efficiency threshold and a held-out comparison against an equally concise non-graph structured context. Introduce graph infrastructure only after a future preregistered use case demonstrates a representation-specific need and material benefit that concise structured provenance cannot satisfy. Backend enthusiasm or storage convenience is not evidence. | CYAX-0157 ablation, CYAX-0155 exact-input rerun, and future owner-reviewed representation-specific evidence; no backend is selected in this draft. |
 | R-009 Scientific stress boundary | Start a complex scientific pilot only after the clean pilot, ablation, and adversarial gates pass. Never allow one extractor interpretation to become authoritative. | Separate reviewed slice with frozen sources, conflicting interpretations, negative evidence, explicit abstention, and a defined approval boundary. |
 
 ## Preserved semantic principles
@@ -85,6 +85,9 @@ history only.
   distinct.
 - Provenance and source anchors survive context compression.
 - Abstention is a valid result when evidence is insufficient.
+- Only active relationship assertions may derive dispositions; rejected,
+  superseded, disputed, resolved, contradicted, or dependency-stale relations
+  cannot change the state of their targets.
 - Temporal validity and observation/recording time remain distinct where
   materially relevant.
 - Corrections and supersession append durable history; they do not silently
@@ -124,6 +127,16 @@ do not satisfy this specification's durable-authority boundary. MnemoBrain and
 Mnemosyne are architectural/operational comparators, and GBrain is a pattern
 source for evidence-bearing, frozen context assembly; all remain subject to the
 same authority, privacy, and owner-approval boundaries.
+
+The added comparator facts are pinned to public primary documents: MnemoBrain /
+MnemeBrain Lite [`README.md`](https://github.com/mnemebrain/mnemebrain-lite/blob/b20be4f4c513b3e15e6fb5bc8718e24b0eceac34/README.md) and
+[`docs/architecture.md`](https://github.com/mnemebrain/mnemebrain-lite/blob/b20be4f4c513b3e15e6fb5bc8718e24b0eceac34/docs/architecture.md) at
+`b20be4f4c513b3e15e6fb5bc8718e24b0eceac34`; Mnemosyne
+[`docs/architecture.md`](https://github.com/mnemosyne-oss/mnemosyne/blob/5f3d7df84b6eea1c127a448aa4eedb600f0cec8e/docs/architecture.md) at
+`5f3d7df84b6eea1c127a448aa4eedb600f0cec8e`; and GBrain
+[`MEMORY_VERBS_v1.md`](https://github.com/garrytan/gbrain/blob/a6be012a3bcfac42e279630aedec5cda4a450e29/docs/protocol/MEMORY_VERBS_v1.md) at
+`a6be012a3bcfac42e279630aedec5cda4a450e29`. These are source identities only,
+not dependencies, integrations, or CYAxiverse authority.
 
 ## Non-scope
 
@@ -187,8 +200,8 @@ rendering.
 
 Graph-shaped representation is optional and downstream of authoritative
 structured provenance/context assembly. A future graph proposal must first
-preregister a use case and show material benefit that a bounded structured
-context cannot explain, such as:
+preregister a use case and demonstrate a representation-specific need and
+material benefit that concise structured provenance cannot satisfy, such as:
 
 - traversal that cannot be represented adequately in bounded structured
   context;
@@ -208,7 +221,7 @@ The initial investigation does not:
 - ingest or publish raw private conversations;
 - infer owner decisions or automatically arbitrate scientific disputes;
 - make any derived graph, index, ledger, or context irreplaceable; or
-- start fuzzy/Table-1 testing or modify CYAX-0152 private-memory infrastructure.
+- start fuzzy/Table-1 testing or modify CYAX-0162 private-memory infrastructure.
 
 ## Compatibility, version impact, and remaining approval work
 

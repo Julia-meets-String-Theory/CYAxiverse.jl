@@ -28,9 +28,9 @@ that a graph will improve CYAxiverse reconstruction or selected dependencies.
 | System | Useful evidence | CYAxiverse limitation / decision |
 | --- | --- | --- |
 | [Flow](https://github.com/samyakkkk/flow/tree/53b9b45daf657c2ef45d561ed2b596383ff76c20) | An integrated coding-memory reference: one Brain per project, source-at-commit reads, typed graph writes with provenance, an append-only [mutation journal](https://github.com/samyakkkk/flow/blob/53b9b45daf657c2ef45d561ed2b596383ff76c20/flow-t3/shared/graph-gateway/src/journal.ts), evidence cards, revisioned living documents, and compare-and-swap updates. Its orientation workflow directly targets restart and compaction recovery. | The graph ontology is code-centric. Entity and relation upserts replace properties in place; entity merging deletes the duplicate. Memory refinement replaces the canonical claim, memory deletion cascades to evidence, and recency/strength can sink active memories. These are useful retrieval and operations mechanisms, not a durable scientific-authority model. Borrow the source verification, journal, evidence display, isolation, and writer-safety patterns; do not adopt its ontology or memory-strength policy as the authoritative layer. |
-| MnemoBrain | Architectural/operational reference for an explicit split between reflex/episodic memory and deliberate durable knowledge. | Keep the separation of fast session recall from deliberate durable materialization, but do not let either memory tier establish scientific authority without canonical evidence and owner-scoped review. No backend is adopted. |
-| Mnemosyne | #162-style comparator for cross-session episodic/reflex memory, automatic recall/context injection, local SQLite-first operation, temporal retrieval, and temporary/decaying memory. | Recency/importance and decay can guide retrieval only. They must not determine authority, supersession, or scientific currentness. It remains a reference, not an integrated backend. |
-| GBrain | First-class #163 pattern source for mandatory provenance on durable memories, evidence-bearing retrieval, audit-preserving withdrawal, versioned/frozen memory protocols, deterministic token-budgeted context assembly, explicit gap/unknown reporting, and a narrow MCP memory surface. | Semantic similarity may propose a candidate supersession but cannot make it authoritative. Durable CYAxiverse evidence determines supersession; the GBrain system is not selected or integrated here. |
+| [MnemoBrain / MnemeBrain Lite](https://github.com/mnemebrain/mnemebrain-lite/tree/b20be4f4c513b3e15e6fb5bc8718e24b0eceac34) | Public source fact at pinned revision: an evidence/provenance belief graph with explicit truth states, append-only evidence, revision, temporal decay, and a `WorkingMemoryFrame`; the public architecture also separates that working layer from its fuller consolidation architecture. | Architectural/operational interpretation for #163: keep reflex/episodic recall separate from deliberate durable knowledge. This interpretation does not make either tier authoritative; canonical evidence and owner-scoped review remain required. No backend is adopted. |
+| [Mnemosyne](https://github.com/mnemosyne-oss/mnemosyne/blob/5f3d7df84b6eea1c127a448aa4eedb600f0cec8e/docs/architecture.md) | Public source fact at pinned `docs/architecture.md`: local-first SQLite storage with working, episodic, and scratchpad tiers; automatic prompt injection, temporal retrieval, and decaying/importance-weighted recall are described. | #162-style comparator for cross-session episodic/reflex memory, automatic recall/context injection, local SQLite-first operation, temporal retrieval, and temporary/decaying memory. Recency/importance and decay can guide retrieval only; they must not determine authority, supersession, or scientific currentness. |
+| [GBrain](https://github.com/garrytan/gbrain/blob/a6be012a3bcfac42e279630aedec5cda4a450e29/docs/protocol/MEMORY_VERBS_v1.md) | Public source fact at pinned `MEMORY_VERBS_v1.md`: a frozen seven-verb MCP protocol with mandatory provenance/evidence fields, additive versioning, `context_pack`/`delta`, budget metadata, and conformance checks. | First-class #163 pattern source for evidence-bearing retrieval, audit-preserving withdrawal, versioned/frozen memory protocol, deterministic token-budgeted context assembly, explicit gap/unknown reporting, and a narrow MCP surface. Semantic similarity may propose candidate supersession; durable CYAxiverse evidence determines authority. |
 | [Graphiti/Zep](https://github.com/getzep/graphiti) | Episodes, edge provenance, valid time versus system time, fact invalidation, and hybrid semantic/keyword/graph retrieval. | Extraction, entity resolution, and contradiction handling are model-driven. Current issues document unsafe invalidation scope, stale-fact ranking, backfill gaps, and inconsistent invalidation ([#1489](https://github.com/getzep/graphiti/issues/1489), [#1645](https://github.com/getzep/graphiti/issues/1645), [#1728](https://github.com/getzep/graphiti/issues/1728), [#1841](https://github.com/getzep/graphiti/issues/1841)). Borrow the temporal mechanics; do not use it as the authority layer. |
 | [NornicDB canonical ledger](https://github.com/orneryd/NornicDB/blob/main/docs/user-guides/canonical-graph-ledger.md) and [Roynard](https://arxiv.org/abs/2604.11364) | Separating durable knowledge, decaying episodes, and evidence-gated guidance is useful. `FactKey`/`FactVersion`, validity windows, mutation records, and as-of reads are relevant. | Roynard is a conceptual proposal, not independent validation. NornicDB's example closes the old version by mutation, a single `CURRENT` value cannot represent unresolved alternatives, and persistence/safety depend on backend configuration. Keep the pilot backend-independent and allow disputes. |
 | [Mem0](https://arxiv.org/abs/2504.19413) | Practical extraction and memory update/retrieval baseline. | Paper, current graph product, and implementation history differ. A reported hard-delete path loses temporal history ([mem0 #4187](https://github.com/mem0ai/mem0/issues/4187)). It lacks CYAxiverse authority and durable episode-to-assertion evidence semantics. Use only as a later comparison baseline. |
@@ -48,23 +48,40 @@ Important corrections to the preliminary synthesis:
   they retain and correctly scope canonical source authority.
 - Vendor benchmark results do not establish benefit for CYAxiverse.
 
+### Pinned comparator source identities
+
+The comparator rows above separate public source facts from CYAxiverse
+interpretation. The exact public primary documents used for the three added
+comparators are pinned by repository revision:
+
+| Comparator | Public document | Revision |
+| --- | --- | --- |
+| MnemoBrain / MnemeBrain Lite | [`README.md`](https://github.com/mnemebrain/mnemebrain-lite/blob/b20be4f4c513b3e15e6fb5bc8718e24b0eceac34/README.md) and [`docs/architecture.md`](https://github.com/mnemebrain/mnemebrain-lite/blob/b20be4f4c513b3e15e6fb5bc8718e24b0eceac34/docs/architecture.md) | `b20be4f4c513b3e15e6fb5bc8718e24b0eceac34` |
+| Mnemosyne | [`docs/architecture.md`](https://github.com/mnemosyne-oss/mnemosyne/blob/5f3d7df84b6eea1c127a448aa4eedb600f0cec8e/docs/architecture.md) | `5f3d7df84b6eea1c127a448aa4eedb600f0cec8e` |
+| GBrain | [`docs/protocol/MEMORY_VERBS_v1.md`](https://github.com/garrytan/gbrain/blob/a6be012a3bcfac42e279630aedec5cda4a450e29/docs/protocol/MEMORY_VERBS_v1.md) | `a6be012a3bcfac42e279630aedec5cda4a450e29` |
+
+These external revisions are source identities only. They are not dependency
+pins, integrations, or authority for CYAxiverse artifacts.
+
 ### Comparator synthesis
 
 The comparator roles are intentionally different. Flow is a revision-pinned
 coding-memory reference: retain source-at-commit reads, evidence cards,
 mutation journaling, project isolation, and compare-and-swap updates, while
 rejecting historical erasure, hard deletion, and recency-driven authority.
-MnemoBrain is primarily an architectural/operational reference for separating
-reflex/episodic memory from deliberate durable knowledge. Mnemosyne is a #162
-style reference for cross-session episodic/reflex recall, automatic context
+The pinned MnemoBrain / MnemeBrain Lite sources identify an evidence/provenance belief graph,
+explicit truth states, append-only evidence, and a WorkingMemoryFrame; our
+architectural interpretation is to separate reflex/episodic recall from
+deliberate durable knowledge. The pinned Mnemosyne architecture is a #162-style
+reference for cross-session episodic/reflex recall, automatic context
 injection, local SQLite-first operation, temporal retrieval, and temporary or
 decaying memory; its recency/importance machinery cannot establish scientific
-authority. GBrain is a first-class #163 pattern source for provenance-bearing
-durable memories, evidence retrieval, audit-preserving withdrawal,
-versioned/frozen memory, deterministic token-budgeted context assembly,
-explicit gap/unknown reporting, and a narrow MCP memory surface. GBrain may
-propose candidate supersession by semantic similarity, but durable CYAxiverse
-evidence must decide whether supersession is authoritative.
+authority. The pinned GBrain protocol is a first-class #163 pattern source for
+provenance-bearing durable memories, evidence retrieval, audit-preserving
+withdrawal, versioned/frozen memory, deterministic token-budgeted context
+assembly, explicit gap/unknown reporting, and a narrow MCP memory surface.
+GBrain may propose candidate supersession by semantic similarity, but durable
+CYAxiverse evidence must decide whether supersession is authoritative.
 
 None of these systems is integrated or selected as a backend. These patterns
 inform the broader layer of structured provenance and deterministic context
@@ -165,6 +182,10 @@ without changing their identifiers or semantics.
 - Currentness is derived. A current `supersedes` relation makes its target
   historical without declaring the historical state false. A `contradicts`
   assertion explicitly says whether it disputes or refutes the target.
+- Only active relationship assertions affect dispositions. Rejected relations,
+  and relations that are themselves superseded, disputed, contradicted,
+  resolved, or stale through a required dependency, are ignored. Activity is
+  resolved to a fixed point so an inactive relation cannot change its target.
 - Required dependency staleness propagates only through explicit `depends_on`
   assertions. It is not inferred from chronology or semantic similarity.
 - Supersession cycles, missing references, non-canonical provenance, invalid
@@ -287,9 +308,9 @@ authority.
 
 The initial bounded pilot passes only if the derived context improves
 reliability or context efficiency materially. A graph-specific proposal has a
-stricter gate: it must show a representation-specific benefit beyond an
-equally concise structured context. A reasonable pre-registered threshold for
-the bounded pilot is:
+stricter binding gate: it must demonstrate a representation-specific need and
+material benefit that concise structured provenance cannot satisfy. A
+reasonable pre-registered threshold for the bounded pilot is:
 
 - no automatic failure;
 - at least 10/12 overall and no dimension below 1;
@@ -338,14 +359,15 @@ canonical snapshot for both conditions.
 Do not choose Graphiti, NornicDB, Neo4j, RDF/OWL, or another backend from this
 prototype. The current default is structured provenance plus deterministic
 context assembly. Graph-shaped representation is optional and downstream; it
-requires a new preregistered use case showing a material benefit that a bounded
-structured context cannot explain. Examples include traversal that cannot be
-represented adequately in the context budget, large-scale cascading
-dependency invalidation where graph operations materially outperform simpler
-structures, multi-hop reconstruction whose correctness or efficiency degrades
-without relational topology, or another explicit representation-specific
-advantage. The completed held-out ablation and exact-input adversarial rerun
-do not select a backend or approve the draft specification.
+requires a new preregistered use case demonstrating a representation-specific
+need and material benefit that concise structured provenance cannot satisfy.
+Examples include traversal that cannot be represented adequately in the context
+budget, large-scale cascading dependency invalidation where graph operations
+materially outperform simpler structures, multi-hop reconstruction whose
+correctness or efficiency degrades without relational topology, or another
+explicit representation-specific advantage. The completed held-out ablation
+and exact-input adversarial rerun do not select a backend or approve the draft
+specification.
 
 ## Frozen CYAX-0157 held-out ablation result
 
