@@ -1,0 +1,74 @@
+## Current observation
+
+At the frozen observation time, `2026-09-13T04:35:55Z`, the authoritative live work-tracking state was:
+
+- Issue #155: **Closed**, state reason **Completed**
+- Project item: **Done**
+
+This is supported by the GitHub Issue observation [`issue-155-current`]. The SDD identifies GitHub Issues and Projects as the systems that track live work state [`sdd-contract-at-merge`].
+
+This establishes the recorded work-state at the observation time. It does not independently prove that every previously stated workflow condition was fulfilled.
+
+## Historical instruction and unresolved condition
+
+After PR #156 merged, the durable checkpoint explicitly instructed: **keep #155 open until the Research & Chats saved Project view/filter is configured** [`issue-155-checkpoint`].
+
+At that time:
+
+- The available connector could neither configure nor verify Projects-v2 views.
+- No alternative Projects-specific connector was found.
+- The checkpoint did not claim that configuration was complete [`issue-155-checkpoint`].
+- PR #156 also treated saved-view configuration as a separate Project mutation outside its repository diff and claimed no such mutation [`pr-156`].
+
+Thus, the unresolved item was a workflow/Project configuration condition—not an unresolved repository implementation change.
+
+## Implementation evidence
+
+PR #156 was merged into `vmm` on `2026-09-11T00:01:20Z`, producing squash commit `f0013552cd69a93221464e9c8ccfd56339f39052` [`pr-156`, `pr-156-merge-commit`].
+
+The merged repository work implemented the documented privacy/checkpoint model across AGENTS.md, the SDD, the human guide, and the approved specification. The specification covers sanitized publication, summaries instead of transcripts, the existing Kanban lifecycle, Research & Chats as a saved view rather than another ledger, and fail-closed behavior [`spec-0155`]. The checkpoint consequently reported that the repository-side privacy boundary was active on `vmm` [`issue-155-checkpoint`].
+
+This evidence supports completion of the repository-side implementation. It does **not** demonstrate a concrete saved Project view: the guide explains how such a view works but reports no configured instance [`checkpoint-guide-at-merge`].
+
+## Later event and authority
+
+At `2026-09-11T01:09:18Z`, `vmmhep` manually closed #155. The captured event contains an actor, event type, and timestamp, but no explanation, commit, or GitHub App attribution [`issue-155-closure-event`].
+
+The merge commit did not contain a `Closes`, `Fixes`, or `Resolves` reference that could explain automatic closure [`pr-156-merge-commit`].
+
+Therefore:
+
+- The closure is authoritative evidence that the live work item was moved to Closed.
+- It is not evidence, by itself, that the saved view was configured.
+- It is not an explicit supersession or waiver of the checkpoint’s keep-open instruction.
+
+## Inference
+
+The strongest supported reconstruction is:
+
+1. The repository implementation completed and merged.
+2. A concrete saved-view configuration remained a stated Project action.
+3. The issue was subsequently closed and now records Completed/Done.
+4. The available evidence does not explain why closure was valid despite the earlier keep-open condition.
+
+It would be unsupported to infer either view configuration or intentional supersession merely from closure.
+
+## Unknowns and abstention
+
+No captured durable artifact confirms that the Research & Chats view/filter was later configured. No captured artifact explicitly withdraws, waives, or supersedes the keep-open condition. The finite search found none within its recorded scope through the observation time [`closure-search`].
+
+Accordingly, I abstain from claiming:
+
+- that the saved view exists;
+- that the earlier condition was satisfied;
+- that an authorized decision superseded it;
+- why `vmmhep` closed the issue; or
+- what the live state became after `2026-09-13T04:35:55Z`.
+
+## Next valid verification or action
+
+Use an authorized GitHub Projects-v2/UI capability to inspect the **CYAxiverse Research & Development** Project and verify whether a concrete **Research & Chats** saved view/filter exists over the existing Project items and normal Status field.
+
+- If it exists, record durable sanitized confirmation on #155.
+- If it does not exist, configure it and document completion, or reopen #155 until that action is completed.
+- If the condition was intentionally waived, obtain and record an explicit authoritative supersession decision.

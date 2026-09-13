@@ -1,0 +1,18 @@
+{
+  "opaque_id": "S5",
+  "scores": {"K1": 1, "K2": 1, "K3": 1, "K4": 1, "K5": 1, "K6": 1, "K7": 1, "K8": 1, "K9": 1, "K10": 1, "K11": 1, "K12": 1},
+  "raw_total": 12,
+  "conflict_critical": 5,
+  "automatic_failure": false,
+  "automatic_failure_reasons": [],
+  "unsupported_assertions": 0,
+  "authority_errors": 0,
+  "temporal_errors": 0,
+  "supersession_errors": 0,
+  "unjustified_inferences": 0,
+  "correct_abstentions": 1,
+  "incorrect_abstentions": 0,
+  "next_action_correct": true,
+  "source_reopenings": 0
+}
+

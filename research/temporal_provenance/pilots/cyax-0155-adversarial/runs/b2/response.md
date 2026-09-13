@@ -1,0 +1,69 @@
+### Current observations
+
+The authoritative live workflow state is:
+
+- CYAX-0155 is **CLOSED**, reason **COMPLETED**.
+- Its Project item is **Done**.  
+  Source: `[issue-155-current]`
+- PR #156 was merged into `vmm` at `2026-09-11T00:01:20Z` as commit `f0013552cd69a93221464e9c8ccfd56339f39052`.  
+  Sources: `[pr-156]`, `[pr-156-merge-commit]`
+
+### Historical instruction
+
+Twenty-seven seconds after the merge, the checkpoint said to keep #155 open until the **Research & Chats** saved Project view/filter was configured. It explicitly said the available connector could neither perform nor verify that Projects-v2 operation, and therefore did not claim UI completion.  
+Source: `[issue-155-checkpoint]`
+
+PR #156 likewise treated saved-view configuration as separate from the repository diff and did not claim a Project mutation.  
+Source: `[pr-156]`
+
+### Implementation evidence
+
+The merge provides durable evidence for the repository-side implementation:
+
+- The approved specification defines R-001–R-005, including sanitization, summaries instead of transcripts, preservation of the existing Kanban workflow, a non-authoritative Research & Chats view, and fail-closed privacy handling.  
+  Source: `[spec-0155]`
+- The squash commit added the governing policy, SDD contract, human guide, and approved specification.  
+  Source: `[pr-156-merge-commit]`
+- The guide describes how the saved view should operate over the same items and Status field, but does not record an actual configured view.  
+  Source: `[checkpoint-guide-at-merge]`
+
+Thus, repository controls are evidenced; the concrete Project-view configuration is not.
+
+### Authority
+
+Under the recorded workflow contract:
+
+- Issues and Projects contain live work state.
+- The governing Issue is the primary Project item.
+- PRs provide implementation, integration, and evidence.
+- The approved specification records feature intent.  
+  Sources: `[sdd-contract-at-merge]`, `[agents-contract-at-merge]`
+
+Accordingly, `CLOSED / COMPLETED / Done` is the authoritative **current workflow state**. It is not, by itself, authoritative proof that every acceptance condition was verified.
+
+### Inference
+
+The later manual closure by `vmmhep` explains how the live state changed, but the event contains no reason, commit, or verification record. The merge did not contain an automatic `Closes`, `Fixes`, or `Resolves` reference.  
+Sources: `[issue-155-closure-event]`, `[pr-156-merge-commit]`
+
+It is reasonable to infer that an authorized actor considered the work complete. It is **not** valid to infer from closure alone that the saved view was configured or that the requirement was superseded.
+
+### Unknowns and abstention
+
+No captured durable public artifact proves either:
+
+1. that the Research & Chats saved view/filter was later configured, or
+2. that the unresolved condition was explicitly waived, replaced, or superseded.
+
+The bounded search found no such later artifact.  
+Source: `[closure-search]`
+
+I therefore abstain from claiming that the saved-view acceptance condition was satisfied or superseded. It remains uncertain whether the current completed state is substantively justified.
+
+### Next valid verification or action
+
+Inspect the actual Projects-v2 configuration and verify that the **Research & Chats** saved view exists over the same Project items and Status field, using only sanitized metadata and no second ledger.
+
+- If it exists, add a durable sanitized verification record to #155 identifying what was checked.
+- If it does not exist, reopen #155 or move it out of Done, then configure the view.
+- If the requirement was intentionally superseded, record that decision explicitly through the governing Issue/specification authority before treating completion as verified.

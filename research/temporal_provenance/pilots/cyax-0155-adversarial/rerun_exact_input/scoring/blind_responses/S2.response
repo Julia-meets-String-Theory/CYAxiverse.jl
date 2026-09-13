@@ -1,0 +1,59 @@
+## Current observation
+
+The authoritative current work-state observation is:
+
+- CYAX-0155 / Issue #155 is **CLOSED**, with state reason **COMPLETED**.
+- Its Project Status is **Done**.
+
+This is supported by `issue-155-current`. Under the governing workflow, Issues and Projects—not the specification or this frozen summary—track live work state (`sdd-contract-at-merge`).
+
+## Historical instruction and unresolved condition
+
+After PR #156 merged, the durable checkpoint said to **keep #155 open until the Research & Chats saved Project view/filter was configured**. It also expressly declined to claim that configuration was complete because the available connector could neither mutate nor directly verify Projects-v2 views (`issue-155-checkpoint`).
+
+This was a remaining Project/workflow condition, distinct from the repository implementation:
+
+- The approved specification requires Research & Chats to be a saved view rather than another authority layer. Its acceptance language says such a view “can be configured,” which does not unambiguously prove that a concrete view had to exist as part of the repository change (`spec-0155`).
+- The PR classified actual saved-view configuration as a separate Projects-v2 operation and claimed no such mutation (`pr-156`).
+- The human guide describes how the view works but records no concrete configured instance (`checkpoint-guide-at-merge`).
+
+## Implementation evidence
+
+The repository-side implementation is durably established:
+
+- PR #156 was merged at `2026-09-11T00:01:20Z` with squash commit `f0013552cd69a93221464e9c8ccfd56339f39052` (`pr-156`).
+- That commit updated the repository contract, SDD, human guide, and approved specification (`pr-156-merge-commit`).
+- The checkpoint states that the repository-side privacy boundary was active on `vmm` (`issue-155-checkpoint`).
+
+This supports implementation of the repository control-plane changes. It does **not** prove creation of the Project saved view.
+
+## Later authority event
+
+At `2026-09-11T01:09:18Z`, `vmmhep` closed Issue #155. That is the later authoritative work-state mutation and explains why the current state is Closed/Completed (`issue-155-closure-event`, `issue-155-current`).
+
+However, the closure event contains no reason or explanatory text. It has no associated commit, was not performed through a GitHub App, and the merge message itself did not automatically close #155 (`issue-155-closure-event`, `pr-156-merge-commit`).
+
+## Inference and unknowns
+
+The defensible inference is that someone intentionally changed the governing Issue’s state after the keep-open checkpoint. It is **not** defensible to infer why.
+
+The frozen evidence does not durably prove that:
+
+- the Research & Chats saved view/filter was configured;
+- the keep-open condition was expressly waived or superseded;
+- the closer determined that the specification did not require a concrete view;
+- the closure was accidental or erroneous; or
+- the observed view configuration has remained unchanged.
+
+The bounded artifact search found no later public evidence documenting configuration or explicitly superseding the condition (`closure-search`). That is an absence within the captured scope, not proof that configuration never occurred.
+
+Therefore, I abstain from claiming either that the saved-view condition was satisfied or that it was validly superseded.
+
+## Next valid verification or action
+
+Directly inspect the current **CYAxiverse Research & Development** Project configuration using a Projects-v2-capable UI or API and verify whether a saved **Research & Chats** view/filter exists with the intended normal Status field and sanitized metadata.
+
+- If it exists, record a durable, sanitized Issue checkpoint documenting that verification.
+- If it does not exist, configure it or obtain an explicit authoritative waiver/supersession; then reconcile Issue #155’s Closed/Done state with the earlier keep-open instruction.
+
+Until that direct verification occurs, the authoritative state remains **Closed/Completed and Done**, while satisfaction or supersession of the saved-view condition remains **unknown**.

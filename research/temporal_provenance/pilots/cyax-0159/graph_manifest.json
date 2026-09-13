@@ -1,0 +1,14 @@
+{
+  "condition": "derived-temporal-provenance-context",
+  "pilot": "CYAX-0159",
+  "anchor": "vmm@856012f015a866bf7ff352bc50e8d10c250855e6",
+  "run": "run-02",
+  "instructions": "Read context.md first. Prefer opening zero cited canonical artifacts. Open a cited canonical artifact only when a material ambiguity cannot be answered from context, and open no more than two. Record each opened artifact and the reason in the response. Do not read baseline_manifest.json or ledger.jsonl before answering.",
+  "source_opening_budget": {
+    "preferred": 0,
+    "maximum": 2,
+    "condition": "Only a material ambiguity that context.md cannot answer justifies opening a cited canonical artifact.",
+    "recording": "List each opened artifact and its ambiguity-resolution reason in the response."
+  },
+  "context": "context.md"
+}
