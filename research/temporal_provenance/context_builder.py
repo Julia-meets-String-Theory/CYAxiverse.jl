@@ -357,6 +357,8 @@ def derive_dispositions(records: list[dict[str, Any]]) -> dict[str, set[str]]:
                     continue
                 subject = assertion["subject"]
                 dependency = assertion["object"]["ref"]
+                if "candidate" in dispositions[dependency]:
+                    continue
                 if "current" not in dispositions[dependency] and "dependency_stale" not in dispositions[subject]:
                     dispositions[subject].discard("current")
                     dispositions[subject].add("dependency_stale")

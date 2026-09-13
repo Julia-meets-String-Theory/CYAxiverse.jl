@@ -190,6 +190,8 @@ without changing their identifiers or semantics.
   inert. Relations that are themselves superseded, disputed, contradicted,
   resolved, or stale through a required dependency are also ignored. Activity
   is resolved to a fixed point so an inactive relation cannot change its target.
+  A candidate dependency is unknown rather than stale and cannot propagate
+  staleness through an otherwise active required-dependency relation.
 - Required dependency staleness propagates only through explicit `depends_on`
   assertions. It is not inferred from chronology or semantic similarity.
 - Supersession cycles, missing references, non-canonical provenance, invalid

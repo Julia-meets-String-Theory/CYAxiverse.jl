@@ -151,6 +151,28 @@ class PilotLedgerTests(unittest.TestCase):
         self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
         self.assertEqual(dispositions["assert:unresolved-dependency"], {"candidate"})
 
+    def test_required_dependency_on_candidate_does_not_propagate_staleness(self):
+        records = copy.deepcopy(self.records)
+        self._add_relation(
+            records,
+            identifier="assert:candidate-dependency",
+            predicate="concerns",
+            target="impl:pr160@2b9b056",
+            epistemic_status="extracted",
+            review_status="unreviewed",
+        )
+        self._add_relation(
+            records,
+            identifier="assert:depends-on-candidate",
+            predicate="depends_on",
+            target="assert:candidate-dependency",
+            qualifiers={"strength": "required"},
+        )
+        dispositions = derive_dispositions(records)
+        self.assertEqual(dispositions["assert:candidate-dependency"], {"candidate"})
+        self.assertEqual(dispositions["impl:pr160@bd3e866"], {"current"})
+        self.assertEqual(dispositions["assert:depends-on-candidate"], {"current"})
+
     def test_superseded_relationship_does_not_change_target(self):
         records = copy.deepcopy(self.records)
         self._add_relation(
