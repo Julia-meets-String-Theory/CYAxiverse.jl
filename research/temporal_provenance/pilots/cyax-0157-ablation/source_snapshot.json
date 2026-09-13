@@ -1,0 +1,107 @@
+{
+  "snapshot_id": "cyax-0157-ablation-20260913T0122Z",
+  "observation_time": "2026-09-13T01:22:00Z",
+  "description": "Immutable canonical source snapshot for the CYAX-0157 held-out ablation pilot, frozen before any experimental reconstruction context exists.",
+  "governing_issue": {
+    "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157",
+    "title": "Remove current machine-local path disclosures",
+    "state": "OPEN",
+    "project_status": "Verification",
+    "created_at": "2026-09-11T02:06:26Z",
+    "updated_at": "2026-09-11T20:50:02Z",
+    "body_sha256": "409b589cbee9bbc5bd1abfe78ec19edf492c5ec4c8241971c7ab07ebf9bba2fd"
+  },
+  "supporting_pr": {
+    "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158",
+    "title": "Sanitize machine-local path configuration",
+    "state": "OPEN",
+    "is_draft": false,
+    "merged_at": null,
+    "mergeable": "MERGEABLE",
+    "head_ref": "fix/privacy-path-remediation-20260910",
+    "head_oid": "8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45",
+    "head_tree": "fc980d28f3faa51f66031fe2e1fb5281b2ad5a48",
+    "base_ref": "vmm",
+    "base_oid": "856012f015a866bf7ff352bc50e8d10c250855e6",
+    "project_status": "Verification",
+    "created_at": "2026-09-11T02:06:37Z",
+    "updated_at": "2026-09-11T20:50:22Z",
+    "body_sha256": "4dd0e8559cf7d0b7a696db7acc9e311b51bf337e2d72aea8fa42eaf83883c565",
+    "reviews": [],
+    "comments": [
+      {
+        "id": "IC_kwDOH3RaMs8AAAABT-VIRg",
+        "author": "vmmhep",
+        "created_at": "2026-09-11T13:49:52Z",
+        "summary": "Independent re-review requested against prior head 1ed97e181e3203524d5435c43f58c1a3ff03d813"
+      },
+      {
+        "id": "IC_kwDOH3RaMs8AAAABUDLL4A",
+        "author": "vmmhep",
+        "created_at": "2026-09-11T20:50:22Z",
+        "summary": "Independent re-review requested against current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, incorporating current vmm base 856012f015a866bf7ff352bc50e8d10c250855e6"
+      }
+    ],
+    "status_checks": [
+      {
+        "name": "Fast tests",
+        "workflow": "CI",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+        "completed_at": "2026-09-11T19:27:09Z"
+      },
+      {
+        "name": "build",
+        "workflow": "Documentation",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "completed_at": "2026-09-11T18:36:05Z"
+      },
+      {
+        "name": "Full test suite",
+        "workflow": "CI",
+        "status": "COMPLETED",
+        "conclusion": "SKIPPED",
+        "completed_at": "2026-09-11T18:34:40Z"
+      }
+    ]
+  },
+  "repository_artifacts_at_head": [
+    {
+      "path": "specs/0157-public-path-remediation/spec.md",
+      "git_blob": "1c670b6fdb6ca4417256fc46024cb211c38ea3f4",
+      "content_sha256": "81c8ad7bf596b66328cd1be0e4371868fc517f82ede728fb3a694e332ee0cc36",
+      "description": "Approved CYAX-0157 S1 specification"
+    },
+    {
+      "path": "AGENTS.md",
+      "git_blob": "e7ece2c1e28a321e0971ed743cd666938bb39cb7",
+      "content_sha256": "b213b788da72e703363810be998352fdf5e91a28991a8bcbeb7860213f642e32",
+      "description": "Repository agent contract including privacy/publication rules"
+    },
+    {
+      "path": "specs/0155-private-safe-chat-checkpoints/spec.md",
+      "git_blob": "b686c91baa6353600f6f258ea1b1cbe2057acd34",
+      "content_sha256": "4e010cd612eae44cb75eb729078c92a73476d2ec6989b04c5112854977d43363",
+      "description": "CYAX-0155 specification for repository privacy policy reference"
+    }
+  ],
+  "git_objects": {
+    "pr_head_commit": "8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45",
+    "pr_head_tree": "fc980d28f3faa51f66031fe2e1fb5281b2ad5a48",
+    "pr_base_commit": "856012f015a866bf7ff352bc50e8d10c250855e6",
+    "prior_head_stale": "1ed97e181e3203524d5435c43f58c1a3ff03d813"
+  },
+  "authority_rules": {
+    "source": "AGENTS.md section 1 at git_blob e7ece2c1e28a321e0971ed743cd666938bb39cb7",
+    "summary": "Private chats, local paths, usernames, hostnames, tokens, and session locators are non-public by default. Publication requires explicit owner approval of the exact datum. Repository content uses repository-relative paths."
+  },
+  "open_work_items": {
+    "R-005": "Surviving public branches require read-only privacy scan and preservation/reachability classification. No branch deleted, force-pushed, or rewritten. Deferred from PR #158."
+  },
+  "integrity": {
+    "method": "Each content_sha256 is SHA-256 of the UTF-8 file content piped through shasum -a 256. Each body_sha256 is SHA-256 of the GitHub API JSON body field value with trailing newline from gh CLI. Git blob SHAs are standard Git blob object identifiers.",
+    "deterministic": true,
+    "snapshot_frozen_before_contexts": true
+  }
+}

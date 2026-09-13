@@ -95,12 +95,29 @@ The initial investigation does not:
 
 None for the research/prototype stage.
 
+## Pre-registered ablation (R-008 gate)
+
+The CYAX-0157 held-out ablation is pre-registered at
+`research/temporal_provenance/pilots/cyax-0157-ablation/preregistration.md`.
+It uses a frozen canonical snapshot (`source_snapshot.json`) of Issue #157
+and PR #158 observed at 2026-09-13 approximately 01:22 UTC. The answer key
+(`answer_key.md`) is committed before either experimental context exists.
+
+This ablation tests whether the provenance-aware derived context from the
+CYAX-0159 prototype produces materially better reconstruction than an equally
+concise non-graph structured summary, both built from the same frozen
+snapshot. It is the R-008 structured-summary ablation required by the
+go/no-go boundary.
+
+Recording this ablation does not approve the draft specification or any
+production adoption. The pilot, contexts, and scoring remain experimental
+evidence under the existing draft status.
+
 ## Remaining approval and evidence work
 
 - Obtain repository-owner and independent review of this draft before any
   production adoption.
-- Run an equally concise non-graph structured-summary ablation on a held-out
-  frozen source snapshot.
+- Complete the pre-registered CYAX-0157 ablation (R-008 gate).
 - If that gate passes, define a separate adversarial or scientific pilot and
   its approval boundary.
 - Evaluate storage backends only after these experiments.
