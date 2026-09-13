@@ -1,0 +1,60 @@
+{
+  "observed_at": "2026-09-13T04:35:55Z",
+  "github": {
+    "issue_155": {"comments_reported": 1, "comments_pages": 1, "comments_captured": 1, "timeline_pages": 1, "timeline_events_captured": 10},
+    "pr_156": {"comments_reported": 0, "issue_comments_pages": 1, "issue_comments_captured": 0, "review_comments_reported": 0, "reviews_pages": 1, "reviews_captured": 0, "commits_reported": 6},
+    "searches": [
+      {
+        "query": "repo:Julia-meets-String-Theory/CYAxiverse.jl \"Research & Chats\"",
+        "total_count": 2,
+        "results": [
+          {"number": 155, "kind": "issue", "title": "Add private-safe conversation checkpoints to the CYAxiverse Project"},
+          {"number": 156, "kind": "pull_request", "title": "Add private-safe conversation checkpoints"}
+        ]
+      },
+      {
+        "query": "repo:Julia-meets-String-Theory/CYAxiverse.jl \"155\"",
+        "total_count": 5,
+        "results": [
+          {"number": 155, "kind": "issue"},
+          {"number": 164, "kind": "pull_request"},
+          {"number": 156, "kind": "pull_request"},
+          {"number": 162, "kind": "issue"},
+          {"number": 163, "kind": "issue"}
+        ]
+      }
+    ]
+  },
+  "timeline_events": [
+    {"id": 30938689959, "event": "added_to_project_v2", "created_at": "2026-09-10T23:58:14Z", "actor": "github-project-automation[bot]"},
+    {"id": 30938694477, "event": "project_v2_item_status_changed", "created_at": "2026-09-10T23:58:15Z", "actor": "github-project-automation[bot]"},
+    {"id": null, "event": "cross-referenced", "created_at": "2026-09-11T00:00:25Z", "actor": "vmmhep", "source_number": 156},
+    {"id": 5627189023, "event": "commented", "created_at": "2026-09-11T00:01:47Z", "actor": "vmmhep", "performed_via_github_app": "chatgpt-codex-connector"},
+    {"id": 30940149228, "event": "project_v2_item_status_changed", "created_at": "2026-09-11T00:34:39Z", "actor": "vmmhep"},
+    {"id": 30941590523, "event": "closed", "created_at": "2026-09-11T01:09:18Z", "actor": "vmmhep", "commit_id": null, "performed_via_github_app": null},
+    {"id": 30941621655, "event": "project_v2_item_status_changed", "created_at": "2026-09-11T01:09:18Z", "actor": "vmmhep"},
+    {"id": null, "event": "cross-referenced", "created_at": "2026-09-12T02:31:12Z", "actor": "vmmhep", "source_number": 162},
+    {"id": null, "event": "cross-referenced", "created_at": "2026-09-13T01:10:31Z", "actor": "vmmhep", "source_number": 164},
+    {"id": null, "event": "cross-referenced", "created_at": "2026-09-13T01:10:57Z", "actor": "vmmhep", "source_number": 163}
+  ],
+  "git": {
+    "ref_command": "git for-each-ref refs/remotes/origin refs/tags --sort=refname --format='%(refname) %(objectname)'",
+    "ref_count": 66,
+    "ref_inventory_fixture": "public_ref_inventory.txt",
+    "ref_inventory_sha256": "103b7931b7abf066d64f55c2693b33f3a67c5851a4b07dc2fc4c6528861a55ab",
+    "log_query": "git log --remotes=origin --tags --regexp-ignore-case --extended-regexp --grep='(#155|Research & Chats|Research.*Chats|saved Project view|saved view/filter)'",
+    "log_matches": 0
+  },
+  "repository_text_search": {
+    "query": "rg -n -i '(Research & Chats|Research.*Chats|#155.*(clos|complet|supersed)|saved (Project )?view)' excluding this pilot",
+    "matching_files": [
+      "specs/0155-private-safe-chat-checkpoints/spec.md",
+      "docs/PRIVACY_AND_CONVERSATION_CHECKPOINTS.md",
+      "specs/0151-sdd-v1/spec.md",
+      "specs/0151-sdd-v1/tasks.md",
+      "research/temporal_provenance/README.md"
+    ],
+    "assessment": "The first four specify intended views or outstanding generic SDD view work. The #164 README says the #155 Projects view remained pending/unverified; it does not document configuration or explain closure and is excluded from subject contexts as experiment-design meta-commentary."
+  },
+  "result": "No captured public source proves saved-view configuration or explicitly supersedes the keep-open condition; the closure timeline supplies no rationale."
+}

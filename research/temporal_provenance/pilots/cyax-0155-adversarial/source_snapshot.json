@@ -93,6 +93,8 @@
       "id": "closure-search",
       "kind": "mechanical_absence_record",
       "path": "closure_search_log.md",
+      "audit_fixture": "sources/source_search_audit.json",
+      "public_ref_inventory": "sources/public_ref_inventory.txt",
       "result": "No later public artifact was found that proves the saved view was configured or states that the checkpoint condition was superseded."
     }
   ],

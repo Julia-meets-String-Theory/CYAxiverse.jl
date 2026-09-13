@@ -35,6 +35,29 @@ def main() -> int:
     assert pr["baseRefName"] == "vmm"
     assert pr["mergeCommit"] == "f0013552cd69a93221464e9c8ccfd56339f39052"
 
+    audit = json.loads((HERE / "sources/source_search_audit.json").read_text())
+    assert audit["github"]["issue_155"] == {
+        "comments_reported": 1,
+        "comments_pages": 1,
+        "comments_captured": 1,
+        "timeline_pages": 1,
+        "timeline_events_captured": 10,
+    }
+    assert audit["github"]["pr_156"]["issue_comments_captured"] == 0
+    assert audit["github"]["pr_156"]["reviews_captured"] == 0
+    assert len(audit["timeline_events"]) == 10
+    assert [e for e in audit["timeline_events"] if e["event"] == "closed"] == [{
+        "id": 30941590523,
+        "event": "closed",
+        "created_at": "2026-09-11T01:09:18Z",
+        "actor": "vmmhep",
+        "commit_id": None,
+        "performed_via_github_app": None,
+    }]
+    refs = (HERE / "sources/public_ref_inventory.txt").read_bytes()
+    assert refs.count(b"\n") == audit["git"]["ref_count"] == 66
+    assert hashlib.sha256(refs).hexdigest() == audit["git"]["ref_inventory_sha256"]
+
     commit = pr["mergeCommit"]
     expected = {
         "specs/0155-private-safe-chat-checkpoints/spec.md": "4e010cd612eae44cb75eb729078c92a73476d2ec6989b04c5112854977d43363",

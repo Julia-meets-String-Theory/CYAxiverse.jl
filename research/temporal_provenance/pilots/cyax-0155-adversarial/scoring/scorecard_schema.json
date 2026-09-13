@@ -1,132 +1,42 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "CYAX-0155 Adversarial Scorecard",
-  "description": "Frozen scoring schema for the CYAX-0155 adversarial A/B reconstruction experiment. Validates individual run scorecards.",
+  "title": "CYAX-0155 blind scorecard",
   "type": "object",
+  "additionalProperties": false,
   "required": [
-    "run_id",
-    "condition",
-    "scores",
-    "total",
-    "conflict_critical",
-    "auto_failure",
-    "auto_failure_reasons",
-    "unsupported_assertions",
-    "authority_errors",
-    "temporal_errors",
-    "supersession_errors",
-    "unjustified_inferences",
-    "correct_abstentions",
-    "incorrect_abstentions",
-    "next_action_correct",
-    "reopening_proposed",
-    "input_words",
+    "opaque_id", "scores", "raw_total", "conflict_critical", "automatic_failure",
+    "automatic_failure_reasons", "unsupported_assertions", "authority_errors",
+    "temporal_errors", "supersession_errors", "unjustified_inferences",
+    "correct_abstentions", "incorrect_abstentions", "next_action_correct",
     "source_reopenings"
   ],
   "properties": {
-    "run_id": {
-      "type": "string",
-      "description": "Opaque run identifier (e.g. A1, B2)"
-    },
-    "condition": {
-      "type": "string",
-      "enum": ["A", "B"],
-      "description": "Experimental condition"
-    },
+    "opaque_id": {"type": "string", "pattern": "^S[1-6]$"},
     "scores": {
       "type": "object",
-      "description": "Per-item scores K1 through K12",
+      "additionalProperties": false,
       "required": ["K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9", "K10", "K11", "K12"],
       "properties": {
-        "K1": {"type": "integer", "enum": [0, 1]},
-        "K2": {"type": "integer", "enum": [0, 1]},
-        "K3": {"type": "integer", "enum": [0, 1]},
-        "K4": {"type": "integer", "enum": [0, 1]},
-        "K5": {"type": "integer", "enum": [0, 1]},
-        "K6": {"type": "integer", "enum": [0, 1]},
-        "K7": {"type": "integer", "enum": [0, 1]},
-        "K8": {"type": "integer", "enum": [0, 1]},
-        "K9": {"type": "integer", "enum": [0, 1]},
-        "K10": {"type": "integer", "enum": [0, 1]},
-        "K11": {"type": "integer", "enum": [0, 1]},
-        "K12": {"type": "integer", "enum": [0, 1]}
-      },
-      "additionalProperties": false
+        "K1": {"type": "integer", "enum": [0, 1]}, "K2": {"type": "integer", "enum": [0, 1]},
+        "K3": {"type": "integer", "enum": [0, 1]}, "K4": {"type": "integer", "enum": [0, 1]},
+        "K5": {"type": "integer", "enum": [0, 1]}, "K6": {"type": "integer", "enum": [0, 1]},
+        "K7": {"type": "integer", "enum": [0, 1]}, "K8": {"type": "integer", "enum": [0, 1]},
+        "K9": {"type": "integer", "enum": [0, 1]}, "K10": {"type": "integer", "enum": [0, 1]},
+        "K11": {"type": "integer", "enum": [0, 1]}, "K12": {"type": "integer", "enum": [0, 1]}
+      }
     },
-    "total": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 12,
-      "description": "Sum of K1-K12 scores (0 if auto_failure)"
-    },
-    "conflict_critical": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 5,
-      "description": "Sum of conflict-critical items K6, K7, K8, K9, K11"
-    },
-    "auto_failure": {
-      "type": "boolean",
-      "description": "True if any automatic failure condition was triggered"
-    },
-    "auto_failure_reasons": {
-      "type": "array",
-      "items": {"type": "string"},
-      "description": "List of triggered automatic failure conditions"
-    },
-    "unsupported_assertions": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Count of material claims without source citations"
-    },
-    "authority_errors": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Count of authority misattributions or scope violations"
-    },
-    "temporal_errors": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Count of temporal or current/stale misreadings"
-    },
-    "supersession_errors": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Count of supersession or enablement/completion misreadings"
-    },
-    "unjustified_inferences": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Count of conclusions drawn without sufficient evidence"
-    },
-    "correct_abstentions": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Count of appropriate abstentions with named missing evidence"
-    },
-    "incorrect_abstentions": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Count of abstentions where context provided sufficient evidence"
-    },
-    "next_action_correct": {
-      "type": "boolean",
-      "description": "True if K12 answer correctly abstains naming both interpretations"
-    },
-    "reopening_proposed": {
-      "type": "boolean",
-      "description": "True if subject proposes reopening Issue #155"
-    },
-    "input_words": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Word count of the context document provided to the subject"
-    },
-    "source_reopenings": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Count of prohibited source reopenings during the run"
-    }
-  },
-  "additionalProperties": false
+    "raw_total": {"type": "integer", "minimum": 0, "maximum": 12, "description": "Always sum K1-K12; never zeroed by automatic failure."},
+    "conflict_critical": {"type": "integer", "minimum": 0, "maximum": 5, "description": "Sum K6,K7,K8,K9,K11."},
+    "automatic_failure": {"type": "boolean"},
+    "automatic_failure_reasons": {"type": "array", "items": {"type": "string"}},
+    "unsupported_assertions": {"type": "integer", "minimum": 0},
+    "authority_errors": {"type": "integer", "minimum": 0},
+    "temporal_errors": {"type": "integer", "minimum": 0},
+    "supersession_errors": {"type": "integer", "minimum": 0},
+    "unjustified_inferences": {"type": "integer", "minimum": 0},
+    "correct_abstentions": {"type": "integer", "minimum": 0},
+    "incorrect_abstentions": {"type": "integer", "minimum": 0},
+    "next_action_correct": {"type": "boolean", "description": "Whether the proposed next step verifies the Project view or obtains a durable owner statement without automatically changing #155."},
+    "source_reopenings": {"type": "integer", "minimum": 0}
+  }
 }

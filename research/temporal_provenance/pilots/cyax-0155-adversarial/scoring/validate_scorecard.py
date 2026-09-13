@@ -1,69 +1,72 @@
 #!/usr/bin/env python3
-"""Validate a CYAX-0155 adversarial scorecard against the frozen schema."""
+"""Strict offline validation for a scorer-facing opaque scorecard."""
 
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
-SCHEMA_PATH = Path(__file__).resolve().parent / "scorecard_schema.json"
-EXPECTED_KEYS = [f"K{i}" for i in range(1, 13)]
-CONFLICT_CRITICAL = {"K6", "K7", "K8", "K9", "K11"}
+HERE = Path(__file__).resolve().parent
+KEYS = [f"K{i}" for i in range(1, 13)]
+CRITICAL = ["K6", "K7", "K8", "K9", "K11"]
+INT_FIELDS = [
+    "raw_total", "conflict_critical", "unsupported_assertions", "authority_errors",
+    "temporal_errors", "supersession_errors", "unjustified_inferences",
+    "correct_abstentions", "incorrect_abstentions", "source_reopenings",
+]
+BOOL_FIELDS = ["automatic_failure", "next_action_correct"]
 
 
-def validate_scorecard(scorecard: dict) -> list[str]:
-    errors: list[str] = []
-    schema = json.loads(SCHEMA_PATH.read_text("utf-8"))
-    required = schema.get("required", [])
-    for field in required:
-        if field not in scorecard:
-            errors.append(f"missing required field: {field}")
-    if "scores" in scorecard:
-        scores = scorecard["scores"]
-        for key in EXPECTED_KEYS:
-            if key not in scores:
-                errors.append(f"missing score: {key}")
-            elif scores[key] not in (0, 1):
-                errors.append(f"invalid score for {key}: {scores[key]}")
-        total = sum(scores.get(k, 0) for k in EXPECTED_KEYS)
-        cc = sum(scores.get(k, 0) for k in CONFLICT_CRITICAL)
-        if scorecard.get("auto_failure"):
-            if scorecard.get("total") != 0:
-                errors.append(f"auto_failure is true but total is {scorecard.get('total')}, expected 0")
-        else:
-            if scorecard.get("total") != total:
-                errors.append(f"total mismatch: recorded {scorecard.get('total')}, computed {total}")
-        if scorecard.get("conflict_critical") != cc:
-            errors.append(f"conflict_critical mismatch: recorded {scorecard.get('conflict_critical')}, computed {cc}")
-    if "condition" in scorecard and scorecard["condition"] not in ("A", "B"):
-        errors.append(f"invalid condition: {scorecard['condition']}")
-    if "auto_failure_reasons" in scorecard:
-        if scorecard.get("auto_failure") and not scorecard["auto_failure_reasons"]:
-            errors.append("auto_failure is true but no reasons given")
-        if not scorecard.get("auto_failure") and scorecard["auto_failure_reasons"]:
-            errors.append("auto_failure is false but reasons are present")
-    for field in ("unsupported_assertions", "authority_errors", "temporal_errors",
-                  "supersession_errors", "unjustified_inferences",
-                  "correct_abstentions", "incorrect_abstentions", "input_words",
-                  "source_reopenings"):
-        if field in scorecard and (not isinstance(scorecard[field], int) or scorecard[field] < 0):
-            errors.append(f"invalid {field}: {scorecard[field]}")
-    return errors
+def fail(message: str) -> None:
+    raise ValueError(message)
+
+
+def validate(value: object) -> None:
+    schema = json.loads((HERE / "scorecard_schema.json").read_text())
+    if not isinstance(value, dict):
+        fail("root must be an object")
+    required = set(schema["required"])
+    if set(value) != required:
+        fail(f"root fields mismatch: missing={sorted(required - set(value))}, unexpected={sorted(set(value) - required)}")
+    if not isinstance(value["opaque_id"], str) or not re.fullmatch(r"S[1-6]", value["opaque_id"]):
+        fail("opaque_id must match S1-S6")
+    scores = value["scores"]
+    if not isinstance(scores, dict) or set(scores) != set(KEYS):
+        fail("scores must contain exactly K1-K12")
+    if any(type(scores[key]) is not int or scores[key] not in (0, 1) for key in KEYS):
+        fail("every score must be integer 0 or 1")
+    for field in INT_FIELDS:
+        if type(value[field]) is not int or value[field] < 0:
+            fail(f"{field} must be a nonnegative integer")
+    if value["raw_total"] != sum(scores.values()):
+        fail("raw_total must equal sum K1-K12")
+    if value["conflict_critical"] != sum(scores[key] for key in CRITICAL):
+        fail("conflict_critical must equal sum K6,K7,K8,K9,K11")
+    if value["raw_total"] > 12 or value["conflict_critical"] > 5:
+        fail("score exceeds maximum")
+    for field in BOOL_FIELDS:
+        if type(value[field]) is not bool:
+            fail(f"{field} must be boolean")
+    reasons = value["automatic_failure_reasons"]
+    if not isinstance(reasons, list) or any(not isinstance(item, str) for item in reasons):
+        fail("automatic_failure_reasons must be an array of strings")
+    if value["automatic_failure"] != bool(reasons):
+        fail("automatic_failure must be true exactly when reasons are nonempty")
 
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print(f"usage: {sys.argv[0]} <scorecard.json>")
+        print(f"usage: {sys.argv[0]} SCORECARD.json", file=sys.stderr)
+        return 2
+    try:
+        card = json.loads(Path(sys.argv[1]).read_text())
+        validate(card)
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        print(f"FAIL: {error}")
         return 1
-    path = Path(sys.argv[1])
-    scorecard = json.loads(path.read_text("utf-8"))
-    errors = validate_scorecard(scorecard)
-    if errors:
-        for error in errors:
-            print(f"FAIL: {error}")
-        return 1
-    print(f"PASS: {path.name} ({scorecard.get('run_id', '?')}, condition {scorecard.get('condition', '?')}, total {scorecard.get('total', '?')}/12, cc {scorecard.get('conflict_critical', '?')}/5)")
+    print(f"PASS: {card['opaque_id']} raw={card['raw_total']}/12 critical={card['conflict_critical']}/5 automatic_failure={card['automatic_failure']}")
     return 0
 
 

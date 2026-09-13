@@ -1,0 +1,11 @@
+{
+  "status": "frozen before subjects; withheld from blind scorer",
+  "mapping": {
+    "S1": "B2",
+    "S2": "A3",
+    "S3": "B1",
+    "S4": "A1",
+    "S5": "B3",
+    "S6": "A2"
+  }
+}
