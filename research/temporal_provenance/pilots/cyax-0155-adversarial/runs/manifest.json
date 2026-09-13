@@ -4,7 +4,8 @@
   "reasoning": "high",
   "launch_order": ["A1", "B1", "B2", "A2", "A3", "B3"],
   "source_reopenings": {"A1": 0, "A2": 0, "A3": 0, "B1": 0, "B2": 0, "B3": 0},
-  "input_words": {"A1": 974, "A2": 974, "A3": 974, "B1": 1017, "B2": 1017, "B3": 1017},
+  "planned_input_words_if_exact_dispatch": {"A1": 974, "A2": 974, "A3": 974, "B1": 1017, "B2": 1017, "B3": 1017},
+  "actual_dispatched_input_words": "not captured; inline transcriptions differed from frozen inputs, see ../contamination.md",
   "response_sha256": {
     "A1": "0c36c0cde9241b006c6daa650c21f0f0238682895fc470538bb1b38403a78497",
     "A2": "553c42ad9236e8b5b61bae4bc4b25905691ef648961868cf0c5a7fc552699a24",
