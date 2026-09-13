@@ -1,0 +1,35 @@
+{
+  "response_freeze": "fd8d9313d61445e430fb796cc7a3e2935b7886a9",
+  "items": {
+    "S1": {
+      "words": 504,
+      "bytes": 3662,
+      "sha256": "ea0e7e6f1fb94eeb918a7bcd649d72f8ef755a6bc78fb4be1acb02c32a7769e1"
+    },
+    "S2": {
+      "words": 438,
+      "bytes": 3196,
+      "sha256": "a36fffe274d39577fdad8e4d3212fc6344d665b67e3dfb77422a0c724fa84f4f"
+    },
+    "S3": {
+      "words": 463,
+      "bytes": 3291,
+      "sha256": "cba4aee51b61ed4d1a875649d1513396139dc2fc055bda762bbe0e5ba758de3e"
+    },
+    "S4": {
+      "words": 437,
+      "bytes": 3217,
+      "sha256": "1d2ef6c0374c73e1c83aa7f6eebc34135577fd25194505ea8c58cb98ea1b8847"
+    },
+    "S5": {
+      "words": 494,
+      "bytes": 3586,
+      "sha256": "7c98684eecae67c9cd8ba8ea82cc2a486745c1b9138c1b18162503c953185c64"
+    },
+    "S6": {
+      "words": 357,
+      "bytes": 2661,
+      "sha256": "82c4816aca5a94d30ab97b18130f7ce8eeda48ce02dbfbee80b9ef7a010507a1"
+    }
+  }
+}

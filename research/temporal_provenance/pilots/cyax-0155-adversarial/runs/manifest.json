@@ -1,0 +1,16 @@
+{
+  "response_freeze": "fd8d9313d61445e430fb796cc7a3e2935b7886a9",
+  "model": "gpt-5.6-sol",
+  "reasoning": "high",
+  "launch_order": ["A1", "B1", "B2", "A2", "A3", "B3"],
+  "source_reopenings": {"A1": 0, "A2": 0, "A3": 0, "B1": 0, "B2": 0, "B3": 0},
+  "input_words": {"A1": 974, "A2": 974, "A3": 974, "B1": 1017, "B2": 1017, "B3": 1017},
+  "response_sha256": {
+    "A1": "0c36c0cde9241b006c6daa650c21f0f0238682895fc470538bb1b38403a78497",
+    "A2": "553c42ad9236e8b5b61bae4bc4b25905691ef648961868cf0c5a7fc552699a24",
+    "A3": "bd47f32449b77b043b05efb554e1d5af2a9901652f9b36bae80b599362a65b5a",
+    "B1": "6646a41006b7bd8fc4aa4a01e4a45b60b67b93520159cdc132dc752bb7f77716",
+    "B2": "413d88e7fb6f327ffe309c0a872dee2eb7829817940a518cdaeeb4ebf05ea587",
+    "B3": "548a15e3880ff7eb5bed9545d0e2fd7a4d9dbeb4a01503da705f3d7b3b58208c"
+  }
+}
