@@ -1,0 +1,15 @@
+{
+  "mapping_revealed_after_blind_scorecard_frozen": true,
+  "opaque_to_run": {
+    "R1": "B2",
+    "R2": "A1",
+    "R3": "B1",
+    "R4": "A2"
+  },
+  "response_sha256": {
+    "R1": "e307ea5d709bd2297fa988fea45e27cfcc5d93f595483bb47b4b42b0678d57af",
+    "R2": "8236096c5dacc7d9217a158d43cf31a4eb1bd8483d61b302953d2dcb77fcdf6a",
+    "R3": "4cb972fcaa1c06ca700334e680b74defbb1688c8668f95f4bd49ca78fe07d956",
+    "R4": "8bdf196099aaedc6e9918a03ad388bccf2afb1675e6034fa6412aea6a34fdd72"
+  }
+}
