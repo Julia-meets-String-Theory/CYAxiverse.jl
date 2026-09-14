@@ -3,6 +3,15 @@
 These tasks decompose evidence readiness. GitHub remains authoritative for live
 Issue, Project, review, PR, and merge state.
 
+Post-dispatch execution note: a later CYAX-0168 G1 dispatch was attempted and
+stopped at the mandatory independent generator-reproduction gate. The two
+phase-2 constructions permitted by the approved prose produced different
+identity-bearing bytes, while review also found a separate primary-generator
+phase-3 candidate-vector nonconformance. CYAX-0168 G1 is not satisfied and the
+phase-2 component order and `depends_on` chain direction return to G0 amendment,
+independent rereview, and owner approval. See `g1-execution-report.md`. The
+unchecked T9/T10 items remain incomplete; no later gate was entered.
+
 Exact head `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` received **PASS WITH
 REQUIRED REVISIONS**. The common provenance architecture, B2, main B4, B5
 condition 3, and the independent #117 K1–K12 source audit passed and are not

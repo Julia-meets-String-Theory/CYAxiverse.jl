@@ -33,10 +33,13 @@
     "semantic_source_revision_count": 500
   },
   "result": "FAIL",
+  "separate_implementation_finding": {
+    "primary_phase_3_candidate_membership": "The primary implementation includes the subject WorkItem in the ordinary phase-3 candidate vector and rejects it after PRF selection. The specification requires every other WorkItem to be the frozen candidate vector, so this is a separate implementation nonconformance that can also change later PRF choices."
+  },
   "specification_defect": {
     "component_order": "Phase 2 says to partition the remaining blocks into consecutive components but does not name the ordering that defines consecutive.",
     "depends_on_chain_direction": "Phase 2 requires a WorkItem depends_on chain but does not define which adjacent WorkItem is the assertion subject and which is the object.",
-    "effect": "The first phase-2 assertion bytes and IDs differ. Assertion-provenance ordinals then make every later affected source revision, assertion ID, and logical snapshot identity differ."
+    "effect": "The first phase-2 assertion bytes and IDs differ. Assertion-provenance ordinals necessarily propagate that phase-2 difference into later affected source revisions, assertion IDs, and logical snapshot identity. The separate primary phase-3 nonconformance can cause additional later differences and is not attributed to the contract defect."
   },
   "t0_t4_accessed": false
 }

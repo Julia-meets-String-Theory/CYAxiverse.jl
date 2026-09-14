@@ -10,9 +10,9 @@ PR was open, draft, and unmerged and that Issue #168 comment `5668898317`
 remained the valid G0 approval event.
 
 G1 stopped during the mandatory independent generator 2.2 reproduction. Two
-independent implementations agree on the complete 130 base-motif assertions
-for the shared tiny conformance input but legally diverge at phase 2 because
-the approved specification does not freeze:
+independently implemented phase-2 constructions agree on the complete 130
+base-motif assertions for the shared tiny conformance input but legally diverge
+at phase 2 because the approved specification does not freeze:
 
 1. the ordering in which the remaining blocks become “consecutive
    components”; or
@@ -22,10 +22,18 @@ the approved specification does not freeze:
 One implementation partitions by block ordinal and emits each adjacent chain
 edge from the earlier item to the later item. The other partitions by
 primary-ID order and emits each later item as depending on the previous item.
-Both choices satisfy the current prose. The first differing chain bytes create
-different assertion IDs; assertion-provenance ordinals then propagate the
-difference through later source revisions, assertions, and logical snapshot
-identity.
+Both phase-2 choices satisfy the current prose. The first differing chain bytes
+create different assertion IDs; assertion-provenance ordinals necessarily
+propagate that phase-2 difference through later affected source revisions,
+assertions, and logical snapshot identity.
+
+The primary implementation also has a separate phase-3 nonconformance: its
+ordinary candidate vector contains the subject WorkItem and relies on the
+post-PRF self-edge rejection. The specification instead defines the frozen
+candidate vector as every *other* same-component WorkItem. Changing the vector
+length can change PRF mapping and retry traces. This implementation defect can
+create additional later differences and is not evidence for, or attributed to,
+the phase-2 contract defect. It does not remove the first divergence at phase 2.
 
 The manager comparison is frozen in
 `research/cyax0168/evidence/generator-independence-failure.json`.
@@ -45,10 +53,14 @@ The implementations share 138 final assertion IDs and each has 362 distinct
 assertion IDs. The extra common IDs beyond the 130 base motif records arise
 from later deterministic records that do not resolve the phase-2 ambiguity.
 
-This meets the approved stop criterion: two competent conforming
-implementations can materially diverge in fixture bytes and snapshot identity.
-The defect must return to CYAX-0168 G0 amendment and independent rereview. It
-must not be repaired normatively inside this G1 execution.
+This meets the approved stop criterion: two competent implementations following
+the two phase-2 constructions permitted by the approved prose can materially
+diverge in identity-bearing fixture bytes before phase 3. The defect must return
+to CYAX-0168 G0 amendment and independent rereview. It must not be repaired
+normatively inside this G1 execution. The separate primary phase-3
+nonconformance must also be corrected before a later generator reproduction can
+pass, but that implementation correction cannot select the missing phase-2
+semantics.
 
 ## Work completed before the stop
 
@@ -66,6 +78,11 @@ must not be repaired normatively inside this G1 execution.
 
 These implementation artifacts are provisional G1 evidence. They do not
 ratify the defective generator contract or establish CYAX-0168 G1.
+
+The approved spec/plan/tasks statements that G1 was “not yet executed” describe
+the pre-dispatch state at their frozen approval revision. This report is the
+newer execution record: a G1 attempt occurred and stopped at generator
+independence. That lifecycle clarification does not amend normative intent.
 
 ## Work not executed after the stop
 
