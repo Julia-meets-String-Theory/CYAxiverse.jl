@@ -23,9 +23,12 @@ One implementation partitions by block ordinal and emits each adjacent chain
 edge from the earlier item to the later item. The other partitions by
 primary-ID order and emits each later item as depending on the previous item.
 Both phase-2 choices satisfy the current prose. The first differing chain bytes
-create different assertion IDs; assertion-provenance ordinals necessarily
-propagate that phase-2 difference through later affected source revisions,
-assertions, and logical snapshot identity.
+at construction ordinal 130 create different assertion IDs before either
+separate implementation nonconformance described below. That first
+identity-bearing difference alone fails byte-level generator reproduction and
+shows that the approved phase-2 prose does not determine one canonical
+snapshot. Later differences are not used as evidence for, or causally
+attributed to, the contract defect.
 
 The primary implementation also has a separate phase-3 nonconformance: its
 ordinary candidate vector contains the subject WorkItem and relies on the
@@ -61,6 +64,14 @@ normatively inside this G1 execution. The separate primary phase-3
 nonconformance must also be corrected before a later generator reproduction can
 pass, but that implementation correction cannot select the missing phase-2
 semantics.
+
+The independent implementation has another separate nonconformance in phase 5:
+it includes isolated WorkItems in supersession even though phase 1 excludes
+isolated blocks from cross-block phases. Both implementations produce the same
+four supersession assertions at ordinals 146–149; the independent implementation
+then adds an isolated-block supersession at ordinal 150. This shifts its parallel
+and filler provenance ordinals independently of the phase-2 defect. This later
+shift is disclosed but is not part of the G0-escalation evidence.
 
 ## Work completed before the stop
 

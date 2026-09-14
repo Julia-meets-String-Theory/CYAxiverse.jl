@@ -34,12 +34,13 @@
   },
   "result": "FAIL",
   "separate_implementation_finding": {
+    "independent_phase_5_isolation": "The independent implementation includes isolated WorkItems in phase-5 supersession. Phase 1 excludes isolated blocks from cross-block phases, so its additional isolated-block supersession shifts later provenance ordinals independently of the phase-2 defect.",
     "primary_phase_3_candidate_membership": "The primary implementation includes the subject WorkItem in the ordinary phase-3 candidate vector and rejects it after PRF selection. The specification requires every other WorkItem to be the frozen candidate vector, so this is a separate implementation nonconformance that can also change later PRF choices."
   },
   "specification_defect": {
     "component_order": "Phase 2 says to partition the remaining blocks into consecutive components but does not name the ordering that defines consecutive.",
     "depends_on_chain_direction": "Phase 2 requires a WorkItem depends_on chain but does not define which adjacent WorkItem is the assertion subject and which is the object.",
-    "effect": "The first phase-2 assertion bytes and IDs differ. Assertion-provenance ordinals necessarily propagate that phase-2 difference into later affected source revisions, assertion IDs, and logical snapshot identity. The separate primary phase-3 nonconformance can cause additional later differences and is not attributed to the contract defect."
+    "effect": "The first phase-2 assertion bytes and IDs differ at construction ordinal 130, before either separately identified implementation nonconformance. This identity-bearing difference alone is sufficient to fail byte-level generator reproduction and demonstrate that the approved phase-2 contract does not determine one canonical snapshot. Later differences are not used as evidence for, or causally attributed to, the contract defect."
   },
   "t0_t4_accessed": false
 }
