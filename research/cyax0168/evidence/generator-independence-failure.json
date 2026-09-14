@@ -1,0 +1,42 @@
+{
+  "comparison_version": "cyax-0168-generator-independence-g1-v1",
+  "fixture": {
+    "entity_count": 100,
+    "profile_id": "P-low",
+    "seed": 900001,
+    "tier": "conformance-tiny"
+  },
+  "independent": {
+    "assertion_count": 500,
+    "entity_count": 100,
+    "literal_count": 10,
+    "logical_snapshot_id": "cyax-snapshot-sha256:b63a35f36b933f27d3d1e119ea1b4ec98038756c8c0a7f445f34eb203f70b988",
+    "physical_source_revision_count": 510,
+    "semantic_source_revision_count": 500
+  },
+  "manager_comparison": {
+    "assertion_ids_common": 138,
+    "assertion_ids_independent_only": 362,
+    "assertion_ids_primary_only": 362,
+    "base_motif_assertions_equal": true,
+    "complete_canonical_bytes_equal": false,
+    "entity_records_equal_after_diagnostic_projection": true,
+    "literal_records_equal": true,
+    "logical_snapshot_id_equal": false
+  },
+  "primary": {
+    "assertion_count": 500,
+    "entity_count": 100,
+    "literal_count": 10,
+    "logical_snapshot_id": "cyax-snapshot-sha256:f58102d64790359a88e3cfc4393e169b4cf6ab775400d999e4d8efca802d2a29",
+    "physical_source_revision_count": 510,
+    "semantic_source_revision_count": 500
+  },
+  "result": "FAIL",
+  "specification_defect": {
+    "component_order": "Phase 2 says to partition the remaining blocks into consecutive components but does not name the ordering that defines consecutive.",
+    "depends_on_chain_direction": "Phase 2 requires a WorkItem depends_on chain but does not define which adjacent WorkItem is the assertion subject and which is the object.",
+    "effect": "The first phase-2 assertion bytes and IDs differ. Assertion-provenance ordinals then make every later affected source revision, assertion ID, and logical snapshot identity differ."
+  },
+  "t0_t4_accessed": false
+}
