@@ -21,8 +21,22 @@ The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 and its B1–B5 repair remain recorded as prior rereview history.
 The independent macOS architecture/methodology rereview of exact head
 `e8aa76fafb0eb015af0aa1bba45381e3021beb83` returned **PASS WITH REQUIRED
-REVISIONS**. This repair is limited to its three blocking methodology findings;
-the next rereview is of the new exact repaired head.
+REVISIONS**. That repair was limited to its three blocking methodology findings.
+
+A subsequent bounded repair replaces physical-machine authority with one
+host-portable paired benchmark protocol: normative portable semantic, workload,
+measurement, statistical, classifier, and claim contracts are separated from
+campaign-specific host manifests; each campaign freezes one admissible host
+manifest and executes S and G on that same host; results are host-scoped; raw
+statistics are never automatically pooled across dissimilar hosts; and the
+owner's Apple-silicon/macOS ARM64 machine is only the initial reference
+execution host. Repetition counts, independent units, statistics, latency and
+resource thresholds, the 48-hour ceiling, the `ladybug==0.20.4` candidate pin,
+and every reviewed initial-macOS control are unchanged. Promotion to a normal
+dependency, a project-wide default backend, or a production commitment
+additionally requires independent replication on at least one further frozen
+admissible host/environment. The next rereview is of the new exact repaired
+head.
 
 1. Freeze the immutable F-real source bundle, Claim-key/type registry, owner
    actor/role evidence, and exact owner-decision-event registry while preserving
@@ -46,8 +60,9 @@ the next rereview is of the new exact repaired head.
 7. Build and freeze only the direct scale-matched C0→T0, C1→T1, C2→T2,
    and C3→T3 non-decision calibration fixtures with their independent seeds;
    decision fixtures remain unmaterialized and inaccessible to either backend.
-8. Implement the exact macOS `preconditioned-warm-cache` helper/evidence
-   protocol, including ordered complete manifests before conditioning,
+8. Implement the portable `preconditioned-warm-cache` helper/evidence
+   protocol in its initial macOS form, including ordered complete manifests
+   before conditioning,
    strongest supported non-mutating query modes, and full post-pair file-set/
    logical/allocated-byte/hash/sparse/clone verification; implement the frozen
    empirical/lognormal/two-component calibration simulation, population
@@ -58,8 +73,10 @@ the next rereview is of the new exact repaired head.
    recursive CTE cycle/depth controls, one connection and one query-execution
    worker, and complete logical export. Freeze Ladybug to `THREADS=1` or its
    exact documented equivalent.
-10. Once approved, on the exact frozen macOS ARM64 machine, freeze the complete
-   Ladybug wheelhouse and repeat the offline smoke gate. If it fails, stop; any
+10. Once approved, on the campaign's frozen execution host — initially the
+   exact frozen macOS ARM64 reference host — freeze the complete Ladybug
+   wheelhouse and repeat the offline smoke gate for that host. If it fails,
+   stop; any
    FalkorDBLite work requires an amended, rereviewed, owner-approved design.
    Otherwise implement minimal G.
 11. Give S and G the same calibration-only tuning budget; hash final schemas,
@@ -76,17 +93,19 @@ the next rereview is of the new exact repaired head.
    the both-cache-mode classifier truth table, exact family/profile joint
    quantifiers, and exhaustive reachable-outcome evaluation over all crossing
    CI predicates on synthetic records.
-13. Under a later explicit execution dispatch, run the paired T0–T3 campaign on
-   the exact frozen macOS host. Distinguish invalid controls from valid resource
-   breaches and classify them by the frozen precedence.
+13. Under a later explicit execution dispatch, run the paired T0–T3 campaign
+   with S and G on the campaign's single frozen admissible host, initially the
+   macOS reference host, under its frozen manifest. Distinguish invalid controls
+   from valid resource breaches and classify them by the frozen precedence.
 14. Evaluate T4 condition 3 from direct T3 observations and condition 4 from
     the frozen T1–T3 monotone upper-envelope projection: logical materialization
     against cache/RAM feasibility, allocated materialization against the capped
     disk resource rule, and hard metrics against the exact `R<=0.75L` headroom
     rule. Run T4 only if all five preregistered conditions pass. Apply
     the then-reviewed and owner-approved classifier,
-    independently review the evidence, and return a bounded result
-    to #168/#162 without production adoption.
+    independently review the evidence, and return a bounded host-scoped result
+    to #168/#162 — reported with its campaign host manifest identity, without
+    pooling raw statistics across hosts, and without production adoption.
 Later CYAX-0168 G1 may legitimately fail because statistical precision is
 inadequate, the projected campaign exceeds 48 hours, exact-host Ladybug smoke
 fails, or the resource envelope is infeasible. Such an experimental result
@@ -105,18 +124,21 @@ preregistration defect or an owner proposes a normative amendment.
 | R-006 | exact Q11 slot, Q02 rank, Q01–Q12 selection table, reference evaluator, pre-backend instances and frozen gold | category exclusion, authority-order, population/selector/tie/parameter/invalid-role tests and deterministic gold checksums |
 | R-007 | S/G adapters and canonical literal-closed `RetrievalBundle` v1 serializer/compiler input | empty/order/unique/no-dangling/reference-closure tests plus gold, pairwise, and complete-bundle equality |
 | R-008 | canonical N→N+1 deltas with exact assertion-ID removals and independent full target | dependency insert/remove, replacement, supersession, target identity/export equality, crash/rollback/recovery and isolation tests |
-| R-009 | C0–C3 direct scale matches, calibration non-access freeze, pre/post-manifest non-mutating cache protocol, actual-p95 truth simulation, scale-keyed duration report, macOS machine/Energy-Mode manifest, one-query-execution-worker paired runner and exact aggregation | scale-map/no-cross-scale-reuse, unequal-dispersion and p95-saving truth, pre-access hash, cache stabilization and mutation invalidation, precision and 48-hour thresholds, power/Energy-Mode/thermal/memory-pressure/page-out/swap/descendant audit, both objective-detector and diagnostics-only competing-load branches, paired block-level BCa, fresh-process `ru_maxrss`, Mach diagnostics, and APFS zero-sharing/rebuild/exclude accounting |
-| R-010 | explicit hard gates, capped relative memory/disk rules, resource/control disposition, both-mode classifier, exact family/profile quantifiers, joint CI reachable outcomes, unchanged latency thresholds/precedence, direct-observation T4 condition 3, and logical-versus-allocated deterministic T4 condition 4 | fresh/warm, capped-allowance boundaries, APFS clone ambiguity, G/S/both timeout/breach, five joint-CI cases, relational-Hybrid, T4 logical/allocated projection/headroom tables, followed by owner approval |
+| R-009 | C0–C3 direct scale matches, calibration non-access freeze, pre/post-manifest non-mutating cache protocol, actual-p95 truth simulation, scale-keyed duration report, initial campaign host/Energy-Mode manifest, one-query-execution-worker paired runner and exact aggregation | scale-map/no-cross-scale-reuse, unequal-dispersion and p95-saving truth, pre-access hash, cache stabilization and mutation invalidation, precision and 48-hour thresholds, power/Energy-Mode/thermal/memory-pressure/page-out/swap/descendant audit, both objective-detector and diagnostics-only competing-load branches, paired block-level BCa, fresh-process `ru_maxrss`, Mach diagnostics, and APFS zero-sharing/rebuild/exclude accounting |
+| R-010 | explicit hard gates, capped relative memory/disk rules, resource/control disposition, both-mode classifier, exact family/profile quantifiers, joint CI reachable outcomes, unchanged latency thresholds/precedence, direct-observation T4 condition 3, and logical-versus-allocated deterministic T4 condition 4 | fresh/warm, capped-allowance boundaries, APFS clone ambiguity, G/S/both timeout/breach, five joint-CI cases, relational-Hybrid, T4 logical/allocated projection/headroom tables, host-scoped reporting with the pooling prohibition and replication requirement, followed by owner approval |
 
 ## Escalation and stop conditions
 
 Return to the owner if F-real authority/chronology remains ambiguous; the
 registered vocabulary must expand; semantics would differ by backend; an immutable
 source cannot be captured; host fsync/process accounting is inadequate; the
-Ladybug pin or offline smoke changes; a calibration/decision fixture leaks;
-host, repetitions, statistical power, duration envelope, T4 gate, or thresholds
-need amendment; or any
-result is used to imply production adoption.
+Ladybug pin or offline smoke changes; a calibration/decision fixture leaks; no
+admissible campaign host manifest can be frozen, or a portable measurement
+control has no exact implementation on the intended host; a portable contract,
+repetitions, statistical power, duration envelope, T4 gate, or thresholds
+need amendment; raw statistics would be pooled across dissimilar hosts; or any
+result is used to imply production adoption or replication that has not
+occurred.
 
 ## Interface, lesson, and version impact
 

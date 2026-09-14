@@ -31,8 +31,12 @@ checkpoint and must not be used as repository-owner approval. The original
 comment remains part of the historical record; the durable correction is
 recorded in `authority-correction-a.md` and on Issue #168.
 
-This revision restores lifecycle truth and proposes a macOS ARM64 execution
-contract that the owner can actually provide. The independent macOS
+This revision restores lifecycle truth and proposes a host-portable paired
+benchmark protocol in which no physical machine is authoritative: each campaign
+freezes one admissible host manifest, executes S and G on that same host under
+common semantic, workload, measurement, and classifier contracts, and yields
+host-scoped evidence. The owner's exact Apple-silicon/macOS ARM64 machine is
+only the initial reference execution host. The independent macOS
 architecture/methodology rereview of exact head
 `e8aa76fafb0eb015af0aa1bba45381e3021beb83` returned **PASS WITH REQUIRED
 REVISIONS**. This bounded repair closes only its three blocking findings:
@@ -50,8 +54,11 @@ B4 classifier repair, B5 condition 3, and the independent #117 K1–K12
 chronology passed and are not reopened. The later reviewed design revision
 repaired the four residual C1–C4 preregistration defects: generator collision
 closure, scale-matched calibration and p95-estimand truth, joint CI uncertainty,
-and deterministic T4 condition 4. The present authority/host repair preserves
-that evidence while changing the proposed execution controls. It does not
+and deterministic T4 condition 4. The present authority and host-portability
+repair preserves that evidence while replacing physical-machine authority with
+a portable campaign-host contract; it changes no repetition count, independent
+unit, statistic, latency or resource threshold, 48-hour ceiling, candidate
+version, or reviewed initial-macOS control. It does not
 approve the specification, authorize benchmark implementation or execution,
 revise CYAX-0166/CYAX-0167, or select a production backend. The design branch
 starts from integrated `vmm` revision
@@ -63,11 +70,15 @@ recorded in T6 and is not rewritten by this final bounded repair.
 
 If later reviewed and approved, the benchmark may establish correctness and
 operational measurements only for the frozen fixtures, workload, software
-versions, and tested Apple-silicon/macOS environment. It cannot
+versions, and one frozen campaign host environment. It cannot
 establish that graph storage is authoritative, that topology creates truth,
 that one backend improves fresh-agent correctness, or that a production
 backend should be adopted. Results are evidence for a CYAxiverse architecture
-decision on that environment, not universal database-performance claims.
+decision on that campaign environment, not universal database-performance
+claims. No physical machine, operating system, or hardware class is a CYAX-0168
+authority; raw statistics from different campaign hosts are never automatically
+pooled; and promotion beyond bounded experimental use requires independent
+replication on at least one further frozen admissible host/environment.
 
 ## Governing architecture
 
@@ -951,7 +962,9 @@ with CPython 3.14.6 and offline installation. That evidence is candidate-host
 smoke only.
 
 After the revised design passes review and owner approval, repeat the smoke on
-the exact frozen macOS ARM64 execution machine. Freeze the compatible wheel
+the campaign's exact frozen execution host — initially the frozen macOS ARM64
+reference host — and repeat it independently for every later campaign host.
+Freeze the compatible wheel
 filename and SHA-256, every dependency wheel/hash, Python and platform tags,
 license files, offline wheelhouse manifest, and proof of `PIP_NO_INDEX=1`
 import/build/reopen/query/export. Disable network and runtime extension
@@ -1076,26 +1089,102 @@ feasibility bound, not proof that every page is resident. The only permitted nam
 `preconditioned-warm-cache`; `filesystem-cache-warm`, `fully resident`, and
 `OS-cold` are forbidden claims under this macOS protocol.
 
-## Proposed macOS authority environment and measurement protocol
+## Host-portable protocol and initial macOS implementation
 
-The proposed authority environment is the owner's exact Apple-silicon/macOS
-ARM64 machine, used for an internal paired S-versus-G comparison. No additional
-host, VM, container, privileged cache control, or remote service is assumed.
-The pre-execution manifest freezes the non-unique hardware configuration needed
-for replay: Apple SoC/model class, performance/efficiency core topology,
-physical RAM, macOS version/build, filesystem type and relevant mount behavior,
-total benchmark-volume capacity and ordinary available volume capacity,
-Python, SQLite version and compile
-options, Ladybug wheel/commit/dependencies, libc/native runtimes, and
-measurement-tool versions. It excludes serial numbers, hostnames, account
-names, and other machine-unique identifiers.
+### No physical machine is authoritative
+
+CYAX-0168 has no authoritative benchmark machine, reference hardware, or
+privileged operating system. Neither macOS nor Linux, and no particular SoC,
+core count, RAM size, or storage device, is a normative CYAxiverse benchmark
+authority. The unit of admissible evidence is a **campaign**, not a machine.
+
+A campaign is one execution of the frozen workload in which a single host
+manifest is frozen in advance and both S and G run on that same host under the
+portable contracts below. The protocol is portable; the host is campaign data.
+
+### Normative portable contracts
+
+The following are normative and identical in every admissible campaign. They
+are properties of the protocol, not of any host, and a campaign that changes
+any of them is not a CYAX-0168 campaign:
+
+| Portable contract | Content |
+| --- | --- |
+| semantic | R-001–R-004, R-007, R-008: the registered Claim/literal model, assertion identity and time, the semantic snapshot projection, the shared semantic evaluator, canonical `RetrievalBundle` v1, and canonical successor deltas |
+| workload | R-005, R-006: generator 2.2 fixtures, the T0–T3 and C0–C3 scales, the Q01–Q12 decision-instance table, frozen gold, and the raw→instance→family/profile→paired-CI aggregation |
+| measurement | R-009: paired same-host S-versus-G execution, balanced pair order, the one-process/no-descendant/one-connection/one-query-execution-worker topology, fresh and warm cache modes, `preconditioned-warm-cache` conditioning semantics, pre/post complete-manifest immutability, monotonic wall time, fresh-process peak-RSS accounting, and logical-versus-allocated storage accounting |
+| statistical | R-009: the repetition counts, independent units, nearest-rank p95 estimator, paired block-level BCa resampling, precision ratification, and the 48-hour campaign ceiling |
+| classifier | R-010: the hard gates, capped relative memory/disk allowances, latency thresholds and precedence, joint-CI reachable outcomes, and the five-part conditional T4 gate |
+| claim | the authorization boundary: host-scoped conclusions, the pooling prohibition, and the replication requirement below |
+
+Changing a portable contract requires a reviewed amendment and explicit owner
+approval. Implementing a portable contract differently on a different
+admissible host does not.
+
+### Campaign-specific host manifest
+
+Each admissible campaign freezes exactly one **host manifest** before any
+measurement and executes both S and G on that same host under that manifest.
+A host manifest is campaign-specific data, never normative contract, and never
+a claim about other hosts.
+
+A host is admissible for a campaign only when the manifest can be frozen in
+advance, both backends install and run offline on it from frozen artifacts, and
+every portable measurement-validity control has an exact, preregistered
+implementation on it. If any of these fails, the campaign does not start.
+
+The manifest freezes the non-unique hardware and software context needed for
+replay: CPU/SoC model class and core topology, physical RAM, operating-system
+version/build, filesystem type and relevant mount behavior, total
+benchmark-volume capacity and ordinary available volume capacity, Python,
+SQLite version and compile options, Ladybug wheel/commit/dependencies,
+libc/native runtimes, and measurement-tool versions. It excludes serial
+numbers, hostnames, account names, and other machine-unique identifiers.
+
+### Initial macOS reference execution host
+
+The initial reference execution host is the owner's exact Apple-silicon/macOS
+ARM64 machine. It supplies the first frozen host manifest and the environment
+in which the portable measurement semantics receive their initial
+implementation. It is a reference host only: it is not project authority, not a
+required host for later campaigns, and not a bound on where CYAX-0168 may later
+be replicated.
+
+On that initial reference host the manifest additionally freezes Apple
+SoC/model class, performance/efficiency core topology, and macOS version/build.
+The remainder of this section states the initial macOS implementation of the
+portable measurement contract; the controls it names are the reviewed
+initial-macOS controls and are retained unchanged.
+
+### Host-scoped results, pooling prohibition, and replication
+
+Every CYAX-0168 result is reported together with its campaign host manifest
+identity and is scoped to that campaign. Raw per-operation measurements,
+resampling units, confidence intervals, and classifier statistics from
+different campaign hosts must never be automatically pooled, concatenated,
+averaged, or resampled together; dissimilar hosts do not share an estimand, and
+a pooled statistic across them is not a valid CYAX-0168 quantity. Cross-campaign
+comparison is permitted only as explicit side-by-side reporting of separately
+computed host-scoped results, or through a separately reviewed and
+owner-approved cross-host analysis that states its own assumptions.
+
+One successful first campaign may support bounded experimental conclusions and
+may motivate bounded experimental or Hybrid integration work inside the
+existing authorization boundary. It may not, on its own, make graph
+materialization a normal CYAxiverse dependency, a project-wide default backend,
+or a production commitment. Each of those promotions additionally requires
+independent replication of the classifier-relevant outcome on at least one
+further frozen, admissible host/environment manifest, together with the
+separate approvals named under non-scope.
+
+### Initial macOS execution-validity controls
 
 Primary runs require AC power and one exact macOS-supported non-low Energy Mode
 frozen for the complete campaign: `Automatic`, `High Power` where supported and
 selected, or another exactly named supported non-low setting. Low Power Mode
 is prohibited, but High Power is not mandatory when unavailable or unselected.
-The exact selected mode is recorded in the machine manifest. A power-source or
-Energy-Mode transition invalidates the pair.
+The exact selected mode is recorded in the campaign host manifest. A
+power-source or Energy-Mode transition invalidates the pair.
 
 macOS thermal pressure must remain `nominal`; a transition to `fair`,
 `serious`, or `critical` invalidates the pair. System memory pressure must
@@ -1112,14 +1201,20 @@ child process or monitor gap invalidates the pair. During CYAX-0168 G1,
 calibration must freeze a simple symmetric objective competing-I/O detector;
 if no such detector can be preregistered without creating a new research
 problem, background-load diagnostics are recorded but cannot exclude samples.
-Subjective judgments that the machine "seemed busy" never exclude a sample.
+Subjective judgments that the host "seemed busy" never exclude a sample.
 Because macOS background services and dynamic frequency cannot be frozen, the
 balanced paired order is the primary nuisance-control design and the residual
 OS scheduling/power limitation is reported with every result.
 
-### Portability disposition
+### Portable measurement semantics and their initial macOS implementation
 
-| Prior control | macOS disposition | Revised claim or control |
+The prior design expressed several measurement controls in Linux-specific
+terms. This table separates the portable measurement semantics, which are
+normative for every campaign, from the initial macOS implementation of each,
+which is campaign-host-specific. A later admissible host implements the same
+middle column; it is not required to reproduce the right column.
+
+| Prior Linux-specific control | Portable measurement semantics | Initial macOS implementation |
 | --- | --- | --- |
 | deterministic fixtures, immutable snapshots, semantic parity, build/rebuild/reopen checks, exact hashes, offline installation, process lifecycle, repetitions, monotonic wall time, and logical/allocated file bytes | portable unchanged | retain the existing contract |
 | Linux `mincore` full-residency gate | portable only with replacement | repeated verified reads to a frozen throughput-stabilization criterion; call the regime `preconditioned-warm-cache` |
@@ -1129,9 +1224,10 @@ OS scheduling/power limitation is reported with every result.
 | certified full filesystem-page residency, Linux-equivalent PSS/USS, fixed-core execution, fixed CPU frequency, and privileged OS-cold cache dropping | not portable | remove these claims and do not substitute inferred evidence |
 
 These replacements preserve an internal paired comparison on one frozen
-machine. They intentionally weaken cross-machine and OS-level cache/resource
-generality. They do not weaken semantic correctness, deterministic identity, or
-S/G parity requirements.
+campaign host. They intentionally weaken cross-host and OS-level cache/resource
+generality, which is precisely why results stay host-scoped and raw statistics
+are never pooled across dissimilar hosts. They do not weaken semantic
+correctness, deterministic identity, or S/G parity requirements.
 
 The proposed repetition candidates retained for precision validation are:
 
@@ -1152,11 +1248,12 @@ classifier endpoint; their 12/30 counts test paired repeatability within the
 48-hour campaign budget.
 
 This host repair does not change repetition counts, independent units,
-resampling, estimands, or statistical thresholds because the replacement macOS
-controls do not alter those definitions. No calibration or duration evidence is
-collected in this design task, so practical duration remains unresolved. A
-later authorized CYAX-0168 G1 must rerun both precision and 48-hour duration
-ratification on the exact macOS machine. Any reduction or other repetition
+resampling, estimands, or statistical thresholds, because neither the portable
+host contract nor the replacement macOS controls alter those definitions. No
+calibration or duration evidence is collected in this design task, so practical
+duration remains unresolved. Every authorized CYAX-0168 G1 must rerun both
+precision and 48-hour duration ratification on its own campaign host, initially
+the macOS reference host. Any reduction or other repetition
 change would alter the precision guarantee and requires a new reviewed
 amendment and explicit owner approval.
 
@@ -1341,10 +1438,10 @@ transition operations name one of the six frozen transition IDs. Categories
 may be merged only when all seven tuple fields are byte-identical.
 
 For each category `c`, collect at least 30 calibration-only wall-time
-observations under the frozen execution-machine controls from its direct scale match:
-T0 uses C0, T1 uses C1, T2 uses C2, and T3 uses C3. The backend, profile,
-cache/process mode, Q ID, and transition ID must also match `c`; a C1 or C2
-upper bound may not ratify the corresponding T3 operation. Let `q99_c` be
+observations under the frozen campaign-host execution controls from its direct
+scale match: T0 uses C0, T1 uses C1, T2 uses C2, and T3 uses C3. The backend,
+profile, cache/process mode, Q ID, and transition ID must also match `c`; a C1
+or C2 upper bound may not ratify the corresponding T3 operation. Let `q99_c` be
 nearest-rank order statistic `ceil(0.99*m)` and let `u_c` be the larger of
 `q99_c` and the one-sided 99% BCa upper endpoint for the mean using 10,000
 deterministic whole-unit resamples and the same BCa rule with `alpha=0.99`.
@@ -1437,8 +1534,9 @@ mechanical.
 
 Freeze ordinary **available volume capacity** as
 `preflight_available_volume_capacity`, the only decision-bearing capacity
-denominator. The machine manifest freezes one exact macOS API and its ordinary-
-available-capacity definition for the complete campaign. Values such as
+denominator. The campaign host manifest freezes one exact ordinary-available-
+capacity API and its definition for the complete campaign; on the initial macOS
+reference host that is one exact macOS API. Values such as
 "available for important usage" may be recorded as diagnostics but cannot
 enlarge the resource envelope. Record temporary peak allocated disk separately.
 Apply one frozen `gc.collect()` immediately before every measured Python block,
@@ -1455,8 +1553,10 @@ native traversal work remain diagnostics only.
 
 ## Hard resource envelope and conditional T4
 
-The proposed machine-relative T3 hard envelope is evaluated from the exact
-frozen execution-machine manifest. For backend `b`, the macOS hard gates are:
+The proposed host-relative T3 hard envelope is evaluated from the campaign's
+exact frozen host manifest, so the same formulas apply unchanged on any
+admissible host. For backend `b`, the hard gates, in their initial macOS
+implementation, are:
 
 ```text
 MEM_HARD_b :=
@@ -1684,7 +1784,7 @@ DISK_REL_G :=
 Peak RSS in `MEM_REL_G` is the primary `ru_maxrss` measure. Logical
 materialization bytes never enter `DISK_REL_G`. G build/rebuild/transition time
 must be ≤3× S and always inside the unchanged hard envelope. Final
-context/prompt values must match exactly. These capped machine-relative rules
+context/prompt values must match exactly. These capped host-relative rules
 require exact-head rereview and explicit owner approval.
 
 Resource/control disposition is frozen separately from measurement validity:
@@ -1892,15 +1992,16 @@ decide CYAX-0168 G0.
 | R-006 Frozen workload | The Q01–Q12 population/selector/parameter/role table, gold, and exact aggregation precede backend implementation. | Invalid-stratum/tie tests, manifest/gold review, and raw-to-classifier statistic tests. |
 | R-007 RetrievalBundle v1 | Both adapters return complete, literal-reference-closed canonical objects and deterministic directional paths. | Empty/order/unique/no-dangling tests, complete serialization/compiler validation, and gold/S/G equality. |
 | R-008 Successor updates | N + a non-authoritative delta with exact removals yields independently frozen immutable N+1. | Dependency insert/remove, replacement, supersession, complete export, crash, rollback, and isolation tests. |
-| R-009 Preregistered measurement | Scale-matched calibration/non-access, exact macOS machine and Energy Mode, one query-execution worker, paired fairness, pre/post-manifest non-mutating cache conditioning, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, fresh-process `ru_maxrss`, Mach diagnostics, and logical/allocated/APFS resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache stabilization and mutation detection, statistical and 48-hour duration ratification, power/Energy-Mode/thermal/memory-pressure/page-out/swap/descendant audit, both competing-load branches, APFS zero-sharing/rebuild/exclude cases, and paired block-level analysis validation. |
+| R-009 Preregistered measurement | Scale-matched calibration/non-access, initial campaign host manifest and Energy Mode, one query-execution worker, paired fairness, pre/post-manifest non-mutating cache conditioning, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, fresh-process `ru_maxrss`, Mach diagnostics, and logical/allocated/APFS resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache stabilization and mutation detection, statistical and 48-hour duration ratification, power/Energy-Mode/thermal/memory-pressure/page-out/swap/descendant audit, both competing-load branches, APFS zero-sharing/rebuild/exclude cases, and paired block-level analysis validation. |
 | R-010 Deterministic decision | Exact hard gates, capped memory/disk relative rules, cache-mode conjunction, family/profile quantifiers, outcomes, valid resource-breach table including pair-level cache capacity, joint CI uncertainty, direct-observation T4 condition 3, and logical/allocated deterministic projected-headroom condition 4 are encoded. | Fresh/warm, capped-allowance boundaries, family/profile, G/S/pair-level breach and timeout, reachable-outcome CI cases, T4 logical/allocated/memory/disk projection tables, classifier tests, and owner approval. |
 
 ### CYAX-0168 G0 — pending repaired-design approval
 
 Acceptance requires a fresh independent architecture/methodology rereview and
 an explicit owner decision citing the exact repaired head, passed K1–K12 audit,
-backend pin, macOS host contract, workload, repetition candidates/ratification
-rule, envelope, and thresholds. The independent rereview **PASS** at exact head
+backend pin, the host-portable execution contract with its initial macOS
+reference host manifest, workload, repetition candidates/ratification rule,
+envelope, and thresholds. The independent rereview **PASS** at exact head
 `438aaaa69d4b965de29ea967cc05f02274f56e57` remains evidence for that earlier
 technical design. Issue #168 comment `5658274383` is preserved but is explicitly
 superseded as owner-approval evidence because it lacked a valid owner-decision
@@ -1939,8 +2040,12 @@ deterministic classifier. Production adoption remains separate.
 No item in this section is an owner decision. After a fresh bounded rereview of
 the exact repaired head, the Control Desk must present these choices explicitly:
 
-1. approve macOS ARM64 on the owner's exact frozen machine as the benchmark
-   authority environment and accept the environment-specific claim boundary;
+1. approve the host-portable execution contract — no authoritative benchmark
+   machine; each campaign freezes one admissible host manifest, runs S and G on
+   that same host, and reports host-scoped results under the pooling
+   prohibition and the replication requirement — with the owner's exact
+   Apple-silicon/macOS ARM64 machine as the initial reference execution host
+   and the accompanying campaign-scoped claim boundary;
 2. approve the `preconditioned-warm-cache` protocol: three stabilized passes,
    a 5% throughput-range criterion, a ten-pass cap, pre/post complete-manifest
    verification, non-mutating measured queries, and no full-residency or OS-
@@ -1968,7 +2073,7 @@ the exact repaired head, the Control Desk must present these choices explicitly:
    resource inputs; and
 10. retain `ladybug==0.20.4` at upstream commit
    `df58ee387c4e5e9f02bb9d518636b52cd4abe5f7` as the sole graph candidate,
-   subject to a fresh exact-machine offline artifact and smoke gate.
+   subject to a fresh per-campaign-host offline artifact and smoke gate.
 
 ## Non-scope and completion
 
@@ -1977,6 +2082,13 @@ dependency, fresh-agent cohort, transcript ingestion, vector search, Julia code
 graph, general scientific ontology, scientific/package behavior, public API,
 persisted scientific schema, version change, CYAX-0166 revision, or production
 backend adoption is authorized here.
+
+A single successful first campaign may support bounded experimental or Hybrid
+conclusions and may motivate bounded experimental or Hybrid integration work.
+It may not by itself make graph materialization a normal CYAxiverse dependency,
+a project-wide default backend, or a production commitment; each of those
+additionally requires independent replication on at least one further frozen
+admissible host/environment plus the separate approvals named above.
 
 This S2 work completes only after a later approved implementation/execution
 passes CYAX-0168 G1–G3 (and G4 if eligible), publishes replayable evidence, and
