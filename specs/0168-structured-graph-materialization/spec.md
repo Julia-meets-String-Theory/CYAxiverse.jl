@@ -22,7 +22,9 @@ material operational advantage over indexed SQLite for graph-shaped CYAxiverse
 provenance retrieval when both views derive from the same immutable,
 authority-safe assertion snapshot.
 
-This revision repairs the design after independent review. It does not approve
+The prior exact-head rereview returned **PASS WITH REQUIRED REVISIONS**; this
+revision makes those bounded R1–R9 repairs. The independent #117 K1–K12 source
+audit passed and its chronology is preserved. This revision does not approve
 the specification, authorize benchmark implementation or execution, revise
 CYAX-0166/CYAX-0167, or select a production backend. The design branch starts
 from integrated `vmm` revision
@@ -83,9 +85,13 @@ Every entity has `entity_id`, `entity_type`, and nullable
 semantic comparison. It must never contain the proposition represented by a
 `Claim`.
 
-A `Claim` additionally has:
-
-- `claim_key`: a closed fixture-local semantic slot such as `K07.total_rows`;
+A `Claim` additionally has `claim_key`, a **registered fixture-local semantic
+key** such as `K07.total_rows`. Before either backend is implemented, each
+fixture manifest freezes a `claim_key_registry` sorted by `claim_key`. Every
+entry contains exactly `claim_key`, `literal_type`, and `semantic_slot`, where
+`semantic_slot` is a stable identifier/meaning, not prose to parse. Duplicate
+or unregistered keys fail validation, and the Claim literal's type must equal
+the registered `literal_type`.
 
 This field is absent on every other entity type. Exactly one Claim
 `documented_in` assertion with a `literal_ref` states the content, and at least
@@ -111,8 +117,10 @@ types and canonical values are:
 | `review_verdict` | `pending`, `pass`, `changes_required`, or `rejected` | exact token equality |
 
 Floating point, binary blobs, maps, arrays, backend values, and unregistered
-enum strings are forbidden. `text` is permitted only for frozen Claim content
-or diagnostic display labels; it is not parsed to infer authority or state.
+enum strings are forbidden. `text` is permitted only when the Claim registry
+explicitly assigns `text`, or for diagnostic display labels. Text is never
+parsed to derive authority, state, predicate behavior, ranking, or any other
+ontology semantics.
 Every semantic literal is stored canonically in the snapshot and linked through
 its Claim and source-provenanced assertion to exact captured source evidence.
 `literal_ref` in an assertion is not a generic escape hatch: it is permitted
@@ -125,7 +133,7 @@ All values are lowercase ASCII tokens. Unknown values fail validation.
 
 | Field | Allowed values and semantics | Provenance and transitions |
 | --- | --- | --- |
-| `source_kind` | `github_issue`, `github_issue_comment`, `github_pull_request`, `github_pull_request_comment`, `github_review`, `git_commit`, `repository_file`, `verification_artifact`, `external_document` | Source-derived from the captured object type; immutable for a source revision. |
+| `source_kind` | `github_issue`, `github_issue_comment`, `github_pull_request`, `github_pull_request_comment`, `github_review`, `git_commit`, `repository_file`, `verification_artifact`, `external_document`, `synthetic_fixture` | Source-derived from the captured object type; `synthetic_fixture` is reserved for generator-owned canonical bytes and may never classify real evidence. Immutable for a source revision. |
 | `authority_class` | `owner_decision`, `approved_specification`, `canonical_work_item`, `merged_implementation`, `verification_evidence`, `external_reference`, `ordinary_record`, `agent_proposal` | Curator-supplied by the mechanical derivation table below and independently reviewable; immutable in a snapshot. Reclassification creates a successor snapshot. |
 | `origin` | `source_direct`, `curator_interpretation`, `rule_derived` | Assertion compiler supplies the value. `source_direct` is explicitly stated; `curator_interpretation` is bounded human interpretation; `rule_derived` names a frozen evaluator rule and supporting assertions. Immutable; correction creates a new assertion in a successor snapshot. |
 | `curation_state` | `unreviewed`, `curator_checked`, `independently_reviewed` | Curator-supplied. Allowed forward transitions are `unreviewed → curator_checked → independently_reviewed`; a failed check creates a corrected/rejected successor assertion, never a backward mutation. |
@@ -173,16 +181,22 @@ Each assertion has exactly:
 - exactly one of `object_id` or `literal_ref`;
 - `source_revision_id` and `source_locator` anchored within captured bytes;
 - `source_event_at`, nullable when the source provides no event time;
-- `recorded_at`, the assertion-recording time;
+- `asserted_at`, the deterministic provenance time for creation of this
+  immutable assertion revision;
 - nullable `valid_from` and `valid_to` domain/effective bounds;
 - `validity_basis = explicit | source_event | unknown`;
+- `authority_class` and `authority_derivation_rule_id`, copied from the
+  validated mechanical authority derivation for this assertion;
 - `origin`, `curation_state`, `review_state`, `epistemic_state`, and
   `dispute_state` from the frozen vocabularies.
 
-`recorded_at` is deterministic: it equals the captured source observation time
-for `source_direct`, the captured curator action time for
-`curator_interpretation`, and the latest supporting assertion's `recorded_at`
-for `rule_derived`. It is never rebuild wall time.
+`asserted_at` equals `source_event_at` for `source_direct` when present and
+otherwise the source revision's captured `observed_at`; the captured curator
+action time for `curator_interpretation`; and the maximum `asserted_at` of the
+explicit supporting assertion IDs for `rule_derived`. Empty rule support is
+invalid. It is never compiler/build wall time. Actual wall time is nullable
+`built_at` in nonsemantic manifest/build metadata and never affects semantic
+evaluation or a stable ID.
 
 `source_locator` uses a source-kind-specific stable anchor: GitHub comment ID,
 review ID, Issue/PR body plus captured revision, Git commit/path/blob/line
@@ -196,7 +210,7 @@ this ordered table and records the matched rule ID:
 
 | Source evidence | Authority class |
 | --- | --- |
-| GitHub Issue/PR comment or review whose immutable actor ID is in the fixture's owner allowlist and whose role is `repository_owner` for the observation boundary | `owner_decision` |
+| GitHub Issue/PR comment or review whose immutable actor ID and captured role evidence establish `repository_owner` **and** whose exact `(source_revision_id, source_locator)` is in the fixture's frozen owner-decision-event registry | `owner_decision` |
 | `spec.md` with `status: approved` and non-null approval provenance that resolves to the captured approving owner/reviewer records | `approved_specification` |
 | Captured Issue body/state or PR body/state | `canonical_work_item` |
 | Commit reachable from the captured base branch whose associated PR is captured as merged | `merged_implementation` |
@@ -205,16 +219,33 @@ this ordered table and records the matched rule ID:
 | Ordinary Issue/PR comment, review, repository file, or commit not matching a higher rule | `ordinary_record` |
 | Agent-authored proposal or generated design lacking the required approval record | `agent_proposal` |
 
+Owner identity and decision-event identity are independent predicates. The
+immutable `owner_decision_events.jsonl` registry is fixture-bound, sorted by
+the framed `(source_revision_id, source_locator)`, and contains exactly those
+two fields plus `registry_entry_id`; duplicates and references outside the
+source bundle fail validation. The registry is hashed into the source bundle
+and is independently reviewable. No display name, login, author association,
+generic owner authorship, free-text parsing, or proximity to another event can
+establish decision status.
+
 For F-real the owner allowlist contains GitHub actor ID `102535039` for the
-captured observation boundary. Login, display name, author association, or
-textual implication alone is insufficient. The bundle captures actor ID,
-login-at-observation, author association, and the repository-role evidence used
-to establish the allowlist. Issue and PR state are source facts, not owner
-decisions. A merged PR establishes merged implementation, not scientific
-acceptance. Verification evidence establishes only what its frozen gate says.
-External sources retain external authority. Agent proposals remain proposals
-until a separately captured approval changes their class in a successor
-snapshot.
+captured observation boundary, and comment `5556641428` is an explicit registry
+entry bound to its exact captured comment revision and locator. The bundle
+captures actor ID, login-at-observation, author association, and repository-role
+evidence, but an ordinary acknowledgement, question, or proposal by that owner
+remains `ordinary_record` unless its exact event is registered. The same text
+from a non-owner cannot become an owner decision even if registered in error;
+validation rejects it. Issue and PR state are source facts, not owner decisions.
+A merged PR establishes merged implementation, not scientific acceptance.
+Verification evidence establishes only what its frozen gate says. External
+sources retain external authority. Agent proposals remain proposals until a
+separately captured approval changes their class in a successor snapshot.
+
+Authority conformance fixtures include an unregistered owner acknowledgement,
+an unregistered owner question, an unregistered owner proposal, the exact
+registered owner decision, and the same decision text from a non-owner. Only
+the exact registered event with valid owner actor/role evidence may classify as
+`owner_decision`.
 
 ## Temporal model
 
@@ -223,8 +254,11 @@ Four times remain distinct:
 - domain/effective time: `valid_from`/`valid_to`, when the proposition holds;
 - source event time: `source_event_at`, when the canonical source event occurred;
 - observation time: `observed_at`, when source bytes/state were captured;
-- assertion recording time: `recorded_at`, when the assertion was compiled.
+- assertion-revision provenance time: `asserted_at`, determined by the rule
+  above.
 
+These four temporal roles are conceptually distinct even when two or more
+values coincide. `built_at` is a fifth, nonsemantic build-wall-time field.
 Timestamps are UTC Gregorian instants serialized as
 `YYYY-MM-DDTHH:MM:SS.ffffffZ`, exactly six fractional digits, with no leap
 second. Intervals are half-open `[valid_from, valid_to)`. A null `valid_from`
@@ -253,6 +287,7 @@ source-bundle/
   source_revisions.jsonl
   actors.jsonl
   events.jsonl
+  owner_decision_events.jsonl
   objects/sha256/<two-hex>/<remaining-hex>
 ```
 
@@ -264,10 +299,11 @@ URL without captured bytes is invalid. `source_revisions.jsonl` freezes
 digest and byte count, source event time, observed time, source metadata,
 anchors, actor ID, event/state fields, authority class, and derivation rule ID.
 The manifest freezes schema/rule versions, ordered payload hashes/counts, the
-repository observation boundary, and every selected source revision.
+repository observation boundary, every selected source revision, immutable
+owner actor/role evidence, and the owner-decision-event registry.
 
 `source_bundle_id` is `cyax-source-bundle-sha256:<digest>` where `digest` is the
-canonical framed hash defined below over the three JSONL payloads and the
+canonical framed hash defined below over the four JSONL payloads and the
 ordered object `(sha256, byte_count)` pairs. If a canonical source changes, the
 old bundle remains valid as historical evidence and a fresh capture creates a
 new bundle/snapshot. If a source is unavailable, historical replay may use the
@@ -292,13 +328,22 @@ Stable IDs are lowercase SHA-256 of these tuples:
 | `entity_id` | `['cyax-entity-v1', namespace, entity_type, canonical_source_identity]` |
 | `source_revision_id` | `['cyax-source-revision-v1', source_kind, canonical_locator, object_sha256, source_event_at]` |
 | `literal_id` | `['cyax-literal-v1', literal_type, canonical_value]` |
-| `assertion_id` | `['cyax-assertion-v1', subject_id, predicate, object_id-or-null, literal_ref-or-null, source_revision_id, source_locator, valid_from, valid_to, origin]` |
+| `assertion_id` | `['cyax-assertion-v2', <complete canonical semantic assertion revision excluding assertion_id>]` |
 
 The rendered forms are respectively `cyax-entity-sha256:`,
 `cyax-source-revision-sha256:`, `cyax-literal-sha256:`, and
 `cyax-assertion-sha256:` plus the digest. Namespace is the captured repository
-identity or registered external namespace. Rebuild, observation, and recording
-times are excluded except where a source event is part of revision identity.
+identity or registered external namespace. The assertion preimage contains
+`subject_id`, `predicate`, `object_id`, `literal_ref`, `source_revision_id`,
+`source_locator`, `source_event_at`, `asserted_at`, `valid_from`, `valid_to`,
+`validity_basis`, `authority_class`, `authority_derivation_rule_id`, `origin`,
+`curation_state`, `review_state`,
+`epistemic_state`, and `dispute_state`, with required nulls present. These are
+identity-bearing semantic fields. Any change creates a successor assertion
+with a different ID. Nonsemantic audit/build metadata is limited to `built_at`,
+compiler/validator/curator implementation versions, process/host records,
+diagnostics, and physical payload checksums; none may appear in the assertion
+record or ID preimage. Rebuild wall time is always excluded.
 On an ID collision with unequal canonical preimages, validation stops and
 preserves both preimages as failure evidence; no suffix or rehash is allowed.
 
@@ -318,29 +363,58 @@ record, and primary-ID byte order. Timestamps and integers use the canonical
 forms above. Semantically unordered arrays are sorted by their canonical framed
 bytes; semantically ordered arrays retain order.
 
-The **logical semantic checksum** is SHA-256 of:
+The **logical semantic checksum** hashes an explicit semantic projection, not
+the complete physical JSONL payload or whole physical source bundle. The
+`semantic_source_bundle_projection_checksum` covers only source revisions,
+objects, actor/role evidence, and owner-decision registry entries reachable
+from semantic assertions; display-only sources are excluded. The snapshot
+projection contains entities ordered
+by `entity_id` with `display_label_ref` removed; literals referenced by
+semantic assertions (and no literal reachable only from a display label),
+ordered by `literal_id`; complete source revisions referenced by semantic
+assertions, ordered by `source_revision_id`; and complete assertions ordered by
+`assertion_id`. It is SHA-256 of:
 
 ```text
 frame([
-  'cyax-logical-snapshot-v1', schema_version, source_bundle_id,
+  'cyax-logical-snapshot-v1', schema_version,
+  semantic_source_bundle_projection_checksum,
   authority_rule_version, semantic_evaluator_rule_version,
-  ['entities.jsonl', bytes], ['literals.jsonl', bytes],
-  ['source_revisions.jsonl', bytes], ['assertions.jsonl', bytes]
+  ['semantic_entities', framed_records],
+  ['semantic_literals', framed_records],
+  ['semantic_source_revisions', framed_records],
+  ['semantic_assertions', framed_records]
 ])
 ```
 
-`snapshot_id = cyax-snapshot-sha256:<logical_semantic_checksum>`. Compiler,
-curator, and backend implementation versions do not alter logical identity.
-The separate `build_contract_checksum` hashes the snapshot ID plus exact
-assertion-compiler, curator, validator, and context-compiler versions. This
-replaces the ambiguous old `semantic_checksum` name.
+`snapshot_id = cyax-snapshot-sha256:<logical_semantic_checksum>`. Reordered
+input, a different compiler with identical semantics, and a diagnostic-label-
+only change leave it unchanged. Assertion/provenance changes and authority or
+evaluator rule-version changes alter it. The separate
+`physical_payload_checksum` hashes the complete encoded physical payload,
+including display references and display-only literals. The
+`build_contract_checksum` hashes `snapshot_id`, `physical_payload_checksum`,
+the complete physical `source_bundle_id`, and exact assertion-compiler, curator,
+validator, and context-compiler versions.
 
 `manifest.json` records all named versions and checksums, every payload byte
 count/SHA-256/record count, ordered source-revision IDs/fingerprints, and total
 entity/assertion/source/literal counts. On open, validators recompute and check
 every manifest-derived value, ID, foreign key, enum, predicate signature,
-literal constraint, canonical order, payload hash, source-bundle link, logical
-checksum, and build-contract checksum. Unknown fields fail under v1.
+literal constraint, canonical order, payload hash, source-bundle link, semantic
+source-bundle/snapshot projections, logical checksum, physical payload checksum,
+and build-contract checksum. A display literal referenced by an assertion is semantic and cannot
+be excluded merely because it is also a label. Unknown fields fail under v1.
+
+Identity conformance fixtures freeze these results:
+
+| Change | Logical `snapshot_id` |
+| --- | --- |
+| reordered input only | unchanged |
+| different compiler, same semantic projection | unchanged |
+| diagnostic `display_label_ref`/display-only literal only | unchanged |
+| assertion or provenance field | changed |
+| authority/evaluator rule version | changed |
 
 ### Freshness versus consistency
 
@@ -391,6 +465,7 @@ RetrievalBundle
   snapshot_id
   as_of                         # timestamp or null
   entities[]
+  literals[]
   assertions[]
   source_revisions[]
   paths[]
@@ -401,15 +476,28 @@ RetrievalBundle
   diagnostics                   # object or null
 ```
 
-Semantic arrays are empty rather than null and are sorted by primary ID.
+Semantic arrays are empty rather than null and are sorted by primary ID;
+`literals[]` is ordered by `literal_id`.
 Records are complete canonical snapshot objects, not backend projections.
 `paths` are ordered by the framed sequence of `(assertion_id,direction)`;
 steps retain traversal order. `path_id` hashes that sequence. Parallel edges
 remain distinct because they have distinct assertion IDs. Exact duplicate step
 sequences are invalid adapter output, not silently deduplicated. Thus semantic
 path multiplicity is assertion-distinct and every exact path has multiplicity
-one. All referenced entities, assertions, and source revisions are included
-once. An absent optional value is forbidden in v1; it is represented as null.
+one. All referenced entities, assertions, literals, and source revisions are
+included exactly once. Every `literal_ref` in a returned assertion and every
+non-null `display_label_ref` in a returned entity resolves to exactly one
+complete canonical Literal in `literals[]`; other literals are omitted,
+duplicate literals and dangling references invalidate the bundle, and a bundle
+with no literal reference contains `literals: []`. Label references/literals
+are retained in complete serialization but removed with the diagnostic-only
+projection for semantic gold/S/G comparison. Assertion-literal closure remains
+mandatory in every projection. The same closure applies before gold comparison,
+diagnostics-stripped S/G parity, complete-bundle serialization, and
+bounded-context compilation. The
+context compiler accepts only a validated, reference-closed bundle and never
+loads a missing literal from a backend. An absent optional value is forbidden
+in v1; it is represented as null.
 
 Diagnostics may contain backend/version, candidates examined, candidate bytes,
 adapter-boundary bytes, native traversal work, page faults, timings, truncation,
@@ -445,17 +533,73 @@ The audited K1–K12 answer key is:
 | K11 | Preserve the historical replay. The next admissible work is the focused direct producer test and bounded h11=4/h11=5 replay under owner comment `5556641428`, with immutable inputs, CYTools availability, and normal independent evidence gates. |
 | K12 | Abstain from population, orbifold/stringy-Euler, non-simplicial, or broader scientific conclusions absent separate evidence and approval. |
 
-Each item is compiled into exact Claims/assertions/source anchors and must pass
-independent source review before reuse by CYAX-0168 or CYAX-0166. This repair
-does not modify CYAX-0166.
+Each item is compiled into exact Claims/assertions/source anchors. The
+independent K1–K12 source audit passed at the starting PR head and this bounded
+repair does not reopen its chronology. CYAX-0166 remains unchanged and cannot
+consume the still-unstable common interface before the new exact-head
+architecture/methodology rereview. F-real's manifest registers every used K1–K12
+`claim_key`, its exact literal type, and its stable semantic-slot description;
+the registry is part of frozen gold and may not be inferred from Claim text.
 
 ### F-scale generator
 
-Generator version `cyax-0168-scale-2.0` is a fully specified, scientifically
+Generator version `cyax-0168-scale-2.1` is a fully specified, scientifically
 inert project-record generator. It uses no runtime RNG. For each random choice,
-it evaluates `SHA256(frame(['cyax-gen-2.0', seed, profile_id, purpose,
+it evaluates `SHA256(frame(['cyax-gen-2.1', seed, profile_id, purpose,
 ordinal, counter]))`; unsigned big-endian digest values feed rejection sampling
 to avoid modulo bias. Endpoint candidates are always primary-ID sorted.
+
+The generator uses namespace `cyax-0168-synthetic-v2.1`. Its manifest registers
+`synthetic.block_claim` as literal type `text` with semantic slot
+`synthetic_fixture_block_statement`. For block ordinal `b` and role ordinal
+`r`, every Entity canonical source identity is the framed array
+`[tier, profile_id, seed, b, r]`; the Claim's `claim_key` is
+`synthetic.block_claim`; its literal value is the exact ASCII string
+`block=<b>;profile=<profile_id>;seed=<seed>` with base-10 ordinals and no
+padding. Every generated Source has kind `synthetic_fixture`, locator
+`cyax://0168/scale/2.1/<tier>/<profile_id>/<seed>/block/<b>/source/<r>`, and
+exact source bytes equal to canonical JSON of the sorted-key object
+`{"block":b,"generator":"cyax-0168-scale-2.1","profile":profile_id,"role":r,"seed":seed,"tier":tier}`
+followed by one LF. Its object digest/byte count and `source_revision_id` follow
+the common rules. Generated `source_event_at` is null and `observed_at` and
+`asserted_at` are exactly `2000-01-01T00:00:00.000000Z`; ordinary assertions
+have null `valid_from`/`valid_to` and `validity_basis=unknown`. A `supersedes`
+assertion instead has `validity_basis=explicit` and `valid_from` equal to
+`2000-01-02T00:00:SS.000000Z`, where `SS` is the zero-padded successor position
+within its chain (00 through 31), with null `valid_to`. All assertions use
+`origin=source_direct`, `curation_state=independently_reviewed`,
+`review_state=not_required`, `epistemic_state=supported`, and
+`dispute_state=undisputed`, except phase-6 `contradicts` assertions use
+`dispute_state=disputed`. Each assertion uses the referenced Source revision
+and locator plus anchor `json-object`; parallel assertions use a second Source
+whose role ordinal is the original role plus `1000000`. Generated authority is
+`ordinary_record`; owner allowlists and decision registries are empty. No field
+may depend on iteration order, locale, wall clock, runtime version, or
+unspecified randomness.
+
+Within block `b`, role ordinals and types are fixed as: 0 WorkItem, 1 Decision,
+2 Requirement A, 3 Requirement B, 4 Implementation A, 5 Implementation B,
+6 Verification, 7 Claim, 8 Artifact, and 9 Source. Every generated
+`display_label_ref` is null. The 13 base assertions, in this exact construction
+order, are `1 governs 2`; `0 requires 2`; `0 requires 3`; `2 requires 4`;
+`3 requires 5`; `4 implements 2`; `5 implements 3`; `6 verifies 4`;
+`8 verifies 3`; `8 supports 7`; `7 concerns 0`; `7 documented_in <block
+literal>`; and `8 documented_in 9`. An ordinary assertion uses the Source and
+Source revision of its subject's block; a cross-block/supersession assertion
+uses the subject block's Source; and a phase-6 contradiction uses the second
+Claim's block Source. Fill assertions follow the same subject-block rule.
+
+Synthetic source-revision records use null actor ID, login, author association,
+event/state fields, and role evidence; `authority_class=ordinary_record`,
+`authority_derivation_rule_id=synthetic_fixture_v2.1`, anchor `json-object`, and
+no additional metadata. The Source entity's canonical source identity is still
+the common framed entity identity above; its revision is the digest-bound
+record for the exact synthetic bytes. Parallel evidence creates one additional
+revision for that Source with role ordinal `1000000 + original assertion
+construction ordinal` in both locator and canonical JSON; it does not create a
+new Source entity. These rules, the common canonical schemas, and the phases
+below determine every field in every Entity, Literal, Source revision, and
+Assertion record.
 
 Every tier entity count is divisible by ten. Each consecutive ten-entity block
 contains exactly one WorkItem, one Decision, two Requirements, two
@@ -492,9 +636,17 @@ For `B = entity_count / 10`, the ordered post-motif phases are executable:
    `floor(cross_link_rate × dependency_quota)` phase positions instead select a
    target in a different component. Self-edges and duplicate subject/object
    pairs are rejected.
-4. For the lowest-ID `floor(cycle_rate × connected_blocks)` disjoint triples,
-   replace three non-chain dependency edges with a directed three-cycle. A
-   cycle never changes reachability depth limits and is never interpreted as
+4. Form candidate triples from consecutive primary-ID-sorted connected
+   WorkItems. A triple is eligible only when each member has at least one
+   non-chain outgoing dependency edge and none of the three proposed cycle
+   pairs already exists. Take the lowest-ID
+   `floor(cycle_rate × connected_blocks)` disjoint eligible triples. For each
+   `(a,b,c)`, remove the lexicographically smallest `(assertion_id, subject_id,
+   object_id)` non-chain outgoing dependency assertion for each member, then
+   add exactly `a→b`, `b→c`, and `c→a` using the corresponding removed
+   assertion's Source revision and provenance fields. If the quota cannot be
+   met, generation fails. The exact removed assertion IDs are recorded in the
+   generator trace; no chain edge is replaced. A cycle never enters
    supersession.
 5. Partition the lowest-ID still-eligible WorkItems into as many disjoint
    chains of exactly `supersession_depth` as fit; add one `supersedes` assertion
@@ -516,6 +668,12 @@ the PRF. The validator checks exact entity-type counts, phase quotas, intended
 fan-out and shortest-path/depth strata, same-type supersession, dispute pairs,
 cycle count, parallel provenance, isolated blocks, predicate signatures,
 referential integrity, and total counts.
+
+Generator acceptance is byte-level: two independent implementations supplied
+only with generator version 2.1, tier, profile, and seed must produce identical
+complete canonical snapshot records and the same logical snapshot checksum.
+Topology/count checks alone do not pass. The version is bumped from 2.0 because
+complete generated bytes and cycle-replacement identities are now frozen.
 
 Topology is separate from seed. Each generated snapshot also contains the
 low/median/high query-selectivity strata frozen below, so selectivity is not
@@ -539,17 +697,36 @@ The smallest decision matrix is:
 
 ### Frozen query instances and gold
 
-Instances are selected from generated snapshots before backend implementation.
-For each tier/profile/seed, compute degree, reachability, selectivity, and
-shortest-path depth with the reference in-memory specification evaluator, not a
-backend. Select the smallest entity ID at the nearest-rank 10th, 50th, and 90th
-degree percentiles; the smallest IDs at the 10th and 90th result-set-size
-percentiles; and smallest-ID pairs with shortest distances `≤4`, `5..8`, and
-`≥9` (bounded by profile depth). Ties use canonical ID order. Missing strata
-are recorded before implementation and invalidate that fixture rather than
-triggering post-result reselection. F-real instances are named directly by the
-audited Claim/entity IDs. Query parameters, `as_of`, depth, selected stratum,
-gold bundle, and gold checksum are frozen in the fixture manifest.
+Instances are selected from generated snapshots before backend implementation
+with the reference in-memory evaluator. For a population sorted by
+`(metric, primary_id)`, nearest-rank percentile `p` selects rank
+`ceil(p × population_size)` (one-based); pair populations use framed
+`(source_id,target_id)` as the primary tie key. Each row below yields exactly
+one preregistered decision instance per tier/profile/seed. Diagnostic 10th and
+90th percentile instances may also be frozen, but they are never pooled into or
+substituted for the decision statistic.
+
+| Query | Eligible population and metric | Decision selector | Parameters | Tie break | Invalid-fixture rule | Use |
+| --- | --- | --- | --- | --- | --- | --- |
+| Q01 | entities with at least one admissible current `governs` result; result count | 50th percentile | `as_of=2000-01-03T00:00:00.000000Z`, depth null | smallest entity ID | empty population | decision |
+| Q02 | entities with at least one admissible authority-evidence result; result count | 90th percentile | same `as_of`, depth null | smallest entity ID | empty population | decision |
+| Q03 | reachable Decision/Verification pairs matching the required typed path; shortest distance | maximum distance not exceeding profile `path_depth` | `as_of` null, depth=`path_depth` | smallest framed pair | no eligible pair | decision |
+| Q04 | supersession assertions; `valid_from` instant | 50th percentile | `as_of` equals the selected assertion's `valid_from`, depth null | assertion ID then subject ID | no supersession | decision |
+| Q05 | entities with nonzero reverse direct `depends_on` degree; degree | 50th percentile | `as_of` null, depth=1 | smallest entity ID | empty population | decision |
+| Q06 | entities with nonzero bounded reverse dependant reachability; result count | 90th percentile | `as_of` null, depth=`path_depth` | smallest entity ID | empty population | decision |
+| Q07 | superseded entities with nonempty dependency-stale reachability; result count | 90th percentile | `as_of=2000-01-03T00:00:00.000000Z`, depth=`path_depth` | smallest entity ID | empty population | decision |
+| Q08 | entities concerned by at least one dispute record; total inspectable dispute count | 50th percentile | same `as_of`, depth null | smallest entity ID | empty population | decision |
+| Q09 | Claims with a typed evidence path to Source; shortest distance | maximum attainable distance | `as_of` null, depth=`path_depth` | smallest Claim ID, then Source ID | empty population | decision |
+| Q10 | unordered pairs of current Claims for which each Claim has admissible Source evidence; minimal evidence-cover assertion count | 90th percentile | same `as_of`, depth=`path_depth` | smallest framed sorted Claim-ID pair | fewer than two eligible Claims | decision |
+| Q11 | WorkItems concerned by a current Claim registered to semantic slot `synthetic_fixture_block_statement`; eligible-result count | 50th percentile | same `as_of`, depth null | smallest WorkItem ID | empty population | decision |
+| Q12 | Requirements with at least one implementing and one verifying subject; combined result count | 50th percentile | same `as_of`, depth null | smallest Requirement ID | empty population | decision |
+
+Any invalid population invalidates that entire tier/profile/seed fixture before
+backend work; the generator must be corrected by a versioned design amendment,
+never by post hoc reselection. F-real instances are named directly by audited
+Claim/entity IDs and are diagnostic correctness cases, not performance-decision
+instances. The manifest freezes all target IDs/pairs, parameters, role,
+population checksum/count, selector result, gold bundle, and gold checksum.
 
 Semantic answers are:
 
@@ -593,9 +770,14 @@ supersession, and dependency staleness. Rebuild validation also compares a
 complete canonical logical export of every record, including records untouched
 by Q01–Q12. Agreement between two backends is never sufficient by itself.
 
-Updates do not mutate snapshot N. Each frozen delta contains base snapshot ID,
-ordered added source objects/revisions/entities/literals/assertions, explicit
-supersession/tombstone assertions, and expected target snapshot ID:
+Updates do not mutate snapshot N. Removal is a benchmark delta transformation,
+not an authority source, assertion, tombstone, retraction predicate, or claim of
+truth. Each frozen canonical delta contains `base_snapshot_id`,
+`expected_target_snapshot_id`, primary-ID-ordered complete additions for source
+objects/revisions/entities/literals/assertions, and primary-ID-ordered unique
+`remove_assertion_ids[]`. Every removal ID must exist in N; every addition must
+be a complete canonical record; duplicate, missing, dangling, or colliding IDs
+fail before either backend runs:
 
 ```text
 immutable snapshot N + frozen delta → immutable snapshot N+1
@@ -603,6 +785,16 @@ immutable snapshot N + frozen delta → immutable snapshot N+1
 
 S and G receive the same N, delta, and target identity. They may incrementally
 update disposable indexes, but their complete logical export must equal N+1.
+N+1 is independently frozen from a full canonical build, and applying the delta
+must reproduce its exact logical export and `snapshot_id`; historical N remains
+immutable and available. Dependency insertion adds a complete `depends_on`
+assertion; dependency removal names its exact assertion ID. Source-revision
+replacement adds the new revision and successor assertions and removes only
+the explicitly listed old assertion IDs. Supersession adds a complete
+`supersedes` assertion and does not delete history. Rollback discards the
+unpublished candidate and reopens N. Crash interruption leaves N published and
+causes any incomplete N+1 to fail open; recovery either discards the candidate
+or completes it from the same delta and must match the frozen N+1.
 Every measured repetition begins from an independent reflink/copy verified to
 match N; it never reuses a prior repetition. Frozen batches are one assertion,
 100 assertions, 1%, source-revision replacement, supersession, and dependency
@@ -634,7 +826,7 @@ rereview, and owner approval before any implementation or measurement.
 
 ## Calibration and fairness controls
 
-A separate non-decision corpus uses generator version 2.0: 25,000 assertions
+A separate non-decision corpus uses generator version 2.1: 25,000 assertions
 with `P-low/P-medium/P-high` seeds `168901/168902/168903`, and 125,000
 assertions with seeds `168904/168905/168906` respectively. It is
 never reused in F-real or T0–T4. Each backend receives at most eight person-hours
@@ -644,9 +836,14 @@ Ladybug index/configuration and equivalent query formulation. Schema semantics,
 evaluator, output, query instances, hardware, data, and resource envelopes may
 not change. Stop at the earlier of budget exhaustion or five consecutive trials
 without ≥2% improvement in the preregistered geometric mean of calibration
-latencies while passing correctness. Before decision fixtures are revealed,
-hash and commit final schemas, queries, indexes, pragmas/configs, dependency
-lock, and explain/query plans where stable. No result-driven tuning follows.
+latencies while passing correctness. Final schemas, queries, indexes,
+pragmas/configuration, dependencies, plans, evaluator, and tuning decisions are
+hashed and committed before **any F-real or T0–T4 decision fixture is
+materialized, executed, profiled, explained, or inspected through either
+backend**. Public seeds provide no blinding and are never described as hidden
+or unrevealed. Calibration uses only its dedicated corpus; no decision-result-
+driven tuning follows. A future claim of blinding would require a separately
+reviewed commitment/reveal protocol.
 
 The controlled primary comparison uses one pinned CPU core/thread per query,
 one process and one connection, no concurrency, identical snapshot parser,
@@ -665,6 +862,29 @@ cold. Backend order is paired and balanced. Any optional page-cache-dropped run
 is secondary and requires the same privileged procedure for both. Record minor
 and major page faults for every process where Linux tooling permits.
 
+Immediately before each paired primary measurement, a fresh, version-hashed
+`cache_warm` helper process performs one buffered sequential read from byte zero
+through EOF of every regular materialization file included by the frozen
+backend manifest: data, index, checkpoint, and steady-state auxiliary files;
+WAL/shadow/spill files must be empty/absent at steady state or are included.
+It warms S and G separately, verifies each ordered `(relative_path, byte_count,
+sha256)` against the manifest, uses a 8 MiB read buffer, records bytes read,
+start/end monotonic times, exit status, and major/minor faults, closes all file
+descriptors, then memory-maps each file read-only and uses Linux `mincore` to
+record and require `resident_pages=total_pages` before unmapping and exiting.
+The first-read
+backend alternates by the same balanced pair schedule as measured execution;
+within each pair the helper reads the first backend, then the second, while the
+measured order is first then second. Both complete materializations must fit
+within the preregistered cache-residency budget of 50% of physical RAM combined;
+otherwise `filesystem-cache-warm` is invalid. No other file-touching process
+runs between helper exit and the pair. Missing files, digest/byte mismatch,
+short reads, nonzero helper exit, incomplete residency, or monitor gaps
+invalidate the pair. Measured major faults remain reported evidence but do not
+alone invalidate a pair whose full pre-measurement residency proof passed. Each
+new pair repeats the full helper procedure, so prior pair state is not used as
+evidence that warming occurred.
+
 ## Primary host and measurement protocol
 
 The proposed authority host is dedicated bare-metal Linux x86-64 with at least
@@ -676,24 +896,46 @@ distribution/kernel, filesystem/mounts, storage device/firmware, Python,
 SQLite version and compile options, Ladybug wheel/commit/dependencies, libc and
 native runtimes, and measurement-tool versions.
 
-Primary repetitions are:
+Primary repetition candidates, frozen for precision validation, are:
 
-- clean build/rebuild: 7 independently cloned paired repetitions;
-- each snapshot transition batch: 15 independent paired repetitions;
-- application-cold/database-open-cold queries: 20 paired fresh-process
-  repetitions per query instance;
-- warm queries: 10 independent process blocks, each with 5 unmeasured warmups
-  and 50 measured calls.
+- clean build/rebuild: 12 independently cloned paired repetitions;
+- each snapshot transition batch: 30 independent paired repetitions;
+- application-cold/database-open-cold queries: 200 paired fresh-process
+  repetitions per decision query instance;
+- warm queries: 100 independent paired process blocks per decision query
+  instance, each with 5 unmeasured warmups and 50 measured calls.
+
+The exact p95 estimator is nearest rank: for sorted measurements
+`x_(1)..x_(n)`, `p95=x_(ceil(0.95n))`. Thus 200 fresh processes place the
+endpoint at order statistic 190 rather than estimating a tail from 20 units;
+100 warm blocks preserve 100 independent resampling units while the 50 calls
+within each block characterize that process only. Build and transition gates
+use all-sample hard-envelope breach plus median/maximum reporting, not a p95
+classifier endpoint; their 12/30 counts test paired repeatability within the
+48-hour campaign budget.
+
+Before these counts become executable, a preregistered precision report using
+only the calibration corpus must simulate 10,000 campaigns at the independent-
+unit level over the observed distributions and lognormal/two-component-tail
+stress variants. It must demonstrate at least 95% interval coverage, at least
+90% correct classification when the true speedup is 25% beyond each threshold,
+and at most 5% false-positive classification at the null, separately for fresh
+and warm modes. Failure stops CYAX-0168 G1 before any decision-fixture access
+and requires an amended repetition design and rereview; counts may not be tuned
+after any decision fixture access.
+This analytical order-statistic basis plus the calibration-only simulation—not
+bootstrap resample count—is the required tail-precision justification.
 
 The independent unit is the paired build, transition, fresh process, or warm
 process block—not an individual warm call. Alternate first backend with a
 frozen balanced schedule. Report raw values, paired differences and ratios,
-nearest-rank p50/p95 within blocks, then topology-stratified paired BCa 95%
+nearest-rank p50/p95 as defined above, then paired BCa 95%
 bootstrap intervals with 10,000 deterministic resamples at the independent
 block level. Seeds for bootstrap/order live in the preregistration manifest.
 Do not pool tiers, profiles, seeds, query families, or repeated calls as
-independent observations. Missing/timeout/resource-breach samples remain in the
-evidence and invoke invalid/inconclusive classification; they are not replaced.
+independent observations. Missing or corrupt samples invoke invalid execution;
+valid timeouts and resource breaches remain censored-at-limit observations and
+enter the resource classifier rather than being replaced or called invalid.
 
 Process-tree accounting is primary. Record absolute peak RSS, incremental RSS,
 PSS/USS where `/proc` permits, CPU/wall time, minor/major faults, logical and
@@ -723,26 +965,61 @@ T4 runs only when all are true:
 3. T3 projects a classification-relevant crossover by 5 million assertions or
    lies within 25% of a decision threshold;
 4. both systems have at least 25% projected memory, disk, and time headroom;
-5. the T4 fixture/workload/hash was frozen before T3 results were revealed.
+5. the T4 fixture/workload/hash was frozen before T3 results were examined.
 
 T4 alone cannot justify graph adoption for current CYAxiverse scale.
 
 ## Proposed thresholds and deterministic classifier
 
-These thresholds remain proposals pending owner approval. Speedup is paired
-`S p95 / G p95`; absolute saving is `S p95 - G p95`.
+These thresholds remain proposals pending owner approval. A **query family** is
+exactly one frozen Q ID; graph-shaped families are Q03/Q06/Q07/Q09,
+relational families are Q01/Q04/Q12, semantic/ranking families are
+Q02/Q10/Q11, and neutral families are Q05/Q08. Q07 is the preregistered
+critical impact-analysis family.
+
+For a fresh decision instance/backend, the query-instance statistic is the
+nearest-rank p95 of its 200 independent process measurements. For warm mode it
+is the nearest-rank p95 of all 5,000 measured calls, preserving each 50-call
+process block intact during inference; calls are observations, not independent
+units. For one tier/family/profile, the **family/profile latency index** is the
+geometric mean of the query-instance p95 values across every frozen decision
+instance/seed in that cell, with equal weight per instance. It is not itself a
+pooled p95. The **family/profile speedup of A over B** is B latency index divided
+by A latency index; unqualified “speedup” below means G over S. **Absolute
+saving of A over B** is the arithmetic mean across the same instances of
+`(B query-instance p95 - A query-instance p95)`; unqualified “absolute saving”
+below means G over S.
+
+Each of 10,000 deterministic paired bootstrap resamples samples whole paired
+fresh processes, or whole paired warm-process blocks, within each instance;
+all calls in a selected warm block travel together. It recomputes instance
+p95s, then the equal-weight family/profile index, speedup, and absolute saving.
+For statistic `theta`, let `z0=Phi^-1((count(theta* < theta_hat) +
+0.5 count(theta* = theta_hat))/10000)`. Let `a` be the standard delete-one
+independent-unit jackknife acceleration
+`sum((mean(theta_j)-theta_j)^3)/(6*(sum((mean(theta_j)-theta_j)^2))^(3/2))`.
+For `alpha` in `{0.025,0.975}`, use adjusted probability
+`Phi(z0 + (z0 + Phi^-1(alpha))/(1 - a*(z0 + Phi^-1(alpha))))`; the BCa endpoints
+are linearly interpolated empirical bootstrap quantiles at those two adjusted
+probabilities, using quantile type 7 (`h=1+(B-1)p`, linear interpolation between
+the surrounding one-based order statistics). Undefined denominator/acceleration or an adjusted probability
+outside `[0,1]` makes the cell Inconclusive. No measurement is pooled across Q ID,
+tier, profile, seed, cache mode, or process type, and no mean/median/worst-case
+choice remains open. “p95” means only the query-instance estimator;
+“family p95” is forbidden shorthand for the family/profile latency index.
 
 **G — experimental derived-index status:** At T3, on at least two preregistered
 graph-shaped families and at least two of three topology profiles, require
 speedup point estimate ≥2.0, lower 95% CI ≥1.5, and absolute end-to-end saving
-≥10 ms. The same family/profile direction at T2 requires point estimate >1.0
+of G over S ≥10 ms. The same family/profile direction at T2 requires point estimate >1.0
 and lower 95% CI ≥1.0. All semantic and resource gates must pass.
 
 **Hybrid:** G either meets the preceding rule on two graph-shaped families, or
 one preregistered critical impact-analysis family has point estimate ≥5.0,
 lower 95% CI ≥3.0, and absolute saving ≥50 ms. Under either alternative, S must
-simultaneously have a material relational-family advantage: `G p95 / S p95`
-point estimate ≥2.0, lower 95% CI ≥1.5, and ≥10 ms absolute saving. Routing
+simultaneously have a material relational-family advantage: G latency index / S
+latency index point estimate ≥2.0, lower 95% CI ≥1.5, and ≥10 ms absolute
+saving of S over G. Routing
 remains explicit and static. All semantic and resource gates must pass.
 
 **Resource acceptance:** G materialization footprint (data, indexes, and
@@ -750,52 +1027,95 @@ steady-state auxiliary files) and peak query memory must each be ≤2× S or hav
 absolute excess ≤2 GiB. G build/rebuild/transition time must be ≤3× S and
 always inside the hard envelope. Final context/prompt values must match exactly.
 
+Resource/control disposition is frozen separately from measurement validity:
+
+| Observed case | Disposition |
+| --- | --- |
+| host controls or process-tree/resource monitoring invalid | Inconclusive / invalid execution |
+| measurement evidence missing, corrupt, or pairing broken | Inconclusive / invalid execution |
+| G alone validly exceeds a hard T3 envelope while S passes | Retain S / G not justified |
+| G violates relative resource acceptance with otherwise valid measurements | Retain S / G not justified |
+| S alone validly exceeds a hard envelope while G passes | Operational envelope failure / owner decision required; do not infer G adoption |
+| both backends validly exceed a hard envelope | Operational envelope failure / owner decision required |
+| query reaches the frozen 120-second limit with valid monitor/control evidence | measured resource breach, censored at 120 seconds; apply the corresponding backend-breach row above |
+| crash or implementation failure before the common contract is exercised | Inconclusive / invalid execution |
+| demonstrated defect in the shared semantic contract | Architecture problem |
+
+`Operational envelope failure / owner decision required` is a sixth outcome,
+added because a valid S breach cannot honestly be called invalid or used to
+infer G. It authorizes neither production adoption nor threshold relaxation.
+
 Classifier precedence is:
 
 1. **Inconclusive / invalid execution** for failed host controls, missing or
-   corrupted samples, threshold-straddling CIs needed for classification, or
-   implementation failure before the common contract is exercised.
+   corrupted samples, broken pairing, or implementation failure before the
+   common contract is exercised. A valid resource breach is not in this class.
 2. **Architecture problem** only for a demonstrated common-contract defect:
    frozen-gold/parity failure, non-failing snapshot identity, or nondeterministic
    complete logical export.
-3. **Hybrid** when its performance and resource rule passes.
-4. **G (experimental derived-index status)** when its rule passes and no material
+3. **Retain S / G not justified** when S passes and G has any valid hard or
+   relative resource breach.
+4. **Operational envelope failure / owner decision required** when S has a
+   valid hard breach, whether or not G also breaches.
+5. **Inconclusive / invalid execution** when a confidence interval required to
+   distinguish otherwise eligible performance classes overlaps its threshold.
+6. **Hybrid** when its performance and resource rule passes.
+7. **G (experimental derived-index status)** when its rule passes and no material
    S relational advantage requires Hybrid.
-5. **Retain S / G not justified** for every other valid execution.
+8. **Retain S / G not justified** for every other valid execution.
 
 Examples: G 4× faster but 3× larger with >2 GiB excess retains S; a win only at
 T4 retains S; a 20× critical-query win yields Hybrid only if its lower CI,
 absolute saving, S relational advantage, and resource gates pass; candidate-byte
 reduction without end-to-end latency never changes the outcome; and a required
-CI overlapping a threshold is Inconclusive. A timeout is preserved as a breach,
-not silently rerun into a favorable class.
+CI overlapping a decision-bearing threshold is Inconclusive. G timing out at
+120 seconds while S succeeds retains S; S timing out while G succeeds produces
+Operational envelope failure, not G adoption; both timing out produce the same
+operational-envelope outcome. A timeout is preserved as a measured breach, not
+silently rerun into a favorable class.
+
+### Required adversarial conformance cases
+
+Before CYAX-0168 G1, contract tests must prove: an ordinary owner comment is not
+a decision without exact registration; an epistemic-state-only successor gets
+a new assertion ID; a display-label-only edit preserves logical snapshot ID;
+dependency removal deletes only the named assertion in N+1; independent
+generator implementations produce the same complete checksum; multiple
+instances in a Q family receive equal frozen weighting; a G-only timeout while
+S passes retains S; an S-only timeout while G passes yields Operational envelope
+failure; every filesystem-cache-warm pair uses a fresh successful helper; and a
+decision-bearing CI that overlaps its threshold yields Inconclusive. These are
+normative examples of the contracts above, not substitute benchmark results.
 
 ## Requirements and gates
 
 | Requirement | Required behavior | Verification |
 | --- | --- | --- |
-| R-001 Common semantics | Closed entities, Claims/literals, enums, predicate signatures, authority and time rules feed one evaluator. | Schema tests and adversarial authority/time/dispute fixtures. |
-| R-002 Immutable evidence/identity | Content-addressed source bundle, stable IDs, logical snapshot identity, freshness, and atomic publication fail closed. | Rebuild, collision fixture, tamper, stale, unavailable-source, and crash tests. |
+| R-001 Common semantics | Registered Claim keys/types, closed literals/enums/predicates, exact owner-decision events, and distinct provenance times feed one evaluator. | Unregistered-key/type, ordinary-owner/question/proposal/non-owner authority, temporal, and dispute fixtures. |
+| R-002 Immutable evidence/identity | Complete semantic assertion IDs, content-addressed source bundle, semantic snapshot projection, separate physical/build checksums, freshness, and atomic publication fail closed. | State-change ID, label-only stability, rule-version change, rebuild, collision, tamper, stale, unavailable-source, and crash tests. |
 | R-003 Fair materializations | Normalized indexed S and pinned G derive only from the same snapshot. | DDL/index/config/query-plan review and complete-export equality. |
-| R-004 Source-correct F-real | Audited K1–K12 distinguish historical evidence from current gates. | Independent source/anchor review before reuse. |
-| R-005 Deterministic scale | Generator 2.0 produces the frozen profile/seed matrix exactly. | Invariants and repeated byte/checksum equality. |
-| R-006 Frozen workload | Instances and gold precede implementation; query answer/path semantics are exact. | Manifest/gold review and query validator. |
-| R-007 RetrievalBundle v1 | Both adapters return complete canonical objects and deterministic directional paths. | Contract/order/dedup/reference tests and gold/S/G equality. |
-| R-008 Successor updates | N + delta yields immutable N+1 from independent clones with atomic recovery. | Complete export, crash, rollback, and repetition-isolation tests. |
-| R-009 Preregistered measurement | Calibration, host, fairness, cache, repetitions, confidence, and resources are frozen. | Hash manifest, synthetic analysis validation, and independent methodology review. |
-| R-010 Deterministic decision | Exact outcomes, resource gates, T4 gate, and ambiguous cases are encoded. | Classifier boundary/table tests and owner approval. |
+| R-004 Source-correct F-real | Audited K1–K12 distinguish historical evidence from current gates. | Preserve the passed independent source/anchor audit; no chronology rewrite. |
+| R-005 Deterministic scale | Byte-complete generator 2.1 produces the frozen profile/seed matrix exactly. | Two independent implementations reproduce complete records/checksum; exact cycle-removal trace and invariants. |
+| R-006 Frozen workload | The Q01–Q12 population/selector/parameter/role table, gold, and exact aggregation precede backend implementation. | Invalid-stratum/tie tests, manifest/gold review, and raw-to-classifier statistic tests. |
+| R-007 RetrievalBundle v1 | Both adapters return complete, literal-reference-closed canonical objects and deterministic directional paths. | Empty/order/unique/no-dangling tests, complete serialization/compiler validation, and gold/S/G equality. |
+| R-008 Successor updates | N + a non-authoritative delta with exact removals yields independently frozen immutable N+1. | Dependency insert/remove, replacement, supersession, complete export, crash, rollback, and isolation tests. |
+| R-009 Preregistered measurement | Calibration non-access, host, fairness, cache helper, precision validation, repetitions, exact statistics, confidence, and resources are frozen. | Pre-access hash, cache evidence, precision thresholds, host/control audit, and paired block-level analysis validation. |
+| R-010 Deterministic decision | Exact outcomes, valid resource-breach table, T4 gate, and ambiguous cases are encoded. | G/S/both breach/timeout, CI overlap, classifier boundary/table tests, and owner approval. |
 
 ### CYAX-0168 G0 — repaired design approval
 
-Acceptance requires independent architecture/methodology rereview, independent
-K1–K12 source review, and owner approval citing the exact head, backend pin,
-host, workload, repetitions, envelope, and thresholds. `approval_ref: null` or
+Acceptance requires independent architecture/methodology rereview and owner
+approval citing the exact head, passed K1–K12 audit, backend pin, host,
+workload, repetition candidates/ratification rule, envelope, and thresholds.
+`approval_ref: null` or
 any unresolved normative choice stops implementation.
 
 ### CYAX-0168 G1 — frozen inputs and smoke
 
 Acceptance requires frozen source/gold/generator/query/calibration/dependency
-manifests and offline S/G clean-build/rebuild/reopen/tamper/crash smoke checks.
+manifests, a passing calibration-only precision report that ratifies the frozen
+repetition counts, and offline S/G clean-build/rebuild/reopen/tamper/crash smoke
+checks.
 Source asymmetry, runtime download, or nondeterministic export stops.
 
 ### CYAX-0168 G2 — semantic correctness
@@ -822,9 +1142,9 @@ Before benchmark implementation or execution, the repository owner must:
 1. approve or amend the closed enums, predicate signatures, Claim/literal
    mechanism, authority derivation, time rules, and `RetrievalBundle` v1;
 2. approve the source-bundle/stable-ID/snapshot/freshness/publication contracts;
-3. accept the corrected K1–K12 key after independent source review and decide
-   when the separate CYAX-0166 copy may be repaired;
-4. approve generator 2.0, profile/seed matrix, query-selection/gold rules, and
+3. acknowledge the passed corrected K1–K12 audit and decide when the separate
+   CYAX-0166 copy may be repaired after this interface stabilizes;
+4. approve generator 2.1, profile/seed matrix, query-selection/gold rules, and
    successor-snapshot update contract;
 5. approve the calibration budget, controlled comparison, cache state,
    repetition counts, BCa method, and process-tree resource accounting;
