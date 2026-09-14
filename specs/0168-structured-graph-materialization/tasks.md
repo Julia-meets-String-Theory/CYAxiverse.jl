@@ -10,9 +10,10 @@ reopened. Prior design
 tasks T2–T4 are retained as superseded history; they do not establish that the
 repaired contracts are complete. The convergence-gated independent
 architecture/methodology rereview returned **PASS** at exact head
-`438aaaa69d4b965de29ea967cc05f02274f56e57`, and the repository owner approved
-that exact design in Issue #168 comment `5658274383`. **CYAX-0168 G0 is
-satisfied.**
+`438aaaa69d4b965de29ea967cc05f02274f56e57`; that result remains technical
+evidence. Issue #168 comment `5658274383` was recorded without a valid explicit
+owner-decision checkpoint and must not be used as owner approval. **CYAX-0168
+G0 is not satisfied; CYAX-0168 G1 is not authorized.**
 
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 received its prior **PASS WITH REQUIRED REVISIONS** and remains the historical
@@ -67,21 +68,42 @@ input to T6-rereview-repair-2.
     pass/duration-fail and inverse G1 cases; five reachable-outcome CI cases;
     below/equal/above-75%, insufficient/censored/breach, and nonmonotonic T4
     projection cases; convergence, privacy, scope, frontmatter, and diff checks.
-- [x] T8-convergence-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a new independent
-  architecture/methodology rereview, then repository-owner approval tied to the
-  exact repaired head.
+- [x] T8a-convergence-rereview [R-001–R-010] — Obtain the independent
+  architecture/methodology rereview of the prior repaired design.
   - Outcome: independent rereview **PASS** at exact head
-    `438aaaa69d4b965de29ea967cc05f02274f56e57`, followed by repository-owner
-    approval in Issue #168 comment `5658274383`.
-  - Evidence: the spec is `status: approved`, its `approval_ref` resolves to the
-    approval comment, and CYAX-0168 G0 is satisfied.
+    `438aaaa69d4b965de29ea967cc05f02274f56e57`.
+  - Boundary: the review is technical evidence and never substitutes for an
+    explicit repository-owner decision.
+- [x] T8b-invalid-approval-synchronization [CYAX-0168 G0] — Preserve and correct
+  the historical approval-state synchronization.
+  - Historical outcome: Issue #168 comment `5658274383` and commit
+    `246389b9c34c7b7019ee7ab4cc38a1a0f508f5ce` recorded owner approval and
+    CYAX-0168 G0 satisfaction.
+  - Correction: the comment lacked a valid explicit owner-decision checkpoint,
+    has no owner-approval effect, and is superseded as authority evidence.
+- [x] T8c-authority-host-design-repair [R-009, R-010] — Restore draft/G0 truth,
+  record the provenance chain, and propose an owner-available macOS ARM64
+  paired-measurement contract.
+  - Outcome: Linux-only residency/process-control claims are replaced or
+    removed; machine-relative envelopes and the exact remaining owner choices
+    are explicit; no implementation or fixture access is authorized.
+- [ ] T8d-exact-head-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a
+  fresh bounded independent architecture/methodology rereview of the repaired
+  exact head, then present the explicit choices to the owner in the Control
+  Desk.
+  - Verify: rereview covers macOS cache conditioning, resource accounting,
+    machine-relative envelopes, retained repetitions/statistics/thresholds, and
+    Ladybug candidate status; a later approval must cite the exact reviewed
+    head and the owner's actual choices.
+  - Stop: neither a drafted approval nor an Issue comment published without an
+    authoritative owner interaction can satisfy CYAX-0168 G0.
 - [ ] T9 [R-001, R-002, R-004–R-009, CYAX-0168 G1] — Under later dispatch,
   freeze source/registry/gold/generator/query/calibration manifests and v1
   validators only after G0.
   - Verify: identity, registry, generator checksum, query selection,
     reference-closure, tamper, freshness, cache-helper harness, and crash
     tests.
-- [ ] T10 [R-003, R-007, R-009, CYAX-0168 G1] — Implement S, repeat approved-host
+- [ ] T10 [R-003, R-007, R-009, CYAX-0168 G1] — Implement S, repeat exact-machine
   Ladybug smoke, implement G only if it passes, and run calibration-only
   statistical-precision and campaign-duration validation before any
   decision-fixture access.
@@ -93,8 +115,8 @@ input to T6-rereview-repair-2.
   literal-closed bundle, full-export, delta, isolation, and crash-recovery gates.
   - Stop: preserve the minimal failure; no associated performance is admissible.
 - [ ] T12 [R-009, R-010, CYAX-0168 G3] — Under later execution dispatch, run
-  paired T0–T3 with cache and process-tree resource evidence and frozen
-  aggregation.
+  paired T0–T3 with stabilized-cache and single-process resource evidence and
+  frozen aggregation.
   - Verify: controls, sample completeness, valid-breach disposition, block-level
     BCa output, and hard envelope.
 - [ ] T13 [R-010, CYAX-0168 G4] — Conditionally run T4, classify, independently
@@ -104,8 +126,6 @@ input to T6-rereview-repair-2.
 
 No benchmark implementation, dependency, generated database/fixture,
 timing/resource run, CYAX-0166/CYAX-0167 edit, or production-backend adoption
-is part of this approval-state synchronization. A later G1 failure is a valid
-experimental outcome and does not reopen design unless it exposes a
-preregistration defect or an owner proposes a normative amendment. CYAX-0168 G0
-is satisfied; CYAX-0168 G1 is the next gate, and its
-implementation/calibration tasks remain incomplete.
+is part of this authority/host design repair. **CYAX-0168 G0 is not satisfied
+and CYAX-0168 G1 is not authorized.** Fresh independent rereview and explicit
+owner choices precede any new G1 dispatch.

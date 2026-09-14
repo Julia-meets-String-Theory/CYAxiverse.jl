@@ -2,17 +2,21 @@
 
 ## Status and sequencing
 
-Approved; CYAX-0168 G0 is satisfied. The convergence-gated independent
-architecture/methodology rereview returned **PASS** at exact design head
-`438aaaa69d4b965de29ea967cc05f02274f56e57`, and the repository owner approved
-that exact design in Issue #168 comment `5658274383`. Exact earlier head
+Draft authority/host repair; CYAX-0168 G0 is not satisfied and CYAX-0168 G1 is
+not authorized. The convergence-gated independent architecture/methodology
+rereview returned **PASS** at exact design head
+`438aaaa69d4b965de29ea967cc05f02274f56e57`; that verdict remains technical
+evidence. Issue #168 comment `5658274383` was recorded without a valid explicit
+owner-decision checkpoint and must not be used as owner approval. Exact earlier head
 `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` received **PASS WITH REQUIRED
 REVISIONS**; the common provenance architecture, B2, main B4, and B5 condition
 3 passed, and the residual C1–C4 findings are repaired here. This plan exposes
 the later execution sequence but
 does not authorize benchmark code, fixtures, dependencies, timing, or resource
-runs. The independent K1–K12 source audit has passed and is not reopened.
-**CYAX-0168 G1 is the next gate.**
+runs. The independent K1–K12 source audit has passed and is not reopened. The
+next lifecycle steps are fresh bounded rereview of the exact repaired head and
+explicit owner choices in the Control Desk; only a valid later approval can
+satisfy CYAX-0168 G0 and authorize a new CYAX-0168 G1 dispatch.
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 and its B1–B5 repair remain recorded as prior rereview history.
 
@@ -38,7 +42,8 @@ and its B1–B5 repair remain recorded as prior rereview history.
 7. Build and freeze only the direct scale-matched C0→T0, C1→T1, C2→T2,
    and C3→T3 non-decision calibration fixtures with their independent seeds;
    decision fixtures remain unmaterialized and inaccessible to either backend.
-8. Implement the exact filesystem-cache-warm helper/evidence protocol, frozen
+8. Implement the exact macOS `preconditioned-warm-cache` helper/evidence
+   protocol, frozen
    empirical/lognormal/two-component calibration simulation, population
    rescaling and truth verification against the classifier's actual p95-derived
    estimands, statistical precision ratification, and exact scale-keyed
@@ -46,32 +51,32 @@ and its B1–B5 repair remain recorded as prior rereview history.
 9. Implement S as normalized indexed SQLite with bidirectional indexes,
    recursive CTE cycle/depth controls, one connection/thread, and complete
    logical export.
-10. On the approved Linux host, freeze the complete Ladybug wheelhouse and repeat
-   the offline smoke gate. If it fails, stop; any FalkorDBLite work requires an
-   amended, rereviewed, owner-approved design. Otherwise implement minimal G.
+10. Once approved, on the exact frozen macOS ARM64 machine, freeze the complete
+   Ladybug wheelhouse and repeat the offline smoke gate. If it fails, stop; any
+   FalkorDBLite work requires an amended, rereviewed, owner-approved design.
+   Otherwise implement minimal G.
 11. Give S and G the same calibration-only tuning budget; hash final schemas,
    queries, configs, pragmas, dependencies, and plans; run statistical precision
-   and 48-hour duration ratification; only after both pass materialize decision
-   fixtures and complete
-   CYAX-0168 G1 and G2 against frozen gold, S-versus-G parity, and full export.
-   Preserve the smallest failure and stop before decision-fixture access on a
-   precision, common-contract, or implementation failure.
+   and 48-hour duration ratification. Complete CYAX-0168 G1 only from its
+   calibration-only evidence, preserve the smallest failure, and stop. Decision
+   fixtures remain inaccessible until a separate CYAX-0168 G2 dispatch.
 12. Validate successor-snapshot transitions, independent clones, crash
-   interruption, rollback/recovery, process-tree accounting, context identity,
+   interruption, rollback/recovery, single-process macOS accounting, context
+   identity,
    the both-cache-mode classifier truth table, exact family/profile joint
    quantifiers, and exhaustive reachable-outcome evaluation over all crossing
    CI predicates on synthetic records.
 13. Under a later explicit execution dispatch, run the paired T0–T3 campaign on
-   the approved host. Distinguish invalid controls from valid resource breaches
-   and classify them by the frozen precedence.
+   the exact frozen macOS host. Distinguish invalid controls from valid resource
+   breaches and classify them by the frozen precedence.
 14. Evaluate T4 condition 3 from direct T3 observations and condition 4 from
     the frozen T1–T3 monotone upper-envelope projection and exact `R<=0.75L`
     headroom rule; run T4 only if all five preregistered conditions pass. Apply
-    the approved classifier,
+    the then-reviewed and owner-approved classifier,
     independently review the evidence, and return a bounded result
     to #168/#162 without production adoption.
 Later CYAX-0168 G1 may legitimately fail because statistical precision is
-inadequate, the projected campaign exceeds 48 hours, approved-host Ladybug smoke
+inadequate, the projected campaign exceeds 48 hours, exact-host Ladybug smoke
 fails, or the resource envelope is infeasible. Such an experimental result
 stops progression but does not reopen the design unless it demonstrates a
 preregistration defect or an owner proposes a normative amendment.
@@ -88,7 +93,7 @@ preregistration defect or an owner proposes a normative amendment.
 | R-006 | exact Q11 slot, Q02 rank, Q01–Q12 selection table, reference evaluator, pre-backend instances and frozen gold | category exclusion, authority-order, population/selector/tie/parameter/invalid-role tests and deterministic gold checksums |
 | R-007 | S/G adapters and canonical literal-closed `RetrievalBundle` v1 serializer/compiler input | empty/order/unique/no-dangling/reference-closure tests plus gold, pairwise, and complete-bundle equality |
 | R-008 | canonical N→N+1 deltas with exact assertion-ID removals and independent full target | dependency insert/remove, replacement, supersession, target identity/export equality, crash/rollback/recovery and isolation tests |
-| R-009 | C0–C3 direct scale matches, calibration non-access freeze, cache helper, actual-p95 truth simulation, scale-keyed duration report, host manifest, paired runner and exact aggregation | scale-map/no-cross-scale-reuse, unequal-dispersion and p95-saving truth, pre-access hash, cache evidence, precision and 48-hour thresholds, host/control audit, paired block-level BCa and resource accounting |
+| R-009 | C0–C3 direct scale matches, calibration non-access freeze, stabilized cache helper, actual-p95 truth simulation, scale-keyed duration report, macOS machine manifest, paired runner and exact aggregation | scale-map/no-cross-scale-reuse, unequal-dispersion and p95-saving truth, pre-access hash, cache stabilization, precision and 48-hour thresholds, power/thermal/swap/descendant audit, paired block-level BCa and single-process resource accounting |
 | R-010 | resource/control disposition, both-mode classifier, exact family/profile quantifiers, joint CI reachable outcomes, thresholds/precedence, direct-observation T4 condition 3, and deterministic projected-headroom condition 4 | fresh/warm, joint-quantifier, G/S/both timeout/breach, five joint-CI cases, boundary, relational-Hybrid, T4 margin/projection/headroom tables, followed by owner approval |
 
 ## Escalation and stop conditions
@@ -105,10 +110,10 @@ result is used to imply production adoption.
 
 The only later CYAX-0166 interface is snapshot identity, the shared evaluator,
 canonical `RetrievalBundle`, and bounded context compiler. No CYAX-0166/CYAX-0167
-edit occurs here. This repair applies the validated chronology lesson by
-preserving historical replay evidence and the validated evidence-state lesson
-by not treating it as post-approval acceptance. It does not create a new
-repository-wide lesson.
+edit occurs here. This repair applies the validated chronology and evidence-state
+lessons by preserving the independent review record without treating a drafted
+or published approval statement as an actual owner decision. The reusable
+authority-provenance failure is recorded as a candidate lesson pending review.
 
 Version impact is none. All future benchmark dependencies remain optional and
 outside the Julia package runtime.

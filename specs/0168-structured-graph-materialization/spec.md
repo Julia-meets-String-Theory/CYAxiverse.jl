@@ -3,14 +3,14 @@ spec_id: CYAX-0168
 title: Structured versus graph provenance materialization benchmark
 issue: 168
 class: S2
-status: approved
+status: draft
 workstream: Infrastructure
 parent: 162
 depends_on: [163, 117]
 created: 2026-09-13
 last_reviewed: 2026-09-14
-review_required: independent architecture/methodology review and repository-owner approval before benchmark implementation or execution
-approval_ref: "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/168#issuecomment-5658274383"
+review_required: fresh independent architecture/methodology review and explicit repository-owner approval before benchmark implementation or execution
+approval_ref: null
 ---
 
 # CYAX-0168 — Structured versus graph provenance materialization benchmark
@@ -24,35 +24,45 @@ authority-safe assertion snapshot.
 
 The convergence-gated independent architecture/methodology rereview returned
 **PASS** at exact design head
-`438aaaa69d4b965de29ea967cc05f02274f56e57`. The repository owner approved that
-exact reviewed design in Issue #168 comment `5658274383`, recorded by
-`approval_ref`. **CYAX-0168 G0 is satisfied.** This approval-state
-synchronization is the mechanical consequence of that review and approval; it
-does not revise the approved design, waive CYAX-0168 G1–G4, or select or adopt a
-production backend. The next gate is **CYAX-0168 G1**.
+`438aaaa69d4b965de29ea967cc05f02274f56e57`. That result remains valid technical
+review evidence for the design at that exact head. Issue #168 comment
+`5658274383`, however, was recorded without a valid explicit owner-decision
+checkpoint and must not be used as repository-owner approval. The original
+comment remains part of the historical record; the durable correction is
+recorded in `authority-correction-a.md` and on Issue #168.
+
+This revision restores lifecycle truth and proposes a macOS ARM64 execution
+contract that the owner can actually provide. The revised host, cache,
+resource-accounting, and machine-relative-envelope design requires a fresh
+bounded independent architecture/methodology rereview and explicit owner
+choices. **CYAX-0168 G0 is not satisfied. CYAX-0168 G1 is not authorized.** No
+benchmark implementation or fixture access may begin from this draft.
 
 The exact-head rereview of
 `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` returned **PASS WITH REQUIRED
 REVISIONS**. The common provenance architecture, the B2 query repair, the main
 B4 classifier repair, B5 condition 3, and the independent #117 K1–K12
-chronology passed and are not reopened. This revision repairs only the four
-residual C1–C4 preregistration defects: generator collision closure,
-scale-matched calibration and p95-estimand truth, joint CI uncertainty, and
-deterministic T4 condition 4. It does not approve
-the specification, authorize benchmark implementation or execution, revise
-CYAX-0166/CYAX-0167, or select a production backend. The design branch starts
-from integrated `vmm` revision
+chronology passed and are not reopened. The later reviewed design revision
+repaired the four residual C1–C4 preregistration defects: generator collision
+closure, scale-matched calibration and p95-estimand truth, joint CI uncertainty,
+and deterministic T4 condition 4. The present authority/host repair preserves
+that evidence while changing the proposed execution controls. It does not
+approve the specification, authorize benchmark implementation or execution,
+revise CYAX-0166/CYAX-0167, or select a production backend. The design branch
+starts from integrated `vmm` revision
 `7a40285bb5c313f7e8746b90644d5f45bb67be44`.
 
 The preceding exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 also received **PASS WITH REQUIRED REVISIONS**; its B1–B5 repair history remains
 recorded in T6 and is not rewritten by this final bounded repair.
 
-The benchmark may establish correctness and operational measurements only for
-the frozen fixtures, workload, software versions, and host class. It cannot
+If later reviewed and approved, the benchmark may establish correctness and
+operational measurements only for the frozen fixtures, workload, software
+versions, and tested Apple-silicon/macOS environment. It cannot
 establish that graph storage is authoritative, that topology creates truth,
 that one backend improves fresh-agent correctness, or that a production
-backend should be adopted.
+backend should be adopted. Results are evidence for a CYAxiverse architecture
+decision on that environment, not universal database-performance claims.
 
 ## Governing architecture
 
@@ -927,7 +937,7 @@ timing is admissible.
 
 ## Candidate pin and stop-only fallback
 
-The primary candidate is `ladybug==0.20.4`, upstream immutable tag `v0.20.4`
+The proposed primary candidate remains `ladybug==0.20.4`, upstream immutable tag `v0.20.4`
 at full commit `df58ee387c4e5e9f02bb9d518636b52cd4abe5f7`, independently confirmed from
 the official tag. It is MIT licensed. The existing macOS ARM64 smoke used
 `ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl`, SHA-256
@@ -935,16 +945,18 @@ the official tag. It is MIT licensed. The existing macOS ARM64 smoke used
 with CPython 3.14.6 and offline installation. That evidence is candidate-host
 smoke only.
 
-Before implementation on the approved Linux x86-64 host, freeze the exact
-compatible wheel filename and SHA-256, every dependency wheel/hash, Python and
-platform tags, license files, offline wheelhouse manifest, and proof of
-`PIP_NO_INDEX=1` import/build/reopen/query/export. Disable network and runtime
-extension installation. If no supported approved-host wheel exists or any
-frozen smoke check fails, stop.
+After the revised design passes review and owner approval, repeat the smoke on
+the exact frozen macOS ARM64 execution machine. Freeze the compatible wheel
+filename and SHA-256, every dependency wheel/hash, Python and platform tags,
+license files, offline wheelhouse manifest, and proof of `PIP_NO_INDEX=1`
+import/build/reopen/query/export. Disable network and runtime extension
+installation. The earlier smoke is evidence, not a substitute for this
+independent reproduction. If no supported wheel exists or any frozen smoke
+check fails, stop CYAX-0168 G1.
 
 FalkorDBLite is not an automatic fallback. Its use would require an amended
 design with exact engine/module/client pins, dependency hashes, transitive
-license review, offline artifact proof, process-tree accounting, independent
+license review, offline artifact proof, resource accounting, independent
 rereview, and owner approval before any implementation or measurement.
 
 ## Calibration and fairness controls
@@ -985,58 +997,96 @@ change schemas, queries, configurations, repetition counts, truth surfaces, or
 category mappings. A future claim of blinding would require a separately
 reviewed commitment/reveal protocol.
 
-The controlled primary comparison uses one pinned CPU core/thread per query,
-one process and one connection, no concurrency, identical snapshot parser,
-semantic evaluator, entity resolution, and context compiler, no vector search,
-no graph-native FTS, all indexes built before timing, disabled network, fixed
-affinity/thread environment variables, and checkpointed steady state. SQLite
-FTS is excluded from Q01–Q12. A separately labelled native-defaults secondary
-run may be reported but cannot replace the controlled result.
+The controlled primary comparison uses one Python process, one connection, and
+one backend thread per query, with no child processes or concurrent benchmark
+work. It uses an identical snapshot parser, semantic evaluator, entity
+resolution, and context compiler, no vector search,
+no graph-native FTS, all indexes built before timing, disabled network, frozen
+thread-count environment variables, and checkpointed steady state. macOS does
+not provide a supported per-process fixed-core or CPU-governor contract, so the
+benchmark makes no affinity, governor, or fixed-frequency claim. Balanced
+paired backend order and run-validity monitoring control those shared nuisance
+effects. SQLite FTS is excluded from Q01–Q12. A separately labelled
+native-defaults secondary run may be reported but cannot replace the controlled
+result.
 
 Cache states are named precisely. `application-cold` is a fresh Python process;
 `database-open-cold` is the first query after opening the connection in that
 process; `warm-process` reuses that process/connection. The primary query
-campaign deliberately preconditions and retains the OS filesystem page cache,
-so both cold categories are `filesystem-cache-warm`; it never calls them OS
-cold. Backend order is paired and balanced. Any optional page-cache-dropped run
-is secondary and requires the same privileged procedure for both. Record minor
-and major page faults for every process where Linux tooling permits.
+campaign deliberately preconditions storage reads, so both cold categories are
+`preconditioned-warm-cache`; it never calls them OS cold or fully resident.
+Backend order is paired and balanced. There is no primary page-cache-dropped
+run because the revised contract assumes no privileged cache operation. Record
+the macOS-available minor and major page-fault counters for every process, but
+do not treat them as proof of complete filesystem-cache residency.
 
 Immediately before each paired primary measurement, a fresh, version-hashed
-`cache_warm` helper process performs one buffered sequential read from byte zero
-through EOF of every regular materialization file included by the frozen
-backend manifest: data, index, checkpoint, and steady-state auxiliary files;
-WAL/shadow/spill files must be empty/absent at steady state or are included.
-It warms S and G separately, verifies each ordered `(relative_path, byte_count,
-sha256)` against the manifest, uses a 8 MiB read buffer, records bytes read,
-start/end monotonic times, exit status, and major/minor faults, closes all file
-descriptors, then memory-maps each file read-only and uses Linux `mincore` to
-record and require `resident_pages=total_pages` before unmapping and exiting.
-The first-read
-backend alternates by the same balanced pair schedule as measured execution;
-within each pair the helper reads the first backend, then the second, while the
-measured order is first then second. Both complete materializations must fit
-within the preregistered cache-residency budget of 50% of physical RAM combined;
-otherwise `filesystem-cache-warm` is invalid. No other file-touching process
-runs between helper exit and the pair. Missing files, digest/byte mismatch,
-short reads, nonzero helper exit, incomplete residency, or monitor gaps
-invalidate the pair. Measured major faults remain reported evidence but do not
-alone invalidate a pair whose full pre-measurement residency proof passed. Each
-new pair repeats the full helper procedure, so prior pair state is not used as
-evidence that warming occurred.
+`cache_condition` helper process performs paired conditioning passes. In each
+pass it sequentially reads from byte zero through EOF every regular
+materialization file in the frozen backend manifests: data, index, checkpoint,
+and steady-state auxiliary files; WAL/shadow/spill files must be empty/absent at
+steady state or are included. It verifies each ordered `(relative_path,
+byte_count, sha256)`, uses an 8 MiB buffered read, closes every descriptor, and
+records bytes read, monotonic elapsed nanoseconds, throughput, exit status, and
+available major/minor faults for each backend.
 
-## Primary host and measurement protocol
+The first-read backend alternates with the measured balanced pair schedule.
+After at least three complete passes and at most ten, conditioning succeeds at
+the first pass where, for each backend separately, the last three throughput
+values have `(maximum-minimum)/median <= 0.05`. Failure to stabilize by pass ten
+invalidates the pair. The helper exits before measurement; no other deliberate
+file-touching process may intervene. Every new pair repeats the complete
+procedure. Missing files, digest/byte mismatch, short reads, nonzero exit,
+stabilization failure, power/thermal invalidity, or monitor gaps invalidate the
+pair. Major faults remain reported but are not a residency certificate.
 
-The proposed authority host is dedicated bare-metal Linux x86-64 with at least
-64 GiB RAM, local NVMe, ext4 (or a preregistered recorded local filesystem), no
-swap, no competing workload, isolated fixed CPU affinity, one benchmark thread,
-and frozen governor/turbo/power policy where controllable. macOS ARM64 remains a
-smoke host only. Freeze CPU model, microcode, core/SMT layout, RAM, Linux
-distribution/kernel, filesystem/mounts, storage device/firmware, Python,
-SQLite version and compile options, Ladybug wheel/commit/dependencies, libc and
-native runtimes, and measurement-tool versions.
+The combined steady-state materialization bytes must not exceed the proposed
+limit of 25% of frozen physical RAM. This is a conservative feasibility bound,
+not proof that every page is resident. The only permitted name is
+`preconditioned-warm-cache`; `filesystem-cache-warm`, `fully resident`, and
+`OS-cold` are forbidden claims under this macOS protocol.
 
-Primary repetition candidates, frozen for precision validation, are:
+## Proposed macOS authority environment and measurement protocol
+
+The proposed authority environment is the owner's exact Apple-silicon/macOS
+ARM64 machine, used for an internal paired S-versus-G comparison. No additional
+host, VM, container, privileged cache control, or remote service is assumed.
+The pre-execution manifest freezes the non-unique hardware configuration needed
+for replay: Apple SoC/model class, performance/efficiency core topology,
+physical RAM, macOS version/build, filesystem type and relevant mount behavior,
+benchmark-volume capacity and free bytes, Python, SQLite version and compile
+options, Ladybug wheel/commit/dependencies, libc/native runtimes, and
+measurement-tool versions. It excludes serial numbers, hostnames, account
+names, and other machine-unique identifiers.
+
+Primary runs require AC power, Low Power Mode disabled, nominal thermal state,
+one benchmark process/connection/thread, no benchmark descendants, and no
+concurrent user workload. A versioned monitor records power source, Low Power
+Mode, macOS thermal state, system page-outs/swap-ins/swap-outs, and competing
+process activity before, during, and after every paired block. A power-source
+change, non-nominal thermal state, enabled Low Power Mode, any page-out or swap
+I/O delta, an unexpected child process, or a monitor gap invalidates the pair.
+Because macOS background services and dynamic frequency cannot be frozen, the
+balanced paired order is the primary nuisance-control design and the residual
+OS scheduling/power limitation is reported with every result.
+
+### Portability disposition
+
+| Prior control | macOS disposition | Revised claim or control |
+| --- | --- | --- |
+| deterministic fixtures, immutable snapshots, semantic parity, build/rebuild/reopen checks, exact hashes, offline installation, process lifecycle, repetitions, monotonic wall time, and logical/allocated file bytes | portable unchanged | retain the existing contract |
+| Linux `mincore` full-residency gate | portable only with replacement | repeated verified reads to a frozen throughput-stabilization criterion; call the regime `preconditioned-warm-cache` |
+| cgroup-v2 process-tree accounting and `/proc` PSS/USS | portable only with replacement | require one in-process backend with no descendants; use `getrusage` peak RSS and sampled Mach-task metrics |
+| isolated CPU affinity and frozen governor/turbo policy | portable only with replacement | single thread, balanced pair order, AC/Low-Power/thermal/competing-work monitoring, and explicit residual limitation |
+| disabled swap | portable only with replacement | invalidate any paired block with observed page-out or swap-I/O activity |
+| certified full filesystem-page residency, Linux-equivalent PSS/USS, fixed-core execution, fixed CPU frequency, and privileged OS-cold cache dropping | not portable | remove these claims and do not substitute inferred evidence |
+
+These replacements preserve an internal paired comparison on one frozen
+machine. They intentionally weaken cross-machine and OS-level cache/resource
+generality. They do not weaken semantic correctness, deterministic identity, or
+S/G parity requirements.
+
+The proposed repetition candidates retained for precision validation are:
 
 - clean build/rebuild: 12 independently cloned paired repetitions;
 - each snapshot transition batch: 30 independent paired repetitions;
@@ -1053,6 +1103,15 @@ within each block characterize that process only. Build and transition gates
 use all-sample hard-envelope breach plus median/maximum reporting, not a p95
 classifier endpoint; their 12/30 counts test paired repeatability within the
 48-hour campaign budget.
+
+This host repair does not change repetition counts, independent units,
+resampling, estimands, or statistical thresholds because the replacement macOS
+controls do not alter those definitions. No calibration or duration evidence is
+collected in this design task, so practical duration remains unresolved. A
+later authorized CYAX-0168 G1 must rerun both precision and 48-hour duration
+ratification on the exact macOS machine. Any reduction or other repetition
+change would alter the precision guarantee and requires a new reviewed
+amendment and explicit owner approval.
 
 Before these counts become executable, calibration-only CYAX-0168 G1 has two
 mandatory ratifications: statistical precision **and** campaign duration. Both
@@ -1235,7 +1294,7 @@ transition operations name one of the six frozen transition IDs. Categories
 may be merged only when all seven tuple fields are byte-identical.
 
 For each category `c`, collect at least 30 calibration-only wall-time
-observations under the authority-host controls from its direct scale match:
+observations under the frozen execution-machine controls from its direct scale match:
 T0 uses C0, T1 uses C1, T2 uses C2, and T3 uses C3. The backend, profile,
 cache/process mode, Q ID, and transition ID must also match `c`; a C1 or C2
 upper bound may not ratify the corresponding T3 operation. Let `q99_c` be
@@ -1280,13 +1339,19 @@ independent observations. Missing or corrupt samples invoke invalid execution;
 valid timeouts and resource breaches remain censored-at-limit observations and
 enter the resource classifier rather than being replaced or called invalid.
 
-Process-tree accounting is primary. Record absolute peak RSS, incremental RSS,
-PSS/USS where `/proc` permits, CPU/wall time, minor/major faults, logical and
-allocated bytes for data/index/WAL/checkpoint/shadow/spill files, and temporary
-peak disk. Apply one frozen `gc.collect()` immediately before every measured
-Python block, never between timed calls, for both backends. Builds and queries
-run in a cgroup v2 scope or equivalently validated process-tree monitor; child
-processes cannot escape accounting.
+Single-process macOS accounting is primary. Both backends must remain in the
+same one-process/no-descendant envelope. Record absolute peak RSS from
+`getrusage(RUSAGE_SELF)` using macOS byte units, baseline RSS at the same frozen
+lifecycle point, CPU/wall time, and minor/major faults. A versioned Mach-task
+sampler records `resident_size` and `phys_footprint` at no more than 10 ms
+intervals as secondary diagnostics and reports their maxima. PSS/USS and Linux
+process-tree equivalence are not claimed. Record logical and allocated bytes
+for data/index/WAL/checkpoint/shadow/spill files and temporary peak disk. Apply
+one frozen `gc.collect()` immediately before every measured Python block, never
+between timed calls, for both backends. A descendant monitor invalidates an
+operation if either backend creates a child; separate cache and monitoring
+helpers complete outside the measured backend process and are accounted in
+their own duration categories.
 
 The same semantic bundle passes through one compiler/tokenizer. Final selected
 assertions, bundle semantics, rendered context bytes, and prompt tokens must be
@@ -1296,10 +1361,16 @@ native traversal work remain diagnostics only.
 
 ## Hard resource envelope and conditional T4
 
-For each T3 backend/profile: clean build ≤30 minutes; rebuild or 1% transition
-≤30 minutes; peak process-tree memory ≤16 GiB; temporary disk ≤50 GiB;
-individual query ≤120 seconds; no swap. The total decision campaign is ≤48
-hours excluding setup and explicitly invalid reruns.
+The proposed machine-relative T3 hard envelope is evaluated from the exact
+frozen execution-machine manifest. For each backend/profile: clean build ≤30
+minutes; rebuild or 1% transition ≤30 minutes; peak RSS ≤25% of physical
+RAM; temporary allocated disk ≤25% of the benchmark volume's preflight free
+bytes while preserving at least 20% of total volume capacity free; individual
+query ≤120 seconds; and no page-out or swap-I/O delta during a valid paired
+block. The combined steady-state S+G materialization bytes must be ≤25% of
+physical RAM for the preconditioned-warm-cache regime. The total decision
+campaign remains proposed at ≤48 hours excluding setup and explicitly invalid
+reruns.
 
 T4 runs only when all are true:
 
@@ -1328,7 +1399,7 @@ does not run.
 For condition 4, the independent scale variable is assertion count:
 `n1=50000` (T1), `n2=500000` (T2), `n3=1000000` (T3), and
 `n4=5000000` (T4). Only `P-medium` observations are inputs because T4 is
-`P-medium`. For each backend and each of peak process-tree memory, steady-state
+`P-medium`. For each backend and each of peak RSS, steady-state
 materialization disk, temporary disk, clean-build time, rebuild time, 1%
 transition time, and individual query time, let `r_i` be the maximum valid
 observed value at Ti across every applicable frozen seed, repetition, query
@@ -1365,9 +1436,9 @@ Condition 4 requires all of these mechanically evaluated limits:
 
 | Projected quantity `R` | Hard limit `L` |
 | --- | ---: |
-| each backend's peak process-tree memory | 16 GiB |
-| both backends' steady-state materialization disk projections added together | 50% of the frozen host's physical RAM, the existing cache-residency limit |
-| each backend's temporary disk | 50 GiB |
+| each backend's peak RSS | 25% of frozen physical RAM |
+| both backends' steady-state materialization disk projections added together | 25% of frozen physical RAM, the proposed conditioning-feasibility limit |
+| each backend's temporary allocated disk | 25% of preflight free benchmark-volume bytes, while retaining 20% of total capacity free |
 | each backend's clean build, rebuild, and 1% transition time, evaluated separately | 1,800 s |
 | each backend's individual query time | 120 s |
 | valid observed T0–T3 campaign wall time plus projected incremental T4 campaign time | 172,800 s |
@@ -1385,7 +1456,8 @@ T4 alone cannot justify graph adoption for current CYAxiverse scale.
 
 ## Proposed thresholds and deterministic classifier
 
-These owner-approved thresholds remain preregistered for later execution. A
+The latency, saving, family/profile, and classifier thresholds below remain the
+reviewed preregistered proposal; they are not owner-approved. A
 **query family** is exactly one frozen Q ID; graph-shaped families are
 Q03/Q06/Q07/Q09, relational families are Q01/Q04/Q12, semantic/ranking families
 are Q02/Q10/Q11, and neutral families are Q05/Q08. Q07 is the preregistered
@@ -1471,16 +1543,19 @@ belong to different families fail `graph_arm` unless the Q07 critical arm itself
 passes two profiles. Seeds contribute only through the equal-weight
 family/profile latency index already defined; they are never votes.
 
-**Resource acceptance:** G materialization footprint (data, indexes, and
-steady-state auxiliary files) and peak query memory must each be ≤2× S or have
-absolute excess ≤2 GiB. G build/rebuild/transition time must be ≤3× S and
-always inside the hard envelope. Final context/prompt values must match exactly.
+**Proposed resource acceptance:** G materialization footprint (data, indexes,
+and steady-state auxiliary files) must be ≤2× S or have excess ≤5% of the
+benchmark volume's preflight free bytes. G peak query RSS must be ≤2× S or
+have excess ≤5% of physical RAM. G build/rebuild/transition time must be ≤3×
+S and always inside the hard envelope. Final context/prompt values must match
+exactly. These machine-relative replacements for the earlier fixed 2 GiB
+allowance require rereview and explicit owner approval.
 
 Resource/control disposition is frozen separately from measurement validity:
 
 | Observed case | Disposition |
 | --- | --- |
-| host controls or process-tree/resource monitoring invalid | Inconclusive / invalid execution |
+| host controls or single-process/resource monitoring invalid | Inconclusive / invalid execution |
 | measurement evidence missing, corrupt, or pairing broken | Inconclusive / invalid execution |
 | G alone validly exceeds a hard T3 envelope while S passes | Retain S / G not justified |
 | G violates relative resource acceptance with otherwise valid measurements | Retain S / G not justified |
@@ -1599,7 +1674,8 @@ fixtures must separately cover every projection below 75% of its limit, one
 projection exactly at 75%, one above 75%, fewer than three valid scale points,
 a censored or prior hard-breach point, and nonmonotonic observations that are
 replaced by the monotone envelope. T4 eligibility must be unique in every row.
-Every filesystem-cache-warm pair still requires a fresh successful helper.
+Every `preconditioned-warm-cache` pair still requires a fresh successful
+conditioning helper.
 These are normative contract examples, not benchmark results.
 
 The minimum truth-table rows and exact outcomes are:
@@ -1643,11 +1719,12 @@ If none applies, the verdict is **PASS**, with any lesser observation labelled
 `NON-BLOCKING IMPLEMENTATION CLARIFICATION`, `NON-BLOCKING G1 VALIDATION ITEM`,
 or `NON-BLOCKING FUTURE REFINEMENT`. **PASS WITH REQUIRED REVISIONS** requires a
 demonstrated criterion 1–5 violation; **FAIL / REDESIGN** requires a fundamental
-architecture defect. CYAX-0168 G0 freezes how later G1 success or failure is
-decided; it does not guarantee statistical precision, a campaign within 48
-hours, approved-host Ladybug smoke, resource feasibility, or T4 execution.
-The convergence-gated rereview returned **PASS** at exact head
-`438aaaa69d4b965de29ea967cc05f02274f56e57`.
+architecture defect. The convergence-gated rereview returned **PASS** at exact
+head `438aaaa69d4b965de29ea967cc05f02274f56e57`. That verdict remains technical
+evidence for its exact design head. It did not create owner authority, and it
+predates the macOS host amendment in this draft. A fresh bounded rereview must
+decide whether the revised host, cache, resource, and threshold contracts close
+the same criteria before the owner is asked to decide CYAX-0168 G0.
 
 ## Requirements and gates
 
@@ -1661,18 +1738,19 @@ The convergence-gated rereview returned **PASS** at exact head
 | R-006 Frozen workload | The Q01–Q12 population/selector/parameter/role table, gold, and exact aggregation precede backend implementation. | Invalid-stratum/tie tests, manifest/gold review, and raw-to-classifier statistic tests. |
 | R-007 RetrievalBundle v1 | Both adapters return complete, literal-reference-closed canonical objects and deterministic directional paths. | Empty/order/unique/no-dangling tests, complete serialization/compiler validation, and gold/S/G equality. |
 | R-008 Successor updates | N + a non-authoritative delta with exact removals yields independently frozen immutable N+1. | Dependency insert/remove, replacement, supersession, complete export, crash, rollback, and isolation tests. |
-| R-009 Preregistered measurement | Scale-matched calibration/non-access, host, fairness, cache helper, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, and resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache evidence, statistical and 48-hour duration ratification, host/control audit, and paired block-level analysis validation. |
+| R-009 Preregistered measurement | Scale-matched calibration/non-access, exact macOS machine, paired fairness, stabilized cache conditioning, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, and machine-relative resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache-stabilization evidence, statistical and 48-hour duration ratification, power/thermal/swap/descendant audit, and paired block-level analysis validation. |
 | R-010 Deterministic decision | Exact cache-mode conjunction, family/profile quantifiers, outcomes, valid resource-breach table, joint CI uncertainty, direct-observation T4 condition 3, and deterministic projected-headroom condition 4 are encoded. | Fresh/warm, family/profile, boundary, G/S/both breach/timeout, reachable-outcome CI cases, T4 margin/projection/headroom tables, classifier tests, and owner approval. |
 
-### CYAX-0168 G0 — repaired design approval
+### CYAX-0168 G0 — pending repaired-design approval
 
-Acceptance requires independent architecture/methodology rereview and owner
-approval citing the exact head, passed K1–K12 audit, backend pin, host,
-workload, repetition candidates/ratification rule, envelope, and thresholds.
-The independent rereview returned **PASS** at exact head
-`438aaaa69d4b965de29ea967cc05f02274f56e57`, and the repository owner approved
-that exact design in Issue #168 comment `5658274383`. The non-null
-`approval_ref` records that decision. **CYAX-0168 G0 is satisfied.**
+Acceptance requires a fresh independent architecture/methodology rereview and
+an explicit owner decision citing the exact repaired head, passed K1–K12 audit,
+backend pin, macOS host contract, workload, repetition candidates/ratification
+rule, envelope, and thresholds. The independent rereview **PASS** at exact head
+`438aaaa69d4b965de29ea967cc05f02274f56e57` remains evidence for that earlier
+technical design. Issue #168 comment `5658274383` is preserved but is explicitly
+superseded as owner-approval evidence because it lacked a valid owner-decision
+checkpoint. `approval_ref` is null. **CYAX-0168 G0 is not satisfied.**
 
 ### CYAX-0168 G1 — frozen inputs and smoke
 
@@ -1683,6 +1761,7 @@ S/G clean-build/rebuild/reopen/tamper/crash smoke checks. Neither decision
 fixtures nor their derived identities may be accessed before both G0 and these
 calibration-only G1 prerequisites pass.
 Source asymmetry, runtime download, or nondeterministic export stops.
+**CYAX-0168 G1 is not authorized while this specification is draft.**
 
 ### CYAX-0168 G2 — semantic correctness
 
@@ -1698,28 +1777,33 @@ corrupt evidence is Inconclusive/invalid and blocks T4.
 
 ### CYAX-0168 G4 — conditional T4 and classification
 
-Run only under the five-part T4 gate, then apply the approved deterministic
-classifier. Production adoption remains separate.
+Run only under the five-part T4 gate, then apply the reviewed and owner-approved
+deterministic classifier. Production adoption remains separate.
 
-## Approved G0 scope and preserved G1 conditions
+## Pending owner choices after fresh rereview
 
-The exact-head owner approval resolves these G0 design choices while preserving
-their stated G1 conditions:
+No item in this section is an owner decision. After a fresh bounded rereview of
+the exact repaired head, the Control Desk must present these choices explicitly:
 
-1. approve or amend the closed enums, predicate signatures, Claim/literal
-   mechanism, authority derivation, time rules, and `RetrievalBundle` v1;
-2. approve the source-bundle/stable-ID/snapshot/freshness/publication contracts;
-3. acknowledge the passed corrected K1–K12 audit and decide when the separate
-   CYAX-0166 copy may be repaired after this interface stabilizes;
-4. approve generator 2.2, profile/seed matrix, query-selection/gold rules, and
-   successor-snapshot update contract;
-5. approve the calibration budget, controlled comparison, cache state,
-   repetition counts, BCa method, and process-tree resource accounting;
-6. approve the Linux host class and provide the exact qualifying host manifest;
-7. approve Ladybug 0.20.4 only after the approved-host wheel/dependency hashes,
-   license, offline installation, and smoke evidence exist;
-8. approve the hard resource envelope, conditional T4 gate, proposed thresholds,
-   workload categories, and classifier.
+1. approve macOS ARM64 on the owner's exact frozen machine as the benchmark
+   authority environment and accept the environment-specific claim boundary;
+2. approve the `preconditioned-warm-cache` protocol: three stabilized passes,
+   a 5% throughput-range criterion, a ten-pass cap, and no full-residency or
+   OS-cold claim;
+3. approve single-process `getrusage` peak RSS as primary, sampled Mach
+   `resident_size`/`phys_footprint` as diagnostics, and removal of PSS/USS and
+   Linux process-tree-equivalence claims;
+4. approve hard limits of 25% of physical RAM for each backend's peak RSS and
+   for combined steady-state materialization bytes, plus the temporary-disk
+   limit of 25% of preflight free bytes while preserving 20% volume free;
+5. retain the reviewed repetition/statistical design and proposed 48-hour
+   ceiling unchanged, subject to CYAX-0168 G1 precision and duration
+   ratification on calibration fixtures;
+6. retain the latency/statistical classifier thresholds while replacing the
+   fixed resource allowances with the machine-relative 5% excess rules; and
+7. retain `ladybug==0.20.4` at upstream commit
+   `df58ee387c4e5e9f02bb9d518636b52cd4abe5f7` as the sole graph candidate,
+   subject to a fresh exact-machine offline artifact and smoke gate.
 
 ## Non-scope and completion
 
@@ -1729,7 +1813,8 @@ graph, general scientific ontology, scientific/package behavior, public API,
 persisted scientific schema, version change, CYAX-0166 revision, or production
 backend adoption is authorized here.
 
-This S2 work completes only after the approved implementation/execution passes
-CYAX-0168 G1–G3 (and G4 if eligible), publishes replayable evidence, and returns
-the classification to #162. This synchronization records the satisfied
-CYAX-0168 G0 gate only; **CYAX-0168 G1** is next.
+This S2 work completes only after a later approved implementation/execution
+passes CYAX-0168 G1–G3 (and G4 if eligible), publishes replayable evidence, and
+returns the classification to #162. The present lifecycle is: prior technical-
+review evidence preserved; owner approval pending; **CYAX-0168 G0 not
+satisfied**; **CYAX-0168 G1 not authorized**.
