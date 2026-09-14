@@ -132,8 +132,12 @@ candidate version, or reviewed initial-macOS control.
     latency/resource thresholds, the 48-hour ceiling, the `ladybug==0.20.4`
     candidate pin, and every reviewed initial-macOS control are unchanged.
     Issue #117, CYAX-0166, CYAX-0167, L-0007, the historical review records, the
-    generator/query/statistical architecture, and the Issue #168 body are not
-    altered. `approval_ref` stays null.
+    technical architecture, and the generator/query/statistical architecture are
+    not altered. The Issue #168 body was aligned to this host-portable contract
+    so the live work item no longer states the superseded machine-authority
+    proposal; that alignment carries the same bounded repair and changes no
+    scientific intent and no other architecture. `approval_ref` stays null,
+    CYAX-0168 G0 stays not satisfied, and CYAX-0168 G1 stays not authorized.
   - Verify: hardware-authority terminology sweep of the CYAX-0168 normative
     surfaces, spec/plan/tasks convergence, lifecycle-state and privacy scans,
     frontmatter parse, and diff checks. The T8e rereview gate applies to the
