@@ -2,12 +2,15 @@
 
 ## Status and sequencing
 
-Draft authority/host repair; CYAX-0168 G0 is not satisfied and CYAX-0168 G1 is
-not authorized. The convergence-gated independent architecture/methodology
-rereview returned **PASS** at exact design head
+Approved authority/host repair; CYAX-0168 G0 is satisfied and CYAX-0168 G1 is
+the next gate under a later execution dispatch, not yet executed. The
+convergence-gated independent architecture/methodology rereview returned
+**PASS** at exact design head
 `438aaaa69d4b965de29ea967cc05f02274f56e57`; that verdict remains technical
 evidence. Issue #168 comment `5658274383` was recorded without a valid explicit
-owner-decision checkpoint and must not be used as owner approval. Exact earlier head
+owner-decision checkpoint and must not be used as owner approval; the
+correction is recorded in `authority-correction-a.md` and Issue #168
+correction comment `5664014428`. Exact earlier head
 `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` received **PASS WITH REQUIRED
 REVISIONS**; the common provenance architecture, B2, main B4, and B5 condition
 3 passed, and the residual C1–C4 findings are repaired here. This plan exposes
@@ -16,9 +19,11 @@ does not authorize benchmark code, fixtures, dependencies, timing, or resource
 runs. The independent K1–K12 source audit has passed and is not reopened. The
 independent bounded rereview of the exact repaired head
 `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**; that verdict is
-technical evidence only and did not create owner authority. The next lifecycle
-step is explicit owner choices in the Control Desk; only a valid owner
-decision can satisfy CYAX-0168 G0 and authorize a new CYAX-0168 G1 dispatch.
+technical evidence only and did not by itself create owner authority. The
+repository owner has since explicitly approved CYAX-0168 Decisions 1–7 in
+Issue #168 comment `5668898317` (`approval_ref`), satisfying CYAX-0168 G0.
+CYAX-0168 G1 is now the next gate; it requires a later execution dispatch and
+has not yet been executed.
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 and its B1–B5 repair remain recorded as prior rereview history.
 The independent macOS architecture/methodology rereview of exact head
@@ -39,7 +44,9 @@ dependency, a project-wide default backend, or a production commitment
 additionally requires independent replication on at least one further frozen
 admissible host/environment. The independent bounded rereview of the new exact
 repaired head `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**;
-the next lifecycle step is explicit owner choices in the Control Desk.
+the repository owner has since approved those choices as Decisions 1–7 in
+Issue #168 comment `5668898317`, satisfying CYAX-0168 G0. CYAX-0168 G1 is the
+next gate and has not yet been executed.
 
 1. Freeze the immutable F-real source bundle, Claim-key/type registry, owner
    actor/role evidence, and exact owner-decision-event registry while preserving

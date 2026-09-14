@@ -3,14 +3,14 @@ spec_id: CYAX-0168
 title: Structured versus graph provenance materialization benchmark
 issue: 168
 class: S2
-status: draft
+status: approved
 workstream: Infrastructure
 parent: 162
 depends_on: [163, 117]
 created: 2026-09-13
 last_reviewed: 2026-09-14
-review_required: independent architecture/methodology PASS at exact head f2283f6a1f58600d05ed0a50535d07013ac6fb2c and explicit repository-owner approval before benchmark implementation or execution
-approval_ref: null
+review_required: CYAX-0168 G0 satisfied; CYAX-0168 G1-G4 remain required at their corresponding lifecycle gates
+approval_ref: "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/168#issuecomment-5668898317"
 ---
 
 # CYAX-0168 — Structured versus graph provenance materialization benchmark
@@ -29,7 +29,8 @@ review evidence for the design at that exact head. Issue #168 comment
 `5658274383`, however, was recorded without a valid explicit owner-decision
 checkpoint and must not be used as repository-owner approval. The original
 comment remains part of the historical record; the durable correction is
-recorded in `authority-correction-a.md` and on Issue #168.
+recorded in `authority-correction-a.md` and Issue #168 correction comment
+`5664014428`.
 
 This revision restores lifecycle truth and proposes a host-portable paired
 benchmark protocol in which no physical machine is authoritative: each campaign
@@ -45,11 +46,15 @@ post-measurement cache-manifest immutability, and operational macOS
 host/process validity. A subsequent independent bounded rereview of this
 repaired host-portable design at exact head
 `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**. That verdict is
-technical evidence for its exact design head only; it did not create owner
-authority. **CYAX-0168 G0 is not satisfied. CYAX-0168 G1 is
-not authorized.** The next step is explicit owner consideration of the ten
-pending choices below. No benchmark implementation or fixture access may begin
-from this draft.
+technical evidence for its exact design head only; it did not by itself create
+owner authority. The repository owner has since explicitly approved CYAX-0168
+Decisions 1–7, covering all ten pending choices below, in the new valid Issue
+#168 comment `5668898317`, which is `approval_ref`. **CYAX-0168 G0 is
+satisfied.** That approval does not merge PR #169, authorize production
+adoption, waive G1–G4, guarantee G1 success, or authorize automatic
+FalkorDBLite fallback. **CYAX-0168 G1 is the next gate and has not yet been
+executed.** No benchmark implementation, calibration, smoke execution, or
+fixture/decision-fixture access is authorized by this synchronization.
 
 The exact-head rereview of
 `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` returned **PASS WITH REQUIRED
@@ -2002,7 +2007,7 @@ pending choices below.
 | R-009 Preregistered measurement | Scale-matched calibration/non-access, initial campaign host manifest and Energy Mode, one query-execution worker, paired fairness, pre/post-manifest non-mutating cache conditioning, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, fresh-process `ru_maxrss`, Mach diagnostics, and logical/allocated/APFS resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache stabilization and mutation detection, statistical and 48-hour duration ratification, power/Energy-Mode/thermal/memory-pressure/page-out/swap/descendant audit, both competing-load branches, APFS zero-sharing/rebuild/exclude cases, and paired block-level analysis validation. |
 | R-010 Deterministic decision | Exact hard gates, capped memory/disk relative rules, cache-mode conjunction, family/profile quantifiers, outcomes, valid resource-breach table including pair-level cache capacity, joint CI uncertainty, direct-observation T4 condition 3, and logical/allocated deterministic projected-headroom condition 4 are encoded. | Fresh/warm, capped-allowance boundaries, family/profile, G/S/pair-level breach and timeout, reachable-outcome CI cases, T4 logical/allocated/memory/disk projection tables, classifier tests, and owner approval. |
 
-### CYAX-0168 G0 — pending repaired-design approval
+### CYAX-0168 G0 — satisfied by owner approval
 
 Acceptance requires an independent architecture/methodology rereview and
 an explicit owner decision citing the exact repaired head, passed K1–K12 audit,
@@ -2012,11 +2017,16 @@ envelope, and thresholds. The independent rereview **PASS** at exact head
 `438aaaa69d4b965de29ea967cc05f02274f56e57` remains evidence for that earlier
 technical design. The independent bounded rereview **PASS** at exact head
 `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` is technical evidence for the
-current repaired host-portable design; it did not create owner authority.
-Issue #168 comment `5658274383` is preserved but is explicitly
-superseded as owner-approval evidence because it lacked a valid owner-decision
-checkpoint. `approval_ref` is null. The remaining step is explicit owner
-decision on the ten pending choices below. **CYAX-0168 G0 is not satisfied.**
+current repaired host-portable design; it did not by itself create owner
+authority. Issue #168 comment `5658274383` remains preserved as history but
+stays explicitly superseded as owner-approval evidence because it lacked a
+valid owner-decision checkpoint; the correction is recorded in
+`authority-correction-a.md` and Issue #168 correction comment `5664014428`.
+The repository owner has since explicitly approved CYAX-0168 Decisions 1–7,
+covering all ten pending choices below, in the new valid Issue #168 comment
+`5668898317`. `approval_ref` is that comment. **CYAX-0168 G0 is satisfied.**
+This approval does not merge PR #169, authorize production adoption, waive
+G1–G4, guarantee G1 success, or authorize automatic FalkorDBLite fallback.
 
 ### CYAX-0168 G1 — frozen inputs and smoke
 
@@ -2027,7 +2037,8 @@ S/G clean-build/rebuild/reopen/tamper/crash smoke checks. Neither decision
 fixtures nor their derived identities may be accessed before both G0 and these
 calibration-only G1 prerequisites pass.
 Source asymmetry, runtime download, or nondeterministic export stops.
-**CYAX-0168 G1 is not authorized while this specification is draft.**
+**CYAX-0168 G0 is satisfied; CYAX-0168 G1 is the next gate under a later
+execution dispatch and has not yet been executed.**
 
 ### CYAX-0168 G2 — semantic correctness
 
@@ -2046,12 +2057,15 @@ corrupt evidence is Inconclusive/invalid and blocks T4.
 Run only under the five-part T4 gate, then apply the reviewed and owner-approved
 deterministic classifier. Production adoption remains separate.
 
-## Pending owner choices after rereview PASS
+## Owner-decided choices (Decisions 1–7)
 
-No item in this section is an owner decision. The independent bounded rereview
-of the exact repaired head `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned
-**PASS**; that verdict is technical evidence only and is not owner authority.
-The Control Desk must now present these choices explicitly for owner decision:
+Every item in this section has been decided by explicit repository-owner
+approval. The independent bounded rereview of the exact repaired head
+`f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**; that verdict was
+technical evidence only and was not itself owner authority. The repository
+owner has since explicitly approved CYAX-0168 Decisions 1–7 exactly as
+recorded in Issue #168 comment `5668898317` (`approval_ref`), which decides
+all ten items below:
 
 1. approve the host-portable execution contract — no authoritative benchmark
    machine; each campaign freezes one admissible host manifest, runs S and G on
@@ -2088,6 +2102,10 @@ The Control Desk must now present these choices explicitly for owner decision:
    `df58ee387c4e5e9f02bb9d518636b52cd4abe5f7` as the sole graph candidate,
    subject to a fresh per-campaign-host offline artifact and smoke gate.
 
+This owner decision satisfies the owner-decision portion of CYAX-0168 G0. It
+does not merge PR #169, authorize production adoption, waive G1–G4, guarantee
+G1 success, or authorize automatic FalkorDBLite fallback.
+
 ## Non-scope and completion
 
 No benchmark code, generated fixture/database, timing/resource run, package
@@ -2106,5 +2124,6 @@ admissible host/environment plus the separate approvals named above.
 This S2 work completes only after a later approved implementation/execution
 passes CYAX-0168 G1–G3 (and G4 if eligible), publishes replayable evidence, and
 returns the classification to #162. The present lifecycle is: prior technical-
-review evidence preserved; owner approval pending; **CYAX-0168 G0 not
-satisfied**; **CYAX-0168 G1 not authorized**.
+review evidence preserved; owner approval recorded in Issue #168 comment
+`5668898317` (`approval_ref`); **CYAX-0168 G0 satisfied**; **CYAX-0168 G1 is
+the next gate and has not yet been executed**.

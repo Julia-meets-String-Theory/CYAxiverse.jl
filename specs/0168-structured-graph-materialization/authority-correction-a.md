@@ -42,8 +42,9 @@ The macOS ARM64 preflight that reported approved-host controls unavailable is
 retained as evidence about the then-current Linux contract. It generated no G1
 benchmark evidence and accessed no decision fixture. Because the Linux contract
 was never validly owner-approved, that preflight is not a permanent programme
-blocker. The revised macOS-capable design in `spec.md` requires fresh bounded
-independent rereview followed by explicit owner choices.
+blocker. The revised macOS-capable design in `spec.md` therefore required fresh
+bounded independent rereview followed by explicit owner choices; that sequence
+later completed as recorded in the Resolution section below.
 
 ## Prevention rule
 
@@ -52,3 +53,15 @@ publish it as an owner decision unless the owner has explicitly made that
 decision in an authoritative interaction. A technically reviewed recommendation
 and an agent-authored approval statement are evidence of neither owner intent
 nor owner approval.
+
+## Resolution
+
+Issue #168 correction comment `5664014428` records this correction durably on
+GitHub. The repository owner has since made an explicit, valid decision:
+Issue #168 comment `5668898317` records the repository owner's approval of
+CYAX-0168 Decisions 1–7, which is `approval_ref` in `spec.md`. **CYAX-0168 G0
+is satisfied; CYAX-0168 G1 is the next gate and has not yet been executed.**
+This approval does not merge PR #169, authorize production adoption, waive
+G1–G4, guarantee G1 success, or authorize automatic FalkorDBLite fallback. The
+corrected-lifecycle-state block above remains the accurate historical record
+of state at the time of this correction and is not rewritten.

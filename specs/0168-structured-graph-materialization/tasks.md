@@ -12,8 +12,12 @@ repaired contracts are complete. The convergence-gated independent
 architecture/methodology rereview returned **PASS** at exact head
 `438aaaa69d4b965de29ea967cc05f02274f56e57`; that result remains technical
 evidence. Issue #168 comment `5658274383` was recorded without a valid explicit
-owner-decision checkpoint and must not be used as owner approval. **CYAX-0168
-G0 is not satisfied; CYAX-0168 G1 is not authorized.**
+owner-decision checkpoint and must not be used as owner approval; the
+correction is recorded in `authority-correction-a.md` and Issue #168
+correction comment `5664014428`. The repository owner has since explicitly
+approved CYAX-0168 Decisions 1–7 in the new valid Issue #168 comment
+`5668898317` (`approval_ref`). **CYAX-0168 G0 is satisfied; CYAX-0168 G1 is
+the next gate and has not yet been executed.**
 
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 received its prior **PASS WITH REQUIRED REVISIONS** and remains the historical
@@ -29,8 +33,11 @@ repetition count, statistic, latency or resource threshold, 48-hour ceiling,
 candidate version, or reviewed initial-macOS control. The independent bounded
 rereview of the exact head produced by this repair,
 `f2283f6a1f58600d05ed0a50535d07013ac6fb2c`, returned **PASS** (T8e below);
-that verdict is technical evidence only and did not create owner authority.
-The next step is explicit owner choices in the Control Desk.
+that verdict is technical evidence only and did not by itself create owner
+authority. The repository owner has since made those choices explicit,
+approving CYAX-0168 Decisions 1–7 in Issue #168 comment `5668898317`
+(`approval_ref`), satisfying CYAX-0168 G0. CYAX-0168 G1 is the next gate
+under a later execution dispatch and has not yet been executed.
 
 - [x] T1 [R-004] — Audit #117 K1–K12 against captured canonical sources.
   - Outcome: the independent audit passed; corrected K7/K8/K10/K11 preserves
@@ -146,14 +153,17 @@ The next step is explicit owner choices in the Control Desk.
     surfaces, spec/plan/tasks convergence, lifecycle-state and privacy scans,
     frontmatter parse, and diff checks. The T8e rereview gate applies to the
     exact head produced by this repair.
-- [ ] T8e-exact-head-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a
+- [x] T8e-exact-head-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a
   bounded independent architecture/methodology rereview of the new exact
   repaired head, then present the explicit choices to the owner in the Control
   Desk.
   - Outcome: the independent bounded rereview returned **PASS** at exact head
     `f2283f6a1f58600d05ed0a50535d07013ac6fb2c`. That verdict is technical
-    evidence only; it did not create owner authority and does not satisfy
-    CYAX-0168 G0 by itself.
+    evidence only; it did not by itself create owner authority or satisfy
+    CYAX-0168 G0. The repository owner has since explicitly approved
+    CYAX-0168 Decisions 1–7, deciding all ten pending choices, in the new
+    valid Issue #168 comment `5668898317` (`approval_ref`). **CYAX-0168 G0 is
+    satisfied.**
   - Verify: rereview covers cache immutability, logical/allocated/APFS resource
     accounting and deterministic rebuild/exclude behavior, capped allowances,
     hard gates and pair-level cache-capacity disposition, the host-portable
@@ -161,13 +171,16 @@ The next step is explicit owner choices in the Control Desk.
     implementation, the host-scoped claim boundary with its pooling prohibition
     and replication requirement,
     retained repetitions/statistics/latency thresholds, and Ladybug candidate
-    status; a later approval must cite the exact reviewed head and the owner's
-    actual choices.
-  - Remaining: present the ten pending choices to the owner in the Control
-    Desk for explicit decision; the task is not complete until that
-    presentation and decision occur.
+    status; the recorded approval cites the exact reviewed head
+    `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` and the owner's actual
+    Decisions 1–7.
+  - Boundary: this owner approval does not merge PR #169, authorize production
+    adoption, waive G1–G4, guarantee G1 success, or authorize automatic
+    FalkorDBLite fallback. CYAX-0168 G1 is the next gate under a later
+    execution dispatch and has not yet been executed.
   - Stop: neither a drafted approval nor an Issue comment published without an
-    authoritative owner interaction can satisfy CYAX-0168 G0.
+    authoritative owner interaction can satisfy CYAX-0168 G0; that condition
+    did not apply here because the owner made the decision directly.
 - [ ] T9 [R-001, R-002, R-004–R-009, CYAX-0168 G1] — Under later dispatch,
   freeze source/registry/gold/generator/query/calibration manifests and v1
   validators only after G0.
@@ -204,7 +217,10 @@ The next step is explicit owner choices in the Control Desk.
 
 No benchmark implementation, dependency, generated database/fixture,
 timing/resource run, CYAX-0166/CYAX-0167 edit, or production-backend adoption
-is part of this authority and host-portability design repair. **CYAX-0168 G0 is
-not satisfied and CYAX-0168 G1 is not authorized.** The independent bounded
-rereview of this design returned **PASS** as technical evidence only; explicit
-owner choices in the Control Desk precede any new G1 dispatch.
+is part of this authority and host-portability design repair. **CYAX-0168 G0
+is satisfied by the repository owner's approval of Decisions 1–7 in Issue #168
+comment `5668898317` (`approval_ref`); CYAX-0168 G1 is the next gate and has
+not yet been executed.** The independent bounded rereview of this design
+returned **PASS** as technical evidence only; the owner's explicit approval,
+recorded above, was the remaining step for G0. T9 and later G1–G4 tasks remain
+unexecuted pending a later execution dispatch.
