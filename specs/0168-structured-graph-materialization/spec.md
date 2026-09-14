@@ -23,14 +23,21 @@ provenance retrieval when both views derive from the same immutable,
 authority-safe assertion snapshot.
 
 The exact-head rereview of
-`4005f60da7fa330cc964bbf3688b65fabb8dfd8b` returned **PASS WITH REQUIRED
-REVISIONS**. R1–R5, the common provenance interface, and the independent #117
-K1–K12 chronology passed and are not reopened. This revision repairs only the
-residual B1–B5 preregistration defects. It does not approve
+`185d56dfced79fe9adc51c5573bcd3bd3d198d1f` returned **PASS WITH REQUIRED
+REVISIONS**. The common provenance architecture, the B2 query repair, the main
+B4 classifier repair, B5 condition 3, and the independent #117 K1–K12
+chronology passed and are not reopened. This revision repairs only the four
+residual C1–C4 preregistration defects: generator collision closure,
+scale-matched calibration and p95-estimand truth, joint CI uncertainty, and
+deterministic T4 condition 4. It does not approve
 the specification, authorize benchmark implementation or execution, revise
 CYAX-0166/CYAX-0167, or select a production backend. The design branch starts
 from integrated `vmm` revision
 `7a40285bb5c313f7e8746b90644d5f45bb67be44`.
+
+The preceding exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
+also received **PASS WITH REQUIRED REVISIONS**; its B1–B5 repair history remains
+recorded in T6 and is not rewritten by this final bounded repair.
 
 The benchmark may establish correctness and operational measurements only for
 the frozen fixtures, workload, software versions, and host class. It cannot
@@ -565,23 +572,39 @@ purpose token is conforming:
 
 For a candidate vector `C` of length `n`, candidates are sorted by primary-ID
 bytes; pair candidates are sorted by `frame([subject_id,object_id])`. If `n=0`,
-the choice fails generation. If `n=1`, the sole candidate is returned without a
-PRF call. If `n>=2`, interpret the 32 digest bytes as one unsigned 256-bit
+the choice fails generation. If `n=1`, the sole candidate is tested against its
+purpose row without a PRF call; it is returned if no predicate holds and
+generation fails otherwise. If `n>=2`, interpret the 32 digest bytes as one unsigned 256-bit
 big-endian integer `x`, set `L=floor(2^256/n)*n`, reject when `x>=L`, and accept
 `C[x mod n]` otherwise. A digest rejection increments `counter` by one and
-rehashes. If an accepted endpoint would create a self-edge, duplicate
-subject/predicate/object triple, forbidden cycle edge, or other phase-invalid
-collision, it is also rejected, `counter` increments by one, and selection
-repeats against the same unchanged `C`. Counter overflow above `2^64-1` fails
-generation. Candidate removal, modulo-before-rejection, little-endian digest
-interpretation, and implementation-named purpose strings are forbidden.
+rehashes. After digest acceptance, the implementation applies exactly the
+purpose row below. If either listed predicate is true, the candidate is
+rejected, `counter` increments by one, and selection repeats against the same
+unchanged `C`. No other candidate property may cause a retry.
 
-Phase 3 cycles source blocks in primary-ID order. Its ordinary candidate vector
+| Purpose | Exhaustive post-PRF rejection predicates |
+| --- | --- |
+| `dependency_target` | (1) `subject_id == object_id`; or (2) the exact `(subject_id, depends_on, object_id)` triple is already present at that construction point. |
+| `cross_component_dependency_target` | (1) `subject_id == object_id`; or (2) the exact `(subject_id, depends_on, object_id)` triple is already present at that construction point. |
+| `fill_concerns_pair` | (1) `subject_id == object_id`; or (2) the exact `(subject_id, concerns, object_id)` triple is already present at that construction point. |
+
+Candidate-vector membership is validated before selection: the two dependency
+vectors must have the exact component/isolation membership defined below, and
+the filler vector must contain every and only same-block, signature-valid pair.
+A membership error fails generation; it is not a candidate retry. Phase 4 is
+the only cycle-construction phase, occurs after phase 3, uses no PRF, and has
+its own eligibility/failure rule below. Phase 3 therefore has no cycle-edge
+rejection predicate. Counter overflow above `2^64-1` fails generation.
+Candidate removal, modulo-before-rejection, little-endian digest interpretation,
+and implementation-named purpose strings are forbidden.
+
+Phase 3 visits source blocks in primary-ID order. Its ordinary candidate vector
 is every other nonisolated WorkItem in the source component, primary-ID sorted;
 its cross-component vector is every nonisolated WorkItem outside that component,
 primary-ID sorted. Phase 8 constructs one vector of all same-block,
 signature-valid `concerns` pairs whose subject and object differ, ordered as
-above. An already present triple is handled only by the collision retry rule.
+above. An already present triple is handled only by the applicable exhaustive
+post-PRF rejection row.
 No other generator branch is stochastic-looking or invokes the PRF.
 
 The generator uses namespace `cyax-0168-synthetic-v2.2`. Its manifest registers
@@ -674,8 +697,9 @@ paired supported/contradicting Claims with independent sources. Cycles are
 explicit `depends_on` cycles of length three and never enter supersession.
 Parallel edges are allowed only when assertion IDs differ by source revision.
 Cross-links connect distinct work items. Quotas use floor(rate × eligible
-population), sorted eligible ordinals, and PRF-selected endpoints; collisions
-advance `counter`. Remaining assertion slots are filled with profile-neutral
+population), sorted eligible ordinals, and PRF-selected endpoints; every
+post-PRF rejection in the exhaustive table advances `counter`. Remaining
+assertion slots are filled with profile-neutral
 `concerns` evidence in ordinal order. Exact tier counts and all invariants must
 hold or generation fails.
 
@@ -696,8 +720,8 @@ For `B = entity_count / 10`, the ordered post-motif phases are executable:
    `cross_component_dependency_target`; every later position uses
    `dependency_target`. In either call `ordinal=i`. The former selects from the
    frozen outside-component vector and the latter from the frozen same-component
-   vector. Self-edges and duplicate subject/object pairs follow the collision
-   rule. If the declared cross-link count exceeds the number of additional
+   vector. Self-edges and duplicate subject/object pairs follow the exhaustive
+   purpose table above. If the declared cross-link count exceeds the number of additional
    positions, generation fails.
 4. Form candidate triples from consecutive primary-ID-sorted connected
    WorkItems. A triple is eligible only when each member has at least one
@@ -725,7 +749,7 @@ For `B = entity_count / 10`, the ordered post-motif phases are executable:
    ID differ.
 8. Fill the remaining assertion budget to exactly `50 × B` with `concerns`
    assertions selected with `fill_concerns_pair` over the frozen pair vector and
-   collision rule above; the filler position starting at zero is the PRF
+   its exhaustive rejection row above; the filler position starting at zero is the PRF
    `ordinal`.
 
 Only the selections named in the closed purpose registry use the PRF. The
@@ -916,10 +940,25 @@ rereview, and owner approval before any implementation or measurement.
 
 ## Calibration and fairness controls
 
-A separate non-decision corpus uses generator version 2.2: 25,000 assertions
-with `P-low/P-medium/P-high` seeds `168901/168902/168903`, and 125,000
-assertions with seeds `168904/168905/168906` respectively. It is
-never reused in F-real or T0–T4. Each backend receives at most eight person-hours
+A separate non-decision corpus uses generator version 2.2 at every T0–T3
+decision scale. `Ck` has exactly the entity/assertion dimensions of `Tk` but
+uses only the independent calibration seeds below; no calibration seed appears
+in F-real or T0–T4.
+
+| Calibration tier | Entities | Assertions | Profiles and calibration-only seeds | Permitted ratification use |
+| --- | ---: | ---: | --- | --- |
+| C0 | 1,000 | 5,000 | smoke projection of `P-medium`: `168900` | T0 operation-duration categories |
+| C1 | 10,000 | 50,000 | `P-low`: `168911,168912`; `P-medium`: `168913,168914`; `P-high`: `168915,168916` | T1 operation-duration categories |
+| C2 | 100,000 | 500,000 | `P-low`: `168921,168922`; `P-medium`: `168923,168924`; `P-high`: `168925,168926` | T2 duration categories and T2 classifier-statistic precision |
+| C3 | 200,000 | 1,000,000 | `P-low`: `168931`; `P-medium`: `168932`; `P-high`: `168933` | T3 duration categories and T3 classifier-statistic precision |
+
+The calibration manifest maps `C0→T0`, `C1→T1`, `C2→T2`, and
+`C3→T3`; a measurement may ratify only the mapped target tier, exact profile,
+backend, operation category, and cache/process mode. No small-tier measurement
+is transferred to a larger tier. C2 and C3 contain the same frozen query-family
+and selector construction as their mapped decision tiers, but their selected
+identities and gold derive only from their calibration seeds. These fixtures
+are never reused in F-real or T0–T4. Each backend receives at most eight person-hours
 of tuning and 40 executed plan/config trials. Permitted changes are SQLite
 index selection/order, documented pragmas, and CTE formulation; or documented
 Ladybug index/configuration and equivalent query formulation. Schema semantics,
@@ -931,8 +970,10 @@ pragmas/configuration, dependencies, plans, evaluator, and tuning decisions are
 hashed and committed before **any F-real or T0–T4 decision fixture is
 materialized, executed, profiled, explained, or inspected through either
 backend**. Public seeds provide no blinding and are never described as hidden
-or unrevealed. Calibration uses only its dedicated corpus; no decision-result-
-driven tuning follows. A future claim of blinding would require a separately
+or unrevealed. Calibration uses only its dedicated corpus. Once the tuning and
+ratification freeze is committed, neither calibration nor decision results may
+change schemas, queries, configurations, repetition counts, truth surfaces, or
+category mappings. A future claim of blinding would require a separately
 reviewed commitment/reveal protocol.
 
 The controlled primary comparison uses one pinned CPU core/thread per query,
@@ -1012,9 +1053,12 @@ inaccessible until both reports pass.
 
 ### Frozen calibration simulation
 
-Each calibration family/profile/cache-mode cell must contain at least 200 valid
-paired fresh-process units and 100 valid paired warm-process blocks. A warm
-unit contains its ordered 50 measured S calls and 50 measured G calls. Sampling
+Each C2 and C3 calibration decision query instance/cache-mode must separately
+contain at least 200 valid paired fresh-process units and 100 valid paired
+warm-process blocks. Thus the family/profile statistic contains the same number
+of independently seeded instances as its mapped T2 or T3 decision cell. C2
+ratifies only T2 classifier quantities; C3 ratifies only T3 classifier
+quantities. A warm unit contains its ordered 50 measured S calls and 50 measured G calls. Sampling
 is always paired and with replacement; a selected warm block carries all 100
 ordered calls. A valid timeout is the exact integer `120000000000` ns plus its
 breach flag, not missing data. Missing/corrupt units or fewer than the minimum
@@ -1053,35 +1097,74 @@ The modes are:
    for each paired unit, multiply **both** backends and every call in a warm
    block by `k` with probability `w`, otherwise by one. Test the exact grid
    `(w,k) in {(0.05,4),(0.05,10),(0.10,4),(0.10,10)}`. A common paired tail
-   preserves the imposed central speedup while stressing p95 tail placement and
+   preserves the paired center while stressing p95 tail placement and
    block dependence.
 
 All model fitting and draws preserve S/G pairing. Marginal, unpaired, or
-without-replacement resampling is forbidden. For a target direction, let
-`M_i=sqrt(S_i*G_i)` and let
-`d_i=ln(S_i/G_i)-mean_j(ln(S_j/G_j))`. For target central speedup `rho`, replace
-the pair by
-`S'_i=M_i*exp((ln(rho)+d_i)/2)` and
-`G'_i=M_i*exp(-(ln(rho)+d_i)/2)`; swap S/G for an S-over-G target. If the target
-also has additive saving `delta>0`, multiply both values by the one positive
-constant that makes the model-distribution arithmetic mean of `S'-G'` equal
-`delta` (or `G'-S'` for S advantage). A non-positive unscaled mean fails that
-surface. Apply this transformation to the fitted/resampled population before
-campaign sampling, and round generated calls once to integer nanoseconds,
-ties-to-even, with a minimum of one ns.
+without-replacement resampling is forbidden. Simulation truth is defined only
+by the classifier's population estimands, never by a latent log-mean parameter.
+For each empirical, lognormal, or two-component-tail model and each query
+instance `k`, let `q_Ak` and `q_Bk` be the exact population p95s for the backend
+in the target advantage direction (`A`) and the other backend (`B`). A
+population p95 is `inf{x:F(x)>=0.95}`. For empirical mode `F` is the exact
+finite empirical distribution. For lognormal mode it is the fitted continuous
+distribution. For a warm model it is the equally weighted mixture over the 50
+ordered within-block call positions and the fitted/resampled block population;
+for a two-component tail it additionally includes the exact `(w,k)` mixture.
+The truth evaluator computes these quantiles in the 50-significant-digit
+decimal context below, using the analytic inverse when available and otherwise
+bisection on positive nanoseconds. Bisection starts at zero and doubles the
+upper endpoint until `F(upper)>=0.95`, then stops at interval width
+`<=1e-30 ns`; failure to bracket within 256 doublings fails the surface.
+
+Across the `K` frozen instances in one family/profile/cache-mode cell define
+
+```text
+I_A = exp((1/K) * sum_k(ln(q_Ak)))
+I_B = exp((1/K) * sum_k(ln(q_Bk)))
+mean_A = (1/K) * sum_k(q_Ak)
+mean_B = (1/K) * sum_k(q_Bk)
+```
+
+The transformation multiplies every call/unit of A by one positive constant
+`a` and every call/unit of B by one positive constant `b`, preserving pairing,
+dispersion, tail shape, and within-block order. For a speedup-only truth `rho`,
+use `a=1` and `b=rho*I_A/I_B`. For an additive-saving-only truth `d`, use
+`a=1` and `b=(d+mean_A)/mean_B`. For a joint truth `(rho,d)` with `d>0`, use
+
+```text
+D = rho * I_A * mean_B / I_B - mean_A
+a = d / D
+b = rho * a * I_A / I_B
+```
+
+and fail the surface unless `D>0`, `a>0`, and `b>0`. Swap A/B to construct the
+opposite advantage direction. The exact null copies each paired A population
+value to B before campaign sampling, so both distributions and every population
+decision statistic are identical. Simulation values remain positive decimals;
+they are not rounded to integer nanoseconds before classification.
+
+After transformation and before any campaign sampling, the truth evaluator
+recomputes every query-instance population p95, family/profile latency index,
+family/profile speedup, and absolute p95 saving under the classifier definitions
+below, separately for fresh and warm mode. The manifest records those computed
+truths. A surface is valid only when its speedup target has
+`abs(ln(actual/target))<=1e-40` and its saving target has
+`abs(actual-target)<=1e-20 ns`; a failed equality check fails ratification and
+may not be relabelled with the latent input. These tolerances are numerical
+conformance bounds, not classifier threshold slack; the exact named target is
+used for the frozen expected boundary relation.
 
 The frozen surfaces for each named point-speedup and lower-CI speedup threshold
-`tau` are central speedups `{1,0.95*tau,tau,1.05*tau,1.25*tau}`. For each named
-absolute-saving threshold `delta`, surfaces are
-`{0,0.95*delta,delta,1.05*delta,1.25*delta}`. Thus "25% beyond" means
-`1.25*tau` for a multiplicative threshold and `1.25*delta` for an additive
-threshold; it never means 25% of distance from one or zero. Joint alternative
-surfaces use the largest applicable central speedup and additive saving: G
-standard `(2.5,12.5 ms)`, Q07 critical `(6.25,62.5 ms)`, S relational
-`(2.5,12.5 ms)`, and T2 corroboration `(1.25,0)`. The exact null is identical
-paired S/G latency and resource distributions: `rho=1`, `delta=0`.
-For that null only, set every `d_i=0` before the transformation, so `S'_i=G'_i`
-exactly; observed ratio noise may not leak into the null.
+`tau` have actual population classifier speedups
+`{1,0.95*tau,tau,1.05*tau,1.25*tau}`. For each named absolute-saving threshold
+`d`, surfaces have actual population absolute p95 savings
+`{0,0.95*d,d,1.05*d,1.25*d}`. Thus "25% beyond" means an actual classifier
+statistic of `1.25*tau` or `1.25*d`; it never names a log mean or arithmetic
+mean latency saving. Joint alternative surfaces target the actual paired
+classifier statistics: G standard `(2.5,12.5 ms)`, Q07 critical
+`(6.25,62.5 ms)`, S relational `(2.5,12.5 ms)`, and T2 corroboration
+`(1.25,0)`, with the zero-saving T2 case constructed by the speedup-only rule.
 
 Joint classifier simulations instantiate, under every permutation of family
 and profile labels, these exact masks: two graph families each passing the same
@@ -1096,7 +1179,8 @@ below, evaluated on the true surface; no family/profile or cache-mode rule is
 chosen from calibration results.
 
 For every scalar speedup and saving statistic, the paired BCa interval must
-cover its generating value in at least 9,500 of 10,000 campaigns in every mode
+cover its recomputed population classifier truth in at least 9,500 of 10,000
+campaigns in every mode
 and tail-grid cell. At every 1.25-beyond joint alternative, at least 9,000 of
 10,000 campaigns must return its expected G or Hybrid class. At the exact null,
 at most 500 of 10,000 may return G or Hybrid. The fresh and warm checks are
@@ -1106,10 +1190,12 @@ inclusive at the stated integer count.
 Simulation arithmetic is decimal floating point with 50 significant digits,
 round-half-even; `pi` is
 `3.1415926535897932384626433832795028841971693993751`, and `ln`, `exp`, square
-root, sine, and cosine are correctly rounded to that context. Only the final
-integer-ns rounding above occurs. Reported probabilities are exact integer
-counts divided by 10,000. These rules leave no numerical tolerance affecting
-PASS/FAIL. Statistical precision ratification passes only if every required
+root, sine, and cosine are correctly rounded to that context. Generated
+simulation values remain in that context; no pre-classification integer-
+nanosecond rounding occurs. Reported probabilities are exact integer counts
+divided by 10,000. The frozen truth-conformance tolerances above leave no
+implementation-selected tolerance affecting PASS/FAIL. Statistical precision
+ratification passes only if every required
 cell, mode, surface, coverage, power, false-positive, and classifier-mask check
 passes. This analytical order-statistic basis plus this simulation—not bootstrap
 resample count—is the required tail-precision justification.
@@ -1128,8 +1214,22 @@ enumerate all mandatory validation, full export, clone/copy, checksum, monitor,
 process teardown, crash/rollback/recovery, and publication-gate operations;
 none may be hidden in setup or assigned zero duration.
 
-For each enumerated operation category `c`, collect at least 30 calibration-only
-wall-time observations under the authority-host controls. Let `q99_c` be
+Each duration category is the exact tuple
+`c=(operation_kind,backend,target_tier,profile_id,cache_process_mode,query_id,transition_id)`.
+The manifest's closed `operation_kind` tokens are `cache_helper`,
+`process_start`, `query_warmup`, `query_measured`, `process_teardown`,
+`clean_build`, `rebuild`, `transition`, `semantic_validation`, `full_export`,
+`clone_copy`, `checksum`, `monitor_start`, `monitor_stop`, `crash_interrupt`,
+`rollback`, `recovery`, and `publication_gate`. Fields that do not apply use the
+exact token `not_applicable`; query operations name their exact Q ID and
+transition operations name one of the six frozen transition IDs. Categories
+may be merged only when all seven tuple fields are byte-identical.
+
+For each category `c`, collect at least 30 calibration-only wall-time
+observations under the authority-host controls from its direct scale match:
+T0 uses C0, T1 uses C1, T2 uses C2, and T3 uses C3. The backend, profile,
+cache/process mode, Q ID, and transition ID must also match `c`; a C1 or C2
+upper bound may not ratify the corresponding T3 operation. Let `q99_c` be
 nearest-rank order statistic `ceil(0.99*m)` and let `u_c` be the larger of
 `q99_c` and the one-sided 99% BCa upper endpoint for the mean using 10,000
 deterministic whole-unit resamples and the same BCa rule with `alpha=0.99`.
@@ -1152,9 +1252,13 @@ mean, omitted overhead, omission or mislabelling of an enumerated required
 operation, or post-calibration category merger fails the gate. Genuinely invalid
 reruns remain outside the hard envelope as stated above.
 
-Failure of either ratification stops CYAX-0168 G1 before decision-fixture access.
-It requires amended counts or methodology, another independent rereview, and
-owner approval; G1 may not reduce repetitions automatically.
+Failure of either ratification stops CYAX-0168 G1 before decision-fixture access
+and is a legitimate experimental result: precision can fail while duration
+passes, and duration can exceed 48 hours while precision passes. The frozen
+design is not reopened merely to make G1 pass, and repetitions may not be
+reduced automatically. Only a later proposed change to counts, methodology, or
+thresholds requires an amended exact-head rereview and owner approval; a result
+that instead demonstrates a preregistration defect returns to CYAX-0168 G0.
 
 The independent unit is the paired build, transition, fresh process, or warm
 process block—not an individual warm call. Alternate first backend with a
@@ -1194,10 +1298,11 @@ T4 runs only when all are true:
 2. no measurement invalidation remains;
 3. at least one valid T3 decision-bearing family/profile/cache-mode cell meets
    the direct-observation margin test below;
-4. both systems have at least 25% projected memory, disk, and time headroom;
+4. the deterministic resource projection and 25% headroom test below passes;
 5. the T4 fixture/workload/hash was frozen before T3 results were examined.
 
-There is no crossover projection to 5 million assertions. For condition 3 the
+There is no performance-crossover projection to 5 million assertions. For
+condition 3 the
 only named statistics are the T3 point speedup, lower 95% speedup-CI endpoint,
 and absolute saving used by the G-standard, Q07-critical, or S-relational rule.
 For positive threshold `t` and observed statistic `x`, define
@@ -1210,6 +1315,62 @@ decision-bearing. Resource ratios, family/profile counts, T2 values, undefined
 statistics, censored observations, and analyst-fitted trends never satisfy
 condition 3. If the inputs are insufficient to evaluate it mechanically, T4
 does not run.
+
+For condition 4, the independent scale variable is assertion count:
+`n1=50000` (T1), `n2=500000` (T2), `n3=1000000` (T3), and
+`n4=5000000` (T4). Only `P-medium` observations are inputs because T4 is
+`P-medium`. For each backend and each of peak process-tree memory, steady-state
+materialization disk, temporary disk, clean-build time, rebuild time, 1%
+transition time, and individual query time, let `r_i` be the maximum valid
+observed value at Ti across every applicable frozen seed, repetition, query
+instance, cache mode, and transition. Steady-state materialization disk is the
+sum of the backend-manifest data, index, checkpoint, and nonempty auxiliary
+file byte counts after checkpoint; temporary disk is the maximum additional
+allocated bytes during the operation. For query time the maximum includes
+every T4-applicable Q ID and both decision-bearing cache modes.
+
+Construct the monotone envelope `e1=r1`, `e2=max(r1,r2)`,
+`e3=max(r1,r2,r3)`, then the fixed upper slope
+
+```text
+s = max(e1/n1,
+        e2/n2,
+        e3/n3,
+        (e2-e1)/(n2-n1),
+        (e3-e2)/(n3-n2),
+        (e3-e1)/(n3-n1))
+projected_R4 = 1.25 * (e3 + s * (n4-n3))
+```
+
+All arithmetic uses the 50-significant-digit decimal context and exact byte or
+nanosecond input integers. The mandatory 1.25 multiplier is part of the upper
+projection. A decrease or other nonmonotonic observation cannot reduce the
+projection because of the monotone envelope. The same formula is applied to
+every exact T4 duration-manifest category, including cache helper, process
+start/teardown, warmup, validation/export, checksum/monitor, and
+publication/recovery work, using its T1–T3 `P-medium` maxima. T4's projected
+incremental campaign time is the sum of each frozen T4 category count times its
+projected per-operation value.
+
+Condition 4 requires all of these mechanically evaluated limits:
+
+| Projected quantity `R` | Hard limit `L` |
+| --- | ---: |
+| each backend's peak process-tree memory | 16 GiB |
+| both backends' steady-state materialization disk projections added together | 50% of the frozen host's physical RAM, the existing cache-residency limit |
+| each backend's temporary disk | 50 GiB |
+| each backend's clean build, rebuild, and 1% transition time, evaluated separately | 1,800 s |
+| each backend's individual query time | 120 s |
+| valid observed T0–T3 campaign wall time plus projected incremental T4 campaign time | 172,800 s |
+
+For every row, `headroom_fraction=(L-R)/L` and passage requires
+`headroom_fraction>=0.25`, equivalently `R<=0.75*L`; exact equality passes. The
+combined steady-state row uses the sum of the separately projected S and G
+values. Every other backend-specific row must pass for both S and G. Condition
+4 fails, and T4 does not run, if any required T1, T2, or T3 point is missing or
+invalid; any input is censored; any backend had a valid hard-resource breach at
+T1–T3; the projection is undefined/non-finite; or any row exceeds `0.75*L`.
+There is no analyst override or alternate fitted projection.
 
 T4 alone cannot justify graph adoption for current CYAxiverse scale.
 
@@ -1343,12 +1504,40 @@ Classifier precedence is:
    S relational advantage requires Hybrid.
 8. **Retain S / G not justified** for every other valid execution.
 
-For step 5, a CI is classification-relevantly crossing only when an otherwise
-met point/saving/resource condition has `lower < threshold <= upper` and
-treating that one lower endpoint as passing would change the final class under
-the Boolean rules above. Equality of the lower endpoint and threshold passes
-and is not crossing. CIs in cells that cannot change any family/profile
-quantifier do not make the campaign Inconclusive.
+Step 5 evaluates CI uncertainty jointly. First apply precedence steps 1–4; if
+one returns an outcome, no performance assignment can override it. Otherwise
+freeze every point-estimate, absolute-saving, resource, structural, and CI
+predicate whose interval wholly passes or wholly fails. A decision-bearing CI
+threshold predicate is **crossing** exactly when
+`lower < threshold <= upper`; exact lower-endpoint equality passes and is not
+crossing. T2's point predicate remains strict `>1.0` and is never converted to
+a `>=` predicate.
+
+Let `U` be all crossing predicates in graph and relational cells that feed the
+G, critical-Q07, or Hybrid Boolean expressions. Crossings derived from distinct
+CI statistics vary independently. When one CI statistic crosses more than one
+ordered threshold, its predicate assignments must be monotone: an assignment is
+admissible only if some value `z` in its closed `[lower,upper]` interval makes
+all of that statistic's `z>=threshold` predicates equal the assignment. The
+admissible values are enumerated by partitioning `[lower,upper]` at its sorted
+distinct thresholds, including threshold points on the passing side, and taking
+the Cartesian product across distinct CI statistics. Evaluate the deterministic
+performance classifier with step 5 omitted for every admissible assignment
+`u: U -> {fail,pass}`, holding every noncrossing predicate fixed, and collect
+
+```text
+reachable_outcomes = set(classify_without_step5(u) for admissible u)
+```
+
+where the possible performance outcomes are Hybrid, G, and Retain S. If the
+set has one member, return that unique class. If it has more than one member,
+return **Inconclusive / invalid execution**. An implementation may use a
+symbolic or reduced Boolean representation only if a conformance proof shows
+that it returns exactly the same reachable set as exhaustive enumeration.
+Crossings in cells made incapable of satisfying the frozen family/profile
+counts by fixed structural predicates may be retained in `U`; their assignments
+then collapse to the same outcome. They may be pruned only by an exact Boolean
+proof, never by a one-at-a-time counterfactual.
 
 Examples: G 4× faster but 3× larger with >2 GiB excess retains S; a win only at
 T4 retains S; a 20× critical-query win yields Hybrid only if its lower CI,
@@ -1365,25 +1554,43 @@ silently rerun into a favorable class.
 Before CYAX-0168 G1, contract tests must prove: an ordinary owner comment is not
 a decision without exact registration; an epistemic-state-only successor gets
 a new assertion ID; a display-label-only edit preserves logical snapshot ID;
-dependency removal deletes only the named assertion in N+1; independent
-generator implementations using different natural-language labels still use
-the same closed purpose token, select identically from a population of three,
-and retry a collision identically; assertion source bytes state the proposition;
-parallel evidence adds a distinct revision; Q11 includes only the registered
-block-claim slot; Q02 ranks `owner_decision` before `verification_evidence`;
-multiple instances in a Q family receive equal frozen weighting; and a
-statistically adequate design whose conservative projection exceeds 48 hours
-fails G1.
+dependency removal deletes only the named assertion in N+1; assertion source
+bytes state the proposition; parallel evidence adds a distinct revision; Q11
+includes only the registered block-claim slot; Q02 ranks `owner_decision`
+before `verification_evidence`; and multiple instances in a Q family receive
+equal frozen weighting.
+
+Generator conformance must cover a duplicate dependency retry, a self-edge
+retry, acceptance of a candidate satisfying both listed predicates, phase-4
+cycle construction after all phase-3 choices without a cycle retry, a duplicate
+filler retry, and rejection of any implementation that adds an unlisted retry
+predicate. Two independent implementations using different display prose must
+use the same purpose tokens, counters, candidates, retry trace, complete records,
+and snapshot checksum.
+
+Calibration/estimand conformance must pair a T1 operation only with C1 and the
+corresponding T3 operation only with C3; a C1/C2 duration bound reused for T3
+fails. It must use unequal S/G dispersions to show that the rescaled actual
+p95-derived speedup equals the target, and a tail where mean saving differs
+materially from p95 saving to show that the rescaled actual absolute p95 saving
+equals the target. It must verify the 95%, 100%, 105%, and 125% surfaces from
+the recomputed classifier statistics in both cache modes. A statistically
+adequate design whose duration projection exceeds 48 hours fails G1, and a
+duration-adequate design whose statistical precision fails also fails G1.
 
 The classifier truth-table fixture must cover fresh pass/warm fail, warm
 pass/fresh fail, two families passing only one profile each, one family passing
 all profiles, disjoint winning families across two profiles, exact threshold
-equality, a classification-relevant CI crossing exactly one threshold, G-rule
-performance plus the relational Hybrid condition, G-only timeout, and S-only
-timeout. Each row produces exactly one outcome under the precedence above. T4
-fixtures cover a cell far below every threshold, exact 25% margin equality, one
-statistic within the margin while another is far, and censored/insufficient
-data. Every filesystem-cache-warm pair still requires a fresh successful helper.
+equality, the five joint-CI cases below, G-rule performance plus the relational
+Hybrid condition, G-only timeout, and S-only timeout. Each row produces exactly
+one outcome under the precedence above. T4 fixtures cover condition-3 cells far
+below every threshold, exact 25% margin equality, one statistic within the
+margin while another is far, and censored/insufficient data. Condition-4
+fixtures must separately cover every projection below 75% of its limit, one
+projection exactly at 75%, one above 75%, fewer than three valid scale points,
+a censored or prior hard-breach point, and nonmonotonic observations that are
+replaced by the monotone envelope. T4 eligibility must be unique in every row.
+Every filesystem-cache-warm pair still requires a fresh successful helper.
 These are normative contract examples, not benchmark results.
 
 The minimum truth-table rows and exact outcomes are:
@@ -1397,10 +1604,39 @@ The minimum truth-table rows and exact outcomes are:
 | two profiles pass but each for a different noncritical graph family | Retain S / G not justified |
 | two graph families each pass two profiles with every `>=` statistic exactly equal to its threshold and T2 point strictly above 1.0 | G — experimental derived-index status |
 | the preceding G row also has one relational family passing two profiles | Hybrid |
-| one otherwise decisive lower CI strictly crosses its threshold and counterfactually changes the class | Inconclusive / invalid execution |
+| one crossing CI has pass/fail assignments that change the class | Inconclusive / invalid execution |
+| two crossing CIs together satisfy the two-profile count, while neither passing alone changes Retain S | Inconclusive / invalid execution |
+| three crossing CIs have multiple internal assignments but every assignment reaches Retain S | Retain S / G not justified |
+| one crossing graph cell and one crossing relational cell make G and Hybrid both reachable | Inconclusive / invalid execution |
+| crossings occur only in cells structurally incapable of meeting the required family/profile counts, and every assignment reaches Retain S | Retain S / G not justified |
 
 Resource/timeout rows retain the separate precedence table and cannot be
 overridden by these performance rows.
+
+## Convergence-gated exact-head rereview
+
+The next independent rereview is bounded to whether this preregistration is
+ready for repository-owner decision and CYAX-0168 G0. A new finding blocks only
+when the reviewer demonstrates at least one of:
+
+1. two competent conforming implementations can materially diverge in fixtures,
+   gold, measurements, classifier inputs, or classifier outputs;
+2. the same frozen evidence can legally produce different final classes;
+3. a post-result analyst choice can materially change fixture inclusion, T4
+   eligibility, threshold evaluation, or classification;
+4. the contract permits invented owner authority, lost provenance,
+   backend-created semantics, stale truth promotion, gold/parity ambiguity, or
+   violation of immutable-snapshot semantics; or
+5. a statistical, resource, timing, or correctness guarantee measures a
+   different quantity from the one it claims to constrain.
+
+If none applies, the verdict is **PASS**, with any lesser observation labelled
+`NON-BLOCKING IMPLEMENTATION CLARIFICATION`, `NON-BLOCKING G1 VALIDATION ITEM`,
+or `NON-BLOCKING FUTURE REFINEMENT`. **PASS WITH REQUIRED REVISIONS** requires a
+demonstrated criterion 1–5 violation; **FAIL / REDESIGN** requires a fundamental
+architecture defect. CYAX-0168 G0 freezes how later G1 success or failure is
+decided; it does not guarantee statistical precision, a campaign within 48
+hours, approved-host Ladybug smoke, resource feasibility, or T4 execution.
 
 ## Requirements and gates
 
@@ -1414,8 +1650,8 @@ overridden by these performance rows.
 | R-006 Frozen workload | The Q01–Q12 population/selector/parameter/role table, gold, and exact aggregation precede backend implementation. | Invalid-stratum/tie tests, manifest/gold review, and raw-to-classifier statistic tests. |
 | R-007 RetrievalBundle v1 | Both adapters return complete, literal-reference-closed canonical objects and deterministic directional paths. | Empty/order/unique/no-dangling tests, complete serialization/compiler validation, and gold/S/G equality. |
 | R-008 Successor updates | N + a non-authoritative delta with exact removals yields independently frozen immutable N+1. | Dependency insert/remove, replacement, supersession, complete export, crash, rollback, and isolation tests. |
-| R-009 Preregistered measurement | Calibration non-access, host, fairness, cache helper, frozen precision simulation, duration projection, repetitions, exact statistics, confidence, and resources are frozen. | Pre-access hash, cache evidence, statistical and 48-hour duration ratification, host/control audit, and paired block-level analysis validation. |
-| R-010 Deterministic decision | Exact cache-mode conjunction, family/profile quantifiers, outcomes, valid resource-breach table, direct-observation T4 gate, and ambiguous cases are encoded. | Fresh/warm, family/profile, boundary, G/S/both breach/timeout, CI crossing, T4 margin, classifier table tests, and owner approval. |
+| R-009 Preregistered measurement | Scale-matched calibration/non-access, host, fairness, cache helper, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, and resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache evidence, statistical and 48-hour duration ratification, host/control audit, and paired block-level analysis validation. |
+| R-010 Deterministic decision | Exact cache-mode conjunction, family/profile quantifiers, outcomes, valid resource-breach table, joint CI uncertainty, direct-observation T4 condition 3, and deterministic projected-headroom condition 4 are encoded. | Fresh/warm, family/profile, boundary, G/S/both breach/timeout, reachable-outcome CI cases, T4 margin/projection/headroom tables, classifier tests, and owner approval. |
 
 ### CYAX-0168 G0 — repaired design approval
 
@@ -1427,8 +1663,8 @@ any unresolved normative choice stops implementation.
 
 ### CYAX-0168 G1 — frozen inputs and smoke
 
-Acceptance requires frozen source/gold/generator/query/calibration/dependency
-manifests, passing calibration-only statistical-precision and 48-hour
+Acceptance requires frozen source/gold/generator/query/scale-matched-calibration/dependency
+manifests, passing calibration-only actual-p95-estimand statistical-precision and 48-hour
 campaign-duration reports that ratify the frozen repetition counts, and offline
 S/G clean-build/rebuild/reopen/tamper/crash smoke checks. Neither decision
 fixtures nor their derived identities may be accessed before both G0 and these

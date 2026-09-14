@@ -3,13 +3,18 @@
 These tasks decompose evidence readiness. GitHub remains authoritative for live
 Issue, Project, review, PR, and merge state.
 
-Exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b` received **PASS WITH
-REQUIRED REVISIONS**. R1–R5, the common provenance interface, and the independent
-#117 K1–K12 source audit passed and are not reopened. Prior design
+Exact head `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` received **PASS WITH
+REQUIRED REVISIONS**. The common provenance architecture, B2, main B4, B5
+condition 3, and the independent #117 K1–K12 source audit passed and are not
+reopened. Prior design
 tasks T2–T4 are retained as superseded history; they do not establish that the
 repaired contracts are complete. CYAX-0168 G0 remains unsatisfied until a new
 independent architecture/methodology rereview passes the new exact head and the
 repository owner approves it.
+
+The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
+received its prior **PASS WITH REQUIRED REVISIONS** and remains the historical
+input to T6-rereview-repair-2.
 
 - [x] T1 [R-004] — Audit #117 K1–K12 against captured canonical sources.
   - Outcome: the independent audit passed; corrected K7/K8/K10/K11 preserves
@@ -48,19 +53,33 @@ repository owner approves it.
     empirical/lognormal/two-component/null/alternative simulation cases;
     projected-over-48-hours failure; classifier truth table; deterministic T4
     margin cases; convergence, terminology, privacy, frontmatter, and diff checks.
-- [ ] T7 [R-001–R-010, CYAX-0168 G0] — Obtain a new independent
+- [x] T7-rereview-repair-3 [R-005, R-009, R-010] — Perform the final bounded
+  C1–C4 repair without reopening accepted architecture or provenance sections.
+  - Outcome: every generator PRF purpose has an exhaustive retry table;
+    C0–C3 directly match T0–T3 and simulation truth uses actual p95-derived
+    classifier estimands; CI crossings are evaluated as one joint uncertainty
+    set; and T4 condition 4 uses a fixed monotone upper-envelope projection plus
+    exact `R<=0.75L` headroom.
+  - Verify: duplicate/self/valid/cycle/filler generator cases; scale-map,
+    unequal-dispersion, p95-saving, and 95/100/105/125% truth cases; precision-
+    pass/duration-fail and inverse G1 cases; five reachable-outcome CI cases;
+    below/equal/above-75%, insufficient/censored/breach, and nonmonotonic T4
+    projection cases; convergence, privacy, scope, frontmatter, and diff checks.
+- [ ] T8-convergence-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a new independent
   architecture/methodology rereview, then repository-owner approval tied to the
   exact repaired head.
-  - Outcome: approval or a bounded revision request.
+  - Outcome: PASS or a revision request demonstrating one of the five explicit
+    blocking criteria, followed by owner approval only after PASS.
   - Stop: `status: draft`, `approval_ref: null`, or any unresolved decision. Do
-    not mark the rereview complete here.
-- [ ] T8 [R-001, R-002, R-004–R-009, CYAX-0168 G1] — Under later dispatch,
+    not mark the future rereview complete here; classify lesser observations as
+    non-blocking implementation clarification, G1 validation, or future refinement.
+- [ ] T9 [R-001, R-002, R-004–R-009, CYAX-0168 G1] — Under later dispatch,
   freeze source/registry/gold/generator/query/calibration manifests and v1
   validators only after G0.
   - Verify: identity, registry, generator checksum, query selection,
     reference-closure, tamper, freshness, cache-helper harness, and crash
     tests.
-- [ ] T9 [R-003, R-007, R-009, CYAX-0168 G1] — Implement S, repeat approved-host
+- [ ] T10 [R-003, R-007, R-009, CYAX-0168 G1] — Implement S, repeat approved-host
   Ladybug smoke, implement G only if it passes, and run calibration-only
   statistical-precision and campaign-duration validation before any
   decision-fixture access.
@@ -68,19 +87,21 @@ repository owner approves it.
     conservative 48-hour projection, ratified counts, and complete logical
     exports.
   - Stop: Ladybug failure; FalkorDBLite requires amended approval.
-- [ ] T10 [R-004, R-006–R-008, CYAX-0168 G2] — Pass frozen gold, S/G parity,
+- [ ] T11 [R-004, R-006–R-008, CYAX-0168 G2] — Pass frozen gold, S/G parity,
   literal-closed bundle, full-export, delta, isolation, and crash-recovery gates.
   - Stop: preserve the minimal failure; no associated performance is admissible.
-- [ ] T11 [R-009, R-010, CYAX-0168 G3] — Under later execution dispatch, run
+- [ ] T12 [R-009, R-010, CYAX-0168 G3] — Under later execution dispatch, run
   paired T0–T3 with cache and process-tree resource evidence and frozen
   aggregation.
   - Verify: controls, sample completeness, valid-breach disposition, block-level
     BCa output, and hard envelope.
-- [ ] T12 [R-010, CYAX-0168 G4] — Conditionally run T4, classify, independently
+- [ ] T13 [R-010, CYAX-0168 G4] — Conditionally run T4, classify, independently
   review evidence, and report to #168/#162.
   - Verify: five-part eligibility and deterministic classifier.
   - Stop: no production adoption or CYAX-0166/CYAX-0167 revision.
 
 No benchmark implementation, dependency, generated database/fixture,
 timing/resource run, CYAX-0166/CYAX-0167 edit, new rereview, or owner approval
-is part of T6-rereview-repair-2. CYAX-0168 G0 remains unsatisfied.
+is part of T7-rereview-repair-3. A later G1 failure is a valid experimental
+outcome and does not reopen design unless it exposes a preregistration defect or
+an owner proposes a normative amendment. CYAX-0168 G0 remains unsatisfied.
