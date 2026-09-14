@@ -8,9 +8,11 @@ REQUIRED REVISIONS**. The common provenance architecture, B2, main B4, B5
 condition 3, and the independent #117 K1–K12 source audit passed and are not
 reopened. Prior design
 tasks T2–T4 are retained as superseded history; they do not establish that the
-repaired contracts are complete. CYAX-0168 G0 remains unsatisfied until a new
-independent architecture/methodology rereview passes the new exact head and the
-repository owner approves it.
+repaired contracts are complete. The convergence-gated independent
+architecture/methodology rereview returned **PASS** at exact head
+`438aaaa69d4b965de29ea967cc05f02274f56e57`, and the repository owner approved
+that exact design in Issue #168 comment `5658274383`. **CYAX-0168 G0 is
+satisfied.**
 
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 received its prior **PASS WITH REQUIRED REVISIONS** and remains the historical
@@ -65,14 +67,14 @@ input to T6-rereview-repair-2.
     pass/duration-fail and inverse G1 cases; five reachable-outcome CI cases;
     below/equal/above-75%, insufficient/censored/breach, and nonmonotonic T4
     projection cases; convergence, privacy, scope, frontmatter, and diff checks.
-- [ ] T8-convergence-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a new independent
+- [x] T8-convergence-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a new independent
   architecture/methodology rereview, then repository-owner approval tied to the
   exact repaired head.
-  - Outcome: PASS or a revision request demonstrating one of the five explicit
-    blocking criteria, followed by owner approval only after PASS.
-  - Stop: `status: draft`, `approval_ref: null`, or any unresolved decision. Do
-    not mark the future rereview complete here; classify lesser observations as
-    non-blocking implementation clarification, G1 validation, or future refinement.
+  - Outcome: independent rereview **PASS** at exact head
+    `438aaaa69d4b965de29ea967cc05f02274f56e57`, followed by repository-owner
+    approval in Issue #168 comment `5658274383`.
+  - Evidence: the spec is `status: approved`, its `approval_ref` resolves to the
+    approval comment, and CYAX-0168 G0 is satisfied.
 - [ ] T9 [R-001, R-002, R-004–R-009, CYAX-0168 G1] — Under later dispatch,
   freeze source/registry/gold/generator/query/calibration manifests and v1
   validators only after G0.
@@ -101,7 +103,9 @@ input to T6-rereview-repair-2.
   - Stop: no production adoption or CYAX-0166/CYAX-0167 revision.
 
 No benchmark implementation, dependency, generated database/fixture,
-timing/resource run, CYAX-0166/CYAX-0167 edit, new rereview, or owner approval
-is part of T7-rereview-repair-3. A later G1 failure is a valid experimental
-outcome and does not reopen design unless it exposes a preregistration defect or
-an owner proposes a normative amendment. CYAX-0168 G0 remains unsatisfied.
+timing/resource run, CYAX-0166/CYAX-0167 edit, or production-backend adoption
+is part of this approval-state synchronization. A later G1 failure is a valid
+experimental outcome and does not reopen design unless it exposes a
+preregistration defect or an owner proposes a normative amendment. CYAX-0168 G0
+is satisfied; CYAX-0168 G1 is the next gate, and its
+implementation/calibration tasks remain incomplete.

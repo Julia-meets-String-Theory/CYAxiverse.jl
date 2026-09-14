@@ -3,14 +3,14 @@ spec_id: CYAX-0168
 title: Structured versus graph provenance materialization benchmark
 issue: 168
 class: S2
-status: draft
+status: approved
 workstream: Infrastructure
 parent: 162
 depends_on: [163, 117]
 created: 2026-09-13
-last_reviewed: 2026-09-13
+last_reviewed: 2026-09-14
 review_required: independent architecture/methodology review and repository-owner approval before benchmark implementation or execution
-approval_ref: null
+approval_ref: "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/168#issuecomment-5658274383"
 ---
 
 # CYAX-0168 — Structured versus graph provenance materialization benchmark
@@ -21,6 +21,15 @@ Determine whether an embedded property-graph materialization provides a
 material operational advantage over indexed SQLite for graph-shaped CYAxiverse
 provenance retrieval when both views derive from the same immutable,
 authority-safe assertion snapshot.
+
+The convergence-gated independent architecture/methodology rereview returned
+**PASS** at exact design head
+`438aaaa69d4b965de29ea967cc05f02274f56e57`. The repository owner approved that
+exact reviewed design in Issue #168 comment `5658274383`, recorded by
+`approval_ref`. **CYAX-0168 G0 is satisfied.** This approval-state
+synchronization is the mechanical consequence of that review and approval; it
+does not revise the approved design, waive CYAX-0168 G1–G4, or select or adopt a
+production backend. The next gate is **CYAX-0168 G1**.
 
 The exact-head rereview of
 `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` returned **PASS WITH REQUIRED
@@ -1376,10 +1385,10 @@ T4 alone cannot justify graph adoption for current CYAxiverse scale.
 
 ## Proposed thresholds and deterministic classifier
 
-These thresholds remain proposals pending owner approval. A **query family** is
-exactly one frozen Q ID; graph-shaped families are Q03/Q06/Q07/Q09,
-relational families are Q01/Q04/Q12, semantic/ranking families are
-Q02/Q10/Q11, and neutral families are Q05/Q08. Q07 is the preregistered
+These owner-approved thresholds remain preregistered for later execution. A
+**query family** is exactly one frozen Q ID; graph-shaped families are
+Q03/Q06/Q07/Q09, relational families are Q01/Q04/Q12, semantic/ranking families
+are Q02/Q10/Q11, and neutral families are Q05/Q08. Q07 is the preregistered
 critical impact-analysis family.
 
 For a fresh decision instance/backend, the query-instance statistic is the
@@ -1613,10 +1622,10 @@ The minimum truth-table rows and exact outcomes are:
 Resource/timeout rows retain the separate precedence table and cannot be
 overridden by these performance rows.
 
-## Convergence-gated exact-head rereview
+## Convergence-gated exact-head rereview record
 
-The next independent rereview is bounded to whether this preregistration is
-ready for repository-owner decision and CYAX-0168 G0. A new finding blocks only
+The independent rereview was bounded to whether this preregistration was ready
+for repository-owner decision and CYAX-0168 G0. A finding blocked only
 when the reviewer demonstrates at least one of:
 
 1. two competent conforming implementations can materially diverge in fixtures,
@@ -1637,6 +1646,8 @@ demonstrated criterion 1–5 violation; **FAIL / REDESIGN** requires a fundament
 architecture defect. CYAX-0168 G0 freezes how later G1 success or failure is
 decided; it does not guarantee statistical precision, a campaign within 48
 hours, approved-host Ladybug smoke, resource feasibility, or T4 execution.
+The convergence-gated rereview returned **PASS** at exact head
+`438aaaa69d4b965de29ea967cc05f02274f56e57`.
 
 ## Requirements and gates
 
@@ -1658,8 +1669,10 @@ hours, approved-host Ladybug smoke, resource feasibility, or T4 execution.
 Acceptance requires independent architecture/methodology rereview and owner
 approval citing the exact head, passed K1–K12 audit, backend pin, host,
 workload, repetition candidates/ratification rule, envelope, and thresholds.
-`approval_ref: null` or
-any unresolved normative choice stops implementation.
+The independent rereview returned **PASS** at exact head
+`438aaaa69d4b965de29ea967cc05f02274f56e57`, and the repository owner approved
+that exact design in Issue #168 comment `5658274383`. The non-null
+`approval_ref` records that decision. **CYAX-0168 G0 is satisfied.**
 
 ### CYAX-0168 G1 — frozen inputs and smoke
 
@@ -1688,9 +1701,10 @@ corrupt evidence is Inconclusive/invalid and blocks T4.
 Run only under the five-part T4 gate, then apply the approved deterministic
 classifier. Production adoption remains separate.
 
-## Open owner decisions
+## Approved G0 scope and preserved G1 conditions
 
-Before benchmark implementation or execution, the repository owner must:
+The exact-head owner approval resolves these G0 design choices while preserving
+their stated G1 conditions:
 
 1. approve or amend the closed enums, predicate signatures, Claim/literal
    mechanism, authority derivation, time rules, and `RetrievalBundle` v1;
@@ -1715,7 +1729,7 @@ graph, general scientific ontology, scientific/package behavior, public API,
 persisted scientific schema, version change, CYAX-0166 revision, or production
 backend adoption is authorized here.
 
-This S2 work completes only after a later approved implementation/execution
-passes CYAX-0168 G0–G3 (and G4 if eligible), publishes replayable evidence, and
-returns the classification to #162. This repair stops before independent
-rereview and approval.
+This S2 work completes only after the approved implementation/execution passes
+CYAX-0168 G1–G3 (and G4 if eligible), publishes replayable evidence, and returns
+the classification to #162. This synchronization records the satisfied
+CYAX-0168 G0 gate only; **CYAX-0168 G1** is next.

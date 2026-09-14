@@ -2,15 +2,17 @@
 
 ## Status and sequencing
 
-Draft final bounded rereview repair only. Exact head
+Approved; CYAX-0168 G0 is satisfied. The convergence-gated independent
+architecture/methodology rereview returned **PASS** at exact design head
+`438aaaa69d4b965de29ea967cc05f02274f56e57`, and the repository owner approved
+that exact design in Issue #168 comment `5658274383`. Exact earlier head
 `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` received **PASS WITH REQUIRED
 REVISIONS**; the common provenance architecture, B2, main B4, and B5 condition
 3 passed, and the residual C1–C4 findings are repaired here. This plan exposes
 the later execution sequence but
 does not authorize benchmark code, fixtures, dependencies, timing, or resource
 runs. The independent K1–K12 source audit has passed and is not reopened.
-Architecture/methodology rereview and owner approval of the new exact revision
-remain CYAX-0168 G0 prerequisites.
+**CYAX-0168 G1 is the next gate.**
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 and its B1–B5 repair remain recorded as prior rereview history.
 
@@ -68,12 +70,6 @@ and its B1–B5 repair remain recorded as prior rereview history.
     the approved classifier,
     independently review the evidence, and return a bounded result
     to #168/#162 without production adoption.
-15. Before owner approval, obtain a convergence-gated independent exact-head
-    rereview. A blocker must demonstrate implementation/classification
-    divergence, post-result discretion, authority/provenance/correctness
-    violation, or a false guarantee under the five spec criteria; lesser notes
-    are non-blocking implementation, G1-validation, or future-refinement items.
-
 Later CYAX-0168 G1 may legitimately fail because statistical precision is
 inadequate, the projected campaign exceeds 48 hours, approved-host Ladybug smoke
 fails, or the resource envelope is infeasible. Such an experimental result
