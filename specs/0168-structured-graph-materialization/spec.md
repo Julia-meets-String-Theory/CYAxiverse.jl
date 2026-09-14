@@ -3,14 +3,14 @@ spec_id: CYAX-0168
 title: Structured versus graph provenance materialization benchmark
 issue: 168
 class: S2
-status: approved
+status: draft
 workstream: Infrastructure
 parent: 162
 depends_on: [163, 117]
 created: 2026-09-13
 last_reviewed: 2026-09-14
-review_required: CYAX-0168 G0 satisfied; CYAX-0168 G1-G4 remain required at their corresponding lifecycle gates
-approval_ref: "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/168#issuecomment-5668898317"
+review_required: independent generator-contract rereview and explicit owner approval for CYAX-0168 G0; CYAX-0168 G1-G4 remain required at their corresponding lifecycle gates
+approval_ref: null
 ---
 
 # CYAX-0168 — Structured versus graph provenance materialization benchmark
@@ -47,14 +47,26 @@ host/process validity. A subsequent independent bounded rereview of this
 repaired host-portable design at exact head
 `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**. That verdict is
 technical evidence for its exact design head only; it did not by itself create
-owner authority. The repository owner has since explicitly approved CYAX-0168
-Decisions 1–7, covering all ten pending choices below, in the new valid Issue
-#168 comment `5668898317`, which is `approval_ref`. **CYAX-0168 G0 is
-satisfied.** That approval does not merge PR #169, authorize production
-adoption, waive G1–G4, guarantee G1 success, or authorize automatic
-FalkorDBLite fallback. **CYAX-0168 G1 is the next gate and has not yet been
-executed.** No benchmark implementation, calibration, smoke execution, or
-fixture/decision-fixture access is authorized by this synchronization.
+owner authority for this amendment. The prior generator-2.2 design was
+explicitly approved by the repository owner in Issue #168 comment `5668898317`;
+that approval remains valid historical evidence for the prior exact design, but
+it is not approval of this amended generator-2.3 contract. A later G1 attempt
+at failed head `33f74af29710c92a762cc1edad8858a83b323b7c` returned
+**NOT SATISFIED — preregistration/common-contract defect** because the approved
+2.2 prose left phase-2 component ordering and `depends_on` chain direction
+identity-bearing choices unspecified. The separately observed primary phase-3
+candidate-vector and independent phase-5 isolation findings are implementation
+nonconformances, not the causal G0 defect. **CYAX-0168 G0 is NOT SATISFIED for
+this amended contract; CYAX-0168 G1 is NOT AUTHORIZED; CYAX-0168 G2–G4 are NOT
+ENTERED.** The current amended specification is **DRAFT** and
+`approval_ref` is null. No benchmark implementation, calibration, smoke
+execution, or fixture/decision-fixture access is authorized by this amendment.
+
+The failed G1 report and generator-independence comparison remain immutable
+2.2 evidence. This amendment proposes generator `cyax-0168-scale-2.3` and
+requires a fresh independent rereview before an explicit owner decision. The
+prior approval is preserved as history and is not silently converted into
+approval of version 2.3.
 
 The exact-head rereview of
 `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` returned **PASS WITH REQUIRED
@@ -596,13 +608,16 @@ the registry is part of frozen gold and may not be inferred from Claim text.
 
 ### F-scale generator
 
-Generator version `cyax-0168-scale-2.2` is a fully specified, scientifically
-inert project-record generator. Version 2.2 supersedes 2.1 because the source
-bytes now state each evidenced assertion explicitly; changing those bytes under
-the old version would be a silent identity change. It uses no runtime RNG.
+Generator version `cyax-0168-scale-2.3` is the proposed fully specified,
+scientifically inert project-record generator. Version 2.3 supersedes 2.2
+because G1 demonstrated that the 2.2 prose permitted more than one
+identity-bearing output; selecting one canonical interpretation changes the
+normative identity algorithm. It uses no runtime RNG. Version 2.2 remains the
+historical generator under which the failed G1 evidence was produced and is not
+silently repaired in place.
 
 The only PRF call is
-`SHA256(frame(['cyax-gen-2.2', seed, profile_id, purpose, ordinal, counter]))`.
+`SHA256(frame(['cyax-gen-2.3', seed, profile_id, purpose, ordinal, counter]))`.
 `seed`, `ordinal`, and `counter` are nonnegative integers; `profile_id` and
 `purpose` are the exact ASCII tokens below. `ordinal` is the zero-based position
 within the named phase, and `counter` starts at zero for each choice. No other
@@ -642,16 +657,25 @@ rejection predicate. Counter overflow above `2^64-1` fails generation.
 Candidate removal, modulo-before-rejection, little-endian digest interpretation,
 and implementation-named purpose strings are forbidden.
 
-Phase 3 visits source blocks in primary-ID order. Its ordinary candidate vector
-is every other nonisolated WorkItem in the source component, primary-ID sorted;
-its cross-component vector is every nonisolated WorkItem outside that component,
-primary-ID sorted. Phase 8 constructs one vector of all same-block,
+Phase 3 visits source blocks in `block_primary_order`. The ordinary
+`dependency_target` candidate vector excludes the subject WorkItem before PRF selection
+and contains every other nonisolated WorkItem in the source component, primary-ID sorted; its
+cross-component vector is every nonisolated WorkItem outside that component,
+primary-ID sorted. The self-edge rejection predicate remains part of the closed
+rejection contract, but it must not be used as a substitute for excluding the
+subject from the ordinary candidate vector. Phase 8 constructs one vector of all same-block,
 signature-valid `concerns` pairs whose subject and object differ, ordered as
 above. An already present triple is handled only by the applicable exhaustive
 post-PRF rejection row.
 No other generator branch is stochastic-looking or invokes the PRF.
 
-The generator uses namespace `cyax-0168-synthetic-v2.2`. Its manifest registers
+The generator uses namespace `cyax-0168-synthetic-v2.3`. The generator-version
+manifest fields are closed as `generator_name="cyax-0168-scale-2.3"`,
+`generator_version="2.3"`, `prf_domain="cyax-gen-2.3"`,
+`synthetic_namespace="cyax-0168-synthetic-v2.3"`,
+`source_locator_version="/scale/2.3/"`, and
+`authority_derivation_rule_id="synthetic_fixture_v2.3"`; every identity-bearing
+field must use these 2.3 values. Its manifest registers
 `synthetic.block_claim` as literal type `text` with semantic slot
 `synthetic_fixture_block_statement`. For block ordinal `b` and role ordinal
 `r`, every Entity canonical source identity is the framed array
@@ -659,9 +683,9 @@ The generator uses namespace `cyax-0168-synthetic-v2.2`. Its manifest registers
 `synthetic.block_claim`; its literal value is the exact ASCII string
 `block=<b>;profile=<profile_id>;seed=<seed>` with base-10 ordinals and no
 padding. Every generated Source has kind `synthetic_fixture`, locator
-`cyax://0168/scale/2.2/<tier>/<profile_id>/<seed>/block/<b>/base`, and
+`cyax://0168/scale/2.3/<tier>/<profile_id>/<seed>/block/<b>/base`, and
 exact source bytes equal to canonical JSON of the sorted-key object
-`{"block":b,"generator":"cyax-0168-scale-2.2","profile":profile_id,"seed":seed,"tier":tier}`
+`{"block":b,"generator":"cyax-0168-scale-2.3","profile":profile_id,"seed":seed,"tier":tier}`
 followed by one LF. Its object digest/byte count and `source_revision_id` follow
 the common rules. Generated `source_event_at` is null and `observed_at` and
 `asserted_at` are exactly `2000-01-01T00:00:00.000000Z`; ordinary assertions
@@ -692,7 +716,7 @@ follow the same subject-block rule.
 
 Synthetic source-revision records use null actor ID, login, author association,
 event/state fields, and role evidence; `authority_class=ordinary_record`,
-`authority_derivation_rule_id=synthetic_fixture_v2.2`, and no additional
+`authority_derivation_rule_id=synthetic_fixture_v2.3`, and no additional
 metadata. Each block has exactly one base Source entity and one base source
 revision with the base locator/bytes above. The base revision is not assertion
 provenance. Every surviving assertion has exactly one additional provenance
@@ -700,11 +724,11 @@ revision of its subject block's Source entity. Its zero-based global
 `assertion_ordinal=a` is assigned in construction order: all base motifs in
 block/local order, then every added assertion in phase order; removed phase-3
 assertions leave gaps and are absent from the final snapshot. The locator is
-`cyax://0168/scale/2.2/<tier>/<profile_id>/<seed>/block/<b>/assertion/<a>` and
+`cyax://0168/scale/2.3/<tier>/<profile_id>/<seed>/block/<b>/assertion/<a>` and
 the exact bytes are sorted-key canonical JSON plus LF:
 
 ```json
-{"assertion_ordinal":a,"generator":"cyax-0168-scale-2.2","literal_identity":literal_id_or_null,"object_identity":object_id_or_null,"predicate":predicate,"profile":profile_id,"seed":seed,"subject_identity":subject_id,"tier":tier}
+{"assertion_ordinal":a,"generator":"cyax-0168-scale-2.3","literal_identity":literal_id_or_null,"object_identity":object_id_or_null,"predicate":predicate,"profile":profile_id,"seed":seed,"subject_identity":subject_id,"tier":tier}
 ```
 
 Exactly one of `object_identity` and `literal_identity` is non-null. The
@@ -747,19 +771,46 @@ assertion slots are filled with profile-neutral
 `concerns` evidence in ordinal order. Exact tier counts and all invariants must
 hold or generation fails.
 
-For `B = entity_count / 10`, the ordered post-motif phases are executable:
+For `B = entity_count / 10`, define one canonical block ordering used by every
+phase and every identity-bearing construction ordinal. For each block `b`,
+
+```text
+block_key(b) = entity_id of role-0 WorkItem belonging to block b
+block_primary_order = ascending primary-ID byte order of block_key(b)
+```
+
+The primary-ID byte ordering is the same canonical byte ordering defined for
+entity IDs elsewhere in this contract. No implementation iteration order or
+numeric block ordinal may substitute for `block_primary_order`. In particular,
+“highest-ID blocks” in phase 1 means the highest `block_key` values in this
+ordering, “consecutive” in phase 2 means contiguous slices of this ordering,
+and “source blocks in primary-ID order” in phase 3 means this same ordering.
+
+The ordered post-motif phases are executable:
 
 1. Mark the highest-ID `floor(isolated_rate × B)` blocks isolated; they may
    contain internal motif edges but are excluded from cross-block phases.
-2. Partition the other blocks into consecutive components of
-   `max(path_depth + 1, 64)` blocks, with a shorter final component. Within each
-   component, first add a WorkItem `depends_on` chain of exactly
-   `min(path_depth, component_size - 1)` edges.
+2. Let the ordered nonisolated block sequence be
+   `B0, B1, ..., B(n-1)`, and set
+   `component_capacity = max(path_depth + 1, 64)`. Components are exactly the
+   contiguous slices `[B0 ... B(component_capacity-1)]`,
+   `[Bcomponent_capacity ... B(2*component_capacity-1)]`, and so on, with only
+   the final component permitted to be shorter. Component boundaries are
+   determined before any phase-2 chain assertion is emitted. No hash-map order,
+   construction-order grouping, numeric block-ordinal grouping, or other
+   implementation-defined ordering is conforming unless it produces exactly
+   these slices. Within each component, let its WorkItems in component order be
+   `w0, w1, ..., w(m-1)`, set `k = min(path_depth, m - 1)`, and emit exactly
+   `k` fixed-chain assertions in ascending `j` order:
+   `w(j+1) depends_on w(j)` for `j = 0, 1, ..., k-1`. Thus the subject is the
+   later WorkItem, the object is the immediately previous WorkItem, and the
+   chain construction order is ascending `j`. No reverse-direction
+   interpretation is conforming.
 3. Add further cross-block `depends_on` assertions until the dependency phase
    contains exactly `min(dependency_fanout × connected_blocks, 30 × B)` edges.
    Number only these additional positions from zero after the fixed chain
    edges. Source block at position `i` is connected block
-   `i mod connected_blocks` in primary-ID order. The first
+   `i mod connected_blocks` in `block_primary_order`. The first
    `floor(cross_link_rate × dependency_quota)` additional positions use
    `cross_component_dependency_target`; every later position uses
    `dependency_target`. In either call `ordinal=i`. The former selects from the
@@ -779,10 +830,13 @@ For `B = entity_count / 10`, the ordered post-motif phases are executable:
    met, generation fails. The exact removed assertion IDs are recorded in the
    generator trace; no chain edge is replaced. A cycle never enters
    supersession.
-5. Partition the lowest-ID still-eligible WorkItems into as many disjoint
-   chains of exactly `supersession_depth` as fit; add one `supersedes` assertion
-   between consecutive members. A remainder shorter than the declared depth is
-   unused. The new member always supersedes the previous member.
+5. `still-eligible WorkItems` excludes every WorkItem in a phase-1 isolated block;
+   equivalently, it contains WorkItems in nonisolated blocks only. Partition the
+   lowest-ID still-eligible WorkItems into as many disjoint chains of exactly
+   `supersession_depth` as fit; add one `supersedes` assertion between
+   consecutive members. A remainder shorter than the declared depth is unused.
+   The new member always supersedes the previous member. Phase-1 isolated
+   WorkItems remain excluded from phase-5 cross-block supersession.
 6. Pair the lowest-ID `2 × floor(dispute_rate × B)` Claims; add one
    `contradicts` assertion from the second Claim in each pair to the first. The
    base evidence continues to support both, so the evaluator sees a real
@@ -803,11 +857,17 @@ cycle count, parallel provenance, isolated blocks, predicate signatures,
 referential integrity, and total counts.
 
 Generator acceptance is byte-level: two independent implementations supplied
-only with generator version 2.2, tier, profile, and seed must produce identical
-complete canonical snapshot records and the same logical snapshot checksum.
-Topology/count checks alone do not pass. The version is bumped from 2.1 because
-source-direct provenance bytes now state the assertion fact and the PRF domains
-and rejection procedure are closed.
+only with the approved generator-2.3 contract, tier, profile, and seed must,
+without implementation choice, determine identical complete source bytes,
+identical Entity records, identical Literal records, identical SourceRevision
+records, identical Assertion records, identical construction trace, identical
+assertion IDs, and an identical logical snapshot checksum. Any identity-bearing
+unspecified choice fails the contract. Topology/count checks alone do not pass.
+The version is bumped from 2.2 because the amended block order, phase-2
+component slices and chain direction, and explicit phase-3/phase-5 membership
+rules close the identity-bearing choices exposed by G1; source-direct
+provenance bytes, PRF domains, and rejection procedure remain closed under the
+new version.
 
 Topology is separate from seed. Each generated snapshot also contains the
 low/median/high query-selectivity strata frozen below, so selectivity is not
@@ -882,8 +942,8 @@ Semantic answers are:
 Q11 has no general "action" category. Its eligible Claim class is exactly the
 generator-owned `synthetic.block_claim` registration with semantic slot
 `synthetic_fixture_block_statement`; all other Claim keys/slots are excluded.
-The proposition is the block statement literal already frozen by generator
-2.2. `depends_on`, `contradicts`, and `supersedes` have their common closed-model
+The proposition is the block statement literal frozen by generator 2.3.
+`depends_on`, `contradicts`, and `supersedes` have their common closed-model
 meaning and create no benchmark-specific ontology. The selector population,
 gold evaluator, and conformance fixtures use this same slot equality test.
 
@@ -988,7 +1048,7 @@ rereview, and owner approval before any implementation or measurement.
 
 ## Calibration and fairness controls
 
-A separate non-decision corpus uses generator version 2.2 at every T0–T3
+A separate non-decision corpus uses generator version 2.3 at every T0–T3
 decision scale. `Ck` has exactly the entity/assertion dimensions of `Tk` but
 uses only the independent calibration seeds below; no calibration seed appears
 in F-real or T0–T4.
@@ -1120,7 +1180,7 @@ any of them is not a CYAX-0168 campaign:
 | Portable contract | Content |
 | --- | --- |
 | semantic | R-001–R-004, R-007, R-008: the registered Claim/literal model, assertion identity and time, the semantic snapshot projection, the shared semantic evaluator, canonical `RetrievalBundle` v1, and canonical successor deltas |
-| workload | R-005, R-006: generator 2.2 fixtures, the T0–T3 and C0–C3 scales, the Q01–Q12 decision-instance table, frozen gold, and the raw→instance→family/profile→paired-CI aggregation |
+| workload | R-005, R-006: generator 2.3 fixtures, the T0–T3 and C0–C3 scales, the Q01–Q12 decision-instance table, frozen gold, and the raw→instance→family/profile→paired-CI aggregation |
 | measurement | R-009: paired same-host S-versus-G execution, balanced pair order, the one-process/no-descendant/one-connection/one-query-execution-worker topology, fresh and warm cache modes, `preconditioned-warm-cache` conditioning semantics, pre/post complete-manifest immutability, monotonic wall time, fresh-process peak-RSS accounting, and logical-versus-allocated storage accounting |
 | statistical | R-009: the repetition counts, independent units, nearest-rank p95 estimator, paired block-level BCa resampling, precision ratification, and the 48-hour campaign ceiling |
 | classifier | R-010: the hard gates, capped relative memory/disk allowances, latency thresholds and precedence, joint-CI reachable outcomes, and the five-part conditional T4 gate |
@@ -1291,7 +1351,7 @@ Simulation draw `j` uses the first acceptable 256-bit big-endian SHA-256 value
 from `frame(['cyax-0168-ratification-v1', simulation_seed, mode, surface_id,
 campaign_ordinal, draw_ordinal, counter])`; exact ASCII `mode` tokens are
 `empirical`, `lognormal`, and `two_component_tail`. Reduction to an index uses
-the generator 2.2 rejection algorithm. For continuous uniforms use
+the generator 2.3 rejection algorithm. For continuous uniforms use
 `u=(x+0.5)/2^256`. Draw/campaign ordinals and counters are zero-based. The
 ratification manifest fixes one distinct integer `simulation_seed` per
 `(mode,surface_id,cache_mode)` before measurement.
@@ -2000,32 +2060,30 @@ pending choices below.
 | R-002 Immutable evidence/identity | Complete semantic assertion IDs, content-addressed source bundle, semantic snapshot projection, separate physical/build checksums, freshness, and atomic publication fail closed. | State-change ID, label-only stability, rule-version change, rebuild, collision, tamper, stale, unavailable-source, and crash tests. |
 | R-003 Fair materializations | Normalized indexed S and pinned G derive only from the same snapshot. | DDL/index/config/query-plan review and complete-export equality. |
 | R-004 Source-correct F-real | Audited K1–K12 distinguish historical evidence from current gates. | Preserve the passed independent source/anchor audit; no chronology rewrite. |
-| R-005 Deterministic scale | Byte-complete generator 2.2 produces the frozen profile/seed matrix exactly. | Two independent implementations reproduce complete records/checksum, exact source-direct statement bytes, PRF choices, rejection retries, cycle-removal trace, and invariants. |
+| R-005 Deterministic scale | Byte-complete generator 2.3 produces the frozen profile/seed matrix exactly. | Two independent implementations reproduce complete records/checksum, exact source-direct statement bytes, PRF choices, rejection retries, cycle-removal trace, and invariants. |
 | R-006 Frozen workload | The Q01–Q12 population/selector/parameter/role table, gold, and exact aggregation precede backend implementation. | Invalid-stratum/tie tests, manifest/gold review, and raw-to-classifier statistic tests. |
 | R-007 RetrievalBundle v1 | Both adapters return complete, literal-reference-closed canonical objects and deterministic directional paths. | Empty/order/unique/no-dangling tests, complete serialization/compiler validation, and gold/S/G equality. |
 | R-008 Successor updates | N + a non-authoritative delta with exact removals yields independently frozen immutable N+1. | Dependency insert/remove, replacement, supersession, complete export, crash, rollback, and isolation tests. |
 | R-009 Preregistered measurement | Scale-matched calibration/non-access, initial campaign host manifest and Energy Mode, one query-execution worker, paired fairness, pre/post-manifest non-mutating cache conditioning, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, fresh-process `ru_maxrss`, Mach diagnostics, and logical/allocated/APFS resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache stabilization and mutation detection, statistical and 48-hour duration ratification, power/Energy-Mode/thermal/memory-pressure/page-out/swap/descendant audit, both competing-load branches, APFS zero-sharing/rebuild/exclude cases, and paired block-level analysis validation. |
 | R-010 Deterministic decision | Exact hard gates, capped memory/disk relative rules, cache-mode conjunction, family/profile quantifiers, outcomes, valid resource-breach table including pair-level cache capacity, joint CI uncertainty, direct-observation T4 condition 3, and logical/allocated deterministic projected-headroom condition 4 are encoded. | Fresh/warm, capped-allowance boundaries, family/profile, G/S/pair-level breach and timeout, reachable-outcome CI cases, T4 logical/allocated/memory/disk projection tables, classifier tests, and owner approval. |
 
-### CYAX-0168 G0 — satisfied by owner approval
+### CYAX-0168 G0 — NOT SATISFIED for the amended contract
 
-Acceptance requires an independent architecture/methodology rereview and
-an explicit owner decision citing the exact repaired head, passed K1–K12 audit,
-backend pin, the host-portable execution contract with its initial macOS
-reference host manifest, workload, repetition candidates/ratification rule,
-envelope, and thresholds. The independent rereview **PASS** at exact head
-`438aaaa69d4b965de29ea967cc05f02274f56e57` remains evidence for that earlier
-technical design. The independent bounded rereview **PASS** at exact head
-`f2283f6a1f58600d05ed0a50535d07013ac6fb2c` is technical evidence for the
-current repaired host-portable design; it did not by itself create owner
-authority. Issue #168 comment `5658274383` remains preserved as history but
-stays explicitly superseded as owner-approval evidence because it lacked a
-valid owner-decision checkpoint; the correction is recorded in
-`authority-correction-a.md` and Issue #168 correction comment `5664014428`.
-The repository owner has since explicitly approved CYAX-0168 Decisions 1–7,
-covering all ten pending choices below, in the new valid Issue #168 comment
-`5668898317`. `approval_ref` is that comment. **CYAX-0168 G0 is satisfied.**
-This approval does not merge PR #169, authorize production adoption, waive
+The prior generator-2.2 contract had an independent architecture/methodology
+rereview and explicit owner approval at the exact repaired host-portable design
+head. Issue #168 comment `5668898317` remains valid historical evidence for
+that prior G0 decision and for the unchanged host, workload, measurement,
+statistical, classifier, resource, and Ladybug choices below. It is not
+approval of this generator-2.3 amendment. The prior technical rereview at
+`438aaaa69d4b965de29ea967cc05f02274f56e57` and the bounded rereview at
+`f2283f6a1f58600d05ed0a50535d07013ac6fb2c` remain technical evidence for their
+exact heads only. The later G1 attempt demonstrated a preregistration/common-
+contract defect in generator 2.2, so the amended specification is draft and
+requires a fresh independent generator-contract rereview and explicit owner
+decision citing the amended exact head. **`approval_ref` is null and CYAX-0168
+G0 is NOT SATISFIED for generator 2.3.**
+
+This amendment does not merge PR #169, authorize production adoption, waive
 G1–G4, guarantee G1 success, or authorize automatic FalkorDBLite fallback.
 
 ### CYAX-0168 G1 — frozen inputs and smoke
@@ -2037,8 +2095,9 @@ S/G clean-build/rebuild/reopen/tamper/crash smoke checks. Neither decision
 fixtures nor their derived identities may be accessed before both G0 and these
 calibration-only G1 prerequisites pass.
 Source asymmetry, runtime download, or nondeterministic export stops.
-**CYAX-0168 G0 is satisfied; CYAX-0168 G1 is the next gate under a later
-execution dispatch and has not yet been executed.**
+**CYAX-0168 G0 is NOT SATISFIED for the amended contract; CYAX-0168 G1 is NOT
+AUTHORIZED; and CYAX-0168 G2–G4 are NOT ENTERED.** No calibration or decision
+fixture may be generated or accessed in this amendment.
 
 ### CYAX-0168 G2 — semantic correctness
 
@@ -2057,15 +2116,15 @@ corrupt evidence is Inconclusive/invalid and blocks T4.
 Run only under the five-part T4 gate, then apply the reviewed and owner-approved
 deterministic classifier. Production adoption remains separate.
 
-## Owner-decided choices (Decisions 1–7)
+## Prior owner-decided choices (historical generator-2.2 approval)
 
-Every item in this section has been decided by explicit repository-owner
-approval. The independent bounded rereview of the exact repaired head
-`f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**; that verdict was
-technical evidence only and was not itself owner authority. The repository
-owner has since explicitly approved CYAX-0168 Decisions 1–7 exactly as
-recorded in Issue #168 comment `5668898317` (`approval_ref`), which decides
-all ten items below:
+Every item in this section was decided by explicit repository-owner approval
+for the prior generator-2.2 design. The independent bounded rereview of the
+exact repaired head `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**;
+that verdict was technical evidence only and was not itself owner authority.
+Issue #168 comment `5668898317` records the prior owner decision and remains
+historical evidence. The choices below remain unchanged by the proposed
+generator-2.3 amendment, but they do not approve it:
 
 1. approve the host-portable execution contract — no authoritative benchmark
    machine; each campaign freezes one admissible host manifest, runs S and G on
@@ -2102,17 +2161,20 @@ all ten items below:
    `df58ee387c4e5e9f02bb9d518636b52cd4abe5f7` as the sole graph candidate,
    subject to a fresh per-campaign-host offline artifact and smoke gate.
 
-This owner decision satisfies the owner-decision portion of CYAX-0168 G0. It
-does not merge PR #169, authorize production adoption, waive G1–G4, guarantee
-G1 success, or authorize automatic FalkorDBLite fallback.
+This prior owner decision satisfied the owner-decision portion of the prior
+generator-2.2 CYAX-0168 G0 only. It does not satisfy G0 for generator 2.3,
+merge PR #169, authorize production adoption, waive G1–G4, guarantee G1
+success, or authorize automatic FalkorDBLite fallback.
 
 ## Non-scope and completion
 
 No benchmark code, generated fixture/database, timing/resource run, package
 dependency, fresh-agent cohort, transcript ingestion, vector search, Julia code
 graph, general scientific ontology, scientific/package behavior, public API,
-persisted scientific schema, version change, CYAX-0166 revision, or production
-backend adoption is authorized here.
+persisted scientific schema, package version change, CYAX-0166 revision, or
+production backend adoption is authorized here. The generator identity version
+change from 2.2 to the proposed 2.3 is the sole intended version change in
+this amendment.
 
 A single successful first campaign may support bounded experimental or Hybrid
 conclusions and may motivate bounded experimental or Hybrid integration work.
@@ -2123,7 +2185,7 @@ admissible host/environment plus the separate approvals named above.
 
 This S2 work completes only after a later approved implementation/execution
 passes CYAX-0168 G1–G3 (and G4 if eligible), publishes replayable evidence, and
-returns the classification to #162. The present lifecycle is: prior technical-
-review evidence preserved; owner approval recorded in Issue #168 comment
-`5668898317` (`approval_ref`); **CYAX-0168 G0 satisfied**; **CYAX-0168 G1 is
-the next gate and has not yet been executed**.
+returns the classification to #162. The present lifecycle is: prior generator-
+2.2 approval preserved as historical evidence; amended specification **DRAFT**;
+`approval_ref: null`; **CYAX-0168 G0 NOT SATISFIED for generator 2.3**;
+**CYAX-0168 G1 NOT AUTHORIZED**; and **CYAX-0168 G2–G4 NOT ENTERED**.

@@ -2,8 +2,24 @@
 
 ## Status and sequencing
 
-Approved authority/host repair; CYAX-0168 G0 is satisfied and CYAX-0168 G1 is
-the next gate under a later execution dispatch, not yet executed. The
+This plan now records a generator-2.3 normative amendment after a failed
+CYAX-0168 G1 attempt. The prior generator-2.2 G0 approval in Issue #168
+comment `5668898317` remains historical evidence for the prior exact design;
+it is not approval of this amendment. The G1 result at exact head
+`33f74af29710c92a762cc1edad8858a83b323b7c` was **NOT SATISFIED —
+preregistration/common-contract defect** because phase-2 component ordering
+and `depends_on` chain direction were not identity-determined. The separate
+phase-3 candidate-vector and phase-5 isolated-WorkItem findings are
+implementation nonconformances and are closed explicitly in the amendment.
+The current amended specification is **DRAFT**, `approval_ref` is null,
+CYAX-0168 G0 is **NOT SATISFIED**, CYAX-0168 G1 is **NOT AUTHORIZED**, and
+CYAX-0168 G2–G4 are **NOT ENTERED**. Return to G0 amendment and fresh
+independent rereview is required before an explicit owner decision; no new G1
+is authorized by this plan.
+
+The prior authority/host repair had recorded CYAX-0168 G0 as satisfied and G1
+as the next gate under a later execution dispatch. That historical status is
+superseded for the amended contract. The
 convergence-gated independent architecture/methodology rereview returned
 **PASS** at exact design head
 `438aaaa69d4b965de29ea967cc05f02274f56e57`; that verdict remains technical
@@ -19,11 +35,8 @@ does not authorize benchmark code, fixtures, dependencies, timing, or resource
 runs. The independent K1–K12 source audit has passed and is not reopened. The
 independent bounded rereview of the exact repaired head
 `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**; that verdict is
-technical evidence only and did not by itself create owner authority. The
-repository owner has since explicitly approved CYAX-0168 Decisions 1–7 in
-Issue #168 comment `5668898317` (`approval_ref`), satisfying CYAX-0168 G0.
-CYAX-0168 G1 is now the next gate; it requires a later execution dispatch and
-has not yet been executed.
+technical evidence only and did not by itself create owner authority for this
+amendment. The prior approval comment remains preserved as history.
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 and its B1–B5 repair remain recorded as prior rereview history.
 The independent macOS architecture/methodology rereview of exact head
@@ -44,9 +57,8 @@ dependency, a project-wide default backend, or a production commitment
 additionally requires independent replication on at least one further frozen
 admissible host/environment. The independent bounded rereview of the new exact
 repaired head `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**;
-the repository owner has since approved those choices as Decisions 1–7 in
-Issue #168 comment `5668898317`, satisfying CYAX-0168 G0. CYAX-0168 G1 is the
-next gate and has not yet been executed.
+that verdict and the prior owner approval are historical evidence only for the
+superseded contract. They do not approve this generator-2.3 amendment.
 
 1. Freeze the immutable F-real source bundle, Claim-key/type registry, owner
    actor/role evidence, and exact owner-decision-event registry while preserving
@@ -59,11 +71,19 @@ next gate and has not yet been executed.
 4. Implement exact canonical deltas with `remove_assertion_ids[]`; prove
    dependency insertion/removal, replacement, supersession, rollback, crash
    interruption, and independent full-build N+1 equality without tombstones.
-5. Implement generator 2.2's closed PRF-purpose registry and its exhaustive
-   per-purpose self/duplicate rejection table, with phase-4 cycles outside PRF
-   retries, assertion-stating synthetic provenance, and base versus
-   additional source-revision rules. Require a second independent implementation
-   to reproduce every byte, assertion identity, and complete snapshot checksum.
+5. Amend and later implement generator 2.3's closed PRF-purpose registry and
+   its exhaustive per-purpose self/duplicate rejection table. Freeze
+   `block_key(b)` as the role-0 WorkItem `entity_id`, use ascending primary-ID
+   byte order as `block_primary_order`, partition nonisolated blocks into exact
+   contiguous slices of `max(path_depth + 1, 64)`, and emit each fixed-chain
+   edge as `w(j+1) depends_on w(j)` in ascending `j` construction order. Keep
+   phase-4 cycles outside PRF retries, exclude the phase-3 subject before PRF
+   selection, exclude phase-1 isolated WorkItems from phase-5 supersession,
+   and preserve assertion-stating synthetic provenance and base versus
+   additional source-revision rules. Advance every generator identity domain
+   coherently from 2.2 to 2.3. Require a fresh independent implementation to
+   reproduce every byte, assertion identity, construction trace, and complete
+   snapshot checksum. This amendment does not authorize G1 execution.
 6. Freeze Q11 to the benchmark-local block-claim slot, Q02's query-local
    authority ordering, the Q01–Q12 decision-instance table, and independent
    gold; then implement the raw→instance→family/profile→paired-CI map.
@@ -130,7 +150,7 @@ preregistration defect or an owner proposes a normative amendment.
 | R-002 | complete semantic assertion IDs, `asserted_at`, content-addressed source bundle, semantic projection, physical/build checksums, freshness and atomic publishers | state-change ID, label-only stability, rule-version change, repeat-build identity, collision, tamper, stale/unavailable source and crash tests |
 | R-003 | normalized S and pinned minimal G over identical snapshot input | DDL/index/config/plan review, no backend authority flags, complete-export equality |
 | R-004 | F-real bundle, corrected Claim records, exact source anchors | preserve the passed independent K1–K12 audit; no chronology rewrite |
-| R-005 | byte-complete generator 2.2, closed PRF registry and exhaustive purpose-specific rejection rules, assertion-stating provenance, plus T0–T4 profile/seed manifests | two independent implementations reproduce every source byte, record, assertion ID, and logical checksum; self/duplicate/valid/filler retries, phase-4 cycle-removal trace, and invariants |
+| R-005 | byte-complete generator 2.3, canonical block order and phase-2 slices/direction, closed PRF registry and exhaustive purpose-specific rejection rules, assertion-stating provenance, plus unchanged T0–T4 profile/seed manifests | two independent implementations reproduce every source byte, record, assertion ID, construction trace, and logical checksum; self/duplicate/valid/filler retries, phase-4 cycle-removal trace, and invariants |
 | R-006 | exact Q11 slot, Q02 rank, Q01–Q12 selection table, reference evaluator, pre-backend instances and frozen gold | category exclusion, authority-order, population/selector/tie/parameter/invalid-role tests and deterministic gold checksums |
 | R-007 | S/G adapters and canonical literal-closed `RetrievalBundle` v1 serializer/compiler input | empty/order/unique/no-dangling/reference-closure tests plus gold, pairwise, and complete-bundle equality |
 | R-008 | canonical N→N+1 deltas with exact assertion-ID removals and independent full target | dependency insert/remove, replacement, supersession, target identity/export equality, crash/rollback/recovery and isolation tests |
