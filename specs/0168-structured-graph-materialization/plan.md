@@ -19,6 +19,10 @@ explicit owner choices in the Control Desk; only a valid later approval can
 satisfy CYAX-0168 G0 and authorize a new CYAX-0168 G1 dispatch.
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 and its B1–B5 repair remain recorded as prior rereview history.
+The independent macOS architecture/methodology rereview of exact head
+`e8aa76fafb0eb015af0aa1bba45381e3021beb83` returned **PASS WITH REQUIRED
+REVISIONS**. This repair is limited to its three blocking methodology findings;
+the next rereview is of the new exact repaired head.
 
 1. Freeze the immutable F-real source bundle, Claim-key/type registry, owner
    actor/role evidence, and exact owner-decision-event registry while preserving
@@ -43,14 +47,17 @@ and its B1–B5 repair remain recorded as prior rereview history.
    and C3→T3 non-decision calibration fixtures with their independent seeds;
    decision fixtures remain unmaterialized and inaccessible to either backend.
 8. Implement the exact macOS `preconditioned-warm-cache` helper/evidence
-   protocol, frozen
+   protocol, including ordered complete manifests before conditioning,
+   strongest supported non-mutating query modes, and full post-pair file-set/
+   logical/allocated-byte/hash/sparse/clone verification; implement the frozen
    empirical/lognormal/two-component calibration simulation, population
    rescaling and truth verification against the classifier's actual p95-derived
    estimands, statistical precision ratification, and exact scale-keyed
    campaign-duration categories; decision access remains prohibited.
 9. Implement S as normalized indexed SQLite with bidirectional indexes,
-   recursive CTE cycle/depth controls, one connection/thread, and complete
-   logical export.
+   recursive CTE cycle/depth controls, one connection and one query-execution
+   worker, and complete logical export. Freeze Ladybug to `THREADS=1` or its
+   exact documented equivalent.
 10. Once approved, on the exact frozen macOS ARM64 machine, freeze the complete
    Ladybug wheelhouse and repeat the offline smoke gate. If it fails, stop; any
    FalkorDBLite work requires an amended, rereviewed, owner-approved design.
@@ -61,8 +68,11 @@ and its B1–B5 repair remain recorded as prior rereview history.
    calibration-only evidence, preserve the smallest failure, and stop. Decision
    fixtures remain inaccessible until a separate CYAX-0168 G2 dispatch.
 12. Validate successor-snapshot transitions, independent clones, crash
-   interruption, rollback/recovery, single-process macOS accounting, context
-   identity,
+   interruption, rollback/recovery, fresh-process macOS `ru_maxrss` accounting,
+   named Mach diagnostics, logical/allocated storage accounting with one frozen
+   APFS inspection API/algorithm and zero-shared-extent rebuild-or-exclude behavior, frozen
+   Energy Mode, nominal thermal pressure, normal memory pressure, zero page-
+   out/swap-I/O deltas, process topology, context identity,
    the both-cache-mode classifier truth table, exact family/profile joint
    quantifiers, and exhaustive reachable-outcome evaluation over all crossing
    CI predicates on synthetic records.
@@ -70,8 +80,10 @@ and its B1–B5 repair remain recorded as prior rereview history.
    the exact frozen macOS host. Distinguish invalid controls from valid resource
    breaches and classify them by the frozen precedence.
 14. Evaluate T4 condition 3 from direct T3 observations and condition 4 from
-    the frozen T1–T3 monotone upper-envelope projection and exact `R<=0.75L`
-    headroom rule; run T4 only if all five preregistered conditions pass. Apply
+    the frozen T1–T3 monotone upper-envelope projection: logical materialization
+    against cache/RAM feasibility, allocated materialization against the capped
+    disk resource rule, and hard metrics against the exact `R<=0.75L` headroom
+    rule. Run T4 only if all five preregistered conditions pass. Apply
     the then-reviewed and owner-approved classifier,
     independently review the evidence, and return a bounded result
     to #168/#162 without production adoption.
@@ -93,8 +105,8 @@ preregistration defect or an owner proposes a normative amendment.
 | R-006 | exact Q11 slot, Q02 rank, Q01–Q12 selection table, reference evaluator, pre-backend instances and frozen gold | category exclusion, authority-order, population/selector/tie/parameter/invalid-role tests and deterministic gold checksums |
 | R-007 | S/G adapters and canonical literal-closed `RetrievalBundle` v1 serializer/compiler input | empty/order/unique/no-dangling/reference-closure tests plus gold, pairwise, and complete-bundle equality |
 | R-008 | canonical N→N+1 deltas with exact assertion-ID removals and independent full target | dependency insert/remove, replacement, supersession, target identity/export equality, crash/rollback/recovery and isolation tests |
-| R-009 | C0–C3 direct scale matches, calibration non-access freeze, stabilized cache helper, actual-p95 truth simulation, scale-keyed duration report, macOS machine manifest, paired runner and exact aggregation | scale-map/no-cross-scale-reuse, unequal-dispersion and p95-saving truth, pre-access hash, cache stabilization, precision and 48-hour thresholds, power/thermal/swap/descendant audit, paired block-level BCa and single-process resource accounting |
-| R-010 | resource/control disposition, both-mode classifier, exact family/profile quantifiers, joint CI reachable outcomes, thresholds/precedence, direct-observation T4 condition 3, and deterministic projected-headroom condition 4 | fresh/warm, joint-quantifier, G/S/both timeout/breach, five joint-CI cases, boundary, relational-Hybrid, T4 margin/projection/headroom tables, followed by owner approval |
+| R-009 | C0–C3 direct scale matches, calibration non-access freeze, pre/post-manifest non-mutating cache protocol, actual-p95 truth simulation, scale-keyed duration report, macOS machine/Energy-Mode manifest, one-query-execution-worker paired runner and exact aggregation | scale-map/no-cross-scale-reuse, unequal-dispersion and p95-saving truth, pre-access hash, cache stabilization and mutation invalidation, precision and 48-hour thresholds, power/Energy-Mode/thermal/memory-pressure/page-out/swap/descendant audit, both objective-detector and diagnostics-only competing-load branches, paired block-level BCa, fresh-process `ru_maxrss`, Mach diagnostics, and APFS zero-sharing/rebuild/exclude accounting |
+| R-010 | explicit hard gates, capped relative memory/disk rules, resource/control disposition, both-mode classifier, exact family/profile quantifiers, joint CI reachable outcomes, unchanged latency thresholds/precedence, direct-observation T4 condition 3, and logical-versus-allocated deterministic T4 condition 4 | fresh/warm, capped-allowance boundaries, APFS clone ambiguity, G/S/both timeout/breach, five joint-CI cases, relational-Hybrid, T4 logical/allocated projection/headroom tables, followed by owner approval |
 
 ## Escalation and stop conditions
 

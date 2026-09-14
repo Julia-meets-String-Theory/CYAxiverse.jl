@@ -32,11 +32,16 @@ comment remains part of the historical record; the durable correction is
 recorded in `authority-correction-a.md` and on Issue #168.
 
 This revision restores lifecycle truth and proposes a macOS ARM64 execution
-contract that the owner can actually provide. The revised host, cache,
-resource-accounting, and machine-relative-envelope design requires a fresh
-bounded independent architecture/methodology rereview and explicit owner
-choices. **CYAX-0168 G0 is not satisfied. CYAX-0168 G1 is not authorized.** No
-benchmark implementation or fixture access may begin from this draft.
+contract that the owner can actually provide. The independent macOS
+architecture/methodology rereview of exact head
+`e8aa76fafb0eb015af0aa1bba45381e3021beb83` returned **PASS WITH REQUIRED
+REVISIONS**. This bounded repair closes only its three blocking findings:
+logical/allocated resource accounting with capped excess allowances,
+post-measurement cache-manifest immutability, and operational macOS
+host/process validity. The repaired design still requires exact-head rereview
+and explicit owner choices. **CYAX-0168 G0 is not satisfied. CYAX-0168 G1 is
+not authorized.** No benchmark implementation or fixture access may begin
+from this draft.
 
 The exact-head rereview of
 `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` returned **PASS WITH REQUIRED
@@ -997,9 +1002,15 @@ change schemas, queries, configurations, repetition counts, truth surfaces, or
 category mappings. A future claim of blinding would require a separately
 reviewed commitment/reveal protocol.
 
-The controlled primary comparison uses one Python process, one connection, and
-one backend thread per query, with no child processes or concurrent benchmark
-work. It uses an identical snapshot parser, semantic evaluator, entity
+The controlled primary comparison uses one benchmark process, one connection,
+and one **query-execution worker**, with no descendants or concurrent benchmark
+workload. SQLite uses one process, one connection, and one calling/query-
+execution thread. Ladybug query execution is frozen to one worker with
+`THREADS=1` or its exact documented equivalent. Unavoidable in-process
+runtime/helper threads are permitted only when they do not execute the
+benchmark query in parallel; their configuration and count are recorded. A
+runtime is not rejected merely for owning housekeeping threads. It uses an
+identical snapshot parser, semantic evaluator, entity
 resolution, and context compiler, no vector search,
 no graph-native FTS, all indexes built before timing, disabled network, frozen
 thread-count environment variables, and checkpointed steady state. macOS does
@@ -1020,13 +1031,17 @@ run because the revised contract assumes no privileged cache operation. Record
 the macOS-available minor and major page-fault counters for every process, but
 do not treat them as proof of complete filesystem-cache residency.
 
-Immediately before each paired primary measurement, a fresh, version-hashed
-`cache_condition` helper process performs paired conditioning passes. In each
-pass it sequentially reads from byte zero through EOF every regular
-materialization file in the frozen backend manifests: data, index, checkpoint,
-and steady-state auxiliary files; WAL/shadow/spill files must be empty/absent at
-steady state or are included. It verifies each ordered `(relative_path,
-byte_count, sha256)`, uses an 8 MiB buffered read, closes every descriptor, and
+Immediately before conditioning for each paired primary measurement, freeze
+the ordered complete steady-state manifest. Its cache-identity projection is
+exactly `(relative_path, logical_bytes, sha256)` for each backend. Each complete
+record additionally freezes allocated bytes, file-set identity, sparse-file
+state, and clone/shared-block state under the resource-accounting protocol
+below. It includes every participating data, index, checkpoint, and auxiliary
+persistent file; nonempty WAL/shadow/spill files are included. A fresh,
+version-hashed `cache_condition` helper process then
+performs paired conditioning passes. In each pass it sequentially reads from
+byte zero through EOF every regular file in that frozen manifest, verifies the
+ordered tuple, uses an 8 MiB buffered read, closes every descriptor, and
 records bytes read, monotonic elapsed nanoseconds, throughput, exit status, and
 available major/minor faults for each backend.
 
@@ -1035,14 +1050,29 @@ After at least three complete passes and at most ten, conditioning succeeds at
 the first pass where, for each backend separately, the last three throughput
 values have `(maximum-minimum)/median <= 0.05`. Failure to stabilize by pass ten
 invalidates the pair. The helper exits before measurement; no other deliberate
-file-touching process may intervene. Every new pair repeats the complete
-procedure. Missing files, digest/byte mismatch, short reads, nonzero exit,
-stabilization failure, power/thermal invalidity, or monitor gaps invalidate the
-pair. Major faults remain reported but are not a residency certificate.
+file-touching process may intervene. During the measured query pair, both
+materializations are open in the strongest supported read-only/non-mutating
+mode. Checkpoints, autovacuum or equivalent mutation, materialization writes,
+and index/schema changes are prohibited. A backend that cannot execute the
+frozen workload without persistent-file mutation has a methodology
+incompatibility.
 
-The combined steady-state materialization bytes must not exceed the proposed
-limit of 25% of frozen physical RAM. This is a conservative feasibility bound,
-not proof that every page is resident. The only permitted name is
+Immediately after each measured pair, enumerate the complete materialization
+file set again. Every frozen relative path, logical byte count, SHA-256,
+allocated byte count, file-set identity, sparse-file state, and detectable
+clone/shared-block state must match, and no new nonempty persistent WAL/shadow/
+spill/auxiliary file may appear. A changed file set, decision-bearing field,
+byte count, digest, sparse/clone state, new nonempty persistent auxiliary file,
+or persistent materialization write invalidates the entire pair. Every new pair
+repeats the complete procedure. A conditioning
+read failure or short read, nonzero helper exit, failure to stabilize by pass
+ten, host thermal/power/memory-pressure failure, objective competing-I/O-rule
+failure, or monitor gap also invalidates the pair. Page faults remain
+diagnostic only and neither prove nor disprove cache residency.
+
+The combined S+G `logical_materialization_bytes` must not exceed the proposed
+limit of 25% of frozen physical RAM. This is a conservative conditioning-
+feasibility bound, not proof that every page is resident. The only permitted name is
 `preconditioned-warm-cache`; `filesystem-cache-warm`, `fully resident`, and
 `OS-cold` are forbidden claims under this macOS protocol.
 
@@ -1054,18 +1084,35 @@ host, VM, container, privileged cache control, or remote service is assumed.
 The pre-execution manifest freezes the non-unique hardware configuration needed
 for replay: Apple SoC/model class, performance/efficiency core topology,
 physical RAM, macOS version/build, filesystem type and relevant mount behavior,
-benchmark-volume capacity and free bytes, Python, SQLite version and compile
+total benchmark-volume capacity and ordinary available volume capacity,
+Python, SQLite version and compile
 options, Ladybug wheel/commit/dependencies, libc/native runtimes, and
 measurement-tool versions. It excludes serial numbers, hostnames, account
 names, and other machine-unique identifiers.
 
-Primary runs require AC power, Low Power Mode disabled, nominal thermal state,
-one benchmark process/connection/thread, no benchmark descendants, and no
-concurrent user workload. A versioned monitor records power source, Low Power
-Mode, macOS thermal state, system page-outs/swap-ins/swap-outs, and competing
-process activity before, during, and after every paired block. A power-source
-change, non-nominal thermal state, enabled Low Power Mode, any page-out or swap
-I/O delta, an unexpected child process, or a monitor gap invalidates the pair.
+Primary runs require AC power and one exact macOS-supported non-low Energy Mode
+frozen for the complete campaign: `Automatic`, `High Power` where supported and
+selected, or another exactly named supported non-low setting. Low Power Mode
+is prohibited, but High Power is not mandatory when unavailable or unselected.
+The exact selected mode is recorded in the machine manifest. A power-source or
+Energy-Mode transition invalidates the pair.
+
+macOS thermal pressure must remain `nominal`; a transition to `fair`,
+`serious`, or `critical` invalidates the pair. System memory pressure must
+remain `normal`; `warning` or `critical` invalidates the pair. A versioned
+monitor records power source, exact Energy Mode, thermal pressure, memory
+pressure, system page-outs/swap-ins/swap-outs, descendants, and background-load
+diagnostics before, during, and after every paired block. A valid pair also
+requires zero page-out delta and zero swap-I/O delta. The monitor does not
+attempt to suppress ordinary system services.
+
+The primary topology is one benchmark process, no descendants, one connection,
+one query-execution worker, and no concurrent benchmark workload. An unexpected
+child process or monitor gap invalidates the pair. During CYAX-0168 G1,
+calibration must freeze a simple symmetric objective competing-I/O detector;
+if no such detector can be preregistered without creating a new research
+problem, background-load diagnostics are recorded but cannot exclude samples.
+Subjective judgments that the machine "seemed busy" never exclude a sample.
 Because macOS background services and dynamic frequency cannot be frozen, the
 balanced paired order is the primary nuisance-control design and the residual
 OS scheduling/power limitation is reported with every result.
@@ -1077,7 +1124,7 @@ OS scheduling/power limitation is reported with every result.
 | deterministic fixtures, immutable snapshots, semantic parity, build/rebuild/reopen checks, exact hashes, offline installation, process lifecycle, repetitions, monotonic wall time, and logical/allocated file bytes | portable unchanged | retain the existing contract |
 | Linux `mincore` full-residency gate | portable only with replacement | repeated verified reads to a frozen throughput-stabilization criterion; call the regime `preconditioned-warm-cache` |
 | cgroup-v2 process-tree accounting and `/proc` PSS/USS | portable only with replacement | require one in-process backend with no descendants; use `getrusage` peak RSS and sampled Mach-task metrics |
-| isolated CPU affinity and frozen governor/turbo policy | portable only with replacement | single thread, balanced pair order, AC/Low-Power/thermal/competing-work monitoring, and explicit residual limitation |
+| isolated CPU affinity and frozen governor/turbo policy | portable only with replacement | one query-execution worker, balanced pair order, frozen AC/Energy Mode, thermal/memory-pressure/competing-work monitoring, and explicit residual limitation |
 | disabled swap | portable only with replacement | invalidate any paired block with observed page-out or swap-I/O activity |
 | certified full filesystem-page residency, Linux-equivalent PSS/USS, fixed-core execution, fixed CPU frequency, and privileged OS-cold cache dropping | not portable | remove these claims and do not substitute inferred evidence |
 
@@ -1340,16 +1387,63 @@ valid timeouts and resource breaches remain censored-at-limit observations and
 enter the resource classifier rather than being replaced or called invalid.
 
 Single-process macOS accounting is primary. Both backends must remain in the
-same one-process/no-descendant envelope. Record absolute peak RSS from
+same one-process/no-descendant envelope. Every independent measured
+process/block begins in a fresh process so an earlier high-water mark cannot
+contaminate the other backend. Record absolute peak RSS from
 `getrusage(RUSAGE_SELF)` using macOS byte units, baseline RSS at the same frozen
 lifecycle point, CPU/wall time, and minor/major faults. A versioned Mach-task
-sampler records `resident_size` and `phys_footprint` at no more than 10 ms
-intervals as secondary diagnostics and reports their maxima. PSS/USS and Linux
-process-tree equivalence are not claimed. Record logical and allocated bytes
-for data/index/WAL/checkpoint/shadow/spill files and temporary peak disk. Apply
-one frozen `gc.collect()` immediately before every measured Python block, never
-between timed calls, for both backends. A descendant monitor invalidates an
-operation if either backend creates a child; separate cache and monitoring
+sampler records, where exposed, `resident_size`, `resident_size_peak`,
+`phys_footprint`, and `ledger_phys_footprint_peak` at no more than 10 ms
+intervals as secondary diagnostics and reports their maxima. Sampling is only
+diagnostic and does not guarantee capture of the true instantaneous maximum.
+PSS/USS, cgroup equivalence, and Linux process-tree equivalence are not claimed.
+
+For every steady-state materialization file, record logical bytes, allocated
+on-disk bytes, file-set identity, sparse-file state where detectable, and
+clone/shared-block state where detectable. Before CYAX-0168 G1, freeze one
+exact macOS/APFS inspection API version, its field interpretation, the
+allocated-byte aggregation algorithm, and the clone/sparse capability check.
+All files and both backends use that same protocol. Define:
+
+```text
+logical_materialization_bytes_b =
+    sum of logical byte lengths of every steady-state materialization file for b
+allocated_materialization_bytes_b =
+    sum of allocated on-disk bytes of every steady-state materialization file for b
+```
+
+`logical_materialization_bytes` is used only for warm-cache conditioning
+feasibility and the combined-materialization RAM-fraction condition.
+`allocated_materialization_bytes` is the normative S-versus-G disk comparison
+and the input to T4 disk projection and disk-related resource classification.
+Both values are reported. APFS copy-on-write or clone sharing must not
+artificially lower either backend's apparent disk cost. Disk attribution is
+**materially obscured** exactly when the frozen detector reports any shared
+extent affecting more than zero allocated bytes, or when its required clone/
+sparse capability check is unavailable or indeterminate. Such a layout is
+never admissible to `DISK_REL_G`, even if exclusive attribution appears
+computable. Rebuild each affected backend independently from the canonical
+snapshot into a fresh destination using the frozen clone-disabled creation
+route, then rerun inspection. The rebuild must preserve the backend's frozen
+schema/configuration and record its resulting sparse layout; it must not copy or
+densify a prior sparse file. Only a detector-confirmed zero-shared-extent layout
+may contribute the per-file allocated-byte sum to
+`allocated_materialization_bytes_b`. If zero sharing cannot be established,
+exclude the disk measurement and return Inconclusive for that resource
+comparison. Shared extents are never assigned, divided, dropped, or double-
+counted between backends. The manifest records inspection output, rebuild
+route, sparse layout, and zero-sharing result, making rebuild/exclude behavior
+mechanical.
+
+Freeze ordinary **available volume capacity** as
+`preflight_available_volume_capacity`, the only decision-bearing capacity
+denominator. The machine manifest freezes one exact macOS API and its ordinary-
+available-capacity definition for the complete campaign. Values such as
+"available for important usage" may be recorded as diagnostics but cannot
+enlarge the resource envelope. Record temporary peak allocated disk separately.
+Apply one frozen `gc.collect()` immediately before every measured Python block,
+never between timed calls, for both backends. A descendant monitor invalidates
+an operation if either backend creates a child; separate cache and monitoring
 helpers complete outside the measured backend process and are accounted in
 their own duration categories.
 
@@ -1362,15 +1456,34 @@ native traversal work remain diagnostics only.
 ## Hard resource envelope and conditional T4
 
 The proposed machine-relative T3 hard envelope is evaluated from the exact
-frozen execution-machine manifest. For each backend/profile: clean build ≤30
-minutes; rebuild or 1% transition ≤30 minutes; peak RSS ≤25% of physical
-RAM; temporary allocated disk ≤25% of the benchmark volume's preflight free
-bytes while preserving at least 20% of total volume capacity free; individual
-query ≤120 seconds; and no page-out or swap-I/O delta during a valid paired
-block. The combined steady-state S+G materialization bytes must be ≤25% of
-physical RAM for the preconditioned-warm-cache regime. The total decision
-campaign remains proposed at ≤48 hours excluding setup and explicitly invalid
-reruns.
+frozen execution-machine manifest. For backend `b`, the macOS hard gates are:
+
+```text
+MEM_HARD_b :=
+    peak_ru_maxrss_b <= 0.25 * physical_RAM
+    AND memory_pressure == normal
+    AND page_out_delta == 0
+    AND swap_io_delta == 0
+
+CACHE_HARD :=
+    logical_materialization_bytes_S
+      + logical_materialization_bytes_G <= 0.25 * physical_RAM
+    AND cache_condition_S == pass
+    AND cache_condition_G == pass
+    AND post_measurement_manifest_check == pass
+
+DISK_HARD_b :=
+    temporary_allocated_bytes_b
+      <= 0.25 * preflight_available_volume_capacity
+    AND post_operation_available_capacity
+      >= 0.20 * total_volume_capacity
+```
+
+For each backend/profile, clean build remains ≤30 minutes, rebuild or 1%
+transition remains ≤30 minutes, and an individual query remains ≤120 seconds.
+The total decision campaign remains proposed at ≤48 hours excluding setup and
+explicitly invalid reruns. These latency, build, update, and campaign envelopes
+are unchanged by this repair.
 
 T4 runs only when all are true:
 
@@ -1399,15 +1512,15 @@ does not run.
 For condition 4, the independent scale variable is assertion count:
 `n1=50000` (T1), `n2=500000` (T2), `n3=1000000` (T3), and
 `n4=5000000` (T4). Only `P-medium` observations are inputs because T4 is
-`P-medium`. For each backend and each of peak RSS, steady-state
-materialization disk, temporary disk, clean-build time, rebuild time, 1%
-transition time, and individual query time, let `r_i` be the maximum valid
-observed value at Ti across every applicable frozen seed, repetition, query
-instance, cache mode, and transition. Steady-state materialization disk is the
-sum of the backend-manifest data, index, checkpoint, and nonempty auxiliary
-file byte counts after checkpoint; temporary disk is the maximum additional
-allocated bytes during the operation. For query time the maximum includes
-every T4-applicable Q ID and both decision-bearing cache modes.
+`P-medium`. For each backend and each of peak RSS, logical materialization
+bytes, allocated materialization bytes, temporary allocated disk, clean-build
+time, rebuild time, 1% transition time, and individual query time, let `r_i` be
+the maximum valid observed value at Ti across every applicable frozen seed,
+repetition, query instance, cache mode, and transition. The two steady-state
+materialization projections use their distinct definitions above; temporary
+disk is the maximum additional allocated bytes during the operation. For query
+time the maximum includes every T4-applicable Q ID and both decision-bearing
+cache modes.
 
 Construct the monotone envelope `e1=r1`, `e2=max(r1,r2)`,
 `e3=max(r1,r2,r3)`, then the fixed upper slope
@@ -1437,20 +1550,26 @@ Condition 4 requires all of these mechanically evaluated limits:
 | Projected quantity `R` | Hard limit `L` |
 | --- | ---: |
 | each backend's peak RSS | 25% of frozen physical RAM |
-| both backends' steady-state materialization disk projections added together | 25% of frozen physical RAM, the proposed conditioning-feasibility limit |
-| each backend's temporary allocated disk | 25% of preflight free benchmark-volume bytes, while retaining 20% of total capacity free |
+| both backends' logical materialization projections added together | 25% of frozen physical RAM, the conditioning-feasibility limit |
+| each backend's temporary allocated disk | 25% of `preflight_available_volume_capacity`, while retaining 20% of total volume capacity available after the operation |
 | each backend's clean build, rebuild, and 1% transition time, evaluated separately | 1,800 s |
 | each backend's individual query time | 120 s |
 | valid observed T0–T3 campaign wall time plus projected incremental T4 campaign time | 172,800 s |
 
 For every row, `headroom_fraction=(L-R)/L` and passage requires
 `headroom_fraction>=0.25`, equivalently `R<=0.75*L`; exact equality passes. The
-combined steady-state row uses the sum of the separately projected S and G
-values. Every other backend-specific row must pass for both S and G. Condition
-4 fails, and T4 does not run, if any required T1, T2, or T3 point is missing or
-invalid; any input is censored; any backend had a valid hard-resource breach at
-T1–T3; the projection is undefined/non-finite; or any row exceeds `0.75*L`.
-There is no analyst override or alternate fitted projection.
+combined logical-materialization row uses the sum of the separately projected
+S and G values. Every other backend-specific hard-limit row must pass for both
+S and G. Separately, the projected S/G peak-RSS values must satisfy the exact
+capped `MEM_REL_G` rule and the projected S/G
+`allocated_materialization_bytes` values must satisfy the exact capped
+`DISK_REL_G` rule below. Allocated disk projection is never substituted for the
+combined logical cache-feasibility projection. Condition 4 fails, and T4 does
+not run, if any required T1, T2, or T3 point is missing or invalid; any input is
+censored; any backend had a valid hard-resource breach at T1–T3; a projected
+relative `MEM_REL_G` or `DISK_REL_G` rule fails; the projection is undefined/
+non-finite; or any hard-limit row exceeds `0.75*L`. There is no analyst override
+or alternate fitted projection.
 
 T4 alone cannot justify graph adoption for current CYAxiverse scale.
 
@@ -1543,24 +1662,42 @@ belong to different families fail `graph_arm` unless the Q07 critical arm itself
 passes two profiles. Seeds contribute only through the equal-weight
 family/profile latency index already defined; they are never votes.
 
-**Proposed resource acceptance:** G materialization footprint (data, indexes,
-and steady-state auxiliary files) must be ≤2× S or have excess ≤5% of the
-benchmark volume's preflight free bytes. G peak query RSS must be ≤2× S or
-have excess ≤5% of physical RAM. G build/rebuild/transition time must be ≤3×
-S and always inside the hard envelope. Final context/prompt values must match
-exactly. These machine-relative replacements for the earlier fixed 2 GiB
-allowance require rereview and explicit owner approval.
+**Proposed resource acceptance:** freeze the capped excess allowances and
+relative rules as:
+
+```text
+memory_excess_allowance = min(2 GiB, 0.05 * physical_RAM)
+disk_excess_allowance =
+    min(2 GiB, 0.05 * preflight_available_volume_capacity)
+
+MEM_REL_G :=
+    G_peak_RSS <= 2 * S_peak_RSS
+    OR G_peak_RSS - S_peak_RSS <= memory_excess_allowance
+
+DISK_REL_G :=
+    G_allocated_materialization_bytes
+      <= 2 * S_allocated_materialization_bytes
+    OR G_allocated_materialization_bytes
+         - S_allocated_materialization_bytes <= disk_excess_allowance
+```
+
+Peak RSS in `MEM_REL_G` is the primary `ru_maxrss` measure. Logical
+materialization bytes never enter `DISK_REL_G`. G build/rebuild/transition time
+must be ≤3× S and always inside the unchanged hard envelope. Final
+context/prompt values must match exactly. These capped machine-relative rules
+require exact-head rereview and explicit owner approval.
 
 Resource/control disposition is frozen separately from measurement validity:
 
 | Observed case | Disposition |
 | --- | --- |
-| host controls or single-process/resource monitoring invalid | Inconclusive / invalid execution |
+| host, cache, or single-process/resource monitoring evidence invalid | Inconclusive / invalid execution |
 | measurement evidence missing, corrupt, or pairing broken | Inconclusive / invalid execution |
-| G alone validly exceeds a hard T3 envelope while S passes | Retain S / G not justified |
-| G violates relative resource acceptance with otherwise valid measurements | Retain S / G not justified |
+| valid combined logical-materialization capacity breach, with cache/manifest evidence otherwise valid | Operational envelope failure / owner decision required; do not attribute the pair-level breach to either backend |
 | S alone validly exceeds a hard envelope while G passes | Operational envelope failure / owner decision required; do not infer G adoption |
 | both backends validly exceed a hard envelope | Operational envelope failure / owner decision required |
+| G alone validly exceeds a hard T3 envelope while S passes | Retain S / G not justified |
+| G violates relative resource acceptance while S passes and measurements are otherwise valid | Retain S / G not justified |
 | query reaches the frozen 120-second limit with valid monitor/control evidence | measured resource breach, censored at 120 seconds; apply the corresponding backend-breach row above |
 | crash or implementation failure before the common contract is exercised | Inconclusive / invalid execution |
 | demonstrated defect in the shared semantic contract | Architecture problem |
@@ -1571,16 +1708,18 @@ infer G. It authorizes neither production adoption nor threshold relaxation.
 
 Classifier precedence is:
 
-1. **Inconclusive / invalid execution** for failed host controls, missing or
-   corrupted samples, broken pairing, or implementation failure before the
-   common contract is exercised. A valid resource breach is not in this class.
+1. **Inconclusive / invalid execution** for failed host/cache/monitor evidence,
+   missing or corrupted samples, broken pairing, or implementation failure
+   before the common contract is exercised. A valid resource breach is not in
+   this class.
 2. **Architecture problem** only for a demonstrated common-contract defect:
    frozen-gold/parity failure, non-failing snapshot identity, or nondeterministic
    complete logical export.
-3. **Retain S / G not justified** when S passes and G has any valid hard or
+3. **Operational envelope failure / owner decision required** when the valid
+   combined logical-materialization capacity conjunct of `CACHE_HARD` breaches,
+   or when S has a valid backend hard breach whether or not G also breaches.
+4. **Retain S / G not justified** when S passes and G has any valid hard or
    relative resource breach.
-4. **Operational envelope failure / owner decision required** when S has a
-   valid hard breach, whether or not G also breaches.
 5. **Inconclusive / invalid execution** when a confidence interval required to
    distinguish otherwise eligible performance classes overlaps its threshold.
 6. **Hybrid** when its performance and resource rule passes.
@@ -1698,6 +1837,18 @@ The minimum truth-table rows and exact outcomes are:
 Resource/timeout rows retain the separate precedence table and cannot be
 overridden by these performance rows.
 
+Resource/cache/host conformance must also cover: logical and allocated bytes
+that differ; sparse files; unambiguous and materially ambiguous APFS clone
+ancestry; each side and exact equality of both capped excess allowances;
+ordinary versus "important usage" capacity; a post-pair changed hash, byte
+count, file set, and new nonempty auxiliary file; a backend unable to run
+without persistent mutation; Ladybug query parallelism despite `THREADS=1`;
+permitted housekeeping threads; unexpected descendants; Energy-Mode and power-
+source transitions; every non-nominal thermal state; warning/critical memory
+pressure; page-out/swap-I/O deltas; monitor gaps; and both branches of the
+objective-detector-or-diagnostics-only competing-load rule. Each case must
+produce the disposition fixed above.
+
 ## Convergence-gated exact-head rereview record
 
 The independent rereview was bounded to whether this preregistration was ready
@@ -1722,9 +1873,12 @@ demonstrated criterion 1–5 violation; **FAIL / REDESIGN** requires a fundament
 architecture defect. The convergence-gated rereview returned **PASS** at exact
 head `438aaaa69d4b965de29ea967cc05f02274f56e57`. That verdict remains technical
 evidence for its exact design head. It did not create owner authority, and it
-predates the macOS host amendment in this draft. A fresh bounded rereview must
-decide whether the revised host, cache, resource, and threshold contracts close
-the same criteria before the owner is asked to decide CYAX-0168 G0.
+predates the macOS host amendment in this draft. The independent rereview of
+macOS repair head `e8aa76fafb0eb015af0aa1bba45381e3021beb83` returned **PASS
+WITH REQUIRED REVISIONS**; this bounded repair addresses only those findings.
+A fresh bounded rereview must decide whether the repaired host, cache, resource,
+and threshold contracts close the same criteria before the owner is asked to
+decide CYAX-0168 G0.
 
 ## Requirements and gates
 
@@ -1738,8 +1892,8 @@ the same criteria before the owner is asked to decide CYAX-0168 G0.
 | R-006 Frozen workload | The Q01–Q12 population/selector/parameter/role table, gold, and exact aggregation precede backend implementation. | Invalid-stratum/tie tests, manifest/gold review, and raw-to-classifier statistic tests. |
 | R-007 RetrievalBundle v1 | Both adapters return complete, literal-reference-closed canonical objects and deterministic directional paths. | Empty/order/unique/no-dangling tests, complete serialization/compiler validation, and gold/S/G equality. |
 | R-008 Successor updates | N + a non-authoritative delta with exact removals yields independently frozen immutable N+1. | Dependency insert/remove, replacement, supersession, complete export, crash, rollback, and isolation tests. |
-| R-009 Preregistered measurement | Scale-matched calibration/non-access, exact macOS machine, paired fairness, stabilized cache conditioning, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, and machine-relative resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache-stabilization evidence, statistical and 48-hour duration ratification, power/thermal/swap/descendant audit, and paired block-level analysis validation. |
-| R-010 Deterministic decision | Exact cache-mode conjunction, family/profile quantifiers, outcomes, valid resource-breach table, joint CI uncertainty, direct-observation T4 condition 3, and deterministic projected-headroom condition 4 are encoded. | Fresh/warm, family/profile, boundary, G/S/both breach/timeout, reachable-outcome CI cases, T4 margin/projection/headroom tables, classifier tests, and owner approval. |
+| R-009 Preregistered measurement | Scale-matched calibration/non-access, exact macOS machine and Energy Mode, one query-execution worker, paired fairness, pre/post-manifest non-mutating cache conditioning, actual p95-estimand simulation truth, duration projection, repetitions, exact statistics, confidence, fresh-process `ru_maxrss`, Mach diagnostics, and logical/allocated/APFS resources are frozen. | C0→T0 through C3→T3 mapping, pre-access hash, unequal-dispersion/p95-saving truth, cache stabilization and mutation detection, statistical and 48-hour duration ratification, power/Energy-Mode/thermal/memory-pressure/page-out/swap/descendant audit, both competing-load branches, APFS zero-sharing/rebuild/exclude cases, and paired block-level analysis validation. |
+| R-010 Deterministic decision | Exact hard gates, capped memory/disk relative rules, cache-mode conjunction, family/profile quantifiers, outcomes, valid resource-breach table including pair-level cache capacity, joint CI uncertainty, direct-observation T4 condition 3, and logical/allocated deterministic projected-headroom condition 4 are encoded. | Fresh/warm, capped-allowance boundaries, family/profile, G/S/pair-level breach and timeout, reachable-outcome CI cases, T4 logical/allocated/memory/disk projection tables, classifier tests, and owner approval. |
 
 ### CYAX-0168 G0 — pending repaired-design approval
 
@@ -1788,20 +1942,31 @@ the exact repaired head, the Control Desk must present these choices explicitly:
 1. approve macOS ARM64 on the owner's exact frozen machine as the benchmark
    authority environment and accept the environment-specific claim boundary;
 2. approve the `preconditioned-warm-cache` protocol: three stabilized passes,
-   a 5% throughput-range criterion, a ten-pass cap, and no full-residency or
-   OS-cold claim;
-3. approve single-process `getrusage` peak RSS as primary, sampled Mach
-   `resident_size`/`phys_footprint` as diagnostics, and removal of PSS/USS and
-   Linux process-tree-equivalence claims;
-4. approve hard limits of 25% of physical RAM for each backend's peak RSS and
-   for combined steady-state materialization bytes, plus the temporary-disk
-   limit of 25% of preflight free bytes while preserving 20% volume free;
-5. retain the reviewed repetition/statistical design and proposed 48-hour
+   a 5% throughput-range criterion, a ten-pass cap, pre/post complete-manifest
+   verification, non-mutating measured queries, and no full-residency or OS-
+   cold claim;
+3. approve the one-process/no-descendant/one-connection/one-query-execution-
+   worker contract, including Ladybug `THREADS=1` or its exact documented
+   equivalent;
+4. approve primary fresh-process `getrusage(RUSAGE_SELF).ru_maxrss`, the named
+   Mach metrics as diagnostics, and removal of PSS/USS, cgroup, and Linux
+   process-tree-equivalence claims;
+5. approve logical bytes only for cache feasibility; allocated bytes for disk
+   comparison/classification/T4; APFS sparse/clone attribution; and ordinary
+   available volume capacity as the normative disk denominator;
+6. approve the explicit `MEM_HARD_b`, `CACHE_HARD`, and `DISK_HARD_b` gates,
+   including 25% RAM/temporary-disk limits, the 20% post-operation volume
+   reserve, normal memory pressure, and zero page-out/swap-I/O deltas;
+7. approve AC power with one exact frozen non-low macOS Energy Mode, nominal
+   thermal pressure, normal memory pressure, and the preregistered objective-
+   detector-or-diagnostics-only competing-load rule;
+8. retain the reviewed repetition/statistical design and proposed 48-hour
    ceiling unchanged, subject to CYAX-0168 G1 precision and duration
    ratification on calibration fixtures;
-6. retain the latency/statistical classifier thresholds while replacing the
-   fixed resource allowances with the machine-relative 5% excess rules; and
-7. retain `ladybug==0.20.4` at upstream commit
+9. retain the latency/statistical classifier thresholds while using the capped
+   `min(2 GiB, 5%)` memory/disk excess allowances and repaired classifier/T4
+   resource inputs; and
+10. retain `ladybug==0.20.4` at upstream commit
    `df58ee387c4e5e9f02bb9d518636b52cd4abe5f7` as the sole graph candidate,
    subject to a fresh exact-machine offline artifact and smoke gate.
 

@@ -18,6 +18,9 @@ G0 is not satisfied; CYAX-0168 G1 is not authorized.**
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 received its prior **PASS WITH REQUIRED REVISIONS** and remains the historical
 input to T6-rereview-repair-2.
+The independent macOS architecture/methodology rereview of exact head
+`e8aa76fafb0eb015af0aa1bba45381e3021beb83` returned **PASS WITH REQUIRED
+REVISIONS**. Its three blocking methodology repairs are T8d below.
 
 - [x] T1 [R-004] — Audit #117 K1–K12 against captured canonical sources.
   - Outcome: the independent audit passed; corrected K7/K8/K10/K11 preserves
@@ -87,38 +90,53 @@ input to T6-rereview-repair-2.
   - Outcome: Linux-only residency/process-control claims are replaced or
     removed; machine-relative envelopes and the exact remaining owner choices
     are explicit; no implementation or fixture access is authorized.
-- [ ] T8d-exact-head-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a
-  fresh bounded independent architecture/methodology rereview of the repaired
-  exact head, then present the explicit choices to the owner in the Control
+- [x] T8d-final-macos-methodology-repair [R-009, R-010] — Close only the three
+  blocking findings from the independent rereview of `e8aa76f`.
+  - Outcome: split logical versus allocated materialization bytes with APFS
+    attribution, a frozen inspection algorithm, and capped 2 GiB/5% relative
+    allowances; require decision-complete pre/post cache manifests and non-
+    mutating query pairs; freeze one-query-execution-worker,
+    Ladybug `THREADS=1`, Energy Mode, thermal, memory-pressure, page-out/swap,
+    descendant, and objective competing-load validity.
+  - Verify: explicit hard-gate formulas, ordinary available-capacity
+    denominator, T4/classifier metric mapping, and unchanged latency/statistical
+    clauses; no benchmark, calibration, or decision-fixture work.
+- [ ] T8e-exact-head-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a
+  fresh bounded independent architecture/methodology rereview of the new exact
+  repaired head, then present the explicit choices to the owner in the Control
   Desk.
-  - Verify: rereview covers macOS cache conditioning, resource accounting,
-    machine-relative envelopes, retained repetitions/statistics/thresholds, and
-    Ladybug candidate status; a later approval must cite the exact reviewed
-    head and the owner's actual choices.
+  - Verify: rereview covers cache immutability, logical/allocated/APFS resource
+    accounting and deterministic rebuild/exclude behavior, capped allowances,
+    hard gates and pair-level cache-capacity disposition, macOS process/host validity,
+    retained repetitions/statistics/latency thresholds, and Ladybug candidate
+    status; a later approval must cite the exact reviewed head and the owner's
+    actual choices.
   - Stop: neither a drafted approval nor an Issue comment published without an
     authoritative owner interaction can satisfy CYAX-0168 G0.
 - [ ] T9 [R-001, R-002, R-004–R-009, CYAX-0168 G1] — Under later dispatch,
   freeze source/registry/gold/generator/query/calibration manifests and v1
   validators only after G0.
   - Verify: identity, registry, generator checksum, query selection,
-    reference-closure, tamper, freshness, cache-helper harness, and crash
-    tests.
+    reference-closure, tamper, freshness, pre/post cache-manifest mutation
+    detection, host/process monitoring, and crash tests.
 - [ ] T10 [R-003, R-007, R-009, CYAX-0168 G1] — Implement S, repeat exact-machine
   Ladybug smoke, implement G only if it passes, and run calibration-only
   statistical-precision and campaign-duration validation before any
   decision-fixture access.
-  - Verify: offline pins, DDL/index/config/plan review, precision thresholds,
-    conservative 48-hour projection, ratified counts, and complete logical
-    exports.
+  - Verify: offline pins, Ladybug `THREADS=1`, DDL/index/config/plan review,
+    precision thresholds, conservative 48-hour projection, ratified counts,
+    complete logical exports, and logical/allocated/APFS disk accounting.
   - Stop: Ladybug failure; FalkorDBLite requires amended approval.
 - [ ] T11 [R-004, R-006–R-008, CYAX-0168 G2] — Pass frozen gold, S/G parity,
   literal-closed bundle, full-export, delta, isolation, and crash-recovery gates.
   - Stop: preserve the minimal failure; no associated performance is admissible.
 - [ ] T12 [R-009, R-010, CYAX-0168 G3] — Under later execution dispatch, run
-  paired T0–T3 with stabilized-cache and single-process resource evidence and
-  frozen aggregation.
-  - Verify: controls, sample completeness, valid-breach disposition, block-level
-    BCa output, and hard envelope.
+  paired T0–T3 with stabilized-cache, post-measurement immutability, and fresh-
+  process macOS resource evidence with frozen aggregation.
+  - Verify: controls, sample completeness, Energy Mode/thermal/memory-pressure/
+    page-out/swap/process validity, logical/allocated resource mapping, capped
+    relative allowances including projected `MEM_REL_G`/`DISK_REL_G`, valid-
+    breach disposition, block-level BCa output, and hard envelope.
 - [ ] T13 [R-010, CYAX-0168 G4] — Conditionally run T4, classify, independently
   review evidence, and report to #168/#162.
   - Verify: five-part eligibility and deterministic classifier.
