@@ -74,9 +74,13 @@ superseded contract. They do not approve this generator-2.3 amendment.
 5. Amend and later implement generator 2.3's closed PRF-purpose registry and
    its exhaustive per-purpose self/duplicate rejection table. Freeze
    `block_key(b)` as the role-0 WorkItem `entity_id`, use ascending primary-ID
-   byte order as `block_primary_order`, partition nonisolated blocks into exact
-   contiguous slices of `max(path_depth + 1, 64)`, and emit each fixed-chain
-   edge as `w(j+1) depends_on w(j)` in ascending `j` construction order. Keep
+   byte order as `block_primary_order` for post-motif block-order references,
+   partition nonisolated blocks into exact contiguous slices of
+   `max(path_depth + 1, 64)`, and emit phase 2 component-major (ascending
+   first-block position), completing each component's edges as
+   `w(j+1) depends_on w(j)` in ascending `j` before the next, with no
+   interleaving. Preserve base-motif construction order as ascending numeric
+   block ordinal followed by the fixed local motif order. Keep
    phase-4 cycles outside PRF retries, exclude the phase-3 subject before PRF
    selection, exclude phase-1 isolated WorkItems from phase-5 supersession,
    and preserve assertion-stating synthetic provenance and base versus

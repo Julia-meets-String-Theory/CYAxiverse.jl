@@ -722,8 +722,9 @@ revision with the base locator/bytes above. The base revision is not assertion
 provenance. Every surviving assertion has exactly one additional provenance
 revision of its subject block's Source entity. Its zero-based global
 `assertion_ordinal=a` is assigned in construction order: all base motifs in
-block/local order, then every added assertion in phase order; removed phase-3
-assertions leave gaps and are absent from the final snapshot. The locator is
+ascending numeric block ordinal and, within each block, the fixed local motif
+order, then every added assertion in phase order; removed phase-3 assertions
+leave gaps and are absent from the final snapshot. The locator is
 `cyax://0168/scale/2.3/<tier>/<profile_id>/<seed>/block/<b>/assertion/<a>` and
 the exact bytes are sorted-key canonical JSON plus LF:
 
@@ -771,8 +772,9 @@ assertion slots are filled with profile-neutral
 `concerns` evidence in ordinal order. Exact tier counts and all invariants must
 hold or generation fails.
 
-For `B = entity_count / 10`, define one canonical block ordering used by every
-phase and every identity-bearing construction ordinal. For each block `b`,
+For `B = entity_count / 10`, define one canonical block ordering for post-motif
+phases and for selections or traversals that reference block ID/order. For each
+block `b`,
 
 ```text
 block_key(b) = entity_id of role-0 WorkItem belonging to block b
@@ -781,10 +783,13 @@ block_primary_order = ascending primary-ID byte order of block_key(b)
 
 The primary-ID byte ordering is the same canonical byte ordering defined for
 entity IDs elsewhere in this contract. No implementation iteration order or
-numeric block ordinal may substitute for `block_primary_order`. In particular,
-“highest-ID blocks” in phase 1 means the highest `block_key` values in this
-ordering, “consecutive” in phase 2 means contiguous slices of this ordering,
-and “source blocks in primary-ID order” in phase 3 means this same ordering.
+numeric block ordinal may substitute for `block_primary_order` in those
+post-motif references. In particular, “highest-ID blocks” in phase 1 means the
+highest `block_key` values in this ordering, “consecutive” in phase 2 means
+contiguous slices of this ordering, and “source blocks in primary-ID order” in
+phase 3 means this same ordering. The base motif construction order is a
+separate preserved rule: ascending numeric block ordinal followed by the fixed
+local motif order stated above.
 
 The ordered post-motif phases are executable:
 
@@ -799,9 +804,12 @@ The ordered post-motif phases are executable:
    determined before any phase-2 chain assertion is emitted. No hash-map order,
    construction-order grouping, numeric block-ordinal grouping, or other
    implementation-defined ordering is conforming unless it produces exactly
-   these slices. Within each component, let its WorkItems in component order be
-   `w0, w1, ..., w(m-1)`, set `k = min(path_depth, m - 1)`, and emit exactly
-   `k` fixed-chain assertions in ascending `j` order:
+   these slices. Phase-2 emission is component-major: visit components in
+   ascending first-block position in `block_primary_order`; within each
+   component, let its WorkItems in component order be `w0, w1, ..., w(m-1)`,
+   set `k = min(path_depth, m - 1)`, and emit all `k` fixed-chain assertions in
+   ascending `j` order before visiting the next component. Components are not
+   interleaved. Emit exactly the edge for each `j`:
    `w(j+1) depends_on w(j)` for `j = 0, 1, ..., k-1`. Thus the subject is the
    later WorkItem, the object is the immediately previous WorkItem, and the
    chain construction order is ascending `j`. No reverse-direction

@@ -196,13 +196,17 @@ explicit owner decision.
   profiles, queries, statistics, resources, host controls, or Ladybug rules.
   - Outcome: proposed `cyax-0168-scale-2.3` with one canonical
     `block_key(b)` equal to the role-0 WorkItem `entity_id`; ascending
-    primary-ID byte order as `block_primary_order`; exact contiguous phase-2
-    slices of `max(path_depth + 1, 64)`; fixed edges
-    `w(j+1) depends_on w(j)` in ascending `j`; phase-3 subject exclusion
-    before PRF selection; and phase-5 exclusion of every phase-1 isolated
-    WorkItem. All generator identity/version domains advance coherently from
-    2.2 to 2.3. The current spec remains draft and this task does not
-    authorize G1.
+    primary-ID byte order as `block_primary_order` for post-motif block-order
+    references; exact contiguous phase-2 slices of
+    `max(path_depth + 1, 64)` with component-major emission (ascending
+    first-block position), completing each component's fixed edges
+    `w(j+1) depends_on w(j)` in ascending `j` before the next, with no
+    interleaving; and preserved base-motif construction order of ascending
+    numeric block ordinal followed by fixed local motif order. It also freezes
+    phase-3 subject exclusion before PRF selection and phase-5 exclusion of
+    every phase-1 isolated WorkItem. All generator identity/version domains
+    advance coherently from 2.2 to 2.3. The current spec remains draft and this
+    task does not authorize G1.
   - Boundary: preserve `g1-execution-report.md`,
     `generator-independence-failure.json`, and all historical 2.2 evidence;
     do not regenerate fixtures, calibrate, rerun G1, or enter G2–G4.
