@@ -9,7 +9,7 @@ parent: 162
 depends_on: [163, 117]
 created: 2026-09-13
 last_reviewed: 2026-09-14
-review_required: fresh independent architecture/methodology review and explicit repository-owner approval before benchmark implementation or execution
+review_required: independent architecture/methodology PASS at exact head f2283f6a1f58600d05ed0a50535d07013ac6fb2c and explicit repository-owner approval before benchmark implementation or execution
 approval_ref: null
 ---
 
@@ -42,9 +42,13 @@ architecture/methodology rereview of exact head
 REVISIONS**. This bounded repair closes only its three blocking findings:
 logical/allocated resource accounting with capped excess allowances,
 post-measurement cache-manifest immutability, and operational macOS
-host/process validity. The repaired design still requires exact-head rereview
-and explicit owner choices. **CYAX-0168 G0 is not satisfied. CYAX-0168 G1 is
-not authorized.** No benchmark implementation or fixture access may begin
+host/process validity. A subsequent independent bounded rereview of this
+repaired host-portable design at exact head
+`f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**. That verdict is
+technical evidence for its exact design head only; it did not create owner
+authority. **CYAX-0168 G0 is not satisfied. CYAX-0168 G1 is
+not authorized.** The next step is explicit owner consideration of the ten
+pending choices below. No benchmark implementation or fixture access may begin
 from this draft.
 
 The exact-head rereview of
@@ -1976,9 +1980,12 @@ evidence for its exact design head. It did not create owner authority, and it
 predates the macOS host amendment in this draft. The independent rereview of
 macOS repair head `e8aa76fafb0eb015af0aa1bba45381e3021beb83` returned **PASS
 WITH REQUIRED REVISIONS**; this bounded repair addresses only those findings.
-A fresh bounded rereview must decide whether the repaired host, cache, resource,
-and threshold contracts close the same criteria before the owner is asked to
-decide CYAX-0168 G0.
+The independent bounded rereview of the repaired host-portable design at exact
+head `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**, confirming
+that the repaired host, cache, resource, and threshold contracts close the same
+criteria. That verdict is technical evidence only and did not create owner
+authority; the owner is now asked to decide CYAX-0168 G0 by considering the ten
+pending choices below.
 
 ## Requirements and gates
 
@@ -1997,15 +2004,19 @@ decide CYAX-0168 G0.
 
 ### CYAX-0168 G0 — pending repaired-design approval
 
-Acceptance requires a fresh independent architecture/methodology rereview and
+Acceptance requires an independent architecture/methodology rereview and
 an explicit owner decision citing the exact repaired head, passed K1–K12 audit,
 backend pin, the host-portable execution contract with its initial macOS
 reference host manifest, workload, repetition candidates/ratification rule,
 envelope, and thresholds. The independent rereview **PASS** at exact head
 `438aaaa69d4b965de29ea967cc05f02274f56e57` remains evidence for that earlier
-technical design. Issue #168 comment `5658274383` is preserved but is explicitly
+technical design. The independent bounded rereview **PASS** at exact head
+`f2283f6a1f58600d05ed0a50535d07013ac6fb2c` is technical evidence for the
+current repaired host-portable design; it did not create owner authority.
+Issue #168 comment `5658274383` is preserved but is explicitly
 superseded as owner-approval evidence because it lacked a valid owner-decision
-checkpoint. `approval_ref` is null. **CYAX-0168 G0 is not satisfied.**
+checkpoint. `approval_ref` is null. The remaining step is explicit owner
+decision on the ten pending choices below. **CYAX-0168 G0 is not satisfied.**
 
 ### CYAX-0168 G1 — frozen inputs and smoke
 
@@ -2035,10 +2046,12 @@ corrupt evidence is Inconclusive/invalid and blocks T4.
 Run only under the five-part T4 gate, then apply the reviewed and owner-approved
 deterministic classifier. Production adoption remains separate.
 
-## Pending owner choices after fresh rereview
+## Pending owner choices after rereview PASS
 
-No item in this section is an owner decision. After a fresh bounded rereview of
-the exact repaired head, the Control Desk must present these choices explicitly:
+No item in this section is an owner decision. The independent bounded rereview
+of the exact repaired head `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned
+**PASS**; that verdict is technical evidence only and is not owner authority.
+The Control Desk must now present these choices explicitly for owner decision:
 
 1. approve the host-portable execution contract — no authoritative benchmark
    machine; each campaign freezes one admissible host manifest, runs S and G on

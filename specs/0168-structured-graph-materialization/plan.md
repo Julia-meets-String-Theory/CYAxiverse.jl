@@ -14,9 +14,11 @@ REVISIONS**; the common provenance architecture, B2, main B4, and B5 condition
 the later execution sequence but
 does not authorize benchmark code, fixtures, dependencies, timing, or resource
 runs. The independent K1–K12 source audit has passed and is not reopened. The
-next lifecycle steps are fresh bounded rereview of the exact repaired head and
-explicit owner choices in the Control Desk; only a valid later approval can
-satisfy CYAX-0168 G0 and authorize a new CYAX-0168 G1 dispatch.
+independent bounded rereview of the exact repaired head
+`f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**; that verdict is
+technical evidence only and did not create owner authority. The next lifecycle
+step is explicit owner choices in the Control Desk; only a valid owner
+decision can satisfy CYAX-0168 G0 and authorize a new CYAX-0168 G1 dispatch.
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 and its B1–B5 repair remain recorded as prior rereview history.
 The independent macOS architecture/methodology rereview of exact head
@@ -35,8 +37,9 @@ resource thresholds, the 48-hour ceiling, the `ladybug==0.20.4` candidate pin,
 and every reviewed initial-macOS control are unchanged. Promotion to a normal
 dependency, a project-wide default backend, or a production commitment
 additionally requires independent replication on at least one further frozen
-admissible host/environment. The next rereview is of the new exact repaired
-head.
+admissible host/environment. The independent bounded rereview of the new exact
+repaired head `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**;
+the next lifecycle step is explicit owner choices in the Control Desk.
 
 1. Freeze the immutable F-real source bundle, Claim-key/type registry, owner
    actor/role evidence, and exact owner-decision-event registry while preserving

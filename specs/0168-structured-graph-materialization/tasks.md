@@ -26,7 +26,11 @@ A subsequent bounded repair (T8f) replaces physical-machine authority with the
 host-portable campaign contract and records the owner's Apple-silicon/macOS
 ARM64 machine as the initial reference execution host only. It changes no
 repetition count, statistic, latency or resource threshold, 48-hour ceiling,
-candidate version, or reviewed initial-macOS control.
+candidate version, or reviewed initial-macOS control. The independent bounded
+rereview of the exact head produced by this repair,
+`f2283f6a1f58600d05ed0a50535d07013ac6fb2c`, returned **PASS** (T8e below);
+that verdict is technical evidence only and did not create owner authority.
+The next step is explicit owner choices in the Control Desk.
 
 - [x] T1 [R-004] — Audit #117 K1–K12 against captured canonical sources.
   - Outcome: the independent audit passed; corrected K7/K8/K10/K11 preserves
@@ -143,9 +147,13 @@ candidate version, or reviewed initial-macOS control.
     frontmatter parse, and diff checks. The T8e rereview gate applies to the
     exact head produced by this repair.
 - [ ] T8e-exact-head-rereview-owner-gate [R-001–R-010, CYAX-0168 G0] — Obtain a
-  fresh bounded independent architecture/methodology rereview of the new exact
+  bounded independent architecture/methodology rereview of the new exact
   repaired head, then present the explicit choices to the owner in the Control
   Desk.
+  - Outcome: the independent bounded rereview returned **PASS** at exact head
+    `f2283f6a1f58600d05ed0a50535d07013ac6fb2c`. That verdict is technical
+    evidence only; it did not create owner authority and does not satisfy
+    CYAX-0168 G0 by itself.
   - Verify: rereview covers cache immutability, logical/allocated/APFS resource
     accounting and deterministic rebuild/exclude behavior, capped allowances,
     hard gates and pair-level cache-capacity disposition, the host-portable
@@ -155,6 +163,9 @@ candidate version, or reviewed initial-macOS control.
     retained repetitions/statistics/latency thresholds, and Ladybug candidate
     status; a later approval must cite the exact reviewed head and the owner's
     actual choices.
+  - Remaining: present the ten pending choices to the owner in the Control
+    Desk for explicit decision; the task is not complete until that
+    presentation and decision occur.
   - Stop: neither a drafted approval nor an Issue comment published without an
     authoritative owner interaction can satisfy CYAX-0168 G0.
 - [ ] T9 [R-001, R-002, R-004–R-009, CYAX-0168 G1] — Under later dispatch,
@@ -194,6 +205,6 @@ candidate version, or reviewed initial-macOS control.
 No benchmark implementation, dependency, generated database/fixture,
 timing/resource run, CYAX-0166/CYAX-0167 edit, or production-backend adoption
 is part of this authority and host-portability design repair. **CYAX-0168 G0 is
-not satisfied and CYAX-0168 G1 is not authorized.** Fresh independent rereview
-and explicit
-owner choices precede any new G1 dispatch.
+not satisfied and CYAX-0168 G1 is not authorized.** The independent bounded
+rereview of this design returned **PASS** as technical evidence only; explicit
+owner choices in the Control Desk precede any new G1 dispatch.
