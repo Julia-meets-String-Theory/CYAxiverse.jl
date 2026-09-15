@@ -3,14 +3,26 @@
 These tasks decompose evidence readiness. GitHub remains authoritative for live
 Issue, Project, review, PR, and merge state.
 
-Post-dispatch execution note: a later CYAX-0168 G1 dispatch was attempted and
-stopped at the mandatory independent generator-reproduction gate. The two
+Historical post-dispatch execution note for generator 2.2: a later CYAX-0168 G1
+dispatch was attempted and stopped at the mandatory independent generator-
+reproduction gate. The two
 phase-2 constructions permitted by the approved prose produced different
 identity-bearing bytes, while review also found a separate primary-generator
-phase-3 candidate-vector nonconformance. CYAX-0168 G1 is not satisfied and the
-phase-2 component order and `depends_on` chain direction return to G0 amendment,
-independent rereview, and owner approval. See `g1-execution-report.md`. The
-unchecked T9/T10 items remain incomplete; no later gate was entered.
+phase-3 candidate-vector nonconformance. CYAX-0168 G1 was not satisfied for
+that prior execution and the phase-2 component order and `depends_on` chain
+direction returned to G0 amendment, independent rereview, and owner approval.
+See `g1-execution-report.md`. The unchecked T9/T10 items remain incomplete;
+no later gate was entered in that historical execution.
+
+Current lifecycle: the generator-2.3 amendment received independent rereview
+**PASS** at exact head `fe31fed192bfbefa28946736cdb5d2ec134985e0`, recorded in
+PR #169 comment `5672416432`. The repository owner subsequently approved that
+exact amendment in Issue #168 comment `5672541712` (`approval_ref`), so the
+generator-2.3 amendment is approved and **CYAX-0168 G0 is satisfied**.
+**CYAX-0168 G1 is the next gate and has not yet been executed for generator
+2.3; CYAX-0168 G2–G4 have not been entered.** The later synchronization head
+is a mechanical, nonmaterial lifecycle update and is not itself independently
+reviewed.
 
 Exact head `185d56dfced79fe9adc51c5573bcd3bd3d198d1f` received **PASS WITH
 REQUIRED REVISIONS**. The common provenance architecture, B2, main B4, B5
@@ -24,12 +36,11 @@ evidence. Issue #168 comment `5658274383` was recorded without a valid explicit
 owner-decision checkpoint and must not be used as owner approval; the
 correction is recorded in `authority-correction-a.md` and Issue #168
 correction comment `5664014428`. The prior generator-2.2 design was approved
-in Issue #168 comment `5668898317` (`approval_ref`) and that approval remains
-historical evidence for the prior exact design. It is not approval of the
-amended generator-2.3 contract. The current amended specification is
-**DRAFT** with `approval_ref` null; **CYAX-0168 G0 is NOT SATISFIED for the
-amended contract; CYAX-0168 G1 is NOT AUTHORIZED; CYAX-0168 G2–G4 are NOT
-ENTERED.**
+in Issue #168 comment `5668898317` and that approval remains historical
+evidence for the prior exact design only. The pre-approval state of the
+amended generator-2.3 specification was **DRAFT** with `approval_ref` null and
+G0 not satisfied; that historical state is superseded by the current lifecycle
+recorded above.
 
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 received its prior **PASS WITH REQUIRED REVISIONS** and remains the historical
@@ -47,8 +58,9 @@ rereview of the exact head produced by this repair,
 `f2283f6a1f58600d05ed0a50535d07013ac6fb2c`, returned **PASS** (T8e below);
 that verdict is technical evidence only and did not by itself create owner
 authority for this amendment. The prior approval remains preserved as history;
-the amended generator-2.3 contract awaits fresh independent rereview and an
-explicit owner decision.
+at that pre-approval stage, the amended generator-2.3 contract awaited fresh
+independent rereview and an explicit owner decision; the current outcome is
+recorded above.
 
 - [x] T1 [R-004] — Audit #117 K1–K12 against captured canonical sources.
   - Outcome: the independent audit passed; corrected K7/K8/K10/K11 preserves
@@ -159,8 +171,10 @@ explicit owner decision.
     not altered. The Issue #168 body was aligned to this host-portable contract
     so the live work item no longer states the superseded machine-authority
     proposal; that alignment carries the same bounded repair and changes no
-    scientific intent and no other architecture. `approval_ref` stays null,
-    CYAX-0168 G0 stays not satisfied, and CYAX-0168 G1 stays not authorized.
+    scientific intent and no other architecture. At the time of this repair,
+    `approval_ref` was null, CYAX-0168 G0 was not satisfied, and CYAX-0168 G1
+    was not authorized; the later owner approval supersedes that historical
+    lifecycle state.
   - Verify: hardware-authority terminology sweep of the CYAX-0168 normative
     surfaces, spec/plan/tasks convergence, lifecycle-state and privacy scans,
     frontmatter parse, and diff checks. The T8e rereview gate applies to the
@@ -186,11 +200,13 @@ explicit owner decision.
     historical and are not approval of the amended contract.
   - Boundary: the prior owner approval did not merge PR #169, authorize
     production adoption, waive G1–G4, guarantee G1 success, or authorize
-    automatic FalkorDBLite fallback. The generator-2.3 amendment requires a
-    fresh independent rereview and explicit owner decision at G0.
-  - Stop: do not treat the prior approval as current authority; current
-    `approval_ref` remains null and CYAX-0168 G0 remains not satisfied for the
-    amended contract.
+    automatic FalkorDBLite fallback. At that historical pre-approval stage, the
+    generator-2.3 amendment required a fresh independent rereview and explicit
+    owner decision at G0; that gate is now recorded as satisfied below.
+  - Stop (historical pre-approval boundary): do not treat the prior 2.2
+    approval as current authority for generator 2.3; at that time
+    `approval_ref` was null and CYAX-0168 G0 was not satisfied for the amended
+    contract.
 - [x] T8g-generator-2.3-contract-amendment [R-005, R-006, CYAX-0168 G0] —
   Amend the failed generator-2.2 contract without changing seeds, sizes,
   profiles, queries, statistics, resources, host controls, or Ladybug rules.
@@ -205,25 +221,35 @@ explicit owner decision.
     numeric block ordinal followed by fixed local motif order. It also freezes
     phase-3 subject exclusion before PRF selection and phase-5 exclusion of
     every phase-1 isolated WorkItem. All generator identity/version domains
-    advance coherently from 2.2 to 2.3. The current spec remains draft and this
-    task does not authorize G1.
+    advance coherently from 2.2 to 2.3. At this task's reviewed head the spec
+    was still draft and this task did not authorize G1; those pre-approval
+    lifecycle statements are superseded by the owner approval recorded below.
   - Boundary: preserve `g1-execution-report.md`,
     `generator-independence-failure.json`, and all historical 2.2 evidence;
     do not regenerate fixtures, calibrate, rerun G1, or enter G2–G4.
   - Verify: exact block/order/component/direction wording, generator-token
     closure, unchanged experiment-shape scan, lifecycle/frontmatter/privacy
     checks, and diff checks.
-- [ ] T8h-generator-2.3-independent-rereview-owner-gate [R-005, R-006,
+- [x] T8h-generator-2.3-independent-rereview-owner-gate [R-005, R-006,
   CYAX-0168 G0] — Obtain a fresh independent review of the amended contract,
   then present the proposed amendment to the owner for an explicit decision.
+  - Outcome: independent rereview **PASS** at exact head
+    `fe31fed192bfbefa28946736cdb5d2ec134985e0`, recorded in PR #169 comment
+    `5672416432` (comparison head
+    `33f74af29710c92a762cc1edad8858a83b323b7c`). The repository owner
+    subsequently approved that exact generator-2.3 amendment in Issue #168
+    comment `5672541712` (`approval_ref`). **CYAX-0168 G0 is satisfied.**
+    The later synchronization head is a mechanical, nonmaterial lifecycle
+    update and is not itself independently reviewed.
   - Verify: adversarial phase-2 uniqueness, complete 2.3 identity/version
     closure, phase-3 and phase-5 clarifications, preservation of all seeds,
     profiles, queries, statistical/resource/host/Ladybug contracts, lifecycle
     authority, and immutable 2.2 failure evidence.
-  - Stop: a review PASS is technical evidence only; do not record owner
-    approval or authorize G1 without the owner's explicit decision. Until then
-    `approval_ref` is null, G0 is not satisfied for 2.3, G1 is not authorized,
-    and G2–G4 are not entered.
+  - Boundary: the owner approval does not waive CYAX-0168 G1–G4, constitute
+    CYAX-0168 G1 evidence, authorize production adoption or automatic
+    FalkorDBLite fallback, or authorize CYAX-0168 G1 execution as part of this
+    synchronization. CYAX-0168 G1 is the next gate and has not yet been
+    executed for generator 2.3; CYAX-0168 G2–G4 have not been entered.
 - [ ] T9 [R-001, R-002, R-004–R-009, CYAX-0168 G1] — Under later dispatch,
   freeze source/registry/gold/generator/query/calibration manifests and v1
   validators only after amended G0 approval.
@@ -261,9 +287,11 @@ explicit owner decision.
 No benchmark implementation, dependency, generated database/fixture,
 timing/resource run, CYAX-0166/CYAX-0167 edit, or production-backend adoption
 is part of this authority and host-portability design repair or the generator
-2.3 amendment. The prior owner approval in Issue #168 comment `5668898317`
-remains historical evidence for generator 2.2 and is not current approval.
-**CYAX-0168 G0 is NOT SATISFIED for the amended contract; `approval_ref` is
-null; CYAX-0168 G1 is NOT AUTHORIZED; and CYAX-0168 G2–G4 are NOT ENTERED.**
-The independent rereview and explicit owner decision for the amended contract
-remain pending. T9 and later G1–G4 tasks remain unexecuted.
+2.3 amendment or this synchronization. The prior owner approval in Issue #168
+comment `5668898317` remains historical evidence for generator 2.2 only. The
+current generator-2.3 amendment was independently rereviewed **PASS** at exact
+head `fe31fed192bfbefa28946736cdb5d2ec134985e0` (PR #169 comment `5672416432`)
+and approved by the repository owner in Issue #168 comment `5672541712`
+(`approval_ref`). **CYAX-0168 G0 is satisfied; CYAX-0168 G1 is the next gate
+and has not yet been executed for generator 2.3; and CYAX-0168 G2–G4 have not
+been entered.** T9, T10, and all later-gate tasks remain unchecked.

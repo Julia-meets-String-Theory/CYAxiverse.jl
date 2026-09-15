@@ -11,11 +11,15 @@ preregistration/common-contract defect** because phase-2 component ordering
 and `depends_on` chain direction were not identity-determined. The separate
 phase-3 candidate-vector and phase-5 isolated-WorkItem findings are
 implementation nonconformances and are closed explicitly in the amendment.
-The current amended specification is **DRAFT**, `approval_ref` is null,
-CYAX-0168 G0 is **NOT SATISFIED**, CYAX-0168 G1 is **NOT AUTHORIZED**, and
-CYAX-0168 G2–G4 are **NOT ENTERED**. Return to G0 amendment and fresh
-independent rereview is required before an explicit owner decision; no new G1
-is authorized by this plan.
+The generator-2.3 amendment received an independent rereview **PASS** at exact
+head `fe31fed192bfbefa28946736cdb5d2ec134985e0`, recorded in PR #169 comment
+`5672416432`. The repository owner subsequently approved that exact amendment in
+Issue #168 comment `5672541712` (`approval_ref`). The current amended
+specification is **APPROVED**; **CYAX-0168 G0 is satisfied**; **CYAX-0168 G1 is
+the next gate and has not yet been executed for generator 2.3**; and
+**CYAX-0168 G2–G4 have not been entered**. The later synchronization head is a
+mechanical, nonmaterial lifecycle update and is not itself independently
+reviewed. This plan does not execute or dispatch G1.
 
 The prior authority/host repair had recorded CYAX-0168 G0 as satisfied and G1
 as the next gate under a later execution dispatch. That historical status is
@@ -36,7 +40,12 @@ runs. The independent K1–K12 source audit has passed and is not reopened. The
 independent bounded rereview of the exact repaired head
 `f2283f6a1f58600d05ed0a50535d07013ac6fb2c` returned **PASS**; that verdict is
 technical evidence only and did not by itself create owner authority for this
-amendment. The prior approval comment remains preserved as history.
+amendment. The prior approval comment remains preserved as history. The later
+generator-2.3 rereview **PASS** at exact head
+`fe31fed192bfbefa28946736cdb5d2ec134985e0` (PR #169 comment `5672416432`) and
+the subsequent owner approval in Issue #168 comment `5672541712` are recorded
+above. The later synchronization head is mechanical and nonmaterial and is
+not itself independently reviewed.
 The earlier exact head `4005f60da7fa330cc964bbf3688b65fabb8dfd8b`
 and its B1–B5 repair remain recorded as prior rereview history.
 The independent macOS architecture/methodology rereview of exact head
@@ -87,7 +96,8 @@ superseded contract. They do not approve this generator-2.3 amendment.
    additional source-revision rules. Advance every generator identity domain
    coherently from 2.2 to 2.3. Require a fresh independent implementation to
    reproduce every byte, assertion identity, construction trace, and complete
-   snapshot checksum. This amendment does not authorize G1 execution.
+   snapshot checksum. This plan does not execute or dispatch G1; G1 remains the
+   next lifecycle gate after this G0 synchronization.
 6. Freeze Q11 to the benchmark-local block-claim slot, Q02's query-local
    authority ordering, the Q01–Q12 decision-instance table, and independent
    gold; then implement the raw→instance→family/profile→paired-CI map.
@@ -179,9 +189,10 @@ occurred.
 The only later CYAX-0166 interface is snapshot identity, the shared evaluator,
 canonical `RetrievalBundle`, and bounded context compiler. No CYAX-0166/CYAX-0167
 edit occurs here. This repair applies the validated chronology and evidence-state
-lessons by preserving the independent review record without treating a drafted
-or published approval statement as an actual owner decision. The reusable
-authority-provenance failure is recorded as a candidate lesson pending review.
+lessons by preserving the independent review record and distinguishing the
+historical drafted or published approval statement from the later explicit
+owner decision. The reusable authority-provenance failure is recorded as a
+candidate lesson pending review.
 
 Version impact is none. All future benchmark dependencies remain optional and
 outside the Julia package runtime.
