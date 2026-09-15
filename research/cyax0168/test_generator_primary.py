@@ -1,4 +1,4 @@
-"""Focused conformance checks for the CYAX-0168 generator 2.2 primary."""
+"""Focused conformance checks for the CYAX-0168 generator 2.3 primary."""
 
 from __future__ import annotations
 
@@ -15,6 +15,45 @@ from research.cyax0168.generator_primary import (
 
 
 class GeneratorPrimaryTests(unittest.TestCase):
+    def test_generator_23_identity_domains_and_calibration_barrier(self):
+        snapshot = generate_snapshot("C0", "P-medium", 168900)
+        self.assertEqual(snapshot.manifest["generator_name"], "cyax-0168-scale-2.3")
+        self.assertEqual(snapshot.manifest["generator_version"], "2.3")
+        self.assertEqual(snapshot.manifest["namespace"], "cyax-0168-synthetic-v2.3")
+        self.assertEqual(snapshot.manifest["entity_count"], 1_000)
+        self.assertEqual(snapshot.manifest["assertion_count"], 5_000)
+        self.assertTrue(all("/scale/2.3/" in row["canonical_locator"] for row in snapshot.source_revisions))
+        with self.assertRaises(GenerationError):
+            generate_snapshot("T0", "P-medium", 162000, entity_count=100)
+
+    def test_phase_2_uses_primary_order_and_later_to_previous_chain_direction(self):
+        snapshot = generate_snapshot("conformance-tiny", "P-low", 900001, entity_count=100)
+        by_id = {row["assertion_id"]: row for row in snapshot.assertions}
+        work_ids = {row["entity_id"] for row in snapshot.entities if row["entity_type"] == "WorkItem"}
+        phase = next(row for row in snapshot.trace["phases"] if row["phase"] == 2)
+        for component in phase["component_blocks"]:
+            component_work_ids = [
+                next(row["entity_id"] for row in snapshot.entities
+                     if row["entity_type"] == "WorkItem"
+                     and row["canonical_source_identity"][3] == block)
+                for block in component
+            ]
+            self.assertEqual(component_work_ids, sorted(component_work_ids, key=lambda value: value.encode("utf-8")))
+        chain = [by_id[aid] for aid in phase["chain_assertion_ids"]]
+        self.assertTrue(all(row["predicate"] == "depends_on" for row in chain))
+        self.assertTrue(all(row["subject_id"] in work_ids and row["object_id"] in work_ids for row in chain))
+        for component in phase["component_blocks"]:
+            component_work_ids = [
+                next(row["entity_id"] for row in snapshot.entities
+                     if row["entity_type"] == "WorkItem"
+                     and row["canonical_source_identity"][3] == block)
+                for block in component
+            ]
+            length = min(4, len(component_work_ids) - 1)
+            expected = list(zip(component_work_ids[1:length + 1], component_work_ids[:length]))
+            actual = [(row["subject_id"], row["object_id"]) for row in chain[:length]]
+            self.assertEqual(actual, expected)
+
     def test_small_conformance_snapshot_is_repeatable_and_exactly_50_per_block(self):
         first = generate_snapshot("conformance-tiny", "P-low", 900001, entity_count=100)
         second = generate_snapshot("conformance-tiny", "P-low", 900001, entity_count=100)
@@ -61,7 +100,7 @@ class GeneratorPrimaryTests(unittest.TestCase):
 
     def test_prf_uses_big_endian_digest_and_closed_purpose_registry(self):
         candidates = ["a", "b", "c", "d"]
-        digest = hashlib.sha256(canonical_frame(["cyax-gen-2.2", 7, "P-low", "dependency_target", 0, 0])).digest()
+        digest = hashlib.sha256(canonical_frame(["cyax-gen-2.3", 7, "P-low", "dependency_target", 0, 0])).digest()
         expected = candidates[int.from_bytes(digest, "big") % len(candidates)]
         selected, _ = prf_choice(candidates, seed=7, profile_id="P-low", purpose="dependency_target", ordinal=0)
         self.assertEqual(selected, expected)

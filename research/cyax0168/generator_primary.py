@@ -1,4 +1,4 @@
-"""Primary implementation of the CYAX-0168 scale generator 2.2.
+"""Primary implementation of the CYAX-0168 scale generator 2.3.
 
 This module implements the frozen, scientifically inert synthetic fixture
 generator.  It has no backend imports, no wall-clock reads, and no runtime
@@ -22,12 +22,16 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 import unicodedata
 
 
-GENERATOR_VERSION = "cyax-0168-scale-2.2"
-NAMESPACE = "cyax-0168-synthetic-v2.2"
+GENERATOR_NAME = "cyax-0168-scale-2.3"
+GENERATOR_VERSION = "2.3"
+PRF_DOMAIN = "cyax-gen-2.3"
+NAMESPACE = "cyax-0168-synthetic-v2.3"
+SOURCE_LOCATOR_VERSION = "/scale/2.3/"
 OBSERVED_AT = "2000-01-01T00:00:00.000000Z"
 FIXED_TIME = OBSERVED_AT
 BASE_VALID_FROM = "2000-01-02T00:00:00.000000Z"
-AUTHORITY_RULE = "synthetic_fixture_v2.2"
+AUTHORITY_RULE = "synthetic_fixture_v2.3"
+AUTHORITY_DERIVATION_RULE_ID = AUTHORITY_RULE
 SCHEMA_VERSION = "cyax-snapshot-v1"
 AUTHORITY_RULE_VERSION = "cyax-authority-v1"
 EVALUATOR_RULE_VERSION = "cyax-evaluator-v1"
@@ -91,6 +95,38 @@ TIERS: dict[str, dict[str, int]] = {
     "T2": {"entity_count": 100_000, "assertion_count": 500_000},
     "T3": {"entity_count": 200_000, "assertion_count": 1_000_000},
     "T4": {"entity_count": 1_000_000, "assertion_count": 5_000_000},
+}
+
+# Calibration tiers are the only registered scales that may be generated
+# during CYAX-0168 G1.  T0--T4 remain decision-fixture labels and are rejected
+# by ``generate_snapshot`` regardless of whether a caller supplies a size.
+CALIBRATION_TIERS: dict[str, dict[str, int]] = {
+    "C0": {"entity_count": 1_000, "assertion_count": 5_000},
+    "C1": {"entity_count": 10_000, "assertion_count": 50_000},
+    "C2": {"entity_count": 100_000, "assertion_count": 500_000},
+    "C3": {"entity_count": 200_000, "assertion_count": 1_000_000},
+}
+
+# The calibration seed matrix is frozen by the approved G1 contract.  Keep
+# this manifest adjacent to the generator so callers cannot accidentally
+# substitute a decision seed or transfer a result across scales.
+CALIBRATION_SEEDS: dict[str, dict[str, tuple[int, ...]]] = {
+    "C0": {"P-medium": (168900,)},
+    "C1": {
+        "P-low": (168911, 168912),
+        "P-medium": (168913, 168914),
+        "P-high": (168915, 168916),
+    },
+    "C2": {
+        "P-low": (168921, 168922),
+        "P-medium": (168923, 168924),
+        "P-high": (168925, 168926),
+    },
+    "C3": {
+        "P-low": (168931,),
+        "P-medium": (168932,),
+        "P-high": (168933,),
+    },
 }
 
 PRF_PURPOSES = {
@@ -312,14 +348,19 @@ def _prf_digest(seed: int, profile_id: str, purpose: str, ordinal: int, counter:
         raise GenerationError(f"unregistered PRF purpose: {purpose!r}")
     if min(seed, ordinal, counter) < 0 or counter > (2**64 - 1):
         raise GenerationError("PRF integer outside the frozen nonnegative u64 domain")
-    return hashlib.sha256(canonical_frame(["cyax-gen-2.2", seed, profile_id, purpose, ordinal, counter])).digest()
+    return hashlib.sha256(canonical_frame([PRF_DOMAIN, seed, profile_id, purpose, ordinal, counter])).digest()
 
 
 def prf_digest(seed: int, profile_id: str, purpose: str, ordinal: int, counter: int = 0) -> bytes:
     return _prf_digest(seed, profile_id, purpose, ordinal, counter)
 
 
-def prf_choice(candidates: Sequence[Any], *, seed: int, profile_id: str, purpose: str, ordinal: int, reject: Any = None, presorted: bool = False) -> tuple[Any, int]:
+def prf_choice(
+    candidates: Sequence[Any], *, seed: int, profile_id: str, purpose: str,
+    ordinal: int, reject: Any = None, presorted: bool = False,
+    trace: list[dict[str, Any]] | None = None, phase: str | None = None,
+    subject_id: str | None = None,
+) -> tuple[Any, int]:
     """Apply the exact rejection-sampling rule and return ``(choice,counter)``.
 
     ``reject`` is a callback accepting a candidate, or ``None``.  The helper
@@ -330,34 +371,106 @@ def prf_choice(candidates: Sequence[Any], *, seed: int, profile_id: str, purpose
     if purpose not in PRF_PURPOSES:
         raise GenerationError(f"unregistered PRF purpose: {purpose!r}")
     def candidate_key(value: Any) -> bytes:
-        if isinstance(value, (tuple, list)) and len(value) == 2:
+        if isinstance(value, (tuple, list)) and len(value) >= 2:
             return canonical_frame([value[0], value[1]])
         return _primary(str(value))
 
     ordered = list(candidates) if presorted else sorted(candidates, key=candidate_key)
     if not ordered:
         raise GenerationError("empty candidate vector")
+    def trace_value(value: Any) -> Any:
+        if isinstance(value, tuple):
+            return [trace_value(item) for item in value]
+        if isinstance(value, list):
+            return [trace_value(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): trace_value(item) for key, item in value.items()}
+        return value
+
+    attempts: list[dict[str, Any]] | None = None
+    choice_record: dict[str, Any] | None = None
+    if trace is not None:
+        attempts = []
+        choice_record = {
+            "phase": phase,
+            "purpose": purpose,
+            "ordinal": ordinal,
+            "candidate_count": len(ordered),
+            "candidates": [trace_value(item) for item in ordered],
+            "attempts": attempts,
+        }
+        if subject_id is not None:
+            choice_record["subject_id"] = subject_id
+        trace.append(choice_record)
+
     counter = 0
     while True:
         if len(ordered) == 1:
             candidate = ordered[0]
+            rejected = bool(reject is not None and reject(candidate))
+            if choice_record is not None:
+                attempts.append({
+                    "counter": 0,
+                    "prf_called": False,
+                    "candidate": trace_value(candidate),
+                    "digest": None,
+                    "digest_rejected": False,
+                    "predicate_rejected": rejected,
+                })
+            if rejected:
+                if choice_record is not None:
+                    choice_record.update({"selected": None, "selected_counter": None, "retry_count": 0, "failed": True})
+                raise GenerationError("sole candidate rejected by the exhaustive purpose rule")
+            if choice_record is not None:
+                choice_record.update({"selected": trace_value(candidate), "selected_counter": 0, "retry_count": 0, "failed": False})
+            return candidate, 0
         else:
             digest = prf_digest(seed, profile_id, purpose, ordinal, counter)
             x = int.from_bytes(digest, "big")
             limit = (1 << 256) - ((1 << 256) % len(ordered))
             if x >= limit:
+                if choice_record is not None:
+                    attempts.append({
+                        "counter": counter,
+                        "prf_called": True,
+                        "candidate": None,
+                        "digest": digest.hex(),
+                        "digest_rejected": True,
+                        "predicate_rejected": False,
+                    })
                 if counter == 2**64 - 1:
+                    if choice_record is not None:
+                        choice_record.update({"selected": None, "selected_counter": None, "retry_count": counter + 1, "failed": True})
                     raise GenerationError("PRF counter overflow")
                 counter += 1
                 continue
             candidate = ordered[x % len(ordered)]
-        if reject is not None and reject(candidate):
+        rejected = bool(reject is not None and reject(candidate))
+        if choice_record is not None:
+            attempts.append({
+                "counter": counter,
+                "prf_called": True,
+                "candidate": trace_value(candidate),
+                "digest": digest.hex(),
+                "digest_rejected": False,
+                "predicate_rejected": rejected,
+            })
+        if rejected:
             if len(ordered) == 1:
                 raise GenerationError("sole candidate rejected by the exhaustive purpose rule")
             if counter == 2**64 - 1:
+                if choice_record is not None:
+                    choice_record.update({"selected": None, "selected_counter": None, "retry_count": counter + 1, "failed": True})
                 raise GenerationError("PRF counter overflow")
             counter += 1
             continue
+        if choice_record is not None:
+            choice_record.update({
+                "selected": trace_value(candidate),
+                "selected_counter": counter,
+                "retry_count": counter,
+                "failed": False,
+            })
         return candidate, counter
 
 
@@ -411,6 +524,68 @@ class Snapshot:
     @property
     def logical_snapshot_checksum(self) -> str:
         return self.manifest["logical_snapshot_checksum"]
+
+    @property
+    def generator_name(self) -> str:
+        return GENERATOR_NAME
+
+    @property
+    def generator_version(self) -> str:
+        return GENERATOR_VERSION
+
+    @property
+    def prf_domain(self) -> str:
+        return PRF_DOMAIN
+
+    @property
+    def synthetic_namespace(self) -> str:
+        return NAMESPACE
+
+    @property
+    def source_locator_version(self) -> str:
+        return SOURCE_LOCATOR_VERSION
+
+    @property
+    def authority_derivation_rule_id(self) -> str:
+        return AUTHORITY_DERIVATION_RULE_ID
+
+    @property
+    def assertion_ids(self) -> list[str]:
+        return [record["assertion_id"] for record in self.assertions]
+
+    @property
+    def retry_trace(self) -> list[dict[str, Any]]:
+        return self.trace.get("prf_choices", [])
+
+    @property
+    def prf_choices(self) -> list[dict[str, Any]]:
+        return self.retry_trace
+
+    @property
+    def construction_trace(self) -> list[dict[str, Any]]:
+        """Return the append-only identity-bearing construction trace."""
+        return self.trace.get("construction_trace", [])
+
+    @property
+    def source_bytes(self) -> dict[str, bytes]:
+        return {
+            record["canonical_locator"]: self.source_objects[record["object_sha256"]]
+            for record in self.source_revisions
+        }
+
+    @property
+    def records(self) -> dict[str, list[dict[str, Any]]]:
+        """Return JSON-ready physical records for comparison/evidence."""
+        return {
+            "entities": [dict(record) for record in self.entities],
+            "literals": [dict(record) for record in self.literals],
+            "source_revisions": [dict(record) for record in self.source_revisions],
+            "assertions": [dict(record) for record in self.assertions],
+        }
+
+    @property
+    def canonical_records(self) -> dict[str, list[dict[str, Any]]]:
+        return self.records
 
     @property
     def cycle_trace(self) -> list[dict[str, Any]]:
@@ -514,15 +689,37 @@ class _Builder:
         self.base_assertion_ids: list[str] = []
         self.active_assertions: set[str] = set()
         self.next_ordinal = 0
+        # Complete retry/candidate traces are required for the small
+        # conformance reproduction.  They are intentionally not retained for
+        # C0--C3 bulk calibration snapshots: retaining a full candidate vector
+        # for every filler choice would turn evidence diagnostics into a
+        # second, quadratic-size fixture and is not needed for the checksum.
+        self.trace_enabled = tier not in CALIBRATION_TIERS
+        self.construction_trace: list[dict[str, Any]] = []
         self.trace: dict[str, Any] = {
             "generator_version": GENERATOR_VERSION,
             "prf_purposes": sorted(PRF_PURPOSES),
             "prf_choices": [],
+            "construction_trace": self.construction_trace,
             "removed_assertion_ids": [],
             "phases": [],
         }
         self._source_base_revision: dict[int, str] = {}
         self._init_entities()
+
+    def _trace_construction(self, record: dict[str, Any]) -> None:
+        if self.trace_enabled:
+            self.construction_trace.append(record)
+            return
+        # Keep compact phase-level calibration diagnostics while dropping the
+        # per-assertion event stream.  Phase 8's candidate-pair vector is also
+        # omitted because it is quadratic in the number of blocks.
+        if record.get("event") == "assertion_constructed":
+            return
+        compact = dict(record)
+        if compact.get("phase") == "phase-8-filler":
+            compact.pop("candidate_pairs", None)
+        self.construction_trace.append(compact)
 
     def _init_entities(self) -> None:
         for b in range(self.block_count):
@@ -549,7 +746,7 @@ class _Builder:
             base_locator = self._base_locator(b)
             base_record = {
                 "block": b,
-                "generator": GENERATOR_VERSION,
+                "generator": GENERATOR_NAME,
                 "profile": self.profile_id,
                 "seed": self.seed,
                 "tier": self.tier,
@@ -565,10 +762,10 @@ class _Builder:
             self.block_claim_literal[b] = literal_id
 
     def _base_locator(self, block: int) -> str:
-        return f"cyax://0168/scale/2.2/{self.tier}/{self.profile_id}/{self.seed}/block/{block}/base"
+        return f"cyax://0168/scale/2.3/{self.tier}/{self.profile_id}/{self.seed}/block/{block}/base"
 
     def _assertion_locator(self, ordinal: int, block: int) -> str:
-        return f"cyax://0168/scale/2.2/{self.tier}/{self.profile_id}/{self.seed}/block/{block}/assertion/{ordinal}"
+        return f"cyax://0168/scale/2.3/{self.tier}/{self.profile_id}/{self.seed}/block/{block}/assertion/{ordinal}"
 
     def _new_source_revision(self, block: int, locator: str, content: bytes, *, base: bool = False) -> str:
         digest = hashlib.sha256(content).hexdigest()
@@ -639,7 +836,7 @@ class _Builder:
             self.next_ordinal += 1
         statement = {
             "assertion_ordinal": ordinal,
-            "generator": GENERATOR_VERSION,
+            "generator": GENERATOR_NAME,
             "literal_identity": literal_ref,
             "object_identity": object_id,
             "predicate": predicate,
@@ -677,7 +874,17 @@ class _Builder:
             raise GenerationError("assertion ID collision")
         record["assertion_id"] = assertion_id
         self.assertions[assertion_id] = record
-        self.assertion_meta[assertion_id] = {"phase": phase, "base": phase == "base"}
+        self.assertion_meta[assertion_id] = {"phase": phase, "base": phase in {"base", "base_motif"}}
+        self._trace_construction({
+            "event": "assertion_constructed",
+            "phase": phase,
+            "assertion_ordinal": ordinal,
+            "assertion_id": assertion_id,
+            "subject_id": subject_id,
+            "predicate": predicate,
+            "object_id": object_id,
+            "literal_ref": literal_ref,
+        })
         self.active_assertions.add(assertion_id)
         if object_id is not None:
             self.triples.add((subject_id, predicate, object_id))
@@ -697,7 +904,7 @@ class _Builder:
                 aid = self._record_assertion_for_entities(
                     subject_id=e[sr]["entity_id"], block=b, predicate=predicate,
                     object_id=e[orole]["entity_id"] if orole is not None else None,
-                    literal_ref=literal, phase="base",
+                    literal_ref=literal, phase="base_motif",
                 )
                 self.base_assertion_ids.append(aid)
 
@@ -708,19 +915,30 @@ class _Builder:
         return (subject_id, predicate, object_id) in self.triples
 
     def _phase_dependencies(self, isolated: set[int]) -> tuple[list[int], list[list[int]], list[str]]:
-        # Components are consecutive block ordinals.  Phase 3 has a separate,
-        # explicit primary-ID visit order for its source positions.
+        # The post-motif block order is identity-bearing.  It is always the
+        # ascending UTF-8 byte order of role-0 WorkItem IDs; numeric block
+        # order is reserved for base-motif emission only.
         connected = [b for b in range(self.block_count) if b not in isolated]
         connected_primary = sorted(connected, key=lambda b: _primary(self.block_entities[b][0]["entity_id"]))
         width = max(int(self.profile["path_depth"]) + 1, 64)
-        components = [connected[i:i + width] for i in range(0, len(connected), width)]
+        components = [connected_primary[i:i + width] for i in range(0, len(connected_primary), width)]
         component_of = {b: i for i, comp in enumerate(components) for b in comp}
         chain_ids: list[str] = []
+        self._trace_construction({
+            "event": "phase_complete",
+            "phase": "phase-2-components",
+            "component_capacity": width,
+            "components": [list(component) for component in components],
+        })
         for comp in components:
             works = [self.block_entities[b][0]["entity_id"] for b in comp]
             chain_length = min(int(self.profile["path_depth"]), len(works) - 1)
-            for left, right in zip(works[:chain_length], works[1:chain_length + 1]):
-                aid = self._record_assertion_for_entities(subject_id=left, block=self.block_by_work_id[left], predicate="depends_on", object_id=right, literal_ref=None, phase="dependency_chain")
+            # The fixed chain points from each later WorkItem to its
+            # immediately previous WorkItem: w(j+1) depends_on w(j).
+            for j in range(chain_length):
+                subject_id = works[j + 1]
+                object_id = works[j]
+                aid = self._record_assertion_for_entities(subject_id=subject_id, block=self.block_by_work_id[subject_id], predicate="depends_on", object_id=object_id, literal_ref=None, phase="phase-2-components")
                 self.assertion_meta[aid]["chain"] = True
                 chain_ids.append(aid)
         self.trace["phases"].append({
@@ -744,25 +962,59 @@ class _Builder:
             cross_count = 0
         if cross_count > additional:
             raise GenerationError("cross-link quota exceeds additional dependency positions")
-        all_nonisolated = self._work_items(connected)
+        self._trace_construction({
+            "event": "phase_start",
+            "phase": "phase-3-dependencies",
+            "dependency_quota": dep_quota,
+            "fixed_chain_edges": len(chain_ids),
+            "additional_dependency_positions": additional,
+            "cross_link_count": cross_count,
+            "connected_block_ordinals": list(connected_primary),
+        })
+        all_nonisolated = list(self._work_items(connected_primary))
         block_component = {b: component_of[b] for b in connected}
+        # Freeze the complete candidate vectors before any phase-3 assertion is
+        # emitted.  Ordinary vectors exclude their subject before PRF
+        # selection; self-edge rejection remains in the closed purpose row as
+        # a defensive check, but is never used to define membership.
+        same_component_candidates = {
+            component_id: tuple(
+                self._work_items(component)
+            )
+            for component_id, component in enumerate(components)
+        }
+        cross_component_candidates = {
+            component_id: tuple(
+                work_id
+                for work_id in all_nonisolated
+                if block_component[self.block_by_work_id[work_id]] != component_id
+            )
+            for component_id in range(len(components))
+        }
         # Detect an exhausted no-replacement domain before invoking rejection
         # sampling.  A frozen candidate vector is never mutated, so an
         # impossible unique-target quota must fail rather than spin forever.
-        positions_by_source: dict[str, list[tuple[list[str], str]]] = defaultdict(list)
+        positions_by_source: dict[str, list[tuple[tuple[str, ...], str]]] = defaultdict(list)
         for i in range(additional):
             source_block = connected_primary[i % len(connected_primary)]
             source_id = self.block_entities[source_block][0]["entity_id"]
             comp_id = block_component[source_block]
             if i < cross_count:
-                domain = [wid for wid in all_nonisolated if block_component[self.block_by_work_id[wid]] != comp_id]
+                domain = cross_component_candidates[comp_id]
                 purpose = "cross_component_dependency_target"
             else:
-                domain = self._work_items(components[comp_id])
+                domain = tuple(
+                    wid for wid in same_component_candidates[comp_id]
+                    if wid != source_id
+                )
                 purpose = "dependency_target"
             positions_by_source[source_id].append((domain, purpose))
         for source_id, positions in positions_by_source.items():
-            domains = {target for domain, _ in positions for target in domain if target != source_id and not self._assertion_triple_present(source_id, "depends_on", target)}
+            domains = {
+                target for domain, _ in positions
+                for target in domain
+                if target != source_id and not self._assertion_triple_present(source_id, "depends_on", target)
+            }
             if len(positions) > len(domains):
                 raise GenerationError("dependency target domain exhausted by duplicate rejection")
         for i in range(additional):
@@ -772,20 +1024,28 @@ class _Builder:
             source_id = self.block_entities[source_block][0]["entity_id"]
             comp_id = block_component[source_block]
             if i < cross_count:
-                candidates = [wid for wid in all_nonisolated if block_component[self.block_by_work_id[wid]] != comp_id]
+                candidates = cross_component_candidates[comp_id]
                 purpose = "cross_component_dependency_target"
             else:
-                candidates = [wid for wid in self._work_items(components[comp_id])]
+                candidates = tuple(
+                    wid for wid in same_component_candidates[comp_id]
+                    if wid != source_id
+                )
                 purpose = "dependency_target"
             if not candidates:
                 raise GenerationError("empty dependency candidate vector")
             def reject(target: str) -> bool:
                 return target == source_id or self._assertion_triple_present(source_id, "depends_on", target)
-            target, counter = prf_choice(candidates, seed=self.seed, profile_id=self.profile_id, purpose=purpose, ordinal=i, reject=reject)
-            self.trace["prf_choices"].append({"phase": 3, "purpose": purpose, "ordinal": i, "counter": counter, "subject_id": source_id, "object_id": target})
-            self._record_assertion_for_entities(subject_id=source_id, block=source_block, predicate="depends_on", object_id=target, literal_ref=None, phase="dependency")
+            target, counter = prf_choice(
+                candidates, seed=self.seed, profile_id=self.profile_id,
+                purpose=purpose, ordinal=i, reject=reject, presorted=True,
+                trace=self.trace["prf_choices"] if self.trace_enabled else None,
+                phase="phase-3-dependencies",
+                subject_id=source_id,
+            )
+            self._record_assertion_for_entities(subject_id=source_id, block=source_block, predicate="depends_on", object_id=target, literal_ref=None, phase="phase-3-dependencies")
         self.trace["phases"].append({"phase": 3, "isolated_blocks": sorted(isolated), "connected_blocks": len(connected), "dependency_quota": dep_quota, "chain_count": len(chain_ids), "additional_count": additional, "cross_link_count": cross_count})
-        return connected, components, chain_ids
+        return connected_primary, components, chain_ids
 
     def _phase_cycles(self, connected: list[int], components: list[list[int]]) -> set[int]:
         connected_work = self._work_items(connected)
@@ -797,7 +1057,21 @@ class _Builder:
         need = math.floor(float(self.profile["cycle_rate"]) * len(connected))
         if need == 0:
             self.trace["phases"].append({"phase": 4, "cycle_count": 0, "removed_assertion_ids": [], "triples": []})
+            self._trace_construction({
+                "event": "phase_start",
+                "phase": "phase-4-cycles",
+                "cycle_quota": 0,
+                "cycle_selection": "consecutive_primary_id_windows_lowest_id_disjoint",
+                "uses_prf": False,
+            })
             return set()
+        self._trace_construction({
+            "event": "phase_start",
+            "phase": "phase-4-cycles",
+            "cycle_quota": need,
+            "cycle_selection": "consecutive_primary_id_windows_lowest_id_disjoint",
+            "uses_prf": False,
+        })
         triples: list[tuple[str, str, str]] = []
         for i in range(0, max(0, len(connected_work) - 2)):
             tri = tuple(connected_work[i:i + 3])
@@ -821,6 +1095,7 @@ class _Builder:
         cycle_blocks: set[int] = set()
         removed: list[str] = []
         for a, b, c in chosen:
+            removed_for_triple: list[str] = []
             for subject, target in ((a, b), (b, c), (c, a)):
                 candidates = [aid for aid in outgoing[subject] if aid in self.active_assertions]
                 candidates.sort(key=lambda aid: (_primary(aid), _primary(self.assertions[aid]["subject_id"]), _primary(self.assertions[aid]["object_id"] or "")))
@@ -832,27 +1107,49 @@ class _Builder:
                 if removed_record["object_id"] is not None:
                     self.triples.discard((removed_record["subject_id"], removed_record["predicate"], removed_record["object_id"]))
                 removed.append(removed_id)
+                removed_for_triple.append(removed_id)
                 outgoing[subject].remove(removed_id)
+            added_for_triple: list[str] = []
             for subject, target in ((a, b), (b, c), (c, a)):
                 sb = self.block_by_work_id[subject]
-                aid = self._record_assertion_for_entities(subject_id=subject, block=sb, predicate="depends_on", object_id=target, literal_ref=None, phase="cycle")
+                aid = self._record_assertion_for_entities(subject_id=subject, block=sb, predicate="depends_on", object_id=target, literal_ref=None, phase="phase-4-cycles")
                 self.assertion_meta[aid]["cycle"] = True
+                added_for_triple.append(aid)
             cycle_blocks.update(self.block_by_work_id[w] for w in (a, b, c))
+            self._trace_construction({
+                "event": "cycle_rewrite",
+                "phase": "phase-4-cycles",
+                "triple": [a, b, c],
+                "removed_assertion_ids": list(removed_for_triple),
+                "added_assertion_ids": list(added_for_triple),
+            })
         self.trace["removed_assertion_ids"].extend(removed)
         self.trace["phases"].append({"phase": 4, "cycle_count": len(chosen), "removed_assertion_ids": removed, "triples": [list(x) for x in chosen]})
         return cycle_blocks
 
     def _phase_supersession(self, connected: list[int], cycle_blocks: set[int]) -> None:
         depth = int(self.profile["supersession_depth"])
-        eligible = [b for b in connected if b not in cycle_blocks]
+        # Phase 1 is the sole cross-block eligibility filter.  Cycle members
+        # remain eligible for phase 5; the cycle assertions themselves are not
+        # supersession edges.  This is the explicit 2.3 repair for the prior
+        # isolated-WorkItem inclusion defect.
+        eligible = list(connected)
         works = self._work_items(eligible)
         chains = [works[i:i + depth] for i in range(0, len(works), depth) if len(works[i:i + depth]) == depth]
         count = 0
+        self._trace_construction({
+            "event": "phase_start",
+            "phase": "phase-5-supersession",
+            "eligible_workitem_ids": list(works),
+            "supersession_depth": depth,
+            "chain_count": len(chains),
+            "isolated_excluded": sorted(set(range(self.block_count)) - set(eligible)),
+        })
         for chain in chains:
             for pos, (previous, successor) in enumerate(zip(chain, chain[1:]), start=1):
                 sb = self.block_by_work_id[successor]
                 valid_from = f"2000-01-02T00:00:{pos:02d}.000000Z"
-                self._record_assertion_for_entities(subject_id=successor, block=sb, predicate="supersedes", object_id=previous, literal_ref=None, phase="supersession", valid_from=valid_from)
+                self._record_assertion_for_entities(subject_id=successor, block=sb, predicate="supersedes", object_id=previous, literal_ref=None, phase="phase-5-supersession", valid_from=valid_from)
                 count += 1
         self.trace["phases"].append({"phase": 5, "chain_count": len(chains), "supersession_count": count, "depth": depth})
 
@@ -861,15 +1158,27 @@ class _Builder:
         claim_block = {self.block_entities[b][7]["entity_id"]: b for b in range(self.block_count)}
         pair_count = math.floor(float(self.profile["dispute_rate"]) * self.block_count)
         used = claim_ids[:2 * pair_count]
+        self._trace_construction({
+            "event": "phase_start",
+            "phase": "phase-6-disputes",
+            "claim_pair_count": pair_count,
+            "selected_claim_ids": list(used),
+        })
         for i in range(pair_count):
             second, first = used[2 * i + 1], used[2 * i]
             sb = claim_block[second]
-            self._record_assertion_for_entities(subject_id=second, block=sb, predicate="contradicts", object_id=first, literal_ref=None, phase="dispute", dispute_state="disputed")
+            self._record_assertion_for_entities(subject_id=second, block=sb, predicate="contradicts", object_id=first, literal_ref=None, phase="phase-6-disputes", dispute_state="disputed")
         self.trace["phases"].append({"phase": 6, "dispute_pair_count": pair_count, "contradiction_count": pair_count})
 
     def _phase_parallel(self) -> None:
         count = math.floor(float(self.profile["parallel_evidence_rate"]) * 13 * self.block_count)
         base = sorted(self.base_assertion_ids, key=_primary)[:count]
+        self._trace_construction({
+            "event": "phase_start",
+            "phase": "phase-7-parallel-evidence",
+            "parallel_count": count,
+            "selected_base_assertion_ids": list(base),
+        })
         for original_id in base:
             original = self.assertions[original_id]
             subject_id = original["subject_id"]
@@ -878,7 +1187,7 @@ class _Builder:
                 block = next(b for b, roles in self.block_entities.items() if any(e["entity_id"] == subject_id for e in roles.values()))
             aid = self._record_assertion_for_entities(
                 subject_id=subject_id, block=block, predicate=original["predicate"],
-                object_id=original["object_id"], literal_ref=original["literal_ref"], phase="parallel",
+                object_id=original["object_id"], literal_ref=original["literal_ref"], phase="phase-7-parallel-evidence",
             )
             self.assertion_meta[aid]["parallel_of"] = original_id
         self.trace["phases"].append({"phase": 7, "parallel_count": count, "parallel_of": base})
@@ -904,17 +1213,30 @@ class _Builder:
         if remaining < 0:
             raise GenerationError("profile phases exceed exact assertion quota")
         pairs = self._signature_valid_concerns_pairs()
-        candidates = sorted(((s, o) for s, o, _ in pairs), key=canonical_frame)
+        candidates = list(pairs)
         if not candidates and remaining:
             raise GenerationError("empty concerns filler vector")
+        self._trace_construction({
+            "event": "phase_start",
+            "phase": "phase-8-filler",
+            "target_assertion_count": target,
+            "surviving_count_before_fill": len(self.active_assertions),
+            "remaining": remaining,
+            "candidate_pair_count": len(pairs),
+            "candidate_pairs": [[subject, object_id, block] for subject, object_id, block in pairs],
+        })
         for i in range(remaining):
-            def reject(pair: tuple[str, str]) -> bool:
+            def reject(pair: tuple[str, str, int]) -> bool:
                 return pair[0] == pair[1] or self._assertion_triple_present(pair[0], "concerns", pair[1])
-            pair, counter = prf_choice(candidates, seed=self.seed, profile_id=self.profile_id, purpose="fill_concerns_pair", ordinal=i, reject=reject, presorted=True)
-            subject, object_id = pair
-            block = self.entity_block[subject]
-            self.trace["prf_choices"].append({"phase": 8, "purpose": "fill_concerns_pair", "ordinal": i, "counter": counter, "subject_id": subject, "object_id": object_id})
-            self._record_assertion_for_entities(subject_id=subject, block=block, predicate="concerns", object_id=object_id, literal_ref=None, phase="filler")
+            pair, counter = prf_choice(
+                candidates, seed=self.seed, profile_id=self.profile_id,
+                purpose="fill_concerns_pair", ordinal=i, reject=reject,
+                presorted=True,
+                trace=self.trace["prf_choices"] if self.trace_enabled else None,
+                phase="phase-8-filler",
+            )
+            subject, object_id, block = pair
+            self._record_assertion_for_entities(subject_id=subject, block=block, predicate="concerns", object_id=object_id, literal_ref=None, phase="phase-8-filler")
         self.trace["phases"].append({"phase": 8, "filler_count": remaining, "candidate_count": len(candidates), "target_assertions": target})
 
     def _validate(self, isolated: set[int]) -> None:
@@ -961,6 +1283,13 @@ class _Builder:
             "isolated_blocks": sorted(isolated),
             "isolated_count": len(isolated),
         })
+        self._trace_construction({
+            "event": "phase_complete",
+            "phase": "phase-1-isolation",
+            "block_primary_order": list(work_sorted),
+            "isolated_block_ordinals": sorted(isolated),
+            "connected_block_ordinals": [b for b in work_sorted if b not in isolated],
+        })
         connected, components, _ = self._phase_dependencies(isolated)
         cycle_blocks = self._phase_cycles(connected, components)
         self._phase_supersession(connected, cycle_blocks)
@@ -974,7 +1303,12 @@ class _Builder:
         assertions = sorted((self.assertions[aid] for aid in self.active_assertions), key=lambda r: _primary(r["assertion_id"]))
         checksum = logical_snapshot_checksum(entities, literals, revisions, assertions, self.source_objects)
         manifest = {
+            "generator_name": GENERATOR_NAME,
             "generator_version": GENERATOR_VERSION,
+            "prf_domain": PRF_DOMAIN,
+            "synthetic_namespace": NAMESPACE,
+            "source_locator_version": SOURCE_LOCATOR_VERSION,
+            "authority_derivation_rule_id": AUTHORITY_DERIVATION_RULE_ID,
             "namespace": NAMESPACE,
             "tier": self.tier,
             "profile_id": self.profile_id,
@@ -1115,16 +1449,80 @@ def generate_snapshot(tier: str | int, profile_id: str, seed: int, entity_count:
         label = f"T{tier}"
     else:
         label = str(tier)
-    if label in {"C0", "C1", "C2", "C3", "T0", "T1", "T2", "T3", "T4"}:
-        # Registered calibration/decision and benchmark tiers remain outside
-        # this G1 implementation rung.  Conformance callers must use an
-        # unregistered synthetic label with an explicit tiny size.
-        raise GenerationError(f"registered tier {label} generation/materialization is not authorized during CYAX-0168 G1")
+    if label in {"T0", "T1", "T2", "T3", "T4"}:
+        # The decision-fixture barrier is absolute during G1.  Do not permit
+        # an explicit tiny size to disguise a decision-tier generation.
+        raise GenerationError(f"decision tier {label} generation/materialization is not authorized during CYAX-0168 G1")
+    if label in CALIBRATION_TIERS:
+        expected = CALIBRATION_TIERS[label]["entity_count"]
+        if entity_count is None:
+            entity_count = expected
+        elif entity_count != expected:
+            raise GenerationError(f"calibration tier {label} requires the frozen entity_count={expected}")
     if entity_count is None:
         if label not in TIERS:
             raise GenerationError(f"unknown tier {tier!r}; provide entity_count for a tiny fixture")
         entity_count = TIERS[label]["entity_count"]
     return _Builder(label, profile_id, seed, entity_count).build()
+
+
+def generate_calibration_snapshot(tier: str, profile_id: str, seed: int) -> Snapshot:
+    """Generate one exact approved C0-C3 calibration cell.
+
+    This entry point applies the frozen G1 seed matrix before construction.  It
+    is intentionally separate from ``generate_snapshot`` so conformance
+    callers can use custom seeds and tiny labels without being mistaken for
+    calibration evidence.
+    """
+
+    if tier not in CALIBRATION_SEEDS or seed not in CALIBRATION_SEEDS[tier].get(profile_id, ()):
+        raise GenerationError(f"not an approved calibration cell: {tier}/{profile_id}/{seed}")
+    return generate_snapshot(tier, profile_id, seed, CALIBRATION_TIERS[tier]["entity_count"])
+
+
+def physical_records(snapshot: Snapshot) -> dict[str, list[dict[str, Any]]]:
+    """Return the complete JSON-ready physical record projection."""
+    return snapshot.records
+
+
+def entity_records(snapshot: Snapshot) -> list[dict[str, Any]]:
+    return snapshot.records["entities"]
+
+
+def literal_records(snapshot: Snapshot) -> list[dict[str, Any]]:
+    return snapshot.records["literals"]
+
+
+def source_records(snapshot: Snapshot) -> list[dict[str, Any]]:
+    return snapshot.records["source_revisions"]
+
+
+def assertion_records(snapshot: Snapshot) -> list[dict[str, Any]]:
+    return snapshot.records["assertions"]
+
+
+def complete_output(snapshot: Snapshot) -> dict[str, Any]:
+    """Package all canonical records and calibration diagnostics."""
+    return {
+        "generator_name": snapshot.generator_name,
+        "generator_version": snapshot.generator_version,
+        "prf_domain": snapshot.prf_domain,
+        "synthetic_namespace": snapshot.synthetic_namespace,
+        "source_locator_version": snapshot.source_locator_version,
+        "authority_derivation_rule_id": snapshot.authority_derivation_rule_id,
+        "tier": snapshot.tier,
+        "profile_id": snapshot.profile_id,
+        "seed": snapshot.seed,
+        "entities": entity_records(snapshot),
+        "literals": literal_records(snapshot),
+        "source_revisions": source_records(snapshot),
+        "assertions": assertion_records(snapshot),
+        "source_bytes": snapshot.source_bytes,
+        "construction_trace": snapshot.construction_trace,
+        "prf_choices": snapshot.prf_choices,
+        "assertion_ids": snapshot.assertion_ids,
+        "logical_snapshot_checksum": snapshot.logical_snapshot_checksum,
+    }
 
 
 # Short aliases used by focused conformance harnesses.
@@ -1133,8 +1531,9 @@ build_snapshot = generate_snapshot
 
 
 __all__ = [
-    "GENERATOR_VERSION", "NAMESPACE", "PROFILES", "TIERS", "PRF_PURPOSES",
+    "GENERATOR_NAME", "GENERATOR_VERSION", "PRF_DOMAIN", "NAMESPACE", "SOURCE_LOCATOR_VERSION", "AUTHORITY_DERIVATION_RULE_ID",
+    "PROFILES", "TIERS", "CALIBRATION_TIERS", "CALIBRATION_SEEDS", "PRF_PURPOSES",
     "ASSERTION_PREIMAGE_KEYS", "FIXED_TIME", "Snapshot", "GenerationError", "GenerationFailure",
     "canonical_frame", "frame", "canonical_json_bytes", "entity_id", "literal_id", "source_revision_id", "assertion_id", "sha256_hex",
-    "prf_digest", "prf_choice", "prf_select", "logical_snapshot_checksum", "semantic_projection_checksum", "compute_logical_snapshot_checksum", "physical_source_revisions", "semantic_projection", "compute_semantic_source_bundle_projection_checksum", "dependency_target_rejects", "fill_concerns_pair_rejects", "generate_snapshot", "generate", "build_snapshot",
+    "prf_digest", "prf_choice", "prf_select", "logical_snapshot_checksum", "semantic_projection_checksum", "compute_logical_snapshot_checksum", "physical_source_revisions", "semantic_projection", "compute_semantic_source_bundle_projection_checksum", "dependency_target_rejects", "fill_concerns_pair_rejects", "generate_snapshot", "generate_calibration_snapshot", "physical_records", "entity_records", "literal_records", "source_records", "assertion_records", "complete_output", "generate", "build_snapshot",
 ]
