@@ -38,6 +38,86 @@ function short_summary(x)
     string(x)
 end
 
+"""Render a diagnostic value on one TSV-safe line, retaining full arrays."""
+function diagnostic_repr(x)
+    x === nothing && return "unavailable"
+    value = repr(x)
+    replace(value, '\t' => ' ', '\n' => ' ', '\r' => ' ')
+end
+
+"""Return the deterministic Halton starts used by `critical_points` here."""
+function critical_start_set(starts::Int)
+    starts > 0 || throw(ArgumentError("starts must be positive"))
+    starts_matrix = Matrix{Float64}(undef, 2, starts)
+    starts_matrix[:, 1] .= 0.0
+    for sample in 2:starts
+        index = sample - 1
+        for (row, base) in enumerate((2, 3))
+            result = 0.0
+            factor = inv(Float64(base))
+            remaining = index
+            while remaining > 0
+                remaining, digit = divrem(remaining, base)
+                result += digit * factor
+                factor /= base
+            end
+            starts_matrix[row, sample] = result
+        end
+    end
+    starts_matrix
+end
+
+"""Distance on the unit torus used by `critical_points` deduplication."""
+periodic_distance(left, right) =
+    maximum(min.(abs.(left .- right), 1 .- abs.(left .- right)))
+
+"""One-to-one root matching witnesses for two deterministic replays."""
+function root_matching_witnesses(left, right)
+    size(left, 1) == size(right, 1) ||
+        throw(DimensionMismatch("root sets have different dimensions"))
+    size(left, 2) == size(right, 2) ||
+        throw(DimensionMismatch("root sets have different cardinalities"))
+    used = falses(size(right, 2))
+    witnesses = NamedTuple[]
+    for i in axes(left, 2)
+        candidates = [(periodic_distance(left[:, i], right[:, j]), j)
+            for j in axes(right, 2) if !used[j]]
+        isempty(candidates) && throw(ErrorException("one-to-one matching failed"))
+        distance, j = candidates[argmin(first.(candidates))]
+        used[j] = true
+        push!(witnesses, (; left_index=i, right_index=j, periodic_distance=distance))
+    end
+    witnesses
+end
+
+"""Compact correction diagnostics, including the final coordinate."""
+function correction_summary(c, diagnostics)
+    c === nothing && return "unavailable"
+    diagnostic = diagnostics === nothing ? "unavailable" :
+        "value=$(diagnostic_repr(diagnostics.value)), gradient_norm=$(diagnostic_repr(diagnostics.gradient_norm)), gradient_residual=$(diagnostic_repr(diagnostics.gradient_residual)), epsilon=$(diagnostic_repr(diagnostics.epsilon)), eta_values=$(diagnostic_repr(diagnostics.eta_values)), hessian_eigenvalues=$(diagnostic_repr(diagnostics.hessian_eigenvalues)), inertia=($(diagnostics.negative_modes),$(diagnostics.zeroish_modes),$(diagnostics.positive_modes)), zero_tolerance=$(diagnostic_repr(diagnostics.zero_tolerance)), physical_basis=$(diagnostics.physical_basis)"
+    "status=$(c.status), theta=$(diagnostic_repr(c.theta)), residual=$(diagnostic_repr(c.residual)), iterations=$(c.iterations), seconds=$(c.seconds), error=$(diagnostic_repr(c.error)), working_basis=$(c.working_basis), diagnostics=[$diagnostic]"
+end
+
+"""Full state diagnostics exposed by the bounded N=8 trajectory API."""
+function trajectory_summary(result; include_final_unavailable=true)
+    result === nothing && return "unavailable"
+    initial = result.initial
+    saved_samples = diagnostic_repr(result.samples)
+    final_state = include_final_unavailable ?
+        "unavailable_from_current_api" : "saved_endpoint_sample"
+    "initial_theta=$(diagnostic_repr(initial.theta)), initial_epsilon=$(diagnostic_repr(initial.epsilon)), initial_eta_parallel=$(diagnostic_repr(initial.eta_parallel)), initial_gradient_norm=$(norm(initial.initial_gradient)), initial_basis=$(initial.basis), initial_displacement=$(initial.displacement), saved_samples=$(saved_samples), final_state=$(final_state)"
+end
+
+"""Full spectrum diagnostics and quartic log arrays exposed by the API."""
+function spectrum_summary(s, kinetic, lq; precision_label)
+    s === nothing && return "unavailable"
+    float_basis = precision_label == :float64 ?
+        G.leading_hessian_mass_basis_float64(kinetic, lq.Ltilde, lq.Qtilde) :
+        G.leading_hessian_mass_basis(kinetic, lq.Ltilde, lq.Qtilde; prec=80)
+    masses, signs, eigenvectors = float_basis
+    "status=returned_AxionSpectrum, precision=$(precision_label), m=$(diagnostic_repr(s.m)), msign=$(diagnostic_repr(s.msign)), f=$(diagnostic_repr(s.f)), fK=$(diagnostic_repr(s.fK)), eigenvectors_api=leading_hessian_mass_basis, eigenvectors=$(diagnostic_repr(eigenvectors)), basis_m=$(diagnostic_repr(masses)), basis_msign=$(diagnostic_repr(signs)), lambda_self_sign=$(diagnostic_repr(s.λselfsign)), lambda_self_log10=$(diagnostic_repr(s.λself)), lambda31_indices=$(diagnostic_repr(s.λ31_i)), lambda31_sign=$(diagnostic_repr(s.λ31sign)), lambda31_log10=$(diagnostic_repr(s.λ31)), lambda22_indices=$(diagnostic_repr(s.λ22_i)), lambda22_sign=$(diagnostic_repr(s.λ22sign)), lambda22_log10=$(diagnostic_repr(s.λ22)), mass_basis_diagnostics=$(diagnostic_repr(s.mass_basis_diagnostics)), quartic_diagnostics=$(diagnostic_repr(s.quartic_diagnostics)), instanton_hierarchy=$(diagnostic_repr(s.instanton_hierarchy))"
+end
+
 """Measure a warmed function with explicit allocation accounting.
 
 One call is discarded as warmup.  Each measured sample runs after `GC.gc()`.
@@ -69,7 +149,7 @@ function measure(name::AbstractString, f; samples::Int=5, summary::Function=() -
        minimum_seconds=minimum(times), maximum_seconds=maximum(times),
        median_bytes=Int(round(median(bytes))),
        allocated_crosscheck, median_gc_seconds=median(gc_times),
-       summary=replace(result_summary, '\t' => ' '),
+       summary=replace(result_summary, '\t' => ' ', '\n' => ' ', '\r' => ' '),
        status="completed")
 end
 
@@ -219,7 +299,8 @@ function run_b4!(rows, identities)
     q = Int[1 0 1; 0 1 1]
     l = Float64[1.0 1.0 -1.0; 0.0 -0.2 -0.7]
     starts = 24
-    identities["B4_critical_points_n2"] = fixture_digest("B4", q, l, starts)
+    start_set = critical_start_set(starts)
+    identities["B4_critical_points_n2"] = fixture_digest("B4", q, l, starts, start_set)
     result = Ref{Any}(nothing)
     safe_measure(rows, "B4_critical_points_n2_starts24",
         () -> begin
@@ -231,7 +312,11 @@ function run_b4!(rows, identities)
         samples=3,
         summary=() -> begin
             r = result[]
-            "starts=$(r.starts), critical_count=$(r.critical_count), minima_count=$(r.minima_count), residuals=$(r.residuals), inertia=$(r.inertia)"
+            replay = CYAxiverse.minimizer.critical_points(l, q;
+                starts=starts, residual_tolerance=1e-10,
+                merge_tolerance=1e-7, max_iterations=100)
+            witnesses = root_matching_witnesses(r.coordinates, replay.coordinates)
+            "starts=$(r.starts), deterministic_start_set=$(diagnostic_repr(start_set)), coordinates=$(diagnostic_repr(r.coordinates)), critical_count=$(r.critical_count), minima_count=$(r.minima_count), residuals=$(diagnostic_repr(r.residuals)), inertia=$(diagnostic_repr(r.inertia)), periodic_one_to_one_replay_witnesses=$(diagnostic_repr(witnesses)), status_availability=per_start_unavailable_public_api; returned_root_status=converged_only; replay_status=identical, public_fields=$(diagnostic_repr(propertynames(r)))"
         end)
 end
 
@@ -240,7 +325,7 @@ function run_b5!(rows, fixtures, identities)
     # exposes accepted step count and exit event but not internal RHS/Hessian
     # counters; those fields remain explicitly unavailable in the report.
     delta_k = 1.0e-3
-    identities["B5a_n8_slow_roll"] = fixture_digest("B5a", delta_k, 0.25, 0.1, 1.0e-3, 4)
+    identities["B5a_n8_slow_roll"] = fixture_digest("B5a", delta_k, 1e-6, 0.25, 0.1, 1.0e-3, 4, :canonical_hessian, PB.N8_BEST_X)
     flow = Ref{Any}(nothing)
     safe_measure(rows, "B5a_n8_slow_roll_trajectory_bounded",
         () -> begin
@@ -252,7 +337,7 @@ function run_b5!(rows, fixtures, identities)
         samples=2,
         summary=() -> begin
             f = flow[]
-            "entered=$(f.entered_slow_roll), end_event=$(f.end_event), steps=$(f.steps), efolds=$(f.efolds), samples=$(length(f.samples)), solver=$(f.solver)"
+            "entered=$(f.entered_slow_roll), end_event=$(f.end_event), steps=$(f.steps), efolds=$(f.efolds), samples=$(length(f.samples)), solver=$(f.solver), trajectory_diagnostics=$(trajectory_summary(f))"
         end)
     probe = Ref{Any}(nothing)
     safe_measure(rows, "B5a_n8_hilltop_probe_normal_form",
@@ -264,14 +349,15 @@ function run_b5!(rows, fixtures, identities)
         samples=3,
         summary=() -> begin
             p = probe[]
-            "entered=$(p.entered_slow_roll), end_event=$(p.end_event), steps=$(p.steps), efolds=$(p.efolds), samples=$(length(p.samples))"
+            "entered=$(p.entered_slow_roll), end_event=$(p.end_event), steps=$(p.steps), efolds=$(p.efolds), samples=$(length(p.samples)), trajectory_diagnostics=$(trajectory_summary(p; include_final_unavailable=false))"
         end)
 
     # B5b: stationary correction at Float64 plus a bounded BigFloat replay.
     p = fixtures.p5
     k = Matrix(PB.n5_kinetic_matrix(1.0))
     seed = Float64[0.02, -0.01, 0.03, -0.02, 0.01]
-    identities["B5b_stationary_correction_n5"] = fixture_digest("B5b", p.Q, p.L, k, seed)
+    high_residual_tolerance = 1e-40
+    identities["B5b_stationary_correction_n5"] = fixture_digest("B5b", p.Q, p.L, k, seed, high_residual_tolerance)
     context = IP.prepare_context(p.Q, p.L, k)
     correction = Ref{Any}(nothing)
     safe_measure(rows, "B5b_stationary_correction_float64_n5",
@@ -284,52 +370,56 @@ function run_b5!(rows, fixtures, identities)
         samples=3,
         summary=() -> begin
             c = correction[]
-            "status=$(c.status), iterations=$(c.iterations), residual=$(c.residual), internal_seconds=$(c.seconds), working_basis=$(c.working_basis)"
+            "$(correction_summary(c, IP.diagnose(context, c.theta))), high_residual_tolerance=$(high_residual_tolerance)"
         end)
     comparison = Ref{Any}(nothing)
     safe_measure(rows, "B5b_stationary_correction_float64_bigfloat128_n5",
         () -> begin
             comparison[] = IP.compare_precision(seed, p.Q, p.L, k;
                 precision_bits=128, float_residual_tolerance=1e-10,
-                high_residual_tolerance=1e-30, zero_tolerance=1e-10,
+                high_residual_tolerance=high_residual_tolerance, zero_tolerance=1e-10,
                 max_iterations=40, max_line_search=12)
             comparison[]
         end;
         samples=1,
         summary=() -> begin
             c = comparison[]
-            "accepted=$(c.accepted), residual_agreement=$(c.residual_agreement), inertia_agreement=$(c.inertia_agreement), float_status=$(c.float_correction.status), high_status=$(c.high_correction.status), high_residual=$(c.high_correction.residual)"
+            "accepted=$(c.accepted), residual_agreement=$(c.residual_agreement), inertia_agreement=$(c.inertia_agreement), high_residual_tolerance=$(high_residual_tolerance), float=$(correction_summary(c.float_correction, c.float_diagnostics)), high=$(correction_summary(c.high_correction, c.high_diagnostics))"
         end)
 end
 
 function run_b6!(rows, fixtures, identities)
     p = fixtures.p5
     k = p isa NamedTuple ? PB.n5_kinetic_matrix(1.0) : nothing
-    identities["B6_pq_spectrum_n5"] = fixture_digest("B6", p.Q, p.L, k)
+    identities["B6_pq_spectrum_n5"] = fixture_digest("B6", p.Q, p.L, k, :float64, :high_precision, 80, true, true, true)
+    lq = G.LQtilde(p.Q, p.L)
     float_result = Ref{Any}(nothing)
     safe_measure(rows, "B6_pq_spectrum_float64_n5",
         () -> begin
             float_result[] = G.pq_spectrum(k, p.L, p.Q;
-                mixing_correction=:float64, mass_basis_diagnostics=true,
+                mixing_correction=:float64, quartic_diagnostics=true,
+                mass_basis_diagnostics=true,
                 hierarchy_diagnostics=true)
             float_result[]
         end;
         samples=2,
         summary=() -> begin
             s = float_result[]
-            "m=$(s.m), msign=$(s.msign), quartic_self_count=$(length(s.λself)), lambda31_count=$(length(s.λ31)), lambda22_count=$(length(s.λ22)), diagnostics=$(s.mass_basis_diagnostics)"
+            "quartic_self_count=$(length(s.λself)), lambda31_count=$(length(s.λ31)), lambda22_count=$(length(s.λ22)), $(spectrum_summary(s, k, lq; precision_label=:float64))"
         end)
     high_result = Ref{Any}(nothing)
     safe_measure(rows, "B6_pq_spectrum_high_precision80_n5",
         () -> begin
             high_result[] = G.pq_spectrum(k, p.L, p.Q;
-                mixing_correction=:high_precision, prec=80)
+                mixing_correction=:high_precision, prec=80,
+                quartic_diagnostics=true, mass_basis_diagnostics=true,
+                hierarchy_diagnostics=true)
             high_result[]
         end;
         samples=1,
         summary=() -> begin
             s = high_result[]
-            "m=$(s.m), msign=$(s.msign), quartic_self_count=$(length(s.λself)), lambda31_count=$(length(s.λ31)), lambda22_count=$(length(s.λ22))"
+            "quartic_self_count=$(length(s.λself)), lambda31_count=$(length(s.λ31)), lambda22_count=$(length(s.λ22)), $(spectrum_summary(s, k, lq; precision_label=:high_precision80))"
         end)
 end
 
@@ -497,7 +587,8 @@ function main()
         method="warmup=1 discarded call; samples=5 by default (route overrides 1--3); GC.gc before every sample; primary allocation=@timed.bytes; crosscheck=@allocated once after warmup; statistic=median with min/max retained",
         environment=env,
         fixture_identities=identities,
-        b5_internal_counters="unavailable from current APIs: n8_slow_roll_trajectory does not expose RHS/Hessian counters; correct_stationary_point does not expose Hessian/line-search trial counters",
+        b5_internal_counters="unavailable from current APIs: n8_slow_roll_trajectory does not expose RHS/Hessian counters or final state; correct_stationary_point does not expose Hessian/line-search trial counters",
+        b5b_high_residual_tolerance="1e-40 (contract value)",
         b7_data_scope="synthetic bounded HDF5 fixture only; no checked-out geometry data or population scan")
     println("WROTE ", result_path)
     println("WROTE ", metadata_path)

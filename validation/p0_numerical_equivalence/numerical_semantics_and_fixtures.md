@@ -19,13 +19,13 @@ This record distinguishes four kinds of statement:
 * **Inference/requirement** — a future P2 acceptance rule or an unresolved
   scientific decision.  It is not a claim about a source result.
 
-The full package could not be loaded in this checkout: Julia 1.12.6 attempted
-to write the user-level compiled-package cache and was denied by the execution
-sandbox; with compiled modules disabled, package dependencies were not
-instantiated.  Therefore this worker did not report package-level Julia
-benchmark output as executed.  The helper replays only the small arithmetic
-policies visible in the source, and marks the F11 named benchmark as a source
-fixture rather than pretending to have run its package route.
+The dependency-free Python helper does not load the package.  A direct root
+project load also hit the sandbox's read-only user-level compiled-package cache
+and, with compiled modules disabled, found the root checkout's dependencies
+uninstantiated.  The retained normalized environment does provide a writable
+temporary depot and was used for the actual Julia route replay recorded below.
+The Python helper therefore remains a small arithmetic-policy diagnostic, not a
+package-level oracle; the Julia harness supplies the callable-route evidence.
 
 Executed focused check:
 
@@ -36,6 +36,53 @@ python3 validation/p0_numerical_equivalence/scripts/fixture_replay.py
 Observed result: exit 0; all 13 fixture payloads parsed, all manifest SHA-256
 entries matched, and all checks emitted by the helper passed.  The helper's
 output is intentionally a diagnostic stream, not a new scientific oracle.
+
+## Pinned-source Julia replay evidence
+
+The retained normalized environment was loaded with a writable temporary
+depot (the host depot was read-only fallback).  This is the exact command
+used for the Julia route replay; `<writable-depot>` and `<host-depot>` are
+privacy-safe placeholders for the environment locators:
+
+```text
+env JULIA_DEPOT_PATH=<writable-depot>:<host-depot> \
+  JULIA_PKG_PRECOMPILE_AUTO=0 JULIA_PROGRESS=0 \
+  julia --startup-file=no --history-file=no \
+  --project=validation/p0_numerical_equivalence/environment \
+  validation/p0_numerical_equivalence/scripts/fixture_julia_replay.jl
+```
+
+Observed exit `0` under Julia `1.12.6`, with `package_load=ok`, current
+evidence checkout `8dab6e6185867c62d962b44ca4e664f749df55db`, and
+`source_tree_equal=true` for `Project.toml` and `src/` against pinned source
+`7a40285bb5c313f7e8746b90644d5f45bb67be44`.  The harness calls actual source
+routes where their inputs are callable, and labels local formula probes where
+the route does not expose the intermediate object.
+
+| Fixture | Julia evidence observed |
+| --- | --- |
+| F1 | Source probe row scales `[0.0,-400.0]`; direct `minimizer.critical_points` accepted one root, one minimum, inertia `(0,0,2)`. |
+| F2 | Source probe row scales `[0.0,-10.0]` and mixed support; direct critical-point route accepted one root with inertia `(1,0,1)`. |
+| F3 | Source probe preserved factors `[2.5,-0.25]` and global amplitudes `[2.5,-0.00025]`; direct route accepted. |
+| F4 | Direct critical-point route accepted one root with inertia `(0,1,1)`; actual `generate.logshifted_derivative_workspace` and `inflation_points.prepare_context` both rejected `L` with `ArgumentError: L contains non-finite values`. |
+| F5 | Exact source-probe arguments were `[1.8640116411299439,1.0681415022205298]` from `(2π .* (q' * theta)) .+ phase`; direct route accepted two roots, one minimum. |
+| F6 | Source displacement probe gave `[0.1875,0.5]`; actual `mass_eigenbasis` accepted and bounded `gradient_flow` returned `no_slow_roll_window`, with `theta_initial=[0.1875,0.5]`, `coordinate_chart=canonical_cholesky`, one step. |
+| F7 | Julia `A\Q` was exactly `[1.0 8.881784197001252e-16; 0.0 0.9999999999999991]`; exact nonzero support was retained, and direct route accepted. |
+| F8 | Julia transformed charge map was exactly `[1.0 -0.5; 0.0 1.0]`, with noninteger support retained; direct route accepted. |
+| F9 | Actual derivative workspace produced value `0.0`, zero gradient, and H3-equivalent Hessian `[39.47841760435743 -39.47841760435743; -39.47841760435743 39.47841760435743]`; retained gradient/Hessian arrays were aliased and overwritten on the next workspace call. |
+| F10 | Source probe H3 was `[-3.9478417604357434e-7 0.0; 0.0 39.47841760435743]`; seed threshold `-2.220446049250313e-14` selected one negative mode, final tolerance was `3.9478417604357434e-7`, and final inertia was `(0,1,1)`. Direct route returned the same inertia. |
+| F11 | Actual `paper_benchmarks.n5_potential` returned `Qsize=(5,8)` and the governed eight `qdot_tau` values. Top-level package/source `k_c=1.7700681326109957` gave two minima below and one above; nested legacy `author_inflation` route reported `0.674506370003365`, preserving the known route conflict. |
+| F12 | Source probe empty support used row scale `0.0`; direct route accepted one zero-equation root with inertia `(0,1,1)`. |
+| F13 | Source probe produced row scales `[-Inf,-Inf]`, global amplitudes `[NaN,NaN]`, and H3 diagonal `NaN`; direct route reached classification and threw `ArgumentError: matrix contains Infs or NaNs`, while both validators rejected non-finite `L`. |
+
+The full machine-readable diagnostic stream is reproducible by rerunning
+`fixture_julia_replay.jl`; values above are copied from the observed run, not
+from source comments or expected fixture fields.  F6's bounded flow call uses
+an explicit fixture mass basis to hold the signed direction fixed while still
+executing the historical `gradient_flow` route; the independent package
+`mass_eigenbasis` call is reported separately.  F11 uses the top-level
+`paper_benchmarks` source route and explicitly probes its nested legacy author
+route so the corrected-versus-stale scale distinction remains visible.
 
 ## Historical encoded input
 
@@ -248,7 +295,7 @@ environment.  The manifest records the SHA-256 hash of each raw TOML payload.
 | F4 | `fixtures/F04_exact_zero_and_minus_inf.toml` | Zero coefficients remain encoded; finite dominant zero logs affect references; `-Inf` is accepted by direct critical-point code but rejected by finite-input validators. |
 | F5 | `fixtures/F05_argument_phase_offsets.toml` | Per-instanton radian offsets are added after `2pi*(q' * theta)` and remain separate from coordinates. |
 | F6 | `fixtures/F06_coordinate_displacement.toml` | Raw-coordinate mass-mode displacement is periodicized before canonical-chart integration; it is not a phase vector. |
-| F7 | `fixtures/F07_transformed_near_zero_support.toml` | `A\\Q` is Float64 materialized before support detection; `8.881784197001252e-16` is nonzero and supported. |
+| F7 | `fixtures/F07_transformed_near_zero_support.toml` | `A\Q` is Float64 materialized before support detection; `8.881784197001252e-16` is nonzero and supported. |
 | F8 | `fixtures/F08_transformed_noninteger_charges.toml` | Noninteger transformed charges are accepted under the current real-valued dispatch domain. |
 | F9 | `fixtures/F09_signed_cancellation.toml` | Opposite signed terms cancel without pruning, preserving encoded term count and accumulation order. |
 | F10 | `fixtures/F10_near_degenerate_classification.toml` | Dominant cancellation places one H3 mode at the final inertia band; seed and final thresholds remain separate. |

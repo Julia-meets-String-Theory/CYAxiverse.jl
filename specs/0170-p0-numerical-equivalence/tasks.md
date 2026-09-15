@@ -59,7 +59,7 @@
   - Verify: every comparison and tolerance is traceable and precommitted.
   - Escalate if: a tolerance cannot be fixed without seeing later output.
 
-- [ ] **T202 [R-001-R-015, G1] Converge evidence index and exact candidate**
+- [x] **T202 [R-001-R-015, G1] Converge evidence index and exact candidate**
   - Output: evidence index/hash manifest, completed requirement mapping, clean
     artifact-only diff, and exact candidate commit.
   - Verify: focused checks, applicable package gates, diff-check, privacy scan,
