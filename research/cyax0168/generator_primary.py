@@ -689,12 +689,10 @@ class _Builder:
         self.base_assertion_ids: list[str] = []
         self.active_assertions: set[str] = set()
         self.next_ordinal = 0
-        # Complete retry/candidate traces are required for the small
-        # conformance reproduction.  They are intentionally not retained for
-        # C0--C3 bulk calibration snapshots: retaining a full candidate vector
-        # for every filler choice would turn evidence diagnostics into a
-        # second, quadratic-size fixture and is not needed for the checksum.
-        self.trace_enabled = tier not in CALIBRATION_TIERS
+        # The construction and PRF traces are identity-bearing conformance
+        # output.  Retain them for every permitted tier, including C0, so the
+        # manager can compare the complete primary and independent states.
+        self.trace_enabled = True
         self.construction_trace: list[dict[str, Any]] = []
         self.trace: dict[str, Any] = {
             "generator_version": GENERATOR_VERSION,
@@ -708,18 +706,7 @@ class _Builder:
         self._init_entities()
 
     def _trace_construction(self, record: dict[str, Any]) -> None:
-        if self.trace_enabled:
-            self.construction_trace.append(record)
-            return
-        # Keep compact phase-level calibration diagnostics while dropping the
-        # per-assertion event stream.  Phase 8's candidate-pair vector is also
-        # omitted because it is quadratic in the number of blocks.
-        if record.get("event") == "assertion_constructed":
-            return
-        compact = dict(record)
-        if compact.get("phase") == "phase-8-filler":
-            compact.pop("candidate_pairs", None)
-        self.construction_trace.append(compact)
+        self.construction_trace.append(record)
 
     def _init_entities(self) -> None:
         for b in range(self.block_count):
@@ -1039,7 +1026,7 @@ class _Builder:
             target, counter = prf_choice(
                 candidates, seed=self.seed, profile_id=self.profile_id,
                 purpose=purpose, ordinal=i, reject=reject, presorted=True,
-                trace=self.trace["prf_choices"] if self.trace_enabled else None,
+                trace=self.trace["prf_choices"],
                 phase="phase-3-dependencies",
                 subject_id=source_id,
             )
@@ -1232,7 +1219,7 @@ class _Builder:
                 candidates, seed=self.seed, profile_id=self.profile_id,
                 purpose="fill_concerns_pair", ordinal=i, reject=reject,
                 presorted=True,
-                trace=self.trace["prf_choices"] if self.trace_enabled else None,
+                trace=self.trace["prf_choices"],
                 phase="phase-8-filler",
             )
             subject, object_id, block = pair
