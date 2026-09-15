@@ -1,4 +1,4 @@
-"""Conformance tests for Worker D's independent CYAX-0168 generator 2.2
+"""Conformance tests for Worker D's independent CYAX-0168 generator 2.3
 reproduction (``research/cyax0168/generator_independent.py``).
 
 The module under test is loaded directly from its file path so that this
@@ -163,7 +163,7 @@ class TestStableIds(unittest.TestCase):
             asserted_at=gi.FIXED_TIME,
             validity_basis="unknown",
             authority_class="ordinary_record",
-            authority_derivation_rule_id="synthetic_fixture_v2.2",
+            authority_derivation_rule_id="synthetic_fixture_v2.3",
             origin="source_direct",
             curation_state="independently_reviewed",
             review_state="not_required",
@@ -194,7 +194,7 @@ class TestStableIds(unittest.TestCase):
             asserted_at=gi.FIXED_TIME,
             validity_basis="unknown",
             authority_class="ordinary_record",
-            authority_derivation_rule_id="synthetic_fixture_v2.2",
+            authority_derivation_rule_id="synthetic_fixture_v2.3",
             origin="source_direct",
             curation_state="independently_reviewed",
             review_state="not_required",
@@ -208,17 +208,17 @@ class TestStableIds(unittest.TestCase):
 
 class TestCanonicalJson(unittest.TestCase):
     def test_base_source_bytes_match_spec_example_shape(self):
-        obj = {"block": 3, "generator": "cyax-0168-scale-2.2", "profile": "P-low", "seed": 162011, "tier": "T1"}
+        obj = {"block": 3, "generator": "cyax-0168-scale-2.3", "profile": "P-low", "seed": 162011, "tier": "T1"}
         raw = gi.canonical_json_bytes(obj)
         self.assertEqual(
             raw,
-            b'{"block":3,"generator":"cyax-0168-scale-2.2","profile":"P-low","seed":162011,"tier":"T1"}\n',
+            b'{"block":3,"generator":"cyax-0168-scale-2.3","profile":"P-low","seed":162011,"tier":"T1"}\n',
         )
 
     def test_assertion_body_key_order_and_null_identity(self):
         obj = {
             "assertion_ordinal": 5,
-            "generator": "cyax-0168-scale-2.2",
+            "generator": "cyax-0168-scale-2.3",
             "literal_identity": None,
             "object_identity": "cyax-entity-sha256:" + "ab" * 32,
             "predicate": "depends_on",
@@ -234,7 +234,7 @@ class TestCanonicalJson(unittest.TestCase):
         self.assertEqual(
             raw,
             (
-                b'{"assertion_ordinal":5,"generator":"cyax-0168-scale-2.2",'
+                b'{"assertion_ordinal":5,"generator":"cyax-0168-scale-2.3",'
                 b'"literal_identity":null,"object_identity":"cyax-entity-sha256:'
                 + b"ab" * 32
                 + b'","predicate":"depends_on","profile":"P-low","seed":1,'
@@ -416,6 +416,32 @@ class TestPrfSelect(unittest.TestCase):
         finally:
             gi.MAX_COUNTER = original_max
 
+    def test_trace_records_frozen_candidates_attempt_counters_and_retry_causes(self):
+        subject, bad, good = "id-a", "id-a", "id-b"
+        candidates = [bad, good]
+        seed = _find_seed_with_first_pick("dependency_target", 11, "P-low", 2, 0)
+        trace = []
+        result = gi.prf_select(
+            seed,
+            "P-low",
+            "dependency_target",
+            11,
+            candidates,
+            sort_key=lambda x: x,
+            rejects=lambda candidate: gi.dependency_target_rejects(subject, candidate, set()),
+            trace=trace,
+            phase="phase-3-dependencies",
+            subject_id=subject,
+        )
+        self.assertEqual(result, good)
+        self.assertEqual(len(trace), 1)
+        choice = trace[0]
+        self.assertEqual(choice["candidates"], sorted(candidates))
+        self.assertEqual([attempt["counter"] for attempt in choice["attempts"]], [0, 1])
+        self.assertTrue(choice["attempts"][0]["predicate_rejected"])
+        self.assertEqual(choice["selected_counter"], 1)
+        self.assertEqual(choice["retry_count"], 1)
+
 
 class TestPredicateRejectionClosure(unittest.TestCase):
     """Differential check that the two purpose-row predicate functions
@@ -443,6 +469,13 @@ class TestPredicateRejectionClosure(unittest.TestCase):
         for subj, obj, expected in cases:
             with self.subTest(subj=subj, obj=obj):
                 self.assertEqual(gi.fill_concerns_pair_rejects(subj, obj, existing), expected)
+
+    def test_unlisted_candidate_properties_do_not_trigger_dependency_retry(self):
+        # Component membership, isolation status, cycle eligibility, and
+        # candidate labels are not predicates in the closed purpose row.
+        existing = {("other-subject", "depends_on", "id-o")}
+        self.assertFalse(gi.dependency_target_rejects("id-s", "id-o", existing))
+        self.assertFalse(gi.dependency_target_rejects("id-s", "id-o|isolated", existing))
 
 
 class TestGenerateSnapshotStructure(unittest.TestCase):
@@ -520,6 +553,87 @@ class TestGenerateSnapshotStructure(unittest.TestCase):
             self.assertIn(obj_type, allowed_obj, f"{a.predicate}: bad object type {obj_type}")
 
 
+class TestGenerator23Contract(unittest.TestCase):
+    """Focused checks for the identity-bearing 2.3 amendments."""
+
+    def test_manifest_version_namespace_and_locator_are_23(self):
+        snap = gi.generate_snapshot(TINY_TIER, "P-low", SEED_A, 100)
+        self.assertEqual(snap.generator_name, "cyax-0168-scale-2.3")
+        self.assertEqual(snap.generator_version, "2.3")
+        self.assertEqual(snap.prf_domain, "cyax-gen-2.3")
+        self.assertEqual(snap.synthetic_namespace, "cyax-0168-synthetic-v2.3")
+        self.assertEqual(snap.source_locator_version, "/scale/2.3/")
+        self.assertEqual(snap.authority_derivation_rule_id, "synthetic_fixture_v2.3")
+        self.assertTrue(all("/scale/2.3/" in revision.locator for revision in snap.source_revisions))
+
+    def test_phase2_uses_primary_order_contiguous_slices_and_later_to_previous_direction(self):
+        snap = gi.generate_snapshot(TINY_TIER, "P-low", SEED_A, 100)
+        workitems = {e.entity_id: e.canonical_source_identity[3] for e in snap.entities if e.entity_type == "WorkItem"}
+        block_order = sorted(range(snap.block_count), key=lambda b: next(e.entity_id for e in snap.entities if e.entity_type == "WorkItem" and e.canonical_source_identity[3] == b))
+        phase1 = next(x for x in snap.construction_trace if x.get("phase") == "phase-1-isolation")
+        phase2 = next(x for x in snap.construction_trace if x.get("phase") == "phase-2-components" and x.get("event") == "phase_complete")
+        self.assertEqual(phase1["block_primary_order"], block_order)
+        connected = phase1["connected_block_ordinals"]
+        flattened = [b for component in phase2["components"] for b in component]
+        self.assertEqual(flattened, connected)
+        self.assertTrue(all(component == connected[i : i + phase2["component_capacity"]] for i, component in enumerate(phase2["components"])))
+        chains = [a for a in snap.assertions if a.predicate == "depends_on" and a.assertion_ordinal < 13 * snap.block_count + 100]
+        # Check all fixed-chain edges by their component adjacency, not by
+        # assertion-ID order.
+        for component in phase2["components"]:
+            for earlier, later in zip(component[:5], component[1:5]):
+                expected_subject = next(e.entity_id for e in snap.entities if e.entity_type == "WorkItem" and e.canonical_source_identity[3] == later)
+                expected_object = next(e.entity_id for e in snap.entities if e.entity_type == "WorkItem" and e.canonical_source_identity[3] == earlier)
+                self.assertTrue(any(a.subject_id == expected_subject and a.object_id == expected_object for a in chains))
+
+    def test_phase3_ordinary_candidate_vector_excludes_subject(self):
+        snap = gi.generate_snapshot(TINY_TIER, "P-low", SEED_A, 100)
+        choices = [choice for choice in snap.prf_trace if choice["purpose"] == "dependency_target"]
+        self.assertGreater(len(choices), 0)
+        for choice in choices:
+            selected = choice["selected"]
+            subject = choice["subject_id"]
+            self.assertNotIn(subject, choice["candidates"])
+
+    def test_phase5_excludes_isolated_blocks_only(self):
+        import math
+
+        snap = gi.generate_snapshot(TINY_TIER, "P-low", SEED_A, 100)
+        profile = gi.PROFILES["P-low"]
+        workitem_by_block = {e.canonical_source_identity[3]: e.entity_id for e in snap.entities if e.entity_type == "WorkItem"}
+        primary = sorted(workitem_by_block, key=lambda b: workitem_by_block[b])
+        isolated = set(primary[-math.floor(profile.isolated_rate * snap.block_count) :])
+        supersedes = [a for a in snap.assertions if a.predicate == "supersedes"]
+        self.assertEqual(len(supersedes), (snap.block_count - len(isolated)) // profile.supersession_depth * (profile.supersession_depth - 1))
+        self.assertTrue(all(next(b for b, wid in workitem_by_block.items() if wid == a.subject_id) not in isolated for a in supersedes))
+        self.assertTrue(all(next(b for b, wid in workitem_by_block.items() if wid == a.object_id) not in isolated for a in supersedes))
+
+    def test_complete_records_bytes_trace_ids_and_checksum_close(self):
+        snap = gi.generate_snapshot(TINY_TIER, "P-low", SEED_A, 100)
+        self.assertEqual(len(snap.records["entities"]), len(snap.entities))
+        self.assertEqual(len(snap.records["assertions"]), len(snap.assertions))
+        self.assertEqual(len(snap.source_bytes), len(snap.source_revisions))
+        self.assertEqual(len(snap.assertion_ids), len(snap.assertions))
+        self.assertEqual(snap.snapshot_id, gi.compute_logical_snapshot_checksum(snap))
+        by_locator = {revision.locator: revision for revision in snap.source_revisions}
+        for assertion in snap.assertions:
+            revision = by_locator[assertion.source_locator]
+            decoded = __import__("json").loads(revision.raw_bytes)
+            self.assertEqual(decoded["assertion_ordinal"], assertion.assertion_ordinal)
+            self.assertEqual(decoded["predicate"], assertion.predicate)
+            self.assertEqual(decoded["subject_identity"], assertion.subject_id)
+            self.assertEqual(decoded["object_identity"], assertion.object_id)
+            self.assertEqual(decoded["literal_identity"], assertion.literal_ref)
+
+    def test_decision_cells_are_not_materialized_and_calibration_matrix_is_frozen(self):
+        self.assertEqual(gi.CALIBRATION_MATRIX["C0"]["P-medium"], (168900,))
+        self.assertEqual(gi.CALIBRATION_MATRIX["C3"]["P-high"], (168933,))
+        with self.assertRaises(gi.GenerationFailure):
+            gi.generate_snapshot("T0", "P-medium", 162000, 1000)
+        with self.assertRaises(gi.GenerationFailure):
+            gi.generate_calibration_snapshot("T1", "P-low", 162011)
+
+
 class TestDeterminism(unittest.TestCase):
     def test_repeated_generation_is_byte_identical(self):
         snap1 = gi.generate_snapshot(TINY_TIER, "P-medium", SEED_A, 1300)
@@ -569,10 +683,10 @@ class TestDeterminism(unittest.TestCase):
         }
 
         for block in range(snap.block_count):
-            locator = f"cyax://0168/scale/2.2/{TINY_TIER}/P-low/{SEED_A}/block/{block}/base"
+            locator = f"cyax://0168/scale/2.3/{TINY_TIER}/P-low/{SEED_A}/block/{block}/base"
             revision = base_by_locator[locator]
             expected = (
-                f'{{"block":{block},"generator":"cyax-0168-scale-2.2",'
+                f'{{"block":{block},"generator":"cyax-0168-scale-2.3",'
                 f'"profile":"P-low","seed":{SEED_A},"tier":"{TINY_TIER}"}}\n'
             ).encode("ascii")
             self.assertEqual(revision.raw_bytes, expected)
@@ -680,7 +794,10 @@ class TestPhaseQuotas(unittest.TestCase):
 
         supersedes = [a for a in snap.assertions if a.predicate == "supersedes"]
         depth = profile.supersession_depth
-        eligible_count = B - len(snap.cycle_trace) * 3
+        # 2.3 excludes phase-1 isolated blocks only.  Cycle members remain
+        # eligible for phase-5 supersession, while cycle edges themselves are
+        # never replaced by supersession edges.
+        eligible_count = B - isolated_count
         expected_chains = eligible_count // depth
         self.assertEqual(len(supersedes), expected_chains * (depth - 1))
         for a in supersedes:
@@ -747,12 +864,12 @@ class TestCycleConstruction(unittest.TestCase):
             self.assertEqual(by_id[added[2]].subject_id, c)
             self.assertEqual(by_id[added[2]].object_id, a)
 
-        # A cycle member is never also a supersession participant.
-        cycle_members = {m for entry in snap.cycle_trace for m in entry["triple"]}
-        supersedes_ids = {a.subject_id for a in snap.assertions if a.predicate == "supersedes"} | {
-            a.object_id for a in snap.assertions if a.predicate == "supersedes"
-        }
-        self.assertTrue(cycle_members.isdisjoint(supersedes_ids))
+        # 2.3 permits cycle members to participate in phase-5 supersession;
+        # only phase-1 isolated WorkItems are excluded.  The exact count is a
+        # stronger check than relying on a particular cycle landing in one of
+        # the complete depth-sized chains.
+        supersedes = [a for a in snap.assertions if a.predicate == "supersedes"]
+        self.assertEqual(len(supersedes), (B - isolated_count) // profile.supersession_depth * (profile.supersession_depth - 1))
 
 
 class TestParallelEvidence(unittest.TestCase):
