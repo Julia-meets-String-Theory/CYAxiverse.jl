@@ -42,6 +42,7 @@ def compare_cell(tier: str, profile_id: str, seed: int) -> dict[str, Any]:
         "prf_choices": left.prf_choices == right.prf_trace,
         "assertion_ids": left.assertion_ids == [record.assertion_id for record in right.assertions],
         "logical_snapshot_checksum": left.logical_snapshot_checksum == _unprefix_checksum(right.logical_snapshot_checksum),
+        "snapshot_id": left.snapshot_id == right.snapshot_id,
     }
     return {
         "tier": tier,

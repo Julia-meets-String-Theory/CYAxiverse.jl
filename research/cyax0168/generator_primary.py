@@ -1509,6 +1509,7 @@ def complete_output(snapshot: Snapshot) -> dict[str, Any]:
         "prf_choices": snapshot.prf_choices,
         "assertion_ids": snapshot.assertion_ids,
         "logical_snapshot_checksum": snapshot.logical_snapshot_checksum,
+        "snapshot_id": snapshot.snapshot_id,
     }
 
 
