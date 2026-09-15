@@ -1,6 +1,6 @@
 # CYAX-0170 P0 evidence index
 
-Status: **candidate evidence; G0 approval and G2 independent review pending**
+Status: **G2 evidence PASS; overall P0 REVISE/BLOCKED pending G0 owner decisions**
 
 ## Identity and topology
 
@@ -12,7 +12,10 @@ Status: **candidate evidence; G0 approval and G2 independent review pending**
   Worker C semantics/F1-F13; Worker D B2-B7; independent numerical reviewer.
   The first review of candidate `8dab6e6185867c62d962b44ca4e664f749df55db`
   returned **revise/BLOCKED** and drove bounded evidence corrections.  A fresh
-  review of the corrected exact candidate remains required.
+  v2 review drove the provenance correction.  Independent Numerical Reviewer
+  v3 reviewed exact candidate `ddc304f25040ff36bc84e7897d5b6dc5d16344f6`
+  and returned **PASS for evidence integrity**, with the overall checkpoint
+  still blocked on G0 owner decisions.
 - Worker write sets were disjoint.  The Manager owns this index, the versioned
   contract, convergence, candidate revision, and final return.
 
@@ -38,7 +41,7 @@ of P0.
 | R-013 versioned contract | `numerical_equivalence_contract-v1.md` | proposed candidate present |
 | R-014 precommitted tolerances | contract v1 section 9 | proposed from existing defaults/tests before P2 output; independent review pending |
 | R-015 identity/privacy | `execution_provenance.md`, retained hashes, relative paths, privacy scans | execution revision is distinguished from first integration and exact review candidate; SHA256SUMS is converged |
-| R-016 independent review/stop | reviews of `8dab6e6185867c62d962b44ca4e664f749df55db` and `5c90bfe3ce91dcdca442af9df72cf1f32390aea6` returned revise | provenance-corrected exact candidate requires fresh durable review; G0 remains open |
+| R-016 independent review/stop | `independent_review_v3.md` reviews exact candidate `ddc304f25040ff36bc84e7897d5b6dc5d16344f6` | G2 evidence PASS; no correctable evidence blocker remains; G0 and owner-only decisions keep overall P0 blocked |
 
 ## Key empirical results
 
@@ -117,3 +120,16 @@ The candidate records but does not resolve:
 
 Under the P0 boundary these are evidence and explicit decision points.  They do
 not authorize production correction or later-phase work.
+
+## Final independent disposition
+
+Independent Numerical Reviewer v3 reviewed exact candidate
+`ddc304f25040ff36bc84e7897d5b6dc5d16344f6` and returned **G2 evidence PASS**.
+The review independently passed checksum, privacy, source-parity, direct Julia
+F1-F13, and bounded B2-B7 coverage checks.  It found no remaining correctable
+evidence blocker.  Its post-review record is `independent_review_v3.md` and is
+part of the later mechanical synchronization, not the reviewed commit.
+
+The overall P0 checkpoint remains **REVISE/BLOCKED** because the required G0
+approval and owner dispositions listed above are absent.  No later phase is
+authorized.

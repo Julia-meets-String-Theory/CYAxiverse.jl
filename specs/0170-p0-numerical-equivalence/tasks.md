@@ -68,7 +68,7 @@
 
 ## Phase 3 — Independent verification
 
-- [ ] **T301 [R-016, G2] Independently review the exact P0 candidate**
+- [x] **T301 [R-016, G2] Independently review the exact P0 candidate**
   - Owner: fresh Independent Numerical Reviewer who did not define fixtures or
     contract.
   - Output: durable review identifying candidate revision and PASS/revise verdict.
@@ -76,7 +76,7 @@
     support/zero/order/threshold/compatibility coverage, and objective P2 gates.
   - Escalate if: any material claim changes; correct then review the new state.
 
-- [ ] **T302 [R-016, G3] Return reviewed P0 checkpoint and stop**
+- [x] **T302 [R-016, G3] Return reviewed P0 checkpoint and stop**
   - Owner: Manager.
   - Output: required 13-part Manager return packet and recommendation.
   - Verify: reviewed revision distinguished from later mechanical synchronization;
