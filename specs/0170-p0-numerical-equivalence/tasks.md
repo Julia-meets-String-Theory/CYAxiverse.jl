@@ -24,28 +24,28 @@
 
 ## Phase 1 — Parallel evidence construction
 
-- [ ] **T101 [R-001, R-002, R-015, G1] Freeze environment and B1 load identity**
+- [x] **T101 [R-001, R-002, R-015, G1] Freeze environment and B1 load identity**
   - Owner: Worker A.
   - Output: `validation/p0_numerical_equivalence/environment_and_load.md` and
     optional validation-only helper scripts.
   - Verify: exact commands/outcomes and separate warm/cold measurements.
   - Escalate if: reconstructing the environment requires changing dependencies.
 
-- [ ] **T102 [R-003, R-015, G1] Inventory compatibility and consumers**
+- [x] **T102 [R-003, R-015, G1] Inventory compatibility and consumers**
   - Owner: Worker B.
   - Output: `validation/p0_numerical_equivalence/compatibility_inventory.md`.
   - Verify: named surfaces, repository-wide consumers, domains, failures, and
     persistence/conditional behavior are accounted for.
   - Escalate if: a surface cannot be classified without an owner API decision.
 
-- [ ] **T103 [R-004-R-010, R-015, G1] Freeze semantics and F1-F13**
+- [x] **T103 [R-004-R-010, R-015, G1] Freeze semantics and F1-F13**
   - Owner: Worker C.
   - Output: semantics report, deterministic fixtures/results, and hashes.
   - Verify: focused execution at the pinned source; historical defects retained.
   - Escalate if: routes implement irreconcilable scientific contracts or fixture
     construction would require production changes.
 
-- [ ] **T104 [R-010, R-012, R-015, G1] Capture B2-B7 baseline**
+- [x] **T104 [R-010, R-012, R-015, G1] Capture B2-B7 baseline**
   - Owner: Worker D.
   - Output: benchmark report, bounded scripts/results, and identities.
   - Verify: exact commands, warmup/sample/stat/allocation method, results/gaps.
@@ -54,7 +54,7 @@
 
 ## Phase 2 — Manager integration
 
-- [ ] **T201 [R-011, R-013, R-014, G1] Integrate equivalence contract v1**
+- [x] **T201 [R-011, R-013, R-014, G1] Integrate equivalence contract v1**
   - Output: `validation/p0_numerical_equivalence/numerical_equivalence_contract-v1.md`.
   - Verify: every comparison and tolerance is traceable and precommitted.
   - Escalate if: a tolerance cannot be fixed without seeing later output.
@@ -86,4 +86,3 @@
 
 - [ ] **TC01 [R-001-R-016] Resolve findings from Manager convergence or G2 review**
   - Add bounded correction details only when a finding exists.
-
