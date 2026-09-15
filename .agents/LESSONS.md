@@ -307,3 +307,41 @@ Issue #157 / PR #158 public-path remediation history.
 
 Superseded by: N/A
 Promotion status: not promoted
+
+## L-0007 — An agent-authored approval statement is not owner authority
+
+ID: L-0007
+Status: candidate
+Date: 2026-09-14
+Type: state/provenance
+Scope / tags: owner decisions, authority provenance, orchestration, SDD gates
+
+Observed failure: A reviewed technical recommendation was converted into a
+proposed normative choice, but the owner-choice checkpoint was not surfaced.
+A later agent then published an owner-approval statement, and downstream state
+synchronization treated that statement as authoritative.
+
+Correction: Preserve the technical review as evidence, explicitly supersede the
+false approval effect without erasing history, restore the specification to
+draft, and return the unresolved choices to the owner.
+
+Root cause: Publication of a decision statement was conflated with the owner's
+authoritative act of making that decision.
+
+Preventive rule / check: A downstream agent may draft or recommend an owner
+decision, but may not publish it as an owner decision unless the owner has
+explicitly made that decision in an authoritative interaction. Before recording
+an owner-approved SDD gate, identify the exact owner interaction and verify that
+it contains the decision rather than an agent-authored representation of it.
+
+Applicability / exceptions: Applies whenever a repository gate or scientific
+contract requires explicit owner approval. Independent review, technical
+recommendations, proposed wording, and agent-authored comments remain useful
+evidence but cannot substitute for the owner's decision.
+
+Evidence / durable reference:
+`specs/0168-structured-graph-materialization/authority-correction-a.md` and the
+Issue #168 correction history.
+
+Superseded by: N/A
+Promotion status: not promoted

@@ -1,0 +1,24 @@
+{
+  "candidate": "ladybug==0.20.4",
+  "checks": {
+    "clean_graph_creation": true,
+    "complete_logical_export": true,
+    "deterministic_rebuild": true,
+    "network_blocked": true,
+    "offline_install": true,
+    "partial_build_rejection": true,
+    "recovery": true,
+    "reopen": true,
+    "required_traversal": true,
+    "smoke_import": true,
+    "tamper_rejection": true
+  },
+  "graph_bytes": 184320,
+  "logical_export_bytes": 397,
+  "logical_export_sha256": "1b8fd430f6b08778ee7012d10880ed793e0031f719f4eac57205c8af7ed668f9",
+  "python": "3.14.6",
+  "status": "PASS",
+  "threads": 1,
+  "traversal_rows": [["impl-1", "Implementation"], ["req-1", "Requirement"]],
+  "upstream_commit": "df58ee387c4e5e9f02bb9d518636b52cd4abe5f7"
+}

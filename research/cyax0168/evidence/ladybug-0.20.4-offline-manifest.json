@@ -1,0 +1,33 @@
+{
+  "candidate": {
+    "distribution": "ladybug",
+    "version": "0.20.4",
+    "upstream_tag": "v0.20.4",
+    "upstream_commit": "df58ee387c4e5e9f02bb9d518636b52cd4abe5f7",
+    "license": "MIT",
+    "license_file_sha256": "1c495c9546d0de02e83c9d50d5f7eb21f0085bc8f77a0ee333081a123a9c8d0c",
+    "requires_python": ">=3.10,<3.15",
+    "runtime_dependencies": []
+  },
+  "host": {
+    "python": "CPython 3.14.6",
+    "platform": "macOS ARM64",
+    "wheelhouse_mode": "offline, PIP_NO_INDEX=1",
+    "network_policy": "disabled during import, build, reopen, query, and export",
+    "threads": 1,
+    "pip_check": "No broken requirements found",
+    "installation_command": "PIP_NO_INDEX=1 python -m pip install --no-index --find-links=<offline-wheelhouse> ladybug==0.20.4"
+  },
+  "wheelhouse_files": [{
+    "filename": "ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl",
+    "sha256": "7a36d5b051ddc954d7ee5d5fa6165fb49d48a4785a132bafdd311723897fa649",
+    "python_tag": "cp314",
+    "abi_tag": "cp314",
+    "platform_tag": "macosx_15_0_arm64",
+    "wheel_generator": "delocate 0.13.0",
+    "wheel_root_is_purelib": false,
+    "license": "MIT"
+  }],
+  "excluded_optional_extras": ["dev"],
+  "evidence_scope": "candidate-host smoke only; no decision fixture or campaign materialization"
+}
