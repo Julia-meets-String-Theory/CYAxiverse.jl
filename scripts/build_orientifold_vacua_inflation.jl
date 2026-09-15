@@ -523,9 +523,19 @@ function run_pipeline2(data_dir::AbstractString; h11::Int=2, force::Bool=false,
     results
 end
 
+"""Resolve the Phase-3 database root without a machine-local fallback."""
+function _phase3_cli_data_dir(args)
+    length(args) <= 1 || throw(ArgumentError(
+        "usage: julia --project=. scripts/build_orientifold_vacua_inflation.jl [DATA_DIR]"))
+    selected = isempty(args) ? strip(get(ENV, "CYAXIVERSE_DATA_DIR", "")) :
+        strip(String(only(args)))
+    isempty(selected) && throw(ArgumentError(
+        "data directory is required; pass DATA_DIR or set CYAXIVERSE_DATA_DIR"))
+    CYAxiverse.filestructure.resolve_data_dir(selected)
+end
+
 if abspath(PROGRAM_FILE) == @__FILE__
-    data_dir = length(ARGS) >= 1 ? ARGS[1] :
-        "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data/orientifold_axiverse_database_20260821"
+    data_dir = _phase3_cli_data_dir(ARGS)
     results = run_pipeline2(data_dir; h11=2)
     println("\n=== summary ===")
     println("geometries: ", length(results))

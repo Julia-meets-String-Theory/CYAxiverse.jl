@@ -2,8 +2,7 @@
 
 This page documents the bounded axion--photon scan implemented in
 `CYAxiverse.axion_photon`. It is designed to run against the complete geometry
-files already present in
-`/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data`.
+files beneath the configured `CYAXIVERSE_DATA_DIR`.
 
 The formulas are the leading EFT hierarchy, mixing, photon-coupling, and
 width relations described in *Glimmers from the Axiverse*,
@@ -90,12 +89,12 @@ factorization costs at larger h11.
 From the package checkout:
 
 ```bash
-cd /Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl
+# From the repository root:
 julia --project=. scripts/run_axion_photon_scan.jl \
-  --data-dir /Users/vmehta/Documents/CYAxiverse/cyaxiverse/data \
+  --data-dir "$CYAXIVERSE_DATA_DIR" \
   --h11 15,100,200,300 \
   --limit 2 \
-  --output /private/tmp/cyaxiverse-axion-photon.csv
+  --output ./cyaxiverse-axion-photon.csv
 ```
 
 The default slices are `h11 = 15, 100, 200, 300`, with two deterministic
@@ -127,7 +126,7 @@ using CYAxiverse
 const A = CYAxiverse.axion_photon
 
 results = A.run_local_scan(
-    data_dir="/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data",
+    data_dir=ENV["CYAXIVERSE_DATA_DIR"],
     h11s=(15, 100, 200, 300),
     limit_per_h11=2,
 )
@@ -302,8 +301,7 @@ following remain deferred:
   calculations; and
 - CP-breaking phases and the appendix resonance/channel analysis.
 
-Use the historical handoff
-`/Users/vmehta/Documents/CYAxiverse/cyaxiverse/HANDOFF_AXION_PHOTON_LOCAL_SCAN.md`
-for the original reproducibility contract and next-agent checklist. It is
-retained for provenance; new code and documentation use the science-based
-axion/photon names above.
+The repository history and linked public Issues retain the original
+reproducibility decisions. New code and documentation use the science-based
+axion/photon names above; machine-local handoff locations are not part of the
+public provenance contract.

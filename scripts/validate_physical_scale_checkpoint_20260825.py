@@ -10,6 +10,12 @@ JSON format.
 
 from __future__ import annotations
 
+raise SystemExit(
+    """The 2026-08-25 physical-scaling v1 evidence workflow is retired and cannot be run.
+See validation/RETIRED_physical_scaling_evidence_20260825.md. Any replacement
+must use a new, path-safe evidence version."""
+)
+
 import argparse
 import csv
 import hashlib

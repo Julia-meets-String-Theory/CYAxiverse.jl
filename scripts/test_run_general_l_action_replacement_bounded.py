@@ -361,16 +361,17 @@ class ContractTests(unittest.TestCase):
         formula_text = formula_source.read_text(encoding="utf-8")
         self.assertIn("h^{2,1}_-", formula_text)
         self.assertIn("chi(\\mathcal{F}", formula_text)
-        archive = Path("/Users/vmehta/Downloads/fuzzy-2412.12012v1.tar.gz")
-        if not archive.is_file():
-            self.assertFalse(archive.exists())
-        else:
-            self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), "905db55f2ab72e2b94ba9175148cd5a4976756e95ce37e64622bffdbc4d7bcea")
-            with tarfile.open(archive, "r:gz") as source:
-                tex = source.extractfile("main.tex").read().decode("utf-8")
-            self.assertIn("h^{1,1}_+", tex)
-            self.assertIn("(2, 0, 0, 132)", tex)
-            self.assertIn("1 & -1 & 0 & 0 & -2 & 0", tex)
+        archive_value = os.environ.get("CYAXIVERSE_SHERIDAN_ARCHIVE", "").strip()
+        if not archive_value:
+            return
+        archive = Path(archive_value)
+        self.assertTrue(archive.is_file())
+        self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), "905db55f2ab72e2b94ba9175148cd5a4976756e95ce37e64622bffdbc4d7bcea")
+        with tarfile.open(archive, "r:gz") as source:
+            tex = source.extractfile("main.tex").read().decode("utf-8")
+        self.assertIn("h^{1,1}_+", tex)
+        self.assertIn("(2, 0, 0, 132)", tex)
+        self.assertIn("1 & -1 & 0 & 0 & -2 & 0", tex)
 
     def test_caps_ordering_resume_and_hash_mismatch(self):
         self.assertEqual(sorted(["b", "a"]), ["a", "b"])

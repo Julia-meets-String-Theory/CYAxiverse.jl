@@ -35,10 +35,20 @@ export CYAXIVERSE_STAGE2_ROOT=/path/to/stage2_eft
 julia --project=notebooks scripts/testing/pluto.jl
 ```
 
-Set `CYAXIVERSE_PYTHON` to the Python executable from the `cytools` environment
-when the notebook cannot find PyArrow automatically.
+Set `CYAXIVERSE_PYTHON` to a Python executable with PyArrow when the statistics
+notebook cannot find PyArrow automatically. That notebook invokes the
+executable directly and does not use PyCall.
 
 The notebook files activate `notebooks/` relative to their own location, so
 they do not depend on machine-specific checkout paths. The CYTools notebook
-also requires a Python environment containing CYTools; that integration remains
-explicitly opt-in through `PyCall`.
+also requires a Python environment containing CYTools. Configure PyCall before
+launching Pluto, then restart Julia after the build:
+
+```sh
+export CYAXIVERSE_PYTHON=/path/to/cytools/bin/python
+julia --project=notebooks -e 'ENV["PYTHON"] = ENV["CYAXIVERSE_PYTHON"]; import Pkg; Pkg.build("PyCall")'
+```
+
+The notebook checks that PyCall is using `CYAXIVERSE_PYTHON`; the variable does
+not rebind an already-built PyCall, and CYAxiverse does not rebuild it
+automatically.

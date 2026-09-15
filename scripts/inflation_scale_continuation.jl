@@ -35,8 +35,7 @@ const PILOT_CONVERSION_POLICY_VERSION = "kinv-mixed-tolerance-v1"
 const PILOT_KINV_CONVERSION_RULE =
     "max_absolute_error <= 1e-12 OR max_relative_error <= 1e-12"
 const PILOT_AUTHOR_SOURCE_IDENTITY =
-    "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CN_Axiverse_code/" *
-    "ks_axiverse_python_collaborator/src/cytools_catastrophe_scan.py@sha256:" *
+    "cytools_catastrophe_scan.py@sha256:" *
     "d820dd3e19d2833bac0691d74c2f99d2461c8eb0ef1620062f70d3daffd3bcf4"
 const PILOT_HOMOTOPY_SOURCE_IDENTITY =
     "scripts/inflation_scale_continuation.jl::pilot_homotopy_scale"

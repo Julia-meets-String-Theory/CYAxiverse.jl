@@ -8,10 +8,14 @@ using PyCall
 const CYTools = Base.get_extension(CYAxiverse, :CYAxiversePyCallExt)
 CYTools.enable_cytools!()
 ```
+
+When `CYAXIVERSE_PYTHON` is set, `enable_cytools!()` verifies that PyCall was
+built for that interpreter. It never rebuilds PyCall automatically.
 """
 module CYAxiverse
 
 include("structs.jl")
+include("python_interpreter.jl")
 include("filestructure.jl")
 include("read.jl")
 include("minimizer.jl")

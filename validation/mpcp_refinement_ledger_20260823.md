@@ -444,7 +444,7 @@ git diff --check
 The CYTools runs emitted the environment's existing Python 3.14 SWIG
 deprecation warnings and an exit-time CYTools cache warning because this
 managed checkout cannot write the default
-`/Users/vmehta/Library/Caches/CYTools/twoface_ineqs.pkl.gz.tmp.*` path. The
+the CYTools `twoface_ineqs.pkl.gz.tmp.*` cache path. The
 tests themselves passed; no cache or repository data was written. A live
 CYTools smoke replay of an explicit five-point reflexive simplex yielded one
 fine/regular/star triangulation, `h11=1`, `h21=101`, `chi=-200`, and a verified

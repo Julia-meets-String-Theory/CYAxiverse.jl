@@ -72,7 +72,7 @@ The corrected raw JSON result and selection CSV were written to
 Replay from the package root:
 
 ```sh
-CYAXIVERSE_DATA_DIR=/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data \
+CYAXIVERSE_DATA_DIR=/path/to/data \
 CYAXIVERSE_AUTHOR_BRIDGE_OUTPUT=/private/tmp/cyaxiverse-author-bridge-random20-h11-004-050 \
 julia --project=. validation/inflation_author_code_vs_julia_random20.jl
 ```

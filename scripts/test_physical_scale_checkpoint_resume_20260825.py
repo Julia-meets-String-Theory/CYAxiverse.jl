@@ -3,6 +3,12 @@
 
 from __future__ import annotations
 
+raise SystemExit(
+    """The 2026-08-25 physical-scaling v1 evidence workflow is retired and cannot be run.
+See validation/RETIRED_physical_scaling_evidence_20260825.md. Any replacement
+must use a new, path-safe evidence version."""
+)
+
 import hashlib
 import json
 import os
@@ -22,13 +28,17 @@ from validate_physical_scale_checkpoint_20260825 import (
 
 
 WORKTREE = pathlib.Path(__file__).resolve().parents[1]
-SOURCE_ROOT = pathlib.Path("/private/tmp/cyax-inflation-physical-scale-pilot-20260825/first-geometry")
+SOURCE_ROOT = pathlib.Path(os.environ.get(
+    "CYAXIVERSE_PHYSICAL_SCALE_FIXTURE_ROOT",
+    str(pathlib.Path(tempfile.gettempdir()) / "cyax-inflation-physical-scale-pilot-20260825" / "first-geometry"),
+))
 CHECKPOINT = SOURCE_ROOT / "checkpoints" / "h11_005_np_0000001_cy_0000001.checkpoint-v6.json"
 CHECKSUM = pathlib.Path(str(CHECKPOINT) + ".sha256")
 QUARANTINE_MANIFEST = SOURCE_ROOT / "quarantine" / "nonterminal_partial_quarantine_manifest-v1.json"
-JULIA = pathlib.Path("/Users/vmehta/.juliaup/bin/julia")
-PROJECT = pathlib.Path("/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl")
-DATA_ROOT = "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data"
+JULIA = pathlib.Path(os.environ.get("CYAXIVERSE_JULIA", shutil.which("julia") or "julia"))
+PROJECT = pathlib.Path(os.environ.get("CYAXIVERSE_PROJECT_ROOT", str(WORKTREE)))
+DATA_ROOT = os.environ.get(
+    "CYAXIVERSE_DATA_DIR", str(WORKTREE.parent / "data"))
 EXPECTED_GEOMETRY11_EFFECTIVE_HASH = \
     "9f0c830901a6079c945cb5215b6cdcac55b4d249e1b9398e4b7cd6adad0913ae"
 

@@ -167,7 +167,7 @@ Independent post-run checks confirmed, for every artifact:
 
 The three audit workers reported no known CYTools cache-save warning. The
 focused local tests can still emit the known non-fatal cache warning when
-CYTools attempts to write /Users/vmehta/Library/Caches/CYTools/; that warning
+CYTools attempts to write its local cache; that warning
 does not affect the generated audit artifacts and was not present in the
 three final audit runs.
 
@@ -673,8 +673,7 @@ All commands below use the local cytools environment and the target worktree.
 The three full audits were run in parallel by separate Luna Max workers, with
 distinct output files:
 
-    cd /Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse-orientifold-overcount
-    source /opt/homebrew/Caskroom/miniforge/base/etc/profile.d/conda.sh
+    cd /path/to/CYAxiverse.jl
     conda activate cytools
 
     PYTHONDONTWRITEBYTECODE=1 python -B scripts/test_inherited_orientifold_candidates.py
