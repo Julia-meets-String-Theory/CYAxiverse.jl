@@ -1,0 +1,33 @@
+{
+  "checkpoint_schema": "cyax-0168-isolated-generator-checkpoint-v1",
+  "status": "BLOCKED",
+  "pause_reason": "owner_requested_pause_after_first_durable_cell",
+  "input_packet_sha256": "35cb27cc7231c3003b217f2aa1aa40a9004bf1db49bb0bfef9582343ed0fc98d",
+  "runner": {
+    "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-runner-v1.py",
+    "sha256": "fe0abedad3f3cb154521abca5613b36be7ecefc5f27b4bedbfb1834e1dc96b4d"
+  },
+  "completed_cells": [
+    {
+      "tier": "C0",
+      "profile_id": "P-medium",
+      "seed": 168900,
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C0-v1.json",
+      "result_sha256": "7685def061d842f5fdc11105397f50f86a43163b6b6cc550d0301973ca1855e6",
+      "logical_snapshot_checksum": "e73063a46e1c585bfb15aa0db5e920a0f6b4a37f2b5a44a7a0b372f7aecd3b18",
+      "snapshot_id": "cyax-snapshot-sha256:e73063a46e1c585bfb15aa0db5e920a0f6b4a37f2b5a44a7a0b372f7aecd3b18"
+    }
+  ],
+  "remaining_declared_cells": [
+    ["C1", "P-low", 168911], ["C1", "P-low", 168912],
+    ["C1", "P-medium", 168913], ["C1", "P-medium", 168914],
+    ["C1", "P-high", 168915], ["C1", "P-high", 168916],
+    ["C2", "P-low", 168921], ["C2", "P-low", 168922],
+    ["C2", "P-medium", 168923], ["C2", "P-medium", 168924],
+    ["C2", "P-high", 168925], ["C2", "P-high", 168926],
+    ["C3", "P-low", 168931], ["C3", "P-medium", 168932],
+    ["C3", "P-high", 168933]
+  ],
+  "next_action": "STOP; do not start another cell until the owner resumes",
+  "r2_result": "INCOMPLETE; one of sixteen cells completed"
+}
