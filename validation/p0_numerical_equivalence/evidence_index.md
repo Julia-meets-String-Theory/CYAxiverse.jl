@@ -23,7 +23,7 @@ of P0.
 
 | Requirement | Primary durable evidence | Candidate status |
 |---|---|---|
-| R-001 exact replay identity | `environment_and_load.md`, `environment/`, `environment_benchmarks/`, benchmark metadata | present; two execution lockfiles retained and shared dependency equivalence checked |
+| R-001 exact replay identity | `execution_provenance.md`, `environment_and_load.md`, `environment/`, `environment_benchmarks/`, benchmark metadata | execution bases, exact harness/result hashes, later candidate relationship, two lockfiles, and shared dependency equivalence are explicit |
 | R-002 distinct load baselines | `environment_and_load.md` | present: five warm samples and one fresh compiled-cache/build run |
 | R-003 compatibility inventory | `compatibility_inventory.md` | present, including named modules, consumers, failures, persistence, and conditional surfaces |
 | R-004 encoding/order | `numerical_semantics_and_fixtures.md`, compatibility inventory, F1-F13 | present; route boundaries remain separate |
@@ -37,8 +37,8 @@ of P0.
 | R-012 B1-B7 | environment/load and benchmark reports/results | present where observable; missing internal counters explicitly unavailable |
 | R-013 versioned contract | `numerical_equivalence_contract-v1.md` | proposed candidate present |
 | R-014 precommitted tolerances | contract v1 section 9 | proposed from existing defaults/tests before P2 output; independent review pending |
-| R-015 identity/privacy | retained hashes, relative paths, privacy scans | candidate present; final SHA256SUMS generated at commit convergence |
-| R-016 independent review/stop | first independent review returned revise on `8dab6e6185867c62d962b44ca4e664f749df55db` | corrected exact candidate requires fresh durable review; G0 remains open |
+| R-015 identity/privacy | `execution_provenance.md`, retained hashes, relative paths, privacy scans | execution revision is distinguished from first integration and exact review candidate; SHA256SUMS is converged |
+| R-016 independent review/stop | reviews of `8dab6e6185867c62d962b44ca4e664f749df55db` and `5c90bfe3ce91dcdca442af9df72cf1f32390aea6` returned revise | provenance-corrected exact candidate requires fresh durable review; G0 remains open |
 
 ## Key empirical results
 
