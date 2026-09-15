@@ -614,7 +614,11 @@ class TestGenerator23Contract(unittest.TestCase):
         self.assertEqual(len(snap.records["assertions"]), len(snap.assertions))
         self.assertEqual(len(snap.source_bytes), len(snap.source_revisions))
         self.assertEqual(len(snap.assertion_ids), len(snap.assertions))
-        self.assertEqual(snap.snapshot_id, gi.compute_logical_snapshot_checksum(snap))
+        raw_checksum = gi.compute_logical_snapshot_checksum(snap)
+        self.assertEqual(snap.logical_snapshot_checksum, raw_checksum)
+        self.assertEqual(snap.snapshot_id, "cyax-snapshot-sha256:" + raw_checksum)
+        self.assertEqual(gi.complete_output(snap)["logical_snapshot_checksum"], raw_checksum)
+        self.assertEqual(gi.complete_output(snap)["snapshot_id"], snap.snapshot_id)
         by_locator = {revision.locator: revision for revision in snap.source_revisions}
         for assertion in snap.assertions:
             revision = by_locator[assertion.source_locator]

@@ -701,11 +701,12 @@ class GeneratedSnapshot:
 
     @property
     def logical_snapshot_checksum(self) -> str:
+        """Raw SHA-256 logical semantic checksum (without the ID prefix)."""
         return compute_logical_snapshot_checksum(self)
 
     @property
     def snapshot_id(self) -> str:
-        return self.logical_snapshot_checksum
+        return f"cyax-snapshot-sha256:{self.logical_snapshot_checksum}"
 
 
 # ---------------------------------------------------------------------------
@@ -1429,6 +1430,7 @@ def complete_output(snapshot: GeneratedSnapshot) -> Dict[str, object]:
         "prf_choices": snapshot.prf_trace,
         "assertion_ids": snapshot.assertion_ids,
         "logical_snapshot_checksum": snapshot.logical_snapshot_checksum,
+        "snapshot_id": snapshot.snapshot_id,
     }
 
 
@@ -1485,6 +1487,11 @@ def compute_logical_snapshot_checksum(
     semantic_evaluator_rule_version: str = "cyax-evaluator-v1",
     semantic_source_bundle_projection_checksum: Optional[str] = None,
 ) -> str:
+    """Return the raw logical semantic SHA-256 checksum.
+
+    The public ``snapshot_id`` is the separate rendered form
+    ``cyax-snapshot-sha256:<checksum>``.
+    """
     proj = semantic_projection(snapshot)
     if semantic_source_bundle_projection_checksum is None:
         semantic_source_bundle_projection_checksum = compute_semantic_source_bundle_projection_checksum(snapshot)
@@ -1502,4 +1509,4 @@ def compute_logical_snapshot_checksum(
         ]
     )
     digest = sha256_hex(payload)
-    return f"cyax-snapshot-sha256:{digest}"
+    return digest
