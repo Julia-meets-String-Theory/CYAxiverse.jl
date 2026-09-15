@@ -720,7 +720,7 @@ def _locator(tier: str, profile_id: str, seed: int, b: int, suffix: str) -> str:
 def generate_snapshot(tier: str, profile_id: str, seed: int, entity_count: int) -> GeneratedSnapshot:
     if profile_id not in PROFILES:
         raise ValueError(f"unknown profile: {profile_id!r}")
-    if any(seed in seeds for cells in DECISION_MATRIX.values() for seeds in cells.values()) and tier in DECISION_MATRIX and seed in DECISION_MATRIX[tier].get(profile_id, ()):
+    if tier in DECISION_MATRIX:
         raise GenerationFailure("decision fixtures T0-T4 are outside the independent calibration-only generator")
     if entity_count <= 0 or entity_count % 10 != 0:
         raise GenerationFailure("entity_count must be a positive multiple of ten")
