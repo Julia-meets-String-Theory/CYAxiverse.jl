@@ -1,0 +1,20 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F4-exact-zero-and-minus-inf"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:133-146", "src/generate.jl:374-384"]
+precision = "Float64 source encoding; -Inf log token in hostile branch"
+environment = "Julia 1.12.6; one Julia thread; scalar Float64 arithmetic"
+construction = "The second row has a zero coefficient at dominant log 20 and a second zero coefficient at log -Inf. The first term is finite and supported by coordinate 1."
+purpose = "Separate exact-zero representation from policy admission and exercise both finite and -Inf zero-term encodings."
+q = [[1, 0, 0], [0, 1, 1]]
+l = [[1.0, 0.0, 0.0], [0.0, 20.0, "-Inf"]]
+theta = [0.125, 0.125]
+phases = [0.0, 0.0, 0.0]
+
+[expected]
+historical_result = "critical_points has no finite-input guard: row_logscale=[0,20], zero coefficients contribute zero to scaled amplitudes, and the -Inf term produces a zero/underflowed contribution after delta handling. logshifted_derivative_workspace rejects the same encoded L because all(isfinite,L) is false; inflation_points.prepare_context also rejects it."
+critical_points_policy = "accepted-by-historical-path"
+generic_workspace_policy = "reject-nonfinite-L"
+row_logscale = [0.0, 20.0]
+scaled_amplitudes = [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+status = "applicable-with-cross-route-rejection"

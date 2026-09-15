@@ -1,0 +1,19 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F1-disjoint-support-hierarchy"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:128-161", "src/minimizer.jl:167-185"]
+precision = "Float64"
+environment = "Julia 1.12.6; one Julia thread; BLAS threads not used by scalar loop"
+construction = "Synthetic two-axion identity charge map; stored log scales are [0,-400]."
+purpose = "Expose per-equation row scaling for disjoint hierarchical support."
+q = [[1, 0], [0, 1]]
+l = [[1.0, 1.0], [0.0, -400.0]]
+theta = [0.125, 0.125]
+phases = [0.0, 0.0]
+
+[expected]
+historical_result = "row_logscale=[0,-400]; each supported row retains its own term at scaled amplitude 1; physical classification Hessian has two finite diagonal modes."
+row_logscale = [0.0, -400.0]
+scaled_amplitudes = [[1.0, 0.0], [0.0, 1.0]]
+minimum_logscale_policy = "delta >= log10(floatmin(Float64))"
+status = "applicable"
