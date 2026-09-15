@@ -1,0 +1,44 @@
+{
+  "schema_version": "cyax-host-manifest-v2",
+  "manifest_id": "b44f7f33c5da253ffba913a072c7a5e8ef173696fdd6ef39d192015075afc7ce",
+  "manifest_sha256": "b44f7f33c5da253ffba913a072c7a5e8ef173696fdd6ef39d192015075afc7ce",
+  "manifest": {
+    "manifest_version": "cyax-host-manifest-v2",
+    "cpu_model_class": "arm64",
+    "core_topology": "logical_cpus=12",
+    "physical_ram_bytes": 25769803776,
+    "operating_system": "macOS",
+    "operating_system_build": "25.6.0",
+    "filesystem_type": "APFS",
+    "benchmark_volume_capacity_bytes": 494384795648,
+    "ordinary_available_volume_capacity_bytes": 180871118848,
+    "python_version": "3.14.6",
+    "sqlite_version": "3.53.4",
+    "sqlite_compile_options": [
+      "ATOMIC_INTRINSICS=1", "COMPILER=clang-21.0.0", "DEFAULT_AUTOVACUUM", "DEFAULT_CACHE_SIZE=-2000",
+      "DEFAULT_FILE_FORMAT=4", "DEFAULT_JOURNAL_SIZE_LIMIT=-1", "DEFAULT_MMAP_SIZE=0", "DEFAULT_PAGE_SIZE=4096",
+      "DEFAULT_PCACHE_INITSZ=20", "DEFAULT_RECURSIVE_TRIGGERS", "DEFAULT_SECTOR_SIZE=4096", "DEFAULT_SYNCHRONOUS=2",
+      "DEFAULT_WAL_AUTOCHECKPOINT=1000", "DEFAULT_WAL_SYNCHRONOUS=2", "DEFAULT_WORKER_THREADS=0", "DIRECT_OVERFLOW_READ", "ENABLE_API_ARMOR", "ENABLE_COLUMN_METADATA", "ENABLE_DBSTAT_VTAB",
+      "ENABLE_FTS3", "ENABLE_FTS3_PARENTHESIS", "ENABLE_FTS5", "ENABLE_GEOPOLY", "ENABLE_MATH_FUNCTIONS", "ENABLE_MEMORY_MANAGEMENT",
+      "ENABLE_PERCENTILE", "ENABLE_PREUPDATE_HOOK", "ENABLE_RTREE", "ENABLE_SESSION", "ENABLE_STAT4", "ENABLE_UNLOCK_NOTIFY",
+      "MALLOC_SOFT_LIMIT=1024", "MAX_ATTACHED=10", "MAX_COLUMN=2000", "MAX_COMPOUND_SELECT=500", "MAX_DEFAULT_PAGE_SIZE=8192",
+      "MAX_EXPR_DEPTH=1000", "MAX_FUNCTION_ARG=1000", "MAX_LENGTH=1000000000", "MAX_LIKE_PATTERN_LENGTH=50000",
+      "MAX_MMAP_SIZE=0x7fff0000", "MAX_PAGE_COUNT=0xfffffffe", "MAX_PAGE_SIZE=65536", "MAX_SQL_LENGTH=1000000000",
+      "MAX_TRIGGER_DEPTH=1000", "MAX_VARIABLE_NUMBER=250000", "MAX_VDBE_OP=250000000", "MAX_WORKER_THREADS=8", "MUTEX_PTHREADS", "SYSTEM_MALLOC", "TEMP_STORE=1", "THREADSAFE=1", "USE_URI"
+    ],
+    "ladybug_artifact": "ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl",
+    "native_runtime_versions": {},
+    "measurement_tool_versions": {"host-controls": "cyax-host-v2", "python": "3.14.6"},
+    "power_source": "AC Power",
+    "energy_mode": "Automatic",
+    "host_api_versions": {"mach": "mach-task-v1", "platform": "python-platform-v1", "thermal": "macos-foundation-nsprocessinfo-thermal-v1"},
+    "extra_context": {},
+    "capacity_api": "shutil.disk_usage.free",
+    "capacity_definition": "ordinary bytes available to an unprivileged process on the benchmark volume, as returned by the frozen capacity API",
+    "capacity_terms": {
+      "mapping_version": "cyax-capacity-terms-v1",
+      "benchmark_volume_capacity_bytes": {"term": "total_volume_capacity", "value_bytes": 494384795648, "api": "shutil.disk_usage.total", "role": "post_operation_reserve_denominator"},
+      "ordinary_available_volume_capacity_bytes": {"term": "preflight_available_volume_capacity", "value_bytes": 180871118848, "api": "shutil.disk_usage.free", "definition": "ordinary bytes available to an unprivileged process on the benchmark volume, as returned by the frozen capacity API", "role": "disk_hard_and_disk_excess_allowance_denominator"}
+    }
+  }
+}

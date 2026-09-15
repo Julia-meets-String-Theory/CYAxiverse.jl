@@ -9,14 +9,16 @@ try:
     from .measurement import (
         MeasurementError, condition_preconditioned_warm_cache, compare_manifest,
         hard_resource_envelope, inspect_materialization, one_query_execution_worker,
-        pair_order_schedule, require_zero_sharing,
+        pair_order_schedule, require_zero_sharing, ProcessMonitor,
     )
+    from .host import ThermalObservation
 except ImportError:  # pragma: no cover
     from measurement import (
         MeasurementError, condition_preconditioned_warm_cache, compare_manifest,
         hard_resource_envelope, inspect_materialization, one_query_execution_worker,
-        pair_order_schedule, require_zero_sharing,
+        pair_order_schedule, require_zero_sharing, ProcessMonitor,
     )
+    from host import ThermalObservation
 
 
 class MeasurementTests(unittest.TestCase):
@@ -57,6 +59,17 @@ class MeasurementTests(unittest.TestCase):
     def test_query_worker_contract(self):
         self.assertTrue(one_query_execution_worker(worker_thread_names=("MainThread", "runtime-helper"))["valid"])
         self.assertFalse(one_query_execution_worker(worker_thread_names=("query-worker-1", "query-worker-2"))["valid"])
+
+    def test_process_monitor_uses_direct_thermal_reader_by_default(self):
+        calls = []
+        def reader(*, phase):
+            calls.append(phase)
+            return ThermalObservation(phase, "nominal", observed_at_ns=len(calls))
+        monitor = ProcessMonitor(power_source="AC", energy_mode="Automatic", thermal_reader=reader)
+        sample = monitor.sample()
+        self.assertEqual(calls, ["during"])
+        self.assertEqual(sample.thermal_mechanism_version, "macos-foundation-nsprocessinfo-thermal-v1")
+        self.assertTrue(monitor.final()["valid"])
 
 
 if __name__ == "__main__":

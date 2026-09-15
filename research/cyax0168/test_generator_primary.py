@@ -9,6 +9,7 @@ from research.cyax0168.generator_primary import (
     GENERATOR_VERSION,
     GenerationError,
     canonical_frame,
+    reconstruct_candidate_vector,
     generate_snapshot,
     prf_choice,
 )
@@ -22,6 +23,10 @@ class GeneratorPrimaryTests(unittest.TestCase):
         self.assertEqual(snapshot.manifest["namespace"], "cyax-0168-synthetic-v2.3")
         self.assertEqual(snapshot.manifest["entity_count"], 1_000)
         self.assertEqual(snapshot.manifest["assertion_count"], 5_000)
+        self.assertEqual(
+            snapshot.manifest["logical_snapshot_checksum"],
+            "e73063a46e1c585bfb15aa0db5e920a0f6b4a37f2b5a44a7a0b372f7aecd3b18",
+        )
         self.assertTrue(all("/scale/2.3/" in row["canonical_locator"] for row in snapshot.source_revisions))
         with self.assertRaises(GenerationError):
             generate_snapshot("T0", "P-medium", 162000, entity_count=100)
@@ -106,6 +111,19 @@ class GeneratorPrimaryTests(unittest.TestCase):
         self.assertEqual(selected, expected)
         with self.assertRaises(GenerationError):
             prf_choice(candidates, seed=7, profile_id="P-low", purpose="unlisted", ordinal=0)
+
+    def test_generator_trace_deduplicates_vectors_and_reconstructs_losslessly(self):
+        snapshot = generate_snapshot("conformance-tiny", "P-low", 900001, entity_count=100)
+        choices = snapshot.prf_choices
+        self.assertTrue(choices)
+        self.assertTrue(all("candidates" not in choice for choice in choices))
+        self.assertLess(len(snapshot.candidate_vectors), len(choices))
+        for choice in choices:
+            vector = reconstruct_candidate_vector(snapshot.trace, choice)
+            self.assertEqual(vector, snapshot.candidate_vectors[choice["candidate_vector_id"]])
+        # Trace compression is diagnostic only: semantic output remains the
+        # byte-stable generator-2.3 result.
+        self.assertEqual(snapshot.logical_snapshot_checksum, snapshot.manifest["logical_snapshot_checksum"])
 
     def test_unregistered_tier_requires_an_explicit_tiny_size(self):
         with self.assertRaisesRegex(GenerationError, "unknown tier"):

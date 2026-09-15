@@ -47,6 +47,26 @@ from .generator_primary import (
     fill_concerns_pair_rejects,
     prf_choice,
     prf_select,
+    candidate_vector_id,
+    reconstruct_candidate_vector,
+    reconstruct_prf_trace,
+)
+from .execution_packet import (
+    PACKET_GATE,
+    PACKET_SCHEMA_VERSION,
+    ExecutionPacketError,
+    PreRerunExecutionPacket,
+    build_execution_packet,
+    validate_execution_packet,
+)
+from .host import (
+    HostError,
+    HostManifest,
+    ThermalObservation,
+    freeze_host_manifest,
+    load_frozen_host_manifest,
+    read_macos_thermal_state,
+    validate_thermal_observations,
 )
 
 __all__ = [
@@ -92,4 +112,20 @@ __all__ = [
     "fill_concerns_pair_rejects",
     "prf_choice",
     "prf_select",
+    "candidate_vector_id",
+    "reconstruct_candidate_vector",
+    "reconstruct_prf_trace",
+    "PACKET_GATE",
+    "PACKET_SCHEMA_VERSION",
+    "ExecutionPacketError",
+    "PreRerunExecutionPacket",
+    "build_execution_packet",
+    "validate_execution_packet",
+    "HostError",
+    "HostManifest",
+    "ThermalObservation",
+    "freeze_host_manifest",
+    "load_frozen_host_manifest",
+    "read_macos_thermal_state",
+    "validate_thermal_observations",
 ]

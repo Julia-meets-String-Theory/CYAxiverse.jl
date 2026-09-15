@@ -1,0 +1,16 @@
+{
+  "schema_version": "cyax-0168-thermal-preflight-v1",
+  "mechanism_version": "macos-foundation-nsprocessinfo-thermal-v1",
+  "source": "Foundation.framework:NSProcessInfo.processInfo.thermalState",
+  "runtime": "libobjc.A.dylib:objc_getClass+sel_registerName+objc_msgSend",
+  "notification": "NSProcessInfoThermalStateDidChange (not subscribed; polling is authoritative)",
+  "polling": "synchronous ProcessInfo.thermalState read at each declared phase",
+  "state_mapping": {"0": "nominal", "1": "fair", "2": "serious", "3": "critical"},
+  "observations": [
+    {"phase": "pre", "state": "nominal", "available": true, "observed_at_ns": 616171819868000, "elapsed_ns": 152125, "output_sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"},
+    {"phase": "during", "state": "nominal", "available": true, "observed_at_ns": 616172820960791, "elapsed_ns": 146666, "output_sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"},
+    {"phase": "post", "state": "nominal", "available": true, "observed_at_ns": 616173825855833, "elapsed_ns": 192833, "output_sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"}
+  ],
+  "timing": {"sample_timeout_seconds": 2.0, "interval_seconds": 1.0, "max_gap_seconds": 5.0, "phases": ["pre", "during", "post"], "transition_policy": "any fair/serious/critical or unavailable observation invalidates"},
+  "validation": {"valid": true, "states": ["nominal", "nominal", "nominal"], "reasons": []}
+}

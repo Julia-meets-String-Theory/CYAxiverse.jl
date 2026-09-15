@@ -72,7 +72,7 @@ import math
 import unicodedata
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 # ---------------------------------------------------------------------------
 # Canonical domain-separated framing (spec.md "Canonical encoding and stable
@@ -163,6 +163,41 @@ def sha256_hex(data: bytes) -> str:
 
 def sha256_bytes(data: bytes) -> bytes:
     return hashlib.sha256(data).digest()
+
+
+def _trace_value(value: object) -> object:
+    """Convert a candidate to its deterministic JSON-compatible form."""
+    if isinstance(value, (tuple, list)):
+        return [_trace_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _trace_value(item) for key, item in value.items()}
+    return value
+
+
+def candidate_vector_id(candidates: Sequence[object]) -> str:
+    """Return the content identity of one frozen PRF candidate vector."""
+    values = [_trace_value(item) for item in candidates]
+    return f"cyax-candidate-vector-sha256:{sha256_hex(frame(['cyax-candidate-vector-v1', values]))}"
+
+
+def reconstruct_candidate_vector(trace: Mapping[str, object], choice: Mapping[str, object]) -> List[object]:
+    """Losslessly recover a choice's candidates from the deduplicated trace."""
+    if "candidates" in choice:  # backwards-compatible standalone selector traces
+        return list(choice["candidates"])  # type: ignore[arg-type]
+    vector_id = choice.get("candidate_vector_id")
+    vectors = trace.get("candidate_vectors", {})
+    if not isinstance(vector_id, str) or not isinstance(vectors, dict) or vector_id not in vectors:
+        raise GenerationFailure("choice references an unavailable candidate vector")
+    return list(vectors[vector_id])  # type: ignore[arg-type]
+
+
+def reconstruct_prf_trace(trace: Mapping[str, object]) -> List[Dict[str, object]]:
+    """Expand only on demand; stored traces never repeat vector payloads."""
+    choices = trace.get("prf_choices", [])
+    return [
+        {**choice, "candidates": reconstruct_candidate_vector(trace, choice)}
+        for choice in choices  # type: ignore[union-attr]
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +336,8 @@ def prf_select(
     trace: Optional[List[Dict[str, object]]] = None,
     phase: Optional[str] = None,
     subject_id: Optional[str] = None,
+    candidate_vectors: Optional[Dict[str, List[object]]] = None,
+    candidate_vector_cache: Optional[Dict[int, Tuple[object, str]]] = None,
 ) -> object:
     """Generic implementation of the closed generator-2.3 selection rule.
 
@@ -325,17 +362,7 @@ def prf_select(
     # the same immutable vector for every ordinal; the default retains the
     # standalone selector's defensive sort and its public conformance
     # behavior.
-    sorted_candidates = list(candidates) if candidates_sorted else sorted(candidates, key=sort_key)
-
-    def trace_value(value: object) -> object:
-        # JSON-friendly and deterministic representation for pair candidates.
-        if isinstance(value, tuple):
-            return [trace_value(item) for item in value]
-        if isinstance(value, list):
-            return [trace_value(item) for item in value]
-        if isinstance(value, dict):
-            return {str(key): trace_value(item) for key, item in value.items()}
-        return value
+    sorted_candidates = candidates if candidates_sorted else sorted(candidates, key=sort_key)
 
     attempts: List[Dict[str, object]] = []
     choice_record: Dict[str, object] = {
@@ -343,9 +370,25 @@ def prf_select(
         "purpose": purpose,
         "ordinal": ordinal,
         "candidate_count": n,
-        "candidates": [trace_value(item) for item in sorted_candidates],
         "attempts": attempts,
     }
+    if candidate_vectors is None:
+        # Preserve the standalone helper's historical shape.  Generator
+        # traces pass a registry below, avoiding repeated O(n) vectors.
+        choice_record["candidates"] = [_trace_value(item) for item in sorted_candidates]
+    else:
+        cache_entry = candidate_vector_cache.get(id(candidates)) if candidate_vector_cache is not None else None
+        if cache_entry is not None and cache_entry[0] is candidates:
+            vector_id = cache_entry[1]
+        else:
+            vector_id = candidate_vector_id(sorted_candidates)
+            if candidate_vector_cache is not None:
+                candidate_vector_cache[id(candidates)] = (candidates, vector_id)
+        vector_value = [_trace_value(item) for item in sorted_candidates]
+        if vector_id in candidate_vectors and candidate_vectors[vector_id] != vector_value:
+            raise GenerationFailure("candidate vector hash collision")
+        candidate_vectors.setdefault(vector_id, vector_value)
+        choice_record["candidate_vector_id"] = vector_id
     if subject_id is not None:
         choice_record["subject_id"] = subject_id
     if trace is not None:
@@ -357,7 +400,7 @@ def prf_select(
         attempts.append({
             "counter": 0,
             "prf_called": False,
-            "candidate": trace_value(cand),
+            "candidate": _trace_value(cand),
             "digest": None,
             "digest_rejected": False,
             "predicate_rejected": rejected,
@@ -367,7 +410,7 @@ def prf_select(
             raise GenerationFailure(
                 f"sole candidate rejected without retry for purpose={purpose} ordinal={ordinal}"
             )
-        choice_record.update({"selected": trace_value(cand), "selected_counter": 0, "retry_count": 0, "failed": False})
+        choice_record.update({"selected": _trace_value(cand), "selected_counter": 0, "retry_count": 0, "failed": False})
         return cand
 
     counter = 0
@@ -394,7 +437,7 @@ def prf_select(
         attempts.append({
             "counter": counter,
             "prf_called": True,
-            "candidate": trace_value(cand),
+            "candidate": _trace_value(cand),
             "digest": digest.hex(),
             "digest_rejected": False,
             "predicate_rejected": rejected,
@@ -406,7 +449,7 @@ def prf_select(
                 raise GenerationFailure("counter overflow during predicate rejection")
             continue
         choice_record.update({
-            "selected": trace_value(cand),
+            "selected": _trace_value(cand),
             "selected_counter": counter,
             "retry_count": counter,
             "failed": False,
@@ -635,6 +678,7 @@ class GeneratedSnapshot:
     # trace without importing one another's classes.
     prf_trace: List[Dict[str, object]] = field(default_factory=list)
     construction_trace: List[Dict[str, object]] = field(default_factory=list)
+    candidate_vectors: Dict[str, List[object]] = field(default_factory=dict)
 
     @property
     def source_revisions(self) -> List[GeneratedSourceRevision]:
@@ -708,6 +752,57 @@ class GeneratedSnapshot:
     def snapshot_id(self) -> str:
         return f"cyax-snapshot-sha256:{self.logical_snapshot_checksum}"
 
+    @property
+    def manifest(self) -> Dict[str, object]:
+        """Return the complete generator manifest used by the primary path.
+
+        This is constructed from the independent implementation's own frozen
+        constants and records.  Keeping it in the complete output lets the
+        comparison harness detect metadata drift even when record checksums
+        happen to remain equal.
+        """
+        checksum = self.logical_snapshot_checksum
+        profile = PROFILES[self.profile_id]
+        profile_record = {
+            "dependency_fanout": profile.dependency_fanout,
+            "path_depth": profile.path_depth,
+            "supersession_depth": profile.supersession_depth,
+            "dispute_rate": float(profile.dispute_rate),
+            "cross_link_rate": float(profile.cross_link_rate),
+            "cycle_rate": float(profile.cycle_rate),
+            "isolated_rate": float(profile.isolated_rate),
+            "parallel_evidence_rate": float(profile.parallel_evidence_rate),
+        }
+        return {
+            "generator_name": GENERATOR_NAME,
+            "generator_version": GENERATOR_VERSION,
+            "prf_domain": PRF_DOMAIN,
+            "synthetic_namespace": NAMESPACE,
+            "source_locator_version": SOURCE_LOCATOR_VERSION,
+            "authority_derivation_rule_id": AUTHORITY_DERIVATION_RULE_ID,
+            "namespace": NAMESPACE,
+            "tier": self.tier,
+            "profile_id": self.profile_id,
+            "seed": self.seed,
+            "profile": profile_record,
+            "schema_version": "cyax-snapshot-v1",
+            "authority_rule_version": "cyax-authority-v1",
+            "semantic_evaluator_rule_version": "cyax-evaluator-v1",
+            "claim_key_registry": [{
+                "claim_key": "synthetic.block_claim",
+                "literal_type": "text",
+                "semantic_slot": "synthetic_fixture_block_statement",
+            }],
+            "owner_allowlist": [],
+            "owner_decision_events": [],
+            "entity_count": len(self.entities),
+            "literal_count": len(self.literals),
+            "source_revision_count": len(self.source_revisions),
+            "assertion_count": len(self.assertions),
+            "logical_snapshot_checksum": checksum,
+            "snapshot_id": f"cyax-snapshot-sha256:{checksum}",
+        }
+
 
 # ---------------------------------------------------------------------------
 # Main generation routine.
@@ -734,6 +829,8 @@ def generate_snapshot(tier: str, profile_id: str, seed: int, entity_count: int) 
     # no diagnostic or host value enters an Entity/Assertion identity.
     prf_trace: List[Dict[str, object]] = []
     construction_trace: List[Dict[str, object]] = []
+    candidate_vectors: Dict[str, List[object]] = {}
+    candidate_vector_cache: Dict[int, Tuple[object, str]] = {}
     entities: Dict[Tuple[int, int], GeneratedEntity] = {}
     workitem_id: Dict[int, str] = {}
     claim_id: Dict[int, str] = {}
@@ -1010,6 +1107,8 @@ def generate_snapshot(tier: str, profile_id: str, seed: int, entity_count: int) 
             trace=prf_trace,
             phase="phase-3-dependencies",
             subject_id=subj_id,
+            candidate_vectors=candidate_vectors,
+            candidate_vector_cache=candidate_vector_cache,
         )
         asrt = make_assertion(subj_id, "depends_on", target_id, None, src_b, None, "unknown", "undisputed", "phase-3-dependencies")
         all_constructed.append(asrt)
@@ -1211,6 +1310,8 @@ def generate_snapshot(tier: str, profile_id: str, seed: int, entity_count: int) 
             candidates_sorted=True,
             trace=prf_trace,
             phase="phase-8-filler",
+            candidate_vectors=candidate_vectors,
+            candidate_vector_cache=candidate_vector_cache,
         )
         s, o, b = chosen
         asrt = make_assertion(s, "concerns", o, None, b, None, "unknown", "undisputed", "phase-8-filler")
@@ -1240,6 +1341,7 @@ def generate_snapshot(tier: str, profile_id: str, seed: int, entity_count: int) 
         removed_assertions=removed_assertions,
         prf_trace=prf_trace,
         construction_trace=construction_trace,
+        candidate_vectors={key: candidate_vectors[key] for key in sorted(candidate_vectors)},
     )
 
 
@@ -1421,6 +1523,7 @@ def complete_output(snapshot: GeneratedSnapshot) -> Dict[str, object]:
         "tier": snapshot.tier,
         "profile_id": snapshot.profile_id,
         "seed": snapshot.seed,
+        "manifest": snapshot.manifest,
         "entities": entity_records(snapshot),
         "literals": literal_records(snapshot),
         "source_revisions": source_records(snapshot),
@@ -1428,6 +1531,7 @@ def complete_output(snapshot: GeneratedSnapshot) -> Dict[str, object]:
         "source_bytes": snapshot.source_bytes,
         "construction_trace": snapshot.construction_trace,
         "prf_choices": snapshot.prf_trace,
+        "candidate_vectors": snapshot.candidate_vectors,
         "assertion_ids": snapshot.assertion_ids,
         "logical_snapshot_checksum": snapshot.logical_snapshot_checksum,
         "snapshot_id": snapshot.snapshot_id,

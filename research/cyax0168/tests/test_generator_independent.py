@@ -593,7 +593,21 @@ class TestGenerator23Contract(unittest.TestCase):
         for choice in choices:
             selected = choice["selected"]
             subject = choice["subject_id"]
-            self.assertNotIn(subject, choice["candidates"])
+            candidates = gi.reconstruct_candidate_vector(
+                {"candidate_vectors": snap.candidate_vectors}, choice
+            )
+            self.assertNotIn(subject, candidates)
+
+    def test_generator_trace_deduplicates_vectors_and_reconstructs_losslessly(self):
+        snap = gi.generate_snapshot(TINY_TIER, "P-low", SEED_A, 100)
+        self.assertTrue(snap.prf_trace)
+        self.assertTrue(all("candidates" not in choice for choice in snap.prf_trace))
+        self.assertLess(len(snap.candidate_vectors), len(snap.prf_trace))
+        for choice in snap.prf_trace:
+            vector = gi.reconstruct_candidate_vector(
+                {"candidate_vectors": snap.candidate_vectors}, choice
+            )
+            self.assertEqual(vector, snap.candidate_vectors[choice["candidate_vector_id"]])
 
     def test_phase5_excludes_isolated_blocks_only(self):
         import math

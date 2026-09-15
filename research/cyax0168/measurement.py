@@ -23,9 +23,21 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 try:
-    from .host import ProcessControlSample, make_control_sample, validate_process_control
+    from .host import (
+        ProcessControlSample,
+        ThermalObservation,
+        make_control_sample,
+        read_macos_thermal_state,
+        validate_process_control,
+    )
 except ImportError:  # pragma: no cover - direct script/discovery mode
-    from host import ProcessControlSample, make_control_sample, validate_process_control
+    from host import (
+        ProcessControlSample,
+        ThermalObservation,
+        make_control_sample,
+        read_macos_thermal_state,
+        validate_process_control,
+    )
 
 
 class MeasurementError(ValueError):
@@ -197,23 +209,31 @@ class ProcessMonitor:
     """Small injectable monitor for the initial macOS validity controls."""
     power_source: str
     energy_mode: str
-    thermal_pressure: str = "nominal"
+    # A supplied state is reserved for deterministic contract fixtures.  The
+    # campaign path leaves it unset and reads the direct macOS route below.
+    thermal_pressure: str | None = None
     memory_pressure: str = "normal"
     page_out_start: int = 0
     swap_io_start: int = 0
     samples: list[ProcessControlSample] = field(default_factory=list)
     monitor_gap: bool = False
+    thermal_reader: Callable[..., ThermalObservation] = read_macos_thermal_state
 
     def sample(self, *, page_out: int | None = None, swap_io: int | None = None, descendants: Sequence[int] = (), competing_load_ok: bool = True) -> ProcessControlSample:
         page_delta = int((page_out if page_out is not None else self.page_out_start) - self.page_out_start)
         swap_delta = int((swap_io if swap_io is not None else self.swap_io_start) - self.swap_io_start)
+        observation = None if self.thermal_pressure is not None else self.thermal_reader(phase="during")
         current = make_control_sample(
             power_source=self.power_source, energy_mode=self.energy_mode,
-            thermal_pressure=self.thermal_pressure, memory_pressure=self.memory_pressure,
+            thermal_pressure=(self.thermal_pressure if observation is None else observation.state),
+            memory_pressure=self.memory_pressure,
             page_out_delta=page_delta, swap_io_delta=swap_delta,
             descendants=descendants, monitor_gap=self.monitor_gap,
             competing_load_ok=competing_load_ok,
         )
+        if observation is not None:
+            current.thermal_mechanism_version = observation.mechanism_version
+            current.thermal_observation = observation.to_record()
         self.samples.append(current)
         return current
 

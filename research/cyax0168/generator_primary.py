@@ -339,6 +339,41 @@ def _digest_frame(value: Any) -> str:
     return hashlib.sha256(canonical_frame(value)).hexdigest()
 
 
+def _trace_value(value: Any) -> Any:
+    """Convert a candidate to its deterministic JSON-compatible form."""
+    if isinstance(value, (tuple, list)):
+        return [_trace_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): _trace_value(item) for key, item in value.items()}
+    return value
+
+
+def candidate_vector_id(candidates: Sequence[Any]) -> str:
+    """Return the content identity of one frozen PRF candidate vector."""
+    values = [_trace_value(item) for item in candidates]
+    return f"cyax-candidate-vector-sha256:{_digest_frame(['cyax-candidate-vector-v1', values])}"
+
+
+def reconstruct_candidate_vector(trace: Mapping[str, Any], choice: Mapping[str, Any]) -> list[Any]:
+    """Losslessly recover one choice's candidates from the deduplicated trace."""
+    if "candidates" in choice:  # backwards-compatible standalone selector traces
+        return list(choice["candidates"])
+    vector_id = choice.get("candidate_vector_id")
+    vectors = trace.get("candidate_vectors", {})
+    if not isinstance(vector_id, str) or not isinstance(vectors, Mapping) or vector_id not in vectors:
+        raise GenerationError("choice references an unavailable candidate vector")
+    return list(vectors[vector_id])
+
+
+def reconstruct_prf_trace(trace: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Expand only on demand; stored traces never repeat vector payloads."""
+    choices = trace.get("prf_choices", [])
+    return [
+        {**choice, "candidates": reconstruct_candidate_vector(trace, choice)}
+        for choice in choices
+    ]
+
+
 def _block_identity(tier: str, profile_id: str, seed: int, block: int, role: int) -> list[Any]:
     return [tier, profile_id, seed, block, role]
 
@@ -360,6 +395,8 @@ def prf_choice(
     ordinal: int, reject: Any = None, presorted: bool = False,
     trace: list[dict[str, Any]] | None = None, phase: str | None = None,
     subject_id: str | None = None,
+    candidate_vectors: MutableMapping[str, list[Any]] | None = None,
+    candidate_vector_cache: MutableMapping[int, tuple[object, str]] | None = None,
 ) -> tuple[Any, int]:
     """Apply the exact rejection-sampling rule and return ``(choice,counter)``.
 
@@ -375,18 +412,9 @@ def prf_choice(
             return canonical_frame([value[0], value[1]])
         return _primary(str(value))
 
-    ordered = list(candidates) if presorted else sorted(candidates, key=candidate_key)
+    ordered = candidates if presorted else sorted(candidates, key=candidate_key)
     if not ordered:
         raise GenerationError("empty candidate vector")
-    def trace_value(value: Any) -> Any:
-        if isinstance(value, tuple):
-            return [trace_value(item) for item in value]
-        if isinstance(value, list):
-            return [trace_value(item) for item in value]
-        if isinstance(value, dict):
-            return {str(key): trace_value(item) for key, item in value.items()}
-        return value
-
     attempts: list[dict[str, Any]] | None = None
     choice_record: dict[str, Any] | None = None
     if trace is not None:
@@ -396,9 +424,25 @@ def prf_choice(
             "purpose": purpose,
             "ordinal": ordinal,
             "candidate_count": len(ordered),
-            "candidates": [trace_value(item) for item in ordered],
             "attempts": attempts,
         }
+        if candidate_vectors is None:
+            # Preserve the standalone helper's historical shape.  Generator
+            # traces pass a registry below, avoiding repeated O(n) vectors.
+            choice_record["candidates"] = [_trace_value(item) for item in ordered]
+        else:
+            cache_entry = candidate_vector_cache.get(id(candidates)) if candidate_vector_cache is not None else None
+            if cache_entry is not None and cache_entry[0] is candidates:
+                vector_id = cache_entry[1]
+            else:
+                vector_id = candidate_vector_id(ordered)
+                if candidate_vector_cache is not None:
+                    candidate_vector_cache[id(candidates)] = (candidates, vector_id)
+            vector_value = [_trace_value(item) for item in ordered]
+            if vector_id in candidate_vectors and candidate_vectors[vector_id] != vector_value:
+                raise GenerationError("candidate vector hash collision")
+            candidate_vectors.setdefault(vector_id, vector_value)
+            choice_record["candidate_vector_id"] = vector_id
         if subject_id is not None:
             choice_record["subject_id"] = subject_id
         trace.append(choice_record)
@@ -412,7 +456,7 @@ def prf_choice(
                 attempts.append({
                     "counter": 0,
                     "prf_called": False,
-                    "candidate": trace_value(candidate),
+                    "candidate": _trace_value(candidate),
                     "digest": None,
                     "digest_rejected": False,
                     "predicate_rejected": rejected,
@@ -422,7 +466,7 @@ def prf_choice(
                     choice_record.update({"selected": None, "selected_counter": None, "retry_count": 0, "failed": True})
                 raise GenerationError("sole candidate rejected by the exhaustive purpose rule")
             if choice_record is not None:
-                choice_record.update({"selected": trace_value(candidate), "selected_counter": 0, "retry_count": 0, "failed": False})
+                choice_record.update({"selected": _trace_value(candidate), "selected_counter": 0, "retry_count": 0, "failed": False})
             return candidate, 0
         else:
             digest = prf_digest(seed, profile_id, purpose, ordinal, counter)
@@ -450,7 +494,7 @@ def prf_choice(
             attempts.append({
                 "counter": counter,
                 "prf_called": True,
-                "candidate": trace_value(candidate),
+                "candidate": _trace_value(candidate),
                 "digest": digest.hex(),
                 "digest_rejected": False,
                 "predicate_rejected": rejected,
@@ -466,7 +510,7 @@ def prf_choice(
             continue
         if choice_record is not None:
             choice_record.update({
-                "selected": trace_value(candidate),
+                "selected": _trace_value(candidate),
                 "selected_counter": counter,
                 "retry_count": counter,
                 "failed": False,
@@ -560,6 +604,11 @@ class Snapshot:
     @property
     def prf_choices(self) -> list[dict[str, Any]]:
         return self.retry_trace
+
+    @property
+    def candidate_vectors(self) -> Mapping[str, list[Any]]:
+        """Deduplicated candidate vectors used by the PRF trace."""
+        return self.trace.get("candidate_vectors", {})
 
     @property
     def construction_trace(self) -> list[dict[str, Any]]:
@@ -694,10 +743,14 @@ class _Builder:
         # manager can compare the complete primary and independent states.
         self.trace_enabled = True
         self.construction_trace: list[dict[str, Any]] = []
+        self.candidate_vectors: dict[str, list[Any]] = {}
+        self.candidate_vector_cache: dict[int, tuple[object, str]] = {}
         self.trace: dict[str, Any] = {
             "generator_version": GENERATOR_VERSION,
             "prf_purposes": sorted(PRF_PURPOSES),
             "prf_choices": [],
+            "candidate_vector_schema": "cyax-candidate-vector-v1",
+            "candidate_vectors": self.candidate_vectors,
             "construction_trace": self.construction_trace,
             "removed_assertion_ids": [],
             "phases": [],
@@ -1029,6 +1082,8 @@ class _Builder:
                 trace=self.trace["prf_choices"],
                 phase="phase-3-dependencies",
                 subject_id=source_id,
+                candidate_vectors=self.candidate_vectors,
+                candidate_vector_cache=self.candidate_vector_cache,
             )
             self._record_assertion_for_entities(subject_id=source_id, block=source_block, predicate="depends_on", object_id=target, literal_ref=None, phase="phase-3-dependencies")
         self.trace["phases"].append({"phase": 3, "isolated_blocks": sorted(isolated), "connected_blocks": len(connected), "dependency_quota": dep_quota, "chain_count": len(chain_ids), "additional_count": additional, "cross_link_count": cross_count})
@@ -1221,6 +1276,8 @@ class _Builder:
                 presorted=True,
                 trace=self.trace["prf_choices"],
                 phase="phase-8-filler",
+                candidate_vectors=self.candidate_vectors,
+                candidate_vector_cache=self.candidate_vector_cache,
             )
             subject, object_id, block = pair
             self._record_assertion_for_entities(subject_id=subject, block=block, predicate="concerns", object_id=object_id, literal_ref=None, phase="phase-8-filler")
@@ -1284,6 +1341,12 @@ class _Builder:
         self._phase_parallel()
         self._phase_filler()
         self._validate(isolated)
+        # Registry order is diagnostic but must be canonical for byte-level
+        # comparison and replay across implementations.
+        self.trace["candidate_vectors"] = {
+            key: self.candidate_vectors[key] for key in sorted(self.candidate_vectors)
+        }
+        self.trace["candidate_vector_count"] = len(self.trace["candidate_vectors"])
         entities = sorted(self.entities, key=lambda r: _primary(r["entity_id"]))
         literals = sorted(self.literals.values(), key=lambda r: _primary(r["literal_id"]))
         revisions = sorted(self.source_revisions.values(), key=lambda r: _primary(r["source_revision_id"]))
@@ -1500,14 +1563,16 @@ def complete_output(snapshot: Snapshot) -> dict[str, Any]:
         "tier": snapshot.tier,
         "profile_id": snapshot.profile_id,
         "seed": snapshot.seed,
+        "manifest": snapshot.manifest,
         "entities": entity_records(snapshot),
         "literals": literal_records(snapshot),
         "source_revisions": source_records(snapshot),
         "assertions": assertion_records(snapshot),
         "source_bytes": snapshot.source_bytes,
-        "construction_trace": snapshot.construction_trace,
-        "prf_choices": snapshot.prf_choices,
-        "assertion_ids": snapshot.assertion_ids,
+            "construction_trace": snapshot.construction_trace,
+            "prf_choices": snapshot.prf_choices,
+            "candidate_vectors": snapshot.candidate_vectors,
+            "assertion_ids": snapshot.assertion_ids,
         "logical_snapshot_checksum": snapshot.logical_snapshot_checksum,
         "snapshot_id": snapshot.snapshot_id,
     }
@@ -1523,5 +1588,5 @@ __all__ = [
     "PROFILES", "TIERS", "CALIBRATION_TIERS", "CALIBRATION_SEEDS", "PRF_PURPOSES",
     "ASSERTION_PREIMAGE_KEYS", "FIXED_TIME", "Snapshot", "GenerationError", "GenerationFailure",
     "canonical_frame", "frame", "canonical_json_bytes", "entity_id", "literal_id", "source_revision_id", "assertion_id", "sha256_hex",
-    "prf_digest", "prf_choice", "prf_select", "logical_snapshot_checksum", "semantic_projection_checksum", "compute_logical_snapshot_checksum", "physical_source_revisions", "semantic_projection", "compute_semantic_source_bundle_projection_checksum", "dependency_target_rejects", "fill_concerns_pair_rejects", "generate_snapshot", "generate_calibration_snapshot", "physical_records", "entity_records", "literal_records", "source_records", "assertion_records", "complete_output", "generate", "build_snapshot",
+    "prf_digest", "prf_choice", "prf_select", "candidate_vector_id", "reconstruct_candidate_vector", "reconstruct_prf_trace", "logical_snapshot_checksum", "semantic_projection_checksum", "compute_logical_snapshot_checksum", "physical_source_revisions", "semantic_projection", "compute_semantic_source_bundle_projection_checksum", "dependency_target_rejects", "fill_concerns_pair_rejects", "generate_snapshot", "generate_calibration_snapshot", "physical_records", "entity_records", "literal_records", "source_records", "assertion_records", "complete_output", "generate", "build_snapshot",
 ]
