@@ -22,11 +22,11 @@ and mixed-context tests pass.
 ## R3 — exact pre-rerun identity packet
 
 `g1-pre-rerun-execution-packet-v1.json` binds candidate head
-`cd5112ed6afb41937c42ffa9354b5ecc554f4d31` to the host-manifest identity
+`4ed8293fd5483f98eba6f4603c5b8d34e945f4bd` to the host-manifest identity
 above. The packet context hash is
-`3a1d912e2c1890764d1ad0e2405e3d8b8b7693ae1eb2239075734c61d65e9c61` and the
+`4c9e36b467f1817b48b773c2dd26c9864c6042f9b10572da411277a42fd54a94` and the
 packet hash is
-`adc84ad0261854f6d959c2547a455a9fbcc0e3efe06fb980e2c4c027a60fa436`.
+`f1809d142acde02ba8d31e38c2b1c43fea851cac2035392cbf04fb1f20796dd9`.
 Validation rejects a different host or a changed packet field.
 
 ## R5 — lossless candidate-vector trace
@@ -68,6 +68,6 @@ the Foundation property read.
 - Direct local Foundation preflight — completed; all three observations were
   available and nominal through `NSProcessInfo.processInfo.thermalState`.
 
-Generated cache directories were removed after verification. The next rerun
-must regenerate the packet with the final committed candidate head before any
-campaign execution.
+Generated cache directories were removed after verification. Any later
+material change to the candidate repair or frozen host manifest invalidates
+this packet and requires a new exact-state review.

@@ -1,0 +1,9 @@
+{
+  "schema_version": "cyax-0168-pre-rerun-execution-packet-v1",
+  "gate": "CYAX-0168-G1",
+  "scope": "calibration-only; decision fixtures prohibited",
+  "candidate_head": "4ed8293fd5483f98eba6f4603c5b8d34e945f4bd",
+  "host_manifest_id": "b44f7f33c5da253ffba913a072c7a5e8ef173696fdd6ef39d192015075afc7ce",
+  "candidate_context_id": "4c9e36b467f1817b48b773c2dd26c9864c6042f9b10572da411277a42fd54a94",
+  "packet_sha256": "f1809d142acde02ba8d31e38c2b1c43fea851cac2035392cbf04fb1f20796dd9"
+}

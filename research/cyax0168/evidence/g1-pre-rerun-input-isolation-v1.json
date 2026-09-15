@@ -1,0 +1,65 @@
+{
+  "schema_version": "cyax-0168-input-isolation-v1",
+  "candidate_head": "4ed8293fd5483f98eba6f4603c5b8d34e945f4bd",
+  "normative_head": "fe31fed192bfbefa28946736cdb5d2ec134985e0",
+  "purpose": "independent generator-2.3 construction for the 16 approved C0-C3 calibration cells",
+  "allowed_inputs": [
+    {
+      "role": "approved_contract",
+      "path": "specs/0168-structured-graph-materialization/spec.md",
+      "git_blob": "5b5b126d6f8b26c54a36395dd426cca7a63a7384",
+      "sha256": "4d4972b2351e0a7342120104fb8568ff61c98c939eb98312b8cb4ac2ae7e2025"
+    },
+    {
+      "role": "previously_isolated_implementation",
+      "path": "research/cyax0168/generator_independent.py",
+      "git_blob": "7558479695dff5c313e6729aec19384080d02b5e",
+      "sha256": "d074af746e47d5e1d9675f29a75d557b625c402523ae4997ff95c565736c1657"
+    },
+    {
+      "role": "runtime",
+      "identity": "CPython 3.14.6 standard library only"
+    },
+    {
+      "role": "declared_cells",
+      "cells": [
+        ["C0", "P-medium", 168900],
+        ["C1", "P-low", 168911], ["C1", "P-low", 168912],
+        ["C1", "P-medium", 168913], ["C1", "P-medium", 168914],
+        ["C1", "P-high", 168915], ["C1", "P-high", 168916],
+        ["C2", "P-low", 168921], ["C2", "P-low", 168922],
+        ["C2", "P-medium", 168923], ["C2", "P-medium", 168924],
+        ["C2", "P-high", 168925], ["C2", "P-high", 168926],
+        ["C3", "P-low", 168931], ["C3", "P-medium", 168932],
+        ["C3", "P-high", 168933]
+      ]
+    }
+  ],
+  "worker_instruction": "Use only the isolated bundle containing this packet, the approved spec, and generator_independent.py. Do not open the repository or any primary implementation, output, trace, assertion ID, checksum, hidden expected byte, decision fixture, or mismatch-derived hint. Generate only the declared C0-C3 cells. Preserve complete generator manifests and compute deterministic component and complete-output identities for later manager comparison. Stop on any error or undeclared input need.",
+  "prohibited_inputs": [
+    "research/cyax0168/generator_primary.py",
+    "research/cyax0168/compare_generator_23.py",
+    "any primary generated output or construction trace",
+    "any primary PRF result sequence or assertion IDs",
+    "any primary checksum or hidden expected bytes",
+    "any T0-T4 decision-fixture content or derived identity",
+    "any hint derived from a primary/independent mismatch"
+  ],
+  "output_contract": {
+    "decision_fixture_access": "forbidden",
+    "cells": "exactly the 16 declared C0-C3 cells",
+    "required_per_cell": [
+      "complete generator manifest",
+      "canonical serialized complete-output SHA-256",
+      "canonical Entity/Literal/SourceRevision/Assertion record SHA-256 values",
+      "canonical source-bytes SHA-256",
+      "construction-trace SHA-256",
+      "reconstructed PRF trace SHA-256",
+      "candidate-vector registry SHA-256",
+      "assertion-ID sequence SHA-256",
+      "logical snapshot checksum",
+      "snapshot identity"
+    ]
+  },
+  "packet_sha256": "35cb27cc7231c3003b217f2aa1aa40a9004bf1db49bb0bfef9582343ed0fc98d"
+}
