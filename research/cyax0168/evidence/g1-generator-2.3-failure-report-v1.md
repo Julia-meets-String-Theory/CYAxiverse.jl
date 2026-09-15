@@ -72,12 +72,12 @@ The approved candidate was installed from the local wheelhouse only:
 Wheel identity commands and results:
 
 ```text
-$ shasum -a 256 /private/tmp/cyax0168-h-wheelhouse-clean/ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl
-7a36d5b051ddc954d7ee5d5fa6165fb49d48a4785a132bafdd311723897fa649  /private/tmp/cyax0168-h-wheelhouse-clean/ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl
+$ shasum -a 256 <offline-wheelhouse>/ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl
+7a36d5b051ddc954d7ee5d5fa6165fb49d48a4785a132bafdd311723897fa649  <offline-wheelhouse>/ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl
 
-$ python3 -m venv /private/tmp/cyax0168-g1-ladybug-venv-20260915 && PIP_NO_INDEX=1 /private/tmp/cyax0168-g1-ladybug-venv-20260915/bin/python -m pip install --no-index --find-links=/private/tmp/cyax0168-h-wheelhouse-clean ladybug==0.20.4
-Looking in links: /private/tmp/cyax0168-h-wheelhouse-clean
-Processing /private/tmp/cyax0168-h-wheelhouse-clean/ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl
+$ python3 -m venv <ephemeral-venv> && PIP_NO_INDEX=1 <ephemeral-venv>/bin/python -m pip install --no-index --find-links=<offline-wheelhouse> ladybug==0.20.4
+Looking in links: <offline-wheelhouse>
+Processing <offline-wheelhouse>/ladybug-0.20.4-cp314-cp314-macosx_15_0_arm64.whl
 Installing collected packages: ladybug
 Successfully installed ladybug-0.20.4
 ```
@@ -86,7 +86,7 @@ The durable network-blocked smoke harness is
 `research/cyax0168/ladybug_g1_offline_smoke.py`. It was run with:
 
 ```text
-$ PYTHONPATH=. PIP_NO_INDEX=1 PIP_DISABLE_PIP_VERSION_CHECK=1 /private/tmp/cyax0168-g1-ladybug-venv-20260915/bin/python -m research.cyax0168.ladybug_g1_offline_smoke
+$ PYTHONPATH=. PIP_NO_INDEX=1 PIP_DISABLE_PIP_VERSION_CHECK=1 <ephemeral-venv>/bin/python -m research.cyax0168.ladybug_g1_offline_smoke
 {"candidate": "ladybug==0.20.4", "clean_graph_creation": true, "complete_logical_export": true, "deterministic_rebuild": true, "graph_bytes": 184320, "logical_export_sha256": "804d9626ecfe42a17436eec6c7ed531355cb9206639de50a60723244a7daca79", "network_blocked": true, "partial_build_rejection": true, "recovery": true, "reopen": true, "required_traversal": true, "smoke_import": true, "tamper_rejection": true, "threads": 1, "traversal_rows": [["impl-1", "Implementation"], ["req-1", "Requirement"]], "version": "0.20.4"}
 ```
 
@@ -95,8 +95,8 @@ smoke. The adapter unit test also passed 2/2 in the same isolated venv.
 
 ## Campaign-host control gate
 
-Sanitized facts captured on the execution host (no hostname, account, serial,
-UUID, or other machine-unique field was recorded):
+Sanitized facts captured on the execution host (no machine name, account,
+serial, UUID, or other machine-unique field was recorded):
 
 ```text
 operating_system=macOS
@@ -160,7 +160,7 @@ $ python3 -m unittest discover -s research/cyax0168/tests -p 'test*.py'
 Ran 63 tests in 120.464s
 OK
 
-$ PYTHONPATH=. /private/tmp/cyax0168-g1-ladybug-venv-20260915/bin/python -m unittest research.cyax0168.test_ladybug_backend -v
+$ PYTHONPATH=. <ephemeral-venv>/bin/python -m unittest research.cyax0168.test_ladybug_backend -v
 Ran 2 tests in 0.832s
 OK
 ```
