@@ -26,8 +26,9 @@ Pkg.add(url = "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
 
 The core package does not require Python, CYTools, Docker, a geometry database,
 or a graphical backend. Existing-data workflows require a separately supplied
-geometry database; geometry generation through CYTools/PyCall and plotting with
-CairoMakie and ColorSchemes are optional workflows with separate prerequisites.
+geometry database. Optional CYTools/PyCall workflows include geometry generation
+or inspection and the existing Python-backed `jlm_minimizer` path; plotting with
+CairoMakie and ColorSchemes is a separate optional workflow.
 
 Use the live [installation guide](https://julia-meets-string-theory.github.io/CYAxiverse.jl/dev/installation/)
 for the complete setup, data-directory, optional-integration, and current
@@ -75,10 +76,11 @@ source-faithful reduced potential on the subcritical side of its cusp.
   `CYAxiverse.paper_benchmarks` contains reduced N=5 and N=8 models, fixed
   poly-102 inflation inputs, and fuzzy-axion model-stage helpers used by the
   repository's reproduction tests.
-- **Optional extensions.** CYTools/PyCall is used only on geometry-generation
-  paths that request it. CairoMakie and ColorSchemes provide plotting methods
-  through an optional extension. Core package loading keeps these integrations
-  optional.
+- **Optional extensions.** CYTools/PyCall supports optional Python-bridge
+  workflows, including geometry generation or inspection and the existing
+  Python-backed `jlm_minimizer` path. CairoMakie and ColorSchemes provide
+  plotting methods through an optional extension. Core package loading keeps
+  these integrations optional.
 
 These are implementation surfaces, not claims that every research workflow is
 complete or production-qualified. Read the method and validation notes before
@@ -118,8 +120,9 @@ the canonical package orientation.
 For existing-data workflows, follow the data-directory and input-file
 instructions in the
 [User guide](https://julia-meets-string-theory.github.io/CYAxiverse.jl/dev/userguide/).
-Geometry generation is a separate workflow and may require CYTools; importing
-the core Julia package does not require a live Python object.
+Python-bridge geometry generation or inspection and the existing Python-backed
+`jlm_minimizer` path are separate optional workflows; importing the core Julia
+package does not require a live Python object.
 
 ## Main workflows
 
