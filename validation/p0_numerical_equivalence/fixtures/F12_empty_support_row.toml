@@ -1,0 +1,19 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F12-empty-support-row"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:137-146"]
+precision = "Float64"
+environment = "Julia 1.12.6; one Julia thread; scalar Float64 arithmetic"
+construction = "Two equations, but the second transformed charge row has no supported terms."
+purpose = "Freeze the historical empty-support row rule before any future P2 redesign."
+q = [[1, 0], [0, 0]]
+l = [[1.0, 1.0], [0.0, -400.0]]
+theta = [0.125, 0.125]
+phases = [0.0, 0.0]
+
+[expected]
+historical_result = "support row 2 is empty and row_logscale[2]=maximum(logscale)=0.0. The equation remains present with zero stationarity row; it is not assigned -Inf, deleted, or rejected."
+row_logscale = [0.0, 0.0]
+scaled_amplitudes = [[1.0, 0.0], [0.0, 0.0]]
+empty_row_policy = "maximum(logscale)"
+status = "applicable"

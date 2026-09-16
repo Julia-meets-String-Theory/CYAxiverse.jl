@@ -1,0 +1,19 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F8-transformed-noninteger-charge-map"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:128-146", "src/minimizer.jl:116"]
+precision = "Float64 after coordinate-basis solve"
+environment = "Julia 1.12.6; one Julia thread; AbstractMatrix{<:Real} dispatch"
+construction = "Integer identity charges transformed with A=[[1,0.5],[0,1]], yielding q=[[1,-0.5],[0,1]]."
+purpose = "Freeze acceptance of noninteger transformed charge maps and support semantics; do not narrow the current AbstractMatrix{<:Real} input domain."
+q = [[1, 0], [0, 1]]
+coordinate_basis = [[1.0, 0.5], [0.0, 1.0]]
+l = [[1.0, 1.0], [0.0, -2.0]]
+theta = [0.1, 0.2]
+phases = [0.0, 0.0]
+
+[expected]
+historical_result = "q=A\\Q=[[1,-0.5],[0,1]] is accepted; support is determined on this transformed Float64 matrix and no integer cast is applied."
+transformed_q = [[1.0, -0.5], [0.0, 1.0]]
+support = [[true, true], [false, true]]
+status = "applicable"

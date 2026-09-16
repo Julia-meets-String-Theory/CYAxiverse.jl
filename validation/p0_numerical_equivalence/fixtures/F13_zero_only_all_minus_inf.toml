@@ -1,0 +1,20 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F13-zero-only-support-all-minus-inf"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:133-146", "src/generate.jl:374-384", "src/inflation_points.jl:90-112"]
+precision = "Float64 hostile encoding; all stored log exponents are -Inf"
+environment = "Julia 1.12.6; one Julia thread; source-level historical edge audit"
+construction = "Both coordinates have supported nonzero charges, but every encoded term has ell=-Inf."
+purpose = "Determine reachability and preserve the historical -Inf - (-Inf) edge without repairing it."
+q = [[1, 0], [0, 1]]
+l = [[1.0, 1.0], ["-Inf", "-Inf"]]
+theta = [0.0, 0.0]
+phases = [0.0, 0.0]
+
+[expected]
+historical_result = "critical_points computes row_logscale=[-Inf,-Inf]; each delta is -Inf-(-Inf)=NaN, so scaled-amplitude comparisons fail while the physical classification Hessian receives NaN contributions. Generic logshifted_derivative_workspace and inflation_points.prepare_context reject nonfinite L before evaluation. This is a defective cross-route edge, not a repair target."
+row_logscale = ["-Inf", "-Inf"]
+delta_policy = "-Inf - (-Inf) => NaN"
+critical_points_policy = "reachable-source-edge"
+generic_workspace_policy = "reject-nonfinite-L"
+status = "applicable-hostile-defect-recorded"
