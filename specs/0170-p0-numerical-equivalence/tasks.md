@@ -1,5 +1,24 @@
 # Tasks — CYAX-0170
 
+## Current P0 lifecycle
+
+The CYAX-0170 P0 baseline and `cyaxiverse-numerical-equivalence-v1` are
+owner-approved by Issue #170 comment `5685945127`. The scientific reference is
+`7a40285bb5c313f7e8746b90644d5f45bb67be44`; independently reviewed evidence
+candidate `ddc304f25040ff36bc84e7897d5b6dc5d16344f6` remains the evidence
+identity, while `6f2acaef2a181937f63d8f085c4317e91a08267b` is mechanical
+bookkeeping only. The four approved route-specific dispositions are recorded in
+the synchronized spec and contract below; no P1/P2/P3A/P3B work is authorized.
+
+The dispositions are: F13 remains route-specific (validator rejection and
+direct critical-point propagation/failure are both historical, with no
+harmonization); the governed/source-faithful top-level N=5 route is authoritative
+for future modularisation/equivalence gates while stale nested legacy N=5 is
+historical only; Float64 and high-precision B6 baselines remain separate with
+numerical/physical authority unresolved and no silent oracle choice; and observed
+`2pi^2 I` remains historical defect evidence while the `4pi^2 I` correction is
+separate Issue #172 work and Issue #173 remains separate.
+
 ## Rules
 
 - Every task names the requirements/gates it advances.
@@ -12,9 +31,10 @@
 
 ## Phase 0 — Contract and topology
 
-- [ ] **T001 [G0] Obtain durable owner approval of the S2 draft**
+- [x] **T001 [G0] Obtain durable owner approval of the S2 draft**
   - Input: `specs/0170-p0-numerical-equivalence/spec.md`, Issue #170.
-  - Expected output: explicit durable approval reference and approved metadata.
+  - Expected output: explicit durable approval reference and approved metadata;
+    owner approval is comment `5685945127`.
   - Verify: approval references the reviewed normative revision/content.
   - Escalate if: requested changes alter the scientific reference or P0 boundary.
 
@@ -61,7 +81,8 @@
 
 - [x] **T202 [R-001-R-015, G1] Converge evidence index and exact candidate**
   - Output: evidence index/hash manifest, completed requirement mapping, clean
-    artifact-only diff, and exact candidate commit.
+    artifact-only diff, and reviewed evidence candidate
+    `ddc304f25040ff36bc84e7897d5b6dc5d16344f6`.
   - Verify: focused checks, applicable package gates, diff-check, privacy scan,
     spec-plan-task-evidence reconciliation.
   - Escalate if: any production/dependency/schema change appears.
@@ -86,3 +107,28 @@
 
 - [ ] **TC01 [R-001-R-016] Resolve findings from Manager convergence or G2 review**
   - Add bounded correction details only when a finding exists.
+
+## CYAX-0170-P0-SYNC-20260915 handoff
+
+These tasks are the mechanical synchronization handoff and are distinct from
+the historical evidence task identifiers above.
+
+- [x] **T001 [integration] Reconcile contemporary `vmm`**
+  - Integrated `vmm` revision `4523ab090c70ba4fcf3b1711a028d19f2b8e2a62` as a
+    base update while retaining scientific reference
+    `7a40285bb5c313f7e8746b90644d5f45bb67be44`. Inherited `.agents/LESSONS.md`
+    content matches contemporary `vmm`; no other upstream work was authored.
+- [x] **T002 [normative synchronization] Record owner approval and dispositions**
+  - Synchronized Issue #170 approval comment `5685945127`, the F13, N=5, B6,
+    and phase/volume-factor dispositions, evidence candidate identity, and
+    later-phase prohibitions across the five normative/lifecycle surfaces.
+- [x] **T003 [preservation and scope] Verify exact evidence preservation**
+  - Compared pre/post validation contents and checksums; only the authorized
+    lifecycle/index/checksum records changed. No production paths, APIs,
+    schemas, dependencies, or scientific evidence were modified.
+- [x] **T004 [candidate freeze] Freeze one synchronization commit**
+  - The final commit containing this complete synchronized state is the sole
+    candidate for the fresh independent normative-fidelity review.
+- [ ] **T005 [independent review] Review the exact synchronization candidate**
+  - Manager-owned follow-on; the reviewer must bind its verdict to the exact
+    T004 commit. No post-review repair is authorized by this handoff.

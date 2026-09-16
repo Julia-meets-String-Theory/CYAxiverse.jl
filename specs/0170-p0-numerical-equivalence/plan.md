@@ -4,8 +4,10 @@
 
 Canonical specification: `specs/0170-p0-numerical-equivalence/spec.md`
 
-Spec revision reviewed for this plan: draft worktree state; CYAX-0170 G0 durable
-approval pending.
+Spec revision reviewed for this plan: owner-approved CYAX-0170 P0 baseline,
+approved in Issue #170 comment `5685945127`. Scientific reference remains
+`7a40285bb5c313f7e8746b90644d5f45bb67be44`; independently reviewed evidence
+candidate remains `ddc304f25040ff36bc84e7897d5b6dc5d16344f6`.
 
 ## Coverage
 
@@ -21,7 +23,7 @@ approval pending.
 | R-013, R-014 | `numerical_equivalence_contract-v1.md` | Trace each comparison/tolerance to source, repeatability, analytic, or high-precision evidence |
 | R-015 | Evidence index and hashes | Privacy scan; repository-relative references; exact source/candidate identity |
 | R-016, G2 | Fresh independent numerical review | Reviewer verdict tied to exact candidate commit |
-| G0 | Owner review of draft | Durable approval reference in Issue #170 and spec metadata |
+| G0 | Owner review of draft | **Met:** approval comment `5685945127` recorded in spec metadata |
 | G1 | Manager convergence | Spec-plan-task-evidence-diff checklist |
 | G3 | Manager return packet | Exact reviewed revision and explicit later-phase stop |
 
@@ -35,7 +37,8 @@ paths at the pinned revision. It does not move ownership or change these paths.
 
 1. Record the source/worktree identity and a disjoint worker topology.
 2. Draft and obtain approval of the S2 contract while read-only historical
-   evidence is gathered.
+   evidence is gathered; record the four route-specific dispositions without
+   changing historical evidence.
 3. Capture environment/load evidence and compatibility inventory independently
    from numerical-semantics archaeology and performance measurement.
 4. Build deterministic validation-only fixtures/scripts. Record historical
@@ -68,6 +71,32 @@ artifacts. Fixture files use validation-only versioned schemas.
 ## Migration / compatibility
 
 None. P0 records the historical contract and defines future acceptance gates.
+
+## Approved P0 synchronization state
+
+The owner-approved dispositions are synchronized mechanically across the spec,
+contract, evidence index, and execution tasks:
+
+1. F13 remains route-specific: validator routes retain historical non-finite
+   rejection; direct critical-point propagation/failure remains a historical
+   parity defect; no harmonization is performed.
+2. The governed/source-faithful top-level N=5 route is authoritative for future
+   modularisation/equivalence gates. Stale nested legacy N=5 behavior is
+   historical only and is not the scientific oracle.
+3. Float64 and high-precision B6 baselines remain separate. Numerical/physical
+   authority is unresolved; no silent oracle choice is allowed.
+4. Observed `2pi^2 I` remains historical defect evidence, not intended behavior.
+   The `4pi^2 I` correction is separate Issue #172 work, and Issue #173 remains
+   separate.
+
+The synchronization reconciles this artifact-only branch with contemporary
+`vmm` revision `4523ab090c70ba4fcf3b1711a028d19f2b8e2a62` as an integration/base
+update. It does not rebase the scientific reference, alter empirical evidence,
+or authorize P1/P2/P3A/P3B. PR #171 metadata is a separate lifecycle surface;
+the manager should confirm the live PR description records the same state. The
+contemporary-vmm `.gitignore` tightening was cleanly accounted for: this branch
+retains its existing P0 validation allow-list so authorized validation artifacts
+remain tracked, and no `.gitignore` change is included in the candidate.
 
 ## Risk and stop conditions
 

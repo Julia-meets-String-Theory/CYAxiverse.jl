@@ -1,6 +1,6 @@
 # CYAxiverse numerical-equivalence contract v1
 
-Status: **proposed P0 candidate; CYAX-0170 G0 approval and G2 independent review pending**
+Status: **owner-approved CYAX-0170 P0 baseline; evidence G2 PASS; exact synchronization candidate pending normative-fidelity review**
 
 Contract version: `cyaxiverse-numerical-equivalence-v1`
 
@@ -10,7 +10,13 @@ Governing specification: `specs/0170-p0-numerical-equivalence/spec.md`
 
 This contract freezes historical observations for later differential tests.  It
 does not declare every historical result physically desirable, does not repair
-known defects, and does not authorize P1/P2/P3 work.
+known defects, and does not authorize P1/P2/P3A/P3B work. Owner approval is
+recorded in Issue #170 comment `5685945127`.
+
+The scientific reference remains
+`7a40285bb5c313f7e8746b90644d5f45bb67be44`. Independently reviewed P0 evidence
+is identified by candidate `ddc304f25040ff36bc84e7897d5b6dc5d16344f6`;
+`6f2acaef2a181937f63d8f085c4317e91a08267b` is mechanical bookkeeping only.
 
 ## 1. Evidence classes
 
@@ -18,7 +24,8 @@ known defects, and does not authorize P1/P2/P3 work.
 - **Implementation fact:** observable behavior of that source at the recorded
   route boundary.
 - **Empirical evidence:** an executed result tied to fixture and environment.
-- **Proposed contract:** a future pass/fail rule awaiting CYAX-0170 approval.
+- **Owner-approved contract:** a P0 comparison rule approved for later
+  differential implementation, subject to the route-specific dispositions below.
 - **Open owner decision:** normative intent P0 must not infer.
 
 Evidence sources are:
@@ -91,10 +98,11 @@ Representation validity is distinct from policy admissibility.
 
 Current routes conflict for non-finite log inputs: generic workspaces and the
 inflation context reject them, while direct critical-point construction can
-reach `-Inf - (-Inf) => NaN`.  F13 freezes both observations.  Whether v1 later
-requires route-specific preservation or a single rejection policy is an open
-owner decision; no future implementation can claim v1 equivalence for F13 until
-that decision is approved.
+reach `-Inf - (-Inf) => NaN`. F13 freezes both observations. The owner-approved
+P0 disposition is route-specific preservation: validator routes retain
+historical non-finite rejection, while direct critical-point non-finite
+propagation/failure remains a historical parity defect. P0 performs no
+harmonization.
 
 ## 5. Argument and coordinate semantics
 
@@ -174,7 +182,7 @@ These envelopes are fixed before any P2 output is observed.  A route-specific
 historical test or solver gate overrides a generic row when it is stricter and
 is recorded in the fixture identity.
 
-| Object | Proposed comparison | Historical basis |
+| Object | Approved comparison envelope | Historical basis |
 |---|---|---|
 | Encodings, masks, order, indices, statuses, counts, inertia, events | exact | Discrete compatibility/semantic contract |
 | Same route/order/environment deterministic replay | `isequal` where promised by the existing API/test; otherwise the route-specific row below | Detect unintended order changes |
@@ -216,9 +224,11 @@ Local normal-form diagnostics and nonlinear flow are distinct routes.
 For protected spectra compare retained mode indices, mass logs, signs,
 eigenvectors up to the approved sign/degenerate-subspace convention, quartic
 indices/signs/logs, diagnostics, provisional/fallback/certified statuses, and
-threshold/window identity.  B6 shows a material current Float64/high-precision
-light-mode disagreement; v1 records it as route-specific historical behavior,
-not as permission to choose the more plausible result.
+threshold/window identity. B6 shows a material current Float64/high-precision
+light-mode disagreement; v1 records it as route-specific historical behavior.
+The Float64 and high-precision baselines remain separate; numerical/physical
+authority is unresolved, and no future migration may silently choose one route
+as an oracle.
 
 ## 11. Workspace/result ownership acceptance
 
@@ -260,28 +270,31 @@ removed.  Inflation and critical-point migrations are reviewed as distinct S2
 scientific changes.  A matching aggregate root, minimum, or spectrum count is
 insufficient without identity/matching and diagnostic parity.
 
-## 14. Known conflicts and owner decisions
+## 14. Approved route-specific dispositions
 
-The candidate cannot receive an unqualified PASS until the reviewer/owner
-disposes of these facts:
+The owner approved the P0 baseline and this contract in Issue #170 comment
+`5685945127`, subject only to mechanical synchronization of these dispositions:
 
-1. Direct all-`-Inf` critical-point behavior can reach NaN, while modern generic
-   and inflation validators reject non-finite `L`.
-2. Legacy `poly102_inflation.n5_critical_scale()` uses the stale N8 value, while
-   the source-faithful governed N=5 fixture uses `reduced_models.jl`.
-3. B6 Float64 and high-precision N=5 light modes differ materially.
-4. Current APIs do not expose all requested failed-start, RHS/Hessian, or
-   line-search counters.
-5. Future workspace result borrowing/copying is specified as a required later
-   decision, not an existing public promise.
-6. The pinned full package test stops at `test/runtests.jl:1252`: the
-   phase/volume-detuning helper returns `2pi^2 I` for the identity fixture while
-   its test expects `4pi^2 I`.  P0 records this pre-existing baseline defect and
-   does not change either implementation or test.
+1. **F13 all-minus-infinity behavior.** Validator routes retain historical
+   non-finite rejection. Direct critical-point non-finite propagation/failure
+   remains a historical parity defect. No P0 harmonization is permitted.
+2. **N=5 authority.** The governed/source-faithful top-level N=5 route is
+   authoritative for future modularisation and equivalence gates. Stale nested
+   legacy N=5 behavior is historical only and is not the scientific oracle.
+3. **B6 spectrum authority.** Float64 and high-precision baselines remain
+   separately preserved. Numerical/physical authority is unresolved; no future
+   migration may silently choose one route as oracle.
+4. **Phase/volume Hessian factor.** Observed `2pi^2 I` is historical defect
+   evidence, not intended behavior. The `4pi^2 I` correction is separate Issue
+   #172 work. Issue #173 remains separate.
 
-P0 may preserve these as explicit route-specific historical contracts or return
-for a narrower owner decision.  It must not harmonize them by changing production
-code.
+The underlying facts remain evidence: the stale
+`poly102_inflation.n5_critical_scale()` route, unavailable failed-start and
+internal RHS/Hessian/line-search counters, and the pre-existing package-test
+failure are not repaired or reinterpreted here. The exact future
+workspace-result borrowing/copying policy remains a later implementation
+decision. This contract does not authorize production changes or any P1/P2/P3A/P3B
+work.
 
 ## 15. Review identity
 

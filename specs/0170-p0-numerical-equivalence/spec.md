@@ -3,14 +3,14 @@ spec_id: CYAX-0170
 title: Freeze the P0 numerical-equivalence and performance baseline
 issue: 170
 class: S2
-status: draft
+status: approved
 workstream: numerical architecture
 parent: null
 depends_on: []
 created: 2026-09-15
-last_reviewed: null
+last_reviewed: 2026-09-15
 review_required: project-owner and independent numerical reviewer
-approval_ref: N/A while draft; owner dispatch is recorded in Issue #170 but durable normative approval remains pending
+approval_ref: https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/170#issuecomment-5685945127
 ---
 
 # Freeze the P0 numerical-equivalence and performance baseline
@@ -42,8 +42,11 @@ boundaries before any such implementation begins.
 ### Current implementation facts
 
 Implementation behavior, API surfaces, environment identity, and benchmark
-results remain to be recorded by P0 evidence. Source observations do not become
-normative scientific interpretations merely because they are historical.
+results are recorded in the frozen P0 evidence set. Source observations do not
+become normative scientific interpretations merely because they are historical.
+The independently reviewed evidence candidate is
+`ddc304f25040ff36bc84e7897d5b6dc5d16344f6`; synchronization commit
+`6f2acaef2a181937f63d8f085c4317e91a08267b` is mechanical bookkeeping only.
 
 ### Existing empirical evidence
 
@@ -53,9 +56,31 @@ comments is not executed evidence.
 
 ### Owner-approved conventions
 
-The owner dispatched P0 execution on 2026-09-15 with the scientific reference
-revision and phase boundary above. This draft does not claim durable approval of
-its normative contract until an explicit approval reference is recorded.
+The owner approved the P0 numerical-equivalence and compatibility baseline and
+`cyaxiverse-numerical-equivalence-v1` in Issue #170 comment
+`5685945127`, subject only to mechanical synchronization of the dispositions
+below. The scientific reference remains
+`7a40285bb5c313f7e8746b90644d5f45bb67be44`; no P1/P2/P3A/P3B authorization is
+granted.
+
+The approved route-specific dispositions are:
+
+1. F13 preserves historical route differences: validator routes retain
+   historical non-finite rejection, while direct critical-point non-finite
+   propagation/failure remains a historical parity defect. P0 performs no
+   harmonization.
+2. The governed/source-faithful top-level N=5 route is authoritative for future
+   modularisation and equivalence gates. Stale nested legacy N=5 behavior is
+   historical only and is not the scientific oracle.
+3. Float64 and high-precision B6 baselines remain separately preserved.
+   Numerical/physical authority is unresolved; no future migration may silently
+   choose one route as an oracle.
+4. Observed `2pi^2 I` is retained as historical defect evidence, not intended
+   behavior. The `4pi^2 I` correction is separate Issue #172 work. Issue #173
+   remains separate.
+
+These dispositions describe the approved P0 contract; they do not repair,
+reinterpret, regenerate, or relabel the empirical evidence.
 
 ### Open inference
 
@@ -229,10 +254,11 @@ a new owner decision.
 
 **Objective:** Establish durable owner-approved P0 intent and review provenance.
 
-**Acceptance:** This specification records an explicit durable approval reference.
+**Acceptance:** Met. This specification records the owner approval in Issue #170
+comment `5685945127`.
 
-**Stop condition:** Consequential scientific choices remain draft; historical
-evidence may be gathered, but unresolved intent must not be guessed.
+**Stop condition:** Any consequential scientific choice outside the four approved
+dispositions remains owner-controlled; unresolved intent must not be guessed.
 
 ### CYAX-0170 G1 — Evidence candidate
 
@@ -281,16 +307,20 @@ validation/specification artifacts only.
 
 ## Dependencies and blockers
 
-- Durable CYAX-0170 G0 approval is required before this draft becomes normative.
+- The exact synchronized candidate requires the independent normative-fidelity
+  review authorized by the P0 handoff; that review does not authorize merge.
 - Optional Python/CYTools or external datasets may limit applicable measurements;
   such limits are evidence, not permission to make them mandatory.
 - Issues #113, #124, and #127 retain their scientific ownership boundaries.
+- Issue #172 owns the separate `4pi^2 I` correction. Issue #173 owns any
+  numerical/physical authority decision for the B6 routes.
 
 ## Open owner decisions
 
-1. Approve, amend, or reject this draft as the durable CYAX-0170 P0 contract.
-2. After CYAX-0170 G2, decide whether to authorize P1/P2, revise P0, or reopen
-   design.
+1. After the exact synchronization candidate receives normative-fidelity review,
+   decide whether to merge PR #171.
+2. Separately decide whether to authorize P1/P2/P3A/P3B; this P0 approval grants
+   no such authorization.
 
 ## Completion criterion
 
