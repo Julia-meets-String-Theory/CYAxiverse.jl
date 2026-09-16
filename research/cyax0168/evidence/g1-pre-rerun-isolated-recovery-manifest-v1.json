@@ -1,0 +1,261 @@
+{
+  "manifest_schema": "cyax-0168-isolated-recovery-evidence-manifest-v1",
+  "packet_id": "CYAX-0168-R2-RECOVERY-20260915",
+  "purpose": "Durable sanitized preservation of the fourteen additional completed isolated C1-C3 results and the failed 15-of-16 checkpoint.",
+  "source": {
+    "source_class": "private temporary isolated-recovery output bundle",
+    "source_locator": "omitted intentionally",
+    "raw_source_hash_algorithm": "SHA-256",
+    "raw_source_hash_scope": "Exact bytes before repository preservation",
+    "sanitization_actions": [
+      "Read only the isolated result JSON files and isolated checkpoint needed for T001; no primary outputs, primary traces, primary PRF sequences, primary assertion IDs, primary checksums, expected bytes, or T0-T4 were accessed.",
+      "Verified each per-cell result had no machine-local path, account or host metadata, execution-context identifier, credential, or private locator; copied those files byte-identically.",
+      "Removed the checkpoint bundle_root field and replaced every absolute result_path with its repository-relative durable evidence path.",
+      "Preserved result identities and checkpoint failure metadata; no scientific, normative, or implementation content was changed."
+    ]
+  },
+  "candidate_identity": {
+    "starting_head": "2dabea2812eab063a7ad72ff95508694cd928eef",
+    "repair_candidate_head": "4ed8293fd5483f98eba6f4603c5b8d34e945f4bd",
+    "isolated_generator_sha256": "d074af746e47d5e1d9675f29a75d557b625c402523ae4997ff95c565736c1657",
+    "input_packet_sha256": "35cb27cc7231c3003b217f2aa1aa40a9004bf1db49bb0bfef9582343ed0fc98d",
+    "generator_version": "2.3",
+    "evidence_schema": "cyax-0168-isolated-generator-identities-v1"
+  },
+  "declared_cells": [
+    ["C0", "P-medium", 168900],
+    ["C1", "P-low", 168911],
+    ["C1", "P-low", 168912],
+    ["C1", "P-medium", 168913],
+    ["C1", "P-medium", 168914],
+    ["C1", "P-high", 168915],
+    ["C1", "P-high", 168916],
+    ["C2", "P-low", 168921],
+    ["C2", "P-low", 168922],
+    ["C2", "P-medium", 168923],
+    ["C2", "P-medium", 168924],
+    ["C2", "P-high", 168925],
+    ["C2", "P-high", 168926],
+    ["C3", "P-low", 168931],
+    ["C3", "P-medium", 168932],
+    ["C3", "P-high", 168933]
+  ],
+  "existing_durable_c0": {
+    "cell": ["C0", "P-medium", 168900],
+    "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C0-v1.json",
+    "raw_source_sha256": "7685def061d842f5fdc11105397f50f86a43163b6b6cc550d0301973ca1855e6",
+    "durable_sha256": "7685def061d842f5fdc11105397f50f86a43163b6b6cc550d0301973ca1855e6",
+    "logical_snapshot_checksum": "e73063a46e1c585bfb15aa0db5e920a0f6b4a37f2b5a44a7a0b372f7aecd3b18",
+    "snapshot_id": "cyax-snapshot-sha256:e73063a46e1c585bfb15aa0db5e920a0f6b4a37f2b5a44a7a0b372f7aecd3b18",
+    "preservation": "already durable and sanitized before this recovery preservation"
+  },
+  "additional_completed_results": [
+    {
+      "cell": ["C1", "P-low", 168911],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-low-168911-v1.json",
+      "raw_source_sha256": "7417b370704ead41be6b05e0d18034157fd3b8b69a0cd45ed4dfb80d0e9cc537",
+      "durable_sha256": "7417b370704ead41be6b05e0d18034157fd3b8b69a0cd45ed4dfb80d0e9cc537",
+      "logical_snapshot_checksum": "689b92c46daea6a4cac2a7172fcf76a0dcf6730613e38755048296b0a6c1174e",
+      "snapshot_id": "cyax-snapshot-sha256:689b92c46daea6a4cac2a7172fcf76a0dcf6730613e38755048296b0a6c1174e",
+      "source_bytes_sha256": "27ce8b191f0d7ad392f09690f1b768f0bf4ec51bd7e47405d9f9ac575ae6d651",
+      "complete_output_sha256": "2eae08edf5d6316c79ede4091b6d6378ba5c5e31e7295c3b11894b913beb0e0b",
+      "construction_trace_sha256": "824aab785f08d708ee77c278b58c1b98597e954fe8dd87c8461b18ec48d1ca58",
+      "reconstructed_prf_trace_sha256": "4c733db028ea2f196789940bacf8803547088ce230aedb0a6bb32e5d7b8be5cd"
+    },
+    {
+      "cell": ["C1", "P-low", 168912],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-low-168912-v1.json",
+      "raw_source_sha256": "7acc09f596baaef18ea0120aa40ab6b1cad84d0cb0ded65e969068e5b4ee9b46",
+      "durable_sha256": "7acc09f596baaef18ea0120aa40ab6b1cad84d0cb0ded65e969068e5b4ee9b46",
+      "logical_snapshot_checksum": "070b86811f7430df9dd1464f77052d7e80e12bb97b9266d4aa801bef1253f816",
+      "snapshot_id": "cyax-snapshot-sha256:070b86811f7430df9dd1464f77052d7e80e12bb97b9266d4aa801bef1253f816",
+      "source_bytes_sha256": "5df2b939c377da38df44fcbcf144df28a4957c20c69e573d76e9d4a28c4eeca7",
+      "complete_output_sha256": "7ec6abf3574ac95c6ee8a4d946b4198b575375e5146a00c83b62b83f5513fef2",
+      "construction_trace_sha256": "25a012f8be7e9132f1e0f31fe7b611aab9783fce14944cc58ca4ad9924c0c9a8",
+      "reconstructed_prf_trace_sha256": "ba5767bab184a93b223c9c8345153f29060fd2735824e59420a637947b8b30d4"
+    },
+    {
+      "cell": ["C1", "P-medium", 168913],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-medium-168913-v1.json",
+      "raw_source_sha256": "8f4f864ae67b348d57f1dd598aed350385a2fa7e56624d8b6ff1fd78969c3c33",
+      "durable_sha256": "8f4f864ae67b348d57f1dd598aed350385a2fa7e56624d8b6ff1fd78969c3c33",
+      "logical_snapshot_checksum": "4b4511ae9360716270a1b8cf9d9d8962276998f3f588507409e7f90c08124fec",
+      "snapshot_id": "cyax-snapshot-sha256:4b4511ae9360716270a1b8cf9d9d8962276998f3f588507409e7f90c08124fec",
+      "source_bytes_sha256": "86182b36113b25690655ccdb845860fe4110e5c599b17bd6ea3d097654058377",
+      "complete_output_sha256": "b1fba6565a051c1b3dc3e5fdcef01a40bf02a87b6e70eef2acd42d5b0de3a84d",
+      "construction_trace_sha256": "6b5a2a2b25ce93d0706372eba7f63a30510bec908a34436eaddc6bac44ea1e0e",
+      "reconstructed_prf_trace_sha256": "bae115869d598a30441e84c339d65df2e86498eb98bf37aef3ea2dd989c71dd1"
+    },
+    {
+      "cell": ["C1", "P-medium", 168914],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-medium-168914-v1.json",
+      "raw_source_sha256": "38205f8df13e578dfc1fbf358b29b8bd5710360d06a48e67b793312bab2c7204",
+      "durable_sha256": "38205f8df13e578dfc1fbf358b29b8bd5710360d06a48e67b793312bab2c7204",
+      "logical_snapshot_checksum": "0b672f6413a8719e6a8a2dc2ea5a60e24c131ebe39273de3b361ca707564234f",
+      "snapshot_id": "cyax-snapshot-sha256:0b672f6413a8719e6a8a2dc2ea5a60e24c131ebe39273de3b361ca707564234f",
+      "source_bytes_sha256": "22237710e83f8811e718f1947f3e6e6d359d2f404eb98f09d05113edd0f53b99",
+      "complete_output_sha256": "feb095c89cd6fc55a7276336ffadac49867cf5434a872955a275c2970a1a3f94",
+      "construction_trace_sha256": "3d958bb69d4f75236b268cc16669b2f43f67e6e6b471bcd962c2bb691fa87971",
+      "reconstructed_prf_trace_sha256": "9944365d2c3085807e6c77cb5690b27d6f18a420100f37500002ce9decd29518"
+    },
+    {
+      "cell": ["C1", "P-high", 168915],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-high-168915-v1.json",
+      "raw_source_sha256": "85b346a3044306a8dad3fc29c6cdcc3b1aeb332169ac750cceae40fbfa5db58e",
+      "durable_sha256": "85b346a3044306a8dad3fc29c6cdcc3b1aeb332169ac750cceae40fbfa5db58e",
+      "logical_snapshot_checksum": "606a85f1265ef4ce396eea880397926bc32dba7131ee3219e24f4db30207d6c4",
+      "snapshot_id": "cyax-snapshot-sha256:606a85f1265ef4ce396eea880397926bc32dba7131ee3219e24f4db30207d6c4",
+      "source_bytes_sha256": "39072e0b58c4322292a30cd8f130e5631e2b0e8838772c03d4bd3290e9149206",
+      "complete_output_sha256": "756f9403925d90e63e9eb2c8e0cdb3e90a70e3685d61923b797cbd7c1876e347",
+      "construction_trace_sha256": "c52b6b34191dade3df204f33124a3802db22cf3603367e93e4d77c865107fe56",
+      "reconstructed_prf_trace_sha256": "da3cda43ed7b9fe9bd74306076a5858d073433a3173da1476764228c05f03e19"
+    },
+    {
+      "cell": ["C1", "P-high", 168916],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-high-168916-v1.json",
+      "raw_source_sha256": "7bee419cb69aa412630195c649de6a2e042618add1be08b9b02c6d7eeccc8524",
+      "durable_sha256": "7bee419cb69aa412630195c649de6a2e042618add1be08b9b02c6d7eeccc8524",
+      "logical_snapshot_checksum": "3387d7ed408f69a82f8ccf400976ad6a7fd1b0f241e509c350a6a14e4bbdc832",
+      "snapshot_id": "cyax-snapshot-sha256:3387d7ed408f69a82f8ccf400976ad6a7fd1b0f241e509c350a6a14e4bbdc832",
+      "source_bytes_sha256": "77c67de11be51a150283eb23d89a7ee47092a2356cadb1a8551f47946718f893",
+      "complete_output_sha256": "beff9615d7562a4d53b7269171718ec123dcb4e04c3366b29f75a0bb462072fa",
+      "construction_trace_sha256": "b136e1f16a406f631608cc9c0a43ad92ea078d404c3a2f990e8c84a55d55c5a7",
+      "reconstructed_prf_trace_sha256": "083581c4a7e5a52f5bd2b2ff34788a4259c3e429d61449484b6b101de43438aa"
+    },
+    {
+      "cell": ["C2", "P-low", 168921],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-low-168921-v1.json",
+      "raw_source_sha256": "33f86a50e7318d5b8f6be64ef4d93a45052f744044b8c79be973ad26f68121ff",
+      "durable_sha256": "33f86a50e7318d5b8f6be64ef4d93a45052f744044b8c79be973ad26f68121ff",
+      "logical_snapshot_checksum": "4bd0066c0f10eca345d546ddd9ffb37c1c241b508a8b6723f00fa31ddb84fa9b",
+      "snapshot_id": "cyax-snapshot-sha256:4bd0066c0f10eca345d546ddd9ffb37c1c241b508a8b6723f00fa31ddb84fa9b",
+      "source_bytes_sha256": "6e7b56eb1a1251c7d64ffaf3b124052e7366f0fd75e8605ef25a1d00e7d1f5e7",
+      "complete_output_sha256": "a6a5b343c4e583d452d9f0da1e4ef3c0f27de9c5db8042448675ee263fb7b191",
+      "construction_trace_sha256": "d96c05034da5bad62617cbf3d1d43ba113e803e08774d0b101211ed997b53389",
+      "reconstructed_prf_trace_sha256": "09dccfbc0c851a60b6ad804faf875dbe5e010cb5dc9c2ea130e3d5ddc7bc5d95"
+    },
+    {
+      "cell": ["C2", "P-low", 168922],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-low-168922-v1.json",
+      "raw_source_sha256": "420cc2dd6c53d91671f2c1e2951a85e686cc0057127fa942bd4d468b7d41dce2",
+      "durable_sha256": "420cc2dd6c53d91671f2c1e2951a85e686cc0057127fa942bd4d468b7d41dce2",
+      "logical_snapshot_checksum": "497259ae19ddd7b2f720a67e51ff9682261970fd5fe5d14113bd34692a63143c",
+      "snapshot_id": "cyax-snapshot-sha256:497259ae19ddd7b2f720a67e51ff9682261970fd5fe5d14113bd34692a63143c",
+      "source_bytes_sha256": "58cdadaad8a5b05bac9d4079fb447655ace14be1f74b38e61cc80ff9ce6c43b6",
+      "complete_output_sha256": "d6a35bb91b0b86f5f75864e7d78c544fb0bc8032f1d2588a80ded63e6f031160",
+      "construction_trace_sha256": "3dc7f64e8e60695a2954c519ab94092291e605b25d056b7cba4ae7839a5b40b3",
+      "reconstructed_prf_trace_sha256": "06b614f151fdd7318e8da592c250624684cfe7229b78643de2abdb94fe7a11b4"
+    },
+    {
+      "cell": ["C2", "P-medium", 168923],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-medium-168923-v1.json",
+      "raw_source_sha256": "7e8cda0d03a701b57316a80292bbad53cc1d22c13cc575b68e3d982f2e1339de",
+      "durable_sha256": "7e8cda0d03a701b57316a80292bbad53cc1d22c13cc575b68e3d982f2e1339de",
+      "logical_snapshot_checksum": "c3ed24090db1fdd9b6d81bf05db0fe9d96b289cf8c062af11ef079822d846fbc",
+      "snapshot_id": "cyax-snapshot-sha256:c3ed24090db1fdd9b6d81bf05db0fe9d96b289cf8c062af11ef079822d846fbc",
+      "source_bytes_sha256": "9ce60a17dedac8dc16555214f61e3219750418c707734cc05ff3727ede45f8de",
+      "complete_output_sha256": "21df70749b6a5a307d6e3ed766eab99ee8adbcb3a8ba0b273604fb055595cee5",
+      "construction_trace_sha256": "fffdde3d240e11411dafcc1a8ddaf5d7771258414e99a66bd3e2f31bbf022e24",
+      "reconstructed_prf_trace_sha256": "d3e6a61d18e4a9b3e7df0fcc773adee9d2f42c32c5c03c2459a1964225cd3d9a"
+    },
+    {
+      "cell": ["C2", "P-medium", 168924],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-medium-168924-v1.json",
+      "raw_source_sha256": "949a798eaacb274d98e07aaa3d50f2822a62b08c5bbd6c234e2e46f1581f9eac",
+      "durable_sha256": "949a798eaacb274d98e07aaa3d50f2822a62b08c5bbd6c234e2e46f1581f9eac",
+      "logical_snapshot_checksum": "dce892dcf7213605965648bcbf80198bd0bc8ac6a04ead6947cbf573b4007d9f",
+      "snapshot_id": "cyax-snapshot-sha256:dce892dcf7213605965648bcbf80198bd0bc8ac6a04ead6947cbf573b4007d9f",
+      "source_bytes_sha256": "2cb580b7adb2403957c97969b2f3725c186837d63839de3a76d50e89d13b4cfc",
+      "complete_output_sha256": "e1834385fe4863d64c8f37c528331e2dae654c6c628d8fe539fe5927f8498a57",
+      "construction_trace_sha256": "2b41985fd9f7daa35bda9421d5ed019534a01ac03576f563578666ca17345832",
+      "reconstructed_prf_trace_sha256": "ea8ad90637fafc539146d1a7c4cce27557adc6ec7c02b32c96bfc8f1146f7c1f"
+    },
+    {
+      "cell": ["C2", "P-high", 168925],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-high-168925-v1.json",
+      "raw_source_sha256": "aa235e7295d5049d10c8cec86b0c42edeaf5cae5a113dc570d370717b2dcec43",
+      "durable_sha256": "aa235e7295d5049d10c8cec86b0c42edeaf5cae5a113dc570d370717b2dcec43",
+      "logical_snapshot_checksum": "1520255b6d1006bbfb8e91999349a4b348c9c3949e5691a47acfa56147f69ca6",
+      "snapshot_id": "cyax-snapshot-sha256:1520255b6d1006bbfb8e91999349a4b348c9c3949e5691a47acfa56147f69ca6",
+      "source_bytes_sha256": "30ab6f94b69d5953045fc24dd8988449e73b1b2d8f455c046944659b619224cb",
+      "complete_output_sha256": "818e2b0d6d6536f2069b458e0cef5865369f14ac9ad11c8827e9d633aa5b842d",
+      "construction_trace_sha256": "c4c44450ed27df0a3a6ab648dc8ee472016b76966d20eeaf7a4f5d9a9d70cead",
+      "reconstructed_prf_trace_sha256": "93a9ab080dc65a27db94c436e84f7f92105340c7af56b6e6f024e94b8ca3e170"
+    },
+    {
+      "cell": ["C2", "P-high", 168926],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-high-168926-v1.json",
+      "raw_source_sha256": "cb10aac9e1b3b3015234c5bc1be0fa7347c92589b34b59fe5fe15507d78b1f59",
+      "durable_sha256": "cb10aac9e1b3b3015234c5bc1be0fa7347c92589b34b59fe5fe15507d78b1f59",
+      "logical_snapshot_checksum": "a153de46d01ed02c9f442dc59bdb903c6738c73260af5d79d4de9ce4c49a2746",
+      "snapshot_id": "cyax-snapshot-sha256:a153de46d01ed02c9f442dc59bdb903c6738c73260af5d79d4de9ce4c49a2746",
+      "source_bytes_sha256": "3cabb9c75c61c93f14c2f9ea6757870a809d9cc209b4d3818853f5ff9df464d7",
+      "complete_output_sha256": "9cab2f7960963abe43101bf86e99d25fb5726bcc55a933cea1f42a4d9967f7aa",
+      "construction_trace_sha256": "c414099673d0ffd5b2bce26ed4799276c04aee45f886d51095f3670de3a3fb8f",
+      "reconstructed_prf_trace_sha256": "6fd913da9b1c5822f0161bebbe909ae0ae075148b538fc13fc0ade7f2aa3a2c7"
+    },
+    {
+      "cell": ["C3", "P-low", 168931],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C3-P-low-168931-v1.json",
+      "raw_source_sha256": "ad7b9deea500c430214e12e5deab6cd93452f2037497056e72d2b62ef4cb594f",
+      "durable_sha256": "ad7b9deea500c430214e12e5deab6cd93452f2037497056e72d2b62ef4cb594f",
+      "logical_snapshot_checksum": "313274c6237dabe709f2a3c564bd38b2ca3701daff85a8da68df2d4ecea4c8a4",
+      "snapshot_id": "cyax-snapshot-sha256:313274c6237dabe709f2a3c564bd38b2ca3701daff85a8da68df2d4ecea4c8a4",
+      "source_bytes_sha256": "2f49b2476dda4baff6b771093b78c7ba5a9fa5586f904671a1ef007cd2d53c72",
+      "complete_output_sha256": "83645ceff6ff9325e975e55a359fc492f94433e36166977476e627379a567790",
+      "construction_trace_sha256": "9232eef5277229f10069eec968f72c0a385f118f5cd1670506ba43bb2566d8bb",
+      "reconstructed_prf_trace_sha256": "c7bc9e9a0585b454168e66f381fb53ba38ef2dc8c5179475785215f0d29ffbf2"
+    },
+    {
+      "cell": ["C3", "P-medium", 168932],
+      "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C3-P-medium-168932-v1.json",
+      "raw_source_sha256": "2ffaef82f1c7fe646bc8b37f3a9080d1fc4ed8f456416f20f3129d548f998bdd",
+      "durable_sha256": "2ffaef82f1c7fe646bc8b37f3a9080d1fc4ed8f456416f20f3129d548f998bdd",
+      "logical_snapshot_checksum": "7ac8525119a08ce9595e2374b13decc43832cde03f48774264f7ae3a50f43401",
+      "snapshot_id": "cyax-snapshot-sha256:7ac8525119a08ce9595e2374b13decc43832cde03f48774264f7ae3a50f43401",
+      "source_bytes_sha256": "acf1624edbee1d87c543ffd6b8093356a6e73ebe4563730077bebdc4f1626479",
+      "complete_output_sha256": "20040f6030e141b91097069dc2feb888acdf427403412e8425045fc4afbba05e",
+      "construction_trace_sha256": "7d3e5918d0ff14f2c6a24282dd9cf6d6e746e1faeb482d7e8e343941cf05fa54",
+      "reconstructed_prf_trace_sha256": "5cd673d1c9bf4e7eb8f9186a785e44b7d50b3d907cd4ebb5e6037487d4f01625"
+    }
+  ],
+  "failed_checkpoint": {
+    "path": "research/cyax0168/evidence/g1-pre-rerun-isolated-recovery-checkpoint-v1.json",
+    "raw_source_sha256": "750ea10bb73e2f4dbc3a7119534d88eb8445736b01a21d4670a5c1de46d820eb",
+    "durable_sha256": "162cd3767b74f808432621ab0384fd3c36ffc9ddf5899f308be66b23c7064606",
+    "checkpoint_schema": "cyax-0168-isolated-generator-checkpoint-v1",
+    "status": "FAILED",
+    "completed_cell_count": 15,
+    "additional_completed_cell_count": 14,
+    "missing_cell": ["C3", "P-high", 168933],
+    "exception_type": "LeaseExpired",
+    "failure_kind": "resource_envelope_exceeded",
+    "message": "60-minute lease expired before C3/P-high/168933 produced an atomic result and checkpoint entry",
+    "remaining_declared_cells": [["C3", "P-high", 168933]],
+    "next_action": "STOP; resume only from this durable checkpoint"
+  },
+  "terminal_state": {
+    "declared_cell_count": 16,
+    "completed_cell_count": 15,
+    "additional_completed_cell_count": 14,
+    "missing_cell_count": 1,
+    "isolated_result_set": "INCOMPLETE",
+    "r2_status": "FAILED / INCOMPLETE",
+    "g1_status": "NOT REACHED",
+    "clean_g1_campaign_started": false,
+    "t0_t4_accessed": false,
+    "next_action": "Diagnose the missing isolated cell only under the approved recovery packet."
+  },
+  "privacy_checks": {
+    "status": "PASS",
+    "checked_for": [
+      "absolute machine-local paths",
+      "account or host metadata",
+      "execution-context identifiers",
+      "private temporary locators",
+      "credentials or tokens"
+    ],
+    "allowed_repository_paths_are_relative": true,
+    "prohibited_primary_or_decision_fixture_inputs": "not accessed"
+  }
+}

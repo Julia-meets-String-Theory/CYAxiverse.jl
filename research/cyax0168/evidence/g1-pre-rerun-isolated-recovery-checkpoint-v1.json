@@ -1,0 +1,160 @@
+{
+  "checkpoint_schema": "cyax-0168-isolated-generator-checkpoint-v1",
+  "completed_cells": [
+    {
+      "logical_snapshot_checksum": "e73063a46e1c585bfb15aa0db5e920a0f6b4a37f2b5a44a7a0b372f7aecd3b18",
+      "profile_id": "P-medium",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C0-v1.json",
+      "result_sha256": "7685def061d842f5fdc11105397f50f86a43163b6b6cc550d0301973ca1855e6",
+      "seed": 168900,
+      "snapshot_id": "cyax-snapshot-sha256:e73063a46e1c585bfb15aa0db5e920a0f6b4a37f2b5a44a7a0b372f7aecd3b18",
+      "tier": "C0"
+    },
+    {
+      "logical_snapshot_checksum": "689b92c46daea6a4cac2a7172fcf76a0dcf6730613e38755048296b0a6c1174e",
+      "profile_id": "P-low",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-low-168911-v1.json",
+      "result_sha256": "7417b370704ead41be6b05e0d18034157fd3b8b69a0cd45ed4dfb80d0e9cc537",
+      "seed": 168911,
+      "snapshot_id": "cyax-snapshot-sha256:689b92c46daea6a4cac2a7172fcf76a0dcf6730613e38755048296b0a6c1174e",
+      "tier": "C1"
+    },
+    {
+      "logical_snapshot_checksum": "070b86811f7430df9dd1464f77052d7e80e12bb97b9266d4aa801bef1253f816",
+      "profile_id": "P-low",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-low-168912-v1.json",
+      "result_sha256": "7acc09f596baaef18ea0120aa40ab6b1cad84d0cb0ded65e969068e5b4ee9b46",
+      "seed": 168912,
+      "snapshot_id": "cyax-snapshot-sha256:070b86811f7430df9dd1464f77052d7e80e12bb97b9266d4aa801bef1253f816",
+      "tier": "C1"
+    },
+    {
+      "logical_snapshot_checksum": "4b4511ae9360716270a1b8cf9d9d8962276998f3f588507409e7f90c08124fec",
+      "profile_id": "P-medium",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-medium-168913-v1.json",
+      "result_sha256": "8f4f864ae67b348d57f1dd598aed350385a2fa7e56624d8b6ff1fd78969c3c33",
+      "seed": 168913,
+      "snapshot_id": "cyax-snapshot-sha256:4b4511ae9360716270a1b8cf9d9d8962276998f3f588507409e7f90c08124fec",
+      "tier": "C1"
+    },
+    {
+      "logical_snapshot_checksum": "0b672f6413a8719e6a8a2dc2ea5a60e24c131ebe39273de3b361ca707564234f",
+      "profile_id": "P-medium",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-medium-168914-v1.json",
+      "result_sha256": "38205f8df13e578dfc1fbf358b29b8bd5710360d06a48e67b793312bab2c7204",
+      "seed": 168914,
+      "snapshot_id": "cyax-snapshot-sha256:0b672f6413a8719e6a8a2dc2ea5a60e24c131ebe39273de3b361ca707564234f",
+      "tier": "C1"
+    },
+    {
+      "logical_snapshot_checksum": "606a85f1265ef4ce396eea880397926bc32dba7131ee3219e24f4db30207d6c4",
+      "profile_id": "P-high",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-high-168915-v1.json",
+      "result_sha256": "85b346a3044306a8dad3fc29c6cdcc3b1aeb332169ac750cceae40fbfa5db58e",
+      "seed": 168915,
+      "snapshot_id": "cyax-snapshot-sha256:606a85f1265ef4ce396eea880397926bc32dba7131ee3219e24f4db30207d6c4",
+      "tier": "C1"
+    },
+    {
+      "logical_snapshot_checksum": "3387d7ed408f69a82f8ccf400976ad6a7fd1b0f241e509c350a6a14e4bbdc832",
+      "profile_id": "P-high",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C1-P-high-168916-v1.json",
+      "result_sha256": "7bee419cb69aa412630195c649de6a2e042618add1be08b9b02c6d7eeccc8524",
+      "seed": 168916,
+      "snapshot_id": "cyax-snapshot-sha256:3387d7ed408f69a82f8ccf400976ad6a7fd1b0f241e509c350a6a14e4bbdc832",
+      "tier": "C1"
+    },
+    {
+      "logical_snapshot_checksum": "4bd0066c0f10eca345d546ddd9ffb37c1c241b508a8b6723f00fa31ddb84fa9b",
+      "profile_id": "P-low",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-low-168921-v1.json",
+      "result_sha256": "33f86a50e7318d5b8f6be64ef4d93a45052f744044b8c79be973ad26f68121ff",
+      "seed": 168921,
+      "snapshot_id": "cyax-snapshot-sha256:4bd0066c0f10eca345d546ddd9ffb37c1c241b508a8b6723f00fa31ddb84fa9b",
+      "tier": "C2"
+    },
+    {
+      "logical_snapshot_checksum": "497259ae19ddd7b2f720a67e51ff9682261970fd5fe5d14113bd34692a63143c",
+      "profile_id": "P-low",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-low-168922-v1.json",
+      "result_sha256": "420cc2dd6c53d91671f2c1e2951a85e686cc0057127fa942bd4d468b7d41dce2",
+      "seed": 168922,
+      "snapshot_id": "cyax-snapshot-sha256:497259ae19ddd7b2f720a67e51ff9682261970fd5fe5d14113bd34692a63143c",
+      "tier": "C2"
+    },
+    {
+      "logical_snapshot_checksum": "c3ed24090db1fdd9b6d81bf05db0fe9d96b289cf8c062af11ef079822d846fbc",
+      "profile_id": "P-medium",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-medium-168923-v1.json",
+      "result_sha256": "7e8cda0d03a701b57316a80292bbad53cc1d22c13cc575b68e3d982f2e1339de",
+      "seed": 168923,
+      "snapshot_id": "cyax-snapshot-sha256:c3ed24090db1fdd9b6d81bf05db0fe9d96b289cf8c062af11ef079822d846fbc",
+      "tier": "C2"
+    },
+    {
+      "logical_snapshot_checksum": "dce892dcf7213605965648bcbf80198bd0bc8ac6a04ead6947cbf573b4007d9f",
+      "profile_id": "P-medium",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-medium-168924-v1.json",
+      "result_sha256": "949a798eaacb274d98e07aaa3d50f2822a62b08c5bbd6c234e2e46f1581f9eac",
+      "seed": 168924,
+      "snapshot_id": "cyax-snapshot-sha256:dce892dcf7213605965648bcbf80198bd0bc8ac6a04ead6947cbf573b4007d9f",
+      "tier": "C2"
+    },
+    {
+      "logical_snapshot_checksum": "1520255b6d1006bbfb8e91999349a4b348c9c3949e5691a47acfa56147f69ca6",
+      "profile_id": "P-high",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-high-168925-v1.json",
+      "result_sha256": "aa235e7295d5049d10c8cec86b0c42edeaf5cae5a113dc570d370717b2dcec43",
+      "seed": 168925,
+      "snapshot_id": "cyax-snapshot-sha256:1520255b6d1006bbfb8e91999349a4b348c9c3949e5691a47acfa56147f69ca6",
+      "tier": "C2"
+    },
+    {
+      "logical_snapshot_checksum": "a153de46d01ed02c9f442dc59bdb903c6738c73260af5d79d4de9ce4c49a2746",
+      "profile_id": "P-high",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C2-P-high-168926-v1.json",
+      "result_sha256": "cb10aac9e1b3b3015234c5bc1be0fa7347c92589b34b59fe5fe15507d78b1f59",
+      "seed": 168926,
+      "snapshot_id": "cyax-snapshot-sha256:a153de46d01ed02c9f442dc59bdb903c6738c73260af5d79d4de9ce4c49a2746",
+      "tier": "C2"
+    },
+    {
+      "logical_snapshot_checksum": "313274c6237dabe709f2a3c564bd38b2ca3701daff85a8da68df2d4ecea4c8a4",
+      "profile_id": "P-low",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C3-P-low-168931-v1.json",
+      "result_sha256": "ad7b9deea500c430214e12e5deab6cd93452f2037497056e72d2b62ef4cb594f",
+      "seed": 168931,
+      "snapshot_id": "cyax-snapshot-sha256:313274c6237dabe709f2a3c564bd38b2ca3701daff85a8da68df2d4ecea4c8a4",
+      "tier": "C3"
+    },
+    {
+      "logical_snapshot_checksum": "7ac8525119a08ce9595e2374b13decc43832cde03f48774264f7ae3a50f43401",
+      "profile_id": "P-medium",
+      "result_path": "research/cyax0168/evidence/g1-pre-rerun-isolated-C3-P-medium-168932-v1.json",
+      "result_sha256": "2ffaef82f1c7fe646bc8b37f3a9080d1fc4ed8f456416f20f3129d548f998bdd",
+      "seed": 168932,
+      "snapshot_id": "cyax-snapshot-sha256:7ac8525119a08ce9595e2374b13decc43832cde03f48774264f7ae3a50f43401",
+      "tier": "C3"
+    }
+  ],
+  "failure": {
+    "cell": {
+      "profile_id": "P-high",
+      "seed": 168933,
+      "tier": "C3"
+    },
+    "exception_type": "LeaseExpired",
+    "failure_kind": "resource_envelope_exceeded",
+    "message": "60-minute lease expired before C3/P-high/168933 produced an atomic result and checkpoint entry"
+  },
+  "input_packet_sha256": "35cb27cc7231c3003b217f2aa1aa40a9004bf1db49bb0bfef9582343ed0fc98d",
+  "next_action": "STOP; resume only from this durable checkpoint",
+  "remaining_declared_cells": [
+    [
+      "C3",
+      "P-high",
+      168933
+    ]
+  ],
+  "status": "FAILED"
+}

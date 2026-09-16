@@ -1,0 +1,111 @@
+{
+  "cell": {
+    "profile_id": "P-medium",
+    "seed": 168932,
+    "tier": "C3"
+  },
+  "complete_output_inventory": {
+    "assertion_count": 1000000,
+    "assertion_id_count": 1000000,
+    "candidate_vector_count": 19120,
+    "construction_trace_count": 1000388,
+    "entity_count": 200000,
+    "literal_count": 20000,
+    "prf_choice_count": 712799,
+    "reconstructed_prf_trace_count": 712799,
+    "source_bytes_count": 1020000,
+    "source_revision_count": 1020000
+  },
+  "diagnostic_elapsed_seconds": 468.15946516697295,
+  "evidence_schema": "cyax-0168-isolated-generator-identities-v1",
+  "generator_manifest": {
+    "assertion_count": 1000000,
+    "authority_derivation_rule_id": "synthetic_fixture_v2.3",
+    "authority_rule_version": "cyax-authority-v1",
+    "claim_key_registry": [
+      {
+        "claim_key": "synthetic.block_claim",
+        "literal_type": "text",
+        "semantic_slot": "synthetic_fixture_block_statement"
+      }
+    ],
+    "entity_count": 200000,
+    "generator_name": "cyax-0168-scale-2.3",
+    "generator_version": "2.3",
+    "literal_count": 20000,
+    "logical_snapshot_checksum": "7ac8525119a08ce9595e2374b13decc43832cde03f48774264f7ae3a50f43401",
+    "namespace": "cyax-0168-synthetic-v2.3",
+    "owner_allowlist": [],
+    "owner_decision_events": [],
+    "prf_domain": "cyax-gen-2.3",
+    "profile": {
+      "cross_link_rate": 0.05,
+      "cycle_rate": 0.005,
+      "dependency_fanout": 8,
+      "dispute_rate": 0.02,
+      "isolated_rate": 0.05,
+      "parallel_evidence_rate": 0.03,
+      "path_depth": 8,
+      "supersession_depth": 8
+    },
+    "profile_id": "P-medium",
+    "schema_version": "cyax-snapshot-v1",
+    "seed": 168932,
+    "semantic_evaluator_rule_version": "cyax-evaluator-v1",
+    "snapshot_id": "cyax-snapshot-sha256:7ac8525119a08ce9595e2374b13decc43832cde03f48774264f7ae3a50f43401",
+    "source_locator_version": "/scale/2.3/",
+    "source_revision_count": 1020000,
+    "synthetic_namespace": "cyax-0168-synthetic-v2.3",
+    "tier": "C3"
+  },
+  "identities": {
+    "assertion_id_sequence_sha256": "4adbde71844a80c7e36ed64c54fb10aa7dd0173e2fac980fba99555a3a6ec376",
+    "candidate_vector_registry_sha256": "a513ad16552f34802bb94d921aab939c60202413b19435658bce55100daa1103",
+    "complete_canonical_serialized_output_sha256": "20040f6030e141b91097069dc2feb888acdf427403412e8425045fc4afbba05e",
+    "complete_output_framing": "sha256(frame(tagged_complete_output(snapshot))); bytes=hex-tagged, floats=repr-tagged because the approved frame rejects floats",
+    "construction_trace_sha256": "7d3e5918d0ff14f2c6a24282dd9cf6d6e746e1faeb482d7e8e343941cf05fa54",
+    "logical_snapshot_checksum": "7ac8525119a08ce9595e2374b13decc43832cde03f48774264f7ae3a50f43401",
+    "reconstructed_prf_trace_framing": "sha256(frame(list(choice records with registry-backed candidates represented by candidate_vector_id and candidate_count)))",
+    "reconstructed_prf_trace_sha256": "5cd673d1c9bf4e7eb8f9186a785e44b7d50b3d907cd4ebb5e6037487d4f01625",
+    "record_class_jsonl_sha256": {
+      "assertions": "d4cdcc4938a4f362ec50edf8eaa907cba9f6970d3d2a25baab76c456ab88ce1e",
+      "entities": "b79e696ba183359697392020c4a54efa65b869ddfb78ed62ee04bed5629d78e1",
+      "literals": "eb33f0e0fa3b795e39f0016a318686f01dd90dd9b8d02340d473dedf8606fbad",
+      "source_revisions": "2f24a3f660f53a9afe0ec4be4b32cdf630ac123362c1a30f1da3723188d88d18"
+    },
+    "record_class_sha256": {
+      "assertions": "1631fa127102efa800f523c248ddceee38dff7c28fa5a0120e74db95e270fd7b",
+      "entities": "cdd3b9bebb9f0f2afa4a3f9746f3439e3ff462a509066873a0e66f693fc000f8",
+      "literals": "636eba9fcb1de447d317b2c46ddf4e93ff770e3c310a09c57f1f5eec4a2831b8",
+      "source_revisions": "e944aa23f7f2802d093261448ce2263846be77a9795654b00c7688d2b6d50843"
+    },
+    "snapshot_id": "cyax-snapshot-sha256:7ac8525119a08ce9595e2374b13decc43832cde03f48774264f7ae3a50f43401",
+    "source_bytes_framing": "sha256(frame(source_bytes keyed by canonical_locator; raw bytes retained))",
+    "source_bytes_sha256": "acf1624edbee1d87c543ffd6b8093356a6e73ebe4563730077bebdc4f1626479"
+  },
+  "identity_serialization": {
+    "framed": "generator_independent.frame; SHA-256 of the exact framed value",
+    "reconstructed_prf_trace": "registry-backed lossless compact reconstruction; candidate-vector registry is hashed separately",
+    "record_jsonl": "UTF-8 sorted-key compact JSON, LF after each record, records in generator order"
+  },
+  "input_validation": {
+    "allowed_file_hashes": {
+      "research/cyax0168/generator_independent.py": {
+        "git_blob": "7558479695dff5c313e6729aec19384080d02b5e",
+        "sha256": "d074af746e47d5e1d9675f29a75d557b625c402523ae4997ff95c565736c1657"
+      },
+      "specs/0168-structured-graph-materialization/spec.md": {
+        "git_blob": "5b5b126d6f8b26c54a36395dd426cca7a63a7384",
+        "sha256": "4d4972b2351e0a7342120104fb8568ff61c98c939eb98312b8cb4ac2ae7e2025"
+      }
+    },
+    "packet_canonical_sha256": "35cb27cc7231c3003b217f2aa1aa40a9004bf1db49bb0bfef9582343ed0fc98d",
+    "packet_sha256": "35cb27cc7231c3003b217f2aa1aa40a9004bf1db49bb0bfef9582343ed0fc98d",
+    "runtime": {
+      "implementation": "CPython",
+      "stdlib_only": true,
+      "version": "3.14.6"
+    }
+  },
+  "status": "COMPLETE"
+}
