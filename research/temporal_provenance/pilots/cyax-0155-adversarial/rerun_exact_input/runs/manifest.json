@@ -1,0 +1,692 @@
+{
+  "dispatch_manifest": "../dispatch_manifest.json",
+  "identity_sanitization": {
+    "event_streams": [
+      {
+        "original": {
+          "bytes": 4903,
+          "sha256": "4dff805a4ece55d5a1ec01cff36cdd707dcf6914e82800c4254afbcebd561f92"
+        },
+        "run_id": "A1",
+        "sanitized": {
+          "bytes": 4938,
+          "sha256": "564b29940e55a2529da555b49b82cc5c7bd9651584a78492c8896d388abecc74"
+        }
+      },
+      {
+        "original": {
+          "bytes": 4521,
+          "sha256": "966ad374786a3ac23b0a19b10bf5ab0bca86a5b748387a26c6529f973cdc60f3"
+        },
+        "run_id": "B1",
+        "sanitized": {
+          "bytes": 4556,
+          "sha256": "d4757005e9f147b4c38b9d3242ae9e54fe7f5a6fec0dc10abb1e43d22542664c"
+        }
+      },
+      {
+        "original": {
+          "bytes": 4465,
+          "sha256": "68ad50c8aab645b7fee83e4ec8ea7db403681d0991559f9d9cb76ca8ab1b6c5f"
+        },
+        "run_id": "B2",
+        "sanitized": {
+          "bytes": 4500,
+          "sha256": "def487e6b3ce198abcaf013bac874d3e9727d9b3ad87abca4e1051158029f3ca"
+        }
+      },
+      {
+        "original": {
+          "bytes": 4157,
+          "sha256": "d7c6d19f5b9583cdc304e6bd38690329ec6ad789b58c831d88d4c2d46055ef29"
+        },
+        "run_id": "A2",
+        "sanitized": {
+          "bytes": 4192,
+          "sha256": "255d4de7593b9de66643b0686bb066cd66b8e23e3a10c69cbd308197b73bdacf"
+        }
+      },
+      {
+        "original": {
+          "bytes": 4653,
+          "sha256": "c565b11e4c450439e4b2b2ff22cfceead6c1f19a40b1abae50c9cb92132d236c"
+        },
+        "run_id": "A3",
+        "sanitized": {
+          "bytes": 4688,
+          "sha256": "5f0db943058bd2aa78b44a50c9507e697486b4da3a0f655aa7a87cc57c66bc4d"
+        }
+      },
+      {
+        "original": {
+          "bytes": 5173,
+          "sha256": "a3172ee488d34f8eb893a70aea4fd87e657305587bf50de963eac24ed7f45540"
+        },
+        "run_id": "B3",
+        "sanitized": {
+          "bytes": 5208,
+          "sha256": "a81da1de2759d996ded63b304884e7beea0e752972a4f288b91fb933c6505135"
+        }
+      }
+    ],
+    "identity_fields": [
+      "thread_id",
+      "session_id",
+      "conversation_id",
+      "turn_id"
+    ],
+    "note": "Original event bytes are not retained; original byte/hash provenance is recorded per run.",
+    "schema": "cyax-0163-identity-sanitization-v1",
+    "status": "SANITIZED",
+    "value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix"
+  },
+  "launch_order": [
+    "A1",
+    "B1",
+    "B2",
+    "A2",
+    "A3",
+    "B3"
+  ],
+  "model": "gpt-5.6-sol",
+  "reasoning": "high",
+  "runs": [
+    {
+      "condition": "A",
+      "event_artifact": "events/A1.jsonl",
+      "input_artifact": "requests/A1.input",
+      "input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f",
+      "invocation": {
+        "argv": [
+          "codex",
+          "exec",
+          "--model",
+          "gpt-5.6-sol",
+          "-c",
+          "model_reasoning_effort=high",
+          "--sandbox",
+          "read-only",
+          "--ephemeral",
+          "--ignore-user-config",
+          "--ignore-rules",
+          "--skip-git-repo-check",
+          "--json",
+          "--output-last-message",
+          "final.response",
+          "-"
+        ],
+        "cwd": "fresh empty temporary directory",
+        "ephemeral": true,
+        "ignore_rules": true,
+        "ignore_user_config": true,
+        "input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "sandbox": "read-only",
+        "shell": false,
+        "skip_git_repo_check": true,
+        "stdin": "binary per-run input artifact"
+      },
+      "invocation_sha256": "de9183ea4e71fa77e6390690ab083528f5ab53698508bcbdaad45306e3bfb4f7",
+      "launch_finished_at": "2026-09-13T13:30:45.250624Z",
+      "launch_result": {
+        "completion_status": "COMPLETE",
+        "event": {
+          "bytes": 4938,
+          "sha256": "564b29940e55a2529da555b49b82cc5c7bd9651584a78492c8896d388abecc74"
+        },
+        "event_audit": {
+          "errors": [],
+          "event_count": 4,
+          "forbidden_events": [],
+          "session_id": null,
+          "source_reopenings": 0,
+          "thread_id": "sha256:4e26de086926ffeca460cc3d373e78a4825ec2e91526d43f9ae34a5bd46acf48",
+          "tools_used": false,
+          "valid_jsonl": true
+        },
+        "event_original": {
+          "bytes": 4903,
+          "sha256": "4dff805a4ece55d5a1ec01cff36cdd707dcf6914e82800c4254afbcebd561f92"
+        },
+        "identity_sanitization": {
+          "hashed_identities": [
+            "sha256:4e26de086926ffeca460cc3d373e78a4825ec2e91526d43f9ae34a5bd46acf48"
+          ],
+          "hashed_identity_count": 1,
+          "identity_fields": [
+            "thread_id",
+            "session_id",
+            "conversation_id",
+            "turn_id"
+          ],
+          "identity_value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix",
+          "original_bytes": 4903,
+          "original_sha256": "4dff805a4ece55d5a1ec01cff36cdd707dcf6914e82800c4254afbcebd561f92",
+          "sanitized_bytes": 4938,
+          "sanitized_sha256": "564b29940e55a2529da555b49b82cc5c7bd9651584a78492c8896d388abecc74",
+          "schema": "cyax-0163-identity-sanitization-v1"
+        },
+        "response": {
+          "bytes": 4482,
+          "sha256": "8adf61d6cc26c76eec28bb049609ba6c383320940cbd75b41fa402080549fef0"
+        },
+        "returncode": 0,
+        "session_id": null,
+        "stderr": {
+          "bytes": 2920,
+          "sha256": "78bd40b090d2263db41297c7dad6e17f79f3a61fce25d1c6eb9e8da15efc3c86"
+        },
+        "thread_id": "sha256:4e26de086926ffeca460cc3d373e78a4825ec2e91526d43f9ae34a5bd46acf48"
+      },
+      "launch_started_at": "2026-09-13T13:30:02.964320Z",
+      "response": {
+        "bytes": 4482,
+        "completion_status": "COMPLETE",
+        "sha256": "8adf61d6cc26c76eec28bb049609ba6c383320940cbd75b41fa402080549fef0",
+        "source_reopenings": 0
+      },
+      "response_artifact": "responses/A1.response",
+      "run_id": "A1",
+      "status": "CAPTURED"
+    },
+    {
+      "condition": "B",
+      "event_artifact": "events/B1.jsonl",
+      "input_artifact": "requests/B1.input",
+      "input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f",
+      "invocation": {
+        "argv": [
+          "codex",
+          "exec",
+          "--model",
+          "gpt-5.6-sol",
+          "-c",
+          "model_reasoning_effort=high",
+          "--sandbox",
+          "read-only",
+          "--ephemeral",
+          "--ignore-user-config",
+          "--ignore-rules",
+          "--skip-git-repo-check",
+          "--json",
+          "--output-last-message",
+          "final.response",
+          "-"
+        ],
+        "cwd": "fresh empty temporary directory",
+        "ephemeral": true,
+        "ignore_rules": true,
+        "ignore_user_config": true,
+        "input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "sandbox": "read-only",
+        "shell": false,
+        "skip_git_repo_check": true,
+        "stdin": "binary per-run input artifact"
+      },
+      "invocation_sha256": "e9b1163c0e8b9eef87a6493c36556ff82e0be3750ddda4ae327cb3d45c717ea5",
+      "launch_finished_at": "2026-09-13T13:31:30.652673Z",
+      "launch_result": {
+        "completion_status": "COMPLETE",
+        "event": {
+          "bytes": 4556,
+          "sha256": "d4757005e9f147b4c38b9d3242ae9e54fe7f5a6fec0dc10abb1e43d22542664c"
+        },
+        "event_audit": {
+          "errors": [],
+          "event_count": 4,
+          "forbidden_events": [],
+          "session_id": null,
+          "source_reopenings": 0,
+          "thread_id": "sha256:1ba3f1b3c3febb987c55813729df411eda3c29e8b2d4a9299600410aeb209c53",
+          "tools_used": false,
+          "valid_jsonl": true
+        },
+        "event_original": {
+          "bytes": 4521,
+          "sha256": "966ad374786a3ac23b0a19b10bf5ab0bca86a5b748387a26c6529f973cdc60f3"
+        },
+        "identity_sanitization": {
+          "hashed_identities": [
+            "sha256:1ba3f1b3c3febb987c55813729df411eda3c29e8b2d4a9299600410aeb209c53"
+          ],
+          "hashed_identity_count": 1,
+          "identity_fields": [
+            "thread_id",
+            "session_id",
+            "conversation_id",
+            "turn_id"
+          ],
+          "identity_value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix",
+          "original_bytes": 4521,
+          "original_sha256": "966ad374786a3ac23b0a19b10bf5ab0bca86a5b748387a26c6529f973cdc60f3",
+          "sanitized_bytes": 4556,
+          "sanitized_sha256": "d4757005e9f147b4c38b9d3242ae9e54fe7f5a6fec0dc10abb1e43d22542664c",
+          "schema": "cyax-0163-identity-sanitization-v1"
+        },
+        "response": {
+          "bytes": 4115,
+          "sha256": "1f518c93e978176e1a22fd6a700756c09f19833eb178a558e1eb375acc8488ab"
+        },
+        "returncode": 0,
+        "session_id": null,
+        "stderr": {
+          "bytes": 2920,
+          "sha256": "9881041f6b272b9b3e2040ea05fa784abdb314cdf9c6d43ffac306067abe3138"
+        },
+        "thread_id": "sha256:1ba3f1b3c3febb987c55813729df411eda3c29e8b2d4a9299600410aeb209c53"
+      },
+      "launch_started_at": "2026-09-13T13:30:55.584766Z",
+      "response": {
+        "bytes": 4115,
+        "completion_status": "COMPLETE",
+        "sha256": "1f518c93e978176e1a22fd6a700756c09f19833eb178a558e1eb375acc8488ab",
+        "source_reopenings": 0
+      },
+      "response_artifact": "responses/B1.response",
+      "run_id": "B1",
+      "status": "CAPTURED"
+    },
+    {
+      "condition": "B",
+      "event_artifact": "events/B2.jsonl",
+      "input_artifact": "requests/B2.input",
+      "input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f",
+      "invocation": {
+        "argv": [
+          "codex",
+          "exec",
+          "--model",
+          "gpt-5.6-sol",
+          "-c",
+          "model_reasoning_effort=high",
+          "--sandbox",
+          "read-only",
+          "--ephemeral",
+          "--ignore-user-config",
+          "--ignore-rules",
+          "--skip-git-repo-check",
+          "--json",
+          "--output-last-message",
+          "final.response",
+          "-"
+        ],
+        "cwd": "fresh empty temporary directory",
+        "ephemeral": true,
+        "ignore_rules": true,
+        "ignore_user_config": true,
+        "input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "sandbox": "read-only",
+        "shell": false,
+        "skip_git_repo_check": true,
+        "stdin": "binary per-run input artifact"
+      },
+      "invocation_sha256": "e9b1163c0e8b9eef87a6493c36556ff82e0be3750ddda4ae327cb3d45c717ea5",
+      "launch_finished_at": "2026-09-13T13:32:24.081543Z",
+      "launch_result": {
+        "completion_status": "COMPLETE",
+        "event": {
+          "bytes": 4500,
+          "sha256": "def487e6b3ce198abcaf013bac874d3e9727d9b3ad87abca4e1051158029f3ca"
+        },
+        "event_audit": {
+          "errors": [],
+          "event_count": 4,
+          "forbidden_events": [],
+          "session_id": null,
+          "source_reopenings": 0,
+          "thread_id": "sha256:5740321777be311b18034b30d8c0ac861b74e34aadd4d07fdf80da5e2014f246",
+          "tools_used": false,
+          "valid_jsonl": true
+        },
+        "event_original": {
+          "bytes": 4465,
+          "sha256": "68ad50c8aab645b7fee83e4ec8ea7db403681d0991559f9d9cb76ca8ab1b6c5f"
+        },
+        "identity_sanitization": {
+          "hashed_identities": [
+            "sha256:5740321777be311b18034b30d8c0ac861b74e34aadd4d07fdf80da5e2014f246"
+          ],
+          "hashed_identity_count": 1,
+          "identity_fields": [
+            "thread_id",
+            "session_id",
+            "conversation_id",
+            "turn_id"
+          ],
+          "identity_value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix",
+          "original_bytes": 4465,
+          "original_sha256": "68ad50c8aab645b7fee83e4ec8ea7db403681d0991559f9d9cb76ca8ab1b6c5f",
+          "sanitized_bytes": 4500,
+          "sanitized_sha256": "def487e6b3ce198abcaf013bac874d3e9727d9b3ad87abca4e1051158029f3ca",
+          "schema": "cyax-0163-identity-sanitization-v1"
+        },
+        "response": {
+          "bytes": 4071,
+          "sha256": "178aada6be7c756f88d01914ff0a45d17c538a92e3670d219abede697036260c"
+        },
+        "returncode": 0,
+        "session_id": null,
+        "stderr": {
+          "bytes": 2920,
+          "sha256": "b40829a07f69b9482e87741ec0d41cc792b0a0047c55ea1eceedb08f5c16f8ee"
+        },
+        "thread_id": "sha256:5740321777be311b18034b30d8c0ac861b74e34aadd4d07fdf80da5e2014f246"
+      },
+      "launch_started_at": "2026-09-13T13:31:39.442981Z",
+      "response": {
+        "bytes": 4071,
+        "completion_status": "COMPLETE",
+        "sha256": "178aada6be7c756f88d01914ff0a45d17c538a92e3670d219abede697036260c",
+        "source_reopenings": 0
+      },
+      "response_artifact": "responses/B2.response",
+      "run_id": "B2",
+      "status": "CAPTURED"
+    },
+    {
+      "condition": "A",
+      "event_artifact": "events/A2.jsonl",
+      "input_artifact": "requests/A2.input",
+      "input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f",
+      "invocation": {
+        "argv": [
+          "codex",
+          "exec",
+          "--model",
+          "gpt-5.6-sol",
+          "-c",
+          "model_reasoning_effort=high",
+          "--sandbox",
+          "read-only",
+          "--ephemeral",
+          "--ignore-user-config",
+          "--ignore-rules",
+          "--skip-git-repo-check",
+          "--json",
+          "--output-last-message",
+          "final.response",
+          "-"
+        ],
+        "cwd": "fresh empty temporary directory",
+        "ephemeral": true,
+        "ignore_rules": true,
+        "ignore_user_config": true,
+        "input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "sandbox": "read-only",
+        "shell": false,
+        "skip_git_repo_check": true,
+        "stdin": "binary per-run input artifact"
+      },
+      "invocation_sha256": "de9183ea4e71fa77e6390690ab083528f5ab53698508bcbdaad45306e3bfb4f7",
+      "launch_finished_at": "2026-09-13T13:33:14.111055Z",
+      "launch_result": {
+        "completion_status": "COMPLETE",
+        "event": {
+          "bytes": 4192,
+          "sha256": "255d4de7593b9de66643b0686bb066cd66b8e23e3a10c69cbd308197b73bdacf"
+        },
+        "event_audit": {
+          "errors": [],
+          "event_count": 4,
+          "forbidden_events": [],
+          "session_id": null,
+          "source_reopenings": 0,
+          "thread_id": "sha256:35396c5e9d605e0d4cfe119fba35c0ab5f44d8286f6bfba894086152e90c8366",
+          "tools_used": false,
+          "valid_jsonl": true
+        },
+        "event_original": {
+          "bytes": 4157,
+          "sha256": "d7c6d19f5b9583cdc304e6bd38690329ec6ad789b58c831d88d4c2d46055ef29"
+        },
+        "identity_sanitization": {
+          "hashed_identities": [
+            "sha256:35396c5e9d605e0d4cfe119fba35c0ab5f44d8286f6bfba894086152e90c8366"
+          ],
+          "hashed_identity_count": 1,
+          "identity_fields": [
+            "thread_id",
+            "session_id",
+            "conversation_id",
+            "turn_id"
+          ],
+          "identity_value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix",
+          "original_bytes": 4157,
+          "original_sha256": "d7c6d19f5b9583cdc304e6bd38690329ec6ad789b58c831d88d4c2d46055ef29",
+          "sanitized_bytes": 4192,
+          "sanitized_sha256": "255d4de7593b9de66643b0686bb066cd66b8e23e3a10c69cbd308197b73bdacf",
+          "schema": "cyax-0163-identity-sanitization-v1"
+        },
+        "response": {
+          "bytes": 3764,
+          "sha256": "456ba1fe60a14465c5794f910ba9a74a04529592ac6a3a891cbb928e4e33bbe2"
+        },
+        "returncode": 0,
+        "session_id": null,
+        "stderr": {
+          "bytes": 2920,
+          "sha256": "1ac5d6843b8170877d380744c1e8870e786404c604580bef538140da6b4ccceb"
+        },
+        "thread_id": "sha256:35396c5e9d605e0d4cfe119fba35c0ab5f44d8286f6bfba894086152e90c8366"
+      },
+      "launch_started_at": "2026-09-13T13:32:36.742184Z",
+      "response": {
+        "bytes": 3764,
+        "completion_status": "COMPLETE",
+        "sha256": "456ba1fe60a14465c5794f910ba9a74a04529592ac6a3a891cbb928e4e33bbe2",
+        "source_reopenings": 0
+      },
+      "response_artifact": "responses/A2.response",
+      "run_id": "A2",
+      "status": "CAPTURED"
+    },
+    {
+      "condition": "A",
+      "event_artifact": "events/A3.jsonl",
+      "input_artifact": "requests/A3.input",
+      "input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f",
+      "invocation": {
+        "argv": [
+          "codex",
+          "exec",
+          "--model",
+          "gpt-5.6-sol",
+          "-c",
+          "model_reasoning_effort=high",
+          "--sandbox",
+          "read-only",
+          "--ephemeral",
+          "--ignore-user-config",
+          "--ignore-rules",
+          "--skip-git-repo-check",
+          "--json",
+          "--output-last-message",
+          "final.response",
+          "-"
+        ],
+        "cwd": "fresh empty temporary directory",
+        "ephemeral": true,
+        "ignore_rules": true,
+        "ignore_user_config": true,
+        "input_sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "sandbox": "read-only",
+        "shell": false,
+        "skip_git_repo_check": true,
+        "stdin": "binary per-run input artifact"
+      },
+      "invocation_sha256": "de9183ea4e71fa77e6390690ab083528f5ab53698508bcbdaad45306e3bfb4f7",
+      "launch_finished_at": "2026-09-13T13:33:57.750134Z",
+      "launch_result": {
+        "completion_status": "COMPLETE",
+        "event": {
+          "bytes": 4688,
+          "sha256": "5f0db943058bd2aa78b44a50c9507e697486b4da3a0f655aa7a87cc57c66bc4d"
+        },
+        "event_audit": {
+          "errors": [],
+          "event_count": 4,
+          "forbidden_events": [],
+          "session_id": null,
+          "source_reopenings": 0,
+          "thread_id": "sha256:7c826453151c383e802e5763e64c9eaf7ac5782b472ee0798b80469df00b43ba",
+          "tools_used": false,
+          "valid_jsonl": true
+        },
+        "event_original": {
+          "bytes": 4653,
+          "sha256": "c565b11e4c450439e4b2b2ff22cfceead6c1f19a40b1abae50c9cb92132d236c"
+        },
+        "identity_sanitization": {
+          "hashed_identities": [
+            "sha256:7c826453151c383e802e5763e64c9eaf7ac5782b472ee0798b80469df00b43ba"
+          ],
+          "hashed_identity_count": 1,
+          "identity_fields": [
+            "thread_id",
+            "session_id",
+            "conversation_id",
+            "turn_id"
+          ],
+          "identity_value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix",
+          "original_bytes": 4653,
+          "original_sha256": "c565b11e4c450439e4b2b2ff22cfceead6c1f19a40b1abae50c9cb92132d236c",
+          "sanitized_bytes": 4688,
+          "sanitized_sha256": "5f0db943058bd2aa78b44a50c9507e697486b4da3a0f655aa7a87cc57c66bc4d",
+          "schema": "cyax-0163-identity-sanitization-v1"
+        },
+        "response": {
+          "bytes": 4247,
+          "sha256": "e9272dcf24d6b208b001098c62bf641a20f766dfeb1580d3ca54429aa2330c3d"
+        },
+        "returncode": 0,
+        "session_id": null,
+        "stderr": {
+          "bytes": 2920,
+          "sha256": "ab2c1ffa2f223dbe9b7484120ba9a1194b53cdfbb4d2394544965d6f7f6d3703"
+        },
+        "thread_id": "sha256:7c826453151c383e802e5763e64c9eaf7ac5782b472ee0798b80469df00b43ba"
+      },
+      "launch_started_at": "2026-09-13T13:33:24.088540Z",
+      "response": {
+        "bytes": 4247,
+        "completion_status": "COMPLETE",
+        "sha256": "e9272dcf24d6b208b001098c62bf641a20f766dfeb1580d3ca54429aa2330c3d",
+        "source_reopenings": 0
+      },
+      "response_artifact": "responses/A3.response",
+      "run_id": "A3",
+      "status": "CAPTURED"
+    },
+    {
+      "condition": "B",
+      "event_artifact": "events/B3.jsonl",
+      "input_artifact": "requests/B3.input",
+      "input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f",
+      "invocation": {
+        "argv": [
+          "codex",
+          "exec",
+          "--model",
+          "gpt-5.6-sol",
+          "-c",
+          "model_reasoning_effort=high",
+          "--sandbox",
+          "read-only",
+          "--ephemeral",
+          "--ignore-user-config",
+          "--ignore-rules",
+          "--skip-git-repo-check",
+          "--json",
+          "--output-last-message",
+          "final.response",
+          "-"
+        ],
+        "cwd": "fresh empty temporary directory",
+        "ephemeral": true,
+        "ignore_rules": true,
+        "ignore_user_config": true,
+        "input_sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "sandbox": "read-only",
+        "shell": false,
+        "skip_git_repo_check": true,
+        "stdin": "binary per-run input artifact"
+      },
+      "invocation_sha256": "e9b1163c0e8b9eef87a6493c36556ff82e0be3750ddda4ae327cb3d45c717ea5",
+      "launch_finished_at": "2026-09-13T13:34:54.388316Z",
+      "launch_result": {
+        "completion_status": "COMPLETE",
+        "event": {
+          "bytes": 5208,
+          "sha256": "a81da1de2759d996ded63b304884e7beea0e752972a4f288b91fb933c6505135"
+        },
+        "event_audit": {
+          "errors": [],
+          "event_count": 4,
+          "forbidden_events": [],
+          "session_id": null,
+          "source_reopenings": 0,
+          "thread_id": "sha256:9c62bc67bc94c2f4af401db080b3dd987bf716609e31bc30efc7ca30b9340750",
+          "tools_used": false,
+          "valid_jsonl": true
+        },
+        "event_original": {
+          "bytes": 5173,
+          "sha256": "a3172ee488d34f8eb893a70aea4fd87e657305587bf50de963eac24ed7f45540"
+        },
+        "identity_sanitization": {
+          "hashed_identities": [
+            "sha256:9c62bc67bc94c2f4af401db080b3dd987bf716609e31bc30efc7ca30b9340750"
+          ],
+          "hashed_identity_count": 1,
+          "identity_fields": [
+            "thread_id",
+            "session_id",
+            "conversation_id",
+            "turn_id"
+          ],
+          "identity_value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix",
+          "original_bytes": 5173,
+          "original_sha256": "a3172ee488d34f8eb893a70aea4fd87e657305587bf50de963eac24ed7f45540",
+          "sanitized_bytes": 5208,
+          "sanitized_sha256": "a81da1de2759d996ded63b304884e7beea0e752972a4f288b91fb933c6505135",
+          "schema": "cyax-0163-identity-sanitization-v1"
+        },
+        "response": {
+          "bytes": 4760,
+          "sha256": "fd24565fb69cd51cb6410c8637ffc04e205f6ccf2d23ac7d088cb2910cb055cf"
+        },
+        "returncode": 0,
+        "session_id": null,
+        "stderr": {
+          "bytes": 2920,
+          "sha256": "8de91e5feb38fc5ede866fa4db4a254bb98c40badb2c537fda1107fb1d4ea591"
+        },
+        "thread_id": "sha256:9c62bc67bc94c2f4af401db080b3dd987bf716609e31bc30efc7ca30b9340750"
+      },
+      "launch_started_at": "2026-09-13T13:34:07.293958Z",
+      "response": {
+        "bytes": 4760,
+        "completion_status": "COMPLETE",
+        "sha256": "fd24565fb69cd51cb6410c8637ffc04e205f6ccf2d23ac7d088cb2910cb055cf",
+        "source_reopenings": 0
+      },
+      "response_artifact": "responses/B3.response",
+      "run_id": "B3",
+      "status": "CAPTURED"
+    }
+  ],
+  "schema": "cyax-0163-clean-rerun-runs-v1",
+  "source_snapshot": "cyax-0155-adversarial-20260913T043555Z",
+  "status": "ALL_CAPTURED"
+}

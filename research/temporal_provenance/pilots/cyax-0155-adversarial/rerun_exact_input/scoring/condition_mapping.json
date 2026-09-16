@@ -1,0 +1,13 @@
+{
+  "schema": "cyax-0163-clean-rerun-blind-mapping-v1",
+  "status": "FROZEN_BEFORE_DISPATCH",
+  "mapping": {
+    "S1": "A1",
+    "S2": "B1",
+    "S3": "B2",
+    "S4": "A2",
+    "S5": "A3",
+    "S6": "B3"
+  },
+  "note": "Keep this condition mapping separate from scorer-facing opaque response files. Do not provide it to the scorer until all blind scorecards are frozen."
+}

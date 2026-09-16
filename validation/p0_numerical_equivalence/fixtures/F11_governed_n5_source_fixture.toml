@@ -1,0 +1,20 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F11-governed-n5-source-fixture"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/paper_benchmarks/reduced_models.jl:11-35", "src/paper_benchmarks/reduced_models.jl:150-179", "specs/0148-catastrophe-continuation/plan.md"]
+paper_source_identity = "arXiv:2608.14780v1; source_sha256=b0f5539bf0fb40e401d93b8cfcbe3e725ba8849efdde2519646103d5f004d2e6"
+precision = "Float64 source fixture; analytic reduced-model checks use Float64"
+environment = "Julia 1.12.6; source-reconstructed bounded benchmark; no population claim"
+construction = "Named Appendix-B/Eqs. (32)-(39) N=5 eight-term charge fixture with qdot_tau values copied from the governed source function."
+purpose = "Anchor the pathological corpus to one existing bounded scientific fixture without expanding to a population result."
+legacy_source_conflict = "The legacy poly102_inflation route defines n5_critical_scale() = N8_KC (~0.674506370003365); accepted G1 evidence identifies that as a pre-existing N=5 fixture defect. This fixture follows reduced_models.jl's source-faithful N=5 scale instead."
+q = [[1, 0, 0, 2, 2, 0, 0, 7], [0, 0, 1, 2, 1, 0, 0, 5], [0, 0, 0, -2, -1, 0, 1, -3], [0, 0, 0, 1, 1, 1, 0, 3], [0, 1, 0, 1, 0, 0, 0, 2]]
+qdot_tau = [6.0, 6.25, 24.0, 26.0, 31.875, 32.0, 36.125, 162.125]
+k_c = 1.7700681326109957
+phases = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+[expected]
+historical_result = "n5_potential returns Q size (5,8), L from instanton_scales(qdot_tau,k), and eight zero phases. The governed reduced N=5 check reports minima=2 below k_c by 1e-4 and minima=1 above k_c by 1e-4."
+bounded_status = "source_reconstructed"
+claim_boundary = "bounded fixture only; not a population or stabilization claim"
+status = "applicable"

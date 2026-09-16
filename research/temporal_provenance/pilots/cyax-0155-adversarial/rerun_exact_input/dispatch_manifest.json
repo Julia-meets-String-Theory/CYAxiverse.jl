@@ -1,0 +1,90 @@
+{
+  "schema": "cyax-0163-exact-dispatch-v1",
+  "experiment": "CYAX-0163 clean adversarial rerun",
+  "source_snapshot": "cyax-0155-adversarial-20260913T043555Z",
+  "preregistration_commit": "44937a83cc039805d072bd0263517d8dfef03a10",
+  "reviewed_context_revision": "cc9545ff7bdecb44f3c5bf39d9eed3405c7ddc42",
+  "model": "gpt-5.6-sol",
+  "reasoning": "high",
+  "launch_order": [
+    "A1",
+    "B1",
+    "B2",
+    "A2",
+    "A3",
+    "B3"
+  ],
+  "encoding": "UTF-8",
+  "construction": "common_prompt_bytes + delimiter_bytes + condition_context_bytes",
+  "delimiter": {
+    "escaped_utf8": "\\n--- BEGIN FROZEN CONTEXT ---\\n",
+    "bytes": 30,
+    "sha256": "aa23570e27878cc6f2b1871145b5cca8a53128ee24ecaa12af68aca8f6f3f2f3"
+  },
+  "frozen_files": {
+    "common_prompt": {
+      "path": "../common_subject_prompt.md",
+      "bytes": 899,
+      "words": 122,
+      "sha256": "cf9b6aec4c7e232a9c2462e2f100dcefb6e49ea67422ce7670c4f85e66f3c52a"
+    },
+    "condition_a_context": {
+      "path": "../condition_a_context.md",
+      "bytes": 6429,
+      "words": 852,
+      "sha256": "aedd1350bef5389be90d2608318f7b9675f94aad0a50a8d5d59499fb017bc780"
+    },
+    "condition_b_context": {
+      "path": "../condition_b_context.md",
+      "bytes": 6702,
+      "words": 895,
+      "sha256": "33c61ad16a5228a557ae59f0ac80834674e40aae5b77a0a9e0044e82c1b2237c"
+    }
+  },
+  "inputs": {
+    "A": {
+      "artifact": "inputs/condition_a.input",
+      "bytes": 7358,
+      "words": 979,
+      "sha256": "d33243fcfd5c17698ebd6d4e64e3dce8633e889c88935c2e11ccf8f3f6a1354f"
+    },
+    "B": {
+      "artifact": "inputs/condition_b.input",
+      "bytes": 7631,
+      "words": 1022,
+      "sha256": "523d3f90ced130219eb4a06c7658d6ec4c40530d0b5e1999113476beca6c1f9f"
+    }
+  },
+  "dispatch": {
+    "mechanism": "exact_dispatch.py emit RUN_ID to binary stdout",
+    "subject_input": "one exact input artifact only",
+    "interactive_copy": false,
+    "source_reopening": false
+  },
+  "launcher": {
+    "mechanism": "launch_subject.py direct subprocess with binary stdin",
+    "argv": [
+      "codex",
+      "exec",
+      "--model",
+      "gpt-5.6-sol",
+      "-c",
+      "model_reasoning_effort=high",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--ignore-rules",
+      "--skip-git-repo-check",
+      "--json",
+      "--output-last-message",
+      "final.response",
+      "-"
+    ],
+    "shell": false,
+    "stdin": "exact per-run input artifact bytes",
+    "cwd": "fresh empty temporary directory",
+    "tool_use": false,
+    "source_reopening": false
+  }
+}

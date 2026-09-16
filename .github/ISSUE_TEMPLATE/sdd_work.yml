@@ -1,0 +1,86 @@
+name: SDD work
+description: Propose substantial engineering, scientific-contract, or research-programme work
+title: ""
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for substantial new work. It is an intake/coordination record, not the completed specification. Small S0 fixes may go directly to a focused PR.
+
+  - type: dropdown
+    id: spec_class
+    attributes:
+      label: Proposed SDD class
+      description: Classify by semantic/scientific risk rather than line count. This may be refined during specification.
+      options:
+        - S1 — Engineering
+        - S2 — Scientific / Contract
+        - S3 — Research Programme
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workstream
+    attributes:
+      label: Workstream
+      options:
+        - Inflation
+        - Orientifolds
+        - Sampling / Ensembles
+        - Spectrum / BHSR
+        - Axion-photon
+        - Bayesian
+        - Infrastructure
+        - Release
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or research question
+      description: What capability, correction, reproduction, or scientific question should this work address?
+      placeholder: State the problem or question without prescribing unnecessary implementation detail.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why_now
+    attributes:
+      label: Why now?
+      description: Why is this work useful or necessary at this point in the project?
+    validations:
+      required: true
+
+  - type: textarea
+    id: sources
+    attributes:
+      label: Known sources and prior work
+      description: Link relevant papers, repository files, Issues, PRs, validation artifacts, or prior specs. Leave unknowns explicit.
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Known constraints and non-scope
+      description: Record important boundaries already known. Detailed requirements belong in the eventual spec.
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Known dependencies or blockers
+      description: Prefer native GitHub dependency relationships once the Issue exists; summarize known relationships here for intake.
+
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Potential contract impact
+      description: Check every area this work might change. This is a risk signal, not approval to make the change.
+      options:
+        - label: Scientific interpretation or acceptance criteria
+        - label: Physical normalization, basis, coordinates, or reported observable
+        - label: Sampling measure, population definition, or counting unit
+        - label: Persisted scientific schema or reader/writer contract
+        - label: Public API or supported environment
+        - label: None of the above is currently expected

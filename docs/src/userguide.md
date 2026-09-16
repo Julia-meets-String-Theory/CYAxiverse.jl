@@ -3,6 +3,8 @@
 !!! warning
     Under construction
 
+For first-time setup, see the [Installation](@ref Installation) page.
+
 ## Optional plotting
 
 Core package loading does not import the plotting stack. To use the plotting
@@ -22,6 +24,11 @@ The geometry database is rooted at a directory containing entries such as
 `CYAxiverse.jl`, the package's general default is `../data`: the `data`
 directory one level above the repository directory. This default is anchored
 to the package checkout and does not depend on the current working directory.
+Core package loading does not require this database; set a data directory only
+for workflows that read or write geometry files.
+For a package-manager installation or another public data-backed deployment,
+set `CYAXIVERSE_DATA_DIR` explicitly. The `../data` location is a
+source-checkout fallback, not the recommended public default.
 
 Data-directory selection follows this order:
 

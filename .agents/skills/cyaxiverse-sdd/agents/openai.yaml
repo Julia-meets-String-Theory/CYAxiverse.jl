@@ -1,0 +1,4 @@
+interface:
+  display_name: "CYAxiverse SDD"
+  short_description: "Specify and trace CYAxiverse work"
+  default_prompt: "Use $cyaxiverse-sdd to specify, plan, task, or converge this CYAxiverse change."

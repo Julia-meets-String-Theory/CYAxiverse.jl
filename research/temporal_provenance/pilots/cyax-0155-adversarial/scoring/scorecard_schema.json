@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CYAX-0155 blind scorecard",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "opaque_id", "scores", "raw_total", "conflict_critical", "automatic_failure",
+    "automatic_failure_reasons", "unsupported_assertions", "authority_errors",
+    "temporal_errors", "supersession_errors", "unjustified_inferences",
+    "correct_abstentions", "incorrect_abstentions", "next_action_correct",
+    "source_reopenings"
+  ],
+  "properties": {
+    "opaque_id": {"type": "string", "pattern": "^S[1-6]$"},
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9", "K10", "K11", "K12"],
+      "properties": {
+        "K1": {"type": "integer", "enum": [0, 1]}, "K2": {"type": "integer", "enum": [0, 1]},
+        "K3": {"type": "integer", "enum": [0, 1]}, "K4": {"type": "integer", "enum": [0, 1]},
+        "K5": {"type": "integer", "enum": [0, 1]}, "K6": {"type": "integer", "enum": [0, 1]},
+        "K7": {"type": "integer", "enum": [0, 1]}, "K8": {"type": "integer", "enum": [0, 1]},
+        "K9": {"type": "integer", "enum": [0, 1]}, "K10": {"type": "integer", "enum": [0, 1]},
+        "K11": {"type": "integer", "enum": [0, 1]}, "K12": {"type": "integer", "enum": [0, 1]}
+      }
+    },
+    "raw_total": {"type": "integer", "minimum": 0, "maximum": 12, "description": "Always sum K1-K12; never zeroed by automatic failure."},
+    "conflict_critical": {"type": "integer", "minimum": 0, "maximum": 5, "description": "Sum K6,K7,K8,K9,K11."},
+    "automatic_failure": {"type": "boolean"},
+    "automatic_failure_reasons": {"type": "array", "items": {"type": "string"}},
+    "unsupported_assertions": {"type": "integer", "minimum": 0},
+    "authority_errors": {"type": "integer", "minimum": 0},
+    "temporal_errors": {"type": "integer", "minimum": 0},
+    "supersession_errors": {"type": "integer", "minimum": 0},
+    "unjustified_inferences": {"type": "integer", "minimum": 0},
+    "correct_abstentions": {"type": "integer", "minimum": 0},
+    "incorrect_abstentions": {"type": "integer", "minimum": 0},
+    "next_action_correct": {"type": "boolean", "description": "Whether the proposed next step verifies the Project view or obtains a durable owner statement without automatically changing #155."},
+    "source_reopenings": {"type": "integer", "minimum": 0}
+  }
+}

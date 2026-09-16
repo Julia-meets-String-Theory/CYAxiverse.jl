@@ -1,0 +1,50 @@
+{
+  "context_commit": "191cb52fcc0788b863d03f403f6710bcb600e544",
+  "launch_order": [
+    "A1",
+    "B1",
+    "B2",
+    "A2"
+  ],
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "high",
+  "responses_frozen_before_scoring": true,
+  "runs": {
+    "A1": {
+      "condition": "A",
+      "context": "condition_a_context.md",
+      "response": "runs/a1/response.md",
+      "response_bytes": 8273,
+      "response_sha256": "8236096c5dacc7d9217a158d43cf31a4eb1bd8483d61b302953d2dcb77fcdf6a",
+      "response_words": 927,
+      "source_reopenings": 0
+    },
+    "A2": {
+      "condition": "A",
+      "context": "condition_a_context.md",
+      "response": "runs/a2/response.md",
+      "response_bytes": 8131,
+      "response_sha256": "8bdf196099aaedc6e9918a03ad388bccf2afb1675e6034fa6412aea6a34fdd72",
+      "response_words": 1004,
+      "source_reopenings": 0
+    },
+    "B1": {
+      "condition": "B",
+      "context": "condition_b_context.md",
+      "response": "runs/b1/response.md",
+      "response_bytes": 7963,
+      "response_sha256": "4cb972fcaa1c06ca700334e680b74defbb1688c8668f95f4bd49ca78fe07d956",
+      "response_words": 859,
+      "source_reopenings": 0
+    },
+    "B2": {
+      "condition": "B",
+      "context": "condition_b_context.md",
+      "response": "runs/b2/response.md",
+      "response_bytes": 8798,
+      "response_sha256": "e307ea5d709bd2297fa988fea45e27cfcc5d93f595483bb47b4b42b0678d57af",
+      "response_words": 963,
+      "source_reopenings": 0
+    }
+  }
+}

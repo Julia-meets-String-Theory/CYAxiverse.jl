@@ -1,0 +1,32 @@
+{
+  "number": 155,
+  "title": "Add private-safe conversation checkpoints to the CYAxiverse Project",
+  "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/155",
+  "state": "CLOSED",
+  "stateReason": "COMPLETED",
+  "createdAt": "2026-09-10T23:58:12Z",
+  "closedAt": "2026-09-11T01:09:18Z",
+  "updatedAt": "2026-09-11T01:09:18Z",
+  "projectItems": [
+    {"title": "CYAxiverse Research & Development", "status": "Done"}
+  ],
+  "body_extracts": {
+    "objective": "Add a privacy-safe way to surface durable outcomes from exploratory AI/chat investigations in the existing CYAxiverse Research & Development GitHub Project without making GitHub an index or archive of private conversations.",
+    "project_model": "A later Research & Chats saved view should show these durable investigation/checkpoint Issues using the same Status field.",
+    "acceptance": "A Research & Chats Project view can be created from the defined durable-item convention without creating a second project ledger."
+  },
+  "comments": [
+    {
+      "id": "IC_kwDOH3RaMs8AAAABT2gXHw",
+      "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/155#issuecomment-5627189023",
+      "createdAt": "2026-09-11T00:01:47Z",
+      "author": "vmmhep",
+      "authorAssociation": "MEMBER",
+      "heading": "CYAX-0155 implementation update",
+      "implementation_statement": "Privacy-rule implementation is complete and merged via PR #156. The repository-side privacy boundary is therefore active on vmm.",
+      "remaining_project_action": "Keep #155 open until the Research & Chats saved Project view/filter is configured.",
+      "tooling_limit": "The current GitHub connector does not expose Projects-v2 view/field mutations, and current plugin discovery found no alternative Projects-specific connector, so this comment does not falsely claim that UI configuration is complete.",
+      "verification_limit": "The existing G2 auto-add workflow is expected to add matching open Issues such as #155 to Backlog; that Project-side result cannot be directly verified from the current connector."
+    }
+  ]
+}

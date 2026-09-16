@@ -15,6 +15,7 @@ makedocs(
     modules = [CYAxiverse],
     pages = [
         "Home" => "index.md",
+        "Installation" => "installation.md",
         "User guide" => "userguide.md",
         "Pipelines" => "pipelines.md",
         "Local axion-photon scan" => "axion_photon.md",

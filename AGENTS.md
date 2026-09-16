@@ -14,6 +14,16 @@ Read additional skills or handoffs only when they are relevant to the task.
 - Ordinary durable state belongs in Git: issue (when useful), branch, commits,
   PR, tests, and concise PR notes. Use long continuation handoffs only for
   genuinely long investigations or context-compaction boundaries.
+- Treat private chats, local agent sessions, local filesystem context, connected
+  applications, and private attachments as non-public by default. Before any
+  durable GitHub write derived from them, deliberately sanitize the material.
+  Unless the owner explicitly approves the exact datum for publication, do not
+  publish private conversation/share URLs or transcript dumps; absolute local
+  filesystem/home-directory paths; local usernames, hostnames, machine/device
+  identifiers; local Codex/agent/workspace/session paths; private attachment or
+  connector-local locations; secrets; credentials; or tokens. Refer to
+  repository content with repository-relative paths. If publication safety is
+  uncertain, omit the datum and stop for owner direction.
 - Prefer one branch/worktree per deliverable. Subagents normally work toward
   the same deliverable; do not create a new branch/worktree for every reasoning
   step.
@@ -129,6 +139,26 @@ durable Git/SHA/path/artifact references. Keep raw logs, full transcripts, and
 large derivations in files or artifacts unless they are needed to resolve a
 specific contradiction.
 
+### Specification-driven work
+
+Classify substantial work as S0–S3 using `cyaxiverse-sdd`. S0 work remains
+lightweight; for S1–S3 work, locate the governing feature specification before
+changing intended behavior, or draft one if none exists.
+
+For S2/S3 work, do not implement consequential behavior while the governing
+spec is still draft. Do not infer unresolved scientific normalization, basis,
+population/counting, acceptance, physical-interpretation, or schema choices;
+return them to the scientific owner. If investigation changes intended behavior,
+update and re-review the spec before continuing the affected work.
+
+Treat an approved `spec.md` as feature intent below this repository contract;
+`plan.md` and `tasks.md` are subordinate implementation artifacts. Before
+claiming S2 completion, reconcile spec, plan, tasks, implementation,
+tests/evidence, and PR scope. GitHub Issues/Projects track work state but do not
+supersede the governing spec. Do not create a GitHub issue for every task; use
+sub-issues only for independently durable, blocked, mergeable/reviewable, or
+owner-decision-bearing work.
+
 ## 7. Project skills
 
 Project-specific reusable workflows live under `.agents/skills/` and are
@@ -136,6 +166,7 @@ mirrored to tool-specific skill directories by tracked symlinks. Use only the
 skill relevant to the task; they are not mandatory pre-reading for every run:
 
 - `cyaxiverse-agent-orchestration` (delegated multi-agent work only)
+- `cyaxiverse-sdd` (S1–S3 specification/planning/convergence work)
 - `cyaxiverse-julia-quality`
 - `cyaxiverse-scientific-reproduction`
 - `cyaxiverse-ks-geometry-sampling`

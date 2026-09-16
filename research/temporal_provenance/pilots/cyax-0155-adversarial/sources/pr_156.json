@@ -1,0 +1,19 @@
+{
+  "number": 156,
+  "title": "Add private-safe conversation checkpoints",
+  "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/pull/156",
+  "state": "MERGED",
+  "baseRefName": "vmm",
+  "mergedAt": "2026-09-11T00:01:20Z",
+  "mergeCommit": "f0013552cd69a93221464e9c8ccfd56339f39052",
+  "governing_issue": 155,
+  "canonical_spec": "specs/0155-private-safe-chat-checkpoints/spec.md",
+  "implements": ["R-001", "R-002", "R-003", "R-004", "R-005"],
+  "remaining_project_action": "Creating/configuring the Research & Chats saved view itself requires GitHub Projects-v2 write capability and is intentionally kept separate from the repository diff; no Project mutation is falsely claimed here.",
+  "changed_files": [
+    ".agents/skills/cyaxiverse-sdd/SKILL.md",
+    "AGENTS.md",
+    "docs/PRIVACY_AND_CONVERSATION_CHECKPOINTS.md",
+    "specs/0155-private-safe-chat-checkpoints/spec.md"
+  ]
+}
