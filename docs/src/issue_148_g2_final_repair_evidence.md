@@ -11,7 +11,7 @@ after independent review `5b8daff`.
 - Tested commit: `cc8ac73` (`fix: enforce strict G2 branch fidelity and precision ladder`)
 - Julia: 1.12.6, arm64-apple-darwin24.0.0
 - Replay:
-  `JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia --startup-file=no --project=. scripts/issue_148_g2_continuation_evidence.jl`
+  `JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. scripts/issue_148_g2_continuation_evidence.jl`
 - Outcome: exit 0; focused regression testset passed 327/327.
 
 The replay also ran `scripts/issue_148_g1_replay_checks.jl` and

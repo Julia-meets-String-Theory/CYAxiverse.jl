@@ -16,8 +16,8 @@ The two changed files in this WIP checkpoint are
 the associated regression updates and evidence are not complete. The manager
 ran `git diff --check`, which passed; no numerical acceptance follows from it.
 
-The in-flight Julia run of `/tmp/check_n5_nonconv.jl` was interrupted during
-precompilation, with exit 130/SIGINT (execution session 60667). The worker
+The in-flight Julia run of `${TMPDIR%/}/check_n5_nonconv.jl` was interrupted during
+precompilation, with exit 130/SIGINT in a local execution session. The worker
 confirmed it stopped editing and launching tests. There is no pending worker
 lease and no automatic resume scheduled.
 

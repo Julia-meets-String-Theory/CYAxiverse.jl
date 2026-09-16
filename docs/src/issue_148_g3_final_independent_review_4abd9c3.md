@@ -228,7 +228,7 @@ avoid an unnecessary linear solve and make the method easier to read.
 ## Exact checks and observed outcomes
 
 All Julia commands used the host Julia 1.12.6 project with
-`JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`.
+`JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`.
 
 1. `julia --startup-file=no --project=.
    scripts/issue_148_g3_control_evidence.jl` exited zero in 17.5 seconds.  It

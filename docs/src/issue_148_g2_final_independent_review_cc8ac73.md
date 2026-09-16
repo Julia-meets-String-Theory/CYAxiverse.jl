@@ -55,7 +55,7 @@ unauthorized.
 ## Commands and observed outcomes
 
 All Julia commands used Julia `1.12.6` with
-`JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`.
+`JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`.
 
 1. `gh issue view 148 --repo Julia-meets-String-Theory/CYAxiverse.jl --comments --json body,comments,title,url`
    exited zero and supplied the current issue body and owner comments.
@@ -64,14 +64,14 @@ All Julia commands used Julia `1.12.6` with
    brackets, continuation/augmented agreement `1.286e-12`, a real 128/256
    ladder, 5/5 matcher agreement, the strict minimum/saddle witness, and
    327/327 assertions.
-3. Reviewer-local `/private/tmp/issue148_g2_final_reviewer_probe.jl` exited
+3. Reviewer-local `${TMPDIR%/}/issue148_g2_final_reviewer_probe.jl` exited
    zero and produced the independent inertia/separation ladder, off-branch
    rejection measurement, and independent/chained precision results recorded
    above.
-4. Reviewer-local `/private/tmp/issue148_g2_final_reviewer_probe2.jl` exited
+4. Reviewer-local `${TMPDIR%/}/issue148_g2_final_reviewer_probe2.jl` exited
    zero and reproduced the event with two fixed-`k` step sizes, exact-source
    event-bracket polishing, rank/condition diagnostics, and inertia crossing.
-5. Reviewer-local `/private/tmp/issue148_g2_reviewer_matcher_probe.jl` exited
+5. Reviewer-local `${TMPDIR%/}/issue148_g2_reviewer_matcher_probe.jl` exited
    zero against the final candidate and reported 5 matches with zero identity
    disagreements.
 6. `julia --startup-file=no --project=. scripts/audit_issue_148_n8_metric_boundary.jl`

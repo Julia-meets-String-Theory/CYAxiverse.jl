@@ -42,7 +42,7 @@ requirement under the
   observable.
 - Persisted schema: N/A; this gate creates no persisted scientific artifact.
 - Environment: Julia 1.12.6, Darwin arm64,
-  `JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`.
+  `JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`.
 - Review date: 2026-09-09. Worktree HEAD was evidence commit `668ef25` and was
   clean before this report. `git diff --exit-code 792a02f 668ef25 -- src scripts test`
   exited 0, so the tested source, regression, and replay trees equal code
@@ -190,7 +190,7 @@ Passed; worktree was clean at `668ef25`.
 
 ```sh
 python3 scripts/agent_verify.py run -- env \
-  JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+  JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. \
   scripts/issue_148_g1_n5_regression_tests.jl
 ```
@@ -199,7 +199,7 @@ Passed, exit 0: `63/63` assertions.
 
 ```sh
 python3 scripts/agent_verify.py run -- env \
-  JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+  JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. \
   scripts/issue_148_g1_replay_checks.jl
 ```
@@ -212,7 +212,7 @@ satellites with symmetry error 0 and maximum gradient `1.170419e-97`, and
 The independent satellite/rational/mixed/strict-ladder probe was run with:
 
 ```sh
-env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. -e '
 using CYAxiverse, Printf
 P = CYAxiverse.paper_benchmarks.poly102_inflation
@@ -261,7 +261,7 @@ It exited 0 with the satellite, rational, mixed-type, and strict-ladder values
 reported above. The literal default event bracket was checked with:
 
 ```sh
-env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. -e '
 using CYAxiverse, Printf
 P=CYAxiverse.paper_benchmarks.poly102_inflation

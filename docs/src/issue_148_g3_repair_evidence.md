@@ -103,7 +103,7 @@ remains available for scale transparency.
 ## Focused replay
 
 Commands were run with
-`JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`:
+`JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`:
 
 ```text
 julia --startup-file=no --project=. scripts/issue_148_g3_control_evidence.jl

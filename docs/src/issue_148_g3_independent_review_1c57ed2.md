@@ -43,7 +43,7 @@ absence of an opposing branch.
   phases, fixed saxions, period-one GLSM axions, and the P96/CYTools metric.
 
 The review used Julia 1.12.6 on `arm64-apple-darwin24.0.0` with
-`JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`. The working
+`JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`. The working
 tree was clean before this review document was added.
 
 ## Blocking findings
@@ -307,7 +307,7 @@ repeat unrelated known package failures or expand into G4/population work.
 All focused Julia commands used:
 
 ```text
-JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. <command>
 ```
 

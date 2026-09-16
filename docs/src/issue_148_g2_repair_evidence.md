@@ -12,13 +12,13 @@ revision-specific record.
 ## Replay command
 
 ```text
-JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. \
   scripts/issue_148_g2_continuation_evidence.jl
 ```
 
 Exit status was `0`. Output is retained at
-`/private/tmp/issue148-g2-repair-5b8daff.log`. The named regression testsets
+`${TMPDIR%/}/issue148-g2-repair-5b8daff.log`. The named regression testsets
 reported `321/321`, with additional top-level assertions for diagnostic,
 provenance, matcher, precision, tensor-factor, and failure-boundary checks.
 
@@ -117,4 +117,4 @@ This revision covers radial N8 G2 continuation only. It does not change the
 classifier cutoff, promote the result to a cusp claim, add G3 work, alter N5,
 change public schemas, or repair unrelated baseline failures. G1 remains
 preserved; the focused G1 replay passed 63/63 at the repaired tree (log:
-`/private/tmp/issue148-g1-after-g2-repair.log`).
+`${TMPDIR%/}/issue148-g1-after-g2-repair.log`).

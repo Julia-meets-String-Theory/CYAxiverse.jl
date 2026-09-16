@@ -133,15 +133,15 @@ is only decoupled from the repaired N=5 value.
    Hessian, gradients from `0` to `9.32e-18`, and `passed=true`. All five N=5
    records reported one iteration, meaning each accepted its initial/predicted
    state before a Newton correction.
-2. `python3 scripts/agent_verify.py run -- julia --startup-file=no --project=. /tmp/issue148_g1_regression_check.jl`
+2. `python3 scripts/agent_verify.py run -- julia --startup-file=no --project=. ${TMPDIR%/}/issue148_g1_regression_check.jl`
    exited 0 with the worker-reported `theta=[pi,pi,pi]`, gradients near zero,
    and Hessians `[7.857066692962267e-4,0,-7.850898189895039e-4]`.
-3. `python3 scripts/agent_verify.py run -- julia --startup-file=no --project=. /tmp/issue148_g1_independent_checks.jl`
+3. `python3 scripts/agent_verify.py run -- julia --startup-file=no --project=. ${TMPDIR%/}/issue148_g1_independent_checks.jl`
    exited 0. It reproduced the source ratio to at worst
    `5.551115123125783e-17` on the checked Float64 points and exposed the
    supplied-`k_c`, branch-label, last-update convergence, precision, and
    abstract-container results above. Raw output:
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_wqvtl2ad/run.stdout.log`.
+   `${TMPDIR%/}/agent_verify_wqvtl2ad/run.stdout.log`.
 4. `python3 scripts/agent_verify.py snapshot`,
    `python3 scripts/agent_verify.py diff-check`, and
    `git diff --check 62c5a6135de9ddc8208a1530f50640d666f33cfd...2a4e495ccdd838cc5b1e884fbac136115a7d433f`
@@ -294,16 +294,16 @@ boundary is not yet truthful. No scope creep was found.
    `passed=true`, event `k=1.7700681326502656`, error `3.93e-11`, gradient
    `3.78e-27`, and Hessian `-3.08e-11`. Its fine symmetric bracket happens to
    meet `1e-10`; the implementation does not enforce that result.
-2. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=/tmp/julia-depot:/Users/vmehta/.julia julia --startup-file=no --project=. /tmp/issue148_g1_rereview_checks.jl`
+2. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=${TMPDIR%/}/julia-depot:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. ${TMPDIR%/}/issue148_g1_rereview_checks.jl`
    exited 0 and produced the event, branch, precision, type, and failure results
    above. Raw output:
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_183jehj6/run.stdout.log`.
+   `${TMPDIR%/}/agent_verify_183jehj6/run.stdout.log`.
 3. The reported full-suite failure is pre-existing at the accepted base. The
    `phase_volume_detuning_scan.jl` blob is identical at base and corrected SHA
    (`cd861aa8a257ae36c9dadef6486449a0497c35a4`), and the base test contains the
    same `4pi^2 I` assertion. A direct replay returned `2pi^2 I`, not `4pi^2 I`.
    Raw output:
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_dwjdviy8/run.stdout.log`.
+   `${TMPDIR%/}/agent_verify_dwjdviy8/run.stdout.log`.
    This unrelated existing failure does not change the G1 verdict.
 4. `git diff --check 62c5a6135de9ddc8208a1530f50640d666f33cfd...b35cb74781513601cc4079e37060bf75a3e39e0e`
    passed. PR 149's documentation build passed; Fast tests were pending and the
@@ -436,22 +436,22 @@ are resolved. No scope expansion was found.
 
 1. The tracked replay script exited 0 and reproduced the reported four-record
    continuation and event. Raw output:
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_nefpd_f0/run.stdout.log`.
+   `${TMPDIR%/}/agent_verify_nefpd_f0/run.stdout.log`.
 2. The tracked focused regression script exited 0 with 24/24 assertions.
    Raw output:
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_olmcx1fv/run.stdout.log`.
+   `${TMPDIR%/}/agent_verify_olmcx1fv/run.stdout.log`.
 3. Independent adversarial replay exited 0 and produced the branch, failed
    continuation event, endpoint-scale, absolute-gradient, precision, and
    non-finite-control results above. Script:
-   `/tmp/issue148_g1_final_rereview_checks.jl`; raw output:
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_934vulah/run.stdout.log`.
+   `${TMPDIR%/}/issue148_g1_final_rereview_checks.jl`; raw output:
+   `${TMPDIR%/}/agent_verify_934vulah/run.stdout.log`.
 4. `git diff --check
    62c5a6135de9ddc8208a1530f50640d666f33cfd...e880fd22ff46711826967191da90c69aaafcf6b6`
    passed. The worktree was clean before this review artifact was appended.
 5. The broader audit's JET `i` findings are pre-existing N8 limitations:
    `reduced_models.jl` has no diff from G0, and the `poly102_inflation.jl`
    diff has no N8 functional hunk. The audit log is
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_e5hy0bcu/run.stdout.log`;
+   `${TMPDIR%/}/agent_verify_e5hy0bcu/run.stdout.log`;
    its unrelated N8 result and subsequent EMFILE/Revise limitations do not
    alter this G1 verdict.
 

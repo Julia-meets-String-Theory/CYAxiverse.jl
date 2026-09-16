@@ -27,7 +27,7 @@ yet satisfy G1.
   either repository homotopy scale. The review makes no N=8, physical
   observable, off-ray, population, metric, phase, or persisted-schema claim.
 - Environment: Julia 1.12.6, Darwin arm64,
-  `JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`.
+  `JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`.
 
 ## Material finding
 
@@ -198,13 +198,13 @@ No scope creep was found.
    this review document was added.
 2. `python3 scripts/agent_verify.py diff-check` and
    `git diff --check 62c5a61...c391d30` passed.
-3. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia --startup-file=no --project=. scripts/issue_148_g1_replay_checks.jl`
+3. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. scripts/issue_148_g1_replay_checks.jl`
    passed as a process. The observed results are recorded above; raw output was
    written to
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_s3yk80c0/run.stdout.log`.
-4. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia --startup-file=no --project=. scripts/issue_148_g1_n5_regression_tests.jl`
+   `${TMPDIR%/}/agent_verify_s3yk80c0/run.stdout.log`.
+4. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. scripts/issue_148_g1_n5_regression_tests.jl`
    passed 40/40 assertions; raw output was written to
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_an9oz5l9/run.stdout.log`.
+   `${TMPDIR%/}/agent_verify_an9oz5l9/run.stdout.log`.
 5. A direct Julia replay computed `theta_satellite=acos(-1/(4a(k)))` at the
    same `k=k_c-1e-5` and supplied it as the one-point seed. It exited 0 with the
    incorrect accepted identity quoted in the material finding.
@@ -215,13 +215,13 @@ No scope creep was found.
 The exact direct adversarial command was:
 
 ```sh
-env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia --startup-file=no --project=. -e 'using CYAxiverse; P=CYAxiverse.paper_benchmarks.poly102_inflation; kc=P.n5_critical_scale(); k0=kc-1e-5; a=P.n5_reduced_ratio(k0); sat=acos(-1/(4a)); println("kc=",repr(kc)); println("k0=",repr(k0)); println("satellite=",repr(sat)); println("distance_from_pi=",repr(pi-sat)); try p=P.n5_reduced_zero_phase_continuation([k0]; seed_theta=sat, gradient_tolerance=1e-12); s=p[1]; println("accepted=true"); println("branch=",s.branch); println("theta=",repr(s.theta)); println("theta_minus_sat=",repr(s.theta-sat)); println("gradient=",repr(s.gradient)); println("hessian=",repr(s.hessian)); println("converged=",s.converged); catch e; println("accepted=false"); println("error=",typeof(e),": ",e); end'
+env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. -e 'using CYAxiverse; P=CYAxiverse.paper_benchmarks.poly102_inflation; kc=P.n5_critical_scale(); k0=kc-1e-5; a=P.n5_reduced_ratio(k0); sat=acos(-1/(4a)); println("kc=",repr(kc)); println("k0=",repr(k0)); println("satellite=",repr(sat)); println("distance_from_pi=",repr(pi-sat)); try p=P.n5_reduced_zero_phase_continuation([k0]; seed_theta=sat, gradient_tolerance=1e-12); s=p[1]; println("accepted=true"); println("branch=",s.branch); println("theta=",repr(s.theta)); println("theta_minus_sat=",repr(s.theta-sat)); println("gradient=",repr(s.gradient)); println("hessian=",repr(s.hessian)); println("converged=",s.converged); catch e; println("accepted=false"); println("error=",typeof(e),": ",e); end'
 ```
 
 The exact precision-boundary and decreasing-tolerance command was:
 
 ```sh
-env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia --startup-file=no --project=. -e 'using CYAxiverse; P=CYAxiverse.paper_benchmarks.poly102_inflation; setprecision(BigFloat,256) do; kc=BigFloat(4)/BigFloat(pi)*log(BigFloat(1024)/BigFloat(255)); k=kc-BigFloat("1e-20"); d=P.n5_reduced_critical_points(k); d0=P.n5_reduced_critical_points(k;atol=zero(BigFloat)); println("precision_boundary_bits=",precision(BigFloat)); println("precision_boundary_delta=",kc-k); println("default_points=",length(d.theta)); println("default_minima=",d.minima); println("zero_atol_points=",length(d0.theta)); println("zero_atol_minima=",d0.minima); println("zero_atol_satellite_offset=",pi-d0.theta[2]); end; for (bits,tolstr) in ((128,"1e-30"),(256,"1e-60")); setprecision(BigFloat,bits) do; kc=BigFloat(4)/BigFloat(pi)*log(BigFloat(1024)/BigFloat(255)); t=BigFloat(tolstr); grid=[kc-BigFloat("1e-3"),kc-BigFloat("2e-4"),kc+BigFloat("2e-4"),kc+BigFloat("1e-3")]; p=P.n5_reduced_zero_phase_continuation(grid;seed_theta=BigFloat(pi)+BigFloat("1e-3"),gradient_tolerance=t,hessian_tolerance=t,event_scale_tolerance=t,max_iterations=256); idx=findfirst(s->s.catastrophe_detected,p); s=p[idx]; println("ladder_bits=",bits); println("ladder_type=",typeof(s.catastrophe_k)); println("ladder_k=",s.catastrophe_k); println("ladder_k_error=",abs(s.catastrophe_k-kc)); println("ladder_theta_error=",abs(s.catastrophe_theta-BigFloat(pi))); println("ladder_gradient=",s.catastrophe_residual); println("ladder_hessian=",s.catastrophe_hessian); end; end'
+env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. -e 'using CYAxiverse; P=CYAxiverse.paper_benchmarks.poly102_inflation; setprecision(BigFloat,256) do; kc=BigFloat(4)/BigFloat(pi)*log(BigFloat(1024)/BigFloat(255)); k=kc-BigFloat("1e-20"); d=P.n5_reduced_critical_points(k); d0=P.n5_reduced_critical_points(k;atol=zero(BigFloat)); println("precision_boundary_bits=",precision(BigFloat)); println("precision_boundary_delta=",kc-k); println("default_points=",length(d.theta)); println("default_minima=",d.minima); println("zero_atol_points=",length(d0.theta)); println("zero_atol_minima=",d0.minima); println("zero_atol_satellite_offset=",pi-d0.theta[2]); end; for (bits,tolstr) in ((128,"1e-30"),(256,"1e-60")); setprecision(BigFloat,bits) do; kc=BigFloat(4)/BigFloat(pi)*log(BigFloat(1024)/BigFloat(255)); t=BigFloat(tolstr); grid=[kc-BigFloat("1e-3"),kc-BigFloat("2e-4"),kc+BigFloat("2e-4"),kc+BigFloat("1e-3")]; p=P.n5_reduced_zero_phase_continuation(grid;seed_theta=BigFloat(pi)+BigFloat("1e-3"),gradient_tolerance=t,hessian_tolerance=t,event_scale_tolerance=t,max_iterations=256); idx=findfirst(s->s.catastrophe_detected,p); s=p[idx]; println("ladder_bits=",bits); println("ladder_type=",typeof(s.catastrophe_k)); println("ladder_k=",s.catastrophe_k); println("ladder_k_error=",abs(s.catastrophe_k-kc)); println("ladder_theta_error=",abs(s.catastrophe_theta-BigFloat(pi))); println("ladder_gradient=",s.catastrophe_residual); println("ladder_hessian=",s.catastrophe_hessian); end; end'
 ```
 
 The known full-suite phase-volume mismatch and N8 JET/Revise audit failures are

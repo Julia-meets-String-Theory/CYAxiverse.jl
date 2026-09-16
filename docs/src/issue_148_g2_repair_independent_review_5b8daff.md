@@ -146,15 +146,15 @@ No cutoff or physical normalization should change without that decision.
 
 ## Commands and observed outcomes
 
-- `JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia
+- `JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia
   --startup-file=no --project=. scripts/issue_148_g2_continuation_evidence.jl`
   exited 0 and reported 321/321 in the named testset, 8 bordered steps, 292
   fixed-k fallbacks, 5 matcher comparisons with 0 disagreements, and
   `:unresolved` classification.
-- Reviewer probes at `/private/tmp/issue148_g2_reviewer_probe.jl`,
-  `/private/tmp/issue148_g2_reviewer_probe2.jl`,
-  `/private/tmp/issue148_g2_reviewer_probe3.jl`, and
-  `/private/tmp/issue148_g2_reviewer_matcher_probe.jl` exited 0 after one
+- Reviewer probes at `${TMPDIR%/}/issue148_g2_reviewer_probe.jl`,
+  `${TMPDIR%/}/issue148_g2_reviewer_probe2.jl`,
+  `${TMPDIR%/}/issue148_g2_reviewer_probe3.jl`, and
+  `${TMPDIR%/}/issue148_g2_reviewer_matcher_probe.jl` exited 0 after one
   corrected probe-script error. They produced the duplicate-root,
   strict-fallback, true-256-bit, below-side pair, and matcher observations
   quoted above. These scripts are reviewer-local; all decisive numerical

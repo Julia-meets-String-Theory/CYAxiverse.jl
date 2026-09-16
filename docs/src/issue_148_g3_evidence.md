@@ -120,7 +120,7 @@ All commands below use the host Julia installation and the isolated issue
 depot used for the focused checks:
 
 ```text
-JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. scripts/issue_148_g3_control_evidence.jl
 ```
 
@@ -129,7 +129,7 @@ Result: exit `0`, `Issue 148 G3 local-control evidence: PASS`.
 The prerequisite and preserved-scope checks also passed at this tree:
 
 ```text
-JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. scripts/audit_issue_148_g3_controls.jl
 ```
 
@@ -138,7 +138,7 @@ control boundaries, action/amplitude rank, and the audit finite-difference
 control witness.
 
 ```text
-JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. scripts/issue_148_g1_replay_checks.jl
 ```
 

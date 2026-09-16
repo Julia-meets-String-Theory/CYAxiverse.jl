@@ -25,11 +25,11 @@ remove or change existing public interfaces. Persisted schema: N/A.
 
 ## Tested revision and environment
 
-- `CODE`: `/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CYAxiverse.jl.worktrees/issue-148-catastrophe-continuation`
+- `CODE`: `.`
 - Tested code SHA: `792a02f`
 - Accepted G0 base: `62c5a61`
 - Julia: `1.12.6` (commit `15346901f00`), macOS arm64
-- `JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`
+- `JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`
 - Date: `2026-09-09`
 
 ## Focused checks at `792a02f`
@@ -37,7 +37,7 @@ remove or change existing public interfaces. Persisted schema: N/A.
 ### Regression tests (63/63 pass)
 
 ```
-env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. scripts/issue_148_g1_n5_regression_tests.jl
 ```
 
@@ -61,7 +61,7 @@ Key assertions:
 ### Replay checks
 
 ```
-env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. scripts/issue_148_g1_replay_checks.jl
 ```
 

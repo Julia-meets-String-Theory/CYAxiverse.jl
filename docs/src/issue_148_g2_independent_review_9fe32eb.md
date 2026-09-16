@@ -142,11 +142,11 @@ another already-approved diagnostic is required for the source cusp claim.
 ## Commands and observed outcomes
 
 All Julia commands used Julia `1.12.6` with
-`JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`.
+`JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`.
 
 1. `gh issue view 148 --comments --json ...` — exit 0 with escalated network;
    current issue body and owner comments through P96 approval were inspected.
-2. `shasum -a 256 /private/tmp/2608.14780v1.pdf` — exit 0; hash matched
+2. `shasum -a 256 ${TMPDIR%/}/2608.14780v1.pdf` — exit 0; hash matched
    `b0f5539...d2e6`.
 3. `julia --startup-file=no --project=. scripts/issue_148_g2_continuation_evidence.jl`
    — exit 0, reported 321/321; reproduced `k=0.6745063700038947`, but also

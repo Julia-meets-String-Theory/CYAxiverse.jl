@@ -28,14 +28,14 @@ The ten-term author raw-angle path remains the separately labeled A96 check.
 ## Exact replay
 
 ```text
-JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia \
+JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} \
   julia --startup-file=no --project=. \
   scripts/issue_148_g2_continuation_evidence.jl
 ```
 
 Observed exit status: `0`. The run used `Random.seed!(148)` for the bounded
 regular-seed discovery. The tested output is retained at
-`/private/tmp/issue148-g2-run-9fe32eb.log`.
+`${TMPDIR%/}/issue148-g2-run-9fe32eb.log`.
 
 ## Observed results
 

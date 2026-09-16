@@ -40,7 +40,7 @@ owner/source ambiguity.
   repository homotopy scale and is not a physical observable.
 - Persisted schema: N/A. No persisted artifact or schema is produced.
 - Environment: Julia 1.12.6, `arm64-apple-darwin24.0.0`, Darwin,
-  `JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia`.
+  `JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH}`.
 - Review scope is N5 zero-phase source-reduced behavior only. It makes no N8,
   off-ray, exhaustive-branch, through-cusp, metric, phase, physical-observable,
   population, or persisted-schema claim. G2 pseudo-arclength/metric requirements
@@ -235,13 +235,13 @@ G1's analytic-agreement requirement. No material scope creep was found.
 
 1. `python3 scripts/agent_verify.py snapshot` passed on a clean worktree before
    this review document was added.
-2. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia --startup-file=no --project=. scripts/issue_148_g1_n5_regression_tests.jl`
+2. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. scripts/issue_148_g1_n5_regression_tests.jl`
    passed 49/49 assertions. Raw stdout:
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_fy9tcu9j/run.stdout.log`.
-3. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia --startup-file=no --project=. scripts/issue_148_g1_replay_checks.jl`
+   `${TMPDIR%/}/agent_verify_fy9tcu9j/run.stdout.log`.
+3. `python3 scripts/agent_verify.py run -- env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. scripts/issue_148_g1_replay_checks.jl`
    exited 0 with the event, failure-boundary, branch, and fixed-tolerance ladder
    values above. Raw stdout:
-   `/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_j24fkrrn/run.stdout.log`.
+   `${TMPDIR%/}/agent_verify_j24fkrrn/run.stdout.log`.
 4. Direct Float64 replay computed the satellite from `acos(-1/(4a(k)))` at the
    same `k_c-1e-5`, proved its rejection, accepted the perturbed `pi` seed, and
    replayed the two-point event path.
@@ -257,7 +257,7 @@ G1's analytic-agreement requirement. No material scope creep was found.
 The exact command that reproduces the material defect is:
 
 ```sh
-env JULIA_DEPOT_PATH=/tmp/julia_depot_issue148:/Users/vmehta/.julia julia --startup-file=no --project=. -e 'using CYAxiverse; P=CYAxiverse.paper_benchmarks.poly102_inflation; setprecision(BigFloat,256) do; kc=BigFloat(4)/BigFloat(pi)*log(BigFloat(1024)/BigFloat(255)); k=kc-BigFloat("1e-40"); a=P.n5_reduced_ratio(k); lower=acos(-one(BigFloat)/(BigFloat(4)*a)); upper=BigFloat(2)*BigFloat(pi)-lower; cp=P.n5_reduced_critical_points(k;atol=zero(BigFloat)); grad(t)=sin(t)+BigFloat(2)*a*sin(BigFloat(2)*t); println((k_delta=kc-k,true_lower_offset=lower-BigFloat(pi),true_upper_offset=upper-BigFloat(pi),reported_offsets=cp.theta.-BigFloat(pi),nearest_upper_error=minimum(abs.(cp.theta.-upper)),spurious_gradient=abs(grad(cp.theta[2])),true_upper_gradient=abs(grad(upper)),two_pi_float_error=BigFloat(2pi)-BigFloat(2)*BigFloat(pi),signs=cp.hessian_sign,minima=cp.minima)); end'
+env JULIA_DEPOT_PATH=${TMPDIR%/}/julia_depot_issue148:${JULIA_DEPOT_PATH} julia --startup-file=no --project=. -e 'using CYAxiverse; P=CYAxiverse.paper_benchmarks.poly102_inflation; setprecision(BigFloat,256) do; kc=BigFloat(4)/BigFloat(pi)*log(BigFloat(1024)/BigFloat(255)); k=kc-BigFloat("1e-40"); a=P.n5_reduced_ratio(k); lower=acos(-one(BigFloat)/(BigFloat(4)*a)); upper=BigFloat(2)*BigFloat(pi)-lower; cp=P.n5_reduced_critical_points(k;atol=zero(BigFloat)); grad(t)=sin(t)+BigFloat(2)*a*sin(BigFloat(2)*t); println((k_delta=kc-k,true_lower_offset=lower-BigFloat(pi),true_upper_offset=upper-BigFloat(pi),reported_offsets=cp.theta.-BigFloat(pi),nearest_upper_error=minimum(abs.(cp.theta.-upper)),spurious_gradient=abs(grad(cp.theta[2])),true_upper_gradient=abs(grad(upper)),two_pi_float_error=BigFloat(2pi)-BigFloat(2)*BigFloat(pi),signs=cp.hessian_sign,minima=cp.minima)); end'
 ```
 
 Return only the bounded target-precision satellite-construction correction and
