@@ -93,8 +93,12 @@ Version validation uses Julia `VersionNumber` semantics or a demonstrated
 equivalent. It distinguishes final `X.Y.Z` from approved `X.Y.Z-DEV`;
 the prerelease suffix alone does not make a valid development version invalid.
 The governed package grammar admits only those two exact forms, with three
-nonnegative decimal components and no build metadata. Other prereleases,
+canonical nonnegative decimal components (`0|[1-9][0-9]*`) and no build
+metadata. The raw version string must equal its canonical rendering; reject
+leading-zero aliases even when Julia normalizes them. Other prereleases,
 including `-alpha` and `-rc1`, are rejected even if Julia can parse them.
+Canonical future public tags use exactly `vX.Y.Z` with the same component
+grammar and raw-string equality.
 
 ### R-006 — Deterministic principal development identity
 
@@ -374,6 +378,11 @@ The canonical `released` event precedes GitHub Release publication and is
 never mutated to add its later ID. A separate immutable/content-addressed
 publication-evidence artifact keyed by event ID and public tag records GitHub
 Release identity, publication time and evidence after publication.
+Public event and evidence references are sanitized repository-relative paths,
+public GitHub identities or content-addressed digests. They must not contain
+private conversation or local-machine locators, credentials, or raw private
+environment values. The publication boundary in `AGENTS.md` applies before
+any event or evidence artifact becomes durable on GitHub.
 
 ### R-043 — Bidirectional release consistency
 
@@ -382,6 +391,9 @@ exactly one matching released event/version/line/commit/tree/certified
 iteration tree; every GitHub Release to resolve through its canonical tag to
 that event; and every released event to resolve back to its immutable tag,
 release commit/tree and certified anchor/tree. Mismatch is INVALID.
+This bidirectional contract applies to post-retrofit canonical releases;
+legacy `v-0.1` and its historical publication remain grandfathered under
+R-036 rather than being reinterpreted as a future canonical release.
 `publication_reconciliation_pending` is an explicit nonterminal forward
 recovery state, never silently accepted as `terminal_consistent`.
 `tag_reconciliation_pending` is likewise nonterminal and requires durable
@@ -416,6 +428,15 @@ from canonical future tag parsing. Existing principal `main` and
 pre-adoption `vmm` package versions remain unavailable as historical/current
 identities until Gate B provides fuller designations.
 
+Every `static_iteration_snapshot` stores the canonical source repository/ref,
+resolved source commit and tree, exact `iterations.toml` SHA-256 content digest,
+sorted validated `iterations/*` ref-to-commit/tree bindings and their
+canonical ref-set digest, sorted canonical public tag-to-commit bindings and
+their canonical tag-set digest, derived occupied version set and overall
+snapshot digest. The snapshot is replayable from these identities. If any
+source, anchor or tag changes before a mutation commits, the bound snapshot
+is stale and the transaction refreshes or blocks.
+
 The `release-events` branch is a minimal orphan non-package-source branch
 containing one canonical `release-events.jsonl` stream, bootstrapped empty in
 Gate A. Every mutation is made by a controlled writer under protected linear
@@ -442,6 +463,25 @@ UTC time and lifecycle transitions. One owner-line DEV identity corresponds
 to one active reservation and actual line head. A prepared reservation is
 globally unavailable. Abort is allowed only with proof the matching DEV state
 was never entered; uncertain outcomes remain unavailable and frozen.
+
+Every event has the common required fields in R-040. Allocation-changing
+events also require `transaction_id`, `static_iteration_snapshot` digest and
+`expected_event_head`. The schema requires reservation events to bind owner
+line, final version and intended DEV; `prepared` additionally binds expected
+line head, `opened` binds actual DEV head, `aborted` binds definite non-entry
+evidence, and `consumed` binds closure anchor and terminal disposition.
+`maintenance_line_opened` binds approved base, branch ref/head, active
+reservation and DEV version. `candidate_opened` binds durable candidate
+ref/SHA/tree, final version, release line and anchor; `candidate_withdrawn`
+binds prior candidate and withdrawal evidence. `release_intent_prepared`
+binds candidate, certified subject/evidence, final release SHA/tree, version,
+line and proposed tag; `release_intent_aborted` binds prior intent and proof
+that no public tag exists. `released` requires the R-042 line-specific
+identity set and a matching intent/tag. Type-specific events reject fields
+from unrelated states, duplicate transitions, nonexistent predecessors and
+terminal-to-active reversals. The implementation publishes a versioned schema
+with these exact required/forbidden fields and transition predicates; the
+event stream records its schema version for replay.
 
 Canonical snapshots, events and evidence identities use UTF-8 with ASCII
 printable wire strings, lexicographically sorted object keys, compact JSON
@@ -484,12 +524,17 @@ subsequent failures reconcile event and publication forward. The released
 event's `previous_main_*` means frozen pre-integration principal `main`;
 `main_at_event_*` means verified post-reconciliation principal release
 `main`, or contemporaneous unchanged principal `main` for maintenance.
-At closure, candidate, final release and certified anchor trees, parsed
+For `kind=prospective` records, at closure, candidate, final release and
+certified anchor trees, parsed
 `Project.toml` must equal the recorded final `X.Y.Z` exactly. Principal
 `main` after promotion must carry the same final version; a maintenance
 public tag must resolve to the matching package version without moving
 principal `main`. A mismatch is INVALID before tag creation and during
 terminal validation.
+Gate B retrospective records instead validate the recorded historical
+declared version and the separate fact of what `Project.toml` actually
+carried. Historical mismatch is preserved as truth, not rewritten to pass
+prospective equality.
 
 For each append, the writer first checks whether the exact transaction ID
 already appears with the same canonical payload. A match is idempotent
@@ -533,6 +578,8 @@ Negative cases include unsupported Julia prereleases/build forms, final
 package-version mismatch at each release tree, uncertain append response,
 duplicate transaction ID with changed payload, intent without tag, tag
 without released event, and mismatched tag/intent/release evidence.
+Include leading-zero package and public-tag aliases, static snapshot field
+omissions/digest mismatch and changed anchor/tag/source under a bound snapshot.
 
 Fail closed when a pinned source/approval or reviewer authority cannot be
 verified, the static selector or serialized writer cannot be established, an
