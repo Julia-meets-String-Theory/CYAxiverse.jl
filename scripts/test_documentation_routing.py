@@ -122,6 +122,46 @@ class DocumentationRoutingTests(unittest.TestCase):
             stable_exported = stable_values.github_env.read_text(encoding="utf-8")
         self.assertIn("CYAX_DOCS_STABLE_TAG=v0.3.0", stable_exported)
 
+        multi_ref = copy.deepcopy(event)
+        multi_ref["certification_evidence_refs"] = [
+            "evidence/certification.json",
+            "evidence/certification-attestation.json",
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            values.github_env = pathlib.Path(temporary) / "multi-ref.env"
+            with patch.object(verifier, "parse_stream", return_value=[multi_ref]), patch.object(
+                verifier, "list_canonical_public_tags", return_value=["v0.3.0"]
+            ), patch.object(verifier, "resolve_tag_commit", return_value=sha):
+                self.assertEqual(verifier.verify(values), 0)
+            self.assertIn(
+                "CYAX_DOCS_EVENT_STATUS=verified",
+                values.github_env.read_text(encoding="utf-8"),
+            )
+
+        transferred = copy.deepcopy(event)
+        transferred["candidate_sha"] = "b" * 40
+        transferred["certification_subject_sha"] = "b" * 40
+        transferred["certification_transfer_evidence"] = {
+            "verified": True,
+            "candidate_sha": "b" * 40,
+            "final_release_sha": sha,
+            "certified_tree": tree,
+            "candidate_tree": tree,
+            "final_release_tree": tree,
+            "anchor_tree": tree,
+            "evidence_ref": "evidence/transfer.json",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            values.github_env = pathlib.Path(temporary) / "transfer.env"
+            with patch.object(verifier, "parse_stream", return_value=[transferred]), patch.object(
+                verifier, "list_canonical_public_tags", return_value=["v0.3.0"]
+            ), patch.object(verifier, "resolve_tag_commit", return_value=sha):
+                self.assertEqual(verifier.verify(values), 0)
+            self.assertIn(
+                "CYAX_DOCS_EVENT_STATUS=verified",
+                values.github_env.read_text(encoding="utf-8"),
+            )
+
         empty_values = type(
             "Args",
             (),

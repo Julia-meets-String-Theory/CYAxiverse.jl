@@ -508,6 +508,19 @@ class TestReleaseEvidence(unittest.TestCase):
     def test_bidirectional_mismatch_is_invalid(self):
         release = github_release()
         release["target_sha"] = SHA_B
+        without_publication_evidence = validate_release_consistency(
+            released_event(),
+            tag(),
+            release,
+            release_intent=release_intent(),
+            certification=certification(),
+            project_versions=project_versions(),
+        )
+        self.assertEqual(without_publication_evidence["status"], INVALID)
+        self.assertEqual(
+            without_publication_evidence["reason_code"],
+            "GITHUB_RELEASE_SHA_MISMATCH",
+        )
         result = validate_release_consistency(
             released_event(),
             tag(),

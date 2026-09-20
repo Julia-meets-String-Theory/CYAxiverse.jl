@@ -838,26 +838,27 @@ def validate_release_consistency(
     if not intent_match:
         return _result(INVALID, "TAG_INTENT_MISMATCH", intent_errors)
 
-    # The canonical released event and immutable tag are now consistent.  The
-    # GitHub publication boundary may still be waiting for reconciliation.
+    # A publication artifact may still be pending, but a GitHub Release that
+    # already exists must match the event and tag before pending is reported.
+    if release_identity is not None:
+        if release_identity.get("id") is None or release_identity.get("published_at") is None:
+            return _result(INVALID, "GITHUB_RELEASE_IDENTITY_INCOMPLETE")
+        if release_identity.get("tag") != tag_name:
+            return _result(INVALID, "GITHUB_RELEASE_TAG_MISMATCH")
+        if not _validate_sha(release_identity.get("sha")):
+            return _result(INVALID, "GITHUB_RELEASE_SHA_MISSING")
+        if release_identity["sha"] != event_result["final_release_sha"]:
+            return _result(INVALID, "GITHUB_RELEASE_SHA_MISMATCH")
+        if not _validate_sha(release_identity.get("tree")):
+            return _result(INVALID, "GITHUB_RELEASE_TREE_MISSING")
+        if release_identity["tree"] != event_result["final_release_tree"]:
+            return _result(INVALID, "GITHUB_RELEASE_TREE_MISMATCH")
     if release_identity is None or publication_evidence is None:
         return _result(
             PUBLICATION_RECONCILIATION_PENDING,
             event_id=event_result["event_id"],
             public_tag=tag_name,
         )
-    if release_identity.get("id") is None or release_identity.get("published_at") is None:
-        return _result(INVALID, "GITHUB_RELEASE_IDENTITY_INCOMPLETE")
-    if release_identity.get("tag") != tag_name:
-        return _result(INVALID, "GITHUB_RELEASE_TAG_MISMATCH")
-    if not _validate_sha(release_identity.get("sha")):
-        return _result(INVALID, "GITHUB_RELEASE_SHA_MISSING")
-    if release_identity["sha"] != event_result["final_release_sha"]:
-        return _result(INVALID, "GITHUB_RELEASE_SHA_MISMATCH")
-    if not _validate_sha(release_identity.get("tree")):
-        return _result(INVALID, "GITHUB_RELEASE_TREE_MISSING")
-    if release_identity["tree"] != event_result["final_release_tree"]:
-        return _result(INVALID, "GITHUB_RELEASE_TREE_MISMATCH")
     publication_result = validate_publication_evidence(
         publication_evidence,
         event=event,

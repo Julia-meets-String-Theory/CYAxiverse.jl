@@ -449,7 +449,22 @@ class VersionLifecycleStaticTests(unittest.TestCase):
             transaction_id="reservation-abort",
             expected_event_head="d" * 40,
             abort_reason="branch_not_created",
-            non_entry_evidence="branch_absent_at_reconciliation",
+            non_entry_evidence={
+                "verified": True,
+                "reservation_id": prepared["reservation_id"],
+                "owner_line": "principal",
+                "final_version": "0.3.1",
+                "intended_dev_version": "0.3.1-DEV",
+                "line_ref": "refs/heads/vmm",
+                "expected_line_head": prepared["expected_line_head"],
+                "line_state": "unchanged",
+                "observed_line_head": prepared["expected_line_head"],
+                "dev_not_entered": True,
+                "exclusion_verified": True,
+                "observed_at_utc": "2026-09-20T12:34:55Z",
+                "evidence_ref": "evidence/non-entry.json",
+                "evidence_digest": "d" * 64,
+            },
         )
         aborted.pop("expected_line_head")
         aborted_raw = active_raw + canonical_event_bytes(aborted) + b"\n"
@@ -514,6 +529,49 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         self.assertNotIsInstance(retrospective, BlockedResult)
         assert not isinstance(retrospective, BlockedResult)
         self.assertIn("0.4.0", retrospective.occupied_versions)
+        self.assertNotIn("0.4.0-DEV", retrospective.occupied_versions)
+
+    def test_retrospective_truth_requires_explicit_consistent_fields(self) -> None:
+        cases = {
+            "contradictory final_version": (
+                "final_version contradicts declared_version",
+                'declared_version = "0.4.0"\n'
+                'final_version = "0.4.1"\n'
+                'project_toml_version = "0.4.0-DEV"\n'
+                "project_toml_carried = true\n",
+            ),
+            "missing carried status": (
+                "requires project_toml_carried",
+                'declared_version = "0.4.0"\n'
+                'project_toml_version = "0.4.0-DEV"\n',
+            ),
+            "carried without actual version": (
+                "marks Project.toml carried but omits actual version",
+                'declared_version = "0.4.0"\n'
+                "project_toml_carried = true\n",
+            ),
+        }
+        for label, (expected_detail, historical_fields) in cases.items():
+            with self.subTest(label=label):
+                repo = _fixture()
+                (repo / "iterations.toml").write_text(
+                    "schema_version = 1\ntarget_iteration = \"fixture\"\n"
+                    "iterations = []\nprospective = []\n"
+                    "[[retrospective]]\niteration_id = \"history\"\n"
+                    + historical_fields
+                    + 'historical_release_status = "unreleased"\n'
+                    + 'anchor_sha = "a"\nanchor_tree = "b"\n',
+                    encoding="utf-8",
+                )
+                _run(repo, "add", "iterations.toml")
+                _run(repo, "commit", "-q", "-m", "invalid retrospective fixture")
+                _run(repo, "branch", "-f", "vmm")
+                _run(repo, "push", "-q", "--force", "origin", "vmm")
+                result = static_snapshot(repo, source_repository="fixture/repo")
+                self.assertIsInstance(result, BlockedResult)
+                assert isinstance(result, BlockedResult)
+                self.assertEqual(result.reason_code, "STATIC_AUTHORITY_SELECTOR_UNRESOLVED")
+                self.assertIn(expected_detail, result.detail)
 
     def test_root_registry_rejects_forwardported_maintenance_metadata(self) -> None:
         repo = _fixture()

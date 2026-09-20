@@ -233,35 +233,11 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
                     advertised_head=remote_head,
                     fetched_head=fetched_head,
                 ), None
-            object_type = writer._git(  # type: ignore[attr-defined]
-                ["cat-file", "-t", disposable_ref]
-            ).stdout.decode("ascii", errors="strict").strip()
-            if object_type != "commit":
-                return _blocked(
-                    "EVENT_AUTHORITY_DIVERGENT",
-                    "remote event ref does not resolve to a commit",
-                    remote=args.remote,
-                    remote_ref=remote_ref,
-                    remote_head=remote_head,
-                    object_type=object_type,
-                ), None
-            tree_entries = writer._git(  # type: ignore[attr-defined]
-                ["ls-tree", "--name-only", disposable_ref]
-            ).stdout.decode("utf-8", errors="strict").splitlines()
-            if tree_entries != [args.event_stream]:
-                return _blocked(
-                    "EVENT_AUTHORITY_DIVERGENT",
-                    "remote event head must contain exactly the configured stream",
-                    remote=args.remote,
-                    remote_ref=remote_ref,
-                    remote_head=remote_head,
-                    tree_entries=tree_entries,
-                    stream_path=args.event_stream,
-                ), None
             try:
                 raw = writer._git(  # type: ignore[attr-defined]
                     ["show", f"{disposable_ref}:{args.event_stream}"]
                 ).stdout
+                writer._verify_stream_topology(fetched_head, raw)
                 events = tuple(parse_stream(raw))
             except (WriterError, ValueError) as error:
                 return _blocked(

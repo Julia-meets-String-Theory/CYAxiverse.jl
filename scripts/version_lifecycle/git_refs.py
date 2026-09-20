@@ -35,6 +35,7 @@ def require_full_ref(value: str) -> str:
     if (
         not isinstance(value, str)
         or FULL_REF.fullmatch(value) is None
+        or value.endswith("/")
         or ".." in value
         or "//" in value
         or any(

@@ -400,14 +400,41 @@ def _entry_version(entry: Mapping[str, Any], source: str) -> Version:
     raise StaticValidationError(f"{source} lacks a final version field")
 
 
+def _final_entry_version(entry: Mapping[str, Any], key: str, source: str) -> Version:
+    """Parse one explicitly recorded final version field."""
+
+    try:
+        return final_version(parse_package_version(_as_str(entry, key, source)))
+    except (TypeError, ValueError) as error:
+        raise StaticValidationError(f"{source} invalid {key}: {error}") from error
+
+
+def _historical_alias(
+    entry: Mapping[str, Any],
+    keys: tuple[str, ...],
+    source: str,
+) -> tuple[bool, Any]:
+    """Return one historical field value and reject contradictory aliases."""
+
+    present = [(key, entry[key]) for key in keys if key in entry]
+    if not present:
+        return False, None
+    value = present[0][1]
+    if any(candidate != value for _, candidate in present[1:]):
+        raise StaticValidationError(
+            f"{source} has contradictory historical fields: {[key for key, _ in present]}"
+        )
+    return True, value
+
+
 def _validate_entry(entry: Mapping[str, Any], source: str, *, anchor: str | None = None) -> Version:
-    version = _entry_version(entry, source)
     kind = entry.get("kind")
     if kind not in {"prospective", "retrospective"}:
         raise StaticValidationError(f"{source} kind must be prospective or retrospective")
     _as_str(entry, "iteration_id", source)
 
     if kind == "prospective":
+        version = _entry_version(entry, source)
         release_line = _as_str(entry, "release_line", source)
         if release_line != "principal":
             match = re.fullmatch(
@@ -449,24 +476,37 @@ def _validate_entry(entry: Mapping[str, Any], source: str, *, anchor: str | None
         # release facts distinct so a historical mismatch cannot be hidden.
         for key in ("historical_release_status", "anchor_sha", "anchor_tree"):
             _as_str(entry, key, source)
-        declared = entry.get("declared_version", entry.get("final_version"))
-        if not isinstance(declared, str):
+        # ``declared_version`` is the historical truth source.  Do not let a
+        # legacy ``final_version``/``version`` field silently override it.
+        if "declared_version" not in entry:
             raise StaticValidationError(f"{source} requires declared_version")
-        actual = entry.get(
-            "actual_project_version",
-            entry.get("project_toml_version", entry.get("actual_version")),
+        version = _final_entry_version(entry, "declared_version", source)
+        for key in ("final_version", "version"):
+            if key in entry and _final_entry_version(entry, key, source) != version:
+                raise StaticValidationError(
+                    f"{source} {key} contradicts declared_version"
+                )
+
+        carried_present, carried = _historical_alias(
+            entry,
+            ("project_toml_carried", "project_toml_carried_version", "actual_version_present"),
+            source,
         )
-        carried = entry.get(
-            "project_toml_carried",
-            entry.get("project_toml_carried_version", entry.get("actual_version_present")),
-        )
-        if carried is not None and not isinstance(carried, bool):
+        if not carried_present:
+            raise StaticValidationError(f"{source} requires project_toml_carried")
+        if not isinstance(carried, bool):
             raise StaticValidationError(f"{source} project_toml_carried must be boolean")
-        if carried is True and actual is None:
+
+        actual_present, actual = _historical_alias(
+            entry,
+            ("actual_project_version", "project_toml_version", "actual_version"),
+            source,
+        )
+        if carried is True and (not actual_present or actual is None):
             raise StaticValidationError(f"{source} marks Project.toml carried but omits actual version")
-        if carried is False and actual is not None:
+        if carried is False and actual_present:
             raise StaticValidationError(f"{source} marks Project.toml absent but supplies actual version")
-        if actual is not None:
+        if actual_present:
             try:
                 parse_package_version(actual)
             except (TypeError, ValueError) as error:

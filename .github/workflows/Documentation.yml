@@ -50,7 +50,24 @@ jobs:
           if git ls-remote --exit-code origin refs/heads/release-events >/dev/null 2>&1; then
             git fetch --no-tags origin \
               refs/heads/release-events:refs/remotes/origin/release-events
-            git show refs/remotes/origin/release-events:release-events.jsonl > "$EVENT_STREAM"
+            python3 - "$EVENT_STREAM" <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.writer import ReleaseEventWriter
+
+          head = subprocess.check_output(
+              ["git", "rev-parse", "refs/remotes/origin/release-events"],
+              text=True,
+          ).strip()
+          raw = subprocess.check_output(
+              ["git", "show", f"{head}:release-events.jsonl"]
+          )
+          ReleaseEventWriter(".")._verify_stream_topology(head, raw)
+          pathlib.Path(sys.argv[1]).write_bytes(raw)
+          PY
           else
             release_events_status=$?
             if [ "$release_events_status" -ne 2 ]; then

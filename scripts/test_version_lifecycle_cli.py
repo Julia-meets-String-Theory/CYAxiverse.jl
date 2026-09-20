@@ -184,6 +184,28 @@ class GateALifecycleCliFixture(unittest.TestCase):
         self.assertEqual(payload["status"], "BLOCKED")
         self.assertEqual(payload["reason_code"], "EVENT_AUTHORITY_UNAVAILABLE")
 
+    def test_remote_event_blob_mode_must_be_canonical(self) -> None:
+        head = self.writer.current_head()
+        blob = subprocess.check_output(
+            ["git", "-C", str(self.repo), "hash-object", "-w", "--stdin"],
+            input=b"",
+        ).decode().strip()
+        tree = subprocess.check_output(
+            ["git", "-C", str(self.repo), "mktree"],
+            input=f"100755 blob {blob}\trelease-events.jsonl\n".encode(),
+        ).decode().strip()
+        malformed = _git(
+            self.repo, "commit-tree", tree, "-p", head, "-m", "bad mode"
+        )
+        _git(self.repo, "push", "-q", "origin", f"{malformed}:refs/heads/release-events")
+        code, payload = self._run_cli(
+            "events", "--repo", str(self.repo), "--dry-run",
+            "--source-repository", "fixture/repo",
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(payload["status"], "BLOCKED")
+        self.assertEqual(payload["reason_code"], "EVENT_AUTHORITY_DIVERGENT")
+
     def test_remote_advance_is_used_when_local_cache_is_stale(self) -> None:
         initial_head = self.writer.current_head()
         event = {

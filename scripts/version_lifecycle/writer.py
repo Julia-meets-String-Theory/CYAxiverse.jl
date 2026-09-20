@@ -56,12 +56,20 @@ class StaticSnapshotStale(WriterError):
     reason_code = "STATIC_SNAPSHOT_STALE"
 
 
+class StaticAuthorityUnavailable(WriterError):
+    reason_code = "STATIC_AUTHORITY_SELECTOR_UNRESOLVED"
+
+
 class PublicTagAbsenceUnavailable(WriterError):
     reason_code = "PUBLIC_TAG_ABSENCE_UNAVAILABLE"
 
 
 class PublicTagExists(WriterError):
     reason_code = "PUBLIC_TAG_EXISTS"
+
+
+class ReservationNonEntryUnavailable(WriterError):
+    reason_code = "RESERVATION_NON_ENTRY_UNAVAILABLE"
 
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -96,11 +104,12 @@ class ReleaseEventWriter:
 
     ``repo`` is a Git working tree or bare repository.  The writer never
     force-updates the branch and never edits a package-source branch.
-    ``exclusion_checker``, ``static_snapshot_checker`` and the optional
-    ``public_tag_absence_checker`` are injected by the allocation layer so
-    this bounded module remains usable with fixture repos.  The tag checker
-    is mandatory for a ``release_intent_aborted`` append and receives the
-    exact canonical public tag from that event.
+    ``exclusion_checker``, ``static_snapshot_checker`` and abort-specific
+    proof callbacks are injected by the allocation layer so this bounded
+    module remains usable with fixture repos.  The tag checker is mandatory
+    for ``release_intent_aborted``; the non-entry checker is mandatory for
+    ``development_reservation_aborted``.  Both run under exclusion immediately
+    before append.
     """
 
     def __init__(
@@ -113,6 +122,7 @@ class ReleaseEventWriter:
         exclusion_checker: Callable[[], bool] | None = None,
         static_snapshot_checker: Callable[[str], bool] | None = None,
         public_tag_absence_checker: Callable[[str], bool] | None = None,
+        reservation_non_entry_checker: Callable[[Mapping[str, Any]], bool] | None = None,
     ) -> None:
         self.repo = Path(repo)
         self.branch = self._validate_ref_component(branch)
@@ -121,6 +131,7 @@ class ReleaseEventWriter:
         self.exclusion_checker = exclusion_checker
         self.static_snapshot_checker = static_snapshot_checker
         self.public_tag_absence_checker = public_tag_absence_checker
+        self.reservation_non_entry_checker = reservation_non_entry_checker
         if not (self.repo / ".git").exists() and not (self.repo / "HEAD").exists():
             raise BranchUnavailable(f"not a Git repository: {self.repo}")
 
@@ -181,15 +192,9 @@ class ReleaseEventWriter:
 
     def read_head(self) -> LedgerHead:
         commit = self.current_head()
-        tree_entries = _as_text(
-            self._git(["ls-tree", "--name-only", commit]).stdout
-        ).splitlines()
-        if tree_entries != [self.stream_path]:
-            raise BranchUnavailable(
-                "release-events branch must contain exactly release-events.jsonl"
-            )
         result = self._git(["show", f"{commit}:{self.stream_path}"])
         raw = bytes(result.stdout)
+        self._verify_stream_topology(commit, raw)
         events = tuple(parse_stream(raw))
         return LedgerHead(commit=commit, raw=raw, events=events)
 
@@ -337,7 +342,13 @@ class ReleaseEventWriter:
             raise AppendOutcomeUncertain(
                 "callback-only bootstrap has no remote observation; outcome is uncertain"
             )
-        if protection_checker is None or not protection_checker():
+        try:
+            protected = protection_checker is not None and protection_checker() is True
+        except Exception as error:
+            raise ExclusionUnavailable(
+                "event branch creation protection could not be verified"
+            ) from error
+        if not protected:
             raise ExclusionUnavailable("event branch creation protection is unavailable")
         remote_reader = reconcile
         if remote_reader is None and remote_name is not None:
@@ -442,7 +453,13 @@ class ReleaseEventWriter:
         *,
         expected_head: str | None,
     ) -> tuple[dict[str, Any], bytes, LedgerHead]:
-        if self.exclusion_checker is not None and not self.exclusion_checker():
+        try:
+            excluded = self.exclusion_checker is not None and self.exclusion_checker() is True
+        except Exception as error:
+            raise ExclusionUnavailable(
+                "serialized static/event exclusion could not be verified"
+            ) from error
+        if not excluded:
             raise ExclusionUnavailable("serialized static/event exclusion is unavailable")
         current = self.read_head()
         canonical = validate_event(event)
@@ -462,10 +479,33 @@ class ReleaseEventWriter:
             )
         if canonical["expected_event_head"] != current.commit:
             raise StaleHeadError("event expected_event_head does not match current branch head")
-        if self.static_snapshot_checker is not None and not self.static_snapshot_checker(
-            canonical["static_iteration_snapshot"]
-        ):
+        try:
+            static_current = (
+                self.static_snapshot_checker is not None
+                and self.static_snapshot_checker(canonical["static_iteration_snapshot"]) is True
+            )
+        except Exception as error:
+            raise StaticAuthorityUnavailable(
+                "static snapshot authority could not be verified"
+            ) from error
+        if not static_current:
             raise StaticSnapshotStale("static snapshot changed before append")
+        if canonical["event_type"] == "development_reservation_aborted":
+            checker = self.reservation_non_entry_checker
+            if checker is None:
+                raise ReservationNonEntryUnavailable(
+                    "live reservation non-entry proof is unavailable"
+                )
+            try:
+                non_entry_verified = checker(canonical) is True
+            except Exception as error:
+                raise ReservationNonEntryUnavailable(
+                    "live reservation non-entry proof could not be verified"
+                ) from error
+            if not non_entry_verified:
+                raise ReservationNonEntryUnavailable(
+                    "matching DEV non-entry was not proved under exclusion"
+                )
         if canonical["event_type"] == "release_intent_aborted":
             checker = self.public_tag_absence_checker
             if checker is None:
@@ -528,9 +568,11 @@ class ReleaseEventWriter:
             canonical, encoded, current = self._preflight(event, expected_head=expected_head)
         except (
             ExclusionUnavailable,
+            StaticAuthorityUnavailable,
             StaticSnapshotStale,
             PublicTagAbsenceUnavailable,
             PublicTagExists,
+            ReservationNonEntryUnavailable,
             UnsupportedCertificationBinding,
         ) as error:
             # These are machine-visible fail-closed outcomes.  A valid event
@@ -657,9 +699,11 @@ class ReleaseEventWriter:
             )
         except (
             ExclusionUnavailable,
+            StaticAuthorityUnavailable,
             StaticSnapshotStale,
             PublicTagAbsenceUnavailable,
             PublicTagExists,
+            ReservationNonEntryUnavailable,
             UnsupportedCertificationBinding,
         ) as error:
             canonical = (

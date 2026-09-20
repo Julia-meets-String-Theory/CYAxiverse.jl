@@ -125,6 +125,12 @@ def _event_occupied(events: Iterable[Mapping[str, Any]]) -> set[str]:
     for event in events:
         event_type = event.get("event_type")
         if event_type in reservation_event_types:
+            if event_type == "development_reservation_aborted":
+                # An unverified abort cannot free a globally reserved final.
+                # Full stream replay also checks this proof against prepared.
+                from .events import validate_event
+
+                validate_event(event)
             reservation_id = event.get("reservation_id")
             if not isinstance(reservation_id, str) or not reservation_id:
                 raise ValueError("reservation event requires a reservation_id")

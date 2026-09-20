@@ -121,7 +121,7 @@ def certification_record(event: dict[str, object]) -> dict[str, object]:
 
     evidence_refs = event.get("certification_evidence_refs")
     evidence_ref = evidence_refs[0] if isinstance(evidence_refs, list) and evidence_refs else ""
-    return {
+    record = {
         "binding": event.get("certification_binding", ""),
         "package_commit": event.get("certification_subject_sha", ""),
         "package_tree": event.get("certification_subject_tree", ""),
@@ -129,7 +129,11 @@ def certification_record(event: dict[str, object]) -> dict[str, object]:
         "harness_revision": event.get("certification_harness_revision", ""),
         "environment": event.get("certification_environment", ""),
         "evidence_ref": evidence_ref,
+        "evidence_refs": evidence_refs,
     }
+    if "certification_transfer_evidence" in event:
+        record["transfer_evidence"] = event["certification_transfer_evidence"]
+    return record
 
 
 def project_version_evidence(

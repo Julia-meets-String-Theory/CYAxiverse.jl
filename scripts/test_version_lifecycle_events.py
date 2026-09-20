@@ -30,8 +30,10 @@ from version_lifecycle.events import (  # noqa: E402
 from version_lifecycle.writer import (  # noqa: E402
     AppendOutcomeUncertain,
     DuplicateTransactionError,
+    ExclusionUnavailable,
     ReleaseEventWriter,
     StaleHeadError,
+    WriterError,
 )
 from version_lifecycle.allocation import _event_occupied  # noqa: E402
 
@@ -64,6 +66,30 @@ def reservation_event(
         event.pop("expected_line_head")
         event["actual_dev_head"] = "c" * 40
     return event
+
+
+def non_entry_proof(prepared: dict, *, absent: bool = False) -> dict:
+    proof = {
+        "verified": True,
+        "reservation_id": prepared["reservation_id"],
+        "owner_line": prepared["owner_line"],
+        "final_version": prepared["final_version"],
+        "intended_dev_version": prepared["intended_dev_version"],
+        "line_ref": (
+            "refs/heads/vmm" if prepared["owner_line"] == "principal"
+            else f"refs/heads/{prepared['owner_line']}"
+        ),
+        "expected_line_head": prepared["expected_line_head"],
+        "line_state": "absent" if absent else "unchanged",
+        "dev_not_entered": True,
+        "exclusion_verified": True,
+        "observed_at_utc": "2026-09-20T12:34:55Z",
+        "evidence_ref": "evidence/non-entry.json",
+        "evidence_digest": "d" * 64,
+    }
+    if not absent:
+        proof["observed_line_head"] = prepared["expected_line_head"]
+    return proof
 
 
 def candidate_event(
@@ -118,7 +144,7 @@ def release_intent_event(
         "anchor_sha": "e" * 40,
         "anchor_tree": "f" * 40,
         "certification_binding": "tree-bound",
-        "certification_subject_sha": "f" * 40,
+        "certification_subject_sha": "c" * 40,
         "certification_subject_tree": "f" * 40,
         "certification_policy_revision": "policy-r1",
         "certification_harness_revision": "harness-r1",
@@ -223,6 +249,60 @@ class EventValidationTests(unittest.TestCase):
         with self.assertRaises(EventSchemaError):
             validate_event(event)
 
+    def test_reservation_abort_requires_matching_structured_non_entry_proof(self):
+        prepared = reservation_event(expected_head="b" * 40)
+        aborted = dict(
+            prepared,
+            event_id="EVT-000000000002",
+            transaction_id="tx-abort",
+            event_type="development_reservation_aborted",
+            abort_reason="definite_non_entry",
+            non_entry_evidence="not-proof",
+        )
+        aborted.pop("expected_line_head")
+        with self.assertRaises(EventSchemaError):
+            validate_event(aborted)
+        with self.assertRaises(EventSchemaError):
+            _event_occupied([prepared, aborted])
+
+        aborted["non_entry_evidence"] = non_entry_proof(prepared)
+        validate_transition([prepared], aborted)
+        self.assertNotIn("0.3.1", _event_occupied([prepared, aborted]))
+
+        wrong = dict(aborted)
+        wrong["non_entry_evidence"] = dict(aborted["non_entry_evidence"])
+        wrong["non_entry_evidence"]["expected_line_head"] = "d" * 40
+        wrong["non_entry_evidence"]["observed_line_head"] = "d" * 40
+        with self.assertRaises(EventTransitionError):
+            validate_transition([prepared], wrong)
+
+        wrong["non_entry_evidence"]["verified"] = False
+        with self.assertRaises(EventSchemaError):
+            validate_event(wrong)
+
+        late = dict(aborted)
+        late["non_entry_evidence"] = dict(aborted["non_entry_evidence"])
+        late["non_entry_evidence"]["observed_at_utc"] = "2026-09-20T12:35:00Z"
+        with self.assertRaises(EventSchemaError):
+            validate_event(late)
+
+        maintenance_prepared = reservation_event(expected_head="b" * 40)
+        maintenance_prepared.update(
+            owner_line="maintenance/1.2",
+            final_version="1.2.1",
+            intended_dev_version="1.2.1-DEV",
+        )
+        maintenance_abort = dict(
+            maintenance_prepared,
+            event_id="EVT-000000000002",
+            transaction_id="maintenance-abort",
+            event_type="development_reservation_aborted",
+            abort_reason="branch_not_created",
+            non_entry_evidence=non_entry_proof(maintenance_prepared, absent=True),
+        )
+        maintenance_abort.pop("expected_line_head")
+        validate_transition([maintenance_prepared], maintenance_abort)
+
     def test_git_identity_fields_require_full_sha(self):
         event = reservation_event(expected_head="b" * 40)
         event["expected_line_head"] = "line-head"
@@ -261,6 +341,23 @@ class EventValidationTests(unittest.TestCase):
 
         intent = release_intent_event()
         intent["certification_environment"] = "token=private-value"
+        with self.assertRaises(EventSchemaError):
+            validate_event(intent)
+
+        intent = release_intent_event()
+        intent["certification_environment"] = "https://user:pass@example.com/env"
+        with self.assertRaises(EventSchemaError):
+            validate_event(intent)
+
+    def test_release_intent_binds_certified_subject_to_exact_trees(self):
+        intent = release_intent_event()
+        intent["certification_subject_tree"] = "d" * 40
+        with self.assertRaises(EventSchemaError):
+            validate_event(intent)
+
+        intent = release_intent_event()
+        intent["certification_binding"] = "commit-bound"
+        intent.pop("certification_transfer_evidence")
         with self.assertRaises(EventSchemaError):
             validate_event(intent)
 
@@ -565,6 +662,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            reservation_non_entry_checker=lambda _event: True,
         )
         self.unproved_writer = ReleaseEventWriter(self.repo)
         self.writer.bootstrap()
@@ -620,6 +718,70 @@ class WriterTests(unittest.TestCase):
             text=True,
         ).splitlines()
         self.assertEqual(tree, ["release-events.jsonl"])
+
+    def test_read_head_rejects_noncanonical_event_trees(self):
+        head = self.writer.current_head()
+        blob = subprocess.check_output(
+            ["git", "-C", str(self.repo), "hash-object", "-w", "--stdin"],
+            input=b"",
+        ).decode().strip()
+        for label, tree_input in (
+            ("executable", f"100755 blob {blob}\trelease-events.jsonl\n"),
+            ("symlink", f"120000 blob {blob}\trelease-events.jsonl\n"),
+            ("gitlink", f"160000 commit {head}\trelease-events.jsonl\n"),
+            ("extra file", f"100644 blob {blob}\tREADME\n100644 blob {blob}\trelease-events.jsonl\n"),
+        ):
+            with self.subTest(label=label):
+                tree = subprocess.check_output(
+                    ["git", "-C", str(self.repo), "mktree"],
+                    input=tree_input.encode(),
+                ).decode().strip()
+                malformed = subprocess.check_output(
+                    ["git", "-C", str(self.repo), "commit-tree", tree, "-p", head, "-m", "bad tree"],
+                    text=True,
+                ).strip()
+                subprocess.run(
+                    ["git", "-C", str(self.repo), "update-ref", "refs/heads/release-events", malformed],
+                    check=True,
+                )
+                with self.assertRaises((AppendOutcomeUncertain, WriterError)):
+                    self.writer.read_head()
+
+    def test_callback_exceptions_block_and_freeze_without_appending(self):
+        head = self.writer.current_head()
+        event = reservation_event(expected_head=head)
+
+        def unavailable(*_args):
+            raise OSError("fixture authority unavailable")
+
+        for callbacks, reason in (
+            ({"exclusion_checker": unavailable, "static_snapshot_checker": lambda _: True},
+             "EXCLUSION_UNAVAILABLE"),
+            ({"exclusion_checker": lambda: True, "static_snapshot_checker": unavailable},
+             "STATIC_AUTHORITY_SELECTOR_UNRESOLVED"),
+        ):
+            with self.subTest(reason=reason):
+                writer = ReleaseEventWriter(self.repo, **callbacks)
+                result = writer.append(event, expected_head=head)
+                self.assertEqual((result.status, result.reason_code, result.frozen),
+                                 ("BLOCKED", reason, True))
+                remote_result = writer.append_remote(
+                    event,
+                    expected_head=head,
+                    push=lambda *_args: None,
+                    reconcile=lambda: (head, b""),
+                )
+                self.assertEqual(
+                    (remote_result.status, remote_result.reason_code, remote_result.frozen),
+                    ("BLOCKED", reason, True),
+                )
+                self.assertEqual(self.writer.current_head(), head)
+
+        with self.assertRaisesRegex(ExclusionUnavailable, "event branch creation protection"):
+            self.writer.bootstrap_remote(
+                remote="origin",
+                protection_checker=unavailable,
+            )
 
     def test_append_expected_head_and_idempotent_transaction(self):
         head = self.writer.current_head()
@@ -770,7 +932,7 @@ class WriterTests(unittest.TestCase):
             expected_event_head=None,
             event_type="development_reservation_aborted",
             abort_reason="branch_not_created",
-            non_entry_evidence="branch_absent_at_reconciliation",
+            non_entry_evidence=non_entry_proof(prepared),
         )
         aborted["expected_event_head"] = self.writer.append(
             prepared, expected_head=head
@@ -788,6 +950,39 @@ class WriterTests(unittest.TestCase):
             self.writer.append(replacement, expected_head=after_abort.head).status,
             "APPENDED",
         )
+
+    def test_abort_blocks_without_live_non_entry_recheck(self):
+        head = self.writer.current_head()
+        prepared = reservation_event(expected_head=head)
+        prepared_result = self.writer.append(prepared, expected_head=head)
+        aborted = dict(
+            prepared,
+            event_id="EVT-000000000002",
+            transaction_id="tx-abort",
+            expected_event_head=prepared_result.head,
+            event_type="development_reservation_aborted",
+            abort_reason="definite_non_entry",
+            non_entry_evidence=non_entry_proof(prepared),
+        )
+        aborted.pop("expected_line_head")
+
+        def unavailable(_event):
+            raise OSError("live line state unavailable")
+
+        for checker in (None, unavailable, lambda _event: False):
+            with self.subTest(checker=checker):
+                writer = ReleaseEventWriter(
+                    self.repo,
+                    exclusion_checker=lambda: True,
+                    static_snapshot_checker=lambda _digest: True,
+                    reservation_non_entry_checker=checker,
+                )
+                result = writer.append(aborted, expected_head=prepared_result.head)
+                self.assertEqual(
+                    (result.status, result.reason_code, result.frozen),
+                    ("BLOCKED", "RESERVATION_NON_ENTRY_UNAVAILABLE", True),
+                )
+                self.assertEqual(writer.current_head(), prepared_result.head)
 
     def test_consumed_version_cannot_be_reallocated(self):
         head = self.writer.current_head()

@@ -14,6 +14,7 @@ import json
 import re
 from typing import Any
 
+from .certification import is_safe_public_value
 from .codec import canonical_json, sha256_hex
 from .git_refs import GitIdentityError, require_candidate_ref
 
@@ -317,50 +318,8 @@ class UnsupportedCertificationBinding(EventError):
 # while workstation paths, local services, credentials and secret-like values
 # are not durable identities.  This is a public-value gate, not a substitute
 # for review of the evidence itself.
-_UNSAFE_PUBLIC_MARKERS = (
-    "file://",
-    "file:",
-    "ssh://",
-    "/users/",
-    "users/",
-    "\\users\\",
-    "/private/",
-    "private/",
-    "\\private\\",
-    "/home/",
-    "home/",
-    "\\home\\",
-    "/tmp/",
-    "tmp/",
-    "\\tmp\\",
-    "/var/",
-    "var/",
-    "\\var\\",
-    "codex/",
-    "credential",
-    "authorization:",
-    "authorization",
-    "bearer ",
-    "password",
-    "token",
-    "secret",
-    "api_key",
-    "apikey",
-    "localhost",
-    "127.0.0.1",
-    ".env",
-)
-
-
 def _reject_unsafe_public_string(value: str, *, field: str = "event value") -> None:
-    if any(ord(char) < 0x20 or ord(char) > 0x7E for char in value):
-        raise EventSchemaError(f"{field} must contain printable ASCII")
-    # Absolute POSIX/Windows paths and home-relative paths are local locators,
-    # even when they do not contain one of the platform directory markers.
-    if value.startswith(("/", "~", "\\\\")) or re.match(r"^[A-Za-z]:[\\/]", value):
-        raise EventSchemaError(f"{field} contains a private or local locator")
-    lowered = value.lower()
-    if any(marker in lowered for marker in _UNSAFE_PUBLIC_MARKERS):
+    if not is_safe_public_value(value):
         raise EventSchemaError(f"{field} contains a private or secret-like value")
 
 
@@ -531,6 +490,53 @@ def _require_git_object(event: Mapping[str, Any], name: str) -> None:
     _require_text(event, name)
     if GIT_OBJECT_RE.fullmatch(event[name]) is None:
         raise EventSchemaError(f"{name} must be a full hexadecimal Git object ID")
+
+
+def _require_non_entry_evidence(event: Mapping[str, Any]) -> None:
+    """Require a replayable, exclusion-bound proof of definite DEV non-entry."""
+
+    proof = event.get("non_entry_evidence")
+    if not isinstance(proof, Mapping):
+        raise EventSchemaError("non_entry_evidence must be a structured proof")
+    common = {
+        "verified", "reservation_id", "owner_line", "final_version",
+        "intended_dev_version", "line_ref", "expected_line_head",
+        "line_state", "dev_not_entered", "exclusion_verified",
+        "observed_at_utc", "evidence_ref", "evidence_digest",
+    }
+    state = proof.get("line_state")
+    required = common | ({"observed_line_head"} if state == "unchanged" else set())
+    if set(proof) != required:
+        raise EventSchemaError("non_entry_evidence has missing or undeclared fields")
+    if (
+        proof["verified"] is not True
+        or proof["dev_not_entered"] is not True
+        or proof["exclusion_verified"] is not True
+    ):
+        raise EventSchemaError("non_entry_evidence is not a verified non-entry proof")
+    for field in ("reservation_id", "owner_line", "final_version", "intended_dev_version"):
+        if proof[field] != event[field]:
+            raise EventSchemaError(f"non_entry_evidence {field} does not match reservation")
+    expected_ref = (
+        "refs/heads/vmm" if event["owner_line"] == "principal"
+        else f"refs/heads/{event['owner_line']}"
+    )
+    if proof["line_ref"] != expected_ref:
+        raise EventSchemaError("non_entry_evidence line_ref does not match owner line")
+    _require_git_object(proof, "expected_line_head")
+    if state == "unchanged":
+        _require_git_object(proof, "observed_line_head")
+        if proof["observed_line_head"] != proof["expected_line_head"]:
+            raise EventSchemaError("non_entry_evidence line head changed")
+    elif state == "absent":
+        if event["owner_line"] == "principal":
+            raise EventSchemaError("principal line cannot be absent for reservation abort")
+    else:
+        raise EventSchemaError("non_entry_evidence line_state is unsupported")
+    if parse_timestamp(proof["observed_at_utc"]) > parse_timestamp(event["timestamp_utc"]):
+        raise EventSchemaError("non_entry_evidence observation follows abort event")
+    _require_text(proof, "evidence_ref")
+    _require_digest(proof, "evidence_digest")
 
 
 def _require_certification_transfer_evidence(event: Mapping[str, Any]) -> None:
@@ -710,7 +716,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             _require_git_object(event, "actual_dev_head")
         elif event_type == "development_reservation_aborted":
             _require_text(event, "abort_reason")
-            _require_text(event, "non_entry_evidence")
+            _require_non_entry_evidence(event)
         else:
             _require_git_identity_or_anchor_ref(event, "closure_anchor")
             closure_anchor = event["closure_anchor"]
@@ -855,9 +861,25 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             _require_text({"value": item}, "value")
         for field in (
             "candidate_sha", "candidate_tree", "anchor_sha", "anchor_tree",
+            "certification_subject_sha", "certification_subject_tree",
             "final_release_sha", "final_release_tree",
         ):
             _require_git_object(event, field)
+        if len({
+            event["candidate_tree"], event["anchor_tree"],
+            event["certification_subject_tree"], event["final_release_tree"],
+        }) != 1:
+            raise EventSchemaError("release intent trees must equal the certified anchor tree")
+        if (
+            event["certification_binding"] == "commit-bound"
+            and event["certification_subject_sha"] != event["final_release_sha"]
+        ):
+            raise EventSchemaError("commit-bound intent must certify the final release commit")
+        if (
+            event["certification_binding"] == "tree-bound"
+            and event["certification_subject_sha"] != event["candidate_sha"]
+        ):
+            raise EventSchemaError("tree-bound intent must certify the candidate commit")
         transfer_present = "certification_transfer_evidence" in event
         if event["certification_binding"] == "tree-bound" and (
             event["candidate_sha"] != event["final_release_sha"]
@@ -1083,6 +1105,18 @@ def validate_transition(
         _require_matching_reservation_identity(prior, current)
         if _has_reservation_state(prior, current, "opened"):
             raise EventTransitionError("opened reservation cannot be aborted")
+        prepared = next(
+            old for old in prior
+            if old["event_type"] == "development_reservation_prepared"
+            and old["reservation_id"] == current["reservation_id"]
+        )
+        if (
+            current["non_entry_evidence"]["expected_line_head"]
+            != prepared["expected_line_head"]
+        ):
+            raise EventTransitionError(
+                "non-entry proof does not bind the prepared line head"
+            )
     elif event_type == "development_reservation_consumed":
         _require_reservation_predecessor(prior, current, "opened")
         _require_matching_reservation_identity(prior, current)

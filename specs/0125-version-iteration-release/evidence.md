@@ -56,11 +56,21 @@ versions, public evidence validation, and maintenance base/line binding.
 Those verdicts belong only to the second candidate. The corrected successor
 requires fresh reviews.
 
+The third frozen candidate was commit
+`932b6a94230e9b93d1dabf10d7033d5c50f8c7f3` (tree
+`1c7c0d3f3feb9f02f77636d7f60e0c1298470ee6`). Independent SPEC and
+STANDARDS reviews returned `REQUEST_CHANGES`. Findings covered reservation
+non-entry proof, intent certification identity, public URL sanitation,
+retrospective truth, documentation certification references, release mismatch
+classification, event-tree topology and authority callback failure handling.
+Those verdicts belong only to the third candidate. The corrected successor
+requires fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 148 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 155 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline local dependencies; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

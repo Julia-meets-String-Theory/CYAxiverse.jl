@@ -188,6 +188,8 @@ class GitRefFixture(unittest.TestCase):
         for ref in (
             "refs/heads/candidates/foo/../bar",
             "refs/heads/candidates/foo//bar",
+            "refs/heads/candidates/foo/",
+            "refs/heads/candidates/",
             "refs/heads/candidates/.hidden",
             "refs/heads/candidates/name.lock",
             "refs/heads/candidates/name.",
