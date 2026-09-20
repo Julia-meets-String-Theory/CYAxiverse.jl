@@ -18,6 +18,7 @@ from version_lifecycle.certification import (
     validate_certification_transfer,
 )
 from version_lifecycle.codec import canonical_json, sha256_hex
+from version_lifecycle.events import validate_event
 from version_lifecycle.release import (
     BLOCKED,
     LEGACY_EXCLUDED,
@@ -70,6 +71,9 @@ def released_event(
         "event_id": event_id,
         "event_type": "released",
         "timestamp_utc": "2026-09-20T14:00:00Z",
+        "transaction_id": f"release-{event_id}",
+        "static_iteration_snapshot": "a" * 64,
+        "expected_event_head": "0" * 40,
         "closure_timestamp_utc": "2026-09-20T13:00:00Z",
         "final_version": version,
         "release_line": line,
@@ -248,6 +252,47 @@ class TestReleaseEvidence(unittest.TestCase):
         )
         self.assertEqual(result["status"], TERMINAL_CONSISTENT)
 
+    def test_durable_tree_transfer_proof_matches_event_and_certification(self):
+        event = released_event(main_sha=SHA_B)
+        event["final_release_sha"] = SHA_B
+        transfer = {
+            "verified": True,
+            "candidate_sha": SHA_A,
+            "final_release_sha": SHA_B,
+            "certified_tree": TREE,
+            "candidate_tree": TREE,
+            "final_release_tree": TREE,
+            "anchor_tree": TREE,
+            "evidence_ref": "evidence/transfer.json",
+        }
+        event["certification_transfer_evidence"] = dict(transfer)
+        record = certification()
+        record["transfer_evidence"] = dict(transfer)
+        result = validate_released_event(
+            event,
+            certification=record,
+            project_versions=project_versions(),
+        )
+        self.assertEqual(result["status"], PASS)
+
+        missing = dict(event)
+        missing.pop("certification_transfer_evidence")
+        self.assertEqual(
+            validate_released_event(
+                missing,
+                certification=record,
+                project_versions=project_versions(),
+            )["status"],
+            INVALID,
+        )
+
+        missing_cert = validate_released_event(
+            event,
+            certification=certification(),
+            project_versions=project_versions(),
+        )
+        self.assertEqual(missing_cert["status"], INVALID)
+
     def test_maintenance_forbids_previous_main_claim(self):
         event = released_event("maintenance/0.3")
         event["previous_main_sha"] = "e" * 40
@@ -284,6 +329,45 @@ class TestReleaseEvidence(unittest.TestCase):
         )
         self.assertEqual(result["status"], BLOCKED)
         self.assertEqual(result["reason_code"], "CERTIFICATION_EVIDENCE_UNAVAILABLE")
+
+    def test_terminal_released_event_requires_schema_version_one(self):
+        for schema_version in (None, 2):
+            with self.subTest(schema_version=schema_version):
+                event = released_event()
+                if schema_version is None:
+                    event.pop("schema_version")
+                else:
+                    event["schema_version"] = schema_version
+                result = validate_released_event(
+                    event,
+                    certification=certification(),
+                    project_versions=project_versions(),
+                )
+                self.assertEqual(result["status"], INVALID)
+                self.assertIn("schema_version_must_be_one", result["errors"])
+
+        event = released_event()
+        event["unrecognized_alias"] = "value"
+        result = validate_released_event(
+            event,
+            certification=certification(),
+            project_versions=project_versions(),
+        )
+        self.assertEqual(result["status"], INVALID)
+        self.assertTrue(any(error.startswith("unknown_event_fields:") for error in result["errors"]))
+
+    def test_terminal_released_event_requires_all_common_schema_fields(self):
+        for field in ("transaction_id", "static_iteration_snapshot", "expected_event_head"):
+            with self.subTest(field=field):
+                event = released_event()
+                event.pop(field)
+                result = validate_released_event(
+                    event,
+                    certification=certification(),
+                    project_versions=project_versions(),
+                )
+                self.assertEqual(result["status"], INVALID)
+                self.assertTrue(result["errors"])
 
     def test_anchor_and_candidate_refs_are_exact(self):
         event = released_event()
@@ -445,6 +529,36 @@ class TestReleaseEvidence(unittest.TestCase):
         bad["evidence_ref"] = "/Users/owner/private.json"
         self.assertEqual(validate_publication_evidence(bad)["reason_code"], "UNSAFE_PUBLIC_EVIDENCE")
 
+        for value in (
+            "local://runner/evidence.json",
+            "ssh://runner/evidence.json",
+            "private/evidence.json",
+            "../private/evidence.json",
+            "credentials/evidence.json",
+            "https://intranet/org/evidence.json",
+        ):
+            with self.subTest(value=value):
+                bad = publication_evidence()
+                bad["evidence_ref"] = value
+                self.assertEqual(
+                    validate_publication_evidence(bad)["reason_code"],
+                    "UNSAFE_PUBLIC_EVIDENCE",
+                )
+
+    def test_certification_rejects_private_public_boundary_values(self):
+        for field, value in (
+            ("evidence_ref", "local://runner/certification.json"),
+            ("policy_revision", "ssh://runner/policy"),
+            ("harness_revision", "private/harness"),
+            ("environment", "https://intranet/ci"),
+        ):
+            with self.subTest(field=field):
+                record = certification()
+                record[field] = value
+                result = validate_certification_identity(record)
+                self.assertEqual(result["status"], INVALID)
+                self.assertEqual(result["reason_code"], "UNSAFE_PUBLIC_EVIDENCE")
+
     def test_legacy_tag_is_excluded(self):
         result = validate_release_consistency(tag={"name": "v-0.1"})
         self.assertEqual(result["status"], LEGACY_EXCLUDED)
@@ -467,6 +581,21 @@ class TestReleaseEvidence(unittest.TestCase):
         )
         self.assertEqual(result["status"], TERMINAL_CONSISTENT)
         self.assertEqual(result["release_count"], 1)
+
+    def test_catalog_rejects_noncanonical_released_event(self):
+        event = released_event()
+        event.pop("transaction_id")
+        result = validate_release_catalog(
+            [event],
+            [tag()],
+            [github_release()],
+            [publication_evidence()],
+            release_intents=[release_intent()],
+            certifications={EVENT_ID: certification()},
+            project_versions={EVENT_ID: project_versions()},
+        )
+        self.assertEqual(result["status"], INVALID)
+        self.assertEqual(result["reason_code"], "RELEASED_EVENT_INVALID")
 
     def test_catalog_duplicate_tag_is_invalid(self):
         result = validate_release_catalog(
@@ -523,6 +652,19 @@ class TestReleaseEvidence(unittest.TestCase):
         )
         self.assertEqual(result["status"], INVALID)
         self.assertEqual(result["reason_code"], "GITHUB_RELEASE_EVENT_MISSING")
+
+    def test_catalog_malformed_names_are_structured_invalid(self):
+        result = validate_release_catalog(
+            [released_event()],
+            [{"name": []}],
+            [github_release()],
+            [publication_evidence()],
+            release_intents=[release_intent()],
+            certifications={EVENT_ID: certification()},
+            project_versions={EVENT_ID: project_versions()},
+        )
+        self.assertEqual(result["status"], INVALID)
+        self.assertEqual(result["reason_code"], "INVALID_CANONICAL_TAG_RECORD")
 
     def test_catalog_legacy_record_is_ignored_with_future_release(self):
         result = validate_release_catalog(
@@ -599,9 +741,11 @@ class TestSyntheticEvidencePacket(unittest.TestCase):
                 payload_raw = payload_path.read_bytes()
                 self.assertEqual(payload_raw, canonical_json(json.loads(payload_raw)))
                 self.assertEqual(sha256_hex(payload_raw), publication["evidence_digest"])
+                event = record["event"]
+                self.assertEqual(validate_event(event)["event_id"], event["event_id"])
                 self.assertEqual(
                     validate_release_consistency(
-                        event=record["event"], tag=record["tag"],
+                        event=event, tag=record["tag"],
                         github_release=record["github_release"],
                         publication_evidence=publication,
                         release_intent=record["release_intent"],

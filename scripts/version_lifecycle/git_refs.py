@@ -18,10 +18,43 @@ from pathlib import Path
 FULL_REF = re.compile(r"^refs/(?:heads|tags|candidates)/[A-Za-z0-9._/-]+$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 UTC = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+PUBLIC_TAG_REF = re.compile(
+    r"^refs/tags/v(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
+)
+LEGACY_TAG_REF = "refs/tags/v-0.1"
 
 
 class GitIdentityError(RuntimeError):
     """A Git identity, protection, or exact-ref expectation failed."""
+
+
+def require_full_ref(value: str) -> str:
+    """Reject Git-invalid names before they become durable ref identities."""
+
+    if (
+        not isinstance(value, str)
+        or FULL_REF.fullmatch(value) is None
+        or ".." in value
+        or "//" in value
+        or any(
+            component.startswith(".")
+            or component.endswith(".")
+            or component.endswith(".lock")
+            for component in value.split("/")
+        )
+    ):
+        raise GitIdentityError("invalid fully qualified ref")
+    return value
+
+
+def require_candidate_ref(value: str) -> str:
+    """Require a valid durable candidate ref under its canonical namespace."""
+
+    require_full_ref(value)
+    if not value.startswith("refs/heads/candidates/"):
+        raise GitIdentityError("invalid candidate ref")
+    return value
 
 
 @dataclass(frozen=True)
@@ -35,6 +68,14 @@ class ProtectionEvidence:
     creation_guarded: bool
     update_guarded: bool
     deletion_guarded: bool
+
+    def _matches(self, ref: str) -> bool:
+        # Only exact names and validated trailing-star prefixes are accepted
+        # here; GitHub's broader ruleset pattern language needs a separate
+        # live matcher before its result can be represented by this evidence.
+        return self.pattern == ref or (
+            self.pattern.endswith("*") and ref.startswith(self.pattern[:-1])
+        )
 
     def require(self, ref: str, *, creation: bool = False) -> None:
         if not self.rule_id or not re.fullmatch(r"[0-9a-f]{64}", self.snapshot_sha256):
@@ -51,10 +92,20 @@ class ProtectionEvidence:
             raise GitIdentityError("PROTECTION_EVIDENCE_UNAVAILABLE")
         # GitHub's pattern syntax is not fnmatch-compatible in every case.
         # The caller must provide an exact or validated prefix pattern.
-        if self.pattern != ref and not (
-            self.pattern.endswith("*") and ref.startswith(self.pattern[:-1])
-        ):
+        if not self._matches(ref):
             raise GitIdentityError("PROTECTION_EVIDENCE_UNAVAILABLE")
+
+    def require_public_tag(self, ref: str) -> None:
+        """Require an applicable create/update/delete rule excluding legacy."""
+
+        try:
+            if PUBLIC_TAG_REF.fullmatch(ref) is None:
+                raise GitIdentityError("noncanonical public tag")
+            self.require(ref, creation=True)
+            if self._matches(LEGACY_TAG_REF):
+                raise GitIdentityError("ruleset would also change legacy tag protection")
+        except GitIdentityError as exc:
+            raise GitIdentityError("PUBLIC_TAG_RULESET_UNAVAILABLE") from exc
 
 
 class GitRepository:
@@ -180,7 +231,10 @@ class GitRepository:
         """
         self._ref(ref)
         self._sha(object_id)
-        protection.require(ref, creation=True)
+        if ref.startswith("refs/tags/v"):
+            protection.require_public_tag(ref)
+        else:
+            protection.require(ref, creation=True)
         current = self.remote_ref(ref)
         if current == object_id:
             return
@@ -248,6 +302,4 @@ class GitRepository:
 
     @staticmethod
     def _ref(value: str) -> str:
-        if not FULL_REF.fullmatch(value) or ".." in value or "//" in value:
-            raise GitIdentityError("invalid fully qualified ref")
-        return value
+        return require_full_ref(value)

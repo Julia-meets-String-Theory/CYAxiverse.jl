@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
+
+from .git_refs import GitIdentityError, ProtectionEvidence
 
 
 FINAL = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -174,9 +176,12 @@ class ReleasePort(Protocol):
         self, intent: ReleaseIntent, candidate: dict[str, Any],
         certification: dict[str, Any], final: dict[str, Any],
     ) -> dict[str, Any]: ...
+    def verify_public_tag_ruleset(
+        self, intent: ReleaseIntent, tag_ref: str
+    ) -> ProtectionEvidence: ...
     def create_protected_tag(
         self, intent: ReleaseIntent, prepared: dict[str, Any],
-        final: dict[str, Any],
+        final: dict[str, Any], protection: ProtectionEvidence,
     ) -> dict[str, Any]: ...
     def append_released(
         self, intent: ReleaseIntent, candidate: dict[str, Any],
@@ -463,6 +468,7 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         evidence["certification"] = certification
         evidence["candidate_certification"] = dict(certification)
         phase = "candidate_certified"
+        transfer_evidence: dict[str, Any] | None = None
 
         if intent.release_line == "principal":
             if not SHA.fullmatch(str(candidate.get("main_at_candidate_sha", ""))) or not candidate.get("main_at_candidate_version"):
@@ -567,13 +573,36 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
                     )
                 ):
                     raise TransactionError("CERTIFICATION_TRANSFER_UNPROVEN")
-                evidence["certification_transfer"] = transfer
+                transfer_evidence = dict(transfer)
+                # The transfer proof is part of the certification identity
+                # passed to both durable release events.  Keeping this copy
+                # on the certification prevents an in-memory verification
+                # from being mistaken for durable evidence.
+                certification = dict(certification)
+                certification["transfer_evidence"] = {
+                    **dict(transfer_evidence),
+                    "certified_tree": certification["subject_tree"],
+                }
+                transfer_evidence = dict(certification["transfer_evidence"])
+                evidence["certification"] = dict(certification)
+                evidence["certification_transfer"] = dict(transfer_evidence)
                 phase = "transfer_verified"
 
         evidence["final_certification"] = dict(certification)
 
-        prepared = port.append_release_intent(intent, candidate, certification, final)
         public_tag = f"v{intent.final_version}"
+        tag_ref = f"refs/tags/{public_tag}"
+        try:
+            tag_protection = port.verify_public_tag_ruleset(intent, tag_ref)
+            if not isinstance(tag_protection, ProtectionEvidence):
+                raise GitIdentityError("public tag ruleset proof has the wrong type")
+            tag_protection.require_public_tag(tag_ref)
+        except Exception as exc:
+            raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE") from exc
+        evidence["public_tag_ruleset"] = asdict(tag_protection)
+        phase = "tag_ruleset_verified"
+
+        prepared = port.append_release_intent(intent, candidate, certification, final)
         if (
             prepared.get("public_tag") != public_tag
             or prepared.get("release_sha") != final["sha"]
@@ -581,10 +610,14 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
             or not prepared.get("event_id")
         ):
             raise TransactionError("RELEASE_INTENT_MISMATCH")
+        if transfer_evidence is not None and prepared.get(
+            "certification_transfer_evidence"
+        ) != transfer_evidence:
+            raise TransactionError("RELEASE_INTENT_TRANSFER_EVIDENCE_UNPROVEN")
         evidence["intent"] = prepared
         phase = "release_intent_durable"
         tag_attempted = True
-        tag = port.create_protected_tag(intent, prepared, final)
+        tag = port.create_protected_tag(intent, prepared, final, tag_protection)
         tag_created = True
         if (
             tag.get("name") != public_tag
@@ -600,6 +633,10 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         port.verify_released(intent, released, certification, final)
         if released.get("public_tag") != public_tag or not released.get("event_id"):
             raise TransactionError("RELEASED_EVENT_MISMATCH")
+        if transfer_evidence is not None and released.get(
+            "certification_transfer_evidence"
+        ) != transfer_evidence:
+            raise TransactionError("RELEASED_EVENT_TRANSFER_EVIDENCE_UNPROVEN")
         evidence["released"] = released
         phase = "released_event_durable"
         publication = port.publish_github_release(intent, released)

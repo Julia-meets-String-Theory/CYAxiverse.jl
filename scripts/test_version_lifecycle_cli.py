@@ -99,6 +99,8 @@ class GateALifecycleCliFixture(unittest.TestCase):
             "--dry-run",
             "--principal-closed",
             "0.2.0",
+            "--source-repository",
+            "fixture/repo",
         )
         after = _git(self.repo, "show-ref")
 
@@ -152,6 +154,17 @@ class GateALifecycleCliFixture(unittest.TestCase):
             "https://github.com/Org/Repo",
         )
 
+    def test_implicit_local_remote_identity_is_blocked(self) -> None:
+        code, payload = self._run_cli(
+            "snapshot",
+            "--repo",
+            str(self.repo),
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(payload["status"], "BLOCKED")
+        self.assertEqual(payload["reason_code"], "STATIC_SOURCE_REPOSITORY_UNSAFE")
+        self.assertNotIn(self.repo.name, json.dumps(payload))
+
     def test_missing_event_branch_is_a_machine_readable_block(self) -> None:
         # The local cache still exists, but the remote authority is absent.
         # The CLI must not treat local state as a substitute or bootstrap a
@@ -163,6 +176,8 @@ class GateALifecycleCliFixture(unittest.TestCase):
             "--repo",
             str(self.repo),
             "--dry-run",
+            "--source-repository",
+            "fixture/repo",
         )
         self.assertEqual(code, 2)
         self.assertEqual(_git(self.repo, "show-ref"), before)
@@ -208,6 +223,8 @@ class GateALifecycleCliFixture(unittest.TestCase):
             "--repo",
             str(self.repo),
             "--dry-run",
+            "--source-repository",
+            "fixture/repo",
         )
         self.assertEqual(code, 0)
         self.assertEqual(payload["status"], "READY")
@@ -226,6 +243,8 @@ class GateALifecycleCliFixture(unittest.TestCase):
             "--dry-run",
             "--maintenance-closed",
             "0.2.0",
+            "--source-repository",
+            "fixture/repo",
         )
         self.assertEqual(code, 2)
         self.assertEqual(payload["status"], "BLOCKED")

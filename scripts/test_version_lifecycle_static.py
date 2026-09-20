@@ -151,6 +151,52 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         assert not isinstance(snapshot, BlockedResult)
         self.assertEqual(snapshot.source_repository, "https://github.com/Org/Repo")
 
+    def test_implicit_local_remote_identity_is_blocked(self) -> None:
+        repo = _fixture()
+        result = static_snapshot(repo)
+        self.assertIsInstance(result, BlockedResult)
+        assert isinstance(result, BlockedResult)
+        self.assertEqual(result.reason_code, "STATIC_SOURCE_REPOSITORY_UNSAFE")
+        self.assertNotIn(repo.name, result.detail)
+
+    def test_schema_versions_require_exact_integer_one(self) -> None:
+        repo = _fixture()
+        for schema_version in ("true", '"1"'):
+            with self.subTest(schema_version=schema_version):
+                (repo / "iterations.toml").write_text(
+                    f"schema_version = {schema_version}\n"
+                    "target_iteration = \"fixture\"\n"
+                    "iterations = []\nprospective = []\nretrospective = []\n",
+                    encoding="utf-8",
+                )
+                _run(repo, "add", "iterations.toml")
+                _run(repo, "commit", "-q", "-m", "invalid registry schema version")
+                _run(repo, "branch", "-f", "vmm")
+                _run(repo, "push", "-q", "--force", "origin", "vmm")
+                result = static_snapshot(repo, source_repository="fixture/repo")
+                self.assertIsInstance(result, BlockedResult)
+                assert isinstance(result, BlockedResult)
+
+        valid = static_snapshot(_fixture(), source_repository="fixture/repo")
+        assert not isinstance(valid, BlockedResult)
+        for value in (True, "1"):
+            with self.subTest(snapshot_schema_version=value):
+                tampered = valid.to_dict()
+                tampered["snapshot_schema_version"] = value
+                with self.assertRaises(StaticValidationError):
+                    recompute_snapshot_digests(tampered)
+
+    def test_malformed_occupied_versions_raise_structured_validation_error(self) -> None:
+        repo = _fixture()
+        snapshot = static_snapshot(repo, source_repository="fixture/repo")
+        assert not isinstance(snapshot, BlockedResult)
+        for value in ([{"version": "0.1.0"}], [True], ["0.1.0-DEV"]):
+            with self.subTest(value=value):
+                tampered = snapshot.to_dict()
+                tampered["occupied_versions"] = value
+                with self.assertRaises(StaticValidationError):
+                    recompute_snapshot_digests(tampered)
+
     def test_prospective_release_line_is_canonical_and_matches_version(self) -> None:
         repo = _fixture()
         for release_line in ("maintenance/0.1", "maintenance/01.2", "release/0.2"):
@@ -369,6 +415,55 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         self.assertEqual(view.status, "READY")
         self.assertIn("0.3.1", view.mutable_occupied)
         self.assertFalse(view.is_available("0.3.1"))
+
+    def test_preentry_abort_releases_reservation_for_allocation_replay(self) -> None:
+        repo = _fixture()
+        snapshot = static_snapshot(repo, source_repository="fixture/repo")
+        assert not isinstance(snapshot, BlockedResult)
+        prepared = {
+            "schema_version": 1,
+            "event_id": "EVT-000000000001",
+            "event_type": "development_reservation_prepared",
+            "timestamp_utc": "2026-09-20T12:34:56Z",
+            "transaction_id": "reservation-prepare",
+            "static_iteration_snapshot": "a" * 64,
+            "expected_event_head": "b" * 40,
+            "owner_line": "principal",
+            "final_version": "0.3.1",
+            "intended_dev_version": "0.3.1-DEV",
+            "expected_line_head": "c" * 40,
+            "reservation_id": "reservation-1",
+        }
+        active_raw = canonical_event_bytes(prepared) + b"\n"
+        active = global_allocation_view(
+            snapshot,
+            LedgerHead(commit="c" * 40, raw=active_raw, events=(prepared,)),
+        )
+        self.assertEqual(active.status, "READY")
+        self.assertFalse(active.is_available("0.3.1"))
+
+        aborted = dict(
+            prepared,
+            event_id="EVT-000000000002",
+            event_type="development_reservation_aborted",
+            transaction_id="reservation-abort",
+            expected_event_head="d" * 40,
+            abort_reason="branch_not_created",
+            non_entry_evidence="branch_absent_at_reconciliation",
+        )
+        aborted.pop("expected_line_head")
+        aborted_raw = active_raw + canonical_event_bytes(aborted) + b"\n"
+        after_abort = global_allocation_view(
+            snapshot,
+            LedgerHead(
+                commit="d" * 40,
+                raw=aborted_raw,
+                events=(prepared, aborted),
+            ),
+        )
+        self.assertEqual(after_abort.status, "READY")
+        self.assertNotIn("0.3.1", after_abort.mutable_occupied)
+        self.assertTrue(after_abort.is_available("0.3.1"))
 
     def test_unresolved_selector_returns_required_blocked_result(self) -> None:
         repo = _fixture()

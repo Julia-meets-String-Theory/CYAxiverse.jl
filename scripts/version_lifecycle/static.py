@@ -332,17 +332,16 @@ def sanitize_source_repository(value: str) -> str:
 
 def _repository_identity(repository: Path, remote_name: str = "origin") -> str:
     remote = _git(repository, "config", "--get", f"remote.{remote_name}.url", check=False).decode().strip()
-    if remote:
-        try:
-            return sanitize_source_repository(remote)
-        except UnsafeSourceRepositoryError:
-            # Local fixture remotes and private checkout URLs do not become
-            # durable metadata.  A safe checkout basename is the fallback.
-            pass
+    if not remote:
+        raise UnsafeSourceRepositoryError(
+            "source_repository requires an explicitly supplied public identity when no remote is configured"
+        )
     try:
-        return sanitize_source_repository(repository.name or "repository")
-    except UnsafeSourceRepositoryError:
-        return "repository"
+        return sanitize_source_repository(remote)
+    except UnsafeSourceRepositoryError as error:
+        raise UnsafeSourceRepositoryError(
+            "configured remote does not provide a sanitized public source identity"
+        ) from error
 
 
 def _read_toml(raw: bytes, source: str) -> Mapping[str, Any]:
@@ -364,7 +363,12 @@ def _as_str(mapping: Mapping[str, Any], key: str, source: str) -> str:
 
 def _entry_lists(registry: Mapping[str, Any], source: str) -> list[Mapping[str, Any]]:
     entries: list[Mapping[str, Any]] = []
-    if "schema_version" not in registry or registry["schema_version"] != SNAPSHOT_SCHEMA_VERSION:
+    schema_version = registry.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != SNAPSHOT_SCHEMA_VERSION
+    ):
         raise StaticValidationError(f"{source} requires schema_version = 1")
     # ``iterations`` is convenient for fixtures; the named arrays make the
     # prospective/retrospective boundary explicit in the checked-in registry.
@@ -644,7 +648,11 @@ def recompute_snapshot_digests(snapshot: StaticSnapshot | Mapping[str, Any]) -> 
     missing = [key for key in fields if key not in data]
     if missing:
         raise StaticValidationError(f"snapshot missing fields: {missing}")
-    if data["snapshot_schema_version"] != SNAPSHOT_SCHEMA_VERSION:
+    if (
+        isinstance(data["snapshot_schema_version"], bool)
+        or not isinstance(data["snapshot_schema_version"], int)
+        or data["snapshot_schema_version"] != SNAPSHOT_SCHEMA_VERSION
+    ):
         raise StaticValidationError("unsupported snapshot_schema_version")
     for field in ("source_repository", "source_ref", "source_path", "source_commit", "source_tree"):
         if not isinstance(data[field], str) or not data[field]:
@@ -661,6 +669,21 @@ def recompute_snapshot_digests(snapshot: StaticSnapshot | Mapping[str, Any]) -> 
     occupied = data["occupied_versions"]
     if not isinstance(refs, list) or not isinstance(tags, list) or not isinstance(occupied, list):
         raise StaticValidationError("snapshot binding and occupied fields must be arrays")
+    for index, version in enumerate(occupied):
+        if not isinstance(version, str):
+            raise StaticValidationError(
+                f"occupied_versions[{index}] must be a canonical final version string"
+            )
+        try:
+            parsed = final_version(parse_package_version(version))
+        except (TypeError, ValueError) as error:
+            raise StaticValidationError(
+                f"occupied_versions[{index}] is not a canonical final version"
+            ) from error
+        if parsed.canonical != version:
+            raise StaticValidationError(
+                f"occupied_versions[{index}] is not a canonical final version"
+            )
     ref_names = [item.get("ref") for item in refs if isinstance(item, dict)]
     tag_names = [item.get("tag") for item in tags if isinstance(item, dict)]
     if len(ref_names) != len(refs) or len(tag_names) != len(tags):
@@ -685,8 +708,6 @@ def recompute_snapshot_digests(snapshot: StaticSnapshot | Mapping[str, Any]) -> 
             raise StaticValidationError(f"invalid canonical public tag binding: {error}") from error
         if not _HEX40_RE.fullmatch(str(item["commit"])) or not _HEX40_RE.fullmatch(str(item["tree"])):
             raise StaticValidationError("public tag binding has invalid commit/tree")
-    for version in occupied:
-        final_version(parse_package_version(version))
     ref_digest = _bind_digest(refs, ("ref", "commit", "tree"))
     tag_digest = _bind_digest(tags, ("tag", "commit", "tree"))
     raw_digest = str(data["iterations_toml_sha256"])

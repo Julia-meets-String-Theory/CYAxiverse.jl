@@ -51,6 +51,9 @@ class DocumentationRoutingTests(unittest.TestCase):
             "event_type": "released",
             "event_id": "EVT-000000000003",
             "timestamp_utc": "2026-09-20T14:00:00Z",
+            "transaction_id": "release-3",
+            "static_iteration_snapshot": "b" * 64,
+            "expected_event_head": "0" * 40,
             "closure_timestamp_utc": "2026-09-20T13:00:00Z",
             "public_tag": "v0.3.0",
             "release_line": "principal",
@@ -235,6 +238,7 @@ class DocumentationRoutingTests(unittest.TestCase):
         maintenance.update(
             {
                 "event_id": "EVT-000000000004",
+                "transaction_id": "release-4",
                 "public_tag": "v0.2.1",
                 "release_line": "maintenance/0.2",
                 "final_version": "0.2.1",
@@ -252,6 +256,7 @@ class DocumentationRoutingTests(unittest.TestCase):
         current.update(
             {
                 "event_id": "EVT-000000000005",
+                "transaction_id": "release-5",
                 "public_tag": "v0.4.0",
                 "final_version": "0.4.0",
                 "anchor_ref": "refs/tags/iterations/0.4.0",

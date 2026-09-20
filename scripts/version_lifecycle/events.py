@@ -15,6 +15,7 @@ import re
 from typing import Any
 
 from .codec import canonical_json, sha256_hex
+from .git_refs import GitIdentityError, require_candidate_ref
 
 
 SCHEMA_VERSION = 1
@@ -273,7 +274,15 @@ TYPE_FORBIDDEN_FIELDS = {
 # canonical event identity or by transition replay.
 SCHEMA_FIELDS = (
     frozenset().union(COMMON_FIELDS, *TYPE_REQUIRED_FIELDS.values())
-    | frozenset({"candidate_id", "previous_main_sha", "previous_main_version", "closed_final_version"})
+    | frozenset(
+        {
+            "candidate_id",
+            "previous_main_sha",
+            "previous_main_version",
+            "closed_final_version",
+            "certification_transfer_evidence",
+        }
+    )
 )
 
 
@@ -524,6 +533,82 @@ def _require_git_object(event: Mapping[str, Any], name: str) -> None:
         raise EventSchemaError(f"{name} must be a full hexadecimal Git object ID")
 
 
+def _require_certification_transfer_evidence(event: Mapping[str, Any]) -> None:
+    """Validate the durable proof for a tree-bound commit transfer.
+
+    The proof is kept as one structured public value so replay can compare it
+    with the certification and with the release identities.  It deliberately
+    accepts one evidence reference or digest, never a workstation locator.
+    """
+
+    proof = event.get("certification_transfer_evidence")
+    if not isinstance(proof, Mapping):
+        raise EventSchemaError("certification_transfer_evidence must be an object")
+    allowed = {
+        "verified",
+        "candidate_sha",
+        "final_release_sha",
+        "certified_tree",
+        "candidate_tree",
+        "final_release_tree",
+        "anchor_tree",
+        "evidence_ref",
+        "evidence_digest",
+        "digest",
+    }
+    if set(proof) - allowed:
+        raise EventSchemaError("certification_transfer_evidence has unknown fields")
+    if proof.get("verified") is not True:
+        raise EventSchemaError("certification_transfer_evidence must be verified")
+    for field in (
+        "candidate_sha",
+        "final_release_sha",
+        "candidate_tree",
+        "final_release_tree",
+        "anchor_tree",
+    ):
+        _require_git_object(proof, field)
+    evidence_fields = [
+        field
+        for field in ("evidence_ref", "evidence_digest", "digest")
+        if field in proof
+    ]
+    if len(evidence_fields) != 1:
+        raise EventSchemaError(
+            "certification_transfer_evidence requires one evidence_ref or evidence_digest"
+        )
+    if evidence_fields[0] == "evidence_ref":
+        _require_text(proof, "evidence_ref")
+    elif evidence_fields[0] == "evidence_digest":
+        _require_digest(proof, "evidence_digest")
+    else:
+        _require_text(proof, "digest")
+    for field in (
+        "candidate_sha",
+        "final_release_sha",
+        "candidate_tree",
+        "final_release_tree",
+        "anchor_tree",
+    ):
+        event_field = {
+            "candidate_sha": "candidate_sha",
+            "final_release_sha": "final_release_sha",
+            "candidate_tree": "candidate_tree",
+            "final_release_tree": "final_release_tree",
+            "anchor_tree": "anchor_tree",
+        }[field]
+        if proof[field] != event.get(event_field):
+            raise EventSchemaError(
+                f"certification_transfer_evidence {field} does not match event"
+            )
+    if "certified_tree" in proof:
+        _require_git_object(proof, "certified_tree")
+        if proof["certified_tree"] != event.get("certification_subject_tree"):
+            raise EventSchemaError(
+                "certification_transfer_evidence certified_tree does not match event"
+            )
+
+
 def _require_final_version(event: Mapping[str, Any], name: str) -> None:
     _require_text(event, name)
     if FINAL_VERSION_RE.fullmatch(event[name]) is None:
@@ -550,6 +635,16 @@ def _require_ref(
         raise EventSchemaError(f"{name} must be a canonical {description}")
 
 
+def _require_candidate_ref(event: Mapping[str, Any], name: str = "candidate_ref") -> None:
+    """Validate a durable candidate ref with the shared Git ref policy."""
+
+    _require_text(event, name)
+    try:
+        require_candidate_ref(event[name])
+    except GitIdentityError as exc:
+        raise EventSchemaError(f"{name} must be a canonical candidate ref") from exc
+
+
 def _require_git_identity_or_anchor_ref(event: Mapping[str, Any], name: str) -> None:
     """Accept a full commit identity or the canonical iteration anchor ref."""
 
@@ -573,6 +668,12 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
     if forbidden:
         raise EventSchemaError(
             f"{event_type} has fields from an unrelated lifecycle state: {', '.join(forbidden)}"
+        )
+    if event_type not in {"release_intent_prepared", "released"} and (
+        "certification_transfer_evidence" in event
+    ):
+        raise EventSchemaError(
+            "certification_transfer_evidence is only valid on release events"
         )
 
     if event_type in {
@@ -651,6 +752,17 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
         ) is None:
             raise EventSchemaError("release_line must be maintenance/X.Y")
         _require_final_version(event, "approved_base_version")
+        if not _line_matches_version(
+            event["release_line"], event["approved_base_version"]
+        ):
+            raise EventSchemaError(
+                "approved_base_version must match release_line maintenance/X.Y"
+            )
+        expected_branch_ref = f"refs/heads/{event['release_line']}"
+        if event["branch_ref"] != expected_branch_ref:
+            raise EventSchemaError(
+                "branch_ref must match release_line maintenance/X.Y"
+            )
         _require_dev_version(event, "dev_version")
         _require_git_object(event, "branch_head")
 
@@ -665,7 +777,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             "anchor_tree",
         ):
             _require_text(event, field)
-        _require_ref(event, "candidate_ref", CANDIDATE_REF_RE, "candidate ref")
+        _require_candidate_ref(event)
         _require_ref(event, "anchor_ref", ANCHOR_REF_RE, "iteration anchor ref")
         _require_final_version(event, "final_version")
         if event["release_line"] != "principal" and re.fullmatch(
@@ -683,7 +795,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
     elif event_type == "candidate_withdrawn":
         for field in ("candidate_id", "candidate_sha", "withdrawal_evidence"):
             _require_text(event, field)
-        _require_ref(event, "candidate_ref", CANDIDATE_REF_RE, "candidate ref")
+        _require_candidate_ref(event)
         _require_git_object(event, "candidate_sha")
 
     elif event_type == "release_intent_prepared":
@@ -707,7 +819,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             "public_tag",
         ):
             _require_text(event, field)
-        _require_ref(event, "candidate_ref", CANDIDATE_REF_RE, "candidate ref")
+        _require_candidate_ref(event)
         _require_ref(event, "anchor_ref", ANCHOR_REF_RE, "iteration anchor ref")
         _require_final_version(event, "final_version")
         _require_public_tag(event, "public_tag")
@@ -746,6 +858,20 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             "final_release_sha", "final_release_tree",
         ):
             _require_git_object(event, field)
+        transfer_present = "certification_transfer_evidence" in event
+        if event["certification_binding"] == "tree-bound" and (
+            event["candidate_sha"] != event["final_release_sha"]
+        ):
+            if not transfer_present:
+                raise EventSchemaError(
+                    "tree-bound release intent requires certification transfer evidence"
+                )
+        if transfer_present:
+            if event["certification_binding"] != "tree-bound":
+                raise EventSchemaError(
+                    "commit-bound release intent cannot carry transfer evidence"
+                )
+            _require_certification_transfer_evidence(event)
 
     elif event_type == "release_intent_aborted":
         for field in ("intent_id", "candidate_id", "public_tag"):
@@ -776,7 +902,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
         ):
             _require_text(event, field)
         _require_ref(event, "anchor_ref", ANCHOR_REF_RE, "iteration anchor ref")
-        _require_ref(event, "candidate_ref", CANDIDATE_REF_RE, "candidate ref")
+        _require_candidate_ref(event)
         parse_timestamp(event["closure_timestamp_utc"])
         _require_final_version(event, "final_version")
         _require_public_tag(event, "public_tag")
@@ -826,6 +952,20 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             _require_final_version(event, "previous_main_version")
         elif "previous_main_sha" in event or "previous_main_version" in event:
             raise EventSchemaError("maintenance released events cannot claim previous main")
+        transfer_present = "certification_transfer_evidence" in event
+        if event["certification_binding"] == "tree-bound" and (
+            event["candidate_sha"] != event["final_release_sha"]
+        ):
+            if not transfer_present:
+                raise EventSchemaError(
+                    "tree-bound released event requires certification transfer evidence"
+                )
+        if transfer_present:
+            if event["certification_binding"] != "tree-bound":
+                raise EventSchemaError(
+                    "commit-bound released event cannot carry transfer evidence"
+                )
+            _require_certification_transfer_evidence(event)
 
 
 def validate_event(event: Mapping[str, Any] | bytes | bytearray | str) -> dict[str, Any]:
@@ -862,7 +1002,10 @@ def validate_event(event: Mapping[str, Any] | bytes | bytearray | str) -> dict[s
     unknown = sorted(set(value) - SCHEMA_FIELDS)
     if unknown:
         raise EventSchemaError(f"undeclared event fields: {', '.join(unknown)}")
-    if value.get("schema_version") != SCHEMA_VERSION:
+    if (
+        type(value.get("schema_version")) is not int
+        or value["schema_version"] != SCHEMA_VERSION
+    ):
         raise EventSchemaError("schema_version must equal 1")
     if not isinstance(value.get("event_type"), str) or value["event_type"] not in EVENT_TYPES:
         raise EventSchemaError("event_type is not in the canonical vocabulary")
@@ -1101,6 +1244,7 @@ def validate_transition(
                 "certification_harness_revision",
                 "certification_environment",
                 "certification_evidence_refs",
+                "certification_transfer_evidence",
                 "final_release_sha",
                 "final_release_tree",
                 "public_tag",

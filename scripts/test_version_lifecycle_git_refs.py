@@ -14,6 +14,7 @@ from version_lifecycle.git_refs import (  # noqa: E402
     GitIdentityError,
     GitRepository,
     ProtectionEvidence,
+    require_candidate_ref,
 )
 
 
@@ -126,6 +127,51 @@ class GitRefFixture(unittest.TestCase):
             self.repository.push_create_only(ref, later, branch_protection)
         self.assertEqual(remote_ref(ref), self.commit)
 
+    def test_public_tag_requires_canonical_ruleset_and_excludes_legacy(self) -> None:
+        public_ref = "refs/tags/v0.3.0"
+        self._cmd(
+            "git", "push", "origin", f"{self.commit}:refs/tags/v-0.1", cwd=self.work
+        )
+        good = ProtectionEvidence(
+            rule_id="fixture-canonical-rule",
+            pattern="refs/tags/v0.*",
+            snapshot_sha256="0" * 64,
+            retrieved_at_utc="2026-09-20T00:00:00Z",
+            creation_guarded=True,
+            update_guarded=True,
+            deletion_guarded=True,
+        )
+        self.repository.push_create_only(public_ref, self.commit, good)
+        self.assertEqual(self.repository.remote_ref(public_ref), self.commit)
+        self.assertEqual(self.repository.remote_ref("refs/tags/v-0.1"), self.commit)
+
+        for pattern, creation, update, deletion in (
+            ("refs/tags/v*", True, True, True),
+            ("refs/tags/v0.*", False, True, True),
+            ("refs/tags/v0.*", True, False, True),
+            ("refs/tags/v0.*", True, True, False),
+        ):
+            with self.subTest(pattern=pattern, creation=creation, update=update, deletion=deletion):
+                weak = ProtectionEvidence(
+                    rule_id="fixture-weak-rule",
+                    pattern=pattern,
+                    snapshot_sha256="0" * 64,
+                    retrieved_at_utc="2026-09-20T00:00:00Z",
+                    creation_guarded=creation,
+                    update_guarded=update,
+                    deletion_guarded=deletion,
+                )
+                with self.assertRaisesRegex(GitIdentityError, "PUBLIC_TAG_RULESET_UNAVAILABLE"):
+                    weak.require_public_tag(public_ref)
+
+        with self.assertRaisesRegex(GitIdentityError, "PUBLIC_TAG_RULESET_UNAVAILABLE"):
+            good.require_public_tag("refs/tags/v-0.1")
+        with self.assertRaisesRegex(GitIdentityError, "PUBLIC_TAG_RULESET_UNAVAILABLE"):
+            good.require_public_tag("refs/tags/v00.3.0")
+        with self.assertRaisesRegex(GitIdentityError, "PUBLIC_TAG_RULESET_UNAVAILABLE"):
+            self.repository.push_create_only("refs/tags/v-0.1", self.commit, good)
+        self.assertEqual(self.repository.remote_ref("refs/tags/v-0.1"), self.commit)
+
     def test_invalid_closure_time_is_not_inferred(self) -> None:
         with self.assertRaisesRegex(GitIdentityError, "invalid closure UTC timestamp"):
             self.repository.make_annotated_iteration_tag(
@@ -133,6 +179,23 @@ class GitRefFixture(unittest.TestCase):
                 closure_timestamp_utc="2026-02-30T12:34:56Z",
                 tagger_name="Fixture", tagger_email="fixture@example.invalid",
             )
+
+    def test_candidate_ref_validation_rejects_git_invalid_names(self) -> None:
+        self.assertEqual(
+            require_candidate_ref("refs/heads/candidates/0.3.0"),
+            "refs/heads/candidates/0.3.0",
+        )
+        for ref in (
+            "refs/heads/candidates/foo/../bar",
+            "refs/heads/candidates/foo//bar",
+            "refs/heads/candidates/.hidden",
+            "refs/heads/candidates/name.lock",
+            "refs/heads/candidates/name.",
+            "refs/heads/maintenance/0.3",
+        ):
+            with self.subTest(ref=ref):
+                with self.assertRaises(GitIdentityError):
+                    require_candidate_ref(ref)
 
     def test_principal_interval_enumerates_drift_before_promotion(self) -> None:
         certified_tree = self.repository.tree(self.commit)

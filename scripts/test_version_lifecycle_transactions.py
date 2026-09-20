@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from version_lifecycle.git_refs import ProtectionEvidence  # noqa: E402
 from version_lifecycle.transactions import (  # noqa: E402
     AllocationView,
     BootstrapIntent,
@@ -146,6 +147,8 @@ class ReleaseFixture:
         self.candidate_sha = "a" * 40
         self.final_sha = "b" * 40
         self.tree = "c" * 40
+        self.intent_certification = None
+        self.released_certification = None
 
     def verify_anchor(self, intent):
         self.calls.append("anchor")
@@ -219,12 +222,32 @@ class ReleaseFixture:
 
     def append_release_intent(self, intent, candidate, certification, final):
         self.calls.append("intent")
-        return {"public_tag": "v" + intent.final_version,
-                "release_sha": final["sha"], "release_tree": final["tree"],
-                "event_id": "EVT-000000000002"}
+        self.intent_certification = dict(certification)
+        result = {"public_tag": "v" + intent.final_version,
+                  "release_sha": final["sha"], "release_tree": final["tree"],
+                  "event_id": "EVT-000000000002"}
+        if "transfer_evidence" in certification:
+            result["certification_transfer_evidence"] = dict(
+                certification["transfer_evidence"]
+            )
+        return result
 
-    def create_protected_tag(self, intent, prepared, final):
+    def verify_public_tag_ruleset(self, intent, tag_ref):
+        self.calls.append("ruleset")
+        major = tag_ref.removeprefix("refs/tags/v").split(".", 1)[0]
+        return ProtectionEvidence(
+            rule_id="fixture-future-tags",
+            pattern=f"refs/tags/v{major}.*",
+            snapshot_sha256="0" * 64,
+            retrieved_at_utc="2026-09-20T00:00:00Z",
+            creation_guarded=True,
+            update_guarded=True,
+            deletion_guarded=True,
+        )
+
+    def create_protected_tag(self, intent, prepared, final, protection):
         self.calls.append("tag")
+        protection.require_public_tag(f"refs/tags/{prepared['public_tag']}")
         return {"name": prepared["public_tag"], "commit": "0" * 40 if self.bad_tag else final["sha"],
                 "tree": final["tree"], "protected": True}
 
@@ -232,7 +255,13 @@ class ReleaseFixture:
         self.calls.append("released")
         if self.fail_after_tag:
             raise RuntimeError("transport timeout")
-        return {"event_id": "EVT-000000000003", "public_tag": tag["name"]}
+        self.released_certification = dict(certification)
+        result = {"event_id": "EVT-000000000003", "public_tag": tag["name"]}
+        if "transfer_evidence" in certification:
+            result["certification_transfer_evidence"] = dict(
+                certification["transfer_evidence"]
+            )
+        return result
 
     def verify_released(self, intent, event, certification, final):
         self.calls.append("verify-released")
@@ -365,9 +394,68 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(result.status, "COMPLETE")
         self.assertEqual(port.calls[-3:], ["publication-evidence", "terminal", "unfreeze-main"])
         self.assertLess(port.calls.index("intent"), port.calls.index("tag"))
+        self.assertLess(port.calls.index("ruleset"), port.calls.index("intent"))
         self.assertLess(port.calls.index("tag"), port.calls.index("released"))
         self.assertLess(port.calls.index("verify-interval"), port.calls.index("promote"))
         self.assertLess(port.calls.index("verify-transfer"), port.calls.index("tag"))
+        self.assertEqual(
+            result.evidence["public_tag_ruleset"]["rule_id"],
+            "fixture-future-tags",
+        )
+
+    def test_release_blocks_before_intent_without_canonical_public_tag_ruleset(self):
+        for failure in ("missing", "legacy-inclusive", "creation", "update", "deletion"):
+            with self.subTest(failure=failure):
+                port = ReleaseFixture()
+                original = port.verify_public_tag_ruleset
+
+                def bad_ruleset(intent, tag_ref, failure=failure):
+                    if failure == "missing":
+                        return None
+                    proof = original(intent, tag_ref)
+                    values = dict(proof.__dict__)
+                    if failure == "legacy-inclusive":
+                        values["pattern"] = "refs/tags/v*"
+                    else:
+                        values[f"{failure}_guarded"] = False
+                    return ProtectionEvidence(**values)
+
+                port.verify_public_tag_ruleset = bad_ruleset
+                result = run_release(port, self.release)
+                self.assertEqual(
+                    (result.status, result.reason_code, result.frozen),
+                    ("BLOCKED", "PUBLIC_TAG_RULESET_UNAVAILABLE", True),
+                )
+                self.assertNotIn("intent", port.calls)
+                self.assertNotIn("tag", port.calls)
+
+    def test_tree_transfer_proof_is_bound_to_both_release_events(self):
+        port = ReleaseFixture()
+        result = run_release(port, self.release)
+        self.assertEqual(result.status, "COMPLETE")
+        proof = result.evidence["certification_transfer"]
+        self.assertEqual(result.evidence["certification"]["transfer_evidence"], proof)
+        self.assertEqual(result.evidence["final_certification"]["transfer_evidence"], proof)
+        self.assertEqual(port.intent_certification["transfer_evidence"], proof)
+        self.assertEqual(port.released_certification["transfer_evidence"], proof)
+        self.assertEqual(result.evidence["intent"]["certification_transfer_evidence"], proof)
+        self.assertEqual(result.evidence["released"]["certification_transfer_evidence"], proof)
+
+    def test_missing_durable_transfer_proof_blocks_before_public_tag(self):
+        port = ReleaseFixture()
+        original = port.append_release_intent
+
+        def missing_transfer(intent, candidate, certification, final):
+            result = original(intent, candidate, certification, final)
+            result.pop("certification_transfer_evidence", None)
+            return result
+
+        port.append_release_intent = missing_transfer
+        result = run_release(port, self.release)
+        self.assertEqual((result.status, result.reason_code, result.frozen), (
+            "BLOCKED", "RELEASE_INTENT_TRANSFER_EVIDENCE_UNPROVEN", True
+        ))
+        self.assertNotIn("tag", port.calls)
 
     def test_missing_ancestry_or_transfer_proof_blocks_public_tag(self):
         for missing in ("interval", "transfer"):

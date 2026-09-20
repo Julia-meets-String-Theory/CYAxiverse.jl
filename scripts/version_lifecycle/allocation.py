@@ -102,8 +102,50 @@ _EVENT_VERSION_FIELDS = frozenset(
 
 
 def _event_occupied(events: Iterable[Mapping[str, Any]]) -> set[str]:
+    """Replay event occupation with reservation terminal semantics.
+
+    A prepared reservation remains occupied while it is prepared or opened.
+    A proven pre-entry abort releases that reserved final identity.  A
+    consumed reservation occupies its reserved identity and, when closure
+    used a different final, the closed final as well.  Other lifecycle events
+    retain the generic version-field occupation rules because their durable
+    identities remain unavailable after withdrawal or abort.
+    """
+
     occupied: set[str] = set()
+    reservation_states: dict[str, str] = {}
+    reservation_versions: dict[str, str] = {}
+    consumed_closed_versions: dict[str, str | None] = {}
+    reservation_event_types = {
+        "development_reservation_prepared",
+        "development_reservation_opened",
+        "development_reservation_aborted",
+        "development_reservation_consumed",
+    }
     for event in events:
+        event_type = event.get("event_type")
+        if event_type in reservation_event_types:
+            reservation_id = event.get("reservation_id")
+            if not isinstance(reservation_id, str) or not reservation_id:
+                raise ValueError("reservation event requires a reservation_id")
+            final_identity = _version_identity(event.get("final_version"))
+            if final_identity is None:
+                raise ValueError("reservation event final_version is not a canonical package identity")
+            reservation_states[reservation_id] = str(event_type).removeprefix(
+                "development_reservation_"
+            )
+            reservation_versions[reservation_id] = final_identity
+            if event_type == "development_reservation_consumed":
+                closed_value = event.get("closed_final_version")
+                closed_identity = None
+                if closed_value is not None:
+                    closed_identity = _version_identity(closed_value)
+                    if closed_identity is None:
+                        raise ValueError(
+                            "reservation event closed_final_version is not a canonical package identity"
+                        )
+                consumed_closed_versions[reservation_id] = closed_identity
+            continue
         for key, value in event.items():
             if key not in _EVENT_VERSION_FIELDS:
                 continue
@@ -113,6 +155,13 @@ def _event_occupied(events: Iterable[Mapping[str, Any]]) -> set[str]:
             if identity is None:
                 raise ValueError(f"event version field {key} is not a canonical package/tag identity")
             occupied.add(identity)
+    for reservation_id, state in reservation_states.items():
+        if state == "aborted":
+            continue
+        occupied.add(reservation_versions[reservation_id])
+        closed_identity = consumed_closed_versions.get(reservation_id)
+        if closed_identity is not None:
+            occupied.add(closed_identity)
     return occupied
 
 

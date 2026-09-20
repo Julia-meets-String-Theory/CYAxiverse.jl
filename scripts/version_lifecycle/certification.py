@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 
 SUPPORTED_BINDINGS = frozenset(("tree-bound", "commit-bound"))
@@ -19,6 +20,75 @@ BLOCKED = "BLOCKED"
 INVALID = "INVALID"
 PASS = "PASS"
 _GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+_DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def is_safe_public_value(value: Any) -> bool:
+    """Return whether a durable value is safe to expose publicly.
+
+    This lexical gate rejects private locators and credential-like values.
+    It is shared by the certification and release validators; it does not
+    claim that an otherwise safe value is approved evidence.
+    """
+
+    if isinstance(value, Mapping):
+        return all(
+            isinstance(key, str)
+            and is_safe_public_value(key)
+            and is_safe_public_value(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return all(is_safe_public_value(item) for item in value)
+    if not isinstance(value, str):
+        return True
+    if any(ord(character) < 0x20 or ord(character) > 0x7E for character in value):
+        return False
+    lowered = value.lower()
+    if (
+        value.startswith(("/", "~", "\\\\"))
+        or _DRIVE_PATH.match(value) is not None
+    ):
+        return False
+    normalized = lowered.replace("\\", "/")
+    if normalized.startswith(("file:", "local:", "ssh:")):
+        return False
+    if "://" in normalized:
+        try:
+            parsed = urlsplit(value)
+            host = (parsed.hostname or "").lower()
+            username = parsed.username
+            password = parsed.password
+        except ValueError:
+            return False
+        if parsed.scheme not in {"http", "https"} or username or password:
+            return False
+        if (
+            not host
+            or "." not in host
+            or host.endswith((".local", ".internal", ".lan", ".corp"))
+            or host in {"localhost", "intranet", "internal"}
+        ):
+            return False
+    components = {part for part in normalized.split("/") if part in {
+        "private", "users", "home", "tmp", "var", "codex"
+    }}
+    if components or re.search(r"(?:^|[./\s])private(?:/|$)", normalized):
+        return False
+    forbidden = (
+        "credential",
+        "authorization",
+        "bearer ",
+        "password",
+        "token",
+        "secret",
+        "api_key",
+        "apikey",
+        ".env",
+        "localhost",
+        "127.0.0.1",
+    )
+    return not any(marker in lowered for marker in forbidden)
 
 
 def _value(record: Mapping[str, Any], *names: str) -> Any:
@@ -74,6 +144,8 @@ def validate_certification_identity(record: Mapping[str, Any]) -> dict[str, Any]
 
     if not isinstance(record, Mapping):
         return _result(BLOCKED, "CERTIFICATION_RECORD_UNAVAILABLE")
+    if not is_safe_public_value(record):
+        return _result(INVALID, "UNSAFE_PUBLIC_EVIDENCE")
 
     binding = certification_binding(record)
     if binding not in SUPPORTED_BINDINGS:
@@ -216,19 +288,29 @@ def validate_certification_transfer(
         )
 
     if binding == "tree-bound" and subject_commit != final_release_commit:
-        transfer = _value(record, "transfer_evidence", "transfer_proof")
+        transfer = _value(
+            record,
+            "transfer_evidence",
+            "transfer_proof",
+            "certification_transfer_evidence",
+            "certification_transfer",
+        )
         if not isinstance(transfer, Mapping):
             return _result(BLOCKED, "TREE_BOUND_TRANSFER_EVIDENCE_REQUIRED")
+        transfer_certified_tree = _value(transfer, "certified_tree", "subject_tree")
         if (
-            _value(transfer, "certified_tree", "subject_tree") != subject_tree
+            transfer_certified_tree is not None
+            and transfer_certified_tree != subject_tree
             or _value(transfer, "candidate_tree") != candidate_tree
             or _value(transfer, "final_release_tree", "release_tree") != final_release_tree
             or _value(transfer, "anchor_tree") != anchor_tree
         ):
             return _result(INVALID, "TREE_BOUND_TRANSFER_MISMATCH")
+        if transfer_certified_tree is not None and not _git_sha(transfer_certified_tree):
+            return _result(INVALID, "TREE_BOUND_TRANSFER_EVIDENCE_INVALID")
         if not all(
             _git_sha(_value(transfer, name))
-            for name in ("certified_tree", "candidate_tree", "final_release_tree", "anchor_tree")
+            for name in ("candidate_tree", "final_release_tree", "anchor_tree")
         ):
             return _result(INVALID, "TREE_BOUND_TRANSFER_EVIDENCE_INVALID")
         if not _text(_value(transfer, "evidence_ref", "evidence_digest", "digest")):
@@ -261,6 +343,7 @@ __all__ = [
     "SUPPORTED_BINDINGS",
     "certification_binding",
     "certify_exact_tree",
+    "is_safe_public_value",
     "validate_certification",
     "validate_certification_identity",
     "validate_certification_transfer",

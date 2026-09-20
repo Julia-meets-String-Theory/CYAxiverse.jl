@@ -124,6 +124,16 @@ def release_intent_event(
         "certification_harness_revision": "harness-r1",
         "certification_environment": "ci-linux",
         "certification_evidence_refs": ["evidence/certification-1"],
+        "certification_transfer_evidence": {
+            "verified": True,
+            "candidate_sha": "c" * 40,
+            "final_release_sha": "f" * 40,
+            "certified_tree": "f" * 40,
+            "candidate_tree": "f" * 40,
+            "final_release_tree": "f" * 40,
+            "anchor_tree": "f" * 40,
+            "evidence_ref": "evidence/transfer-1",
+        },
         "final_release_sha": "f" * 40,
         "final_release_tree": "f" * 40,
         "final_version": "0.3.1",
@@ -279,6 +289,60 @@ class EventValidationTests(unittest.TestCase):
             "exclusion_snapshot": "d" * 64,
         }
         validate_event(abort)
+
+    def test_tree_bound_release_events_require_durable_transfer_proof(self):
+        missing = release_intent_event()
+        missing.pop("certification_transfer_evidence")
+        with self.assertRaises(EventSchemaError):
+            validate_event(missing)
+
+        mismatched = release_intent_event()
+        mismatched["certification_transfer_evidence"] = dict(
+            mismatched["certification_transfer_evidence"]
+        )
+        mismatched["certification_transfer_evidence"]["final_release_sha"] = "e" * 40
+        with self.assertRaises(EventSchemaError):
+            validate_event(mismatched)
+
+        released = {
+            **{key: value for key, value in release_intent_event().items() if key != "intent_id"},
+            "event_id": "EVT-000000000003",
+            "event_type": "released",
+            "transaction_id": "released-1",
+            "closure_timestamp_utc": "2026-09-20T12:34:56Z",
+            "evidence_refs": ["evidence/released-1"],
+            "main_at_event_sha": "f" * 40,
+            "main_at_event_version": "0.3.1",
+            "previous_main_sha": "d" * 40,
+            "previous_main_version": "0.2.0",
+        }
+        released.pop("certification_transfer_evidence")
+        with self.assertRaises(EventSchemaError):
+            validate_event(released)
+
+    def test_released_transition_matches_durable_transfer_proof(self):
+        candidate = candidate_event()
+        intent = release_intent_event()
+        released = {
+            **{key: value for key, value in intent.items() if key != "intent_id"},
+            "event_id": "EVT-000000000003",
+            "event_type": "released",
+            "transaction_id": "released-1",
+            "closure_timestamp_utc": "2026-09-20T12:34:56Z",
+            "evidence_refs": ["evidence/released-1"],
+            "main_at_event_sha": "f" * 40,
+            "main_at_event_version": "0.3.1",
+            "previous_main_sha": "d" * 40,
+            "previous_main_version": "0.2.0",
+        }
+        released["certification_transfer_evidence"] = dict(
+            released["certification_transfer_evidence"]
+        )
+        released["certification_transfer_evidence"]["evidence_ref"] = (
+            "evidence/other-transfer"
+        )
+        with self.assertRaises(EventTransitionError):
+            validate_transition([candidate, intent], released)
 
     def test_release_intent_transition_has_one_active_candidate_intent(self):
         candidate = candidate_event()
@@ -1145,6 +1209,89 @@ class EventIntegrationAuditTests(unittest.TestCase):
         )
         with self.assertRaises(EventSchemaError):
             validate_event(aborted)
+
+    def test_schema_version_requires_exact_integer_one(self):
+        for schema_version in (True, False, "1"):
+            event = reservation_event()
+            event["schema_version"] = schema_version
+            with self.subTest(schema_version=schema_version):
+                with self.assertRaises(EventSchemaError):
+                    validate_event(event)
+
+    def test_maintenance_line_open_binds_base_and_branch(self):
+        opened = reservation_event(
+            event_id_value="EVT-000000000001",
+            transaction_id="maintenance-opened",
+            expected_head="b" * 40,
+            event_type="development_reservation_opened",
+        )
+        opened.update(
+            owner_line="maintenance/1.2",
+            final_version="1.2.1",
+            intended_dev_version="1.2.1-DEV",
+        )
+        line_opened = {
+            "schema_version": 1,
+            "event_id": "EVT-000000000002",
+            "event_type": "maintenance_line_opened",
+            "timestamp_utc": "2026-09-20T12:34:56Z",
+            "transaction_id": "maintenance-line",
+            "static_iteration_snapshot": SNAPSHOT,
+            "expected_event_head": "b" * 40,
+            "release_line": "maintenance/1.2",
+            "approved_base_version": "1.2.0",
+            "branch_ref": "refs/heads/maintenance/1.2",
+            "branch_head": "d" * 40,
+            "reservation_id": opened["reservation_id"],
+            "dev_version": "1.2.1-DEV",
+        }
+        validate_event(line_opened)
+        validate_transition([opened], line_opened)
+
+        wrong_base = dict(line_opened, approved_base_version="1.3.0")
+        with self.assertRaises(EventSchemaError):
+            validate_event(wrong_base)
+        wrong_branch = dict(line_opened, branch_ref="refs/heads/maintenance/1.2-extra")
+        with self.assertRaises(EventSchemaError):
+            validate_event(wrong_branch)
+        wrong_shape = dict(line_opened, approved_base_version="1.2")
+        with self.assertRaises(EventSchemaError):
+            validate_event(wrong_shape)
+
+    def test_candidate_refs_use_git_invalid_component_policy(self):
+        released = dict(
+            (key, value)
+            for key, value in release_intent_event().items()
+            if key != "intent_id"
+        )
+        released.update(
+            event_id="EVT-000000000003",
+            event_type="released",
+            transaction_id="released-1",
+            closure_timestamp_utc="2026-09-20T12:34:56Z",
+            evidence_refs=["evidence/released-1"],
+            main_at_event_sha="f" * 40,
+            main_at_event_version="0.3.1",
+            previous_main_sha="d" * 40,
+            previous_main_version="0.2.0",
+        )
+        shapes = (
+            ("candidate_opened", candidate_event()),
+            ("release_intent_prepared", release_intent_event()),
+            ("released", released),
+        )
+        invalid_refs = (
+            "refs/heads/candidates/../0.3.1",
+            "refs/heads/candidates//0.3.1",
+            "refs/heads/candidates/.0.3.1",
+            "refs/heads/candidates/0.3.1.lock",
+        )
+        for event_type, event in shapes:
+            for candidate_ref in invalid_refs:
+                bad = dict(event, candidate_ref=candidate_ref)
+                with self.subTest(event_type=event_type, candidate_ref=candidate_ref):
+                    with self.assertRaises(EventSchemaError):
+                        validate_event(bad)
 
 
 if __name__ == "__main__":

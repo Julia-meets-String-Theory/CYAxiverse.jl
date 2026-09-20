@@ -17,15 +17,25 @@ try:  # Namespace packages work when this module is run from ``scripts``.
     from .certification import (
         PASS as CERTIFICATION_PASS,
         SUPPORTED_BINDINGS,
+        is_safe_public_value,
         validate_certification_transfer,
         validate_certification_identity,
+    )
+    from .events import (
+        EventError,
+        validate_event,
     )
 except ImportError:  # pragma: no cover - direct script import fallback
     from certification import (  # type: ignore
         PASS as CERTIFICATION_PASS,
         SUPPORTED_BINDINGS,
+        is_safe_public_value,
         validate_certification_transfer,
         validate_certification_identity,
+    )
+    from events import (  # type: ignore
+        EventError,
+        validate_event,
     )
 
 
@@ -113,45 +123,9 @@ def tag_version(value: str) -> str | None:
 
 
 def _safe_public_value(value: Any) -> bool:
-    """Apply a conservative lexical gate to values before public storage.
+    """Compatibility wrapper for the shared certification boundary gate."""
 
-    This is a boundary check for obvious local locators and secret-like
-    material.  It is not a confidentiality proof: callers must still supply
-    owner-approved public identities and content-addressed evidence.
-    """
-
-    if isinstance(value, Mapping):
-        return all(_safe_public_value(key) and _safe_public_value(item) for key, item in value.items())
-    if isinstance(value, (list, tuple)):
-        return all(_safe_public_value(item) for item in value)
-    if not isinstance(value, str):
-        return True
-    if any(ord(char) < 0x20 or ord(char) > 0x7E for char in value):
-        return False
-    lowered = value.lower()
-    if value.startswith("/") or value.startswith("~") or re.match(r"^[A-Za-z]:[\\/]", value):
-        return False
-    forbidden = (
-        "file://",
-        "/users/",
-        "\\users\\",
-        "/private/",
-        "\\private\\",
-        "/home/",
-        "\\home\\",
-        "codex/",
-        "credential",
-        "authorization:",
-        "authorization",
-        "bearer ",
-        "password",
-        "token",
-        "secret",
-        "localhost",
-        "127.0.0.1",
-        ".env",
-    )
-    return not any(marker in lowered for marker in forbidden)
+    return is_safe_public_value(value)
 
 
 def _validate_sha(value: Any) -> bool:
@@ -178,6 +152,23 @@ def _validate_ref_list(value: Any) -> bool:
         and all(_text(item) for item in value)
         and len(set(value)) == len(value)
     )
+
+
+def _validate_released_event_shape(event: Mapping[str, Any]) -> list[str]:
+    """Run the canonical event schema check before release identity checks."""
+
+    try:
+        validate_event(event)
+    except EventError as error:
+        message = str(error)
+        if message.startswith("schema_version"):
+            return ["schema_version_must_be_one"]
+        if message.startswith("undeclared event fields:"):
+            return ["unknown_event_fields:" + message.split(": ", 1)[1]]
+        return [message]
+    except (TypeError, ValueError) as error:
+        return [f"event_schema_error:{error}"]
+    return []
 
 
 def _normalise_certification_record(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -226,6 +217,20 @@ def _normalise_certification_record(record: Mapping[str, Any]) -> dict[str, Any]
             normalized["evidence_ref"] = refs[0]
     elif evidence_values and "evidence" not in normalized:
         normalized["evidence"] = evidence_values[0]
+    transfer_values = tuple(
+        record[name]
+        for name in (
+            "transfer_evidence",
+            "transfer_proof",
+            "certification_transfer_evidence",
+            "certification_transfer",
+        )
+        if name in record
+    )
+    if transfer_values:
+        if any(value != transfer_values[0] for value in transfer_values[1:]):
+            raise ValueError("conflicting certification transfer evidence aliases")
+        normalized["transfer_evidence"] = transfer_values[0]
     return normalized
 
 
@@ -242,6 +247,65 @@ def _certification_ref_list(record: Mapping[str, Any]) -> list[Any] | None:
         if name in record:
             return [record[name]]
     return None
+
+
+def _transfer_evidence_projection(value: Any) -> dict[str, Any] | None:
+    """Project transfer proof aliases to the canonical durable identity."""
+
+    if not isinstance(value, Mapping) or value.get("verified") is not True:
+        return None
+    result: dict[str, Any] = {"verified": True}
+    for field in (
+        "candidate_sha",
+        "final_release_sha",
+        "candidate_tree",
+        "final_release_tree",
+        "anchor_tree",
+    ):
+        item = value.get(field)
+        if not _validate_sha(item):
+            return None
+        result[field] = item
+    if "certified_tree" in value:
+        if not _validate_sha(value["certified_tree"]):
+            return None
+        result["certified_tree"] = value["certified_tree"]
+    evidence = [
+        (name, value[name])
+        for name in ("evidence_ref", "evidence_digest", "digest")
+        if name in value
+    ]
+    if len(evidence) != 1 or not _text(evidence[0][1]):
+        return None
+    result["evidence"] = evidence[0][1]
+    return result
+
+
+def _validate_event_transfer_evidence(
+    proof: Any,
+    *,
+    candidate_sha: Any,
+    final_sha: Any,
+    subject_tree: Any,
+    candidate_tree: Any,
+    final_tree: Any,
+    anchor_tree: Any,
+) -> bool:
+    projected = _transfer_evidence_projection(proof)
+    if projected is None:
+        return False
+    if not all(
+        projected[field] == expected
+        for field, expected in (
+            ("candidate_sha", candidate_sha),
+            ("final_release_sha", final_sha),
+            ("candidate_tree", candidate_tree),
+            ("final_release_tree", final_tree),
+            ("anchor_tree", anchor_tree),
+        )
+    ):
+        return False
+    return projected.get("certified_tree", subject_tree) == subject_tree
 
 
 def _project_version_evidence(
@@ -373,6 +437,8 @@ def validate_released_event(
 
     if not isinstance(event, Mapping):
         return _result(INVALID, "RELEASED_EVENT_INVALID")
+    if not _safe_public_value(event):
+        return _result(INVALID, "UNSAFE_PUBLIC_EVIDENCE")
     errors: list[str] = []
     event_id = _missing(errors, event, "event_id")
     event_type = _missing(errors, event, "event_type")
@@ -397,9 +463,11 @@ def validate_released_event(
     closure_time = _missing(errors, event, "closure_timestamp_utc")
     public_tag = _missing(errors, event, "public_tag")
     evidence_refs = _missing(errors, event, "evidence_refs")
+    event_transfer_evidence = event.get("certification_transfer_evidence")
 
     if errors:
         return _result(INVALID, "RELEASED_EVENT_INVALID", errors)
+    errors.extend(_validate_released_event_shape(event))
     if event_type != "released":
         errors.append("event_type_must_be_released")
     if not _valid_event_id(event_id):
@@ -448,6 +516,23 @@ def validate_released_event(
         errors.append("invalid_certification_evidence_refs")
     if not _validate_ref_list(evidence_refs):
         errors.append("invalid_evidence_refs")
+
+    transfer_required = binding == "tree-bound" and candidate_sha != final_sha
+    if transfer_required and event_transfer_evidence is None:
+        errors.append("missing_certification_transfer_evidence")
+    if event_transfer_evidence is not None:
+        if binding != "tree-bound":
+            errors.append("unexpected_certification_transfer_evidence")
+        elif not _validate_event_transfer_evidence(
+            event_transfer_evidence,
+            candidate_sha=candidate_sha,
+            final_sha=final_sha,
+            subject_tree=subject_tree,
+            candidate_tree=candidate_tree,
+            final_tree=final_tree,
+            anchor_tree=anchor_tree,
+        ):
+            errors.append("invalid_certification_transfer_evidence")
 
     if len({anchor_tree, candidate_tree, final_tree, subject_tree}) != 1:
         errors.append("release_tree_mismatch")
@@ -529,6 +614,45 @@ def validate_released_event(
                 errors.append("certification_evidence_identity_mismatch")
             if certification_identity_refs != certification_refs:
                 errors.append("certification_evidence_refs_mismatch")
+        certification_transfer = normalized_certification.get("transfer_evidence")
+        if transfer_required:
+            if not _validate_event_transfer_evidence(
+                certification_transfer,
+                candidate_sha=candidate_sha,
+                final_sha=final_sha,
+                subject_tree=subject_tree,
+                candidate_tree=candidate_tree,
+                final_tree=final_tree,
+                anchor_tree=anchor_tree,
+            ):
+                errors.append("certification_transfer_evidence_missing_or_invalid")
+            else:
+                certification_projection = _transfer_evidence_projection(
+                    certification_transfer
+                )
+                event_projection = _transfer_evidence_projection(
+                    event_transfer_evidence
+                )
+                if certification_projection is None or event_projection is None:
+                    errors.append("certification_transfer_evidence_mismatch")
+                else:
+                    mismatched_transfer_fields = (
+                        "candidate_sha",
+                        "final_release_sha",
+                        "candidate_tree",
+                        "final_release_tree",
+                        "anchor_tree",
+                    )
+                    if any(
+                        certification_projection[field]
+                        != event_projection[field]
+                        for field in mismatched_transfer_fields
+                    ) or (
+                        "certified_tree" in event_projection
+                        and event_projection["certified_tree"]
+                        != certification_projection.get("certified_tree", subject_tree)
+                    ):
+                        errors.append("certification_transfer_evidence_mismatch")
         if not errors:
             transfer_result = validate_certification_transfer(
                 normalized_certification,
@@ -545,8 +669,6 @@ def validate_released_event(
         # evidence identities even when the certified commit equals release.
         return _result(BLOCKED, "CERTIFICATION_EVIDENCE_UNAVAILABLE")
 
-    if not _safe_public_value(event):
-        return _result(INVALID, "UNSAFE_PUBLIC_EVIDENCE")
     if errors:
         return _result(INVALID, "RELEASED_EVENT_INVALID", errors)
     return _result(
@@ -642,6 +764,19 @@ def validate_release_consistency(
     ``publication_reconciliation_pending``.  Any identity disagreement is
     ``INVALID`` and never authorises a replacement tag.
     """
+
+    for name, value in (
+        ("released_event", event),
+        ("tag", tag),
+        ("github_release", github_release),
+        ("publication_evidence", publication_evidence),
+        ("release_intent", release_intent),
+        ("certification", certification),
+        ("project_versions", project_versions),
+        ("principal_main", principal_main),
+    ):
+        if value is not None and not _safe_public_value(value):
+            return _result(INVALID, "UNSAFE_PUBLIC_EVIDENCE", [name])
 
     tag_identity = _tag_identity(tag)
     release_identity = _release_identity(github_release)
@@ -774,9 +909,16 @@ def _unique_index(
         identity = key(record)
         if identity is None:
             return None, _result(INVALID, reason, ["record_identity_missing"])
-        if identity in index:
+        try:
+            duplicate = identity in index
+        except TypeError:
+            return None, _result(INVALID, reason, ["record_identity_unhashable"])
+        if duplicate:
             return None, _result(INVALID, reason, [f"duplicate:{identity}"])
-        index[identity] = record
+        try:
+            index[identity] = record
+        except TypeError:
+            return None, _result(INVALID, reason, ["record_identity_unhashable"])
     return index, None
 
 
@@ -817,7 +959,10 @@ def _legacy_partition(
         else:
             return None, _result(INVALID, reason, ["record_is_not_an_object"])
         names = [name for name in names if name is not None]
-        distinct = set(names)
+        try:
+            distinct = set(names)
+        except TypeError:
+            return None, _result(INVALID, reason, ["record_name_unhashable"])
         if LEGACY_PUBLIC_TAG in distinct and any(name != LEGACY_PUBLIC_TAG for name in distinct):
             return None, _result(INVALID, "MIXED_LEGACY_CANONICAL_IDENTITIES", [reason])
         if distinct == {LEGACY_PUBLIC_TAG}:
@@ -854,11 +999,28 @@ def validate_release_catalog(
     intent_records = _records(release_intents)
     if any(records is None for records in (event_records, tag_records, release_records, evidence_records, intent_records)):
         return _result(INVALID, "RELEASE_CATALOG_INVALID", ["collection_is_not_iterable"])
+    for name, value in (
+        ("certifications", certifications),
+        ("project_versions", project_versions),
+        ("principal_main", principal_main),
+    ):
+        if value is not None and not _safe_public_value(value):
+            return _result(INVALID, "UNSAFE_PUBLIC_EVIDENCE", [name])
     assert event_records is not None
     assert tag_records is not None
     assert release_records is not None
     assert evidence_records is not None
     assert intent_records is not None
+
+    for name, records in (
+        ("events", event_records),
+        ("tags", tag_records),
+        ("github_releases", release_records),
+        ("publication_evidence", evidence_records),
+        ("release_intents", intent_records),
+    ):
+        if any(not _safe_public_value(record) for record in records):
+            return _result(INVALID, "UNSAFE_PUBLIC_EVIDENCE", [name])
 
     original_event_records = event_records
     original_tag_records = tag_records
