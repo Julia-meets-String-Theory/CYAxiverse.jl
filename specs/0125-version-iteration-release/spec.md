@@ -226,7 +226,11 @@ iteration tree. Candidate and release tree equality is verified.
 
 Certification evidence records independently pinned package, policy, harness,
 environment and evidence identities, and states whether the certified subject
-is tree-bound, commit-bound or another reviewed exact model.
+is tree-bound or commit-bound. Gate A accepts only those two binding models.
+Any other value returns `status = BLOCKED` with
+`reason_code = UNSUPPORTED_CERTIFICATION_BINDING` before public-tag creation;
+a future reviewed spec amendment must define an additional model's subject,
+equality proof, transfer rule and release gate before it can be used.
 
 ### R-025 — Single candidate lifecycle
 
@@ -378,11 +382,12 @@ The canonical `released` event precedes GitHub Release publication and is
 never mutated to add its later ID. A separate immutable/content-addressed
 publication-evidence artifact keyed by event ID and public tag records GitHub
 Release identity, publication time and evidence after publication.
-Public event and evidence references are sanitized repository-relative paths,
-public GitHub identities or content-addressed digests. They must not contain
-private conversation or local-machine locators, credentials, or raw private
-environment values. The publication boundary in `AGENTS.md` applies before
-any event or evidence artifact becomes durable on GitHub.
+All durable public event and evidence field values, including certification
+environment data and references, are sanitized public values, approved
+identities, repository-relative paths or content-addressed digests. They must
+not contain private conversation or local-machine locators, credentials, or
+raw private environment values. The publication boundary in `AGENTS.md`
+applies before any event or evidence artifact becomes durable on GitHub.
 
 ### R-043 — Bidirectional release consistency
 
@@ -406,7 +411,8 @@ Tree-bound certification may transfer from candidate to different final
 commit only with durable evidence that certified subject, candidate, final
 release and anchor trees are equal. Commit-bound certification requires a
 new certification of a different final release commit before tag creation.
-No implicit transfer is permitted.
+No implicit transfer is permitted. Unrecognized binding models are blocked
+under R-024; they cannot inherit either transfer rule.
 
 ## Concrete static and mutable authorities
 
@@ -464,7 +470,9 @@ to one active reservation and actual line head. A prepared reservation is
 globally unavailable. Abort is allowed only with proof the matching DEV state
 was never entered; uncertain outcomes remain unavailable and frozen.
 
-Every event has the common required fields in R-040. Allocation-changing
+Every event has `schema_version = 1` and the common required fields in R-040.
+The schema version is a top-level event field, not ambient writer state.
+Allocation-changing
 events also require `transaction_id`, `static_iteration_snapshot` digest and
 `expected_event_head`. The schema requires reservation events to bind owner
 line, final version and intended DEV; `prepared` additionally binds expected
@@ -493,6 +501,15 @@ times. Digests are lowercase hexadecimal SHA-256 of these exact bytes.
 Duplicate keys, malformed UTF-8, noncanonical encodings and nonconforming
 timestamps are rejected. Snapshot sets and ref bindings sort by canonical
 ASCII identity before serialization.
+Every array is declared by its schema as ordered or set-valued: ordered arrays
+retain their stated lifecycle/evidence order; set-valued arrays sort by each
+element's complete canonical JSON bytes and reject duplicates. No undeclared
+array is accepted. Optional fields are omitted when inapplicable; explicit
+`null` is rejected unless the field schema requires it. A standalone canonical
+JSON artifact has no trailing LF; JSONL records have exactly one trailing LF.
+For non-JSON evidence, the digest covers exact raw bytes, while the evidence
+identity separately records its media type; no normalization or inferred
+framing is permitted.
 
 ## Protected transactions and recovery
 
@@ -580,6 +597,9 @@ duplicate transaction ID with changed payload, intent without tag, tag
 without released event, and mismatched tag/intent/release evidence.
 Include leading-zero package and public-tag aliases, static snapshot field
 omissions/digest mismatch and changed anchor/tag/source under a bound snapshot.
+Include unsupported certification bindings, missing/wrong event schema
+version, undeclared or unsorted set arrays, duplicate set members, and
+noncanonical optional-field encoding.
 
 Fail closed when a pinned source/approval or reviewer authority cannot be
 verified, the static selector or serialized writer cannot be established, an
