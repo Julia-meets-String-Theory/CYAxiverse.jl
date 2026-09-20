@@ -443,6 +443,21 @@ snapshot digest. The snapshot is replayable from these identities. If any
 source, anchor or tag changes before a mutation commits, the bound snapshot
 is stale and the transaction refreshes or blocks.
 
+Digest preimages are exact, noncircular canonical bytes. The file digest is
+SHA-256 of raw `iterations.toml` bytes. `ref_set_digest` is SHA-256 of the
+standalone canonical JSON array of sorted objects `{ref, commit, tree}` for
+every validated `iterations/*` binding. `tag_set_digest` is SHA-256 of the
+standalone canonical JSON array of sorted objects `{tag, commit, tree}` for
+every canonical future public tag. Empty sets hash canonical `[]`.
+The `snapshot_digest` is SHA-256 of standalone canonical JSON for a snapshot
+object containing `snapshot_schema_version = 1`, source repository/ref/commit/
+tree, file digest, both complete sorted binding arrays, both verified set
+digests, and the sorted occupied version array. That object excludes
+`snapshot_digest` itself. Set digests exclude their own digest fields from
+their preimages but are included in the overall snapshot preimage. Every
+reader recomputes all three digests and rejects any mismatch before relying
+on an allocation view.
+
 The `release-events` branch is a minimal orphan non-package-source branch
 containing one canonical `release-events.jsonl` stream, bootstrapped empty in
 Gate A. Every mutation is made by a controlled writer under protected linear
@@ -597,6 +612,8 @@ duplicate transaction ID with changed payload, intent without tag, tag
 without released event, and mismatched tag/intent/release evidence.
 Include leading-zero package and public-tag aliases, static snapshot field
 omissions/digest mismatch and changed anchor/tag/source under a bound snapshot.
+Test empty/nonempty ref/tag digest preimages, tampered nested digests,
+tampered occupied sets and rejection of a self-including snapshot digest.
 Include unsupported certification bindings, missing/wrong event schema
 version, undeclared or unsorted set arrays, duplicate set members, and
 noncanonical optional-field encoding.
