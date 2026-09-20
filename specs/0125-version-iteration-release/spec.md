@@ -3,7 +3,7 @@ spec_id: CYAX-0125-Gate-A
 title: Package iteration and release lifecycle
 issue: 125
 class: S2
-status: draft
+status: Approved
 target_iteration: version-lifecycle-retrofit-2026-09
 version_bearing: true
 package_infrastructure_impact: patch
@@ -12,7 +12,11 @@ review_required: independent SPEC and STANDARDS
 approval_refs:
   - "Issue #125 comment 5746793852"
   - "Issue #125 comment 5752268640"
-reviewed_spec_revision: pending
+reviewed_spec_revision: cf0f9c39256b7a58e179af92a46fbf1cb651ff76
+review_records:
+  - "SPEC PASS at cf0f9c39256b7a58e179af92a46fbf1cb651ff76"
+  - "STANDARDS PASS at cf0f9c39256b7a58e179af92a46fbf1cb651ff76"
+review_rubric_sha256: 418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72
 ---
 
 # CYAX-0125 Gate A — package iteration and release lifecycle
