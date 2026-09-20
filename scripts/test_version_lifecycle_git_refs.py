@@ -98,6 +98,34 @@ class GitRefFixture(unittest.TestCase):
         with self.assertRaisesRegex(GitIdentityError, "REF_ALREADY_EXISTS"):
             self.repository.push_create_only(ref, different_tag, self.protection)
 
+    def test_create_only_lease_rejects_concurrent_fast_forward(self) -> None:
+        ref = "refs/heads/maintenance/0.3"
+        branch_protection = ProtectionEvidence(
+            rule_id="fixture-maintenance-rule",
+            pattern="refs/heads/maintenance/*",
+            snapshot_sha256="0" * 64,
+            retrieved_at_utc="2026-09-20T00:00:00Z",
+            creation_guarded=True,
+            update_guarded=True,
+            deletion_guarded=True,
+        )
+        self._cmd("git", "push", "origin", f"{self.commit}:{ref}", cwd=self.work)
+        (self.work / "Project.toml").write_text('name = "Fixture"\nversion = "0.3.1"\n')
+        self._cmd("git", "commit", "-am", "later", cwd=self.work)
+        later = self._cmd("git", "rev-parse", "HEAD", cwd=self.work).strip()
+        remote_ref = self.repository.remote_ref
+        calls = 0
+
+        def stale_absence(observed_ref: str) -> str | None:
+            nonlocal calls
+            calls += 1
+            return None if calls == 1 else remote_ref(observed_ref)
+
+        self.repository.remote_ref = stale_absence
+        with self.assertRaisesRegex(GitIdentityError, "REF_ALREADY_EXISTS"):
+            self.repository.push_create_only(ref, later, branch_protection)
+        self.assertEqual(remote_ref(ref), self.commit)
+
     def test_invalid_closure_time_is_not_inferred(self) -> None:
         with self.assertRaisesRegex(GitIdentityError, "invalid closure UTC timestamp"):
             self.repository.make_annotated_iteration_tag(

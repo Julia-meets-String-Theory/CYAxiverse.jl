@@ -273,7 +273,7 @@ TYPE_FORBIDDEN_FIELDS = {
 # canonical event identity or by transition replay.
 SCHEMA_FIELDS = (
     frozenset().union(COMMON_FIELDS, *TYPE_REQUIRED_FIELDS.values())
-    | frozenset({"candidate_id", "previous_main_sha", "previous_main_version"})
+    | frozenset({"candidate_id", "previous_main_sha", "previous_main_version", "closed_final_version"})
 )
 
 
@@ -563,6 +563,8 @@ def _require_git_identity_or_anchor_ref(event: Mapping[str, Any], name: str) -> 
 
 def _validate_type_fields(event: Mapping[str, Any]) -> None:
     event_type = event["event_type"]
+    if event_type != "development_reservation_consumed" and "closed_final_version" in event:
+        raise EventSchemaError("closed_final_version is only valid for reservation consumption")
     required = TYPE_REQUIRED_FIELDS[event_type]
     missing = sorted(required - event.keys())
     if missing:
@@ -611,14 +613,27 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
         else:
             _require_git_identity_or_anchor_ref(event, "closure_anchor")
             closure_anchor = event["closure_anchor"]
+            disposition = event["terminal_disposition"]
+            if disposition == "closed":
+                if "closed_final_version" in event:
+                    raise EventSchemaError("closed reservation cannot declare a different final")
+                closed_final = event["final_version"]
+            elif disposition == "CONSUMED_UNUSED_DEV_RESERVATION":
+                _require_final_version(event, "closed_final_version")
+                closed_final = event["closed_final_version"]
+                if closed_final == event["final_version"]:
+                    raise EventSchemaError("unused reservation disposition requires a different final")
+                if not _line_matches_version(event["owner_line"], closed_final):
+                    raise EventSchemaError("closed final does not belong to the owner line")
+            else:
+                raise EventSchemaError("invalid reservation terminal_disposition")
             if (
                 ANCHOR_REF_RE.fullmatch(closure_anchor)
-                and closure_anchor != f"refs/tags/iterations/{event['final_version']}"
+                and closure_anchor != f"refs/tags/iterations/{closed_final}"
             ):
                 raise EventSchemaError(
-                    "closure_anchor ref must identify final_version"
+                    "closure_anchor ref must identify the closed final version"
                 )
-            _require_text(event, "terminal_disposition")
 
     elif event_type == "maintenance_line_opened":
         for field in (
@@ -949,6 +964,12 @@ def validate_transition(
         candidate = current["candidate_id"]
         if any(old.get("candidate_id") == candidate for old in prior):
             raise EventTransitionError("candidate identity already exists")
+        if any(
+            old["event_type"] == "candidate_opened"
+            and old.get("final_version") == current.get("final_version")
+            for old in prior
+        ):
+            raise EventTransitionError("final version already has a durable candidate")
         consumed = _find_consumed_reservation(prior, current)
         if consumed is None:
             raise EventTransitionError(
@@ -964,6 +985,15 @@ def validate_transition(
         candidate = _find_candidate(prior, current["candidate_id"])
         if candidate is None:
             raise EventTransitionError("candidate withdrawal has no opened candidate")
+        if _candidate_released(prior, current["candidate_id"]):
+            raise EventTransitionError("released candidate cannot be withdrawn")
+        if any(
+            old["event_type"] == "release_intent_prepared"
+            and old.get("candidate_id") == current["candidate_id"]
+            and not _intent_is_terminal(prior, old)
+            for old in prior
+        ):
+            raise EventTransitionError("active release intent must be aborted before withdrawal")
         _require_matching_fields(
             candidate,
             current,
@@ -1020,6 +1050,12 @@ def validate_transition(
         if prepared is None:
             raise EventTransitionError("intent abort has no prepared intent")
         _require_matching_fields(prepared, current, ("candidate_id", "public_tag"))
+        if any(
+            old["event_type"] == "released"
+            and old.get("public_tag") == prepared.get("public_tag")
+            for old in prior
+        ):
+            raise EventTransitionError("released intent cannot be aborted")
         if any(
             old["event_type"] == "release_intent_aborted"
             and old.get("intent_id") == current["intent_id"]
@@ -1218,7 +1254,8 @@ def _find_consumed_reservation(
         if (
             old["event_type"] == "development_reservation_consumed"
             and old.get("owner_line") == current.get("release_line")
-            and old.get("final_version") == current.get("final_version")
+            and old.get("closed_final_version", old.get("final_version"))
+            == current.get("final_version")
         ):
             return old
     return None
@@ -1232,6 +1269,11 @@ def _version_seen(prior: Iterable[Mapping[str, Any]], version: Any) -> bool:
     occupied = False
     for old in prior:
         event_type = old["event_type"]
+        if (
+            event_type == "development_reservation_consumed"
+            and old.get("closed_final_version") == version
+        ):
+            occupied = True
         reservation_id = old.get("reservation_id")
         if reservation_id is not None and event_type.startswith("development_reservation_"):
             reservation_state[str(reservation_id)] = event_type.removeprefix(

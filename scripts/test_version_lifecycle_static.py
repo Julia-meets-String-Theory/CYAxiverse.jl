@@ -31,7 +31,10 @@ from version_lifecycle import (  # noqa: E402
     validate_static_snapshot,
     validated_occupancy_proof,
 )
-from version_lifecycle.static import StaticValidationError  # noqa: E402
+from version_lifecycle.static import (  # noqa: E402
+    StaticValidationError,
+    sanitize_source_repository,
+)
 from version_lifecycle.writer import LedgerHead  # noqa: E402
 from version_lifecycle.events import canonical_event_bytes  # noqa: E402
 
@@ -119,6 +122,83 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         self.assertEqual(validate_static_snapshot(snapshot, repository=repo).snapshot_digest, snapshot.snapshot_digest)
         self.assertIn("0.1.0", snapshot.occupied_versions)
         self.assertIn("0.2.0", snapshot.occupied_versions)
+
+    def test_source_repository_is_a_safe_public_identity(self) -> None:
+        repo = _fixture()
+        unsafe = (
+            "/Users/private/repo",
+            "file:///Users/private/repo",
+            "local://repo",
+            "https://user:password@example.com/org/repo.git",
+        )
+        for value in unsafe:
+            with self.subTest(value=value):
+                result = static_snapshot(repo, source_repository=value)
+                self.assertIsInstance(result, BlockedResult)
+                assert isinstance(result, BlockedResult)
+                self.assertEqual(result.reason_code, "STATIC_SOURCE_REPOSITORY_UNSAFE")
+                self.assertNotIn(value, result.detail)
+
+        self.assertEqual(
+            sanitize_source_repository("git@github.com:Org/Repo.git"),
+            "https://github.com/Org/Repo",
+        )
+        snapshot = static_snapshot(
+            repo,
+            source_repository="https://github.com/Org/Repo.git",
+        )
+        self.assertNotIsInstance(snapshot, BlockedResult)
+        assert not isinstance(snapshot, BlockedResult)
+        self.assertEqual(snapshot.source_repository, "https://github.com/Org/Repo")
+
+    def test_prospective_release_line_is_canonical_and_matches_version(self) -> None:
+        repo = _fixture()
+        for release_line in ("maintenance/0.1", "maintenance/01.2", "release/0.2"):
+            with self.subTest(release_line=release_line):
+                (repo / "iterations.toml").write_text(
+                    "schema_version = 1\ntarget_iteration = \"fixture\"\n"
+                    "[[iterations]]\niteration_id = \"prospective-fixture\"\n"
+                    "final_version = \"0.2.0\"\nkind = \"prospective\"\n"
+                    f"release_line = \"{release_line}\"\n"
+                    "aggregate_impact = {}\nanchor_ref = \"iterations/0.2.0\"\n"
+                    "contributing_identities = [{ role = \"issue\", identity = \"#125\" }]\n"
+                    "prospective = []\nretrospective = []\n",
+                    encoding="utf-8",
+                )
+                _run(repo, "add", "iterations.toml")
+                _run(repo, "commit", "-q", "-m", f"invalid release line {release_line}")
+                _run(repo, "branch", "-f", "vmm")
+                _run(repo, "push", "-q", "--force", "origin", "vmm")
+                result = static_snapshot(repo, source_repository="fixture/repo")
+                self.assertIsInstance(result, BlockedResult)
+                assert isinstance(result, BlockedResult)
+                self.assertEqual(result.reason_code, "STATIC_AUTHORITY_SELECTOR_UNRESOLVED")
+
+        (repo / "iterations.toml").write_text(
+            "schema_version = 1\ntarget_iteration = \"fixture\"\n"
+            "iterations = []\nprospective = []\nretrospective = []\n",
+            encoding="utf-8",
+        )
+        _run(repo, "add", "iterations.toml")
+        _run(repo, "commit", "-q", "-m", "valid canonical root registry")
+        _run(repo, "branch", "-f", "vmm")
+        _run(repo, "push", "-q", "--force", "origin", "vmm")
+        (repo / "iterations.toml").write_text(
+            "schema_version = 1\ntarget_iteration = \"fixture\"\n"
+            "[[iterations]]\niteration_id = \"prospective-fixture\"\n"
+            "final_version = \"0.2.1\"\nkind = \"prospective\"\n"
+            "release_line = \"maintenance/0.2\"\naggregate_impact = {}\n"
+            "anchor_ref = \"iterations/0.2.1\"\n"
+            "contributing_identities = [{ role = \"issue\", identity = \"#125\" }]\n"
+            "prospective = []\nretrospective = []\n",
+            encoding="utf-8",
+        )
+        _run(repo, "add", "iterations.toml")
+        _run(repo, "commit", "-q", "-m", "valid maintenance release line")
+        _run(repo, "tag", "-a", "iterations/0.2.1", "-m", "fixture anchor")
+        _run(repo, "push", "-q", "origin", "--tags")
+        result = static_snapshot(repo, source_repository="fixture/repo")
+        self.assertNotIsInstance(result, BlockedResult)
 
     def test_snapshot_tampering_and_staleness_fail_closed(self) -> None:
         repo = _fixture()

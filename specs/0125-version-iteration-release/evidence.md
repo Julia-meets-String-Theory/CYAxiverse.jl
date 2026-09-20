@@ -34,11 +34,23 @@ revalidates both complete tag/event/Release/publication tuples as
 `terminal_consistent`. Repeated hexadecimal characters and numeric release
 IDs in these files are fixture values only.
 
+## Independent review history
+
+The first frozen implementation candidate was commit
+`638ee4dfcd237d91646d963ac77cb473fcaccef1` (tree
+`dbf2dda371b213c317d10606fb38d859658de7a5`). Independent SPEC and
+STANDARDS reviews both returned `REQUEST_CHANGES`. The blocking findings
+covered different-final reservation consumption; duplicate or late candidate
+withdrawal; certification identity binding; default remote event observation,
+topology and race checks; and public identity sanitation. The review verdicts
+belong only to that exact candidate. A corrected candidate requires fresh
+reviews before any premerge readiness claim.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 101 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 118 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --project=docs/ docs/make.jl` | Passed on the regular local host; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the regular local host with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

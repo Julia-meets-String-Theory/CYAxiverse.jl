@@ -186,7 +186,22 @@ class GitRepository:
             return
         if current is not None:
             raise GitIdentityError("REF_ALREADY_EXISTS")
-        self.git("push", "--porcelain", self.remote, f"{object_id}:{ref}")
+        # An absence precheck is not atomic with the push advertisement.  An
+        # empty expected value in this per-ref lease makes the server reject
+        # a ref that appeared in between, even when our object would be a
+        # fast-forward update of the concurrent creator's object.
+        try:
+            self.git(
+                "push", "--porcelain", f"--force-with-lease={ref}:",
+                self.remote, f"{object_id}:{ref}",
+            )
+        except GitIdentityError as exc:
+            observed = self.remote_ref(ref)
+            if observed == object_id:
+                return
+            if observed is not None:
+                raise GitIdentityError("REF_ALREADY_EXISTS") from exc
+            raise
         self.verify_durable_ref(ref, object_id)
 
     def make_annotated_iteration_tag(

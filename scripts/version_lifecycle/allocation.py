@@ -94,6 +94,7 @@ _GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
 _EVENT_VERSION_FIELDS = frozenset(
     {
         "version", "final_version", "declared_version", "reserved_final",
+        "closed_final_version",
         "intended_dev", "intended_dev_version", "dev_version", "public_tag",
         "approved_base_version", "main_at_event_version", "previous_main_version",
     }

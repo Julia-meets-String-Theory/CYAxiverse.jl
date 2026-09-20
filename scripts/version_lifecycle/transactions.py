@@ -261,7 +261,17 @@ def run_closure(port: ClosurePort, intent: ClosureIntent) -> TransactionResult:
         try:
             consumption = port.consume_outgoing(intent, anchor, post_anchor_view)
             port.verify_outgoing_terminal(intent, consumption)
-            if consumption.get("reserved_final") != intent.outgoing_reserved_final:
+            expected_disposition = (
+                "closed"
+                if intent.outgoing_reserved_final == intent.final_version
+                else "CONSUMED_UNUSED_DEV_RESERVATION"
+            )
+            if (
+                consumption.get("reserved_final") != intent.outgoing_reserved_final
+                or consumption.get("closed_final_version") != intent.final_version
+                or consumption.get("terminal_disposition") != expected_disposition
+                or not consumption.get("event_id")
+            ):
                 raise TransactionError("OUTGOING_RESERVATION_RECONCILIATION_FAILED")
         except Exception as exc:
             raise TransactionError(

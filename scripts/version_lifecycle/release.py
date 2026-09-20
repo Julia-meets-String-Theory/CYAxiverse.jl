@@ -180,6 +180,70 @@ def _validate_ref_list(value: Any) -> bool:
     )
 
 
+def _normalise_certification_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Map event-schema certification aliases to the cert validator contract."""
+
+    normalized = dict(record)
+    aliases = {
+        "binding": ("certification_binding",),
+        "package_commit": ("package_sha", "subject_sha", "certification_subject_sha"),
+        "package_tree": ("subject_tree", "certified_tree", "certification_subject_tree"),
+        "policy_revision": ("policy_sha", "certification_policy_revision"),
+        "harness_revision": ("harness_sha", "certification_harness_revision"),
+        "environment": ("environment_id", "environment_ref", "certification_environment"),
+    }
+    for canonical, alternate_names in aliases.items():
+        present = [
+            record[name] for name in (canonical, *alternate_names) if name in record
+        ]
+        if present:
+            if canonical == "binding":
+                equivalent = {"tree_bound": "tree-bound", "commit_bound": "commit-bound"}
+                compared = [
+                    equivalent.get(value, value) if isinstance(value, str) else value
+                    for value in present
+                ]
+            else:
+                compared = present
+            if any(value != compared[0] for value in compared[1:]):
+                raise ValueError(f"conflicting certification aliases for {canonical}")
+            normalized[canonical] = present[0]
+    evidence_values = tuple(
+        record[name]
+        for name in ("evidence", "evidence_ref", "evidence_digest", "evidence_sha")
+        if name in record
+    )
+    if (
+        "evidence_refs" in record
+        and "certification_evidence_refs" in record
+        and record["evidence_refs"] != record["certification_evidence_refs"]
+    ):
+        raise ValueError("conflicting certification evidence reference aliases")
+    refs = record.get("evidence_refs", record.get("certification_evidence_refs"))
+    if isinstance(refs, (list, tuple)):
+        normalized["evidence_refs"] = list(refs)
+        if "evidence" not in normalized and refs:
+            normalized["evidence_ref"] = refs[0]
+    elif evidence_values and "evidence" not in normalized:
+        normalized["evidence"] = evidence_values[0]
+    return normalized
+
+
+def _certification_ref_list(record: Mapping[str, Any]) -> list[Any] | None:
+    refs = record.get("evidence_refs", record.get("certification_evidence_refs"))
+    if isinstance(refs, (list, tuple)):
+        return list(refs)
+    # The released-event field is a list of evidence references.  A digest is
+    # an evidence identity, but it is not an additional reference when a
+    # record already carries its durable path.  Preserve the validator's
+    # precedence (evidence, ref, digest, SHA) while projecting one fallback
+    # reference for the event comparison.
+    for name in ("evidence", "evidence_ref", "evidence_sha", "evidence_digest"):
+        if name in record:
+            return [record[name]]
+    return None
+
+
 def _project_version_evidence(
     project_versions: Mapping[str, str] | None,
     *,
@@ -437,7 +501,11 @@ def validate_released_event(
             return project_result
 
     if isinstance(certification, Mapping):
-        cert_result = validate_certification_identity(certification)
+        try:
+            normalized_certification = _normalise_certification_record(certification)
+        except ValueError as error:
+            return _result(INVALID, "CERTIFICATION_IDENTITY_AMBIGUOUS", [str(error)])
+        cert_result = validate_certification_identity(normalized_certification)
         if cert_result["status"] != CERTIFICATION_PASS:
             return cert_result
         cert_identity = cert_result["identity"]
@@ -447,9 +515,23 @@ def validate_released_event(
             errors.append("certification_subject_commit_mismatch")
         if cert_identity["package_tree"] != subject_tree:
             errors.append("certification_subject_tree_mismatch")
+        if cert_identity["policy_revision"] != policy_revision:
+            errors.append("certification_policy_revision_mismatch")
+        if cert_identity["harness_revision"] != harness_revision:
+            errors.append("certification_harness_revision_mismatch")
+        if cert_identity["environment"] != environment:
+            errors.append("certification_environment_mismatch")
+        certification_identity_refs = _certification_ref_list(normalized_certification)
+        if not _validate_ref_list(certification_identity_refs):
+            errors.append("certification_identity_refs_invalid")
+        else:
+            if cert_identity["evidence"] != certification_identity_refs[0]:
+                errors.append("certification_evidence_identity_mismatch")
+            if certification_identity_refs != certification_refs:
+                errors.append("certification_evidence_refs_mismatch")
         if not errors:
             transfer_result = validate_certification_transfer(
-                certification,
+                normalized_certification,
                 candidate_commit=candidate_sha,
                 candidate_tree=candidate_tree,
                 final_release_commit=final_sha,

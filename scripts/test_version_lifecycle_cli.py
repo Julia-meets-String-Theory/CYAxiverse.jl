@@ -117,6 +117,41 @@ class GateALifecycleCliFixture(unittest.TestCase):
         self.assertEqual(view["allocation"]["status"], "AVAILABLE")
         self.assertEqual(view["allocation"]["version"], "0.2.1-DEV")
 
+    def test_unsafe_source_repository_is_blocked_without_echoing_input(self) -> None:
+        unsafe = (
+            "/Users/private/repo",
+            "file:///Users/private/repo",
+            "local://repo",
+            "https://user:password@example.com/org/repo.git",
+        )
+        for value in unsafe:
+            with self.subTest(value=value):
+                code, payload = self._run_cli(
+                    "snapshot",
+                    "--repo",
+                    str(self.repo),
+                    "--source-repository",
+                    value,
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(payload["status"], "BLOCKED")
+                self.assertEqual(payload["reason_code"], "STATIC_SOURCE_REPOSITORY_UNSAFE")
+                self.assertNotIn(value, json.dumps(payload))
+
+        code, payload = self._run_cli(
+            "snapshot",
+            "--repo",
+            str(self.repo),
+            "--source-repository",
+            "https://github.com/Org/Repo.git",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["source_repository"], "https://github.com/Org/Repo")
+        self.assertEqual(
+            payload["static_snapshot"]["source_repository"],
+            "https://github.com/Org/Repo",
+        )
+
     def test_missing_event_branch_is_a_machine_readable_block(self) -> None:
         # The local cache still exists, but the remote authority is absent.
         # The CLI must not treat local state as a substitute or bootstrap a

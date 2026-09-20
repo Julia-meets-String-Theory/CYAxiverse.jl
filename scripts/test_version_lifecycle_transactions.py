@@ -52,7 +52,15 @@ class ClosureFixture:
         self.calls.append("consume")
         if self.fail_consumption:
             raise RuntimeError("uncertain append")
-        return {"reserved_final": intent.outgoing_reserved_final, "event_id": "EVT-000000000002"}
+        return {
+            "reserved_final": intent.outgoing_reserved_final,
+            "closed_final_version": intent.final_version,
+            "terminal_disposition": (
+                "closed" if intent.outgoing_reserved_final == intent.final_version
+                else "CONSUMED_UNUSED_DEV_RESERVATION"
+            ),
+            "event_id": "EVT-000000000002",
+        }
 
     def verify_outgoing_terminal(self, intent, consumption):
         self.calls.append("terminal")
@@ -270,6 +278,40 @@ class TransactionTests(unittest.TestCase):
         ))
         self.assertNotIn("prepare", port.calls)
         self.assertNotIn("unfreeze", port.calls)
+
+    def test_different_final_consumes_unused_dev_before_reopen(self):
+        intent = ClosureIntent(
+            "different-final", "principal", "0.3.2", "0.3.1",
+            "old-head", "2026-09-20T12:34:56Z",
+        )
+        port = ClosureFixture()
+        result = run_closure(port, intent)
+        self.assertEqual(result.status, "COMPLETE")
+        self.assertEqual(result.evidence["next_final"], "0.3.3")
+        self.assertEqual(
+            result.evidence["consumption"]["terminal_disposition"],
+            "CONSUMED_UNUSED_DEV_RESERVATION",
+        )
+        self.assertLess(port.calls.index("terminal"), port.calls.index("prepare"))
+
+    def test_different_final_requires_exact_unused_disposition(self):
+        intent = ClosureIntent(
+            "different-final", "principal", "0.3.2", "0.3.1",
+            "old-head", "2026-09-20T12:34:56Z",
+        )
+        port = ClosureFixture()
+        original = port.consume_outgoing
+        def wrong_disposition(intent, anchor, view):
+            result = original(intent, anchor, view)
+            result["terminal_disposition"] = "closed"
+            return result
+        port.consume_outgoing = wrong_disposition
+        result = run_closure(port, intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "OUTGOING_RESERVATION_RECONCILIATION_FAILED", True),
+        )
+        self.assertNotIn("prepare", port.calls)
 
     def test_exact_principal_sentinel_cannot_skip_occupied_patch(self):
         port = ClosureFixture(occupied=frozenset({"0.3.1"}))

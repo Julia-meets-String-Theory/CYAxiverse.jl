@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 import subprocess
 from typing import Any, Callable, Mapping
 import uuid
@@ -61,6 +62,9 @@ class PublicTagAbsenceUnavailable(WriterError):
 
 class PublicTagExists(WriterError):
     reason_code = "PUBLIC_TAG_EXISTS"
+
+
+_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass(frozen=True)
@@ -215,7 +219,7 @@ class ReleaseEventWriter:
 
         remote_ref = f"refs/heads/{self.branch}"
         listed = self._git(["ls-remote", "--refs", remote, remote_ref])
-        lines = [line for line in _as_text(listed).splitlines() if line]
+        lines = [line for line in _as_text(listed.stdout).splitlines() if line]
         if not lines:
             return None, b""
         if len(lines) != 1 or "\t" not in lines[0]:
@@ -226,10 +230,89 @@ class ReleaseEventWriter:
         temp_ref = f"refs/codex/reconcile/{uuid.uuid4().hex}"
         try:
             self._git(["fetch", "--no-tags", remote, f"{remote_ref}:{temp_ref}"])
+            fetched_head = _as_text(
+                self._git(["rev-parse", f"{temp_ref}^{{commit}}"]).stdout
+            ).strip()
+            if fetched_head != remote_head:
+                raise AppendOutcomeUncertain(
+                    "remote event branch advanced during reconciliation"
+                )
             raw = bytes(self._git(["show", f"{temp_ref}:{self.stream_path}"]).stdout)
+            self._verify_stream_topology(fetched_head, raw)
             return remote_head, raw
+        except AppendOutcomeUncertain:
+            raise
+        except Exception as error:
+            raise AppendOutcomeUncertain(
+                "remote event branch could not be fetched and verified"
+            ) from error
         finally:
             self._git(["update-ref", "-d", temp_ref], check=False)
+
+    def _verify_stream_topology(self, commit: str, raw: bytes) -> None:
+        """Verify one observed commit is exactly the event stream object.
+
+        Callback reconciliation is accepted only when the advertised commit
+        is also present in this Git object database and independently proves
+        the one-file tree and exact blob bytes.  A callback cannot claim a
+        remote head with an unverified or divergent topology.
+        """
+
+        if not isinstance(commit, str) or _GIT_SHA_RE.fullmatch(commit) is None:
+            raise AppendOutcomeUncertain("observed event head is not a full Git SHA")
+        if not isinstance(raw, bytes):
+            raise AppendOutcomeUncertain("observed event stream is not bytes")
+        try:
+            object_type = _as_text(
+                self._git(["cat-file", "-t", commit]).stdout
+            ).strip()
+            if object_type != "commit":
+                raise AppendOutcomeUncertain("observed event head is not a commit")
+            entries = _as_text(self._git(["ls-tree", commit]).stdout).splitlines()
+            if len(entries) != 1 or "\t" not in entries[0]:
+                raise AppendOutcomeUncertain(
+                    "observed event commit does not contain exactly one stream file"
+                )
+            metadata, path = entries[0].split("\t", 1)
+            fields = metadata.split()
+            if (
+                len(fields) != 3
+                or fields[0] != "100644"
+                or fields[1] != "blob"
+                or path != self.stream_path
+            ):
+                raise AppendOutcomeUncertain(
+                    "observed event commit tree is not the canonical one-file tree"
+                )
+            stored = bytes(self._git(["show", f"{commit}:{self.stream_path}"]).stdout)
+            if stored != raw:
+                raise AppendOutcomeUncertain(
+                    "observed event stream does not match its commit tree"
+                )
+            parse_stream(raw)
+        except AppendOutcomeUncertain:
+            raise
+        except Exception as error:
+            raise AppendOutcomeUncertain(
+                "observed event commit topology could not be verified"
+            ) from error
+
+    def _verified_remote_observation(
+        self, observation: tuple[str | None, bytes]
+    ) -> tuple[str | None, bytes]:
+        """Verify callback observations before treating them as remote state."""
+
+        if not isinstance(observation, tuple) or len(observation) != 2:
+            raise AppendOutcomeUncertain("remote observation shape is invalid")
+        head, raw = observation
+        if head is None:
+            if raw != b"":
+                raise AppendOutcomeUncertain(
+                    "missing remote event head must have an empty stream"
+                )
+            return None, b""
+        self._verify_stream_topology(head, raw)
+        return head, raw
 
     def bootstrap_remote(
         self,
@@ -259,7 +342,11 @@ class ReleaseEventWriter:
         remote_reader = reconcile
         if remote_reader is None and remote_name is not None:
             remote_reader = lambda: self._remote_observation(remote_name)
-        existing = remote_reader() if remote_reader is not None else None
+        existing = (
+            self._verified_remote_observation(remote_reader())
+            if remote_reader is not None
+            else None
+        )
         if existing is not None and existing[0] is not None:
             # A pre-existing branch is valid only after full stream validation;
             # a caller can then continue with normal expected-head appends.
@@ -276,7 +363,9 @@ class ReleaseEventWriter:
             # Reconcile the protected remote before deciding whether the new
             # branch is durable; otherwise leave bootstrap unresolved.
             try:
-                observed_head, observed_raw = remote_reader()  # type: ignore[misc]
+                observed_head, observed_raw = self._verified_remote_observation(
+                    remote_reader()  # type: ignore[misc]
+                )
                 parse_stream(observed_raw)
                 if observed_head == commit and observed_raw == b"":
                     return commit
@@ -286,8 +375,9 @@ class ReleaseEventWriter:
                 "remote bootstrap outcome cannot be classified"
             ) from error
         try:
-            observed_head, observed_raw = remote_reader()  # type: ignore[misc]
-            parse_stream(observed_raw)
+            observed_head, observed_raw = self._verified_remote_observation(
+                remote_reader()  # type: ignore[misc]
+            )
         except Exception as error:
             raise AppendOutcomeUncertain(
                 "remote bootstrap outcome cannot be classified"
@@ -312,10 +402,12 @@ class ReleaseEventWriter:
         if parent:
             args.extend(["-p", parent])
         env = os.environ.copy()
-        env.setdefault("GIT_AUTHOR_NAME", "CYAxiverse Lifecycle Writer")
-        env.setdefault("GIT_AUTHOR_EMAIL", "release-events@cyaxiverse.invalid")
-        env.setdefault("GIT_COMMITTER_NAME", "CYAxiverse Lifecycle Writer")
-        env.setdefault("GIT_COMMITTER_EMAIL", "release-events@cyaxiverse.invalid")
+        # Do not inherit a developer's ambient Git identity into the durable
+        # authority.  These values are fixed for every ledger commit.
+        env["GIT_AUTHOR_NAME"] = "CYAxiverse Lifecycle Writer"
+        env["GIT_AUTHOR_EMAIL"] = "release-events@cyaxiverse.invalid"
+        env["GIT_COMMITTER_NAME"] = "CYAxiverse Lifecycle Writer"
+        env["GIT_COMMITTER_EMAIL"] = "release-events@cyaxiverse.invalid"
         try:
             result = subprocess.run(
                 ["git", *args],
@@ -597,7 +689,9 @@ class ReleaseEventWriter:
 
         if remote_reader is not None:
             try:
-                freshest_head, freshest_raw = remote_reader()
+                freshest_head, freshest_raw = self._verified_remote_observation(
+                    remote_reader()
+                )
                 if freshest_head is not None and freshest_head != current.commit:
                     # The local proposal was made against stale evidence.  A
                     # caller must refresh and recompute its event ID/payload.
@@ -644,7 +738,7 @@ class ReleaseEventWriter:
             observed: tuple[str, bytes] | None = None
             if remote_reader is not None:
                 try:
-                    observed = remote_reader()
+                    observed = self._verified_remote_observation(remote_reader())
                 except Exception:
                     observed = None
             if observed is not None:
@@ -724,7 +818,9 @@ class ReleaseEventWriter:
                 )
 
         try:
-            observed_head, observed_raw = remote_reader()
+            observed_head, observed_raw = self._verified_remote_observation(
+                remote_reader()
+            )
             observed_events = parse_stream(observed_raw)
             matching = self._transaction_event(observed_events, transaction_id)
             expected_raw = current.raw + encoded + b"\n"

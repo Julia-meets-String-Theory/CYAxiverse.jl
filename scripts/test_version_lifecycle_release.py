@@ -313,6 +313,87 @@ class TestReleaseEvidence(unittest.TestCase):
         self.assertEqual(result["status"], INVALID)
         self.assertIn("principal_main_release_sha_mismatch", result["errors"])
 
+    def test_certification_event_schema_aliases_match_identity(self):
+        event = released_event()
+        event_certification = {
+            "certification_binding": "tree_bound",
+            "certification_subject_sha": SHA_A,
+            "certification_subject_tree": TREE,
+            "certification_policy_revision": "policy-2026-09",
+            "certification_harness_revision": "harness-2026-09",
+            "certification_environment": "julia-1.12-python-3.14",
+            "certification_evidence_refs": ["evidence/certification.json"],
+        }
+        result = validate_released_event(
+            event,
+            certification=event_certification,
+            project_versions=project_versions(),
+        )
+        self.assertEqual(result["status"], PASS)
+
+    def test_certification_identity_fields_must_match_event(self):
+        cases = (
+            ("policy_revision", "policy-2026-10", "certification_policy_revision_mismatch"),
+            ("harness_revision", "harness-2026-10", "certification_harness_revision_mismatch"),
+            ("environment", "julia-1.13-python-3.14", "certification_environment_mismatch"),
+            ("evidence_ref", "evidence/other-certification.json", "certification_evidence_refs_mismatch"),
+        )
+        for field, value, expected_error in cases:
+            with self.subTest(field=field):
+                record = certification()
+                record[field] = value
+                result = validate_released_event(
+                    released_event(),
+                    certification=record,
+                    project_versions=project_versions(),
+                )
+                self.assertEqual(result["status"], INVALID)
+                self.assertIn(expected_error, result["errors"])
+
+    def test_certification_evidence_reference_list_must_match_event(self):
+        record = certification()
+        record["evidence_refs"] = [
+            "evidence/certification.json",
+            "evidence/extra-certification.json",
+        ]
+        result = validate_released_event(
+            released_event(),
+            certification=record,
+            project_versions=project_versions(),
+        )
+        self.assertEqual(result["status"], INVALID)
+        self.assertIn("certification_evidence_refs_mismatch", result["errors"])
+
+    def test_certification_evidence_identity_must_match_reference_list(self):
+        record = certification()
+        record["evidence"] = "evidence/other-certification.json"
+        record["evidence_refs"] = ["evidence/certification.json"]
+        result = validate_released_event(
+            released_event(),
+            certification=record,
+            project_versions=project_versions(),
+        )
+        self.assertEqual(result["status"], INVALID)
+        self.assertIn("certification_evidence_identity_mismatch", result["errors"])
+
+    def test_conflicting_certification_aliases_are_invalid(self):
+        record = certification()
+        record["certification_policy_revision"] = "different-policy"
+        result = validate_released_event(
+            released_event(), certification=record, project_versions=project_versions()
+        )
+        self.assertEqual(result["status"], INVALID)
+        self.assertEqual(result["reason_code"], "CERTIFICATION_IDENTITY_AMBIGUOUS")
+
+        record = certification()
+        record["evidence_refs"] = ["evidence/certification.json"]
+        record["certification_evidence_refs"] = ["evidence/another.json"]
+        result = validate_released_event(
+            released_event(), certification=record, project_versions=project_versions()
+        )
+        self.assertEqual(result["status"], INVALID)
+        self.assertEqual(result["reason_code"], "CERTIFICATION_IDENTITY_AMBIGUOUS")
+
     def test_tree_mismatch_is_invalid(self):
         event = released_event()
         event["final_release_tree"] = "f" * 40

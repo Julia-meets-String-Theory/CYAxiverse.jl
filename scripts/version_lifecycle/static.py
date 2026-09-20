@@ -9,11 +9,13 @@ production ref mutation code.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import re
 import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 import tomllib
+from urllib.parse import urlsplit, urlunsplit
 
 from .codec import canonical_json, sha256_hex
 from .versions import Version, final_version, parse_package_version, parse_public_tag
@@ -24,10 +26,24 @@ canonical_static_iteration_source = CANONICAL_STATIC_ITERATION_SOURCE
 SNAPSHOT_SCHEMA_VERSION = 1
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
+_PUBLIC_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_PUBLIC_URL_PATH_RE = re.compile(r"^/(?:[A-Za-z0-9][A-Za-z0-9_.-]*/)+[A-Za-z0-9][A-Za-z0-9_.-]*/?$")
+_PUBLIC_SCP_RE = re.compile(r"^git@github\.com:(?P<path>[^/]+/[^/]+?)(?:\.git)?$")
+_UNSAFE_SOURCE_MARKERS = (
+    "file:", "local:", "ssh:", "git:", "credential", "password", "token",
+    "secret", "authorization", "bearer ", "api_key", "apikey",
+)
+_LOCAL_SOURCE_NAMES = {"file", "local", "localhost", "private", "users", "home", "tmp", "var"}
 
 
 class StaticValidationError(ValueError):
     """Raised when static registry data or a snapshot is not valid."""
+
+
+class UnsafeSourceRepositoryError(StaticValidationError):
+    """Raised when a source identity is not safe to persist as public metadata."""
+
+    reason_code = "STATIC_SOURCE_REPOSITORY_UNSAFE"
 
 
 class SnapshotStaleError(StaticValidationError):
@@ -207,17 +223,126 @@ def _selector(selector: str) -> tuple[str, str]:
     return ref, path
 
 
+def sanitize_source_repository(value: str) -> str:
+    """Return a canonical public repository identity or reject it.
+
+    A source identity is metadata included in a durable snapshot.  Accept
+    either a simple public slug (``owner/repository`` or ``repository``), a
+    GitHub SCP identity, or an HTTP(S) URL without credentials.  Local
+    locators, private hosts, credentials, and secret-like values are rejected
+    without echoing the supplied value in the exception.
+    """
+
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise UnsafeSourceRepositoryError(
+            "source_repository must be a sanitized public repository identity"
+        )
+    if any(ord(char) < 0x20 or ord(char) > 0x7E for char in value):
+        raise UnsafeSourceRepositoryError(
+            "source_repository must contain printable ASCII"
+        )
+    if value.startswith(("/", "~", "\\")) or re.match(r"^[A-Za-z]:[\\/]", value):
+        raise UnsafeSourceRepositoryError(
+            "source_repository cannot contain a local locator"
+        )
+    lowered = value.lower()
+    if any(marker in lowered for marker in _UNSAFE_SOURCE_MARKERS):
+        raise UnsafeSourceRepositoryError(
+            "source_repository cannot contain a local or secret-like locator"
+        )
+
+    scp = _PUBLIC_SCP_RE.fullmatch(value)
+    if scp is not None:
+        owner, repository = scp.group("path").split("/", 1)
+        if _PUBLIC_SLUG_RE.fullmatch(owner) and _PUBLIC_SLUG_RE.fullmatch(repository):
+            return f"https://github.com/{owner}/{repository}"
+        raise UnsafeSourceRepositoryError(
+            "source_repository must identify a public repository"
+        )
+
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError as error:
+        raise UnsafeSourceRepositoryError(
+            "source_repository must be a well-formed public repository identity"
+        ) from error
+    if parsed.scheme:
+        if parsed.scheme not in {"http", "https"} or parsed.username is not None or parsed.password is not None:
+            raise UnsafeSourceRepositoryError(
+                "source_repository must be an HTTP(S) URL without credentials"
+            )
+        if parsed.query or parsed.fragment or not host or port is not None:
+            raise UnsafeSourceRepositoryError(
+                "source_repository URL must not contain query, fragment, port, or missing host"
+            )
+        host = host.lower()
+        if host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".internal")):
+            raise UnsafeSourceRepositoryError(
+                "source_repository URL must use a public host"
+            )
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            address = None
+        if address is not None and (
+            address.is_private or address.is_loopback or address.is_link_local
+            or address.is_reserved or address.is_multicast or address.is_unspecified
+        ):
+            raise UnsafeSourceRepositoryError(
+                "source_repository URL must use a public host"
+            )
+        path = parsed.path
+        if not _PUBLIC_URL_PATH_RE.fullmatch(path):
+            raise UnsafeSourceRepositoryError(
+                "source_repository URL must identify a public repository"
+            )
+        normalized_path = path.rstrip("/")
+        if normalized_path.endswith(".git"):
+            normalized_path = normalized_path[:-4]
+        return urlunsplit((parsed.scheme, host, normalized_path, "", ""))
+
+    if "/" in value:
+        parts = value.split("/")
+        if len(parts) != 2 or any(part in _LOCAL_SOURCE_NAMES for part in (part.lower() for part in parts)):
+            raise UnsafeSourceRepositoryError(
+                "source_repository must identify a public repository"
+            )
+        if not all(_PUBLIC_SLUG_RE.fullmatch(part) for part in parts):
+            raise UnsafeSourceRepositoryError(
+                "source_repository must identify a public repository"
+            )
+        owner, repository = parts
+    else:
+        if value.lower() in _LOCAL_SOURCE_NAMES or not _PUBLIC_SLUG_RE.fullmatch(value):
+            raise UnsafeSourceRepositoryError(
+                "source_repository must identify a public repository"
+            )
+        repository = value
+        owner = None
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    if not repository or not _PUBLIC_SLUG_RE.fullmatch(repository):
+        raise UnsafeSourceRepositoryError(
+            "source_repository must identify a public repository"
+        )
+    return f"{owner}/{repository}" if owner is not None else repository
+
+
 def _repository_identity(repository: Path, remote_name: str = "origin") -> str:
     remote = _git(repository, "config", "--get", f"remote.{remote_name}.url", check=False).decode().strip()
     if remote:
-        # The identity is public repository metadata, never a local checkout path.
-        if remote.endswith(".git"):
-            remote = remote[:-4]
-        if remote.startswith("git@github.com:"):
-            return "https://github.com/" + remote.removeprefix("git@github.com:")
-        if remote.startswith("https://") or remote.startswith("http://"):
-            return remote
-    return repository.name or "repository"
+        try:
+            return sanitize_source_repository(remote)
+        except UnsafeSourceRepositoryError:
+            # Local fixture remotes and private checkout URLs do not become
+            # durable metadata.  A safe checkout basename is the fallback.
+            pass
+    try:
+        return sanitize_source_repository(repository.name or "repository")
+    except UnsafeSourceRepositoryError:
+        return "repository"
 
 
 def _read_toml(raw: bytes, source: str) -> Mapping[str, Any]:
@@ -279,7 +404,20 @@ def _validate_entry(entry: Mapping[str, Any], source: str, *, anchor: str | None
     _as_str(entry, "iteration_id", source)
 
     if kind == "prospective":
-        _as_str(entry, "release_line", source)
+        release_line = _as_str(entry, "release_line", source)
+        if release_line != "principal":
+            match = re.fullmatch(
+                r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
+                release_line,
+            )
+            if match is None:
+                raise StaticValidationError(
+                    f"{source} release_line must be principal or maintenance/X.Y"
+                )
+            if (int(match.group(1)), int(match.group(2))) != (version.major, version.minor):
+                raise StaticValidationError(
+                    f"{source} release_line does not match final_version lineage"
+                )
         if not isinstance(entry.get("aggregate_impact"), dict):
             raise StaticValidationError(f"{source} requires aggregate_impact table")
         anchor_ref = _as_str(entry, "anchor_ref", source)
@@ -511,6 +649,9 @@ def recompute_snapshot_digests(snapshot: StaticSnapshot | Mapping[str, Any]) -> 
     for field in ("source_repository", "source_ref", "source_path", "source_commit", "source_tree"):
         if not isinstance(data[field], str) or not data[field]:
             raise StaticValidationError(f"snapshot field {field} must be a nonempty string")
+    normalized_source_repository = sanitize_source_repository(data["source_repository"])
+    if normalized_source_repository != data["source_repository"]:
+        raise StaticValidationError("snapshot source_repository is not canonical")
     if not _HEX64_RE.fullmatch(str(data["iterations_toml_sha256"])):
         raise StaticValidationError("iterations_toml_sha256 must be lowercase SHA-256 hex")
     if not _HEX40_RE.fullmatch(str(data["source_commit"])) or not _HEX40_RE.fullmatch(str(data["source_tree"])):
@@ -641,6 +782,11 @@ def build_static_snapshot(
     repository_path = Path(repository).resolve()
     try:
         source_ref, source_path = _selector(selector)
+        resolved_source_repository = (
+            sanitize_source_repository(source_repository)
+            if source_repository is not None
+            else None
+        )
         advertised_refs = _remote_refs(repository_path, remote)
         advertised_refs = _ensure_remote_objects(repository_path, remote, advertised_refs)
         source_commit = _resolve_commit_value(repository_path, advertised_refs[source_ref])
@@ -664,7 +810,7 @@ def build_static_snapshot(
         data: dict[str, Any] = {
             "snapshot_schema_version": SNAPSHOT_SCHEMA_VERSION,
             "canonical_static_iteration_source": selector,
-            "source_repository": source_repository or _repository_identity(repository_path, remote),
+            "source_repository": resolved_source_repository or _repository_identity(repository_path, remote),
             "source_ref": source_ref,
             "source_path": source_path,
             "source_commit": source_commit,
@@ -683,6 +829,8 @@ def build_static_snapshot(
             source_bytes=raw,
             authority_verified=True,
         )
+    except UnsafeSourceRepositoryError as error:
+        return BlockedResult(reason_code=error.reason_code, detail=str(error))
     except (OSError, subprocess.SubprocessError, StaticValidationError, UnicodeError, ValueError) as error:
         return BlockedResult(detail=str(error))
 
@@ -723,11 +871,13 @@ __all__ = [
     "SnapshotStaleError",
     "StaticSnapshot",
     "StaticValidationError",
+    "UnsafeSourceRepositoryError",
     "build_static_snapshot",
     "compute_static_snapshot",
     "recompute_snapshot_digests",
     "recompute_snapshot",
     "snapshot_is_stale",
+    "sanitize_source_repository",
     "static_iteration_snapshot",
     "static_snapshot",
     "validate_static_snapshot",

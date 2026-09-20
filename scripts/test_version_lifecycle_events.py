@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -31,6 +33,7 @@ from version_lifecycle.writer import (  # noqa: E402
     ReleaseEventWriter,
     StaleHeadError,
 )
+from version_lifecycle.allocation import _event_occupied  # noqa: E402
 
 
 SNAPSHOT = "a" * 64
@@ -325,6 +328,134 @@ class EventValidationTests(unittest.TestCase):
         )
         with self.assertRaises(EventTransitionError):
             validate_transition([candidate, first], mismatched_abort)
+
+    def test_candidate_cannot_be_reopened_for_the_same_final_after_withdrawal(self):
+        candidate = candidate_event()
+        replacement = candidate_event(
+            "EVT-000000000002", transaction_id="candidate-2", candidate_id="candidate-2"
+        )
+        with self.assertRaisesRegex(EventTransitionError, "durable candidate"):
+            validate_transition([candidate], replacement)
+        withdrawn = {
+            "schema_version": 1,
+            "event_id": "EVT-000000000002",
+            "event_type": "candidate_withdrawn",
+            "timestamp_utc": "2026-09-20T12:34:56Z",
+            "transaction_id": "withdraw-1",
+            "static_iteration_snapshot": SNAPSHOT,
+            "expected_event_head": "b" * 40,
+            "candidate_id": candidate["candidate_id"],
+            "candidate_ref": candidate["candidate_ref"],
+            "candidate_sha": candidate["candidate_sha"],
+            "candidate_tree": candidate["candidate_tree"],
+            "withdrawal_evidence": "evidence/withdrawal-1",
+        }
+        validate_transition([candidate], withdrawn)
+        replacement["event_id"] = "EVT-000000000003"
+        with self.assertRaisesRegex(EventTransitionError, "durable candidate"):
+            validate_transition([candidate, withdrawn], replacement)
+
+    def test_withdrawal_requires_intent_abort_and_cannot_follow_release(self):
+        candidate = candidate_event()
+        intent = release_intent_event()
+        withdrawn = {
+            "schema_version": 1,
+            "event_id": "EVT-000000000003",
+            "event_type": "candidate_withdrawn",
+            "timestamp_utc": "2026-09-20T12:34:56Z",
+            "transaction_id": "withdraw-after-intent",
+            "static_iteration_snapshot": SNAPSHOT,
+            "expected_event_head": "b" * 40,
+            "candidate_id": candidate["candidate_id"],
+            "candidate_ref": candidate["candidate_ref"],
+            "candidate_sha": candidate["candidate_sha"],
+            "candidate_tree": candidate["candidate_tree"],
+            "withdrawal_evidence": "evidence/withdrawal-1",
+        }
+        with self.assertRaisesRegex(EventTransitionError, "intent must be aborted"):
+            validate_transition([candidate, intent], withdrawn)
+
+        abort = release_intent_abort_event("EVT-000000000003")
+        validate_transition([candidate, intent], abort)
+        withdrawn["event_id"] = "EVT-000000000004"
+        validate_transition([candidate, intent, abort], withdrawn)
+
+        released = {
+            **{key: value for key, value in intent.items() if key not in {"intent_id"}},
+            "event_id": "EVT-000000000003",
+            "event_type": "released",
+            "transaction_id": "released-1",
+            "closure_timestamp_utc": "2026-09-20T12:34:56Z",
+            "evidence_refs": ["evidence/released-1"],
+            "main_at_event_sha": "f" * 40,
+            "main_at_event_version": "0.3.1",
+            "previous_main_sha": "d" * 40,
+            "previous_main_version": "0.2.0",
+        }
+        validate_transition([candidate, intent], released)
+        with self.assertRaisesRegex(EventTransitionError, "released candidate"):
+            validate_transition([candidate, intent, released], withdrawn)
+        with self.assertRaisesRegex(EventTransitionError, "released intent"):
+            validate_transition(
+                [candidate, intent, released],
+                release_intent_abort_event("EVT-000000000004", transaction_id="late-abort"),
+            )
+
+    def test_different_final_consumes_reserved_identity_and_opens_one_candidate(self):
+        prepared = reservation_event(expected_head="b" * 40)
+        opened = reservation_event(
+            "EVT-000000000002", transaction_id="open-1",
+            expected_head="b" * 40, event_type="development_reservation_opened",
+        )
+        consumed = dict(
+            opened,
+            event_id="EVT-000000000003",
+            transaction_id="consume-unused",
+            event_type="development_reservation_consumed",
+            closed_final_version="0.3.2",
+            closure_anchor="refs/tags/iterations/0.3.2",
+            terminal_disposition="CONSUMED_UNUSED_DEV_RESERVATION",
+        )
+        consumed.pop("actual_dev_head")
+        for prior, event in (([], prepared), ([prepared], opened), ([prepared, opened], consumed)):
+            validate_transition(prior, event)
+        self.assertEqual(_event_occupied([consumed]), {"0.3.1", "0.3.2"})
+
+        reused = reservation_event(
+            "EVT-000000000004", transaction_id="reuse-closed",
+            expected_head="b" * 40,
+        )
+        reused.update(final_version="0.3.2", intended_dev_version="0.3.2-DEV")
+        with self.assertRaises(EventTransitionError):
+            validate_transition([prepared, opened, consumed], reused)
+
+        candidate = candidate_event(
+            "EVT-000000000004", transaction_id="candidate-closed",
+        )
+        candidate.update(
+            final_version="0.3.2",
+            candidate_ref="refs/heads/candidates/0.3.2",
+            anchor_ref="refs/tags/iterations/0.3.2",
+        )
+        validate_transition([prepared, opened, consumed], candidate)
+        duplicate = dict(
+            candidate,
+            event_id="EVT-000000000005",
+            transaction_id="duplicate-candidate",
+            candidate_id="candidate-2",
+        )
+        with self.assertRaisesRegex(EventTransitionError, "durable candidate"):
+            validate_transition([prepared, opened, consumed, candidate], duplicate)
+
+        bad = dict(consumed, terminal_disposition="something-else")
+        with self.assertRaises(EventSchemaError):
+            validate_event(bad)
+        bad = dict(consumed, closure_anchor="refs/tags/iterations/0.3.1")
+        with self.assertRaises(EventSchemaError):
+            validate_event(bad)
+        bad = dict(consumed, closed_final_version="0.3.1")
+        with self.assertRaises(EventSchemaError):
+            validate_event(bad)
 
     def test_withdrawn_candidate_keeps_version_occupied(self):
         candidate = candidate_event()
@@ -851,6 +982,99 @@ class WriterTests(unittest.TestCase):
                 protection_checker=lambda: True,
             )
         self.assertEqual(context.exception.reason_code, "APPEND_OUTCOME_UNCERTAIN")
+
+    def test_real_bare_remote_bootstrap_and_append_verify_one_file_topology(self):
+        remote = self.repo.parent / f"{self.repo.name}-release-events-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="release-events-real-remote",
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+        )
+        head = writer.bootstrap_remote(
+            protection_checker=lambda: True,
+        )
+        event = reservation_event(expected_head=head)
+        result = writer.append_remote(event, expected_head=head)
+        self.assertEqual(result.status, "APPENDED")
+        advertised = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(remote),
+                "rev-parse",
+                "refs/heads/release-events-real-remote",
+            ],
+            text=True,
+        ).strip()
+        self.assertEqual(advertised, result.head)
+        tree = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(remote),
+                "ls-tree",
+                "--name-only",
+                advertised,
+            ],
+            text=True,
+        ).splitlines()
+        self.assertEqual(tree, ["release-events.jsonl"])
+
+    def test_commit_identity_ignores_private_ambient_git_identity(self):
+        ambient = {
+            "GIT_AUTHOR_NAME": "Private Ambient Author",
+            "GIT_AUTHOR_EMAIL": "private-author@example.invalid",
+            "GIT_COMMITTER_NAME": "Private Ambient Committer",
+            "GIT_COMMITTER_EMAIL": "private-committer@example.invalid",
+        }
+        with patch.dict(os.environ, ambient, clear=False):
+            commit = self.writer._make_commit(
+                b"", parent=self.writer.current_head(), message="ambient identity test"
+            )
+        identity = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "show",
+                "-s",
+                "--format=%an%x00%ae%x00%cn%x00%ce",
+                commit,
+            ],
+            text=True,
+        ).strip()
+        self.assertEqual(
+            identity,
+            "CYAxiverse Lifecycle Writer\x00release-events@cyaxiverse.invalid\x00"
+            "CYAxiverse Lifecycle Writer\x00release-events@cyaxiverse.invalid",
+        )
+
+    def test_callback_reconciliation_cannot_claim_unverified_topology(self):
+        writer = ReleaseEventWriter(
+            self.repo,
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+        )
+        head = writer.current_head()
+        pushed: list[bool] = []
+        result = writer.append_remote(
+            reservation_event(expected_head=head),
+            expected_head=head,
+            push=lambda *_args: pushed.append(True),
+            reconcile=lambda: ("f" * 40, b""),
+        )
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "APPEND_OUTCOME_UNCERTAIN", True),
+        )
+        self.assertEqual(pushed, [])
 
 
 if __name__ == "__main__":
