@@ -19,6 +19,16 @@ UTC = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
+def _public_text(value: Any) -> bool:
+    """Return whether an identity is a nonempty durable public text value."""
+
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and all(0x20 <= ord(character) <= 0x7E for character in value)
+    )
+
+
 class TransactionError(RuntimeError):
     def __init__(self, reason_code: str, detail: str = "") -> None:
         super().__init__(detail or reason_code)
@@ -426,7 +436,8 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
             candidate.get("ref") != intent.candidate_ref
             or candidate.get("tree") != intent.anchor_tree
             or candidate.get("version") != intent.final_version
-            or not candidate.get("sha")
+            or not SHA.fullmatch(str(candidate.get("sha", "")))
+            or not SHA.fullmatch(str(candidate.get("tree", "")))
             or candidate.get("durable") is not True
         ):
             raise TransactionError("CANDIDATE_DURABILITY_UNPROVEN")
@@ -441,14 +452,16 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         if (
             certification.get("binding") not in ("tree-bound", "commit-bound")
             or certification.get("subject_tree") != intent.anchor_tree
-            or not certification.get("subject_sha")
-            or not certification.get("policy_revision")
-            or not certification.get("harness_revision")
-            or not certification.get("environment")
+            or not SHA.fullmatch(str(certification.get("subject_sha", "")))
+            or certification.get("subject_sha") != candidate.get("sha")
+            or not _public_text(certification.get("policy_revision"))
+            or not _public_text(certification.get("harness_revision"))
+            or not _public_text(certification.get("environment"))
             or not certification.get("evidence_refs")
         ):
             raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
         evidence["certification"] = certification
+        evidence["candidate_certification"] = dict(certification)
         phase = "candidate_certified"
 
         if intent.release_line == "principal":
@@ -479,9 +492,12 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
                     or not SHA.fullmatch(str(item.get("tree", "")))
                     for item in commits
                 )
+                or len({item["sha"] for item in commits}) != len(commits)
                 or disposition not in ("no_drift", "tree_neutral_included")
                 or (disposition == "no_drift" and (
-                    commits or interval["candidate_main_sha"] != interval["freeze_main_sha"]
+                    commits
+                    or interval["candidate_main_sha"] != interval["freeze_main_sha"]
+                    or interval["candidate_main_tree"] != interval["freeze_main_tree"]
                 ))
                 or (disposition == "tree_neutral_included" and (
                     not commits or interval["freeze_main_tree"] != intent.anchor_tree
@@ -510,21 +526,22 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         if (
             final.get("tree") != intent.anchor_tree
             or final.get("version") != intent.final_version
-            or not final.get("sha")
+            or not SHA.fullmatch(str(final.get("sha", "")))
+            or not SHA.fullmatch(str(final.get("tree", "")))
         ):
             raise TransactionError("RELEASE_TREE_MISMATCH")
         evidence["final"] = final
         phase = "final_verified"
 
-        if certification["binding"] == "commit-bound" and certification["subject_sha"] != final["sha"]:
+        if certification["binding"] == "commit-bound" and candidate["sha"] != final["sha"]:
             certification = port.recertify_final(intent, final)
             if (
                 certification.get("binding") != "commit-bound"
                 or certification.get("subject_sha") != final["sha"]
                 or certification.get("subject_tree") != final["tree"]
-                or not certification.get("policy_revision")
-                or not certification.get("harness_revision")
-                or not certification.get("environment")
+                or not _public_text(certification.get("policy_revision"))
+                or not _public_text(certification.get("harness_revision"))
+                or not _public_text(certification.get("environment"))
                 or not certification.get("evidence_refs")
             ):
                 raise TransactionError("RECERTIFICATION_REQUIRED")
@@ -533,7 +550,9 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         elif certification["binding"] == "tree-bound":
             if certification["subject_tree"] != final["tree"]:
                 raise TransactionError("CERTIFICATION_TRANSFER_UNPROVEN")
-            if certification["subject_sha"] != final["sha"]:
+            if certification["subject_sha"] != candidate["sha"]:
+                raise TransactionError("CERTIFICATION_TRANSFER_UNPROVEN")
+            if candidate["sha"] != final["sha"]:
                 transfer = port.verify_tree_transfer(intent, candidate, certification, final)
                 if (
                     transfer.get("verified") is not True
@@ -542,11 +561,16 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
                     or transfer.get("candidate_tree") != intent.anchor_tree
                     or transfer.get("final_release_tree") != intent.anchor_tree
                     or transfer.get("anchor_tree") != intent.anchor_tree
-                    or not transfer.get("evidence_ref")
+                    or not any(
+                        isinstance(transfer.get(name), str) and bool(transfer.get(name))
+                        for name in ("evidence_ref", "evidence_digest", "digest")
+                    )
                 ):
                     raise TransactionError("CERTIFICATION_TRANSFER_UNPROVEN")
                 evidence["certification_transfer"] = transfer
                 phase = "transfer_verified"
+
+        evidence["final_certification"] = dict(certification)
 
         prepared = port.append_release_intent(intent, candidate, certification, final)
         public_tag = f"v{intent.final_version}"

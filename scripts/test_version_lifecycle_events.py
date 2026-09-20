@@ -1077,5 +1077,75 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(pushed, [])
 
 
+class EventIntegrationAuditTests(unittest.TestCase):
+    """Regression coverage for public-boundary event validation."""
+
+    def test_abort_proof_binds_tag_and_exclusion_fields(self):
+        abort = release_intent_abort_event()
+        proof = dict(abort["no_public_tag_evidence"])
+        proof["public_tag"] = "v0.3.2"
+        abort["no_public_tag_evidence"] = proof
+        with self.assertRaises(EventSchemaError):
+            validate_event(abort)
+
+        abort = release_intent_abort_event()
+        proof = dict(abort["no_public_tag_evidence"])
+        proof["exclusion_verified"] = False
+        abort["no_public_tag_evidence"] = proof
+        with self.assertRaises(EventSchemaError):
+            validate_event(abort)
+
+        candidate = candidate_event()
+        intent = release_intent_event()
+        abort = release_intent_abort_event(candidate_id="candidate-other")
+        with self.assertRaises(EventTransitionError):
+            validate_transition([candidate, intent], abort)
+
+    def test_public_boundary_rejects_durable_locators_and_does_not_echo_values(self):
+        cases = (
+            (reservation_event(), "expected_line_head", "/Users/secret/line-head"),
+            (release_intent_event(), "certification_environment", "file:///Users/secret/env"),
+            (release_intent_event(), "certification_evidence_refs", ["Bearer SECRET-CREDENTIAL"]),
+        )
+        for event, field, value in cases:
+            event[field] = value
+            with self.subTest(field=field):
+                with self.assertRaises(EventSchemaError) as context:
+                    validate_event(event)
+                self.assertNotIn("SECRET-CREDENTIAL", str(context.exception))
+                self.assertNotIn("/Users/secret", str(context.exception))
+
+    def test_maintenance_reservation_rejects_wrong_major_minor_for_each_state_shape(self):
+        prepared = reservation_event()
+        prepared.update(
+            owner_line="maintenance/1.2",
+            final_version="1.3.1",
+            intended_dev_version="1.3.1-DEV",
+        )
+        with self.assertRaises(EventSchemaError):
+            validate_event(prepared)
+
+        opened = reservation_event(event_type="development_reservation_opened")
+        opened.update(
+            owner_line="maintenance/1.2",
+            final_version="1.3.1",
+            intended_dev_version="1.3.1-DEV",
+        )
+        with self.assertRaises(EventSchemaError):
+            validate_event(opened)
+
+        aborted = reservation_event(event_type="development_reservation_aborted")
+        aborted.pop("expected_line_head")
+        aborted.update(
+            owner_line="maintenance/1.2",
+            final_version="1.3.1",
+            intended_dev_version="1.3.1-DEV",
+            abort_reason="fixture",
+            non_entry_evidence="evidence/non-entry",
+        )
+        with self.assertRaises(EventSchemaError):
+            validate_event(aborted)
+
+
 if __name__ == "__main__":
     raise SystemExit(unittest.main())

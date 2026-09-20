@@ -24,6 +24,8 @@ class ClosureFixture:
         self.calls: list[str] = []
         self.fail_consumption = fail_consumption
         self.occupied = occupied
+        self.views: list[AllocationView] = []
+        self.consumed_view: AllocationView | None = None
 
     def freeze_line(self, intent):
         self.calls.append("freeze")
@@ -31,7 +33,11 @@ class ClosureFixture:
 
     def allocation_view(self):
         self.calls.append("view")
-        return AllocationView("snapshot", "event-head", self.occupied)
+        view = AllocationView(
+            f"snapshot-{len(self.views)}", f"event-head-{len(self.views)}", self.occupied
+        )
+        self.views.append(view)
+        return view
 
     def verify_closure_target(self, intent, view):
         self.calls.append("target")
@@ -50,6 +56,7 @@ class ClosureFixture:
 
     def consume_outgoing(self, intent, anchor, view):
         self.calls.append("consume")
+        self.consumed_view = view
         if self.fail_consumption:
             raise RuntimeError("uncertain append")
         return {
@@ -270,6 +277,12 @@ class TransactionTests(unittest.TestCase):
             "view", "prepare", "reopen", "activate", "correspondence", "unfreeze",
         ])
 
+    def test_closure_consumption_uses_post_anchor_allocation_view(self):
+        port = ClosureFixture()
+        result = run_closure(port, self.closure)
+        self.assertIs(port.consumed_view, result.evidence["post_anchor_view"])
+        self.assertIsNot(port.consumed_view, result.evidence["bound_view"])
+
     def test_failed_outgoing_consumption_never_allocates_or_unfreezes(self):
         port = ClosureFixture(fail_consumption=True)
         result = run_closure(port, self.closure)
@@ -371,6 +384,140 @@ class TransactionTests(unittest.TestCase):
                     "BLOCKED", reason, True
                 ))
                 self.assertNotIn("tag", port.calls)
+
+    def test_tree_bound_transfer_is_required_when_candidate_and_final_differ(self):
+        port = ReleaseFixture()
+        original = port.certify_candidate
+
+        def incorrectly_final_certified(intent, candidate):
+            result = original(intent, candidate)
+            result["subject_sha"] = port.final_sha
+            return result
+
+        port.certify_candidate = incorrectly_final_certified
+        result = run_release(port, self.release)
+        self.assertEqual((result.status, result.reason_code, result.frozen), (
+            "BLOCKED", "CERTIFICATION_IDENTITY_UNPROVEN", False
+        ))
+        self.assertNotIn("verify-transfer", port.calls)
+        self.assertNotIn("tag", port.calls)
+
+    def test_commit_bound_recertification_accepts_updated_reviewed_pins(self):
+        port = ReleaseFixture()
+
+        def commit_bound_certification(intent, candidate):
+            return {
+                "binding": "commit-bound",
+                "subject_sha": candidate["sha"],
+                "subject_tree": candidate["tree"],
+                "policy_revision": "policy",
+                "harness_revision": "harness",
+                "environment": "env",
+                "evidence_refs": ["evidence/candidate-certification.json"],
+            }
+
+        port.certify_candidate = commit_bound_certification
+        original = port.recertify_final
+
+        def recertified_with_updated_pins(intent, final):
+            result = original(intent, final)
+            result.update({
+                "policy_revision": "policy-2026-10",
+                "harness_revision": "harness-2026-10",
+                "environment": "julia-1.13-python-3.14",
+                "evidence_refs": ["evidence/final-certification.json"],
+            })
+            return result
+
+        port.recertify_final = recertified_with_updated_pins
+        result = run_release(port, self.release)
+        self.assertEqual(result.status, "COMPLETE")
+        self.assertEqual(
+            result.evidence["candidate_certification"]["policy_revision"], "policy"
+        )
+        self.assertEqual(
+            result.evidence["final_certification"]["policy_revision"], "policy-2026-10"
+        )
+        self.assertEqual(
+            result.evidence["final_certification"]["harness_revision"], "harness-2026-10"
+        )
+        self.assertEqual(
+            result.evidence["final_certification"]["environment"],
+            "julia-1.13-python-3.14",
+        )
+
+    def test_commit_bound_recertification_requires_valid_final_pins(self):
+        for field in ("policy_revision", "harness_revision", "environment"):
+            for case, value in (("missing", None), ("invalid", 123)):
+                with self.subTest(field=field, case=case):
+                    port = ReleaseFixture()
+
+                    def commit_bound_certification(intent, candidate):
+                        return {
+                            "binding": "commit-bound",
+                            "subject_sha": candidate["sha"],
+                            "subject_tree": candidate["tree"],
+                            "policy_revision": "policy",
+                            "harness_revision": "harness",
+                            "environment": "env",
+                            "evidence_refs": ["evidence"],
+                        }
+
+                    port.certify_candidate = commit_bound_certification
+                    original = port.recertify_final
+
+                    def recertified_with_bad_pin(
+                        intent, final, field=field, case=case, value=value
+                    ):
+                        result = original(intent, final)
+                        if case == "missing":
+                            result.pop(field, None)
+                        else:
+                            result[field] = value
+                        return result
+
+                    port.recertify_final = recertified_with_bad_pin
+                    result = run_release(port, self.release)
+                    self.assertEqual((result.status, result.reason_code, result.frozen), (
+                        "BLOCKED", "RECERTIFICATION_REQUIRED", True
+                    ))
+                    self.assertNotIn("intent", port.calls)
+                    self.assertNotIn("tag", port.calls)
+
+    def test_principal_interval_requires_tree_comparison_for_no_drift(self):
+        port = ReleaseFixture()
+        original = port.verify_principal_interval
+
+        def mismatched_trees(intent, candidate, freeze):
+            result = original(intent, candidate, freeze)
+            result["freeze_main_tree"] = "f" * 40
+            return result
+
+        port.verify_principal_interval = mismatched_trees
+        result = run_release(port, self.release)
+        self.assertEqual((result.status, result.reason_code, result.frozen), (
+            "BLOCKED", "PRINCIPAL_ANCESTRY_UNPROVEN", True
+        ))
+        self.assertNotIn("promote", port.calls)
+        self.assertNotIn("tag", port.calls)
+
+    def test_principal_interval_requires_each_intervening_tree_record(self):
+        port = ReleaseFixture()
+        original = port.verify_principal_interval
+
+        def missing_tree_record(intent, candidate, freeze):
+            result = original(intent, candidate, freeze)
+            result["intervening_commits"] = [{"sha": "f" * 40}]
+            result["disposition"] = "tree_neutral_included"
+            return result
+
+        port.verify_principal_interval = missing_tree_record
+        result = run_release(port, self.release)
+        self.assertEqual((result.status, result.reason_code, result.frozen), (
+            "BLOCKED", "PRINCIPAL_ANCESTRY_UNPROVEN", True
+        ))
+        self.assertNotIn("promote", port.calls)
+        self.assertNotIn("tag", port.calls)
 
     def test_principal_regression_stops_before_main_promotion(self):
         port = ReleaseFixture()
