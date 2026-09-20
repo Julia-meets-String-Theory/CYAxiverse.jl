@@ -92,6 +92,9 @@ Work records a stable target-iteration identity before final SemVer assignment.
 Version validation uses Julia `VersionNumber` semantics or a demonstrated
 equivalent. It distinguishes final `X.Y.Z` from approved `X.Y.Z-DEV`;
 the prerelease suffix alone does not make a valid development version invalid.
+The governed package grammar admits only those two exact forms, with three
+nonnegative decimal components and no build metadata. Other prereleases,
+including `-alpha` and `-rc1`, are rejected even if Julia can parse them.
 
 ### R-006 — Deterministic principal development identity
 
@@ -99,6 +102,8 @@ After principal `X.Y.Z` closes, the exact next sentinel is
 `X.Y.(Z+1)-DEV`. It reserves final `X.Y.(Z+1)` but does not predetermine
 the next closure's reviewed aggregate impact. If that exact sentinel is
 unavailable, return `PRINCIPAL_SENTINEL_UNAVAILABLE`; do not skip it.
+The machine-visible result is `status = BLOCKED` with
+`reason_code = PRINCIPAL_SENTINEL_UNAVAILABLE`.
 
 ### R-007 — Deterministic maintenance development identity
 
@@ -160,6 +165,12 @@ An allocation-changing transaction binds a transaction ID, exact static
 snapshot and expected event head. It revalidates both, derives the next event
 ID, appends a descendant commit and performs a non-force linear update.
 Stale decisions must refresh and recompute.
+An uncertain remote-update outcome is reconciled by re-reading the protected
+remote event branch and matching the transaction ID and exact event payload.
+Only a matching published event consumes an ID. If remote evidence cannot
+classify the result, return `status = BLOCKED` with
+`reason_code = APPEND_OUTCOME_UNCERTAIN` and retain the affected line/version
+freeze; never blindly append again or release a reservation.
 
 ### R-018 — Static mutation serialization
 
@@ -193,6 +204,13 @@ maintenance lines, `main` and public tags. Installation docs distinguish
 immutable release-tag use from active `vmm` use. Documenter source requires no
 release-time edit; deployment derives from ref/event/environment while
 preserving generated API, development and stable/versioned docs.
+The `vmm` ref deploys the development channel. A canonical principal public
+tag deploys its immutable versioned channel and may advance `stable` only
+when its certified release commit equals the current principal `main`.
+A canonical maintenance public tag deploys its immutable versioned channel
+without changing `stable`. Deployments run only for those verified refs;
+the channel is selected by ref, canonical event and environment, not by a
+tracked source edit.
 
 ### R-023 — Exact-tree certification
 
@@ -212,6 +230,10 @@ Principal and maintenance use one sequence: durable exact candidate, equality
 check, `candidate_opened`, certification, line-specific pre-tag checks,
 immutable public tag, `released` event, GitHub Release. No duplicate
 candidate opening or certification path is allowed.
+Before the tag, append durable `release_intent_prepared` evidence binding
+candidate, certification, final commit/tree, version and proposed tag. After
+tag creation, that intent and the protected tag establish the nonterminal
+`tag_reconciliation_pending` state until the matching `released` event exists.
 
 ### R-026 — Principal exact-tree promotion
 
@@ -219,6 +241,13 @@ A principal release records candidate-time and freeze-time `main` identities,
 mechanically freezes `main`, dispositions intervening ancestry, reconciles to
 the certified closed tree, checks final version greater than prior `main`
 and no `-DEV`, then applies certification-transfer rules before tagging.
+The frozen candidate-to-main interval enumerates every intervening commit.
+Allowed dispositions are `no_drift`, `tree_neutral_included` (the intervening
+commits' net tree equals the certified tree), and `content_drift_blocked`.
+Content drift blocks promotion until a new reviewed closure/candidate and
+certification make the exact final tree valid. The evidence records the
+intervening SHAs, tree comparisons and disposition; no commit is silently
+dropped from the release decision.
 
 ### R-027 — Maintenance exact-tree release
 
@@ -271,6 +300,11 @@ identity remain permanently consumed and retained for audit.
 
 After protected canonical public tag creation, do not withdraw, delete,
 repoint or reuse. Reconcile missing event/publication forward.
+If the tag exists with a matching durable intent but no `released` event,
+validation returns `tag_reconciliation_pending`; the writer appends only the
+matching release event after rechecking tag, commit, tree and certification.
+If any identity disagrees, validation is INVALID and no replacement tag is
+created.
 
 ### R-035 — Public-tag immutability
 
@@ -350,6 +384,9 @@ that event; and every released event to resolve back to its immutable tag,
 release commit/tree and certified anchor/tree. Mismatch is INVALID.
 `publication_reconciliation_pending` is an explicit nonterminal forward
 recovery state, never silently accepted as `terminal_consistent`.
+`tag_reconciliation_pending` is likewise nonterminal and requires durable
+intent plus a matching immutable tag. Neither state authorizes another
+candidate, version allocation or public release for the affected identity.
 
 ### R-044 — Certification binding and transfer
 
@@ -366,6 +403,9 @@ No implicit transfer is permitted.
 that ref to an exact commit/tree and hashes the file bytes; no caller may
 substitute an arbitrary historical copy. The root registry carries principal
 prospective entries and, after Gate B only, reviewed retrospective entries.
+If that exact selector cannot be resolved and validated, return
+`status = BLOCKED` with
+`reason_code = STATIC_AUTHORITY_SELECTOR_UNRESOLVED`.
 For maintenance, the protected `iterations/X.Y.Z` anchor tree carries its
 own static entry. The snapshot validates all protected iteration refs and
 their exact anchor-tree entries; maintenance version metadata is not copied
@@ -391,12 +431,28 @@ The event vocabulary includes `development_reservation_prepared`,
 `development_reservation_opened`, `development_reservation_aborted`,
 `development_reservation_consumed`, `maintenance_line_opened`,
 `candidate_opened`, `candidate_withdrawn` and `released`.
+The vocabulary also includes `release_intent_prepared` and
+`release_intent_aborted`. An intent binds the exact candidate, certified
+subject, final version/commit/tree and proposed public tag before tag
+creation. Pre-tag withdrawal may abort an intent only after proving under
+the serialized exclusion boundary that the public tag does not exist.
 Type-specific schemas require and forbid fields according to their transition.
 The validator checks byte-prefix preservation, strict JSONL, contiguous IDs,
 UTC time and lifecycle transitions. One owner-line DEV identity corresponds
 to one active reservation and actual line head. A prepared reservation is
 globally unavailable. Abort is allowed only with proof the matching DEV state
 was never entered; uncertain outcomes remain unavailable and frozen.
+
+Canonical snapshots, events and evidence identities use UTF-8 with ASCII
+printable wire strings, lexicographically sorted object keys, compact JSON
+without insignificant whitespace, decimal integers without leading zeroes,
+and no floating-point values. Strings escape only JSON-required quote and
+backslash characters; slash is not escaped. Each JSONL event ends in one LF.
+UTC timestamps use `YYYY-MM-DDTHH:MM:SSZ` and are validated as real calendar
+times. Digests are lowercase hexadecimal SHA-256 of these exact bytes.
+Duplicate keys, malformed UTF-8, noncanonical encodings and nonconforming
+timestamps are rejected. Snapshot sets and ref bindings sort by canonical
+ASCII identity before serialization.
 
 ## Protected transactions and recovery
 
@@ -428,6 +484,21 @@ subsequent failures reconcile event and publication forward. The released
 event's `previous_main_*` means frozen pre-integration principal `main`;
 `main_at_event_*` means verified post-reconciliation principal release
 `main`, or contemporaneous unchanged principal `main` for maintenance.
+At closure, candidate, final release and certified anchor trees, parsed
+`Project.toml` must equal the recorded final `X.Y.Z` exactly. Principal
+`main` after promotion must carry the same final version; a maintenance
+public tag must resolve to the matching package version without moving
+principal `main`. A mismatch is INVALID before tag creation and during
+terminal validation.
+
+For each append, the writer first checks whether the exact transaction ID
+already appears with the same canonical payload. A match is idempotent
+success; the same ID with a different payload is INVALID. After an uncertain
+push, it fetches the protected remote head and compares the full stream.
+An unchanged expected head permits retry of the same proposed event under
+the same expected-head update; an advanced head without that event requires
+refresh and recomputation. If the remote outcome cannot be established, the
+transaction remains blocked and frozen under R-017.
 
 ## Gate order, evidence and stop rules
 
@@ -458,6 +529,10 @@ maintenance evidence, bidirectional tag/event/tree consistency and post-tag
 forward recovery. Run focused tests before package, audit, docs, Python-free
 import, workflow and remote CI checks. Record exact commands, results and
 unavailable checks; unobserved checks are not PASS.
+Negative cases include unsupported Julia prereleases/build forms, final
+package-version mismatch at each release tree, uncertain append response,
+duplicate transaction ID with changed payload, intent without tag, tag
+without released event, and mismatched tag/intent/release evidence.
 
 Fail closed when a pinned source/approval or reviewer authority cannot be
 verified, the static selector or serialized writer cannot be established, an
@@ -466,6 +541,9 @@ patch, Julia prerelease semantics conflict, outgoing reservation or bootstrap
 state is uncertain, durable candidate retention, certification subject,
 exact-tree promotion, main freeze, or required protections cannot be proven,
 or implementation would require Gate B. Do not silently weaken an invariant.
+The exact static-selector and principal-sentinel blocked outcomes are stated
+in R-006 and the concrete authority section. No generic fail-closed result
+may replace their required status and reason codes.
 
 The governing Issue is the live work-state record. `tasks.md` tracks
 execution/evidence readiness only. A review verdict is evidence, never
