@@ -95,9 +95,44 @@ For scientific, numerical, sampling, benchmark, or persisted-data changes:
   reader/writer contract, persisted schema, supported environment, or scientific
   behavior. State any intentional compatibility break explicitly.
 - `Project.toml` is the package version source of truth. Feature branches state
-  version impact but normally do not bump it. Apply the reviewed release bump at
-  the `vmm -> main` integration boundary. Keep scientific artifact/schema
-  versions separate from the package version.
+  version impact but normally do not bump it. A reviewed closure adopts the
+  final package version on its owner line; principal promotion then verifies
+  that the certified release tree and version reach `main` at the deliberate
+  `vmm -> main` integration boundary. Keep scientific artifact/schema versions
+  separate from the package version. Pre-retrofit work keeps its historical
+  declaration and evidence under the approved transition rules.
+
+### Package iteration and release lifecycle
+
+- `vmm` is the principal development line. Under the adopted lifecycle, `main`
+  is intended to carry the latest certified principal release after reviewed
+  reconciliation; pre-retrofit `main` history is not retroactively certified
+  by this policy and never carries a `-DEV` package version. A
+  `maintenance/X.Y` line may carry exact-tree certified maintenance releases
+  on that `X.Y` lineage without moving the principal `main` line backward.
+- Record a stable target-iteration identity before assigning a final SemVer.
+  For CYAX-0125 Gate A the target is `version-lifecycle-retrofit-2026-09`, the
+  package infrastructure impact is `patch`, and the package remains at
+  `0.2.0`; this gate does not adopt a development version or publish a release.
+- An active `X.Y.Z-DEV` reserves final `X.Y.Z` globally for its owner line.
+  Other lines cannot close, candidate, or publish that version. Closing the
+  reserved final consumes it; closing a different final records the reserved
+  identity as `CONSUMED_UNUSED_DEV_RESERVATION`. Closed, candidate, withdrawn,
+  released, and consumed versions are never reused. A reservation with proven
+  pre-entry abort may be made available again under the recovery rules;
+  uncertain outcomes remain unavailable.
+- A release candidate is certified against an immutable exact tree and retains
+  its candidate, commit, tree, version, tag intent, certification, and release
+  evidence identities. Public canonical tags are irreversible and are checked
+  against the corresponding event and publication evidence.
+- Gate A builds and tests this machinery only. It does not perform historical
+  designation, package-version adoption, a production `-DEV` transition,
+  closure, public-tag creation, publication, or `vmm -> main` reconciliation.
+  Gate B and the deliberate `vmm -> main` release boundary handle those actions.
+- Tracked installation and documentation source remains release-neutral. The
+  verified ref and release event select development, principal-versioned,
+  maintenance-versioned, or stable documentation channels; a public release
+  must not require editing tracked source files.
 
 ## 6. Git, PRs, and agent delegation
 

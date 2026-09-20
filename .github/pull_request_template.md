@@ -9,6 +9,10 @@ Implements:
 - R-... / N/A for S0
 - G... / N/A for S0
 
+Target iteration: `<stable identity>` / N/A for S0
+Package-infrastructure SemVer impact: `patch` / `minor` / `major` / `none`
+Package-version adoption: `none` / `<exact version and reason>`
+
 > For S0 work, omit or mark `N/A` any SDD section that is not relevant. Do not invent specification metadata merely to satisfy the template.
 
 ## Change
@@ -18,6 +22,11 @@ Concise description of what was implemented.
 ## Explicit non-scope
 
 What remains outside this PR/spec gate. N/A for trivial S0 changes when there is no meaningful separate non-scope.
+
+For lifecycle work, state explicitly whether historical designation,
+production `-DEV`, closure, public-tag creation, publication, or `vmm -> main`
+reconciliation is outside this PR. Gate A infrastructure does not perform those
+actions.
 
 ## Scientific / contract impact
 
@@ -33,6 +42,11 @@ What remains outside this PR/spec gate. N/A for trivial S0 changes when there is
 | Requirement / gate | Evidence | Result |
 | --- | --- | --- |
 | R-... / S0 check | `test/...` / validation artifact / command | PASS / FAIL / BLOCKED |
+
+For release work, include the verified ref/event context, exact candidate and
+certification tree identities, and the release evidence location. Documentation
+deployment must be selected from that context without a release-time tracked
+source edit.
 
 Include exact commands and observed results where material. Keep large evidence in durable artifacts rather than the PR body.
 

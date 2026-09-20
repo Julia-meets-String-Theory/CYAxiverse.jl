@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - vmm
-    tags: '*'
+    # Legacy v-0.1 is retained but is not a canonical future release tag.
+    tags: 'v*.*.*'
     paths:
       - 'docs/src/**'
       - 'docs/make.jl'
+      - 'docs/verify_release_context.py'
       - 'docs/Project.toml'
       - 'src/**'
       - 'ext/**'
@@ -17,6 +19,7 @@ on:
     paths:
       - 'docs/src/**'
       - 'docs/make.jl'
+      - 'docs/verify_release_context.py'
       - 'docs/Project.toml'
       - 'src/**'
       - 'ext/**'
@@ -38,17 +41,87 @@ jobs:
         with:
           version: '1.12'
       - uses: julia-actions/cache@v2
+      - name: Fetch canonical release event authority
+        if: github.event_name != 'pull_request'
+        run: |
+          EVENT_STREAM="$RUNNER_TEMP/release-events.jsonl"
+          git fetch --no-tags origin \
+            refs/heads/main:refs/remotes/origin/main
+          if git ls-remote --exit-code origin refs/heads/release-events >/dev/null 2>&1; then
+            git fetch --no-tags origin \
+              refs/heads/release-events:refs/remotes/origin/release-events
+            git show refs/remotes/origin/release-events:release-events.jsonl > "$EVENT_STREAM"
+          else
+            release_events_status=$?
+            if [ "$release_events_status" -ne 2 ]; then
+              echo "release-events authority probe failed" >&2
+              exit "$release_events_status"
+            fi
+            if [ "$GITHUB_REF" = "refs/heads/vmm" ]; then
+              if tag_refs="$(git ls-remote origin 'refs/tags/v*' 2>/dev/null)"; then
+                :
+              else
+                tag_probe_status=$?
+                echo "canonical public tag enumeration failed" >&2
+                exit "$tag_probe_status"
+              fi
+              if printf '%s\n' "$tag_refs" | grep -E -q \
+                'refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\^\{\})?$'; then
+                echo "A canonical public tag exists before release-events bootstrap" >&2
+                exit 1
+              fi
+              : > "$EVENT_STREAM"
+            else
+              echo "release-events authority is required for tag documentation" >&2
+              exit 1
+            fi
+          fi
+      - name: Verify canonical release event for tag documentation
+        if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')
+        env:
+          EVENT_STREAM: ${{ runner.temp }}/release-events.jsonl
+        run: |
+          python3 docs/verify_release_context.py \
+            --event-stream "$EVENT_STREAM" \
+            --tag "$GITHUB_REF_NAME" \
+            --tag-sha "$(git rev-parse "${GITHUB_REF}^{commit}")" \
+            --tag-tree "$(git rev-parse "${GITHUB_REF}^{tree}")" \
+            --tag-version "$(git show "${GITHUB_REF}:Project.toml" | sed -n 's/^version = "\(.*\)"/\1/p')" \
+            --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = "\(.*\)"/\1/p')" \
+            --github-env "$GITHUB_ENV"
+      - name: Verify stable context for development documentation
+        if: github.ref == 'refs/heads/vmm'
+        env:
+          EVENT_STREAM: ${{ runner.temp }}/release-events.jsonl
+        run: |
+          python3 docs/verify_release_context.py \
+            --stable-only \
+            --event-stream "$EVENT_STREAM" \
+            --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = "\(.*\)"/\1/p')" \
+            --github-env "$GITHUB_ENV"
       - name: Install dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
       - name: Build documentation
         if: github.event_name == 'pull_request'
         env:
           DOCS_DEPLOY: 'false'
+          CYAX_DOCS_REF: ${{ github.ref }}
+          CYAX_DOCS_EVENT_STATUS: 'preview'
         run: julia --project=docs/ docs/make.jl
       - name: Build and deploy documentation
         if: github.event_name != 'pull_request'
         env:
           DOCS_DEPLOY: 'true'
+          CYAX_DOCS_REF: ${{ github.ref }}
+          # vmm is a protected, verified development ref. A canonical tag
+          # must receive verified release-event identities from the release
+          # verifier before this deployment can proceed. The verifier must
+          # export CYAX_DOCS_RELEASE_LINE, CYAX_DOCS_RELEASE_VERSION,
+          # CYAX_DOCS_RELEASE_SHA, CYAX_DOCS_PRINCIPAL_MAIN_SHA, and (when
+          # appropriate) CYAX_DOCS_STABLE. Missing evidence fails closed in
+          # docs/make.jl.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
         run: julia --project=docs/ docs/make.jl

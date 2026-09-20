@@ -18,12 +18,32 @@ description: Consolidate, rebase, integrate, verify, or prepare approved CYAxive
    interpretation, population definition, or scientific schema. Integration
    preserves approved science; it does not decide science.
 5. Keep `vmm` as the integration branch and `vmm -> main` as the deliberate
-   release boundary. Feature branches state version impact; the aggregate
-   release PR applies the reviewed package-version bump.
-6. Run the applicable release gates on the integrated commit: `git diff --check`,
+   principal promotion boundary. A reviewed closure adopts the final package
+   version on its owner line; the aggregate release PR verifies that the
+   certified principal tree and version reach `main`. Feature branches state
+   version impact, and Gate A does not adopt a package version.
+6. Preserve the package iteration contract while integrating: an active
+   `X.Y.Z-DEV` reservation is global to its owner line. Closing its reserved
+   final consumes it; closing a different final records the unused identity as
+   `CONSUMED_UNUSED_DEV_RESERVATION`. Closed, candidate, withdrawn, released,
+   and consumed identities are never reused. A reservation with proven
+   pre-entry abort may be made available again under the recovery rules;
+   uncertain outcomes remain unavailable. Certify release candidates against an
+   immutable exact tree and retain the candidate, tag intent, event, and
+   publication evidence identities.
+7. Keep tracked source release-neutral. Documentation deployment selects the
+   development, principal-versioned, maintenance-versioned, or stable channel
+   from a verified ref and canonical release event. Do not edit documentation
+   source as part of a release.
+8. Gate A may implement and test lifecycle machinery, but it does not adopt a
+   package version, designate historical releases, create a production `-DEV`,
+   close an iteration, create a public tag, publish a release, or reconcile
+   `vmm -> main`. Those actions require the later approved gate and owner
+   authorization.
+9. Run the applicable release gates on the integrated commit: `git diff --check`,
    package tests, `bin/audit.jl`, docs build, Python-free import, and CI as
    required. Record exact results and unavailable optional integrations.
-7. After merge, prune superseded branches/worktrees as a separate, verified
+10. After merge, prune superseded branches/worktrees as a separate, verified
    cleanup step rather than leaving historical agent worktrees indefinitely.
 
 End with the branch/commit integrated, verification evidence, remaining
