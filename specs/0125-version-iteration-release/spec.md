@@ -445,18 +445,22 @@ is stale and the transaction refreshes or blocks.
 
 Digest preimages are exact, noncircular canonical bytes. The file digest is
 SHA-256 of raw `iterations.toml` bytes. `ref_set_digest` is SHA-256 of the
-standalone canonical JSON array of sorted objects `{ref, commit, tree}` for
-every validated `iterations/*` binding. `tag_set_digest` is SHA-256 of the
-standalone canonical JSON array of sorted objects `{tag, commit, tree}` for
-every canonical future public tag. Empty sets hash canonical `[]`.
+standalone canonical JSON array of objects `{ref, commit, tree}`, sorted by
+the `ref` string's ascending ASCII bytes, for every validated `iterations/*`
+binding. `tag_set_digest` is SHA-256 of the standalone canonical JSON array
+of objects `{tag, commit, tree}`, sorted by the `tag` string's ascending ASCII
+bytes, for every canonical future public tag. Duplicate `ref` or `tag`
+identities are rejected. Empty sets hash canonical `[]`.
 The `snapshot_digest` is SHA-256 of standalone canonical JSON for a snapshot
 object containing `snapshot_schema_version = 1`, source repository/ref/commit/
 tree, file digest, both complete sorted binding arrays, both verified set
 digests, and the sorted occupied version array. That object excludes
-`snapshot_digest` itself. Set digests exclude their own digest fields from
-their preimages but are included in the overall snapshot preimage. Every
-reader recomputes all three digests and rejects any mismatch before relying
-on an allocation view.
+`snapshot_digest` itself. The occupied version array is sorted by canonical
+version string's ascending ASCII bytes and rejects duplicates. Set digests
+exclude their own digest fields from their preimages but are included in the
+overall snapshot preimage. Every reader recomputes and compares all four
+digests: raw file, ref set, tag set and overall snapshot. Any mismatch is
+rejected before relying on an allocation view.
 
 The `release-events` branch is a minimal orphan non-package-source branch
 containing one canonical `release-events.jsonl` stream, bootstrapped empty in
@@ -514,12 +518,14 @@ backslash characters; slash is not escaped. Each JSONL event ends in one LF.
 UTC timestamps use `YYYY-MM-DDTHH:MM:SSZ` and are validated as real calendar
 times. Digests are lowercase hexadecimal SHA-256 of these exact bytes.
 Duplicate keys, malformed UTF-8, noncanonical encodings and nonconforming
-timestamps are rejected. Snapshot sets and ref bindings sort by canonical
-ASCII identity before serialization.
+timestamps are rejected. Snapshot ref bindings, tag bindings and occupied
+versions use their explicit ASCII identity sort keys above.
 Every array is declared by its schema as ordered or set-valued: ordered arrays
 retain their stated lifecycle/evidence order; set-valued arrays sort by each
 element's complete canonical JSON bytes and reject duplicates. No undeclared
-array is accepted. Optional fields are omitted when inapplicable; explicit
+array is accepted. The three named snapshot arrays use their explicit sort
+keys instead of the generic set-array rule. Optional fields are omitted when
+inapplicable; explicit
 `null` is rejected unless the field schema requires it. A standalone canonical
 JSON artifact has no trailing LF; JSONL records have exactly one trailing LF.
 For non-JSON evidence, the digest covers exact raw bytes, while the evidence
@@ -613,7 +619,8 @@ without released event, and mismatched tag/intent/release evidence.
 Include leading-zero package and public-tag aliases, static snapshot field
 omissions/digest mismatch and changed anchor/tag/source under a bound snapshot.
 Test empty/nonempty ref/tag digest preimages, tampered nested digests,
-tampered occupied sets and rejection of a self-including snapshot digest.
+tampered occupied sets, reversed ref/tag/occupied ordering, raw file digest
+mismatch and rejection of a self-including snapshot digest.
 Include unsupported certification bindings, missing/wrong event schema
 version, undeclared or unsorted set arrays, duplicate set members, and
 noncanonical optional-field encoding.
