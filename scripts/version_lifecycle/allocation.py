@@ -12,7 +12,13 @@ import re
 from typing import Any, Iterable, Mapping
 
 from .codec import canonical_json, sha256_hex
-from .static import BlockedResult, StaticSnapshot, StaticValidationError, validate_static_snapshot
+from .static import (
+    BlockedResult,
+    StaticSnapshot,
+    StaticValidationError,
+    _has_verified_authority,
+    validate_static_snapshot,
+)
 from .versions import (
     Version,
     VersionLike,
@@ -276,7 +282,11 @@ def global_allocation_view(
         return static_snapshot
     try:
         snapshot = validate_static_snapshot(static_snapshot)
-        if not snapshot.authority_verified:
+        # The public ``authority_verified`` field is descriptive only.  The
+        # static module carries a private authority marker after it has
+        # resolved and validated the canonical remote source.  Structural
+        # snapshots and caller-forged booleans must fail closed here.
+        if not _has_verified_authority(snapshot):
             raise StaticValidationError("fresh remote static authority has not been verified")
         event_head_commit, mutable_values = _validated_event_head(
             allocation_event_head,

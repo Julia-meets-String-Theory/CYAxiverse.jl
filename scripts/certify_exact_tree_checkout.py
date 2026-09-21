@@ -31,9 +31,11 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+import platform
 from collections.abc import Sequence
 from typing import Any
 
@@ -43,6 +45,37 @@ INVALID = "INVALID"
 BLOCKED = "BLOCKED"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+
+# Keep the package test route identical to the repository's compact package
+# verifier.  The executable is resolved from PATH, but its identity is
+# recorded independently below.  In particular, a caller cannot turn a
+# successful certification into a no-op by supplying ``true`` or ``pass``.
+APPROVED_PACKAGE_TEST_COMMAND = (
+    "julia",
+    "--startup-file=no",
+    "--project=.",
+    "-e",
+    "using Pkg; Pkg.test()",
+)
+_APPROVED_PACKAGE_TEST_ARGS = APPROVED_PACKAGE_TEST_COMMAND[1:]
+_PUBLIC_ENVIRONMENT_KEYS = frozenset(
+    {
+        "CI",
+        "GITHUB_ACTIONS",
+        "GITHUB_RUNNER_OS",
+        "JULIA_CPU_TARGET",
+        "JULIA_DEPOT_PATH",
+        "JULIA_LOAD_PATH",
+        "JULIA_NUM_THREADS",
+        "JULIA_PKG_OFFLINE",
+        "JULIA_PROJECT",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "TMPDIR",
+        "TZ",
+    }
+)
 
 
 def _result(status: str, reason_code: str | None = None, **details: Any) -> dict[str, Any]:
@@ -150,7 +183,167 @@ def _status_sha256(status: str | None) -> str | None:
 
 
 def _safe_command(command: Sequence[str]) -> bool:
-    return bool(command) and all(isinstance(item, str) and item for item in command)
+    return (
+        isinstance(command, Sequence)
+        and not isinstance(command, (str, bytes))
+        and bool(command)
+        and all(isinstance(item, str) and item and "\x00" not in item for item in command)
+    )
+
+
+def _canonical_package_test_command(command: Sequence[str]) -> list[str] | None:
+    """Return the public command identity when ``command`` is approved.
+
+    Absolute paths are accepted for the Julia executable so callers can pin a
+    toolchain without putting a local path in public evidence.  The remaining
+    arguments are exact, which prevents shell wrappers, alternate projects,
+    and no-op snippets from receiving a package-test PASS.
+    """
+
+    if not _safe_command(command) or len(command) != len(APPROVED_PACKAGE_TEST_COMMAND):
+        return None
+    executable = Path(command[0]).name
+    if executable != APPROVED_PACKAGE_TEST_COMMAND[0]:
+        return None
+    if tuple(command[1:]) != _APPROVED_PACKAGE_TEST_ARGS:
+        return None
+    return [executable, *_APPROVED_PACKAGE_TEST_ARGS]
+
+
+def _json_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _file_sha256(path: Path) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _resolve_executable(command: Sequence[str], environment: dict[str, str]) -> Path | None:
+    raw = command[0]
+    if os.path.dirname(raw):
+        candidate = Path(raw)
+    else:
+        resolved = shutil.which(raw, path=environment.get("PATH"))
+        if resolved is None:
+            return None
+        candidate = Path(resolved)
+    try:
+        candidate = candidate.resolve(strict=True)
+    except OSError:
+        return None
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        return None
+    return candidate
+
+
+def _test_environment_identity(
+    environment: dict[str, str],
+    *,
+    executable_version: str,
+    executable_version_sha256: str,
+) -> tuple[dict[str, Any], str]:
+    """Build replayable, path-free runtime identity and its private preimage.
+
+    The digest covers every environment variable used for the child process,
+    while the public projection exposes only a small allowlist of names.  This
+    binds ambient settings without publishing home directories, depot paths,
+    credentials, or other local values.
+    """
+
+    environment_preimage = {
+        "variables": [[name, environment[name]] for name in sorted(environment)],
+        "os_name": os.name,
+        "sys_platform": sys.platform,
+        "machine": platform.machine(),
+        "python_implementation": platform.python_implementation(),
+        "python_version": platform.python_version(),
+        "test_executable_version": executable_version,
+        "test_executable_version_sha256": executable_version_sha256,
+    }
+    public = {
+        "os_name": os.name,
+        "sys_platform": sys.platform,
+        "machine": platform.machine(),
+        "python_implementation": platform.python_implementation(),
+        "python_version": platform.python_version(),
+        "test_executable_version": executable_version,
+        "test_executable_version_sha256": executable_version_sha256,
+        "environment_keys": sorted(
+            name for name in environment if name in _PUBLIC_ENVIRONMENT_KEYS
+        ),
+    }
+    return public, _json_sha256(environment_preimage)
+
+
+def _test_execution_identity(
+    test_command: Sequence[str],
+) -> tuple[list[str], Path, dict[str, Any], dict[str, str], str, str, str] | None:
+    """Resolve and bind command, executable, and child runtime identities."""
+
+    public_command = _canonical_package_test_command(test_command)
+    if public_command is None:
+        return None
+    environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+    executable = _resolve_executable(test_command, environment)
+    if executable is None:
+        return None
+    executable_sha256 = _file_sha256(executable)
+    if executable_sha256 is None:
+        return None
+    try:
+        version = subprocess.run(
+            [str(executable), "--version"],
+            check=False,
+            capture_output=True,
+            timeout=10.0,
+            env=environment,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    version_bytes = (
+        version.stdout.encode("utf-8", errors="replace")
+        + b"\0"
+        + version.stderr.encode("utf-8", errors="replace")
+    )
+    executable_version_sha256 = hashlib.sha256(version_bytes).hexdigest()
+    if version.returncode != 0:
+        return None
+    version_label = version.stdout.strip().splitlines()[0] if version.stdout.strip() else "unknown"
+    if (
+        len(version_label) > 160
+        or any(ord(character) < 0x20 or ord(character) > 0x7E for character in version_label)
+        or any(marker in version_label.lower() for marker in ("/", "\\", "private", "users", "home", "tmp"))
+    ):
+        version_label = f"sha256:{executable_version_sha256}"
+    environment_public, environment_sha256 = _test_environment_identity(
+        environment,
+        executable_version=version_label,
+        executable_version_sha256=executable_version_sha256,
+    )
+    command_sha256 = _json_sha256(public_command)
+    return (
+        public_command,
+        executable,
+        environment_public,
+        environment,
+        command_sha256,
+        executable_sha256,
+        environment_sha256,
+    )
 
 
 def certify_exact_tree_checkout(
@@ -187,6 +380,9 @@ def certify_exact_tree_checkout(
         return _result(BLOCKED, "HARNESS_DIGEST_UNPINNED")
     if not _safe_command(test_command):
         return _result(BLOCKED, "PACKAGE_TEST_COMMAND_UNAVAILABLE")
+    public_command = _canonical_package_test_command(test_command)
+    if public_command is None:
+        return _result(BLOCKED, "PACKAGE_TEST_COMMAND_UNAPPROVED")
     if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
         return _result(BLOCKED, "PACKAGE_TEST_TIMEOUT_INVALID")
 
@@ -220,6 +416,31 @@ def certify_exact_tree_checkout(
     if len({candidate_tree, closed_tree, release_tree}) != 1:
         return _result(INVALID, "CERTIFIED_TREE_MISMATCH", **identities)
 
+    execution_identity = _test_execution_identity(test_command)
+    if execution_identity is None:
+        return _result(BLOCKED, "PACKAGE_TEST_EXECUTABLE_UNAVAILABLE", **identities)
+    (
+        public_command,
+        test_executable_path,
+        test_environment,
+        test_process_environment,
+        test_command_sha256,
+        test_executable_sha256,
+        test_environment_sha256,
+    ) = execution_identity
+    identities.update(
+        {
+            "test_command_argv": public_command,
+            "test_command_sha256": test_command_sha256,
+            "test_executable": public_command[0],
+            "test_executable_sha256": test_executable_sha256,
+            "test_environment": test_environment,
+            "test_environment_sha256": test_environment_sha256,
+            "runtime_environment": test_environment,
+            "runtime_environment_sha256": test_environment_sha256,
+        }
+    )
+
     try:
         with tempfile.TemporaryDirectory(prefix="cyax-certification-") as temporary:
             checkout = Path(temporary) / "package"
@@ -252,13 +473,13 @@ def certify_exact_tree_checkout(
 
             try:
                 test = subprocess.run(
-                    list(test_command),
+                    [str(test_executable_path), *public_command[1:]],
                     cwd=checkout,
                     check=False,
                     capture_output=True,
                     text=True,
                     timeout=float(timeout_seconds),
-                    env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+                    env=test_process_environment,
                 )
             except FileNotFoundError:
                 return _result(BLOCKED, "PACKAGE_TEST_COMMAND_UNAVAILABLE", **identities)

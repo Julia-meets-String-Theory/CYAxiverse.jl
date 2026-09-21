@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 import subprocess
 import sys
@@ -226,6 +227,7 @@ class GateALifecycleCliFixture(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         appended = append_writer.append(event, expected_head=initial_head)
         self.assertEqual(appended.status, "APPENDED")

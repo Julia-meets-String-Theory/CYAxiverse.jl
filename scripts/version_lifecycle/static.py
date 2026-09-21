@@ -8,7 +8,7 @@ production ref mutation code.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import ipaddress
 import re
 import subprocess
@@ -29,11 +29,20 @@ _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 _PUBLIC_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _PUBLIC_URL_PATH_RE = re.compile(r"^/(?:[A-Za-z0-9][A-Za-z0-9_.-]*/)+[A-Za-z0-9][A-Za-z0-9_.-]*/?$")
 _PUBLIC_SCP_RE = re.compile(r"^git@github\.com:(?P<path>[^/]+/[^/]+?)(?:\.git)?$")
+_NUMERIC_HOST_LABEL_RE = re.compile(r"^(?:0[xX][0-9A-Fa-f]+|[0-9A-Fa-f]+)$")
 _UNSAFE_SOURCE_MARKERS = (
     "file:", "local:", "ssh:", "git:", "credential", "password", "token",
     "secret", "authorization", "bearer ", "api_key", "apikey",
 )
 _LOCAL_SOURCE_NAMES = {"file", "local", "localhost", "private", "users", "home", "tmp", "var"}
+_LOCAL_SOURCE_NAMES.update({"intranet"})
+
+# ``authority_verified`` is retained as a compatibility/status field, but it
+# is not an authority capability.  The marker is installed only after the
+# canonical remote source has been resolved and validated.  In particular, a
+# caller cannot obtain allocation authority by constructing a snapshot with
+# ``authority_verified=True``.
+_STATIC_AUTHORITY_TOKEN = object()
 
 
 class StaticValidationError(ValueError):
@@ -71,6 +80,10 @@ class StaticSnapshot:
     data: Mapping[str, Any]
     source_bytes: bytes | None = None
     authority_verified: bool = False
+    _authority_token: object | None = field(default=None, init=False, repr=False, compare=False)
+    _authority_binding: tuple[str, str, str, str] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @property
     def status(self) -> str:
@@ -125,6 +138,47 @@ class StaticSnapshot:
 
     def __getitem__(self, key: str) -> Any:
         return self.data[key]
+
+
+def _mark_authority_verified(snapshot: StaticSnapshot) -> StaticSnapshot:
+    """Mark a snapshot as remote-authority verified using a private token."""
+
+    object.__setattr__(snapshot, "_authority_token", _STATIC_AUTHORITY_TOKEN)
+    source_bytes = snapshot.source_bytes
+    if not isinstance(source_bytes, bytes):
+        raise StaticValidationError("remote-authority snapshots require exact source bytes")
+    object.__setattr__(
+        snapshot,
+        "_authority_binding",
+        (
+            snapshot.snapshot_digest,
+            snapshot.source_commit,
+            snapshot.source_tree,
+            sha256_hex(source_bytes),
+        ),
+    )
+    object.__setattr__(snapshot, "authority_verified", True)
+    return snapshot
+
+
+def _has_verified_authority(snapshot: StaticSnapshot) -> bool:
+    """Return whether *snapshot* was verified by this module's authority path."""
+
+    if snapshot._authority_token is not _STATIC_AUTHORITY_TOKEN:
+        return False
+    binding = snapshot._authority_binding
+    if binding is None or not isinstance(snapshot.source_bytes, bytes):
+        return False
+    try:
+        current = (
+            snapshot.snapshot_digest,
+            snapshot.source_commit,
+            snapshot.source_tree,
+            sha256_hex(snapshot.source_bytes),
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    return binding == current
 
 
 def _git(repository: Path, *args: str, check: bool = True) -> bytes:
@@ -277,8 +331,27 @@ def sanitize_source_repository(value: str) -> str:
             raise UnsafeSourceRepositoryError(
                 "source_repository URL must not contain query, fragment, port, or missing host"
             )
-        host = host.lower()
-        if host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".internal")):
+        # DNS permits an absolute name with a trailing root label.  Strip it
+        # before classifying the host so ``127.0.0.1.`` cannot bypass the IP
+        # policy or the local-host suffix checks.
+        host = host.lower().rstrip(".")
+        if not host:
+            raise UnsafeSourceRepositoryError(
+                "source_repository URL must use a public host"
+            )
+        if (
+            host in {"localhost", "localhost.localdomain", "intranet"}
+            or "." not in host
+            or host.endswith((".local", ".internal", ".lan", ".intranet"))
+        ):
+            raise UnsafeSourceRepositoryError(
+                "source_repository URL must use a public host"
+            )
+        # URL parsers accept abbreviated and non-decimal IPv4 spellings that
+        # ``ipaddress`` does not (for example ``127.1`` and
+        # ``0x7f.0.0.1``).  A host made only of numeric/hexadecimal labels is
+        # therefore rejected before it can be treated as a public DNS name.
+        if all(_NUMERIC_HOST_LABEL_RE.fullmatch(label) for label in host.split(".")):
             raise UnsafeSourceRepositoryError(
                 "source_repository URL must use a public host"
             )
@@ -286,10 +359,7 @@ def sanitize_source_repository(value: str) -> str:
             address = ipaddress.ip_address(host)
         except ValueError:
             address = None
-        if address is not None and (
-            address.is_private or address.is_loopback or address.is_link_local
-            or address.is_reserved or address.is_multicast or address.is_unspecified
-        ):
+        if address is not None and not address.is_global:
             raise UnsafeSourceRepositoryError(
                 "source_repository URL must use a public host"
             )
@@ -543,19 +613,22 @@ def _anchor_bindings(
     repository: Path,
     remote_refs: Mapping[str, str],
 ) -> list[dict[str, str]]:
-    full_refs = [
+    # Iteration anchors are protected annotated tags.  A branch or an
+    # unqualified custom namespace is mutable and cannot establish the static
+    # identity required by R-019.
+    invalid_refs = [
         ref for ref in remote_refs
-        if ref.startswith(("refs/iterations/", "refs/heads/iterations/", "refs/tags/iterations/"))
+        if ref.startswith(("refs/iterations/", "refs/heads/iterations/"))
     ]
+    if invalid_refs:
+        raise StaticValidationError(
+            "protected iteration anchors must use annotated refs/tags/iterations/* tags"
+        )
+    full_refs = [ref for ref in remote_refs if ref.startswith("refs/tags/iterations/")]
     bindings: list[dict[str, str]] = []
     seen: set[str] = set()
     for full_ref in sorted(set(full_refs)):
-        if full_ref.startswith("refs/tags/"):
-            ref = full_ref.removeprefix("refs/tags/")
-        elif full_ref.startswith("refs/heads/"):
-            ref = full_ref.removeprefix("refs/heads/")
-        else:
-            ref = full_ref.removeprefix("refs/")
+        ref = full_ref.removeprefix("refs/tags/")
         if ref in seen:
             raise StaticValidationError(f"duplicate protected iteration identity {ref}")
         seen.add(ref)
@@ -564,7 +637,13 @@ def _anchor_bindings(
             version = final_version(parse_package_version(suffix))
         except (TypeError, ValueError) as error:
             raise StaticValidationError(f"invalid protected iteration ref {ref!r}: {error}") from error
-        commit = _resolve_commit_value(repository, remote_refs[full_ref])
+        object_id = remote_refs[full_ref]
+        object_type = _git(repository, "cat-file", "-t", object_id).decode().strip()
+        if object_type != "tag":
+            raise StaticValidationError(
+                f"protected iteration anchor {ref} must be an annotated tag"
+            )
+        commit = _resolve_commit_value(repository, object_id)
         tree = _resolve_tree(repository, commit)
         anchor_raw: bytes | None = None
         for path in ("iterations.toml", ".cyaxiverse/iteration.toml"):
@@ -694,6 +773,14 @@ def recompute_snapshot_digests(snapshot: StaticSnapshot | Mapping[str, Any]) -> 
         or data["snapshot_schema_version"] != SNAPSHOT_SCHEMA_VERSION
     ):
         raise StaticValidationError("unsupported snapshot_schema_version")
+    if data["canonical_static_iteration_source"] != CANONICAL_STATIC_ITERATION_SOURCE:
+        raise StaticValidationError(
+            "canonical_static_iteration_source must be the exact canonical selector"
+        )
+    if data["source_ref"] != "refs/heads/vmm" or data["source_path"] != "iterations.toml":
+        raise StaticValidationError(
+            "snapshot source_ref/source_path must identify the canonical selector"
+        )
     for field in ("source_repository", "source_ref", "source_path", "source_commit", "source_tree"):
         if not isinstance(data[field], str) or not data[field]:
             raise StaticValidationError(f"snapshot field {field} must be a nonempty string")
@@ -798,6 +885,7 @@ def validate_static_snapshot(
         if sha256_hex(source_bytes) != data["iterations_toml_sha256"]:
             raise StaticValidationError("iterations.toml raw digest does not match source bytes")
     authority_verified = isinstance(snapshot, StaticSnapshot) and snapshot.authority_verified
+    authority_token = isinstance(snapshot, StaticSnapshot) and _has_verified_authority(snapshot)
     if repository is not None:
         fresh = build_static_snapshot(
             repository=repository,
@@ -810,11 +898,15 @@ def validate_static_snapshot(
             raise SnapshotStaleError("bound static snapshot differs from current source refs")
         source_bytes = fresh.source_bytes
         authority_verified = True
-    return StaticSnapshot(
+        authority_token = True
+    validated = StaticSnapshot(
         data,
         source_bytes=source_bytes,
         authority_verified=authority_verified,
     )
+    if authority_token:
+        _mark_authority_verified(validated)
+    return validated
 
 
 def build_static_snapshot(
@@ -885,11 +977,11 @@ def build_static_snapshot(
         }
         data["snapshot_digest"] = sha256_hex(canonical_json(_snapshot_preimage(data)))
         validated = validate_static_snapshot(StaticSnapshot(data, source_bytes=raw), source_bytes=raw)
-        return StaticSnapshot(
+        return _mark_authority_verified(StaticSnapshot(
             validated.data,
             source_bytes=raw,
             authority_verified=True,
-        )
+        ))
     except UnsafeSourceRepositoryError as error:
         return BlockedResult(reason_code=error.reason_code, detail=str(error))
     except (OSError, subprocess.SubprocessError, StaticValidationError, UnicodeError, ValueError) as error:

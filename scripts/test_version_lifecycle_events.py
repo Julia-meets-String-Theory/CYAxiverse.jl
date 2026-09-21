@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import subprocess
 import sys
@@ -664,8 +665,12 @@ class WriterTests(unittest.TestCase):
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
             reservation_non_entry_checker=lambda _event: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
-        self.unproved_writer = ReleaseEventWriter(self.repo)
+        self.unproved_writer = ReleaseEventWriter(
+            self.repo,
+            exclusion_lease=lambda: nullcontext(True),
+        )
         self.writer.bootstrap()
 
     def tearDown(self):
@@ -762,7 +767,11 @@ class WriterTests(unittest.TestCase):
              "STATIC_AUTHORITY_SELECTOR_UNRESOLVED"),
         ):
             with self.subTest(reason=reason):
-                writer = ReleaseEventWriter(self.repo, **callbacks)
+                writer = ReleaseEventWriter(
+                    self.repo,
+                    exclusion_lease=lambda: nullcontext(True),
+                    **callbacks,
+                )
                 result = writer.append(event, expected_head=head)
                 self.assertEqual((result.status, result.reason_code, result.frozen),
                                  ("BLOCKED", reason, True))
@@ -997,6 +1006,7 @@ class WriterTests(unittest.TestCase):
                     exclusion_checker=lambda: True,
                     static_snapshot_checker=lambda _digest: True,
                     reservation_non_entry_checker=checker,
+                    exclusion_lease=lambda: nullcontext(True),
                 )
                 result = writer.append(aborted, expected_head=prepared_result.head)
                 self.assertEqual(
@@ -1042,6 +1052,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.current_head()
         event = reservation_event(expected_head=head)
@@ -1076,6 +1087,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.current_head()
         event = reservation_event(expected_head=head)
@@ -1102,6 +1114,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.current_head()
         event = reservation_event(expected_head=head)
@@ -1165,6 +1178,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.current_head()
         pushed = []
@@ -1193,6 +1207,7 @@ class WriterTests(unittest.TestCase):
             remote="origin",
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.current_head()
         result = writer.append_remote(
@@ -1225,6 +1240,7 @@ class WriterTests(unittest.TestCase):
                     self.repo,
                     exclusion_checker=lambda: True,
                     static_snapshot_checker=lambda _digest: True,
+                    exclusion_lease=lambda: nullcontext(True),
                 ),
                 {},
             ),
@@ -1252,7 +1268,11 @@ class WriterTests(unittest.TestCase):
             ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
         )
 
-        static_unproved = ReleaseEventWriter(self.repo, exclusion_checker=lambda: True)
+        static_unproved = ReleaseEventWriter(
+            self.repo,
+            exclusion_checker=lambda: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
         result = static_unproved.append(
             reservation_event(expected_head=head), expected_head=head
         )
@@ -1261,12 +1281,36 @@ class WriterTests(unittest.TestCase):
             ("BLOCKED", "STATIC_AUTHORITY_SELECTOR_UNRESOLVED", True),
         )
 
+    def test_local_append_requires_external_exclusion_lease(self):
+        head = self.writer.current_head()
+
+        def raising_lease():
+            raise OSError("external lease unavailable")
+
+        for lease in (None, lambda: nullcontext(False), raising_lease):
+            with self.subTest(lease=lease):
+                writer = ReleaseEventWriter(
+                    self.repo,
+                    exclusion_checker=lambda: True,
+                    static_snapshot_checker=lambda _digest: True,
+                    exclusion_lease=lease,
+                )
+                result = writer.append(
+                    reservation_event(expected_head=head), expected_head=head
+                )
+                self.assertEqual(
+                    (result.status, result.reason_code, result.frozen),
+                    ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
+                )
+                self.assertEqual(writer.current_head(), head)
+
     def test_abort_requires_live_public_tag_absence_checker(self):
         abort = self._prepare_release_intent_abort()
         writer = ReleaseEventWriter(
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         result = writer.append(abort, expected_head=abort["expected_event_head"])
         self.assertEqual(
@@ -1282,6 +1326,7 @@ class WriterTests(unittest.TestCase):
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
             public_tag_absence_checker=lambda tag: checked.append(tag) or False,
+            exclusion_lease=lambda: nullcontext(True),
         )
         result = writer.append(abort, expected_head=abort["expected_event_head"])
         self.assertEqual(
@@ -1298,6 +1343,7 @@ class WriterTests(unittest.TestCase):
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
             public_tag_absence_checker=lambda tag: checked.append(tag) or True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         result = writer.append(abort, expected_head=abort["expected_event_head"])
         self.assertEqual(result.status, "APPENDED")
@@ -1309,6 +1355,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.current_head()
         result = writer.append_remote(
@@ -1327,6 +1374,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.current_head()
         result = writer.append_remote(
@@ -1338,7 +1386,11 @@ class WriterTests(unittest.TestCase):
                          ("BLOCKED", "APPEND_OUTCOME_UNCERTAIN", True))
 
     def test_callback_only_bootstrap_requires_and_uses_observation(self):
-        writer = ReleaseEventWriter(self.repo, branch="callback-bootstrap")
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="callback-bootstrap",
+            exclusion_lease=lambda: nullcontext(True),
+        )
         observations = [(None, b"")]
         pushed: list[str] = []
 
@@ -1354,13 +1406,21 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(result, pushed[0])
 
     def test_callback_only_bootstrap_without_observation_is_uncertain(self):
-        writer = ReleaseEventWriter(self.repo, branch="callback-bootstrap-no-proof")
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="callback-bootstrap-no-proof",
+            exclusion_lease=lambda: nullcontext(True),
+        )
         with self.assertRaises(AppendOutcomeUncertain) as context:
             writer.bootstrap_remote(push=lambda *_args: None, protection_checker=lambda: True)
         self.assertEqual(context.exception.reason_code, "APPEND_OUTCOME_UNCERTAIN")
 
     def test_bootstrap_push_uncertainty_reconciles_before_freezing(self):
-        writer = ReleaseEventWriter(self.repo, branch="callback-bootstrap-uncertain")
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="callback-bootstrap-uncertain",
+            exclusion_lease=lambda: nullcontext(True),
+        )
         observations = [(None, b""), (None, b"")]
 
         with self.assertRaises(AppendOutcomeUncertain) as context:
@@ -1370,6 +1430,207 @@ class WriterTests(unittest.TestCase):
                 protection_checker=lambda: True,
             )
         self.assertEqual(context.exception.reason_code, "APPEND_OUTCOME_UNCERTAIN")
+
+    def test_bootstrap_remote_rejects_nonempty_local_ledger_when_remote_is_absent(self):
+        remote = self.repo.parent / "nonempty-bootstrap-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        local_head = self.writer.current_head()
+        self.writer.append(
+            reservation_event(expected_head=local_head), expected_head=local_head
+        )
+        writer = ReleaseEventWriter(
+            self.repo,
+            remote="origin",
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        with self.assertRaises(AppendOutcomeUncertain):
+            writer.bootstrap_remote(protection_checker=lambda: True)
+        advertised = subprocess.run(
+            ["git", "-C", str(remote), "show-ref", "--heads"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(advertised.returncode, 1)
+        self.assertEqual(advertised.stdout, "")
+
+    def test_bootstrap_remote_rejects_local_empty_descendant_when_remote_is_absent(self):
+        remote = self.repo.parent / "descendant-bootstrap-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        local_head = self.writer.current_head()
+        appended = self.writer.append(
+            reservation_event(expected_head=local_head), expected_head=local_head
+        )
+        assert appended.head is not None
+        empty_descendant = self.writer._make_commit(
+            b"", parent=appended.head, message="invalid empty descendant"
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "update-ref",
+                "refs/heads/release-events",
+                empty_descendant,
+            ],
+            check=True,
+        )
+        writer = ReleaseEventWriter(
+            self.repo,
+            remote="origin",
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        with self.assertRaises(AppendOutcomeUncertain):
+            writer.bootstrap_remote(protection_checker=lambda: True)
+        advertised = subprocess.run(
+            ["git", "-C", str(remote), "show-ref", "--heads"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(advertised.returncode, 1)
+        self.assertEqual(advertised.stdout, "")
+
+    def test_bootstrap_remote_requires_external_exclusion_lease_before_push(self):
+        for lease in (None, lambda: nullcontext(False)):
+            with self.subTest(lease=lease):
+                writer = ReleaseEventWriter(
+                    self.repo,
+                    branch=(
+                        "bootstrap-missing-lease"
+                        if lease is None
+                        else "bootstrap-false-lease"
+                    ),
+                    exclusion_lease=lease,
+                )
+                pushed: list[bool] = []
+                with self.assertRaises(ExclusionUnavailable) as context:
+                    writer.bootstrap_remote(
+                        push=lambda *_args: pushed.append(True),
+                        reconcile=lambda: (None, b""),
+                        protection_checker=lambda: True,
+                    )
+                self.assertEqual(context.exception.reason_code, "EXCLUSION_UNAVAILABLE")
+                self.assertEqual(pushed, [])
+
+    def test_bootstrap_remote_holds_lock_and_external_lease_through_push(self):
+        active = False
+        observations = [(None, b"")]
+
+        class TrackingLease:
+            def __enter__(self):
+                nonlocal active
+                active = True
+                return True
+
+            def __exit__(self, *_args):
+                nonlocal active
+                active = False
+                return False
+
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="bootstrap-lease-lifetime",
+            exclusion_lease=lambda: TrackingLease(),
+        )
+        pushed: list[str] = []
+
+        def reconcile():
+            self.assertTrue(active)
+            self.assertTrue(writer.static_exclusion.held())
+            return observations.pop(0)
+
+        def push(commit, _branch, _expected):
+            self.assertTrue(active)
+            self.assertTrue(writer.static_exclusion.held())
+            pushed.append(commit)
+            observations.append((commit, b""))
+
+        result = writer.bootstrap_remote(
+            push=push,
+            reconcile=reconcile,
+            protection_checker=lambda: active,
+        )
+        self.assertEqual(result, pushed[0])
+        self.assertFalse(active)
+        self.assertFalse(writer.static_exclusion.held())
+
+    def test_remote_append_lease_release_failure_returns_uncertain_result(self):
+        class RaisingLease:
+            def __enter__(self):
+                return True
+
+            def __exit__(self, *_args):
+                raise OSError("lease release failed after remote push")
+
+        writer = ReleaseEventWriter(
+            self.repo,
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: RaisingLease(),
+        )
+        head = writer.current_head()
+        event = reservation_event(expected_head=head)
+        expected_raw = writer.read_head().raw + canonical_event_bytes(event) + b"\n"
+        observations = [(head, writer.read_head().raw)]
+        pushed: list[str] = []
+
+        def push(commit, _branch, _expected):
+            pushed.append(commit)
+            observations.append((commit, expected_raw))
+
+        result = writer.append_remote(
+            event,
+            expected_head=head,
+            push=push,
+            reconcile=lambda: observations.pop(0),
+        )
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "APPEND_OUTCOME_UNCERTAIN", True),
+        )
+        self.assertEqual(len(pushed), 1)
+
+    def test_bootstrap_remote_static_exclusion_race_blocks_before_observation(self):
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="bootstrap-static-race",
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        held = writer.static_exclusion.acquire()
+        pushed: list[bool] = []
+        outcomes: list[BaseException] = []
+
+        def run_bootstrap():
+            try:
+                writer.bootstrap_remote(
+                    push=lambda *_args: pushed.append(True),
+                    reconcile=lambda: (None, b""),
+                    protection_checker=lambda: True,
+                )
+            except BaseException as error:  # noqa: BLE001 - capture worker result
+                outcomes.append(error)
+
+        try:
+            thread = threading.Thread(target=run_bootstrap)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+        finally:
+            held.release()
+        self.assertEqual(len(outcomes), 1)
+        self.assertIsInstance(outcomes[0], ExclusionUnavailable)
+        self.assertEqual(outcomes[0].reason_code, "EXCLUSION_UNAVAILABLE")
+        self.assertEqual(pushed, [])
 
     def test_real_bare_remote_bootstrap_and_append_verify_one_file_topology(self):
         remote = self.repo.parent / f"{self.repo.name}-release-events-origin.git"
@@ -1384,6 +1645,7 @@ class WriterTests(unittest.TestCase):
             remote="origin",
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.bootstrap_remote(
             protection_checker=lambda: True,
@@ -1449,6 +1711,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_checker=lambda: True,
             static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
         )
         head = writer.current_head()
         pushed: list[bool] = []

@@ -9,12 +9,13 @@ by transaction ID and exact canonical event bytes.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
 import subprocess
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, ContextManager, Mapping
 import uuid
 
 from .events import (
@@ -73,6 +74,12 @@ class ReservationNonEntryUnavailable(WriterError):
     reason_code = "RESERVATION_NON_ENTRY_UNAVAILABLE"
 
 
+class _ExternalLeaseReleaseError(WriterError):
+    """The external exclusion lease could not be released cleanly."""
+
+    reason_code = "APPEND_OUTCOME_UNCERTAIN"
+
+
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -96,6 +103,24 @@ class LedgerHead:
     events: tuple[dict[str, Any], ...]
 
 
+class _ExternalLeaseGuard:
+    """Preserve a lease's body errors while classifying release failures."""
+
+    def __init__(self, manager: ContextManager[bool]) -> None:
+        self.manager = manager
+
+    def __enter__(self) -> bool:
+        return self.manager.__enter__()
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
+        try:
+            return self.manager.__exit__(exc_type, exc, traceback)
+        except Exception as error:
+            raise _ExternalLeaseReleaseError(
+                "external exclusion lease could not be released"
+            ) from error
+
+
 def _as_text(value: bytes | str) -> str:
     return value.decode("utf-8") if isinstance(value, bytes) else value
 
@@ -109,8 +134,11 @@ class ReleaseEventWriter:
     proof callbacks are injected by the allocation layer so this bounded
     module remains usable with fixture repos.  The tag checker is mandatory
     for ``release_intent_aborted``; the non-entry checker is mandatory for
-    ``development_reservation_aborted``.  Both run under exclusion immediately
-    before append.
+    ``development_reservation_aborted``.  Local and remote operations also
+    require an externally governed ``exclusion_lease`` and hold it with the
+    local static exclusion through mutation.  Remote operations retain the
+    lease through every observation, push and reconciliation step.  Both event
+    proof callbacks run under exclusion immediately before append.
     """
 
     def __init__(
@@ -125,6 +153,7 @@ class ReleaseEventWriter:
         public_tag_absence_checker: Callable[[str], bool] | None = None,
         reservation_non_entry_checker: Callable[[Mapping[str, Any]], bool] | None = None,
         static_exclusion: StaticMutationExclusion | None = None,
+        exclusion_lease: Callable[[], ContextManager[bool]] | None = None,
     ) -> None:
         self.repo = Path(repo)
         self.branch = self._validate_ref_component(branch)
@@ -137,6 +166,7 @@ class ReleaseEventWriter:
         self.static_exclusion = static_exclusion or StaticMutationExclusion.for_repository(
             self.repo
         )
+        self.exclusion_lease = exclusion_lease
         if not (self.repo / ".git").exists() and not (self.repo / "HEAD").exists():
             raise BranchUnavailable(f"not a Git repository: {self.repo}")
 
@@ -324,6 +354,19 @@ class ReleaseEventWriter:
         self._verify_stream_topology(head, raw)
         return head, raw
 
+    def _enter_external_exclusion(self, stack: ExitStack) -> None:
+        """Enter the externally governed exclusion held across mutations."""
+
+        if self.exclusion_lease is None:
+            raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+        try:
+            manager = self.exclusion_lease()
+            held = stack.enter_context(_ExternalLeaseGuard(manager))
+        except Exception as error:
+            raise GitIdentityError("EXCLUSION_UNAVAILABLE") from error
+        if held is not True:
+            raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+
     def bootstrap_remote(
         self,
         *,
@@ -336,10 +379,40 @@ class ReleaseEventWriter:
         """Create the orphan event branch remotely with create-if-absent CAS.
 
         Production callers must supply protection evidence through
-        ``protection_checker``.  The default Git transport uses a normal
-        create-only push and verifies the resulting remote object.
+        ``protection_checker`` and an externally held ``exclusion_lease``.
+        The default Git transport uses a normal create-only push and verifies
+        the resulting remote object.
         """
 
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(self.static_exclusion.acquire())
+                self._enter_external_exclusion(stack)
+                return self._bootstrap_remote_under_exclusion(
+                    remote=remote,
+                    push=push,
+                    reconcile=reconcile,
+                    protection_checker=protection_checker,
+                    message=message,
+                )
+        except _ExternalLeaseReleaseError as error:
+            raise AppendOutcomeUncertain(
+                "remote bootstrap outcome cannot be classified"
+            ) from error
+        except GitIdentityError as error:
+            raise ExclusionUnavailable(
+                "serialized static/event exclusion is unavailable"
+            ) from error
+
+    def _bootstrap_remote_under_exclusion(
+        self,
+        *,
+        remote: str | None,
+        push: Callable[[str, str, str], Any] | None,
+        reconcile: Callable[[], tuple[str, bytes]] | None,
+        protection_checker: Callable[[], bool] | None,
+        message: str,
+    ) -> str:
         remote_name = remote or self.remote
         if not remote_name and push is None:
             raise ValueError("bootstrap_remote needs a remote name or push callback")
@@ -368,7 +441,34 @@ class ReleaseEventWriter:
             # a caller can then continue with normal expected-head appends.
             parse_stream(existing[1])
             return str(existing[0])
-        commit = self.bootstrap(expected_absent=False, message=message)
+        # A local branch is only a cache for an already empty authority.  If
+        # the remote branch is absent, never promote an existing nonempty
+        # local ledger into the protected authority.
+        if self.branch_exists():
+            try:
+                local = self.read_head()
+                if local.raw:
+                    raise AppendOutcomeUncertain(
+                        "local event branch is nonempty while remote event branch is absent"
+                    )
+                parents = _as_text(
+                    self._git(
+                        ["rev-list", "--parents", "-n", "1", local.commit]
+                    ).stdout
+                ).split()
+                if len(parents) != 1:
+                    raise AppendOutcomeUncertain(
+                        "local empty event branch is not an orphan while remote event branch is absent"
+                    )
+            except AppendOutcomeUncertain:
+                raise
+            except Exception as error:
+                raise AppendOutcomeUncertain(
+                    "local event branch could not be verified while remote event branch is absent"
+                ) from error
+            commit = local.commit
+        else:
+            commit = self.bootstrap(expected_absent=False, message=message)
         try:
             if push is not None:
                 push(commit, self.branch, "0" * 40)
@@ -540,10 +640,14 @@ class ReleaseEventWriter:
         """Append one event with an expected-head compare-and-swap."""
 
         try:
-            with self.static_exclusion.acquire():
+            with ExitStack() as stack:
+                stack.enter_context(self.static_exclusion.acquire())
+                self._enter_external_exclusion(stack)
                 return self._append_under_exclusion(
                     event, expected_head=expected_head, message=message
                 )
+        except _ExternalLeaseReleaseError:
+            return self._remote_uncertain(event)
         except GitIdentityError:
             return self._exclusion_blocked(event)
 
@@ -692,7 +796,9 @@ class ReleaseEventWriter:
         """
 
         try:
-            with self.static_exclusion.acquire():
+            with ExitStack() as stack:
+                stack.enter_context(self.static_exclusion.acquire())
+                self._enter_external_exclusion(stack)
                 return self._append_remote_under_exclusion(
                     event,
                     expected_head=expected_head,
@@ -701,8 +807,22 @@ class ReleaseEventWriter:
                     reconcile=reconcile,
                     message=message,
                 )
+        except _ExternalLeaseReleaseError:
+            return self._remote_uncertain(event)
         except GitIdentityError:
             return self._exclusion_blocked(event)
+
+    @staticmethod
+    def _remote_uncertain(event: Mapping[str, Any]) -> AppendResult:
+        canonical = dict(event)
+        return AppendResult(
+            status="BLOCKED",
+            reason_code="APPEND_OUTCOME_UNCERTAIN",
+            transaction_id=str(canonical.get("transaction_id", "")),
+            event=canonical,
+            head=None,
+            frozen=True,
+        )
 
     def _append_remote_under_exclusion(
         self,

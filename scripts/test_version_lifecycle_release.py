@@ -572,6 +572,8 @@ class TestReleaseEvidence(unittest.TestCase):
             ("environment", "https://[::1]/org/repo"),
             ("environment", "https://localhost./org/repo"),
             ("environment", "https://service.internal./org/repo"),
+            ("environment", "https:/10.0.0.1/org/repo"),
+            ("environment", "https:/user:pass@github.com/org/repo"),
             ("environment", "https://@github.com/org/repo"),
             ("environment", "https://user%3Apass@github.com/org/repo"),
         ):

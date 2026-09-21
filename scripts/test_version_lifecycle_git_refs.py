@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from contextlib import contextmanager, nullcontext
 import sys
 import tempfile
 import threading
@@ -36,7 +37,11 @@ class GitRefFixture(unittest.TestCase):
         self._cmd("git", "add", "Project.toml", cwd=self.work)
         self._cmd("git", "commit", "-m", "closure", cwd=self.work)
         self.commit = self._cmd("git", "rev-parse", "HEAD", cwd=self.work).strip()
-        self.repository = GitRepository(self.work, exclusion_checker=lambda: True)
+        self.repository = GitRepository(
+            self.work,
+            exclusion_checker=lambda: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
         self.protection = ProtectionEvidence(
             rule_id="fixture-rule",
             pattern="refs/tags/iterations/*",
@@ -147,7 +152,11 @@ class GitRefFixture(unittest.TestCase):
             deletion_guarded=True,
         )
         held = self.repository.acquire_static_mutation()
-        contender = GitRepository(self.work, exclusion_checker=lambda: True)
+        contender = GitRepository(
+            self.work,
+            exclusion_checker=lambda: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
         try:
             for ref, object_id, protection in (
                 ("refs/tags/iterations/0.3.0", iteration_tag, self.protection),
@@ -199,10 +208,84 @@ class GitRefFixture(unittest.TestCase):
             ("exception", unavailable),
         ):
             with self.subTest(checker=label):
-                repository = GitRepository(self.work, exclusion_checker=checker)
+                repository = GitRepository(
+                    self.work,
+                    exclusion_checker=checker,
+                    exclusion_lease=lambda: nullcontext(True),
+                )
                 with self.assertRaisesRegex(GitIdentityError, "EXCLUSION_UNAVAILABLE"):
                     repository.push_create_only(ref, tag, self.protection)
                 self.assertIsNone(self.repository.remote_ref(ref))
+
+    def test_remote_static_mutation_holds_external_lease_through_push(self) -> None:
+        held = False
+        push_observed = False
+
+        @contextmanager
+        def external_lease():
+            nonlocal held
+            held = True
+            try:
+                yield True
+            finally:
+                held = False
+
+        repository = GitRepository(
+            self.work,
+            exclusion_checker=lambda: held,
+            exclusion_lease=external_lease,
+        )
+        original_git = repository.git
+
+        def observed_git(*args, **kwargs):
+            nonlocal push_observed
+            if args and args[0] == "push":
+                self.assertTrue(held)
+                push_observed = True
+            return original_git(*args, **kwargs)
+
+        repository.git = observed_git
+        repository.push_create_only(
+            "refs/tags/iterations/0.3.0", self.commit, self.protection
+        )
+        self.assertTrue(push_observed)
+        self.assertFalse(held)
+
+    def test_remote_static_mutation_rejects_missing_or_failed_external_lease(self) -> None:
+        for label, factory in (
+            ("missing", None),
+            ("false", lambda: nullcontext(False)),
+            ("exception", lambda: (_ for _ in ()).throw(OSError("lease unavailable"))),
+        ):
+            with self.subTest(label=label):
+                repository = GitRepository(
+                    self.work,
+                    exclusion_checker=lambda: True,
+                    exclusion_lease=factory,
+                )
+                with self.assertRaisesRegex(GitIdentityError, "EXCLUSION_UNAVAILABLE"):
+                    repository.push_create_only(
+                        "refs/tags/iterations/0.3.0", self.commit, self.protection
+                    )
+                self.assertIsNone(self.repository.remote_ref("refs/tags/iterations/0.3.0"))
+
+    def test_remote_static_mutation_lease_release_failure_is_uncertain(self) -> None:
+        @contextmanager
+        def failed_release():
+            yield True
+            raise OSError("lease release failed after remote push")
+
+        repository = GitRepository(
+            self.work,
+            exclusion_checker=lambda: True,
+            exclusion_lease=failed_release,
+        )
+        ref = "refs/tags/iterations/0.3.0"
+        with self.assertRaisesRegex(
+            GitIdentityError, "STATIC_MUTATION_OUTCOME_UNCERTAIN"
+        ):
+            repository.push_create_only(ref, self.commit, self.protection)
+        self.assertEqual(self.repository.remote_ref(ref), self.commit)
 
     def test_static_mutation_boundary_requires_supported_lock(self) -> None:
         exclusion = StaticMutationExclusion(self.work / "missing" / "lock")

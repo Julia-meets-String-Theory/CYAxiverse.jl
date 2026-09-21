@@ -54,6 +54,12 @@ def is_safe_public_value(value: Any) -> bool:
     normalized = lowered.replace("\\", "/")
     if normalized.startswith(("file:", "local:", "ssh:")):
         return False
+    # A URL-like value with a missing slash must not fall through as an
+    # ordinary evidence label; doing so bypasses the host/userinfo checks.
+    if re.match(r"^[a-z][a-z0-9+.-]*:", normalized) and not normalized.startswith(
+        ("http://", "https://")
+    ):
+        return False
     if "://" in normalized:
         try:
             parsed = urlsplit(value)

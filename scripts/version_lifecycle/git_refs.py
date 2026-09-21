@@ -8,6 +8,7 @@ repositories; no production lifecycle operation is performed by this module.
 from __future__ import annotations
 
 import datetime as dt
+from contextlib import ExitStack, contextmanager
 import os
 import re
 import subprocess
@@ -15,7 +16,7 @@ import threading
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, ContextManager
 
 try:
     import fcntl
@@ -253,9 +254,9 @@ class ProtectionEvidence:
 class GitRepository:
     """Exact Git identity operations under local and live exclusion proofs.
 
-    ``exclusion_checker`` must consult the externally governed allocation
-    authority and return ``True`` only while that authority excludes competing
-    static/event writers. It is required for every remote static-ref write.
+    ``exclusion_lease`` must hold the externally governed allocation authority
+    through the final remote mutation. ``exclusion_checker`` supplies a fresh
+    proof under that lease. Both are required for remote static-ref writes.
     """
 
     def __init__(
@@ -265,6 +266,7 @@ class GitRepository:
         *,
         static_exclusion: StaticMutationExclusion | None = None,
         exclusion_checker: Callable[[], bool] | None = None,
+        exclusion_lease: Callable[[], ContextManager[bool]] | None = None,
     ) -> None:
         self.root = Path(root)
         self.remote = remote
@@ -272,6 +274,7 @@ class GitRepository:
             self.root
         )
         self.exclusion_checker = exclusion_checker
+        self.exclusion_lease = exclusion_lease
 
     def acquire_static_mutation(self, intent: Any = None) -> StaticMutationLease:
         """Acquire the repository's shared static mutation boundary."""
@@ -295,6 +298,33 @@ class GitRepository:
             raise GitIdentityError("EXCLUSION_UNAVAILABLE") from exc
         if verified is not True:
             raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+
+    def _enter_external_exclusion(self, stack: ExitStack) -> None:
+        if self.exclusion_lease is None:
+            raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+        try:
+            held = stack.enter_context(self.exclusion_lease())
+        except Exception as exc:
+            raise GitIdentityError("EXCLUSION_UNAVAILABLE") from exc
+        if held is not True:
+            raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+
+    @contextmanager
+    def _remote_mutation_boundary(self):
+        """Hold both exclusion proofs through remote mutation and reconciliation."""
+
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(self.acquire_static_mutation())
+                self._enter_external_exclusion(stack)
+                self._require_live_exclusion()
+                yield
+        except GitIdentityError:
+            raise
+        except Exception as exc:
+            # A lease release failure can occur after the remote accepted the
+            # ref. Callers must reconcile rather than treating it as absence.
+            raise GitIdentityError("STATIC_MUTATION_OUTCOME_UNCERTAIN") from exc
 
     def git(self, *args: str, input_bytes: bytes | None = None) -> bytes:
         result = subprocess.run(
@@ -412,8 +442,7 @@ class GitRepository:
         An existing identical ref is idempotent. Protected update denial is
         essential: Git alone cannot atomically promise create-if-absent.
         """
-        with self.acquire_static_mutation():
-            self._require_live_exclusion()
+        with self._remote_mutation_boundary():
             self._ref(ref)
             self._sha(object_id)
             if ref.startswith("refs/tags/v"):

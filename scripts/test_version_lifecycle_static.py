@@ -130,6 +130,18 @@ class VersionLifecycleStaticTests(unittest.TestCase):
             "file:///Users/private/repo",
             "local://repo",
             "https://user:password@example.com/org/repo.git",
+            "https://100.64.0.1/org/repo",
+            "https://127.0.0.1./org/repo",
+            "https://10.0.0.1./org/repo",
+            "https://169.254.169.254./org/repo",
+            "https://2130706433/org/repo",
+            "https://0x7f000001/org/repo",
+            "https://127.1/org/repo",
+            "https://0x7f.0.0.1/org/repo",
+            "https://0177.0.0.1/org/repo",
+            "https://foo.lan/org/repo",
+            "https://intranet/org/repo",
+            "https://localhost/org/repo",
         )
         for value in unsafe:
             with self.subTest(value=value):
@@ -150,6 +162,65 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         self.assertNotIsInstance(snapshot, BlockedResult)
         assert not isinstance(snapshot, BlockedResult)
         self.assertEqual(snapshot.source_repository, "https://github.com/Org/Repo")
+
+    def test_structural_snapshot_requires_the_canonical_selector(self) -> None:
+        repo = _fixture()
+        snapshot = static_snapshot(repo, source_repository="fixture/repo")
+        assert not isinstance(snapshot, BlockedResult)
+        tampered = snapshot.to_dict()
+        tampered["canonical_static_iteration_source"] = "refs/heads/other:iterations.toml"
+        tampered["source_ref"] = "refs/heads/other"
+        tampered["snapshot_digest"] = sha256_hex(
+            canonical_json({
+                key: tampered[key]
+                for key in (
+                    "snapshot_schema_version", "canonical_static_iteration_source",
+                    "source_repository", "source_ref", "source_path", "source_commit",
+                    "source_tree", "iterations_toml_sha256", "iteration_ref_bindings",
+                    "ref_set_digest", "public_tag_bindings", "tag_set_digest",
+                    "occupied_versions",
+                )
+            })
+        )
+        with self.assertRaises(StaticValidationError):
+            validate_static_snapshot(tampered, structural_only=True)
+
+    def test_caller_set_authority_boolean_cannot_enter_allocation_view(self) -> None:
+        repo = _fixture()
+        snapshot = static_snapshot(repo, source_repository="fixture/repo")
+        assert not isinstance(snapshot, BlockedResult)
+        forged = type(snapshot)(
+            snapshot.to_dict(),
+            source_bytes=snapshot.source_bytes,
+            authority_verified=True,
+        )
+        result = global_allocation_view(
+            forged,
+            validated_occupancy_proof("a" * 40, []),
+        )
+        self.assertIsInstance(result, BlockedResult)
+        assert isinstance(result, BlockedResult)
+        self.assertEqual(result.reason_code, "STATIC_AUTHORITY_SELECTOR_UNRESOLVED")
+
+    def test_snapshot_mapping_mutation_cannot_retain_authority(self) -> None:
+        repo = _fixture()
+        snapshot = static_snapshot(repo, source_repository="fixture/repo")
+        assert not isinstance(snapshot, BlockedResult)
+        # The dataclass is frozen, but its public mapping is intentionally
+        # exposed for serialization compatibility.  A caller can therefore
+        # alter a field and recompute the public digest; the private binding
+        # must still reject the altered authority.
+        snapshot.data["source_commit"] = "f" * 40
+        snapshot.data["snapshot_digest"] = recompute_snapshot_digests(snapshot)[
+            "snapshot_digest"
+        ]
+        result = global_allocation_view(
+            snapshot,
+            validated_occupancy_proof("a" * 40, []),
+        )
+        self.assertIsInstance(result, BlockedResult)
+        assert isinstance(result, BlockedResult)
+        self.assertEqual(result.reason_code, "STATIC_AUTHORITY_SELECTOR_UNRESOLVED")
 
     def test_implicit_local_remote_identity_is_blocked(self) -> None:
         repo = _fixture()
@@ -319,6 +390,30 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         _run(repo, "tag", "-a", "iterations/0.3.0", "-m", "anchor tag")
         _run(repo, "update-ref", "refs/heads/iterations/0.3.0", "HEAD")
         _run(repo, "push", "-q", "origin", "v0.2.0", "refs/tags/iterations/0.3.0", "refs/heads/iterations/0.3.0")
+        result = static_snapshot(repo, source_repository="fixture/repo")
+        self.assertIsInstance(result, BlockedResult)
+        assert isinstance(result, BlockedResult)
+        self.assertEqual(result.reason_code, "STATIC_AUTHORITY_SELECTOR_UNRESOLVED")
+
+    def test_branch_only_iteration_anchor_is_rejected(self) -> None:
+        repo = _fixture()
+        (repo / "iterations.toml").write_text(
+            "schema_version = 1\n"
+            'target_iteration = "fixture"\n'
+            "[[iterations]]\n"
+            'iteration_id = "prospective-fixture"\n'
+            'final_version = "0.3.0"\n'
+            'kind = "prospective"\n'
+            'release_line = "principal"\n'
+            "aggregate_impact = {}\n"
+            'anchor_ref = "iterations/0.3.0"\n'
+            'contributing_identities = [{ role = "issue", identity = "#125" }]\n'
+            "prospective = []\nretrospective = []\n",
+            encoding="utf-8",
+        )
+        _run(repo, "add", "iterations.toml")
+        _run(repo, "commit", "-q", "-m", "branch-only anchor fixture")
+        _run(repo, "push", "-q", "origin", "HEAD:refs/heads/iterations/0.3.0")
         result = static_snapshot(repo, source_repository="fixture/repo")
         self.assertIsInstance(result, BlockedResult)
         assert isinstance(result, BlockedResult)

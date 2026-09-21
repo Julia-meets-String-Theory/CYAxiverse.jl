@@ -76,11 +76,21 @@ recreation, static/event exclusion, and the absence of a runnable pinned
 checkout certification harness. Those verdicts belong only to the fourth
 candidate. A corrected successor requires fresh reviews.
 
+The fifth frozen candidate was commit
+`168858862372d44c8c46220ac2921bbd7d0b5c13` (tree
+`9f6be909e502d1b75c65932094de41833023266f`). Independent SPEC and
+STANDARDS reviews returned `REQUEST_CHANGES`. Findings covered alternate
+private-host spellings, branch-only iteration anchors, nonempty remote
+bootstrap, missing bootstrap exclusion, boolean exclusion checks that did not
+hold through remote mutation, caller-forged static authority, and unbound
+certification test commands and runtime identities. Those verdicts belong
+only to the fifth candidate. The corrected successor requires fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 175 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 190 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline local dependencies; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |
