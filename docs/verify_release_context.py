@@ -29,6 +29,7 @@ from version_lifecycle.events import parse_stream  # noqa: E402
 from version_lifecycle.git_refs import (  # noqa: E402
     GitIdentityError,
     parse_remote_ref_advertisement,
+    parse_remote_ref_advertisements,
 )
 from version_lifecycle.release import (  # noqa: E402
     PASS,
@@ -255,14 +256,15 @@ def list_canonical_public_tags() -> list[str] | None:
         )
     except (OSError, subprocess.CalledProcessError):
         return None
+    try:
+        records = parse_remote_ref_advertisements(output)
+    except GitIdentityError:
+        return None
     tags = set()
-    for raw_line in output.splitlines():
-        fields = raw_line.split()
-        if len(fields) != 2 or not full_sha(fields[0]):
-            continue
+    for ref in records:
         prefix = "refs/tags/"
-        if fields[1].startswith(prefix):
-            tag = fields[1][len(prefix) :]
+        if ref.startswith(prefix):
+            tag = ref[len(prefix) :]
             if is_canonical_public_tag(tag):
                 tags.add(tag)
     return sorted(tags)

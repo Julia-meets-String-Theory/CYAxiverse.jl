@@ -18,7 +18,12 @@ import tomllib
 from urllib.parse import urlsplit, urlunsplit
 
 from .codec import canonical_json, sha256_hex
-from .git_refs import canonical_remote_authority, validate_remote
+from .git_refs import (
+    GitIdentityError,
+    canonical_remote_authority,
+    parse_remote_ref_advertisements,
+    validate_remote,
+)
 from .public_ip import parse_ipv4_compat
 from .versions import Version, final_version, maintenance_line, parse_package_version, parse_public_tag
 
@@ -228,19 +233,10 @@ def _remote_refs(repository: Path, remote: str) -> dict[str, str]:
 
     remote = validate_remote(remote)
     output = _git(repository, "ls-remote", "--refs", remote)
-    refs: dict[str, str] = {}
-    for line in output.decode("ascii", errors="strict").splitlines():
-        if not line.strip():
-            continue
-        try:
-            object_id, ref = line.split("\t", 1)
-        except ValueError as error:
-            raise StaticValidationError("remote ref advertisement is malformed") from error
-        if not _HEX40_RE.fullmatch(object_id) or not ref.startswith("refs/"):
-            raise StaticValidationError("remote ref advertisement has invalid identity")
-        if ref in refs and refs[ref] != object_id:
-            raise StaticValidationError(f"remote ref {ref} was advertised twice with different objects")
-        refs[ref] = object_id
+    try:
+        refs = parse_remote_ref_advertisements(output)
+    except GitIdentityError as error:
+        raise StaticValidationError("remote ref advertisement is malformed") from error
     if "refs/heads/vmm" not in refs:
         raise StaticValidationError("remote does not advertise refs/heads/vmm")
     return refs

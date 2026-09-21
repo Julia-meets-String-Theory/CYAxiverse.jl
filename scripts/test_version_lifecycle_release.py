@@ -81,6 +81,7 @@ def released_event(
         "anchor_ref": f"refs/tags/iterations/{version}",
         "anchor_sha": SHA_A,
         "anchor_tree": TREE,
+        "candidate_id": f"candidate-{version.replace('.', '-')}",
         "candidate_ref": f"refs/heads/candidates/{version}",
         "candidate_sha": SHA_A,
         "candidate_tree": TREE,
@@ -537,6 +538,7 @@ class TestReleaseEvidence(unittest.TestCase):
 
     def test_released_event_requires_complete_intent_identity(self):
         mismatches = {
+            "candidate_id": "candidate-forged",
             "candidate_ref": "refs/heads/candidates/0.3.1",
             "anchor_sha": "d" * 40,
             "release_line": "maintenance/0.3",

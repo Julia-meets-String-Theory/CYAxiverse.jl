@@ -36,6 +36,7 @@ from version_lifecycle import (  # noqa: E402
 )
 from version_lifecycle.static import (  # noqa: E402
     StaticValidationError,
+    _remote_refs,
     sanitize_source_repository,
 )
 from version_lifecycle.writer import LedgerHead, ReleaseEventWriter  # noqa: E402
@@ -125,6 +126,24 @@ def _fixture() -> Path:
 
 
 class VersionLifecycleStaticTests(unittest.TestCase):
+    def test_static_remote_namespace_rejects_ambiguous_framing(self) -> None:
+        repo = _fixture()
+        sha = "a" * 40
+        valid = f"{sha}\trefs/heads/vmm\n"
+        for output in (
+            valid + "not-an-advertisement\n",
+            valid + valid,
+            valid.removesuffix("\n") + "\x1c",
+            valid.removesuffix("\n"),
+        ):
+            with self.subTest(output=output), patch(
+                "version_lifecycle.static._git", return_value=output.encode("ascii")
+            ):
+                with self.assertRaisesRegex(
+                    StaticValidationError, "remote ref advertisement is malformed"
+                ):
+                    _remote_refs(repo, "origin")
+
     def test_option_like_remote_is_blocked_before_git_subprocess(self) -> None:
         repo = _fixture()
         with patch("version_lifecycle.static.subprocess.run") as run:

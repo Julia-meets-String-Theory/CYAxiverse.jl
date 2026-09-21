@@ -249,6 +249,7 @@ def _expected_release_intent_identity(
     """Return every durable identity fixed before public-tag creation."""
 
     return {
+        "candidate_id": candidate.get("candidate_id"),
         "candidate_ref": candidate.get("ref"),
         "candidate_sha": candidate.get("sha"),
         "candidate_tree": candidate.get("tree"),
@@ -582,7 +583,8 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         phase = "exclusion_acquired"
         candidate = port.make_durable_candidate(intent)
         if (
-            candidate.get("ref") != intent.candidate_ref
+            not _public_identity(candidate.get("candidate_id"), key="candidate_id")
+            or candidate.get("ref") != intent.candidate_ref
             or candidate.get("tree") != intent.anchor_tree
             or candidate.get("version") != intent.final_version
             or not SHA.fullmatch(str(candidate.get("sha", "")))
@@ -593,7 +595,11 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         evidence["candidate"] = candidate
         phase = "candidate_durable"
         opened = port.append_candidate_opened(intent, candidate)
-        if opened.get("candidate_sha") != candidate["sha"] or not opened.get("event_id"):
+        if (
+            opened.get("candidate_id") != candidate["candidate_id"]
+            or opened.get("candidate_sha") != candidate["sha"]
+            or not opened.get("event_id")
+        ):
             raise TransactionError("CANDIDATE_OPEN_EVENT_MISMATCH")
         evidence["candidate_opened"] = opened
         phase = "candidate_opened"

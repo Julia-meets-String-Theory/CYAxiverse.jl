@@ -73,6 +73,27 @@ def parse_remote_ref_advertisement(
 
     if not isinstance(ref, str) or FULL_REF.fullmatch(ref) is None:
         raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+    if allow_peeled and not ref.startswith("refs/tags/"):
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+
+    peeled_ref = f"{ref}^{{}}"
+    allowed = {ref, peeled_ref} if allow_peeled else {ref}
+    records = parse_remote_ref_advertisements(output, allow_peeled=allow_peeled)
+    if any(name not in allowed for name in records):
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+
+    if not records:
+        return None
+    if peeled_ref in records and ref not in records:
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+    return records.get(peeled_ref, records.get(ref))
+
+
+def parse_remote_ref_advertisements(
+    output: bytes | str, *, allow_peeled: bool = False
+) -> dict[str, str]:
+    """Parse a complete ``ls-remote`` response with strict ASCII/LF framing."""
+
     try:
         text = (
             output.decode("ascii", errors="strict")
@@ -85,8 +106,6 @@ def parse_remote_ref_advertisement(
         raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID") from error
     if not isinstance(text, str):
         raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
-    if allow_peeled and not ref.startswith("refs/tags/"):
-        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
     if any(
         (ord(character) < 0x20 and character not in {"\n", "\t"})
         or ord(character) > 0x7E
@@ -96,26 +115,43 @@ def parse_remote_ref_advertisement(
     if text and not text.endswith("\n"):
         raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
 
-    peeled_ref = f"{ref}^{{}}"
-    allowed = {ref, peeled_ref} if allow_peeled else {ref}
     records: dict[str, str] = {}
-    lines = text[:-1].split("\n") if text else []
-    for line in lines:
+    for line in text[:-1].split("\n") if text else []:
         fields = line.split("\t")
+        advertised_ref = fields[1] if len(fields) == 2 else ""
+        is_peeled = advertised_ref.endswith("^{}")
+        structural_ref = (
+            advertised_ref[:-3]
+            if is_peeled
+            else advertised_ref
+        )
         if (
             len(fields) != 2
             or SHA.fullmatch(fields[0]) is None
-            or fields[1] not in allowed
-            or fields[1] in records
+            or (is_peeled and not allow_peeled)
+            or not _valid_advertised_ref(structural_ref)
+            or advertised_ref in records
         ):
             raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
-        records[fields[1]] = fields[0]
+        records[advertised_ref] = fields[0]
+    return records
 
-    if not records:
-        return None
-    if peeled_ref in records and ref not in records:
-        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
-    return records.get(peeled_ref, records.get(ref))
+
+def _valid_advertised_ref(ref: str) -> bool:
+    """Return whether ``ref`` satisfies Git's structural ref-name rules."""
+
+    if not ref.startswith("refs/") or ref.endswith(("/", ".")):
+        return False
+    if ".." in ref or "@{" in ref or "//" in ref:
+        return False
+    if any(character in " ~^:?*[\\" for character in ref):
+        return False
+    return all(
+        component
+        and not component.startswith(".")
+        and not component.endswith(".lock")
+        for component in ref.split("/")
+    )
 
 
 def canonical_remote_authority(repository: str | Path, remote: str) -> str:
@@ -611,16 +647,8 @@ class GitRepository:
 
     def remote_ref(self, ref: str) -> str | None:
         self._ref(ref)
-        output = self.git("ls-remote", "--refs", self.remote, ref).decode().strip()
-        if not output:
-            return None
-        entries = output.splitlines()
-        if len(entries) != 1:
-            raise GitIdentityError("remote ref is ambiguous")
-        sha, name = entries[0].split("\t", 1)
-        if name != ref:
-            raise GitIdentityError("remote ref name mismatch")
-        return self._sha(sha)
+        output = self.git("ls-remote", "--refs", self.remote, ref)
+        return parse_remote_ref_advertisement(output, ref)
 
     def verify_durable_ref(self, ref: str, expected_object: str) -> None:
         self._sha(expected_object)

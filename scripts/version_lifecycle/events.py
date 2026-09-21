@@ -47,6 +47,7 @@ EVENT_TYPES = (
 # Identities fixed by a durable intent before the irreversible public-tag
 # boundary. The later released event must reproduce every value exactly.
 RELEASE_INTENT_BINDING_FIELDS = (
+    "candidate_id",
     "candidate_ref",
     "candidate_sha",
     "candidate_tree",

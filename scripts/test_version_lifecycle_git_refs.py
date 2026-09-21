@@ -20,6 +20,7 @@ from version_lifecycle.git_refs import (  # noqa: E402
     RemoteValueError,
     StaticMutationExclusion,
     parse_remote_ref_advertisement,
+    parse_remote_ref_advertisements,
     require_candidate_ref,
     validate_remote,
 )
@@ -113,6 +114,46 @@ class GitRefFixture(unittest.TestCase):
                 branch_ref,
                 allow_peeled=True,
             )
+
+    def test_complete_remote_advertisement_is_strict_and_duplicate_free(self) -> None:
+        direct = "a" * 40
+        other = "b" * 40
+        valid = (
+            f"{direct}\trefs/heads/main\n"
+            f"{other}\trefs/tags/v0.3.0\n"
+        )
+        self.assertEqual(
+            parse_remote_ref_advertisements(valid),
+            {"refs/heads/main": direct, "refs/tags/v0.3.0": other},
+        )
+        for output in (
+            f"{direct}\trefs/heads/main\nmalformed\n",
+            f"{direct}\trefs/heads/main\n{direct}\trefs/heads/main\n",
+            f"{direct}\trefs/heads/main\x1c",
+            f"{direct}\trefs/heads/main",
+        ):
+            with self.subTest(output=output):
+                with self.assertRaisesRegex(
+                    GitIdentityError, "REMOTE_REF_ADVERTISEMENT_INVALID"
+                ):
+                    parse_remote_ref_advertisements(output)
+
+    def test_protected_ref_reader_uses_strict_remote_advertisement_parser(self) -> None:
+        ref = "refs/heads/main"
+        sha = "a" * 40
+        for output in (
+            f"{sha}\t{ref}\nnot-an-advertisement\n",
+            f"{sha}\t{ref}\n{sha}\t{ref}\n",
+            f"{sha}\t{ref}\x1c",
+            f"{sha}\t{ref}",
+        ):
+            with self.subTest(output=output), patch.object(
+                self.repository, "git", return_value=output.encode("ascii")
+            ):
+                with self.assertRaisesRegex(
+                    GitIdentityError, "REMOTE_REF_ADVERTISEMENT_INVALID"
+                ):
+                    self.repository.remote_ref(ref)
 
     def test_option_like_remote_is_rejected_before_git_subprocess(self) -> None:
         with patch("version_lifecycle.git_refs.subprocess.run") as run:

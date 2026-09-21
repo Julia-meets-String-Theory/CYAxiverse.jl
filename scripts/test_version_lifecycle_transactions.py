@@ -215,14 +215,17 @@ class ReleaseFixture:
 
     def make_durable_candidate(self, intent):
         self.calls.append("candidate")
-        return {"ref": intent.candidate_ref, "sha": self.candidate_sha,
+        return {"candidate_id": f"candidate-{intent.final_version.replace('.', '-')}",
+                "ref": intent.candidate_ref, "sha": self.candidate_sha,
                 "tree": self.tree, "version": intent.final_version, "durable": True,
                 "main_at_candidate_sha": "d" * 40,
                 "main_at_candidate_version": "0.2.0"}
 
     def append_candidate_opened(self, intent, candidate):
         self.calls.append("opened")
-        return {"candidate_sha": candidate["sha"], "event_id": "EVT-000000000001"}
+        return {"candidate_id": candidate["candidate_id"],
+                "candidate_sha": candidate["sha"],
+                "event_id": "EVT-000000000001"}
 
     def certify_candidate(self, intent, candidate):
         self.calls.append("certify")
@@ -292,7 +295,7 @@ class ReleaseFixture:
             "static_iteration_snapshot": "0" * 64,
             "expected_event_head": "0" * 40,
             "intent_id": f"INT-{intent.final_version}",
-            "candidate_id": f"candidate-{intent.final_version.replace('.', '-')}",
+            "candidate_id": candidate["candidate_id"],
             "candidate_ref": candidate["ref"],
             "candidate_sha": candidate["sha"],
             "candidate_tree": candidate["tree"],
@@ -710,6 +713,7 @@ class TransactionTests(unittest.TestCase):
 
     def test_release_intent_must_match_every_pre_tag_identity(self):
         mismatches = {
+            "candidate_id": "candidate-forged",
             "candidate_ref": "refs/heads/candidates/0.3.1",
             "anchor_sha": "e" * 40,
             "release_line": "maintenance/0.3",

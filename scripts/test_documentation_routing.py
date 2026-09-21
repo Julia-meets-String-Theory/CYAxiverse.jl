@@ -62,6 +62,19 @@ class DocumentationRoutingTests(unittest.TestCase):
                 ):
                     self.assertIsNone(verifier.resolve_tag_commit("v0.3.0"))
 
+        valid_tag = f"{'a' * 40}\trefs/tags/v0.3.0\n"
+        invalid_tag_lists = (
+            valid_tag + "not-an-advertisement\n",
+            valid_tag + valid_tag,
+            valid_tag.removesuffix("\n") + "\x1c",
+            valid_tag.removesuffix("\n"),
+        )
+        for output in invalid_tag_lists:
+            with self.subTest(tag_list=output), patch.object(
+                verifier.subprocess, "check_output", return_value=output
+            ):
+                self.assertIsNone(verifier.list_canonical_public_tags())
+
     def test_repository_evidence_resolves_refs_trees_and_versions_independently(self) -> None:
         module_spec = importlib.util.spec_from_file_location(
             "verify_release_context_live_fixture",
@@ -534,6 +547,8 @@ class DocumentationRoutingTests(unittest.TestCase):
         self.assertIn("--stable-only", workflow)
         self.assertIn("refs/remotes/origin/main^{commit}", workflow)
         self.assertIn("git ls-remote --exit-code origin refs/heads/release-events", workflow)
+        self.assertIn("parse_remote_ref_advertisements", workflow)
+        self.assertIn("git ls-remote --refs origin 'refs/tags/v*'", workflow)
         self.assertIn("refs/tags/v*", workflow)
         self.assertIn('EVENT_STREAM="$RUNNER_TEMP/release-events.jsonl"', workflow)
         verifier_source = (ROOT / "docs/verify_release_context.py").read_text(

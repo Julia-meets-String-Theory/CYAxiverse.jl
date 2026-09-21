@@ -75,18 +75,35 @@ jobs:
               exit "$release_events_status"
             fi
             if [ "$GITHUB_REF" = "refs/heads/vmm" ]; then
-              if tag_refs="$(git ls-remote origin 'refs/tags/v*' 2>/dev/null)"; then
+              TAG_ADVERTISEMENT="$RUNNER_TEMP/canonical-tags.remote"
+              if git ls-remote --refs origin 'refs/tags/v*' \
+                  > "$TAG_ADVERTISEMENT" 2>/dev/null; then
                 :
               else
                 tag_probe_status=$?
                 echo "canonical public tag enumeration failed" >&2
                 exit "$tag_probe_status"
               fi
-              if printf '%s\n' "$tag_refs" | grep -E -q \
-                'refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\^\{\})?$'; then
-                echo "A canonical public tag exists before release-events bootstrap" >&2
-                exit 1
-              fi
+              python3 - "$TAG_ADVERTISEMENT" <<'PY'
+          import pathlib
+          import sys
+
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.git_refs import parse_remote_ref_advertisements
+          from version_lifecycle.release import is_canonical_public_tag
+
+          records = parse_remote_ref_advertisements(
+              pathlib.Path(sys.argv[1]).read_bytes()
+          )
+          if any(
+              ref.startswith("refs/tags/")
+              and is_canonical_public_tag(ref.removeprefix("refs/tags/"))
+              for ref in records
+          ):
+              raise SystemExit(
+                  "A canonical public tag exists before release-events bootstrap"
+              )
+          PY
               : > "$EVENT_STREAM"
             else
               echo "release-events authority is required for tag documentation" >&2
