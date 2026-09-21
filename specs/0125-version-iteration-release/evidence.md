@@ -237,15 +237,36 @@ branch peeling, control and unterminated records, post-fetch ref revalidation,
 and a branch advance between advertisement and fetch. Fresh exact-successor
 reviews are required.
 
+The eighteenth frozen candidate was commit
+`49147d7d39000a5493a11c7a0bf210ff8fde031c` (tree
+`085d31130488fe375bbf8b10ca179a9491525c86`). Fresh independent SPEC and
+STANDARDS reviews both returned `REQUEST_CHANGES`. Both found that wildcard
+documentation tag enumeration and the static remote namespace reader still
+bypassed strict framing; STANDARDS also found the protected-ref reader's
+duplicate parser. SPEC additionally found that `candidate_id`, although
+required by both event schemas, was omitted from the shared durable-intent
+binding. Those verdicts belong only to the eighteenth candidate.
+
+The third review-loop correction implementation is commit
+`0fddf3c1fbb13ef32dbc5badc60d224baebfd15e` (tree
+`f5530d7698897a9edb036516aa609274932879c7`). It makes one strict
+ASCII/LF, duplicate-free parser authoritative for exact refs, wildcard tag
+enumeration, the static namespace, protected-ref reads and the documentation
+workflow bootstrap check. It also adds `candidate_id` to the shared durable
+intent binding and verifies the candidate-open receipt before tag creation.
+Adversarial regressions cover malformed, duplicate, control-framed and
+unterminated records at each reader plus forged candidate identifiers. Fresh
+exact-successor reviews are required.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 241 tests in 66.950 seconds on `0b6e76c`. |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 13 tests (3 version, 10 documentation) in 10.925 seconds. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 244 tests in 59.361 seconds on `0fddf3c`. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 13 tests (3 version, 10 documentation) in 9.725 seconds. |
 | `python3 scripts/check_version_bump.py --base 995163f0058488ea183ac645045ed8b1636bef4a --head HEAD` | Passed: lifecycle-only changes require no package-version update. |
-| `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on `0b6e76c` with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
-| Python-unavailable core `using CYAxiverse` | Passed on `0b6e76c` with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |
+| `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on `0fddf3c` with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
+| Python-unavailable core `using CYAxiverse` | Passed on `0fddf3c` with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |
 | `python3 scripts/agent_verify.py package` | Failed: existing phase/volume detuning Hessian test at `test/runtests.jl:1267` expects `4π²`; observed `2π²`. |
 | `julia --project=. bin/audit.jl` via `agent_verify.py run` | Failed: the same two JET reports for undefined `i` in `reduced_models.jl` and `poly102_inflation.jl`; file-monitor exhaustion warnings also appeared after the two reports. |
 | `git diff --exit-code 995163f0058488ea183ac645045ed8b1636bef4a -- src test Project.toml bin/audit.jl` and the same comparison against `877dca1` | Passed; the failing Julia source, tests, package metadata, and audit script are unchanged by the full Gate A diff and this correction pass. |
@@ -257,6 +278,6 @@ The failed broad Julia gates remain failed at their recorded baseline. The
 scientific normalization and benchmark code are outside this approved
 lifecycle change, `Project.toml` remains `0.2.0`, and no production release
 state changed. Remote CI and fresh exact-final-candidate SPEC/STANDARDS review
-for the second review-loop successor are not yet observed. Live protection/event-authority setup, an explicit owner
+for the third review-loop successor are not yet observed. Live protection/event-authority setup, an explicit owner
 merge decision, and fresh post-settings review remain later work; Gate B stays
 separate.

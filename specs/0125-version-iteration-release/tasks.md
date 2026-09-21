@@ -126,6 +126,10 @@ GitHub remain the live work-state record. The Approved spec at
 - [x] Run independent SPEC/STANDARDS review on `6d9a4d5`; record SPEC `PASS`
   and STANDARDS `REQUEST_CHANGES`, then correct tag-only peeling, strict
   ASCII/LF framing, remote-ref race detection and duplicated writer logic.
+- [x] Run independent SPEC/STANDARDS review on `49147d7`; record both
+  `REQUEST_CHANGES` verdicts, then route every remaining remote-advertisement
+  reader through the strict shared parser and bind `candidate_id` across the
+  candidate-open, prepared-intent and released-event identities.
 - [ ] Obtain fresh independent exact-candidate SPEC/STANDARDS pre-merge
   reviews; reconcile all blocking findings and bind the final candidate SHA.
 - [ ] Present final reviewed PR and evidence for an explicit owner merge
