@@ -10,7 +10,7 @@ and reconciled by transaction ID and exact canonical event bytes.
 from __future__ import annotations
 
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import re
@@ -28,6 +28,7 @@ from .events import (
     validate_transition,
 )
 from .git_refs import GitIdentityError, StaticMutationExclusion, validate_remote
+from .codec import canonical_json
 
 
 class WriterError(RuntimeError):
@@ -81,6 +82,7 @@ class _ExternalLeaseReleaseError(WriterError):
 
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_VERIFIED_HEAD_TOKEN = object()
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,43 @@ class LedgerHead:
     commit: str
     raw: bytes
     events: tuple[dict[str, Any], ...]
+    _authority_token: object | None = field(default=None, init=False, repr=False, compare=False)
+    _authority_binding: tuple[str, bytes, tuple[bytes, ...]] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+
+def _verified_ledger_head(
+    commit: str,
+    raw: bytes,
+    events: tuple[dict[str, Any], ...],
+) -> LedgerHead:
+    """Bind a head only after the writer has verified its Git-backed stream."""
+
+    head = LedgerHead(commit=commit, raw=raw, events=events)
+    object.__setattr__(head, "_authority_token", _VERIFIED_HEAD_TOKEN)
+    object.__setattr__(
+        head,
+        "_authority_binding",
+        (commit, raw, tuple(canonical_json(dict(event)) for event in events)),
+    )
+    return head
+
+
+def _is_verified_ledger_head(value: Any) -> bool:
+    """Return whether *value* retains the writer's verified head binding."""
+
+    if not isinstance(value, LedgerHead) or value._authority_token is not _VERIFIED_HEAD_TOKEN:
+        return False
+    try:
+        binding = (
+            value.commit,
+            value.raw,
+            tuple(canonical_json(dict(event)) for event in value.events),
+        )
+    except (TypeError, ValueError):
+        return False
+    return value._authority_binding == binding
 
 
 class _ExternalLeaseGuard:
@@ -232,9 +271,14 @@ class ReleaseEventWriter:
         commit = self.current_head()
         result = self._git(["show", f"{commit}:{self.stream_path}"])
         raw = bytes(result.stdout)
+        return self._verified_head_from_stream(commit, raw)
+
+    def _verified_head_from_stream(self, commit: str, raw: bytes) -> LedgerHead:
+        """Verify one observed stream and return its authority-bound head."""
+
         self._verify_stream_topology(commit, raw)
         events = tuple(parse_stream(raw))
-        return LedgerHead(commit=commit, raw=raw, events=events)
+        return _verified_ledger_head(commit, raw, events)
 
     def bootstrap(
         self,
@@ -356,12 +400,13 @@ class ReleaseEventWriter:
             self._git(["update-ref", "-d", temp_ref], check=False)
 
     def _verify_stream_topology(self, commit: str, raw: bytes) -> None:
-        """Verify one observed commit is exactly the event stream object.
+        """Verify one observed commit has the canonical complete history.
 
         Callback reconciliation is accepted only when the advertised commit
-        is also present in this Git object database and independently proves
-        the one-file tree and exact blob bytes.  A callback cannot claim a
-        remote head with an unverified or divergent topology.
+        is also present in this Git object database and its complete ancestry
+        proves the one-file tree, exact blob bytes, orphan bootstrap, and one
+        canonical append per child commit. A callback cannot claim a remote
+        head with an unverified or divergent topology.
         """
 
         if not isinstance(commit, str) or _GIT_SHA_RE.fullmatch(commit) is None:
@@ -369,39 +414,106 @@ class ReleaseEventWriter:
         if not isinstance(raw, bytes):
             raise AppendOutcomeUncertain("observed event stream is not bytes")
         try:
-            object_type = _as_text(
-                self._git(["cat-file", "-t", commit]).stdout
-            ).strip()
-            if object_type != "commit":
-                raise AppendOutcomeUncertain("observed event head is not a commit")
-            entries = _as_text(self._git(["ls-tree", commit]).stdout).splitlines()
-            if len(entries) != 1 or "\t" not in entries[0]:
-                raise AppendOutcomeUncertain(
-                    "observed event commit does not contain exactly one stream file"
+            current_commit = commit
+            current_raw = raw
+            visited: set[str] = set()
+            while True:
+                if current_commit in visited:
+                    raise AppendOutcomeUncertain(
+                        "observed event history contains a commit cycle"
+                    )
+                visited.add(current_commit)
+                parents = self._verify_commit_stream(current_commit, current_raw)
+                if len(parents) > 1:
+                    raise AppendOutcomeUncertain(
+                        "observed event history contains a merge commit"
+                    )
+                if not parents:
+                    if current_raw != b"":
+                        raise AppendOutcomeUncertain(
+                            "observed event history does not end at an empty orphan bootstrap"
+                        )
+                    return
+
+                parent = parents[0]
+                parent_raw = bytes(
+                    self._git(["show", f"{parent}:{self.stream_path}"]).stdout
                 )
-            metadata, path = entries[0].split("\t", 1)
-            fields = metadata.split()
-            if (
-                len(fields) != 3
-                or fields[0] != "100644"
-                or fields[1] != "blob"
-                or path != self.stream_path
-            ):
-                raise AppendOutcomeUncertain(
-                    "observed event commit tree is not the canonical one-file tree"
-                )
-            stored = bytes(self._git(["show", f"{commit}:{self.stream_path}"]).stdout)
-            if stored != raw:
-                raise AppendOutcomeUncertain(
-                    "observed event stream does not match its commit tree"
-                )
-            parse_stream(raw)
+                if not current_raw.startswith(parent_raw):
+                    raise AppendOutcomeUncertain(
+                        "observed event stream is not an append-only extension"
+                    )
+                appended = current_raw[len(parent_raw):]
+                try:
+                    if not appended.endswith(b"\n") or b"\n" in appended[:-1]:
+                        raise EventTransitionError(
+                            "observed event commit did not append exactly one record"
+                        )
+                    appended_event = validate_event(appended[:-1])
+                    if appended != canonical_event_bytes(appended_event) + b"\n":
+                        raise EventTransitionError(
+                            "observed event commit appended noncanonical bytes"
+                        )
+                except Exception as error:
+                    raise AppendOutcomeUncertain(
+                        "observed event commit appended a noncanonical stream"
+                    ) from error
+                if (
+                    appended_event.get("expected_event_head") != parent
+                ):
+                    raise AppendOutcomeUncertain(
+                        "observed event append does not bind its actual parent"
+                    )
+                current_commit = parent
+                current_raw = parent_raw
         except AppendOutcomeUncertain:
             raise
         except Exception as error:
             raise AppendOutcomeUncertain(
                 "observed event commit topology could not be verified"
             ) from error
+
+    def _verify_commit_stream(self, commit: str, raw: bytes) -> list[str]:
+        """Verify one commit's exact stream tree/blob and return its parents."""
+
+        object_type = _as_text(self._git(["cat-file", "-t", commit]).stdout).strip()
+        if object_type != "commit":
+            raise AppendOutcomeUncertain("observed event history contains a non-commit")
+        commit_text = _as_text(self._git(["cat-file", "-p", commit]).stdout)
+        headers = commit_text.split("\n\n", 1)[0].splitlines()
+        tree_values = [line.split(" ", 1)[1] for line in headers if line.startswith("tree ")]
+        parents = [line.split(" ", 1)[1] for line in headers if line.startswith("parent ")]
+        if len(tree_values) != 1 or any(_GIT_SHA_RE.fullmatch(value) is None for value in tree_values):
+            raise AppendOutcomeUncertain("observed event commit has an invalid tree identity")
+        if any(_GIT_SHA_RE.fullmatch(parent) is None for parent in parents):
+            raise AppendOutcomeUncertain("observed event commit has an invalid parent identity")
+
+        entries = _as_text(self._git(["ls-tree", commit]).stdout).splitlines()
+        if len(entries) != 1 or "\t" not in entries[0]:
+            raise AppendOutcomeUncertain(
+                "observed event commit does not contain exactly one stream file"
+            )
+        metadata, path = entries[0].split("\t", 1)
+        fields = metadata.split()
+        if (
+            len(fields) != 3
+            or fields[0] != "100644"
+            or fields[1] != "blob"
+            or _GIT_SHA_RE.fullmatch(fields[2]) is None
+            or path != self.stream_path
+        ):
+            raise AppendOutcomeUncertain(
+                "observed event commit tree is not the canonical one-file tree"
+            )
+        if _as_text(self._git(["cat-file", "-t", fields[2]]).stdout).strip() != "blob":
+            raise AppendOutcomeUncertain("observed event stream entry is not a blob")
+        stored = bytes(self._git(["show", f"{commit}:{self.stream_path}"]).stdout)
+        if stored != raw:
+            raise AppendOutcomeUncertain(
+                "observed event stream does not match its commit tree"
+            )
+        parse_stream(raw)
+        return parents
 
     def _verified_remote_observation(
         self, observation: tuple[str | None, bytes]

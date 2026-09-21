@@ -45,7 +45,6 @@ from version_lifecycle import (  # noqa: E402
     static_snapshot,
 )
 from version_lifecycle.static import StaticSnapshot  # noqa: E402
-from version_lifecycle.events import parse_stream  # noqa: E402
 from version_lifecycle.certification import is_safe_public_value  # noqa: E402
 from version_lifecycle.git_refs import validate_remote  # noqa: E402
 from version_lifecycle.writer import (  # noqa: E402
@@ -275,8 +274,8 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
                 raw = writer._git(  # type: ignore[attr-defined]
                     ["show", f"{disposable_ref}:{args.event_stream}"]
                 ).stdout
-                writer._verify_stream_topology(fetched_head, raw)
-                events = tuple(parse_stream(raw))
+                head = writer._verified_head_from_stream(fetched_head, raw)
+                raw = head.raw
             except (WriterError, ValueError) as error:
                 return _blocked(
                     "EVENT_AUTHORITY_DIVERGENT",
@@ -302,7 +301,6 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
                 local_head = writer.read_head()
             except (BranchUnavailable, OSError, ValueError, RuntimeError) as error:
                 local_error = str(error)
-        head = LedgerHead(commit=remote_head, raw=raw, events=events)
         report: dict[str, Any] = {
             "status": "READY",
             "authority": "remote",

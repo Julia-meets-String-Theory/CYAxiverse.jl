@@ -151,11 +151,21 @@ Git could interpret as transport flags and argparse failures that bypassed the
 CLI's documented JSON error contract. Those verdicts belong only to the
 twelfth candidate. The corrected successor requires fresh reviews.
 
+The thirteenth frozen candidate was commit
+`eec4ed0aaf101af4a961f94e4ef8150058abe9da` (tree
+`699d938516aa53ce03df742be7f7d3dcfe8d0e93`). A public draft-PR exact-state
+review returned `REQUEST_CHANGES`. The blocking findings covered a
+caller-forgeable allocation occupancy proof, incomplete verification of the
+canonical event branch's Git history, and a lifecycle CI fixture whose
+publisher clone did not start from `vmm`. Those findings belong only to the
+thirteenth candidate. The corrected successor requires fresh independent SPEC
+and STANDARDS reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 224 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 228 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

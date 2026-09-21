@@ -990,6 +990,88 @@ class WriterTests(unittest.TestCase):
                 with self.assertRaises((AppendOutcomeUncertain, WriterError)):
                     self.writer.read_head()
 
+    def test_read_head_rejects_historical_tree_merge_and_nonprefix_topology(self):
+        root = self.writer.current_head()
+        first_event = reservation_event(expected_head=root)
+        first_raw = canonical_event_bytes(first_event) + b"\n"
+
+        def commit_with_tree(
+            raw: bytes, *, mode: str = "100644", parents: tuple[str, ...] = ()
+        ) -> str:
+            blob = subprocess.check_output(
+                ["git", "-C", str(self.repo), "hash-object", "-w", "--stdin"],
+                input=raw,
+            ).decode().strip()
+            tree = subprocess.check_output(
+                ["git", "-C", str(self.repo), "mktree"],
+                input=f"{mode} blob {blob}\trelease-events.jsonl\n".encode(),
+            ).decode().strip()
+            args = ["git", "-C", str(self.repo), "commit-tree", tree]
+            for parent in parents:
+                args.extend(("-p", parent))
+            return subprocess.check_output(
+                [*args, "-m", "topology fixture"], text=True
+            ).strip()
+
+        malformed_parent = commit_with_tree(first_raw, mode="100755", parents=(root,))
+        second_event = reservation_event(
+            "EVT-000000000002",
+            transaction_id="topology-second",
+            expected_head=malformed_parent,
+        )
+        descendant = self.writer._make_commit(
+            first_raw + canonical_event_bytes(second_event) + b"\n",
+            parent=malformed_parent,
+            message="descendant",
+        )
+        subprocess.run(
+            ["git", "-C", str(self.repo), "update-ref", self.writer.ref, descendant],
+            check=True,
+        )
+        with self.assertRaises(AppendOutcomeUncertain):
+            self.writer.read_head()
+
+        merge_child = self.writer._make_commit(first_raw, parent=root, message="child")
+        merge = commit_with_tree(first_raw, parents=(merge_child, root))
+        subprocess.run(
+            ["git", "-C", str(self.repo), "update-ref", self.writer.ref, merge],
+            check=True,
+        )
+        with self.assertRaises(AppendOutcomeUncertain):
+            self.writer.read_head()
+
+        valid_child = self.writer._make_commit(first_raw, parent=root, message="child")
+        changed_first = first_raw.replace(b'"tx-1"', b'"tx-x"', 1)
+        second_event = reservation_event(
+            "EVT-000000000002",
+            transaction_id="nonprefix-second",
+            expected_head=valid_child,
+        )
+        nonprefix = self.writer._make_commit(
+            changed_first + canonical_event_bytes(second_event) + b"\n",
+            parent=valid_child,
+            message="nonprefix",
+        )
+        subprocess.run(
+            ["git", "-C", str(self.repo), "update-ref", self.writer.ref, nonprefix],
+            check=True,
+        )
+        with self.assertRaises(AppendOutcomeUncertain):
+            self.writer.read_head()
+
+    def test_read_head_rejects_event_expected_head_that_differs_from_parent(self):
+        root = self.writer.current_head()
+        event = reservation_event(expected_head="f" * 40)
+        malformed = self.writer._make_commit(
+            canonical_event_bytes(event) + b"\n", parent=root, message="wrong parent"
+        )
+        subprocess.run(
+            ["git", "-C", str(self.repo), "update-ref", self.writer.ref, malformed],
+            check=True,
+        )
+        with self.assertRaises(AppendOutcomeUncertain):
+            self.writer.read_head()
+
     def test_callback_exceptions_block_and_freeze_without_appending(self):
         head = self.writer.current_head()
         event = reservation_event(expected_head=head)
@@ -1328,8 +1410,14 @@ class WriterTests(unittest.TestCase):
         )
         head = writer.current_head()
         event = reservation_event(expected_head=head)
-        advanced = writer._make_commit(b"", parent=head, message="other")
-        observations = [(head, writer.read_head().raw), (advanced, b"")]
+        advanced_event = reservation_event(
+            "EVT-000000000001",
+            transaction_id="remote-other",
+            expected_head=head,
+        )
+        advanced_raw = canonical_event_bytes(advanced_event) + b"\n"
+        advanced = writer._make_commit(advanced_raw, parent=head, message="other")
+        observations = [(head, writer.read_head().raw), (advanced, advanced_raw)]
 
         def push(_commit, _branch, _expected):
             raise OSError("unknown remote response")
@@ -2284,6 +2372,28 @@ class WriterTests(unittest.TestCase):
             expected_head=head,
             push=lambda *_args: pushed.append(True),
             reconcile=lambda: ("f" * 40, b""),
+        )
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "APPEND_OUTCOME_UNCERTAIN", True),
+        )
+        self.assertEqual(pushed, [])
+
+    def test_callback_reconciliation_rejects_malformed_history(self):
+        writer = ReleaseEventWriter(
+            self.repo,
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        head = writer.current_head()
+        malformed = writer._make_commit(b"", parent=head, message="empty descendant")
+        pushed: list[bool] = []
+        result = writer.append_remote(
+            reservation_event(expected_head=head),
+            expected_head=head,
+            push=lambda *_args: pushed.append(True),
+            reconcile=lambda: (malformed, b""),
         )
         self.assertEqual(
             (result.status, result.reason_code, result.frozen),

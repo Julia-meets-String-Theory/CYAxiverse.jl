@@ -9,7 +9,6 @@ from .allocation import (
     select_maintenance_version,
     select_principal_dev,
     select_principal_sentinel,
-    validated_occupancy_proof,
 )
 from .codec import canonical_json, canonical_json_line, sha256_hex
 from .static import (
@@ -75,7 +74,6 @@ __all__ = [
     "select_maintenance_version",
     "select_principal_dev",
     "select_principal_sentinel",
-    "validated_occupancy_proof",
     "sha256_hex",
     "static_iteration_snapshot",
     "snapshot_is_stale",

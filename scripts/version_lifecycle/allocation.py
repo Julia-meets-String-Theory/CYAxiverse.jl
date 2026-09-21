@@ -11,7 +11,6 @@ from dataclasses import dataclass
 import re
 from typing import Any, Iterable, Mapping
 
-from .codec import canonical_json, sha256_hex
 from .static import (
     BlockedResult,
     StaticSnapshot,
@@ -19,6 +18,7 @@ from .static import (
     _has_verified_authority,
     validate_static_snapshot,
 )
+from .writer import _is_verified_ledger_head
 from .versions import (
     Version,
     VersionLike,
@@ -179,97 +179,21 @@ def _event_occupied(events: Iterable[Mapping[str, Any]]) -> set[str]:
 
 def _validated_event_head(
     head: Any,
-    *,
-    static_snapshot_digest: str | None = None,
 ) -> tuple[str, set[str]]:
-    """Require an exact commit identity and a validated canonical event stream."""
+    """Require an authority-bound head returned by the event writer."""
 
-    if head is None:
-        raise ValueError("allocation_event_head is required")
-    if isinstance(head, Mapping) and head.get("status") == "VALIDATED":
-        commit = head.get("head_commit")
-        occupied_values = head.get("occupied_versions")
-        proof_digest = head.get("proof_digest")
-        proof_snapshot_digest = head.get("static_snapshot_digest")
-        if not isinstance(commit, str) or _GIT_OBJECT_RE.fullmatch(commit) is None:
-            raise ValueError("validated event proof requires a full head_commit")
-        if not isinstance(occupied_values, list):
-            raise ValueError("validated event proof requires ordered occupied_versions")
-        if static_snapshot_digest is not None and proof_snapshot_digest != static_snapshot_digest:
-            raise ValueError("occupancy proof is bound to a different static snapshot")
-        normalized: list[str] = []
-        for value in occupied_values:
-            try:
-                parsed = parse_package_version(value)
-            except (TypeError, ValueError) as error:
-                raise ValueError("validated event proof contains a noncanonical version") from error
-            identity = parsed.final.canonical
-            if parsed.canonical != value:
-                raise ValueError("validated event proof contains a noncanonical version")
-            normalized.append(identity)
-        if normalized != sorted(normalized) or len(set(normalized)) != len(normalized):
-            raise ValueError("validated event proof occupied_versions must be sorted and unique")
-        proof_preimage = {"head_commit": commit, "occupied_versions": normalized}
-        if proof_snapshot_digest is not None:
-            proof_preimage["static_snapshot_digest"] = proof_snapshot_digest
-        expected = sha256_hex(canonical_json(proof_preimage))
-        if proof_digest != expected:
-            raise ValueError("validated event proof digest does not match its identity")
-        return commit, set(normalized)
-    commit = getattr(head, "commit", None)
-    raw = getattr(head, "raw", None)
-    provided_events = getattr(head, "events", None)
-    if isinstance(head, Mapping):
-        commit = head.get("commit", head.get("head_commit", commit))
-        raw = head.get("raw", raw)
-        provided_events = head.get("events", provided_events)
-    if commit is not None or raw is not None or provided_events is not None:
-        if not isinstance(commit, str) or _GIT_OBJECT_RE.fullmatch(commit) is None:
-            raise ValueError("event head commit must be a full Git object ID")
-        if not isinstance(raw, (bytes, bytearray)):
-            raise ValueError("event head raw stream bytes are required")
-        from .events import parse_stream
-
-        parsed = tuple(parse_stream(bytes(raw)))
-        if provided_events is not None:
-            supplied = tuple(dict(event) for event in provided_events)
-            if supplied != parsed:
-                raise ValueError("event head events do not match canonical raw stream")
-        return commit, _event_occupied(parsed)
-    raise ValueError("allocation_event_head must be a validated LedgerHead or occupancy proof")
-
-
-def validated_occupancy_proof(
-    head_commit: str,
-    occupied_versions: Iterable[str],
-    *,
-    static_snapshot_digest: str | None = None,
-) -> dict[str, Any]:
-    """Build the explicit proof form accepted by :func:`global_allocation_view`."""
-
-    if not isinstance(head_commit, str) or _GIT_OBJECT_RE.fullmatch(head_commit) is None:
-        raise ValueError("head_commit must be a full Git object ID")
-    normalized: set[str] = set()
-    for value in occupied_versions:
-        try:
-            parsed = parse_package_version(value)
-        except (TypeError, ValueError) as error:
-            raise ValueError("occupied version must be canonical") from error
-        identity = parsed.final.canonical
-        if parsed.canonical != value:
-            raise ValueError("occupied version must be canonical")
-        normalized.add(identity)
-    ordered = sorted(normalized)
-    proof = {"head_commit": head_commit, "occupied_versions": ordered}
-    if static_snapshot_digest is not None:
-        if not isinstance(static_snapshot_digest, str):
-            raise ValueError("static_snapshot_digest must be a string")
-        proof["static_snapshot_digest"] = static_snapshot_digest
-    return {
-        "status": "VALIDATED",
-        **proof,
-        "proof_digest": sha256_hex(canonical_json(proof)),
-    }
+    if not _is_verified_ledger_head(head):
+        raise ValueError("allocation_event_head must be a writer-verified LedgerHead")
+    commit = head.commit
+    raw = head.raw
+    provided_events = head.events
+    if not isinstance(commit, str) or _GIT_OBJECT_RE.fullmatch(commit) is None:
+        raise ValueError("event head commit must be a full Git object ID")
+    if not isinstance(raw, bytes):
+        raise ValueError("event head raw stream bytes are required")
+    if not isinstance(provided_events, tuple):
+        raise ValueError("event head events are required")
+    return commit, _event_occupied(provided_events)
 
 
 def global_allocation_view(
@@ -288,10 +212,7 @@ def global_allocation_view(
         # snapshots and caller-forged booleans must fail closed here.
         if not _has_verified_authority(snapshot):
             raise StaticValidationError("fresh remote static authority has not been verified")
-        event_head_commit, mutable_values = _validated_event_head(
-            allocation_event_head,
-            static_snapshot_digest=snapshot.snapshot_digest,
-        )
+        event_head_commit, mutable_values = _validated_event_head(allocation_event_head)
     except StaticValidationError as error:
         detail = str(error)
         if "source bytes" in detail:
@@ -467,5 +388,4 @@ __all__ = [
     "select_maintenance_version",
     "select_principal_dev",
     "select_principal_sentinel",
-    "validated_occupancy_proof",
 ]
