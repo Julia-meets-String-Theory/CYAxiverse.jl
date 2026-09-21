@@ -240,6 +240,57 @@ class GateALifecycleCliFixture(unittest.TestCase):
         self.assertEqual(payload["status"], "BLOCKED")
         self.assertEqual(payload["reason_code"], "EVENT_AUTHORITY_UNAVAILABLE")
 
+    def test_noncanonical_event_branch_is_blocked_for_authority_commands(self) -> None:
+        second_writer = ReleaseEventWriter(
+            self.repo,
+            branch="second-ledger",
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        second_writer.bootstrap(protection_checker=lambda: True)
+        _git(
+            self.repo,
+            "push",
+            "-q",
+            "origin",
+            "refs/heads/second-ledger:refs/heads/second-ledger",
+        )
+
+        for command, extra in (
+            ("events", ()),
+            ("allocation", ("--principal-closed", "0.2.0")),
+        ):
+            with self.subTest(command=command):
+                code, payload = self._run_cli(
+                    command,
+                    "--event-branch", "second-ledger",
+                    "--repo", str(self.repo),
+                    "--dry-run",
+                    "--source-repository", "fixture/repo",
+                    *extra,
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(payload["status"], "BLOCKED")
+                self.assertEqual(payload["reason_code"], "EVENT_AUTHORITY_NONCANONICAL")
+
+        code, payload = self._run_cli(
+            "events",
+            "--repo", str(self.repo),
+            "--dry-run",
+            "--source-repository", "fixture/repo",
+        )
+        self.assertEqual(code, 0, payload)
+        self.assertEqual(payload["event_head"]["status"], "READY")
+
+        code, payload = self._run_cli(
+            "allocation",
+            "--repo", str(self.repo),
+            "--dry-run",
+            "--principal-closed", "0.2.0",
+            "--source-repository", "fixture/repo",
+        )
+        self.assertEqual(code, 0, payload)
+        self.assertEqual(payload["allocation_view"]["status"], "READY")
+
     def test_remote_event_blob_mode_must_be_canonical(self) -> None:
         head = self.writer.current_head()
         blob = subprocess.check_output(

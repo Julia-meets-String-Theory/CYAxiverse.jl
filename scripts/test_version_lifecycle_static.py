@@ -60,6 +60,7 @@ def _run(repo: Path, *args: str) -> str:
 def _fixture_event_head(
     occupied_versions: tuple[str, ...] = (),
     *,
+    branch: str = "release-events",
     events: tuple[dict, ...] | None = None,
 ) -> LedgerHead:
     """Build a test head through the writer's verified Git authority path."""
@@ -85,7 +86,7 @@ def _fixture_event_head(
     _run(repo, "init", "-q", "-b", "main")
     _run(repo, "config", "user.email", "tests@example.invalid")
     _run(repo, "config", "user.name", "Lifecycle Tests")
-    writer = ReleaseEventWriter(repo)
+    writer = ReleaseEventWriter(repo, branch=branch)
     root = writer._make_commit(b"", parent=None, message="fixture bootstrap")
     _run(repo, "update-ref", writer.ref, root)
     raw = b""
@@ -701,6 +702,22 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         self.assertIsInstance(result, BlockedResult)
         assert isinstance(result, BlockedResult)
         self.assertEqual(result.reason_code, "ALLOCATION_EVENT_HEAD_INVALID")
+
+    def test_noncanonical_orphan_event_history_cannot_enter_allocation(self) -> None:
+        repo = _fixture()
+        snapshot = static_snapshot(repo, source_repository="fixture/repo")
+        assert not isinstance(snapshot, BlockedResult)
+
+        canonical = global_allocation_view(snapshot, _fixture_event_head())
+        self.assertEqual(canonical.status, "READY")
+
+        second_ledger = global_allocation_view(
+            snapshot,
+            _fixture_event_head(branch="second-ledger"),
+        )
+        self.assertIsInstance(second_ledger, BlockedResult)
+        assert isinstance(second_ledger, BlockedResult)
+        self.assertEqual(second_ledger.reason_code, "ALLOCATION_EVENT_HEAD_INVALID")
 
     def test_historical_event_snapshot_remains_occupied_after_static_refresh(self) -> None:
         repo = _fixture()

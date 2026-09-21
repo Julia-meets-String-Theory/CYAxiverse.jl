@@ -83,6 +83,9 @@ class _ExternalLeaseReleaseError(WriterError):
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _VERIFIED_HEAD_TOKEN = object()
+CANONICAL_EVENT_BRANCH = "release-events"
+CANONICAL_EVENT_REF = f"refs/heads/{CANONICAL_EVENT_BRANCH}"
+CANONICAL_EVENT_STREAM = "release-events.jsonl"
 
 
 @dataclass(frozen=True)
@@ -103,25 +106,45 @@ class LedgerHead:
     commit: str
     raw: bytes
     events: tuple[dict[str, Any], ...]
+    repository_identity: str = ""
+    ref: str = ""
+    stream_path: str = ""
     _authority_token: object | None = field(default=None, init=False, repr=False, compare=False)
-    _authority_binding: tuple[str, bytes, tuple[bytes, ...]] | None = field(
+    _authority_binding: tuple[str, str, str, str, bytes, tuple[bytes, ...]] | None = field(
         default=None, init=False, repr=False, compare=False
     )
 
 
 def _verified_ledger_head(
+    repository_identity: str,
+    ref: str,
+    stream_path: str,
     commit: str,
     raw: bytes,
     events: tuple[dict[str, Any], ...],
 ) -> LedgerHead:
     """Bind a head only after the writer has verified its Git-backed stream."""
 
-    head = LedgerHead(commit=commit, raw=raw, events=events)
+    head = LedgerHead(
+        commit=commit,
+        raw=raw,
+        events=events,
+        repository_identity=repository_identity,
+        ref=ref,
+        stream_path=stream_path,
+    )
     object.__setattr__(head, "_authority_token", _VERIFIED_HEAD_TOKEN)
     object.__setattr__(
         head,
         "_authority_binding",
-        (commit, raw, tuple(canonical_json(dict(event)) for event in events)),
+        (
+            repository_identity,
+            ref,
+            stream_path,
+            commit,
+            raw,
+            tuple(canonical_json(dict(event)) for event in events),
+        ),
     )
     return head
 
@@ -131,8 +154,16 @@ def _is_verified_ledger_head(value: Any) -> bool:
 
     if not isinstance(value, LedgerHead) or value._authority_token is not _VERIFIED_HEAD_TOKEN:
         return False
+    if not all(
+        isinstance(identity, str) and identity
+        for identity in (value.repository_identity, value.ref, value.stream_path)
+    ):
+        return False
     try:
         binding = (
+            value.repository_identity,
+            value.ref,
+            value.stream_path,
             value.commit,
             value.raw,
             tuple(canonical_json(dict(event)) for event in value.events),
@@ -187,8 +218,8 @@ class ReleaseEventWriter:
         self,
         repo: str | os.PathLike[str],
         *,
-        branch: str = "release-events",
-        stream_path: str = "release-events.jsonl",
+        branch: str = CANONICAL_EVENT_BRANCH,
+        stream_path: str = CANONICAL_EVENT_STREAM,
         remote: str | None = None,
         exclusion_checker: Callable[[], bool] | None = None,
         static_snapshot_checker: Callable[[str], bool] | None = None,
@@ -278,7 +309,14 @@ class ReleaseEventWriter:
 
         self._verify_stream_topology(commit, raw)
         events = tuple(parse_stream(raw))
-        return _verified_ledger_head(commit, raw, events)
+        return _verified_ledger_head(
+            str(self.repo.resolve()),
+            self.ref,
+            self.stream_path,
+            commit,
+            raw,
+            events,
+        )
 
     def bootstrap(
         self,
@@ -1445,7 +1483,7 @@ class ReleaseEventWriter:
 def bootstrap_release_events(
     repo: str | os.PathLike[str],
     *,
-    branch: str = "release-events",
+    branch: str = CANONICAL_EVENT_BRANCH,
     protection_checker: Callable[[], bool] | None = None,
     static_exclusion: StaticMutationExclusion | None = None,
     exclusion_lease: Callable[[], ContextManager[bool]] | None = None,

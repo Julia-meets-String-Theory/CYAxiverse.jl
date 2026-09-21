@@ -210,6 +210,17 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
     ``finally``; no branch or tag is created by the CLI.
     """
 
+    if (
+        args.event_branch != DEFAULT_EVENT_BRANCH
+        or args.event_stream != DEFAULT_EVENT_STREAM
+    ):
+        return _blocked(
+            "EVENT_AUTHORITY_NONCANONICAL",
+            "allocation event authority must use release-events/release-events.jsonl",
+            branch=args.event_branch,
+            stream_path=args.event_stream,
+        ), None
+
     try:
         writer = ReleaseEventWriter(
             args.repo,

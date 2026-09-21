@@ -18,7 +18,11 @@ from .static import (
     _has_verified_authority,
     validate_static_snapshot,
 )
-from .writer import _is_verified_ledger_head
+from .writer import (
+    CANONICAL_EVENT_REF,
+    CANONICAL_EVENT_STREAM,
+    _is_verified_ledger_head,
+)
 from .versions import (
     Version,
     VersionLike,
@@ -184,6 +188,8 @@ def _validated_event_head(
 
     if not _is_verified_ledger_head(head):
         raise ValueError("allocation_event_head must be a writer-verified LedgerHead")
+    if head.ref != CANONICAL_EVENT_REF or head.stream_path != CANONICAL_EVENT_STREAM:
+        raise ValueError("allocation_event_head is not the canonical release-events authority")
     commit = head.commit
     raw = head.raw
     provided_events = head.events

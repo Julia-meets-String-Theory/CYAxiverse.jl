@@ -161,11 +161,20 @@ publisher clone did not start from `vmm`. Those findings belong only to the
 thirteenth candidate. The corrected successor requires fresh independent SPEC
 and STANDARDS reviews.
 
+The fourteenth frozen candidate was commit
+`2d506e627b9362db4ebcbba0673f1f3423750ed2` (tree
+`53a10d98b4fdc471c6e71c51c2e112957685494e`). The independent STANDARDS
+review returned `PASS`; the independent SPEC review returned
+`REQUEST_CHANGES`. SPEC found that verified event heads bound commit, bytes and
+events but did not bind the canonical `release-events` ref and stream, so a
+second valid ledger branch could reach allocation. Those verdicts belong only
+to the fourteenth candidate. The corrected successor requires fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 228 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 230 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |
