@@ -130,6 +130,9 @@ GitHub remain the live work-state record. The Approved spec at
   `REQUEST_CHANGES` verdicts, then route every remaining remote-advertisement
   reader through the strict shared parser and bind `candidate_id` across the
   candidate-open, prepared-intent and released-event identities.
+- [x] Run independent SPEC/STANDARDS review on `2cb8ad4`; record SPEC `PASS`
+  and STANDARDS `REQUEST_CHANGES`, then require `candidate_id` in released
+  events and compare every durable intent binding again before publication.
 - [ ] Obtain fresh independent exact-candidate SPEC/STANDARDS pre-merge
   reviews; reconcile all blocking findings and bind the final candidate SHA.
 - [ ] Present final reviewed PR and evidence for an explicit owner merge

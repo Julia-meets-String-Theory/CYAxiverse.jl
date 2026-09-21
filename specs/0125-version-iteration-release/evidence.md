@@ -258,14 +258,32 @@ Adversarial regressions cover malformed, duplicate, control-framed and
 unterminated records at each reader plus forged candidate identifiers. Fresh
 exact-successor reviews are required.
 
+The nineteenth frozen candidate was commit
+`2cb8ad4569acd0f811654398e00ccc8520a1df7b` (tree
+`a866c803b55825554a8327d00ab081f88c432020`). Its fresh independent SPEC
+review returned `PASS`. Its fresh independent STANDARDS review returned
+`REQUEST_CHANGES`: the released-event required fields and public validator
+still allowed `candidate_id` to be absent, and the transaction controller did
+not independently compare the returned released event with every durable
+intent binding field. Those verdicts belong only to the nineteenth candidate.
+
+The fourth review-loop correction implementation is commit
+`96f26cda2bb463028964621ecf9ce3864375e8cd` (tree
+`0374fc8e77289f5f2246282a7b4a102778b52131`). It requires `candidate_id` in
+the canonical released-event schema and public validator, removes the
+missing-ID transition compatibility, and independently compares every shared
+intent-binding field before publication. Regressions prove that a missing or
+forged released candidate ID fails closed. Fresh exact-successor reviews are
+required.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 244 tests in 59.361 seconds on `0fddf3c`. |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 13 tests (3 version, 10 documentation) in 9.725 seconds. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 245 tests in 61.385 seconds on `96f26cd`. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 13 tests (3 version, 10 documentation) in 9.840 seconds. |
 | `python3 scripts/check_version_bump.py --base 995163f0058488ea183ac645045ed8b1636bef4a --head HEAD` | Passed: lifecycle-only changes require no package-version update. |
-| `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on `0fddf3c` with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
+| `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on `96f26cd` with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on `0fddf3c` with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |
 | `python3 scripts/agent_verify.py package` | Failed: existing phase/volume detuning Hessian test at `test/runtests.jl:1267` expects `4π²`; observed `2π²`. |
 | `julia --project=. bin/audit.jl` via `agent_verify.py run` | Failed: the same two JET reports for undefined `i` in `reduced_models.jl` and `poly102_inflation.jl`; file-monitor exhaustion warnings also appeared after the two reports. |
@@ -278,6 +296,6 @@ The failed broad Julia gates remain failed at their recorded baseline. The
 scientific normalization and benchmark code are outside this approved
 lifecycle change, `Project.toml` remains `0.2.0`, and no production release
 state changed. Remote CI and fresh exact-final-candidate SPEC/STANDARDS review
-for the third review-loop successor are not yet observed. Live protection/event-authority setup, an explicit owner
+for the fourth review-loop successor are not yet observed. Live protection/event-authority setup, an explicit owner
 merge decision, and fresh post-settings review remain later work; Gate B stays
 separate.
