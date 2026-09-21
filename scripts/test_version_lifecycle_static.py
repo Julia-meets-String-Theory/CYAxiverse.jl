@@ -18,8 +18,11 @@ sys.path.insert(0, str(SCRIPT_ROOT))
 
 from version_lifecycle import (  # noqa: E402
     BlockedResult,
+    MAX_VERSION_COMPONENT,
+    Version,
     canonical_json,
     global_allocation_view,
+    maintenance_line,
     parse_package_version,
     parse_public_tag,
     recompute_snapshot_digests,
@@ -36,7 +39,11 @@ from version_lifecycle.static import (  # noqa: E402
     sanitize_source_repository,
 )
 from version_lifecycle.writer import LedgerHead  # noqa: E402
-from version_lifecycle.events import canonical_event_bytes  # noqa: E402
+from version_lifecycle.events import (  # noqa: E402
+    EventSchemaError,
+    canonical_event_bytes,
+    validate_event,
+)
 
 
 def _run(repo: Path, *args: str) -> str:
@@ -97,15 +104,86 @@ class VersionLifecycleStaticTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_public_tag(value)
 
+    def test_version_components_match_julia_uint32_bounds(self) -> None:
+        maximum = MAX_VERSION_COMPONENT
+        for value in (
+            f"{maximum}.0.0",
+            f"0.{maximum}.0",
+            f"0.0.{maximum}",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(parse_package_version(value).canonical, value)
+                self.assertEqual(parse_public_tag(f"v{value}").canonical, value)
+        for value in (
+            f"{maximum + 1}.0.0",
+            f"0.{maximum + 1}.0",
+            f"0.0.{maximum + 1}",
+            f"{maximum + 1}.0.0-DEV",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_package_version(value)
+        with self.assertRaises(ValueError):
+            Version(maximum + 1, 0, 0)
+
+    def test_maintenance_lines_use_bounded_shared_components(self) -> None:
+        for value in (
+            "maintenance/10.1",
+            "maintenance/172.16",
+            "maintenance/169.254",
+            "maintenance/192.168",
+        ):
+            with self.subTest(value=value):
+                expected = tuple(map(int, value.split("/")[1].split(".")))
+                self.assertEqual(maintenance_line(value), expected)
+        with self.assertRaises(ValueError):
+            maintenance_line(f"maintenance/{MAX_VERSION_COMPONENT + 1}.0")
+
+    def test_event_validator_rejects_julia_overflow_component(self) -> None:
+        event = {
+            "schema_version": 1,
+            "event_id": "EVT-000000000001",
+            "event_type": "development_reservation_prepared",
+            "timestamp_utc": "2026-09-20T12:34:56Z",
+            "transaction_id": "overflow-regression",
+            "static_iteration_snapshot": "a" * 64,
+            "expected_event_head": "c" * 40,
+            "owner_line": "principal",
+            "final_version": "0.3.1",
+            "intended_dev_version": "0.3.1-DEV",
+            "expected_line_head": "b" * 40,
+            "reservation_id": "overflow-regression",
+        }
+        validate_event(event)
+        event["final_version"] = f"{MAX_VERSION_COMPONENT + 1}.0.0"
+        event["intended_dev_version"] = f"{MAX_VERSION_COMPONENT + 1}.0.0-DEV"
+        with self.assertRaises(EventSchemaError):
+            validate_event(event)
+
     @unittest.skipUnless(shutil.which("julia"), "Julia is required for grammar equivalence")
     def test_supported_versions_round_trip_through_julia(self) -> None:
-        for value in ("0.2.0", "0.2.1-DEV", "12.0.3"):
+        for value in (
+            "0.2.0",
+            "0.2.1-DEV",
+            "12.0.3",
+            f"{MAX_VERSION_COMPONENT}.0.0",
+        ):
             with self.subTest(value=value):
                 result = subprocess.run(
                     ["julia", "--startup-file=no", "-e", "print(VersionNumber(ARGS[1]))", value],
                     check=True, capture_output=True, text=True,
                 )
                 self.assertEqual(result.stdout, parse_package_version(value).canonical)
+        for value in (
+            f"{MAX_VERSION_COMPONENT + 1}.0.0",
+            f"0.{MAX_VERSION_COMPONENT + 1}.0",
+            f"0.0.{MAX_VERSION_COMPONENT + 1}",
+        ):
+            with self.subTest(value=value):
+                result = subprocess.run(
+                    ["julia", "--startup-file=no", "-e", "print(VersionNumber(ARGS[1]))", value],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
 
     def test_snapshot_contains_four_verified_digests_and_legacy_tag_is_excluded(self) -> None:
         repo = _fixture()
@@ -494,6 +572,25 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         self.assertEqual(maintenance.version.canonical, "0.7.2-DEV")
         self.assertTrue(view.is_available("0.7.2"))
         self.assertFalse(view.is_available("0.7.3"))
+
+    def test_allocation_blocks_when_julia_patch_domain_is_exhausted(self) -> None:
+        repo = _fixture()
+        snapshot = static_snapshot(repo, source_repository="fixture/repo")
+        assert not isinstance(snapshot, BlockedResult)
+        head = validated_occupancy_proof(
+            "a" * 40, [], static_snapshot_digest=snapshot.snapshot_digest
+        )
+        closed = f"0.7.{MAX_VERSION_COMPONENT}"
+        principal = select_principal_sentinel(closed, snapshot, head)
+        self.assertEqual(
+            (principal.status, principal.reason_code),
+            ("BLOCKED", "PRINCIPAL_VERSION_EXHAUSTED"),
+        )
+        maintenance = select_maintenance_version("maintenance/0.7", closed, snapshot, head)
+        self.assertEqual(
+            (maintenance.status, maintenance.reason_code),
+            ("BLOCKED", "MAINTENANCE_PATCH_EXHAUSTED"),
+        )
 
     def test_invalid_event_head_never_declares_a_version_available(self) -> None:
         repo = _fixture()

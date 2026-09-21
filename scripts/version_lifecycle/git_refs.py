@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, ContextManager
 
+from .versions import parse_package_version, parse_public_tag
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - the supported runner is POSIX.
@@ -27,10 +29,6 @@ except ImportError:  # pragma: no cover - the supported runner is POSIX.
 FULL_REF = re.compile(r"^refs/(?:heads|tags|candidates)/[A-Za-z0-9._/-]+$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 UTC = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-PUBLIC_TAG_REF = re.compile(
-    r"^refs/tags/v(?:0|[1-9][0-9]*)\."
-    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
-)
 LEGACY_TAG_REF = "refs/tags/v-0.1"
 
 
@@ -356,7 +354,14 @@ class ProtectionEvidence:
         """Require an applicable create/update/delete rule excluding legacy."""
 
         try:
-            if PUBLIC_TAG_REF.fullmatch(ref) is None:
+            if not isinstance(ref, str) or not ref.startswith("refs/tags/"):
+                raise GitIdentityError("noncanonical public tag")
+            tag = ref.removeprefix("refs/tags/")
+            try:
+                parsed = parse_public_tag(tag)
+            except (TypeError, ValueError) as exc:
+                raise GitIdentityError("noncanonical public tag") from exc
+            if ref != f"refs/tags/v{parsed.canonical}":
                 raise GitIdentityError("noncanonical public tag")
             self.require(ref, creation=True)
             if self._matches(LEGACY_TAG_REF):
@@ -607,7 +612,11 @@ class GitRepository:
             self._sha(commit)
             if self.object_type(commit) != "commit":
                 raise GitIdentityError("iteration anchor must identify a commit")
-            if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
+            try:
+                parsed_version = parse_package_version(version)
+            except (TypeError, ValueError) as exc:
+                raise GitIdentityError("invalid final version") from exc
+            if parsed_version.is_dev or parsed_version.canonical != version:
                 raise GitIdentityError("invalid final version")
             if not UTC.fullmatch(closure_timestamp_utc):
                 raise GitIdentityError("invalid closure UTC timestamp")

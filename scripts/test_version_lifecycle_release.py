@@ -638,6 +638,14 @@ class TestReleaseEvidence(unittest.TestCase):
             "release_line": "maintenance/10.1",
             "public_tag": "v10.1.0",
         }))
+        for line in ("10.1", "172.16", "169.254", "192.168"):
+            with self.subTest(line=line):
+                ref = f"refs/heads/maintenance/{line}"
+                self.assertTrue(is_safe_public_value(ref, key="branch_ref"))
+                self.assertTrue(is_safe_public_value(ref, key="line_ref"))
+        self.assertTrue(is_safe_public_value("refs/heads/vmm", key="line_ref"))
+        self.assertFalse(is_safe_public_value("10.1.0", key="branch_ref"))
+        self.assertFalse(is_safe_public_value("refs/heads/10.1.0", key="line_ref"))
         self.assertFalse(is_safe_public_value({
             "certification_environment": "10.1.0",
         }))

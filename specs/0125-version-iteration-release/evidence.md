@@ -121,13 +121,24 @@ IP-like source components hidden behind `.git`, SCP, and URL forms. Those
 verdicts belong only to the ninth candidate. The corrected successor requires
 fresh reviews.
 
+The tenth frozen candidate was commit
+`d34f3caa3d0f6d90e2e6b8ced798673ee77eba95` (tree
+`58cab748122edb19c582de900bc9c769bf7db7de`). Independent SPEC and
+STANDARDS reviews returned `REQUEST_CHANGES`. Findings covered false
+rejection of canonical maintenance refs as private addresses, Julia version
+component bounds and duplicate version validators, local-cache-only remote
+idempotency, default CLI path redaction corrupting version identities, and
+remote append without an exact-head compare-and-swap guard. Those verdicts
+belong only to the tenth candidate. The corrected successor requires fresh
+reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 208 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 217 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
-| `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline local dependencies; Documenter rendered all configured pages. |
+| `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |
 | `python3 scripts/agent_verify.py package` | Failed: existing phase/volume detuning Hessian test at `test/runtests.jl:1267` expects `4π²`; observed `2π²`. |
 | `julia --project=. bin/audit.jl` via `agent_verify.py run` | Failed: two existing JET reports for undefined `i` in benchmark modules. |

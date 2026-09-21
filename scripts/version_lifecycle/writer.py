@@ -2,9 +2,9 @@
 
 The writer uses Git's expected-old-value form of ``update-ref`` for local
 compare-and-swap updates.  Remote appends build the descendant commit first
-and use a normal non-force push.  An exception from a remote push is treated
-as an uncertain outcome until the remote stream has been read and reconciled
-by transaction ID and exact canonical event bytes.
+and use an expected-old compare-and-swap push.  An exception from a remote
+push is treated as an uncertain outcome until the remote stream has been read
+and reconciled by transaction ID and exact canonical event bytes.
 """
 
 from __future__ import annotations
@@ -1049,15 +1049,6 @@ class ReleaseEventWriter:
             )
         transaction_id = canonical["transaction_id"]
         existing = self._transaction_event(list(current.events), transaction_id)
-        if existing is not None:
-            return AppendResult(
-                status="IDEMPOTENT",
-                reason_code=None,
-                transaction_id=transaction_id,
-                event=canonical,
-                head=current.commit,
-                idempotent=True,
-            )
 
         if remote_reader is not None:
             try:
@@ -1074,6 +1065,72 @@ class ReleaseEventWriter:
                         event=canonical,
                         head=None,
                         frozen=True,
+                    )
+                freshest_events = parse_stream(freshest_raw)
+                remote_existing = self._transaction_event(
+                    freshest_events, transaction_id
+                )
+                if existing is not None:
+                    # A local transaction match is only a cache result.  The
+                    # remote authority must contain the exact same canonical
+                    # event before a replay can be called idempotent.
+                    if (
+                        remote_existing is None
+                        or canonical_event_bytes(remote_existing) != encoded
+                    ):
+                        return AppendResult(
+                            status="BLOCKED",
+                            reason_code="APPEND_OUTCOME_UNCERTAIN",
+                            transaction_id=transaction_id,
+                            event=canonical,
+                            head=freshest_head,
+                            frozen=True,
+                        )
+                    if freshest_head == current.commit:
+                        if freshest_raw != current.raw:
+                            return AppendResult(
+                                status="BLOCKED",
+                                reason_code="APPEND_OUTCOME_UNCERTAIN",
+                                transaction_id=transaction_id,
+                                event=canonical,
+                                head=freshest_head,
+                                frozen=True,
+                            )
+                    else:
+                        if not freshest_raw.startswith(current.raw):
+                            return AppendResult(
+                                status="BLOCKED",
+                                reason_code="APPEND_OUTCOME_UNCERTAIN",
+                                transaction_id=transaction_id,
+                                event=canonical,
+                                head=freshest_head,
+                                frozen=True,
+                            )
+                        ancestry = self._git(
+                            [
+                                "merge-base",
+                                "--is-ancestor",
+                                current.commit,
+                                freshest_head,
+                            ],
+                            check=False,
+                        )
+                        if ancestry.returncode != 0:
+                            return AppendResult(
+                                status="BLOCKED",
+                                reason_code="APPEND_OUTCOME_UNCERTAIN",
+                                transaction_id=transaction_id,
+                                event=canonical,
+                                head=freshest_head,
+                                frozen=True,
+                            )
+                    return AppendResult(
+                        status="IDEMPOTENT",
+                        reason_code=None,
+                        transaction_id=transaction_id,
+                        event=canonical,
+                        head=freshest_head,
+                        idempotent=True,
                     )
                 if freshest_head is not None and freshest_head != current.commit:
                     # The local proposal was made against stale evidence.  A
@@ -1112,7 +1169,12 @@ class ReleaseEventWriter:
                 push(commit, self.branch, current.commit)
                 return
             self._git(
-                ["push", remote_name, f"{commit}:refs/heads/{self.branch}"],
+                [
+                    "push",
+                    f"--force-with-lease={self.ref}:{current.commit}",
+                    remote_name,
+                    f"{commit}:{self.ref}",
+                ],
             )
 
         try:

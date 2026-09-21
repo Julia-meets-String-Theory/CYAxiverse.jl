@@ -19,7 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .codec import canonical_json, sha256_hex
 from .public_ip import parse_ipv4_compat
-from .versions import Version, final_version, parse_package_version, parse_public_tag
+from .versions import Version, final_version, maintenance_line, parse_package_version, parse_public_tag
 
 
 CANONICAL_STATIC_ITERATION_SOURCE = "refs/heads/vmm:iterations.toml"
@@ -554,15 +554,13 @@ def _validate_entry(entry: Mapping[str, Any], source: str, *, anchor: str | None
         version = _entry_version(entry, source)
         release_line = _as_str(entry, "release_line", source)
         if release_line != "principal":
-            match = re.fullmatch(
-                r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-                release_line,
-            )
-            if match is None:
+            try:
+                line_components = maintenance_line(release_line)
+            except (TypeError, ValueError) as exc:
                 raise StaticValidationError(
                     f"{source} release_line must be principal or maintenance/X.Y"
-                )
-            if (int(match.group(1)), int(match.group(2))) != (version.major, version.minor):
+                ) from exc
+            if line_components != (version.major, version.minor):
                 raise StaticValidationError(
                     f"{source} release_line does not match final_version lineage"
                 )

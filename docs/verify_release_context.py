@@ -29,13 +29,13 @@ from version_lifecycle.release import (  # noqa: E402
     is_canonical_public_tag,
     validate_released_event,
 )
+from version_lifecycle.versions import (  # noqa: E402
+    maintenance_line,
+    parse_package_version,
+)
 
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
-MAINTENANCE_LINE_RE = re.compile(
-    r"^maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
-)
 
 
 def fail(message: str) -> int:
@@ -48,7 +48,12 @@ def full_sha(value: object) -> bool:
 
 
 def canonical_version(value: object) -> bool:
-    return isinstance(value, str) and VERSION_RE.fullmatch(value) is not None
+    if not isinstance(value, str):
+        return False
+    try:
+        return parse_package_version(value).is_final
+    except (TypeError, ValueError):
+        return False
 
 
 def resolve_tag_commit(tag: str) -> str | None:
@@ -291,10 +296,11 @@ def verify(args: argparse.Namespace) -> int:
         return fail("tag Project.toml version does not equal released event final_version")
 
     line = event.get("release_line")
-    if line != "principal" and not (
-        isinstance(line, str) and MAINTENANCE_LINE_RE.fullmatch(line)
-    ):
-        return fail("released event has no canonical principal or maintenance/X.Y line")
+    if line != "principal":
+        try:
+            maintenance_line(line)
+        except (TypeError, ValueError):
+            return fail("released event has no canonical principal or maintenance/X.Y line")
 
     is_principal = line == "principal"
 

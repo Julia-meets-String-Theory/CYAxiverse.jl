@@ -15,6 +15,10 @@ from typing import Union
 
 
 _COMPONENT = r"(?:0|[1-9][0-9]*)"
+# Julia's VersionNumber stores each numeric component in a UInt32.  Keep the
+# Python representation bounded to the same domain so that every governed
+# identity has the same acceptance language as the package runtime.
+MAX_VERSION_COMPONENT = (1 << 32) - 1
 _PACKAGE_RE = re.compile(
     rf"^(?P<major>{_COMPONENT})\.(?P<minor>{_COMPONENT})\.(?P<patch>{_COMPONENT})(?P<dev>-DEV)?$"
 )
@@ -41,8 +45,15 @@ class Version:
     def __post_init__(self) -> None:
         for name in ("major", "minor", "patch"):
             value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"{name} must be a nonnegative integer")
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+                or value > MAX_VERSION_COMPONENT
+            ):
+                raise ValueError(
+                    f"{name} must be an integer in [0, {MAX_VERSION_COMPONENT}]"
+                )
         if not isinstance(self.is_dev, bool):
             raise ValueError("is_dev must be bool")
 
@@ -160,12 +171,17 @@ def maintenance_line(value: str) -> tuple[int, int]:
     match = re.fullmatch(rf"maintenance/({_COMPONENT})\.({_COMPONENT})", value)
     if match is None or value != f"maintenance/{int(match.group(1))}.{int(match.group(2))}":
         raise ValueError(f"invalid maintenance line: {value!r}")
-    return int(match.group(1)), int(match.group(2))
+    major, minor = int(match.group(1)), int(match.group(2))
+    # Validate line components with the same bounded constructor used by
+    # package versions.  The patch value is only a sentinel for this check.
+    Version(major, minor, 0)
+    return major, minor
 
 
 __all__ = [
     "Version",
     "VersionLike",
+    "MAX_VERSION_COMPONENT",
     "as_version",
     "final_version",
     "maintenance_line",

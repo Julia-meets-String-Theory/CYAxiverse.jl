@@ -38,6 +38,7 @@ from version_lifecycle.writer import (  # noqa: E402
     WriterError,
     bootstrap_release_events,
 )
+from version_lifecycle.certification import is_safe_public_value  # noqa: E402
 from version_lifecycle.allocation import _event_occupied  # noqa: E402
 from version_lifecycle.git_refs import GitRepository  # noqa: E402
 
@@ -202,6 +203,61 @@ def release_intent_abort_event(
 
 
 class EventValidationTests(unittest.TestCase):
+    def test_valid_maintenance_refs_pass_event_validation(self):
+        for line in ("10.2", "172.16", "169.254", "192.168"):
+            with self.subTest(line=line):
+                owner = f"maintenance/{line}"
+                prepared = reservation_event(expected_head="b" * 40)
+                prepared.update(
+                    owner_line=owner,
+                    final_version=f"{line}.1",
+                    intended_dev_version=f"{line}.1-DEV",
+                )
+                validate_event(prepared)
+                aborted = dict(
+                    prepared,
+                    event_id="EVT-000000000002",
+                    transaction_id="maintenance-abort",
+                    event_type="development_reservation_aborted",
+                    abort_reason="definite_non_entry",
+                    non_entry_evidence=non_entry_proof(prepared),
+                )
+                aborted.pop("expected_line_head")
+                validate_event(aborted)
+                line_opened = {
+                    "schema_version": 1,
+                    "event_id": "EVT-000000000003",
+                    "event_type": "maintenance_line_opened",
+                    "timestamp_utc": "2026-09-20T12:34:56Z",
+                    "transaction_id": "maintenance-opened",
+                    "static_iteration_snapshot": SNAPSHOT,
+                    "expected_event_head": "b" * 40,
+                    "release_line": owner,
+                    "approved_base_version": f"{line}.0",
+                    "branch_ref": f"refs/heads/{owner}",
+                    "branch_head": "d" * 40,
+                    "reservation_id": prepared["reservation_id"],
+                    "dev_version": f"{line}.1-DEV",
+                }
+                validate_event(line_opened)
+
+    def test_typed_public_refs_allow_maintenance_lines_but_generic_values_stay_strict(self):
+        self.assertTrue(
+            is_safe_public_value(
+                "refs/heads/maintenance/10.2", key="branch_ref"
+            )
+        )
+        self.assertTrue(
+            is_safe_public_value(
+                "refs/heads/maintenance/10.2", key="line_ref"
+            )
+        )
+        for key in ("metadata", "evidence_ref"):
+            with self.subTest(key=key):
+                self.assertFalse(
+                    is_safe_public_value("refs/heads/10.0.0.1", key=key)
+                )
+
     def test_event_is_canonical_and_jsonl_framing_is_exact(self):
         event = dict(reservation_event(), expected_event_head="b" * 40)
         encoded = canonical_event_bytes(event)
@@ -1375,6 +1431,82 @@ class WriterTests(unittest.TestCase):
         )
         self.assertEqual(pushed, [])
         self.assertEqual(writer.current_head(), head)
+
+    def test_remote_replay_does_not_use_local_only_idempotency(self):
+        writer = ReleaseEventWriter(
+            self.repo,
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        head = writer.current_head()
+        event = reservation_event(expected_head=head)
+        appended = writer.append(event, expected_head=head)
+        self.assertEqual(appended.status, "APPENDED")
+        pushed: list[bool] = []
+        result = writer.append_remote(
+            event,
+            expected_head=head,
+            push=lambda *_args: pushed.append(True),
+            reconcile=lambda: (None, b""),
+        )
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "EVENT_BRANCH_UNAVAILABLE", True),
+        )
+        self.assertEqual(pushed, [])
+
+    def test_default_remote_append_uses_expected_head_cas_after_remote_deletion(self):
+        remote = self.repo.parent / "remote-append-cas-race-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        branch = "release-events-cas-race"
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch=branch,
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        head = writer.bootstrap_remote(protection_checker=lambda: True)
+        event = reservation_event(expected_head=head)
+        original_git = writer._git
+        push_commands: list[list[str]] = []
+
+        def delete_before_push(
+            args: list[str], *, input_bytes: bytes | None = None, check: bool = True
+        ):
+            if args and args[0] == "push":
+                push_commands.append(list(args))
+                subprocess.run(
+                    ["git", "-C", str(remote), "update-ref", "-d", writer.ref],
+                    check=True,
+                )
+            return original_git(args, input_bytes=input_bytes, check=check)
+
+        with patch.object(writer, "_git", side_effect=delete_before_push):
+            result = writer.append_remote(event, expected_head=head)
+
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "APPEND_OUTCOME_UNCERTAIN", True),
+        )
+        self.assertEqual(len(push_commands), 1)
+        self.assertIn(
+            f"--force-with-lease={writer.ref}:{head}", push_commands[0]
+        )
+        advertised = subprocess.run(
+            ["git", "-C", str(remote), "show-ref", "--heads"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(advertised.returncode, 1)
+        self.assertEqual(advertised.stdout, "")
 
     def test_remote_append_does_not_create_missing_bare_remote_branch(self):
         remote = self.repo.parent / "missing-event-origin.git"

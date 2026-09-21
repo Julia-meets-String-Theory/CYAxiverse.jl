@@ -76,10 +76,11 @@ class GateALifecycleCliFixture(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def _run_cli(self, *args: str) -> tuple[int, dict]:
+    def _run_cli(self, *args: str, cwd: Path | None = None) -> tuple[int, dict]:
         result = subprocess.run(
             [sys.executable, str(CLI), *args],
             check=False,
+            cwd=cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -90,6 +91,18 @@ class GateALifecycleCliFixture(unittest.TestCase):
         except json.JSONDecodeError as error:
             self.fail(f"CLI did not emit JSON: {result.stdout!r}: {error}")
         return result.returncode, payload
+
+    def test_default_repository_preserves_version_identities(self) -> None:
+        code, payload = self._run_cli(
+            "readiness",
+            "--principal-closed", "0.2.0",
+            "--source-repository", "fixture/repo",
+            cwd=self.repo,
+        )
+        self.assertEqual(code, 0, payload)
+        self.assertEqual(payload["allocation_view"]["allocation"]["version"], "0.2.1-DEV")
+        self.assertNotIn(str(self.repo.resolve()), json.dumps(payload))
+        self.assertNotIn("<repository>", payload["allocation_view"]["allocation"]["version"])
 
     def test_readiness_reads_snapshot_and_event_head_without_mutating_refs(self) -> None:
         before = _git(self.repo, "show-ref")

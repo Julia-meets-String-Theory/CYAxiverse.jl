@@ -30,6 +30,7 @@ from .static import (
     validate_static_snapshot,
 )
 from .versions import (
+    MAX_VERSION_COMPONENT,
     Version,
     as_version,
     final_version,
@@ -54,6 +55,7 @@ __all__ = [
     "StaticSnapshot",
     "StaticValidationError",
     "Version",
+    "MAX_VERSION_COMPONENT",
     "as_version",
     "build_static_snapshot",
     "compute_static_snapshot",

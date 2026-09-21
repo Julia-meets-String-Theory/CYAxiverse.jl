@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .public_ip import parse_ipv4_compat
+from .versions import maintenance_line, parse_package_version, parse_public_tag
 
 
 SUPPORTED_BINDINGS = frozenset(("tree-bound", "commit-bound"))
@@ -44,21 +45,37 @@ def _version_identity(value: str, key: str | None) -> bool:
 
     if key is None:
         return False
-    final = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-    if key == "version" or key.endswith("_version") or key in {
-        "closure", "candidate", "anchor", "final_release", "certified", "main"
-    }:
-        return re.fullmatch(final + r"(?:-DEV)?", value) is not None
-    if key == "line" or key.endswith("_line"):
-        return re.fullmatch(r"maintenance/(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", value) is not None
-    if key == "public_tag":
-        return re.fullmatch("v" + final, value) is not None
-    if key in {"anchor_ref", "closure_anchor"}:
-        return re.fullmatch("refs/tags/iterations/" + final, value) is not None
-    if key == "candidate_ref":
-        return re.fullmatch("refs/heads/candidates/" + final, value) is not None
-    if key == "intent_id":
-        return re.fullmatch("INT-" + final, value) is not None
+    try:
+        if key == "version" or key.endswith("_version") or key in {
+            "closure", "candidate", "anchor", "final_release", "certified", "main"
+        }:
+            parse_package_version(value)
+            return True
+        if key == "line" or key.endswith("_line"):
+            maintenance_line(value)
+            return True
+        if key == "public_tag":
+            parse_public_tag(value)
+            return True
+        if key in {"anchor_ref", "closure_anchor", "candidate_ref", "intent_id"}:
+            prefix = {
+                "anchor_ref": "refs/tags/iterations/",
+                "closure_anchor": "refs/tags/iterations/",
+                "candidate_ref": "refs/heads/candidates/",
+                "intent_id": "INT-",
+            }[key]
+            return value.startswith(prefix) and parse_package_version(
+                value[len(prefix):]
+            ).is_final
+        if key in {"branch_ref", "line_ref"}:
+            if value == "refs/heads/vmm":
+                return True
+            prefix = "refs/heads/"
+            if value.startswith(prefix):
+                maintenance_line(value[len(prefix):])
+                return True
+    except (TypeError, ValueError):
+        return False
     return False
 
 

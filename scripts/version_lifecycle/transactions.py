@@ -14,9 +14,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from .git_refs import GitIdentityError, ProtectionEvidence
+from .versions import maintenance_line, parse_package_version
 
 
-FINAL = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 UTC = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
@@ -219,16 +219,23 @@ class ReleasePort(Protocol):
 
 
 def _version(value: str) -> tuple[int, int, int]:
-    match = FINAL.fullmatch(value)
-    if not match:
+    try:
+        version = parse_package_version(value)
+    except (TypeError, ValueError) as exc:
+        raise TransactionError("INVALID_FINAL_VERSION") from exc
+    if not version.is_final:
         raise TransactionError("INVALID_FINAL_VERSION")
-    return tuple(map(int, match.groups()))
+    return version.tuple
 
 
 def _next_final(line: str, closed: str, view: AllocationView) -> str:
     major, minor, patch = _version(closed)
     if line == "principal":
         proposed = f"{major}.{minor}.{patch + 1}"
+        try:
+            parse_package_version(proposed)
+        except (TypeError, ValueError) as exc:
+            raise TransactionError("PRINCIPAL_VERSION_EXHAUSTED") from exc
         if proposed in view.occupied_versions:
             raise TransactionError("PRINCIPAL_SENTINEL_UNAVAILABLE")
         return proposed
@@ -238,6 +245,10 @@ def _next_final(line: str, closed: str, view: AllocationView) -> str:
     candidate = patch + 1
     while True:
         proposed = f"{major}.{minor}.{candidate}"
+        try:
+            parse_package_version(proposed)
+        except (TypeError, ValueError) as exc:
+            raise TransactionError("MAINTENANCE_PATCH_EXHAUSTED") from exc
         if proposed not in view.occupied_versions:
             return proposed
         candidate += 1
@@ -398,10 +409,10 @@ def run_maintenance_bootstrap(
     port: BootstrapPort, intent: BootstrapIntent
 ) -> TransactionResult:
     """Create a maintenance line only after reservation and freeze converge."""
-    match = re.fullmatch(r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", intent.line)
-    if not match:
+    try:
+        major, minor = maintenance_line(intent.line)
+    except (TypeError, ValueError):
         raise TransactionError("MAINTENANCE_LINE_MISMATCH")
-    major, minor = map(int, match.groups())
     phase = "preflight"
     evidence: dict[str, Any] = {}
     token: str | None = None

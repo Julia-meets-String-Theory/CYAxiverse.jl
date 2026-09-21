@@ -502,11 +502,18 @@ def main(argv: list[str] | None = None) -> int:
     if "args" in locals():
         raw_repository = str(getattr(args, "repo", ""))
         if raw_repository:
-            redact.extend((raw_repository, str(Path(raw_repository).resolve())))
+            repository_path = Path(raw_repository)
+            if repository_path.is_absolute():
+                redact.append(raw_repository)
+            redact.append(str(repository_path.resolve()))
         raw_remote = str(getattr(args, "remote", ""))
         if raw_remote.startswith("/"):
             redact.extend((raw_remote, str(Path(raw_remote).resolve())))
-    return _write(result, exit_code=exit_code, redact_paths=tuple(set(redact)))
+    return _write(
+        result,
+        exit_code=exit_code,
+        redact_paths=tuple(sorted(set(redact), key=len, reverse=True)),
+    )
 
 
 if __name__ == "__main__":

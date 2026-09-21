@@ -17,6 +17,7 @@ from typing import Any
 from .certification import is_safe_public_value
 from .codec import canonical_json, sha256_hex
 from .git_refs import GitIdentityError, require_candidate_ref
+from .versions import maintenance_line, parse_package_version, parse_public_tag
 
 
 SCHEMA_VERSION = 1
@@ -26,16 +27,9 @@ EVENT_ID_RE = re.compile(r"^EVT-(\d{12})$")
 UTC_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
-FINAL_VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
-PUBLIC_TAG_RE = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
-DEV_VERSION_RE = re.compile(
-    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-DEV$"
-)
 BRANCH_REF_RE = re.compile(r"^refs/heads/[A-Za-z0-9._/-]+$")
 CANDIDATE_REF_RE = re.compile(r"^refs/heads/candidates/[A-Za-z0-9._/-]+$")
-ANCHOR_REF_RE = re.compile(
-    r"^refs/tags/iterations/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
-)
+ANCHOR_REF_RE = re.compile(r"^refs/tags/iterations/([^/]+)$")
 
 EVENT_TYPES = (
     "development_reservation_prepared",
@@ -617,19 +611,29 @@ def _require_certification_transfer_evidence(event: Mapping[str, Any]) -> None:
 
 def _require_final_version(event: Mapping[str, Any], name: str) -> None:
     _require_text(event, name)
-    if FINAL_VERSION_RE.fullmatch(event[name]) is None:
+    try:
+        version = parse_package_version(event[name])
+    except (TypeError, ValueError):
+        version = None
+    if version is None or not version.is_final:
         raise EventSchemaError(f"{name} must be canonical final SemVer")
 
 
 def _require_public_tag(event: Mapping[str, Any], name: str) -> None:
     _require_text(event, name)
-    if PUBLIC_TAG_RE.fullmatch(event[name]) is None:
+    try:
+        parse_public_tag(event[name])
+    except (TypeError, ValueError):
         raise EventSchemaError(f"{name} must be canonical vX.Y.Z")
 
 
 def _require_dev_version(event: Mapping[str, Any], name: str) -> None:
     _require_text(event, name)
-    if DEV_VERSION_RE.fullmatch(event[name]) is None:
+    try:
+        version = parse_package_version(event[name])
+    except (TypeError, ValueError):
+        version = None
+    if version is None or not version.is_dev:
         raise EventSchemaError(f"{name} must be canonical X.Y.Z-DEV")
 
 
@@ -639,6 +643,14 @@ def _require_ref(
     _require_text(event, name)
     if pattern.fullmatch(event[name]) is None:
         raise EventSchemaError(f"{name} must be a canonical {description}")
+
+
+def _is_maintenance_line(value: Any) -> bool:
+    try:
+        maintenance_line(value)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _require_candidate_ref(event: Mapping[str, Any], name: str = "candidate_ref") -> None:
@@ -651,15 +663,36 @@ def _require_candidate_ref(event: Mapping[str, Any], name: str = "candidate_ref"
         raise EventSchemaError(f"{name} must be a canonical candidate ref") from exc
 
 
+def _require_anchor_ref(event: Mapping[str, Any], name: str = "anchor_ref") -> None:
+    """Require an iteration anchor ref whose version uses the shared parser."""
+
+    _require_text(event, name)
+    value = event[name]
+    match = ANCHOR_REF_RE.fullmatch(value)
+    if match is None:
+        raise EventSchemaError(f"{name} must be a canonical iteration anchor ref")
+    try:
+        version = parse_package_version(match.group(1))
+    except (TypeError, ValueError) as exc:
+        raise EventSchemaError(
+            f"{name} must be a canonical iteration anchor ref"
+        ) from exc
+    if not version.is_final:
+        raise EventSchemaError(f"{name} must be a canonical iteration anchor ref")
+
+
 def _require_git_identity_or_anchor_ref(event: Mapping[str, Any], name: str) -> None:
     """Accept a full commit identity or the canonical iteration anchor ref."""
 
     _require_text(event, name)
     value = event[name]
-    if GIT_OBJECT_RE.fullmatch(value) is None and ANCHOR_REF_RE.fullmatch(value) is None:
-        raise EventSchemaError(
-            f"{name} must be a full Git object ID or canonical iteration anchor ref"
-        )
+    if GIT_OBJECT_RE.fullmatch(value) is None:
+        try:
+            _require_anchor_ref(event, name)
+        except EventSchemaError as exc:
+            raise EventSchemaError(
+                f"{name} must be a full Git object ID or canonical iteration anchor ref"
+            ) from exc
 
 
 def _validate_type_fields(event: Mapping[str, Any]) -> None:
@@ -699,10 +732,9 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
         _require_dev_version(event, "intended_dev_version")
         if event["intended_dev_version"][0:-4] != event["final_version"]:
             raise EventSchemaError("intended_dev_version must identify final_version")
-        if event["owner_line"] != "principal" and re.fullmatch(
-            r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-            event["owner_line"],
-        ) is None:
+        if event["owner_line"] != "principal" and not _is_maintenance_line(
+            event["owner_line"]
+        ):
             raise EventSchemaError("owner_line must be principal or maintenance/X.Y")
         if event["owner_line"] != "principal" and not _line_matches_version(
             event["owner_line"], event["final_version"]
@@ -752,10 +784,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
         ):
             _require_text(event, field)
         _require_ref(event, "branch_ref", BRANCH_REF_RE, "branch ref")
-        if re.fullmatch(
-            r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-            event["release_line"],
-        ) is None:
+        if not _is_maintenance_line(event["release_line"]):
             raise EventSchemaError("release_line must be maintenance/X.Y")
         _require_final_version(event, "approved_base_version")
         if not _line_matches_version(
@@ -784,12 +813,11 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
         ):
             _require_text(event, field)
         _require_candidate_ref(event)
-        _require_ref(event, "anchor_ref", ANCHOR_REF_RE, "iteration anchor ref")
+        _require_anchor_ref(event)
         _require_final_version(event, "final_version")
-        if event["release_line"] != "principal" and re.fullmatch(
-            r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-            event["release_line"],
-        ) is None:
+        if event["release_line"] != "principal" and not _is_maintenance_line(
+            event["release_line"]
+        ):
             raise EventSchemaError("release_line must be principal or maintenance/X.Y")
         if not _line_matches_version(event["release_line"], event["final_version"]):
             raise EventSchemaError("candidate release_line does not contain final_version")
@@ -826,7 +854,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
         ):
             _require_text(event, field)
         _require_candidate_ref(event)
-        _require_ref(event, "anchor_ref", ANCHOR_REF_RE, "iteration anchor ref")
+        _require_anchor_ref(event)
         _require_final_version(event, "final_version")
         _require_public_tag(event, "public_tag")
         if event["certification_binding"] not in {"tree-bound", "commit-bound"}:
@@ -835,10 +863,9 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             )
         if event["public_tag"][1:] != event["final_version"]:
             raise EventSchemaError("public_tag must identify final_version")
-        if event["release_line"] != "principal" and re.fullmatch(
-            r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-            event["release_line"],
-        ) is None:
+        if event["release_line"] != "principal" and not _is_maintenance_line(
+            event["release_line"]
+        ):
             raise EventSchemaError("release_line must be principal or maintenance/X.Y")
         if not _line_matches_version(event["release_line"], event["final_version"]):
             raise EventSchemaError("release intent release_line does not contain final_version")
@@ -923,7 +950,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             "main_at_event_version",
         ):
             _require_text(event, field)
-        _require_ref(event, "anchor_ref", ANCHOR_REF_RE, "iteration anchor ref")
+        _require_anchor_ref(event)
         _require_candidate_ref(event)
         parse_timestamp(event["closure_timestamp_utc"])
         _require_final_version(event, "final_version")
@@ -934,10 +961,9 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             )
         if event["public_tag"][1:] != event["final_version"]:
             raise EventSchemaError("public_tag must identify final_version")
-        if event["release_line"] != "principal" and re.fullmatch(
-            r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-            event["release_line"],
-        ) is None:
+        if event["release_line"] != "principal" and not _is_maintenance_line(
+            event["release_line"]
+        ):
             raise EventSchemaError("release_line must be principal or maintenance/X.Y")
         if not _line_matches_version(event["release_line"], event["final_version"]):
             raise EventSchemaError("released release_line does not contain final_version")
@@ -1423,8 +1449,12 @@ def _intent_is_terminal(
 def _line_matches_version(line: str, version: str) -> bool:
     if line == "principal":
         return True
-    match = re.fullmatch(r"maintenance/(\d+)\.(\d+)", line)
-    return match is not None and version.startswith(f"{int(match.group(1))}.{int(match.group(2))}.")
+    try:
+        major, minor = maintenance_line(line)
+        parsed = parse_package_version(version)
+    except (TypeError, ValueError):
+        return False
+    return parsed.is_final and (parsed.major, parsed.minor) == (major, minor)
 
 
 def _find_consumed_reservation(

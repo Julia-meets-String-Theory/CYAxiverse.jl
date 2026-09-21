@@ -342,7 +342,15 @@ def select_principal_sentinel(
     view = _view_or_blocked(static_snapshot, allocation_event_head)
     if isinstance(view, AllocationResult):
         return view
-    sentinel = principal_sentinel(closed)
+    try:
+        sentinel = principal_sentinel(closed)
+    except ValueError:
+        return AllocationResult(
+            status="BLOCKED",
+            reason_code="PRINCIPAL_VERSION_EXHAUSTED",
+            line="principal",
+            static_snapshot_digest=view.snapshot_digest,
+        )
     if not view.is_available(sentinel):
         return AllocationResult(
             status="BLOCKED",
@@ -404,7 +412,15 @@ def select_maintenance_version(
     patch = closed.patch + 1
     searched = 0
     while max_search is None or searched < max_search:
-        candidate = Version(major, minor, patch, True)
+        try:
+            candidate = Version(major, minor, patch, True)
+        except ValueError:
+            return AllocationResult(
+                status="BLOCKED",
+                reason_code="MAINTENANCE_PATCH_EXHAUSTED",
+                line=line,
+                static_snapshot_digest=view.snapshot_digest,
+            )
         if view.is_available(candidate):
             return AllocationResult(
                 status="AVAILABLE",

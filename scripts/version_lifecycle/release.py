@@ -25,6 +25,7 @@ try:  # Namespace packages work when this module is run from ``scripts``.
         EventError,
         validate_event,
     )
+    from .versions import maintenance_line, parse_package_version, parse_public_tag
 except ImportError:  # pragma: no cover - direct script import fallback
     from certification import (  # type: ignore
         PASS as CERTIFICATION_PASS,
@@ -37,6 +38,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         EventError,
         validate_event,
     )
+    from versions import maintenance_line, parse_package_version, parse_public_tag  # type: ignore
 
 
 PASS = "PASS"
@@ -49,9 +51,6 @@ LEGACY_EXCLUDED = "LEGACY_EXCLUDED"
 LEGACY_PUBLIC_TAG = "v-0.1"
 
 _EVENT_ID = re.compile(r"^EVT-[0-9]{12}$")
-_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
-_TAG = re.compile(r"^v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$")
-_MAINTENANCE_LINE = re.compile(r"^maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _FULL_REF = re.compile(r"^refs/(?:heads|tags|candidates)/[A-Za-z0-9._/-]+$")
 _UTC = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 _HEX = re.compile(r"^[0-9a-f]{7,64}$")
@@ -94,7 +93,12 @@ def _missing(errors: list[str], record: Mapping[str, Any], name: str, *aliases: 
 
 
 def _valid_version(value: Any) -> bool:
-    return isinstance(value, str) and _VERSION.fullmatch(value) is not None
+    if not isinstance(value, str):
+        return False
+    try:
+        return parse_package_version(value).is_final
+    except (TypeError, ValueError):
+        return False
 
 
 def _valid_event_id(value: Any) -> bool:
@@ -114,12 +118,22 @@ def _valid_utc(value: Any) -> bool:
 def is_canonical_public_tag(value: Any) -> bool:
     """Return whether ``value`` is a prospective canonical public tag."""
 
-    return isinstance(value, str) and value != LEGACY_PUBLIC_TAG and _TAG.fullmatch(value) is not None
+    if not isinstance(value, str) or value == LEGACY_PUBLIC_TAG:
+        return False
+    try:
+        parse_public_tag(value)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def tag_version(value: str) -> str | None:
-    match = _TAG.fullmatch(value) if isinstance(value, str) else None
-    return match.group(1) if match else None
+    if not isinstance(value, str):
+        return None
+    try:
+        return parse_public_tag(value).canonical
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_public_value(value: Any) -> bool:
@@ -474,16 +488,18 @@ def validate_released_event(
         errors.append("invalid_event_id")
     if not _valid_utc(timestamp) or not _valid_utc(closure_time):
         errors.append("invalid_utc_timestamp")
-    maintenance_match = _MAINTENANCE_LINE.fullmatch(line) if isinstance(line, str) else None
+    try:
+        maintenance_parts = maintenance_line(line)
+    except (TypeError, ValueError):
+        maintenance_parts = None
     if not _valid_version(final_version) or not is_canonical_public_tag(public_tag):
         errors.append("invalid_final_version_or_tag")
     if is_canonical_public_tag(public_tag) and tag_version(public_tag) != final_version:
         errors.append("tag_version_mismatch")
-    if maintenance_match is not None and _valid_version(final_version):
-        major, minor = maintenance_match.groups()
-        if tuple(map(int, final_version.split(".")[:2])) != (int(major), int(minor)):
+    if maintenance_parts is not None and _valid_version(final_version):
+        if tuple(parse_package_version(final_version).tuple[:2]) != maintenance_parts:
             errors.append("maintenance_line_version_mismatch")
-    if line != "principal" and maintenance_match is None:
+    if line != "principal" and maintenance_parts is None:
         return _result(INVALID, "INVALID_RELEASE_LINE")
     if binding not in SUPPORTED_BINDINGS:
         return _result(BLOCKED, "UNSUPPORTED_CERTIFICATION_BINDING")
@@ -538,7 +554,7 @@ def validate_released_event(
         errors.append("release_tree_mismatch")
     if isinstance(line, str) and line == "principal" and anchor_ref != f"refs/tags/iterations/{final_version}":
         errors.append("anchor_ref_version_mismatch")
-    if isinstance(line, str) and maintenance_match is not None and anchor_ref != f"refs/tags/iterations/{final_version}":
+    if isinstance(line, str) and maintenance_parts is not None and anchor_ref != f"refs/tags/iterations/{final_version}":
         errors.append("anchor_ref_version_mismatch")
     if line == "principal":
         previous_sha = _missing(errors, event, "previous_main_sha")
@@ -550,7 +566,7 @@ def validate_released_event(
         if not _valid_version(previous_version) or not _valid_version(main_version):
             errors.append("invalid_main_version")
         if _valid_version(previous_version) and _valid_version(final_version):
-            if tuple(map(int, previous_version.split("."))) >= tuple(map(int, final_version.split("."))):
+            if parse_package_version(previous_version).tuple >= parse_package_version(final_version).tuple:
                 errors.append("principal_version_not_monotonic")
         if main_version != final_version:
             errors.append("principal_main_version_mismatch")
