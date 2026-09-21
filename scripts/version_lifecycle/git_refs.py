@@ -57,6 +57,36 @@ def validate_remote(value: str) -> str:
     return value
 
 
+def canonical_remote_authority(repository: str | Path, remote: str) -> str:
+    """Return a private, canonical identity for the actual Git endpoint.
+
+    Public snapshot metadata can use a caller-supplied sanitized repository
+    label, but allocation authority must bind to the transport endpoint that
+    was actually queried.  Resolve configured remote names first, then
+    normalize local paths so two checkouts of one fixture remote compare
+    equal without exposing this identity in serialized evidence.
+    """
+
+    remote = validate_remote(remote)
+    root = Path(repository).resolve()
+    configured = subprocess.run(
+        ["git", "-C", str(root), "config", "--get", f"remote.{remote}.url"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    endpoint = configured.stdout.strip() if configured.returncode == 0 else remote
+    if endpoint.startswith("file://"):
+        return f"file://{Path(endpoint[7:]).expanduser().resolve()}"
+    if "://" not in endpoint and not re.match(r"^[^/@:]+@[^/:]+:", endpoint):
+        candidate = Path(endpoint).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        return f"file://{candidate.resolve()}"
+    return endpoint.removesuffix("/").removesuffix(".git")
+
+
 class _ExclusionState:
     def __init__(self) -> None:
         self.guard = threading.Lock()
@@ -344,6 +374,7 @@ class ProtectionEvidence:
     creation_guarded: bool
     update_guarded: bool
     deletion_guarded: bool
+    canonical_public_tags_globally_guarded: bool = False
 
     def _matches(self, ref: str) -> bool:
         # Only exact names and validated trailing-star prefixes are accepted
@@ -384,7 +415,12 @@ class ProtectionEvidence:
                 raise GitIdentityError("noncanonical public tag") from exc
             if ref != f"refs/tags/v{parsed.canonical}":
                 raise GitIdentityError("noncanonical public tag")
-            self.require(ref, creation=True)
+            if (
+                self.pattern != "refs/tags/v*.*.*"
+                or self.canonical_public_tags_globally_guarded is not True
+            ):
+                raise GitIdentityError("ruleset does not cover every canonical public tag")
+            self.require(self.pattern, creation=True)
             if self._matches(LEGACY_TAG_REF):
                 raise GitIdentityError("ruleset would also change legacy tag protection")
         except GitIdentityError as exc:

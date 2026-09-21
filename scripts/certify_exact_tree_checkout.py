@@ -39,6 +39,8 @@ import platform
 from collections.abc import Sequence
 from typing import Any
 
+from version_lifecycle.certification import is_safe_public_value
+
 
 PASS = "PASS"
 INVALID = "INVALID"
@@ -323,10 +325,8 @@ def _test_execution_identity(
     if version.returncode != 0:
         return None
     version_label = version.stdout.strip().splitlines()[0] if version.stdout.strip() else "unknown"
-    if (
-        len(version_label) > 160
-        or any(ord(character) < 0x20 or ord(character) > 0x7E for character in version_label)
-        or any(marker in version_label.lower() for marker in ("/", "\\", "private", "users", "home", "tmp"))
+    if len(version_label) > 160 or not is_safe_public_value(
+        version_label, key="test_executable_version"
     ):
         version_label = f"sha256:{executable_version_sha256}"
     environment_public, environment_sha256 = _test_environment_identity(

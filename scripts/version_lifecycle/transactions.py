@@ -13,21 +13,22 @@ from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
+from .certification import is_safe_public_value
 from .git_refs import GitIdentityError, ProtectionEvidence
-from .versions import maintenance_line, parse_package_version
+from .versions import MAX_VERSION_COMPONENT, maintenance_line, parse_package_version
 
 
 UTC = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
-def _public_text(value: Any) -> bool:
-    """Return whether an identity is a nonempty durable public text value."""
+def _public_identity(value: Any, *, key: str) -> bool:
+    """Return whether an identity is nonempty and safe for public evidence."""
 
     return (
         isinstance(value, str)
         and bool(value)
-        and all(0x20 <= ord(character) <= 0x7E for character in value)
+        and is_safe_public_value(value, key=key)
     )
 
 
@@ -226,6 +227,16 @@ def _version(value: str) -> tuple[int, int, int]:
     if not version.is_final:
         raise TransactionError("INVALID_FINAL_VERSION")
     return version.tuple
+
+
+def _canonical_final_version(value: Any) -> str | None:
+    """Normalize one final package identity through the shared parser."""
+
+    try:
+        parsed = parse_package_version(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed.canonical if parsed.is_final else None
 
 
 def _next_final(line: str, closed: str, view: AllocationView) -> str:
@@ -433,7 +444,11 @@ def run_maintenance_bootstrap(
         evidence["bound_view"] = view
         patch = 0
         while f"{major}.{minor}.{patch}" in view.occupied_versions:
+            if patch == MAX_VERSION_COMPONENT:
+                raise TransactionError("MAINTENANCE_PATCH_EXHAUSTED")
             patch += 1
+        if patch > MAX_VERSION_COMPONENT:
+            raise TransactionError("MAINTENANCE_PATCH_EXHAUSTED")
         final = f"{major}.{minor}.{patch}"
         preparation = port.prepare_reservation(intent, final, view)
         if preparation.get("version") != final or preparation.get("intended_dev") != f"{final}-DEV":
@@ -557,9 +572,15 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
             certification.get("subject_tree") != intent.anchor_tree
             or not SHA.fullmatch(str(certification.get("subject_sha", "")))
             or certification.get("subject_sha") != candidate.get("sha")
-            or not _public_text(certification.get("policy_revision"))
-            or not _public_text(certification.get("harness_revision"))
-            or not _public_text(certification.get("environment"))
+            or not _public_identity(
+                certification.get("policy_revision"), key="policy_revision"
+            )
+            or not _public_identity(
+                certification.get("harness_revision"), key="harness_revision"
+            )
+            or not _public_identity(
+                certification.get("environment"), key="environment"
+            )
             or not certification.get("evidence_refs")
         ):
             raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
@@ -569,15 +590,26 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         transfer_evidence: dict[str, Any] | None = None
 
         if intent.release_line == "principal":
-            if not SHA.fullmatch(str(candidate.get("main_at_candidate_sha", ""))) or not candidate.get("main_at_candidate_version"):
+            candidate_main_version = _canonical_final_version(
+                candidate.get("main_at_candidate_version")
+            )
+            if (
+                not _git_sha(candidate.get("main_at_candidate_sha"))
+                or candidate_main_version is None
+            ):
                 raise TransactionError("CANDIDATE_MAIN_IDENTITY_UNPROVEN")
             freeze = port.freeze_main(intent)
             main_token = freeze.get("token")
-            if not main_token or not SHA.fullmatch(str(freeze.get("sha", ""))) or not freeze.get("version"):
+            freeze_version = _canonical_final_version(freeze.get("version"))
+            if (
+                not main_token
+                or not _git_sha(freeze.get("sha"))
+                or freeze_version is None
+            ):
                 raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
             evidence["main_freeze"] = freeze
             phase = "main_frozen"
-            previous = _version(freeze["version"])
+            previous = _version(freeze_version)
             if previous >= (major, minor, _version(intent.final_version)[2]):
                 raise TransactionError("PRINCIPAL_VERSION_REGRESSION")
             interval = port.verify_principal_interval(intent, candidate, freeze)
@@ -612,8 +644,12 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
             phase = "ancestry_verified"
             final = port.promote_principal(intent, candidate, certification, freeze)
             if (
-                final.get("previous_main_sha") != freeze["sha"]
-                or final.get("previous_main_version") != freeze["version"]
+                not _git_sha(final.get("previous_main_sha"))
+                or _canonical_final_version(final.get("previous_main_version")) is None
+                or not _git_sha(final.get("main_at_event_sha"))
+                or _canonical_final_version(final.get("main_at_event_version")) is None
+                or final.get("previous_main_sha") != freeze["sha"]
+                or final.get("previous_main_version") != freeze_version
                 or final.get("main_at_event_sha") != final.get("sha")
                 or final.get("main_at_event_version") != intent.final_version
                 or final.get("ancestry_disposition") != disposition
@@ -622,9 +658,12 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         else:
             final = port.verify_maintenance(intent, candidate, certification)
             if (
-                final.get("main_before_sha") != final.get("main_at_event_sha")
+                not _git_sha(final.get("main_before_sha"))
+                or not _git_sha(final.get("main_at_event_sha"))
+                or _canonical_final_version(final.get("main_before_version")) is None
+                or _canonical_final_version(final.get("main_at_event_version")) is None
+                or final.get("main_before_sha") != final.get("main_at_event_sha")
                 or final.get("main_before_version") != final.get("main_at_event_version")
-                or not final.get("main_at_event_sha")
             ):
                 raise TransactionError("MAINTENANCE_MAIN_CHANGED")
         if (
@@ -643,9 +682,15 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
                 certification.get("binding") != "commit-bound"
                 or certification.get("subject_sha") != final["sha"]
                 or certification.get("subject_tree") != final["tree"]
-                or not _public_text(certification.get("policy_revision"))
-                or not _public_text(certification.get("harness_revision"))
-                or not _public_text(certification.get("environment"))
+                or not _public_identity(
+                    certification.get("policy_revision"), key="policy_revision"
+                )
+                or not _public_identity(
+                    certification.get("harness_revision"), key="harness_revision"
+                )
+                or not _public_identity(
+                    certification.get("environment"), key="environment"
+                )
                 or not certification.get("evidence_refs")
             ):
                 raise TransactionError("RECERTIFICATION_REQUIRED")

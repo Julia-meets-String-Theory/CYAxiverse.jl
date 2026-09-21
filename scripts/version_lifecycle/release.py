@@ -754,11 +754,11 @@ def _matches_intent(tag: Mapping[str, Any] | str, intent: Mapping[str, Any]) -> 
 def _active_release_intent(intent: Mapping[str, Any] | None) -> bool:
     if not isinstance(intent, Mapping):
         return False
-    event_type = intent.get("event_type")
-    status = intent.get("status")
-    return event_type in (None, "release_intent_prepared") and status not in {
-        "aborted", "withdrawn", "release_intent_aborted"
-    }
+    try:
+        canonical = validate_event(intent)
+    except (TypeError, ValueError):
+        return False
+    return canonical.get("event_type") == "release_intent_prepared"
 
 
 def validate_release_consistency(

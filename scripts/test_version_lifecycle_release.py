@@ -150,13 +150,36 @@ def publication_evidence(version: str = "0.3.0", event_id: str = EVENT_ID, relea
 
 
 def release_intent(version: str = "0.3.0") -> dict:
+    released = released_event(version=version)
+    slug = version.replace(".", "-")
     return {
+        "schema_version": 1,
+        "event_id": "EVT-000000000122",
         "event_type": "release_intent_prepared",
-        "intent_id": "INT-0.3.0",
+        "timestamp_utc": "2026-09-20T13:30:00Z",
+        "transaction_id": f"intent-{slug}",
+        "static_iteration_snapshot": "a" * 64,
+        "expected_event_head": "0" * 40,
+        "intent_id": f"INT-{version}",
+        "candidate_id": f"candidate-{slug}",
+        "candidate_ref": released["candidate_ref"],
+        "candidate_sha": released["candidate_sha"],
+        "candidate_tree": released["candidate_tree"],
+        "anchor_ref": released["anchor_ref"],
+        "anchor_sha": released["anchor_sha"],
+        "anchor_tree": released["anchor_tree"],
+        "certification_binding": released["certification_binding"],
+        "certification_subject_sha": released["certification_subject_sha"],
+        "certification_subject_tree": released["certification_subject_tree"],
+        "certification_policy_revision": released["certification_policy_revision"],
+        "certification_harness_revision": released["certification_harness_revision"],
+        "certification_environment": released["certification_environment"],
+        "certification_evidence_refs": released["certification_evidence_refs"],
         "public_tag": f"v{version}",
         "final_version": version,
         "final_release_sha": SHA_A,
         "final_release_tree": TREE,
+        "release_line": "principal",
     }
 
 
@@ -487,6 +510,11 @@ class TestReleaseEvidence(unittest.TestCase):
         self.assertIn("release_tree_mismatch", result["errors"])
 
     def test_tag_without_event_with_matching_intent_is_pending(self):
+        intent = release_intent()
+        result = validate_release_consistency(None, tag(), release_intent=intent)
+        self.assertEqual(result["status"], TAG_RECONCILIATION_PENDING)
+
+    def test_tag_without_durable_canonical_intent_is_invalid(self):
         intent = {
             "public_tag": "v0.3.0",
             "final_version": "0.3.0",
@@ -494,7 +522,8 @@ class TestReleaseEvidence(unittest.TestCase):
             "final_release_tree": TREE,
         }
         result = validate_release_consistency(None, tag(), release_intent=intent)
-        self.assertEqual(result["status"], TAG_RECONCILIATION_PENDING)
+        self.assertEqual(result["status"], INVALID)
+        self.assertEqual(result["reason_code"], "RELEASE_INTENT_NOT_ACTIVE")
 
     def test_released_event_without_publication_is_pending(self):
         result = validate_release_consistency(
@@ -721,12 +750,7 @@ class TestReleaseEvidence(unittest.TestCase):
         self.assertEqual(result["reason_code"], "TAG_IDENTITY_INCOMPLETE")
 
     def test_catalog_tag_pending_requires_intent(self):
-        intent = {
-            "public_tag": "v0.3.0",
-            "final_version": "0.3.0",
-            "final_release_sha": SHA_A,
-            "final_release_tree": TREE,
-        }
+        intent = release_intent()
         result = validate_release_catalog(
             [], [tag()], [], [], release_intents=[intent]
         )

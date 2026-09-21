@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -293,15 +294,15 @@ class ReleaseFixture:
 
     def verify_public_tag_ruleset(self, intent, tag_ref):
         self.calls.append("ruleset")
-        major = tag_ref.removeprefix("refs/tags/v").split(".", 1)[0]
         return ProtectionEvidence(
             rule_id="fixture-future-tags",
-            pattern=f"refs/tags/v{major}.*",
+            pattern="refs/tags/v*.*.*",
             snapshot_sha256="0" * 64,
             retrieved_at_utc="2026-09-20T00:00:00Z",
             creation_guarded=True,
             update_guarded=True,
             deletion_guarded=True,
+            canonical_public_tags_globally_guarded=True,
         )
 
     def create_protected_tag(self, intent, prepared, final, protection):
@@ -466,6 +467,19 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(port.calls[:5], ["base", "freeze", "acquire", "base", "view"])
         self.assertEqual(port.calls[-3:], ["correspondence", "release", "unfreeze"])
 
+    def test_bootstrap_patch_exhaustion_fails_at_uint32_boundary(self):
+        port = BootstrapFixture()
+        port.allocation_view = lambda: AllocationView(
+            "snapshot", "event-head", frozenset({"1.2.0", "1.2.1"})
+        )
+        with patch("version_lifecycle.transactions.MAX_VERSION_COMPONENT", 1):
+            result = run_maintenance_bootstrap(port, self.bootstrap)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "MAINTENANCE_PATCH_EXHAUSTED", True),
+        )
+        self.assertNotIn("create", port.calls)
+
     def test_racing_static_mutation_blocks_bootstrap_under_freeze(self):
         port = BootstrapFixture(exclusion_available=False)
         result = run_maintenance_bootstrap(port, self.bootstrap)
@@ -538,6 +552,70 @@ class TransactionTests(unittest.TestCase):
             result.evidence["public_tag_ruleset"]["rule_id"],
             "fixture-future-tags",
         )
+
+    def test_release_rejects_private_certification_identities_before_tag(self):
+        for field in ("policy_revision", "harness_revision", "environment"):
+            with self.subTest(field=field):
+                port = ReleaseFixture()
+                original = port.certify_candidate
+
+                def unsafe_certification(intent, candidate, field=field):
+                    record = original(intent, candidate)
+                    record[field] = "/Users/private/certification"
+                    return record
+
+                port.certify_candidate = unsafe_certification
+                result = run_release(port, self.release)
+                self.assertEqual(
+                    (result.status, result.reason_code),
+                    ("BLOCKED", "CERTIFICATION_IDENTITY_UNPROVEN"),
+                )
+                self.assertNotIn("ruleset", port.calls)
+                self.assertNotIn("intent", port.calls)
+                self.assertNotIn("tag", port.calls)
+
+    def test_release_rejects_noncanonical_principal_main_versions_before_tag(self):
+        port = ReleaseFixture()
+        original_candidate = port.make_durable_candidate
+
+        def invalid_candidate_main(intent):
+            candidate = original_candidate(intent)
+            candidate["main_at_candidate_version"] = "01.2.3"
+            return candidate
+
+        port.make_durable_candidate = invalid_candidate_main
+        result = run_release(port, self.release)
+        self.assertEqual(result.reason_code, "CANDIDATE_MAIN_IDENTITY_UNPROVEN")
+        self.assertNotIn("tag", port.calls)
+
+        port = ReleaseFixture()
+        port.freeze_main = lambda intent: {
+            "token": "freeze", "sha": "d" * 40, "version": "0.2.0-DEV"
+        }
+        result = run_release(port, self.release)
+        self.assertEqual(result.reason_code, "MAIN_FREEZE_UNAVAILABLE")
+        self.assertNotIn("tag", port.calls)
+
+    def test_maintenance_main_identity_requires_full_shas_and_final_versions(self):
+        port = ReleaseFixture()
+        original = port.verify_maintenance
+
+        def malformed_main(intent, candidate, certification):
+            final = original(intent, candidate, certification)
+            final["main_before_sha"] = "short"
+            final["main_before_version"] = "1.0.0-DEV"
+            return final
+
+        port.verify_maintenance = malformed_main
+        maintenance = ReleaseIntent(
+            "tx", "maintenance/0.3", "0.3.1",
+            "refs/tags/iterations/0.3.1", "f" * 40, "c" * 40,
+            "2026-09-20T12:34:56Z", "refs/heads/candidates/0.3.1",
+        )
+        result = run_release(port, maintenance)
+        self.assertEqual(result.reason_code, "MAINTENANCE_MAIN_CHANGED")
+        self.assertNotIn("ruleset", port.calls)
+        self.assertNotIn("tag", port.calls)
 
     def test_release_blocks_before_intent_without_canonical_public_tag_ruleset(self):
         for failure in ("missing", "legacy-inclusive", "creation", "update", "deletion"):

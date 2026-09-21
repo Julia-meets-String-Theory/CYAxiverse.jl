@@ -92,6 +92,17 @@ class GateALifecycleCliFixture(unittest.TestCase):
             self.fail(f"CLI did not emit JSON: {result.stdout!r}: {error}")
         return result.returncode, payload
 
+    def _repository_state(self) -> dict[str, object]:
+        git_dir = self.repo / ".git"
+        fetch_head = git_dir / "FETCH_HEAD"
+        return {
+            "head": _git(self.repo, "rev-parse", "HEAD"),
+            "refs": _git(self.repo, "for-each-ref", "--format=%(refname) %(objectname)"),
+            "status": _git(self.repo, "status", "--porcelain=v2", "--untracked-files=all"),
+            "objects": _git(self.repo, "count-objects", "-v"),
+            "fetch_head": fetch_head.read_bytes() if fetch_head.exists() else None,
+        }
+
     def test_default_repository_preserves_version_identities(self) -> None:
         code, payload = self._run_cli(
             "readiness",
@@ -145,9 +156,7 @@ class GateALifecycleCliFixture(unittest.TestCase):
                 self.assertEqual(payload["detail"], "detail omitted; use reason_code")
 
     def test_readiness_reads_snapshot_and_event_head_without_mutating_refs(self) -> None:
-        before = _git(self.repo, "show-ref")
-        fetch_head = self.repo / ".git" / "FETCH_HEAD"
-        before_fetch_head = fetch_head.read_bytes() if fetch_head.exists() else None
+        before = self._repository_state()
         code, payload = self._run_cli(
             "readiness",
             "--repo",
@@ -158,12 +167,10 @@ class GateALifecycleCliFixture(unittest.TestCase):
             "--source-repository",
             "fixture/repo",
         )
-        after = _git(self.repo, "show-ref")
+        after = self._repository_state()
 
         self.assertEqual(code, 0)
         self.assertEqual(after, before)
-        after_fetch_head = fetch_head.read_bytes() if fetch_head.exists() else None
-        self.assertEqual(after_fetch_head, before_fetch_head)
         self.assertNotIn(str(self.repo.resolve()), json.dumps(payload))
         self.assertTrue(payload["dry_run"])
         self.assertEqual(payload["status"], "READY")
@@ -226,7 +233,7 @@ class GateALifecycleCliFixture(unittest.TestCase):
         # The CLI must not treat local state as a substitute or bootstrap a
         # remote branch as a side effect of a readiness query.
         _git(self.remote, "update-ref", "-d", "refs/heads/release-events")
-        before = _git(self.repo, "show-ref")
+        before = self._repository_state()
         code, payload = self._run_cli(
             "events",
             "--repo",
@@ -236,7 +243,7 @@ class GateALifecycleCliFixture(unittest.TestCase):
             "fixture/repo",
         )
         self.assertEqual(code, 2)
-        self.assertEqual(_git(self.repo, "show-ref"), before)
+        self.assertEqual(self._repository_state(), before)
         self.assertEqual(payload["status"], "BLOCKED")
         self.assertEqual(payload["reason_code"], "EVENT_AUTHORITY_UNAVAILABLE")
 

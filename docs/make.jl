@@ -5,7 +5,8 @@ selected from a ref plus release-event identity supplied by the workflow. A
 canonical tag without verified event evidence fails closed.
 """
 
-const _CANONICAL_PUBLIC_TAG = r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
+const _CANONICAL_PUBLIC_TAG = r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
+const _CANONICAL_VERSION = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
 const _FULL_SHA = r"^[0-9a-f]{40}$"
 
 struct DocsRouteError <: Exception
@@ -13,6 +14,15 @@ struct DocsRouteError <: Exception
 end
 
 Base.showerror(io::IO, err::DocsRouteError) = print(io, err.message)
+
+function _bounded_version(value::AbstractString, pattern::Regex)
+    identity = match(pattern, String(value))
+    identity === nothing && return false
+    all(component -> tryparse(UInt32, component) !== nothing, identity.captures)
+end
+
+_canonical_tag(value::AbstractString) = _bounded_version(value, _CANONICAL_PUBLIC_TAG)
+_canonical_final(value::AbstractString) = _bounded_version(value, _CANONICAL_VERSION)
 
 """Return the documentation channel for one verified deployment context."""
 function docs_route(; ref::AbstractString,
@@ -36,8 +46,9 @@ function docs_route(; ref::AbstractString,
                 version = nothing, line = :principal, stable = false)
     end
 
-    tag = basename(ref_string)
-    if !startswith(ref_string, "refs/tags/") || match(_CANONICAL_PUBLIC_TAG, tag) === nothing
+    tag_prefix = "refs/tags/"
+    tag = startswith(ref_string, tag_prefix) ? ref_string[length(tag_prefix) + 1:end] : ""
+    if ref_string != tag_prefix * tag || !_canonical_tag(tag)
         throw(DocsRouteError("DOCS_ROUTE_INVALID: ref is not vmm or a canonical public tag"))
     end
     status == "verified" || throw(DocsRouteError(
@@ -49,7 +60,7 @@ function docs_route(; ref::AbstractString,
         "DOCS_ROUTE_INVALID: verified tag requires certified release commit"))
 
     version = tag[2:end]
-    release_version == version || throw(DocsRouteError(
+    _canonical_final(release_version) && release_version == version || throw(DocsRouteError(
         "DOCS_ROUTE_INVALID: tag and release-event version disagree"))
 
     stable = false
@@ -94,7 +105,7 @@ function _deploy_versions(route)
     # stable while a maintenance tag gets its own immutable folder; the
     # built-in `v^` selector would incorrectly choose that patch.
     if !isempty(stable_tag)
-        match(_CANONICAL_PUBLIC_TAG, stable_tag) !== nothing || throw(DocsRouteError(
+        _canonical_tag(stable_tag) || throw(DocsRouteError(
             "DOCS_STABLE_CONTEXT_INVALID: stable principal tag is not canonical"))
         push!(versions, "stable" => stable_tag)
     elseif route.channel !== :development

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Read-only Gate A lifecycle readiness CLI.
 
-The CLI deliberately has no writer operation.  It reads the canonical static
-snapshot and the local ``release-events`` branch, then reports a stable JSON
-object that can be consumed by CI or a release operator.  ``--dry-run`` is
-accepted explicitly and is always true in the report; the command never
-creates refs, commits events, or changes a checkout.
+The CLI deliberately has no writer operation. It resolves both canonical
+authorities in an isolated temporary bare repository, then reports a stable
+JSON object that can be consumed by CI or a release operator. ``--dry-run`` is
+accepted explicitly and is always true in the report; the command never adds
+objects, creates refs, commits events, or changes the inspected checkout.
 
 Examples::
 
@@ -27,9 +27,10 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
+import tempfile
 from typing import Any, Mapping
-import uuid
 
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
@@ -172,10 +173,10 @@ def _blocked(reason_code: str, detail: str, **fields: Any) -> dict[str, Any]:
 
 def _static_report(args: argparse.Namespace) -> tuple[dict[str, Any], StaticSnapshot | None]:
     result = static_snapshot(
-        args.repo,
+        args.authority_repo,
         source_repository=args.source_repository,
         selector=args.selector,
-        remote=args.remote,
+        remote=args.authority_remote,
     )
     if isinstance(result, BlockedResult):
         return _blocked(
@@ -205,9 +206,8 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
     """Read the remote event authority and retain local state as diagnostics.
 
     The local branch is a checkout cache.  The advertised remote object is
-    fetched into a disposable ref so the head, tree topology, and stream bytes
-    all come from one exact remote identity.  The disposable ref is removed in
-    ``finally``; no branch or tag is created by the CLI.
+    fetched into an isolated temporary bare repository so the inspected
+    checkout's refs, object database, index, and FETCH_HEAD are never changed.
     """
 
     if (
@@ -223,13 +223,14 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
 
     try:
         writer = ReleaseEventWriter(
-            args.repo,
+            args.authority_repo,
             branch=args.event_branch,
             stream_path=args.event_stream,
+            remote=args.authority_remote,
         )
         remote_ref = f"refs/heads/{args.event_branch}"
         advertised = writer._git(  # type: ignore[attr-defined]
-            ["ls-remote", "--refs", args.remote, remote_ref]
+            ["ls-remote", "--refs", args.authority_remote, remote_ref]
         ).stdout.decode("utf-8", errors="strict").splitlines()
         if not advertised:
             return _blocked(
@@ -258,58 +259,57 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
                 advertised_head=remote_head,
             ), None
 
-        disposable_ref = f"refs/codex/cli-event/{uuid.uuid4().hex}"
+        writer._git(  # type: ignore[attr-defined]
+            [
+                "fetch",
+                "--no-tags",
+                "--no-write-fetch-head",
+                args.authority_remote,
+                remote_head,
+            ]
+        )
+        fetched_head = writer._git(  # type: ignore[attr-defined]
+            ["rev-parse", "--verify", f"{remote_head}^{{commit}}"]
+        ).stdout.decode("ascii", errors="strict").strip()
+        if fetched_head != remote_head:
+            return _blocked(
+                "EVENT_AUTHORITY_DIVERGENT",
+                "fetched event object differs from advertised remote head",
+                remote=args.remote,
+                remote_ref=remote_ref,
+                advertised_head=remote_head,
+                fetched_head=fetched_head,
+            ), None
         try:
-            writer._git(  # type: ignore[attr-defined]
-                [
-                    "fetch",
-                    "--no-tags",
-                    "--no-write-fetch-head",
-                    args.remote,
-                    f"{remote_ref}:{disposable_ref}",
-                ]
-            )
-            fetched_head = writer._git(  # type: ignore[attr-defined]
-                ["rev-parse", "--verify", disposable_ref]
-            ).stdout.decode("ascii", errors="strict").strip()
-            if fetched_head != remote_head:
-                return _blocked(
-                    "EVENT_AUTHORITY_DIVERGENT",
-                    "fetched event object differs from advertised remote head",
-                    remote=args.remote,
-                    remote_ref=remote_ref,
-                    advertised_head=remote_head,
-                    fetched_head=fetched_head,
-                ), None
-            try:
-                raw = writer._git(  # type: ignore[attr-defined]
-                    ["show", f"{disposable_ref}:{args.event_stream}"]
-                ).stdout
-                head = writer._verified_head_from_stream(fetched_head, raw)
-                raw = head.raw
-            except (WriterError, ValueError) as error:
-                return _blocked(
-                    "EVENT_AUTHORITY_DIVERGENT",
-                    f"remote event stream is invalid: {error}",
-                    remote=args.remote,
-                    remote_ref=remote_ref,
-                    remote_head=remote_head,
-                    stream_path=args.event_stream,
-                ), None
-        finally:
-            writer._git(  # type: ignore[attr-defined]
-                ["update-ref", "-d", disposable_ref], check=False
-            )
+            raw = writer._git(  # type: ignore[attr-defined]
+                ["show", f"{fetched_head}:{args.event_stream}"]
+            ).stdout
+            head = writer._verified_head_from_stream(fetched_head, raw)
+            raw = head.raw
+        except (WriterError, ValueError) as error:
+            return _blocked(
+                "EVENT_AUTHORITY_DIVERGENT",
+                f"remote event stream is invalid: {error}",
+                remote=args.remote,
+                remote_ref=remote_ref,
+                remote_head=remote_head,
+                stream_path=args.event_stream,
+            ), None
 
         # Read the local cache through the writer's public read path when it
         # exists.  A stale cache is diagnostic only; allocation binds to the
         # remote head above.  A malformed local cache cannot make a valid
         # remote authority appear valid or change its bytes.
+        local_writer = ReleaseEventWriter(
+            args.repo,
+            branch=args.event_branch,
+            stream_path=args.event_stream,
+        )
         local_head: LedgerHead | None = None
         local_error: str | None = None
-        if writer.branch_exists():
+        if local_writer.branch_exists():
             try:
-                local_head = writer.read_head()
+                local_head = local_writer.read_head()
             except (BranchUnavailable, OSError, ValueError, RuntimeError) as error:
                 local_error = str(error)
         report: dict[str, Any] = {
@@ -345,6 +345,46 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
             branch=args.event_branch,
             stream_path=args.event_stream,
         ), None
+
+
+def _remote_transport(repository: str | Path, remote: str) -> str:
+    """Resolve a configured remote without changing the inspected checkout."""
+
+    root = Path(repository).resolve()
+    configured = subprocess.run(
+        ["git", "-C", str(root), "config", "--get", f"remote.{remote}.url"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    endpoint = configured.stdout.strip() if configured.returncode == 0 else remote
+    if "://" not in endpoint and not re.match(r"^[^/@:]+@[^/:]+:", endpoint):
+        candidate = Path(endpoint).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        endpoint = str(candidate.resolve())
+    return validate_remote(endpoint)
+
+
+def _isolated_authority_repository(args: argparse.Namespace, root: Path) -> None:
+    """Create the disposable object database used by all authority reads."""
+
+    subprocess.run(
+        ["git", "init", "--bare", "--quiet", str(root)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    endpoint = _remote_transport(args.repo, args.remote)
+    subprocess.run(
+        ["git", "-C", str(root), "remote", "add", "authority", endpoint],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    args.authority_repo = str(root)
+    args.authority_remote = "authority"
 
 
 def _allocation_report(
@@ -534,7 +574,9 @@ def main(argv: list[str] | None = None) -> int:
             args.principal_closed = None
             args.maintenance_line = None
             args.maintenance_closed = None
-        result, exit_code = _run(args)
+        with tempfile.TemporaryDirectory(prefix="cyax-gate-a-readonly-") as temporary:
+            _isolated_authority_repository(args, Path(temporary) / "authority.git")
+            result, exit_code = _run(args)
     except SystemExit:
         raise
     except (OSError, ValueError, RuntimeError, TypeError) as error:

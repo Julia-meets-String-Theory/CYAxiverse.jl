@@ -19,6 +19,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -54,6 +56,159 @@ def canonical_version(value: object) -> bool:
         return parse_package_version(value).is_final
     except (TypeError, ValueError):
         return False
+
+
+def canonical_tag_ref(value: object) -> str | None:
+    """Return the tag name only for an exact canonical full tag ref."""
+
+    if not isinstance(value, str) or not value.startswith("refs/tags/"):
+        return None
+    tag = value.removeprefix("refs/tags/")
+    if value != f"refs/tags/{tag}" or not is_canonical_public_tag(tag):
+        return None
+    return tag
+
+
+def _command_text(*command: str, cwd: Path | None = None) -> str:
+    return subprocess.check_output(
+        list(command), cwd=ROOT if cwd is None else cwd,
+        stderr=subprocess.STDOUT, text=True
+    ).strip()
+
+
+def _remote_ref_commit(ref: str) -> str:
+    output = _command_text("git", "ls-remote", "origin", ref, f"{ref}^{{}}")
+    direct = None
+    peeled = None
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not full_sha(fields[0]):
+            continue
+        if fields[1] == ref:
+            direct = fields[0]
+        elif fields[1] == f"{ref}^{{}}":
+            peeled = fields[0]
+    commit = peeled or direct
+    if commit is None:
+        raise ValueError(f"remote ref is unavailable: {ref}")
+    return commit
+
+
+def _project_version(repository: Path, commit: str) -> str:
+    raw = subprocess.check_output(
+        ["git", "-C", str(repository), "show", f"{commit}:Project.toml"],
+        stderr=subprocess.STDOUT,
+    )
+    value = tomllib.loads(raw.decode("utf-8")).get("version")
+    if not canonical_version(value):
+        raise ValueError("resolved Project.toml version is not canonical")
+    return str(value)
+
+
+def resolve_repository_evidence(
+    event: dict[str, object],
+    *,
+    tag_ref: str,
+    tag_sha: str,
+    tag_tree: str,
+    tag_version: str,
+    main_sha: str,
+    main_version: str,
+) -> dict[str, dict[str, str]]:
+    """Resolve Git-backed release identities independently of the event.
+
+    Gate A cannot re-run external certification policy or live repository
+    settings here.  It can and must independently resolve every Git ref,
+    commit, tree, and Project.toml version used to authorize documentation.
+    The event remains the durable authority for non-Git attestation metadata.
+    """
+
+    if canonical_tag_ref(tag_ref) != event.get("public_tag"):
+        raise ValueError("workflow tag ref is not the event's exact canonical tag ref")
+    anchor_ref = event.get("anchor_ref")
+    candidate_ref = event.get("candidate_ref")
+    if not isinstance(anchor_ref, str) or not isinstance(candidate_ref, str):
+        raise ValueError("released event is missing durable Git refs")
+    expected_refs = {
+        "tag": (tag_ref, tag_sha),
+        "anchor": (anchor_ref, event.get("anchor_sha")),
+        "candidate": (candidate_ref, event.get("candidate_sha")),
+        "main": ("refs/heads/main", main_sha),
+    }
+    for name, (ref, expected_sha) in expected_refs.items():
+        if not full_sha(expected_sha) or _remote_ref_commit(ref) != expected_sha:
+            raise ValueError(f"{name} ref does not resolve to the required commit")
+
+    endpoint = _command_text("git", "remote", "get-url", "origin")
+    with tempfile.TemporaryDirectory(prefix="cyax-docs-release-evidence-") as temporary:
+        repository = Path(temporary) / "authority.git"
+        subprocess.run(
+            ["git", "init", "--bare", "--quiet", str(repository)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for ref, _ in expected_refs.values():
+            subprocess.run(
+                [
+                    "git", "-C", str(repository), "fetch", "--quiet",
+                    "--no-tags", "--no-write-fetch-head", endpoint, ref,
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        event_main_sha = event.get("main_at_event_sha")
+        certification_sha = event.get("certification_subject_sha")
+        for commit in (event_main_sha, certification_sha):
+            if not full_sha(commit):
+                raise ValueError("event carries an invalid independently resolved commit")
+            present = subprocess.run(
+                ["git", "-C", str(repository), "cat-file", "-e", f"{commit}^{{commit}}"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if present.returncode != 0:
+                subprocess.run(
+                    [
+                        "git", "-C", str(repository), "fetch", "--quiet",
+                        "--no-tags", "--no-write-fetch-head", endpoint, str(commit),
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+        def identity(commit: object) -> dict[str, str]:
+            if not full_sha(commit):
+                raise ValueError("resolved identity is not a full Git SHA")
+            sha = str(commit)
+            tree = _command_text(
+                "git", "rev-parse", "--verify", f"{sha}^{{tree}}", cwd=repository
+            )
+            if not full_sha(tree):
+                raise ValueError("resolved tree is not a full Git SHA")
+            return {
+                "sha": sha,
+                "tree": tree,
+                "version": _project_version(repository, sha),
+            }
+
+        evidence = {
+            name: identity(expected_sha)
+            for name, (_, expected_sha) in expected_refs.items()
+        }
+        evidence["certified"] = identity(certification_sha)
+        evidence["event_main"] = identity(event_main_sha)
+
+    if evidence["tag"] != {
+        "sha": tag_sha, "tree": tag_tree, "version": tag_version
+    }:
+        raise ValueError("workflow tag checkout does not match remote Git evidence")
+    if evidence["main"]["version"] != main_version:
+        raise ValueError("workflow main version does not match remote Git evidence")
+    return evidence
 
 
 def resolve_tag_commit(tag: str) -> str | None:
@@ -114,22 +269,24 @@ def list_canonical_public_tags() -> list[str] | None:
     return sorted(tags)
 
 
-def certification_record(event: dict[str, object]) -> dict[str, object]:
+def certification_record(
+    event: dict[str, object], repository_evidence: dict[str, dict[str, str]]
+) -> dict[str, object]:
     """Build the pinned certification identity carried by a released event.
 
     The release validator deliberately requires certification evidence as a
-    separate input.  The event stream is the documentation verifier's only
-    authority, so this adapter passes the independently recorded fields to
-    that validator without inventing any evidence or resolving a private
-    locator.
+    separate input. Git commit/tree identity comes from the independent
+    repository resolver. Policy, harness, environment, and evidence-reference
+    fields remain durable ledger assertions at Gate A; live settings and
+    external attestation resolution belong to the later release gate.
     """
 
     evidence_refs = event.get("certification_evidence_refs")
     evidence_ref = evidence_refs[0] if isinstance(evidence_refs, list) and evidence_refs else ""
     record = {
         "binding": event.get("certification_binding", ""),
-        "package_commit": event.get("certification_subject_sha", ""),
-        "package_tree": event.get("certification_subject_tree", ""),
+        "package_commit": repository_evidence["certified"]["sha"],
+        "package_tree": repository_evidence["certified"]["tree"],
         "policy_revision": event.get("certification_policy_revision", ""),
         "harness_revision": event.get("certification_harness_revision", ""),
         "environment": event.get("certification_environment", ""),
@@ -142,24 +299,21 @@ def certification_record(event: dict[str, object]) -> dict[str, object]:
 
 
 def project_version_evidence(
-    event: dict[str, object], *, resolved_version: str
+    repository_evidence: dict[str, dict[str, str]]
 ) -> dict[str, str]:
     """Return version observations from independently resolved Git trees.
 
-    The tag or current principal tree supplies ``resolved_version``. The
-    released event must separately report the same final version and equal
-    exact trees before these observations can be used for the five
-    certification-side views.
+    Every returned version was read from an independently resolved Git tree.
+    The released event must separately agree with these observations.
     """
 
-    event_main_version = str(event.get("main_at_event_version", ""))
     return {
-        "closure": resolved_version,
-        "candidate": resolved_version,
-        "anchor": resolved_version,
-        "final_release": resolved_version,
-        "certified": resolved_version,
-        "main": event_main_version,
+        "closure": repository_evidence["anchor"]["version"],
+        "candidate": repository_evidence["candidate"]["version"],
+        "anchor": repository_evidence["anchor"]["version"],
+        "final_release": repository_evidence["tag"]["version"],
+        "certified": repository_evidence["certified"]["version"],
+        "main": repository_evidence["event_main"]["version"],
     }
 
 
@@ -178,13 +332,19 @@ def verified_principal_matches(
             and is_canonical_public_tag(prior.get("public_tag"))
         ):
             continue
+        prior_evidence = resolve_repository_evidence(
+            prior,
+            tag_ref=f"refs/tags/{prior['public_tag']}",
+            tag_sha=main_sha,
+            tag_tree=str(prior.get("final_release_tree", "")),
+            tag_version=main_version,
+            main_sha=main_sha,
+            main_version=main_version,
+        )
         prior_result = validate_released_event(
             prior,
-            certification=certification_record(prior),
-            project_versions=project_version_evidence(
-                prior,
-                resolved_version=main_version,
-            ),
+            certification=certification_record(prior, prior_evidence),
+            project_versions=project_version_evidence(prior_evidence),
         )
         if prior_result.get("status") != PASS:
             raise ValueError(
@@ -263,6 +423,8 @@ def write_environment(path: Path, values: dict[str, str]) -> None:
 
 
 def verify(args: argparse.Namespace) -> int:
+    if canonical_tag_ref(args.tag_ref) != args.tag:
+        return fail("tag ref is not exactly refs/tags/<canonical-tag>")
     if not is_canonical_public_tag(args.tag):
         return fail("tag is not a canonical vX.Y.Z identity")
     if not canonical_version(args.tag[1:]):
@@ -304,26 +466,30 @@ def verify(args: argparse.Namespace) -> int:
 
     is_principal = line == "principal"
 
-    event_main = {
-        "sha": event.get("main_at_event_sha", ""),
-        "version": event.get("main_at_event_version", ""),
-    }
+    try:
+        repository_evidence = resolve_repository_evidence(
+            event,
+            tag_ref=args.tag_ref,
+            tag_sha=args.tag_sha,
+            tag_tree=args.tag_tree,
+            tag_version=args.tag_version,
+            main_sha=args.main_sha,
+            main_version=args.main_version,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        return fail(f"independent repository identity resolution failed: {error}")
+
     result = validate_released_event(
         event,
-        certification=certification_record(event),
+        certification=certification_record(event, repository_evidence),
         principal_main={
-            "sha": args.main_sha if is_principal else event_main["sha"],
-            "version": args.main_version if is_principal else event_main["version"],
+            "sha": repository_evidence["main" if is_principal else "event_main"]["sha"],
+            "version": repository_evidence["main" if is_principal else "event_main"]["version"],
         },
-        # The released event binds one exact tree for closure, candidate,
-        # anchor, certification, and final release. The tag checkout is that
-        # tree, so its package version supplies all five equal observations.
-        # Principal stable selection reads current main independently; a
-        # maintenance event keeps its contemporaneous main identity above.
-        project_versions=project_version_evidence(
-            event,
-            resolved_version=args.tag_version,
-        ),
+        # Git refs and commits were resolved independently above. Principal
+        # stable selection uses current main; a maintenance event uses its
+        # independently resolved contemporaneous main commit.
+        project_versions=project_version_evidence(repository_evidence),
     )
     if result.get("status") != PASS:
         return fail(f"released event validation failed: {result}")
@@ -371,6 +537,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--event-stream", type=Path, required=True)
     result.add_argument("--tag")
+    result.add_argument("--tag-ref")
     result.add_argument("--tag-sha")
     result.add_argument("--tag-tree")
     result.add_argument("--tag-version")

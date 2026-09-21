@@ -37,6 +37,88 @@ def run_route(**values: str) -> subprocess.CompletedProcess[str]:
 
 @unittest.skipUnless(shutil.which("julia"), "Julia is required for route checks")
 class DocumentationRoutingTests(unittest.TestCase):
+    def test_repository_evidence_resolves_refs_trees_and_versions_independently(self) -> None:
+        module_spec = importlib.util.spec_from_file_location(
+            "verify_release_context_live_fixture",
+            ROOT / "docs/verify_release_context.py",
+        )
+        verifier = importlib.util.module_from_spec(module_spec)
+        assert module_spec.loader is not None
+        module_spec.loader.exec_module(verifier)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            remote = root / "origin.git"
+            checkout = root / "checkout"
+            subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+            subprocess.run(
+                ["git", "init", "-q", "-b", "main", str(checkout)], check=True
+            )
+            for key, value in (
+                ("user.name", "Docs Fixture"),
+                ("user.email", "docs@example.invalid"),
+            ):
+                subprocess.run(
+                    ["git", "-C", str(checkout), "config", key, value], check=True
+                )
+            subprocess.run(
+                ["git", "-C", str(checkout), "remote", "add", "origin", str(remote)],
+                check=True,
+            )
+            (checkout / "Project.toml").write_text(
+                'name = "Fixture"\nversion = "0.3.0"\n', encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "-C", str(checkout), "add", "Project.toml"], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(checkout), "commit", "-q", "-m", "release"],
+                check=True,
+            )
+            sha = subprocess.check_output(
+                ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True
+            ).strip()
+            tree = subprocess.check_output(
+                ["git", "-C", str(checkout), "rev-parse", "HEAD^{tree}"], text=True
+            ).strip()
+            subprocess.run(
+                ["git", "-C", str(checkout), "branch", "candidates/0.3.0"], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(checkout), "tag", "iterations/0.3.0"], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(checkout), "tag", "v0.3.0"], check=True
+            )
+            subprocess.run(
+                [
+                    "git", "-C", str(checkout), "push", "-q", "origin",
+                    "main", "candidates/0.3.0", "--tags",
+                ],
+                check=True,
+            )
+            event = {
+                "public_tag": "v0.3.0",
+                "anchor_ref": "refs/tags/iterations/0.3.0",
+                "anchor_sha": sha,
+                "candidate_ref": "refs/heads/candidates/0.3.0",
+                "candidate_sha": sha,
+                "certification_subject_sha": sha,
+                "main_at_event_sha": sha,
+            }
+            verifier.ROOT = checkout
+            evidence = verifier.resolve_repository_evidence(
+                event,
+                tag_ref="refs/tags/v0.3.0",
+                tag_sha=sha,
+                tag_tree=tree,
+                tag_version="0.3.0",
+                main_sha=sha,
+                main_version="0.3.0",
+            )
+        self.assertTrue(all(item["tree"] == tree for item in evidence.values()))
+        self.assertTrue(all(item["version"] == "0.3.0" for item in evidence.values()))
+
     def test_release_context_verifier_exports_only_verified_identities(self) -> None:
         sha = "a" * 40
         tree = "c" * 40
@@ -46,6 +128,33 @@ class DocumentationRoutingTests(unittest.TestCase):
         verifier = importlib.util.module_from_spec(module_spec)
         assert module_spec.loader is not None
         module_spec.loader.exec_module(verifier)
+        actual_repository_resolver = verifier.resolve_repository_evidence
+
+        def resolved_evidence(event, *, tag_sha, tag_tree, tag_version,
+                              main_sha, main_version, **_):
+            return {
+                "tag": {"sha": tag_sha, "tree": tag_tree, "version": tag_version},
+                "anchor": {
+                    "sha": event["anchor_sha"], "tree": event["anchor_tree"],
+                    "version": event["final_version"],
+                },
+                "candidate": {
+                    "sha": event["candidate_sha"], "tree": event["candidate_tree"],
+                    "version": event["final_version"],
+                },
+                "certified": {
+                    "sha": event["certification_subject_sha"],
+                    "tree": event["certification_subject_tree"],
+                    "version": event["final_version"],
+                },
+                "main": {"sha": main_sha, "tree": tag_tree, "version": main_version},
+                "event_main": {
+                    "sha": event["main_at_event_sha"], "tree": tag_tree,
+                    "version": event["main_at_event_version"],
+                },
+            }
+
+        verifier.resolve_repository_evidence = resolved_evidence
         event = {
             "schema_version": 1,
             "event_type": "released",
@@ -79,12 +188,29 @@ class DocumentationRoutingTests(unittest.TestCase):
             "previous_main_sha": "e" * 40,
             "previous_main_version": "0.2.0",
         }
+        with patch.object(
+            verifier,
+            "_remote_ref_commit",
+            side_effect=lambda ref: "b" * 40
+            if ref == event["candidate_ref"] else sha,
+        ):
+            with self.assertRaisesRegex(ValueError, "candidate ref"):
+                actual_repository_resolver(
+                    event,
+                    tag_ref="refs/tags/v0.3.0",
+                    tag_sha=sha,
+                    tag_tree=tree,
+                    tag_version="0.3.0",
+                    main_sha=sha,
+                    main_version="0.3.0",
+                )
         values = type(
             "Args",
             (),
             {
                 "event_stream": pathlib.Path(__file__),
                 "tag": "v0.3.0",
+                "tag_ref": "refs/tags/v0.3.0",
                 "tag_sha": sha,
                 "tag_tree": tree,
                 "tag_version": "0.3.0",
@@ -103,6 +229,23 @@ class DocumentationRoutingTests(unittest.TestCase):
         self.assertIn("CYAX_DOCS_RELEASE_LINE=principal", exported)
         self.assertIn("CYAX_DOCS_STABLE=true", exported)
         self.assertIn("CYAX_DOCS_STABLE_TAG=v0.3.0", exported)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            values.github_env = pathlib.Path(temporary) / "nested-ref.env"
+            values.tag_ref = "refs/tags/archive/v0.3.0"
+            self.assertNotEqual(verifier.verify(values), 0)
+        values.tag_ref = "refs/tags/v0.3.0"
+
+        def unresolved_repository_evidence(*_args, **_kwargs):
+            raise ValueError("fabricated event has no matching repository identities")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            values.github_env = pathlib.Path(temporary) / "fabricated.env"
+            verifier.resolve_repository_evidence = unresolved_repository_evidence
+            with patch.object(verifier, "parse_stream", return_value=[event]):
+                self.assertNotEqual(verifier.verify(values), 0)
+            self.assertFalse(values.github_env.exists())
+        verifier.resolve_repository_evidence = resolved_evidence
 
         stable_values = type(
             "Args",
@@ -321,6 +464,7 @@ class DocumentationRoutingTests(unittest.TestCase):
             {
                 "event_stream": pathlib.Path(__file__),
                 "tag": "v0.2.1",
+                "tag_ref": "refs/tags/v0.2.1",
                 "tag_sha": sha,
                 "tag_tree": tree,
                 "tag_version": "0.2.1",
@@ -494,6 +638,14 @@ class DocumentationRoutingTests(unittest.TestCase):
             },
             {
                 "CYAX_DOCS_REF": "refs/tags/v01.2.3",
+                "CYAX_DOCS_EVENT_STATUS": "verified",
+            },
+            {
+                "CYAX_DOCS_REF": "refs/tags/archive/v0.3.0",
+                "CYAX_DOCS_EVENT_STATUS": "verified",
+            },
+            {
+                "CYAX_DOCS_REF": "refs/tags/v4294967296.0.0",
                 "CYAX_DOCS_EVENT_STATUS": "verified",
             },
         ):

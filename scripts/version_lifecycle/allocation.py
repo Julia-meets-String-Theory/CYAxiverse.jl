@@ -183,7 +183,7 @@ def _event_occupied(events: Iterable[Mapping[str, Any]]) -> set[str]:
 
 def _validated_event_head(
     head: Any,
-) -> tuple[str, set[str]]:
+) -> tuple[str, str, set[str]]:
     """Require an authority-bound head returned by the event writer."""
 
     if not _is_verified_ledger_head(head):
@@ -199,7 +199,7 @@ def _validated_event_head(
         raise ValueError("event head raw stream bytes are required")
     if not isinstance(provided_events, tuple):
         raise ValueError("event head events are required")
-    return commit, _event_occupied(provided_events)
+    return commit, head.repository_identity, _event_occupied(provided_events)
 
 
 def global_allocation_view(
@@ -218,7 +218,13 @@ def global_allocation_view(
         # snapshots and caller-forged booleans must fail closed here.
         if not _has_verified_authority(snapshot):
             raise StaticValidationError("fresh remote static authority has not been verified")
-        event_head_commit, mutable_values = _validated_event_head(allocation_event_head)
+        event_head_commit, event_repository, mutable_values = _validated_event_head(
+            allocation_event_head
+        )
+        if snapshot._repository_authority != event_repository:
+            raise ValueError(
+                "static and mutable authorities belong to different repositories"
+            )
     except StaticValidationError as error:
         detail = str(error)
         if "source bytes" in detail:

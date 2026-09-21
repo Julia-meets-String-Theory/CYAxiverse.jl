@@ -58,6 +58,7 @@ def _run(repo: Path, *args: str) -> str:
 
 
 def _fixture_event_head(
+    repo: Path,
     occupied_versions: tuple[str, ...] = (),
     *,
     branch: str = "release-events",
@@ -82,10 +83,6 @@ def _fixture_event_head(
             }
             for index, value in enumerate(occupied_versions, start=1)
         )
-    repo = Path(tempfile.mkdtemp(prefix="cyax-event-head-"))
-    _run(repo, "init", "-q", "-b", "main")
-    _run(repo, "config", "user.email", "tests@example.invalid")
-    _run(repo, "config", "user.name", "Lifecycle Tests")
     writer = ReleaseEventWriter(repo, branch=branch)
     root = writer._make_commit(b"", parent=None, message="fixture bootstrap")
     _run(repo, "update-ref", writer.ref, root)
@@ -375,7 +372,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         )
         result = global_allocation_view(
             forged,
-            _fixture_event_head(),
+            _fixture_event_head(repo),
         )
         self.assertIsInstance(result, BlockedResult)
         assert isinstance(result, BlockedResult)
@@ -395,7 +392,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         ]
         result = global_allocation_view(
             snapshot,
-            _fixture_event_head(),
+            _fixture_event_head(repo),
         )
         self.assertIsInstance(result, BlockedResult)
         assert isinstance(result, BlockedResult)
@@ -500,6 +497,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         repo = _fixture()
         snapshot = static_snapshot(repo, source_repository="fixture/repo")
         assert not isinstance(snapshot, BlockedResult)
+        self.assertFalse(snapshot_is_stale(snapshot.to_dict(), repo))
         tampered = snapshot.to_dict()
         tampered["occupied_versions"] = list(reversed(tampered["occupied_versions"]))
         with self.assertRaises(StaticValidationError):
@@ -607,7 +605,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         self.assertNotIsInstance(snapshot, BlockedResult)
         assert not isinstance(snapshot, BlockedResult)
         structural = snapshot.to_dict()
-        result = global_allocation_view(structural, _fixture_event_head())
+        result = global_allocation_view(structural, _fixture_event_head(repo))
         self.assertIsInstance(result, BlockedResult)
         assert isinstance(result, BlockedResult)
         self.assertEqual(result.reason_code, "STATIC_SOURCE_BYTES_UNAVAILABLE")
@@ -617,6 +615,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         snapshot = static_snapshot(repo, source_repository="fixture/repo")
         assert not isinstance(snapshot, BlockedResult)
         head = _fixture_event_head(
+            repo,
             occupied_versions=("0.7.1-DEV", "0.7.3", "1.2.0"),
         )
         view = global_allocation_view(snapshot, head)
@@ -634,7 +633,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         repo = _fixture()
         snapshot = static_snapshot(repo, source_repository="fixture/repo")
         assert not isinstance(snapshot, BlockedResult)
-        head = _fixture_event_head()
+        head = _fixture_event_head(repo)
         closed = f"0.7.{MAX_VERSION_COMPONENT}"
         principal = select_principal_sentinel(closed, snapshot, head)
         self.assertEqual(
@@ -667,7 +666,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
             self.assertEqual(result.reason_code, "ALLOCATION_EVENT_HEAD_INVALID")
 
         result = select_principal_sentinel(
-            "0.7.0", snapshot, _fixture_event_head(occupied_versions=("0.7.1",))
+            "0.7.0", snapshot, _fixture_event_head(repo, occupied_versions=("0.7.1",))
         )
         self.assertEqual(result.reason_code, "PRINCIPAL_SENTINEL_UNAVAILABLE")
 
@@ -693,7 +692,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         repo = _fixture()
         snapshot = static_snapshot(repo, source_repository="fixture/repo")
         assert not isinstance(snapshot, BlockedResult)
-        head = _fixture_event_head()
+        head = _fixture_event_head(repo)
         view = global_allocation_view(snapshot, head)
         self.assertEqual(view.status, "READY")
         self.assertEqual(view.event_head_commit, head.commit)
@@ -703,17 +702,33 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         assert isinstance(result, BlockedResult)
         self.assertEqual(result.reason_code, "ALLOCATION_EVENT_HEAD_INVALID")
 
+    def test_static_and_event_authorities_must_share_one_repository(self) -> None:
+        repository_a = _fixture()
+        repository_b = _fixture()
+        snapshot_a = static_snapshot(
+            repository_a, source_repository="fixture/repository-a"
+        )
+        assert not isinstance(snapshot_a, BlockedResult)
+        event_head_b = _fixture_event_head(repository_b)
+
+        result = global_allocation_view(snapshot_a, event_head_b)
+
+        self.assertIsInstance(result, BlockedResult)
+        assert isinstance(result, BlockedResult)
+        self.assertEqual(result.reason_code, "ALLOCATION_EVENT_HEAD_INVALID")
+        self.assertIn("different repositories", result.detail)
+
     def test_noncanonical_orphan_event_history_cannot_enter_allocation(self) -> None:
         repo = _fixture()
         snapshot = static_snapshot(repo, source_repository="fixture/repo")
         assert not isinstance(snapshot, BlockedResult)
 
-        canonical = global_allocation_view(snapshot, _fixture_event_head())
+        canonical = global_allocation_view(snapshot, _fixture_event_head(repo))
         self.assertEqual(canonical.status, "READY")
 
         second_ledger = global_allocation_view(
             snapshot,
-            _fixture_event_head(branch="second-ledger"),
+            _fixture_event_head(repo, branch="second-ledger"),
         )
         self.assertIsInstance(second_ledger, BlockedResult)
         assert isinstance(second_ledger, BlockedResult)
@@ -737,7 +752,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
             "expected_line_head": "c" * 40,
             "reservation_id": "reservation-1",
         }
-        head = _fixture_event_head(events=(historical_event,))
+        head = _fixture_event_head(repo, events=(historical_event,))
         view = global_allocation_view(current, head)
         self.assertEqual(view.status, "READY")
         self.assertIn("0.3.1", view.mutable_occupied)
@@ -763,7 +778,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         }
         active = global_allocation_view(
             snapshot,
-            _fixture_event_head(events=(prepared,)),
+            _fixture_event_head(repo, events=(prepared,)),
         )
         self.assertEqual(active.status, "READY")
         self.assertFalse(active.is_available("0.3.1"))
@@ -795,7 +810,7 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         aborted.pop("expected_line_head")
         after_abort = global_allocation_view(
             snapshot,
-            _fixture_event_head(events=(prepared, aborted)),
+            _fixture_event_head(repo, events=(prepared, aborted)),
         )
         self.assertEqual(after_abort.status, "READY")
         self.assertNotIn("0.3.1", after_abort.mutable_occupied)

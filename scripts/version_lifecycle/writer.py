@@ -27,7 +27,12 @@ from .events import (
     validate_event,
     validate_transition,
 )
-from .git_refs import GitIdentityError, StaticMutationExclusion, validate_remote
+from .git_refs import (
+    GitIdentityError,
+    StaticMutationExclusion,
+    canonical_remote_authority,
+    validate_remote,
+)
 from .codec import canonical_json
 
 
@@ -264,6 +269,15 @@ class ReleaseEventWriter:
     def ref(self) -> str:
         return f"refs/heads/{self.branch}"
 
+    def _repository_authority(self) -> str:
+        remote = self.remote
+        if remote is None:
+            configured = self._git(
+                ["config", "--get", "remote.origin.url"], check=False
+            ).stdout.decode("utf-8", errors="strict").strip()
+            remote = "origin" if configured else str(self.repo.resolve())
+        return canonical_remote_authority(self.repo, remote)
+
     def _git(
         self,
         args: list[str],
@@ -310,7 +324,7 @@ class ReleaseEventWriter:
         self._verify_stream_topology(commit, raw)
         events = tuple(parse_stream(raw))
         return _verified_ledger_head(
-            str(self.repo.resolve()),
+            self._repository_authority(),
             self.ref,
             self.stream_path,
             commit,

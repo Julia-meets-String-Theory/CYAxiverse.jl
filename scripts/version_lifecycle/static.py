@@ -18,7 +18,7 @@ import tomllib
 from urllib.parse import urlsplit, urlunsplit
 
 from .codec import canonical_json, sha256_hex
-from .git_refs import validate_remote
+from .git_refs import canonical_remote_authority, validate_remote
 from .public_ip import parse_ipv4_compat
 from .versions import Version, final_version, maintenance_line, parse_package_version, parse_public_tag
 
@@ -93,6 +93,9 @@ class StaticSnapshot:
     _authority_binding: tuple[str, str, str, str] | None = field(
         default=None, init=False, repr=False, compare=False
     )
+    _repository_authority: str | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @property
     def status(self) -> str:
@@ -149,7 +152,9 @@ class StaticSnapshot:
         return self.data[key]
 
 
-def _mark_authority_verified(snapshot: StaticSnapshot) -> StaticSnapshot:
+def _mark_authority_verified(
+    snapshot: StaticSnapshot, repository_authority: str
+) -> StaticSnapshot:
     """Mark a snapshot as remote-authority verified using a private token."""
 
     object.__setattr__(snapshot, "_authority_token", _STATIC_AUTHORITY_TOKEN)
@@ -167,6 +172,7 @@ def _mark_authority_verified(snapshot: StaticSnapshot) -> StaticSnapshot:
         ),
     )
     object.__setattr__(snapshot, "authority_verified", True)
+    object.__setattr__(snapshot, "_repository_authority", repository_authority)
     return snapshot
 
 
@@ -174,6 +180,8 @@ def _has_verified_authority(snapshot: StaticSnapshot) -> bool:
     """Return whether *snapshot* was verified by this module's authority path."""
 
     if snapshot._authority_token is not _STATIC_AUTHORITY_TOKEN:
+        return False
+    if not isinstance(snapshot._repository_authority, str) or not snapshot._repository_authority:
         return False
     binding = snapshot._authority_binding
     if binding is None or not isinstance(snapshot.source_bytes, bytes):
@@ -954,7 +962,9 @@ def validate_static_snapshot(
         authority_verified=authority_verified,
     )
     if authority_token:
-        _mark_authority_verified(validated)
+        assert isinstance(snapshot, StaticSnapshot)
+        assert snapshot._repository_authority is not None
+        _mark_authority_verified(validated, snapshot._repository_authority)
     return validated
 
 
@@ -984,6 +994,7 @@ def build_static_snapshot(
     repository_path = Path(repository).resolve()
     try:
         remote = validate_remote(remote)
+        repository_authority = canonical_remote_authority(repository_path, remote)
         source_ref, source_path = _selector(selector)
         resolved_source_repository = (
             sanitize_source_repository(source_repository)
@@ -1031,7 +1042,7 @@ def build_static_snapshot(
             validated.data,
             source_bytes=raw,
             authority_verified=True,
-        ))
+        ), repository_authority)
     except UnsafeSourceRepositoryError as error:
         return BlockedResult(reason_code=error.reason_code, detail=str(error))
     except (OSError, subprocess.SubprocessError, StaticValidationError, UnicodeError, ValueError) as error:
@@ -1053,17 +1064,17 @@ compute_static_snapshot = build_static_snapshot
 
 def snapshot_is_stale(snapshot: StaticSnapshot | Mapping[str, Any], repository: str | Path = ".") -> bool:
     """Return whether a fresh canonical source snapshot differs from *snapshot*."""
-
-    current = build_static_snapshot(repository=repository, source_repository=(
-        snapshot.source_repository if isinstance(snapshot, StaticSnapshot) else snapshot["source_repository"]
-    ))
+    try:
+        validated = validate_static_snapshot(snapshot, structural_only=True)
+        current = build_static_snapshot(
+            repository=repository,
+            source_repository=validated.source_repository,
+        )
+    except (KeyError, TypeError, StaticValidationError):
+        return True
     if isinstance(current, BlockedResult):
         return True
-    try:
-        validate_static_snapshot(snapshot)
-    except StaticValidationError:
-        return True
-    return current.to_dict() != (snapshot.data if isinstance(snapshot, StaticSnapshot) else dict(snapshot))
+    return current.to_dict() != validated.to_dict()
 
 
 __all__ = [

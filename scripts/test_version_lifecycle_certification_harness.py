@@ -53,7 +53,8 @@ class CertificationHarnessFixture(unittest.TestCase):
             "import sys\n"
             "import time\n"
             "if sys.argv[1:] == ['--version']:\n"
-            "    print('julia version 1.12.0-certification-fixture')\n"
+            "    print(os.environ.get('CYAX_CERTIFICATION_VERSION_BANNER', "
+            "'julia version 1.12.0-certification-fixture'))\n"
             "    raise SystemExit(0)\n"
             "if sys.argv[1:] != ['--startup-file=no', '--project=.', '-e', 'using Pkg; Pkg.test()']:\n"
             "    raise SystemExit(41)\n"
@@ -169,6 +170,23 @@ class CertificationHarnessFixture(unittest.TestCase):
         self.assertTrue(result["tracked_files_changed"])
         self.assertEqual(len(result["tracked_status_sha256"]), 64)
         self.assertEqual(result["test_exit_code"], 0)
+
+    def test_unsafe_executable_version_banner_is_published_only_as_a_digest(self) -> None:
+        original = os.environ.get("CYAX_CERTIFICATION_VERSION_BANNER")
+        os.environ["CYAX_CERTIFICATION_VERSION_BANNER"] = (
+            "julia version 1.12.0 /Users/private/toolchain"
+        )
+        try:
+            result = self._certify()
+        finally:
+            if original is None:
+                os.environ.pop("CYAX_CERTIFICATION_VERSION_BANNER", None)
+            else:
+                os.environ["CYAX_CERTIFICATION_VERSION_BANNER"] = original
+        self.assertEqual(result["status"], PASS)
+        banner = result["test_environment"]["test_executable_version"]
+        self.assertRegex(banner, r"^sha256:[0-9a-f]{64}$")
+        self.assertNotIn("/Users/private", json.dumps(result, sort_keys=True))
 
     def test_rejects_a_test_that_moves_head(self) -> None:
         result = self._certify(action="move-head")

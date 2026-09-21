@@ -174,12 +174,13 @@ class GitRefFixture(unittest.TestCase):
         )
         public_protection = ProtectionEvidence(
             rule_id="fixture-canonical-rule",
-            pattern="refs/tags/v0.*",
+            pattern="refs/tags/v*.*.*",
             snapshot_sha256="0" * 64,
             retrieved_at_utc="2026-09-20T00:00:00Z",
             creation_guarded=True,
             update_guarded=True,
             deletion_guarded=True,
+            canonical_public_tags_globally_guarded=True,
         )
         held = self.repository.acquire_static_mutation()
         contender = GitRepository(
@@ -363,22 +364,26 @@ class GitRefFixture(unittest.TestCase):
         )
         good = ProtectionEvidence(
             rule_id="fixture-canonical-rule",
-            pattern="refs/tags/v0.*",
+            pattern="refs/tags/v*.*.*",
             snapshot_sha256="0" * 64,
             retrieved_at_utc="2026-09-20T00:00:00Z",
             creation_guarded=True,
             update_guarded=True,
             deletion_guarded=True,
+            canonical_public_tags_globally_guarded=True,
         )
         self.repository.push_create_only(public_ref, self.commit, good)
         self.assertEqual(self.repository.remote_ref(public_ref), self.commit)
         self.assertEqual(self.repository.remote_ref("refs/tags/v-0.1"), self.commit)
 
-        for pattern, creation, update, deletion in (
-            ("refs/tags/v*", True, True, True),
-            ("refs/tags/v0.*", False, True, True),
-            ("refs/tags/v0.*", True, False, True),
-            ("refs/tags/v0.*", True, True, False),
+        for pattern, creation, update, deletion, global_coverage in (
+            ("refs/tags/v*", True, True, True, True),
+            ("refs/tags/v0.*", True, True, True, True),
+            (public_ref, True, True, True, True),
+            ("refs/tags/v*.*.*", True, True, True, False),
+            ("refs/tags/v*.*.*", False, True, True, True),
+            ("refs/tags/v*.*.*", True, False, True, True),
+            ("refs/tags/v*.*.*", True, True, False, True),
         ):
             with self.subTest(pattern=pattern, creation=creation, update=update, deletion=deletion):
                 weak = ProtectionEvidence(
@@ -389,6 +394,7 @@ class GitRefFixture(unittest.TestCase):
                     creation_guarded=creation,
                     update_guarded=update,
                     deletion_guarded=deletion,
+                    canonical_public_tags_globally_guarded=global_coverage,
                 )
                 with self.assertRaisesRegex(GitIdentityError, "PUBLIC_TAG_RULESET_UNAVAILABLE"):
                     weak.require_public_tag(public_ref)
