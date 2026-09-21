@@ -276,6 +276,17 @@ intent-binding field before publication. Regressions prove that a missing or
 forged released candidate ID fails closed. Fresh exact-successor reviews are
 required.
 
+The twentieth frozen candidate was commit
+`cea78c028e13f4e3f3c6354d3adfd273cc5a6315` (tree
+`9d8b40377075f088857b8037976e3c81d020a6a2`). Fresh independent SPEC and
+STANDARDS reviews both returned `PASS` with no actionable findings. They
+confirmed the complete candidate identity chain, strict shared remote
+authority parser, prior authority and exhaustion corrections, unchanged
+scientific/package scope, and all 245 lifecycle plus 13 version/documentation
+tests. This evidence-only convergence update follows those exact-state
+reviews; its successor still requires exact-state confirmation before the
+owner merge decision.
+
 ## Observed checks
 
 | Check | Observed result |
@@ -290,12 +301,14 @@ required.
 | `git diff --exit-code 995163f0058488ea183ac645045ed8b1636bef4a -- src test Project.toml bin/audit.jl` and the same comparison against `877dca1` | Passed; the failing Julia source, tests, package metadata, and audit script are unchanged by the full Gate A diff and this correction pass. |
 | `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed; local snapshot captured and no whitespace errors. |
 | Remote CI on superseded `52b2569` | Lifecycle and documentation passed; fast tests reproduced only the recorded Hessian baseline failure; full suite skipped by workflow. |
+| Remote CI on reviewed `cea78c0` | Version lifecycle and documentation passed. Fast tests ran 10 pass / 1 fail and reproduced only the unchanged Hessian normalization failure at `test/runtests.jl:1267` (`2π²` observed, `4π²` expected). Full suite skipped by workflow. |
 | `git diff --check`, Python compilation, and Ruby YAML parse of both workflows | Passed. |
 
 The failed broad Julia gates remain failed at their recorded baseline. The
 scientific normalization and benchmark code are outside this approved
 lifecycle change, `Project.toml` remains `0.2.0`, and no production release
-state changed. Remote CI and fresh exact-final-candidate SPEC/STANDARDS review
-for the fourth review-loop successor are not yet observed. Live protection/event-authority setup, an explicit owner
+state changed. Remote CI and fresh exact-candidate SPEC/STANDARDS reviews are
+observed on `cea78c0`; the evidence-only convergence successor requires final
+exact-state confirmation. Live protection/event-authority setup, an explicit owner
 merge decision, and fresh post-settings review remain later work; Gate B stays
 separate.

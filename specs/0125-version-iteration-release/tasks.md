@@ -90,8 +90,9 @@ GitHub remain the live work-state record. The Approved spec at
   package suite, audit, docs build, Python-free core import and workflow
   validation. Record the unchanged Hessian and two-JET baseline failures
   accurately.
-- [ ] Observe remote CI for the final exact candidate; do not inherit results
-  from superseded commit `877dca1`.
+- [x] Observe remote CI on reviewed candidate `cea78c0`: lifecycle/docs pass;
+  fast tests reproduce only the unchanged Hessian baseline; full suite skips.
+  Confirm the evidence-only successor's applicable gates before handoff.
 - [x] Converge spec ↔ plan ↔ tasks ↔ implementation ↔ evidence and sanitize
   PR content. Confirm `Project.toml=0.2.0`, no production event, DEV, release,
   tag, historical designation or Gate B mutation.
@@ -133,8 +134,9 @@ GitHub remain the live work-state record. The Approved spec at
 - [x] Run independent SPEC/STANDARDS review on `2cb8ad4`; record SPEC `PASS`
   and STANDARDS `REQUEST_CHANGES`, then require `candidate_id` in released
   events and compare every durable intent binding again before publication.
-- [ ] Obtain fresh independent exact-candidate SPEC/STANDARDS pre-merge
-  reviews; reconcile all blocking findings and bind the final candidate SHA.
+- [x] Obtain fresh independent exact-candidate SPEC/STANDARDS pre-merge
+  reviews on `cea78c0`; both returned `PASS` after every blocking finding was
+  reconciled. Confirm the evidence-only successor before the owner decision.
 - [ ] Present final reviewed PR and evidence for an explicit owner merge
   decision. Review PASS does not constitute this decision.
 - [ ] After authorized merge, establish and prove actual branch, anchor,
