@@ -86,12 +86,37 @@ GitHub remain the live work-state record. The Approved spec at
 - [x] Run focused event/allocation/closure/release/evidence tests first;
   record exact commands/results and synthetic release-evidence packet with
   every R-042 identity field and canonical storage location.
-- [ ] Run `git diff --check`, `agent_verify.py snapshot` and `diff-check`,
-  package suite, audit, docs build, Python-free core import, workflow
-  validation and remote CI. Record failures/unavailable checks accurately.
-- [ ] Converge spec ↔ plan ↔ tasks ↔ implementation ↔ evidence and sanitize
+- [x] Run `git diff --check`, `agent_verify.py snapshot` and `diff-check`,
+  package suite, audit, docs build, Python-free core import and workflow
+  validation. Record the unchanged Hessian and two-JET baseline failures
+  accurately.
+- [ ] Observe remote CI for the final exact candidate; do not inherit results
+  from superseded commit `877dca1`.
+- [x] Converge spec ↔ plan ↔ tasks ↔ implementation ↔ evidence and sanitize
   PR content. Confirm `Project.toml=0.2.0`, no production event, DEV, release,
   tag, historical designation or Gate B mutation.
+
+## Accepted review correction pass
+
+- [x] Bind static and mutable allocation authorities to one canonical remote
+  identity and reject cross-repository combinations.
+- [x] Require separately verified global protection for every canonical
+  `vX.Y.Z` tag while excluding legacy `v-0.1` and rejecting partial rules.
+- [x] Require a fully validated durable `release_intent_prepared` event for
+  forward tag reconciliation and bound maintenance patch allocation to
+  `UInt32`.
+- [x] Validate principal/maintenance main SHAs and canonical final versions,
+  with exact before/at-event equality before the tag boundary.
+- [x] Move CLI authority fetches into an isolated bare repository and prove
+  the inspected checkout is unchanged on success and failure.
+- [x] Correct serialized snapshot staleness, exact/bounded docs tag routing,
+  certification banner publication, and pre-tag public-value sanitation.
+- [x] Resolve documentation Git refs, commits, trees and package versions
+  independently; keep external attestation/live-settings proof explicit as a
+  later gate.
+- [x] Re-run adversarial regressions for the caller-forgeable occupancy proof,
+  complete orphan-ledger history/actual-parent binding, and explicit `vmm` CI
+  fixture clone.
 
 ## A6 — Review, merge decision and live closure
 

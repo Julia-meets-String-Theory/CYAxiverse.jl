@@ -170,22 +170,52 @@ events but did not bind the canonical `release-events` ref and stream, so a
 second valid ledger branch could reach allocation. Those verdicts belong only
 to the fourteenth candidate. The corrected successor requires fresh reviews.
 
+The fifteenth frozen candidate was commit
+`877dca147599e8e35756f7ded1241c25715019d6` (tree
+`e44eda688f55926cd00a41ab5f364e0984ccb6fe`). The public draft-PR review
+returned additional blocking findings: static and mutable authority could come
+from different repositories; future canonical-tag protection was not global;
+forward reconciliation accepted an incomplete intent; maintenance patch
+allocation was not bounded to Julia's `UInt32` domain; principal/maintenance
+main identities were under-validated; the read-only CLI fetched into the
+inspected repository; serialized snapshot mappings were always stale; docs
+routing accepted nested tag refs and did not apply the shared component bound;
+the certification executable banner and pre-tag certification identities used
+weaker public-value checks; and documentation release evidence trusted Git
+identities copied from the released event. Those findings belong only to the
+fifteenth candidate, which is superseded.
+
+The bounded correction implementation is commit
+`d15124d534516d488c7e9ac5b0181b09882eee78` (tree
+`123cb304e62250a79859405224a4fed22106a234`). It closes the accepted findings
+above with positive and adversarial regressions. It also re-verifies the three
+post-`eec4ed0a` blockers: allocation accepts only a writer-verified ledger head;
+the complete `release-events` history must reach the empty orphan bootstrap and
+bind each event to its actual parent; and the CI publishing fixture clones
+`vmm` explicitly. This commit has no fresh exact-candidate SPEC or STANDARDS
+verdict. The mechanical evidence/tasks successor does not change lifecycle,
+scientific, package, or workflow behavior and must be reviewed together with
+this implementation commit as the final PR state.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 230 tests on the corrected local candidate. |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 237 tests in 63.056 seconds on `d15124d`. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 12 tests (3 version, 9 documentation) in 9.427 seconds. |
+| `python3 scripts/check_version_bump.py --base 995163f0058488ea183ac645045ed8b1636bef4a --head HEAD` | Passed: lifecycle-only changes require no package-version update. |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |
 | `python3 scripts/agent_verify.py package` | Failed: existing phase/volume detuning Hessian test at `test/runtests.jl:1267` expects `4π²`; observed `2π²`. |
-| `julia --project=. bin/audit.jl` via `agent_verify.py run` | Failed: two existing JET reports for undefined `i` in benchmark modules. |
-| `git diff --exit-code origin/vmm -- src test Project.toml bin/audit.jl` | Passed; the failing Julia source, tests, package metadata, and audit script are unchanged by Gate A. |
+| `julia --project=. bin/audit.jl` via `agent_verify.py run` | Failed: the same two JET reports for undefined `i` in `reduced_models.jl` and `poly102_inflation.jl`; file-monitor exhaustion warnings also appeared after the two reports. |
+| `git diff --exit-code 995163f0058488ea183ac645045ed8b1636bef4a -- src test Project.toml bin/audit.jl` and the same comparison against `877dca1` | Passed; the failing Julia source, tests, package metadata, and audit script are unchanged by the full Gate A diff and this correction pass. |
 | `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed; local snapshot captured and no whitespace errors. |
-| `git diff --check` and Ruby YAML parse of both changed workflows | Passed. |
+| `git diff --check`, Python compilation, and Ruby YAML parse of both workflows | Passed. |
 
-The failed broad Julia gates remain failed. The scientific normalization and
-benchmark code are outside this approved lifecycle change. Remote CI and live
-protection enforcement are not yet observed. An explicit owner merge decision
-and a fresh postmerge settings/refs review are still required before Gate A
-can be declared complete.
+The failed broad Julia gates remain failed at their recorded baseline. The
+scientific normalization and benchmark code are outside this approved
+lifecycle change, `Project.toml` remains `0.2.0`, and no production release
+state changed. Remote CI and fresh exact-final-candidate SPEC/STANDARDS review
+are not yet observed. Live protection/event-authority setup, an explicit owner
+merge decision, and fresh post-settings review remain later work; Gate B stays
+separate.
