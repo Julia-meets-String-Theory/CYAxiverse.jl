@@ -86,7 +86,9 @@ def _command_text(*command: str, cwd: Path | None = None) -> str:
 
 def _remote_ref_commit(ref: str) -> str:
     output = _command_output("git", "ls-remote", "origin", ref, f"{ref}^{{}}")
-    commit = parse_remote_ref_advertisement(output, ref, allow_peeled=True)
+    commit = parse_remote_ref_advertisement(
+        output, ref, allow_peeled=ref.startswith("refs/tags/")
+    )
     if commit is None:
         raise ValueError(f"remote ref is unavailable: {ref}")
     return commit
@@ -156,6 +158,11 @@ def resolve_repository_evidence(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+        for name, (ref, expected_sha) in expected_refs.items():
+            if _remote_ref_commit(ref) != expected_sha:
+                raise ValueError(
+                    f"{name} ref changed during independent identity resolution"
+                )
         event_main_sha = event.get("main_at_event_sha")
         certification_sha = event.get("certification_subject_sha")
         for commit in (event_main_sha, certification_sha):

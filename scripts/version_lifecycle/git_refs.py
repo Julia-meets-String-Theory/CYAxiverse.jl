@@ -74,16 +74,33 @@ def parse_remote_ref_advertisement(
     if not isinstance(ref, str) or FULL_REF.fullmatch(ref) is None:
         raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
     try:
-        text = output.decode("utf-8", errors="strict") if isinstance(output, bytes) else output
+        text = (
+            output.decode("ascii", errors="strict")
+            if isinstance(output, bytes)
+            else output
+        )
+        if isinstance(text, str):
+            text.encode("ascii", errors="strict")
     except UnicodeError as error:
         raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID") from error
     if not isinstance(text, str):
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+    if allow_peeled and not ref.startswith("refs/tags/"):
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+    if any(
+        (ord(character) < 0x20 and character not in {"\n", "\t"})
+        or ord(character) > 0x7E
+        for character in text
+    ):
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+    if text and not text.endswith("\n"):
         raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
 
     peeled_ref = f"{ref}^{{}}"
     allowed = {ref, peeled_ref} if allow_peeled else {ref}
     records: dict[str, str] = {}
-    for line in text.splitlines():
+    lines = text[:-1].split("\n") if text else []
+    for line in lines:
         fields = line.split("\t")
         if (
             len(fields) != 2

@@ -327,30 +327,10 @@ class ReleaseEventWriter:
         bare repository without reaching into writer internals.
         """
 
-        remote = self.remote or "origin"
-        listed = self._git(["ls-remote", "--refs", remote, self.ref])
-        try:
-            remote_head = parse_remote_ref_advertisement(listed.stdout, self.ref)
-        except GitIdentityError as error:
-            raise WriterError("remote event branch identity is ambiguous") from error
+        remote_head, raw = self._remote_observation(self.remote or "origin")
         if remote_head is None:
             raise BranchUnavailable(f"remote branch does not exist: {self.ref}")
-        self._git(
-            [
-                "fetch",
-                "--no-tags",
-                "--no-write-fetch-head",
-                remote,
-                remote_head,
-            ]
-        )
-        fetched_head = _as_text(
-            self._git(["rev-parse", "--verify", f"{remote_head}^{{commit}}"]).stdout
-        ).strip()
-        if fetched_head != remote_head:
-            raise WriterError("fetched event object differs from advertised remote head")
-        raw = bytes(self._git(["show", f"{fetched_head}:{self.stream_path}"]).stdout)
-        return self._verified_head_from_stream(fetched_head, raw)
+        return self._verified_head_from_stream(remote_head, raw)
 
     def _verified_head_from_stream(self, commit: str, raw: bytes) -> LedgerHead:
         """Verify one observed stream and return its authority-bound head."""

@@ -92,6 +92,8 @@ class GitRefFixture(unittest.TestCase):
             f"{direct}\t{ref}\n{peeled}\t{ref}\n",
             f"{direct}\trefs/tags/v0.4.0\n",
             f"{peeled}\t{ref}^{{}}\n",
+            f"{direct}\t{ref}\x1cmalformed\n",
+            f"{direct}\t{ref}",
         )
         for output in invalid_outputs:
             with self.subTest(output=output):
@@ -101,6 +103,16 @@ class GitRefFixture(unittest.TestCase):
                     parse_remote_ref_advertisement(
                         output, ref, allow_peeled=True
                     )
+
+        branch_ref = "refs/heads/main"
+        with self.assertRaisesRegex(
+            GitIdentityError, "REMOTE_REF_ADVERTISEMENT_INVALID"
+        ):
+            parse_remote_ref_advertisement(
+                f"{direct}\t{branch_ref}\n{peeled}\t{branch_ref}^{{}}\n",
+                branch_ref,
+                allow_peeled=True,
+            )
 
     def test_option_like_remote_is_rejected_before_git_subprocess(self) -> None:
         with patch("version_lifecycle.git_refs.subprocess.run") as run:

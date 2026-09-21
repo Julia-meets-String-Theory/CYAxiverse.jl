@@ -132,15 +132,22 @@ class DocumentationRoutingTests(unittest.TestCase):
                 "main_at_event_sha": sha,
             }
             verifier.ROOT = checkout
-            evidence = verifier.resolve_repository_evidence(
-                event,
-                tag_ref="refs/tags/v0.3.0",
-                tag_sha=sha,
-                tag_tree=tree,
-                tag_version="0.3.0",
-                main_sha=sha,
-                main_version="0.3.0",
-            )
+            actual_remote_ref_commit = verifier._remote_ref_commit
+            with patch.object(
+                verifier,
+                "_remote_ref_commit",
+                wraps=actual_remote_ref_commit,
+            ) as remote_ref_commit:
+                evidence = verifier.resolve_repository_evidence(
+                    event,
+                    tag_ref="refs/tags/v0.3.0",
+                    tag_sha=sha,
+                    tag_tree=tree,
+                    tag_version="0.3.0",
+                    main_sha=sha,
+                    main_version="0.3.0",
+                )
+            self.assertEqual(remote_ref_commit.call_count, 8)
         self.assertTrue(all(item["tree"] == tree for item in evidence.values()))
         self.assertTrue(all(item["version"] == "0.3.0" for item in evidence.values()))
 

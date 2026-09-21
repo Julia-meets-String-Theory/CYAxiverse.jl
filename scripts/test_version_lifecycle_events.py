@@ -1401,6 +1401,46 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(result.status, "APPENDED")
         self.assertEqual(len(calls), 2)
 
+    def test_remote_head_read_rejects_ref_change_between_listing_and_fetch(self):
+        writer = ReleaseEventWriter(
+            self.repo,
+            remote="origin",
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        advertised = writer.current_head()
+        fetched = "f" * 40
+
+        def raced_git(
+            args: list[str], *, input_bytes: bytes | None = None, check: bool = True
+        ):
+            del input_bytes, check
+            if args[:2] == ["ls-remote", "--refs"]:
+                return subprocess.CompletedProcess(
+                    ["git", *args],
+                    0,
+                    stdout=f"{advertised}\t{writer.ref}\n".encode("ascii"),
+                    stderr=b"",
+                )
+            if args and args[0] == "fetch":
+                return subprocess.CompletedProcess(
+                    ["git", *args], 0, stdout=b"", stderr=b""
+                )
+            if args and args[0] == "rev-parse":
+                return subprocess.CompletedProcess(
+                    ["git", *args], 0, stdout=f"{fetched}\n".encode("ascii"), stderr=b""
+                )
+            if args[:2] == ["update-ref", "-d"]:
+                return subprocess.CompletedProcess(
+                    ["git", *args], 0, stdout=b"", stderr=b""
+                )
+            self.fail(f"unexpected Git command: {args}")
+
+        with patch.object(writer, "_git", side_effect=raced_git):
+            with self.assertRaisesRegex(
+                AppendOutcomeUncertain, "advanced during reconciliation"
+            ):
+                writer.read_remote_head()
+
     def test_remote_advance_without_transaction_returns_stale_block(self):
         writer = ReleaseEventWriter(
             self.repo,
