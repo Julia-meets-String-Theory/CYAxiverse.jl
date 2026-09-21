@@ -197,12 +197,31 @@ verdict. The mechanical evidence/tasks successor does not change lifecycle,
 scientific, package, or workflow behavior and must be reviewed together with
 this implementation commit as the final PR state.
 
+The sixteenth frozen candidate was commit
+`52b2569a57bd07fd3e9742e8fa8269984456f8c3` (tree
+`0c27c7622e1cb7689303afbf98b4cab9dbd783f6`). Fresh independent SPEC and
+STANDARDS reviews both returned `REQUEST_CHANGES`. STANDARDS found that the
+documentation verifier accepted malformed or conflicting duplicate
+`ls-remote` advertisements and that the CLI duplicated writer internals. SPEC
+found that reconciliation and the pre-tag transaction boundary compared only
+a subset of the durable intent's candidate, anchor, release-line and
+certification identity. Those verdicts belong only to the sixteenth candidate.
+
+The review-loop correction implementation is commit
+`870c36500fb1a2b894060ee68ba20cdca95a29f3` (tree
+`3f3bbcd36806f94d0576970c8bcd12dc72f10a4c`). It adds one strict shared remote
+advertisement parser, a public verified remote-ledger read path, full canonical
+intent validation before tag creation, and exact intent-to-released-event
+identity comparison. Adversarial tests cover malformed, duplicate, conflicting,
+unrelated and peeled-only advertisements plus candidate, anchor, release-line
+and certification mismatches. Fresh exact-successor reviews are required.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 237 tests in 63.056 seconds on `d15124d`. |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 12 tests (3 version, 9 documentation) in 9.427 seconds. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 240 tests in 59.933 seconds on `870c365`. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 13 tests (3 version, 10 documentation) in 10.207 seconds. |
 | `python3 scripts/check_version_bump.py --base 995163f0058488ea183ac645045ed8b1636bef4a --head HEAD` | Passed: lifecycle-only changes require no package-version update. |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |
@@ -210,12 +229,13 @@ this implementation commit as the final PR state.
 | `julia --project=. bin/audit.jl` via `agent_verify.py run` | Failed: the same two JET reports for undefined `i` in `reduced_models.jl` and `poly102_inflation.jl`; file-monitor exhaustion warnings also appeared after the two reports. |
 | `git diff --exit-code 995163f0058488ea183ac645045ed8b1636bef4a -- src test Project.toml bin/audit.jl` and the same comparison against `877dca1` | Passed; the failing Julia source, tests, package metadata, and audit script are unchanged by the full Gate A diff and this correction pass. |
 | `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed; local snapshot captured and no whitespace errors. |
+| Remote CI on superseded `52b2569` | Lifecycle and documentation passed; fast tests reproduced only the recorded Hessian baseline failure; full suite skipped by workflow. |
 | `git diff --check`, Python compilation, and Ruby YAML parse of both workflows | Passed. |
 
 The failed broad Julia gates remain failed at their recorded baseline. The
 scientific normalization and benchmark code are outside this approved
 lifecycle change, `Project.toml` remains `0.2.0`, and no production release
 state changed. Remote CI and fresh exact-final-candidate SPEC/STANDARDS review
-are not yet observed. Live protection/event-authority setup, an explicit owner
+for the review-loop successor are not yet observed. Live protection/event-authority setup, an explicit owner
 merge decision, and fresh post-settings review remain later work; Gate B stays
 separate.

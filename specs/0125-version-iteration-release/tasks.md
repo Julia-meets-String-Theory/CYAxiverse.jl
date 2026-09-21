@@ -120,6 +120,9 @@ GitHub remain the live work-state record. The Approved spec at
 
 ## A6 — Review, merge decision and live closure
 
+- [x] Run independent SPEC/STANDARDS review on `52b2569`; record both
+  `REQUEST_CHANGES` verdicts and correct strict remote-advertisement parsing,
+  CLI writer encapsulation and complete durable-intent identity binding.
 - [ ] Obtain fresh independent exact-candidate SPEC/STANDARDS pre-merge
   reviews; reconcile all blocking findings and bind the final candidate SHA.
 - [ ] Present final reviewed PR and evidence for an explicit owner merge
@@ -134,6 +137,7 @@ GitHub remain the live work-state record. The Approved spec at
 
 ## Lesson outcome
 
-- [ ] At convergence, record whether this work produced a reusable failure
-  mode or normative-rule change under the SDD skill. Publish only a sanitized
-  candidate lesson if warranted.
+- [x] Record this review round as a work-specific fail-closed testing lesson:
+  normal Git fixtures do not exercise malformed or duplicate transport
+  advertisements, so authority parsers need explicit adversarial records. No
+  new repository-wide normative rule is required.
