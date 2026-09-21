@@ -24,10 +24,12 @@ _GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 _PUBLIC_DNS_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _NONPUBLIC_DNS_SUFFIXES = (
-    ".corp", ".home", ".internal", ".intranet", ".lan",
+    ".arpa", ".corp", ".example.com", ".example.net", ".example.org",
+    ".home", ".internal", ".intranet", ".lan",
     ".local", ".localdomain", ".localhost", ".private",
     ".test", ".example", ".invalid", ".onion",
 )
+_NONPUBLIC_DNS_NAMES = {"example.com", "example.net", "example.org"}
 
 
 def is_safe_public_value(value: Any) -> bool:
@@ -80,16 +82,16 @@ def is_safe_public_value(value: Any) -> bool:
             or username is not None
             or password is not None
             or port is not None
-            or bool(parsed.query)
-            or bool(parsed.fragment)
+            or "?" in value
+            or "#" in value
             or "%" in parsed.netloc
             or "%" in parsed.path
         ):
             return False
         if (
             not host
-            or "." not in host
             or host.endswith(_NONPUBLIC_DNS_SUFFIXES)
+            or host in _NONPUBLIC_DNS_NAMES
             or host in {"localhost", "localhost.localdomain", "intranet", "internal"}
         ):
             return False
@@ -108,6 +110,7 @@ def is_safe_public_value(value: Any) -> bool:
             return False
         if address is None and (
             len(host) > 253
+            or "." not in host
             or not all(_PUBLIC_DNS_LABEL.fullmatch(label) for label in host.split("."))
         ):
             return False

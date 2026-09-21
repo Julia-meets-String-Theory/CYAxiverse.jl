@@ -576,11 +576,15 @@ class TestReleaseEvidence(unittest.TestCase):
             ("environment", "https://github.com/%55sers/private"),
             ("environment", "https://foo..com/org/repo"),
             ("environment", "https://foo.corp/org/repo"),
+            ("environment", "https://example.com/org/repo"),
+            ("environment", "https://home.arpa/org/repo"),
             ("environment", "https://[::1]/org/repo"),
             ("environment", "https://localhost.localdomain/org/repo"),
             ("environment", "https://service.intranet/org/repo"),
             ("environment", "https://github.com:8443/org/repo"),
             ("environment", "https://github.com/org/repo?key=value"),
+            ("environment", "https://github.com/org/repo?"),
+            ("environment", "https://github.com/org/repo#"),
             ("environment", "https://localhost./org/repo"),
             ("environment", "https://service.internal./org/repo"),
             ("environment", "https:/10.0.0.1/org/repo"),
@@ -599,6 +603,7 @@ class TestReleaseEvidence(unittest.TestCase):
         for value in (
             "https://github.com/org/repo",
             "https://8.8.8.8/org/repo",
+            "https://[2001:4860:4860::8888]/org/repo",
         ):
             with self.subTest(value=value):
                 self.assertTrue(is_safe_public_value(value))

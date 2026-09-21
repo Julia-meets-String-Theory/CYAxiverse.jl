@@ -143,9 +143,17 @@ class VersionLifecycleStaticTests(unittest.TestCase):
             "https://foo.corp/org/repo",
             "https://foo.localdomain/org/repo",
             "https://foo.test/org/repo",
+            "https://example.com/org/repo",
+            "https://example.org/org/repo",
+            "https://example.net/org/repo",
+            "https://sub.example.com/org/repo",
+            "https://home.arpa/org/repo",
             "https://127.0.0.1%2e/org/repo",
             "https://github%2ecom/org/repo",
             "https://foo..com/org/repo",
+            "https://github.com/org/repo?",
+            "https://github.com/org/repo#",
+            "https://[::1]/org/repo",
             "https://intranet/org/repo",
             "https://localhost/org/repo",
         )
@@ -168,6 +176,10 @@ class VersionLifecycleStaticTests(unittest.TestCase):
         self.assertEqual(
             sanitize_source_repository("https://[::ffff:8.8.8.8]/Org/Repo"),
             "https://[::ffff:8.8.8.8]/Org/Repo",
+        )
+        self.assertEqual(
+            sanitize_source_repository("https://[2001:4860:4860::8888]/Org/Repo"),
+            "https://[2001:4860:4860::8888]/Org/Repo",
         )
         snapshot = static_snapshot(
             repo,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 import subprocess
 import sys
@@ -39,6 +39,7 @@ from version_lifecycle.writer import (  # noqa: E402
     bootstrap_release_events,
 )
 from version_lifecycle.allocation import _event_occupied  # noqa: E402
+from version_lifecycle.git_refs import GitRepository  # noqa: E402
 
 
 SNAPSHOT = "a" * 64
@@ -838,6 +839,41 @@ class WriterTests(unittest.TestCase):
         writer = ReleaseEventWriter(self.repo, branch="bootstrap-wrapper")
         self.assertEqual(writer.current_head(), head)
         self.assertEqual(writer.read_head().events, ())
+
+    def test_event_writer_reuses_outer_governed_lease(self):
+        state = {"held": False, "enters": 0}
+
+        @contextmanager
+        def nonreentrant_lease():
+            if state["held"]:
+                raise RuntimeError("external lease cannot be entered twice")
+            state["held"] = True
+            state["enters"] += 1
+            try:
+                yield True
+            finally:
+                state["held"] = False
+
+        repository = GitRepository(
+            self.repo,
+            exclusion_checker=lambda: state["held"],
+            exclusion_lease=nonreentrant_lease,
+        )
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="nested-governed",
+            exclusion_checker=lambda: state["held"],
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=nonreentrant_lease,
+        )
+        with repository.acquire_static_mutation():
+            head = writer.bootstrap(protection_checker=lambda: state["held"])
+            appended = writer.append(reservation_event(expected_head=head), expected_head=head)
+            self.assertEqual(appended.status, "APPENDED")
+            self.assertTrue(state["held"])
+            self.assertEqual(state["enters"], 1)
+        self.assertFalse(state["held"])
+        self.assertEqual(state["enters"], 1)
 
     def test_read_head_rejects_noncanonical_event_trees(self):
         head = self.writer.current_head()

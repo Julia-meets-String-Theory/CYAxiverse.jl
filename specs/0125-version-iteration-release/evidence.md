@@ -94,11 +94,20 @@ leases across complete mutations, the unguarded local event bootstrap, and
 private or malformed public repository locators. Those verdicts belong only
 to the sixth candidate. The corrected successor requires fresh reviews.
 
+The seventh frozen candidate was commit
+`7c04338c44688a897b6b31be1e0d090c4f5260f6` (tree
+`4c86f7d11c579762cb61d6c80e553c8aab4c7315`). Independent SPEC and
+STANDARDS reviews returned `REQUEST_CHANGES`. Findings covered reserved
+special-use source domains, public IPv6 locator handling, and query/fragment
+delimiters. A manager integration probe also found that nested event writes
+must reuse a transaction's nonreentrant external lease. Those verdicts belong
+only to the seventh candidate. The corrected successor requires fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 200 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 201 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline local dependencies; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

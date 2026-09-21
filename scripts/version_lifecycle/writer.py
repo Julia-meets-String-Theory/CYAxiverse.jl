@@ -419,6 +419,11 @@ class ReleaseEventWriter:
     def _enter_external_exclusion(self, stack: ExitStack) -> None:
         """Enter the externally governed exclusion held across mutations."""
 
+        if self.static_exclusion.governed_held():
+            # A transaction controller already holds the same repository's
+            # governed lease. Its Git and event mutations must share that
+            # boundary without reacquiring a nonreentrant external lease.
+            return
         if self.exclusion_lease is None:
             raise GitIdentityError("EXCLUSION_UNAVAILABLE")
         try:

@@ -32,10 +32,12 @@ _PUBLIC_SCP_RE = re.compile(r"^git@github\.com:(?P<path>[^/]+/[^/]+?)(?:\.git)?$
 _NUMERIC_HOST_LABEL_RE = re.compile(r"^(?:0[xX][0-9A-Fa-f]+|[0-9A-Fa-f]+)$")
 _PUBLIC_DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _NONPUBLIC_DNS_SUFFIXES = (
-    ".corp", ".home", ".internal", ".intranet", ".lan",
+    ".arpa", ".corp", ".example.com", ".example.net", ".example.org",
+    ".home", ".internal", ".intranet", ".lan",
     ".local", ".localdomain", ".localhost", ".private",
     ".test", ".example", ".invalid", ".onion",
 )
+_NONPUBLIC_DNS_NAMES = {"example.com", "example.net", "example.org"}
 _UNSAFE_SOURCE_MARKERS = (
     "file:", "local:", "ssh:", "git:", "credential", "password", "token",
     "secret", "authorization", "bearer ", "api_key", "apikey",
@@ -333,7 +335,10 @@ def sanitize_source_repository(value: str) -> str:
             raise UnsafeSourceRepositoryError(
                 "source_repository must be an HTTP(S) URL without credentials"
             )
-        if parsed.query or parsed.fragment or not host or port is not None or "%" in parsed.netloc:
+        if (
+            "?" in value or "#" in value or not host
+            or port is not None or "%" in parsed.netloc
+        ):
             raise UnsafeSourceRepositoryError(
                 "source_repository URL has an unsafe authority or suffix"
             )
@@ -347,7 +352,7 @@ def sanitize_source_repository(value: str) -> str:
             )
         if (
             host in {"localhost", "localhost.localdomain", "intranet"}
-            or "." not in host
+            or host in _NONPUBLIC_DNS_NAMES
             or host.endswith(_NONPUBLIC_DNS_SUFFIXES)
         ):
             raise UnsafeSourceRepositoryError(
@@ -370,6 +375,7 @@ def sanitize_source_repository(value: str) -> str:
             )
         if address is None and (
             len(host) > 253
+            or "." not in host
             or not all(_PUBLIC_DNS_LABEL_RE.fullmatch(label) for label in host.split("."))
         ):
             raise UnsafeSourceRepositoryError(
