@@ -822,7 +822,13 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         released = port.append_released(intent, candidate, certification, final, tag)
         released_appended = True
         port.verify_released(intent, released, certification, final)
-        if released.get("public_tag") != public_tag or not released.get("event_id"):
+        if (
+            not released.get("event_id")
+            or any(
+                released.get(field) != canonical_prepared.get(field)
+                for field in RELEASE_INTENT_BINDING_FIELDS
+            )
+        ):
             raise TransactionError("RELEASED_EVENT_MISMATCH")
         if transfer_evidence is not None and released.get(
             "certification_transfer_evidence"

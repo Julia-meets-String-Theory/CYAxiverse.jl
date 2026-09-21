@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from version_lifecycle.git_refs import ProtectionEvidence  # noqa: E402
+from version_lifecycle.events import RELEASE_INTENT_BINDING_FIELDS  # noqa: E402
 from version_lifecycle.transactions import (  # noqa: E402
     AllocationView,
     BootstrapIntent,
@@ -198,6 +199,7 @@ class ReleaseFixture:
         self.tree = "c" * 40
         self.intent_certification = None
         self.released_certification = None
+        self.prepared_intent = None
 
     def acquire_static_mutation(self, intent):
         if not self.exclusion_available:
@@ -319,6 +321,7 @@ class ReleaseFixture:
             result["certification_transfer_evidence"] = dict(
                 certification["transfer_evidence"]
             )
+        self.prepared_intent = dict(result)
         return result
 
     def verify_public_tag_ruleset(self, intent, tag_ref):
@@ -345,7 +348,15 @@ class ReleaseFixture:
         if self.fail_after_tag:
             raise RuntimeError("transport timeout")
         self.released_certification = dict(certification)
-        result = {"event_id": "EVT-000000000003", "public_tag": tag["name"]}
+        assert self.prepared_intent is not None
+        result = {
+            "event_id": "EVT-000000000003",
+            **{
+                field: self.prepared_intent[field]
+                for field in RELEASE_INTENT_BINDING_FIELDS
+                if field in self.prepared_intent
+            },
+        }
         if "transfer_evidence" in certification:
             result["certification_transfer_evidence"] = dict(
                 certification["transfer_evidence"]
@@ -739,6 +750,23 @@ class TransactionTests(unittest.TestCase):
                     ("INVALID", "RELEASE_INTENT_MISMATCH", True),
                 )
                 self.assertNotIn("tag", port.calls)
+
+    def test_released_event_must_match_durable_intent_identity(self):
+        port = ReleaseFixture()
+        original = port.append_released
+
+        def mismatched_released(intent, candidate, certification, final, tag):
+            released = original(intent, candidate, certification, final, tag)
+            released["candidate_id"] = "candidate-forged"
+            return released
+
+        port.append_released = mismatched_released
+        result = run_release(port, self.release)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("INVALID", "RELEASED_EVENT_MISMATCH", True),
+        )
+        self.assertNotIn("publish", port.calls)
 
     def test_missing_ancestry_or_transfer_proof_blocks_public_tag(self):
         for missing in ("interval", "transfer"):

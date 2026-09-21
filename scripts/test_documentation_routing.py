@@ -215,6 +215,7 @@ class DocumentationRoutingTests(unittest.TestCase):
             "anchor_ref": "refs/tags/iterations/0.3.0",
             "anchor_sha": sha,
             "anchor_tree": tree,
+            "candidate_id": "candidate-0-3-0",
             "candidate_ref": "refs/heads/candidates/0.3.0",
             "candidate_sha": sha,
             "candidate_tree": tree,

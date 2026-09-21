@@ -277,6 +277,14 @@ class TestReleaseEvidence(unittest.TestCase):
         )
         self.assertEqual(result["status"], TERMINAL_CONSISTENT)
 
+        missing_candidate_id = dict(event)
+        missing_candidate_id.pop("candidate_id")
+        with self.assertRaises(ValueError):
+            validate_event(missing_candidate_id)
+        self.assertEqual(
+            validate_released_event(missing_candidate_id)["status"], INVALID
+        )
+
     def test_durable_tree_transfer_proof_matches_event_and_certification(self):
         event = released_event(main_sha=SHA_B)
         event["final_release_sha"] = SHA_B

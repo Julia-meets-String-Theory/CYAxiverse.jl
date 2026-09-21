@@ -182,6 +182,7 @@ TYPE_REQUIRED_FIELDS = {
             "closure_timestamp_utc",
             "final_version",
             "release_line",
+            "candidate_id",
             "anchor_ref",
             "anchor_sha",
             "anchor_tree",
@@ -958,6 +959,7 @@ def _validate_type_fields(event: Mapping[str, Any]) -> None:
             "closure_timestamp_utc",
             "final_version",
             "release_line",
+            "candidate_id",
             "anchor_sha",
             "anchor_tree",
             "candidate_sha",
@@ -1298,10 +1300,7 @@ def validate_transition(
             for old in prior
             if old["event_type"] == "release_intent_prepared"
             and old.get("public_tag") == current.get("public_tag")
-            and (
-                current.get("candidate_id") is None
-                or old.get("candidate_id") == current.get("candidate_id")
-            )
+            and old.get("candidate_id") == current.get("candidate_id")
         ]
         if not matching_intents:
             raise EventTransitionError("released event requires a matching prepared intent")

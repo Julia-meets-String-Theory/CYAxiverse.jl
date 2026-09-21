@@ -464,6 +464,7 @@ def validate_released_event(
     anchor_ref = _missing(errors, event, "anchor_ref")
     anchor_sha = _missing(errors, event, "anchor_sha")
     anchor_tree = _missing(errors, event, "anchor_tree")
+    candidate_id = _missing(errors, event, "candidate_id")
     candidate_ref = _missing(errors, event, "candidate_ref")
     candidate_sha = _missing(errors, event, "candidate_sha")
     candidate_tree = _missing(errors, event, "candidate_tree")
