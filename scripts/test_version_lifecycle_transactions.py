@@ -283,9 +283,35 @@ class ReleaseFixture:
     def append_release_intent(self, intent, candidate, certification, final):
         self.calls.append("intent")
         self.intent_certification = dict(certification)
-        result = {"public_tag": "v" + intent.final_version,
-                  "release_sha": final["sha"], "release_tree": final["tree"],
-                  "event_id": "EVT-000000000002"}
+        result = {
+            "schema_version": 1,
+            "event_id": "EVT-000000000002",
+            "event_type": "release_intent_prepared",
+            "timestamp_utc": "2026-09-20T13:30:00Z",
+            "transaction_id": intent.transaction_id,
+            "static_iteration_snapshot": "0" * 64,
+            "expected_event_head": "0" * 40,
+            "intent_id": f"INT-{intent.final_version}",
+            "candidate_id": f"candidate-{intent.final_version.replace('.', '-')}",
+            "candidate_ref": candidate["ref"],
+            "candidate_sha": candidate["sha"],
+            "candidate_tree": candidate["tree"],
+            "anchor_ref": intent.anchor_ref,
+            "anchor_sha": intent.anchor_sha,
+            "anchor_tree": intent.anchor_tree,
+            "certification_binding": certification["binding"],
+            "certification_subject_sha": certification["subject_sha"],
+            "certification_subject_tree": certification["subject_tree"],
+            "certification_policy_revision": certification["policy_revision"],
+            "certification_harness_revision": certification["harness_revision"],
+            "certification_environment": certification["environment"],
+            "certification_evidence_refs": certification["evidence_refs"],
+            "final_release_sha": final["sha"],
+            "final_release_tree": final["tree"],
+            "final_version": intent.final_version,
+            "release_line": intent.release_line,
+            "public_tag": "v" + intent.final_version,
+        }
         if "transfer_evidence" in certification:
             result["certification_transfer_evidence"] = dict(
                 certification["transfer_evidence"]
@@ -681,6 +707,34 @@ class TransactionTests(unittest.TestCase):
             "BLOCKED", "RELEASE_INTENT_TRANSFER_EVIDENCE_UNPROVEN", True
         ))
         self.assertNotIn("tag", port.calls)
+
+    def test_release_intent_must_match_every_pre_tag_identity(self):
+        mismatches = {
+            "candidate_ref": "refs/heads/candidates/0.3.1",
+            "anchor_sha": "e" * 40,
+            "release_line": "maintenance/0.3",
+            "certification_policy_revision": "policy-2026-10",
+        }
+        for field, value in mismatches.items():
+            with self.subTest(field=field):
+                port = ReleaseFixture()
+                original = port.append_release_intent
+
+                def mismatched_intent(
+                    intent, candidate, certification, final,
+                    *, field=field, value=value,
+                ):
+                    prepared = original(intent, candidate, certification, final)
+                    prepared[field] = value
+                    return prepared
+
+                port.append_release_intent = mismatched_intent
+                result = run_release(port, self.release)
+                self.assertEqual(
+                    (result.status, result.reason_code, result.frozen),
+                    ("INVALID", "RELEASE_INTENT_MISMATCH", True),
+                )
+                self.assertNotIn("tag", port.calls)
 
     def test_missing_ancestry_or_transfer_proof_blocks_public_tag(self):
         for missing in ("interval", "transfer"):

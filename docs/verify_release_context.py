@@ -26,6 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from version_lifecycle.events import parse_stream  # noqa: E402
+from version_lifecycle.git_refs import (  # noqa: E402
+    GitIdentityError,
+    parse_remote_ref_advertisement,
+)
 from version_lifecycle.release import (  # noqa: E402
     PASS,
     is_canonical_public_tag,
@@ -69,26 +73,20 @@ def canonical_tag_ref(value: object) -> str | None:
     return tag
 
 
-def _command_text(*command: str, cwd: Path | None = None) -> str:
+def _command_output(*command: str, cwd: Path | None = None) -> str:
     return subprocess.check_output(
         list(command), cwd=ROOT if cwd is None else cwd,
         stderr=subprocess.STDOUT, text=True
-    ).strip()
+    )
+
+
+def _command_text(*command: str, cwd: Path | None = None) -> str:
+    return _command_output(*command, cwd=cwd).strip()
 
 
 def _remote_ref_commit(ref: str) -> str:
-    output = _command_text("git", "ls-remote", "origin", ref, f"{ref}^{{}}")
-    direct = None
-    peeled = None
-    for line in output.splitlines():
-        fields = line.split()
-        if len(fields) != 2 or not full_sha(fields[0]):
-            continue
-        if fields[1] == ref:
-            direct = fields[0]
-        elif fields[1] == f"{ref}^{{}}":
-            peeled = fields[0]
-    commit = peeled or direct
+    output = _command_output("git", "ls-remote", "origin", ref, f"{ref}^{{}}")
+    commit = parse_remote_ref_advertisement(output, ref, allow_peeled=True)
     if commit is None:
         raise ValueError(f"remote ref is unavailable: {ref}")
     return commit
@@ -226,16 +224,10 @@ def resolve_tag_commit(tag: str) -> str | None:
         )
     except (OSError, subprocess.CalledProcessError):
         return None
-    direct = None
-    for raw_line in output.splitlines():
-        fields = raw_line.split()
-        if len(fields) != 2 or not full_sha(fields[0]):
-            continue
-        if fields[1] == f"{tag_ref}^{{}}":
-            return fields[0]
-        if fields[1] == tag_ref:
-            direct = fields[0]
-    return direct
+    try:
+        return parse_remote_ref_advertisement(output, tag_ref, allow_peeled=True)
+    except GitIdentityError:
+        return None
 
 
 def list_canonical_public_tags() -> list[str] | None:

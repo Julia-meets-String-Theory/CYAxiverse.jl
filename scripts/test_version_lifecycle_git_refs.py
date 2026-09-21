@@ -19,6 +19,7 @@ from version_lifecycle.git_refs import (  # noqa: E402
     ProtectionEvidence,
     RemoteValueError,
     StaticMutationExclusion,
+    parse_remote_ref_advertisement,
     require_candidate_ref,
     validate_remote,
 )
@@ -69,6 +70,37 @@ class GitRefFixture(unittest.TestCase):
             with self.subTest(value=repr(value)):
                 with self.assertRaisesRegex(RemoteValueError, "REMOTE_VALUE_UNSAFE"):
                     validate_remote(value)
+
+    def test_remote_ref_advertisement_rejects_every_ambiguous_shape(self) -> None:
+        ref = "refs/tags/v0.3.0"
+        direct = "a" * 40
+        peeled = "b" * 40
+        self.assertEqual(
+            parse_remote_ref_advertisement(f"{direct}\t{ref}\n", ref), direct
+        )
+        self.assertEqual(
+            parse_remote_ref_advertisement(
+                f"{direct}\t{ref}\n{peeled}\t{ref}^{{}}\n",
+                ref,
+                allow_peeled=True,
+            ),
+            peeled,
+        )
+        invalid_outputs = (
+            f"{direct}\t{ref}\nmalformed\n",
+            f"{direct}\t{ref}\n{direct}\t{ref}\n",
+            f"{direct}\t{ref}\n{peeled}\t{ref}\n",
+            f"{direct}\trefs/tags/v0.4.0\n",
+            f"{peeled}\t{ref}^{{}}\n",
+        )
+        for output in invalid_outputs:
+            with self.subTest(output=output):
+                with self.assertRaisesRegex(
+                    GitIdentityError, "REMOTE_REF_ADVERTISEMENT_INVALID"
+                ):
+                    parse_remote_ref_advertisement(
+                        output, ref, allow_peeled=True
+                    )
 
     def test_option_like_remote_is_rejected_before_git_subprocess(self) -> None:
         with patch("version_lifecycle.git_refs.subprocess.run") as run:

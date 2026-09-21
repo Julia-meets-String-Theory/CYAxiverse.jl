@@ -31,6 +31,7 @@ from .git_refs import (
     GitIdentityError,
     StaticMutationExclusion,
     canonical_remote_authority,
+    parse_remote_ref_advertisement,
     validate_remote,
 )
 from .codec import canonical_json
@@ -318,6 +319,39 @@ class ReleaseEventWriter:
         raw = bytes(result.stdout)
         return self._verified_head_from_stream(commit, raw)
 
+    def read_remote_head(self) -> LedgerHead:
+        """Read and verify the exact advertised remote event authority.
+
+        The caller controls where fetched objects are stored by choosing this
+        writer's repository. Read-only callers can therefore use a disposable
+        bare repository without reaching into writer internals.
+        """
+
+        remote = self.remote or "origin"
+        listed = self._git(["ls-remote", "--refs", remote, self.ref])
+        try:
+            remote_head = parse_remote_ref_advertisement(listed.stdout, self.ref)
+        except GitIdentityError as error:
+            raise WriterError("remote event branch identity is ambiguous") from error
+        if remote_head is None:
+            raise BranchUnavailable(f"remote branch does not exist: {self.ref}")
+        self._git(
+            [
+                "fetch",
+                "--no-tags",
+                "--no-write-fetch-head",
+                remote,
+                remote_head,
+            ]
+        )
+        fetched_head = _as_text(
+            self._git(["rev-parse", "--verify", f"{remote_head}^{{commit}}"]).stdout
+        ).strip()
+        if fetched_head != remote_head:
+            raise WriterError("fetched event object differs from advertised remote head")
+        raw = bytes(self._git(["show", f"{fetched_head}:{self.stream_path}"]).stdout)
+        return self._verified_head_from_stream(fetched_head, raw)
+
     def _verified_head_from_stream(self, commit: str, raw: bytes) -> LedgerHead:
         """Verify one observed stream and return its authority-bound head."""
 
@@ -421,14 +455,14 @@ class ReleaseEventWriter:
         remote = validate_remote(remote)
         remote_ref = f"refs/heads/{self.branch}"
         listed = self._git(["ls-remote", "--refs", remote, remote_ref])
-        lines = [line for line in _as_text(listed.stdout).splitlines() if line]
-        if not lines:
+        try:
+            remote_head = parse_remote_ref_advertisement(listed.stdout, remote_ref)
+        except GitIdentityError as error:
+            raise AppendOutcomeUncertain(
+                "remote event branch identity is ambiguous"
+            ) from error
+        if remote_head is None:
             return None, b""
-        if len(lines) != 1 or "\t" not in lines[0]:
-            raise AppendOutcomeUncertain("remote event branch identity is ambiguous")
-        remote_head, name = lines[0].split("\t", 1)
-        if name != remote_ref or len(remote_head) != 40:
-            raise AppendOutcomeUncertain("remote event branch identity is malformed")
         temp_ref = f"refs/codex/reconcile/{uuid.uuid4().hex}"
         try:
             self._git(["fetch", "--no-tags", remote, f"{remote_ref}:{temp_ref}"])

@@ -59,7 +59,6 @@ from version_lifecycle.writer import (  # noqa: E402
 DEFAULT_EVENT_BRANCH = "release-events"
 DEFAULT_EVENT_STREAM = "release-events.jsonl"
 DEFAULT_REMOTE = "origin"
-_GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 class CliArgumentError(ValueError):
@@ -229,10 +228,9 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
             remote=args.authority_remote,
         )
         remote_ref = f"refs/heads/{args.event_branch}"
-        advertised = writer._git(  # type: ignore[attr-defined]
-            ["ls-remote", "--refs", args.authority_remote, remote_ref]
-        ).stdout.decode("utf-8", errors="strict").splitlines()
-        if not advertised:
+        try:
+            head = writer.read_remote_head()
+        except BranchUnavailable:
             return _blocked(
                 "EVENT_AUTHORITY_UNAVAILABLE",
                 f"remote {args.remote!r} does not advertise {remote_ref}",
@@ -241,58 +239,12 @@ def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead 
                 branch=args.event_branch,
                 stream_path=args.event_stream,
             ), None
-        if len(advertised) != 1 or "\t" not in advertised[0]:
-            return _blocked(
-                "EVENT_AUTHORITY_DIVERGENT",
-                "remote event ref advertisement is ambiguous",
-                remote=args.remote,
-                remote_ref=remote_ref,
-            ), None
-        remote_head, advertised_ref = advertised[0].split("\t", 1)
-        if advertised_ref != remote_ref or _GIT_OBJECT_RE.fullmatch(remote_head) is None:
-            return _blocked(
-                "EVENT_AUTHORITY_DIVERGENT",
-                "remote event ref advertisement has an invalid identity",
-                remote=args.remote,
-                remote_ref=remote_ref,
-                advertised_ref=advertised_ref,
-                advertised_head=remote_head,
-            ), None
-
-        writer._git(  # type: ignore[attr-defined]
-            [
-                "fetch",
-                "--no-tags",
-                "--no-write-fetch-head",
-                args.authority_remote,
-                remote_head,
-            ]
-        )
-        fetched_head = writer._git(  # type: ignore[attr-defined]
-            ["rev-parse", "--verify", f"{remote_head}^{{commit}}"]
-        ).stdout.decode("ascii", errors="strict").strip()
-        if fetched_head != remote_head:
-            return _blocked(
-                "EVENT_AUTHORITY_DIVERGENT",
-                "fetched event object differs from advertised remote head",
-                remote=args.remote,
-                remote_ref=remote_ref,
-                advertised_head=remote_head,
-                fetched_head=fetched_head,
-            ), None
-        try:
-            raw = writer._git(  # type: ignore[attr-defined]
-                ["show", f"{fetched_head}:{args.event_stream}"]
-            ).stdout
-            head = writer._verified_head_from_stream(fetched_head, raw)
-            raw = head.raw
         except (WriterError, ValueError) as error:
             return _blocked(
                 "EVENT_AUTHORITY_DIVERGENT",
                 f"remote event stream is invalid: {error}",
                 remote=args.remote,
                 remote_ref=remote_ref,
-                remote_head=remote_head,
                 stream_path=args.event_stream,
             ), None
 

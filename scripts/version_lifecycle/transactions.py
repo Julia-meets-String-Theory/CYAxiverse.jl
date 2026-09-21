@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from .certification import is_safe_public_value
+from .events import RELEASE_INTENT_BINDING_FIELDS, validate_event
 from .git_refs import GitIdentityError, ProtectionEvidence
 from .versions import MAX_VERSION_COMPONENT, maintenance_line, parse_package_version
 
@@ -237,6 +238,37 @@ def _canonical_final_version(value: Any) -> str | None:
     except (TypeError, ValueError):
         return None
     return parsed.canonical if parsed.is_final else None
+
+
+def _expected_release_intent_identity(
+    intent: ReleaseIntent,
+    candidate: dict[str, Any],
+    certification: dict[str, Any],
+    final: dict[str, Any],
+) -> dict[str, Any]:
+    """Return every durable identity fixed before public-tag creation."""
+
+    return {
+        "candidate_ref": candidate.get("ref"),
+        "candidate_sha": candidate.get("sha"),
+        "candidate_tree": candidate.get("tree"),
+        "anchor_ref": intent.anchor_ref,
+        "anchor_sha": intent.anchor_sha,
+        "anchor_tree": intent.anchor_tree,
+        "final_version": intent.final_version,
+        "release_line": intent.release_line,
+        "certification_binding": certification.get("binding"),
+        "certification_subject_sha": certification.get("subject_sha"),
+        "certification_subject_tree": certification.get("subject_tree"),
+        "certification_policy_revision": certification.get("policy_revision"),
+        "certification_harness_revision": certification.get("harness_revision"),
+        "certification_environment": certification.get("environment"),
+        "certification_evidence_refs": certification.get("evidence_refs"),
+        "certification_transfer_evidence": certification.get("transfer_evidence"),
+        "final_release_sha": final.get("sha"),
+        "final_release_tree": final.get("tree"),
+        "public_tag": f"v{intent.final_version}",
+    }
 
 
 def _next_final(line: str, closed: str, view: AllocationView) -> str:
@@ -746,21 +778,31 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         phase = "tag_ruleset_verified"
 
         prepared = port.append_release_intent(intent, candidate, certification, final)
-        if (
-            prepared.get("public_tag") != public_tag
-            or prepared.get("release_sha") != final["sha"]
-            or prepared.get("release_tree") != final["tree"]
-            or not prepared.get("event_id")
-        ):
-            raise TransactionError("RELEASE_INTENT_MISMATCH")
         if transfer_evidence is not None and prepared.get(
             "certification_transfer_evidence"
         ) != transfer_evidence:
             raise TransactionError("RELEASE_INTENT_TRANSFER_EVIDENCE_UNPROVEN")
-        evidence["intent"] = prepared
+        try:
+            canonical_prepared = validate_event(prepared)
+        except (TypeError, ValueError) as error:
+            raise TransactionError("RELEASE_INTENT_MISMATCH") from error
+        expected_intent = _expected_release_intent_identity(
+            intent, candidate, certification, final
+        )
+        if (
+            canonical_prepared.get("event_type") != "release_intent_prepared"
+            or any(
+                canonical_prepared.get(field) != expected_intent[field]
+                for field in RELEASE_INTENT_BINDING_FIELDS
+            )
+        ):
+            raise TransactionError("RELEASE_INTENT_MISMATCH")
+        evidence["intent"] = canonical_prepared
         phase = "release_intent_durable"
         tag_attempted = True
-        tag = port.create_protected_tag(intent, prepared, final, tag_protection)
+        tag = port.create_protected_tag(
+            intent, canonical_prepared, final, tag_protection
+        )
         tag_created = True
         if (
             tag.get("name") != public_tag

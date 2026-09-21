@@ -23,6 +23,7 @@ try:  # Namespace packages work when this module is run from ``scripts``.
     )
     from .events import (
         EventError,
+        RELEASE_INTENT_BINDING_FIELDS,
         validate_event,
     )
     from .versions import maintenance_line, parse_package_version, parse_public_tag
@@ -36,6 +37,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
     )
     from events import (  # type: ignore
         EventError,
+        RELEASE_INTENT_BINDING_FIELDS,
         validate_event,
     )
     from versions import maintenance_line, parse_package_version, parse_public_tag  # type: ignore
@@ -761,6 +763,19 @@ def _active_release_intent(intent: Mapping[str, Any] | None) -> bool:
     return canonical.get("event_type") == "release_intent_prepared"
 
 
+def _matches_released_intent(
+    event: Mapping[str, Any], intent: Mapping[str, Any]
+) -> tuple[bool, list[str]]:
+    """Compare every identity fixed by an intent with its released event."""
+
+    errors = [
+        f"intent_{field}_mismatch"
+        for field in RELEASE_INTENT_BINDING_FIELDS
+        if intent.get(field) != event.get(field)
+    ]
+    return not errors, errors
+
+
 def validate_release_consistency(
     event: Mapping[str, Any] | None = None,
     tag: Mapping[str, Any] | str | None = None,
@@ -853,6 +868,15 @@ def validate_release_consistency(
     intent_match, intent_errors = _matches_intent(tag, release_intent)
     if not intent_match:
         return _result(INVALID, "TAG_INTENT_MISMATCH", intent_errors)
+    released_intent_match, released_intent_errors = _matches_released_intent(
+        event, release_intent
+    )
+    if not released_intent_match:
+        return _result(
+            INVALID,
+            "RELEASE_INTENT_EVENT_MISMATCH",
+            released_intent_errors,
+        )
 
     # A publication artifact may still be pending, but a GitHub Release that
     # already exists must match the event and tag before pending is reported.

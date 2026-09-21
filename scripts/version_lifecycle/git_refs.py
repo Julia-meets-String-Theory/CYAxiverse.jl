@@ -57,6 +57,50 @@ def validate_remote(value: str) -> str:
     return value
 
 
+def parse_remote_ref_advertisement(
+    output: bytes | str,
+    ref: str,
+    *,
+    allow_peeled: bool = False,
+) -> str | None:
+    """Parse one exact ``ls-remote`` advertisement without ambiguity.
+
+    Empty output means the ref is absent. Every advertised record must be
+    well-formed, name only the requested ref (or its allowed peeled form), and
+    occur exactly once. This prevents a valid-looking record from masking
+    malformed, duplicate, conflicting, or unrelated transport output.
+    """
+
+    if not isinstance(ref, str) or FULL_REF.fullmatch(ref) is None:
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+    try:
+        text = output.decode("utf-8", errors="strict") if isinstance(output, bytes) else output
+    except UnicodeError as error:
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID") from error
+    if not isinstance(text, str):
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+
+    peeled_ref = f"{ref}^{{}}"
+    allowed = {ref, peeled_ref} if allow_peeled else {ref}
+    records: dict[str, str] = {}
+    for line in text.splitlines():
+        fields = line.split("\t")
+        if (
+            len(fields) != 2
+            or SHA.fullmatch(fields[0]) is None
+            or fields[1] not in allowed
+            or fields[1] in records
+        ):
+            raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+        records[fields[1]] = fields[0]
+
+    if not records:
+        return None
+    if peeled_ref in records and ref not in records:
+        raise GitIdentityError("REMOTE_REF_ADVERTISEMENT_INVALID")
+    return records.get(peeled_ref, records.get(ref))
+
+
 def canonical_remote_authority(repository: str | Path, remote: str) -> str:
     """Return a private, canonical identity for the actual Git endpoint.
 

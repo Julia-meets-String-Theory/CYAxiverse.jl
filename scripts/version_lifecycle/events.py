@@ -44,6 +44,30 @@ EVENT_TYPES = (
     "released",
 )
 
+# Identities fixed by a durable intent before the irreversible public-tag
+# boundary. The later released event must reproduce every value exactly.
+RELEASE_INTENT_BINDING_FIELDS = (
+    "candidate_ref",
+    "candidate_sha",
+    "candidate_tree",
+    "anchor_ref",
+    "anchor_sha",
+    "anchor_tree",
+    "final_version",
+    "release_line",
+    "certification_binding",
+    "certification_subject_sha",
+    "certification_subject_tree",
+    "certification_policy_revision",
+    "certification_harness_revision",
+    "certification_environment",
+    "certification_evidence_refs",
+    "certification_transfer_evidence",
+    "final_release_sha",
+    "final_release_tree",
+    "public_tag",
+)
+
 # All lifecycle events participate in the serialized allocation stream.  The
 # fields are therefore required even for transitions which do not allocate a
 # version: the transaction is the durable idempotency key and the two heads
@@ -1290,27 +1314,7 @@ def validate_transition(
         _require_matching_fields(
             intent,
             current,
-            (
-                "candidate_ref",
-                "candidate_sha",
-                "candidate_tree",
-                "anchor_ref",
-                "anchor_sha",
-                "anchor_tree",
-                "final_version",
-                "release_line",
-                "certification_binding",
-                "certification_subject_sha",
-                "certification_subject_tree",
-                "certification_policy_revision",
-                "certification_harness_revision",
-                "certification_environment",
-                "certification_evidence_refs",
-                "certification_transfer_evidence",
-                "final_release_sha",
-                "final_release_tree",
-                "public_tag",
-            ),
+            RELEASE_INTENT_BINDING_FIELDS,
         )
         if any(
             old["event_type"] == "released"

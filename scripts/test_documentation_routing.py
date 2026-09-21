@@ -37,6 +37,31 @@ def run_route(**values: str) -> subprocess.CompletedProcess[str]:
 
 @unittest.skipUnless(shutil.which("julia"), "Julia is required for route checks")
 class DocumentationRoutingTests(unittest.TestCase):
+    def test_release_ref_resolvers_reject_ambiguous_advertisements(self) -> None:
+        module_spec = importlib.util.spec_from_file_location(
+            "verify_release_context_ambiguous_refs",
+            ROOT / "docs/verify_release_context.py",
+        )
+        verifier = importlib.util.module_from_spec(module_spec)
+        assert module_spec.loader is not None
+        module_spec.loader.exec_module(verifier)
+
+        ref = "refs/tags/v0.3.0"
+        conflicting = f"{'a' * 40}\t{ref}\n{'b' * 40}\t{ref}\n"
+        malformed = f"{'a' * 40}\t{ref}\nnot-an-advertisement\n"
+        for output in (conflicting, malformed):
+            with self.subTest(output=output):
+                with patch.object(verifier, "_command_output", return_value=output):
+                    with self.assertRaisesRegex(
+                        verifier.GitIdentityError,
+                        "REMOTE_REF_ADVERTISEMENT_INVALID",
+                    ):
+                        verifier._remote_ref_commit(ref)
+                with patch.object(
+                    verifier.subprocess, "check_output", return_value=output
+                ):
+                    self.assertIsNone(verifier.resolve_tag_commit("v0.3.0"))
+
     def test_repository_evidence_resolves_refs_trees_and_versions_independently(self) -> None:
         module_spec = importlib.util.spec_from_file_location(
             "verify_release_context_live_fixture",

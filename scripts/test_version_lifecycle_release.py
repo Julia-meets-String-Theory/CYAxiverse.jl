@@ -149,8 +149,8 @@ def publication_evidence(version: str = "0.3.0", event_id: str = EVENT_ID, relea
     }
 
 
-def release_intent(version: str = "0.3.0") -> dict:
-    released = released_event(version=version)
+def release_intent(version: str = "0.3.0", line: str = "principal") -> dict:
+    released = released_event(line, version=version)
     slug = version.replace(".", "-")
     return {
         "schema_version": 1,
@@ -179,7 +179,7 @@ def release_intent(version: str = "0.3.0") -> dict:
         "final_version": version,
         "final_release_sha": SHA_A,
         "final_release_tree": TREE,
-        "release_line": "principal",
+        "release_line": line,
     }
 
 
@@ -535,6 +535,32 @@ class TestReleaseEvidence(unittest.TestCase):
         )
         self.assertEqual(result["status"], PUBLICATION_RECONCILIATION_PENDING)
 
+    def test_released_event_requires_complete_intent_identity(self):
+        mismatches = {
+            "candidate_ref": "refs/heads/candidates/0.3.1",
+            "anchor_sha": "d" * 40,
+            "release_line": "maintenance/0.3",
+            "certification_policy_revision": "policy-2026-10",
+        }
+        for field, value in mismatches.items():
+            with self.subTest(field=field):
+                intent = release_intent()
+                intent[field] = value
+                result = validate_release_consistency(
+                    released_event(),
+                    tag(),
+                    github_release(),
+                    publication_evidence(),
+                    release_intent=intent,
+                    certification=certification(),
+                    project_versions=project_versions(),
+                )
+                self.assertEqual(result["status"], INVALID)
+                self.assertEqual(
+                    result["reason_code"], "RELEASE_INTENT_EVENT_MISMATCH"
+                )
+                self.assertIn(f"intent_{field}_mismatch", result["errors"])
+
     def test_bidirectional_mismatch_is_invalid(self):
         release = github_release()
         release["target_sha"] = SHA_B
@@ -836,7 +862,10 @@ class TestReleaseEvidence(unittest.TestCase):
                 publication_evidence(),
                 publication_evidence("0.3.1", EVENT_ID_TWO, 9002),
             ],
-            release_intents=[release_intent(), release_intent("0.3.1")],
+            release_intents=[
+                release_intent(line="maintenance/0.3"),
+                release_intent("0.3.1", line="maintenance/0.3"),
+            ],
             certifications={EVENT_ID: certification(), EVENT_ID_TWO: certification()},
             project_versions={
                 EVENT_ID: project_versions("maintenance/0.3"),
