@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
@@ -85,6 +86,19 @@ def _fixture() -> Path:
 
 
 class VersionLifecycleStaticTests(unittest.TestCase):
+    def test_option_like_remote_is_blocked_before_git_subprocess(self) -> None:
+        repo = _fixture()
+        with patch("version_lifecycle.static.subprocess.run") as run:
+            result = static_snapshot(
+                repo,
+                source_repository="fixture/repo",
+                remote="--upload-pack=touch /tmp/pwned",
+            )
+        self.assertIsInstance(result, BlockedResult)
+        assert isinstance(result, BlockedResult)
+        self.assertEqual(result.reason_code, "STATIC_AUTHORITY_SELECTOR_UNRESOLVED")
+        run.assert_not_called()
+
     def test_canonical_codec(self) -> None:
         self.assertEqual(canonical_json({"z": 1, "a": [True, "ok"]}), b'{"a":[true,"ok"],"z":1}')
         self.assertEqual(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")

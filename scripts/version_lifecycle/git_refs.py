@@ -36,6 +36,27 @@ class GitIdentityError(RuntimeError):
     """A Git identity, protection, or exact-ref expectation failed."""
 
 
+class RemoteValueError(GitIdentityError, ValueError):
+    """A remote argument is unsafe to pass to Git."""
+
+
+def validate_remote(value: str) -> str:
+    """Validate and return a remote argument before passing it to Git.
+
+    Git accepts remote names, URLs, and local repository paths in the same
+    argument position.  Keep those forms open, but reject values that Git
+    could interpret as options or that contain shell/control delimiters.
+    """
+
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise RemoteValueError("REMOTE_VALUE_UNSAFE")
+    if value.startswith("-"):
+        raise RemoteValueError("REMOTE_VALUE_UNSAFE")
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
+        raise RemoteValueError("REMOTE_VALUE_UNSAFE")
+    return value
+
+
 class _ExclusionState:
     def __init__(self) -> None:
         self.guard = threading.Lock()
@@ -389,7 +410,7 @@ class GitRepository:
         exclusion_lease: Callable[[], ContextManager[bool]] | None = None,
     ) -> None:
         self.root = Path(root)
-        self.remote = remote
+        self.remote = validate_remote(remote)
         self.static_exclusion = static_exclusion or StaticMutationExclusion.for_repository(
             self.root
         )
@@ -453,6 +474,10 @@ class GitRepository:
             raise GitIdentityError("STATIC_MUTATION_OUTCOME_UNCERTAIN") from exc
 
     def git(self, *args: str, input_bytes: bytes | None = None) -> bytes:
+        # Validate on every Git invocation as well as construction.  The
+        # attribute is mutable for fixture adapters, and a later invalid
+        # replacement must not reach Git's option parser.
+        validate_remote(self.remote)
         result = subprocess.run(
             ["git", *args],
             cwd=self.root,

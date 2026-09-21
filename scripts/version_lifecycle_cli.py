@@ -47,6 +47,7 @@ from version_lifecycle import (  # noqa: E402
 from version_lifecycle.static import StaticSnapshot  # noqa: E402
 from version_lifecycle.events import parse_stream  # noqa: E402
 from version_lifecycle.certification import is_safe_public_value  # noqa: E402
+from version_lifecycle.git_refs import validate_remote  # noqa: E402
 from version_lifecycle.writer import (  # noqa: E402
     BranchUnavailable,
     LedgerHead,
@@ -59,6 +60,15 @@ DEFAULT_EVENT_BRANCH = "release-events"
 DEFAULT_EVENT_STREAM = "release-events.jsonl"
 DEFAULT_REMOTE = "origin"
 _GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+class CliArgumentError(ValueError):
+    """An argparse failure that can be reported through the JSON contract."""
+
+
+class JsonArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise CliArgumentError(message)
 
 
 def _jsonable(value: Any) -> Any:
@@ -479,7 +489,7 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = JsonArgumentParser(description=__doc__)
     _add_common_options(parser)
     subparsers = parser.add_subparsers(dest="command", required=False)
     for name in ("readiness", "snapshot", "events", "allocation"):
@@ -508,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
         for name, value in defaults.items():
             if not hasattr(args, name):
                 setattr(args, name, value)
+        args.remote = validate_remote(args.remote)
         if args.command is None:
             args.command = "readiness"
             # Root-only invocation has no allocation inputs.

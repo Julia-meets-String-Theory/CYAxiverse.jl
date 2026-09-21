@@ -142,11 +142,20 @@ read-only CLI could emit remote transport credentials or local locators in JSON
 reports and exception details. Those verdicts belong only to the eleventh
 candidate. The corrected successor requires fresh reviews.
 
+The twelfth frozen candidate was commit
+`d50b75d9f304f23e45d8f43f70c0950307715db9` (tree
+`2dfdc7fd19dd8cee9dbc266de615c26b97e94411`). The independent SPEC
+review returned `PASS`; the independent STANDARDS review returned
+`REQUEST_CHANGES`. Standards findings covered option-like remote values that
+Git could interpret as transport flags and argparse failures that bypassed the
+CLI's documented JSON error contract. Those verdicts belong only to the
+twelfth candidate. The corrected successor requires fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 220 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 224 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

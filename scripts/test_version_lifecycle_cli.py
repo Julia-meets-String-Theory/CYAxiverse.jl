@@ -131,6 +131,19 @@ class GateALifecycleCliFixture(unittest.TestCase):
         self.assertEqual(payload["event_head"]["remote"], "configured")
         self.assertNotIn(str(self.remote), json.dumps(payload))
 
+    def test_argument_errors_keep_the_json_contract(self) -> None:
+        for args in (
+            ("--bogus",),
+            ("snapshot", "--repo"),
+            ("events", "--repo", str(self.repo), "--remote=--upload-pack=/bin/echo"),
+        ):
+            with self.subTest(args=args):
+                code, payload = self._run_cli(*args)
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["status"], "BLOCKED")
+                self.assertEqual(payload["reason_code"], "CLI_INPUT_INVALID")
+                self.assertEqual(payload["detail"], "detail omitted; use reason_code")
+
     def test_readiness_reads_snapshot_and_event_head_without_mutating_refs(self) -> None:
         before = _git(self.repo, "show-ref")
         fetch_head = self.repo / ".git" / "FETCH_HEAD"

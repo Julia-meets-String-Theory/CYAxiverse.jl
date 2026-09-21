@@ -27,7 +27,7 @@ from .events import (
     validate_event,
     validate_transition,
 )
-from .git_refs import GitIdentityError, StaticMutationExclusion
+from .git_refs import GitIdentityError, StaticMutationExclusion, validate_remote
 
 
 class WriterError(RuntimeError):
@@ -161,7 +161,7 @@ class ReleaseEventWriter:
         self.repo = Path(repo)
         self.branch = self._validate_ref_component(branch)
         self.stream_path = self._validate_stream_path(stream_path)
-        self.remote = remote
+        self.remote = validate_remote(remote) if remote is not None else None
         self.exclusion_checker = exclusion_checker
         self.static_snapshot_checker = static_snapshot_checker
         self.public_tag_absence_checker = public_tag_absence_checker
@@ -322,6 +322,7 @@ class ReleaseEventWriter:
     def _remote_observation(self, remote: str) -> tuple[str | None, bytes]:
         """Fetch one remote branch into a disposable local ref for reconciliation."""
 
+        remote = validate_remote(remote)
         remote_ref = f"refs/heads/{self.branch}"
         listed = self._git(["ls-remote", "--refs", remote, remote_ref])
         lines = [line for line in _as_text(listed.stdout).splitlines() if line]
@@ -551,7 +552,9 @@ class ReleaseEventWriter:
         protection_checker: Callable[[], bool] | None,
         message: str,
     ) -> str:
-        remote_name = remote or self.remote
+        remote_name = remote if remote is not None else self.remote
+        if remote_name is not None:
+            remote_name = validate_remote(remote_name)
         if not remote_name and push is None:
             raise ValueError("bootstrap_remote needs a remote name or push callback")
         if remote_name is None and reconcile is None:
@@ -974,7 +977,9 @@ class ReleaseEventWriter:
         message: str | None,
     ) -> AppendResult:
 
-        remote_name = remote or self.remote
+        remote_name = remote if remote is not None else self.remote
+        if remote_name is not None:
+            remote_name = validate_remote(remote_name)
         if not remote_name and push is None:
             raise ValueError("append_remote needs a remote name or push callback")
         # Remote lifecycle mutation is never allowed to rely on a caller's

@@ -9,6 +9,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -16,8 +17,10 @@ from version_lifecycle.git_refs import (  # noqa: E402
     GitIdentityError,
     GitRepository,
     ProtectionEvidence,
+    RemoteValueError,
     StaticMutationExclusion,
     require_candidate_ref,
+    validate_remote,
 )
 
 
@@ -51,6 +54,33 @@ class GitRefFixture(unittest.TestCase):
             update_guarded=True,
             deletion_guarded=True,
         )
+
+    def test_remote_validator_preserves_named_url_and_local_forms(self) -> None:
+        for value in (
+            "origin",
+            "https://github.com/example/project.git",
+            "/tmp/remote.git",
+            "./remote.git",
+            "../remote.git",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(validate_remote(value), value)
+        for value in ("", " -u", "origin\n", "origin\x00"):
+            with self.subTest(value=repr(value)):
+                with self.assertRaisesRegex(RemoteValueError, "REMOTE_VALUE_UNSAFE"):
+                    validate_remote(value)
+
+    def test_option_like_remote_is_rejected_before_git_subprocess(self) -> None:
+        with patch("version_lifecycle.git_refs.subprocess.run") as run:
+            with self.assertRaisesRegex(RemoteValueError, "REMOTE_VALUE_UNSAFE"):
+                GitRepository(self.work, remote="--upload-pack=touch /tmp/pwned")
+            run.assert_not_called()
+
+        self.repository.remote = "-u"
+        with patch("version_lifecycle.git_refs.subprocess.run") as run:
+            with self.assertRaisesRegex(RemoteValueError, "REMOTE_VALUE_UNSAFE"):
+                self.repository.git("rev-parse", "HEAD")
+            run.assert_not_called()
 
     @staticmethod
     def _cmd(*command: str, cwd: Path) -> str:

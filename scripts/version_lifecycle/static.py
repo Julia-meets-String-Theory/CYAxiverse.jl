@@ -18,6 +18,7 @@ import tomllib
 from urllib.parse import urlsplit, urlunsplit
 
 from .codec import canonical_json, sha256_hex
+from .git_refs import validate_remote
 from .public_ip import parse_ipv4_compat
 from .versions import Version, final_version, maintenance_line, parse_package_version, parse_public_tag
 
@@ -217,6 +218,7 @@ def _show(repository: Path, treeish: str, path: str) -> bytes:
 def _remote_refs(repository: Path, remote: str) -> dict[str, str]:
     """Resolve the complete remote ref namespace without trusting local refs."""
 
+    remote = validate_remote(remote)
     output = _git(repository, "ls-remote", "--refs", remote)
     refs: dict[str, str] = {}
     for line in output.decode("ascii", errors="strict").splitlines():
@@ -249,6 +251,7 @@ def _ensure_remote_objects(
     a race fail-closed.
     """
 
+    remote = validate_remote(remote)
     relevant = [
         ref for ref in advertised_refs
         if ref == "refs/heads/vmm"
@@ -448,6 +451,7 @@ def sanitize_source_repository(value: str) -> str:
 
 
 def _repository_identity(repository: Path, remote_name: str = "origin") -> str:
+    remote_name = validate_remote(remote_name)
     remote = _git(repository, "config", "--get", f"remote.{remote_name}.url", check=False).decode().strip()
     if not remote:
         raise UnsafeSourceRepositoryError(
@@ -979,6 +983,7 @@ def build_static_snapshot(
         repository = repository_path
     repository_path = Path(repository).resolve()
     try:
+        remote = validate_remote(remote)
         source_ref, source_path = _selector(selector)
         resolved_source_repository = (
             sanitize_source_repository(source_repository)
