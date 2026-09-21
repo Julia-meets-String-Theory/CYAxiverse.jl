@@ -1508,6 +1508,109 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(advertised.returncode, 1)
         self.assertEqual(advertised.stdout, "")
 
+    def test_stale_checkout_replays_verified_remote_transaction_idempotently(self):
+        remote = self.repo.parent / f"{self.repo.name}-stale-cache-replay-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        branch = "release-events-stale-replay"
+        authority = ReleaseEventWriter(
+            self.repo,
+            branch=branch,
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        empty_head = authority.bootstrap_remote(protection_checker=lambda: True)
+        event = reservation_event(expected_head=empty_head)
+
+        with tempfile.TemporaryDirectory(prefix="cyax-event-stale-cache-") as fresh:
+            fresh_repo = Path(fresh)
+            subprocess.run(["git", "init", "-q", str(fresh_repo)], check=True)
+            subprocess.run(
+                ["git", "-C", str(fresh_repo), "remote", "add", "origin", str(remote)],
+                check=True,
+            )
+            cached = ReleaseEventWriter(
+                fresh_repo,
+                branch=branch,
+                remote="origin",
+                exclusion_checker=lambda: True,
+                static_snapshot_checker=lambda _digest: True,
+                exclusion_lease=lambda: nullcontext(True),
+            )
+            self.assertEqual(
+                cached.bootstrap_remote(protection_checker=lambda: True), empty_head
+            )
+
+            appended = authority.append_remote(event, expected_head=empty_head)
+            self.assertEqual(appended.status, "APPENDED")
+            assert appended.head is not None
+
+            mismatch = dict(
+                event,
+                final_version="0.3.2",
+                intended_dev_version="0.3.2-DEV",
+                reservation_id="reservation-2",
+            )
+            with self.assertRaises(DuplicateTransactionError):
+                cached.append_remote(mismatch, expected_head=empty_head)
+            replay = cached.append_remote(event, expected_head=empty_head)
+            self.assertEqual((replay.status, replay.idempotent), ("IDEMPOTENT", True))
+            self.assertEqual(replay.head, appended.head)
+            self.assertEqual(cached.current_head(), appended.head)
+
+    def test_verified_remote_replay_is_idempotent_when_cache_cas_loses_race(self):
+        remote = self.repo.parent / f"{self.repo.name}-cache-cas-replay-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        branch = "release-events-cache-cas-replay"
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch=branch,
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        head = writer.bootstrap_remote(protection_checker=lambda: True)
+        event = reservation_event(expected_head=head)
+        original_git = writer._git
+
+        def lose_cache_cas(
+            args: list[str], *, input_bytes: bytes | None = None, check: bool = True
+        ):
+            if (
+                len(args) == 4
+                and args[:2] == ["update-ref", writer.ref]
+                and args[3] == head
+            ):
+                return subprocess.CompletedProcess(
+                    ["git", *args], 1, stdout=b"", stderr=b"simulated cache CAS loss"
+                )
+            return original_git(args, input_bytes=input_bytes, check=check)
+
+        with patch.object(writer, "_git", side_effect=lose_cache_cas):
+            first = writer.append_remote(event, expected_head=head)
+            self.assertEqual(first.status, "APPENDED")
+            self.assertEqual(writer.current_head(), head)
+            replay = writer.append_remote(event, expected_head=head)
+
+        self.assertEqual((replay.status, replay.idempotent), ("IDEMPOTENT", True))
+        self.assertEqual(replay.head, first.head)
+        self.assertEqual(writer.current_head(), head)
+        advertised = subprocess.check_output(
+            ["git", "-C", str(remote), "rev-parse", f"refs/heads/{branch}"],
+            text=True,
+        ).strip()
+        self.assertEqual(advertised, first.head)
+
     def test_remote_append_does_not_create_missing_bare_remote_branch(self):
         remote = self.repo.parent / "missing-event-origin.git"
         subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)

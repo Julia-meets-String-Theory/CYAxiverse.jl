@@ -46,6 +46,7 @@ from version_lifecycle import (  # noqa: E402
 )
 from version_lifecycle.static import StaticSnapshot  # noqa: E402
 from version_lifecycle.events import parse_stream  # noqa: E402
+from version_lifecycle.certification import is_safe_public_value  # noqa: E402
 from version_lifecycle.writer import (  # noqa: E402
     BranchUnavailable,
     LedgerHead,
@@ -107,6 +108,33 @@ def _redact_paths(value: Any, paths: tuple[str, ...]) -> Any:
     return value
 
 
+def _sanitize_report(value: Any, *, key: str | None = None) -> Any:
+    """Keep transport identities and untrusted diagnostics out of CLI JSON."""
+
+    if isinstance(value, Mapping):
+        return {name: _sanitize_report(item, key=str(name)) for name, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_report(item, key=key) for item in value]
+    if isinstance(value, str):
+        if key == "remote":
+            return "configured"
+        if key in {"detail", "local_read_detail"}:
+            # Exception text can contain a configured URL, credentials, or a
+            # machine path.  The stable reason_code carries the failure.
+            return "detail omitted; use reason_code"
+        if key in {"advertised_ref", "advertised_head"}:
+            return "<redacted>"
+        if key in {
+            "selector", "branch", "stream_path", "remote_ref",
+        } and (
+            "@" in value
+            or "://" in value
+            or not is_safe_public_value(value, key=key)
+        ):
+            return "<redacted>"
+    return value
+
+
 def _write(
     result: Mapping[str, Any],
     *,
@@ -115,7 +143,7 @@ def _write(
 ) -> int:
     """Emit one deterministic JSON object and return the desired exit code."""
 
-    payload = _redact_paths(_jsonable(result), redact_paths)
+    payload = _sanitize_report(_redact_paths(_jsonable(result), redact_paths))
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     return exit_code
 

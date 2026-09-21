@@ -132,11 +132,21 @@ remote append without an exact-head compare-and-swap guard. Those verdicts
 belong only to the tenth candidate. The corrected successor requires fresh
 reviews.
 
+The eleventh frozen candidate was commit
+`7335e167661d958b3976f73a06fa9388aaf4aafd` (tree
+`ff0bc6f721d16971af053e9de8b9b9ec2ebae924`). Independent SPEC and
+STANDARDS reviews returned `REQUEST_CHANGES`. Both found that verified remote
+transaction replay from a stale local cache was misclassified as a stale-head
+block, including same-ID payload collisions. STANDARDS also found that the
+read-only CLI could emit remote transport credentials or local locators in JSON
+reports and exception details. Those verdicts belong only to the eleventh
+candidate. The corrected successor requires fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 217 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 220 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline installed dependencies and a writable temporary Julia depot; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

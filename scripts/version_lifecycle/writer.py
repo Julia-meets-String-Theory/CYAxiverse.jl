@@ -419,15 +419,24 @@ class ReleaseEventWriter:
         self._verify_stream_topology(head, raw)
         return head, raw
 
-    def _materialize_remote_cache(self, remote_head: str, remote_raw: bytes) -> None:
+    def _materialize_remote_cache(
+        self,
+        remote_head: str,
+        remote_raw: bytes,
+        *,
+        fail_on_cache_update: bool = True,
+    ) -> None:
         """Advance the local event cache to a verified remote authority.
 
         The remote branch is authoritative when bootstrap observes it.  The
         local branch is only a cache, so it may be created or advanced when
         the observed remote commit is an append-only descendant of the local
-        commit.  A missing ancestry relation, a byte-prefix mismatch, or a
-        failed compare-and-swap is treated as an uncertain divergent cache;
-        this prevents bootstrap from rewinding a local event authority.
+        commit.  A missing ancestry relation or byte-prefix mismatch is
+        treated as an uncertain divergent cache; this prevents bootstrap from
+        rewinding a local event authority.  Remote replay can set
+        ``fail_on_cache_update`` to false because the verified remote event is
+        authoritative even when the local cache compare-and-swap loses a
+        race.
         """
 
         if _GIT_SHA_RE.fullmatch(remote_head) is None:
@@ -440,9 +449,10 @@ class ReleaseEventWriter:
                 ["update-ref", self.ref, remote_head, "0" * 40], check=False
             )
             if created.returncode != 0:
-                raise AppendOutcomeUncertain(
-                    "local event cache was created concurrently"
-                )
+                if fail_on_cache_update:
+                    raise AppendOutcomeUncertain(
+                        "local event cache was created concurrently"
+                    )
             return
 
         try:
@@ -472,7 +482,7 @@ class ReleaseEventWriter:
         advanced = self._git(
             ["update-ref", self.ref, remote_head, local.commit], check=False
         )
-        if advanced.returncode != 0:
+        if advanced.returncode != 0 and fail_on_cache_update:
             raise AppendOutcomeUncertain(
                 "local event cache advanced concurrently"
             )
@@ -1070,21 +1080,14 @@ class ReleaseEventWriter:
                 remote_existing = self._transaction_event(
                     freshest_events, transaction_id
                 )
-                if existing is not None:
-                    # A local transaction match is only a cache result.  The
-                    # remote authority must contain the exact same canonical
-                    # event before a replay can be called idempotent.
-                    if (
-                        remote_existing is None
-                        or canonical_event_bytes(remote_existing) != encoded
-                    ):
-                        return AppendResult(
-                            status="BLOCKED",
-                            reason_code="APPEND_OUTCOME_UNCERTAIN",
-                            transaction_id=transaction_id,
-                            event=canonical,
-                            head=freshest_head,
-                            frozen=True,
+                if remote_existing is not None:
+                    # A transaction match in either checkout is only
+                    # idempotent after the remote authority proves the exact
+                    # canonical event.  A stale local cache may be advanced
+                    # to that verified append-only remote descendant.
+                    if canonical_event_bytes(remote_existing) != encoded:
+                        raise DuplicateTransactionError(
+                            "remote transaction ID maps to a different canonical event"
                         )
                     if freshest_head == current.commit:
                         if freshest_raw != current.raw:
@@ -1097,25 +1100,13 @@ class ReleaseEventWriter:
                                 frozen=True,
                             )
                     else:
-                        if not freshest_raw.startswith(current.raw):
-                            return AppendResult(
-                                status="BLOCKED",
-                                reason_code="APPEND_OUTCOME_UNCERTAIN",
-                                transaction_id=transaction_id,
-                                event=canonical,
-                                head=freshest_head,
-                                frozen=True,
-                            )
-                        ancestry = self._git(
-                            [
-                                "merge-base",
-                                "--is-ancestor",
-                                current.commit,
+                        try:
+                            self._materialize_remote_cache(
                                 freshest_head,
-                            ],
-                            check=False,
-                        )
-                        if ancestry.returncode != 0:
+                                freshest_raw,
+                                fail_on_cache_update=False,
+                            )
+                        except AppendOutcomeUncertain:
                             return AppendResult(
                                 status="BLOCKED",
                                 reason_code="APPEND_OUTCOME_UNCERTAIN",
@@ -1132,6 +1123,18 @@ class ReleaseEventWriter:
                         head=freshest_head,
                         idempotent=True,
                     )
+                if existing is not None:
+                    # A local transaction match is only a cache result.  The
+                    # remote authority must contain the exact same canonical
+                    # event before a replay can be called idempotent.
+                    return AppendResult(
+                        status="BLOCKED",
+                        reason_code="APPEND_OUTCOME_UNCERTAIN",
+                        transaction_id=transaction_id,
+                        event=canonical,
+                        head=freshest_head,
+                        frozen=True,
+                    )
                 if freshest_head is not None and freshest_head != current.commit:
                     # The local proposal was made against stale evidence.  A
                     # caller must refresh and recompute its event ID/payload.
@@ -1145,6 +1148,8 @@ class ReleaseEventWriter:
                         head=freshest_head,
                         frozen=False,
                     )
+            except DuplicateTransactionError:
+                raise
             except AppendOutcomeUncertain:
                 return AppendResult(
                     status="BLOCKED",

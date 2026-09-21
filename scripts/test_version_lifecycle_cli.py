@@ -104,6 +104,33 @@ class GateALifecycleCliFixture(unittest.TestCase):
         self.assertNotIn(str(self.repo.resolve()), json.dumps(payload))
         self.assertNotIn("<repository>", payload["allocation_view"]["allocation"]["version"])
 
+    def test_cli_does_not_emit_remote_transport_or_exception_details(self) -> None:
+        remote_values = (
+            "https://user:secret@github.com/org/repo.git",
+            "git@github.com:org/private-repo.git",
+            str(self.remote),
+        )
+        for remote in remote_values:
+            with self.subTest(remote=remote):
+                code, payload = self._run_cli(
+                    "snapshot",
+                    "--repo", str(self.repo / "missing"),
+                    "--remote", remote,
+                )
+                self.assertEqual(code, 2)
+                output = json.dumps(payload)
+                self.assertNotIn(remote, output)
+                self.assertNotIn("secret", output)
+                self.assertEqual(payload["static_snapshot"]["remote"], "configured")
+                self.assertEqual(payload["detail"], "detail omitted; use reason_code")
+
+        code, payload = self._run_cli(
+            "events", "--repo", str(self.repo), "--remote", str(self.remote)
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["event_head"]["remote"], "configured")
+        self.assertNotIn(str(self.remote), json.dumps(payload))
+
     def test_readiness_reads_snapshot_and_event_head_without_mutating_refs(self) -> None:
         before = _git(self.repo, "show-ref")
         fetch_head = self.repo / ".git" / "FETCH_HEAD"
