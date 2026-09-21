@@ -24,11 +24,13 @@ class ClosureFixture:
     def __init__(
         self, *, fail_consumption=False, occupied=frozenset(),
         closure_fields=None, anchor_fields=None, exclusion_available=True,
+        release_failure=False,
     ) -> None:
         self.calls: list[str] = []
         self.fail_consumption = fail_consumption
         self.occupied = occupied
         self.exclusion_available = exclusion_available
+        self.release_failure = release_failure
         self.closure_fields = closure_fields or {}
         self.anchor_fields = anchor_fields or {}
         self.views: list[AllocationView] = []
@@ -46,6 +48,8 @@ class ClosureFixture:
     def release_static_mutation(self, lease):
         if lease != "fixture-exclusion":
             raise AssertionError("unexpected exclusion lease")
+        if self.release_failure:
+            raise RuntimeError("external lease release failed")
 
     def allocation_view(self):
         self.calls.append("view")
@@ -116,9 +120,12 @@ class ClosureFixture:
 
 
 class BootstrapFixture:
-    def __init__(self, branch_state="created") -> None:
+    def __init__(self, branch_state="created", *, exclusion_available=True,
+                 release_failure=False) -> None:
         self.calls: list[str] = []
         self.branch_state = branch_state
+        self.exclusion_available = exclusion_available
+        self.release_failure = release_failure
 
     def verify_base_and_absence(self, intent):
         self.calls.append("base")
@@ -126,6 +133,19 @@ class BootstrapFixture:
     def freeze_bootstrap(self, intent):
         self.calls.append("freeze")
         return "freeze-proof"
+
+    def acquire_static_mutation(self, intent):
+        self.calls.append("acquire")
+        if not self.exclusion_available:
+            raise RuntimeError("racing static mutation")
+        return "fixture-exclusion"
+
+    def release_static_mutation(self, lease):
+        self.calls.append("release")
+        if lease != "fixture-exclusion":
+            raise AssertionError("unexpected exclusion lease")
+        if self.release_failure:
+            raise RuntimeError("external lease release failed")
 
     def allocation_view(self):
         self.calls.append("view")
@@ -164,13 +184,14 @@ class BootstrapFixture:
 class ReleaseFixture:
     def __init__(
         self, *, fail_after_tag=False, fail_publication=False, bad_tag=False,
-        exclusion_available=True,
+        exclusion_available=True, release_failure=False,
     ):
         self.calls: list[str] = []
         self.fail_after_tag = fail_after_tag
         self.fail_publication = fail_publication
         self.bad_tag = bad_tag
         self.exclusion_available = exclusion_available
+        self.release_failure = release_failure
         self.candidate_sha = "a" * 40
         self.final_sha = "b" * 40
         self.tree = "c" * 40
@@ -185,6 +206,8 @@ class ReleaseFixture:
     def release_static_mutation(self, lease):
         if lease != "fixture-exclusion":
             raise AssertionError("unexpected exclusion lease")
+        if self.release_failure:
+            raise RuntimeError("external lease release failed")
 
     def verify_anchor(self, intent):
         self.calls.append("anchor")
@@ -440,8 +463,49 @@ class TransactionTests(unittest.TestCase):
         result = run_maintenance_bootstrap(port, self.bootstrap)
         self.assertEqual((result.status, result.evidence["preparation"]["version"]),
                          ("COMPLETE", "1.2.2"))
-        self.assertEqual(port.calls[:4], ["base", "freeze", "base", "view"])
-        self.assertEqual(port.calls[-2:], ["correspondence", "unfreeze"])
+        self.assertEqual(port.calls[:5], ["base", "freeze", "acquire", "base", "view"])
+        self.assertEqual(port.calls[-3:], ["correspondence", "release", "unfreeze"])
+
+    def test_racing_static_mutation_blocks_bootstrap_under_freeze(self):
+        port = BootstrapFixture(exclusion_available=False)
+        result = run_maintenance_bootstrap(port, self.bootstrap)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
+        )
+        self.assertNotIn("view", port.calls)
+        self.assertNotIn("create", port.calls)
+        self.assertNotIn("unfreeze", port.calls)
+
+    def test_bootstrap_lease_release_failure_keeps_freeze(self):
+        port = BootstrapFixture(release_failure=True)
+        result = run_maintenance_bootstrap(port, self.bootstrap)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
+        )
+        self.assertIn("correspondence", port.calls)
+        self.assertNotIn("unfreeze", port.calls)
+
+    def test_closure_lease_release_failure_keeps_freeze(self):
+        port = ClosureFixture(release_failure=True)
+        result = run_closure(port, self.closure)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
+        )
+        self.assertIn("correspondence", port.calls)
+        self.assertNotIn("unfreeze", port.calls)
+
+    def test_release_lease_release_failure_keeps_main_frozen(self):
+        port = ReleaseFixture(release_failure=True)
+        result = run_release(port, self.release)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("publication_reconciliation_pending", "EXCLUSION_UNAVAILABLE", True),
+        )
+        self.assertIn("terminal", port.calls)
+        self.assertNotIn("unfreeze-main", port.calls)
 
     def test_uncertain_branch_creation_keeps_prepared_version_unavailable(self):
         port = BootstrapFixture("uncertain")

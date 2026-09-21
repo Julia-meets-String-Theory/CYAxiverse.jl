@@ -36,6 +36,7 @@ from version_lifecycle.writer import (  # noqa: E402
     ReleaseEventWriter,
     StaleHeadError,
     WriterError,
+    bootstrap_release_events,
 )
 from version_lifecycle.allocation import _event_occupied  # noqa: E402
 
@@ -350,6 +351,16 @@ class EventValidationTests(unittest.TestCase):
         intent["certification_environment"] = "https://user:pass@example.com/env"
         with self.assertRaises(EventSchemaError):
             validate_event(intent)
+
+        for alias in (
+            "https://0177.0.0.1/org/repo",
+            "https://127.0.0.1%2e/org/repo",
+        ):
+            with self.subTest(alias=alias):
+                intent = release_intent_event()
+                intent["certification_environment"] = alias
+                with self.assertRaises(EventSchemaError):
+                    validate_event(intent)
 
     def test_release_intent_binds_certified_subject_to_exact_trees(self):
         intent = release_intent_event()
@@ -671,7 +682,7 @@ class WriterTests(unittest.TestCase):
             self.repo,
             exclusion_lease=lambda: nullcontext(True),
         )
-        self.writer.bootstrap()
+        self.writer.bootstrap(protection_checker=lambda: True)
 
     def tearDown(self):
         self.directory.cleanup()
@@ -724,6 +735,109 @@ class WriterTests(unittest.TestCase):
             text=True,
         ).splitlines()
         self.assertEqual(tree, ["release-events.jsonl"])
+
+    def test_public_bootstrap_requires_lease_and_protection(self):
+        for label, lease, protection in (
+            ("missing lease", None, lambda: True),
+            ("false lease", lambda: nullcontext(False), lambda: True),
+            ("missing protection", lambda: nullcontext(True), None),
+            ("false protection", lambda: nullcontext(True), lambda: False),
+        ):
+            with self.subTest(label=label):
+                writer = ReleaseEventWriter(
+                    self.repo,
+                    branch=f"bootstrap-requires-{label.replace(' ', '-')}",
+                    exclusion_lease=lease,
+                )
+                with self.assertRaises(ExclusionUnavailable):
+                    writer.bootstrap(protection_checker=protection)
+                self.assertFalse(writer.branch_exists())
+
+    def test_public_bootstrap_holds_both_exclusions_through_protected_cas(self):
+        state = {"lease": False, "checked": False}
+
+        class TrackingLease:
+            def __enter__(self):
+                state["lease"] = True
+                return True
+
+            def __exit__(self, *_args):
+                state["lease"] = False
+                return False
+
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="bootstrap-controlled",
+            exclusion_lease=lambda: TrackingLease(),
+        )
+
+        def protection_checker():
+            state["checked"] = True
+            self.assertTrue(state["lease"])
+            self.assertTrue(writer.static_exclusion.held())
+            return True
+
+        head = writer.bootstrap(protection_checker=protection_checker)
+        self.assertTrue(state["checked"])
+        self.assertFalse(state["lease"])
+        self.assertFalse(writer.static_exclusion.held())
+        self.assertEqual(writer.current_head(), head)
+        self.assertEqual(writer.read_head().raw, b"")
+
+    def test_public_bootstrap_static_contention_fails_closed(self):
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="bootstrap-contention",
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        held = writer.static_exclusion.acquire()
+        outcomes: list[BaseException] = []
+
+        def run_bootstrap():
+            try:
+                writer.bootstrap(protection_checker=lambda: True)
+            except BaseException as error:  # noqa: BLE001 - capture worker result
+                outcomes.append(error)
+
+        try:
+            thread = threading.Thread(target=run_bootstrap)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+        finally:
+            held.release()
+        self.assertEqual(len(outcomes), 1)
+        self.assertIsInstance(outcomes[0], ExclusionUnavailable)
+        self.assertFalse(writer.branch_exists())
+
+    def test_public_bootstrap_release_failure_is_uncertain(self):
+        class RaisingLease:
+            def __enter__(self):
+                return True
+
+            def __exit__(self, *_args):
+                raise OSError("lease release failed after local bootstrap")
+
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="bootstrap-release-failure",
+            exclusion_lease=lambda: RaisingLease(),
+        )
+        with self.assertRaises(AppendOutcomeUncertain):
+            writer.bootstrap(protection_checker=lambda: True)
+        self.assertTrue(writer.branch_exists())
+        self.assertEqual(writer.read_head().raw, b"")
+
+    def test_bootstrap_wrapper_uses_the_protected_boundary(self):
+        head = bootstrap_release_events(
+            self.repo,
+            branch="bootstrap-wrapper",
+            exclusion_lease=lambda: nullcontext(True),
+            protection_checker=lambda: True,
+        )
+        writer = ReleaseEventWriter(self.repo, branch="bootstrap-wrapper")
+        self.assertEqual(writer.current_head(), head)
+        self.assertEqual(writer.read_head().events, ())
 
     def test_read_head_rejects_noncanonical_event_trees(self):
         head = self.writer.current_head()

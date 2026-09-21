@@ -61,8 +61,10 @@ class GateALifecycleCliFixture(unittest.TestCase):
         _git(self.repo, "commit", "-q", "-m", "fixture vmm")
         _git(self.repo, "branch", "vmm")
         _git(self.repo, "push", "-q", "origin", "main", "vmm")
-        self.writer = ReleaseEventWriter(self.repo)
-        self.writer.bootstrap()
+        self.writer = ReleaseEventWriter(
+            self.repo, exclusion_lease=lambda: nullcontext(True)
+        )
+        self.writer.bootstrap(protection_checker=lambda: True)
         _git(
             self.repo,
             "push",

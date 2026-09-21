@@ -233,14 +233,76 @@ class ReleaseEventWriter:
         events = tuple(parse_stream(raw))
         return LedgerHead(commit=commit, raw=raw, events=events)
 
-    def bootstrap(self, *, expected_absent: bool = True, message: str = "Initialize release event ledger") -> str:
+    def bootstrap(
+        self,
+        *,
+        expected_absent: bool = True,
+        message: str = "Initialize release event ledger",
+        protection_checker: Callable[[], bool] | None = None,
+    ) -> str:
         """Create the minimal orphan event branch with an empty stream.
 
-        The update is a compare-and-swap against the all-zero object ID, so a
-        concurrent creator cannot be overwritten.  Existing branches are
-        validated and returned when ``expected_absent`` is false.
+        Public bootstrap is a protected mutation.  The shared local
+        exclusion and externally governed lease remain held while protection
+        is checked and while the compare-and-swap runs.  The update is a
+        compare-and-swap against the all-zero object ID, so a concurrent
+        creator cannot be overwritten.  Existing branches are validated and
+        returned when ``expected_absent`` is false.
         """
 
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(self.static_exclusion.acquire())
+                self._enter_external_exclusion(stack)
+                return self._bootstrap_under_exclusion(
+                    expected_absent=expected_absent,
+                    message=message,
+                    protection_checker=protection_checker,
+                )
+        except _ExternalLeaseReleaseError as error:
+            raise AppendOutcomeUncertain(
+                "event bootstrap outcome cannot be classified"
+            ) from error
+        except GitIdentityError as error:
+            raise ExclusionUnavailable(
+                "serialized static/event exclusion is unavailable"
+            ) from error
+
+    def _bootstrap_under_exclusion(
+        self,
+        *,
+        expected_absent: bool,
+        message: str,
+        protection_checker: Callable[[], bool] | None,
+    ) -> str:
+        """Check creation protection before entering the unchecked mutation."""
+
+        try:
+            protected = (
+                protection_checker is not None and protection_checker() is True
+            )
+        except Exception as error:
+            raise ExclusionUnavailable(
+                "event branch creation protection could not be verified"
+            ) from error
+        if not protected:
+            raise ExclusionUnavailable(
+                "event branch creation protection is unavailable"
+            )
+        return self._bootstrap_unchecked(
+            expected_absent=expected_absent,
+            message=message,
+        )
+
+    def _bootstrap_unchecked(
+        self, *, expected_absent: bool, message: str
+    ) -> str:
+        """Bootstrap after the caller has established all exclusion proofs.
+
+        This helper is private because it does not acquire either exclusion
+        layer.  It is used by remote bootstrap while that operation already
+        holds the shared local and external leases.
+        """
         if self.branch_exists():
             if expected_absent:
                 raise StaleHeadError(f"branch already exists: {self.branch}")
@@ -468,7 +530,7 @@ class ReleaseEventWriter:
                 ) from error
             commit = local.commit
         else:
-            commit = self.bootstrap(expected_absent=False, message=message)
+            commit = self._bootstrap_unchecked(expected_absent=False, message=message)
         try:
             if push is not None:
                 push(commit, self.branch, "0" * 40)
@@ -1130,11 +1192,26 @@ class ReleaseEventWriter:
 
 
 def bootstrap_release_events(
-    repo: str | os.PathLike[str], *, branch: str = "release-events"
+    repo: str | os.PathLike[str],
+    *,
+    branch: str = "release-events",
+    protection_checker: Callable[[], bool] | None = None,
+    static_exclusion: StaticMutationExclusion | None = None,
+    exclusion_lease: Callable[[], ContextManager[bool]] | None = None,
 ) -> str:
-    """Convenience wrapper for the one-time orphan branch bootstrap."""
+    """Bootstrap the event branch through the protected public boundary.
 
-    return ReleaseEventWriter(repo, branch=branch).bootstrap()
+    Callers must provide both live protection evidence and the externally
+    governed exclusion lease.  The wrapper intentionally has no unsafe
+    defaults for either input.
+    """
+
+    return ReleaseEventWriter(
+        repo,
+        branch=branch,
+        static_exclusion=static_exclusion,
+        exclusion_lease=exclusion_lease,
+    ).bootstrap(protection_checker=protection_checker)
 
 
 __all__ = [

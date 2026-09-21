@@ -251,6 +251,38 @@ class GitRefFixture(unittest.TestCase):
         self.assertTrue(push_observed)
         self.assertFalse(held)
 
+    def test_static_mutation_lease_reuses_external_authority_for_nested_refs(self) -> None:
+        events: list[str] = []
+        held = False
+
+        @contextmanager
+        def external_lease():
+            nonlocal held
+            events.append("enter")
+            held = True
+            try:
+                yield True
+            finally:
+                held = False
+                events.append("exit")
+
+        repository = GitRepository(
+            self.work,
+            exclusion_checker=lambda: held,
+            exclusion_lease=external_lease,
+        )
+        outer = repository.acquire_static_mutation()
+        try:
+            self.assertTrue(held)
+            nested = repository.acquire_static_mutation()
+            nested.release()
+            self.assertTrue(held)
+            self.assertEqual(events, ["enter"])
+        finally:
+            outer.release()
+        self.assertEqual(events, ["enter", "exit"])
+        self.assertFalse(held)
+
     def test_remote_static_mutation_rejects_missing_or_failed_external_lease(self) -> None:
         for label, factory in (
             ("missing", None),

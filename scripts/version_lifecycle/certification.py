@@ -22,6 +22,12 @@ INVALID = "INVALID"
 PASS = "PASS"
 _GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+_PUBLIC_DNS_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_NONPUBLIC_DNS_SUFFIXES = (
+    ".corp", ".home", ".internal", ".intranet", ".lan",
+    ".local", ".localdomain", ".localhost", ".private",
+    ".test", ".example", ".invalid", ".onion",
+)
 
 
 def is_safe_public_value(value: Any) -> bool:
@@ -66,26 +72,44 @@ def is_safe_public_value(value: Any) -> bool:
             host = (parsed.hostname or "").lower().rstrip(".")
             username = parsed.username
             password = parsed.password
+            port = parsed.port
         except ValueError:
             return False
         if (
             parsed.scheme not in {"http", "https"}
             or username is not None
             or password is not None
+            or port is not None
+            or bool(parsed.query)
+            or bool(parsed.fragment)
+            or "%" in parsed.netloc
+            or "%" in parsed.path
         ):
             return False
         if (
             not host
             or "." not in host
-            or host.endswith((".local", ".internal", ".lan", ".corp"))
-            or host in {"localhost", "intranet", "internal"}
+            or host.endswith(_NONPUBLIC_DNS_SUFFIXES)
+            or host in {"localhost", "localhost.localdomain", "intranet", "internal"}
         ):
             return False
         try:
             address = ipaddress.ip_address(host)
         except ValueError:
+            # URL clients can interpret abbreviated and nondecimal dotted
+            # hosts as private IPv4 addresses despite ipaddress rejecting them.
+            if all(
+                re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|[0-9A-Fa-f]+)", label)
+                for label in host.split(".")
+            ):
+                return False
             address = None
         if address is not None and not address.is_global:
+            return False
+        if address is None and (
+            len(host) > 253
+            or not all(_PUBLIC_DNS_LABEL.fullmatch(label) for label in host.split("."))
+        ):
             return False
     components = {part for part in normalized.split("/") if part in {
         "private", "users", "home", "tmp", "var", "codex"

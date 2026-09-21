@@ -8,7 +8,7 @@ repositories; no production lifecycle operation is performed by this module.
 from __future__ import annotations
 
 import datetime as dt
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 import os
 import re
 import subprocess
@@ -44,6 +44,7 @@ class _ExclusionState:
         self.owner: int | None = None
         self.depth = 0
         self.handle: Any = None
+        self.governed_owner: int | None = None
 
 
 _EXCLUSION_STATES: dict[Path, _ExclusionState] = {}
@@ -75,6 +76,102 @@ class StaticMutationLease:
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
         self.release()
+        return False
+
+
+class CompositeStaticMutationLease:
+    """Hold the local static lock and the external allocation exclusion.
+
+    A lifecycle controller keeps this lease for the complete static/event
+    mutation sequence.  Nested Git ref helpers acquire only a reentrant local
+    lease when this same exclusion is already governed by an outer composite
+    lease; the external authority therefore remains held until the outer
+    controller releases it.
+    """
+
+    def __init__(
+        self,
+        exclusion: "StaticMutationExclusion",
+        external_factory: Callable[[], ContextManager[bool]] | None,
+        checker: Callable[[], bool] | None,
+    ) -> None:
+        self._exclusion = exclusion
+        self._external_factory = external_factory
+        self._checker = checker
+        self._local: StaticMutationLease | None = None
+        self._external: ContextManager[bool] | None = None
+        self._active = False
+
+    def __enter__(self) -> "CompositeStaticMutationLease":
+        if self._active:
+            return self
+        local = self._exclusion.acquire()
+        external: ContextManager[bool] | None = None
+        entered = False
+        try:
+            if self._external_factory is None:
+                raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+            external = self._external_factory()
+            held = external.__enter__()
+            entered = True
+            if held is not True:
+                raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+            if self._checker is None or self._checker() is not True:
+                raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+        except GitIdentityError:
+            if entered and external is not None:
+                try:
+                    external.__exit__(None, None, None)
+                except Exception:
+                    pass
+            local.release()
+            raise
+        except Exception as exc:
+            if entered and external is not None:
+                try:
+                    external.__exit__(None, None, None)
+                except Exception:
+                    pass
+            local.release()
+            raise GitIdentityError("EXCLUSION_UNAVAILABLE") from exc
+        self._local = local
+        self._external = external
+        self._active = True
+        self._exclusion._mark_governed()
+        return self
+
+    def release(
+        self,
+        exc_type: Any = None,
+        exc: Any = None,
+        traceback: Any = None,
+    ) -> None:
+        if not self._active:
+            return
+        self._active = False
+        external = self._external
+        local = self._local
+        self._external = None
+        self._local = None
+        release_error: BaseException | None = None
+        try:
+            if external is not None:
+                external.__exit__(exc_type, exc, traceback)
+        except BaseException as error:  # preserve the uncertain outcome
+            release_error = error
+        finally:
+            if local is not None:
+                try:
+                    local.release()
+                except BaseException as error:
+                    if release_error is None:
+                        release_error = error
+            self._exclusion._unmark_governed()
+        if release_error is not None:
+            raise GitIdentityError("STATIC_MUTATION_OUTCOME_UNCERTAIN") from release_error
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
+        self.release(exc_type, exc, traceback)
         return False
 
 
@@ -128,6 +225,23 @@ class StaticMutationExclusion:
 
         with self._state.guard:
             return self._state.owner == threading.get_ident() and self._state.depth > 0
+
+    def governed_held(self) -> bool:
+        """Return whether an outer composite lease governs this thread."""
+
+        with self._state.guard:
+            return self._state.governed_owner == threading.get_ident()
+
+    def _mark_governed(self) -> None:
+        with self._state.guard:
+            if self._state.owner != threading.get_ident() or self._state.depth <= 0:
+                raise GitIdentityError("STATIC_MUTATION_EXCLUSION_NOT_HELD")
+            self._state.governed_owner = threading.get_ident()
+
+    def _unmark_governed(self) -> None:
+        with self._state.guard:
+            if self._state.governed_owner == threading.get_ident():
+                self._state.governed_owner = None
 
     def _acquire(self) -> None:
         owner = threading.get_ident()
@@ -254,9 +368,10 @@ class ProtectionEvidence:
 class GitRepository:
     """Exact Git identity operations under local and live exclusion proofs.
 
-    ``exclusion_lease`` must hold the externally governed allocation authority
-    through the final remote mutation. ``exclusion_checker`` supplies a fresh
-    proof under that lease. Both are required for remote static-ref writes.
+    ``exclusion_lease`` holds the externally governed allocation authority
+    together with the local static lock for each governed mutation sequence.
+    ``exclusion_checker`` supplies a fresh proof while that lease is held.
+    Both are required for static-ref writes.
     """
 
     def __init__(
@@ -276,13 +391,29 @@ class GitRepository:
         self.exclusion_checker = exclusion_checker
         self.exclusion_lease = exclusion_lease
 
-    def acquire_static_mutation(self, intent: Any = None) -> StaticMutationLease:
-        """Acquire the repository's shared static mutation boundary."""
+    def acquire_static_mutation(
+        self, intent: Any = None
+    ) -> StaticMutationLease | CompositeStaticMutationLease:
+        """Acquire local and externally governed static mutation exclusion.
 
-        return self.static_exclusion.acquire()
+        When an outer composite lease already governs this thread, return a
+        reentrant local lease.  This lets nested annotated-tag and protected
+        ref helpers use the same repository APIs without reacquiring a
+        non-reentrant external authority.
+        """
+
+        if self.static_exclusion.governed_held():
+            return self.static_exclusion.acquire()
+        lease = CompositeStaticMutationLease(
+            self.static_exclusion, self.exclusion_lease, self.exclusion_checker
+        )
+        lease.__enter__()
+        return lease
 
     @staticmethod
-    def release_static_mutation(lease: StaticMutationLease) -> None:
+    def release_static_mutation(
+        lease: StaticMutationLease | CompositeStaticMutationLease,
+    ) -> None:
         """Release a lease acquired through :meth:`acquire_static_mutation`."""
 
         lease.release()
@@ -299,24 +430,14 @@ class GitRepository:
         if verified is not True:
             raise GitIdentityError("EXCLUSION_UNAVAILABLE")
 
-    def _enter_external_exclusion(self, stack: ExitStack) -> None:
-        if self.exclusion_lease is None:
-            raise GitIdentityError("EXCLUSION_UNAVAILABLE")
-        try:
-            held = stack.enter_context(self.exclusion_lease())
-        except Exception as exc:
-            raise GitIdentityError("EXCLUSION_UNAVAILABLE") from exc
-        if held is not True:
-            raise GitIdentityError("EXCLUSION_UNAVAILABLE")
-
     @contextmanager
     def _remote_mutation_boundary(self):
-        """Hold both exclusion proofs through remote mutation and reconciliation."""
+        """Hold the composite exclusion through mutation and reconciliation."""
 
         try:
-            with ExitStack() as stack:
-                stack.enter_context(self.acquire_static_mutation())
-                self._enter_external_exclusion(stack)
+            with self.acquire_static_mutation():
+                # Recheck immediately before the remote operation.  The
+                # acquisition proof remains held for the entire body.
                 self._require_live_exclusion()
                 yield
         except GitIdentityError:

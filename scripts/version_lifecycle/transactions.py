@@ -107,6 +107,8 @@ class ClosurePort(Protocol):
 
 class BootstrapPort(Protocol):
     def freeze_bootstrap(self, intent: BootstrapIntent) -> str: ...
+    def acquire_static_mutation(self, intent: BootstrapIntent) -> Any: ...
+    def release_static_mutation(self, lease: Any) -> None: ...
     def verify_base_and_absence(self, intent: BootstrapIntent) -> None: ...
     def allocation_view(self) -> AllocationView: ...
     def prepare_reservation(
@@ -368,7 +370,13 @@ def run_closure(port: ClosurePort, intent: ClosureIntent) -> TransactionResult:
             intent, anchor, consumption, preparation, reopened, activation
         )
         phase = "correspondence_verified"
-        _release_static_mutation(port, mutation_lease)
+        try:
+            _release_static_mutation(port, mutation_lease)
+        except TransactionError:
+            # A failed external release leaves the freeze in place and must
+            # not be retried with an uncertain lease state.
+            mutation_lease = None
+            raise
         mutation_lease = None
         port.unfreeze_line(token)
         return TransactionResult("COMPLETE", "unfrozen", evidence=evidence)
@@ -397,6 +405,7 @@ def run_maintenance_bootstrap(
     phase = "preflight"
     evidence: dict[str, Any] = {}
     token: str | None = None
+    mutation_lease: Any = None
     try:
         port.verify_base_and_absence(intent)
         token = port.freeze_bootstrap(intent)
@@ -406,6 +415,8 @@ def run_maintenance_bootstrap(
         phase = "frozen"
         # The first check is advisory.  Recheck under the effective freeze so
         # the approved base and branch absence cannot change between checks.
+        mutation_lease = _acquire_static_mutation(port, intent)
+        phase = "exclusion_acquired"
         port.verify_base_and_absence(intent)
         view = port.allocation_view()
         evidence["bound_view"] = view
@@ -423,6 +434,14 @@ def run_maintenance_bootstrap(
         state = branch.get("state")
         if state == "not_created":
             port.abort_nonentry(intent, preparation, branch)
+            try:
+                _release_static_mutation(port, mutation_lease)
+            except TransactionError:
+                # The release boundary is now uncertain.  Do not retry a
+                # possibly one-shot external lease; retain the freeze.
+                mutation_lease = None
+                raise
+            mutation_lease = None
             return TransactionResult(
                 "BLOCKED", phase, "BOOTSTRAP_BRANCH_NOT_CREATED", evidence,
                 frozen=True,
@@ -447,13 +466,24 @@ def run_maintenance_bootstrap(
             intent, preparation, branch, dev_head, activation, line_opened
         )
         phase = "correspondence_verified"
+        try:
+            _release_static_mutation(port, mutation_lease)
+        except TransactionError:
+            # A release failure can follow a completed append.  Retain the
+            # freeze and avoid a second release attempt with an uncertain
+            # external lease state.
+            mutation_lease = None
+            raise
+        mutation_lease = None
         port.unfreeze_bootstrap(token)
         return TransactionResult("COMPLETE", "unfrozen", evidence=evidence)
     except TransactionError as exc:
+        _release_static_mutation_best_effort(port, mutation_lease)
         return TransactionResult(
             "BLOCKED", phase, exc.reason_code, evidence, frozen=token is not None
         )
     except Exception as exc:
+        _release_static_mutation_best_effort(port, mutation_lease)
         evidence["error_type"] = type(exc).__name__
         return TransactionResult(
             "BLOCKED", phase, "BOOTSTRAP_OUTCOME_UNCERTAIN", evidence,
@@ -713,7 +743,13 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         phase = "publication_evidence_durable"
         port.verify_terminal(intent, released, publication, publication_evidence)
         phase = "terminal_verified"
-        _release_static_mutation(port, mutation_lease)
+        try:
+            _release_static_mutation(port, mutation_lease)
+        except TransactionError:
+            # A release failure can follow a complete publication.  Keep the
+            # main freeze and leave reconciliation to the caller.
+            mutation_lease = None
+            raise
         mutation_lease = None
         if main_token is not None:
             port.unfreeze_main(main_token)

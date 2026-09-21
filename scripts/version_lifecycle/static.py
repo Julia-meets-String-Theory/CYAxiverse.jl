@@ -30,6 +30,12 @@ _PUBLIC_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _PUBLIC_URL_PATH_RE = re.compile(r"^/(?:[A-Za-z0-9][A-Za-z0-9_.-]*/)+[A-Za-z0-9][A-Za-z0-9_.-]*/?$")
 _PUBLIC_SCP_RE = re.compile(r"^git@github\.com:(?P<path>[^/]+/[^/]+?)(?:\.git)?$")
 _NUMERIC_HOST_LABEL_RE = re.compile(r"^(?:0[xX][0-9A-Fa-f]+|[0-9A-Fa-f]+)$")
+_PUBLIC_DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_NONPUBLIC_DNS_SUFFIXES = (
+    ".corp", ".home", ".internal", ".intranet", ".lan",
+    ".local", ".localdomain", ".localhost", ".private",
+    ".test", ".example", ".invalid", ".onion",
+)
 _UNSAFE_SOURCE_MARKERS = (
     "file:", "local:", "ssh:", "git:", "credential", "password", "token",
     "secret", "authorization", "bearer ", "api_key", "apikey",
@@ -327,9 +333,9 @@ def sanitize_source_repository(value: str) -> str:
             raise UnsafeSourceRepositoryError(
                 "source_repository must be an HTTP(S) URL without credentials"
             )
-        if parsed.query or parsed.fragment or not host or port is not None:
+        if parsed.query or parsed.fragment or not host or port is not None or "%" in parsed.netloc:
             raise UnsafeSourceRepositoryError(
-                "source_repository URL must not contain query, fragment, port, or missing host"
+                "source_repository URL has an unsafe authority or suffix"
             )
         # DNS permits an absolute name with a trailing root label.  Strip it
         # before classifying the host so ``127.0.0.1.`` cannot bypass the IP
@@ -342,24 +348,30 @@ def sanitize_source_repository(value: str) -> str:
         if (
             host in {"localhost", "localhost.localdomain", "intranet"}
             or "." not in host
-            or host.endswith((".local", ".internal", ".lan", ".intranet"))
+            or host.endswith(_NONPUBLIC_DNS_SUFFIXES)
         ):
-            raise UnsafeSourceRepositoryError(
-                "source_repository URL must use a public host"
-            )
-        # URL parsers accept abbreviated and non-decimal IPv4 spellings that
-        # ``ipaddress`` does not (for example ``127.1`` and
-        # ``0x7f.0.0.1``).  A host made only of numeric/hexadecimal labels is
-        # therefore rejected before it can be treated as a public DNS name.
-        if all(_NUMERIC_HOST_LABEL_RE.fullmatch(label) for label in host.split(".")):
             raise UnsafeSourceRepositoryError(
                 "source_repository URL must use a public host"
             )
         try:
             address = ipaddress.ip_address(host)
         except ValueError:
+            # Some URL clients interpret abbreviated or nondecimal dotted
+            # numeric hosts as IPv4. Reject these aliases while retaining
+            # canonical globally routable IP literals.
+            if all(_NUMERIC_HOST_LABEL_RE.fullmatch(label) for label in host.split(".")):
+                raise UnsafeSourceRepositoryError(
+                    "source_repository URL must use a public host"
+                )
             address = None
         if address is not None and not address.is_global:
+            raise UnsafeSourceRepositoryError(
+                "source_repository URL must use a public host"
+            )
+        if address is None and (
+            len(host) > 253
+            or not all(_PUBLIC_DNS_LABEL_RE.fullmatch(label) for label in host.split("."))
+        ):
             raise UnsafeSourceRepositoryError(
                 "source_repository URL must use a public host"
             )
@@ -371,7 +383,8 @@ def sanitize_source_repository(value: str) -> str:
         normalized_path = path.rstrip("/")
         if normalized_path.endswith(".git"):
             normalized_path = normalized_path[:-4]
-        return urlunsplit((parsed.scheme, host, normalized_path, "", ""))
+        public_host = f"[{host}]" if address is not None and address.version == 6 else host
+        return urlunsplit((parsed.scheme, public_host, normalized_path, "", ""))
 
     if "/" in value:
         parts = value.split("/")
