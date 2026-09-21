@@ -359,6 +359,17 @@ class EventValidationTests(unittest.TestCase):
             "10.0.0.1",
             "::1",
             "runner=fc00::1",
+            "10.0.0.1:443",
+            "runner@10.0.0.1",
+            "runner-10.0.0.1",
+            "10.0.0.1\\path",
+            "10.0.0.1.example.com",
+            "10.1",
+            "10.0.1",
+            "172.16.1",
+            "192.168.1",
+            "runner=10.1",
+            "10.0.0.1#frag",
         ):
             with self.subTest(alias=alias):
                 intent = release_intent_event()

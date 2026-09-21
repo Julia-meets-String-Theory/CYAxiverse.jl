@@ -112,11 +112,20 @@ unsupported-certification-binding reason, and bare private IP values in
 durable evidence or repository slugs. Those verdicts belong only to the
 eighth candidate. The corrected successor requires fresh reviews.
 
+The ninth frozen candidate was commit
+`ad98b29a1ef1f7c23a4591681d85ac8caa064a23` (tree
+`173ab53556082c48b2dc466223e76fb084fc226b`). Independent SPEC and
+STANDARDS reviews returned `REQUEST_CHANGES`. Findings covered abbreviated
+private IPv4 addresses and embedded endpoint forms in durable evidence, plus
+IP-like source components hidden behind `.git`, SCP, and URL forms. Those
+verdicts belong only to the ninth candidate. The corrected successor requires
+fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 207 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 208 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline local dependencies; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

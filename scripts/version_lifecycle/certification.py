@@ -15,6 +15,8 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
+from .public_ip import parse_ipv4_compat
+
 
 SUPPORTED_BINDINGS = frozenset(("tree-bound", "commit-bound"))
 BLOCKED = "BLOCKED"
@@ -30,47 +32,69 @@ _NONPUBLIC_DNS_SUFFIXES = (
     ".test", ".example", ".invalid", ".onion",
 )
 _NONPUBLIC_DNS_NAMES = {"example.com", "example.net", "example.org"}
-_PUBLIC_VALUE_TOKEN_SPLIT = re.compile(r"[\s=,;/()\[\]{}<>\"']+")
+_PUBLIC_VALUE_TOKEN_SPLIT = re.compile(r"[\s=,;/()\[\]{}<>\"'@\\]+")
+_DOTTED_IP_CANDIDATE = re.compile(
+    r"(?<![0-9A-Za-z])(?:0[xX][0-9A-Fa-f]+|[0-9]+)"
+    r"(?:\.(?:0[xX][0-9A-Fa-f]+|[0-9]+)){1,3}(?![0-9])"
+)
 
 
-def _single_part_ipv4_alias(token: str) -> ipaddress.IPv4Address | None:
-    """Decode noncanonical integer IPv4 forms without DNS resolution."""
+def _version_identity(value: str, key: str | None) -> bool:
+    """Recognize typed release identities before interpreting IP aliases."""
 
-    lowered = token.lower()
-    try:
-        if re.fullmatch(r"0x[0-9a-f]{1,8}", lowered):
-            number = int(lowered[2:], 16)
-        elif 9 <= len(token) <= 12 and re.fullmatch(r"0[0-7]+", token):
-            number = int(token, 8)
-        elif 9 <= len(token) <= 10 and token.isascii() and token.isdecimal():
-            number = int(token, 10)
-        else:
-            return None
-        return ipaddress.IPv4Address(number)
-    except ValueError:
-        return None
+    if key is None:
+        return False
+    final = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    if key == "version" or key.endswith("_version") or key in {
+        "closure", "candidate", "anchor", "final_release", "certified", "main"
+    }:
+        return re.fullmatch(final + r"(?:-DEV)?", value) is not None
+    if key == "line" or key.endswith("_line"):
+        return re.fullmatch(r"maintenance/(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", value) is not None
+    if key == "public_tag":
+        return re.fullmatch("v" + final, value) is not None
+    if key in {"anchor_ref", "closure_anchor"}:
+        return re.fullmatch("refs/tags/iterations/" + final, value) is not None
+    if key == "candidate_ref":
+        return re.fullmatch("refs/heads/candidates/" + final, value) is not None
+    if key == "intent_id":
+        return re.fullmatch("INT-" + final, value) is not None
+    return False
 
 
-def _contains_nonpublic_ip_literal(value: str) -> bool:
-    """Find local IP locators in labels as well as URL shaped values."""
+def _contains_nonpublic_locator(value: str) -> bool:
+    """Find local hosts and IP locators in labels and URL shaped values."""
+
+    # Scan the whole string first. A private address followed by a port,
+    # path, punctuation, or DNS suffix is still a private locator.
+    for match in _DOTTED_IP_CANDIDATE.finditer(value):
+        candidate = match.group()
+        address = parse_ipv4_compat(candidate)
+        if address is not None and not address.is_global:
+            return True
 
     for token in _PUBLIC_VALUE_TOKEN_SPLIT.split(value):
         if not token:
             continue
+        host_label = token.lower().rstrip(".")
+        if host_label.count(":") == 1 and host_label.rsplit(":", 1)[1].isdigit():
+            host_label = host_label.rsplit(":", 1)[0]
+        if (
+            host_label in _NONPUBLIC_DNS_NAMES
+            or host_label in {"localhost", "localhost.localdomain", "intranet", "internal"}
+            or host_label.endswith(_NONPUBLIC_DNS_SUFFIXES)
+        ):
+            return True
         try:
             address = ipaddress.ip_address(token)
         except ValueError:
-            integer_alias = _single_part_ipv4_alias(token)
+            integer_alias = (
+                parse_ipv4_compat(token)
+                if "." in token or token.lower().startswith("0x")
+                or (9 <= len(token) <= 12 and token.isascii() and token.isdecimal())
+                else None
+            )
             if integer_alias is not None and not integer_alias.is_global:
-                return True
-            # URL clients also accept these noncanonical IPv4 spellings.
-            labels = token.split(".")
-            if len(labels) == 4 and all(
-                re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|[0-9A-Fa-f]+)", label)
-                for label in labels
-            ):
-                return True
-            if len(labels) > 1 and labels[0].lower() in {"127", "0177", "0x7f"}:
                 return True
             continue
         if not address.is_global:
@@ -78,7 +102,7 @@ def _contains_nonpublic_ip_literal(value: str) -> bool:
     return False
 
 
-def is_safe_public_value(value: Any) -> bool:
+def is_safe_public_value(value: Any, *, key: str | None = None) -> bool:
     """Return whether a durable value is safe to expose publicly.
 
     This lexical gate rejects private locators and credential-like values.
@@ -90,17 +114,21 @@ def is_safe_public_value(value: Any) -> bool:
         return all(
             isinstance(key, str)
             and is_safe_public_value(key)
-            and is_safe_public_value(item)
+            and is_safe_public_value(item, key=key)
             for key, item in value.items()
         )
     if isinstance(value, (list, tuple)):
-        return all(is_safe_public_value(item) for item in value)
+        return all(is_safe_public_value(item, key=key) for item in value)
     if not isinstance(value, str):
         return True
     if any(ord(character) < 0x20 or ord(character) > 0x7E for character in value):
         return False
+    if "%" in value:
+        # Percent escapes can hide a private host or local path in an
+        # otherwise ordinary durable label.
+        return False
     lowered = value.lower()
-    if _contains_nonpublic_ip_literal(value):
+    if value != "v-0.1" and not _version_identity(value, key) and _contains_nonpublic_locator(value):
         return False
     if (
         value.startswith(("/", "~", "\\\\"))
@@ -148,10 +176,7 @@ def is_safe_public_value(value: Any) -> bool:
         except ValueError:
             # URL clients can interpret abbreviated and nondecimal dotted
             # hosts as private IPv4 addresses despite ipaddress rejecting them.
-            if all(
-                re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|[0-9A-Fa-f]+)", label)
-                for label in host.split(".")
-            ):
+            if parse_ipv4_compat(host) is not None:
                 return False
             address = None
         if address is not None and not address.is_global:

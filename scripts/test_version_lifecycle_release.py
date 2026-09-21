@@ -581,11 +581,27 @@ class TestReleaseEvidence(unittest.TestCase):
             ("environment", "10.0.0.1"),
             ("environment", "::1"),
             ("environment", "runner=fc00::1"),
+            ("environment", "runner=foo.internal"),
+            ("environment", "runner=foo.internal:8443"),
+            ("environment", "runner=foo%2einternal"),
+            ("environment", "runner=foo.corp"),
+            ("environment", "runner=home.arpa"),
             ("environment", "runner=192.0.2.1"),
             ("environment", "runner=0177.0.0.1"),
             ("environment", "runner=0x7f000001"),
             ("environment", "runner=2130706433"),
             ("environment", "runner=017700000001"),
+            ("environment", "10.0.0.1:443"),
+            ("environment", "runner@10.0.0.1"),
+            ("environment", "runner-10.0.0.1"),
+            ("environment", "10.0.0.1\\path"),
+            ("environment", "10.0.0.1.example.com"),
+            ("environment", "10.1"),
+            ("environment", "10.0.1"),
+            ("environment", "172.16.1"),
+            ("environment", "192.168.1"),
+            ("environment", "runner=10.1"),
+            ("environment", "10.0.0.1#frag"),
             ("environment", "https://[::1]/org/repo"),
             ("environment", "https://localhost.localdomain/org/repo"),
             ("environment", "https://service.intranet/org/repo"),
@@ -615,6 +631,16 @@ class TestReleaseEvidence(unittest.TestCase):
         ):
             with self.subTest(value=value):
                 self.assertTrue(is_safe_public_value(value))
+
+    def test_typed_version_identifiers_remain_distinct_from_ip_locators(self):
+        self.assertTrue(is_safe_public_value({
+            "final_version": "10.1.0",
+            "release_line": "maintenance/10.1",
+            "public_tag": "v10.1.0",
+        }))
+        self.assertFalse(is_safe_public_value({
+            "certification_environment": "10.1.0",
+        }))
 
     def test_released_event_rejects_bare_private_environment(self):
         event = released_event()

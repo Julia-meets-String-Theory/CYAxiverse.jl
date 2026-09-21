@@ -319,7 +319,7 @@ class UnsupportedCertificationBinding(EventError):
 # are not durable identities.  This is a public-value gate, not a substitute
 # for review of the evidence itself.
 def _reject_unsafe_public_string(value: str, *, field: str = "event value") -> None:
-    if not is_safe_public_value(value):
+    if not is_safe_public_value(value, key=field):
         raise EventSchemaError(f"{field} contains a private or secret-like value")
 
 

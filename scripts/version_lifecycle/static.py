@@ -18,6 +18,7 @@ import tomllib
 from urllib.parse import urlsplit, urlunsplit
 
 from .codec import canonical_json, sha256_hex
+from .public_ip import parse_ipv4_compat
 from .versions import Version, final_version, parse_package_version, parse_public_tag
 
 
@@ -29,7 +30,6 @@ _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 _PUBLIC_SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _PUBLIC_URL_PATH_RE = re.compile(r"^/(?:[A-Za-z0-9][A-Za-z0-9_.-]*/)+[A-Za-z0-9][A-Za-z0-9_.-]*/?$")
 _PUBLIC_SCP_RE = re.compile(r"^git@github\.com:(?P<path>[^/]+/[^/]+?)(?:\.git)?$")
-_NUMERIC_HOST_LABEL_RE = re.compile(r"^(?:0[xX][0-9A-Fa-f]+|[0-9A-Fa-f]+)$")
 _PUBLIC_DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _NONPUBLIC_DNS_SUFFIXES = (
     ".arpa", ".corp", ".example.com", ".example.net", ".example.org",
@@ -313,10 +313,34 @@ def sanitize_source_repository(value: str) -> str:
             "source_repository cannot contain a local or secret-like locator"
         )
 
+    def safe_slug_part(part: str) -> bool:
+        if not _PUBLIC_SLUG_RE.fullmatch(part):
+            return False
+        lowered_part = part.lower()
+        if (
+            lowered_part in _LOCAL_SOURCE_NAMES
+            or lowered_part in _NONPUBLIC_DNS_NAMES
+            or lowered_part.endswith(_NONPUBLIC_DNS_SUFFIXES)
+            or (
+                ("." in lowered_part or lowered_part.startswith("0x") or len(lowered_part) >= 9)
+                and parse_ipv4_compat(lowered_part) is not None
+            )
+        ):
+            return False
+        try:
+            ipaddress.ip_address(lowered_part)
+        except ValueError:
+            pass
+        else:
+            # An address is a locator, not a repository slug.  Use a
+            # validated HTTP(S) URL for a globally routable IP source.
+            return False
+        return True
+
     scp = _PUBLIC_SCP_RE.fullmatch(value)
     if scp is not None:
         owner, repository = scp.group("path").split("/", 1)
-        if _PUBLIC_SLUG_RE.fullmatch(owner) and _PUBLIC_SLUG_RE.fullmatch(repository):
+        if safe_slug_part(owner) and safe_slug_part(repository):
             return f"https://github.com/{owner}/{repository}"
         raise UnsafeSourceRepositoryError(
             "source_repository must identify a public repository"
@@ -364,7 +388,7 @@ def sanitize_source_repository(value: str) -> str:
             # Some URL clients interpret abbreviated or nondecimal dotted
             # numeric hosts as IPv4. Reject these aliases while retaining
             # canonical globally routable IP literals.
-            if all(_NUMERIC_HOST_LABEL_RE.fullmatch(label) for label in host.split(".")):
+            if parse_ipv4_compat(host) is not None:
                 raise UnsafeSourceRepositoryError(
                     "source_repository URL must use a public host"
                 )
@@ -389,53 +413,33 @@ def sanitize_source_repository(value: str) -> str:
         normalized_path = path.rstrip("/")
         if normalized_path.endswith(".git"):
             normalized_path = normalized_path[:-4]
+        if not all(safe_slug_part(part) for part in normalized_path[1:].split("/")):
+            raise UnsafeSourceRepositoryError(
+                "source_repository URL must identify a public repository"
+            )
         public_host = f"[{host}]" if address is not None and address.version == 6 else host
         return urlunsplit((parsed.scheme, public_host, normalized_path, "", ""))
 
-    def safe_slug_part(part: str) -> bool:
-        if not _PUBLIC_SLUG_RE.fullmatch(part):
-            return False
-        lowered_part = part.lower()
-        if (
-            lowered_part in _LOCAL_SOURCE_NAMES
-            or lowered_part in _NONPUBLIC_DNS_NAMES
-            or lowered_part.endswith(_NONPUBLIC_DNS_SUFFIXES)
-            or re.fullmatch(r"0x[0-9a-f]{1,8}", lowered_part) is not None
-            or (len(lowered_part) >= 9 and lowered_part.isascii() and lowered_part.isdecimal())
-        ):
-            return False
-        try:
-            ipaddress.ip_address(lowered_part)
-        except ValueError:
-            labels = lowered_part.split(".")
-            if len(labels) == 4 and all(
-                _NUMERIC_HOST_LABEL_RE.fullmatch(label) for label in labels
-            ):
-                return False
-            if len(labels) > 1 and labels[0] in {"127", "0177", "0x7f"}:
-                return False
-        else:
-            # An address is a locator, not a repository slug.  Use a
-            # validated HTTP(S) URL for a globally routable IP source.
-            return False
-        return True
-
     if "/" in value:
         parts = value.split("/")
-        if len(parts) != 2 or not all(safe_slug_part(part) for part in parts):
+        if len(parts) != 2:
             raise UnsafeSourceRepositoryError(
                 "source_repository must identify a public repository"
             )
         owner, repository = parts
-    else:
-        if not safe_slug_part(value):
+        if repository.endswith(".git"):
+            repository = repository[:-4]
+        if not safe_slug_part(owner) or not safe_slug_part(repository):
             raise UnsafeSourceRepositoryError(
                 "source_repository must identify a public repository"
             )
-        repository = value
+    else:
+        repository = value[:-4] if value.endswith(".git") else value
+        if not safe_slug_part(repository):
+            raise UnsafeSourceRepositoryError(
+                "source_repository must identify a public repository"
+            )
         owner = None
-    if repository.endswith(".git"):
-        repository = repository[:-4]
     if not repository or not _PUBLIC_SLUG_RE.fullmatch(repository):
         raise UnsafeSourceRepositoryError(
             "source_repository must identify a public repository"
