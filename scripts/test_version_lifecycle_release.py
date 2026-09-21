@@ -14,6 +14,7 @@ from version_lifecycle.certification import (
     BLOCKED as CERT_BLOCKED,
     PASS as CERT_PASS,
     certify_exact_tree,
+    is_safe_public_value,
     validate_certification_identity,
     validate_certification_transfer,
 )
@@ -564,6 +565,15 @@ class TestReleaseEvidence(unittest.TestCase):
             ("policy_revision", "ssh://runner/policy"),
             ("harness_revision", "private/harness"),
             ("environment", "https://intranet/ci"),
+            ("environment", "https://10.0.0.1/org/repo"),
+            ("environment", "https://127.0.0.1/org/repo"),
+            ("environment", "https://169.254.169.254/org/repo"),
+            ("environment", "https://192.0.2.1/org/repo"),
+            ("environment", "https://[::1]/org/repo"),
+            ("environment", "https://localhost./org/repo"),
+            ("environment", "https://service.internal./org/repo"),
+            ("environment", "https://@github.com/org/repo"),
+            ("environment", "https://user%3Apass@github.com/org/repo"),
         ):
             with self.subTest(field=field):
                 record = certification()
@@ -571,6 +581,14 @@ class TestReleaseEvidence(unittest.TestCase):
                 result = validate_certification_identity(record)
                 self.assertEqual(result["status"], INVALID)
                 self.assertEqual(result["reason_code"], "UNSAFE_PUBLIC_EVIDENCE")
+
+    def test_public_http_urls_remain_safe(self):
+        for value in (
+            "https://github.com/org/repo",
+            "https://8.8.8.8/org/repo",
+        ):
+            with self.subTest(value=value):
+                self.assertTrue(is_safe_public_value(value))
 
     def test_legacy_tag_is_excluded(self):
         result = validate_release_consistency(tag={"name": "v-0.1"})

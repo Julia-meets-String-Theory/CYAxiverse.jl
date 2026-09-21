@@ -31,6 +31,12 @@ def _public_text(value: Any) -> bool:
     )
 
 
+def _git_sha(value: Any) -> bool:
+    """Return whether a value is a complete lowercase Git object identity."""
+
+    return isinstance(value, str) and SHA.fullmatch(value) is not None
+
+
 class TransactionError(RuntimeError):
     def __init__(self, reason_code: str, detail: str = "") -> None:
         super().__init__(detail or reason_code)
@@ -74,6 +80,8 @@ class TransactionResult:
 
 class ClosurePort(Protocol):
     def freeze_line(self, intent: ClosureIntent) -> str: ...
+    def acquire_static_mutation(self, intent: ClosureIntent) -> Any: ...
+    def release_static_mutation(self, lease: Any) -> None: ...
     def allocation_view(self) -> AllocationView: ...
     def verify_closure_target(self, intent: ClosureIntent, view: AllocationView) -> None: ...
     def merge_final(self, intent: ClosureIntent) -> dict[str, str]: ...
@@ -144,6 +152,8 @@ class ReleaseIntent:
 
 
 class ReleasePort(Protocol):
+    def acquire_static_mutation(self, intent: ReleaseIntent) -> Any: ...
+    def release_static_mutation(self, lease: Any) -> None: ...
     def verify_anchor(self, intent: ReleaseIntent) -> None: ...
     def make_durable_candidate(self, intent: ReleaseIntent) -> dict[str, Any]: ...
     def append_candidate_opened(
@@ -231,6 +241,36 @@ def _next_final(line: str, closed: str, view: AllocationView) -> str:
         candidate += 1
 
 
+def _acquire_static_mutation(port: Any, intent: Any) -> Any:
+    """Acquire the shared static/event mutation boundary or block."""
+
+    try:
+        lease = port.acquire_static_mutation(intent)
+    except Exception as exc:
+        raise TransactionError("EXCLUSION_UNAVAILABLE", str(exc)) from exc
+    if lease is None:
+        raise TransactionError("EXCLUSION_UNAVAILABLE")
+    return lease
+
+
+def _release_static_mutation(port: Any, lease: Any) -> None:
+    try:
+        port.release_static_mutation(lease)
+    except Exception as exc:
+        raise TransactionError("EXCLUSION_UNAVAILABLE", str(exc)) from exc
+
+
+def _release_static_mutation_best_effort(port: Any, lease: Any) -> None:
+    if lease is None:
+        return
+    try:
+        port.release_static_mutation(lease)
+    except Exception:
+        # The enclosing transaction remains frozen on every error path. The
+        # OS releases a process-owned file lock when the process exits.
+        pass
+
+
 def run_closure(port: ClosurePort, intent: ClosureIntent) -> TransactionResult:
     """Run closure through deterministic reopen; retain freeze on any error."""
     _version(intent.final_version)
@@ -244,26 +284,35 @@ def run_closure(port: ClosurePort, intent: ClosureIntent) -> TransactionResult:
     phase = "preflight"
     evidence: dict[str, Any] = {}
     token: str | None = None
+    mutation_lease: Any = None
     try:
         token = port.freeze_line(intent)
         if not token:
             raise TransactionError("LINE_FREEZE_UNAVAILABLE")
         evidence["freeze_token"] = token
         phase = "frozen"
+        mutation_lease = _acquire_static_mutation(port, intent)
+        phase = "exclusion_acquired"
         view = port.allocation_view()
         port.verify_closure_target(intent, view)
         evidence["bound_view"] = view
         phase = "view_bound"
         closure = port.merge_final(intent)
-        if closure.get("version") != intent.final_version or not closure.get("tree"):
+        if (
+            closure.get("version") != intent.final_version
+            or not _git_sha(closure.get("commit"))
+            or not _git_sha(closure.get("tree"))
+        ):
             raise TransactionError("CLOSURE_IDENTITY_MISMATCH")
         evidence["closure"] = closure
         phase = "closed"
         anchor = port.create_anchor(intent, closure)
         if (
             anchor.get("version") != intent.final_version
+            or not _git_sha(anchor.get("commit"))
+            or not _git_sha(anchor.get("tree"))
+            or anchor.get("commit") != closure["commit"]
             or anchor.get("tree") != closure["tree"]
-            or anchor.get("commit") != closure.get("commit")
             or anchor.get("closure_timestamp_utc") != intent.closure_timestamp_utc
         ):
             raise TransactionError("ANCHOR_IDENTITY_MISMATCH")
@@ -319,13 +368,17 @@ def run_closure(port: ClosurePort, intent: ClosureIntent) -> TransactionResult:
             intent, anchor, consumption, preparation, reopened, activation
         )
         phase = "correspondence_verified"
+        _release_static_mutation(port, mutation_lease)
+        mutation_lease = None
         port.unfreeze_line(token)
         return TransactionResult("COMPLETE", "unfrozen", evidence=evidence)
     except TransactionError as exc:
+        _release_static_mutation_best_effort(port, mutation_lease)
         return TransactionResult(
             "BLOCKED", phase, exc.reason_code, evidence, frozen=token is not None
         )
     except Exception as exc:
+        _release_static_mutation_best_effort(port, mutation_lease)
         evidence["error_type"] = type(exc).__name__
         return TransactionResult(
             "BLOCKED", phase, "TRANSACTION_OUTCOME_UNCERTAIN", evidence,
@@ -430,12 +483,15 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
     phase = "preflight"
     evidence: dict[str, Any] = {}
     main_token: str | None = None
+    mutation_lease: Any = None
     tag_attempted = False
     tag_created = False
     released_appended = False
     try:
         port.verify_anchor(intent)
         phase = "anchor_verified"
+        mutation_lease = _acquire_static_mutation(port, intent)
+        phase = "exclusion_acquired"
         candidate = port.make_durable_candidate(intent)
         if (
             candidate.get("ref") != intent.candidate_ref
@@ -657,10 +713,13 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         phase = "publication_evidence_durable"
         port.verify_terminal(intent, released, publication, publication_evidence)
         phase = "terminal_verified"
+        _release_static_mutation(port, mutation_lease)
+        mutation_lease = None
         if main_token is not None:
             port.unfreeze_main(main_token)
         return TransactionResult("COMPLETE", "unfrozen", evidence=evidence)
     except TransactionError as exc:
+        _release_static_mutation_best_effort(port, mutation_lease)
         if exc.reason_code.endswith("_MISMATCH") or "INVALID" in exc.reason_code:
             return TransactionResult(
                 "INVALID", phase, exc.reason_code, evidence,
@@ -681,6 +740,7 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
             frozen=main_token is not None,
         )
     except Exception as exc:
+        _release_static_mutation_best_effort(port, mutation_lease)
         evidence["error_type"] = type(exc).__name__
         if released_appended:
             status = "publication_reconciliation_pending"

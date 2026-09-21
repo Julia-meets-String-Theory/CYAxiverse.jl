@@ -66,11 +66,21 @@ classification, event-tree topology and authority callback failure handling.
 Those verdicts belong only to the third candidate. The corrected successor
 requires fresh reviews.
 
+The fourth frozen candidate was commit
+`391420c5b4b97e9fad60628a364730ff9cdfdd43` (tree
+`df25e78db667083caf78a0ffea3efe3f1b64eaf1`). Independent SPEC and
+STANDARDS reviews returned `REQUEST_CHANGES`. The findings covered duplicate
+reservation opening, early remote unsupported-binding handling, incomplete
+closure identities, private IP and URL userinfo sanitation, remote event-branch
+recreation, static/event exclusion, and the absence of a runnable pinned
+checkout certification harness. Those verdicts belong only to the fourth
+candidate. A corrected successor requires fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 155 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 175 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline local dependencies; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

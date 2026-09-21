@@ -1100,6 +1100,8 @@ def validate_transition(
     elif event_type == "development_reservation_opened":
         _require_reservation_predecessor(prior, current, "prepared")
         _require_matching_reservation_identity(prior, current)
+        if _has_reservation_state(prior, current, "opened"):
+            raise EventTransitionError("reservation is already opened")
     elif event_type == "development_reservation_aborted":
         _require_reservation_predecessor(prior, current, "prepared")
         _require_matching_reservation_identity(prior, current)

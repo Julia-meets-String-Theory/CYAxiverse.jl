@@ -10,6 +10,7 @@ The returned mappings are deliberately JSON serialisable and use the same
 from __future__ import annotations
 
 from collections.abc import Mapping
+import ipaddress
 import re
 from typing import Any
 from urllib.parse import urlsplit
@@ -56,12 +57,16 @@ def is_safe_public_value(value: Any) -> bool:
     if "://" in normalized:
         try:
             parsed = urlsplit(value)
-            host = (parsed.hostname or "").lower()
+            host = (parsed.hostname or "").lower().rstrip(".")
             username = parsed.username
             password = parsed.password
         except ValueError:
             return False
-        if parsed.scheme not in {"http", "https"} or username or password:
+        if (
+            parsed.scheme not in {"http", "https"}
+            or username is not None
+            or password is not None
+        ):
             return False
         if (
             not host
@@ -69,6 +74,12 @@ def is_safe_public_value(value: Any) -> bool:
             or host.endswith((".local", ".internal", ".lan", ".corp"))
             or host in {"localhost", "intranet", "internal"}
         ):
+            return False
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            address = None
+        if address is not None and not address.is_global:
             return False
     components = {part for part in normalized.split("/") if part in {
         "private", "users", "home", "tmp", "var", "codex"

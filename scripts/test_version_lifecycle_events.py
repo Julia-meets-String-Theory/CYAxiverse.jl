@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -836,6 +837,26 @@ class WriterTests(unittest.TestCase):
         with self.assertRaises(EventTransitionError):
             self.writer.append(mismatched)
 
+    def test_opened_reservation_cannot_be_opened_again(self):
+        head = self.writer.current_head()
+        first = self.writer.append(reservation_event(expected_head=head), expected_head=head)
+        opened = reservation_event(
+            "EVT-000000000002",
+            transaction_id="tx-open",
+            expected_head=first.head,
+            event_type="development_reservation_opened",
+        )
+        second = self.writer.append(opened, expected_head=first.head)
+        duplicate = dict(
+            opened,
+            event_id="EVT-000000000003",
+            transaction_id="tx-open-again",
+            expected_event_head=second.head,
+        )
+        with self.assertRaisesRegex(EventTransitionError, "already opened"):
+            self.writer.append(duplicate, expected_head=second.head)
+        self.assertEqual(self.writer.current_head(), second.head)
+
     def test_consumed_owner_can_open_candidate(self):
         head = self.writer.current_head()
         prepared = reservation_event(expected_head=head)
@@ -1112,6 +1133,114 @@ class WriterTests(unittest.TestCase):
         )
         self.assertEqual((result.status, result.reason_code, result.frozen),
                          ("BLOCKED", "EXCLUSION_UNAVAILABLE", True))
+
+    def test_static_mutation_race_blocks_event_append(self):
+        head = self.writer.current_head()
+        held = self.writer.static_exclusion.acquire()
+        outcomes = []
+
+        def contender():
+            outcomes.append(
+                self.writer.append(
+                    reservation_event(expected_head=head), expected_head=head
+                )
+            )
+
+        try:
+            thread = threading.Thread(target=contender)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+        finally:
+            held.release()
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(
+            (outcomes[0].status, outcomes[0].reason_code, outcomes[0].frozen),
+            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
+        )
+        self.assertEqual(self.writer.current_head(), head)
+
+    def test_remote_append_cannot_recreate_missing_authority_branch(self):
+        writer = ReleaseEventWriter(
+            self.repo,
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+        )
+        head = writer.current_head()
+        pushed = []
+        result = writer.append_remote(
+            reservation_event(expected_head=head),
+            expected_head=head,
+            push=lambda *_args: pushed.append(True),
+            reconcile=lambda: (None, b""),
+        )
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "EVENT_BRANCH_UNAVAILABLE", True),
+        )
+        self.assertEqual(pushed, [])
+        self.assertEqual(writer.current_head(), head)
+
+    def test_remote_append_does_not_create_missing_bare_remote_branch(self):
+        remote = self.repo.parent / "missing-event-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        writer = ReleaseEventWriter(
+            self.repo,
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+        )
+        head = writer.current_head()
+        result = writer.append_remote(
+            reservation_event(expected_head=head), expected_head=head
+        )
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "EVENT_BRANCH_UNAVAILABLE", True),
+        )
+        advertised = subprocess.run(
+            ["git", "-C", str(remote), "show-ref", "--heads"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(advertised.returncode, 1)
+        self.assertEqual(advertised.stdout, "")
+
+    def test_remote_unsupported_certification_binding_is_frozen_at_early_gates(self):
+        unsupported = release_intent_event()
+        unsupported["certification_binding"] = "unsupported"
+        head = self.unproved_writer.current_head()
+        for writer, kwargs in (
+            (
+                self.unproved_writer,
+                {"reconcile": lambda: (head, b"")},
+            ),
+            (
+                ReleaseEventWriter(
+                    self.repo,
+                    exclusion_checker=lambda: True,
+                    static_snapshot_checker=lambda _digest: True,
+                ),
+                {},
+            ),
+        ):
+            with self.subTest(proofs=writer.exclusion_checker is not None):
+                result = writer.append_remote(
+                    unsupported,
+                    expected_head=head,
+                    push=lambda *_args: None,
+                    **kwargs,
+                )
+                self.assertEqual(
+                    (result.status, result.reason_code, result.frozen),
+                    ("BLOCKED", "UNSUPPORTED_CERTIFICATION_BINDING", True),
+                )
+                self.assertEqual(writer.current_head(), head)
 
     def test_local_append_without_live_proofs_is_blocked(self):
         head = self.unproved_writer.current_head()

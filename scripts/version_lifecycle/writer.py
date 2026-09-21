@@ -26,6 +26,7 @@ from .events import (
     validate_event,
     validate_transition,
 )
+from .git_refs import GitIdentityError, StaticMutationExclusion
 
 
 class WriterError(RuntimeError):
@@ -123,6 +124,7 @@ class ReleaseEventWriter:
         static_snapshot_checker: Callable[[str], bool] | None = None,
         public_tag_absence_checker: Callable[[str], bool] | None = None,
         reservation_non_entry_checker: Callable[[Mapping[str, Any]], bool] | None = None,
+        static_exclusion: StaticMutationExclusion | None = None,
     ) -> None:
         self.repo = Path(repo)
         self.branch = self._validate_ref_component(branch)
@@ -132,6 +134,9 @@ class ReleaseEventWriter:
         self.static_snapshot_checker = static_snapshot_checker
         self.public_tag_absence_checker = public_tag_absence_checker
         self.reservation_non_entry_checker = reservation_non_entry_checker
+        self.static_exclusion = static_exclusion or StaticMutationExclusion.for_repository(
+            self.repo
+        )
         if not (self.repo / ".git").exists() and not (self.repo / "HEAD").exists():
             raise BranchUnavailable(f"not a Git repository: {self.repo}")
 
@@ -534,6 +539,34 @@ class ReleaseEventWriter:
     ) -> AppendResult:
         """Append one event with an expected-head compare-and-swap."""
 
+        try:
+            with self.static_exclusion.acquire():
+                return self._append_under_exclusion(
+                    event, expected_head=expected_head, message=message
+                )
+        except GitIdentityError:
+            return self._exclusion_blocked(event)
+
+    @staticmethod
+    def _exclusion_blocked(event: Mapping[str, Any]) -> AppendResult:
+        canonical = dict(event)
+        return AppendResult(
+            status="BLOCKED",
+            reason_code="EXCLUSION_UNAVAILABLE",
+            transaction_id=str(canonical.get("transaction_id", "")),
+            event=canonical,
+            head=None,
+            frozen=True,
+        )
+
+    def _append_under_exclusion(
+        self,
+        event: Mapping[str, Any],
+        *,
+        expected_head: str | None,
+        message: str | None,
+    ) -> AppendResult:
+
         # Local refs are only a cache of the same allocation authority.  A
         # caller cannot turn this method into an unsafe production bypass by
         # omitting the live exclusion or static-snapshot proof callbacks.
@@ -658,6 +691,30 @@ class ReleaseEventWriter:
         integration layer supply its authenticated Git transport.
         """
 
+        try:
+            with self.static_exclusion.acquire():
+                return self._append_remote_under_exclusion(
+                    event,
+                    expected_head=expected_head,
+                    remote=remote,
+                    push=push,
+                    reconcile=reconcile,
+                    message=message,
+                )
+        except GitIdentityError:
+            return self._exclusion_blocked(event)
+
+    def _append_remote_under_exclusion(
+        self,
+        event: Mapping[str, Any],
+        *,
+        expected_head: str | None,
+        remote: str | None,
+        push: Callable[[str, str, str], Any] | None,
+        reconcile: Callable[[], tuple[str, bytes]] | None,
+        message: str | None,
+    ) -> AppendResult:
+
         remote_name = remote or self.remote
         if not remote_name and push is None:
             raise ValueError("append_remote needs a remote name or push callback")
@@ -666,7 +723,18 @@ class ReleaseEventWriter:
         # deterministic proof callbacks; production callers wire these to
         # freshly retrieved settings/snapshot evidence.
         if self.exclusion_checker is None or self.static_snapshot_checker is None:
-            canonical = validate_event(event)
+            try:
+                canonical = validate_event(event)
+            except UnsupportedCertificationBinding as error:
+                canonical = dict(event)
+                return AppendResult(
+                    status="BLOCKED",
+                    reason_code=error.reason_code,
+                    transaction_id=str(canonical.get("transaction_id", "")),
+                    event=canonical,
+                    head=None,
+                    frozen=True,
+                )
             reason = (
                 "EXCLUSION_UNAVAILABLE"
                 if self.exclusion_checker is None
@@ -684,7 +752,18 @@ class ReleaseEventWriter:
         if remote_reader is None and remote_name is not None:
             remote_reader = lambda: self._remote_observation(remote_name)
         if remote_reader is None:
-            canonical = validate_event(event)
+            try:
+                canonical = validate_event(event)
+            except UnsupportedCertificationBinding as error:
+                canonical = dict(event)
+                return AppendResult(
+                    status="BLOCKED",
+                    reason_code=error.reason_code,
+                    transaction_id=str(canonical.get("transaction_id", "")),
+                    event=canonical,
+                    head=None,
+                    frozen=True,
+                )
             return AppendResult(
                 status="BLOCKED",
                 reason_code="APPEND_OUTCOME_UNCERTAIN",
@@ -736,6 +815,17 @@ class ReleaseEventWriter:
                 freshest_head, freshest_raw = self._verified_remote_observation(
                     remote_reader()
                 )
+                if freshest_head is None:
+                    # Only bootstrap_remote may create the protected authority.
+                    # An ordinary append must never recreate a missing branch.
+                    return AppendResult(
+                        status="BLOCKED",
+                        reason_code="EVENT_BRANCH_UNAVAILABLE",
+                        transaction_id=transaction_id,
+                        event=canonical,
+                        head=None,
+                        frozen=True,
+                    )
                 if freshest_head is not None and freshest_head != current.commit:
                     # The local proposal was made against stale evidence.  A
                     # caller must refresh and recompute its event ID/payload.

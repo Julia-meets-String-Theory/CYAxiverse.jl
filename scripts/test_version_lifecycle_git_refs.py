@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from version_lifecycle.git_refs import (  # noqa: E402
     GitIdentityError,
     GitRepository,
     ProtectionEvidence,
+    StaticMutationExclusion,
     require_candidate_ref,
 )
 
@@ -34,7 +36,7 @@ class GitRefFixture(unittest.TestCase):
         self._cmd("git", "add", "Project.toml", cwd=self.work)
         self._cmd("git", "commit", "-m", "closure", cwd=self.work)
         self.commit = self._cmd("git", "rev-parse", "HEAD", cwd=self.work).strip()
-        self.repository = GitRepository(self.work)
+        self.repository = GitRepository(self.work, exclusion_checker=lambda: True)
         self.protection = ProtectionEvidence(
             rule_id="fixture-rule",
             pattern="refs/tags/iterations/*",
@@ -126,6 +128,88 @@ class GitRefFixture(unittest.TestCase):
         with self.assertRaisesRegex(GitIdentityError, "REF_ALREADY_EXISTS"):
             self.repository.push_create_only(ref, later, branch_protection)
         self.assertEqual(remote_ref(ref), self.commit)
+
+    def test_static_mutation_boundary_blocks_racing_iteration_and_public_tag(self) -> None:
+        iteration_tag = self.repository.make_annotated_iteration_tag(
+            version="0.3.0",
+            commit=self.commit,
+            closure_timestamp_utc="2026-09-20T12:34:56Z",
+            tagger_name="Fixture",
+            tagger_email="fixture@example.invalid",
+        )
+        public_protection = ProtectionEvidence(
+            rule_id="fixture-canonical-rule",
+            pattern="refs/tags/v0.*",
+            snapshot_sha256="0" * 64,
+            retrieved_at_utc="2026-09-20T00:00:00Z",
+            creation_guarded=True,
+            update_guarded=True,
+            deletion_guarded=True,
+        )
+        held = self.repository.acquire_static_mutation()
+        contender = GitRepository(self.work, exclusion_checker=lambda: True)
+        try:
+            for ref, object_id, protection in (
+                ("refs/tags/iterations/0.3.0", iteration_tag, self.protection),
+                ("refs/tags/v0.3.0", self.commit, public_protection),
+            ):
+                with self.subTest(ref=ref):
+                    errors: list[BaseException] = []
+
+                    def race() -> None:
+                        try:
+                            contender.push_create_only(ref, object_id, protection)
+                        except BaseException as exc:  # report worker failure below
+                            errors.append(exc)
+
+                    thread = threading.Thread(target=race)
+                    thread.start()
+                    thread.join()
+                    self.assertEqual(len(errors), 1)
+                    self.assertIsInstance(errors[0], GitIdentityError)
+                    self.assertRegex(
+                        str(errors[0]), "STATIC_MUTATION_EXCLUSION_UNAVAILABLE"
+                    )
+        finally:
+            held.release()
+
+        self.repository.push_create_only(
+            "refs/tags/iterations/0.3.0", iteration_tag, self.protection
+        )
+        self.repository.push_create_only(
+            "refs/tags/v0.3.0", self.commit, public_protection
+        )
+
+    def test_remote_static_mutation_requires_live_exclusion_proof(self) -> None:
+        tag = self.repository.make_annotated_iteration_tag(
+            version="0.3.0",
+            commit=self.commit,
+            closure_timestamp_utc="2026-09-20T12:34:56Z",
+            tagger_name="Fixture",
+            tagger_email="fixture@example.invalid",
+        )
+        ref = "refs/tags/iterations/0.3.0"
+
+        def unavailable() -> bool:
+            raise OSError("authority unavailable")
+
+        for label, checker in (
+            ("missing", None),
+            ("false", lambda: False),
+            ("exception", unavailable),
+        ):
+            with self.subTest(checker=label):
+                repository = GitRepository(self.work, exclusion_checker=checker)
+                with self.assertRaisesRegex(GitIdentityError, "EXCLUSION_UNAVAILABLE"):
+                    repository.push_create_only(ref, tag, self.protection)
+                self.assertIsNone(self.repository.remote_ref(ref))
+
+    def test_static_mutation_boundary_requires_supported_lock(self) -> None:
+        exclusion = StaticMutationExclusion(self.work / "missing" / "lock")
+        with self.assertRaisesRegex(
+            GitIdentityError, "STATIC_MUTATION_EXCLUSION_UNAVAILABLE"
+        ):
+            exclusion.acquire()
 
     def test_public_tag_requires_canonical_ruleset_and_excludes_legacy(self) -> None:
         public_ref = "refs/tags/v0.3.0"

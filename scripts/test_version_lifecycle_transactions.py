@@ -21,16 +21,31 @@ from version_lifecycle.transactions import (  # noqa: E402
 
 
 class ClosureFixture:
-    def __init__(self, *, fail_consumption=False, occupied=frozenset()) -> None:
+    def __init__(
+        self, *, fail_consumption=False, occupied=frozenset(),
+        closure_fields=None, anchor_fields=None, exclusion_available=True,
+    ) -> None:
         self.calls: list[str] = []
         self.fail_consumption = fail_consumption
         self.occupied = occupied
+        self.exclusion_available = exclusion_available
+        self.closure_fields = closure_fields or {}
+        self.anchor_fields = anchor_fields or {}
         self.views: list[AllocationView] = []
         self.consumed_view: AllocationView | None = None
 
     def freeze_line(self, intent):
         self.calls.append("freeze")
         return "freeze-proof"
+
+    def acquire_static_mutation(self, intent):
+        if not self.exclusion_available:
+            raise RuntimeError("racing static mutation")
+        return "fixture-exclusion"
+
+    def release_static_mutation(self, lease):
+        if lease != "fixture-exclusion":
+            raise AssertionError("unexpected exclusion lease")
 
     def allocation_view(self):
         self.calls.append("view")
@@ -45,15 +60,23 @@ class ClosureFixture:
 
     def merge_final(self, intent):
         self.calls.append("merge")
-        return {"version": intent.final_version, "commit": "closure", "tree": "tree"}
+        result = {
+            "version": intent.final_version,
+            "commit": "a" * 40,
+            "tree": "b" * 40,
+        }
+        result.update(self.closure_fields)
+        return result
 
     def create_anchor(self, intent, closure):
         self.calls.append("anchor")
-        return {
+        result = {
             "version": intent.final_version, "commit": closure["commit"],
             "tree": closure["tree"],
             "closure_timestamp_utc": intent.closure_timestamp_utc,
         }
+        result.update(self.anchor_fields)
+        return result
 
     def consume_outgoing(self, intent, anchor, view):
         self.calls.append("consume")
@@ -139,16 +162,29 @@ class BootstrapFixture:
 
 
 class ReleaseFixture:
-    def __init__(self, *, fail_after_tag=False, fail_publication=False, bad_tag=False):
+    def __init__(
+        self, *, fail_after_tag=False, fail_publication=False, bad_tag=False,
+        exclusion_available=True,
+    ):
         self.calls: list[str] = []
         self.fail_after_tag = fail_after_tag
         self.fail_publication = fail_publication
         self.bad_tag = bad_tag
+        self.exclusion_available = exclusion_available
         self.candidate_sha = "a" * 40
         self.final_sha = "b" * 40
         self.tree = "c" * 40
         self.intent_certification = None
         self.released_certification = None
+
+    def acquire_static_mutation(self, intent):
+        if not self.exclusion_available:
+            raise RuntimeError("racing static mutation")
+        return "fixture-exclusion"
+
+    def release_static_mutation(self, lease):
+        if lease != "fixture-exclusion":
+            raise AssertionError("unexpected exclusion lease")
 
     def verify_anchor(self, intent):
         self.calls.append("anchor")
@@ -321,6 +357,42 @@ class TransactionTests(unittest.TestCase):
         self.assertNotIn("prepare", port.calls)
         self.assertNotIn("unfreeze", port.calls)
 
+    def test_racing_static_mutation_blocks_closure_under_line_freeze(self):
+        port = ClosureFixture(exclusion_available=False)
+        result = run_closure(port, self.closure)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
+        )
+        self.assertEqual(port.calls, ["freeze"])
+        self.assertNotIn("merge", port.calls)
+        self.assertNotIn("unfreeze", port.calls)
+
+    def test_closure_and_anchor_require_complete_matching_git_identities(self):
+        cases = [
+            ("closure", "commit", None, "CLOSURE_IDENTITY_MISMATCH"),
+            ("closure", "commit", "not-a-sha", "CLOSURE_IDENTITY_MISMATCH"),
+            ("closure", "tree", None, "CLOSURE_IDENTITY_MISMATCH"),
+            ("closure", "tree", "not-a-sha", "CLOSURE_IDENTITY_MISMATCH"),
+            ("anchor", "commit", None, "ANCHOR_IDENTITY_MISMATCH"),
+            ("anchor", "commit", "not-a-sha", "ANCHOR_IDENTITY_MISMATCH"),
+            ("anchor", "tree", None, "ANCHOR_IDENTITY_MISMATCH"),
+            ("anchor", "tree", "not-a-sha", "ANCHOR_IDENTITY_MISMATCH"),
+        ]
+        for stage, field, value, reason_code in cases:
+            with self.subTest(stage=stage, field=field, value=value):
+                fields = {field: value}
+                port = ClosureFixture(
+                    closure_fields=fields if stage == "closure" else {},
+                    anchor_fields=fields if stage == "anchor" else {},
+                )
+                result = run_closure(port, self.closure)
+                self.assertEqual(
+                    (result.status, result.reason_code, result.frozen),
+                    ("BLOCKED", reason_code, True),
+                )
+                self.assertNotIn("unfreeze", port.calls)
+
     def test_different_final_consumes_unused_dev_before_reopen(self):
         intent = ClosureIntent(
             "different-final", "principal", "0.3.2", "0.3.1",
@@ -428,6 +500,17 @@ class TransactionTests(unittest.TestCase):
                 )
                 self.assertNotIn("intent", port.calls)
                 self.assertNotIn("tag", port.calls)
+
+    def test_racing_static_mutation_blocks_release_before_candidate(self):
+        port = ReleaseFixture(exclusion_available=False)
+        result = run_release(port, self.release)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "EXCLUSION_UNAVAILABLE", False),
+        )
+        self.assertEqual(port.calls, ["anchor"])
+        self.assertNotIn("candidate", port.calls)
+        self.assertNotIn("tag", port.calls)
 
     def test_tree_transfer_proof_is_bound_to_both_release_events(self):
         port = ReleaseFixture()
