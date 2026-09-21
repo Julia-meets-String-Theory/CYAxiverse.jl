@@ -356,6 +356,9 @@ class EventValidationTests(unittest.TestCase):
         for alias in (
             "https://0177.0.0.1/org/repo",
             "https://127.0.0.1%2e/org/repo",
+            "10.0.0.1",
+            "::1",
+            "runner=fc00::1",
         ):
             with self.subTest(alias=alias):
                 intent = release_intent_event()
@@ -828,6 +831,23 @@ class WriterTests(unittest.TestCase):
             writer.bootstrap(protection_checker=lambda: True)
         self.assertTrue(writer.branch_exists())
         self.assertEqual(writer.read_head().raw, b"")
+
+    def test_external_lease_cannot_suppress_bootstrap_protection_failure(self):
+        class SuppressingLease:
+            def __enter__(self):
+                return True
+
+            def __exit__(self, *_args):
+                return True
+
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch="bootstrap-suppression",
+            exclusion_lease=lambda: SuppressingLease(),
+        )
+        with self.assertRaises(ExclusionUnavailable):
+            writer.bootstrap(protection_checker=lambda: False)
+        self.assertFalse(writer.branch_exists())
 
     def test_bootstrap_wrapper_uses_the_protected_boundary(self):
         head = bootstrap_release_events(
@@ -1649,6 +1669,154 @@ class WriterTests(unittest.TestCase):
         )
         self.assertEqual(advertised.returncode, 1)
         self.assertEqual(advertised.stdout, "")
+
+    def test_bootstrap_remote_materializes_nonempty_head_in_fresh_cache(self):
+        remote = self.repo / "fresh-cache-bootstrap-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        branch = "fresh-cache-events"
+        authority = ReleaseEventWriter(
+            self.repo,
+            branch=branch,
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        empty_head = authority.bootstrap_remote(protection_checker=lambda: True)
+        first = reservation_event(expected_head=empty_head)
+        first_result = authority.append_remote(first, expected_head=empty_head)
+        self.assertEqual(first_result.status, "APPENDED")
+        assert first_result.head is not None
+
+        fresh = self.repo / "fresh-cache-checkout"
+        subprocess.run(["git", "init", "-q", str(fresh)], check=True)
+        subprocess.run(
+            ["git", "-C", str(fresh), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        cached = ReleaseEventWriter(
+            fresh,
+            branch=branch,
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        observed = cached.bootstrap_remote(protection_checker=lambda: True)
+        self.assertEqual(observed, first_result.head)
+        self.assertTrue(cached.branch_exists())
+        self.assertEqual(cached.read_head().raw, authority.read_head().raw)
+
+        continuation = reservation_event(
+            "EVT-000000000002",
+            transaction_id="fresh-cache-continuation",
+            expected_head=observed,
+        )
+        continuation.update(
+            final_version="0.3.2",
+            intended_dev_version="0.3.2-DEV",
+            reservation_id="reservation-2",
+        )
+        result = cached.append_remote(continuation, expected_head=observed)
+        self.assertEqual(result.status, "APPENDED")
+
+    def test_bootstrap_remote_advances_stale_cache_before_append(self):
+        remote = self.repo / "stale-cache-bootstrap-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        branch = "stale-cache-events"
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch=branch,
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        empty_head = writer.bootstrap_remote(protection_checker=lambda: True)
+        first = reservation_event(expected_head=empty_head)
+        first_result = writer.append_remote(first, expected_head=empty_head)
+        self.assertEqual(first_result.status, "APPENDED")
+        assert first_result.head is not None
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "update-ref",
+                f"refs/heads/{branch}",
+                empty_head,
+                first_result.head,
+            ],
+            check=True,
+        )
+
+        observed = writer.bootstrap_remote(protection_checker=lambda: True)
+        self.assertEqual(observed, first_result.head)
+        self.assertEqual(writer.current_head(), first_result.head)
+        continuation = reservation_event(
+            "EVT-000000000002",
+            transaction_id="stale-cache-continuation",
+            expected_head=observed,
+        )
+        continuation.update(
+            final_version="0.3.2",
+            intended_dev_version="0.3.2-DEV",
+            reservation_id="reservation-2",
+        )
+        result = writer.append_remote(continuation, expected_head=observed)
+        self.assertEqual(result.status, "APPENDED")
+
+    def test_bootstrap_remote_refuses_to_rewind_ahead_local_cache(self):
+        remote = self.repo / "divergent-cache-bootstrap-origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        branch = "divergent-cache-events"
+        subprocess.run(
+            ["git", "-C", str(self.repo), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        writer = ReleaseEventWriter(
+            self.repo,
+            branch=branch,
+            remote="origin",
+            exclusion_checker=lambda: True,
+            static_snapshot_checker=lambda _digest: True,
+            exclusion_lease=lambda: nullcontext(True),
+        )
+        empty_head = writer.bootstrap_remote(protection_checker=lambda: True)
+        first = reservation_event(expected_head=empty_head)
+        first_result = writer.append_remote(first, expected_head=empty_head)
+        self.assertEqual(first_result.status, "APPENDED")
+        assert first_result.head is not None
+        local_only = reservation_event(
+            "EVT-000000000002",
+            transaction_id="local-only-continuation",
+            expected_head=first_result.head,
+        )
+        local_only.update(
+            final_version="0.3.2",
+            intended_dev_version="0.3.2-DEV",
+            reservation_id="reservation-2",
+        )
+        local_result = writer.append(local_only, expected_head=first_result.head)
+        self.assertEqual(local_result.status, "APPENDED")
+        assert local_result.head is not None
+
+        with self.assertRaises(AppendOutcomeUncertain):
+            writer.bootstrap_remote(protection_checker=lambda: True)
+        self.assertEqual(writer.current_head(), local_result.head)
+        advertised = subprocess.check_output(
+            ["git", "-C", str(remote), "rev-parse", f"refs/heads/{branch}"],
+            text=True,
+        ).strip()
+        self.assertEqual(advertised, first_result.head)
 
     def test_bootstrap_remote_requires_external_exclusion_lease_before_push(self):
         for lease in (None, lambda: nullcontext(False)):

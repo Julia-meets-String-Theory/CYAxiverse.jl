@@ -578,6 +578,14 @@ class TestReleaseEvidence(unittest.TestCase):
             ("environment", "https://foo.corp/org/repo"),
             ("environment", "https://example.com/org/repo"),
             ("environment", "https://home.arpa/org/repo"),
+            ("environment", "10.0.0.1"),
+            ("environment", "::1"),
+            ("environment", "runner=fc00::1"),
+            ("environment", "runner=192.0.2.1"),
+            ("environment", "runner=0177.0.0.1"),
+            ("environment", "runner=0x7f000001"),
+            ("environment", "runner=2130706433"),
+            ("environment", "runner=017700000001"),
             ("environment", "https://[::1]/org/repo"),
             ("environment", "https://localhost.localdomain/org/repo"),
             ("environment", "https://service.intranet/org/repo"),
@@ -607,6 +615,13 @@ class TestReleaseEvidence(unittest.TestCase):
         ):
             with self.subTest(value=value):
                 self.assertTrue(is_safe_public_value(value))
+
+    def test_released_event_rejects_bare_private_environment(self):
+        event = released_event()
+        event["certification_environment"] = "runner=fc00::1"
+        result = validate_released_event(event)
+        self.assertEqual(result["status"], INVALID)
+        self.assertEqual(result["reason_code"], "UNSAFE_PUBLIC_EVIDENCE")
 
     def test_legacy_tag_is_excluded(self):
         result = validate_release_consistency(tag={"name": "v-0.1"})

@@ -637,6 +637,23 @@ class TransactionTests(unittest.TestCase):
         self.assertNotIn("verify-transfer", port.calls)
         self.assertNotIn("tag", port.calls)
 
+    def test_unsupported_certification_binding_has_required_reason_before_tag(self):
+        port = ReleaseFixture()
+        original = port.certify_candidate
+
+        def unsupported_certification(intent, candidate):
+            record = original(intent, candidate)
+            record["binding"] = "content-bound"
+            return record
+
+        port.certify_candidate = unsupported_certification
+        result = run_release(port, self.release)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "UNSUPPORTED_CERTIFICATION_BINDING", False),
+        )
+        self.assertNotIn("tag", port.calls)
+
     def test_commit_bound_recertification_accepts_updated_reviewed_pins(self):
         port = ReleaseFixture()
 

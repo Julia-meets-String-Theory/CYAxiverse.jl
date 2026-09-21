@@ -103,11 +103,20 @@ delimiters. A manager integration probe also found that nested event writes
 must reuse a transaction's nonreentrant external lease. Those verdicts belong
 only to the seventh candidate. The corrected successor requires fresh reviews.
 
+The eighth frozen candidate was commit
+`fb612fbf511d6d905f8fcd3893dfeea4e97a21f1` (tree
+`0db30ea0a103093e79ab8c713568939b7d3f02f6`). Independent SPEC and
+STANDARDS reviews returned `REQUEST_CHANGES`. Findings covered recovery from
+an existing remote event branch without a local cache, the required
+unsupported-certification-binding reason, and bare private IP values in
+durable evidence or repository slugs. Those verdicts belong only to the
+eighth candidate. The corrected successor requires fresh reviews.
+
 ## Observed checks
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 201 tests on the corrected local candidate. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 207 tests on the corrected local candidate. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts/test_check_version_bump.py scripts/test_documentation_routing.py` | Passed: 11 tests (3 version, 8 documentation). |
 | `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --project=docs/ docs/make.jl` | Passed on the corrected local candidate with offline local dependencies; Documenter rendered all configured pages. |
 | Python-unavailable core `using CYAxiverse` | Passed on the corrected local candidate with `PYTHON` and `PYTHONHOME` set to unavailable paths and the optional PyCall extension absent. |

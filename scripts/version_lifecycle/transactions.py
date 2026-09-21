@@ -540,9 +540,10 @@ def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
         evidence["candidate_opened"] = opened
         phase = "candidate_opened"
         certification = port.certify_candidate(intent, candidate)
+        if certification.get("binding") not in ("tree-bound", "commit-bound"):
+            raise TransactionError("UNSUPPORTED_CERTIFICATION_BINDING")
         if (
-            certification.get("binding") not in ("tree-bound", "commit-bound")
-            or certification.get("subject_tree") != intent.anchor_tree
+            certification.get("subject_tree") != intent.anchor_tree
             or not SHA.fullmatch(str(certification.get("subject_sha", "")))
             or certification.get("subject_sha") != candidate.get("sha")
             or not _public_text(certification.get("policy_revision"))

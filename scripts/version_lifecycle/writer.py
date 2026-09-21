@@ -114,11 +114,14 @@ class _ExternalLeaseGuard:
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
         try:
-            return self.manager.__exit__(exc_type, exc, traceback)
+            self.manager.__exit__(exc_type, exc, traceback)
         except Exception as error:
             raise _ExternalLeaseReleaseError(
                 "external exclusion lease could not be released"
             ) from error
+        # External context managers cannot suppress a validation or mutation
+        # error raised inside the protected boundary.
+        return False
 
 
 def _as_text(value: bytes | str) -> str:
@@ -416,6 +419,64 @@ class ReleaseEventWriter:
         self._verify_stream_topology(head, raw)
         return head, raw
 
+    def _materialize_remote_cache(self, remote_head: str, remote_raw: bytes) -> None:
+        """Advance the local event cache to a verified remote authority.
+
+        The remote branch is authoritative when bootstrap observes it.  The
+        local branch is only a cache, so it may be created or advanced when
+        the observed remote commit is an append-only descendant of the local
+        commit.  A missing ancestry relation, a byte-prefix mismatch, or a
+        failed compare-and-swap is treated as an uncertain divergent cache;
+        this prevents bootstrap from rewinding a local event authority.
+        """
+
+        if _GIT_SHA_RE.fullmatch(remote_head) is None:
+            raise AppendOutcomeUncertain("remote event head is not a full Git SHA")
+        self._verify_stream_topology(remote_head, remote_raw)
+        parse_stream(remote_raw)
+
+        if not self.branch_exists():
+            created = self._git(
+                ["update-ref", self.ref, remote_head, "0" * 40], check=False
+            )
+            if created.returncode != 0:
+                raise AppendOutcomeUncertain(
+                    "local event cache was created concurrently"
+                )
+            return
+
+        try:
+            local = self.read_head()
+        except Exception as error:
+            raise AppendOutcomeUncertain(
+                "local event cache could not be verified"
+            ) from error
+        if local.commit == remote_head:
+            if local.raw != remote_raw:
+                raise AppendOutcomeUncertain(
+                    "local event cache does not match the remote authority"
+                )
+            return
+        if not remote_raw.startswith(local.raw):
+            raise AppendOutcomeUncertain(
+                "remote event stream is not an append-only extension of the local cache"
+            )
+        ancestry = self._git(
+            ["merge-base", "--is-ancestor", local.commit, remote_head],
+            check=False,
+        )
+        if ancestry.returncode != 0:
+            raise AppendOutcomeUncertain(
+                "remote event authority is divergent from the local cache"
+            )
+        advanced = self._git(
+            ["update-ref", self.ref, remote_head, local.commit], check=False
+        )
+        if advanced.returncode != 0:
+            raise AppendOutcomeUncertain(
+                "local event cache advanced concurrently"
+            )
+
     def _enter_external_exclusion(self, stack: ExitStack) -> None:
         """Enter the externally governed exclusion held across mutations."""
 
@@ -505,8 +566,9 @@ class ReleaseEventWriter:
         )
         if existing is not None and existing[0] is not None:
             # A pre-existing branch is valid only after full stream validation;
-            # a caller can then continue with normal expected-head appends.
-            parse_stream(existing[1])
+            # materialize its verified authority into this repository's cache
+            # before returning so a continuation append can read the head.
+            self._materialize_remote_cache(existing[0], existing[1])
             return str(existing[0])
         # A local branch is only a cache for an already empty authority.  If
         # the remote branch is absent, never promote an existing nonempty

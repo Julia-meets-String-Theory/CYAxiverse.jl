@@ -30,6 +30,52 @@ _NONPUBLIC_DNS_SUFFIXES = (
     ".test", ".example", ".invalid", ".onion",
 )
 _NONPUBLIC_DNS_NAMES = {"example.com", "example.net", "example.org"}
+_PUBLIC_VALUE_TOKEN_SPLIT = re.compile(r"[\s=,;/()\[\]{}<>\"']+")
+
+
+def _single_part_ipv4_alias(token: str) -> ipaddress.IPv4Address | None:
+    """Decode noncanonical integer IPv4 forms without DNS resolution."""
+
+    lowered = token.lower()
+    try:
+        if re.fullmatch(r"0x[0-9a-f]{1,8}", lowered):
+            number = int(lowered[2:], 16)
+        elif 9 <= len(token) <= 12 and re.fullmatch(r"0[0-7]+", token):
+            number = int(token, 8)
+        elif 9 <= len(token) <= 10 and token.isascii() and token.isdecimal():
+            number = int(token, 10)
+        else:
+            return None
+        return ipaddress.IPv4Address(number)
+    except ValueError:
+        return None
+
+
+def _contains_nonpublic_ip_literal(value: str) -> bool:
+    """Find local IP locators in labels as well as URL shaped values."""
+
+    for token in _PUBLIC_VALUE_TOKEN_SPLIT.split(value):
+        if not token:
+            continue
+        try:
+            address = ipaddress.ip_address(token)
+        except ValueError:
+            integer_alias = _single_part_ipv4_alias(token)
+            if integer_alias is not None and not integer_alias.is_global:
+                return True
+            # URL clients also accept these noncanonical IPv4 spellings.
+            labels = token.split(".")
+            if len(labels) == 4 and all(
+                re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|[0-9A-Fa-f]+)", label)
+                for label in labels
+            ):
+                return True
+            if len(labels) > 1 and labels[0].lower() in {"127", "0177", "0x7f"}:
+                return True
+            continue
+        if not address.is_global:
+            return True
+    return False
 
 
 def is_safe_public_value(value: Any) -> bool:
@@ -54,6 +100,8 @@ def is_safe_public_value(value: Any) -> bool:
     if any(ord(character) < 0x20 or ord(character) > 0x7E for character in value):
         return False
     lowered = value.lower()
+    if _contains_nonpublic_ip_literal(value):
+        return False
     if (
         value.startswith(("/", "~", "\\\\"))
         or _DRIVE_PATH.match(value) is not None

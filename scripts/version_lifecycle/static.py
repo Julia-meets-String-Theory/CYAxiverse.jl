@@ -392,19 +392,43 @@ def sanitize_source_repository(value: str) -> str:
         public_host = f"[{host}]" if address is not None and address.version == 6 else host
         return urlunsplit((parsed.scheme, public_host, normalized_path, "", ""))
 
+    def safe_slug_part(part: str) -> bool:
+        if not _PUBLIC_SLUG_RE.fullmatch(part):
+            return False
+        lowered_part = part.lower()
+        if (
+            lowered_part in _LOCAL_SOURCE_NAMES
+            or lowered_part in _NONPUBLIC_DNS_NAMES
+            or lowered_part.endswith(_NONPUBLIC_DNS_SUFFIXES)
+            or re.fullmatch(r"0x[0-9a-f]{1,8}", lowered_part) is not None
+            or (len(lowered_part) >= 9 and lowered_part.isascii() and lowered_part.isdecimal())
+        ):
+            return False
+        try:
+            ipaddress.ip_address(lowered_part)
+        except ValueError:
+            labels = lowered_part.split(".")
+            if len(labels) == 4 and all(
+                _NUMERIC_HOST_LABEL_RE.fullmatch(label) for label in labels
+            ):
+                return False
+            if len(labels) > 1 and labels[0] in {"127", "0177", "0x7f"}:
+                return False
+        else:
+            # An address is a locator, not a repository slug.  Use a
+            # validated HTTP(S) URL for a globally routable IP source.
+            return False
+        return True
+
     if "/" in value:
         parts = value.split("/")
-        if len(parts) != 2 or any(part in _LOCAL_SOURCE_NAMES for part in (part.lower() for part in parts)):
-            raise UnsafeSourceRepositoryError(
-                "source_repository must identify a public repository"
-            )
-        if not all(_PUBLIC_SLUG_RE.fullmatch(part) for part in parts):
+        if len(parts) != 2 or not all(safe_slug_part(part) for part in parts):
             raise UnsafeSourceRepositoryError(
                 "source_repository must identify a public repository"
             )
         owner, repository = parts
     else:
-        if value.lower() in _LOCAL_SOURCE_NAMES or not _PUBLIC_SLUG_RE.fullmatch(value):
+        if not safe_slug_part(value):
             raise UnsafeSourceRepositoryError(
                 "source_repository must identify a public repository"
             )
