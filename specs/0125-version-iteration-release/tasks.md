@@ -28,9 +28,12 @@ new requirements.
   historical. Approval/review records remain outside the frozen five-file
   authority set and cannot exempt changed normative bytes from rereview.
 - [ ] Obtain fresh independent SPEC and STANDARDS review of the exact
-  normative successor. The completed reviews of `dd7825d3...` returned
-  `REQUEST_CHANGES`; those verdicts are historical and authorize no readiness
-  claim.
+  normative successor. The checked-in `dd7825d3...` SPEC and STANDARDS records
+  each record `PASS` for that earlier exact candidate and remain historical.
+  Later exact-candidate records are separate: `177d810a...` records SPEC
+  `REQUEST_CHANGES` and STANDARDS `PASS`; `41a0ae26...` records SPEC `PASS`
+  and STANDARDS `REQUEST_CHANGES`. The corresponding records are under
+  `reviews/`; none authorizes a readiness claim for a changed successor.
 
 ## A1 — Policy and release-neutral source
 
