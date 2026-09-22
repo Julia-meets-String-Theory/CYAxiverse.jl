@@ -88,6 +88,10 @@ new requirements.
 - [ ] Verify immutable owner authorization before each affected mutation. Bind
   the exact grant ID/ref/digest in manifests and cover missing, malformed,
   changed, expired, wrong-owner and cross-operation grants before any write.
+  Derive lifecycle manifest IDs/refs from the authorization-independent
+  manifest identity preimage, fetch the grant for that exact ref under the
+  held exclusion, bind it, and prove the complete stored manifest preserves
+  the derived ID/ref.
   Derive the ID and equal digest from the one canonical preimage that omits
   both identity fields. Reproduce the specification's fixed bytes, byte count,
   digest and ID, and reject independent identity, preimage-field and fetched-

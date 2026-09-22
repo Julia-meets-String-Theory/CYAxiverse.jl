@@ -92,6 +92,11 @@ configured owner authority and compares repository, stable owner account,
 validity interval, transaction, action, owner line, final version and exact
 target refs under the held exclusion boundary before each mutation. Missing,
 changed, stale or cross-operation grants block before writes.
+Break the exact-target dependency cycle by deriving the manifest ID and ref
+from the canonical manifest preimage without the three authorization-binding
+fields, then fetch and bind authorization for that exact ref under the held
+exclusion. Reconfirm that the ID/ref did not change and validate/digest the
+complete stored manifest before create-once publication.
 Derive both the exact `AUTH-SHA256-<digest>` ID and the equal digest from one
 canonical noncircular preimage that omits both identity fields. Reproduce the
 specification's fixed authorization bytes, byte count, digest and ID, with

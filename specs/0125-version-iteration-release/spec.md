@@ -468,7 +468,14 @@ explicit schema version and schema-valid RFC3339 UTC `timestamp_utc`, plus a
 transaction ID where applicable. `manifest_id` is
 `LIF-SHA256-<64-lowercase-hex>`, where the suffix is SHA-256 of the canonical
 manifest identity preimage containing every manifest field except
-`manifest_id`. Readers recompute it before trusting the manifest. There is no
+`manifest_id`, `owner_authorization`, `owner_authorization_ref`, and
+`owner_authorization_digest`. Those three authorization-binding fields are
+excluded only to break the dependency cycle between an exact target ref and
+the authorization record for creating that ref. They remain mandatory in the
+stored manifest, are verified against freshly fetched authorization bytes,
+and are covered by the exact manifest-byte digest and immutable Git object
+identity. Readers recompute both identities before trusting the manifest.
+There is no
 global sequence counter, next-ID allocator, or ordering authority hidden in
 manifest identity. A successful protected create permanently consumes its ref
 and identity; an unpublished failed create does not. Reject missing,
@@ -740,6 +747,14 @@ present in the bytes from which either identity is derived. At the instant of
 each mutation, the stored record, including both identity fields, must be
 unchanged, unexpired, for this repository, transaction, line and version, and
 must contain the exact action and target ref.
+For a lifecycle-manifest mutation, the writer first derives the manifest ID
+and canonical target ref from the authorization-independent manifest identity
+preimage defined by R-040. While holding the governed exclusion, it then
+fetches and verifies authorization for that exact target, adds the verified
+authorization ID/reference/digest to the manifest, confirms that the manifest
+ID and target ref are unchanged, validates the complete stored manifest, and
+performs the create-once write. This order is mandatory; authorizing a
+different stable ref or a namespace prefix is invalid.
 Every emitted manifest binds the verified ID, source reference and digest.
 Missing, malformed, changed, expired, cross-repository, cross-transaction,
 cross-line, cross-version, cross-action or wrong-target authorization returns
