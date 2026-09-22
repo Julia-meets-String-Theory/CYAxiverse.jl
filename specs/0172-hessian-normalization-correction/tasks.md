@@ -34,7 +34,18 @@
     - historical formula relation is factor two.
   - Escalate if: any fixed convention must change.
 
-- [ ] **T102 [R-004, R-005, CYAX-0172 G1] Verify typed-input zero-mode invariance**
+- [ ] **T102 [R-004B, CYAX-0172 G1] Verify B exact/high-precision mathematical oracle**
+  - Construct `phase=[BigFloat("0.4"), BigFloat("0")]` directly at 256-bit
+    precision, with `theta` and bracket endpoints also constructed without a
+    Float64 round-trip.
+  - Refine on `[BigFloat("0.10"), BigFloat("0.15")]` with stopping tolerance
+    `1e-20`.
+  - Verify `abs(k_B - 0.5*log10((1+sqrt(5))/2)) <= 1e-20`.
+  - This fixture is mathematical-correctness evidence and does not replace the
+    Float64 replay witness.
+  - Escalate if the exact/high-precision path cannot satisfy the frozen oracle.
+
+- [ ] **T103 [R-004, R-005, CYAX-0172 G1] Verify A typed-input zero-mode invariance**
   - Expected output: analytic-root and scaling/sign evidence.
   - Verify:
     - freeze `p64 = 3602879701896397/9007199254740992`;
@@ -48,6 +59,9 @@
     fails its own predeclared tolerance.
 
 ## Phase 2 — Bounded replay
+
+The replay phase is **A only**. The B exact/high-precision fixture is a focused
+mathematical oracle from Phase 1 and is not the historical/regression witness.
 
 - [ ] **T201 [R-006, R-007, CYAX-0172 G2] Replay the exact golden-ratio witness**
   - Frozen inputs: source `vmm@995163f0058488ea183ac645045ed8b1636bef4a`;
