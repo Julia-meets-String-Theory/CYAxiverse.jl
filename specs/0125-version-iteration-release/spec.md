@@ -3,8 +3,8 @@ spec_id: CYAX-0125-Gate-A
 title: Package iteration and release lifecycle
 issue: 125
 class: S2
-status: draft
-review_state: "prospective review — pending fresh independent SPEC and STANDARDS review"
+status: Approved
+review_state: "fresh independent SPEC and STANDARDS review passed on exact normative candidate"
 target_iteration: version-lifecycle-retrofit-2026-09
 version_bearing: true
 package_infrastructure_impact: patch
@@ -19,8 +19,15 @@ amendment_basis:
   - "handoff-review result a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf"
   - "owner-dispatch receipt 140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c"
   - "target PR head 20b3935ace0e01fcee2808681c56595e3afa7667"
-approval_refs: []
-review_records: []
+reviewed_spec_revision: dd7825d36cbcf9d0d81611d298a8464435931db2
+reviewed_normative_tree: 7fe6e70b732929287902eef4e0ca812089d5ef49
+approval_metadata_only: true
+approval_refs:
+  - "handoff-reviews/cyax-0125-pr181-reduction-manager-handoff/r2/owner-dispatch-approval-v1.json sha256 140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c"
+  - "specs/0125-version-iteration-release/reviews/n1-approval-v1.json sha256 5f908b0857a04d1a462b802653102f2d2e47a8a06581aa2cec413344a94fb7fd"
+review_records:
+  - "SPEC PASS specs/0125-version-iteration-release/reviews/n1-spec-dd7825d.json sha256 6f83bc249c9373b5e5b159ca249ab92c41e008ad62dd7819d667989e09662db1"
+  - "STANDARDS PASS specs/0125-version-iteration-release/reviews/n1-standards-dd7825d.json sha256 3f795581a4015d4acc86c74fba321d3a5f719e328995e14e36a661036e114e82"
 review_rubric_sha256: 418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72
 ---
 
@@ -28,8 +35,8 @@ review_rubric_sha256: 418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55b
 
 ## Objective and authority
 
-This prospective amendment reduces the mutable lifecycle authority before a
-new review. Gate A establishes the forward machinery for package iterations,
+This reviewed prospective amendment reduces the mutable lifecycle authority.
+Gate A establishes the forward machinery for package iterations,
 global version allocation, exact-tree certification and public release using
 protected create-once Git refs and small immutable evidence manifests. It does
 not use that machinery for a real closure, development-version transition,
@@ -51,9 +58,10 @@ Issue #125 statements that confined package bumps and documentation source
 changes to a `vmm → main` release PR or predetermined `0.3.0` as the next
 final. Those older comments remain historical evidence. `AGENTS.md` and
 applicable normative skills remain repository authority until the replacement
-rules merge. This candidate is not Approved and has no new approval
-provenance; fresh independent SPEC and STANDARDS review under the canonical
-rubric is required before it can govern implementation.
+rules merge. This amendment is Approved for bounded I2 implementation through
+the exact owner receipt, normative-candidate identities, and fresh independent
+SPEC/STANDARDS PASS records in the frontmatter. That approval does not make
+the replacement rules authoritative before merge.
 
 The target iteration is `version-lifecycle-retrofit-2026-09`. This is
 version-bearing package infrastructure with **patch** impact: it changes

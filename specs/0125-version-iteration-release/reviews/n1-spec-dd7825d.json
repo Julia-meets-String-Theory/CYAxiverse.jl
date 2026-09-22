@@ -1,0 +1,67 @@
+{
+  "record_type": "cyax-spec-standards-review",
+  "version": 1,
+  "axis": "SPEC",
+  "candidate": {
+    "commit": "dd7825d36cbcf9d0d81611d298a8464435931db2",
+    "tree": "7fe6e70b732929287902eef4e0ca812089d5ef49",
+    "base_commit": "20b3935ace0e01fcee2808681c56595e3afa7667",
+    "base_tree": "a842e81d073c7309c2b45910d3add1b4cc6e2f0b",
+    "scope": [
+      "AGENTS.md",
+      ".agents/skills/cyaxiverse-integration-release/SKILL.md",
+      "specs/0125-version-iteration-release/spec.md",
+      "specs/0125-version-iteration-release/plan.md",
+      "specs/0125-version-iteration-release/tasks.md"
+    ]
+  },
+  "governing_input": {
+    "manager_handoff_sha256": "19fa93e2b4b1439b1cc4217cf7ff9e42846980d46df66793156f72789894e40a",
+    "handoff_review_result_sha256": "a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf",
+    "owner_dispatch_receipt_sha256": "140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c",
+    "rubric_path": "protocol/review-rubrics/spec-and-standards-v1.md",
+    "rubric_sha256": "418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72"
+  },
+  "scope": "comprehensive N1 combined prospective normative-set review",
+  "verdict": "PASS",
+  "mandatory_dimensions": [
+    {"id": "SPEC-01", "status": "SATISFIED"},
+    {"id": "SPEC-02", "status": "SATISFIED"},
+    {"id": "SPEC-03", "status": "SATISFIED"},
+    {"id": "SPEC-04", "status": "SATISFIED"},
+    {"id": "SPEC-05", "status": "SATISFIED"},
+    {"id": "SPEC-06", "status": "SATISFIED"},
+    {"id": "SPEC-07", "status": "SATISFIED"},
+    {"id": "SPEC-08", "status": "SATISFIED"},
+    {"id": "SPEC-09", "status": "SATISFIED"},
+    {"id": "SPEC-10", "status": "SATISFIED"},
+    {"id": "SPEC-11", "status": "SATISFIED"},
+    {"id": "SPEC-12", "status": "SATISFIED"}
+  ],
+  "checks": [
+    "exact candidate identity, ancestry, tree and five-file scope",
+    "R-001 through R-045 presence, uniqueness and plan mapping",
+    "git diff --check",
+    "scripts/agent_verify.py snapshot",
+    "scripts/agent_verify.py diff-check",
+    "YAML frontmatter and requirement consistency",
+    "publication canonical-JSON parse, 124-byte length, no trailing LF, SHA-256, publication ID and ref fixture"
+  ],
+  "findings": [],
+  "limitations": [
+    "N1 contains no implementation, CI, live ref/tag protection, production lifecycle, package, audit, documentation-build or post-merge closure evidence."
+  ],
+  "lineage": {
+    "prior_candidate_742afb1": "PASS, historical only after normative-byte change",
+    "prior_candidate_4c8b38c": "PASS, historical only after normative-byte change"
+  },
+  "authority": {
+    "review_only": true,
+    "authorizes_approval_metadata": false,
+    "authorizes_implementation": false,
+    "authorizes_merge": false,
+    "authorizes_production_lifecycle_actions": false,
+    "authorizes_gate_b": false,
+    "authorizes_issue_closure": false
+  }
+}
