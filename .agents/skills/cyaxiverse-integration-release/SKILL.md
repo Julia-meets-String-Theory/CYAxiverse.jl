@@ -28,21 +28,31 @@ description: Consolidate, rebase, integrate, verify, or prepare approved CYAxive
    `CONSUMED_UNUSED_DEV_RESERVATION`. Closed, candidate, withdrawn, released,
    and consumed identities are never reused. A reservation with proven
    pre-entry abort may be made available again under the recovery rules;
-   uncertain outcomes remain unavailable. Certify release candidates against an
-   immutable exact tree and retain the candidate, tag intent, event, and
-   publication evidence identities.
+   uncertain outcomes remain unavailable. Lifecycle state is represented by
+   protected create-once Git refs and small immutable canonical manifests;
+   refs are never deleted, repointed, or force-updated, and no mutable
+   `release-events` ledger is canonical. Claim, reservation, candidate, intent,
+   release and publication object types remain distinct and progress only via
+   immutable predecessor-ref bindings. Certify release candidates against an
+   immutable exact tree and retain candidate, tag-intent, release, and
+   publication evidence identities in those refs/manifests.
 7. Keep tracked source release-neutral. Documentation deployment selects the
    development, principal-versioned, maintenance-versioned, or stable channel
-   from a verified ref and canonical release event. Do not edit documentation
+   from a verified ref and canonical release manifest. Do not edit documentation
    source as part of a release.
-8. Gate A may implement and test lifecycle machinery, but it does not adopt a
+8. Gate A requires and tests automation for the first principal lifecycle path
+   (principal allocation/reservation, closure/anchor, candidate,
+   certification, canonical tag and release evidence), but does not adopt a
    package version, designate historical releases, create a production `-DEV`,
    close an iteration, create a public tag, publish a release, or reconcile
-   `vmm -> main`. Those actions require the later approved gate and owner
-   authorization.
+   `vmm -> main`. Maintenance-line bootstrap/release and rare recovery
+   automation are deferred to a later approved S2 gate. All unsupported or
+   uncertain operations fail closed under owner authorization.
 9. Run the applicable release gates on the integrated commit: `git diff --check`,
-   package tests, `bin/audit.jl`, docs build, Python-free import, and CI as
-   required. Record exact results and unavailable optional integrations.
+   package tests, `bin/audit.jl`, docs build, Python-free import, bounded
+   repository/CI control-plane checks, and CI as required. Python lifecycle
+   tooling is not a runtime dependency of `using CYAxiverse`. Record exact
+   results and unavailable optional integrations.
 10. After merge, prune superseded branches/worktrees as a separate, verified
    cleanup step rather than leaving historical agent worktrees indefinitely.
 

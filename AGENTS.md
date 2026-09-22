@@ -121,18 +121,40 @@ For scientific, numerical, sampling, benchmark, or persisted-data changes:
   released, and consumed versions are never reused. A reservation with proven
   pre-entry abort may be made available again under the recovery rules;
   uncertain outcomes remain unavailable.
+- Lifecycle state is represented by protected create-once Git refs and small
+  immutable canonical evidence manifests, together with `iterations.toml`,
+  immutable iteration anchors, and protected public tags. A lifecycle ref is
+  never deleted, repointed, force-updated, or treated as mutable ledger state;
+  no `release-events` branch/stream is canonical. Claim, reservation,
+  candidate, intent, release and publication object types remain distinct;
+  progression is an immutable predecessor-ref graph. Allocation and transition writers use
+  create-if-absent/CAS, exact snapshot/ref verification, owner authorization,
+  and fail closed on an uncertain remote result. A proven pre-entry reservation
+  abort consumes its reservation identity but may release only an unclaimed
+  final version; uncertainty keeps that version unavailable.
 - A release candidate is certified against an immutable exact tree and retains
   its candidate, commit, tree, version, tag intent, certification, and release
-  evidence identities. Public canonical tags are irreversible and are checked
-  against the corresponding event and publication evidence.
-- Gate A builds and tests this machinery only. It does not perform historical
+  evidence identities in those immutable refs/manifests. Public canonical tags
+  are irreversible and are checked against the corresponding release manifest
+  and publication evidence.
+- Gate A requires and tests automation for the first principal lifecycle path
+  (principal allocation/reservation, closure/anchor, candidate, certification,
+  canonical tag and release evidence). It does not perform historical
   designation, package-version adoption, a production `-DEV` transition,
   closure, public-tag creation, publication, or `vmm -> main` reconciliation.
-  Gate B and the deliberate `vmm -> main` release boundary handle those actions.
+  Maintenance-line bootstrap/release and rare recovery automation are deferred
+  to a later approved S2 gate. Gate B and the deliberate `vmm -> main` release
+  boundary handle those actions.
 - Tracked installation and documentation source remains release-neutral. The
-  verified ref and release event select development, principal-versioned,
+  verified ref and release manifest select development, principal-versioned,
   maintenance-versioned, or stable documentation channels; a public release
   must not require editing tracked source files.
+- Python used by lifecycle scripts is bounded repository/CI control-plane
+  tooling only. It is not a runtime dependency of the Julia package, and
+  `using CYAxiverse` remains operable without Python, PyCall/CYTools, or their
+  scientific environments. These rules do not change Julia APIs, scientific
+  behavior, persisted scientific schemas, package-version grammar, or the
+  Gate A/Gate B boundary.
 
 ## 6. Git, PRs, and agent delegation
 
