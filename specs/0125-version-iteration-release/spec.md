@@ -730,10 +730,16 @@ sorted exact target-ref set, and `owner_authorization_digest`. The configured
 owner authority must establish that the source author is the repository owner;
 an untrusted caller cannot supply that fact.
 
-The digest is SHA-256 of the canonical record bytes excluding only its digest
-field; the content-derived ID covers the same preimage. At the instant of each
-mutation, the record must be unchanged, unexpired, for this repository,
-transaction, line and version, and must contain the exact action and target ref.
+The authorization identity preimage is the canonical record object with both
+`owner_authorization` and `owner_authorization_digest` omitted. The
+`owner_authorization_digest` is the lowercase hexadecimal SHA-256 of those
+exact preimage bytes. The `owner_authorization` grammar is exactly
+`AUTH-SHA256-<digest>`, where `<digest>` is that same 64-character digest; its
+suffix therefore equals `owner_authorization_digest`. Neither identity field is
+present in the bytes from which either identity is derived. At the instant of
+each mutation, the stored record, including both identity fields, must be
+unchanged, unexpired, for this repository, transaction, line and version, and
+must contain the exact action and target ref.
 Every emitted manifest binds the verified ID, source reference and digest.
 Missing, malformed, changed, expired, cross-repository, cross-transaction,
 cross-line, cross-version, cross-action or wrong-target authorization returns
@@ -741,6 +747,21 @@ cross-line, cross-version, cross-action or wrong-target authorization returns
 first affected mutation. Field presence alone and a prior verification outside
 the held exclusion boundary are insufficient. Gate A uses only synthetic owner
 authority records; it creates no production grant.
+
+The fixed R-046 positive vector has this exact 464-byte identity preimage, with
+no trailing LF:
+
+```json
+{"authority_source_ref":"owner-authority://synthetic/grant-001","authorized_actions":["create-release-manifest","create-tag"],"expires_at_utc":"2026-01-03T00:00:00Z","final_version":"0.3.0","issued_at_utc":"2026-01-02T00:00:00Z","owner_account":"owner-123","owner_line":"principal","repository":"Julia-meets-String-Theory/CYAxiverse.jl","schema_version":1,"target_refs":["refs/tags/v0.3.0","refs/version-lifecycle/releases/v0.3.0"],"transaction_id":"txn-0125-001"}
+```
+
+Its expected digest is
+`f4507713c2fb1d9fe3084f9b2ec55c08805a6c54610743cab0d4307ec036450a` and
+its expected ID is
+`AUTH-SHA256-f4507713c2fb1d9fe3084f9b2ec55c08805a6c54610743cab0d4307ec036450a`.
+Verification must reproduce the exact bytes, length, digest and ID. Tests also
+replace each identity independently, change each preimage field class, and
+change the fetched canonical bytes; every such case must block before mutation.
 
 Canonical snapshots, manifests and evidence identities use UTF-8 with ASCII
 printable wire strings, lexicographically sorted object keys, compact JSON

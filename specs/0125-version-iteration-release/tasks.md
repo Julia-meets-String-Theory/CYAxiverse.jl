@@ -85,6 +85,10 @@ new requirements.
 - [ ] Verify immutable owner authorization before each affected mutation. Bind
   the exact grant ID/ref/digest in manifests and cover missing, malformed,
   changed, expired, wrong-owner and cross-operation grants before any write.
+  Derive the ID and equal digest from the one canonical preimage that omits
+  both identity fields. Reproduce the specification's fixed bytes, byte count,
+  digest and ID, and reject independent identity, preimage-field and fetched-
+  byte tampering before mutation.
 
 ## A4 — First-principal lifecycle automation
 
@@ -113,7 +117,8 @@ new requirements.
   create-once, principal closure, certification, tag/manifest/tree and docs
   routing tests. Include publication positive binding and negative pre-release,
   duplicate, wrong-predecessor, tag-target, GitHub-identity and evidence-digest
-  cases, plus the specification's fixed expected publication hash/ref fixture.
+  cases, plus the specification's fixed expected publication hash/ref and
+  owner-authorization fixtures.
   Include lightweight/same-target anchor substitution and the complete
   owner-authorization negative matrix.
   Assert observable refs, bytes, digests, identities and blocked/INVALID

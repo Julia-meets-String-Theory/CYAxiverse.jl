@@ -92,6 +92,10 @@ configured owner authority and compares repository, stable owner account,
 validity interval, transaction, action, owner line, final version and exact
 target refs under the held exclusion boundary before each mutation. Missing,
 changed, stale or cross-operation grants block before writes.
+Derive both the exact `AUTH-SHA256-<digest>` ID and the equal digest from one
+canonical noncircular preimage that omits both identity fields. Reproduce the
+specification's fixed authorization bytes, byte count, digest and ID, with
+identity, preimage-field and fetched-byte tamper negatives.
 
 ### A4 — First-principal lifecycle automation
 
@@ -117,7 +121,8 @@ Test canonical final/DEV parsing, strict ref/tag grammar, static and lifecycle
 snapshots, claim/no-reuse races, create-once idempotence/conflict/uncertainty,
 principal closure, certification transfer, tag/manifest/tree consistency,
 publication positive binding and duplicate/conflict rejection, and
-the fixed expected publication-hash/ref fixture in the specification, and
+the fixed expected publication-hash/ref and owner-authorization fixtures in
+the specification, and
 release-neutral documentation routing. Run focused checks before package,
 audit, docs, Python-free import and CI checks. Record failures and unavailable
 gates accurately; prior ledger test results remain historical.
