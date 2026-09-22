@@ -1,9 +1,10 @@
-# CYAX-0125 Gate A prospective-amendment tasks
+# CYAX-0125 Gate A implementation tasks
 
 This checklist tracks execution and evidence readiness only. Issue #125 and
-GitHub remain the live work-state record. The companion `spec.md` is a
-prospective amendment, not Approved; fresh independent SPEC and STANDARDS
-review is required before implementation can claim conformance.
+GitHub remain the live work-state record. The companion `spec.md` successor is
+not effective until exact SPEC and STANDARDS review passes and the external
+approval record binds that frozen five-file revision. The final implementation
+candidate also requires convergence review before any owner merge decision.
 
 The prior approved revision was
 `cf0f9c39256b7a58e179af92a46fbf1cb651ff76`, approved under Issue #125 comment
@@ -23,11 +24,13 @@ new requirements.
 - [x] Bind canonical Spec/Standards rubric SHA-256
   `418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72`; no
   successor is adopted.
-- [x] Preserve predecessor approval/review chronology and mark this spec
-  prospective. No new approval metadata or PASS claim is present.
-- [ ] Obtain fresh independent SPEC and STANDARDS review of this exact
-  amendment. Changed bytes require fresh review; prior PASS evidence is not
-  reusable as approval for the reduced candidate.
+- [x] Preserve predecessor approval/review chronology and mark that evidence
+  historical. Approval/review records remain outside the frozen five-file
+  authority set and cannot exempt changed normative bytes from rereview.
+- [ ] Obtain fresh independent SPEC and STANDARDS review of the exact
+  normative successor. The completed reviews of `dd7825d3...` returned
+  `REQUEST_CHANGES`; those verdicts are historical and authorize no readiness
+  claim.
 
 ## A1 — Policy and release-neutral source
 
@@ -40,26 +43,28 @@ new requirements.
   automation to the later approved S2 gate.
 - [ ] Verify any required SDD package-lifecycle wording remains aligned before
   spec approval; do not change the SDD skill unless a contradiction is found.
-- [ ] Verify docs routing uses verified ref/manifest/environment context and
-  requires no tracked release-time source edit.
+- [x] Verify docs routing uses verified ref/manifest/environment context and
+  requires no tracked release-time source edit in the current implementation;
+  the final exact-candidate check remains part of A5.
 
 ## A2 — Static authority and immutable anchors
 
 - [ ] Retain and verify exact `refs/heads/vmm:iterations.toml` selection,
-  immutable `iterations/X.Y.Z` anchor equality, canonical SemVer grammar and
+  immutable annotated `iterations/X.Y.Z` tag-object/payload equality,
+  canonical SemVer grammar and
   Gate B retrospective declared-versus-actual truth.
-- [ ] Define/review `static_iteration_snapshot` and complete
+- [x] Define/review `static_iteration_snapshot` and complete
   `lifecycle_ref_snapshot` digests, sorting, replay and stale detection.
 - [ ] Prove static/public-tag/lifecycle-ref occupied-set collisions and
   permanent no-reuse, including closed, withdrawn and consumed identities.
 
 ## A3 — Create-once lifecycle authority
 
-- [ ] Define exact versioned protected `refs/heads/lifecycle/v1/*` namespaces for
+- [x] Define exact versioned protected `refs/heads/lifecycle/v1/*` namespaces for
   claims/reservations, candidates, intents,
   releases and publications; keep those object types distinct and forbid
   deletion, repointing and force updates.
-- [ ] Define one small canonical manifest per lifecycle ref, including
+- [x] Define one small canonical manifest per lifecycle ref, including
   content-derived `manifest_id` with no global sequence allocator, schema
   version/type, transaction, owner authorization,
   predecessor refs, exact Git SHA/tree identities, timestamps and evidence
@@ -69,12 +74,17 @@ new requirements.
   ID/ref deterministically from the released-manifest ID/tag pair. Represent
   progression only through immutable predecessor refs and validate
   required/forbidden fields and no terminal reversal.
-- [ ] Implement complete-ref replay and create-if-absent/CAS semantics.
+- [x] Implement complete-ref replay and create-if-absent/CAS semantics in the
+  bounded control-plane implementation; exact-candidate test evidence remains
+  pending.
   Prove exact retry idempotence, conflicting identity INVALID, uncertain
   remote create BLOCKED/frozen, and no mutable ledger fallback.
-- [ ] Verify the serialized exclusion boundary covers static snapshots,
+- [x] Verify the serialized exclusion boundary covers static snapshots,
   complete lifecycle-ref snapshots, anchor creation and canonical tag
   creation. Stop if protection is unavailable.
+- [ ] Verify immutable owner authorization before each affected mutation. Bind
+  the exact grant ID/ref/digest in manifests and cover missing, malformed,
+  changed, expired, wrong-owner and cross-operation grants before any write.
 
 ## A4 — First-principal lifecycle automation
 
@@ -89,8 +99,13 @@ new requirements.
   identity/evidence reconciliation.
 - [ ] Preserve tree-bound versus commit-bound certification transfer and
   principal/maintenance SemVer, line and `main` checks.
-- [ ] Record maintenance bootstrap/release and rare recovery as deferred
+- [x] Record maintenance bootstrap/release and rare recovery as deferred
   later-S2 automation; do not mark their production paths complete in Gate A.
+- [ ] Implement and test the validation-only
+  `maintenance-bootstrap-validation-v1` schema. Cover exact activated
+  correspondence, proven non-entry, mismatched identities, and uncertain or
+  failed activation with the version unavailable and line frozen. Do not add a
+  production maintenance writer.
 
 ## A5 — Verification and convergence
 
@@ -99,6 +114,8 @@ new requirements.
   routing tests. Include publication positive binding and negative pre-release,
   duplicate, wrong-predecessor, tag-target, GitHub-identity and evidence-digest
   cases, plus the specification's fixed expected publication hash/ref fixture.
+  Include lightweight/same-target anchor substitution and the complete
+  owner-authorization negative matrix.
   Assert observable refs, bytes, digests, identities and blocked/INVALID
   reasons.
 - [ ] Run `git diff --check`, snapshot/diff checks, package tests, audit,
@@ -130,7 +147,10 @@ new requirements.
 
 ## Current execution state
 
-The policy/spec/plan/task candidate has been drafted in this worktree. The
-reduced lifecycle implementation, fresh reviews, owner merge decision, live
-protection evidence and closure review remain incomplete. No checkbox above
-may be changed to imply those external states without observed evidence.
+The prior N1 candidate received blocking independent-review findings. This
+successor closes those findings but is not effective until its exact review and
+external approval record converge. Existing implementation work remains a
+provisional worktree candidate and cannot claim specification conformance.
+Owner merge decision, live protection evidence, production lifecycle state,
+Gate B, and closure review remain incomplete. No checkbox above implies any of
+those external states.

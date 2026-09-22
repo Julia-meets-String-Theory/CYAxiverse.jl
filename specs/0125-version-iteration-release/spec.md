@@ -4,7 +4,7 @@ title: Package iteration and release lifecycle
 issue: 125
 class: S2
 status: Approved
-review_state: "fresh independent SPEC and STANDARDS review passed on exact normative candidate"
+review_state: "effective only through the external approval record that binds this exact five-file revision and two exact-candidate PASS records"
 target_iteration: version-lifecycle-retrofit-2026-09
 version_bearing: true
 package_infrastructure_impact: patch
@@ -19,15 +19,11 @@ amendment_basis:
   - "handoff-review result a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf"
   - "owner-dispatch receipt 140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c"
   - "target PR head 20b3935ace0e01fcee2808681c56595e3afa7667"
-reviewed_spec_revision: dd7825d36cbcf9d0d81611d298a8464435931db2
-reviewed_normative_tree: 7fe6e70b732929287902eef4e0ca812089d5ef49
-approval_metadata_only: true
 approval_refs:
   - "handoff-reviews/cyax-0125-pr181-reduction-manager-handoff/r2/owner-dispatch-approval-v1.json sha256 140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c"
-  - "specs/0125-version-iteration-release/reviews/n1-approval-v1.json sha256 5f908b0857a04d1a462b802653102f2d2e47a8a06581aa2cec413344a94fb7fd"
+  - "specs/0125-version-iteration-release/reviews/n1-approval-v2.json"
 review_records:
-  - "SPEC PASS specs/0125-version-iteration-release/reviews/n1-spec-dd7825d.json sha256 6f83bc249c9373b5e5b159ca249ab92c41e008ad62dd7819d667989e09662db1"
-  - "STANDARDS PASS specs/0125-version-iteration-release/reviews/n1-standards-dd7825d.json sha256 3f795581a4015d4acc86c74fba321d3a5f719e328995e14e36a661036e114e82"
+  - "external approval record supplies the exact SPEC and STANDARDS record identities"
 review_rubric_sha256: 418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72
 ---
 
@@ -58,10 +54,13 @@ Issue #125 statements that confined package bumps and documentation source
 changes to a `vmm → main` release PR or predetermined `0.3.0` as the next
 final. Those older comments remain historical evidence. `AGENTS.md` and
 applicable normative skills remain repository authority until the replacement
-rules merge. This amendment is Approved for bounded I2 implementation through
-the exact owner receipt, normative-candidate identities, and fresh independent
-SPEC/STANDARDS PASS records in the frontmatter. That approval does not make
-the replacement rules authoritative before merge.
+rules merge. This amendment is Approved for bounded I2 implementation only
+when the external approval record named in the frontmatter exists and binds
+the exact five-file revision plus fresh independent SPEC and STANDARDS PASS
+records. The approval record remains outside the frozen five-file authority
+set, so it does not change the reviewed bytes. Any change to these five files
+requires a fresh exact-successor review. Approval does not make the replacement
+rules authoritative before merge.
 
 The target iteration is `version-lifecycle-retrofit-2026-09`. This is
 version-bearing package infrastructure with **patch** impact: it changes
@@ -376,6 +375,17 @@ immediate protection before installing `-DEV`. Gate A preserves and validates
 this contract but does not claim to implement production maintenance bootstrap
 automation.
 
+Gate A publishes a validation-only
+`maintenance-bootstrap-validation-v1` schema and synthetic fixtures. This
+schema is not a lifecycle manifest type and no production writer accepts or
+creates it. It reserves the future line ref `refs/heads/maintenance/X.Y` and
+bootstrap ref
+`refs/heads/lifecycle/v1/maintenance-bootstrap/maintenance-X.Y/vX.Y.Z/<bootstrap-id>`.
+Its exact fields bind the approved base ref/SHA/tree, line-absence proof digest,
+static and lifecycle snapshot digests, owner line, selected final/DEV versions,
+expected and observed branch heads, reservation ref/manifest ID, bootstrap
+ref/ID, activation status, frozen status and version-unavailable status.
+
 ### R-031 — Maintenance bootstrap correspondence (deferred S2 automation)
 
 No maintenance work begins until base, branch, DEV head, owner line,
@@ -383,6 +393,14 @@ reservation ref and bootstrap manifest correspond exactly. Uncertain creation
 or failed activation keeps the version unavailable and the line frozen under
 the later gate's recovery rules. Gate A does not introduce a mutable
 line-open event or a production maintenance recovery path.
+The Gate A validator accepts an activated fixture only when every bound
+identity corresponds and the line is not frozen. A pre-entry non-activation is
+valid only with definite line/ref absence and an unclaimed final version. An
+uncertain create or failed activation is valid only when the version remains
+unavailable and the line remains frozen. Mismatched base, branch, DEV head,
+owner line, reservation or bootstrap identity is INVALID. Synthetic positive,
+non-entry and uncertain/failure fixtures cover these rules without exercising
+production maintenance automation.
 
 ### R-032 — Candidate durability
 
@@ -581,16 +599,26 @@ identities until Gate B provides fuller designations.
 
 Every `static_iteration_snapshot` stores the canonical source repository/ref,
 resolved source commit and tree, exact `iterations.toml` SHA-256 content digest,
-sorted validated `iterations/*` ref-to-commit/tree bindings and their
+sorted validated `iterations/*` bindings and their
 canonical ref-set digest, sorted canonical public tag-to-commit bindings and
 their canonical tag-set digest, derived occupied version set and overall
 snapshot digest. The snapshot is replayable from these identities. If any
 source, anchor or tag changes before a mutation commits, the bound snapshot
 is stale and the transaction refreshes or blocks.
 
+Each iteration binding is exactly `{ref, tag_object, object_type, commit, tree,
+closure_timestamp_utc}`. `tag_object` is the direct SHA advertised for the
+protected ref, `object_type` is exactly `tag`, and `commit` is the commit peeled
+from that annotated tag object. The tag name, final version, tagger time and
+canonical tag-message payload must agree; the payload binds the same
+`closure_timestamp_utc` recorded by the prospective static entry. A lightweight
+tag, a non-tag object, a different annotated object for the same commit/tree,
+or a changed closure timestamp is INVALID and makes a bound snapshot stale.
+
 Digest preimages are exact, noncircular canonical bytes. The file digest is
 SHA-256 of raw `iterations.toml` bytes. `ref_set_digest` is SHA-256 of the
-standalone canonical JSON array of objects `{ref, commit, tree}`, sorted by
+standalone canonical JSON array of the exact six-field iteration-binding
+objects above, sorted by
 the `ref` string's ascending ASCII bytes, for every validated `iterations/*`
 binding. `tag_set_digest` is SHA-256 of the standalone canonical JSON array
 of objects `{tag, commit, tree}`, sorted by the `tag` string's ascending ASCII
@@ -635,7 +663,8 @@ contains exactly one file, `manifest.json`, holding the canonical manifest.
 A manifest
 contains only the transition identity, canonical version/line, transaction
 and predecessor refs, exact Git SHA/tree identities, required timestamps,
-owner authorization identity and content-addressed evidence references.
+owner-authorization identity/reference/digest and content-addressed evidence
+references.
 State progression is the immutable graph formed by each manifest's typed
 predecessor refs and exact content digests; a later manifest records a new
 state without editing its predecessors. State is derived by replaying the
@@ -676,7 +705,8 @@ additionally requires exactly `publication_id`, `released_manifest_ref`,
 `released_manifest_id`, `released_manifest_digest`, `public_tag`, `tag_commit`,
 `tag_tree`, `github_release_id`, sanitized `github_release_url`,
 `published_at_utc`, `publication_evidence_ref`,
-`publication_evidence_digest`, and `owner_authorization`; its predecessor set
+`publication_evidence_digest`, `owner_authorization`,
+`owner_authorization_ref`, and `owner_authorization_digest`; its predecessor set
 is exactly one released-manifest ref. It forbids reservation, candidate,
 intent, closure, certification and `previous_main_*` fields, and it is accepted
 only after the matching released manifest and canonical tag exist and the
@@ -686,6 +716,31 @@ agree. A missing required field, extra forbidden field, second predecessor,
 duplicate pair or conflicting identity is INVALID. The validator publishes a
 versioned schema with these exact required/forbidden fields and transition
 predicates; the protected ref set records the schema for replay.
+
+### R-046 — Verifiable owner authorization
+
+Before any lifecycle ref, iteration anchor, canonical tag, line, or release
+mutation, the writer fetches the authorization named by
+`owner_authorization_ref` from the configured owner authority and verifies its
+exact canonical bytes. The authorization record contains exactly its schema
+version, content-derived `owner_authorization` ID, repository identity, stable
+owner account identity, authority source reference, issued and expiry UTC
+times, transaction ID, owner line, final version, sorted authorized action set,
+sorted exact target-ref set, and `owner_authorization_digest`. The configured
+owner authority must establish that the source author is the repository owner;
+an untrusted caller cannot supply that fact.
+
+The digest is SHA-256 of the canonical record bytes excluding only its digest
+field; the content-derived ID covers the same preimage. At the instant of each
+mutation, the record must be unchanged, unexpired, for this repository,
+transaction, line and version, and must contain the exact action and target ref.
+Every emitted manifest binds the verified ID, source reference and digest.
+Missing, malformed, changed, expired, cross-repository, cross-transaction,
+cross-line, cross-version, cross-action or wrong-target authorization returns
+`status = BLOCKED`, `reason_code = OWNER_AUTHORIZATION_UNVERIFIED`, before the
+first affected mutation. Field presence alone and a prior verification outside
+the held exclusion boundary are insufficient. Gate A uses only synthetic owner
+authority records; it creates no production grant.
 
 Canonical snapshots, manifests and evidence identities use UTF-8 with ASCII
 printable wire strings, lexicographically sorted object keys, compact JSON
@@ -771,10 +826,10 @@ result keeps the transaction blocked and frozen under R-017.
    independent SPEC and STANDARDS review of that exact set, including
    authority-order consistency and requirement-to-implementation/test
    coverage. Re-review any changed normative bytes.
-3. After both axes pass, verify the durable owner-dispatch receipt and add
-   approval metadata to `spec.md` that pins the exact reviewed normative
-   content identities and both review records. This metadata-only change may
-   not alter normative text; any substantive change returns to step 2.
+3. After both axes pass, verify the durable owner-dispatch receipt and create
+   the external approval record named in the frontmatter. That record pins the
+   exact five-file revision and both review records. Do not change the frozen
+   five files to add approval metadata. Any change to them returns to step 2.
 4. Implement A1–A6 on one branch, then converge spec, plan, tasks, source,
    tests and PR evidence. Keep actual `Project.toml=0.2.0`.
 5. Obtain a fresh independent read-only exact-candidate pre-merge review.
@@ -796,6 +851,8 @@ lifecycle, certification transfer, complete principal and publication evidence,
 publication-key derivation, bidirectional tag/manifest/tree consistency and
 post-tag forward recovery. Maintenance
 bootstrap/release automation and rare recovery are not Gate A PASS criteria.
+The validation-only R-030/R-031 maintenance-bootstrap schema and its positive,
+non-entry and uncertain/failure fixtures are Gate A PASS criteria.
 Run focused tests before package, audit, docs, Python-free
 import, workflow and remote CI checks. Record exact commands, results and
 unavailable checks; unobserved checks are not PASS.
@@ -809,14 +866,20 @@ identity, mismatched evidence digest, and mismatched tag/intent/release
 evidence.
 Include leading-zero package and public-tag aliases, static snapshot field
 omissions/digest mismatch and changed anchor/tag/source under a bound snapshot.
+Reject a lightweight iteration anchor and substitution of a different annotated
+tag object or closure timestamp that peels to the same commit/tree.
 Test empty/nonempty ref/tag digest preimages, tampered nested digests,
 tampered occupied sets, reversed ref/tag/occupied ordering, raw file digest
 mismatch and rejection of a self-including snapshot digest.
 Include unsupported certification bindings, missing/wrong manifest schema
 version, undeclared or unsorted set arrays, duplicate set members, and
 noncanonical optional-field encoding.
+Owner-authorization tests include one exact positive grant and missing,
+malformed, changed, expired, wrong-owner, cross-repository, cross-transaction,
+cross-action and wrong-target negatives. Each negative proves that no affected
+ref, tag, line, or release mutation occurred.
 
-Fail closed when a pinned source/approval or reviewer authority cannot be
+Fail closed when a pinned source/approval, owner authorization, or reviewer authority cannot be
 verified, the static selector or serialized writer cannot be established, an
 exact principal sentinel is unavailable, an operation requires deferred
 maintenance or rare-recovery automation, Julia prerelease semantics conflict,

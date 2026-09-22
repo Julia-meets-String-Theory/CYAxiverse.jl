@@ -1,8 +1,9 @@
 # CYAX-0125 Gate A prospective-amendment plan
 
 Status: derived from the prospective `spec.md` amendment in this worktree.
-The amendment is not Approved. It requires fresh independent SPEC and
-STANDARDS review under rubric SHA-256
+Approval is effective only through the external approval record that binds the
+exact frozen five-file revision and fresh independent SPEC and STANDARDS PASS
+records under rubric SHA-256
 `418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72` before
 implementation may claim conformance.
 
@@ -61,8 +62,10 @@ persisted-schema or version-boundary change stops for a separate decision.
 
 Retain the exact `refs/heads/vmm:iterations.toml` selector and immutable
 `iterations/X.Y.Z` anchor validation. Build canonical static snapshots with
-source/ref/tree, anchor/tag bindings, digests, occupied versions and stale
-detection. Preserve Gate B retrospective truth and supersession chronology;
+source/ref/tree, public-tag bindings, and annotated-anchor bindings that include
+the direct tag-object SHA, object type, peeled commit/tree and validated closure
+UTC payload. Add lightweight-tag and same-target/different-object negatives.
+Preserve Gate B retrospective truth and supersession chronology;
 do not populate real historical designations.
 
 ### A3 — Create-once lifecycle authority
@@ -71,7 +74,7 @@ Replace mutable event-ledger design with protected create-once lifecycle refs
 and one-manifest commits. Define exact versioned claim/reservation, candidate,
 intent, release and publication namespaces; manifest schema,
 content-derived IDs with no global sequence allocator, predecessor binding,
-owner authorization, exact Git identities and content digests; and a complete
+exact Git identities and content digests; and a complete
 replayable `lifecycle_ref_snapshot`. A publication manifest requires exactly
 one released-manifest predecessor, canonical tag commit/tree, GitHub Release
 identity and publication-evidence digest; its `pub-` ID and ref are derived
@@ -83,6 +86,13 @@ version; uncertain outcomes remain unavailable. An uncertain remote result
 freezes the affected line/version and returns a blocked result; it never
 appends or retries a different payload.
 
+Define a canonical immutable owner-authorization record and verifier. Bind its
+ID, source reference and digest in each manifest. The verifier resolves the
+configured owner authority and compares repository, stable owner account,
+validity interval, transaction, action, owner line, final version and exact
+target refs under the held exclusion boundary before each mutation. Missing,
+changed, stale or cross-operation grants block before writes.
+
 ### A4 — First-principal lifecycle automation
 
 Implement and test the first principal path: deterministic principal DEV
@@ -93,6 +103,10 @@ publication manifest/ref with GitHub Release identity/evidence. Preserve
 owner authorization and forward-only post-tag reconciliation. Maintenance-line
 bootstrap/release and rare recovery are contract-only deferred S2 work in this
 Gate A candidate; no production maintenance automation is claimed here.
+Implement only the validation-only `maintenance-bootstrap-validation-v1`
+schema and synthetic positive, non-entry, mismatch and uncertain/failure
+fixtures required by R-030/R-031. Do not expose it as a lifecycle manifest
+writer or create its reserved production refs.
 
 Documentation deployment must independently resolve and validate the selected
 release/publication manifest's tag, commit/tree, package version and digest.
@@ -126,16 +140,17 @@ work and Gate B separate.
 | R-002–R-004 | A1 line roles, target identity and stable-iteration checks. |
 | R-005 | A2 canonical SemVer parser and alias/prerelease rejection tests. |
 | R-006–R-011 | A3 principal/maintenance allocation rules, global claim refs, terminal consumption and no-reuse tests. |
-| R-012, R-015, R-019–R-021 | A2 `iterations.toml`, immutable anchors and prospective/retrospective truth fixtures. |
+| R-012, R-015, R-019–R-021 | A2 `iterations.toml`, exact annotated-anchor object/payload bindings and prospective/retrospective truth fixtures. |
 | R-013–R-018 | A3 protected create-once refs, immutable manifests, complete lifecycle snapshot and serialized CAS boundary. |
 | R-022 | A1/A5 verified-ref/manifest documentation routing with no tracked release edit. |
 | R-023–R-024, R-044 | A4 pinned exact-tree certification and explicit tree/commit binding transfer tests. |
 | R-025–R-027 | A4 single candidate/intent/release-manifest chain and principal/maintenance line checks; maintenance production path deferred. |
-| R-028–R-031 | A4 principal closure/reopen path; R-030/R-031 maintenance bootstrap contract reserved for later S2 automation. |
+| R-028–R-031 | A4 principal closure/reopen path; R-030/R-031 validation-only maintenance-bootstrap schema/fixtures now, with production automation reserved for later S2. |
 | R-032–R-035 | A4 durable candidate refs, withdrawal retention, irreversible protected tags and forward-only reconciliation. |
 | R-036–R-039 | A1/A6 grandfathering, package boundary, Gate A/B separation and fresh final-state review. |
 | R-040–R-043 | A3/A4 manifest schema/identity, closure UTC binding, explicit publication fields/predecessor/key, release evidence and bidirectional tag/manifest/publication validation with duplicate/conflict negatives. |
 | R-045 | A1/A5 bounded Python control-plane checks and Python-free `using CYAxiverse` verification. |
+| R-046 | A3/A4 immutable owner-authorization verification with positive and pre-mutation negative tests. |
 
 ## Stop and escalation points
 

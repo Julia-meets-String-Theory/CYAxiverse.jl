@@ -35,7 +35,13 @@ description: Consolidate, rebase, integrate, verify, or prepare approved CYAxive
    release and publication object types remain distinct and progress only via
    immutable predecessor-ref bindings. Certify release candidates against an
    immutable exact tree and retain candidate, tag-intent, release, and
-   publication evidence identities in those refs/manifests.
+   publication evidence identities in those refs/manifests. Bind each
+   iteration anchor as an annotated tag object, including its direct tag-object
+   SHA, peeled commit/tree, object type, and validated closure UTC payload.
+   Before each mutation, verify an immutable owner-authorization record against
+   the configured owner authority and its exact repository, transaction,
+   action, line, version, target refs, and validity interval; a manifest field
+   alone is not authorization.
 7. Keep tracked source release-neutral. Documentation deployment selects the
    development, principal-versioned, maintenance-versioned, or stable channel
    from a verified ref and canonical release manifest. Do not edit documentation

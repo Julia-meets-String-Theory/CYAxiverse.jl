@@ -123,13 +123,20 @@ For scientific, numerical, sampling, benchmark, or persisted-data changes:
   uncertain outcomes remain unavailable.
 - Lifecycle state is represented by protected create-once Git refs and small
   immutable canonical evidence manifests, together with `iterations.toml`,
-  immutable iteration anchors, and protected public tags. A lifecycle ref is
+  immutable annotated iteration-anchor tag objects, and protected public tags.
+  Static snapshots bind each anchor's direct tag-object SHA, peeled commit/tree,
+  object type, and validated closure UTC payload; a matching commit/tree alone
+  is not sufficient. A lifecycle ref is
   never deleted, repointed, force-updated, or treated as mutable ledger state;
   no `release-events` branch/stream is canonical. Claim, reservation,
   candidate, intent, release and publication object types remain distinct;
   progression is an immutable predecessor-ref graph. Allocation and transition writers use
-  create-if-absent/CAS, exact snapshot/ref verification, owner authorization,
-  and fail closed on an uncertain remote result. A proven pre-entry reservation
+  create-if-absent/CAS, exact snapshot/ref verification, and a freshly verified
+  immutable owner-authorization record bound to the repository, transaction,
+  action, owner line, version, target refs, and validity interval. Mere presence
+  of an authorization string is never sufficient. Writers fail closed on a
+  missing, stale, changed, or cross-operation grant and on an uncertain remote
+  result. A proven pre-entry reservation
   abort consumes its reservation identity but may release only an unclaimed
   final version; uncertainty keeps that version unavailable.
 - A release candidate is certified against an immutable exact tree and retains
