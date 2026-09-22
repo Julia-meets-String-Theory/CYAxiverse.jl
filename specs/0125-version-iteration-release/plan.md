@@ -103,6 +103,7 @@ Test canonical final/DEV parsing, strict ref/tag grammar, static and lifecycle
 snapshots, claim/no-reuse races, create-once idempotence/conflict/uncertainty,
 principal closure, certification transfer, tag/manifest/tree consistency,
 publication positive binding and duplicate/conflict rejection, and
+the fixed expected publication-hash/ref fixture in the specification, and
 release-neutral documentation routing. Run focused checks before package,
 audit, docs, Python-free import and CI checks. Record failures and unavailable
 gates accurately; prior ledger test results remain historical.

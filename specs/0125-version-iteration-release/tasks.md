@@ -98,7 +98,7 @@ new requirements.
   create-once, principal closure, certification, tag/manifest/tree and docs
   routing tests. Include publication positive binding and negative pre-release,
   duplicate, wrong-predecessor, tag-target, GitHub-identity and evidence-digest
-  cases.
+  cases, plus the specification's fixed expected publication hash/ref fixture.
   Assert observable refs, bytes, digests, identities and blocked/INVALID
   reasons.
 - [ ] Run `git diff --check`, snapshot/diff checks, package tests, audit,

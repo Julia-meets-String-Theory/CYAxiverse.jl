@@ -481,13 +481,24 @@ sanitized `github_release_url`, `published_at_utc`,
 `publication_evidence_ref/digest`, and owner-authorization identity. Its
 `publication_id` is deterministic: `pub-` followed by the lowercase SHA-256
 of canonical compact JSON with exactly the sorted keys
-`{\"public_tag\":\"<canonical-tag>\",\"released_manifest_id\":\"<id>\"}`;
+`{"public_tag":"<canonical-tag>","released_manifest_id":"<id>"}`;
 the protected ref is exactly
 `refs/heads/lifecycle/v1/publications/vX.Y.Z/<publication_id>`. A
 publication is valid only when this key, released manifest, canonical tag,
 GitHub Release identity and evidence digest agree. Its
-content-addressed bytes are independently verified. All
-durable public manifest and evidence field values, including certification
+content-addressed bytes are independently verified.
+A fixed key fixture is mandatory. With public tag `v1.2.3` and released
+manifest ID
+`LIF-SHA256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`,
+the exact no-trailing-LF preimage bytes are
+`{"public_tag":"v1.2.3","released_manifest_id":"LIF-SHA256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
+whose SHA-256 is
+`ebd4b5200df5c8e3aa30bee44a17edbfceef805b21fde551196ca1c006ed8c04`.
+The expected `publication_id` is
+`pub-ebd4b5200df5c8e3aa30bee44a17edbfceef805b21fde551196ca1c006ed8c04`
+and the expected protected ref is
+`refs/heads/lifecycle/v1/publications/v1.2.3/pub-ebd4b5200df5c8e3aa30bee44a17edbfceef805b21fde551196ca1c006ed8c04`.
+All durable public manifest and evidence field values, including certification
 environment data and references, are sanitized public values, approved
 identities, repository-relative paths or content-addressed digests. They must
 not contain private conversation or local-machine locators, credentials, or
