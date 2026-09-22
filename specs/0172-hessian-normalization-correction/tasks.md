@@ -43,10 +43,20 @@
 
 ## Phase 2 — Bounded replay
 
-- [ ] **T201 [R-006, R-007, CYAX-0172 G2] Replay representative catastrophe**
-  - Expected output: before/after comparison of bracket, refined `k_c`,
-    catastrophe type, and side signatures.
-  - Verify: only expected Hessian/eigenvalue magnitude scaling changes.
+- [ ] **T201 [R-006, R-007, CYAX-0172 G2] Replay the exact golden-ratio witness**
+  - Frozen inputs: source `vmm@995163f0058488ea183ac645045ed8b1636bef4a`;
+    helper blob `cd861aa8a257ae36c9dadef6486449a0497c35a4`;
+    `test/runtests.jl` blob `67a2c0d6d4ead46fb6acf58a0b6e3acfc41e22d0`;
+    `Q=reshape([1.0,1.0],2,1)`; `L=[[2.0,-1.0],[1.0,1.0]]`;
+    `theta=[0.0]`; `phase=[0.4,0.0]`;
+    `k_grid=range(0.05,0.20; length=4)`; `precision_bits=256`;
+    refinement tolerance `1e-20`.
+  - Expected output: identical coarse bracket `[0.10,0.15]` before/after,
+    refined `k_c = 0.5*log10((1+sqrt(5))/2)` within the specified tolerance,
+    unchanged catastrophe type/side signatures, and only the expected
+    factor-two Hessian/eigenvalue magnitude scaling.
+  - Verify: no post-hoc case selection is permitted; this fixture is the sole
+    CYAX-0172 G2 replay witness.
   - Escalate if: location, branch classification, or another observable changes
     for a reason not explained by the positive global scaling.
 
