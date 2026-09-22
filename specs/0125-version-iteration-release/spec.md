@@ -748,17 +748,17 @@ first affected mutation. Field presence alone and a prior verification outside
 the held exclusion boundary are insufficient. Gate A uses only synthetic owner
 authority records; it creates no production grant.
 
-The fixed R-046 positive vector has this exact 464-byte identity preimage, with
+The fixed R-046 positive vector has this exact 465-byte identity preimage, with
 no trailing LF:
 
 ```json
-{"authority_source_ref":"owner-authority://synthetic/grant-001","authorized_actions":["create-release-manifest","create-tag"],"expires_at_utc":"2026-01-03T00:00:00Z","final_version":"0.3.0","issued_at_utc":"2026-01-02T00:00:00Z","owner_account":"owner-123","owner_line":"principal","repository":"Julia-meets-String-Theory/CYAxiverse.jl","schema_version":1,"target_refs":["refs/tags/v0.3.0","refs/version-lifecycle/releases/v0.3.0"],"transaction_id":"txn-0125-001"}
+{"authority_source_ref":"owner-authority://synthetic/grant-001","authorized_actions":["create-release-manifest","create-tag"],"expires_at_utc":"2026-01-03T00:00:00Z","final_version":"0.3.0","issued_at_utc":"2026-01-02T00:00:00Z","owner_account":"owner-123","owner_line":"principal","repository":"Julia-meets-String-Theory/CYAxiverse.jl","schema_version":1,"target_refs":["refs/heads/lifecycle/v1/releases/v0.3.0","refs/tags/v0.3.0"],"transaction_id":"txn-0125-001"}
 ```
 
 Its expected digest is
-`f4507713c2fb1d9fe3084f9b2ec55c08805a6c54610743cab0d4307ec036450a` and
+`8531fbb361a9d99f67e45e82f8511447ec9f0f03b8d1fa96ac281d5dff3daa40` and
 its expected ID is
-`AUTH-SHA256-f4507713c2fb1d9fe3084f9b2ec55c08805a6c54610743cab0d4307ec036450a`.
+`AUTH-SHA256-8531fbb361a9d99f67e45e82f8511447ec9f0f03b8d1fa96ac281d5dff3daa40`.
 Verification must reproduce the exact bytes, length, digest and ID. Tests also
 replace each identity independently, change each preimage field class, and
 change the fetched canonical bytes; every such case must block before mutation.
