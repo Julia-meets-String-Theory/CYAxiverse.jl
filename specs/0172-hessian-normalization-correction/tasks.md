@@ -34,12 +34,18 @@
     - historical formula relation is factor two.
   - Escalate if: any fixed convention must change.
 
-- [ ] **T102 [R-004, R-005, CYAX-0172 G1] Verify zero-mode invariance**
+- [ ] **T102 [R-004, R-005, CYAX-0172 G1] Verify typed-input zero-mode invariance**
   - Expected output: analytic-root and scaling/sign evidence.
   - Verify:
-    `k_c = 0.5*log10((1+sqrt(5))/2)` within specified tolerance and
-    historical/corrected sign-change bracket agreement.
-  - Escalate if: the root or bracket moves beyond tolerance.
+    - freeze `p64 = 3602879701896397/9007199254740992`;
+    - compare the 256-bit refined root to
+      `k64 = 0.5*log10(-2*cos(2*pi*p64))` at a tolerance justified by the
+      final bisection interval;
+    - compare the same refined root to the exact-decimal
+      `k_phi = 0.5*log10((1+sqrt(5))/2)` only at absolute `1e-12`;
+    - historical/corrected sign-change bracket remains identical.
+  - Escalate if: the typed-input root, exact-decimal cross-check, or bracket
+    fails its own predeclared tolerance.
 
 ## Phase 2 — Bounded replay
 
@@ -50,11 +56,15 @@
     `Q=reshape([1.0,1.0],2,1)`; `L=[[2.0,-1.0],[1.0,1.0]]`;
     `theta=[0.0]`; `phase=[0.4,0.0]`;
     `k_grid=range(0.05,0.20; length=4)`; `precision_bits=256`;
-    refinement tolerance `1e-20`.
+    bisection/refinement stopping tolerance `1e-20`;
+    exact-decimal cross-check acceptance `1e-12`;
+    `p64=3602879701896397/9007199254740992`.
   - Expected output: identical coarse bracket `[0.10,0.15]` before/after,
-    refined `k_c = 0.5*log10((1+sqrt(5))/2)` within the specified tolerance,
-    unchanged catastrophe type/side signatures, and only the expected
-    factor-two Hessian/eigenvalue magnitude scaling.
+    refined root agreeing with
+    `k64=0.5*log10(-2*cos(2*pi*p64))` at refinement-justified tolerance,
+    agreement with exact-decimal `k_phi=0.5*log10((1+sqrt(5))/2)` only at
+    absolute `1e-12`, unchanged catastrophe type/side signatures, and only
+    the expected factor-two Hessian/eigenvalue magnitude scaling.
   - Verify: no post-hoc case selection is permitted; this fixture is the sole
     CYAX-0172 G2 replay witness.
   - Escalate if: location, branch classification, or another observable changes
