@@ -5,8 +5,9 @@ does not designate a historical release, adopt a DEV version, close an
 iteration, publish a release, or establish live GitHub protection. The exact
 normative amendment reviewed for I2 is commit
 `705031fddf943603922daf2779096138c2613ffa` (tree
-`f1d646ec46d48a209ee0e37a504863d5691c0994`); the implementation candidate
-has no frozen final commit/tree at the time of this record. The feature branch
+`f1d646ec46d48a209ee0e37a504863d5691c0994`). The reduced implementation is
+frozen at commit `90653bf6b5603617bf8ac16275f5e253f1a084d2` (tree
+`526c4151a1dd449104183911348878c8e820065b`). The feature branch
 uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
 execution base.
 
@@ -53,9 +54,9 @@ approval record `reviews/n1-approval-v2.json`, SHA-256
 that exact five-file revision and both exact review records without changing
 the reviewed normative bytes.
 
-The implementation worktree was not yet committed when these observations
-were recorded. They are provisional development results until the exact
-implementation commit/tree receives fresh review.
+These observations apply to the frozen implementation commit above. This
+evidence-only successor changes no implementation bytes. The complete final
+candidate, including this record, still requires fresh exact-state review.
 
 | Check | Observed result |
 | --- | --- |
