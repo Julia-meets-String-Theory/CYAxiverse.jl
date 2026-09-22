@@ -304,6 +304,20 @@ def _authorization_reference(
     return reference
 
 
+def _authorization_now_utc(port: Any) -> str:
+    clock = getattr(port, "authorization_now_utc", None)
+    if not callable(clock):
+        raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED")
+    try:
+        value = clock()
+    except Exception as error:
+        raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED") from error
+    try:
+        return _utc(value)
+    except TransactionError as error:
+        raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED") from error
+
+
 def _authorize(
     port: Any,
     intent: Any,
@@ -326,8 +340,7 @@ def _authorize(
             owner_line=getattr(intent, "owner_line", ""),
             final_version=affected_version,
             target_ref=target_ref,
-            now_utc=(getattr(intent, "timestamp_utc", "")
-                     or getattr(intent, "closure_timestamp_utc", "")),
+            now_utc=_authorization_now_utc(port),
         )
         return record, reference
     except (AuthorizationError, KeyError, TypeError, ValueError) as error:
@@ -819,7 +832,9 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             raise TransactionError("ANCHOR_IDENTITY_MISMATCH")
         if (anchor.get("ref") != intent.anchor_ref
                 or anchor.get("tree", anchor.get("anchor_tree")) != intent.anchor_tree
-                or anchor.get("sha", anchor.get("anchor_sha")) != intent.anchor_sha):
+                or anchor.get("sha", anchor.get("anchor_sha")) != intent.anchor_sha
+                or anchor.get("closure_timestamp_utc")
+                != intent.closure_timestamp_utc):
             raise TransactionError("ANCHOR_IDENTITY_MISMATCH")
         evidence["anchor"] = anchor
         phase = "anchor_verified"

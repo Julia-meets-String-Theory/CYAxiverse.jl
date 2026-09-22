@@ -55,6 +55,8 @@ def complete_fixture(
         release.pop("previous_main_version")
         release["main_at_release_sha"] = MAIN_SHA
         release["main_at_release_version"] = "2.0.0"
+        release["main_at_candidate_sha"] = MAIN_SHA
+        release["main_at_candidate_version"] = "2.0.0"
         release = seal_manifest(release)
         prefix = chain[:4]
     else:
@@ -114,6 +116,7 @@ def complete_validation_kwargs(
         "lifecycle_records": observations["records"],
         "anchor_tag_object": release["anchor_sha"],
         "anchor_tree": release["anchor_tree"],
+        "anchor_closure_timestamp_utc": release["closure_timestamp_utc"],
         "candidate_ref": release["candidate_ref"],
         "candidate_commit": release["candidate_sha"],
         "candidate_tree": release["candidate_tree"],
@@ -158,6 +161,8 @@ def write_complete_context(
         "--github-releases", str(github_releases_path),
         "--anchor-tag-object", str(release["anchor_sha"]),
         "--anchor-tree", str(release["anchor_tree"]),
+        "--anchor-closure-timestamp-utc",
+        str(release["closure_timestamp_utc"]),
         "--candidate-ref", str(release["candidate_ref"]),
         "--candidate-commit", str(release["candidate_sha"]),
         "--candidate-tree", str(release["candidate_tree"]),
@@ -176,6 +181,9 @@ class DocumentationRoutingTests(unittest.TestCase):
         self.assertIn("gh api", workflow)
         self.assertIn("releases/assets", workflow)
         self.assertIn("--require-complete-lifecycle", workflow)
+        self.assertIn("canonical_manifest_bytes", workflow)
+        self.assertIn('git fetch --no-tags -- origin "$ANCHOR_REF:$ANCHOR_REF"', workflow)
+        self.assertIn("--anchor-closure-timestamp-utc", workflow)
         self.assertNotIn(
             'git show "$GITHUB_REF:$PUBLICATION_EVIDENCE_REF"', workflow
         )

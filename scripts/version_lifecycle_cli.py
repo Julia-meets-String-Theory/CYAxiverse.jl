@@ -127,10 +127,19 @@ def _static_report(args: argparse.Namespace) -> tuple[dict[str, Any], StaticSnap
     return {"status": "READY", **result.to_dict()}, result
 
 
-def _lifecycle_report(args: argparse.Namespace, source_repository: str | None = None) -> tuple[dict[str, Any], LifecycleRefSnapshot | None]:
+def _lifecycle_report(
+    args: argparse.Namespace,
+    source_repository: str | None = None,
+    root_parent_commit: str | None = None,
+) -> tuple[dict[str, Any], LifecycleRefSnapshot | None]:
     try:
+        if root_parent_commit is None:
+            raise ValueError("canonical lifecycle root parent is unavailable")
         snapshot = lifecycle_ref_snapshot(
-            args.authority_repo, remote=args.authority_remote, source_repository=source_repository or args.source_repository,
+            args.authority_repo,
+            remote=args.authority_remote,
+            source_repository=source_repository or args.source_repository,
+            root_parent_commit=root_parent_commit,
         )
     except (OSError, ValueError, RuntimeError) as error:
         return _blocked("LIFECYCLE_REF_SNAPSHOT_UNAVAILABLE", str(error), remote=args.remote, namespace="refs/heads/lifecycle/v1/*"), None
@@ -208,7 +217,11 @@ def _run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         base["lifecycle_snapshot"] = {"status": "NOT_CHECKED", "reason_code": static_result.get("reason_code")}
         base.update(status="BLOCKED", reason_code=static_result.get("reason_code"), detail=static_result.get("detail", ""))
         return base, 2
-    lifecycle_result, lifecycle = _lifecycle_report(args, static_result.get("source_repository"))
+    lifecycle_result, lifecycle = _lifecycle_report(
+        args,
+        static_result.get("source_repository"),
+        snapshot.source_commit,
+    )
     base["static_snapshot"] = static_result
     base["lifecycle_snapshot"] = lifecycle_result
     if args.command == "lifecycle":

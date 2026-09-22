@@ -426,6 +426,11 @@ def _validate_type_specific(manifest: Mapping[str, Any]) -> None:
         _line_ref_component(manifest["owner_line"])
     if "release_line" in manifest:
         _line_ref_component(manifest["release_line"])
+        if manifest["release_line"] != "principal":
+            final = parse_package_version(manifest["final_version"])
+            expected_line = f"maintenance/{final.major}.{final.minor}"
+            if manifest["release_line"] != expected_line:
+                raise ManifestError("maintenance release line does not match final version")
     if "candidate_id" in manifest:
         _check_identity_text(manifest["candidate_id"], "candidate_id")
         if CANDIDATE_ID_RE.fullmatch(str(manifest["candidate_id"])) is None:
@@ -479,6 +484,14 @@ def _validate_type_specific(manifest: Mapping[str, Any]) -> None:
     if kind == "released" and manifest.get("release_line") != "principal":
         if "previous_main_sha" in manifest or "previous_main_version" in manifest:
             raise ManifestError("maintenance released manifest cannot contain previous main claim")
+        if (
+            manifest["main_at_candidate_sha"] != manifest["main_at_release_sha"]
+            or manifest["main_at_candidate_version"]
+            != manifest["main_at_release_version"]
+        ):
+            raise ManifestError(
+                "maintenance release changes contemporaneous principal main"
+            )
     for field in ("certification_evidence_refs", "evidence_refs"):
         if field in manifest:
             values = manifest[field]
@@ -576,7 +589,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
                 parsed = parse_package_version(manifest[field])
             except (TypeError, ValueError) as error:
                 raise ManifestError(f"{field} is not a canonical package version") from error
-            if field != "main_at_release_version" and parsed.is_dev:
+            if parsed.is_dev:
                 raise ManifestError(f"{field} must be final")
     if "intended_dev_version" in manifest:
         try:
@@ -1155,7 +1168,51 @@ def validate_lifecycle_ref_snapshot(
     return validated
 
 
-def build_lifecycle_ref_snapshot(repository: str | Path, remote: str = "origin", *, source_repository: str | None = None) -> LifecycleRefSnapshot:
+def _validate_lifecycle_commit_topology(
+    repository: str | Path,
+    records: Mapping[str, Any] | Iterable[Mapping[str, Any]],
+    root_parent_commit: str,
+) -> None:
+    root = Path(repository)
+    if not isinstance(root_parent_commit, str) or not SHA1_RE.fullmatch(
+        root_parent_commit
+    ):
+        raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+    _git(root, "cat-file", "-e", f"{root_parent_commit}^{{commit}}")
+    normalized = _normalise_graph_records(records)
+    commits: dict[str, str] = {}
+    manifests: dict[str, Mapping[str, Any]] = {}
+    for ref, manifest, binding in normalized:
+        commit = None if binding is None else binding.get("commit")
+        if not isinstance(commit, str) or not SHA1_RE.fullmatch(commit):
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+        commits[ref] = commit
+        manifests[ref] = manifest
+    for ref, manifest in manifests.items():
+        predecessors = manifest.get("predecessor_refs")
+        if not isinstance(predecessors, list):
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+        if not predecessors:
+            expected_parent = root_parent_commit
+        elif len(predecessors) == 1 and predecessors[0] in commits:
+            expected_parent = commits[predecessors[0]]
+        else:
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+        commit = commits[ref]
+        parents = _git(
+            root, "rev-list", "--parents", "-n", "1", commit
+        ).decode("ascii").strip().split()
+        if parents != [commit, expected_parent]:
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+
+
+def build_lifecycle_ref_snapshot(
+    repository: str | Path,
+    remote: str = "origin",
+    *,
+    source_repository: str | None = None,
+    root_parent_commit: str,
+) -> LifecycleRefSnapshot:
     """Resolve and validate the complete protected lifecycle-ref namespace."""
 
     root = Path(repository)
@@ -1186,6 +1243,9 @@ def build_lifecycle_ref_snapshot(repository: str | Path, remote: str = "origin",
     if parse_remote_ref_advertisements(final_output) != advertisements:
         raise ManifestError("lifecycle ref namespace changed during snapshot")
     graph = validate_lifecycle_graph(graph_records)
+    _validate_lifecycle_commit_topology(
+        root, graph_records, root_parent_commit
+    )
     data: dict[str, Any] = {
         "snapshot_schema_version": SCHEMA_VERSION,
         "source_repository": source_repository or "configured",
@@ -1308,6 +1368,7 @@ class CreateOnlyLifecycleWriter:
         expected_snapshot: Any,
         owner_authorization_authority: Any,
         authorization_reference: Callable[[str, str, str], str],
+        authorization_clock: Callable[[], str],
         repository_identity: str,
         root_parent_commit: str,
     ) -> None:
@@ -1317,7 +1378,11 @@ class CreateOnlyLifecycleWriter:
             raise GitIdentityError("EXCLUSION_UNAVAILABLE")
         if not callable(snapshot_callback) or expected_snapshot is None:
             raise ManifestError("LIFECYCLE_SNAPSHOT_REVALIDATION_REQUIRED")
-        if owner_authorization_authority is None or not callable(authorization_reference):
+        if (
+            owner_authorization_authority is None
+            or not callable(authorization_reference)
+            or not callable(authorization_clock)
+        ):
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
         if not isinstance(repository_identity, str) or not repository_identity:
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
@@ -1329,11 +1394,15 @@ class CreateOnlyLifecycleWriter:
             _git(self.repository, "cat-file", "-e", f"{root_parent_commit}^{{commit}}")
         except ManifestError as error:
             raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED") from error
+        static_data, _lifecycle_data = _snapshot_components(expected_snapshot)
+        if static_data.get("source_commit") != root_parent_commit:
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
         self.exclusion = exclusion_lease
         self.snapshot_callback = snapshot_callback
         self.expected_snapshot = expected_snapshot
         self.owner_authorization_authority = owner_authorization_authority
         self.authorization_reference = authorization_reference
+        self.authorization_clock = authorization_clock
         self.repository_identity = repository_identity
         self.root_parent_commit = root_parent_commit
 
@@ -1453,9 +1522,9 @@ class CreateOnlyLifecycleWriter:
         if parse_remote_ref_advertisements(final_output) != advertisements:
             raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
         validate_lifecycle_graph(records)
-        for record in records.values():
-            expected_parent = self._expected_parent(record["manifest"], records)
-            self._require_commit_parent(str(record["commit"]), expected_parent)
+        _validate_lifecycle_commit_topology(
+            self.repository, records, self.root_parent_commit
+        )
         return records
 
     @staticmethod
@@ -1505,7 +1574,7 @@ class CreateOnlyLifecycleWriter:
         ref = lifecycle_ref_for_manifest(checked)
         protection.require(ref, creation=True)
         required_context = {
-            "transaction_id", "owner_line", "final_version", "now_utc", "action"
+            "transaction_id", "owner_line", "final_version", "action"
         }
         if set(authorization_context) != required_context:
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
@@ -1515,6 +1584,12 @@ class CreateOnlyLifecycleWriter:
                 authorization_context["action"], ref,
                 authorization_context["final_version"],
             )
+            try:
+                authorization_now = self.authorization_clock()
+            except Exception as error:
+                raise AuthorizationError(
+                    "owner authorization clock is unavailable"
+                ) from error
             record = verify_owner_authorization(
                 self.owner_authorization_authority,
                 reference,
@@ -1524,7 +1599,7 @@ class CreateOnlyLifecycleWriter:
                 owner_line=authorization_context["owner_line"],
                 final_version=authorization_context["final_version"],
                 target_ref=ref,
-                now_utc=authorization_context["now_utc"],
+                now_utc=authorization_now,
             )
             if (
                 checked["owner_authorization"] != record["owner_authorization"]
@@ -1655,6 +1730,9 @@ class CreateOnlyLifecycleManifestPort:
         self.writer = writer
         self.protection = protection
         self.authorization_context = authorization_context
+
+    def authorization_now_utc(self) -> str:
+        return self.writer.authorization_clock()
 
     def create_manifest(
         self, manifest_type: str, manifest: Mapping[str, Any]

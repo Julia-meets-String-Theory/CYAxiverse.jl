@@ -131,6 +131,7 @@ class ReleaseTests(unittest.TestCase):
             "lifecycle_records": records,
             "anchor_tag_object": release["anchor_sha"],
             "anchor_tree": release["anchor_tree"],
+            "anchor_closure_timestamp_utc": release["closure_timestamp_utc"],
             "candidate_ref": release["candidate_ref"],
             "candidate_commit": release["candidate_sha"],
             "candidate_tree": release["candidate_tree"],
@@ -175,6 +176,17 @@ class ReleaseTests(unittest.TestCase):
         )
         self.assertEqual(
             mismatch["reason_code"], "COMPLETE_RELEASE_UNIVERSE_MISMATCH"
+        )
+        closure_mismatch = validate_release_consistency(
+            release,
+            publication_manifest,
+            **{
+                **kwargs,
+                "anchor_closure_timestamp_utc": "2026-09-22T00:10:01Z",
+            },
+        )
+        self.assertEqual(
+            closure_mismatch["reason_code"], "ANCHOR_IDENTITY_MISMATCH"
         )
         rogue_github_release = list(kwargs["github_release_observations"])
         rogue_github_release.append({
@@ -266,6 +278,28 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(result["reason_code"], "MAIN_RELEASE_COMMIT_MISMATCH")
         result = validate_released_manifest(released(main_at_release_version="1.2.2"))
         self.assertEqual(result["reason_code"], "MAIN_RELEASE_VERSION_MISMATCH")
+
+    def test_maintenance_release_binds_line_and_unchanged_final_main(self) -> None:
+        valid = released(
+            release_line="maintenance/1.2",
+            previous_main_sha=None,
+            previous_main_version=None,
+            main_at_candidate_sha=OTHER_SHA,
+            main_at_candidate_version="2.0.0",
+            main_at_release_sha=OTHER_SHA,
+            main_at_release_version="2.0.0",
+        )
+        self.assertEqual(validate_released_manifest(valid)["status"], "PASS")
+        for changes in (
+            {"release_line": "maintenance/9.9"},
+            {"main_at_release_version": "2.0.0-DEV"},
+            {"main_at_release_sha": SHA},
+        ):
+            draft = dict(valid)
+            draft.pop("manifest_id")
+            draft.update(changes)
+            result = validate_released_manifest(seal_manifest(draft))
+            self.assertEqual(result["reason_code"], "RELEASED_MANIFEST_INVALID")
 
     def test_exact_tree_mismatch_is_invalid(self) -> None:
         result = validate_released_manifest(released(final_release_tree=OTHER_TREE))

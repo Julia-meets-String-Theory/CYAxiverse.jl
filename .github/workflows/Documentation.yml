@@ -55,10 +55,19 @@ jobs:
           import json
           import pathlib
           import sys
-          from hashlib import sha256
           sys.path.insert(0, "scripts")
-          from version_lifecycle.manifests import publication_ref
-          released = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          from version_lifecycle.manifests import (
+              canonical_manifest_bytes,
+              publication_ref,
+              validate_manifest,
+          )
+          raw = pathlib.Path(sys.argv[1]).read_bytes()
+          released = validate_manifest(json.loads(raw))
+          if (
+              released["manifest_type"] != "released"
+              or canonical_manifest_bytes(released) != raw
+          ):
+              raise SystemExit("released manifest is not exact canonical bytes")
           pathlib.Path(sys.argv[2]).write_text(
               publication_ref(released["public_tag"], released["manifest_id"])
           )
@@ -157,8 +166,22 @@ jobs:
           import json
           import pathlib
           import sys
-          released = json.loads(pathlib.Path(sys.argv[1]).read_text())
-          publication = json.loads(pathlib.Path(sys.argv[2]).read_text())
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.manifests import (
+              canonical_manifest_bytes,
+              validate_manifest,
+          )
+          released_raw = pathlib.Path(sys.argv[1]).read_bytes()
+          publication_raw = pathlib.Path(sys.argv[2]).read_bytes()
+          released = validate_manifest(json.loads(released_raw))
+          publication = validate_manifest(json.loads(publication_raw))
+          if (
+              released["manifest_type"] != "released"
+              or publication["manifest_type"] != "publication"
+              or canonical_manifest_bytes(released) != released_raw
+              or canonical_manifest_bytes(publication) != publication_raw
+          ):
+              raise SystemExit("release manifests are not exact canonical bytes")
           evidence_ref = publication["publication_evidence_ref"]
           parts = pathlib.PurePosixPath(evidence_ref).parts
           if (
@@ -177,8 +200,26 @@ jobs:
           ANCHOR_REF="$(sed -n '1p' "$RUNNER_TEMP/direct-refs")"
           CANDIDATE_REF="$(sed -n '2p' "$RUNNER_TEMP/direct-refs")"
           PUBLICATION_EVIDENCE_REF="$(sed -n '3p' "$RUNNER_TEMP/direct-refs")"
-          git fetch --no-tags origin "$ANCHOR_REF:$ANCHOR_REF"
-          git fetch --no-tags origin "$CANDIDATE_REF:refs/remotes/origin/cyax-candidate"
+          git fetch --no-tags -- origin "$ANCHOR_REF:$ANCHOR_REF"
+          git fetch --no-tags -- origin "$CANDIDATE_REF:refs/remotes/origin/cyax-candidate"
+          python3 - "$ANCHOR_REF" "$RUNNER_TEMP/anchor-closure-timestamp" <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.static import _annotated_anchor_payload
+          ref = sys.argv[1]
+          object_id = subprocess.check_output(
+              ["git", "rev-parse", ref], text=True
+          ).strip()
+          commit = subprocess.check_output(
+              ["git", "rev-parse", f"{ref}^{{commit}}"], text=True
+          ).strip()
+          closure_timestamp = _annotated_anchor_payload(
+              pathlib.Path("."), object_id, ref.removeprefix("refs/tags/"), commit
+          )
+          pathlib.Path(sys.argv[2]).write_text(closure_timestamp, encoding="ascii")
+          PY
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > "$RUNNER_TEMP/github-release.json"
           ASSET_ID="$(python3 - "$RUNNER_TEMP/github-release.json" "$PUBLICATION_EVIDENCE_REF" <<'PY'
           import json
@@ -215,6 +256,7 @@ jobs:
             --tag-version "$(git show "${GITHUB_REF}:Project.toml" | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
             --anchor-tag-object "$(git rev-parse "$(sed -n '1p' "$RUNNER_TEMP/direct-refs")")" \
             --anchor-tree "$(git rev-parse "$(sed -n '1p' "$RUNNER_TEMP/direct-refs")^{tree}")" \
+            --anchor-closure-timestamp-utc "$(cat "$RUNNER_TEMP/anchor-closure-timestamp")" \
             --candidate-ref "$(sed -n '2p' "$RUNNER_TEMP/direct-refs")" \
             --candidate-commit "$(git rev-parse refs/remotes/origin/cyax-candidate^{commit})" \
             --candidate-tree "$(git rev-parse refs/remotes/origin/cyax-candidate^{tree})" \

@@ -178,6 +178,7 @@ def validate_release_consistency(
     lifecycle_records: Mapping[str, Any] | Iterable[Mapping[str, Any]] | None = None,
     anchor_tag_object: str | None = None,
     anchor_tree: str | None = None,
+    anchor_closure_timestamp_utc: str | None = None,
     candidate_ref: str | None = None,
     candidate_commit: str | None = None,
     candidate_tree: str | None = None,
@@ -231,6 +232,7 @@ def validate_release_consistency(
     observations = (
         anchor_tag_object,
         anchor_tree,
+        anchor_closure_timestamp_utc,
         candidate_ref,
         candidate_commit,
         candidate_tree,
@@ -240,6 +242,8 @@ def validate_release_consistency(
     if (
         released.get("anchor_sha") != anchor_tag_object
         or released.get("anchor_tree") != anchor_tree
+        or released.get("closure_timestamp_utc")
+        != anchor_closure_timestamp_utc
     ):
         return _result(INVALID, "ANCHOR_IDENTITY_MISMATCH")
     if (

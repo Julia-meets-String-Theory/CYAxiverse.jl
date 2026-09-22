@@ -103,12 +103,13 @@ WRITER_CONTEXT = {
     "transaction_id": "tx-1",
     "owner_line": "principal",
     "final_version": "1.2.3",
-    "now_utc": "2026-09-22T00:00:00Z",
     "action": "create-release-manifest",
 }
 
 
-def writer_snapshot(occupied: list[str] | None = None) -> object:
+def writer_snapshot(
+    occupied: list[str] | None = None, *, source_commit: str = "a" * 40
+) -> object:
     from test_version_lifecycle_static import (  # noqa: PLC0415
         lifecycle_snapshot,
         static_snapshot,
@@ -116,7 +117,8 @@ def writer_snapshot(occupied: list[str] | None = None) -> object:
     from version_lifecycle.allocation import global_allocation_view  # noqa: PLC0415
 
     return global_allocation_view(
-        static_snapshot(), lifecycle_snapshot(occupied or [])
+        static_snapshot(source_commit=source_commit),
+        lifecycle_snapshot(occupied or []),
     )
 
 
@@ -128,9 +130,16 @@ def remote_writer_snapshot(repository: Path) -> object:
     from version_lifecycle.allocation import global_allocation_view  # noqa: PLC0415
 
     authority = canonical_remote_authority(repository, "origin")
-    static = _mark_authority_verified(static_snapshot(), authority)
+    root_parent = subprocess.check_output(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+    ).strip()
+    static = _mark_authority_verified(
+        static_snapshot(source_commit=root_parent), authority
+    )
     lifecycle = build_lifecycle_ref_snapshot(
-        repository, source_repository=SOURCE_REPOSITORY
+        repository,
+        source_repository=SOURCE_REPOSITORY,
+        root_parent_commit=root_parent,
     )
     return global_allocation_view(static, lifecycle)
 
@@ -736,6 +745,7 @@ class ManifestTests(unittest.TestCase):
                 expected_snapshot=snapshot,
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
+                authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
                 root_parent_commit=root_parent,
             )
@@ -748,6 +758,7 @@ class ManifestTests(unittest.TestCase):
                 expected_snapshot=snapshot,
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
+                authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
                 root_parent_commit=root_parent,
             )
@@ -797,6 +808,77 @@ class ManifestTests(unittest.TestCase):
             with self.assertRaises(ManifestError):
                 writer.create(conflicting, protection, authorization_context=WRITER_CONTEXT)
 
+    def test_authoritative_reader_rejects_invalid_commit_parent_topology(self) -> None:
+        for topology in ("rootless", "wrong-parent", "multi-parent"):
+            with self.subTest(topology=topology), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                remote = root / "origin.git"
+                work = root / "work"
+                subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+                subprocess.run(["git", "init", "-q", str(work)], check=True)
+                for key, value in (
+                    ("user.name", "Fixture"),
+                    ("user.email", "fixture@example.invalid"),
+                ):
+                    subprocess.run(
+                        ["git", "-C", str(work), "config", key, value],
+                        check=True,
+                    )
+                subprocess.run(
+                    ["git", "-C", str(work), "remote", "add", "origin", str(remote)],
+                    check=True,
+                )
+                (work / "base").write_text("base", encoding="utf-8")
+                subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
+                subprocess.run(
+                    ["git", "-C", str(work), "commit", "-qm", "base"],
+                    check=True,
+                )
+                root_parent = subprocess.check_output(
+                    ["git", "-C", str(work), "rev-parse", "HEAD"], text=True
+                ).strip()
+                wrong_parent = subprocess.check_output(
+                    ["git", "-C", str(work), "commit-tree", f"{root_parent}^{{tree}}"],
+                    input="wrong parent\n",
+                    text=True,
+                ).strip()
+                manifest = seal_manifest(self.prepared_draft())
+                if topology == "rootless":
+                    commit = make_manifest_commit(work, manifest)
+                elif topology == "wrong-parent":
+                    commit = make_manifest_commit(
+                        work, manifest, parent=wrong_parent
+                    )
+                else:
+                    single = make_manifest_commit(
+                        work, manifest, parent=root_parent
+                    )
+                    tree = subprocess.check_output(
+                        ["git", "-C", str(work), "rev-parse", f"{single}^{{tree}}"],
+                        text=True,
+                    ).strip()
+                    commit = subprocess.check_output(
+                        [
+                            "git", "-C", str(work), "commit-tree", tree,
+                            "-p", root_parent, "-p", wrong_parent,
+                        ],
+                        input="multi parent\n",
+                        text=True,
+                    ).strip()
+                ref = lifecycle_ref_for_manifest(manifest)
+                subprocess.run(
+                    ["git", "-C", str(work), "push", "-q", "origin", f"{commit}:{ref}"],
+                    check=True,
+                )
+                with self.assertRaisesRegex(
+                    ManifestError, "LIFECYCLE_PARENT_UNVERIFIED"
+                ):
+                    build_lifecycle_ref_snapshot(
+                        work,
+                        source_repository="fixture-repository",
+                        root_parent_commit=root_parent,
+                    )
+
     def test_create_revalidates_snapshot_inside_exclusion_and_blocks_uncertain_create(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -823,8 +905,10 @@ class ManifestTests(unittest.TestCase):
                     return True
                 def __exit__(self, *_args: object) -> None:
                     held["value"] = False
-            first_snapshot = writer_snapshot()
-            second_snapshot = writer_snapshot(["9.9.9"])
+            first_snapshot = writer_snapshot(source_commit=root_parent)
+            second_snapshot = writer_snapshot(
+                ["9.9.9"], source_commit=root_parent
+            )
             values = iter((first_snapshot, second_snapshot))
             def callback() -> object:
                 self.assertTrue(held["value"])
@@ -836,6 +920,7 @@ class ManifestTests(unittest.TestCase):
                 expected_snapshot=first_snapshot,
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
+                authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
                 root_parent_commit=root_parent,
             )
@@ -858,6 +943,7 @@ class ManifestTests(unittest.TestCase):
                 expected_snapshot=first_snapshot,
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
+                authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
                 root_parent_commit=root_parent,
             )
@@ -875,6 +961,7 @@ class ManifestTests(unittest.TestCase):
                 expected_snapshot=first_snapshot,
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
+                authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
                 root_parent_commit=root_parent,
             )

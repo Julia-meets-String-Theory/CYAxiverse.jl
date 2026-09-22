@@ -114,6 +114,7 @@ def verify(args: argparse.Namespace) -> int:
         lifecycle_records=lifecycle_records,
         anchor_tag_object=args.anchor_tag_object,
         anchor_tree=args.anchor_tree,
+        anchor_closure_timestamp_utc=args.anchor_closure_timestamp_utc,
         candidate_ref=args.candidate_ref,
         candidate_commit=args.candidate_commit,
         candidate_tree=args.candidate_tree,
@@ -184,6 +185,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--github-release-id", type=int, default=None)
     result.add_argument("--anchor-tag-object")
     result.add_argument("--anchor-tree")
+    result.add_argument("--anchor-closure-timestamp-utc")
     result.add_argument("--candidate-ref")
     result.add_argument("--candidate-commit")
     result.add_argument("--candidate-tree")

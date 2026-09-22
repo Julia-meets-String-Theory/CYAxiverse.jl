@@ -43,6 +43,7 @@ def static_snapshot(
     *,
     verified: bool = True,
     iteration_bindings: list[dict[str, str]] | None = None,
+    source_commit: str = "a" * 40,
 ) -> StaticSnapshot:
     raw = b'target_iteration = "fixture"\n'
     bindings = iteration_bindings or []
@@ -52,7 +53,7 @@ def static_snapshot(
         "source_repository": SOURCE_REPOSITORY,
         "source_ref": "refs/heads/vmm",
         "source_path": "iterations.toml",
-        "source_commit": "a" * 40,
+        "source_commit": source_commit,
         "source_tree": "b" * 40,
         "iterations_toml_sha256": sha256_hex(raw),
         "iteration_ref_bindings": bindings,

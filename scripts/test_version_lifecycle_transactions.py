@@ -132,11 +132,15 @@ class PrincipalClosureFixture:
         self.occupied = occupied
         self.static_epoch = 0
         self.lifecycle_epoch = 1
+        self.now_utc = "2026-09-20T12:34:56Z"
         self.authorization = IssuingAuthority("tx-closure")
         self.owner_authorization_authority = self.authorization
 
     def owner_authorization_ref_for(self, action, target_ref, final_version):
         return self.authorization.issue(action, target_ref, final_version)
+
+    def authorization_now_utc(self):
+        return self.now_utc
 
     def freeze_line(self, intent):
         self.calls.append("freeze")
@@ -235,11 +239,15 @@ class PrincipalReleaseFixture:
         self.manifests: list[dict[str, object]] = []
         self.static_epoch = 0
         self.lifecycle_epoch = 1
+        self.now_utc = "2026-09-20T13:00:00Z"
         self.authorization = IssuingAuthority("tx-release")
         self.owner_authorization_authority = self.authorization
 
     def owner_authorization_ref_for(self, action, target_ref, final_version):
         return self.authorization.issue(action, target_ref, final_version)
+
+    def authorization_now_utc(self):
+        return self.now_utc
 
     def acquire_static_mutation(self, intent):
         self.calls.append("serialize")
@@ -258,7 +266,12 @@ class PrincipalReleaseFixture:
 
     def verify_anchor(self, intent):
         self.calls.append("anchor")
-        return {"ref": ANCHOR_REF, "sha": SHA_B, "tree": TREE}
+        return {
+            "ref": ANCHOR_REF,
+            "sha": SHA_B,
+            "tree": TREE,
+            "closure_timestamp_utc": intent.closure_timestamp_utc,
+        }
 
     def create_candidate(self, intent):
         self.calls.append("candidate")
@@ -574,6 +587,21 @@ class TransactionTests(unittest.TestCase):
         result = run_closure(port, self.closure_intent)
         self.assertEqual(result.reason_code, "OWNER_AUTHORIZATION_UNVERIFIED")
 
+    def test_authorization_expiry_uses_trusted_execution_clock(self):
+        closure_port = PrincipalClosureFixture()
+        closure_port.now_utc = "2026-09-22T00:00:00Z"
+        closure = run_closure(closure_port, self.closure_intent)
+        self.assertEqual(
+            closure.reason_code, "OWNER_AUTHORIZATION_UNVERIFIED"
+        )
+        self.assertNotIn("create-anchor", closure_port.calls)
+
+        release_port = PrincipalReleaseFixture()
+        release_port.now_utc = "2026-09-22T00:00:00Z"
+        release = run_release(release_port, self.release_intent)
+        self.assertEqual(release.reason_code, "OWNER_AUTHORIZATION_UNVERIFIED")
+        self.assertNotIn("candidate", release_port.calls)
+
     def test_release_authorization_scope_failures_precede_candidate_write(self):
         for field, intent in (
             ("repository", replace(self.release_intent, repository="other/repository")),
@@ -591,6 +619,21 @@ class TransactionTests(unittest.TestCase):
         result = run_release(port, self.release_intent)
         self.assertEqual((result.status, result.reason_code),
                          ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
+        self.assertNotIn("candidate", port.calls)
+
+    def test_release_rejects_anchor_closure_timestamp_mismatch(self):
+        port = PrincipalReleaseFixture()
+        port.verify_anchor = lambda intent: {
+            "ref": ANCHOR_REF,
+            "sha": SHA_B,
+            "tree": TREE,
+            "closure_timestamp_utc": "2026-09-20T12:34:57Z",
+        }
+        result = run_release(port, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code),
+            ("INVALID", "ANCHOR_IDENTITY_MISMATCH"),
+        )
         self.assertNotIn("candidate", port.calls)
 
         port = PrincipalReleaseFixture()
