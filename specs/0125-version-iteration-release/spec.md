@@ -473,7 +473,19 @@ Terminal output alone is insufficient.
 The canonical `released` manifest/ref precedes GitHub Release publication and
 is never mutated to add its later ID. A separate immutable publication
 manifest/ref, keyed by the released manifest ID and public tag, records the
-GitHub Release identity, publication time and evidence after publication. Its
+GitHub Release identity, publication time and evidence after publication. The
+publication manifest has `manifest_type = publication`, its own
+content-derived `manifest_id`, the exact `released_manifest_ref/id/digest`,
+canonical `public_tag` and resolved tag commit/tree, `github_release_id`,
+sanitized `github_release_url`, `published_at_utc`,
+`publication_evidence_ref/digest`, and owner-authorization identity. Its
+`publication_id` is deterministic: `pub-` followed by the lowercase SHA-256
+of canonical compact JSON with exactly the sorted keys
+`{\"public_tag\":\"<canonical-tag>\",\"released_manifest_id\":\"<id>\"}`;
+the protected ref is exactly
+`refs/heads/lifecycle/v1/publications/vX.Y.Z/<publication_id>`. A
+publication is valid only when this key, released manifest, canonical tag,
+GitHub Release identity and evidence digest agree. Its
 content-addressed bytes are independently verified. All
 durable public manifest and evidence field values, including certification
 environment data and references, are sanitized public values, approved
@@ -498,6 +510,15 @@ recovery state, never silently accepted as `terminal_consistent`.
 `tag_reconciliation_pending` is likewise nonterminal and requires durable
 intent plus a matching immutable tag. Neither state authorizes another
 candidate, version allocation or public release for the affected identity.
+Exactly one publication manifest/ref may bind a given pair
+(`released_manifest_id`, `public_tag`) and each GitHub Release identity may
+bind exactly one such pair. A second publication ref for the same pair, a
+publication with a different released manifest, tag, tag target, GitHub
+Release identity or evidence digest, or a duplicate key under a different
+ref is INVALID. If the expected publication ref is absent after release
+publication, the state is `publication_reconciliation_pending`; a matching
+create-once retry is idempotent, while a conflicting or uncertain create
+remains BLOCKED and frozen.
 
 ### R-044 — Certification binding and transfer
 
@@ -602,19 +623,19 @@ state without editing its predecessors. State is derived by replaying the
 complete protected ref set; no mutable head, append-only stream or local cache
 is authoritative.
 
-The manifest vocabulary includes version-claimed, reservation-prepared, reservation-opened,
-reservation-aborted, reservation-consumed, candidate-opened,
-candidate-withdrawn, release-intent-prepared, release-intent-aborted and
-released manifests. A later manifest can record a transition but cannot amend
-an earlier manifest. An intent binds the exact candidate, certified subject,
-final version/commit/tree and proposed public tag before tag creation. A
-withdrawal or intent abort is allowed only after proving under the serialized
-exclusion boundary that the public tag does not exist. Type-specific schemas
-require and forbid fields according to their transition. One owner-line DEV
-identity corresponds to one active reservation and actual line head. A
-prepared reservation is globally unavailable. Abort is allowed only with
-proof the matching DEV state was never entered; uncertain creates remain
-unavailable and frozen.
+The manifest vocabulary includes version-claimed, reservation-prepared,
+reservation-opened, reservation-aborted, reservation-consumed,
+candidate-opened, candidate-withdrawn, release-intent-prepared,
+release-intent-aborted, released and publication manifests. A later manifest
+can record a transition but cannot amend an earlier manifest. An intent binds
+the exact candidate, certified subject, final version/commit/tree and proposed
+public tag before tag creation. A withdrawal or intent abort is allowed only
+after proving under the serialized exclusion boundary that the public tag does
+not exist. Type-specific schemas require and forbid fields according to their
+transition. One owner-line DEV identity corresponds to one active reservation
+and actual line head. A prepared reservation is globally unavailable. Abort is
+allowed only with proof the matching DEV state was never entered; uncertain
+creates remain unavailable and frozen.
 
 Every manifest has `schema_version = 1` and the common fields in R-040.
 Allocation manifests also require `transaction_id`,
@@ -631,7 +652,19 @@ certified subject/evidence, final release SHA/tree, version, line and proposed
 tag; release-intent-aborted binds its predecessor and proof that no public tag
 exists. Released requires the R-042 identity set and matching intent/tag.
 Type-specific manifests reject unrelated fields, duplicate or nonexistent
-predecessors and terminal-to-active reversals. The validator publishes a
+predecessors and terminal-to-active reversals. A publication manifest
+additionally requires exactly `publication_id`, `released_manifest_ref`,
+`released_manifest_id`, `released_manifest_digest`, `public_tag`, `tag_commit`,
+`tag_tree`, `github_release_id`, sanitized `github_release_url`,
+`published_at_utc`, `publication_evidence_ref`,
+`publication_evidence_digest`, and `owner_authorization`; its predecessor set
+is exactly one released-manifest ref. It forbids reservation, candidate,
+intent, closure, certification and `previous_main_*` fields, and it is accepted
+only after the matching released manifest and canonical tag exist and the
+GitHub Release identity/evidence is independently observed. It is accepted
+only when its deterministic publication ID/ref key and every bound identity
+agree. A missing required field, extra forbidden field, second predecessor,
+duplicate pair or conflicting identity is INVALID. The validator publishes a
 versioned schema with these exact required/forbidden fields and transition
 predicates; the protected ref set records the schema for replay.
 
@@ -740,8 +773,9 @@ Tests must cover final/prerelease parsing, the principal sentinel, maintenance
 line/version grammar needed to preserve future compatibility, no reuse,
 static/ref races, concurrent create-once writers, content-derived manifest
 identity/timestamps, principal reservation/closure recovery, durable candidate
-lifecycle, certification transfer, complete principal evidence, bidirectional
-tag/manifest/tree consistency and post-tag forward recovery. Maintenance
+lifecycle, certification transfer, complete principal and publication evidence,
+publication-key derivation, bidirectional tag/manifest/tree consistency and
+post-tag forward recovery. Maintenance
 bootstrap/release automation and rare recovery are not Gate A PASS criteria.
 Run focused tests before package, audit, docs, Python-free
 import, workflow and remote CI checks. Record exact commands, results and
@@ -749,7 +783,11 @@ unavailable checks; unobserved checks are not PASS.
 Negative cases include unsupported Julia prereleases/build forms, final
 package-version mismatch at each release tree, uncertain create response,
 duplicate transaction or manifest ID with changed payload, intent without tag,
-tag without released manifest, and mismatched tag/intent/release evidence.
+tag without released manifest, publication without exactly one released
+predecessor, missing publication required fields, a wrong publication key,
+duplicate publication pair/ref, conflicting tag target or GitHub Release
+identity, mismatched evidence digest, and mismatched tag/intent/release
+evidence.
 Include leading-zero package and public-tag aliases, static snapshot field
 omissions/digest mismatch and changed anchor/tag/source under a bound snapshot.
 Test empty/nonempty ref/tag digest preimages, tampered nested digests,

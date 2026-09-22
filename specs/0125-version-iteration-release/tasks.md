@@ -63,8 +63,12 @@ new requirements.
   content-derived `manifest_id` with no global sequence allocator, schema
   version/type, transaction, owner authorization,
   predecessor refs, exact Git SHA/tree identities, timestamps and evidence
-  digests. Represent progression only through immutable predecessor refs and
-  validate required/forbidden fields and no terminal reversal.
+  digests. For `publication`, require exactly one released-manifest
+  predecessor, the released manifest ID/digest, canonical tag commit/tree,
+  GitHub Release identity and publication-evidence digest; derive its `pub-`
+  ID/ref deterministically from the released-manifest ID/tag pair. Represent
+  progression only through immutable predecessor refs and validate
+  required/forbidden fields and no terminal reversal.
 - [ ] Implement complete-ref replay and create-if-absent/CAS semantics.
   Prove exact retry idempotence, conflicting identity INVALID, uncertain
   remote create BLOCKED/frozen, and no mutable ledger fallback.
@@ -81,7 +85,8 @@ new requirements.
 - [ ] Implement principal closure, explicit UTC timestamp, immutable anchor,
   candidate durability, exact-tree certification, main freeze/ancestry
   disposition, immutable intent, protected canonical tag, released manifest
-  and publication-evidence reconciliation.
+  and exactly one deterministic publication manifest/ref with GitHub Release
+  identity/evidence reconciliation.
 - [ ] Preserve tree-bound versus commit-bound certification transfer and
   principal/maintenance SemVer, line and `main` checks.
 - [ ] Record maintenance bootstrap/release and rare recovery as deferred
@@ -91,8 +96,11 @@ new requirements.
 
 - [ ] Run focused canonical-version, static-snapshot, lifecycle-ref,
   create-once, principal closure, certification, tag/manifest/tree and docs
-  routing tests. Assert observable refs, bytes, digests, identities and
-  blocked/INVALID reasons.
+  routing tests. Include publication positive binding and negative pre-release,
+  duplicate, wrong-predecessor, tag-target, GitHub-identity and evidence-digest
+  cases.
+  Assert observable refs, bytes, digests, identities and blocked/INVALID
+  reasons.
 - [ ] Run `git diff --check`, snapshot/diff checks, package tests, audit,
   docs build, Python-free `using CYAxiverse`, bounded Python control-plane
   checks and applicable CI; record exact failures and unavailable checks.

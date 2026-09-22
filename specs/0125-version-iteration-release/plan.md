@@ -71,8 +71,11 @@ Replace mutable event-ledger design with protected create-once lifecycle refs
 and one-manifest commits. Define exact versioned claim/reservation, candidate,
 intent, release and publication namespaces; manifest schema,
 content-derived IDs with no global sequence allocator, predecessor binding,
-owner authorization, exact Git identities and content
-digests; and a complete replayable `lifecycle_ref_snapshot`. Require
+owner authorization, exact Git identities and content digests; and a complete
+replayable `lifecycle_ref_snapshot`. A publication manifest requires exactly
+one released-manifest predecessor, canonical tag commit/tree, GitHub Release
+identity and publication-evidence digest; its `pub-` ID and ref are derived
+from the released-manifest ID/tag pair. Require
 create-if-absent/CAS, no deletion/repointing/force update, global claim
 occupation and no reuse. A proven pre-entry reservation abort permanently
 consumes the reservation identity but can release a not-yet-claimed final
@@ -85,7 +88,8 @@ appends or retries a different payload.
 Implement and test the first principal path: deterministic principal DEV
 reservation, closure/anchor correspondence, candidate durability, exact-tree
 certification, main freeze/ancestry disposition, immutable intent, protected
-canonical tag boundary, release manifest and publication evidence. Preserve
+canonical tag boundary, release manifest and exactly one deterministic
+publication manifest/ref with GitHub Release identity/evidence. Preserve
 owner authorization and forward-only post-tag reconciliation. Maintenance-line
 bootstrap/release and rare recovery are contract-only deferred S2 work in this
 Gate A candidate; no production maintenance automation is claimed here.
@@ -97,7 +101,8 @@ release/publication manifest's tag, commit/tree, package version and digest.
 
 Test canonical final/DEV parsing, strict ref/tag grammar, static and lifecycle
 snapshots, claim/no-reuse races, create-once idempotence/conflict/uncertainty,
-principal closure, certification transfer, tag/manifest/tree consistency and
+principal closure, certification transfer, tag/manifest/tree consistency,
+publication positive binding and duplicate/conflict rejection, and
 release-neutral documentation routing. Run focused checks before package,
 audit, docs, Python-free import and CI checks. Record failures and unavailable
 gates accurately; prior ledger test results remain historical.
@@ -128,7 +133,7 @@ work and Gate B separate.
 | R-028–R-031 | A4 principal closure/reopen path; R-030/R-031 maintenance bootstrap contract reserved for later S2 automation. |
 | R-032–R-035 | A4 durable candidate refs, withdrawal retention, irreversible protected tags and forward-only reconciliation. |
 | R-036–R-039 | A1/A6 grandfathering, package boundary, Gate A/B separation and fresh final-state review. |
-| R-040–R-043 | A3/A4 manifest schema/identity, closure UTC binding, release evidence and bidirectional tag/manifest/publication validation. |
+| R-040–R-043 | A3/A4 manifest schema/identity, closure UTC binding, explicit publication fields/predecessor/key, release evidence and bidirectional tag/manifest/publication validation with duplicate/conflict negatives. |
 | R-045 | A1/A5 bounded Python control-plane checks and Python-free `using CYAxiverse` verification. |
 
 ## Stop and escalation points
