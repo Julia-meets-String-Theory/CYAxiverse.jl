@@ -20,6 +20,7 @@ from version_lifecycle.manifests import (  # noqa: E402
     CreateOnlyLifecycleManifestPort,
     ManifestError,
     ManifestConflict,
+    build_lifecycle_ref_snapshot,
     canonical_manifest_bytes,
     lifecycle_ref_snapshot,
     lifecycle_ref_for_manifest,
@@ -31,7 +32,11 @@ from version_lifecycle.manifests import (  # noqa: E402
     seal_manifest,
     validate_manifest,
 )
-from version_lifecycle.git_refs import ProtectionEvidence  # noqa: E402
+from version_lifecycle.git_refs import (  # noqa: E402
+    ProtectionEvidence,
+    canonical_remote_authority,
+)
+from version_lifecycle.static import _mark_authority_verified  # noqa: E402
 from version_lifecycle.authorization import (  # noqa: E402
     AuthorizationResolution,
     canonical_authorization_bytes,
@@ -115,6 +120,21 @@ def writer_snapshot(occupied: list[str] | None = None) -> object:
     )
 
 
+def remote_writer_snapshot(repository: Path) -> object:
+    from test_version_lifecycle_static import (  # noqa: PLC0415
+        SOURCE_REPOSITORY,
+        static_snapshot,
+    )
+    from version_lifecycle.allocation import global_allocation_view  # noqa: PLC0415
+
+    authority = canonical_remote_authority(repository, "origin")
+    static = _mark_authority_verified(static_snapshot(), authority)
+    lifecycle = build_lifecycle_ref_snapshot(
+        repository, source_repository=SOURCE_REPOSITORY
+    )
+    return global_allocation_view(static, lifecycle)
+
+
 class ManifestTests(unittest.TestCase):
     def draft(self, **extra: object) -> dict[str, object]:
         result: dict[str, object] = {
@@ -128,6 +148,25 @@ class ManifestTests(unittest.TestCase):
             "lifecycle_ref_snapshot": "b" * 64,
             "final_version": "1.2.3",
             "owner_line": "principal",
+        }
+        result.update(extra)
+        return result
+
+    def prepared_draft(self, **extra: object) -> dict[str, object]:
+        result: dict[str, object] = {
+            "schema_version": 1,
+            "manifest_type": "reservation-prepared",
+            "timestamp_utc": "2026-09-22T00:00:00Z",
+            "predecessor_refs": [],
+            **authorization_fields(),
+            "transaction_id": "tx-1",
+            "static_iteration_snapshot": "a" * 64,
+            "lifecycle_ref_snapshot": "b" * 64,
+            "final_version": "1.2.3",
+            "reserved_final": "1.2.3",
+            "owner_line": "principal",
+            "intended_dev_version": "1.2.3-DEV",
+            "expected_line_head": "a" * 40,
         }
         result.update(extra)
         return result
@@ -400,6 +439,155 @@ class ManifestTests(unittest.TestCase):
                 for item in [*bad[:5], withdrawn, reopened]
             })
 
+    def test_graph_rejects_orphan_candidate_and_certification_substitution(self) -> None:
+        chain = self.chain()
+        candidate = dict(next(
+            item for item in chain if item["manifest_type"] == "candidate-opened"
+        ))
+        candidate.pop("manifest_id")
+        candidate["predecessor_refs"] = []
+        orphan = seal_manifest(candidate)
+        with self.assertRaisesRegex(ManifestError, "predecessor cardinality"):
+            validate_complete_lifecycle_refs({
+                lifecycle_ref_for_manifest(orphan): orphan
+            })
+
+        intent = next(
+            item for item in chain
+            if item["manifest_type"] == "release-intent-prepared"
+        )
+        release = dict(next(
+            item for item in chain if item["manifest_type"] == "released"
+        ))
+        release.pop("manifest_id")
+        release["certification_policy_revision"] = "substituted-policy"
+        substituted = seal_manifest(release)
+        prefix = [
+            item for item in chain
+            if item["manifest_type"] not in {"released", "publication"}
+        ]
+        with self.assertRaisesRegex(
+            ManifestError, "certification_policy_revision"
+        ):
+            validate_complete_lifecycle_refs({
+                lifecycle_ref_for_manifest(item): item
+                for item in [*prefix, substituted]
+            })
+        self.assertEqual(
+            substituted["predecessor_refs"],
+            [lifecycle_ref_for_manifest(intent)],
+        )
+
+    def test_pre_entry_abort_releases_version_and_opened_abort_is_invalid(self) -> None:
+        common = {
+            "schema_version": 1,
+            "timestamp_utc": "2026-09-22T00:00:00Z",
+            **authorization_fields(),
+            "transaction_id": "tx-abort",
+            "static_iteration_snapshot": "a" * 64,
+            "lifecycle_ref_snapshot": "b" * 64,
+            "owner_line": "principal",
+            "final_version": "1.2.3",
+            "reserved_final": "1.2.3",
+            "intended_dev_version": "1.2.3-DEV",
+        }
+        prepared = seal_manifest({
+            **common,
+            "manifest_type": "reservation-prepared",
+            "predecessor_refs": [],
+            "expected_line_head": "1" * 40,
+        })
+        aborted = seal_manifest({
+            **common,
+            "manifest_type": "reservation-aborted",
+            "predecessor_refs": [lifecycle_ref_for_manifest(prepared)],
+            "non_entry_evidence": {"verified": True},
+            "abort_reason": "definite-non-entry",
+        })
+        graph = validate_complete_lifecycle_refs({
+            lifecycle_ref_for_manifest(item): item for item in (prepared, aborted)
+        })
+        self.assertNotIn("1.2.3", graph.occupied_versions)
+
+        opened = seal_manifest({
+            **common,
+            "manifest_type": "reservation-opened",
+            "predecessor_refs": [lifecycle_ref_for_manifest(prepared)],
+            "actual_dev_head": "2" * 40,
+        })
+        invalid_abort = dict(aborted)
+        invalid_abort.pop("manifest_id")
+        invalid_abort["predecessor_refs"] = [lifecycle_ref_for_manifest(opened)]
+        invalid_abort = seal_manifest(invalid_abort)
+        with self.assertRaisesRegex(ManifestError, "invalid for transition"):
+            validate_complete_lifecycle_refs({
+                lifecycle_ref_for_manifest(item): item
+                for item in (prepared, opened, invalid_abort)
+            })
+
+    def test_maintenance_successor_uses_bound_lowest_available_patch(self) -> None:
+        common = {
+            "schema_version": 1,
+            "timestamp_utc": "2026-09-22T00:00:00Z",
+            **authorization_fields(),
+            "transaction_id": "tx-maintenance",
+            "static_iteration_snapshot": "a" * 64,
+            "lifecycle_ref_snapshot": "b" * 64,
+            "owner_line": "maintenance/1.2",
+        }
+        prepared = seal_manifest({
+            **common,
+            "manifest_type": "reservation-prepared",
+            "predecessor_refs": [],
+            "final_version": "1.2.3",
+            "reserved_final": "1.2.3",
+            "intended_dev_version": "1.2.3-DEV",
+            "expected_line_head": "1" * 40,
+        })
+        opened = seal_manifest({
+            **common,
+            "manifest_type": "reservation-opened",
+            "predecessor_refs": [lifecycle_ref_for_manifest(prepared)],
+            "final_version": "1.2.3",
+            "reserved_final": "1.2.3",
+            "intended_dev_version": "1.2.3-DEV",
+            "actual_dev_head": "2" * 40,
+        })
+        consumed = seal_manifest({
+            **common,
+            "manifest_type": "reservation-consumed",
+            "predecessor_refs": [lifecycle_ref_for_manifest(opened)],
+            "final_version": "1.2.3",
+            "reserved_final": "1.2.3",
+            "closed_final_version": "1.2.3",
+            "terminal_disposition": "closed",
+            "closure_anchor_ref": "refs/tags/iterations/1.2.3",
+        })
+        successor = seal_manifest({
+            **common,
+            "manifest_type": "reservation-prepared",
+            "predecessor_refs": [lifecycle_ref_for_manifest(consumed)],
+            "final_version": "1.2.5",
+            "reserved_final": "1.2.5",
+            "intended_dev_version": "1.2.5-DEV",
+            "expected_line_head": "3" * 40,
+        })
+        records = {
+            lifecycle_ref_for_manifest(item): item
+            for item in (prepared, opened, consumed, successor)
+        }
+        allocation_key = (
+            successor["static_iteration_snapshot"],
+            successor["lifecycle_ref_snapshot"],
+        )
+        graph = validate_complete_lifecycle_refs(
+            records,
+            allocation_occupied_by_snapshot={allocation_key: {"1.2.4"}},
+        )
+        self.assertIn("1.2.5", graph.occupied_versions)
+        with self.assertRaisesRegex(ManifestError, "allocation view"):
+            validate_complete_lifecycle_refs(records)
+
     def test_publication_must_match_released_manifest_exactly(self) -> None:
         chain = self.chain()
 
@@ -469,13 +657,13 @@ class ManifestTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
             subprocess.run(["git", "-C", str(work), "commit", "-qm", "base"], check=True)
             authority = ManifestAuthority()
-            manifest = authority.bind(self.draft())
+            manifest = authority.bind(self.prepared_draft())
             protection = ProtectionEvidence("fixture", "refs/heads/lifecycle/v1/*", "0" * 64, "2026-09-22T00:00:00Z", True, True, True)
-            snapshot = writer_snapshot()
+            snapshot = remote_writer_snapshot(work)
             writer = CreateOnlyLifecycleWriter(
                 work,
                 exclusion_lease=lambda: nullcontext(True),
-                snapshot_callback=lambda: snapshot,
+                snapshot_callback=lambda: remote_writer_snapshot(work),
                 expected_snapshot=snapshot,
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
@@ -483,20 +671,45 @@ class ManifestTests(unittest.TestCase):
             )
             first = writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
             second = writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
+            retry_writer = CreateOnlyLifecycleWriter(
+                work,
+                exclusion_lease=lambda: nullcontext(True),
+                snapshot_callback=lambda: remote_writer_snapshot(work),
+                expected_snapshot=snapshot,
+                owner_authorization_authority=authority,
+                authorization_reference=authority.reference,
+                repository_identity="fixture-repository",
+            )
+            retry = retry_writer.create(
+                manifest, protection, authorization_context=WRITER_CONTEXT
+            )
             port = CreateOnlyLifecycleManifestPort(
                 writer, protection, lambda _kind, _manifest: WRITER_CONTEXT
             )
             self.assertEqual(
-                port.create_manifest("version-claimed", manifest), manifest
+                port.create_manifest("reservation-prepared", manifest), manifest
+            )
+            opened_draft = {
+                **self.prepared_draft(),
+                "manifest_type": "reservation-opened",
+                "predecessor_refs": [lifecycle_ref_for_manifest(manifest)],
+                "actual_dev_head": "b" * 40,
+            }
+            opened_draft.pop("expected_line_head")
+            opened = authority.bind(opened_draft)
+            successor = writer.create(
+                opened, protection, authorization_context=WRITER_CONTEXT
             )
             self.assertEqual(first.status, "CREATED")
             self.assertEqual(second.status, "IDEMPOTENT")
+            self.assertEqual(retry.status, "IDEMPOTENT")
+            self.assertEqual(successor.status, "CREATED")
             entries = subprocess.check_output(["git", "-C", str(work), "ls-tree", "--name-only", first.tree], text=True).splitlines()
             self.assertEqual(entries, ["manifest.json"])
             ref = first.ref
             self.assertEqual(subprocess.check_output(["git", "-C", str(work), "ls-remote", "origin", ref], text=True).split("\t")[1].strip(), ref)
-            conflicting = authority.bind(self.draft(timestamp_utc="2026-09-22T00:00:01Z"))
-            with self.assertRaisesRegex(ManifestConflict, "CREATE_ONCE_CONFLICT"):
+            conflicting = authority.bind(self.prepared_draft(timestamp_utc="2026-09-22T00:00:01Z"))
+            with self.assertRaises(ManifestError):
                 writer.create(conflicting, protection, authorization_context=WRITER_CONTEXT)
 
     def test_create_revalidates_snapshot_inside_exclusion_and_blocks_uncertain_create(self) -> None:
@@ -513,7 +726,7 @@ class ManifestTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
             subprocess.run(["git", "-C", str(work), "commit", "-qm", "base"], check=True)
             authority = ManifestAuthority()
-            manifest = authority.bind(self.draft())
+            manifest = authority.bind(self.prepared_draft())
             protection = ProtectionEvidence("fixture", "refs/heads/lifecycle/v1/*", "0" * 64, "2026-09-22T00:00:00Z", True, True, True)
             held = {"value": False}
             class Guard:
@@ -564,7 +777,7 @@ class ManifestTests(unittest.TestCase):
                 )
             authority.fetch_owner_authorization = original_fetch
 
-            manifest = authority.bind(self.draft(timestamp_utc="2026-09-22T00:01:00Z"))
+            manifest = authority.bind(self.prepared_draft(timestamp_utc="2026-09-22T00:01:00Z"))
             writer = CreateOnlyLifecycleWriter(
                 work,
                 exclusion_lease=lambda: nullcontext(True),

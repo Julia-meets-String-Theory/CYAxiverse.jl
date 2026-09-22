@@ -419,6 +419,15 @@ def _as_mapping(value: Any, reason: str) -> dict[str, Any]:
     return value
 
 
+def _required_proof(port: Any, name: str, reason: str, *args: Any) -> dict[str, Any]:
+    if not hasattr(port, name):
+        raise TransactionError(reason)
+    proof = _as_mapping(_call(port, name, *args), reason)
+    if proof.get("verified") is not True:
+        raise TransactionError(reason)
+    return proof
+
+
 def _expect_manifest(value: dict[str, Any], manifest_type: str, reason: str) -> dict[str, Any]:
     actual = value.get("manifest_type")
     if actual is not None and actual != manifest_type:
@@ -512,8 +521,9 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
         phase = "serialized"
         view = _bound_view(port, intent)
         evidence["bound_view"] = view
-        if hasattr(port, "verify_closure_target"):
-            _call(port, "verify_closure_target", intent, view)
+        evidence["closure_target_proof"] = _required_proof(
+            port, "verify_closure_target", "CLOSURE_TARGET_UNPROVEN", intent, view
+        )
         phase = "closure_target_verified"
 
         if not hasattr(port, "create_closure_anchor"):
@@ -562,8 +572,13 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
                 or consumption.get("closed_final_version") != final_version
                 or consumption.get("terminal_disposition") != expected_disposition):
             raise TransactionError("OUTGOING_RESERVATION_RECONCILIATION_FAILED")
-        if hasattr(port, "verify_outgoing_terminal"):
-            _call(port, "verify_outgoing_terminal", intent, consumption)
+        evidence["outgoing_terminal_proof"] = _required_proof(
+            port,
+            "verify_outgoing_terminal",
+            "OUTGOING_RESERVATION_RECONCILIATION_FAILED",
+            intent,
+            consumption,
+        )
         evidence["consumption"] = _expect_manifest(consumption, "reservation-consumed", "OUTGOING_RESERVATION_RECONCILIATION_FAILED")
         phase = "outgoing_terminal"
 
@@ -643,11 +658,18 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
             claim, "version-claimed", "VERSION_CLAIM_MISMATCH"
         )
         phase = "version_claimed"
-        if hasattr(port, "verify_closure_correspondence"):
-            _call(
-                port, "verify_closure_correspondence", intent, anchor,
-                consumption, preparation, reopened, activation, claim,
-            )
+        evidence["closure_correspondence"] = _required_proof(
+            port,
+            "verify_closure_correspondence",
+            "CLOSURE_CORRESPONDENCE_UNPROVEN",
+            intent,
+            anchor,
+            consumption,
+            preparation,
+            reopened,
+            activation,
+            claim,
+        )
         phase = "correspondence_verified"
 
         lease_to_release = lease
@@ -815,16 +837,17 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
         evidence["main_freeze"] = freeze
         phase = "main_frozen"
-        if hasattr(port, "verify_principal_interval"):
-            interval = _as_mapping(_call(port, "verify_principal_interval", intent, candidate, freeze), "PRINCIPAL_ANCESTRY_UNPROVEN")
-            commits = interval.get("intervening_commits")
-            disposition = interval.get("disposition")
-            if (interval.get("verified") is not True or not isinstance(commits, list)
-                    or len({row.get("sha") for row in commits if isinstance(row, dict)}) != len(commits)
-                    or any(not isinstance(row, dict) or not _sha(row.get("sha")) or not _sha(row.get("tree")) for row in commits)
-                    or disposition not in {"no_drift", "tree_neutral_included"}):
-                raise TransactionError("PRINCIPAL_ANCESTRY_UNPROVEN")
-            evidence["principal_interval"] = interval
+        if not hasattr(port, "verify_principal_interval"):
+            raise TransactionError("PRINCIPAL_ANCESTRY_UNPROVEN")
+        interval = _as_mapping(_call(port, "verify_principal_interval", intent, candidate, freeze), "PRINCIPAL_ANCESTRY_UNPROVEN")
+        commits = interval.get("intervening_commits")
+        disposition = interval.get("disposition")
+        if (interval.get("verified") is not True or not isinstance(commits, list)
+                or len({row.get("sha") for row in commits if isinstance(row, dict)}) != len(commits)
+                or any(not isinstance(row, dict) or not _sha(row.get("sha")) or not _sha(row.get("tree")) for row in commits)
+                or disposition not in {"no_drift", "tree_neutral_included"}):
+            raise TransactionError("PRINCIPAL_ANCESTRY_UNPROVEN")
+        evidence["principal_interval"] = interval
         phase = "ancestry_verified"
         if not hasattr(port, "promote_principal"):
             raise TransactionError("RELEASE_PORT_UNSUPPORTED")
@@ -835,6 +858,20 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         if (final.get("version", final.get("final_version")) != final_version
                 or not _sha(final_sha) or not _sha(final_tree) or final_tree != candidate_tree):
             raise TransactionError("RELEASE_TREE_MISMATCH")
+        try:
+            previous_main_version = parse_package_version(
+                _final(freeze.get("version"))
+            )
+            main_at_release_version = _final(final.get("main_at_release_version"))
+        except TransactionError as error:
+            raise TransactionError("RELEASE_MAIN_IDENTITY_UNPROVEN") from error
+        if final.get("main_at_release_sha") != final_sha:
+            raise TransactionError("RELEASE_MAIN_IDENTITY_UNPROVEN")
+        if (
+            parse_package_version(final_version) <= previous_main_version
+            or main_at_release_version != final_version
+        ):
+            raise TransactionError("PRINCIPAL_VERSION_REGRESSION")
         evidence["final"] = final
         phase = "final_verified"
 
@@ -964,11 +1001,6 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
                 and isinstance(release_fields["main_at_release_version"], str)
                 and release_fields["evidence_refs"]):
             raise TransactionError("RELEASE_MAIN_IDENTITY_UNPROVEN")
-        try:
-            _final(release_fields["previous_main_version"])
-            _final(release_fields["main_at_release_version"])
-        except TransactionError as error:
-            raise TransactionError("RELEASE_MAIN_IDENTITY_UNPROVEN") from error
         released_payload = _manifest_payload(
             intent, "released", release_fields,
             predecessor_refs=(lifecycle_ref_for_manifest(prepared),))
@@ -981,8 +1013,15 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             if key in released and released[key] != expected:
                 raise TransactionError("RELEASED_MANIFEST_MISMATCH")
         evidence["released"] = _expect_manifest(released, "released", "RELEASED_MANIFEST_MISMATCH")
-        if hasattr(port, "verify_released"):
-            _call(port, "verify_released", intent, released, certification, final)
+        evidence["released_proof"] = _required_proof(
+            port,
+            "verify_released",
+            "RELEASED_STATE_UNPROVEN",
+            intent,
+            released,
+            certification,
+            final,
+        )
         phase = "released_manifest_durable"
 
         if not hasattr(port, "publish_github_release"):
@@ -1035,8 +1074,15 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             port, "publication", publication_payload,
             authorize=lambda kind, target, version: _manifest_authorize(port, intent, kind, target, version)),
             "PUBLICATION_MANIFEST_MISMATCH")
-        if hasattr(port, "verify_terminal"):
-            _call(port, "verify_terminal", intent, released, publication, publication_evidence)
+        evidence["terminal_proof"] = _required_proof(
+            port,
+            "verify_terminal",
+            "TERMINAL_CONSISTENCY_UNPROVEN",
+            intent,
+            released,
+            publication,
+            publication_evidence,
+        )
         phase = "terminal_verified"
 
         lease_to_release = lease

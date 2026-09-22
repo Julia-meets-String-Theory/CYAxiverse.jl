@@ -746,9 +746,9 @@ def _version_values(manifest: Mapping[str, Any]) -> set[str]:
 
 _PREDECESSOR_TYPES: dict[str, frozenset[str]] = {
     "version-claimed": frozenset({"reservation-prepared", "reservation-opened"}),
-    "reservation-prepared": frozenset({"reservation-consumed", "reservation-aborted"}),
+    "reservation-prepared": frozenset({"reservation-consumed"}),
     "reservation-opened": frozenset({"reservation-prepared"}),
-    "reservation-aborted": frozenset({"reservation-prepared", "reservation-opened"}),
+    "reservation-aborted": frozenset({"reservation-prepared"}),
     "reservation-consumed": frozenset({"reservation-opened", "reservation-prepared"}),
     "candidate-opened": frozenset({"version-claimed"}),
     "candidate-withdrawn": frozenset({"candidate-opened"}),
@@ -756,6 +756,19 @@ _PREDECESSOR_TYPES: dict[str, frozenset[str]] = {
     "release-intent-aborted": frozenset({"release-intent-prepared"}),
     "released": frozenset({"release-intent-prepared"}),
     "publication": frozenset({"released"}),
+}
+_PREDECESSOR_COUNTS: dict[str, frozenset[int]] = {
+    "version-claimed": frozenset({1}),
+    "reservation-prepared": frozenset({0, 1}),
+    "reservation-opened": frozenset({1}),
+    "reservation-aborted": frozenset({1}),
+    "reservation-consumed": frozenset({1}),
+    "candidate-opened": frozenset({1}),
+    "candidate-withdrawn": frozenset({1}),
+    "release-intent-prepared": frozenset({1}),
+    "release-intent-aborted": frozenset({1}),
+    "released": frozenset({1}),
+    "publication": frozenset({1}),
 }
 _TERMINAL_TYPES = frozenset(
     {"reservation-aborted", "reservation-consumed", "candidate-withdrawn", "release-intent-aborted", "released", "publication"}
@@ -802,6 +815,8 @@ def _normalise_graph_records(
 
 def validate_lifecycle_graph(
     records: Mapping[str, Any] | Iterable[Mapping[str, Any]],
+    *,
+    allocation_occupied_by_snapshot: Mapping[tuple[str, str], Iterable[str]] | None = None,
 ) -> LifecycleGraph:
     """Replay every protected ref and reject an incomplete or contradictory graph.
 
@@ -851,6 +866,10 @@ def validate_lifecycle_graph(
     for ref, manifest in by_ref.items():
         kind = str(manifest["manifest_type"])
         predecessors = manifest["predecessor_refs"]
+        if len(predecessors) not in _PREDECESSOR_COUNTS[kind]:
+            raise ManifestError(
+                f"{kind} has invalid predecessor cardinality"
+            )
         allowed = _PREDECESSOR_TYPES[kind]
         seen: set[str] = set()
         for predecessor in predecessors:
@@ -873,7 +892,14 @@ def validate_lifecycle_graph(
             ):
                 raise ManifestError("terminal-to-active lifecycle reversal")
             children[predecessor].append(ref)
-            _validate_transition_identity(previous, manifest, previous_kind, kind, predecessor)
+            _validate_transition_identity(
+                previous,
+                manifest,
+                previous_kind,
+                kind,
+                predecessor,
+                allocation_occupied_by_snapshot=allocation_occupied_by_snapshot,
+            )
     for predecessor, child_refs in children.items():
         if len(child_refs) <= 1:
             continue
@@ -928,8 +954,16 @@ def validate_lifecycle_graph(
             if key in active_reservations:
                 raise ManifestError("duplicate active reservation identity")
             active_reservations[key] = ref
+    pre_entry_aborted = {
+        predecessor
+        for manifest in by_ref.values()
+        if manifest["manifest_type"] == "reservation-aborted"
+        for predecessor in manifest["predecessor_refs"]
+    }
     occupied: set[str] = set()
-    for manifest in by_ref.values():
+    for ref, manifest in by_ref.items():
+        if ref in pre_entry_aborted:
+            continue
         occupied.update(_version_values(manifest))
     return LifecycleGraph(by_ref, tuple(sorted(occupied)))
 
@@ -940,6 +974,8 @@ def _validate_transition_identity(
     previous_kind: str,
     current_kind: str,
     predecessor_ref: str,
+    *,
+    allocation_occupied_by_snapshot: Mapping[tuple[str, str], Iterable[str]] | None,
 ) -> None:
     """Check lineage identity in addition to the predecessor type."""
 
@@ -959,12 +995,40 @@ def _validate_transition_identity(
     if previous_kind == "reservation-consumed" and current_kind == "reservation-prepared":
         previous_version = parse_package_version(str(previous["final_version"]))
         current_version = parse_package_version(str(current["final_version"]))
-        if (
-            current_version.major != previous_version.major
-            or current_version.minor != previous_version.minor
-            or current_version.patch != previous_version.patch + 1
-        ):
-            raise ManifestError("next principal reservation is not the exact sentinel")
+        owner_line = str(current["owner_line"])
+        if owner_line == "principal":
+            if (
+                current_version.major != previous_version.major
+                or current_version.minor != previous_version.minor
+                or current_version.patch != previous_version.patch + 1
+            ):
+                raise ManifestError("next principal reservation is not the exact sentinel")
+        else:
+            match = re.fullmatch(r"maintenance/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", owner_line)
+            if match is None:
+                raise ManifestError("maintenance reservation owner line is invalid")
+            line = (int(match.group(1)), int(match.group(2)))
+            key = (
+                str(current["static_iteration_snapshot"]),
+                str(current["lifecycle_ref_snapshot"]),
+            )
+            if allocation_occupied_by_snapshot is None or key not in allocation_occupied_by_snapshot:
+                raise ManifestError("maintenance allocation view is unavailable")
+            occupied = {
+                parse_package_version(value).final.canonical
+                for value in allocation_occupied_by_snapshot[key]
+            }
+            patch = previous_version.patch + 1
+            while f"{line[0]}.{line[1]}.{patch}" in occupied:
+                patch += 1
+            if (
+                current_version.major,
+                current_version.minor,
+                current_version.patch,
+            ) != (line[0], line[1], patch):
+                raise ManifestError(
+                    "next maintenance reservation is not the lowest available patch"
+                )
     if current_kind == "version-claimed" and previous_kind.startswith("reservation"):
         same("final_version")
     if current_kind == "candidate-opened":
@@ -989,8 +1053,17 @@ def _validate_transition_identity(
             "final_version", "release_line", "public_tag", "final_release_sha",
             "final_release_tree", "anchor_ref", "anchor_sha", "anchor_tree",
             "certification_binding", "certification_subject_sha", "certification_subject_tree",
+            "certification_policy_revision", "certification_harness_revision",
+            "certification_environment", "certification_evidence_refs",
         ):
             same(field)
+        marker = object()
+        if previous.get("certification_transfer_evidence", marker) != current.get(
+            "certification_transfer_evidence", marker
+        ):
+            raise ManifestError(
+                "released changes predecessor certification_transfer_evidence"
+            )
 
 
 # Descriptive aliases make the complete-ref requirement explicit to callers.
@@ -1140,33 +1213,65 @@ class CreateResult:
     manifest_id: str
 
 
-def _snapshot_fingerprint(snapshot: Any) -> bytes:
+def _snapshot_components(snapshot: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     static_snapshot = getattr(snapshot, "static_snapshot", None)
     lifecycle_snapshot = getattr(snapshot, "lifecycle_ref_snapshot", None)
-    if static_snapshot is not None or lifecycle_snapshot is not None:
-        from .static import _has_verified_authority
+    from .static import _has_verified_authority
 
-        if (
-            static_snapshot is None
-            or lifecycle_snapshot is None
-            or not _has_verified_authority(static_snapshot)
-            or not _has_verified_lifecycle_authority(lifecycle_snapshot)
-            or static_snapshot._repository_authority
-            != lifecycle_snapshot._repository_authority
-        ):
-            raise ManifestError("COMBINED_AUTHORITY_SNAPSHOT_UNVERIFIED")
-        data = {
-            "static_snapshot": static_snapshot.to_dict(),
-            "lifecycle_ref_snapshot": lifecycle_snapshot.to_dict(),
-        }
-    elif isinstance(snapshot, LifecycleRefSnapshot):
-        data = snapshot.to_dict()
-    else:
-        raise ManifestError("COMBINED_AUTHORITY_SNAPSHOT_REQUIRED")
+    if (
+        static_snapshot is None
+        or lifecycle_snapshot is None
+        or not _has_verified_authority(static_snapshot)
+        or not _has_verified_lifecycle_authority(lifecycle_snapshot)
+        or static_snapshot._repository_authority
+        != lifecycle_snapshot._repository_authority
+    ):
+        raise ManifestError("COMBINED_AUTHORITY_SNAPSHOT_UNVERIFIED")
+    return static_snapshot.to_dict(), lifecycle_snapshot.to_dict()
+
+
+def _snapshot_fingerprint(snapshot: Any) -> bytes:
+    static_data, lifecycle_data = _snapshot_components(snapshot)
+    data = {
+        "static_snapshot": static_data,
+        "lifecycle_ref_snapshot": lifecycle_data,
+    }
     try:
         return canonical_json(data)
     except (TypeError, ValueError) as error:
         raise ManifestError("lifecycle snapshot callback returned noncanonical data") from error
+
+
+def _snapshot_fingerprint_from_data(
+    static_data: Mapping[str, Any], lifecycle_data: Mapping[str, Any]
+) -> bytes:
+    try:
+        return canonical_json({
+            "static_snapshot": dict(static_data),
+            "lifecycle_ref_snapshot": dict(lifecycle_data),
+        })
+    except (TypeError, ValueError) as error:
+        raise ManifestError("COMBINED_AUTHORITY_SNAPSHOT_REQUIRED")
+
+
+def _successor_snapshot_fingerprint(
+    snapshot: Any,
+    binding: Mapping[str, str],
+    occupied_versions: Iterable[str],
+) -> bytes:
+    static_data, lifecycle_data = _snapshot_components(snapshot)
+    bindings = [dict(item) for item in lifecycle_data["lifecycle_ref_bindings"]]
+    if any(item["ref"] == binding["ref"] for item in bindings):
+        raise ManifestError("CREATE_ONCE_CONFLICT")
+    bindings.append(dict(binding))
+    bindings.sort(key=lambda item: item["ref"])
+    successor = dict(lifecycle_data)
+    successor["lifecycle_ref_bindings"] = bindings
+    successor["lifecycle_ref_set_digest"] = sha256_hex(canonical_json(bindings))
+    successor["occupied_versions"] = sorted(set(occupied_versions))
+    successor.pop("lifecycle_snapshot_digest", None)
+    successor["lifecycle_snapshot_digest"] = sha256_hex(canonical_json(successor))
+    return _snapshot_fingerprint_from_data(static_data, successor)
 
 
 class CreateOnlyLifecycleWriter:
@@ -1228,21 +1333,9 @@ class CreateOnlyLifecycleWriter:
         except Exception as error:
             raise GitIdentityError("EXCLUSION_UNAVAILABLE") from error
 
-    @staticmethod
-    def _revalidate_snapshot(
-        callback: Callable[[], Any] | None,
-        expected: Any,
-        previous: bytes | None,
-    ) -> bytes | None:
-        if callback is None:
-            return previous
-        value = callback()
-        current = _snapshot_fingerprint(value)
-        if expected is not None and current != _snapshot_fingerprint(expected):
-            raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
-        if previous is not None and current != previous:
-            raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
-        return current
+    def _snapshot(self) -> tuple[Any, bytes]:
+        value = self.snapshot_callback()
+        return value, _snapshot_fingerprint(value)
 
     def _fetch_remote_ref(self, ref: str) -> None:
         _git(self.repository, "fetch", "--no-tags", "--no-write-fetch-head", self.remote, ref)
@@ -1259,6 +1352,65 @@ class CreateOnlyLifecycleWriter:
         output = _git(self.repository, "ls-remote", "--refs", self.remote, ref)
         records = parse_remote_ref_advertisements(output)
         return records.get(ref)
+
+    def _complete_graph_records(self) -> dict[str, dict[str, Any]]:
+        output = _git(
+            self.repository,
+            "ls-remote",
+            "--refs",
+            self.remote,
+            f"{LIFECYCLE_REF_PREFIX}*",
+        )
+        advertisements = parse_remote_ref_advertisements(output)
+        records: dict[str, dict[str, Any]] = {}
+        for ref, commit in sorted(advertisements.items()):
+            raw, tree = self._read_remote_manifest(ref, commit)
+            try:
+                manifest = json.loads(
+                    raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys
+                )
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+                raise ManifestError("remote lifecycle manifest is invalid") from error
+            records[ref] = {
+                "ref": ref,
+                "manifest": manifest,
+                "commit": commit,
+                "tree": tree,
+                "manifest_id": manifest.get("manifest_id"),
+                "manifest_digest": sha256_hex(raw),
+            }
+        final_output = _git(
+            self.repository,
+            "ls-remote",
+            "--refs",
+            self.remote,
+            f"{LIFECYCLE_REF_PREFIX}*",
+        )
+        if parse_remote_ref_advertisements(final_output) != advertisements:
+            raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
+        validate_lifecycle_graph(records)
+        return records
+
+    @staticmethod
+    def _snapshot_matches_records(snapshot: Any, records: Mapping[str, Mapping[str, Any]]) -> None:
+        _static_data, lifecycle_data = _snapshot_components(snapshot)
+        graph = validate_lifecycle_graph(records)
+        bindings = sorted(
+            [
+                {
+                    key: record[key]
+                    for key in (
+                        "ref", "commit", "tree", "manifest_id", "manifest_digest"
+                    )
+                }
+                for record in records.values()
+            ],
+            key=lambda item: item["ref"],
+        )
+        if lifecycle_data["lifecycle_ref_bindings"] != bindings:
+            raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
+        if lifecycle_data["occupied_versions"] != list(graph.occupied_versions):
+            raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
 
     def _find_manifest_id_elsewhere(self, manifest_identity: str, expected_ref: str) -> None:
         output = _git(self.repository, "ls-remote", "--refs", self.remote, f"{LIFECYCLE_REF_PREFIX}*")
@@ -1315,26 +1467,50 @@ class CreateOnlyLifecycleWriter:
             ):
                 raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
 
-        callback = self.snapshot_callback
         snapshot = self.expected_snapshot
         with self._governed_boundary():
-            fingerprint = self._revalidate_snapshot(callback, snapshot, None)
+            observed_snapshot, fingerprint = self._snapshot()
             verify_authorization()
-            current = self.remote_ref(ref)
+            records = self._complete_graph_records()
+            self._snapshot_matches_records(observed_snapshot, records)
+            current_record = records.get(ref)
+            current = None if current_record is None else str(current_record["commit"])
             commit: str | None = None
             tree: str | None = None
             if current is not None:
                 existing_raw, existing_tree = self._read_remote_manifest(ref, current)
                 if existing_raw == raw:
-                    fingerprint = self._revalidate_snapshot(callback, snapshot, fingerprint)
+                    graph = validate_lifecycle_graph(records)
+                    expected = _snapshot_fingerprint(snapshot)
+                    if fingerprint != expected:
+                        binding = {
+                            key: str(current_record[key])
+                            for key in (
+                                "ref", "commit", "tree", "manifest_id",
+                                "manifest_digest",
+                            )
+                        }
+                        allowed = _successor_snapshot_fingerprint(
+                            snapshot, binding, graph.occupied_versions
+                        )
+                        if fingerprint != allowed:
+                            raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
+                    self.expected_snapshot = observed_snapshot
                     return CreateResult("IDEMPOTENT", ref, current, existing_tree, checked["manifest_id"])
                 raise ManifestConflict("CREATE_ONCE_CONFLICT")
+            if fingerprint != _snapshot_fingerprint(snapshot):
+                raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
+            proposed_records = dict(records)
+            proposed_records[ref] = {"ref": ref, "manifest": checked}
+            validate_lifecycle_graph(proposed_records)
             self._find_manifest_id_elsewhere(checked["manifest_id"], ref)
             commit = make_manifest_commit(self.repository, checked, message=f"lifecycle: {checked['manifest_type']}\n")
             tree = _resolve_tree(self.repository, commit)
             # Revalidate immediately before the create-once remote operation;
             # the surrounding governed exclusion remains held until reread.
-            fingerprint = self._revalidate_snapshot(callback, snapshot, fingerprint)
+            before_push_snapshot, before_push_fingerprint = self._snapshot()
+            if before_push_fingerprint != fingerprint:
+                raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
             verify_authorization()
             try:
                 _git(self.repository, "push", "--porcelain", f"--force-with-lease={ref}:", self.remote, f"{commit}:{ref}")
@@ -1343,19 +1519,49 @@ class CreateOnlyLifecycleWriter:
                 if observed is None:
                     raise CreateOutcomeUncertain("CREATE_ONCE_OUTCOME_UNCERTAIN") from error
                 existing_raw, existing_tree = self._read_remote_manifest(ref, observed)
-                fingerprint = self._revalidate_snapshot(callback, snapshot, fingerprint)
                 if existing_raw == raw:
+                    records = self._complete_graph_records()
+                    graph = validate_lifecycle_graph(records)
+                    after_snapshot, after_fingerprint = self._snapshot()
+                    self._snapshot_matches_records(after_snapshot, records)
+                    binding = {
+                        "ref": ref,
+                        "commit": observed,
+                        "tree": existing_tree,
+                        "manifest_id": checked["manifest_id"],
+                        "manifest_digest": sha256_hex(raw),
+                    }
+                    if after_fingerprint != _successor_snapshot_fingerprint(
+                        before_push_snapshot, binding, graph.occupied_versions
+                    ):
+                        raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
+                    self.expected_snapshot = after_snapshot
                     return CreateResult("IDEMPOTENT", ref, observed, existing_tree, checked["manifest_id"])
                 raise ManifestConflict("CREATE_ONCE_CONFLICT") from error
             observed = self.remote_ref(ref)
             if observed is None:
                 raise CreateOutcomeUncertain("CREATE_ONCE_OUTCOME_UNCERTAIN")
             existing_raw, existing_tree = self._read_remote_manifest(ref, observed)
-            fingerprint = self._revalidate_snapshot(callback, snapshot, fingerprint)
             if observed != commit or existing_raw != raw or existing_tree != tree:
                 if existing_raw != raw:
                     raise ManifestConflict("CREATE_ONCE_CONFLICT")
                 raise CreateOutcomeUncertain("CREATE_ONCE_OUTCOME_UNCERTAIN")
+            records = self._complete_graph_records()
+            graph = validate_lifecycle_graph(records)
+            after_snapshot, after_fingerprint = self._snapshot()
+            self._snapshot_matches_records(after_snapshot, records)
+            binding = {
+                "ref": ref,
+                "commit": commit,
+                "tree": tree,
+                "manifest_id": checked["manifest_id"],
+                "manifest_digest": sha256_hex(raw),
+            }
+            if after_fingerprint != _successor_snapshot_fingerprint(
+                before_push_snapshot, binding, graph.occupied_versions
+            ):
+                raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
+            self.expected_snapshot = after_snapshot
             return CreateResult("CREATED", ref, commit, tree, checked["manifest_id"])
 
 

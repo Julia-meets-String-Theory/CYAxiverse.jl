@@ -157,6 +157,7 @@ class PrincipalClosureFixture:
 
     def verify_closure_target(self, intent, view):
         self.calls.append("verify-closure")
+        return {"verified": True}
 
     def create_closure_anchor(self, intent):
         self.calls.append("anchor")
@@ -181,6 +182,10 @@ class PrincipalClosureFixture:
         self.manifests.append(result)
         return result
 
+    def verify_outgoing_terminal(self, intent, consumption):
+        self.calls.append("outgoing-terminal")
+        return {"verified": True}
+
     def reopen_dev(self, intent, preparation):
         self.calls.append("reopen")
         return {"version": preparation["intended_dev_version"], "head": SHA_B}
@@ -193,6 +198,7 @@ class PrincipalClosureFixture:
         self.calls.append("correspondence")
         if self.fail == "correspondence":
             raise RuntimeError("correspondence unavailable")
+        return {"verified": True}
 
     def unfreeze_line(self, token):
         self.calls.append("unfreeze")
@@ -316,10 +322,15 @@ class PrincipalReleaseFixture:
     def publication_evidence_target(self, intent, released, publication):
         return "evidence/publication.json"
 
+    def verify_released(self, intent, released, certification, final):
+        self.calls.append("verify-released")
+        return {"verified": True}
+
     def verify_terminal(self, intent, released, publication, evidence):
         self.calls.append("terminal")
         if self.fail == "terminal":
             raise RuntimeError("terminal proof unavailable")
+        return {"verified": True}
 
     def unfreeze_main(self, token):
         self.calls.append("unfreeze-main")
@@ -328,6 +339,30 @@ class PrincipalReleaseFixture:
 class NoTagProtectionReleaseFixture(PrincipalReleaseFixture):
     def __getattribute__(self, name):
         if name == "verify_public_tag_ruleset":
+            raise AttributeError(name)
+        return super().__getattribute__(name)
+
+
+class MissingClosureProofFixture(PrincipalClosureFixture):
+    def __init__(self, missing: str):
+        super().__init__()
+        self.missing = missing
+
+    def __getattribute__(self, name):
+        missing = object.__getattribute__(self, "__dict__").get("missing")
+        if name not in {"missing", "__dict__"} and name == missing:
+            raise AttributeError(name)
+        return super().__getattribute__(name)
+
+
+class MissingReleaseProofFixture(PrincipalReleaseFixture):
+    def __init__(self, missing: str):
+        super().__init__()
+        self.missing = missing
+
+    def __getattribute__(self, name):
+        missing = object.__getattribute__(self, "__dict__").get("missing")
+        if name not in {"missing", "__dict__"} and name == missing:
             raise AttributeError(name)
         return super().__getattribute__(name)
 
@@ -537,6 +572,42 @@ class TransactionTests(unittest.TestCase):
         self.assertLess(port.calls.index("tag"), port.calls.index("manifest:released"))
         self.assertLess(port.calls.index("manifest:released"), port.calls.index("manifest:publication"))
         self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze-main"])
+
+    def test_principal_release_rejects_version_regression_before_tag(self):
+        port = PrincipalReleaseFixture()
+        port.freeze_main = lambda intent: {
+            "token": "main-freeze",
+            "sha": SHA_B,
+            "version": "0.4.0",
+        }
+        result = run_release(port, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "PRINCIPAL_VERSION_REGRESSION", True),
+        )
+        self.assertNotIn("tag", port.calls)
+
+    def test_mandatory_closure_and_release_proofs_fail_closed(self):
+        closure = run_closure(
+            MissingClosureProofFixture("verify_closure_correspondence"),
+            self.closure_intent,
+        )
+        self.assertEqual(
+            closure.reason_code, "CLOSURE_CORRESPONDENCE_UNPROVEN"
+        )
+        self.assertTrue(closure.frozen)
+
+        for missing, reason in (
+            ("verify_principal_interval", "PRINCIPAL_ANCESTRY_UNPROVEN"),
+            ("verify_released", "RELEASED_STATE_UNPROVEN"),
+            ("verify_terminal", "TERMINAL_CONSISTENCY_UNPROVEN"),
+        ):
+            with self.subTest(missing=missing):
+                port = MissingReleaseProofFixture(missing)
+                result = run_release(port, self.release_intent)
+                self.assertEqual(result.reason_code, reason)
+                self.assertTrue(result.frozen)
+                self.assertNotIn("unfreeze-main", port.calls)
 
     def test_unsupported_certification_binding_blocks_before_tag(self):
         port = PrincipalReleaseFixture(binding="content-bound")
