@@ -151,6 +151,10 @@ This specification does not authorize:
 
 ## Fixed conventions and invariants
 
+The owner-approved evidence model is **B+A**: B proves mathematical correctness
+with an exact/high-precision phase; A preserves the existing Float64 regression
+witness. Neither substitutes for the other.
+
 1. Phases are measured in cycles.
 2. Potential arguments remain `2π(Qθ+δ)`.
 3. `Q` has one row per instanton in this helper.
@@ -259,6 +263,49 @@ The two references have different purposes and MUST NOT be conflated:
 The `1e-20` value is a numerical refinement tolerance, not a claim that the
 Float64-origin input equals exact decimal `2/5` to that accuracy.
 
+### R-004B — Exact/high-precision mathematical-correctness fixture
+
+In addition to the preserved Float64 replay witness in R-004/R-006, the
+implementation SHALL add a **separate** exact/high-precision fixture that
+constructs the phase without any Float64 round-trip.
+
+Freeze the B fixture as:
+
+```text
+Q = reshape([1,1], 2, 1)
+L = [[2,-1],[1,1]]
+theta = [BigFloat("0")]
+phase = [BigFloat("0.4"), BigFloat("0")]
+k_low = BigFloat("0.10")
+k_high = BigFloat("0.15")
+precision_bits = 256
+bisection/refinement stopping tolerance = 1e-20
+analytic acceptance tolerance = 1e-20
+```
+
+The exact/high-precision phase represents `p = 2/5` directly. Its analytic
+zero-mode root is
+
+```math
+k_{\phi}
+=
+\frac{1}{2}\log_{10}\!\left(\frac{1+\sqrt{5}}{2}\right).
+```
+
+The B fixture SHALL evaluate the corrected high-precision Hessian/root path and
+satisfy
+
+```text
+abs(k_B - k_phi) <= 1e-20
+```
+
+without constructing `phase`, `theta`, or the bracket endpoints through
+Float64 values.
+
+This fixture is **mathematical-correctness evidence only**. It does not replace
+or redefine the A/Float64 fixture, which remains the sole G2
+historical/regression replay witness.
+
 ### R-005 — Historical/corrected scaling relation
 
 For identical valid inputs, a test-only reconstruction of the historical helper
@@ -358,7 +405,8 @@ tests/evidence.
 
 **Acceptance:**
 
-- R-001 through R-005 pass;
+- R-001 through R-005 pass, including both the B exact/high-precision oracle
+  fixture and the A typed-input regression/oracle checks;
 - diff is confined to approved helper/test/spec/evidence scope;
 - no P0 evidence is modified.
 
@@ -392,18 +440,20 @@ Required evidence includes:
 
 1. the identity `4π² I₂` fixture;
 2. one general nontrivial analytic closed-form fixture;
-3. the typed-input analytic root
+3. the distinct exact/high-precision B fixture with `p=2/5` constructed without
+   Float64 round-trip and `abs(k_B-k_phi) <= 1e-20`;
+4. the typed-input analytic root
    `k64 = 0.5*log10(-2*cos(2*pi*p64))` for the frozen Float64 phase;
-4. the exact-decimal golden-ratio cross-check
+5. the exact-decimal golden-ratio cross-check
    `k_phi = 0.5*log10(phi)` with absolute acceptance `1e-12`;
-5. historical-vs-corrected factor-two and sign invariance;
-6. the exact R-006 replay witness, using the frozen inputs and source identities
+6. historical-vs-corrected factor-two and sign invariance;
+7. the exact R-006 replay witness, using the frozen inputs and source identities
    above;
-7. focused package tests containing the phase/volume-detuning testset;
-8. `scripts/agent_verify.py diff-check`;
-9. broader package verification as practical, with the known pre-correction
+8. focused package tests containing the phase/volume-detuning testset;
+9. `scripts/agent_verify.py diff-check`;
+10. broader package verification as practical, with the known pre-correction
    Hessian failure treated as the target defect rather than hidden baseline;
-10. exact candidate independent Scientific/Numerical Review.
+11. exact candidate independent Scientific/Numerical Review.
 
 Unobserved checks are not PASS.
 
