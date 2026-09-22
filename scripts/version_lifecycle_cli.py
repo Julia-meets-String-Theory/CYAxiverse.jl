@@ -1,29 +1,16 @@
 #!/usr/bin/env python3
 """Read-only Gate A lifecycle readiness CLI.
 
-The CLI deliberately has no writer operation. It resolves both canonical
-authorities in an isolated temporary bare repository, then reports a stable
-JSON object that can be consumed by CI or a release operator. ``--dry-run`` is
-accepted explicitly and is always true in the report; the command never adds
-objects, creates refs, commits events, or changes the inspected checkout.
-
-Examples::
-
-    python scripts/version_lifecycle_cli.py readiness \
-        --repo /path/to/fixture --dry-run --principal-closed 0.2.0
-    python scripts/version_lifecycle_cli.py snapshot --repo /path/to/fixture
-    python scripts/version_lifecycle_cli.py events --repo /path/to/fixture
-
-Exit status is 0 for a ready result, 2 for a structured blocked result, and 1
-for invalid CLI input or an unexpected implementation error.  JSON is always
-written to stdout, including errors.
+The command resolves the static iteration source and the complete immutable
+``refs/heads/lifecycle/v1/*`` namespace in an isolated bare repository. It
+never creates lifecycle objects, changes a ref, or performs a production
+release. The ``lifecycle`` command reports the complete immutable ref snapshot.
 """
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import fields, is_dataclass
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -31,7 +18,6 @@ import subprocess
 import sys
 import tempfile
 from typing import Any, Mapping
-
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
 if str(SCRIPT_ROOT) not in sys.path:
@@ -45,19 +31,11 @@ from version_lifecycle import (  # noqa: E402
     select_principal_sentinel,
     static_snapshot,
 )
+from version_lifecycle.manifests import LifecycleRefSnapshot, lifecycle_ref_snapshot  # noqa: E402
 from version_lifecycle.static import StaticSnapshot  # noqa: E402
 from version_lifecycle.certification import is_safe_public_value  # noqa: E402
 from version_lifecycle.git_refs import validate_remote  # noqa: E402
-from version_lifecycle.writer import (  # noqa: E402
-    BranchUnavailable,
-    LedgerHead,
-    ReleaseEventWriter,
-    WriterError,
-)
 
-
-DEFAULT_EVENT_BRANCH = "release-events"
-DEFAULT_EVENT_STREAM = "release-events.jsonl"
 DEFAULT_REMOTE = "origin"
 
 
@@ -71,8 +49,6 @@ class JsonArgumentParser(argparse.ArgumentParser):
 
 
 def _jsonable(value: Any) -> Any:
-    """Convert lifecycle dataclasses and version values to JSON primitives."""
-
     if hasattr(value, "canonical"):
         return str(value.canonical)
     if isinstance(value, StaticSnapshot):
@@ -80,23 +56,18 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, GlobalAllocationView):
         return {
             "status": value.status,
-            "event_head_commit": value.event_head_commit,
+            "lifecycle_snapshot_digest": value.lifecycle_snapshot_digest,
             "static_snapshot_digest": value.snapshot_digest,
             "static_occupied_versions": sorted(value.static_occupied),
-            "mutable_occupied_versions": sorted(value.mutable_occupied),
+            "lifecycle_occupied_versions": sorted(value.lifecycle_occupied),
             "occupied_versions": sorted(value.occupied),
         }
+    if isinstance(value, LifecycleRefSnapshot):
+        return value.to_dict()
     if isinstance(value, BlockedResult):
-        return {
-            "status": value.status,
-            "reason_code": value.reason_code,
-            "detail": value.detail,
-        }
+        return {"status": value.status, "reason_code": value.reason_code, "detail": value.detail}
     if is_dataclass(value):
-        return {
-            field.name: _jsonable(getattr(value, field.name))
-            for field in fields(value)
-        }
+        return {field.name: _jsonable(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
@@ -104,22 +75,7 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def _redact_paths(value: Any, paths: tuple[str, ...]) -> Any:
-    if isinstance(value, str):
-        for path in paths:
-            if path:
-                value = value.replace(path, "<repository>")
-        return value
-    if isinstance(value, Mapping):
-        return {key: _redact_paths(item, paths) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_redact_paths(item, paths) for item in value]
-    return value
-
-
 def _sanitize_report(value: Any, *, key: str | None = None) -> Any:
-    """Keep transport identities and untrusted diagnostics out of CLI JSON."""
-
     if isinstance(value, Mapping):
         return {name: _sanitize_report(item, key=str(name)) for name, item in value.items()}
     if isinstance(value, list):
@@ -128,45 +84,33 @@ def _sanitize_report(value: Any, *, key: str | None = None) -> Any:
         if key == "remote":
             return "configured"
         if key in {"detail", "local_read_detail"}:
-            # Exception text can contain a configured URL, credentials, or a
-            # machine path.  The stable reason_code carries the failure.
             return "detail omitted; use reason_code"
-        if key in {"advertised_ref", "advertised_head"}:
-            return "<redacted>"
-        if key in {
-            "selector", "branch", "stream_path", "remote_ref",
-        } and (
-            "@" in value
-            or "://" in value
-            or not is_safe_public_value(value, key=key)
-        ):
+        if key in {"selector", "remote_ref"} and ("@" in value or "://" in value or not is_safe_public_value(value, key=key)):
             return "<redacted>"
     return value
 
 
-def _write(
-    result: Mapping[str, Any],
-    *,
-    exit_code: int = 0,
-    redact_paths: tuple[str, ...] = (),
-) -> int:
-    """Emit one deterministic JSON object and return the desired exit code."""
-
-    payload = _sanitize_report(_redact_paths(_jsonable(result), redact_paths))
+def _write(result: Mapping[str, Any], *, exit_code: int = 0, redact_paths: tuple[str, ...] = ()) -> int:
+    payload = _sanitize_report(_jsonable(result))
+    for path in redact_paths:
+        payload = _redact_paths(payload, path)
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     return exit_code
 
 
+def _redact_paths(value: Any, path: str) -> Any:
+    if isinstance(value, str):
+        return value.replace(path, "<repository>")
+    if isinstance(value, Mapping):
+        return {key: _redact_paths(item, path) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_paths(item, path) for item in value]
+    return value
+
+
 def _blocked(reason_code: str, detail: str, **fields: Any) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "status": "BLOCKED",
-        "reason_code": reason_code,
-        "detail": detail,
-    }
+    result: dict[str, Any] = {"status": "BLOCKED", "reason_code": reason_code, "detail": detail}
     result.update(fields)
-    # Callers may attach a READY component report (for example the combined
-    # allocation view); the enclosing result remains blocked.
-    result["status"] = "BLOCKED"
     return result
 
 
@@ -178,137 +122,33 @@ def _static_report(args: argparse.Namespace) -> tuple[dict[str, Any], StaticSnap
         remote=args.authority_remote,
     )
     if isinstance(result, BlockedResult):
-        return _blocked(
-            result.reason_code,
-            result.detail,
-            selector=args.selector,
-            remote=args.remote,
-        ), None
+        return _blocked(result.reason_code, result.detail, selector=args.selector, remote=args.remote), None
     assert isinstance(result, StaticSnapshot)
-    return {
-        "status": "READY",
-        "snapshot_digest": result.snapshot_digest,
-        "source_commit": result.source_commit,
-        "source_tree": result.source_tree,
-        "source_repository": result.source_repository,
-        "canonical_static_iteration_source": result.canonical_source,
-        "iterations_toml_sha256": result.file_digest,
-        "ref_set_digest": result.ref_set_digest,
-        "tag_set_digest": result.tag_set_digest,
-        "occupied_versions": list(result.occupied_versions),
-        "iteration_ref_bindings": list(result.ref_bindings),
-        "public_tag_bindings": list(result.tag_bindings),
-    }, result
+    return {"status": "READY", **result.to_dict()}, result
 
 
-def _event_report(args: argparse.Namespace) -> tuple[dict[str, Any], LedgerHead | None]:
-    """Read the remote event authority and retain local state as diagnostics.
-
-    The local branch is a checkout cache.  The advertised remote object is
-    fetched into an isolated temporary bare repository so the inspected
-    checkout's refs, object database, index, and FETCH_HEAD are never changed.
-    """
-
-    if (
-        args.event_branch != DEFAULT_EVENT_BRANCH
-        or args.event_stream != DEFAULT_EVENT_STREAM
-    ):
-        return _blocked(
-            "EVENT_AUTHORITY_NONCANONICAL",
-            "allocation event authority must use release-events/release-events.jsonl",
-            branch=args.event_branch,
-            stream_path=args.event_stream,
-        ), None
-
+def _lifecycle_report(args: argparse.Namespace, source_repository: str | None = None) -> tuple[dict[str, Any], LifecycleRefSnapshot | None]:
     try:
-        writer = ReleaseEventWriter(
-            args.authority_repo,
-            branch=args.event_branch,
-            stream_path=args.event_stream,
-            remote=args.authority_remote,
+        snapshot = lifecycle_ref_snapshot(
+            args.authority_repo, remote=args.authority_remote, source_repository=source_repository or args.source_repository,
         )
-        remote_ref = f"refs/heads/{args.event_branch}"
-        try:
-            head = writer.read_remote_head()
-        except BranchUnavailable:
-            return _blocked(
-                "EVENT_AUTHORITY_UNAVAILABLE",
-                f"remote {args.remote!r} does not advertise {remote_ref}",
-                remote=args.remote,
-                remote_ref=remote_ref,
-                branch=args.event_branch,
-                stream_path=args.event_stream,
-            ), None
-        except (WriterError, ValueError) as error:
-            return _blocked(
-                "EVENT_AUTHORITY_DIVERGENT",
-                f"remote event stream is invalid: {error}",
-                remote=args.remote,
-                remote_ref=remote_ref,
-                stream_path=args.event_stream,
-            ), None
-
-        # Read the local cache through the writer's public read path when it
-        # exists.  A stale cache is diagnostic only; allocation binds to the
-        # remote head above.  A malformed local cache cannot make a valid
-        # remote authority appear valid or change its bytes.
-        local_writer = ReleaseEventWriter(
-            args.repo,
-            branch=args.event_branch,
-            stream_path=args.event_stream,
-        )
-        local_head: LedgerHead | None = None
-        local_error: str | None = None
-        if local_writer.branch_exists():
-            try:
-                local_head = local_writer.read_head()
-            except (BranchUnavailable, OSError, ValueError, RuntimeError) as error:
-                local_error = str(error)
-        report: dict[str, Any] = {
-            "status": "READY",
-            "authority": "remote",
-            "remote": args.remote,
-            "remote_ref": remote_ref,
-            "branch": args.event_branch,
-            "stream_path": args.event_stream,
-            "head_commit": head.commit,
-            "remote_head_commit": head.commit,
-            "stream_sha256": hashlib.sha256(head.raw).hexdigest(),
-            "event_count": len(head.events),
-            "event_ids": [event["event_id"] for event in head.events],
-            "event_types": [event["event_type"] for event in head.events],
-            "local_head_commit": None if local_head is None else local_head.commit,
-            "local_head_stale": local_head is not None and local_head.commit != head.commit,
-        }
-        if local_error is not None:
-            report["local_read_status"] = "INVALID"
-            report["local_read_detail"] = local_error
-        elif local_head is None:
-            report["local_read_status"] = "ABSENT"
-        else:
-            report["local_read_status"] = "READY"
-        return report, head
-    except (BranchUnavailable, OSError, ValueError, RuntimeError, WriterError) as error:
-        return _blocked(
-            "EVENT_AUTHORITY_INVALID",
-            str(error),
-            remote=args.remote,
-            remote_ref=f"refs/heads/{args.event_branch}",
-            branch=args.event_branch,
-            stream_path=args.event_stream,
-        ), None
+    except (OSError, ValueError, RuntimeError) as error:
+        return _blocked("LIFECYCLE_REF_SNAPSHOT_UNAVAILABLE", str(error), remote=args.remote, namespace="refs/heads/lifecycle/v1/*"), None
+    return {
+        "status": "READY", "authority": "remote", "remote": args.remote,
+        "namespace": "refs/heads/lifecycle/v1/*",
+        "lifecycle_snapshot_digest": snapshot.snapshot_digest,
+        "lifecycle_ref_set_digest": snapshot.ref_set_digest,
+        "occupied_versions": list(snapshot.occupied_versions),
+        "ref_bindings": list(snapshot.ref_bindings),
+    }, snapshot
 
 
 def _remote_transport(repository: str | Path, remote: str) -> str:
-    """Resolve a configured remote without changing the inspected checkout."""
-
     root = Path(repository).resolve()
     configured = subprocess.run(
         ["git", "-C", str(root), "config", "--get", f"remote.{remote}.url"],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+        check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     endpoint = configured.stdout.strip() if configured.returncode == 0 else remote
     if "://" not in endpoint and not re.match(r"^[^/@:]+@[^/:]+:", endpoint):
@@ -320,185 +160,95 @@ def _remote_transport(repository: str | Path, remote: str) -> str:
 
 
 def _isolated_authority_repository(args: argparse.Namespace, root: Path) -> None:
-    """Create the disposable object database used by all authority reads."""
-
-    subprocess.run(
-        ["git", "init", "--bare", "--quiet", str(root)],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    subprocess.run(["git", "init", "--bare", "--quiet", str(root)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     endpoint = _remote_transport(args.repo, args.remote)
-    subprocess.run(
-        ["git", "-C", str(root), "remote", "add", "authority", endpoint],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    subprocess.run(["git", "-C", str(root), "remote", "add", "authority", endpoint], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     args.authority_repo = str(root)
     args.authority_remote = "authority"
 
 
-def _allocation_report(
-    args: argparse.Namespace,
-    snapshot: StaticSnapshot,
-    head: LedgerHead,
-) -> dict[str, Any]:
-    view = global_allocation_view(snapshot, head)
+def _allocation_report(args: argparse.Namespace, snapshot: StaticSnapshot, lifecycle: LifecycleRefSnapshot) -> dict[str, Any]:
+    view = global_allocation_view(snapshot, lifecycle)
     if isinstance(view, BlockedResult):
         return _blocked(view.reason_code, view.detail)
-
     report: dict[str, Any] = _jsonable(view)
-    principal_closed = args.principal_closed
-    maintenance_closed = args.maintenance_closed
-    if principal_closed is not None and maintenance_closed is not None:
-        return _blocked(
-            "ALLOCATION_INPUT_AMBIGUOUS",
-            "provide only one of --principal-closed and --maintenance-closed",
-            **report,
-        )
-    if maintenance_closed is not None and args.maintenance_line is None:
-        return _blocked(
-            "MAINTENANCE_LINE_REQUIRED",
-            "--maintenance-closed requires --maintenance-line",
-            **report,
-        )
-    if args.maintenance_line is not None and maintenance_closed is None:
-        return _blocked(
-            "MAINTENANCE_CLOSED_VERSION_REQUIRED",
-            "--maintenance-line requires --maintenance-closed",
-            **report,
-        )
-
-    if principal_closed is not None:
-        decision = select_principal_sentinel(principal_closed, snapshot, head)
-    elif maintenance_closed is not None:
-        decision = select_maintenance_version(
-            args.maintenance_line,
-            maintenance_closed,
-            snapshot,
-            head,
-        )
+    if args.principal_closed is not None and args.maintenance_closed is not None:
+        return _blocked("ALLOCATION_INPUT_AMBIGUOUS", "provide only one allocation input", **report)
+    if args.maintenance_closed is not None and args.maintenance_line is None:
+        return _blocked("MAINTENANCE_LINE_REQUIRED", "--maintenance-closed requires --maintenance-line", **report)
+    if args.maintenance_line is not None and args.maintenance_closed is None:
+        return _blocked("MAINTENANCE_CLOSED_VERSION_REQUIRED", "--maintenance-line requires --maintenance-closed", **report)
+    if args.principal_closed is not None:
+        decision = select_principal_sentinel(args.principal_closed, snapshot, lifecycle)
+    elif args.maintenance_closed is not None:
+        decision = select_maintenance_version(args.maintenance_line, args.maintenance_closed, snapshot, lifecycle)
     else:
         report["allocation_status"] = "NOT_REQUESTED"
         return report
-
-    decision_data = _jsonable(decision)
-    report["allocation"] = decision_data
+    report["allocation"] = _jsonable(decision)
     if decision.status != "AVAILABLE":
-        report["status"] = "BLOCKED"
-        report["reason_code"] = decision.reason_code
-        report["detail"] = decision.detail
+        report.update(status="BLOCKED", reason_code=decision.reason_code, detail=decision.detail)
     return report
 
 
 def _run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    base: dict[str, Any] = {
-        "command": args.command,
-        "dry_run": True,
-    }
+    base: dict[str, Any] = {"command": args.command, "dry_run": True}
     static_result, snapshot = _static_report(args)
     if static_result.get("status") == "READY":
-        # This is the stable source identity from the validated snapshot, not
-        # the local checkout path.
         base["source_repository"] = static_result["source_repository"]
     if args.command == "snapshot":
         base["static_snapshot"] = static_result
-        base["status"] = static_result["status"]
         if static_result["status"] == "BLOCKED":
-            base.update(
-                reason_code=static_result["reason_code"],
-                detail=static_result["detail"],
-            )
+            base.update(status="BLOCKED", reason_code=static_result["reason_code"], detail=static_result["detail"])
             return base, 2
+        base["status"] = "READY"
         return base, 0
-
-    # A full readiness/allocation result cannot use an unverified static
-    # authority.  Stop before touching the event branch so the reported
-    # reason identifies the first failed gate.
-    if args.command in {"readiness", "allocation"} and snapshot is None:
+    if snapshot is None:
         base["static_snapshot"] = static_result
-        base["event_head"] = {
-            "status": "NOT_CHECKED",
-            "reason_code": static_result["reason_code"],
-        }
-        base["status"] = "BLOCKED"
-        base["reason_code"] = static_result["reason_code"]
-        base["detail"] = static_result["detail"]
+        base["lifecycle_snapshot"] = {"status": "NOT_CHECKED", "reason_code": static_result.get("reason_code")}
+        base.update(status="BLOCKED", reason_code=static_result.get("reason_code"), detail=static_result.get("detail", ""))
         return base, 2
-
-    event_result, head = _event_report(args)
-    if args.command == "events":
-        base["event_head"] = event_result
-        base["status"] = event_result["status"]
-        if event_result["status"] == "BLOCKED":
-            base.update(
-                reason_code=event_result["reason_code"],
-                detail=event_result["detail"],
-            )
+    lifecycle_result, lifecycle = _lifecycle_report(args, static_result.get("source_repository"))
+    base["static_snapshot"] = static_result
+    base["lifecycle_snapshot"] = lifecycle_result
+    if args.command == "lifecycle":
+        base["status"] = lifecycle_result["status"]
+        if lifecycle_result["status"] == "BLOCKED":
+            base.update(reason_code=lifecycle_result["reason_code"], detail=lifecycle_result["detail"])
             return base, 2
         return base, 0
-
-    base["static_snapshot"] = static_result
-    base["event_head"] = event_result
-    if head is None:
-        base["status"] = "BLOCKED"
-        base["reason_code"] = event_result["reason_code"]
-        base["detail"] = event_result["detail"]
+    if lifecycle is None:
+        base.update(status="BLOCKED", reason_code=lifecycle_result["reason_code"], detail=lifecycle_result["detail"])
         return base, 2
-
-    allocation = _allocation_report(args, snapshot, head)
+    allocation = _allocation_report(args, snapshot, lifecycle)
     base["allocation_view"] = allocation
     base["status"] = allocation.get("status", "READY")
     if base["status"] == "BLOCKED":
-        base["reason_code"] = allocation.get("reason_code")
-        base["detail"] = allocation.get("detail", "")
+        base.update(reason_code=allocation.get("reason_code"), detail=allocation.get("detail", ""))
         return base, 2
     return base, 0
 
 
 def _add_common_options(parser: argparse.ArgumentParser) -> None:
-    # Suppress child-parser defaults so options supplied before the subcommand
-    # are retained.  ``main`` installs defaults after parsing.
     absent = argparse.SUPPRESS
-    parser.add_argument("--repo", "--repository", default=absent, help="Git checkout to inspect")
-    parser.add_argument("--remote", default=absent, help="remote used for static authority")
-    parser.add_argument(
-        "--source-repository",
-        default=absent,
-        help="stable source identity in the snapshot",
-    )
-    parser.add_argument(
-        "--selector",
-        default=absent,
-        help="canonical static source selector",
-    )
-    parser.add_argument("--event-branch", "--branch", default=absent)
-    parser.add_argument("--event-stream", "--stream-path", default=absent)
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=absent,
-        help="explicitly request the read-only Gate A mode (the only supported mode)",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        default=absent,
-        help="accepted for callers that select machine-readable output explicitly",
-    )
+    parser.add_argument("--repo", "--repository", default=absent)
+    parser.add_argument("--remote", default=absent)
+    parser.add_argument("--source-repository", default=absent)
+    parser.add_argument("--selector", default=absent)
+    parser.add_argument("--dry-run", action="store_true", default=absent)
+    parser.add_argument("--json", action="store_true", default=absent)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = JsonArgumentParser(description=__doc__)
     _add_common_options(parser)
     subparsers = parser.add_subparsers(dest="command", required=False)
-    for name in ("readiness", "snapshot", "events", "allocation"):
+    for name in ("readiness", "snapshot", "lifecycle", "allocation"):
         child = subparsers.add_parser(name, help=f"read {name} lifecycle state")
         _add_common_options(child)
-        child.add_argument("--principal-closed", metavar="VERSION")
-        child.add_argument("--maintenance-line", metavar="LINE")
-        child.add_argument("--maintenance-closed", metavar="VERSION")
+        child.add_argument("--principal-closed")
+        child.add_argument("--maintenance-line")
+        child.add_argument("--maintenance-closed")
     return parser
 
 
@@ -506,56 +256,36 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
-        defaults = {
-            "repo": ".",
-            "remote": DEFAULT_REMOTE,
-            "source_repository": None,
-            "selector": "refs/heads/vmm:iterations.toml",
-            "event_branch": DEFAULT_EVENT_BRANCH,
-            "event_stream": DEFAULT_EVENT_STREAM,
-            "dry_run": True,
-            "json": True,
-        }
+        defaults = {"repo": ".", "remote": DEFAULT_REMOTE, "source_repository": None, "selector": "refs/heads/vmm:iterations.toml", "dry_run": True, "json": True}
         for name, value in defaults.items():
             if not hasattr(args, name):
                 setattr(args, name, value)
         args.remote = validate_remote(args.remote)
         if args.command is None:
             args.command = "readiness"
-            # Root-only invocation has no allocation inputs.
-            args.principal_closed = None
-            args.maintenance_line = None
-            args.maintenance_closed = None
+            args.principal_closed = args.maintenance_line = args.maintenance_closed = None
         with tempfile.TemporaryDirectory(prefix="cyax-gate-a-readonly-") as temporary:
             _isolated_authority_repository(args, Path(temporary) / "authority.git")
             result, exit_code = _run(args)
     except SystemExit:
         raise
-    except (OSError, ValueError, RuntimeError, TypeError) as error:
+    except CliArgumentError as error:
         result = {
-            "command": getattr(locals().get("args", None), "command", "readiness"),
+            "command": "readiness",
             "dry_run": True,
             "status": "BLOCKED",
-            "reason_code": "CLI_INPUT_INVALID",
+            "reason_code": "CLI_ARGUMENT_INVALID",
             "detail": str(error),
         }
+        exit_code = 2
+    except (OSError, ValueError, RuntimeError, TypeError) as error:
+        result = {"command": "readiness", "dry_run": True, "status": "BLOCKED", "reason_code": "CLI_INPUT_INVALID", "detail": str(error)}
         exit_code = 1
     redact: list[str] = []
-    if "args" in locals():
-        raw_repository = str(getattr(args, "repo", ""))
-        if raw_repository:
-            repository_path = Path(raw_repository)
-            if repository_path.is_absolute():
-                redact.append(raw_repository)
-            redact.append(str(repository_path.resolve()))
-        raw_remote = str(getattr(args, "remote", ""))
-        if raw_remote.startswith("/"):
-            redact.extend((raw_remote, str(Path(raw_remote).resolve())))
-    return _write(
-        result,
-        exit_code=exit_code,
-        redact_paths=tuple(sorted(set(redact), key=len, reverse=True)),
-    )
+    raw_repository = str(getattr(locals().get("args", None), "repo", ""))
+    if raw_repository:
+        redact.extend((raw_repository, str(Path(raw_repository).resolve())))
+    return _write(result, exit_code=exit_code, redact_paths=tuple(sorted(set(redact), key=len, reverse=True)))
 
 
 if __name__ == "__main__":

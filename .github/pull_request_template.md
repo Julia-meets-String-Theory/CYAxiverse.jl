@@ -43,7 +43,7 @@ actions.
 | --- | --- | --- |
 | R-... / S0 check | `test/...` / validation artifact / command | PASS / FAIL / BLOCKED |
 
-For release work, include the verified ref/event context, exact candidate and
+For release work, include the verified ref/manifest context, exact candidate and
 certification tree identities, and the release evidence location. Documentation
 deployment must be selected from that context without a release-time tracked
 source edit.

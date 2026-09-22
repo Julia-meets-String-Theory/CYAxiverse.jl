@@ -2,9 +2,7 @@ name: Documentation
 
 on:
   push:
-    branches:
-      - vmm
-    # Legacy v-0.1 is retained but is not a canonical future release tag.
+    branches: [vmm]
     tags: 'v*.*.*'
     paths:
       - 'docs/src/**'
@@ -41,100 +39,82 @@ jobs:
         with:
           version: '1.12'
       - uses: julia-actions/cache@v2
-      - name: Fetch canonical release event authority
-        if: github.event_name != 'pull_request'
+      - name: Fetch immutable lifecycle authority
+        if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')
         run: |
-          EVENT_STREAM="$RUNNER_TEMP/release-events.jsonl"
-          git fetch --no-tags origin \
-            refs/heads/main:refs/remotes/origin/main
-          if git ls-remote --exit-code origin refs/heads/release-events >/dev/null 2>&1; then
-            git fetch --no-tags origin \
-              refs/heads/release-events:refs/remotes/origin/release-events
-            python3 - "$EVENT_STREAM" <<'PY'
-          import pathlib
-          import subprocess
-          import sys
-
-          sys.path.insert(0, "scripts")
-          from version_lifecycle.writer import ReleaseEventWriter
-
-          head = subprocess.check_output(
-              ["git", "rev-parse", "refs/remotes/origin/release-events"],
-              text=True,
-          ).strip()
-          raw = subprocess.check_output(
-              ["git", "show", f"{head}:release-events.jsonl"]
-          )
-          ReleaseEventWriter(".")._verify_stream_topology(head, raw)
-          pathlib.Path(sys.argv[1]).write_bytes(raw)
-          PY
-          else
-            release_events_status=$?
-            if [ "$release_events_status" -ne 2 ]; then
-              echo "release-events authority probe failed" >&2
-              exit "$release_events_status"
-            fi
-            if [ "$GITHUB_REF" = "refs/heads/vmm" ]; then
-              TAG_ADVERTISEMENT="$RUNNER_TEMP/canonical-tags.remote"
-              if git ls-remote --refs origin 'refs/tags/v*' \
-                  > "$TAG_ADVERTISEMENT" 2>/dev/null; then
-                :
-              else
-                tag_probe_status=$?
-                echo "canonical public tag enumeration failed" >&2
-                exit "$tag_probe_status"
-              fi
-              python3 - "$TAG_ADVERTISEMENT" <<'PY'
-          import pathlib
-          import sys
-
-          sys.path.insert(0, "scripts")
-          from version_lifecycle.git_refs import parse_remote_ref_advertisements
-          from version_lifecycle.release import is_canonical_public_tag
-
-          records = parse_remote_ref_advertisements(
-              pathlib.Path(sys.argv[1]).read_bytes()
-          )
-          if any(
-              ref.startswith("refs/tags/")
-              and is_canonical_public_tag(ref.removeprefix("refs/tags/"))
-              for ref in records
-          ):
-              raise SystemExit(
-                  "A canonical public tag exists before release-events bootstrap"
-              )
-          PY
-              : > "$EVENT_STREAM"
-            else
-              echo "release-events authority is required for tag documentation" >&2
-              exit 1
-            fi
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          git fetch --no-tags origin 'refs/heads/lifecycle/v1/*:refs/remotes/origin/lifecycle/v1/*'
+          RELEASE_REF="refs/remotes/origin/lifecycle/v1/releases/${GITHUB_REF_NAME}"
+          if ! git show "$RELEASE_REF:manifest.json" > "$RUNNER_TEMP/released-manifest.json"; then
+            echo "matching immutable released manifest is unavailable" >&2
+            exit 2
           fi
-      - name: Verify canonical release event for tag documentation
+          python3 - "$RUNNER_TEMP/released-manifest.json" "$RUNNER_TEMP/publication-ref" <<'PY'
+          import json
+          import pathlib
+          import sys
+          from hashlib import sha256
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.manifests import publication_ref
+          released = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          pathlib.Path(sys.argv[2]).write_text(
+              publication_ref(released["public_tag"], released["manifest_id"])
+          )
+          PY
+          PUBLICATION_REF="refs/remotes/origin/$(cat "$RUNNER_TEMP/publication-ref" | sed 's#refs/heads/##')"
+          if ! git show "$PUBLICATION_REF:manifest.json" > "$RUNNER_TEMP/publication-manifest.json"; then
+            echo "matching immutable publication manifest is unavailable" >&2
+            exit 2
+          fi
+          python3 - "$RUNNER_TEMP/publication-manifest.json" "$RUNNER_TEMP/publication-evidence-ref" <<'PY'
+          import json
+          import pathlib
+          import sys
+          publication = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          evidence_ref = publication["publication_evidence_ref"]
+          parts = pathlib.PurePosixPath(evidence_ref).parts
+          if (
+              not isinstance(evidence_ref, str)
+              or not parts
+              or evidence_ref.startswith("/")
+              or any(part in {"", ".", ".."} for part in parts)
+              or "\\" in evidence_ref
+              or ":" in evidence_ref
+          ):
+              raise SystemExit("unsafe publication evidence ref")
+          pathlib.Path(sys.argv[2]).write_text(evidence_ref)
+          PY
+          PUBLICATION_EVIDENCE_REF="$(cat "$RUNNER_TEMP/publication-evidence-ref")"
+          if ! git show "$GITHUB_REF:$PUBLICATION_EVIDENCE_REF" > "$RUNNER_TEMP/publication-evidence"; then
+            echo "immutable publication evidence is unavailable from the release tag" >&2
+            exit 2
+          fi
+      - name: Verify immutable release context for tag documentation
         if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')
         env:
-          EVENT_STREAM: ${{ runner.temp }}/release-events.jsonl
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 docs/verify_release_context.py \
-            --event-stream "$EVENT_STREAM" \
+            --manifest "$RUNNER_TEMP/released-manifest.json" \
+            --publication-manifest "$RUNNER_TEMP/publication-manifest.json" \
+            --publication-evidence "$RUNNER_TEMP/publication-evidence" \
             --tag-ref "$GITHUB_REF" \
             --tag "$GITHUB_REF_NAME" \
             --tag-sha "$(git rev-parse "${GITHUB_REF}^{commit}")" \
             --tag-tree "$(git rev-parse "${GITHUB_REF}^{tree}")" \
-            --tag-version "$(git show "${GITHUB_REF}:Project.toml" | sed -n 's/^version = "\(.*\)"/\1/p')" \
+            --tag-version "$(git show "${GITHUB_REF}:Project.toml" | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
             --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
-            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = "\(.*\)"/\1/p')" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --github-release-id "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id)" \
             --github-env "$GITHUB_ENV"
-      - name: Verify stable context for development documentation
+      - name: Verify development documentation context
         if: github.ref == 'refs/heads/vmm'
-        env:
-          EVENT_STREAM: ${{ runner.temp }}/release-events.jsonl
         run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
           python3 docs/verify_release_context.py \
             --stable-only \
-            --event-stream "$EVENT_STREAM" \
             --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
-            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = "\(.*\)"/\1/p')" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
             --github-env "$GITHUB_ENV"
       - name: Install dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
@@ -143,20 +123,13 @@ jobs:
         env:
           DOCS_DEPLOY: 'false'
           CYAX_DOCS_REF: ${{ github.ref }}
-          CYAX_DOCS_EVENT_STATUS: 'preview'
+          CYAX_DOCS_MANIFEST_STATUS: 'preview'
         run: julia --project=docs/ docs/make.jl
       - name: Build and deploy documentation
         if: github.event_name != 'pull_request'
         env:
           DOCS_DEPLOY: 'true'
           CYAX_DOCS_REF: ${{ github.ref }}
-          # vmm is a protected, verified development ref. A canonical tag
-          # must receive verified release-event identities from the release
-          # verifier before this deployment can proceed. The verifier must
-          # export CYAX_DOCS_RELEASE_LINE, CYAX_DOCS_RELEASE_VERSION,
-          # CYAX_DOCS_RELEASE_SHA, CYAX_DOCS_PRINCIPAL_MAIN_SHA, and (when
-          # appropriate) CYAX_DOCS_STABLE. Missing evidence fails closed in
-          # docs/make.jl.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
         run: julia --project=docs/ docs/make.jl

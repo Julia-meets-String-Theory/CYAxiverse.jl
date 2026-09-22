@@ -58,11 +58,14 @@ consumed versions are never reused. A reservation with proven pre-entry abort
 may be made available again under the recovery rules; uncertain outcomes
 remain unavailable.
 
-Gate A builds and tests this lifecycle machinery with synthetic evidence. It
-does not adopt a development version, assign real historical designations,
-close an iteration, create a public tag, publish a release, or reconcile
-`vmm -> main`. A stable target identity and reviewed package-impact statement
-are recorded before later release work assigns a final version.
+Gate A builds and tests the immutable-manifest primitives and first principal
+lifecycle path with synthetic evidence. Maintenance bootstrap/release and
+rare-recovery automation remain deferred to a later approved S2 gate; this
+README records that contract but does not claim those paths are implemented.
+Gate A does not adopt a development version, assign real historical
+designations, close an iteration, create a public tag, publish a release, or
+reconcile `vmm -> main`. A stable target identity and reviewed package-impact
+statement are recorded before later release work assigns a final version.
 
 The core package does not require Python, CYTools, Docker, a geometry database,
 or a graphical backend. Existing-data workflows require a separately supplied

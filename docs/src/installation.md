@@ -64,16 +64,19 @@ available again under the recovery rules, while uncertain outcomes remain
 unavailable.
 
 Documentation is generated from release-neutral source. The verified ref and
-canonical release event select the development, immutable versioned, or stable
+canonical release/publication manifests select the development, immutable
+versioned, or stable
 documentation channel. A principal tag can advance `stable` only when its
 certified release commit equals current principal `main`; a maintenance tag
 does not advance `stable`. A public release does not require editing this file
 or other tracked documentation source.
 
-Gate A tests this routing and lifecycle machinery with synthetic evidence. It
-keeps the package version unchanged and does not perform adoption, historical
-designation, production `-DEV`, closure, tag creation, publication, or
-`vmm -> main` reconciliation.
+Gate A tests immutable-manifest routing and the first principal lifecycle path
+with synthetic evidence. Maintenance bootstrap/release and rare-recovery
+automation are deferred to a later approved S2 gate and are not claimed by
+this guide. Gate A keeps the package version unchanged and does not perform
+adoption, historical designation, production `-DEV`, closure, tag creation,
+publication, or `vmm -> main` reconciliation.
 
 ## Data-backed workflows
 

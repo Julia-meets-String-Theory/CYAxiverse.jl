@@ -228,7 +228,7 @@ class StaticMutationLease:
 class CompositeStaticMutationLease:
     """Hold the local static lock and the external allocation exclusion.
 
-    A lifecycle controller keeps this lease for the complete static/event
+    A lifecycle controller keeps this lease for the complete static/lifecycle
     mutation sequence.  Nested Git ref helpers acquire only a reentrant local
     lease when this same exclusion is already governed by an outer composite
     lease; the external authority therefore remains held until the outer

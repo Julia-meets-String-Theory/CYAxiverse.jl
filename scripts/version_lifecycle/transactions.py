@@ -1,901 +1,980 @@
-"""Guarded closure and maintenance-bootstrap lifecycle orchestration.
+"""Fail-closed Gate A orchestration over immutable lifecycle manifests.
 
-The port performs repository mutations and returns durable proofs. This
-controller checks their correspondence and never releases a freeze after an
-uncertain or incomplete transaction. A production port must use verified live
-protections; fixture ports are used for Gate A tests.
+This module is deliberately a coordinator, not a Git or GitHub client. A
+typed port owns protected create-once writes and returns durable identity
+evidence. The coordinator checks that evidence, keeps the relevant freeze
+held across every irreversible transition, and only releases it after the
+complete correspondence has been verified.
+
+The old append-only event stream is not an authority here. The durable
+transition names accepted by this module are the hyphenated manifest types
+from the versioned schema.
 """
 
 from __future__ import annotations
 
-import re
+from dataclasses import dataclass, field
 from datetime import datetime
-from dataclasses import asdict, dataclass, field
+import re
 from typing import Any, Protocol
 
-from .certification import is_safe_public_value
-from .events import RELEASE_INTENT_BINDING_FIELDS, validate_event
-from .git_refs import GitIdentityError, ProtectionEvidence
-from .versions import MAX_VERSION_COMPONENT, maintenance_line, parse_package_version
+from .codec import sha256_hex
+from .authorization import AuthorizationError, verify_owner_authorization
+from .manifests import (
+    canonical_manifest_bytes,
+    lifecycle_ref_for_manifest,
+    seal_manifest,
+    validate_manifest,
+)
+from .versions import parse_package_version
 
 
-UTC = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-SHA = re.compile(r"^[0-9a-f]{40}$")
-
-
-def _public_identity(value: Any, *, key: str) -> bool:
-    """Return whether an identity is nonempty and safe for public evidence."""
-
-    return (
-        isinstance(value, str)
-        and bool(value)
-        and is_safe_public_value(value, key=key)
-    )
-
-
-def _git_sha(value: Any) -> bool:
-    """Return whether a value is a complete lowercase Git object identity."""
-
-    return isinstance(value, str) and SHA.fullmatch(value) is not None
+UTC_RE = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+PUBLIC_MANIFEST_TYPES = frozenset(
+    {
+        "version-claimed", "reservation-prepared", "reservation-opened",
+        "reservation-aborted", "reservation-consumed", "candidate-opened",
+        "candidate-withdrawn", "release-intent-prepared",
+        "release-intent-aborted", "released", "publication",
+    }
+)
 
 
 class TransactionError(RuntimeError):
+    """A known fail-closed transaction outcome."""
+
     def __init__(self, reason_code: str, detail: str = "") -> None:
         super().__init__(detail or reason_code)
         self.reason_code = reason_code
+        self.detail = detail
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AllocationView:
+    """The two immutable snapshots used by a serialized allocation."""
+
     static_snapshot_digest: str
-    event_head: str
-    occupied_versions: frozenset[str]
+    lifecycle_snapshot_digest: str
+    occupied: frozenset[str] = field(default_factory=frozenset)
+
+    @property
+    def occupied_versions(self) -> frozenset[str]:
+        return self.occupied
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ClosureIntent:
-    transaction_id: str
-    line: str
+    """Inputs for the first principal closure/reopen transaction."""
+
+    owner_line: str
     final_version: str
-    outgoing_reserved_final: str
-    expected_line_head: str
     closure_timestamp_utc: str
+    outgoing_reserved_final: str | None = None
+    transaction_id: str = ""
+    expected_line_head: str = ""
+    static_snapshot_digest: str = ""
+    lifecycle_snapshot_digest: str = ""
+    owner_authorization: str = ""
+    owner_authorization_ref: str = ""
+    owner_authorization_digest: str = ""
+    repository: str = ""
+    owner_authority: Any = None
+    predecessor_refs: tuple[str, ...] = ()
+
+    @property
+    def line(self) -> str:
+        return self.owner_line
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BootstrapIntent:
-    transaction_id: str
-    line: str
-    approved_base_sha: str
-    expected_main_sha: str
-    expected_main_version: str
+    """A maintenance bootstrap request, retained as an explicit deferral."""
+
+    owner_line: str
+    approved_base_version: str
+    transaction_id: str = ""
+
+    @property
+    def line(self) -> str:
+        return self.owner_line
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
+class ReleaseIntent:
+    """Inputs for a principal candidate-to-publication transaction."""
+
+    owner_line: str
+    final_version: str
+    candidate_ref: str
+    public_tag: str
+    candidate_sha: str = ""
+    candidate_tree: str = ""
+    transaction_id: str = ""
+    anchor_ref: str = ""
+    anchor_sha: str = ""
+    anchor_tree: str = ""
+    closure_timestamp_utc: str = ""
+    release_line: str = ""
+    timestamp_utc: str = ""
+    owner_authorization: str = ""
+    owner_authorization_ref: str = ""
+    owner_authorization_digest: str = ""
+    repository: str = ""
+    owner_authority: Any = None
+    static_snapshot_digest: str = ""
+    lifecycle_snapshot_digest: str = ""
+    predecessor_refs: tuple[str, ...] = ()
+
+    @property
+    def line(self) -> str:
+        return self.release_line or self.owner_line
+
+
+@dataclass(frozen=True, slots=True)
 class TransactionResult:
+    """A durable result with explicit freeze and reconciliation state."""
+
     status: str
-    phase: str
     reason_code: str | None = None
+    detail: str = ""
     evidence: dict[str, Any] = field(default_factory=dict)
     frozen: bool = False
+    phase: str = ""
+
+    @property
+    def complete(self) -> bool:
+        return self.status in {"PASS", "COMPLETE"}
 
 
-class ClosurePort(Protocol):
-    def freeze_line(self, intent: ClosureIntent) -> str: ...
-    def acquire_static_mutation(self, intent: ClosureIntent) -> Any: ...
-    def release_static_mutation(self, lease: Any) -> None: ...
-    def allocation_view(self) -> AllocationView: ...
-    def verify_closure_target(self, intent: ClosureIntent, view: AllocationView) -> None: ...
-    def merge_final(self, intent: ClosureIntent) -> dict[str, str]: ...
-    def create_anchor(self, intent: ClosureIntent, closure: dict[str, str]) -> dict[str, str]: ...
-    def consume_outgoing(
-        self, intent: ClosureIntent, anchor: dict[str, str], view: AllocationView
-    ) -> dict[str, str]: ...
-    def verify_outgoing_terminal(self, intent: ClosureIntent, consumption: dict[str, str]) -> None: ...
-    def prepare_next(
-        self, intent: ClosureIntent, next_final: str, view: AllocationView
-    ) -> dict[str, str]: ...
-    def reopen_dev(self, intent: ClosureIntent, preparation: dict[str, str]) -> dict[str, str]: ...
-    def activate_next(
-        self, intent: ClosureIntent, preparation: dict[str, str], reopened: dict[str, str]
-    ) -> dict[str, str]: ...
-    def verify_closure_correspondence(
-        self, intent: ClosureIntent, anchor: dict[str, str],
-        consumption: dict[str, str], preparation: dict[str, str],
-        reopened: dict[str, str], activation: dict[str, str],
-    ) -> None: ...
-    def unfreeze_line(self, token: str) -> None: ...
+class ImmutableLifecyclePort(Protocol):
+    """Port contract used by the coordinator's create-once fixture."""
+
+    def create_manifest(self, manifest_type: str, manifest: dict[str, Any]) -> Any: ...
 
 
-class BootstrapPort(Protocol):
-    def freeze_bootstrap(self, intent: BootstrapIntent) -> str: ...
-    def acquire_static_mutation(self, intent: BootstrapIntent) -> Any: ...
-    def release_static_mutation(self, lease: Any) -> None: ...
-    def verify_base_and_absence(self, intent: BootstrapIntent) -> None: ...
-    def allocation_view(self) -> AllocationView: ...
-    def prepare_reservation(
-        self, intent: BootstrapIntent, final_version: str, view: AllocationView
-    ) -> dict[str, str]: ...
-    def create_line_if_absent(
-        self, intent: BootstrapIntent, preparation: dict[str, str]
-    ) -> dict[str, str]: ...
-    def abort_nonentry(
-        self, intent: BootstrapIntent, preparation: dict[str, str],
-        branch_proof: dict[str, str],
-    ) -> None: ...
-    def install_dev(
-        self, intent: BootstrapIntent, branch: dict[str, str],
-        preparation: dict[str, str],
-    ) -> dict[str, str]: ...
-    def activate_reservation(
-        self, intent: BootstrapIntent, preparation: dict[str, str],
-        dev_head: dict[str, str],
-    ) -> dict[str, str]: ...
-    def record_line_opened(
-        self, intent: BootstrapIntent, branch: dict[str, str],
-        activation: dict[str, str],
-    ) -> dict[str, str]: ...
-    def verify_bootstrap_correspondence(
-        self, intent: BootstrapIntent, preparation: dict[str, str],
-        branch: dict[str, str], dev_head: dict[str, str],
-        activation: dict[str, str], line_opened: dict[str, str],
-    ) -> None: ...
-    def unfreeze_bootstrap(self, token: str) -> None: ...
+def _sha(value: Any) -> bool:
+    return isinstance(value, str) and SHA1_RE.fullmatch(value) is not None
 
 
-@dataclass(frozen=True)
-class ReleaseIntent:
-    transaction_id: str
-    release_line: str
-    final_version: str
-    anchor_ref: str
-    anchor_sha: str
-    anchor_tree: str
-    closure_timestamp_utc: str
-    candidate_ref: str
-
-
-class ReleasePort(Protocol):
-    def acquire_static_mutation(self, intent: ReleaseIntent) -> Any: ...
-    def release_static_mutation(self, lease: Any) -> None: ...
-    def verify_anchor(self, intent: ReleaseIntent) -> None: ...
-    def make_durable_candidate(self, intent: ReleaseIntent) -> dict[str, Any]: ...
-    def append_candidate_opened(
-        self, intent: ReleaseIntent, candidate: dict[str, Any]
-    ) -> dict[str, Any]: ...
-    def certify_candidate(
-        self, intent: ReleaseIntent, candidate: dict[str, Any]
-    ) -> dict[str, Any]: ...
-    def freeze_main(self, intent: ReleaseIntent) -> dict[str, Any]: ...
-    def verify_principal_interval(
-        self, intent: ReleaseIntent, candidate: dict[str, Any],
-        freeze: dict[str, Any],
-    ) -> dict[str, Any]: ...
-    def promote_principal(
-        self, intent: ReleaseIntent, candidate: dict[str, Any],
-        certification: dict[str, Any], freeze: dict[str, Any],
-    ) -> dict[str, Any]: ...
-    def verify_maintenance(
-        self, intent: ReleaseIntent, candidate: dict[str, Any],
-        certification: dict[str, Any],
-    ) -> dict[str, Any]: ...
-    def recertify_final(
-        self, intent: ReleaseIntent, final: dict[str, Any]
-    ) -> dict[str, Any]: ...
-    def verify_tree_transfer(
-        self, intent: ReleaseIntent, candidate: dict[str, Any],
-        certification: dict[str, Any], final: dict[str, Any],
-    ) -> dict[str, Any]: ...
-    def append_release_intent(
-        self, intent: ReleaseIntent, candidate: dict[str, Any],
-        certification: dict[str, Any], final: dict[str, Any],
-    ) -> dict[str, Any]: ...
-    def verify_public_tag_ruleset(
-        self, intent: ReleaseIntent, tag_ref: str
-    ) -> ProtectionEvidence: ...
-    def create_protected_tag(
-        self, intent: ReleaseIntent, prepared: dict[str, Any],
-        final: dict[str, Any], protection: ProtectionEvidence,
-    ) -> dict[str, Any]: ...
-    def append_released(
-        self, intent: ReleaseIntent, candidate: dict[str, Any],
-        certification: dict[str, Any], final: dict[str, Any],
-        tag: dict[str, Any],
-    ) -> dict[str, Any]: ...
-    def verify_released(
-        self, intent: ReleaseIntent, event: dict[str, Any],
-        certification: dict[str, Any], final: dict[str, Any],
-    ) -> None: ...
-    def publish_github_release(
-        self, intent: ReleaseIntent, event: dict[str, Any]
-    ) -> dict[str, Any]: ...
-    def persist_publication_evidence(
-        self, intent: ReleaseIntent, event: dict[str, Any],
-        publication: dict[str, Any],
-    ) -> dict[str, Any]: ...
-    def verify_terminal(
-        self, intent: ReleaseIntent, event: dict[str, Any],
-        publication: dict[str, Any], evidence: dict[str, Any],
-    ) -> None: ...
-    def unfreeze_main(self, token: str) -> None: ...
-
-
-def _version(value: str) -> tuple[int, int, int]:
-    try:
-        version = parse_package_version(value)
-    except (TypeError, ValueError) as exc:
-        raise TransactionError("INVALID_FINAL_VERSION") from exc
-    if not version.is_final:
-        raise TransactionError("INVALID_FINAL_VERSION")
-    return version.tuple
-
-
-def _canonical_final_version(value: Any) -> str | None:
-    """Normalize one final package identity through the shared parser."""
-
+def _final(value: Any) -> str:
     try:
         parsed = parse_package_version(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed.canonical if parsed.is_final else None
+    except (TypeError, ValueError) as error:
+        raise TransactionError("INVALID_FINAL_VERSION") from error
+    if not parsed.is_final:
+        raise TransactionError("INVALID_FINAL_VERSION")
+    return parsed.canonical
 
 
-def _expected_release_intent_identity(
-    intent: ReleaseIntent,
-    candidate: dict[str, Any],
-    certification: dict[str, Any],
-    final: dict[str, Any],
-) -> dict[str, Any]:
-    """Return every durable identity fixed before public-tag creation."""
-
-    return {
-        "candidate_id": candidate.get("candidate_id"),
-        "candidate_ref": candidate.get("ref"),
-        "candidate_sha": candidate.get("sha"),
-        "candidate_tree": candidate.get("tree"),
-        "anchor_ref": intent.anchor_ref,
-        "anchor_sha": intent.anchor_sha,
-        "anchor_tree": intent.anchor_tree,
-        "final_version": intent.final_version,
-        "release_line": intent.release_line,
-        "certification_binding": certification.get("binding"),
-        "certification_subject_sha": certification.get("subject_sha"),
-        "certification_subject_tree": certification.get("subject_tree"),
-        "certification_policy_revision": certification.get("policy_revision"),
-        "certification_harness_revision": certification.get("harness_revision"),
-        "certification_environment": certification.get("environment"),
-        "certification_evidence_refs": certification.get("evidence_refs"),
-        "certification_transfer_evidence": certification.get("transfer_evidence"),
-        "final_release_sha": final.get("sha"),
-        "final_release_tree": final.get("tree"),
-        "public_tag": f"v{intent.final_version}",
-    }
-
-
-def _next_final(line: str, closed: str, view: AllocationView) -> str:
-    major, minor, patch = _version(closed)
-    if line == "principal":
-        proposed = f"{major}.{minor}.{patch + 1}"
-        try:
-            parse_package_version(proposed)
-        except (TypeError, ValueError) as exc:
-            raise TransactionError("PRINCIPAL_VERSION_EXHAUSTED") from exc
-        if proposed in view.occupied_versions:
-            raise TransactionError("PRINCIPAL_SENTINEL_UNAVAILABLE")
-        return proposed
-    expected = f"maintenance/{major}.{minor}"
-    if line != expected:
-        raise TransactionError("MAINTENANCE_LINE_MISMATCH")
-    candidate = patch + 1
-    while True:
-        proposed = f"{major}.{minor}.{candidate}"
-        try:
-            parse_package_version(proposed)
-        except (TypeError, ValueError) as exc:
-            raise TransactionError("MAINTENANCE_PATCH_EXHAUSTED") from exc
-        if proposed not in view.occupied_versions:
-            return proposed
-        candidate += 1
-
-
-def _acquire_static_mutation(port: Any, intent: Any) -> Any:
-    """Acquire the shared static/event mutation boundary or block."""
-
+def _utc(value: Any) -> str:
+    if not isinstance(value, str) or UTC_RE.fullmatch(value) is None:
+        raise TransactionError("INVALID_CLOSURE_TIMESTAMP")
     try:
-        lease = port.acquire_static_mutation(intent)
-    except Exception as exc:
-        raise TransactionError("EXCLUSION_UNAVAILABLE", str(exc)) from exc
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as error:
+        raise TransactionError("INVALID_CLOSURE_TIMESTAMP") from error
+    return value
+
+
+def _call(port: Any, name: str, *args: Any) -> Any:
+    method = getattr(port, name, None)
+    if method is None:
+        raise TransactionError("PORT_UNSUPPORTED", name)
+    try:
+        return method(*args)
+    except TransactionError:
+        raise
+    except Exception as error:
+        raise TransactionError("PORT_OPERATION_FAILED", f"{name}: {error}") from error
+
+
+def _optional_call(port: Any, names: tuple[str, ...], *args: Any) -> Any:
+    for name in names:
+        if hasattr(port, name):
+            return _call(port, name, *args)
+    return None
+
+
+def _freeze(port: Any, names: tuple[str, ...], intent: Any) -> Any:
+    token = _optional_call(port, names, intent)
+    if not token:
+        raise TransactionError("LINE_FREEZE_UNAVAILABLE")
+    return token
+
+
+def _release_exclusion(port: Any, lease: Any) -> None:
+    if lease is None:
+        return
+    if hasattr(port, "release_static_mutation"):
+        _call(port, "release_static_mutation", lease)
+    elif hasattr(port, "release_allocation_exclusion"):
+        _call(port, "release_allocation_exclusion", lease)
+
+
+def _acquire_exclusion(port: Any, intent: Any) -> Any:
+    if hasattr(port, "acquire_static_mutation"):
+        lease = _call(port, "acquire_static_mutation", intent)
+    elif hasattr(port, "acquire_allocation_exclusion"):
+        lease = _call(port, "acquire_allocation_exclusion", intent)
+    else:
+        raise TransactionError("EXCLUSION_UNAVAILABLE")
     if lease is None:
         raise TransactionError("EXCLUSION_UNAVAILABLE")
     return lease
 
 
-def _release_static_mutation(port: Any, lease: Any) -> None:
+def _view(port: Any, intent: Any) -> Any:
+    if hasattr(port, "allocation_view"):
+        method = getattr(port, "allocation_view")
+        try:
+            return method()
+        except TypeError:
+            return method(intent)
+    if hasattr(port, "read_allocation_view"):
+        return _call(port, "read_allocation_view", intent)
+    return None
+
+
+def _owner_authority(port: Any, intent: Any) -> Any:
+    authority = getattr(intent, "owner_authority", None)
+    if authority is not None:
+        return authority
+    configured = getattr(port, "owner_authorization_authority", None)
+    if configured is not None:
+        return configured
+    if hasattr(port, "fetch_owner_authorization"):
+        return port
+    raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED")
+
+
+def _authorize(port: Any, intent: Any, action: str, target_ref: str) -> dict[str, Any]:
     try:
-        port.release_static_mutation(lease)
-    except Exception as exc:
-        raise TransactionError("EXCLUSION_UNAVAILABLE", str(exc)) from exc
+        record = verify_owner_authorization(
+            _owner_authority(port, intent),
+            getattr(intent, "owner_authorization_ref", ""),
+            repository=getattr(intent, "repository", ""),
+            transaction_id=getattr(intent, "transaction_id", ""),
+            action=action,
+            owner_line=getattr(intent, "owner_line", ""),
+            final_version=getattr(intent, "final_version", ""),
+            target_ref=target_ref,
+            now_utc=(getattr(intent, "timestamp_utc", "")
+                     or getattr(intent, "closure_timestamp_utc", "")),
+        )
+        if (record["owner_authorization"] != getattr(intent, "owner_authorization", "")
+                or record["owner_authorization_digest"] != getattr(intent, "owner_authorization_digest", "")):
+            raise AuthorizationError("authorization binding does not match intent")
+        return record
+    except (AuthorizationError, KeyError, TypeError, ValueError) as error:
+        raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED", str(error)) from error
 
 
-def _release_static_mutation_best_effort(port: Any, lease: Any) -> None:
-    if lease is None:
-        return
+def _typed_manifest(
+    port: Any,
+    manifest_type: str,
+    payload: dict[str, Any],
+    authorize: Any = None,
+) -> Any:
+    """Validate, seal and create one immutable typed manifest."""
+
+    if manifest_type not in PUBLIC_MANIFEST_TYPES:
+        raise TransactionError("INVALID_MANIFEST_TYPE", manifest_type)
+    if not hasattr(port, "create_manifest"):
+        raise TransactionError("PORT_UNSUPPORTED", "create_manifest")
     try:
-        port.release_static_mutation(lease)
-    except Exception:
-        # The enclosing transaction remains frozen on every error path. The
-        # OS releases a process-owned file lock when the process exits.
-        pass
-
-
-def run_closure(port: ClosurePort, intent: ClosureIntent) -> TransactionResult:
-    """Run closure through deterministic reopen; retain freeze on any error."""
-    _version(intent.final_version)
-    _version(intent.outgoing_reserved_final)
-    if not UTC.fullmatch(intent.closure_timestamp_utc):
-        raise TransactionError("INVALID_CLOSURE_TIMESTAMP")
+        sealed = seal_manifest(dict(payload))
+        validate_manifest(sealed)
+        # Re-encode to exercise the exact canonical no-LF wire contract before
+        # handing bytes/identity to the protected create-once port.
+        canonical_manifest_bytes(sealed)
+    except (TypeError, ValueError) as error:
+        raise TransactionError("MANIFEST_INVALID", str(error)) from error
+    if authorize is not None:
+        try:
+            authorize(manifest_type, lifecycle_ref_for_manifest(sealed))
+        except TransactionError:
+            raise
+        except Exception as error:
+            raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED", str(error)) from error
+    method = getattr(port, "create_manifest")
     try:
-        datetime.strptime(intent.closure_timestamp_utc, "%Y-%m-%dT%H:%M:%SZ")
-    except ValueError as exc:
-        raise TransactionError("INVALID_CLOSURE_TIMESTAMP") from exc
+        created = method(manifest_type, sealed)
+    except TransactionError:
+        raise
+    except Exception as error:
+        raise TransactionError("PORT_OPERATION_FAILED", f"create_manifest: {error}") from error
+    if not isinstance(created, dict):
+        raise TransactionError("MANIFEST_CREATE_UNCERTAIN")
+    try:
+        validate_manifest(created)
+    except (TypeError, ValueError) as error:
+        raise TransactionError("MANIFEST_CREATE_UNCERTAIN", str(error)) from error
+    if (created.get("manifest_type") != manifest_type
+            or created.get("manifest_id") != sealed.get("manifest_id")):
+        raise TransactionError("MANIFEST_CREATE_CONFLICT")
+    if created != sealed:
+        raise TransactionError("MANIFEST_CREATE_CONFLICT")
+    return created
+
+
+def _manifest_payload(
+    intent: Any,
+    manifest_type: str,
+    fields: dict[str, Any],
+    *,
+    predecessor_refs: tuple[str, ...] | list[str] | None = None,
+    timestamp_utc: str | None = None,
+    allocation: bool = True,
+) -> dict[str, Any]:
+    """Add exact common/allocation fields required by ``manifests.py``."""
+
+    timestamp = (timestamp_utc or getattr(intent, "timestamp_utc", "")
+                 or getattr(intent, "closure_timestamp_utc", ""))
+    owner_authorization = getattr(intent, "owner_authorization", "")
+    if not timestamp or not owner_authorization:
+        raise TransactionError("MANIFEST_AUTHORITY_IDENTITY_UNPROVEN")
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "manifest_type": manifest_type,
+        "timestamp_utc": timestamp,
+        "predecessor_refs": list(predecessor_refs if predecessor_refs is not None else getattr(intent, "predecessor_refs", ())),
+        "owner_authorization": owner_authorization,
+        "owner_authorization_ref": getattr(intent, "owner_authorization_ref", ""),
+        "owner_authorization_digest": getattr(intent, "owner_authorization_digest", ""),
+        **fields,
+    }
+    if allocation:
+        result.update({
+            "transaction_id": getattr(intent, "transaction_id", ""),
+            "static_iteration_snapshot": getattr(intent, "static_snapshot_digest", ""),
+            "lifecycle_ref_snapshot": getattr(intent, "lifecycle_snapshot_digest", ""),
+        })
+    return result
+
+
+def _as_mapping(value: Any, reason: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise TransactionError(reason)
+    return value
+
+
+def _expect_manifest(value: dict[str, Any], manifest_type: str, reason: str) -> dict[str, Any]:
+    actual = value.get("manifest_type")
+    if actual is not None and actual != manifest_type:
+        raise TransactionError(reason)
+    return value
+
+
+def _next_principal(final_version: str, occupied: Any) -> str:
+    major, minor, patch = (int(part) for part in final_version.split("."))
+    if patch >= 2**32 - 1:
+        raise TransactionError("PRINCIPAL_VERSION_EXHAUSTED")
+    candidate = f"{major}.{minor}.{patch + 1}"
+    occupied_set = set(occupied or ())
+    if candidate in occupied_set or f"v{candidate}" in occupied_set:
+        raise TransactionError("PRINCIPAL_SENTINEL_UNAVAILABLE")
+    return candidate
+
+
+def _line_target(intent: Any) -> str:
+    return "refs/heads/vmm" if getattr(intent, "owner_line", "") == "principal" else f"refs/heads/{intent.owner_line}"
+
+
+def _manifest_authorize(port: Any, intent: Any, _action: str, _target: str) -> dict[str, Any]:
+    """Authorize the stable release-manifest ref, not its content-derived ref.
+
+    Manifest IDs include the authorization ID.  Binding an authorization to a
+    manifest ref that itself contains that ID would create a circular
+    preimage.  The stable release namespace is the exact mutation target used
+    by the R-046 authority record.
+    """
+
+    target = f"refs/heads/lifecycle/v1/releases/v{intent.final_version}"
+    return _authorize(port, intent, "create-release-manifest", target)
+
+
+def run_maintenance_bootstrap(port: Any, intent: BootstrapIntent) -> TransactionResult:
+    """Maintenance bootstrap remains explicitly deferred to approved S2."""
+
+    return TransactionResult(
+        "BLOCKED", "DEFERRED_MAINTENANCE_BOOTSTRAP",
+        "Gate A does not create production maintenance-line reservations",
+        evidence={"deferred": True, "manifest_types": ()}, phase="deferred",
+    )
+
+
+def run_rare_recovery(*args: Any, **kwargs: Any) -> TransactionResult:
+    """Rare recovery is a later S2 operation, never an implicit fallback."""
+
+    return TransactionResult(
+        "BLOCKED", "DEFERRED_RARE_RECOVERY",
+        "rare lifecycle recovery requires a later approved S2 gate",
+        evidence={"deferred": True, "manifest_types": ()}, phase="deferred",
+    )
+
+
+def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
+    """Close the principal line, consume its reservation, and reopen.
+
+    The freeze is acquired before the shared exclusion and is released only
+    after terminal reservation consumption, the exact next principal
+    sentinel, reopen, activation and correspondence proof all succeed.
+    """
+
     phase = "preflight"
     evidence: dict[str, Any] = {}
-    token: str | None = None
-    mutation_lease: Any = None
+    token: Any = None
+    lease: Any = None
     try:
-        token = port.freeze_line(intent)
-        if not token:
-            raise TransactionError("LINE_FREEZE_UNAVAILABLE")
+        if intent.owner_line != "principal":
+            raise TransactionError("PRINCIPAL_LINE_REQUIRED")
+        final_version = _final(intent.final_version)
+        outgoing = _final(intent.outgoing_reserved_final or final_version)
+        _utc(intent.closure_timestamp_utc)
+        if (not _sha(intent.expected_line_head)
+                or not re.fullmatch(r"[0-9a-f]{64}", intent.static_snapshot_digest)
+                or not re.fullmatch(r"[0-9a-f]{64}", intent.lifecycle_snapshot_digest)
+                or not intent.owner_authorization
+                or not intent.owner_authorization_ref
+                or not re.fullmatch(r"[0-9a-f]{64}", intent.owner_authorization_digest)
+                or not intent.repository or not intent.predecessor_refs):
+            raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED")
+        token = _freeze(port, ("freeze_line",), intent)
         evidence["freeze_token"] = token
         phase = "frozen"
-        mutation_lease = _acquire_static_mutation(port, intent)
-        phase = "exclusion_acquired"
-        view = port.allocation_view()
-        port.verify_closure_target(intent, view)
-        evidence["bound_view"] = view
-        phase = "view_bound"
-        closure = port.merge_final(intent)
-        if (
-            closure.get("version") != intent.final_version
-            or not _git_sha(closure.get("commit"))
-            or not _git_sha(closure.get("tree"))
-        ):
+        lease = _acquire_exclusion(port, intent)
+        phase = "serialized"
+        view = _view(port, intent)
+        if view is not None:
+            evidence["bound_view"] = view
+        if hasattr(port, "verify_closure_target"):
+            _call(port, "verify_closure_target", intent, view)
+        phase = "closure_target_verified"
+
+        if not hasattr(port, "create_closure_anchor"):
+            raise TransactionError("CLOSURE_PORT_UNSUPPORTED")
+        expected_anchor_ref = f"refs/tags/iterations/{final_version}"
+        _authorize(port, intent, "create-tag", expected_anchor_ref)
+        closure = _as_mapping(_call(port, "create_closure_anchor", intent), "CLOSURE_IDENTITY_MISMATCH")
+        if (closure.get("version", closure.get("final_version")) != final_version
+                or not _sha(closure.get("commit", closure.get("anchor_sha")))
+                or not _sha(closure.get("tree", closure.get("anchor_tree")))):
             raise TransactionError("CLOSURE_IDENTITY_MISMATCH")
         evidence["closure"] = closure
         phase = "closed"
-        anchor = port.create_anchor(intent, closure)
-        if (
-            anchor.get("version") != intent.final_version
-            or not _git_sha(anchor.get("commit"))
-            or not _git_sha(anchor.get("tree"))
-            or anchor.get("commit") != closure["commit"]
-            or anchor.get("tree") != closure["tree"]
-            or anchor.get("closure_timestamp_utc") != intent.closure_timestamp_utc
-        ):
+
+        if not hasattr(port, "create_anchor"):
+            raise TransactionError("ANCHOR_PORT_UNSUPPORTED")
+        _authorize(port, intent, "create-tag", expected_anchor_ref)
+        anchor = _as_mapping(_call(port, "create_anchor", intent, closure), "ANCHOR_IDENTITY_MISMATCH")
+        if (anchor.get("version", anchor.get("final_version")) != final_version
+                or anchor.get("ref") != expected_anchor_ref
+                or anchor.get("commit", anchor.get("anchor_sha")) != closure.get("commit", closure.get("anchor_sha"))
+                or anchor.get("tree", anchor.get("anchor_tree")) != closure.get("tree", closure.get("anchor_tree"))
+                or anchor.get("closure_timestamp_utc") != intent.closure_timestamp_utc
+                or not _sha(anchor.get("commit", anchor.get("anchor_sha")))
+                or not _sha(anchor.get("tree", anchor.get("anchor_tree")))):
             raise TransactionError("ANCHOR_IDENTITY_MISMATCH")
         evidence["anchor"] = anchor
         phase = "anchored"
-        # Anchor creation changes the static namespace.  Consumption must
-        # bind a fresh static/event pair rather than the pre-closure view.
-        post_anchor_view = port.allocation_view()
+
+        post_anchor_view = _view(port, intent)
         evidence["post_anchor_view"] = post_anchor_view
-        try:
-            consumption = port.consume_outgoing(intent, anchor, post_anchor_view)
-            port.verify_outgoing_terminal(intent, consumption)
-            expected_disposition = (
-                "closed"
-                if intent.outgoing_reserved_final == intent.final_version
-                else "CONSUMED_UNUSED_DEV_RESERVATION"
-            )
-            if (
-                consumption.get("reserved_final") != intent.outgoing_reserved_final
-                or consumption.get("closed_final_version") != intent.final_version
-                or consumption.get("terminal_disposition") != expected_disposition
-                or not consumption.get("event_id")
-            ):
-                raise TransactionError("OUTGOING_RESERVATION_RECONCILIATION_FAILED")
-        except Exception as exc:
-            raise TransactionError(
-                "OUTGOING_RESERVATION_RECONCILIATION_FAILED", str(exc)
-            ) from exc
-        evidence["consumption"] = consumption
+        consumption_payload = _manifest_payload(
+            intent, "reservation-consumed", {
+                "owner_line": intent.owner_line, "final_version": final_version,
+                "reserved_final": outgoing, "closed_final_version": final_version,
+                "closure_anchor_ref": anchor["ref"],
+                "terminal_disposition": ("closed" if outgoing == final_version
+                                          else "CONSUMED_UNUSED_DEV_RESERVATION"),
+            })
+        consumption = _as_mapping(_typed_manifest(
+            port, "reservation-consumed", consumption_payload,
+            authorize=lambda action, target: _manifest_authorize(port, intent, action, target)),
+            "OUTGOING_RESERVATION_RECONCILIATION_FAILED")
+        expected_disposition = consumption_payload["terminal_disposition"]
+        if (consumption.get("reserved_final") != outgoing
+                or consumption.get("closed_final_version") != final_version
+                or consumption.get("terminal_disposition") != expected_disposition):
+            raise TransactionError("OUTGOING_RESERVATION_RECONCILIATION_FAILED")
+        if hasattr(port, "verify_outgoing_terminal"):
+            _call(port, "verify_outgoing_terminal", intent, consumption)
+        evidence["consumption"] = _expect_manifest(consumption, "reservation-consumed", "OUTGOING_RESERVATION_RECONCILIATION_FAILED")
         phase = "outgoing_terminal"
-        fresh_view = port.allocation_view()
-        next_final = _next_final(intent.line, intent.final_version, fresh_view)
+
+        fresh_view = _view(port, intent)
+        occupied = (getattr(fresh_view, "occupied", None)
+                     if fresh_view is not None else None)
+        if occupied is None and fresh_view is not None:
+            occupied = getattr(fresh_view, "occupied_versions", ())
+        next_final = _next_principal(final_version, occupied or ())
         evidence["next_final"] = next_final
-        preparation = port.prepare_next(intent, next_final, fresh_view)
-        if (
-            preparation.get("version") != next_final
-            or preparation.get("intended_dev") != f"{next_final}-DEV"
-        ):
+        preparation_payload = _manifest_payload(
+            intent, "reservation-prepared", {
+                "owner_line": intent.owner_line, "final_version": next_final,
+                "reserved_final": next_final,
+                "intended_dev_version": f"{next_final}-DEV",
+                "expected_line_head": intent.expected_line_head,
+            })
+        preparation = _as_mapping(_typed_manifest(
+            port, "reservation-prepared", preparation_payload,
+            authorize=lambda action, target: _manifest_authorize(port, intent, action, target)),
+            "NEXT_RESERVATION_MISMATCH")
+        if (preparation.get("version", preparation.get("final_version")) != next_final
+                and preparation.get("reserved_final") != next_final):
             raise TransactionError("NEXT_RESERVATION_MISMATCH")
-        evidence["preparation"] = preparation
+        if preparation.get("intended_dev", preparation.get("intended_dev_version")) != f"{next_final}-DEV":
+            raise TransactionError("NEXT_RESERVATION_MISMATCH")
+        evidence["preparation"] = _expect_manifest(preparation, "reservation-prepared", "NEXT_RESERVATION_MISMATCH")
         phase = "next_prepared"
-        reopened = port.reopen_dev(intent, preparation)
-        if reopened.get("version") != f"{next_final}-DEV":
+
+        if not hasattr(port, "reopen_dev"):
+            raise TransactionError("REOPEN_PORT_UNSUPPORTED")
+        _authorize(port, intent, "create-release-manifest", _line_target(intent))
+        reopened = _as_mapping(_call(port, "reopen_dev", intent, preparation), "REOPEN_IDENTITY_MISMATCH")
+        if reopened.get("version", reopened.get("actual_dev_version")) != f"{next_final}-DEV":
             raise TransactionError("REOPEN_IDENTITY_MISMATCH")
         evidence["reopened"] = reopened
         phase = "dev_reopened"
-        activation = port.activate_next(intent, preparation, reopened)
-        if activation.get("head") != reopened.get("head"):
+        if not hasattr(port, "activate_next"):
+            raise TransactionError("ACTIVATION_PORT_UNSUPPORTED")
+        _authorize(port, intent, "create-release-manifest", _line_target(intent))
+        activation = _as_mapping(_call(port, "activate_next", intent, preparation, reopened), "ACTIVATION_IDENTITY_MISMATCH")
+        if (activation.get("head") is not None and reopened.get("head") is not None
+                and activation.get("head") != reopened.get("head")):
             raise TransactionError("ACTIVATION_IDENTITY_MISMATCH")
         evidence["activation"] = activation
         phase = "next_active"
-        port.verify_closure_correspondence(
-            intent, anchor, consumption, preparation, reopened, activation
-        )
+        opened_payload = _manifest_payload(
+            intent, "reservation-opened", {
+                "owner_line": intent.owner_line, "final_version": next_final,
+                "reserved_final": next_final,
+                "intended_dev_version": f"{next_final}-DEV",
+                "actual_dev_head": activation.get("head", reopened.get("head")),
+            }, predecessor_refs=(lifecycle_ref_for_manifest(preparation),))
+        opened = _as_mapping(_typed_manifest(
+            port, "reservation-opened", opened_payload,
+            authorize=lambda action, target: _manifest_authorize(port, intent, action, target)),
+            "RESERVATION_OPEN_MANIFEST_MISMATCH")
+        evidence["reservation_opened"] = opened
+        phase = "reservation_opened"
+        if hasattr(port, "verify_closure_correspondence"):
+            _call(port, "verify_closure_correspondence", intent, anchor, consumption, preparation, reopened, activation)
         phase = "correspondence_verified"
+
+        lease_to_release = lease
+        lease = None
+        _release_exclusion(port, lease_to_release)
+        _call(port, "unfreeze_line", token)
+        token = None
+        return TransactionResult("COMPLETE", evidence=evidence, phase="unfrozen")
+    except TransactionError as error:
         try:
-            _release_static_mutation(port, mutation_lease)
-        except TransactionError:
-            # A failed external release leaves the freeze in place and must
-            # not be retried with an uncertain lease state.
-            mutation_lease = None
-            raise
-        mutation_lease = None
-        port.unfreeze_line(token)
-        return TransactionResult("COMPLETE", "unfrozen", evidence=evidence)
-    except TransactionError as exc:
-        _release_static_mutation_best_effort(port, mutation_lease)
-        return TransactionResult(
-            "BLOCKED", phase, exc.reason_code, evidence, frozen=token is not None
-        )
-    except Exception as exc:
-        _release_static_mutation_best_effort(port, mutation_lease)
-        evidence["error_type"] = type(exc).__name__
-        return TransactionResult(
-            "BLOCKED", phase, "TRANSACTION_OUTCOME_UNCERTAIN", evidence,
-            frozen=token is not None,
-        )
-
-
-def run_maintenance_bootstrap(
-    port: BootstrapPort, intent: BootstrapIntent
-) -> TransactionResult:
-    """Create a maintenance line only after reservation and freeze converge."""
-    try:
-        major, minor = maintenance_line(intent.line)
-    except (TypeError, ValueError):
-        raise TransactionError("MAINTENANCE_LINE_MISMATCH")
-    phase = "preflight"
-    evidence: dict[str, Any] = {}
-    token: str | None = None
-    mutation_lease: Any = None
-    try:
-        port.verify_base_and_absence(intent)
-        token = port.freeze_bootstrap(intent)
-        if not token:
-            raise TransactionError("BOOTSTRAP_FREEZE_UNAVAILABLE")
-        evidence["freeze_token"] = token
-        phase = "frozen"
-        # The first check is advisory.  Recheck under the effective freeze so
-        # the approved base and branch absence cannot change between checks.
-        mutation_lease = _acquire_static_mutation(port, intent)
-        phase = "exclusion_acquired"
-        port.verify_base_and_absence(intent)
-        view = port.allocation_view()
-        evidence["bound_view"] = view
-        patch = 0
-        while f"{major}.{minor}.{patch}" in view.occupied_versions:
-            if patch == MAX_VERSION_COMPONENT:
-                raise TransactionError("MAINTENANCE_PATCH_EXHAUSTED")
-            patch += 1
-        if patch > MAX_VERSION_COMPONENT:
-            raise TransactionError("MAINTENANCE_PATCH_EXHAUSTED")
-        final = f"{major}.{minor}.{patch}"
-        preparation = port.prepare_reservation(intent, final, view)
-        if preparation.get("version") != final or preparation.get("intended_dev") != f"{final}-DEV":
-            raise TransactionError("BOOTSTRAP_RESERVATION_MISMATCH")
-        evidence["preparation"] = preparation
-        phase = "reservation_prepared"
-        branch = port.create_line_if_absent(intent, preparation)
-        evidence["branch"] = branch
-        state = branch.get("state")
-        if state == "not_created":
-            port.abort_nonentry(intent, preparation, branch)
-            try:
-                _release_static_mutation(port, mutation_lease)
-            except TransactionError:
-                # The release boundary is now uncertain.  Do not retry a
-                # possibly one-shot external lease; retain the freeze.
-                mutation_lease = None
-                raise
-            mutation_lease = None
-            return TransactionResult(
-                "BLOCKED", phase, "BOOTSTRAP_BRANCH_NOT_CREATED", evidence,
-                frozen=True,
-            )
-        if state != "created" or not branch.get("head"):
-            raise TransactionError("BOOTSTRAP_CREATION_UNCERTAIN")
-        phase = "branch_created"
-        dev_head = port.install_dev(intent, branch, preparation)
-        if dev_head.get("version") != f"{final}-DEV" or not dev_head.get("head"):
-            raise TransactionError("BOOTSTRAP_DEV_MISMATCH")
-        evidence["dev_head"] = dev_head
-        phase = "dev_installed"
-        activation = port.activate_reservation(intent, preparation, dev_head)
-        if activation.get("head") != dev_head["head"]:
-            raise TransactionError("BOOTSTRAP_ACTIVATION_MISMATCH")
-        evidence["activation"] = activation
-        phase = "reservation_active"
-        line_opened = port.record_line_opened(intent, branch, activation)
-        evidence["line_opened"] = line_opened
-        phase = "line_opened"
-        port.verify_bootstrap_correspondence(
-            intent, preparation, branch, dev_head, activation, line_opened
-        )
-        phase = "correspondence_verified"
+            if lease is not None:
+                _release_exclusion(port, lease)
+        except Exception:
+            pass
+        invalid = {"CLOSURE_IDENTITY_MISMATCH", "ANCHOR_IDENTITY_MISMATCH",
+                   "NEXT_RESERVATION_MISMATCH", "ACTIVATION_IDENTITY_MISMATCH",
+                   "REOPEN_IDENTITY_MISMATCH"}
+        return TransactionResult("INVALID" if error.reason_code in invalid else "BLOCKED",
+                                 error.reason_code, error.detail, evidence,
+                                 frozen=token is not None, phase=phase)
+    except Exception as error:
         try:
-            _release_static_mutation(port, mutation_lease)
-        except TransactionError:
-            # A release failure can follow a completed append.  Retain the
-            # freeze and avoid a second release attempt with an uncertain
-            # external lease state.
-            mutation_lease = None
-            raise
-        mutation_lease = None
-        port.unfreeze_bootstrap(token)
-        return TransactionResult("COMPLETE", "unfrozen", evidence=evidence)
-    except TransactionError as exc:
-        _release_static_mutation_best_effort(port, mutation_lease)
-        return TransactionResult(
-            "BLOCKED", phase, exc.reason_code, evidence, frozen=token is not None
-        )
-    except Exception as exc:
-        _release_static_mutation_best_effort(port, mutation_lease)
-        evidence["error_type"] = type(exc).__name__
-        return TransactionResult(
-            "BLOCKED", phase, "BOOTSTRAP_OUTCOME_UNCERTAIN", evidence,
-            frozen=token is not None,
-        )
+            if lease is not None:
+                _release_exclusion(port, lease)
+        except Exception:
+            pass
+        evidence["error_type"] = type(error).__name__
+        return TransactionResult("BLOCKED", "TRANSACTION_OUTCOME_UNCERTAIN",
+                                 str(error), evidence, frozen=token is not None,
+                                 phase=phase)
 
 
-def run_release(port: ReleasePort, intent: ReleaseIntent) -> TransactionResult:
-    """Orchestrate one candidate→intent→tag→event→publication path.
+def _validate_certification(record: Any, candidate: dict[str, Any]) -> str:
+    if not isinstance(record, dict):
+        raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
+    binding = record.get("binding", record.get("certification_binding"))
+    if binding not in {"tree-bound", "commit-bound"}:
+        raise TransactionError("UNSUPPORTED_CERTIFICATION_BINDING")
+    subject_sha = record.get("subject_sha", record.get("certification_subject_sha"))
+    subject_tree = record.get("subject_tree", record.get("certification_subject_tree"))
+    if (subject_sha != candidate.get("sha") or subject_tree != candidate.get("tree")
+            or not _sha(subject_sha) or not _sha(subject_tree)):
+        raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
+    for key in ("policy_revision", "harness_revision", "environment"):
+        if not isinstance(record.get(key), str) or not record[key]:
+            raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
+    if not record.get("evidence_refs"):
+        raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
+    return binding
 
-    The port must verify GitHub protection/freeze and durable Git identities.
-    This controller never withdraws or repoints a tag and retains the main
-    freeze until terminal evidence is verified.
-    """
-    major, minor, _ = _version(intent.final_version)
-    if intent.release_line != "principal" and intent.release_line != f"maintenance/{major}.{minor}":
-        raise TransactionError("RELEASE_LINE_MISMATCH")
-    if not UTC.fullmatch(intent.closure_timestamp_utc):
-        raise TransactionError("INVALID_CLOSURE_TIMESTAMP")
-    try:
-        datetime.strptime(intent.closure_timestamp_utc, "%Y-%m-%dT%H:%M:%SZ")
-    except ValueError as exc:
-        raise TransactionError("INVALID_CLOSURE_TIMESTAMP") from exc
-    if intent.anchor_ref != f"refs/tags/iterations/{intent.final_version}":
-        raise TransactionError("ANCHOR_IDENTITY_MISMATCH")
+
+def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
+    """Run principal candidate → intent → tag → release → publication."""
 
     phase = "preflight"
     evidence: dict[str, Any] = {}
-    main_token: str | None = None
-    mutation_lease: Any = None
-    tag_attempted = False
+    token: Any = None
+    lease: Any = None
     tag_created = False
-    released_appended = False
+    released_created = False
     try:
-        port.verify_anchor(intent)
+        if (intent.release_line or intent.owner_line) != "principal":
+            raise TransactionError("DEFERRED_MAINTENANCE_RELEASE")
+        final_version = _final(intent.final_version)
+        if intent.public_tag != f"v{final_version}":
+            raise TransactionError("PUBLIC_TAG_IDENTITY_MISMATCH")
+        _utc(intent.closure_timestamp_utc)
+        _utc(intent.timestamp_utc)
+        if (intent.anchor_ref != f"refs/tags/iterations/{final_version}"
+                or not _sha(intent.anchor_sha) or not _sha(intent.anchor_tree)
+                or not _sha(intent.candidate_sha) or not _sha(intent.candidate_tree)
+                or not re.fullmatch(r"[0-9a-f]{64}", intent.static_snapshot_digest)
+                or not re.fullmatch(r"[0-9a-f]{64}", intent.lifecycle_snapshot_digest)
+                or not intent.owner_authorization or not intent.owner_authorization_ref
+                or not re.fullmatch(r"[0-9a-f]{64}", intent.owner_authorization_digest)
+                or not intent.repository or not intent.predecessor_refs):
+            raise TransactionError("OWNER_AUTHORIZATION_UNVERIFIED")
+        if not hasattr(port, "verify_anchor"):
+            raise TransactionError("ANCHOR_PORT_UNSUPPORTED")
+        anchor = _call(port, "verify_anchor", intent)
+        if not isinstance(anchor, dict):
+            raise TransactionError("ANCHOR_IDENTITY_MISMATCH")
+        if (anchor.get("ref") != intent.anchor_ref
+                or anchor.get("tree", anchor.get("anchor_tree")) != intent.anchor_tree
+                or anchor.get("sha", anchor.get("anchor_sha")) != intent.anchor_sha):
+            raise TransactionError("ANCHOR_IDENTITY_MISMATCH")
+        evidence["anchor"] = anchor
         phase = "anchor_verified"
-        mutation_lease = _acquire_static_mutation(port, intent)
-        phase = "exclusion_acquired"
-        candidate = port.make_durable_candidate(intent)
-        if (
-            not _public_identity(candidate.get("candidate_id"), key="candidate_id")
-            or candidate.get("ref") != intent.candidate_ref
-            or candidate.get("tree") != intent.anchor_tree
-            or candidate.get("version") != intent.final_version
-            or not SHA.fullmatch(str(candidate.get("sha", "")))
-            or not SHA.fullmatch(str(candidate.get("tree", "")))
-            or candidate.get("durable") is not True
-        ):
+        lease = _acquire_exclusion(port, intent)
+        phase = "serialized"
+        _authorize(port, intent, "create-release-manifest", intent.candidate_ref)
+
+        if hasattr(port, "make_durable_candidate"):
+            candidate = _as_mapping(_call(port, "make_durable_candidate", intent), "CANDIDATE_DURABILITY_UNPROVEN")
+        elif hasattr(port, "create_candidate"):
+            candidate = _as_mapping(_call(port, "create_candidate", intent), "CANDIDATE_DURABILITY_UNPROVEN")
+        else:
+            raise TransactionError("CANDIDATE_PORT_UNSUPPORTED")
+        candidate_sha = candidate.get("sha", candidate.get("candidate_sha"))
+        candidate_tree = candidate.get("tree", candidate.get("candidate_tree"))
+        if (candidate.get("durable") is not True
+                or candidate.get("ref", candidate.get("candidate_ref")) != intent.candidate_ref
+                or candidate.get("version", candidate.get("final_version")) != final_version
+                or not _sha(candidate_sha) or not _sha(candidate_tree)
+                or (intent.candidate_sha and intent.candidate_sha != candidate_sha)
+                or (intent.candidate_tree and intent.candidate_tree != candidate_tree)):
             raise TransactionError("CANDIDATE_DURABILITY_UNPROVEN")
+        if intent.anchor_tree and candidate_tree != intent.anchor_tree:
+            raise TransactionError("CANDIDATE_ANCHOR_MISMATCH")
         evidence["candidate"] = candidate
         phase = "candidate_durable"
-        opened = port.append_candidate_opened(intent, candidate)
-        if (
-            opened.get("candidate_id") != candidate["candidate_id"]
-            or opened.get("candidate_sha") != candidate["sha"]
-            or not opened.get("event_id")
-        ):
-            raise TransactionError("CANDIDATE_OPEN_EVENT_MISMATCH")
-        evidence["candidate_opened"] = opened
+
+        main_candidate_sha = candidate.get("main_at_candidate_sha")
+        main_candidate_version = candidate.get("main_at_candidate_version")
+        try:
+            _final(main_candidate_version)
+        except TransactionError as error:
+            raise TransactionError("CANDIDATE_MAIN_IDENTITY_UNPROVEN") from error
+        if not _sha(main_candidate_sha):
+            raise TransactionError("CANDIDATE_MAIN_IDENTITY_UNPROVEN")
+        opened_payload = _manifest_payload(
+            intent, "candidate-opened", {
+                "candidate_id": candidate.get("candidate_id", ""),
+                "candidate_ref": intent.candidate_ref,
+                "candidate_sha": candidate_sha,
+                "candidate_tree": candidate_tree,
+                "final_version": final_version,
+                "release_line": "principal",
+                "anchor_ref": intent.anchor_ref,
+                "anchor_sha": intent.anchor_sha,
+                "anchor_tree": intent.anchor_tree,
+                "main_at_candidate_sha": main_candidate_sha,
+                "main_at_candidate_version": main_candidate_version,
+            }, predecessor_refs=intent.predecessor_refs)
+        opened = _as_mapping(_typed_manifest(
+            port, "candidate-opened", opened_payload,
+            authorize=lambda action, target: _manifest_authorize(port, intent, action, target)),
+            "CANDIDATE_OPEN_MANIFEST_MISMATCH")
+        if (opened.get("candidate_id") not in {None, candidate.get("candidate_id")}
+                or opened.get("candidate_sha") not in {None, candidate_sha}):
+            raise TransactionError("CANDIDATE_OPEN_MANIFEST_MISMATCH")
+        evidence["candidate_opened"] = _expect_manifest(opened, "candidate-opened", "CANDIDATE_OPEN_MANIFEST_MISMATCH")
         phase = "candidate_opened"
-        certification = port.certify_candidate(intent, candidate)
-        if certification.get("binding") not in ("tree-bound", "commit-bound"):
-            raise TransactionError("UNSUPPORTED_CERTIFICATION_BINDING")
-        if (
-            certification.get("subject_tree") != intent.anchor_tree
-            or not SHA.fullmatch(str(certification.get("subject_sha", "")))
-            or certification.get("subject_sha") != candidate.get("sha")
-            or not _public_identity(
-                certification.get("policy_revision"), key="policy_revision"
-            )
-            or not _public_identity(
-                certification.get("harness_revision"), key="harness_revision"
-            )
-            or not _public_identity(
-                certification.get("environment"), key="environment"
-            )
-            or not certification.get("evidence_refs")
-        ):
-            raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
-        evidence["certification"] = certification
+
+        if not hasattr(port, "certify_candidate"):
+            raise TransactionError("CERTIFICATION_PORT_UNSUPPORTED")
+        _authorize(port, intent, "create-release-manifest",
+                   f"refs/heads/lifecycle/v1/releases/v{intent.final_version}")
+        certification = _as_mapping(_call(port, "certify_candidate", intent, candidate), "CERTIFICATION_IDENTITY_UNPROVEN")
+        binding = _validate_certification(certification, {"sha": candidate_sha, "tree": candidate_tree})
         evidence["candidate_certification"] = dict(certification)
         phase = "candidate_certified"
-        transfer_evidence: dict[str, Any] | None = None
 
-        if intent.release_line == "principal":
-            candidate_main_version = _canonical_final_version(
-                candidate.get("main_at_candidate_version")
-            )
-            if (
-                not _git_sha(candidate.get("main_at_candidate_sha"))
-                or candidate_main_version is None
-            ):
-                raise TransactionError("CANDIDATE_MAIN_IDENTITY_UNPROVEN")
-            freeze = port.freeze_main(intent)
-            main_token = freeze.get("token")
-            freeze_version = _canonical_final_version(freeze.get("version"))
-            if (
-                not main_token
-                or not _git_sha(freeze.get("sha"))
-                or freeze_version is None
-            ):
-                raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
-            evidence["main_freeze"] = freeze
-            phase = "main_frozen"
-            previous = _version(freeze_version)
-            if previous >= (major, minor, _version(intent.final_version)[2]):
-                raise TransactionError("PRINCIPAL_VERSION_REGRESSION")
-            interval = port.verify_principal_interval(intent, candidate, freeze)
+        if not hasattr(port, "freeze_main"):
+            raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
+        _authorize(port, intent, "create-release-manifest", "refs/heads/main")
+        freeze = _as_mapping(_call(port, "freeze_main", intent), "MAIN_FREEZE_UNAVAILABLE")
+        token = freeze.get("token")
+        if not token or not _sha(freeze.get("sha")):
+            raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
+        evidence["main_freeze"] = freeze
+        phase = "main_frozen"
+        if hasattr(port, "verify_principal_interval"):
+            interval = _as_mapping(_call(port, "verify_principal_interval", intent, candidate, freeze), "PRINCIPAL_ANCESTRY_UNPROVEN")
             commits = interval.get("intervening_commits")
             disposition = interval.get("disposition")
-            if (
-                interval.get("verified") is not True
-                or interval.get("candidate_main_sha") != candidate["main_at_candidate_sha"]
-                or interval.get("freeze_main_sha") != freeze["sha"]
-                or not SHA.fullmatch(str(interval.get("candidate_main_tree", "")))
-                or not SHA.fullmatch(str(interval.get("freeze_main_tree", "")))
-                or not isinstance(commits, list)
-                or any(
-                    not isinstance(item, dict)
-                    or not SHA.fullmatch(str(item.get("sha", "")))
-                    or not SHA.fullmatch(str(item.get("tree", "")))
-                    for item in commits
-                )
-                or len({item["sha"] for item in commits}) != len(commits)
-                or disposition not in ("no_drift", "tree_neutral_included")
-                or (disposition == "no_drift" and (
-                    commits
-                    or interval["candidate_main_sha"] != interval["freeze_main_sha"]
-                    or interval["candidate_main_tree"] != interval["freeze_main_tree"]
-                ))
-                or (disposition == "tree_neutral_included" and (
-                    not commits or interval["freeze_main_tree"] != intent.anchor_tree
-                ))
-            ):
+            if (interval.get("verified") is not True or not isinstance(commits, list)
+                    or len({row.get("sha") for row in commits if isinstance(row, dict)}) != len(commits)
+                    or any(not isinstance(row, dict) or not _sha(row.get("sha")) or not _sha(row.get("tree")) for row in commits)
+                    or disposition not in {"no_drift", "tree_neutral_included"}):
                 raise TransactionError("PRINCIPAL_ANCESTRY_UNPROVEN")
             evidence["principal_interval"] = interval
-            phase = "ancestry_verified"
-            final = port.promote_principal(intent, candidate, certification, freeze)
-            if (
-                not _git_sha(final.get("previous_main_sha"))
-                or _canonical_final_version(final.get("previous_main_version")) is None
-                or not _git_sha(final.get("main_at_event_sha"))
-                or _canonical_final_version(final.get("main_at_event_version")) is None
-                or final.get("previous_main_sha") != freeze["sha"]
-                or final.get("previous_main_version") != freeze_version
-                or final.get("main_at_event_sha") != final.get("sha")
-                or final.get("main_at_event_version") != intent.final_version
-                or final.get("ancestry_disposition") != disposition
-            ):
-                raise TransactionError("MAIN_RECONCILIATION_UNPROVEN")
-        else:
-            final = port.verify_maintenance(intent, candidate, certification)
-            if (
-                not _git_sha(final.get("main_before_sha"))
-                or not _git_sha(final.get("main_at_event_sha"))
-                or _canonical_final_version(final.get("main_before_version")) is None
-                or _canonical_final_version(final.get("main_at_event_version")) is None
-                or final.get("main_before_sha") != final.get("main_at_event_sha")
-                or final.get("main_before_version") != final.get("main_at_event_version")
-            ):
-                raise TransactionError("MAINTENANCE_MAIN_CHANGED")
-        if (
-            final.get("tree") != intent.anchor_tree
-            or final.get("version") != intent.final_version
-            or not SHA.fullmatch(str(final.get("sha", "")))
-            or not SHA.fullmatch(str(final.get("tree", "")))
-        ):
+        phase = "ancestry_verified"
+        if not hasattr(port, "promote_principal"):
+            raise TransactionError("RELEASE_PORT_UNSUPPORTED")
+        _authorize(port, intent, "create-release-manifest",
+                   f"refs/heads/lifecycle/v1/releases/v{intent.final_version}")
+        final = _as_mapping(_call(port, "promote_principal", intent, candidate, certification, freeze), "RELEASE_TREE_MISMATCH")
+        final_sha = final.get("sha", final.get("final_release_sha"))
+        final_tree = final.get("tree", final.get("final_release_tree"))
+        if (final.get("version", final.get("final_version")) != final_version
+                or not _sha(final_sha) or not _sha(final_tree) or final_tree != candidate_tree):
             raise TransactionError("RELEASE_TREE_MISMATCH")
         evidence["final"] = final
         phase = "final_verified"
 
-        if certification["binding"] == "commit-bound" and candidate["sha"] != final["sha"]:
-            certification = port.recertify_final(intent, final)
-            if (
-                certification.get("binding") != "commit-bound"
-                or certification.get("subject_sha") != final["sha"]
-                or certification.get("subject_tree") != final["tree"]
-                or not _public_identity(
-                    certification.get("policy_revision"), key="policy_revision"
-                )
-                or not _public_identity(
-                    certification.get("harness_revision"), key="harness_revision"
-                )
-                or not _public_identity(
-                    certification.get("environment"), key="environment"
-                )
-                or not certification.get("evidence_refs")
-            ):
+        transfer_evidence: dict[str, Any] | None = None
+        if binding == "commit-bound" and final_sha != candidate_sha:
+            if not hasattr(port, "recertify_final"):
                 raise TransactionError("RECERTIFICATION_REQUIRED")
-            evidence["certification"] = certification
+            _authorize(port, intent, "create-release-manifest",
+                       f"refs/heads/lifecycle/v1/releases/v{intent.final_version}")
+            certification = _as_mapping(_call(port, "recertify_final", intent, final), "RECERTIFICATION_REQUIRED")
+            if (certification.get("binding") != "commit-bound"
+                    or certification.get("subject_sha") != final_sha
+                    or certification.get("subject_tree") != final_tree):
+                raise TransactionError("RECERTIFICATION_REQUIRED")
+            _validate_certification(certification, {"sha": final_sha, "tree": final_tree})
+            evidence["final_certification"] = dict(certification)
             phase = "final_recertified"
-        elif certification["binding"] == "tree-bound":
-            if certification["subject_tree"] != final["tree"]:
+        elif binding == "tree-bound" and final_sha != candidate_sha:
+            if not hasattr(port, "verify_tree_transfer"):
                 raise TransactionError("CERTIFICATION_TRANSFER_UNPROVEN")
-            if certification["subject_sha"] != candidate["sha"]:
+            _authorize(port, intent, "create-release-manifest",
+                       f"refs/heads/lifecycle/v1/releases/v{intent.final_version}")
+            transfer_evidence = _as_mapping(_call(port, "verify_tree_transfer", intent, candidate, certification, final), "CERTIFICATION_TRANSFER_UNPROVEN")
+            expected_anchor_tree = intent.anchor_tree or candidate_tree
+            if (transfer_evidence.get("verified") is not True
+                    or transfer_evidence.get("candidate_sha") != candidate_sha
+                    or transfer_evidence.get("final_release_sha") != final_sha
+                    or transfer_evidence.get("candidate_tree") != candidate_tree
+                    or transfer_evidence.get("final_release_tree") != final_tree
+                    or transfer_evidence.get("anchor_tree") != expected_anchor_tree):
                 raise TransactionError("CERTIFICATION_TRANSFER_UNPROVEN")
-            if candidate["sha"] != final["sha"]:
-                transfer = port.verify_tree_transfer(intent, candidate, certification, final)
-                if (
-                    transfer.get("verified") is not True
-                    or transfer.get("candidate_sha") != candidate["sha"]
-                    or transfer.get("final_release_sha") != final["sha"]
-                    or transfer.get("candidate_tree") != intent.anchor_tree
-                    or transfer.get("final_release_tree") != intent.anchor_tree
-                    or transfer.get("anchor_tree") != intent.anchor_tree
-                    or not any(
-                        isinstance(transfer.get(name), str) and bool(transfer.get(name))
-                        for name in ("evidence_ref", "evidence_digest", "digest")
-                    )
-                ):
-                    raise TransactionError("CERTIFICATION_TRANSFER_UNPROVEN")
-                transfer_evidence = dict(transfer)
-                # The transfer proof is part of the certification identity
-                # passed to both durable release events.  Keeping this copy
-                # on the certification prevents an in-memory verification
-                # from being mistaken for durable evidence.
-                certification = dict(certification)
-                certification["transfer_evidence"] = {
-                    **dict(transfer_evidence),
-                    "certified_tree": certification["subject_tree"],
-                }
-                transfer_evidence = dict(certification["transfer_evidence"])
-                evidence["certification"] = dict(certification)
-                evidence["certification_transfer"] = dict(transfer_evidence)
-                phase = "transfer_verified"
+            certification = dict(certification)
+            certification["transfer_evidence"] = dict(transfer_evidence)
+            evidence["certification_transfer"] = dict(transfer_evidence)
+            evidence["final_certification"] = dict(certification)
+            phase = "transfer_verified"
+        else:
+            evidence["final_certification"] = dict(certification)
 
-        evidence["final_certification"] = dict(certification)
-
-        public_tag = f"v{intent.final_version}"
-        tag_ref = f"refs/tags/{public_tag}"
+        if not hasattr(port, "verify_public_tag_ruleset"):
+            raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE")
+        protection = _call(port, "verify_public_tag_ruleset", intent, f"refs/tags/{intent.public_tag}")
+        if protection is None or not hasattr(protection, "require_public_tag"):
+            raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE")
         try:
-            tag_protection = port.verify_public_tag_ruleset(intent, tag_ref)
-            if not isinstance(tag_protection, ProtectionEvidence):
-                raise GitIdentityError("public tag ruleset proof has the wrong type")
-            tag_protection.require_public_tag(tag_ref)
-        except Exception as exc:
-            raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE") from exc
-        evidence["public_tag_ruleset"] = asdict(tag_protection)
+            protection.require_public_tag(f"refs/tags/{intent.public_tag}")
+        except Exception as error:
+            raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE") from error
+        evidence["public_tag_ruleset"] = protection
         phase = "tag_ruleset_verified"
 
-        prepared = port.append_release_intent(intent, candidate, certification, final)
-        if transfer_evidence is not None and prepared.get(
-            "certification_transfer_evidence"
-        ) != transfer_evidence:
-            raise TransactionError("RELEASE_INTENT_TRANSFER_EVIDENCE_UNPROVEN")
-        try:
-            canonical_prepared = validate_event(prepared)
-        except (TypeError, ValueError) as error:
-            raise TransactionError("RELEASE_INTENT_MISMATCH") from error
-        expected_intent = _expected_release_intent_identity(
-            intent, candidate, certification, final
-        )
-        if (
-            canonical_prepared.get("event_type") != "release_intent_prepared"
-            or any(
-                canonical_prepared.get(field) != expected_intent[field]
-                for field in RELEASE_INTENT_BINDING_FIELDS
-            )
-        ):
-            raise TransactionError("RELEASE_INTENT_MISMATCH")
-        evidence["intent"] = canonical_prepared
+        intent_payload = _manifest_payload(
+            intent, "release-intent-prepared", {
+                "candidate_id": candidate.get("candidate_id", ""),
+                "candidate_ref": intent.candidate_ref, "candidate_sha": candidate_sha,
+                "candidate_tree": candidate_tree, "final_version": final_version,
+                "release_line": "principal", "public_tag": intent.public_tag,
+                "anchor_ref": intent.anchor_ref, "anchor_sha": intent.anchor_sha,
+                "anchor_tree": intent.anchor_tree,
+                "certification_binding": binding,
+                "certification_subject_sha": certification.get("subject_sha"),
+                "certification_subject_tree": certification.get("subject_tree"),
+                "certification_policy_revision": certification["policy_revision"],
+                "certification_harness_revision": certification["harness_revision"],
+                "certification_environment": certification["environment"],
+                "certification_evidence_refs": sorted(certification["evidence_refs"]),
+                "final_release_sha": final_sha, "final_release_tree": final_tree,
+            }, predecessor_refs=(lifecycle_ref_for_manifest(opened),))
+        if transfer_evidence is not None:
+            intent_payload["certification_transfer_evidence"] = dict(transfer_evidence)
+        prepared = _as_mapping(_typed_manifest(
+            port, "release-intent-prepared", intent_payload,
+            authorize=lambda action, target: _manifest_authorize(port, intent, action, target)),
+            "RELEASE_INTENT_MISMATCH")
+        for key, expected in intent_payload.items():
+            if key in prepared and prepared[key] != expected:
+                raise TransactionError("RELEASE_INTENT_MISMATCH")
+        evidence["intent"] = _expect_manifest(prepared, "release-intent-prepared", "RELEASE_INTENT_MISMATCH")
         phase = "release_intent_durable"
-        tag_attempted = True
-        tag = port.create_protected_tag(
-            intent, canonical_prepared, final, tag_protection
-        )
+
+        _authorize(port, intent, "create-tag", f"refs/tags/{intent.public_tag}")
+        if hasattr(port, "create_protected_tag"):
+            tag = _as_mapping(_call(port, "create_protected_tag", intent, prepared, final, evidence.get("public_tag_ruleset")), "PUBLIC_TAG_IDENTITY_MISMATCH")
+        elif hasattr(port, "create_tag"):
+            tag = _as_mapping(_call(port, "create_tag", intent, prepared, final), "PUBLIC_TAG_IDENTITY_MISMATCH")
+        else:
+            raise TransactionError("TAG_PORT_UNSUPPORTED")
         tag_created = True
-        if (
-            tag.get("name") != public_tag
-            or tag.get("commit") != final["sha"]
-            or tag.get("tree") != final["tree"]
-            or tag.get("protected") is not True
-        ):
+        if (tag.get("name", tag.get("public_tag")) != intent.public_tag
+                or tag.get("commit", tag.get("tag_commit")) != final_sha
+                or tag.get("tree", tag.get("tag_tree")) != final_tree
+                or tag.get("protected") is False):
             raise TransactionError("PUBLIC_TAG_IDENTITY_MISMATCH")
         evidence["tag"] = tag
         phase = "public_tag_created"
-        released = port.append_released(intent, candidate, certification, final, tag)
-        released_appended = True
-        port.verify_released(intent, released, certification, final)
-        if (
-            not released.get("event_id")
-            or any(
-                released.get(field) != canonical_prepared.get(field)
-                for field in RELEASE_INTENT_BINDING_FIELDS
-            )
-        ):
-            raise TransactionError("RELEASED_EVENT_MISMATCH")
-        if transfer_evidence is not None and released.get(
-            "certification_transfer_evidence"
-        ) != transfer_evidence:
-            raise TransactionError("RELEASED_EVENT_TRANSFER_EVIDENCE_UNPROVEN")
-        evidence["released"] = released
-        phase = "released_event_durable"
-        publication = port.publish_github_release(intent, released)
-        if not publication.get("id") or publication.get("tag") != public_tag:
+
+        release_fields = {
+            "final_version": final_version, "release_line": "principal",
+            "public_tag": intent.public_tag, "candidate_ref": intent.candidate_ref,
+            "candidate_sha": candidate_sha, "candidate_tree": candidate_tree,
+            "anchor_ref": intent.anchor_ref, "anchor_sha": intent.anchor_sha,
+            "anchor_tree": intent.anchor_tree, "final_release_sha": final_sha,
+            "final_release_tree": final_tree, "certification_binding": binding,
+            "certification_subject_sha": certification["subject_sha"],
+            "certification_subject_tree": certification["subject_tree"],
+            "certification_policy_revision": certification["policy_revision"],
+            "certification_harness_revision": certification["harness_revision"],
+            "certification_environment": certification["environment"],
+            "certification_evidence_refs": sorted(certification["evidence_refs"]),
+            "closure_timestamp_utc": intent.closure_timestamp_utc,
+            "previous_main_sha": freeze["sha"],
+            "previous_main_version": freeze.get("version"),
+            "main_at_release_sha": final.get("main_at_release_sha"),
+            "main_at_release_version": final.get("main_at_release_version"),
+            "main_at_candidate_sha": main_candidate_sha,
+            "main_at_candidate_version": main_candidate_version,
+            "evidence_refs": sorted(final.get("evidence_refs", [])),
+        }
+        if not (_sha(release_fields["previous_main_sha"])
+                and isinstance(release_fields["previous_main_version"], str)
+                and _sha(release_fields["main_at_release_sha"])
+                and isinstance(release_fields["main_at_release_version"], str)
+                and release_fields["evidence_refs"]):
+            raise TransactionError("RELEASE_MAIN_IDENTITY_UNPROVEN")
+        try:
+            _final(release_fields["previous_main_version"])
+            _final(release_fields["main_at_release_version"])
+        except TransactionError as error:
+            raise TransactionError("RELEASE_MAIN_IDENTITY_UNPROVEN") from error
+        released_payload = _manifest_payload(
+            intent, "released", release_fields,
+            predecessor_refs=(lifecycle_ref_for_manifest(prepared),))
+        released = _as_mapping(_typed_manifest(
+            port, "released", released_payload,
+            authorize=lambda action, target: _manifest_authorize(port, intent, action, target)),
+            "RELEASED_MANIFEST_MISMATCH")
+        released_created = True
+        for key, expected in release_fields.items():
+            if key in released and released[key] != expected:
+                raise TransactionError("RELEASED_MANIFEST_MISMATCH")
+        evidence["released"] = _expect_manifest(released, "released", "RELEASED_MANIFEST_MISMATCH")
+        if hasattr(port, "verify_released"):
+            _call(port, "verify_released", intent, released, certification, final)
+        phase = "released_manifest_durable"
+
+        if not hasattr(port, "publish_github_release"):
+            raise TransactionError("PUBLICATION_RECONCILIATION_REQUIRED")
+        _authorize(port, intent, "create-release-manifest",
+                   f"refs/heads/lifecycle/v1/releases/v{intent.final_version}")
+        publication = _as_mapping(_call(port, "publish_github_release", intent, released), "PUBLICATION_IDENTITY_MISMATCH")
+        release_id = publication.get("id", publication.get("github_release_id"))
+        if (publication.get("tag", publication.get("public_tag")) != intent.public_tag
+                or isinstance(release_id, bool) or not isinstance(release_id, int) or release_id <= 0):
             raise TransactionError("PUBLICATION_IDENTITY_MISMATCH")
-        evidence["publication"] = publication
+        evidence["github_release"] = publication
         phase = "github_release_published"
-        publication_evidence = port.persist_publication_evidence(
-            intent, released, publication
-        )
-        if (
-            publication_evidence.get("event_id") != released["event_id"]
-            or publication_evidence.get("public_tag") != public_tag
-            or publication_evidence.get("github_release_id") != publication["id"]
-        ):
+        if not hasattr(port, "persist_publication_evidence"):
+            raise TransactionError("PUBLICATION_EVIDENCE_UNAVAILABLE")
+        _authorize(port, intent, "create-release-manifest",
+                   f"refs/heads/lifecycle/v1/releases/v{intent.final_version}")
+        publication_evidence = _as_mapping(_call(port, "persist_publication_evidence", intent, released, publication), "PUBLICATION_EVIDENCE_MISMATCH")
+        if (not isinstance(publication_evidence.get("ref"), str)
+                or not isinstance(publication_evidence.get("digest"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", publication_evidence["digest"])):
             raise TransactionError("PUBLICATION_EVIDENCE_MISMATCH")
         evidence["publication_evidence"] = publication_evidence
-        phase = "publication_evidence_durable"
-        port.verify_terminal(intent, released, publication, publication_evidence)
+        release_ref = lifecycle_ref_for_manifest(released)
+        publication_payload = {
+            "schema_version": 1, "manifest_type": "publication",
+            "timestamp_utc": publication.get("published_at_utc", intent.timestamp_utc),
+            "predecessor_refs": [release_ref],
+            "owner_authorization": intent.owner_authorization,
+            "owner_authorization_ref": intent.owner_authorization_ref,
+            "owner_authorization_digest": intent.owner_authorization_digest,
+            "released_manifest_ref": release_ref,
+            "released_manifest_id": released["manifest_id"],
+            "released_manifest_digest": sha256_hex(canonical_manifest_bytes(released)),
+            "public_tag": intent.public_tag,
+            "tag_commit": tag.get("commit", tag.get("tag_commit")),
+            "tag_tree": tag.get("tree", tag.get("tag_tree")),
+            "github_release_id": release_id,
+            "github_release_url": publication.get("url", publication.get("github_release_url", "")),
+            "published_at_utc": publication.get("published_at_utc", intent.timestamp_utc),
+            "publication_evidence_ref": publication_evidence["ref"],
+            "publication_evidence_digest": publication_evidence["digest"],
+        }
+        evidence["publication"] = _as_mapping(_typed_manifest(
+            port, "publication", publication_payload,
+            authorize=lambda action, target: _manifest_authorize(port, intent, action, target)),
+            "PUBLICATION_MANIFEST_MISMATCH")
+        if hasattr(port, "verify_terminal"):
+            _call(port, "verify_terminal", intent, released, publication, publication_evidence)
         phase = "terminal_verified"
+
+        lease_to_release = lease
+        lease = None
+        _release_exclusion(port, lease_to_release)
+        _call(port, "unfreeze_main", token)
+        token = None
+        return TransactionResult("COMPLETE", evidence=evidence, phase="unfrozen")
+    except TransactionError as error:
         try:
-            _release_static_mutation(port, mutation_lease)
-        except TransactionError:
-            # A release failure can follow a complete publication.  Keep the
-            # main freeze and leave reconciliation to the caller.
-            mutation_lease = None
-            raise
-        mutation_lease = None
-        if main_token is not None:
-            port.unfreeze_main(main_token)
-        return TransactionResult("COMPLETE", "unfrozen", evidence=evidence)
-    except TransactionError as exc:
-        _release_static_mutation_best_effort(port, mutation_lease)
-        if exc.reason_code.endswith("_MISMATCH") or "INVALID" in exc.reason_code:
-            return TransactionResult(
-                "INVALID", phase, exc.reason_code, evidence,
-                frozen=main_token is not None,
-            )
-        if released_appended:
-            return TransactionResult(
-                "publication_reconciliation_pending", phase, exc.reason_code,
-                evidence, frozen=main_token is not None,
-            )
-        if tag_attempted or tag_created:
-            return TransactionResult(
-                "tag_reconciliation_pending", phase, exc.reason_code,
-                evidence, frozen=main_token is not None,
-            )
-        return TransactionResult(
-            "BLOCKED", phase, exc.reason_code, evidence,
-            frozen=main_token is not None,
-        )
-    except Exception as exc:
-        _release_static_mutation_best_effort(port, mutation_lease)
-        evidence["error_type"] = type(exc).__name__
-        if released_appended:
+            if lease is not None:
+                _release_exclusion(port, lease)
+        except Exception:
+            pass
+        if error.reason_code == "OWNER_AUTHORIZATION_UNVERIFIED":
+            status = "BLOCKED"
+        elif error.reason_code.endswith("_MISMATCH"):
+            status = "INVALID"
+        elif released_created:
             status = "publication_reconciliation_pending"
-        elif tag_attempted:
+        elif tag_created:
             status = "tag_reconciliation_pending"
         else:
             status = "BLOCKED"
-        return TransactionResult(
-            status, phase, "RELEASE_OUTCOME_UNCERTAIN", evidence,
-            frozen=main_token is not None,
-        )
+        return TransactionResult(status, error.reason_code, error.detail, evidence, frozen=token is not None, phase=phase)
+    except Exception as error:
+        try:
+            if lease is not None:
+                _release_exclusion(port, lease)
+        except Exception:
+            pass
+        evidence["error_type"] = type(error).__name__
+        status = ("publication_reconciliation_pending" if released_created else
+                  "tag_reconciliation_pending" if tag_created else "BLOCKED")
+        return TransactionResult(status, "RELEASE_OUTCOME_UNCERTAIN", str(error), evidence, frozen=token is not None, phase=phase)
+
+
+__all__ = [
+    "AllocationView", "BootstrapIntent", "ClosureIntent", "ImmutableLifecyclePort",
+    "ReleaseIntent", "TransactionError", "TransactionResult", "run_closure",
+    "run_maintenance_bootstrap", "run_rare_recovery", "run_release",
+]

@@ -1,15 +1,4 @@
-"""Canonical serialization primitives for the version lifecycle.
-
-The lifecycle uses two different byte contracts:
-
-* canonical JSON artifacts have UTF-8 JSON bytes, sorted object keys, compact
-  separators, no trailing newline, and no non-finite numbers;
-* JSONL records add exactly one newline at the append boundary.  The event
-  writer owns that framing and should call :func:`canonical_json` first.
-
-Keeping these primitives in a small dependency-free module gives the event
-ledger and the static snapshot code the same digest preimages.
-"""
+"""Canonical JSON and digest primitives for immutable lifecycle artifacts."""
 
 from __future__ import annotations
 
@@ -78,10 +67,4 @@ def sha256_hex(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def canonical_json_line(value: Any) -> bytes:
-    """Return one canonical JSONL record, including exactly one trailing LF."""
-
-    return canonical_json(value) + b"\n"
-
-
-__all__ = ["canonical_json", "canonical_json_line", "sha256_hex"]
+__all__ = ["canonical_json", "sha256_hex"]

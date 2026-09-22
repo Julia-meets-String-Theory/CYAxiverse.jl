@@ -1,15 +1,15 @@
 """Global occupied-set and deterministic version allocation helpers.
 
-This module consumes a static snapshot and a read-only representation of the
-mutable event head.  It does not append events or mutate refs; event writers
-must bind the returned snapshot/head identities in their own CAS transaction.
+Allocation consumes one verified static snapshot and one complete immutable
+lifecycle-ref snapshot. No mutable head or append-only stream is a valid
+allocation authority.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 from .static import (
     BlockedResult,
@@ -18,10 +18,11 @@ from .static import (
     _has_verified_authority,
     validate_static_snapshot,
 )
-from .writer import (
-    CANONICAL_EVENT_REF,
-    CANONICAL_EVENT_STREAM,
-    _is_verified_ledger_head,
+from .manifests import (
+    LifecycleRefSnapshot,
+    ManifestError,
+    _has_verified_lifecycle_authority,
+    validate_lifecycle_ref_snapshot,
 )
 from .versions import (
     Version,
@@ -56,13 +57,12 @@ class AllocationResult:
 
 @dataclass(frozen=True, slots=True)
 class GlobalAllocationView:
-    """Combined static and mutable occupied namespace."""
+    """Combined static and immutable lifecycle occupied namespace."""
 
     static_snapshot: StaticSnapshot
-    allocation_event_head: Any
-    event_head_commit: str
+    lifecycle_ref_snapshot: LifecycleRefSnapshot
     static_occupied: frozenset[str]
-    mutable_occupied: frozenset[str]
+    lifecycle_occupied: frozenset[str]
     occupied: frozenset[str]
 
     @property
@@ -84,8 +84,18 @@ class GlobalAllocationView:
         return tuple(sorted(self.occupied))
 
     @property
-    def event_head(self) -> str:
-        return self.event_head_commit
+    def lifecycle_snapshot_digest(self) -> str:
+        return self.lifecycle_ref_snapshot.snapshot_digest
+
+    @property
+    def mutable_occupied(self) -> frozenset[str]:
+        """Compatibility name; the underlying authority is immutable."""
+
+        return self.lifecycle_occupied
+
+    @property
+    def ref_snapshot_digest(self) -> str:
+        return self.lifecycle_snapshot_digest
 
 
 def _version_identity(value: Any) -> str | None:
@@ -100,113 +110,11 @@ def _version_identity(value: Any) -> str | None:
         return None
 
 
-_GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
-_EVENT_VERSION_FIELDS = frozenset(
-    {
-        "version", "final_version", "declared_version", "reserved_final",
-        "closed_final_version",
-        "intended_dev", "intended_dev_version", "dev_version", "public_tag",
-        "approved_base_version", "main_at_event_version", "previous_main_version",
-    }
-)
-
-
-def _event_occupied(events: Iterable[Mapping[str, Any]]) -> set[str]:
-    """Replay event occupation with reservation terminal semantics.
-
-    A prepared reservation remains occupied while it is prepared or opened.
-    A proven pre-entry abort releases that reserved final identity.  A
-    consumed reservation occupies its reserved identity and, when closure
-    used a different final, the closed final as well.  Other lifecycle events
-    retain the generic version-field occupation rules because their durable
-    identities remain unavailable after withdrawal or abort.
-    """
-
-    occupied: set[str] = set()
-    reservation_states: dict[str, str] = {}
-    reservation_versions: dict[str, str] = {}
-    consumed_closed_versions: dict[str, str | None] = {}
-    reservation_event_types = {
-        "development_reservation_prepared",
-        "development_reservation_opened",
-        "development_reservation_aborted",
-        "development_reservation_consumed",
-    }
-    for event in events:
-        event_type = event.get("event_type")
-        if event_type in reservation_event_types:
-            if event_type == "development_reservation_aborted":
-                # An unverified abort cannot free a globally reserved final.
-                # Full stream replay also checks this proof against prepared.
-                from .events import validate_event
-
-                validate_event(event)
-            reservation_id = event.get("reservation_id")
-            if not isinstance(reservation_id, str) or not reservation_id:
-                raise ValueError("reservation event requires a reservation_id")
-            final_identity = _version_identity(event.get("final_version"))
-            if final_identity is None:
-                raise ValueError("reservation event final_version is not a canonical package identity")
-            reservation_states[reservation_id] = str(event_type).removeprefix(
-                "development_reservation_"
-            )
-            reservation_versions[reservation_id] = final_identity
-            if event_type == "development_reservation_consumed":
-                closed_value = event.get("closed_final_version")
-                closed_identity = None
-                if closed_value is not None:
-                    closed_identity = _version_identity(closed_value)
-                    if closed_identity is None:
-                        raise ValueError(
-                            "reservation event closed_final_version is not a canonical package identity"
-                        )
-                consumed_closed_versions[reservation_id] = closed_identity
-            continue
-        for key, value in event.items():
-            if key not in _EVENT_VERSION_FIELDS:
-                continue
-            if not isinstance(value, str):
-                raise ValueError(f"event version field {key} must be a string")
-            identity = _version_identity(value)
-            if identity is None:
-                raise ValueError(f"event version field {key} is not a canonical package/tag identity")
-            occupied.add(identity)
-    for reservation_id, state in reservation_states.items():
-        if state == "aborted":
-            continue
-        occupied.add(reservation_versions[reservation_id])
-        closed_identity = consumed_closed_versions.get(reservation_id)
-        if closed_identity is not None:
-            occupied.add(closed_identity)
-    return occupied
-
-
-def _validated_event_head(
-    head: Any,
-) -> tuple[str, str, set[str]]:
-    """Require an authority-bound head returned by the event writer."""
-
-    if not _is_verified_ledger_head(head):
-        raise ValueError("allocation_event_head must be a writer-verified LedgerHead")
-    if head.ref != CANONICAL_EVENT_REF or head.stream_path != CANONICAL_EVENT_STREAM:
-        raise ValueError("allocation_event_head is not the canonical release-events authority")
-    commit = head.commit
-    raw = head.raw
-    provided_events = head.events
-    if not isinstance(commit, str) or _GIT_OBJECT_RE.fullmatch(commit) is None:
-        raise ValueError("event head commit must be a full Git object ID")
-    if not isinstance(raw, bytes):
-        raise ValueError("event head raw stream bytes are required")
-    if not isinstance(provided_events, tuple):
-        raise ValueError("event head events are required")
-    return commit, head.repository_identity, _event_occupied(provided_events)
-
-
 def global_allocation_view(
     static_snapshot: StaticSnapshot | Mapping[str, Any] | BlockedResult,
-    allocation_event_head: Any = None,
+    lifecycle_snapshot: LifecycleRefSnapshot | Mapping[str, Any] | BlockedResult | None = None,
 ) -> GlobalAllocationView | BlockedResult:
-    """Combine one exact static snapshot with one exact mutable event head."""
+    """Combine one exact static snapshot with the complete lifecycle snapshot."""
 
     if isinstance(static_snapshot, BlockedResult):
         return static_snapshot
@@ -218,12 +126,19 @@ def global_allocation_view(
         # snapshots and caller-forged booleans must fail closed here.
         if not _has_verified_authority(snapshot):
             raise StaticValidationError("fresh remote static authority has not been verified")
-        event_head_commit, event_repository, mutable_values = _validated_event_head(
-            allocation_event_head
-        )
-        if snapshot._repository_authority != event_repository:
+        if lifecycle_snapshot is None or isinstance(lifecycle_snapshot, BlockedResult):
+            if isinstance(lifecycle_snapshot, BlockedResult):
+                return lifecycle_snapshot
+            raise ManifestError("complete lifecycle ref snapshot is required")
+        if (
+            not isinstance(lifecycle_snapshot, LifecycleRefSnapshot)
+            or not _has_verified_lifecycle_authority(lifecycle_snapshot)
+        ):
+            raise ManifestError("fresh remote lifecycle authority has not been verified")
+        lifecycle = validate_lifecycle_ref_snapshot(lifecycle_snapshot)
+        if snapshot.source_repository != lifecycle.source_repository:
             raise ValueError(
-                "static and mutable authorities belong to different repositories"
+                "static and lifecycle authorities belong to different repositories"
             )
     except StaticValidationError as error:
         detail = str(error)
@@ -234,17 +149,16 @@ def global_allocation_view(
         else:
             reason = "STATIC_SNAPSHOT_INVALID"
         return BlockedResult(reason_code=reason, detail=detail)
-    except (TypeError, ValueError) as error:
-        return BlockedResult(reason_code="ALLOCATION_EVENT_HEAD_INVALID", detail=str(error))
+    except (TypeError, ValueError, ManifestError) as error:
+        return BlockedResult(reason_code="LIFECYCLE_REF_SNAPSHOT_INVALID", detail=str(error))
     static_occupied = frozenset(snapshot.occupied_versions)
-    mutable_occupied = frozenset(mutable_values)
+    lifecycle_occupied = frozenset(lifecycle.occupied_versions)
     return GlobalAllocationView(
         static_snapshot=snapshot,
-        allocation_event_head=allocation_event_head,
-        event_head_commit=event_head_commit,
+        lifecycle_ref_snapshot=lifecycle,
         static_occupied=static_occupied,
-        mutable_occupied=mutable_occupied,
-        occupied=static_occupied | mutable_occupied,
+        lifecycle_occupied=lifecycle_occupied,
+        occupied=static_occupied | lifecycle_occupied,
     )
 
 
@@ -253,9 +167,9 @@ allocation_view = global_allocation_view
 
 def _view_or_blocked(
     static_snapshot: StaticSnapshot | Mapping[str, Any] | BlockedResult,
-    allocation_event_head: Any,
+    lifecycle_snapshot: Any,
 ) -> GlobalAllocationView | AllocationResult:
-    view = global_allocation_view(static_snapshot, allocation_event_head)
+    view = global_allocation_view(static_snapshot, lifecycle_snapshot)
     if isinstance(view, BlockedResult):
         return AllocationResult(status="BLOCKED", reason_code=view.reason_code, detail=view.detail)
     return view
@@ -264,7 +178,7 @@ def _view_or_blocked(
 def select_principal_sentinel(
     closed_version: VersionLike,
     static_snapshot: StaticSnapshot | Mapping[str, Any] | BlockedResult,
-    allocation_event_head: Any = None,
+    lifecycle_snapshot: Any = None,
 ) -> AllocationResult:
     """Select exactly ``X.Y.(Z+1)-DEV`` for a principal line reopen."""
 
@@ -272,7 +186,7 @@ def select_principal_sentinel(
         closed = final_version(closed_version)
     except (TypeError, ValueError) as error:
         return AllocationResult(status="BLOCKED", reason_code="INVALID_CLOSED_VERSION", detail=str(error))
-    view = _view_or_blocked(static_snapshot, allocation_event_head)
+    view = _view_or_blocked(static_snapshot, lifecycle_snapshot)
     if isinstance(view, AllocationResult):
         return view
     try:
@@ -303,18 +217,18 @@ def select_principal_sentinel(
 def select_principal_dev(
     closed_version: VersionLike,
     static_snapshot: StaticSnapshot | Mapping[str, Any] | BlockedResult,
-    allocation_event_head: Any = None,
+    lifecycle_snapshot: Any = None,
 ) -> AllocationResult:
     """Compatibility alias for :func:`select_principal_sentinel`."""
 
-    return select_principal_sentinel(closed_version, static_snapshot, allocation_event_head)
+    return select_principal_sentinel(closed_version, static_snapshot, lifecycle_snapshot)
 
 
 def select_maintenance_version(
     line: str,
     closed_version: VersionLike,
     static_snapshot: StaticSnapshot | Mapping[str, Any] | BlockedResult,
-    allocation_event_head: Any = None,
+    lifecycle_snapshot: Any = None,
     *,
     max_search: int | None = None,
 ) -> AllocationResult:
@@ -332,7 +246,7 @@ def select_maintenance_version(
             line=line,
             detail=f"closed version {closed} is outside {line}",
         )
-    view = _view_or_blocked(static_snapshot, allocation_event_head)
+    view = _view_or_blocked(static_snapshot, lifecycle_snapshot)
     if isinstance(view, AllocationResult):
         view_line = view.line or line
         return AllocationResult(
@@ -376,7 +290,7 @@ def select_maintenance_dev(
     line: str,
     closed_version: VersionLike,
     static_snapshot: StaticSnapshot | Mapping[str, Any] | BlockedResult,
-    allocation_event_head: Any = None,
+    lifecycle_snapshot: Any = None,
     *,
     max_search: int | None = None,
 ) -> AllocationResult:
@@ -386,7 +300,7 @@ def select_maintenance_dev(
         line,
         closed_version,
         static_snapshot,
-        allocation_event_head,
+        lifecycle_snapshot,
         max_search=max_search,
     )
 

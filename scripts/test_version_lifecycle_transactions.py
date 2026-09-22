@@ -1,16 +1,20 @@
-"""Observable closure/bootstrap ordering and freeze recovery fixtures."""
+"""Fixture coverage for the reduced first-principal lifecycle coordinator."""
 
 from __future__ import annotations
 
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from version_lifecycle.git_refs import ProtectionEvidence  # noqa: E402
-from version_lifecycle.events import RELEASE_INTENT_BINDING_FIELDS  # noqa: E402
+from version_lifecycle.authorization import (  # noqa: E402
+    AuthorizationResolution,
+    canonical_authorization_bytes,
+    seal_authorization,
+)
+from version_lifecycle.manifests import seal_manifest, validate_manifest  # noqa: E402
 from version_lifecycle.transactions import (  # noqa: E402
     AllocationView,
     BootstrapIntent,
@@ -18,970 +22,497 @@ from version_lifecycle.transactions import (  # noqa: E402
     ReleaseIntent,
     run_closure,
     run_maintenance_bootstrap,
+    run_rare_recovery,
     run_release,
 )
 
 
-class ClosureFixture:
-    def __init__(
-        self, *, fail_consumption=False, occupied=frozenset(),
-        closure_fields=None, anchor_fields=None, exclusion_available=True,
-        release_failure=False,
-    ) -> None:
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+TREE = "c" * 40
+SNAPSHOT = "0" * 64
+LIFECYCLE_SNAPSHOT = "1" * 64
+OWNER = "owner-principal"
+REPOSITORY = "fixture-repository"
+RESERVATION_REF = (
+    "refs/heads/lifecycle/v1/reservations/principal/v0.3.0-DEV/"
+    + "LIF-SHA256-" + "e" * 64
+)
+CONSUMED_RESERVATION_REF = (
+    "refs/heads/lifecycle/v1/reservations/principal/v0.3.0-DEV/"
+    + "LIF-SHA256-" + "f" * 64
+)
+ANCHOR_REF = "refs/tags/iterations/0.3.0"
+RELEASE_TARGET = "refs/heads/lifecycle/v1/releases/v0.3.0"
+
+
+def make_authorization(transaction_id: str, target_refs: list[str]) -> dict[str, object]:
+    return seal_authorization({
+        "schema_version": 1,
+        "repository": REPOSITORY,
+        "owner_account": OWNER,
+        "authority_source_ref": f"owner-authority://fixture/{transaction_id}",
+        "issued_at_utc": "2026-09-20T00:00:00Z",
+        "expires_at_utc": "2026-09-21T00:00:00Z",
+        "transaction_id": transaction_id,
+        "owner_line": "principal",
+        "final_version": "0.3.0",
+        "authorized_actions": ["create-release-manifest", "create-tag"],
+        "target_refs": sorted(set(target_refs)),
+    })
+
+
+class FixtureAuthority:
+    def __init__(self, record: dict[str, object], *, owner: bool = True):
+        self.record = record
+        self.raw = canonical_authorization_bytes(record)
+        self.owner = owner
+
+    def fetch_owner_authorization(self, reference: str):
+        return AuthorizationResolution(self.record, self.raw, self.owner)
+
+
+CLOSURE_AUTHORIZATION = make_authorization(
+    "tx-closure", [RELEASE_TARGET, ANCHOR_REF, "refs/heads/vmm"]
+)
+RELEASE_AUTHORIZATION = make_authorization(
+    "tx-release", [RELEASE_TARGET, "refs/heads/main", "refs/tags/v0.3.0",
+                    "refs/heads/candidates/v0.3.0/candidate-0-3-0"]
+)
+CLOSURE_AUTHORITY = FixtureAuthority(CLOSURE_AUTHORIZATION)
+RELEASE_AUTHORITY = FixtureAuthority(RELEASE_AUTHORIZATION)
+
+
+class PrincipalClosureFixture:
+    def __init__(self, *, fail: str | None = None, occupied: frozenset[str] = frozenset()):
+        self.fail = fail
         self.calls: list[str] = []
-        self.fail_consumption = fail_consumption
+        self.manifest_types: list[str] = []
+        self.manifests: list[dict[str, object]] = []
         self.occupied = occupied
-        self.exclusion_available = exclusion_available
-        self.release_failure = release_failure
-        self.closure_fields = closure_fields or {}
-        self.anchor_fields = anchor_fields or {}
-        self.views: list[AllocationView] = []
-        self.consumed_view: AllocationView | None = None
 
     def freeze_line(self, intent):
         self.calls.append("freeze")
-        return "freeze-proof"
+        if self.fail == "freeze":
+            return None
+        return "line-freeze"
 
     def acquire_static_mutation(self, intent):
-        if not self.exclusion_available:
-            raise RuntimeError("racing static mutation")
-        return "fixture-exclusion"
+        self.calls.append("serialize")
+        if self.fail == "serialize":
+            raise RuntimeError("exclusion unavailable")
+        return "exclusion"
 
     def release_static_mutation(self, lease):
-        if lease != "fixture-exclusion":
-            raise AssertionError("unexpected exclusion lease")
-        if self.release_failure:
-            raise RuntimeError("external lease release failed")
+        self.calls.append("release-exclusion")
 
     def allocation_view(self):
         self.calls.append("view")
-        view = AllocationView(
-            f"snapshot-{len(self.views)}", f"event-head-{len(self.views)}", self.occupied
-        )
-        self.views.append(view)
-        return view
+        return AllocationView("static", "lifecycle", self.occupied)
 
     def verify_closure_target(self, intent, view):
-        self.calls.append("target")
+        self.calls.append("verify-closure")
 
-    def merge_final(self, intent):
-        self.calls.append("merge")
-        result = {
-            "version": intent.final_version,
-            "commit": "a" * 40,
-            "tree": "b" * 40,
-        }
-        result.update(self.closure_fields)
-        return result
+    def create_closure_anchor(self, intent):
+        self.calls.append("anchor")
+        if self.fail == "anchor":
+            return {"version": intent.final_version, "commit": "bad", "tree": TREE,
+                    "closure_timestamp_utc": intent.closure_timestamp_utc}
+        return {"version": intent.final_version, "commit": SHA_A, "tree": TREE,
+                "closure_timestamp_utc": intent.closure_timestamp_utc,
+                "ref": ANCHOR_REF}
 
     def create_anchor(self, intent, closure):
-        self.calls.append("anchor")
-        result = {
-            "version": intent.final_version, "commit": closure["commit"],
-            "tree": closure["tree"],
-            "closure_timestamp_utc": intent.closure_timestamp_utc,
-        }
-        result.update(self.anchor_fields)
+        self.calls.append("create-anchor")
+        return dict(closure)
+
+    def create_manifest(self, manifest_type, payload):
+        self.calls.append(f"manifest:{manifest_type}")
+        self.manifest_types.append(manifest_type)
+        if self.fail == manifest_type:
+            raise RuntimeError(f"failed {manifest_type}")
+        result = seal_manifest(dict(payload))
+        validate_manifest(result)
+        self.manifests.append(result)
         return result
-
-    def consume_outgoing(self, intent, anchor, view):
-        self.calls.append("consume")
-        self.consumed_view = view
-        if self.fail_consumption:
-            raise RuntimeError("uncertain append")
-        return {
-            "reserved_final": intent.outgoing_reserved_final,
-            "closed_final_version": intent.final_version,
-            "terminal_disposition": (
-                "closed" if intent.outgoing_reserved_final == intent.final_version
-                else "CONSUMED_UNUSED_DEV_RESERVATION"
-            ),
-            "event_id": "EVT-000000000002",
-        }
-
-    def verify_outgoing_terminal(self, intent, consumption):
-        self.calls.append("terminal")
-
-    def prepare_next(self, intent, next_final, view):
-        self.calls.append("prepare")
-        return {"version": next_final, "intended_dev": next_final + "-DEV"}
 
     def reopen_dev(self, intent, preparation):
         self.calls.append("reopen")
-        return {"version": preparation["intended_dev"], "head": "reopened"}
+        return {"version": preparation["intended_dev_version"], "head": SHA_B}
 
     def activate_next(self, intent, preparation, reopened):
         self.calls.append("activate")
         return {"head": reopened["head"]}
 
-    def verify_closure_correspondence(self, *args):
+    def verify_closure_correspondence(self, intent, anchor, consumed, prepared, reopened, active):
         self.calls.append("correspondence")
+        if self.fail == "correspondence":
+            raise RuntimeError("correspondence unavailable")
 
     def unfreeze_line(self, token):
         self.calls.append("unfreeze")
 
 
-class BootstrapFixture:
-    def __init__(self, branch_state="created", *, exclusion_available=True,
-                 release_failure=False) -> None:
+class NoExclusionClosureFixture(PrincipalClosureFixture):
+    def __getattribute__(self, name):
+        if name in {"acquire_static_mutation", "acquire_allocation_exclusion"}:
+            raise AttributeError(name)
+        return super().__getattribute__(name)
+
+
+class ConfiguredAuthorityClosureFixture(PrincipalClosureFixture):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.owner_authorization_authority = (
+            lambda reference: AuthorizationResolution(
+                CLOSURE_AUTHORIZATION,
+                canonical_authorization_bytes(CLOSURE_AUTHORIZATION),
+                True,
+            )
+        )
+
+
+class PrincipalReleaseFixture:
+    def __init__(self, *, binding="tree-bound", fail: str | None = None):
+        self.binding = binding
+        self.fail = fail
         self.calls: list[str] = []
-        self.branch_state = branch_state
-        self.exclusion_available = exclusion_available
-        self.release_failure = release_failure
-
-    def verify_base_and_absence(self, intent):
-        self.calls.append("base")
-
-    def freeze_bootstrap(self, intent):
-        self.calls.append("freeze")
-        return "freeze-proof"
+        self.manifest_types: list[str] = []
+        self.manifests: list[dict[str, object]] = []
 
     def acquire_static_mutation(self, intent):
-        self.calls.append("acquire")
-        if not self.exclusion_available:
-            raise RuntimeError("racing static mutation")
-        return "fixture-exclusion"
+        self.calls.append("serialize")
+        return "exclusion"
 
     def release_static_mutation(self, lease):
-        self.calls.append("release")
-        if lease != "fixture-exclusion":
-            raise AssertionError("unexpected exclusion lease")
-        if self.release_failure:
-            raise RuntimeError("external lease release failed")
-
-    def allocation_view(self):
-        self.calls.append("view")
-        return AllocationView("snapshot", "event-head", frozenset({"1.2.0", "1.2.1"}))
-
-    def prepare_reservation(self, intent, final, view):
-        self.calls.append("prepare")
-        return {"version": final, "intended_dev": final + "-DEV"}
-
-    def create_line_if_absent(self, intent, preparation):
-        self.calls.append("create")
-        return {"state": self.branch_state, "head": "base" if self.branch_state == "created" else ""}
-
-    def abort_nonentry(self, intent, preparation, branch):
-        self.calls.append("abort")
-
-    def install_dev(self, intent, branch, preparation):
-        self.calls.append("install")
-        return {"version": preparation["intended_dev"], "head": "dev-head"}
-
-    def activate_reservation(self, intent, preparation, dev_head):
-        self.calls.append("activate")
-        return {"head": dev_head["head"]}
-
-    def record_line_opened(self, intent, branch, activation):
-        self.calls.append("line-open")
-        return {"event_id": "EVT-000000000003"}
-
-    def verify_bootstrap_correspondence(self, *args):
-        self.calls.append("correspondence")
-
-    def unfreeze_bootstrap(self, token):
-        self.calls.append("unfreeze")
-
-
-class ReleaseFixture:
-    def __init__(
-        self, *, fail_after_tag=False, fail_publication=False, bad_tag=False,
-        exclusion_available=True, release_failure=False,
-    ):
-        self.calls: list[str] = []
-        self.fail_after_tag = fail_after_tag
-        self.fail_publication = fail_publication
-        self.bad_tag = bad_tag
-        self.exclusion_available = exclusion_available
-        self.release_failure = release_failure
-        self.candidate_sha = "a" * 40
-        self.final_sha = "b" * 40
-        self.tree = "c" * 40
-        self.intent_certification = None
-        self.released_certification = None
-        self.prepared_intent = None
-
-    def acquire_static_mutation(self, intent):
-        if not self.exclusion_available:
-            raise RuntimeError("racing static mutation")
-        return "fixture-exclusion"
-
-    def release_static_mutation(self, lease):
-        if lease != "fixture-exclusion":
-            raise AssertionError("unexpected exclusion lease")
-        if self.release_failure:
-            raise RuntimeError("external lease release failed")
+        self.calls.append("release-exclusion")
 
     def verify_anchor(self, intent):
         self.calls.append("anchor")
+        return {"ref": ANCHOR_REF, "sha": SHA_B, "tree": TREE}
 
-    def make_durable_candidate(self, intent):
+    def create_candidate(self, intent):
         self.calls.append("candidate")
-        return {"candidate_id": f"candidate-{intent.final_version.replace('.', '-')}",
-                "ref": intent.candidate_ref, "sha": self.candidate_sha,
-                "tree": self.tree, "version": intent.final_version, "durable": True,
-                "main_at_candidate_sha": "d" * 40,
+        return {"candidate_id": "candidate-0-3-0", "ref": intent.candidate_ref,
+                "sha": SHA_A, "tree": TREE, "version": intent.final_version,
+                "durable": True, "main_at_candidate_sha": SHA_B,
                 "main_at_candidate_version": "0.2.0"}
 
-    def append_candidate_opened(self, intent, candidate):
-        self.calls.append("opened")
-        return {"candidate_id": candidate["candidate_id"],
-                "candidate_sha": candidate["sha"],
-                "event_id": "EVT-000000000001"}
+    def create_manifest(self, manifest_type, payload):
+        self.calls.append(f"manifest:{manifest_type}")
+        self.manifest_types.append(manifest_type)
+        if self.fail == manifest_type:
+            raise RuntimeError(f"failed {manifest_type}")
+        result = seal_manifest(dict(payload))
+        validate_manifest(result)
+        self.manifests.append(result)
+        return result
 
     def certify_candidate(self, intent, candidate):
         self.calls.append("certify")
-        return {"binding": "tree-bound", "subject_sha": candidate["sha"],
+        return {"binding": self.binding, "subject_sha": candidate["sha"],
                 "subject_tree": candidate["tree"], "policy_revision": "policy",
-                "harness_revision": "harness", "environment": "env",
-                "evidence_refs": ["evidence"]}
+                "harness_revision": "harness", "environment": "fixture",
+                "evidence_refs": ["evidence/candidate.json"]}
 
     def freeze_main(self, intent):
         self.calls.append("freeze-main")
-        return {"token": "freeze", "sha": "d" * 40, "version": "0.2.0"}
+        return {"token": "main-freeze", "sha": SHA_B, "version": "0.2.0"}
 
     def verify_principal_interval(self, intent, candidate, freeze):
-        self.calls.append("verify-interval")
-        return {"verified": True,
-                "candidate_main_sha": candidate["main_at_candidate_sha"],
-                "freeze_main_sha": freeze["sha"],
-                "candidate_main_tree": "e" * 40,
-                "freeze_main_tree": "e" * 40,
-                "intervening_commits": [],
-                "disposition": "no_drift"}
+        self.calls.append("interval")
+        return {"verified": True, "intervening_commits": [], "disposition": "no_drift"}
 
     def promote_principal(self, intent, candidate, certification, freeze):
         self.calls.append("promote")
-        return {"sha": self.final_sha, "tree": self.tree,
-                "version": intent.final_version,
-                "previous_main_sha": freeze["sha"],
-                "previous_main_version": freeze["version"],
-                "main_at_event_sha": self.final_sha,
-                "main_at_event_version": intent.final_version,
-                "ancestry_disposition": "no_drift"}
+        return {"sha": SHA_B, "tree": TREE, "version": intent.final_version,
+                "main_at_release_sha": SHA_B,
+                "main_at_release_version": intent.final_version,
+                "evidence_refs": ["evidence/released.json"]}
 
-    def verify_maintenance(self, intent, candidate, certification):
-        self.calls.append("maintenance")
-        return {"sha": self.final_sha, "tree": self.tree,
-                "version": intent.final_version,
-                "main_before_sha": "d" * 40,
-                "main_at_event_sha": "d" * 40,
-                "main_before_version": "1.0.0",
-                "main_at_event_version": "1.0.0"}
+    def verify_tree_transfer(self, intent, candidate, certification, final):
+        self.calls.append("tree-transfer")
+        return {"verified": True, "candidate_sha": candidate["sha"],
+                "final_release_sha": final["sha"], "candidate_tree": TREE,
+                "final_release_tree": TREE, "anchor_tree": TREE,
+                "evidence_ref": "evidence/transfer.json"}
 
     def recertify_final(self, intent, final):
         self.calls.append("recertify")
         return {"binding": "commit-bound", "subject_sha": final["sha"],
-                "subject_tree": final["tree"], "evidence_refs": ["evidence"],
-                "policy_revision": "policy", "harness_revision": "harness",
-                "environment": "env"}
+                "subject_tree": final["tree"], "policy_revision": "policy-final",
+                "harness_revision": "harness-final", "environment": "fixture-final",
+                "evidence_refs": ["evidence/final.json"]}
 
-    def verify_tree_transfer(self, intent, candidate, certification, final):
-        self.calls.append("verify-transfer")
-        return {"verified": True, "candidate_sha": candidate["sha"],
-                "final_release_sha": final["sha"],
-                "candidate_tree": candidate["tree"],
-                "final_release_tree": final["tree"],
-                "anchor_tree": intent.anchor_tree,
-                "evidence_ref": "evidence/transfer.json"}
+    class Protection:
+        def require_public_tag(self, ref):
+            return None
 
-    def append_release_intent(self, intent, candidate, certification, final):
-        self.calls.append("intent")
-        self.intent_certification = dict(certification)
-        result = {
-            "schema_version": 1,
-            "event_id": "EVT-000000000002",
-            "event_type": "release_intent_prepared",
-            "timestamp_utc": "2026-09-20T13:30:00Z",
-            "transaction_id": intent.transaction_id,
-            "static_iteration_snapshot": "0" * 64,
-            "expected_event_head": "0" * 40,
-            "intent_id": f"INT-{intent.final_version}",
-            "candidate_id": candidate["candidate_id"],
-            "candidate_ref": candidate["ref"],
-            "candidate_sha": candidate["sha"],
-            "candidate_tree": candidate["tree"],
-            "anchor_ref": intent.anchor_ref,
-            "anchor_sha": intent.anchor_sha,
-            "anchor_tree": intent.anchor_tree,
-            "certification_binding": certification["binding"],
-            "certification_subject_sha": certification["subject_sha"],
-            "certification_subject_tree": certification["subject_tree"],
-            "certification_policy_revision": certification["policy_revision"],
-            "certification_harness_revision": certification["harness_revision"],
-            "certification_environment": certification["environment"],
-            "certification_evidence_refs": certification["evidence_refs"],
-            "final_release_sha": final["sha"],
-            "final_release_tree": final["tree"],
-            "final_version": intent.final_version,
-            "release_line": intent.release_line,
-            "public_tag": "v" + intent.final_version,
-        }
-        if "transfer_evidence" in certification:
-            result["certification_transfer_evidence"] = dict(
-                certification["transfer_evidence"]
-            )
-        self.prepared_intent = dict(result)
-        return result
+    def verify_public_tag_ruleset(self, intent, ref):
+        self.calls.append("tag-ruleset")
+        return self.Protection()
 
-    def verify_public_tag_ruleset(self, intent, tag_ref):
-        self.calls.append("ruleset")
-        return ProtectionEvidence(
-            rule_id="fixture-future-tags",
-            pattern="refs/tags/v*.*.*",
-            snapshot_sha256="0" * 64,
-            retrieved_at_utc="2026-09-20T00:00:00Z",
-            creation_guarded=True,
-            update_guarded=True,
-            deletion_guarded=True,
-            canonical_public_tags_globally_guarded=True,
-        )
-
-    def create_protected_tag(self, intent, prepared, final, protection):
+    def create_tag(self, intent, prepared, final):
         self.calls.append("tag")
-        protection.require_public_tag(f"refs/tags/{prepared['public_tag']}")
-        return {"name": prepared["public_tag"], "commit": "0" * 40 if self.bad_tag else final["sha"],
-                "tree": final["tree"], "protected": True}
+        if self.fail == "tag":
+            return {"name": intent.public_tag, "commit": "bad", "tree": TREE, "protected": True}
+        return {"name": intent.public_tag, "commit": final["sha"], "tree": final["tree"], "protected": True}
 
-    def append_released(self, intent, candidate, certification, final, tag):
-        self.calls.append("released")
-        if self.fail_after_tag:
-            raise RuntimeError("transport timeout")
-        self.released_certification = dict(certification)
-        assert self.prepared_intent is not None
-        result = {
-            "event_id": "EVT-000000000003",
-            **{
-                field: self.prepared_intent[field]
-                for field in RELEASE_INTENT_BINDING_FIELDS
-                if field in self.prepared_intent
-            },
-        }
-        if "transfer_evidence" in certification:
-            result["certification_transfer_evidence"] = dict(
-                certification["transfer_evidence"]
-            )
-        return result
+    def publish_github_release(self, intent, released):
+        self.calls.append("github-release")
+        return {"id": 1, "tag": intent.public_tag,
+                "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/releases/tag/v0.3.0",
+                "published_at_utc": "2026-09-20T13:30:00Z"}
 
-    def verify_released(self, intent, event, certification, final):
-        self.calls.append("verify-released")
-
-    def publish_github_release(self, intent, event):
-        self.calls.append("publish")
-        if self.fail_publication:
-            raise RuntimeError("publication timeout")
-        return {"id": "release-1", "tag": event["public_tag"]}
-
-    def persist_publication_evidence(self, intent, event, publication):
+    def persist_publication_evidence(self, intent, released, publication):
         self.calls.append("publication-evidence")
-        return {"event_id": event["event_id"],
-                "public_tag": event["public_tag"],
-                "github_release_id": publication["id"]}
+        if self.fail == "publication-evidence":
+            raise RuntimeError("publication evidence timeout")
+        return {"ref": "evidence/publication.json", "digest": "f" * 64,
+                "public_tag": intent.public_tag, "github_release_id": publication["id"]}
 
-    def verify_terminal(self, intent, event, publication, evidence):
+    def verify_terminal(self, intent, released, publication, evidence):
         self.calls.append("terminal")
+        if self.fail == "terminal":
+            raise RuntimeError("terminal proof unavailable")
 
     def unfreeze_main(self, token):
         self.calls.append("unfreeze-main")
 
 
+class NoTagProtectionReleaseFixture(PrincipalReleaseFixture):
+    def __getattribute__(self, name):
+        if name == "verify_public_tag_ruleset":
+            raise AttributeError(name)
+        return super().__getattribute__(name)
+
+
 class TransactionTests(unittest.TestCase):
-    closure = ClosureIntent(
-        "tx", "principal", "0.3.0", "0.3.0", "old-head", "2026-09-20T12:34:56Z"
+    closure_intent = ClosureIntent(
+        owner_line="principal", final_version="0.3.0",
+        closure_timestamp_utc="2026-09-20T12:34:56Z",
+        outgoing_reserved_final="0.3.0", transaction_id="tx-closure",
+        expected_line_head=SHA_B, static_snapshot_digest=SNAPSHOT,
+        lifecycle_snapshot_digest=LIFECYCLE_SNAPSHOT,
+        owner_authorization=CLOSURE_AUTHORIZATION["owner_authorization"],
+        owner_authorization_ref=CLOSURE_AUTHORIZATION["authority_source_ref"],
+        owner_authorization_digest=CLOSURE_AUTHORIZATION["owner_authorization_digest"],
+        repository=REPOSITORY, owner_authority=CLOSURE_AUTHORITY,
+        predecessor_refs=(RESERVATION_REF,),
     )
-    bootstrap = BootstrapIntent("tx", "maintenance/1.2", "base", "main", "2.0.0")
-    release = ReleaseIntent(
-        "tx", "principal", "0.3.0", "refs/tags/iterations/0.3.0",
-        "f" * 40, "c" * 40, "2026-09-20T12:34:56Z",
-        "refs/heads/candidates/0.3.0",
+    release_intent = ReleaseIntent(
+        owner_line="principal", final_version="0.3.0",
+        candidate_ref="refs/heads/candidates/v0.3.0/candidate-0-3-0",
+        public_tag="v0.3.0", candidate_sha=SHA_A, candidate_tree=TREE,
+        transaction_id="tx-release", anchor_ref=ANCHOR_REF,
+        anchor_sha=SHA_B, anchor_tree=TREE,
+        closure_timestamp_utc="2026-09-20T12:34:56Z",
+        timestamp_utc="2026-09-20T13:00:00Z",
+        owner_authorization=RELEASE_AUTHORIZATION["owner_authorization"],
+        owner_authorization_ref=RELEASE_AUTHORIZATION["authority_source_ref"],
+        owner_authorization_digest=RELEASE_AUTHORIZATION["owner_authorization_digest"],
+        repository=REPOSITORY, owner_authority=RELEASE_AUTHORITY,
+        static_snapshot_digest=SNAPSHOT,
+        lifecycle_snapshot_digest=LIFECYCLE_SNAPSHOT,
+        predecessor_refs=(CONSUMED_RESERVATION_REF,),
     )
 
-    def test_successful_closure_unfreezes_only_after_correspondence(self):
-        port = ClosureFixture()
-        result = run_closure(port, self.closure)
-        self.assertEqual((result.status, result.frozen, result.evidence["next_final"]),
-                         ("COMPLETE", False, "0.3.1"))
-        self.assertEqual(port.calls, [
-            "freeze", "view", "target", "merge", "anchor", "view", "consume", "terminal",
-            "view", "prepare", "reopen", "activate", "correspondence", "unfreeze",
-        ])
+    def test_principal_closure_is_serialized_and_terminal_before_reopen(self):
+        port = PrincipalClosureFixture()
+        result = run_closure(port, self.closure_intent)
+        self.assertTrue(result.complete)
+        self.assertFalse(result.frozen)
+        self.assertEqual(result.evidence["next_final"], "0.3.1")
+        self.assertEqual(port.manifest_types,
+                         ["reservation-consumed", "reservation-prepared", "reservation-opened"])
+        self.assertLess(port.calls.index("manifest:reservation-consumed"), port.calls.index("manifest:reservation-prepared"))
+        self.assertLess(port.calls.index("manifest:reservation-prepared"), port.calls.index("reopen"))
+        self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze"])
 
-    def test_closure_consumption_uses_post_anchor_allocation_view(self):
-        port = ClosureFixture()
-        result = run_closure(port, self.closure)
-        self.assertIs(port.consumed_view, result.evidence["post_anchor_view"])
-        self.assertIsNot(port.consumed_view, result.evidence["bound_view"])
+    def test_emitted_manifests_pass_the_real_schema(self):
+        closure_port = PrincipalClosureFixture()
+        self.assertTrue(run_closure(closure_port, self.closure_intent).complete)
+        for manifest in closure_port.manifests:
+            self.assertEqual(validate_manifest(manifest), manifest)
 
-    def test_failed_outgoing_consumption_never_allocates_or_unfreezes(self):
-        port = ClosureFixture(fail_consumption=True)
-        result = run_closure(port, self.closure)
-        self.assertEqual((result.status, result.reason_code, result.frozen), (
-            "BLOCKED", "OUTGOING_RESERVATION_RECONCILIATION_FAILED", True
-        ))
-        self.assertNotIn("prepare", port.calls)
+        release_port = PrincipalReleaseFixture()
+        self.assertTrue(run_release(release_port, self.release_intent).complete)
+        for manifest in release_port.manifests:
+            self.assertEqual(validate_manifest(manifest), manifest)
+
+    def test_exact_utc_timestamp_is_required(self):
+        port = PrincipalClosureFixture()
+        bad = ClosureIntent("principal", "0.3.0", "2026-02-30T12:34:56Z", "0.3.0")
+        result = run_closure(port, bad)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("BLOCKED", "INVALID_CLOSURE_TIMESTAMP", False))
+        self.assertNotIn("freeze", port.calls)
+
+    def test_outgoing_failure_keeps_line_frozen_and_prevents_new_allocation(self):
+        port = PrincipalClosureFixture(fail="reservation-consumed")
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("BLOCKED", "PORT_OPERATION_FAILED", True))
+        self.assertNotIn("reservation-prepared", port.manifest_types)
         self.assertNotIn("unfreeze", port.calls)
 
-    def test_racing_static_mutation_blocks_closure_under_line_freeze(self):
-        port = ClosureFixture(exclusion_available=False)
-        result = run_closure(port, self.closure)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
-        )
-        self.assertEqual(port.calls, ["freeze"])
-        self.assertNotIn("merge", port.calls)
+    def test_missing_exclusion_fails_closed_before_closure_writes(self):
+        port = NoExclusionClosureFixture()
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("BLOCKED", "EXCLUSION_UNAVAILABLE", True))
+        self.assertNotIn("anchor", port.calls)
         self.assertNotIn("unfreeze", port.calls)
 
-    def test_closure_and_anchor_require_complete_matching_git_identities(self):
+    def test_closure_missing_authority_blocks_before_anchor_write(self):
+        port = PrincipalClosureFixture()
+        intent = replace(self.closure_intent, owner_authority=None,
+                         owner_authorization="", owner_authorization_ref="",
+                         owner_authorization_digest="")
+        result = run_closure(port, intent)
+        self.assertEqual((result.status, result.reason_code),
+                         ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
+        self.assertNotIn("anchor", port.calls)
+
+    def test_configured_authority_callback_establishes_owner_and_current_bytes(self):
+        port = ConfiguredAuthorityClosureFixture()
+        result = run_closure(port, replace(self.closure_intent, owner_authority=None))
+        self.assertTrue(result.complete)
+
+    def test_release_authorization_scope_failures_precede_candidate_write(self):
+        original = self.release_intent
+        expired = make_authorization("tx-release", [RELEASE_TARGET,
+                                                      "refs/heads/main",
+                                                      "refs/tags/v0.3.0",
+                                                      original.candidate_ref])
+        expired["issued_at_utc"] = "2026-09-20T13:01:00Z"
+        expired["expires_at_utc"] = "2026-09-20T13:02:00Z"
+        expired = seal_authorization(expired)
+        action_only = make_authorization("tx-release", [RELEASE_TARGET,
+                                                          original.candidate_ref])
+        action_only["authorized_actions"] = ["create-tag"]
+        action_only = seal_authorization(action_only)
+        target_only = make_authorization("tx-release", [RELEASE_TARGET])
         cases = [
-            ("closure", "commit", None, "CLOSURE_IDENTITY_MISMATCH"),
-            ("closure", "commit", "not-a-sha", "CLOSURE_IDENTITY_MISMATCH"),
-            ("closure", "tree", None, "CLOSURE_IDENTITY_MISMATCH"),
-            ("closure", "tree", "not-a-sha", "CLOSURE_IDENTITY_MISMATCH"),
-            ("anchor", "commit", None, "ANCHOR_IDENTITY_MISMATCH"),
-            ("anchor", "commit", "not-a-sha", "ANCHOR_IDENTITY_MISMATCH"),
-            ("anchor", "tree", None, "ANCHOR_IDENTITY_MISMATCH"),
-            ("anchor", "tree", "not-a-sha", "ANCHOR_IDENTITY_MISMATCH"),
+            (replace(original, owner_authorization="bad"), RELEASE_AUTHORITY),
+            (replace(original, repository="other/repository"), RELEASE_AUTHORITY),
+            (replace(original, transaction_id="other-transaction"), RELEASE_AUTHORITY),
+            (replace(original,
+                     owner_authorization=action_only["owner_authorization"],
+                     owner_authorization_ref=action_only["authority_source_ref"],
+                     owner_authorization_digest=action_only["owner_authorization_digest"]),
+             FixtureAuthority(action_only)),
+            (replace(original,
+                     owner_authorization=target_only["owner_authorization"],
+                     owner_authorization_ref=target_only["authority_source_ref"],
+                     owner_authorization_digest=target_only["owner_authorization_digest"]),
+             FixtureAuthority(target_only)),
+            (replace(original,
+                     owner_authorization=expired["owner_authorization"],
+                     owner_authorization_ref=expired["authority_source_ref"],
+                     owner_authorization_digest=expired["owner_authorization_digest"]),
+             FixtureAuthority(expired)),
+            (replace(original,
+                     owner_authorization=RELEASE_AUTHORIZATION["owner_authorization"],
+                     owner_authorization_ref=RELEASE_AUTHORIZATION["authority_source_ref"],
+                     owner_authorization_digest=RELEASE_AUTHORIZATION["owner_authorization_digest"]),
+             FixtureAuthority(RELEASE_AUTHORIZATION, owner=False)),
         ]
-        for stage, field, value, reason_code in cases:
-            with self.subTest(stage=stage, field=field, value=value):
-                fields = {field: value}
-                port = ClosureFixture(
-                    closure_fields=fields if stage == "closure" else {},
-                    anchor_fields=fields if stage == "anchor" else {},
-                )
-                result = run_closure(port, self.closure)
-                self.assertEqual(
-                    (result.status, result.reason_code, result.frozen),
-                    ("BLOCKED", reason_code, True),
-                )
-                self.assertNotIn("unfreeze", port.calls)
+        for intent, authority in cases:
+            with self.subTest(intent=intent):
+                port = PrincipalReleaseFixture()
+                result = run_release(port, replace(intent, owner_authority=authority))
+                self.assertEqual((result.status, result.reason_code),
+                                 ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
+                self.assertNotIn("candidate", port.calls)
 
-    def test_different_final_consumes_unused_dev_before_reopen(self):
-        intent = ClosureIntent(
-            "different-final", "principal", "0.3.2", "0.3.1",
-            "old-head", "2026-09-20T12:34:56Z",
-        )
-        port = ClosureFixture()
-        result = run_closure(port, intent)
-        self.assertEqual(result.status, "COMPLETE")
-        self.assertEqual(result.evidence["next_final"], "0.3.3")
-        self.assertEqual(
-            result.evidence["consumption"]["terminal_disposition"],
-            "CONSUMED_UNUSED_DEV_RESERVATION",
-        )
-        self.assertLess(port.calls.index("terminal"), port.calls.index("prepare"))
-
-    def test_different_final_requires_exact_unused_disposition(self):
-        intent = ClosureIntent(
-            "different-final", "principal", "0.3.2", "0.3.1",
-            "old-head", "2026-09-20T12:34:56Z",
-        )
-        port = ClosureFixture()
-        original = port.consume_outgoing
-        def wrong_disposition(intent, anchor, view):
-            result = original(intent, anchor, view)
-            result["terminal_disposition"] = "closed"
-            return result
-        port.consume_outgoing = wrong_disposition
-        result = run_closure(port, intent)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("BLOCKED", "OUTGOING_RESERVATION_RECONCILIATION_FAILED", True),
-        )
-        self.assertNotIn("prepare", port.calls)
-
-    def test_exact_principal_sentinel_cannot_skip_occupied_patch(self):
-        port = ClosureFixture(occupied=frozenset({"0.3.1"}))
-        result = run_closure(port, self.closure)
-        self.assertEqual((result.status, result.reason_code), (
-            "BLOCKED", "PRINCIPAL_SENTINEL_UNAVAILABLE"
-        ))
-        self.assertNotIn("prepare", port.calls)
-
-    def test_bootstrap_from_first_available_patch(self):
-        port = BootstrapFixture()
-        result = run_maintenance_bootstrap(port, self.bootstrap)
-        self.assertEqual((result.status, result.evidence["preparation"]["version"]),
-                         ("COMPLETE", "1.2.2"))
-        self.assertEqual(port.calls[:5], ["base", "freeze", "acquire", "base", "view"])
-        self.assertEqual(port.calls[-3:], ["correspondence", "release", "unfreeze"])
-
-    def test_bootstrap_patch_exhaustion_fails_at_uint32_boundary(self):
-        port = BootstrapFixture()
-        port.allocation_view = lambda: AllocationView(
-            "snapshot", "event-head", frozenset({"1.2.0", "1.2.1"})
-        )
-        with patch("version_lifecycle.transactions.MAX_VERSION_COMPONENT", 1):
-            result = run_maintenance_bootstrap(port, self.bootstrap)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("BLOCKED", "MAINTENANCE_PATCH_EXHAUSTED", True),
-        )
-        self.assertNotIn("create", port.calls)
-
-    def test_racing_static_mutation_blocks_bootstrap_under_freeze(self):
-        port = BootstrapFixture(exclusion_available=False)
-        result = run_maintenance_bootstrap(port, self.bootstrap)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
-        )
-        self.assertNotIn("view", port.calls)
-        self.assertNotIn("create", port.calls)
+    def test_occupied_principal_sentinel_is_not_skipped_or_reused(self):
+        port = PrincipalClosureFixture(occupied=frozenset({"0.3.1"}))
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("BLOCKED", "PRINCIPAL_SENTINEL_UNAVAILABLE", True))
+        self.assertNotIn("reservation-prepared", port.manifest_types)
         self.assertNotIn("unfreeze", port.calls)
 
-    def test_bootstrap_lease_release_failure_keeps_freeze(self):
-        port = BootstrapFixture(release_failure=True)
-        result = run_maintenance_bootstrap(port, self.bootstrap)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
-        )
-        self.assertIn("correspondence", port.calls)
-        self.assertNotIn("unfreeze", port.calls)
+    def test_release_happy_path_uses_exact_manifest_types_and_unfreezes_last(self):
+        port = PrincipalReleaseFixture()
+        result = run_release(port, self.release_intent)
+        self.assertTrue(result.complete)
+        self.assertFalse(result.frozen)
+        self.assertEqual(port.manifest_types,
+                         ["candidate-opened", "release-intent-prepared", "released", "publication"])
+        self.assertLess(port.calls.index("tag"), port.calls.index("manifest:released"))
+        self.assertLess(port.calls.index("manifest:released"), port.calls.index("manifest:publication"))
+        self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze-main"])
 
-    def test_closure_lease_release_failure_keeps_freeze(self):
-        port = ClosureFixture(release_failure=True)
-        result = run_closure(port, self.closure)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("BLOCKED", "EXCLUSION_UNAVAILABLE", True),
-        )
-        self.assertIn("correspondence", port.calls)
-        self.assertNotIn("unfreeze", port.calls)
+    def test_unsupported_certification_binding_blocks_before_tag(self):
+        port = PrincipalReleaseFixture(binding="content-bound")
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("BLOCKED", "UNSUPPORTED_CERTIFICATION_BINDING", False))
+        self.assertNotIn("tag", port.calls)
 
-    def test_release_lease_release_failure_keeps_main_frozen(self):
-        port = ReleaseFixture(release_failure=True)
-        result = run_release(port, self.release)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("publication_reconciliation_pending", "EXCLUSION_UNAVAILABLE", True),
-        )
-        self.assertIn("terminal", port.calls)
+    def test_missing_tag_protection_blocks_before_intent_or_tag(self):
+        port = NoTagProtectionReleaseFixture()
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("BLOCKED", "PUBLIC_TAG_RULESET_UNAVAILABLE", True))
+        self.assertNotIn("tag", port.calls)
+        self.assertNotIn("manifest:release-intent-prepared", port.calls)
+
+    def test_tree_bound_transfer_requires_equal_trees(self):
+        port = PrincipalReleaseFixture()
+        original = port.verify_tree_transfer
+
+        def wrong_tree(intent, candidate, certification, final):
+            evidence = original(intent, candidate, certification, final)
+            evidence["final_release_tree"] = "e" * 40
+            return evidence
+
+        port.verify_tree_transfer = wrong_tree
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("BLOCKED", "CERTIFICATION_TRANSFER_UNPROVEN", True))
+        self.assertNotIn("tag", port.calls)
+
+    def test_commit_bound_certification_recertifies_final_commit(self):
+        port = PrincipalReleaseFixture(binding="commit-bound")
+        result = run_release(port, self.release_intent)
+        self.assertTrue(result.complete)
+        self.assertIn("recertify", port.calls)
+        self.assertNotIn("tree-transfer", port.calls)
+
+    def test_tag_failure_is_invalid_and_keeps_main_frozen(self):
+        port = PrincipalReleaseFixture(fail="tag")
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("INVALID", "PUBLIC_TAG_IDENTITY_MISMATCH", True))
+        self.assertNotIn("manifest:released", port.calls)
         self.assertNotIn("unfreeze-main", port.calls)
 
-    def test_uncertain_branch_creation_keeps_prepared_version_unavailable(self):
-        port = BootstrapFixture("uncertain")
-        result = run_maintenance_bootstrap(port, self.bootstrap)
-        self.assertEqual((result.status, result.reason_code, result.frozen), (
-            "BLOCKED", "BOOTSTRAP_CREATION_UNCERTAIN", True
-        ))
-        self.assertNotIn("abort", port.calls)
-        self.assertNotIn("install", port.calls)
-        self.assertNotIn("unfreeze", port.calls)
-
-    def test_definite_noncreation_allows_abort_but_keeps_freeze(self):
-        port = BootstrapFixture("not_created")
-        result = run_maintenance_bootstrap(port, self.bootstrap)
-        self.assertEqual(result.reason_code, "BOOTSTRAP_BRANCH_NOT_CREATED")
-        self.assertIn("abort", port.calls)
-        self.assertNotIn("unfreeze", port.calls)
-
-    def test_release_publication_unfreezes_only_after_terminal_proof(self):
-        port = ReleaseFixture()
-        result = run_release(port, self.release)
-        self.assertEqual(result.status, "COMPLETE")
-        self.assertEqual(port.calls[-3:], ["publication-evidence", "terminal", "unfreeze-main"])
-        self.assertLess(port.calls.index("intent"), port.calls.index("tag"))
-        self.assertLess(port.calls.index("ruleset"), port.calls.index("intent"))
-        self.assertLess(port.calls.index("tag"), port.calls.index("released"))
-        self.assertLess(port.calls.index("verify-interval"), port.calls.index("promote"))
-        self.assertLess(port.calls.index("verify-transfer"), port.calls.index("tag"))
-        self.assertEqual(
-            result.evidence["public_tag_ruleset"]["rule_id"],
-            "fixture-future-tags",
-        )
-
-    def test_release_rejects_private_certification_identities_before_tag(self):
-        for field in ("policy_revision", "harness_revision", "environment"):
-            with self.subTest(field=field):
-                port = ReleaseFixture()
-                original = port.certify_candidate
-
-                def unsafe_certification(intent, candidate, field=field):
-                    record = original(intent, candidate)
-                    record[field] = "/Users/private/certification"
-                    return record
-
-                port.certify_candidate = unsafe_certification
-                result = run_release(port, self.release)
-                self.assertEqual(
-                    (result.status, result.reason_code),
-                    ("BLOCKED", "CERTIFICATION_IDENTITY_UNPROVEN"),
-                )
-                self.assertNotIn("ruleset", port.calls)
-                self.assertNotIn("intent", port.calls)
-                self.assertNotIn("tag", port.calls)
-
-    def test_release_rejects_noncanonical_principal_main_versions_before_tag(self):
-        port = ReleaseFixture()
-        original_candidate = port.make_durable_candidate
-
-        def invalid_candidate_main(intent):
-            candidate = original_candidate(intent)
-            candidate["main_at_candidate_version"] = "01.2.3"
-            return candidate
-
-        port.make_durable_candidate = invalid_candidate_main
-        result = run_release(port, self.release)
-        self.assertEqual(result.reason_code, "CANDIDATE_MAIN_IDENTITY_UNPROVEN")
-        self.assertNotIn("tag", port.calls)
-
-        port = ReleaseFixture()
-        port.freeze_main = lambda intent: {
-            "token": "freeze", "sha": "d" * 40, "version": "0.2.0-DEV"
-        }
-        result = run_release(port, self.release)
-        self.assertEqual(result.reason_code, "MAIN_FREEZE_UNAVAILABLE")
-        self.assertNotIn("tag", port.calls)
-
-    def test_maintenance_main_identity_requires_full_shas_and_final_versions(self):
-        port = ReleaseFixture()
-        original = port.verify_maintenance
-
-        def malformed_main(intent, candidate, certification):
-            final = original(intent, candidate, certification)
-            final["main_before_sha"] = "short"
-            final["main_before_version"] = "1.0.0-DEV"
-            return final
-
-        port.verify_maintenance = malformed_main
-        maintenance = ReleaseIntent(
-            "tx", "maintenance/0.3", "0.3.1",
-            "refs/tags/iterations/0.3.1", "f" * 40, "c" * 40,
-            "2026-09-20T12:34:56Z", "refs/heads/candidates/0.3.1",
-        )
-        result = run_release(port, maintenance)
-        self.assertEqual(result.reason_code, "MAINTENANCE_MAIN_CHANGED")
-        self.assertNotIn("ruleset", port.calls)
-        self.assertNotIn("tag", port.calls)
-
-    def test_release_blocks_before_intent_without_canonical_public_tag_ruleset(self):
-        for failure in ("missing", "legacy-inclusive", "creation", "update", "deletion"):
-            with self.subTest(failure=failure):
-                port = ReleaseFixture()
-                original = port.verify_public_tag_ruleset
-
-                def bad_ruleset(intent, tag_ref, failure=failure):
-                    if failure == "missing":
-                        return None
-                    proof = original(intent, tag_ref)
-                    values = dict(proof.__dict__)
-                    if failure == "legacy-inclusive":
-                        values["pattern"] = "refs/tags/v*"
-                    else:
-                        values[f"{failure}_guarded"] = False
-                    return ProtectionEvidence(**values)
-
-                port.verify_public_tag_ruleset = bad_ruleset
-                result = run_release(port, self.release)
-                self.assertEqual(
-                    (result.status, result.reason_code, result.frozen),
-                    ("BLOCKED", "PUBLIC_TAG_RULESET_UNAVAILABLE", True),
-                )
-                self.assertNotIn("intent", port.calls)
-                self.assertNotIn("tag", port.calls)
-
-    def test_racing_static_mutation_blocks_release_before_candidate(self):
-        port = ReleaseFixture(exclusion_available=False)
-        result = run_release(port, self.release)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("BLOCKED", "EXCLUSION_UNAVAILABLE", False),
-        )
-        self.assertEqual(port.calls, ["anchor"])
-        self.assertNotIn("candidate", port.calls)
-        self.assertNotIn("tag", port.calls)
-
-    def test_tree_transfer_proof_is_bound_to_both_release_events(self):
-        port = ReleaseFixture()
-        result = run_release(port, self.release)
-        self.assertEqual(result.status, "COMPLETE")
-        proof = result.evidence["certification_transfer"]
-        self.assertEqual(result.evidence["certification"]["transfer_evidence"], proof)
-        self.assertEqual(result.evidence["final_certification"]["transfer_evidence"], proof)
-        self.assertEqual(port.intent_certification["transfer_evidence"], proof)
-        self.assertEqual(port.released_certification["transfer_evidence"], proof)
-        self.assertEqual(result.evidence["intent"]["certification_transfer_evidence"], proof)
-        self.assertEqual(result.evidence["released"]["certification_transfer_evidence"], proof)
-
-    def test_missing_durable_transfer_proof_blocks_before_public_tag(self):
-        port = ReleaseFixture()
-        original = port.append_release_intent
-
-        def missing_transfer(intent, candidate, certification, final):
-            result = original(intent, candidate, certification, final)
-            result.pop("certification_transfer_evidence", None)
-            return result
-
-        port.append_release_intent = missing_transfer
-        result = run_release(port, self.release)
-        self.assertEqual((result.status, result.reason_code, result.frozen), (
-            "BLOCKED", "RELEASE_INTENT_TRANSFER_EVIDENCE_UNPROVEN", True
-        ))
-        self.assertNotIn("tag", port.calls)
-
-    def test_release_intent_must_match_every_pre_tag_identity(self):
-        mismatches = {
-            "candidate_id": "candidate-forged",
-            "candidate_ref": "refs/heads/candidates/0.3.1",
-            "anchor_sha": "e" * 40,
-            "release_line": "maintenance/0.3",
-            "certification_policy_revision": "policy-2026-10",
-        }
-        for field, value in mismatches.items():
-            with self.subTest(field=field):
-                port = ReleaseFixture()
-                original = port.append_release_intent
-
-                def mismatched_intent(
-                    intent, candidate, certification, final,
-                    *, field=field, value=value,
-                ):
-                    prepared = original(intent, candidate, certification, final)
-                    prepared[field] = value
-                    return prepared
-
-                port.append_release_intent = mismatched_intent
-                result = run_release(port, self.release)
-                self.assertEqual(
-                    (result.status, result.reason_code, result.frozen),
-                    ("INVALID", "RELEASE_INTENT_MISMATCH", True),
-                )
-                self.assertNotIn("tag", port.calls)
-
-    def test_released_event_must_match_durable_intent_identity(self):
-        port = ReleaseFixture()
-        original = port.append_released
-
-        def mismatched_released(intent, candidate, certification, final, tag):
-            released = original(intent, candidate, certification, final, tag)
-            released["candidate_id"] = "candidate-forged"
-            return released
-
-        port.append_released = mismatched_released
-        result = run_release(port, self.release)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("INVALID", "RELEASED_EVENT_MISMATCH", True),
-        )
-        self.assertNotIn("publish", port.calls)
-
-    def test_missing_ancestry_or_transfer_proof_blocks_public_tag(self):
-        for missing in ("interval", "transfer"):
-            with self.subTest(missing=missing):
-                port = ReleaseFixture()
-                if missing == "interval":
-                    port.verify_principal_interval = lambda *args: {}
-                    reason = "PRINCIPAL_ANCESTRY_UNPROVEN"
-                else:
-                    port.verify_tree_transfer = lambda *args: {}
-                    reason = "CERTIFICATION_TRANSFER_UNPROVEN"
-                result = run_release(port, self.release)
-                self.assertEqual((result.status, result.reason_code, result.frozen), (
-                    "BLOCKED", reason, True
-                ))
-                self.assertNotIn("tag", port.calls)
-
-    def test_tree_bound_transfer_is_required_when_candidate_and_final_differ(self):
-        port = ReleaseFixture()
-        original = port.certify_candidate
-
-        def incorrectly_final_certified(intent, candidate):
-            result = original(intent, candidate)
-            result["subject_sha"] = port.final_sha
-            return result
-
-        port.certify_candidate = incorrectly_final_certified
-        result = run_release(port, self.release)
-        self.assertEqual((result.status, result.reason_code, result.frozen), (
-            "BLOCKED", "CERTIFICATION_IDENTITY_UNPROVEN", False
-        ))
-        self.assertNotIn("verify-transfer", port.calls)
-        self.assertNotIn("tag", port.calls)
-
-    def test_unsupported_certification_binding_has_required_reason_before_tag(self):
-        port = ReleaseFixture()
-        original = port.certify_candidate
-
-        def unsupported_certification(intent, candidate):
-            record = original(intent, candidate)
-            record["binding"] = "content-bound"
-            return record
-
-        port.certify_candidate = unsupported_certification
-        result = run_release(port, self.release)
-        self.assertEqual(
-            (result.status, result.reason_code, result.frozen),
-            ("BLOCKED", "UNSUPPORTED_CERTIFICATION_BINDING", False),
-        )
-        self.assertNotIn("tag", port.calls)
-
-    def test_commit_bound_recertification_accepts_updated_reviewed_pins(self):
-        port = ReleaseFixture()
-
-        def commit_bound_certification(intent, candidate):
-            return {
-                "binding": "commit-bound",
-                "subject_sha": candidate["sha"],
-                "subject_tree": candidate["tree"],
-                "policy_revision": "policy",
-                "harness_revision": "harness",
-                "environment": "env",
-                "evidence_refs": ["evidence/candidate-certification.json"],
-            }
-
-        port.certify_candidate = commit_bound_certification
-        original = port.recertify_final
-
-        def recertified_with_updated_pins(intent, final):
-            result = original(intent, final)
-            result.update({
-                "policy_revision": "policy-2026-10",
-                "harness_revision": "harness-2026-10",
-                "environment": "julia-1.13-python-3.14",
-                "evidence_refs": ["evidence/final-certification.json"],
-            })
-            return result
-
-        port.recertify_final = recertified_with_updated_pins
-        result = run_release(port, self.release)
-        self.assertEqual(result.status, "COMPLETE")
-        self.assertEqual(
-            result.evidence["candidate_certification"]["policy_revision"], "policy"
-        )
-        self.assertEqual(
-            result.evidence["final_certification"]["policy_revision"], "policy-2026-10"
-        )
-        self.assertEqual(
-            result.evidence["final_certification"]["harness_revision"], "harness-2026-10"
-        )
-        self.assertEqual(
-            result.evidence["final_certification"]["environment"],
-            "julia-1.13-python-3.14",
-        )
-
-    def test_commit_bound_recertification_requires_valid_final_pins(self):
-        for field in ("policy_revision", "harness_revision", "environment"):
-            for case, value in (("missing", None), ("invalid", 123)):
-                with self.subTest(field=field, case=case):
-                    port = ReleaseFixture()
-
-                    def commit_bound_certification(intent, candidate):
-                        return {
-                            "binding": "commit-bound",
-                            "subject_sha": candidate["sha"],
-                            "subject_tree": candidate["tree"],
-                            "policy_revision": "policy",
-                            "harness_revision": "harness",
-                            "environment": "env",
-                            "evidence_refs": ["evidence"],
-                        }
-
-                    port.certify_candidate = commit_bound_certification
-                    original = port.recertify_final
-
-                    def recertified_with_bad_pin(
-                        intent, final, field=field, case=case, value=value
-                    ):
-                        result = original(intent, final)
-                        if case == "missing":
-                            result.pop(field, None)
-                        else:
-                            result[field] = value
-                        return result
-
-                    port.recertify_final = recertified_with_bad_pin
-                    result = run_release(port, self.release)
-                    self.assertEqual((result.status, result.reason_code, result.frozen), (
-                        "BLOCKED", "RECERTIFICATION_REQUIRED", True
-                    ))
-                    self.assertNotIn("intent", port.calls)
-                    self.assertNotIn("tag", port.calls)
-
-    def test_principal_interval_requires_tree_comparison_for_no_drift(self):
-        port = ReleaseFixture()
-        original = port.verify_principal_interval
-
-        def mismatched_trees(intent, candidate, freeze):
-            result = original(intent, candidate, freeze)
-            result["freeze_main_tree"] = "f" * 40
-            return result
-
-        port.verify_principal_interval = mismatched_trees
-        result = run_release(port, self.release)
-        self.assertEqual((result.status, result.reason_code, result.frozen), (
-            "BLOCKED", "PRINCIPAL_ANCESTRY_UNPROVEN", True
-        ))
-        self.assertNotIn("promote", port.calls)
-        self.assertNotIn("tag", port.calls)
-
-    def test_principal_interval_requires_each_intervening_tree_record(self):
-        port = ReleaseFixture()
-        original = port.verify_principal_interval
-
-        def missing_tree_record(intent, candidate, freeze):
-            result = original(intent, candidate, freeze)
-            result["intervening_commits"] = [{"sha": "f" * 40}]
-            result["disposition"] = "tree_neutral_included"
-            return result
-
-        port.verify_principal_interval = missing_tree_record
-        result = run_release(port, self.release)
-        self.assertEqual((result.status, result.reason_code, result.frozen), (
-            "BLOCKED", "PRINCIPAL_ANCESTRY_UNPROVEN", True
-        ))
-        self.assertNotIn("promote", port.calls)
-        self.assertNotIn("tag", port.calls)
-
-    def test_principal_regression_stops_before_main_promotion(self):
-        port = ReleaseFixture()
-        port.freeze_main = lambda intent: {
-            "token": "freeze", "sha": "d" * 40, "version": "0.3.0"
-        }
-        result = run_release(port, self.release)
-        self.assertEqual((result.status, result.reason_code, result.frozen), (
-            "BLOCKED", "PRINCIPAL_VERSION_REGRESSION", True
-        ))
-        self.assertNotIn("promote", port.calls)
-        self.assertNotIn("tag", port.calls)
-
-    def test_post_tag_event_failure_is_forward_only(self):
-        port = ReleaseFixture(fail_after_tag=True)
-        result = run_release(port, self.release)
-        self.assertEqual((result.status, result.frozen),
-                         ("tag_reconciliation_pending", True))
-        self.assertNotIn("unfreeze-main", port.calls)
-        self.assertNotIn("publish", port.calls)
-
-    def test_post_event_publication_failure_is_forward_only(self):
-        port = ReleaseFixture(fail_publication=True)
-        result = run_release(port, self.release)
-        self.assertEqual((result.status, result.frozen),
-                         ("publication_reconciliation_pending", True))
+    def test_post_tag_failure_is_forward_reconciliation(self):
+        port = PrincipalReleaseFixture(fail="released")
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("tag_reconciliation_pending", "PORT_OPERATION_FAILED", True))
         self.assertNotIn("unfreeze-main", port.calls)
 
-    def test_irreversible_mismatched_tag_is_invalid(self):
-        port = ReleaseFixture(bad_tag=True)
-        result = run_release(port, self.release)
-        self.assertEqual((result.status, result.reason_code, result.frozen), (
-            "INVALID", "PUBLIC_TAG_IDENTITY_MISMATCH", True
-        ))
-        self.assertNotIn("released", port.calls)
+    def test_post_release_failure_is_publication_reconciliation(self):
+        port = PrincipalReleaseFixture(fail="publication-evidence")
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("publication_reconciliation_pending", "PORT_OPERATION_FAILED", True))
         self.assertNotIn("unfreeze-main", port.calls)
 
-    def test_maintenance_release_does_not_freeze_or_change_main(self):
-        port = ReleaseFixture()
-        intent = ReleaseIntent(
-            "tx", "maintenance/0.3", "0.3.1",
-            "refs/tags/iterations/0.3.1", "f" * 40, "c" * 40,
-            "2026-09-20T12:34:56Z", "refs/heads/candidates/0.3.1",
+    def test_maintenance_bootstrap_and_rare_recovery_are_deferred(self):
+        bootstrap = run_maintenance_bootstrap(
+            object(), BootstrapIntent("maintenance/1.2", "1.2.0")
         )
-        result = run_release(port, intent)
-        self.assertEqual(result.status, "COMPLETE")
-        self.assertNotIn("freeze-main", port.calls)
-        self.assertIn("maintenance", port.calls)
+        recovery = run_rare_recovery(object())
+        self.assertEqual(bootstrap.reason_code, "DEFERRED_MAINTENANCE_BOOTSTRAP")
+        self.assertEqual(recovery.reason_code, "DEFERRED_RARE_RECOVERY")
+        self.assertFalse(bootstrap.frozen)
+        self.assertFalse(recovery.frozen)
 
 
 if __name__ == "__main__":

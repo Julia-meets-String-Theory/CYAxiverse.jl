@@ -183,9 +183,9 @@ outcomes remain unavailable. This rule applies across principal and maintenance
 lines.
 
 Candidates are certified from an immutable exact tree. Candidate, certification,
-commit/tree, tag intent, release event, and publication evidence identities stay
+commit/tree, tag intent, released-manifest, and publication evidence identities stay
 available for audit. A canonical public tag is irreversible and must agree with
-the corresponding event and publication evidence.
+the corresponding released and publication manifests.
 
 Documentation source is release-neutral. The deployment context selects one of
 these channels:
@@ -200,15 +200,20 @@ these channels:
 The documentation workflow resolves the stable selector from the one verified
 principal release whose final commit and version match current `main`. It fails
 closed when that context is unavailable. A canonical tag likewise fails closed
-unless its release event and line-specific identities have been verified. A
-fresh Gate A event ledger may therefore deploy only `vmm` development docs
-without inventing a stable target. This release-neutral route does not require
+unless its released/publication manifests and line-specific identities have
+been verified. Gate A may therefore deploy only `vmm` development docs without
+inventing a stable target. This release-neutral route does not require
 a tracked edit to `docs/make.jl`, the
 installation guide, or any generated API page. Gate A installs and tests this
 routing machinery while the
 package remains at its current version; it does not adopt a `-DEV` version,
 close an iteration, create a public tag, publish a release, or reconcile
 `vmm -> main`.
+
+Gate A's lifecycle implementation and synthetic evidence cover the first
+principal path and immutable-manifest authority. Maintenance bootstrap/release
+and rare-recovery automation remain deferred to a later approved S2 gate; this
+workflow guide must not be read as evidence that those paths are live.
 
 ## 5. Recommended agent workflow
 

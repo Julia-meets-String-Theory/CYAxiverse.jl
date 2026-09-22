@@ -1,14 +1,15 @@
 """Static iteration authority and replayable allocation snapshots.
 
-The mutable lifecycle ledger is implemented separately.  This module only
-reads Git and ``iterations.toml`` and produces an immutable, digest-bound view
-of the versions already occupied by static history.  It intentionally has no
-production ref mutation code.
+This module reads Git and ``iterations.toml`` and produces an immutable,
+digest-bound view of versions occupied by static history. Mutable lifecycle
+ledgers are not supported; dynamic occupation is supplied by the separate
+complete immutable lifecycle-ref snapshot.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import datetime as dt
 import ipaddress
 import re
 import subprocess
@@ -662,6 +663,51 @@ def _validate_registry(registry: Mapping[str, Any], source: str) -> set[str]:
     return occupied
 
 
+def _annotated_anchor_payload(
+    repository: Path,
+    object_id: str,
+    ref: str,
+    commit: str,
+) -> str:
+    """Validate the exact annotated anchor object and return its closure UTC."""
+
+    try:
+        raw = _git(repository, "cat-file", "-p", object_id)
+        text = raw.decode("ascii", errors="strict")
+    except (UnicodeError, StaticValidationError) as error:
+        raise StaticValidationError("iteration anchor tag object is malformed") from error
+    if not text.endswith("\n") or text.count("\n\n") != 1:
+        raise StaticValidationError("iteration anchor tag object is malformed")
+    header, message = text.split("\n\n", 1)
+    lines = header.split("\n")
+    if (
+        len(lines) != 4
+        or lines[0] != f"object {commit}"
+        or lines[1] != "type commit"
+        or lines[2] != f"tag {ref}"
+    ):
+        raise StaticValidationError("iteration anchor tag object identity mismatch")
+    tagger = re.fullmatch(r"tagger .+ <[^<>\r\n]+> ([0-9]+) \+0000", lines[3])
+    if tagger is None:
+        raise StaticValidationError("iteration anchor tagger time must be explicit UTC")
+    match = re.fullmatch(
+        r"closure_timestamp_utc=(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)\n",
+        message,
+    )
+    if match is None:
+        raise StaticValidationError("iteration anchor closure payload is noncanonical")
+    closure_timestamp = match.group(1)
+    try:
+        instant = dt.datetime.strptime(
+            closure_timestamp, "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=dt.timezone.utc)
+    except ValueError as error:
+        raise StaticValidationError("iteration anchor closure timestamp is invalid") from error
+    if int(tagger.group(1)) != int(instant.timestamp()):
+        raise StaticValidationError("iteration anchor tagger and closure times disagree")
+    return closure_timestamp
+
+
 def _anchor_bindings(
     repository: Path,
     remote_refs: Mapping[str, str],
@@ -698,6 +744,9 @@ def _anchor_bindings(
             )
         commit = _resolve_commit_value(repository, object_id)
         tree = _resolve_tree(repository, commit)
+        closure_timestamp = _annotated_anchor_payload(
+            repository, object_id, ref, commit
+        )
         anchor_raw: bytes | None = None
         for path in ("iterations.toml", ".cyaxiverse/iteration.toml"):
             try:
@@ -716,7 +765,14 @@ def _anchor_bindings(
                 matches.append(entry)
         if len(matches) != 1:
             raise StaticValidationError(f"anchor {ref} must contain exactly one matching static entry")
-        bindings.append({"ref": ref, "commit": commit, "tree": tree})
+        bindings.append({
+            "ref": ref,
+            "tag_object": object_id,
+            "object_type": object_type,
+            "commit": commit,
+            "tree": tree,
+            "closure_timestamp_utc": closure_timestamp,
+        })
     return sorted(bindings, key=lambda item: item["ref"])
 
 
@@ -762,7 +818,7 @@ def _source_versions(
             value = project.get("version")
             if isinstance(value, str):
                 # A DEV package identity still reserves its final namespace
-                # member; the mutable event head records its owner state.
+                # member; immutable lifecycle manifests record owner state.
                 version = parse_package_version(value).final
                 occupied.add(version.canonical)
         except (UnicodeDecodeError, tomllib.TOMLDecodeError, TypeError, ValueError) as error:
@@ -770,9 +826,11 @@ def _source_versions(
     return occupied
 
 
-def _bind_digest(bindings: Sequence[Mapping[str, str]], keys: tuple[str, str, str]) -> str:
+def _bind_digest(
+    bindings: Sequence[Mapping[str, str]], keys: tuple[str, ...]
+) -> str:
     normalized = [
-        {keys[0]: str(item[keys[0]]), keys[1]: str(item[keys[1]]), keys[2]: str(item[keys[2]])}
+        {key: str(item[key]) for key in keys}
         for item in bindings
     ]
     return sha256_hex(canonical_json(normalized))
@@ -873,12 +931,26 @@ def recompute_snapshot_digests(snapshot: StaticSnapshot | Mapping[str, Any]) -> 
     if len(set(ref_names)) != len(ref_names) or len(set(tag_names)) != len(tag_names) or len(set(occupied)) != len(occupied):
         raise StaticValidationError("snapshot arrays contain duplicate identities")
     for item in refs:
-        if set(item) != {"ref", "commit", "tree"}:
+        if set(item) != {
+            "ref", "tag_object", "object_type", "commit", "tree",
+            "closure_timestamp_utc",
+        }:
             raise StaticValidationError("iteration ref binding has unexpected fields")
         if not isinstance(item["ref"], str) or not item["ref"].startswith("iterations/"):
             raise StaticValidationError("iteration ref binding has invalid ref")
-        if not _HEX40_RE.fullmatch(str(item["commit"])) or not _HEX40_RE.fullmatch(str(item["tree"])):
+        if (
+            item["object_type"] != "tag"
+            or not _HEX40_RE.fullmatch(str(item["tag_object"]))
+            or not _HEX40_RE.fullmatch(str(item["commit"]))
+            or not _HEX40_RE.fullmatch(str(item["tree"]))
+        ):
             raise StaticValidationError("iteration ref binding has invalid commit/tree")
+        if not isinstance(item["closure_timestamp_utc"], str):
+            raise StaticValidationError("iteration ref binding has invalid closure UTC")
+        try:
+            dt.datetime.strptime(item["closure_timestamp_utc"], "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError as error:
+            raise StaticValidationError("iteration ref binding has invalid closure UTC") from error
     for item in tags:
         if set(item) != {"tag", "commit", "tree"}:
             raise StaticValidationError("public tag binding has unexpected fields")
@@ -888,7 +960,13 @@ def recompute_snapshot_digests(snapshot: StaticSnapshot | Mapping[str, Any]) -> 
             raise StaticValidationError(f"invalid canonical public tag binding: {error}") from error
         if not _HEX40_RE.fullmatch(str(item["commit"])) or not _HEX40_RE.fullmatch(str(item["tree"])):
             raise StaticValidationError("public tag binding has invalid commit/tree")
-    ref_digest = _bind_digest(refs, ("ref", "commit", "tree"))
+    ref_digest = _bind_digest(
+        refs,
+        (
+            "ref", "tag_object", "object_type", "commit", "tree",
+            "closure_timestamp_utc",
+        ),
+    )
     tag_digest = _bind_digest(tags, ("tag", "commit", "tree"))
     raw_digest = str(data["iterations_toml_sha256"])
     preimage = _snapshot_preimage(data)
@@ -1015,7 +1093,13 @@ def build_static_snapshot(
             occupied.add(parse_public_tag(tag["tag"]).canonical)
         occupied.update(_source_versions(repository_path, source_commit, source_ref, advertised_refs))
         occupied_versions = sorted(occupied)
-        ref_digest = _bind_digest(anchors, ("ref", "commit", "tree"))
+        ref_digest = _bind_digest(
+            anchors,
+            (
+                "ref", "tag_object", "object_type", "commit", "tree",
+                "closure_timestamp_utc",
+            ),
+        )
         tag_digest = _bind_digest(tags, ("tag", "commit", "tree"))
         data: dict[str, Any] = {
             "snapshot_schema_version": SNAPSHOT_SCHEMA_VERSION,

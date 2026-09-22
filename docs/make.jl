@@ -1,8 +1,8 @@
 """Build and deploy release-neutral CYAxiverse documentation.
 
 The source tree is shared by development and release documentation. Routing is
-selected from a ref plus release-event identity supplied by the workflow. A
-canonical tag without verified event evidence fails closed.
+selected from a ref plus immutable release/publication manifest evidence. A
+canonical tag without verified manifest evidence fails closed.
 """
 
 const _CANONICAL_PUBLIC_TAG = r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
@@ -26,14 +26,14 @@ _canonical_final(value::AbstractString) = _bounded_version(value, _CANONICAL_VER
 
 """Return the documentation channel for one verified deployment context."""
 function docs_route(; ref::AbstractString,
-                      event_status::AbstractString = "",
+                      manifest_status::AbstractString = "",
                       release_line::AbstractString = "",
                       release_version::AbstractString = "",
                       release_sha::AbstractString = "",
                       principal_main_sha::AbstractString = "",
                       stable_requested::Bool = false)
     ref_string = String(ref)
-    status = lowercase(String(event_status))
+    status = lowercase(String(manifest_status))
 
     if isempty(ref_string) || startswith(ref_string, "refs/pull/") ||
        (status == "preview" && !startswith(ref_string, "refs/tags/"))
@@ -52,7 +52,7 @@ function docs_route(; ref::AbstractString,
         throw(DocsRouteError("DOCS_ROUTE_INVALID: ref is not vmm or a canonical public tag"))
     end
     status == "verified" || throw(DocsRouteError(
-        "DOCS_ROUTE_UNVERIFIED: canonical tag requires a verified release event"))
+        "DOCS_ROUTE_UNVERIFIED: canonical tag requires verified release manifest evidence"))
     valid_maintenance_line = occursin(r"^maintenance/(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$", release_line)
     release_line == "principal" || valid_maintenance_line || throw(DocsRouteError(
         "DOCS_ROUTE_INVALID: verified tag requires principal or maintenance release line"))
@@ -61,7 +61,7 @@ function docs_route(; ref::AbstractString,
 
     version = tag[2:end]
     _canonical_final(release_version) && release_version == version || throw(DocsRouteError(
-        "DOCS_ROUTE_INVALID: tag and release-event version disagree"))
+        "DOCS_ROUTE_INVALID: tag and release-manifest version disagree"))
 
     stable = false
     channel = :versioned
@@ -87,7 +87,7 @@ end
 function docs_route_from_environment()
     docs_route(
         ref = get(ENV, "CYAX_DOCS_REF", get(ENV, "GITHUB_REF", "")),
-        event_status = get(ENV, "CYAX_DOCS_EVENT_STATUS", ""),
+        manifest_status = get(ENV, "CYAX_DOCS_MANIFEST_STATUS", ""),
         release_line = get(ENV, "CYAX_DOCS_RELEASE_LINE", ""),
         release_version = get(ENV, "CYAX_DOCS_RELEASE_VERSION", ""),
         release_sha = get(ENV, "CYAX_DOCS_RELEASE_SHA", ""),

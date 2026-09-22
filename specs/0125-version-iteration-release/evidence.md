@@ -1,40 +1,76 @@
 # CYAX-0125 Gate A candidate evidence
 
-This record belongs to the premerge Gate A candidate. It does not designate a
-historical release, adopt a DEV version, close an iteration, publish a release,
-or establish live GitHub protection. The approved specification is
-`afc90e63f4703a53a51f3fd296e52edbac325862`; the feature branch starts
-from `origin/vmm` at `995163f0058488ea183ac645045ed8b1636bef4a`.
+This record belongs to a provisional premerge Gate A worktree candidate. It
+does not designate a historical release, adopt a DEV version, close an
+iteration, publish a release, or establish live GitHub protection. The exact
+normative amendment reviewed for I2 is commit
+`705031fddf943603922daf2779096138c2613ffa` (tree
+`f1d646ec46d48a209ee0e37a504863d5691c0994`); the implementation candidate
+has no frozen final commit/tree at the time of this record. The feature branch
+uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
+execution base.
+
+The manager is operating under the exact handoff packet SHA
+`19fa93e2b4b1439b1cc4217cf7ff9e42846980d46df66793156f72789894e40a`, review
+result SHA
+`a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf`, owner
+approval receipt SHA
+`140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c`, and
+canonical review-rubric SHA
+`418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72`.
 
 ## Canonical storage and synthetic release packet
 
-The future canonical mutable event location is the protected orphan
-`release-events` branch, sole file `release-events.jsonl`. Prospective static
-metadata is selected from `refs/heads/vmm:iterations.toml`; protected
-`iterations/X.Y.Z` anchors carry closure identity. Candidate refs and public
-`vX.Y.Z` tags are distinct Git identities. A `released` event precedes GitHub
-Release publication. Publication evidence is a separate immutable or content
-addressed artifact keyed by event ID and public tag, with its digest and
-location recorded after publication. No production event authority or release
-artifact is created by this candidate.
+The reduced candidate supersedes the predecessor's append-only event-ledger
+design. Its prospective authority is `refs/heads/vmm:iterations.toml`,
+protected `iterations/X.Y.Z` anchors, canonical `vX.Y.Z` tags, and protected
+create-once `refs/heads/lifecycle/v1/*` refs. Each lifecycle ref contains one
+immutable `manifest.json`; no mutable stream is canonical and Gate A creates no
+production lifecycle ref, tag, or release.
 
-The checked-in **synthetic** packet is
-[`fixtures/synthetic-release-evidence.json`](fixtures/synthetic-release-evidence.json).
-It contains principal and maintenance examples with every R-042 released-event
-identity: event ID/type/time, final version and line, anchor ref/SHA/tree,
-candidate ref/SHA/tree, final SHA/tree, line-specific `main` identity,
-certification binding/subject/policy/harness/environment/evidence references,
-closure UTC time, public tag, and evidence references. Separate synthetic
-publication artifacts are
-[`fixtures/synthetic-publication-principal.json`](fixtures/synthetic-publication-principal.json)
-and
-[`fixtures/synthetic-publication-maintenance.json`](fixtures/synthetic-publication-maintenance.json).
-Their exact raw bytes match the SHA-256 digests in the packet. The fixture test
-revalidates both complete tag/event/Release/publication tuples as
-`terminal_consistent`. Repeated hexadecimal characters and numeric release
-IDs in these files are fixture values only.
+The checked-in **synthetic principal-only** packet is
+[`fixtures/synthetic-lifecycle-principal.json`](fixtures/synthetic-lifecycle-principal.json).
+It contains a complete immutable released/publication manifest pair with a
+content-derived manifest identity, deterministic publication identity, and
+matching released-manifest digest and owner-authorization bindings. Repeated
+hexadecimal identities are fixture values only. Maintenance bootstrap/release
+automation is deferred to a later approved S2 gate. Gate A includes only the
+validation-only `maintenance-bootstrap-validation-v1` validator and synthetic
+positive, non-entry, mismatch, uncertain, and failed-activation cases in
+`scripts/test_version_lifecycle_maintenance_validation.py`; it includes no
+production maintenance writer. The predecessor event-ledger packet and its
+review chronology below remain historical evidence and are not authority for
+this reduced candidate.
 
-## Independent review history
+## Current reduced-candidate checks
+
+The exact reviewed normative authority is commit
+`705031fddf943603922daf2779096138c2613ffa` (tree
+`f1d646ec46d48a209ee0e37a504863d5691c0994`). Independent SPEC and STANDARDS
+reviews both returned `PASS` using `gpt-5.6-sol` at `high` reasoning. External
+approval record `reviews/n1-approval-v2.json`, SHA-256
+`3b46763a981d66092b1084d2d75792d64825b98f8bd3d6c74792a256c8004861`, binds
+that exact five-file revision and both exact review records without changing
+the reviewed normative bytes.
+
+The implementation worktree was not yet committed when these observations
+were recorded. They are provisional development results until the exact
+implementation commit/tree receives fresh review.
+
+| Check | Observed result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 95 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 6 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'` | Passed: 3 tests. |
+| `python3 scripts/check_version_bump.py --base 20b3935ace0e01fcee2808681c56595e3afa7667 --head HEAD` | Passed: no package implementation or `Project.toml` change requires a version bump. |
+| `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed: worktree snapshot captured and no whitespace errors. |
+| `DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed; Documenter rendered all configured pages. |
+| Python-unavailable `julia --project=. -e 'using CYAxiverse'` | Passed with `PYTHON` and `PYTHONHOME` set to unavailable paths. |
+| `python3 scripts/agent_verify.py package` | Failed at the unchanged `test/runtests.jl:1267` Hessian baseline: expected `4π²`, observed `2π²`. The same failure is already recorded below and `src`, `test`, `Project.toml`, `Manifest.toml`, and `bin/audit.jl` have no candidate delta. |
+| `julia --project=. bin/audit.jl` | Failed with the same two unchanged JET undefined-`i` reports in `reduced_models.jl` and `poly102_inflation.jl` recorded below. The audited source and audit script have no candidate delta. |
+| Remote CI for the exact implementation candidate | Pending until the candidate is committed and pushed; no result is claimed. |
+
+## Historical predecessor review history (non-authoritative)
 
 The first frozen implementation candidate was commit
 `638ee4dfcd237d91646d963ac77cb473fcaccef1` (tree
@@ -287,7 +323,7 @@ tests. This evidence-only convergence update follows those exact-state
 reviews; its successor still requires exact-state confirmation before the
 owner merge decision.
 
-## Observed checks
+## Historical observed checks (non-authoritative)
 
 | Check | Observed result |
 | --- | --- |
