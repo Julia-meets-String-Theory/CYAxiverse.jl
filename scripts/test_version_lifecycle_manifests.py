@@ -675,6 +675,14 @@ class ManifestTests(unittest.TestCase):
             validate_complete_lifecycle_refs(
                 records_with_publication(public_tag="v1.2.4")
             )
+        with self.assertRaisesRegex(ManifestError, "release commit mismatch"):
+            validate_complete_lifecycle_refs(
+                records_with_publication(tag_commit="0" * 40)
+            )
+        with self.assertRaisesRegex(ManifestError, "release tree mismatch"):
+            validate_complete_lifecycle_refs(
+                records_with_publication(tag_tree="0" * 40)
+            )
 
     def test_snapshot_occupied_set_must_match_replayed_graph(self) -> None:
         chain = self.chain()

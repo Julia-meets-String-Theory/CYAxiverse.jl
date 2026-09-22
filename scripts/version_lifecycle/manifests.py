@@ -942,6 +942,10 @@ def validate_lifecycle_graph(
                 raise ManifestError("publication released manifest digest mismatch")
             if released.get("public_tag") != manifest["public_tag"]:
                 raise ManifestError("publication public tag mismatch")
+            if released.get("final_release_sha") != manifest["tag_commit"]:
+                raise ManifestError("publication release commit mismatch")
+            if released.get("final_release_tree") != manifest["tag_tree"]:
+                raise ManifestError("publication release tree mismatch")
         if kind == "released":
             for predecessor in predecessors:
                 if by_ref[predecessor]["manifest_type"] != "release-intent-prepared":

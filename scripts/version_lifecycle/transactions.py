@@ -236,17 +236,42 @@ def _view(port: Any, intent: Any) -> Any:
 
 
 def _bound_view(port: Any, intent: Any) -> Any:
-    view = _view(port, intent)
-    if view is None:
-        raise TransactionError("ALLOCATION_AUTHORITY_UNAVAILABLE")
+    view = _fresh_view(port, intent)
+    static_digest, lifecycle_digest = _view_digests(view)
+    if (
+        static_digest != getattr(intent, "static_snapshot_digest", "")
+        or lifecycle_digest != getattr(intent, "lifecycle_snapshot_digest", "")
+    ):
+        raise TransactionError("ALLOCATION_SNAPSHOT_STALE")
+    return view
+
+
+def _view_digests(view: Any) -> tuple[str, str]:
     static_digest = getattr(
         view, "static_snapshot_digest", getattr(view, "snapshot_digest", None)
     )
     lifecycle_digest = getattr(view, "lifecycle_snapshot_digest", None)
     if (
-        static_digest != getattr(intent, "static_snapshot_digest", "")
-        or lifecycle_digest != getattr(intent, "lifecycle_snapshot_digest", "")
+        not isinstance(static_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", static_digest) is None
+        or not isinstance(lifecycle_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", lifecycle_digest) is None
     ):
+        raise TransactionError("ALLOCATION_AUTHORITY_UNAVAILABLE")
+    return static_digest, lifecycle_digest
+
+
+def _fresh_view(port: Any, intent: Any) -> Any:
+    view = _view(port, intent)
+    if view is None:
+        raise TransactionError("ALLOCATION_AUTHORITY_UNAVAILABLE")
+    _view_digests(view)
+    return view
+
+
+def _successor_view(port: Any, intent: Any, previous: Any) -> Any:
+    view = _fresh_view(port, intent)
+    if _view_digests(view) == _view_digests(previous):
         raise TransactionError("ALLOCATION_SNAPSHOT_STALE")
     return view
 
@@ -386,6 +411,7 @@ def _manifest_payload(
     predecessor_refs: tuple[str, ...] | list[str] | None = None,
     timestamp_utc: str | None = None,
     allocation: bool = True,
+    allocation_view: Any = None,
 ) -> dict[str, Any]:
     """Add exact common/allocation fields required by ``manifests.py``."""
 
@@ -405,10 +431,15 @@ def _manifest_payload(
         **fields,
     }
     if allocation:
+        if allocation_view is None:
+            static_digest = getattr(intent, "static_snapshot_digest", "")
+            lifecycle_digest = getattr(intent, "lifecycle_snapshot_digest", "")
+        else:
+            static_digest, lifecycle_digest = _view_digests(allocation_view)
         result.update({
             "transaction_id": getattr(intent, "transaction_id", ""),
-            "static_iteration_snapshot": getattr(intent, "static_snapshot_digest", ""),
-            "lifecycle_ref_snapshot": getattr(intent, "lifecycle_snapshot_digest", ""),
+            "static_iteration_snapshot": static_digest,
+            "lifecycle_ref_snapshot": lifecycle_digest,
         })
     return result
 
@@ -553,7 +584,7 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
         evidence["anchor"] = anchor
         phase = "anchored"
 
-        post_anchor_view = _bound_view(port, intent)
+        post_anchor_view = _successor_view(port, intent, view)
         evidence["post_anchor_view"] = post_anchor_view
         consumption_payload = _manifest_payload(
             intent, "reservation-consumed", {
@@ -562,7 +593,7 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
                 "closure_anchor_ref": anchor["ref"],
                 "terminal_disposition": ("closed" if outgoing == final_version
                                           else "CONSUMED_UNUSED_DEV_RESERVATION"),
-            })
+            }, allocation_view=post_anchor_view)
         consumption = _as_mapping(_typed_manifest(
             port, "reservation-consumed", consumption_payload,
             authorize=lambda kind, target, version: _manifest_authorize(port, intent, kind, target, version)),
@@ -582,7 +613,8 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
         evidence["consumption"] = _expect_manifest(consumption, "reservation-consumed", "OUTGOING_RESERVATION_RECONCILIATION_FAILED")
         phase = "outgoing_terminal"
 
-        fresh_view = _bound_view(port, intent)
+        fresh_view = _successor_view(port, intent, post_anchor_view)
+        evidence["post_consumption_view"] = fresh_view
         occupied = (getattr(fresh_view, "occupied", None)
                      if fresh_view is not None else None)
         if occupied is None and fresh_view is not None:
@@ -595,7 +627,8 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
                 "reserved_final": next_final,
                 "intended_dev_version": f"{next_final}-DEV",
                 "expected_line_head": intent.expected_line_head,
-            }, predecessor_refs=(lifecycle_ref_for_manifest(consumption),))
+            }, predecessor_refs=(lifecycle_ref_for_manifest(consumption),),
+            allocation_view=fresh_view)
         preparation = _as_mapping(_typed_manifest(
             port, "reservation-prepared", preparation_payload,
             authorize=lambda kind, target, version: _manifest_authorize(port, intent, kind, target, version)),
@@ -607,6 +640,9 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
             raise TransactionError("NEXT_RESERVATION_MISMATCH")
         evidence["preparation"] = _expect_manifest(preparation, "reservation-prepared", "NEXT_RESERVATION_MISMATCH")
         phase = "next_prepared"
+
+        post_preparation_view = _successor_view(port, intent, fresh_view)
+        evidence["post_preparation_view"] = post_preparation_view
 
         if not hasattr(port, "reopen_dev"):
             raise TransactionError("REOPEN_PORT_UNSUPPORTED")
@@ -631,24 +667,32 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
             raise TransactionError("ACTIVATION_IDENTITY_MISMATCH")
         evidence["activation"] = activation
         phase = "next_active"
+        post_activation_view = _successor_view(
+            port, intent, post_preparation_view
+        )
+        evidence["post_activation_view"] = post_activation_view
         opened_payload = _manifest_payload(
             intent, "reservation-opened", {
                 "owner_line": intent.owner_line, "final_version": next_final,
                 "reserved_final": next_final,
                 "intended_dev_version": f"{next_final}-DEV",
                 "actual_dev_head": activation.get("head", reopened.get("head")),
-            }, predecessor_refs=(lifecycle_ref_for_manifest(preparation),))
+            }, predecessor_refs=(lifecycle_ref_for_manifest(preparation),),
+            allocation_view=post_activation_view)
         opened = _as_mapping(_typed_manifest(
             port, "reservation-opened", opened_payload,
             authorize=lambda kind, target, version: _manifest_authorize(port, intent, kind, target, version)),
             "RESERVATION_OPEN_MANIFEST_MISMATCH")
         evidence["reservation_opened"] = opened
         phase = "reservation_opened"
+        post_opened_view = _successor_view(port, intent, post_activation_view)
+        evidence["post_opened_view"] = post_opened_view
         claim_payload = _manifest_payload(
             intent, "version-claimed", {
                 "owner_line": intent.owner_line,
                 "final_version": next_final,
-            }, predecessor_refs=(lifecycle_ref_for_manifest(opened),))
+            }, predecessor_refs=(lifecycle_ref_for_manifest(opened),),
+            allocation_view=post_opened_view)
         claim = _as_mapping(_typed_manifest(
             port, "version-claimed", claim_payload,
             authorize=lambda kind, target, version: _manifest_authorize(
@@ -658,6 +702,9 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
             claim, "version-claimed", "VERSION_CLAIM_MISMATCH"
         )
         phase = "version_claimed"
+        evidence["terminal_allocation_view"] = _successor_view(
+            port, intent, post_opened_view
+        )
         evidence["closure_correspondence"] = _required_proof(
             port,
             "verify_closure_correspondence",
@@ -778,7 +825,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         phase = "anchor_verified"
         lease = _acquire_exclusion(port, intent)
         phase = "serialized"
-        evidence["bound_view"] = _bound_view(port, intent)
+        bound_view = _bound_view(port, intent)
+        evidence["bound_view"] = bound_view
         _authorize(port, intent, "create-release-manifest", intent.candidate_ref)
 
         if hasattr(port, "make_durable_candidate"):
@@ -822,7 +870,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
                 "anchor_tree": intent.anchor_tree,
                 "main_at_candidate_sha": main_candidate_sha,
                 "main_at_candidate_version": main_candidate_version,
-            }, predecessor_refs=intent.predecessor_refs)
+            }, predecessor_refs=intent.predecessor_refs,
+            allocation_view=bound_view)
         opened = _as_mapping(_typed_manifest(
             port, "candidate-opened", opened_payload,
             authorize=lambda kind, target, version: _manifest_authorize(port, intent, kind, target, version)),
@@ -934,6 +983,9 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         evidence["public_tag_ruleset"] = protection
         phase = "tag_ruleset_verified"
 
+        intent_view = _successor_view(port, intent, bound_view)
+        evidence["intent_allocation_view"] = intent_view
+
         intent_payload = _manifest_payload(
             intent, "release-intent-prepared", {
                 "candidate_id": candidate.get("candidate_id", ""),
@@ -950,7 +1002,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
                 "certification_environment": certification["environment"],
                 "certification_evidence_refs": sorted(certification["evidence_refs"]),
                 "final_release_sha": final_sha, "final_release_tree": final_tree,
-            }, predecessor_refs=(lifecycle_ref_for_manifest(opened),))
+            }, predecessor_refs=(lifecycle_ref_for_manifest(opened),),
+            allocation_view=intent_view)
         if transfer_evidence is not None:
             intent_payload["certification_transfer_evidence"] = dict(transfer_evidence)
         prepared = _as_mapping(_typed_manifest(
@@ -983,6 +1036,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             raise TransactionError("PUBLIC_TAG_IDENTITY_MISMATCH")
         evidence["tag"] = tag
         phase = "public_tag_created"
+        released_view = _successor_view(port, intent, intent_view)
+        evidence["released_allocation_view"] = released_view
 
         release_fields = {
             "final_version": final_version, "release_line": "principal",
@@ -1018,7 +1073,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             raise TransactionError("RELEASE_MAIN_IDENTITY_UNPROVEN")
         released_payload = _manifest_payload(
             intent, "released", release_fields,
-            predecessor_refs=(lifecycle_ref_for_manifest(prepared),))
+            predecessor_refs=(lifecycle_ref_for_manifest(prepared),),
+            allocation_view=released_view)
         released = _as_mapping(_typed_manifest(
             port, "released", released_payload,
             authorize=lambda kind, target, version: _manifest_authorize(port, intent, kind, target, version)),
@@ -1038,6 +1094,9 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             final,
         )
         phase = "released_manifest_durable"
+        evidence["post_released_allocation_view"] = _successor_view(
+            port, intent, released_view
+        )
 
         if not hasattr(port, "publish_github_release"):
             raise TransactionError("PUBLICATION_RECONCILIATION_REQUIRED")

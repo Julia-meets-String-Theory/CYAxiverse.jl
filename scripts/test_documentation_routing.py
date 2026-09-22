@@ -93,6 +93,7 @@ def complete_fixture(
         "github_releases": [{
             "id": publication_manifest["github_release_id"],
             "tag": publication_manifest["public_tag"],
+            "url": publication_manifest["github_release_url"],
         }],
     }
     return release, publication_manifest, observations

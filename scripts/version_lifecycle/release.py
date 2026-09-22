@@ -296,10 +296,11 @@ def _github_release_index(
         if not isinstance(raw, Mapping):
             raise ValueError("GitHub Release observation must be an object")
         value = dict(raw)
-        if set(value) != {"id", "tag"}:
+        if set(value) != {"id", "tag", "url"}:
             raise ValueError("GitHub Release observation fields are invalid")
         tag = value["tag"]
         release_id = value["id"]
+        release_url = value["url"]
         if tag == LEGACY_PUBLIC_TAG:
             continue
         if not is_canonical_public_tag(tag):
@@ -308,6 +309,8 @@ def _github_release_index(
             isinstance(release_id, bool)
             or not isinstance(release_id, int)
             or release_id <= 0
+            or not isinstance(release_url, str)
+            or not release_url
             or tag in result
             or release_id in ids
         ):
@@ -361,6 +364,8 @@ def _validate_complete_release_universe(
             return publication_result
         if publication["github_release_id"] != github_release["id"]:
             return _result(INVALID, "GITHUB_RELEASE_ID_MISMATCH")
+        if publication["github_release_url"] != github_release["url"]:
+            return _result(INVALID, "GITHUB_RELEASE_URL_MISMATCH")
     return None
 
 

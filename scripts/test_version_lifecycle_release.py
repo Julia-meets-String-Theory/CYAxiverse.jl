@@ -143,6 +143,7 @@ class ReleaseTests(unittest.TestCase):
             "github_release_observations": [{
                 "id": publication_manifest["github_release_id"],
                 "tag": publication_manifest["public_tag"],
+                "url": publication_manifest["github_release_url"],
             }],
             "require_complete_namespace": True,
         }
@@ -176,7 +177,11 @@ class ReleaseTests(unittest.TestCase):
             mismatch["reason_code"], "COMPLETE_RELEASE_UNIVERSE_MISMATCH"
         )
         rogue_github_release = list(kwargs["github_release_observations"])
-        rogue_github_release.append({"id": 2, "tag": "nightly"})
+        rogue_github_release.append({
+            "id": 2,
+            "tag": "nightly",
+            "url": "https://github.com/cyaxiverse/CYAxiverse.jl/releases/tag/nightly",
+        })
         invalid = validate_release_consistency(
             release,
             publication_manifest,
@@ -188,6 +193,16 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(
             invalid["reason_code"], "COMPLETE_RELEASE_UNIVERSE_INVALID"
         )
+        wrong_url = [dict(item) for item in kwargs["github_release_observations"]]
+        wrong_url[0]["url"] = (
+            "https://github.com/other/project/releases/tag/v1.2.3"
+        )
+        mismatch = validate_release_consistency(
+            release,
+            publication_manifest,
+            **{**kwargs, "github_release_observations": wrong_url},
+        )
+        self.assertEqual(mismatch["reason_code"], "GITHUB_RELEASE_URL_MISMATCH")
 
     def test_checked_in_principal_fixture_is_internally_consistent(self) -> None:
         fixture_path = (

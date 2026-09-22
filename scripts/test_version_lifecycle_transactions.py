@@ -130,6 +130,8 @@ class PrincipalClosureFixture:
         self.manifest_types: list[str] = []
         self.manifests: list[dict[str, object]] = []
         self.occupied = occupied
+        self.static_epoch = 0
+        self.lifecycle_epoch = 1
         self.authorization = IssuingAuthority("tx-closure")
         self.owner_authorization_authority = self.authorization
 
@@ -153,7 +155,11 @@ class PrincipalClosureFixture:
 
     def allocation_view(self):
         self.calls.append("view")
-        return AllocationView(SNAPSHOT, LIFECYCLE_SNAPSHOT, self.occupied)
+        return AllocationView(
+            f"{self.static_epoch:x}" * 64,
+            f"{self.lifecycle_epoch:x}" * 64,
+            self.occupied,
+        )
 
     def verify_closure_target(self, intent, view):
         self.calls.append("verify-closure")
@@ -170,6 +176,7 @@ class PrincipalClosureFixture:
 
     def create_anchor(self, intent, closure):
         self.calls.append("create-anchor")
+        self.static_epoch += 2
         return dict(closure)
 
     def create_manifest(self, manifest_type, payload):
@@ -180,6 +187,7 @@ class PrincipalClosureFixture:
         result = seal_manifest(dict(payload))
         validate_manifest(result)
         self.manifests.append(result)
+        self.lifecycle_epoch += 1
         return result
 
     def verify_outgoing_terminal(self, intent, consumption):
@@ -188,6 +196,7 @@ class PrincipalClosureFixture:
 
     def reopen_dev(self, intent, preparation):
         self.calls.append("reopen")
+        self.static_epoch += 1
         return {"version": preparation["intended_dev_version"], "head": SHA_B}
 
     def activate_next(self, intent, preparation, reopened):
@@ -211,6 +220,12 @@ class NoExclusionClosureFixture(PrincipalClosureFixture):
         return super().__getattribute__(name)
 
 
+class CachedClosureFixture(PrincipalClosureFixture):
+    def allocation_view(self):
+        self.calls.append("view")
+        return AllocationView(SNAPSHOT, LIFECYCLE_SNAPSHOT, self.occupied)
+
+
 class PrincipalReleaseFixture:
     def __init__(self, *, binding="tree-bound", fail: str | None = None):
         self.binding = binding
@@ -218,6 +233,8 @@ class PrincipalReleaseFixture:
         self.calls: list[str] = []
         self.manifest_types: list[str] = []
         self.manifests: list[dict[str, object]] = []
+        self.static_epoch = 0
+        self.lifecycle_epoch = 1
         self.authorization = IssuingAuthority("tx-release")
         self.owner_authorization_authority = self.authorization
 
@@ -230,7 +247,11 @@ class PrincipalReleaseFixture:
 
     def allocation_view(self):
         self.calls.append("view")
-        return AllocationView(SNAPSHOT, LIFECYCLE_SNAPSHOT, frozenset({"0.3.0"}))
+        return AllocationView(
+            f"{self.static_epoch:x}" * 64,
+            f"{self.lifecycle_epoch:x}" * 64,
+            frozenset({"0.3.0"}),
+        )
 
     def release_static_mutation(self, lease):
         self.calls.append("release-exclusion")
@@ -254,6 +275,7 @@ class PrincipalReleaseFixture:
         result = seal_manifest(dict(payload))
         validate_manifest(result)
         self.manifests.append(result)
+        self.lifecycle_epoch += 1
         return result
 
     def certify_candidate(self, intent, candidate):
@@ -304,6 +326,7 @@ class PrincipalReleaseFixture:
         self.calls.append("tag")
         if self.fail == "tag":
             return {"name": intent.public_tag, "commit": "bad", "tree": TREE, "protected": True}
+        self.static_epoch += 2
         return {"name": intent.public_tag, "commit": final["sha"], "tree": final["tree"], "protected": True}
 
     def publish_github_release(self, intent, released):
@@ -408,6 +431,31 @@ class TransactionTests(unittest.TestCase):
         self.assertLess(port.calls.index("manifest:reservation-consumed"), port.calls.index("manifest:reservation-prepared"))
         self.assertLess(port.calls.index("manifest:reservation-prepared"), port.calls.index("reopen"))
         self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze"])
+        snapshots = [
+            (
+                manifest["static_iteration_snapshot"],
+                manifest["lifecycle_ref_snapshot"],
+            )
+            for manifest in port.manifests
+        ]
+        self.assertEqual(
+            snapshots,
+            [
+                ("2" * 64, "1" * 64),
+                ("2" * 64, "2" * 64),
+                ("3" * 64, "3" * 64),
+                ("3" * 64, "4" * 64),
+            ],
+        )
+
+    def test_closure_rejects_cached_authority_after_anchor_mutation(self):
+        port = CachedClosureFixture()
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("BLOCKED", "ALLOCATION_SNAPSHOT_STALE", True),
+        )
+        self.assertNotIn("reservation-consumed", port.manifest_types)
 
     def test_emitted_manifests_pass_the_real_schema(self):
         closure_port = PrincipalClosureFixture()
@@ -572,6 +620,24 @@ class TransactionTests(unittest.TestCase):
         self.assertLess(port.calls.index("tag"), port.calls.index("manifest:released"))
         self.assertLess(port.calls.index("manifest:released"), port.calls.index("manifest:publication"))
         self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze-main"])
+        allocation_manifests = [
+            manifest for manifest in port.manifests
+            if manifest["manifest_type"] != "publication"
+        ]
+        self.assertEqual(
+            [
+                (
+                    manifest["static_iteration_snapshot"],
+                    manifest["lifecycle_ref_snapshot"],
+                )
+                for manifest in allocation_manifests
+            ],
+            [
+                ("0" * 64, "1" * 64),
+                ("0" * 64, "2" * 64),
+                ("2" * 64, "3" * 64),
+            ],
+        )
 
     def test_principal_release_rejects_version_regression_before_tag(self):
         port = PrincipalReleaseFixture()

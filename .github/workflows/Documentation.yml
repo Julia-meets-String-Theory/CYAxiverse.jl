@@ -139,15 +139,15 @@ jobs:
           )
           PY
           gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[] | [.id, .tag_name] | @tsv' > "$RUNNER_TEMP/github-releases.tsv"
+            --jq '.[] | [.id, .tag_name, .html_url] | @tsv' > "$RUNNER_TEMP/github-releases.tsv"
           python3 - "$RUNNER_TEMP/github-releases.tsv" "$RUNNER_TEMP/github-releases.json" <<'PY'
           import json
           import pathlib
           import sys
           rows = []
           for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
-              release_id, tag = line.split("\t", 1)
-              rows.append({"id": int(release_id), "tag": tag})
+              release_id, tag, url = line.split("\t", 2)
+              rows.append({"id": int(release_id), "tag": tag, "url": url})
           pathlib.Path(sys.argv[2]).write_text(
               json.dumps(rows, sort_keys=True, separators=(",", ":")),
               encoding="utf-8",
