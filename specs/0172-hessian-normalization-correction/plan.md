@@ -17,7 +17,7 @@ until CYAX-0172 G0 is satisfied and durable owner approval is recorded.
 | R-003 | Add one nontrivial direct-formula fixture | Independent matrix assembly, no `_hessian` reuse |
 | R-004 | Freeze analytic one-dimensional root | Compare refined result to `0.5*log10(phi)` |
 | R-005 | Reconstruct historical formula only inside test/evidence code | Verify factor-two scaling and eigenvalue-sign invariance |
-| R-006 | Replay a representative bounded catastrophe case | Compare bracket, refined `k_c`, type, side signatures |
+| R-006 | Replay the exact predeclared R-004 golden-ratio fixture on identical before/after inputs | Verify `[0.10,0.15]` bracket, refined `k_c`, type, side signatures and factor-two scaling |
 | R-007 | No change to potential/homotopy/claim fields | Exact diff + focused assertions |
 | R-008 | Record exact candidate and evidence | Fresh independent Scientific/Numerical Review |
 | G0 | Spec/Scientific review + owner approval | Durable review identities + approval ref |
@@ -50,8 +50,11 @@ is moved by this work.
    - nontrivial direct analytic matrix oracle;
    - analytic golden-ratio `k_c` oracle;
    - historical-vs-corrected factor-two relation.
-4. Run the existing bounded scan fixture and one representative catastrophe
-   replay under the exact candidate.
+4. Run the exact R-004 golden-ratio fixture as the sole predeclared R-006/G2
+   replay witness on identical before/after inputs: `Q=[1,1]` as a 2×1 matrix,
+   `L=[[2,-1],[1,1]]`, `theta=[0]`, `phase=[0.4,0]`,
+   `k_grid=range(0.05,0.20; length=4)`, `precision_bits=256`, refinement
+   tolerance `1e-20`, with expected coarse bracket `[0.10,0.15]`.
 5. Record exact before/after evidence, commands, environment, commit and tree.
 6. Freeze the candidate and obtain independent Scientific/Numerical Review.
 7. Repair only attributable findings; changed candidate bytes require fresh
@@ -91,7 +94,8 @@ Focused first:
 - analytic matrix fixture;
 - analytic `k_c` fixture;
 - historical/corrected scaling relation;
-- representative replay.
+- the exact R-006 golden-ratio replay witness, with frozen source identities,
+  inputs, `[0.10,0.15]` bracket and analytic root.
 
 Then:
 
