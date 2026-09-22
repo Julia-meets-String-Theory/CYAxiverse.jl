@@ -108,8 +108,8 @@ This specification includes:
   `scripts/phase_volume_detuning_scan.jl`;
 - adding or refining focused regression checks needed to establish analytic
   potential/Hessian consistency;
-- replaying the existing bounded one-dimensional detuning fixture and a
-  representative bounded catastrophe case;
+- replaying the existing bounded one-dimensional golden-ratio detuning fixture
+  as the exact representative catastrophe witness for CYAX-0172 G2;
 - recording exact before/after evidence and candidate identity;
 - obtaining fresh independent scientific/numerical review of the exact
   corrected candidate.
@@ -247,20 +247,41 @@ within arithmetic tolerance.
 Eigenvalue signs SHALL agree away from exact zero, and any zero-mode bracket
 defined only by sign change SHALL remain unchanged.
 
-### R-006 — Representative bounded replay
+### R-006 — Exact representative bounded replay
 
-At least one representative catastrophe scan already governed by the helper
-SHALL be replayed before and after the correction.
+The R-004 golden-ratio fixture is also the **sole predeclared representative
+G2 replay witness**. No second or post-hoc-selected catastrophe case is required
+for this correction.
 
-The evidence SHALL compare:
+Freeze the replay inputs before implementation as:
 
-- the coarse sign-change bracket;
+```text
+source vmm commit = 995163f0058488ea183ac645045ed8b1636bef4a
+helper blob = cd861aa8a257ae36c9dadef6486449a0497c35a4
+test/runtests.jl blob = 67a2c0d6d4ead46fb6acf58a0b6e3acfc41e22d0
+Q = reshape([1.0, 1.0], 2, 1)
+L = [[2.0, -1.0], [1.0, 1.0]]
+theta = [0.0]
+phase = [0.4, 0.0]
+k_grid = range(0.05, 0.20; length=4)
+precision_bits = 256
+refinement tolerance = 1e-20
+expected coarse sign-change bracket = [0.10, 0.15]
+analytic root = 0.5*log10((1+sqrt(5))/2)
+```
+
+The exact pre-correction historical helper and the corrected helper SHALL be
+evaluated on those same inputs. The evidence SHALL compare:
+
+- the coarse sign-change bracket `[0.10, 0.15]`;
 - refined `k_c`;
 - catastrophe type / branch classification;
-- eigenvalue signs on both sides of the bracket.
+- eigenvalue signs on both sides of the bracket;
+- the factor-two Hessian/eigenvalue magnitude relation where finite.
 
-Any change not explained solely by the positive factor-of-two Hessian scaling
-is a stop condition.
+The witness is selected by this specification, before implementation output is
+observed. Any change not explained solely by the positive factor-of-two Hessian
+scaling is a stop condition.
 
 ### R-007 — Preserve scientific boundary
 
@@ -343,7 +364,8 @@ Required evidence includes:
 2. one general nontrivial analytic closed-form fixture;
 3. the exact analytic `k_c = 0.5 log10(phi)` detuning fixture;
 4. historical-vs-corrected factor-two and sign invariance;
-5. one representative bounded catastrophe replay;
+5. the exact R-006 golden-ratio replay witness, using the frozen inputs and
+   source identities above;
 6. focused package tests containing the phase/volume-detuning testset;
 7. `scripts/agent_verify.py diff-check`;
 8. broader package verification as practical, with the known pre-correction
