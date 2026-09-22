@@ -70,6 +70,7 @@ def lifecycle_snapshot(
     occupied: list[str] | None = None,
     *,
     verified: bool = True,
+    repository_authority: str = "fixture-authority",
 ) -> LifecycleRefSnapshot:
     data: dict[str, object] = {
         "snapshot_schema_version": 1,
@@ -80,7 +81,10 @@ def lifecycle_snapshot(
     }
     data["lifecycle_snapshot_digest"] = sha256_hex(canonical_json(data))
     result = validate_lifecycle_ref_snapshot(data)
-    return _mark_lifecycle_authority_verified(result) if verified else result
+    return (
+        _mark_lifecycle_authority_verified(result, repository_authority)
+        if verified else result
+    )
 
 
 class StaticAuthorityTests(unittest.TestCase):
@@ -173,6 +177,14 @@ class StaticAuthorityTests(unittest.TestCase):
             canonical_json({k: v for k, v in lifecycle.items() if k != "lifecycle_snapshot_digest"})
         )
         result = global_allocation_view(static_snapshot(), lifecycle)
+        self.assertIsInstance(result, BlockedResult)
+        self.assertEqual(result.reason_code, "LIFECYCLE_REF_SNAPSHOT_INVALID")
+
+    def test_equal_public_labels_do_not_hide_different_remote_endpoints(self) -> None:
+        result = global_allocation_view(
+            static_snapshot(),
+            lifecycle_snapshot(repository_authority="different-authority"),
+        )
         self.assertIsInstance(result, BlockedResult)
         self.assertEqual(result.reason_code, "LIFECYCLE_REF_SNAPSHOT_INVALID")
 

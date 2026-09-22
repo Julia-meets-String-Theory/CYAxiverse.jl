@@ -14,7 +14,12 @@ from version_lifecycle.authorization import (  # noqa: E402
     canonical_authorization_bytes,
     seal_authorization,
 )
-from version_lifecycle.manifests import seal_manifest, validate_manifest  # noqa: E402
+from version_lifecycle.manifests import (  # noqa: E402
+    lifecycle_ref_for_manifest,
+    seal_manifest,
+    validate_complete_lifecycle_refs,
+    validate_manifest,
+)
 from version_lifecycle.transactions import (  # noqa: E402
     AllocationView,
     BootstrapIntent,
@@ -42,22 +47,30 @@ CONSUMED_RESERVATION_REF = (
     "refs/heads/lifecycle/v1/reservations/principal/v0.3.0-DEV/"
     + "LIF-SHA256-" + "f" * 64
 )
+CLAIM_REF = "refs/heads/lifecycle/v1/claims/v0.3.0"
 ANCHOR_REF = "refs/tags/iterations/0.3.0"
 RELEASE_TARGET = "refs/heads/lifecycle/v1/releases/v0.3.0"
 
 
-def make_authorization(transaction_id: str, target_refs: list[str]) -> dict[str, object]:
+def make_authorization(
+    transaction_id: str,
+    target_refs: list[str],
+    *,
+    final_version: str = "0.3.0",
+    authority_source_ref: str | None = None,
+    authorized_actions: list[str] | None = None,
+) -> dict[str, object]:
     return seal_authorization({
         "schema_version": 1,
         "repository": REPOSITORY,
         "owner_account": OWNER,
-        "authority_source_ref": f"owner-authority://fixture/{transaction_id}",
+        "authority_source_ref": authority_source_ref or f"owner-authority://fixture/{transaction_id}",
         "issued_at_utc": "2026-09-20T00:00:00Z",
         "expires_at_utc": "2026-09-21T00:00:00Z",
         "transaction_id": transaction_id,
         "owner_line": "principal",
-        "final_version": "0.3.0",
-        "authorized_actions": ["create-release-manifest", "create-tag"],
+        "final_version": final_version,
+        "authorized_actions": authorized_actions or ["create-release-manifest", "create-tag"],
         "target_refs": sorted(set(target_refs)),
     })
 
@@ -70,6 +83,33 @@ class FixtureAuthority:
 
     def fetch_owner_authorization(self, reference: str):
         return AuthorizationResolution(self.record, self.raw, self.owner)
+
+
+class IssuingAuthority:
+    def __init__(self, transaction_id: str, *, owner: bool = True):
+        self.transaction_id = transaction_id
+        self.owner = owner
+        self.records: dict[str, dict[str, object]] = {}
+
+    def issue(self, action: str, target_ref: str, final_version: str) -> str:
+        reference = (
+            f"owner-authority://fixture/{self.transaction_id}/"
+            f"grant-{len(self.records) + 1}"
+        )
+        self.records[reference] = make_authorization(
+            self.transaction_id,
+            [target_ref],
+            final_version=final_version,
+            authority_source_ref=reference,
+            authorized_actions=[action],
+        )
+        return reference
+
+    def fetch_owner_authorization(self, reference: str):
+        record = self.records[reference]
+        return AuthorizationResolution(
+            record, canonical_authorization_bytes(record), self.owner
+        )
 
 
 CLOSURE_AUTHORIZATION = make_authorization(
@@ -90,6 +130,11 @@ class PrincipalClosureFixture:
         self.manifest_types: list[str] = []
         self.manifests: list[dict[str, object]] = []
         self.occupied = occupied
+        self.authorization = IssuingAuthority("tx-closure")
+        self.owner_authorization_authority = self.authorization
+
+    def owner_authorization_ref_for(self, action, target_ref, final_version):
+        return self.authorization.issue(action, target_ref, final_version)
 
     def freeze_line(self, intent):
         self.calls.append("freeze")
@@ -108,7 +153,7 @@ class PrincipalClosureFixture:
 
     def allocation_view(self):
         self.calls.append("view")
-        return AllocationView("static", "lifecycle", self.occupied)
+        return AllocationView(SNAPSHOT, LIFECYCLE_SNAPSHOT, self.occupied)
 
     def verify_closure_target(self, intent, view):
         self.calls.append("verify-closure")
@@ -144,7 +189,7 @@ class PrincipalClosureFixture:
         self.calls.append("activate")
         return {"head": reopened["head"]}
 
-    def verify_closure_correspondence(self, intent, anchor, consumed, prepared, reopened, active):
+    def verify_closure_correspondence(self, intent, anchor, consumed, prepared, reopened, active, claim):
         self.calls.append("correspondence")
         if self.fail == "correspondence":
             raise RuntimeError("correspondence unavailable")
@@ -160,18 +205,6 @@ class NoExclusionClosureFixture(PrincipalClosureFixture):
         return super().__getattribute__(name)
 
 
-class ConfiguredAuthorityClosureFixture(PrincipalClosureFixture):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.owner_authorization_authority = (
-            lambda reference: AuthorizationResolution(
-                CLOSURE_AUTHORIZATION,
-                canonical_authorization_bytes(CLOSURE_AUTHORIZATION),
-                True,
-            )
-        )
-
-
 class PrincipalReleaseFixture:
     def __init__(self, *, binding="tree-bound", fail: str | None = None):
         self.binding = binding
@@ -179,10 +212,19 @@ class PrincipalReleaseFixture:
         self.calls: list[str] = []
         self.manifest_types: list[str] = []
         self.manifests: list[dict[str, object]] = []
+        self.authorization = IssuingAuthority("tx-release")
+        self.owner_authorization_authority = self.authorization
+
+    def owner_authorization_ref_for(self, action, target_ref, final_version):
+        return self.authorization.issue(action, target_ref, final_version)
 
     def acquire_static_mutation(self, intent):
         self.calls.append("serialize")
         return "exclusion"
+
+    def allocation_view(self):
+        self.calls.append("view")
+        return AllocationView(SNAPSHOT, LIFECYCLE_SNAPSHOT, frozenset({"0.3.0"}))
 
     def release_static_mutation(self, lease):
         self.calls.append("release-exclusion")
@@ -271,6 +313,9 @@ class PrincipalReleaseFixture:
         return {"ref": "evidence/publication.json", "digest": "f" * 64,
                 "public_tag": intent.public_tag, "github_release_id": publication["id"]}
 
+    def publication_evidence_target(self, intent, released, publication):
+        return "evidence/publication.json"
+
     def verify_terminal(self, intent, released, publication, evidence):
         self.calls.append("terminal")
         if self.fail == "terminal":
@@ -297,7 +342,7 @@ class TransactionTests(unittest.TestCase):
         owner_authorization=CLOSURE_AUTHORIZATION["owner_authorization"],
         owner_authorization_ref=CLOSURE_AUTHORIZATION["authority_source_ref"],
         owner_authorization_digest=CLOSURE_AUTHORIZATION["owner_authorization_digest"],
-        repository=REPOSITORY, owner_authority=CLOSURE_AUTHORITY,
+        repository=REPOSITORY,
         predecessor_refs=(RESERVATION_REF,),
     )
     release_intent = ReleaseIntent(
@@ -311,10 +356,10 @@ class TransactionTests(unittest.TestCase):
         owner_authorization=RELEASE_AUTHORIZATION["owner_authorization"],
         owner_authorization_ref=RELEASE_AUTHORIZATION["authority_source_ref"],
         owner_authorization_digest=RELEASE_AUTHORIZATION["owner_authorization_digest"],
-        repository=REPOSITORY, owner_authority=RELEASE_AUTHORITY,
+        repository=REPOSITORY,
         static_snapshot_digest=SNAPSHOT,
         lifecycle_snapshot_digest=LIFECYCLE_SNAPSHOT,
-        predecessor_refs=(CONSUMED_RESERVATION_REF,),
+        predecessor_refs=(CLAIM_REF,),
     )
 
     def test_principal_closure_is_serialized_and_terminal_before_reopen(self):
@@ -324,7 +369,7 @@ class TransactionTests(unittest.TestCase):
         self.assertFalse(result.frozen)
         self.assertEqual(result.evidence["next_final"], "0.3.1")
         self.assertEqual(port.manifest_types,
-                         ["reservation-consumed", "reservation-prepared", "reservation-opened"])
+                         ["reservation-consumed", "reservation-prepared", "reservation-opened", "version-claimed"])
         self.assertLess(port.calls.index("manifest:reservation-consumed"), port.calls.index("manifest:reservation-prepared"))
         self.assertLess(port.calls.index("manifest:reservation-prepared"), port.calls.index("reopen"))
         self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze"])
@@ -339,6 +384,73 @@ class TransactionTests(unittest.TestCase):
         self.assertTrue(run_release(release_port, self.release_intent).complete)
         for manifest in release_port.manifests:
             self.assertEqual(validate_manifest(manifest), manifest)
+
+    def test_actual_principal_outputs_replay_from_reservation_to_publication(self):
+        common = {
+            "schema_version": 1,
+            "timestamp_utc": "2026-09-20T12:00:00Z",
+            "owner_authorization": CLOSURE_AUTHORIZATION["owner_authorization"],
+            "owner_authorization_ref": CLOSURE_AUTHORIZATION["authority_source_ref"],
+            "owner_authorization_digest": CLOSURE_AUTHORIZATION["owner_authorization_digest"],
+            "transaction_id": "tx-prior-reservation",
+            "static_iteration_snapshot": SNAPSHOT,
+            "lifecycle_ref_snapshot": LIFECYCLE_SNAPSHOT,
+        }
+        prepared = seal_manifest({
+            **common,
+            "manifest_type": "reservation-prepared",
+            "predecessor_refs": [],
+            "owner_line": "principal",
+            "final_version": "0.3.0",
+            "reserved_final": "0.3.0",
+            "intended_dev_version": "0.3.0-DEV",
+            "expected_line_head": SHA_B,
+        })
+        opened = seal_manifest({
+            **common,
+            "manifest_type": "reservation-opened",
+            "predecessor_refs": [lifecycle_ref_for_manifest(prepared)],
+            "owner_line": "principal",
+            "final_version": "0.3.0",
+            "reserved_final": "0.3.0",
+            "intended_dev_version": "0.3.0-DEV",
+            "actual_dev_head": SHA_B,
+        })
+        claim = seal_manifest({
+            **common,
+            "manifest_type": "version-claimed",
+            "predecessor_refs": [lifecycle_ref_for_manifest(opened)],
+            "owner_line": "principal",
+            "final_version": "0.3.0",
+        })
+        closure_port = PrincipalClosureFixture()
+        closure = run_closure(
+            closure_port,
+            replace(
+                self.closure_intent,
+                predecessor_refs=(lifecycle_ref_for_manifest(opened),),
+            ),
+        )
+        release_port = PrincipalReleaseFixture()
+        release = run_release(
+            release_port,
+            replace(
+                self.release_intent,
+                predecessor_refs=(lifecycle_ref_for_manifest(claim),),
+            ),
+        )
+        self.assertTrue(closure.complete)
+        self.assertTrue(release.complete)
+        manifests = [
+            prepared, opened, claim,
+            *closure_port.manifests,
+            *release_port.manifests,
+        ]
+        graph = validate_complete_lifecycle_refs({
+            lifecycle_ref_for_manifest(item): item for item in manifests
+        })
+        self.assertIn("0.3.0", graph.occupied_versions)
+        self.assertIn("0.3.1", graph.occupied_versions)
 
     def test_exact_utc_timestamp_is_required(self):
         port = PrincipalClosureFixture()
@@ -366,65 +478,46 @@ class TransactionTests(unittest.TestCase):
 
     def test_closure_missing_authority_blocks_before_anchor_write(self):
         port = PrincipalClosureFixture()
-        intent = replace(self.closure_intent, owner_authority=None,
-                         owner_authorization="", owner_authorization_ref="",
+        intent = replace(self.closure_intent, owner_authorization="", owner_authorization_ref="",
                          owner_authorization_digest="")
         result = run_closure(port, intent)
         self.assertEqual((result.status, result.reason_code),
                          ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
         self.assertNotIn("anchor", port.calls)
 
-    def test_configured_authority_callback_establishes_owner_and_current_bytes(self):
-        port = ConfiguredAuthorityClosureFixture()
-        result = run_closure(port, replace(self.closure_intent, owner_authority=None))
-        self.assertTrue(result.complete)
+    def test_authority_must_come_from_trusted_port_configuration(self):
+        port = PrincipalClosureFixture()
+        port.owner_authorization_authority = None
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual(result.reason_code, "OWNER_AUTHORIZATION_UNVERIFIED")
 
     def test_release_authorization_scope_failures_precede_candidate_write(self):
-        original = self.release_intent
-        expired = make_authorization("tx-release", [RELEASE_TARGET,
-                                                      "refs/heads/main",
-                                                      "refs/tags/v0.3.0",
-                                                      original.candidate_ref])
-        expired["issued_at_utc"] = "2026-09-20T13:01:00Z"
-        expired["expires_at_utc"] = "2026-09-20T13:02:00Z"
-        expired = seal_authorization(expired)
-        action_only = make_authorization("tx-release", [RELEASE_TARGET,
-                                                          original.candidate_ref])
-        action_only["authorized_actions"] = ["create-tag"]
-        action_only = seal_authorization(action_only)
-        target_only = make_authorization("tx-release", [RELEASE_TARGET])
-        cases = [
-            (replace(original, owner_authorization="bad"), RELEASE_AUTHORITY),
-            (replace(original, repository="other/repository"), RELEASE_AUTHORITY),
-            (replace(original, transaction_id="other-transaction"), RELEASE_AUTHORITY),
-            (replace(original,
-                     owner_authorization=action_only["owner_authorization"],
-                     owner_authorization_ref=action_only["authority_source_ref"],
-                     owner_authorization_digest=action_only["owner_authorization_digest"]),
-             FixtureAuthority(action_only)),
-            (replace(original,
-                     owner_authorization=target_only["owner_authorization"],
-                     owner_authorization_ref=target_only["authority_source_ref"],
-                     owner_authorization_digest=target_only["owner_authorization_digest"]),
-             FixtureAuthority(target_only)),
-            (replace(original,
-                     owner_authorization=expired["owner_authorization"],
-                     owner_authorization_ref=expired["authority_source_ref"],
-                     owner_authorization_digest=expired["owner_authorization_digest"]),
-             FixtureAuthority(expired)),
-            (replace(original,
-                     owner_authorization=RELEASE_AUTHORIZATION["owner_authorization"],
-                     owner_authorization_ref=RELEASE_AUTHORIZATION["authority_source_ref"],
-                     owner_authorization_digest=RELEASE_AUTHORIZATION["owner_authorization_digest"]),
-             FixtureAuthority(RELEASE_AUTHORIZATION, owner=False)),
-        ]
-        for intent, authority in cases:
-            with self.subTest(intent=intent):
+        for field, intent in (
+            ("repository", replace(self.release_intent, repository="other/repository")),
+            ("transaction", replace(self.release_intent, transaction_id="other-transaction")),
+        ):
+            with self.subTest(field=field):
                 port = PrincipalReleaseFixture()
-                result = run_release(port, replace(intent, owner_authority=authority))
+                result = run_release(port, intent)
                 self.assertEqual((result.status, result.reason_code),
                                  ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
                 self.assertNotIn("candidate", port.calls)
+
+        port = PrincipalReleaseFixture()
+        port.authorization.owner = False
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code),
+                         ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
+        self.assertNotIn("candidate", port.calls)
+
+        port = PrincipalReleaseFixture()
+        port.owner_authorization_ref_for = lambda action, target, version: (
+            port.authorization.issue(action, "refs/heads/wrong-target", version)
+        )
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code),
+                         ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
+        self.assertNotIn("candidate", port.calls)
 
     def test_occupied_principal_sentinel_is_not_skipped_or_reused(self):
         port = PrincipalClosureFixture(occupied=frozenset({"0.3.1"}))

@@ -22,11 +22,16 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from .codec import canonical_json, sha256_hex
-from .authorization import AUTHORIZATION_ID_RE
+from .authorization import (
+    AUTHORIZATION_ID_RE,
+    AuthorizationError,
+    verify_owner_authorization,
+)
+from .certification import is_safe_public_value
 from .git_refs import (
+    canonical_remote_authority,
     GitIdentityError,
     ProtectionEvidence,
-    StaticMutationExclusion,
     parse_remote_ref_advertisements,
     require_full_ref,
     validate_remote,
@@ -38,6 +43,7 @@ SCHEMA_VERSION = 1
 MANIFEST_FILE = "manifest.json"
 MANIFEST_ID_RE = re.compile(r"^LIF-SHA256-[0-9a-f]{64}$")
 PUBLICATION_ID_RE = re.compile(r"^pub-[0-9a-f]{64}$")
+CANDIDATE_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 UTC_RE = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
@@ -297,11 +303,15 @@ def publication_key_fixture() -> dict[str, str]:
 
 
 def manifest_identity_preimage(manifest: Mapping[str, Any]) -> bytes:
-    """Encode all manifest identity fields except ``manifest_id``."""
+    """Encode the authorization-independent manifest identity fields."""
 
     if not isinstance(manifest, Mapping):
         raise ManifestError("manifest must be an object")
-    body = {key: value for key, value in manifest.items() if key != "manifest_id"}
+    excluded = {
+        "manifest_id", "owner_authorization", "owner_authorization_ref",
+        "owner_authorization_digest",
+    }
+    body = {key: value for key, value in manifest.items() if key not in excluded}
     try:
         return canonical_json(body)
     except (TypeError, ValueError) as error:
@@ -400,11 +410,11 @@ def _validate_type_specific(manifest: Mapping[str, Any]) -> None:
         "reservation-opened": {"owner_line", "final_version", "intended_dev_version", "actual_dev_head"},
         "reservation-aborted": {"owner_line", "final_version", "intended_dev_version", "non_entry_evidence"},
         "reservation-consumed": {"owner_line", "final_version", "terminal_disposition", "closure_anchor_ref"},
-        "candidate-opened": {"candidate_id", "candidate_ref", "candidate_sha", "candidate_tree", "final_version", "release_line", "anchor_ref"},
+        "candidate-opened": {"candidate_id", "candidate_ref", "candidate_sha", "candidate_tree", "final_version", "release_line", "anchor_ref", "anchor_sha", "anchor_tree", "main_at_candidate_sha", "main_at_candidate_version"},
         "candidate-withdrawn": {"candidate_id", "candidate_ref", "final_version", "release_line", "withdrawal_evidence"},
-        "release-intent-prepared": {"candidate_id", "candidate_ref", "final_version", "release_line", "public_tag", "final_release_sha", "final_release_tree", "certification_binding"},
+        "release-intent-prepared": {"candidate_id", "candidate_ref", "candidate_sha", "candidate_tree", "final_version", "release_line", "public_tag", "final_release_sha", "final_release_tree", "certification_binding", "certification_subject_sha", "certification_subject_tree", "certification_policy_revision", "certification_harness_revision", "certification_environment", "certification_evidence_refs", "anchor_ref", "anchor_sha", "anchor_tree"},
         "release-intent-aborted": {"intent_ref", "candidate_id", "final_version", "no_public_tag_evidence"},
-        "released": {"final_version", "release_line", "public_tag", "candidate_ref", "candidate_sha", "candidate_tree", "anchor_ref", "anchor_sha", "anchor_tree", "final_release_sha", "final_release_tree", "certification_binding", "certification_subject_sha", "certification_subject_tree", "certification_policy_revision", "certification_harness_revision", "certification_environment", "certification_evidence_refs", "closure_timestamp_utc", "main_at_release_sha", "main_at_release_version"},
+        "released": {"final_version", "release_line", "public_tag", "candidate_ref", "candidate_sha", "candidate_tree", "anchor_ref", "anchor_sha", "anchor_tree", "final_release_sha", "final_release_tree", "certification_binding", "certification_subject_sha", "certification_subject_tree", "certification_policy_revision", "certification_harness_revision", "certification_environment", "certification_evidence_refs", "closure_timestamp_utc", "main_at_release_sha", "main_at_release_version", "main_at_candidate_sha", "main_at_candidate_version", "evidence_refs"},
     }
     if kind == "publication":
         _validate_publication(manifest)
@@ -416,9 +426,10 @@ def _validate_type_specific(manifest: Mapping[str, Any]) -> None:
         _line_ref_component(manifest["owner_line"])
     if "release_line" in manifest:
         _line_ref_component(manifest["release_line"])
-    for field in ("candidate_id",):
-        if field in manifest:
-            _check_identity_text(manifest[field], field)
+    if "candidate_id" in manifest:
+        _check_identity_text(manifest["candidate_id"], "candidate_id")
+        if CANDIDATE_ID_RE.fullmatch(str(manifest["candidate_id"])) is None:
+            raise ManifestError("candidate_id is not canonical")
     for field in ("candidate_ref", "anchor_ref", "intent_ref", "closure_anchor_ref"):
         if field in manifest:
             _check_ref(manifest[field], prefix=None)
@@ -439,6 +450,8 @@ def _validate_type_specific(manifest: Mapping[str, Any]) -> None:
                 canonical_json(manifest[field])
             except (TypeError, ValueError) as error:
                 raise ManifestError(f"{field} is not canonical evidence") from error
+            if not is_safe_public_value(manifest[field], key=field):
+                raise ManifestError(f"{field} contains a nonpublic value")
     for field in ("abort_reason", "terminal_disposition", "certification_binding"):
         if field in manifest:
             _check_identity_text(manifest[field], field)
@@ -456,6 +469,26 @@ def _validate_type_specific(manifest: Mapping[str, Any]) -> None:
                 raise ManifestError(f"{field} must be a nonempty string array")
             if len(set(values)) != len(values) or values != sorted(values, key=lambda item: item.encode("utf-8")):
                 raise ManifestError(f"{field} must be a sorted duplicate-free set array")
+            if not is_safe_public_value(values, key=field):
+                raise ManifestError(f"{field} contains a nonpublic value")
+    for field in (
+        "certification_environment", "certification_policy_revision",
+        "certification_harness_revision", "github_release_url",
+        "publication_evidence_ref",
+    ):
+        if field in manifest and not is_safe_public_value(manifest[field], key=field):
+            raise ManifestError(f"{field} contains a nonpublic value")
+    if kind in {"candidate-opened", "candidate-withdrawn", "release-intent-prepared"}:
+        expected_candidate_ref = (
+            f"refs/heads/candidates/v{manifest['final_version']}/"
+            f"{manifest['candidate_id']}"
+        )
+        if manifest["candidate_ref"] != expected_candidate_ref:
+            raise ManifestError("candidate_ref does not match candidate identity")
+    if kind in {"candidate-opened", "release-intent-prepared", "released"}:
+        expected_anchor_ref = f"refs/tags/iterations/{manifest['final_version']}"
+        if manifest["anchor_ref"] != expected_anchor_ref:
+            raise ManifestError("anchor_ref does not match final version")
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -517,7 +550,10 @@ def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     for field in ("closure_timestamp_utc",):
         if field in manifest:
             _check_timestamp(manifest[field], field)
-    for field in ("final_version", "previous_main_version", "main_at_release_version"):
+    for field in (
+        "final_version", "previous_main_version", "main_at_release_version",
+        "main_at_candidate_version",
+    ):
         if field in manifest:
             try:
                 parsed = parse_package_version(manifest[field])
@@ -629,6 +665,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 class LifecycleRefSnapshot:
     data: Mapping[str, Any]
     _authority_token: object | None = field(default=None, repr=False, compare=False)
+    _repository_authority: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def status(self) -> str:
@@ -659,7 +696,11 @@ class LifecycleRefSnapshot:
 
     @property
     def authority_verified(self) -> bool:
-        return self._authority_token is _LIFECYCLE_AUTHORITY_TOKEN
+        return (
+            self._authority_token is _LIFECYCLE_AUTHORITY_TOKEN
+            and isinstance(self._repository_authority, str)
+            and bool(self._repository_authority)
+        )
 
 
 _LIFECYCLE_AUTHORITY_TOKEN = object()
@@ -668,15 +709,20 @@ _LIFECYCLE_AUTHORITY_TOKEN = object()
 def _has_verified_lifecycle_authority(snapshot: LifecycleRefSnapshot) -> bool:
     """Return true only for snapshots built from the remote authority."""
 
-    return snapshot._authority_token is _LIFECYCLE_AUTHORITY_TOKEN
+    return snapshot.authority_verified
 
 
 def _mark_lifecycle_authority_verified(
     snapshot: LifecycleRefSnapshot,
+    repository_authority: str,
 ) -> LifecycleRefSnapshot:
     """Attach the private authority marker after authoritative verification."""
 
-    return LifecycleRefSnapshot(snapshot.data, _LIFECYCLE_AUTHORITY_TOKEN)
+    if not isinstance(repository_authority, str) or not repository_authority:
+        raise ManifestError("lifecycle repository authority is unavailable")
+    return LifecycleRefSnapshot(
+        snapshot.data, _LIFECYCLE_AUTHORITY_TOKEN, repository_authority
+    )
 
 
 def _version_values(manifest: Mapping[str, Any]) -> set[str]:
@@ -704,9 +750,9 @@ _PREDECESSOR_TYPES: dict[str, frozenset[str]] = {
     "reservation-opened": frozenset({"reservation-prepared"}),
     "reservation-aborted": frozenset({"reservation-prepared", "reservation-opened"}),
     "reservation-consumed": frozenset({"reservation-opened", "reservation-prepared"}),
-    "candidate-opened": frozenset({"version-claimed", "reservation-consumed", "candidate-withdrawn"}),
+    "candidate-opened": frozenset({"version-claimed"}),
     "candidate-withdrawn": frozenset({"candidate-opened"}),
-    "release-intent-prepared": frozenset({"candidate-opened", "candidate-withdrawn"}),
+    "release-intent-prepared": frozenset({"candidate-opened"}),
     "release-intent-aborted": frozenset({"release-intent-prepared"}),
     "released": frozenset({"release-intent-prepared"}),
     "publication": frozenset({"released"}),
@@ -817,12 +863,27 @@ def validate_lifecycle_graph(
             previous_kind = str(previous["manifest_type"])
             if previous_kind not in allowed:
                 raise ManifestError("predecessor manifest type is invalid for transition")
-            if previous_kind in _TERMINAL_TYPES and kind in _ACTIVE_TYPES:
+            if (
+                previous_kind in _TERMINAL_TYPES
+                and kind in _ACTIVE_TYPES
+                and not (
+                    previous_kind == "reservation-consumed"
+                    and kind == "reservation-prepared"
+                )
+            ):
                 raise ManifestError("terminal-to-active lifecycle reversal")
             children[predecessor].append(ref)
             _validate_transition_identity(previous, manifest, previous_kind, kind, predecessor)
-    if any(len(child_refs) > 1 for child_refs in children.values()):
-        raise ManifestError("lifecycle graph has a branching predecessor")
+    for predecessor, child_refs in children.items():
+        if len(child_refs) <= 1:
+            continue
+        child_types = [str(by_ref[child]["manifest_type"]) for child in child_refs]
+        allowed_reservation_fork = (
+            by_ref[predecessor]["manifest_type"] == "reservation-opened"
+            and sorted(child_types) == ["reservation-consumed", "version-claimed"]
+        )
+        if not allowed_reservation_fork:
+            raise ManifestError("lifecycle graph has a branching predecessor")
 
     for manifest in by_ref.values():
         kind = str(manifest["manifest_type"])
@@ -888,7 +949,22 @@ def _validate_transition_identity(
 
     for field in ("final_version", "owner_line", "intended_dev_version"):
         if previous_kind.startswith("reservation") and field in previous and field in current:
+            if (
+                previous_kind == "reservation-consumed"
+                and current_kind == "reservation-prepared"
+                and field == "final_version"
+            ):
+                continue
             same(field)
+    if previous_kind == "reservation-consumed" and current_kind == "reservation-prepared":
+        previous_version = parse_package_version(str(previous["final_version"]))
+        current_version = parse_package_version(str(current["final_version"]))
+        if (
+            current_version.major != previous_version.major
+            or current_version.minor != previous_version.minor
+            or current_version.patch != previous_version.patch + 1
+        ):
+            raise ManifestError("next principal reservation is not the exact sentinel")
     if current_kind == "version-claimed" and previous_kind.startswith("reservation"):
         same("final_version")
     if current_kind == "candidate-opened":
@@ -979,7 +1055,9 @@ def validate_lifecycle_ref_snapshot(
         raise ManifestError("lifecycle snapshot digest mismatch")
     validated = LifecycleRefSnapshot(data)
     if authority_verified:
-        return _mark_lifecycle_authority_verified(validated)
+        return _mark_lifecycle_authority_verified(
+            validated, str(snapshot._repository_authority)
+        )
     return validated
 
 
@@ -988,6 +1066,7 @@ def build_lifecycle_ref_snapshot(repository: str | Path, remote: str = "origin",
 
     root = Path(repository)
     remote = validate_remote(remote)
+    repository_authority = canonical_remote_authority(root, remote)
     output = _git(root, "ls-remote", "--refs", remote, f"{LIFECYCLE_REF_PREFIX}*")
     advertisements = parse_remote_ref_advertisements(output)
     bindings: list[dict[str, str]] = []
@@ -1007,6 +1086,11 @@ def build_lifecycle_ref_snapshot(repository: str | Path, remote: str = "origin",
         binding = {"ref": ref, "commit": commit, "tree": tree, "manifest_id": value["manifest_id"], "manifest_digest": sha256_hex(raw)}
         bindings.append(binding)
         graph_records.append({"ref": ref, "manifest": value, **binding})
+    final_output = _git(
+        root, "ls-remote", "--refs", remote, f"{LIFECYCLE_REF_PREFIX}*"
+    )
+    if parse_remote_ref_advertisements(final_output) != advertisements:
+        raise ManifestError("lifecycle ref namespace changed during snapshot")
     graph = validate_lifecycle_graph(graph_records)
     data: dict[str, Any] = {
         "snapshot_schema_version": SCHEMA_VERSION,
@@ -1021,7 +1105,7 @@ def build_lifecycle_ref_snapshot(repository: str | Path, remote: str = "origin",
         graph_records=graph_records,
         expected_occupied_versions=graph.occupied_versions,
     )
-    return _mark_lifecycle_authority_verified(validated)
+    return _mark_lifecycle_authority_verified(validated, repository_authority)
 
 
 def lifecycle_ref_snapshot(*args: Any, **kwargs: Any) -> LifecycleRefSnapshot:
@@ -1057,12 +1141,28 @@ class CreateResult:
 
 
 def _snapshot_fingerprint(snapshot: Any) -> bytes:
-    if isinstance(snapshot, LifecycleRefSnapshot):
+    static_snapshot = getattr(snapshot, "static_snapshot", None)
+    lifecycle_snapshot = getattr(snapshot, "lifecycle_ref_snapshot", None)
+    if static_snapshot is not None or lifecycle_snapshot is not None:
+        from .static import _has_verified_authority
+
+        if (
+            static_snapshot is None
+            or lifecycle_snapshot is None
+            or not _has_verified_authority(static_snapshot)
+            or not _has_verified_lifecycle_authority(lifecycle_snapshot)
+            or static_snapshot._repository_authority
+            != lifecycle_snapshot._repository_authority
+        ):
+            raise ManifestError("COMBINED_AUTHORITY_SNAPSHOT_UNVERIFIED")
+        data = {
+            "static_snapshot": static_snapshot.to_dict(),
+            "lifecycle_ref_snapshot": lifecycle_snapshot.to_dict(),
+        }
+    elif isinstance(snapshot, LifecycleRefSnapshot):
         data = snapshot.to_dict()
-    elif isinstance(snapshot, Mapping):
-        data = dict(snapshot)
     else:
-        data = snapshot
+        raise ManifestError("COMBINED_AUTHORITY_SNAPSHOT_REQUIRED")
     try:
         return canonical_json(data)
     except (TypeError, ValueError) as error:
@@ -1077,14 +1177,29 @@ class CreateOnlyLifecycleWriter:
         repository: str | Path,
         remote: str = "origin",
         *,
-        exclusion: Any = None,
-        exclusion_lease: Callable[[], Any] | None = None,
-        snapshot_callback: Callable[[], Any] | None = None,
+        exclusion_lease: Callable[[], Any],
+        snapshot_callback: Callable[[], Any],
+        expected_snapshot: Any,
+        owner_authorization_authority: Any,
+        authorization_reference: Callable[[str, str, str], str],
+        repository_identity: str,
     ) -> None:
         self.repository = Path(repository)
         self.remote = validate_remote(remote)
-        self.exclusion = exclusion_lease or exclusion or StaticMutationExclusion.for_repository(self.repository)
+        if not callable(exclusion_lease):
+            raise GitIdentityError("EXCLUSION_UNAVAILABLE")
+        if not callable(snapshot_callback) or expected_snapshot is None:
+            raise ManifestError("LIFECYCLE_SNAPSHOT_REVALIDATION_REQUIRED")
+        if owner_authorization_authority is None or not callable(authorization_reference):
+            raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+        if not isinstance(repository_identity, str) or not repository_identity:
+            raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+        self.exclusion = exclusion_lease
         self.snapshot_callback = snapshot_callback
+        self.expected_snapshot = expected_snapshot
+        self.owner_authorization_authority = owner_authorization_authority
+        self.authorization_reference = authorization_reference
+        self.repository_identity = repository_identity
 
     @contextmanager
     def _governed_boundary(self) -> Any:
@@ -1105,6 +1220,8 @@ class CreateOnlyLifecycleWriter:
         except GitIdentityError:
             raise
         except ManifestError:
+            raise
+        except AuthorizationError:
             raise
         except CreateOutcomeUncertain:
             raise
@@ -1162,16 +1279,47 @@ class CreateOnlyLifecycleWriter:
         manifest: Mapping[str, Any],
         protection: ProtectionEvidence,
         *,
-        snapshot: Any = None,
-        snapshot_callback: Callable[[], Any] | None = None,
+        authorization_context: Mapping[str, str],
     ) -> CreateResult:
         checked = validate_manifest(manifest)
         raw = canonical_manifest_bytes(checked)
         ref = lifecycle_ref_for_manifest(checked)
         protection.require(ref, creation=True)
-        callback = snapshot_callback or self.snapshot_callback
+        required_context = {
+            "transaction_id", "owner_line", "final_version", "now_utc", "action"
+        }
+        if set(authorization_context) != required_context:
+            raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+
+        def verify_authorization() -> None:
+            reference = self.authorization_reference(
+                authorization_context["action"], ref,
+                authorization_context["final_version"],
+            )
+            record = verify_owner_authorization(
+                self.owner_authorization_authority,
+                reference,
+                repository=self.repository_identity,
+                transaction_id=authorization_context["transaction_id"],
+                action=authorization_context["action"],
+                owner_line=authorization_context["owner_line"],
+                final_version=authorization_context["final_version"],
+                target_ref=ref,
+                now_utc=authorization_context["now_utc"],
+            )
+            if (
+                checked["owner_authorization"] != record["owner_authorization"]
+                or checked["owner_authorization_ref"] != reference
+                or checked["owner_authorization_digest"]
+                != record["owner_authorization_digest"]
+            ):
+                raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+
+        callback = self.snapshot_callback
+        snapshot = self.expected_snapshot
         with self._governed_boundary():
             fingerprint = self._revalidate_snapshot(callback, snapshot, None)
+            verify_authorization()
             current = self.remote_ref(ref)
             commit: str | None = None
             tree: str | None = None
@@ -1187,6 +1335,7 @@ class CreateOnlyLifecycleWriter:
             # Revalidate immediately before the create-once remote operation;
             # the surrounding governed exclusion remains held until reread.
             fingerprint = self._revalidate_snapshot(callback, snapshot, fingerprint)
+            verify_authorization()
             try:
                 _git(self.repository, "push", "--porcelain", f"--force-with-lease={ref}:", self.remote, f"{commit}:{ref}")
             except ManifestError as error:
@@ -1210,8 +1359,37 @@ class CreateOnlyLifecycleWriter:
             return CreateResult("CREATED", ref, commit, tree, checked["manifest_id"])
 
 
+class CreateOnlyLifecycleManifestPort:
+    """Bind the coordinator's manifest port to the protected network writer."""
+
+    def __init__(
+        self,
+        writer: CreateOnlyLifecycleWriter,
+        protection: ProtectionEvidence,
+        authorization_context: Callable[[str, Mapping[str, Any]], Mapping[str, str]],
+    ) -> None:
+        if not callable(authorization_context):
+            raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+        self.writer = writer
+        self.protection = protection
+        self.authorization_context = authorization_context
+
+    def create_manifest(
+        self, manifest_type: str, manifest: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        checked = validate_manifest(manifest)
+        if checked["manifest_type"] != manifest_type:
+            raise ManifestError("manifest type does not match mutation port")
+        context = self.authorization_context(manifest_type, checked)
+        self.writer.create(
+            checked, self.protection, authorization_context=context
+        )
+        return dict(checked)
+
+
 __all__ = [
-    "CreateOnlyLifecycleWriter", "CreateOutcomeUncertain", "CreateResult",
+    "CreateOnlyLifecycleManifestPort", "CreateOnlyLifecycleWriter",
+    "CreateOutcomeUncertain", "CreateResult",
     "LIFECYCLE_REF_PREFIX", "LifecycleRefSnapshot", "MANIFEST_FILE", "MANIFEST_ID_RE",
     "LifecycleGraph", "MANIFEST_TYPES", "ManifestConflict", "ManifestError", "SCHEMA_VERSION",
     "build_lifecycle_ref_snapshot", "canonical_manifest_bytes", "lifecycle_ref_for_manifest",

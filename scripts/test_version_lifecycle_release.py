@@ -10,7 +10,12 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from version_lifecycle.codec import sha256_hex  # noqa: E402
-from version_lifecycle.manifests import canonical_manifest_bytes, seal_manifest  # noqa: E402
+from version_lifecycle.manifests import (  # noqa: E402
+    canonical_manifest_bytes,
+    lifecycle_ref_for_manifest,
+    seal_manifest,
+)
+from test_version_lifecycle_manifests import ManifestTests  # noqa: E402
 from version_lifecycle.release import (  # noqa: E402
     BLOCKED,
     PUBLICATION_RECONCILIATION_PENDING,
@@ -66,8 +71,11 @@ def released(**overrides: object) -> dict[str, object]:
         "closure_timestamp_utc": "2026-09-21T00:00:00Z",
         "previous_main_sha": OTHER_SHA,
         "previous_main_version": "1.2.2",
+        "main_at_candidate_sha": OTHER_SHA,
+        "main_at_candidate_version": "1.2.2",
         "main_at_release_sha": SHA,
         "main_at_release_version": "1.2.3",
+        "evidence_refs": ["evidence/release-r1"],
     }
     value.update(overrides)
     value = {key: item for key, item in value.items() if item is not None}
@@ -100,6 +108,38 @@ def publication(release: dict[str, object], **overrides: object) -> dict[str, ob
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_terminal_validation_replays_complete_namespace_and_direct_identities(self) -> None:
+        chain = ManifestTests().chain()
+        release = next(item for item in chain if item["manifest_type"] == "released")
+        publication_manifest = next(
+            item for item in chain if item["manifest_type"] == "publication"
+        )
+        records = {lifecycle_ref_for_manifest(item): item for item in chain}
+        result = validate_release_consistency(
+            release,
+            publication_manifest,
+            public_tag=publication_manifest["public_tag"],
+            tag_commit=publication_manifest["tag_commit"],
+            tag_tree=publication_manifest["tag_tree"],
+            certified_tree=release["anchor_tree"],
+            github_release_id=publication_manifest["github_release_id"],
+            publication_evidence_digest=publication_manifest["publication_evidence_digest"],
+            lifecycle_records=records,
+            anchor_tag_object=release["anchor_sha"],
+            anchor_tree=release["anchor_tree"],
+            candidate_ref=release["candidate_ref"],
+            candidate_commit=release["candidate_sha"],
+            candidate_tree=release["candidate_tree"],
+            require_complete_namespace=True,
+        )
+        self.assertEqual(result["status"], TERMINAL_CONSISTENT)
+        missing = validate_release_consistency(
+            release,
+            publication_manifest,
+            require_complete_namespace=True,
+        )
+        self.assertEqual(missing["reason_code"], "COMPLETE_LIFECYCLE_NAMESPACE_UNAVAILABLE")
+
     def test_checked_in_principal_fixture_is_internally_consistent(self) -> None:
         fixture_path = (
             Path(__file__).resolve().parents[1]

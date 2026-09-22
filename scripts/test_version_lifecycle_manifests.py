@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from version_lifecycle.manifests import (  # noqa: E402
     CreateOnlyLifecycleWriter,
+    CreateOnlyLifecycleManifestPort,
     ManifestError,
     ManifestConflict,
     canonical_manifest_bytes,
@@ -31,6 +32,11 @@ from version_lifecycle.manifests import (  # noqa: E402
     validate_manifest,
 )
 from version_lifecycle.git_refs import ProtectionEvidence  # noqa: E402
+from version_lifecycle.authorization import (  # noqa: E402
+    AuthorizationResolution,
+    canonical_authorization_bytes,
+    seal_authorization,
+)
 
 
 OWNER_AUTHORIZATION = "AUTH-SHA256-" + "7" * 64
@@ -44,6 +50,69 @@ def authorization_fields() -> dict[str, str]:
         "owner_authorization_ref": OWNER_AUTHORIZATION_REF,
         "owner_authorization_digest": OWNER_AUTHORIZATION_DIGEST,
     }
+
+
+class ManifestAuthority:
+    def __init__(self) -> None:
+        self.records: dict[str, dict[str, object]] = {}
+        self.references: dict[str, str] = {}
+
+    def bind(self, manifest: dict[str, object]) -> dict[str, object]:
+        provisional = seal_manifest(manifest)
+        target = lifecycle_ref_for_manifest(provisional)
+        reference = f"owner-authority://fixture/manifest-{len(self.records) + 1}"
+        record = seal_authorization({
+            "schema_version": 1,
+            "repository": "fixture-repository",
+            "owner_account": "fixture-owner",
+            "authority_source_ref": reference,
+            "issued_at_utc": "2026-09-21T00:00:00Z",
+            "expires_at_utc": "2026-09-23T00:00:00Z",
+            "transaction_id": "tx-1",
+            "owner_line": "principal",
+            "final_version": str(manifest["final_version"]),
+            "authorized_actions": ["create-release-manifest"],
+            "target_refs": [target],
+        })
+        self.records[reference] = record
+        self.references[target] = reference
+        rebound = dict(manifest)
+        rebound.update({
+            "owner_authorization": record["owner_authorization"],
+            "owner_authorization_ref": reference,
+            "owner_authorization_digest": record["owner_authorization_digest"],
+        })
+        return seal_manifest(rebound)
+
+    def reference(self, action: str, target: str, version: str) -> str:
+        return self.references[target]
+
+    def fetch_owner_authorization(self, reference: str) -> AuthorizationResolution:
+        record = self.records[reference]
+        return AuthorizationResolution(
+            record, canonical_authorization_bytes(record), True
+        )
+
+
+WRITER_CONTEXT = {
+    "transaction_id": "tx-1",
+    "owner_line": "principal",
+    "final_version": "1.2.3",
+    "now_utc": "2026-09-22T00:00:00Z",
+    "action": "create-release-manifest",
+}
+
+
+def writer_snapshot(occupied: list[str] | None = None) -> object:
+    from test_version_lifecycle_static import (  # noqa: PLC0415
+        lifecycle_snapshot,
+        static_snapshot,
+    )
+    from version_lifecycle.allocation import global_allocation_view  # noqa: PLC0415
+
+    return global_allocation_view(
+        static_snapshot(), lifecycle_snapshot(occupied or [])
+    )
 
 
 class ManifestTests(unittest.TestCase):
@@ -72,9 +141,31 @@ class ManifestTests(unittest.TestCase):
             "static_iteration_snapshot": "a" * 64,
             "lifecycle_ref_snapshot": "b" * 64,
         }
-        claim = seal_manifest({
-            **common, "manifest_type": "version-claimed", "predecessor_refs": [],
+        prepared_reservation = seal_manifest({
+            **common, "manifest_type": "reservation-prepared", "predecessor_refs": [],
             "final_version": "1.2.3", "owner_line": "principal",
+            "reserved_final": "1.2.3", "intended_dev_version": "1.2.3-DEV",
+            "expected_line_head": "1" * 40,
+        })
+        opened_reservation = seal_manifest({
+            **common, "manifest_type": "reservation-opened",
+            "predecessor_refs": [lifecycle_ref_for_manifest(prepared_reservation)],
+            "final_version": "1.2.3", "owner_line": "principal",
+            "reserved_final": "1.2.3", "intended_dev_version": "1.2.3-DEV",
+            "actual_dev_head": "2" * 40,
+        })
+        claim = seal_manifest({
+            **common, "manifest_type": "version-claimed",
+            "predecessor_refs": [lifecycle_ref_for_manifest(opened_reservation)],
+            "final_version": "1.2.3", "owner_line": "principal",
+        })
+        consumed_reservation = seal_manifest({
+            **common, "manifest_type": "reservation-consumed",
+            "predecessor_refs": [lifecycle_ref_for_manifest(opened_reservation)],
+            "final_version": "1.2.3", "owner_line": "principal",
+            "reserved_final": "1.2.3", "closed_final_version": "1.2.3",
+            "closure_anchor_ref": "refs/tags/iterations/1.2.3",
+            "terminal_disposition": "closed",
         })
         candidate = seal_manifest({
             **common, "manifest_type": "candidate-opened",
@@ -84,6 +175,8 @@ class ManifestTests(unittest.TestCase):
             "final_version": "1.2.3", "release_line": "principal",
             "anchor_ref": "refs/tags/iterations/1.2.3", "anchor_sha": "c" * 40,
             "anchor_tree": "d" * 40,
+            "main_at_candidate_sha": "1" * 40,
+            "main_at_candidate_version": "1.2.2",
         })
         intent = seal_manifest({
             **common, "manifest_type": "release-intent-prepared",
@@ -91,11 +184,17 @@ class ManifestTests(unittest.TestCase):
             "candidate_id": "candidate-1", "candidate_ref": candidate["candidate_ref"],
             "candidate_sha": candidate["candidate_sha"], "candidate_tree": candidate["candidate_tree"],
             "final_version": "1.2.3", "release_line": "principal", "public_tag": "v1.2.3",
-            "final_release_sha": "e" * 40, "final_release_tree": "f" * 40,
+            "final_release_sha": "e" * 40, "final_release_tree": "d" * 40,
             "certification_binding": "tree-bound", "certification_subject_sha": "c" * 40,
             "certification_subject_tree": "d" * 40, "certification_policy_revision": "policy-r1",
             "certification_harness_revision": "harness-r1", "certification_environment": "ci",
             "certification_evidence_refs": ["evidence/certification-r1"],
+            "certification_transfer_evidence": {
+                "candidate_tree": "d" * 40,
+                "final_release_tree": "d" * 40,
+                "anchor_tree": "d" * 40,
+                "evidence_ref": "evidence/transfer-r1",
+            },
             "anchor_ref": candidate["anchor_ref"], "anchor_sha": candidate["anchor_sha"],
             "anchor_tree": candidate["anchor_tree"],
         })
@@ -114,9 +213,13 @@ class ManifestTests(unittest.TestCase):
             "certification_harness_revision": intent["certification_harness_revision"],
             "certification_environment": intent["certification_environment"],
             "certification_evidence_refs": intent["certification_evidence_refs"],
+            "certification_transfer_evidence": intent["certification_transfer_evidence"],
             "closure_timestamp_utc": "2026-09-22T00:10:00Z", "previous_main_sha": "1" * 40,
-            "previous_main_version": "1.2.2", "main_at_release_sha": "2" * 40,
+            "previous_main_version": "1.2.2", "main_at_release_sha": "e" * 40,
             "main_at_release_version": "1.2.3",
+            "main_at_candidate_sha": candidate["main_at_candidate_sha"],
+            "main_at_candidate_version": candidate["main_at_candidate_version"],
+            "evidence_refs": ["evidence/release-r1"],
         })
         publication = seal_manifest({
             **{key: value for key, value in common.items() if key not in {"transaction_id", "static_iteration_snapshot", "lifecycle_ref_snapshot"}},
@@ -129,13 +232,27 @@ class ManifestTests(unittest.TestCase):
             "published_at_utc": "2026-09-22T01:00:00Z", "publication_evidence_ref": "evidence/publication-r1",
             "publication_evidence_digest": "9" * 64,
         })
-        return [claim, candidate, intent, release, publication]
+        return [
+            prepared_reservation, opened_reservation, claim,
+            consumed_reservation, candidate, intent, release, publication,
+        ]
 
     def test_content_derived_id_and_exact_wire_bytes(self) -> None:
         value = seal_manifest(self.draft())
         self.assertEqual(value["manifest_id"], manifest_id(value))
         self.assertEqual(canonical_manifest_bytes(value), json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
         self.assertEqual(lifecycle_ref_for_manifest(value), "refs/heads/lifecycle/v1/claims/v1.2.3")
+
+    def test_authorization_binding_does_not_create_identity_cycle(self) -> None:
+        first = seal_manifest(self.draft())
+        second = seal_manifest(self.draft(
+            owner_authorization="AUTH-SHA256-" + "8" * 64,
+            owner_authorization_ref="owner-authority://synthetic/grant-other",
+            owner_authorization_digest="8" * 64,
+        ))
+        self.assertEqual(first["manifest_id"], second["manifest_id"])
+        self.assertEqual(lifecycle_ref_for_manifest(first), lifecycle_ref_for_manifest(second))
+        self.assertNotEqual(canonical_manifest_bytes(first), canonical_manifest_bytes(second))
 
     def test_fixed_publication_fixture(self) -> None:
         fixture = publication_key_fixture()
@@ -205,6 +322,38 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ManifestError, "sanitized HTTPS URL"):
             validate_manifest(seal_manifest(publication))
 
+    def test_schema_rejects_missing_transition_identity_and_unsafe_public_values(self) -> None:
+        intent = next(
+            item for item in self.chain()
+            if item["manifest_type"] == "release-intent-prepared"
+        )
+        missing = dict(intent)
+        missing.pop("manifest_id")
+        missing.pop("anchor_tree")
+        with self.assertRaisesRegex(ManifestError, "missing required fields"):
+            validate_manifest(seal_manifest(missing))
+
+        candidate = next(
+            item for item in self.chain() if item["manifest_type"] == "candidate-opened"
+        )
+        bad_candidate = dict(candidate)
+        bad_candidate.pop("manifest_id")
+        bad_candidate["candidate_id"] = "candidate bad~ref"
+        with self.assertRaisesRegex(ManifestError, "candidate_id is not canonical"):
+            validate_manifest(seal_manifest(bad_candidate))
+
+        unsafe = dict(intent)
+        unsafe.pop("manifest_id")
+        unsafe["certification_environment"] = "/Users/private/workstation"
+        with self.assertRaisesRegex(ManifestError, "nonpublic value"):
+            validate_manifest(seal_manifest(unsafe))
+
+        unsafe = dict(intent)
+        unsafe.pop("manifest_id")
+        unsafe["certification_evidence_refs"] = ["https://user:secret@example.com/evidence"]
+        with self.assertRaisesRegex(ManifestError, "nonpublic value"):
+            validate_manifest(seal_manifest(unsafe))
+
     def test_duplicate_key_raw_json_and_one_file_commit_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -228,24 +377,28 @@ class ManifestTests(unittest.TestCase):
         graph = validate_complete_lifecycle_refs(records)
         self.assertEqual(graph.occupied_versions, ("1.2.3",))
         bad = list(chain)
+        candidate = next(item for item in bad if item["manifest_type"] == "candidate-opened")
         withdrawn_draft = {
             "schema_version": 1, "manifest_type": "candidate-withdrawn",
-            "timestamp_utc": "2026-09-22T00:20:00Z", "predecessor_refs": [lifecycle_ref_for_manifest(bad[1])],
+            "timestamp_utc": "2026-09-22T00:20:00Z", "predecessor_refs": [lifecycle_ref_for_manifest(candidate)],
             **authorization_fields(), "transaction_id": "tx-chain",
             "static_iteration_snapshot": "a" * 64, "lifecycle_ref_snapshot": "b" * 64,
             "final_version": "1.2.3", "release_line": "principal", "candidate_id": "candidate-1",
-            "candidate_ref": bad[1]["candidate_ref"], "withdrawal_evidence": {"reason": "no-tag"},
+            "candidate_ref": candidate["candidate_ref"], "withdrawal_evidence": {"reason": "no-tag"},
         }
         withdrawn_draft.pop("manifest_id", None)
         withdrawn = seal_manifest(withdrawn_draft)
         reopened_draft = {
-            **bad[1], "candidate_id": "candidate-2", "candidate_ref": "refs/heads/candidates/v1.2.3/candidate-2",
+            **candidate, "candidate_id": "candidate-2", "candidate_ref": "refs/heads/candidates/v1.2.3/candidate-2",
             "predecessor_refs": [lifecycle_ref_for_manifest(withdrawn)],
         }
         reopened_draft.pop("manifest_id", None)
         reopened = seal_manifest(reopened_draft)
-        with self.assertRaisesRegex(ManifestError, "terminal-to-active"):
-            validate_complete_lifecycle_refs({lifecycle_ref_for_manifest(item): item for item in [bad[0], bad[1], withdrawn, reopened]})
+        with self.assertRaisesRegex(ManifestError, "invalid for transition"):
+            validate_complete_lifecycle_refs({
+                lifecycle_ref_for_manifest(item): item
+                for item in [*bad[:5], withdrawn, reopened]
+            })
 
     def test_publication_must_match_released_manifest_exactly(self) -> None:
         chain = self.chain()
@@ -315,20 +468,36 @@ class ManifestTests(unittest.TestCase):
             (work / "base").write_text("base", encoding="utf-8")
             subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
             subprocess.run(["git", "-C", str(work), "commit", "-qm", "base"], check=True)
-            manifest = seal_manifest(self.draft())
+            authority = ManifestAuthority()
+            manifest = authority.bind(self.draft())
             protection = ProtectionEvidence("fixture", "refs/heads/lifecycle/v1/*", "0" * 64, "2026-09-22T00:00:00Z", True, True, True)
-            writer = CreateOnlyLifecycleWriter(work)
-            first = writer.create(manifest, protection)
-            second = writer.create(manifest, protection)
+            snapshot = writer_snapshot()
+            writer = CreateOnlyLifecycleWriter(
+                work,
+                exclusion_lease=lambda: nullcontext(True),
+                snapshot_callback=lambda: snapshot,
+                expected_snapshot=snapshot,
+                owner_authorization_authority=authority,
+                authorization_reference=authority.reference,
+                repository_identity="fixture-repository",
+            )
+            first = writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
+            second = writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
+            port = CreateOnlyLifecycleManifestPort(
+                writer, protection, lambda _kind, _manifest: WRITER_CONTEXT
+            )
+            self.assertEqual(
+                port.create_manifest("version-claimed", manifest), manifest
+            )
             self.assertEqual(first.status, "CREATED")
             self.assertEqual(second.status, "IDEMPOTENT")
             entries = subprocess.check_output(["git", "-C", str(work), "ls-tree", "--name-only", first.tree], text=True).splitlines()
             self.assertEqual(entries, ["manifest.json"])
             ref = first.ref
             self.assertEqual(subprocess.check_output(["git", "-C", str(work), "ls-remote", "origin", ref], text=True).split("\t")[1].strip(), ref)
-            conflicting = seal_manifest(self.draft(timestamp_utc="2026-09-22T00:00:01Z"))
+            conflicting = authority.bind(self.draft(timestamp_utc="2026-09-22T00:00:01Z"))
             with self.assertRaisesRegex(ManifestConflict, "CREATE_ONCE_CONFLICT"):
-                writer.create(conflicting, protection)
+                writer.create(conflicting, protection, authorization_context=WRITER_CONTEXT)
 
     def test_create_revalidates_snapshot_inside_exclusion_and_blocks_uncertain_create(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -343,7 +512,8 @@ class ManifestTests(unittest.TestCase):
             (work / "base").write_text("base", encoding="utf-8")
             subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
             subprocess.run(["git", "-C", str(work), "commit", "-qm", "base"], check=True)
-            manifest = seal_manifest(self.draft())
+            authority = ManifestAuthority()
+            manifest = authority.bind(self.draft())
             protection = ProtectionEvidence("fixture", "refs/heads/lifecycle/v1/*", "0" * 64, "2026-09-22T00:00:00Z", True, True, True)
             held = {"value": False}
             class Guard:
@@ -352,17 +522,58 @@ class ManifestTests(unittest.TestCase):
                     return True
                 def __exit__(self, *_args: object) -> None:
                     held["value"] = False
-            values = iter(({"snapshot": 1}, {"snapshot": 2}))
+            first_snapshot = writer_snapshot()
+            second_snapshot = writer_snapshot(["9.9.9"])
+            values = iter((first_snapshot, second_snapshot))
             def callback() -> object:
                 self.assertTrue(held["value"])
                 return next(values)
-            writer = CreateOnlyLifecycleWriter(work, exclusion=lambda: Guard(), snapshot_callback=callback)
+            writer = CreateOnlyLifecycleWriter(
+                work,
+                exclusion_lease=lambda: Guard(),
+                snapshot_callback=callback,
+                expected_snapshot=first_snapshot,
+                owner_authorization_authority=authority,
+                authorization_reference=authority.reference,
+                repository_identity="fixture-repository",
+            )
             with self.assertRaisesRegex(ManifestError, "SNAPSHOT_STALE"):
-                writer.create(manifest, protection)
+                writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
             self.assertFalse(held["value"])
 
-            manifest = seal_manifest(self.draft(timestamp_utc="2026-09-22T00:01:00Z"))
-            writer = CreateOnlyLifecycleWriter(work, exclusion=lambda: nullcontext(True))
+            original_fetch = authority.fetch_owner_authorization
+            authority.fetch_owner_authorization = lambda reference: (
+                lambda resolution: AuthorizationResolution(
+                    resolution.record,
+                    resolution.canonical_bytes + b" ",
+                    resolution.repository_owner_verified,
+                )
+            )(original_fetch(reference))
+            writer = CreateOnlyLifecycleWriter(
+                work,
+                exclusion_lease=lambda: nullcontext(True),
+                snapshot_callback=lambda: first_snapshot,
+                expected_snapshot=first_snapshot,
+                owner_authorization_authority=authority,
+                authorization_reference=authority.reference,
+                repository_identity="fixture-repository",
+            )
+            with self.assertRaisesRegex(Exception, "bytes changed"):
+                writer.create(
+                    manifest, protection, authorization_context=WRITER_CONTEXT
+                )
+            authority.fetch_owner_authorization = original_fetch
+
+            manifest = authority.bind(self.draft(timestamp_utc="2026-09-22T00:01:00Z"))
+            writer = CreateOnlyLifecycleWriter(
+                work,
+                exclusion_lease=lambda: nullcontext(True),
+                snapshot_callback=lambda: first_snapshot,
+                expected_snapshot=first_snapshot,
+                owner_authorization_authority=authority,
+                authorization_reference=authority.reference,
+                repository_identity="fixture-repository",
+            )
             import version_lifecycle.manifests as module
             real_git = module._git
             def fail_push(repository: Path, *args: str, input_bytes: bytes | None = None, check: bool = True) -> bytes:
@@ -371,7 +582,7 @@ class ManifestTests(unittest.TestCase):
                 return real_git(repository, *args, input_bytes=input_bytes, check=check)
             with patch.object(module, "_git", side_effect=fail_push):
                 with self.assertRaisesRegex(Exception, "CREATE_ONCE_OUTCOME_UNCERTAIN"):
-                    writer.create(manifest, protection)
+                    writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
 
 
 if __name__ == "__main__":

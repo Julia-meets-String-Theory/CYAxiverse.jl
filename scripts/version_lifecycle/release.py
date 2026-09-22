@@ -8,7 +8,7 @@ or used as an authority.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .certification import validate_certification_transfer
@@ -16,7 +16,9 @@ from .codec import sha256_hex
 from .manifests import (
     ManifestError,
     canonical_manifest_bytes,
+    lifecycle_ref_for_manifest,
     publication_ref,
+    validate_lifecycle_graph,
     validate_manifest,
 )
 from .versions import parse_package_version, parse_public_tag
@@ -173,6 +175,13 @@ def validate_release_consistency(
     tag_tree: str | None = None, certified_tree: str | None = None,
     github_release_id: object | None = None,
     publication_evidence_digest: str | None = None,
+    lifecycle_records: Mapping[str, Any] | Iterable[Mapping[str, Any]] | None = None,
+    anchor_tag_object: str | None = None,
+    anchor_tree: str | None = None,
+    candidate_ref: str | None = None,
+    candidate_commit: str | None = None,
+    candidate_tree: str | None = None,
+    require_complete_namespace: bool = False,
 ) -> dict[str, Any]:
     """Perform bidirectional tag/release/publication consistency checks."""
 
@@ -194,6 +203,39 @@ def validate_release_consistency(
         return publication_result
     if github_release_id is not None and publication.get("github_release_id") != github_release_id:
         return _result(INVALID, "GITHUB_RELEASE_ID_MISMATCH")
+    if require_complete_namespace:
+        if lifecycle_records is None:
+            return _result(BLOCKED, "COMPLETE_LIFECYCLE_NAMESPACE_UNAVAILABLE")
+        try:
+            graph = validate_lifecycle_graph(lifecycle_records)
+        except ManifestError as error:
+            return _result(INVALID, "LIFECYCLE_NAMESPACE_INVALID", [str(error)])
+        released_ref = lifecycle_ref_for_manifest(released)
+        publication_ref_name = lifecycle_ref_for_manifest(publication)
+        if graph.manifests_by_ref.get(released_ref) != released:
+            return _result(INVALID, "RELEASED_MANIFEST_NAMESPACE_MISMATCH")
+        if graph.manifests_by_ref.get(publication_ref_name) != publication:
+            return _result(INVALID, "PUBLICATION_MANIFEST_NAMESPACE_MISMATCH")
+        observations = (
+            anchor_tag_object,
+            anchor_tree,
+            candidate_ref,
+            candidate_commit,
+            candidate_tree,
+        )
+        if any(value is None for value in observations):
+            return _result(BLOCKED, "DIRECT_IDENTITY_OBSERVATION_INCOMPLETE")
+        if (
+            released.get("anchor_sha") != anchor_tag_object
+            or released.get("anchor_tree") != anchor_tree
+        ):
+            return _result(INVALID, "ANCHOR_IDENTITY_MISMATCH")
+        if (
+            released.get("candidate_ref") != candidate_ref
+            or released.get("candidate_sha") != candidate_commit
+            or released.get("candidate_tree") != candidate_tree
+        ):
+            return _result(INVALID, "CANDIDATE_IDENTITY_MISMATCH")
     if any(
         value is None
         for value in (

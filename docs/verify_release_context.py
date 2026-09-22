@@ -83,12 +83,29 @@ def verify(args: argparse.Namespace) -> int:
     except OSError as error:
         return fail(f"publication evidence is unavailable: {error}")
     evidence_digest = hashlib.sha256(evidence_bytes).hexdigest()
+    lifecycle_records = None
+    if args.require_complete_lifecycle:
+        if args.lifecycle_index is None:
+            return fail("complete lifecycle index is required")
+        try:
+            lifecycle_records = json.loads(
+                args.lifecycle_index.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            return fail(f"complete lifecycle index is invalid: {error}")
     result = validate_release_consistency(
         released, publication,
         public_tag=args.tag, tag_commit=args.tag_sha, tag_tree=args.tag_tree,
         certified_tree=args.tag_tree,
         github_release_id=args.github_release_id,
         publication_evidence_digest=evidence_digest,
+        lifecycle_records=lifecycle_records,
+        anchor_tag_object=args.anchor_tag_object,
+        anchor_tree=args.anchor_tree,
+        candidate_ref=args.candidate_ref,
+        candidate_commit=args.candidate_commit,
+        candidate_tree=args.candidate_tree,
+        require_complete_namespace=args.require_complete_lifecycle,
     )
     if result.get("status") != PASS and result.get("status") != "terminal_consistent":
         return fail(f"immutable release/publication validation failed: {result}")
@@ -139,6 +156,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--manifest", type=Path)
     result.add_argument("--publication-manifest", type=Path)
     result.add_argument("--publication-evidence", type=Path)
+    result.add_argument("--lifecycle-index", type=Path)
     result.add_argument("--tag")
     result.add_argument("--tag-ref")
     result.add_argument("--tag-sha")
@@ -148,6 +166,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--main-version", required=True)
     result.add_argument("--github-env", type=Path, required=True)
     result.add_argument("--github-release-id", type=int, default=None)
+    result.add_argument("--anchor-tag-object")
+    result.add_argument("--anchor-tree")
+    result.add_argument("--candidate-ref")
+    result.add_argument("--candidate-commit")
+    result.add_argument("--candidate-tree")
+    result.add_argument("--require-complete-lifecycle", action="store_true")
     result.add_argument("--stable-only", action="store_true")
     return result
 

@@ -35,6 +35,11 @@ class DocumentationRoutingTests(unittest.TestCase):
         self.assertIn("refs/heads/lifecycle/v1/*", workflow)
         self.assertIn("publication-evidence", workflow)
         self.assertIn("gh api", workflow)
+        self.assertIn("releases/assets", workflow)
+        self.assertIn("--require-complete-lifecycle", workflow)
+        self.assertNotIn(
+            'git show "$GITHUB_REF:$PUBLICATION_EVIDENCE_REF"', workflow
+        )
 
     def test_manifest_pair_is_terminal_only_when_both_bind(self) -> None:
         release = released()

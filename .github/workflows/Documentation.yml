@@ -41,6 +41,8 @@ jobs:
       - uses: julia-actions/cache@v2
       - name: Fetch immutable lifecycle authority
         if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
           git fetch --no-tags origin 'refs/heads/lifecycle/v1/*:refs/remotes/origin/lifecycle/v1/*'
@@ -66,11 +68,50 @@ jobs:
             echo "matching immutable publication manifest is unavailable" >&2
             exit 2
           fi
-          python3 - "$RUNNER_TEMP/publication-manifest.json" "$RUNNER_TEMP/publication-evidence-ref" <<'PY'
+          python3 - "$RUNNER_TEMP/lifecycle-index.json" <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          import sys
+          from hashlib import sha256
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.manifests import canonical_manifest_bytes
+          prefix = "refs/remotes/origin/lifecycle/v1/"
+          refs = subprocess.check_output(
+              ["git", "for-each-ref", "--format=%(refname)", prefix], text=True
+          ).splitlines()
+          records = []
+          for ref in refs:
+              canonical_ref = ref.replace(prefix, "refs/heads/lifecycle/v1/", 1)
+              raw = subprocess.check_output(["git", "show", f"{ref}:manifest.json"])
+              manifest = json.loads(raw)
+              if canonical_manifest_bytes(manifest) != raw:
+                  raise SystemExit("lifecycle manifest bytes are not canonical")
+              commit = subprocess.check_output(
+                  ["git", "rev-parse", f"{ref}^{{commit}}"], text=True
+              ).strip()
+              tree = subprocess.check_output(
+                  ["git", "rev-parse", f"{ref}^{{tree}}"], text=True
+              ).strip()
+              records.append({
+                  "ref": canonical_ref,
+                  "manifest": manifest,
+                  "commit": commit,
+                  "tree": tree,
+                  "manifest_id": manifest["manifest_id"],
+                  "manifest_digest": sha256(raw).hexdigest(),
+              })
+          pathlib.Path(sys.argv[1]).write_text(
+              json.dumps(records, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+          python3 - "$RUNNER_TEMP/released-manifest.json" "$RUNNER_TEMP/publication-manifest.json" "$RUNNER_TEMP/direct-refs" <<'PY'
           import json
           import pathlib
           import sys
-          publication = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          released = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          publication = json.loads(pathlib.Path(sys.argv[2]).read_text())
           evidence_ref = publication["publication_evidence_ref"]
           parts = pathlib.PurePosixPath(evidence_ref).parts
           if (
@@ -82,11 +123,29 @@ jobs:
               or ":" in evidence_ref
           ):
               raise SystemExit("unsafe publication evidence ref")
-          pathlib.Path(sys.argv[2]).write_text(evidence_ref)
+          pathlib.Path(sys.argv[3]).write_text(
+              "\n".join((released["anchor_ref"], released["candidate_ref"], evidence_ref))
+          )
           PY
-          PUBLICATION_EVIDENCE_REF="$(cat "$RUNNER_TEMP/publication-evidence-ref")"
-          if ! git show "$GITHUB_REF:$PUBLICATION_EVIDENCE_REF" > "$RUNNER_TEMP/publication-evidence"; then
-            echo "immutable publication evidence is unavailable from the release tag" >&2
+          ANCHOR_REF="$(sed -n '1p' "$RUNNER_TEMP/direct-refs")"
+          CANDIDATE_REF="$(sed -n '2p' "$RUNNER_TEMP/direct-refs")"
+          PUBLICATION_EVIDENCE_REF="$(sed -n '3p' "$RUNNER_TEMP/direct-refs")"
+          git fetch --no-tags origin "$ANCHOR_REF:$ANCHOR_REF"
+          git fetch --no-tags origin "$CANDIDATE_REF:refs/remotes/origin/cyax-candidate"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > "$RUNNER_TEMP/github-release.json"
+          ASSET_ID="$(python3 - "$RUNNER_TEMP/github-release.json" "$PUBLICATION_EVIDENCE_REF" <<'PY'
+          import json
+          import pathlib
+          import sys
+          release = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          matches = [asset["id"] for asset in release.get("assets", []) if asset.get("name") == sys.argv[2]]
+          if len(matches) != 1:
+              raise SystemExit("publication evidence asset is missing or ambiguous")
+          print(matches[0])
+          PY
+          )"
+          if ! gh api -H 'Accept: application/octet-stream' "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" > "$RUNNER_TEMP/publication-evidence"; then
+            echo "immutable publication evidence asset is unavailable" >&2
             exit 2
           fi
       - name: Verify immutable release context for tag documentation
@@ -98,11 +157,18 @@ jobs:
             --manifest "$RUNNER_TEMP/released-manifest.json" \
             --publication-manifest "$RUNNER_TEMP/publication-manifest.json" \
             --publication-evidence "$RUNNER_TEMP/publication-evidence" \
+            --lifecycle-index "$RUNNER_TEMP/lifecycle-index.json" \
+            --require-complete-lifecycle \
             --tag-ref "$GITHUB_REF" \
             --tag "$GITHUB_REF_NAME" \
             --tag-sha "$(git rev-parse "${GITHUB_REF}^{commit}")" \
             --tag-tree "$(git rev-parse "${GITHUB_REF}^{tree}")" \
             --tag-version "$(git show "${GITHUB_REF}:Project.toml" | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --anchor-tag-object "$(git rev-parse "$(sed -n '1p' "$RUNNER_TEMP/direct-refs")")" \
+            --anchor-tree "$(git rev-parse "$(sed -n '1p' "$RUNNER_TEMP/direct-refs")^{tree}")" \
+            --candidate-ref "$(sed -n '2p' "$RUNNER_TEMP/direct-refs")" \
+            --candidate-commit "$(git rev-parse refs/remotes/origin/cyax-candidate^{commit})" \
+            --candidate-tree "$(git rev-parse refs/remotes/origin/cyax-candidate^{tree})" \
             --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
             --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
             --github-release-id "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id)" \

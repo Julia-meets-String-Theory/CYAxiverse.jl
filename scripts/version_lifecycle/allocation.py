@@ -136,7 +136,11 @@ def global_allocation_view(
         ):
             raise ManifestError("fresh remote lifecycle authority has not been verified")
         lifecycle = validate_lifecycle_ref_snapshot(lifecycle_snapshot)
-        if snapshot.source_repository != lifecycle.source_repository:
+        if (
+            snapshot.source_repository != lifecycle.source_repository
+            or snapshot._repository_authority
+            != lifecycle._repository_authority
+        ):
             raise ValueError(
                 "static and lifecycle authorities belong to different repositories"
             )
