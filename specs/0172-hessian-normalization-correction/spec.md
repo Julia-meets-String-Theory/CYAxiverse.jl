@@ -201,37 +201,63 @@ in R-001.
 
 The oracle must not call the helper's private `_hessian` implementation.
 
-### R-004 — Analytic catastrophe-location oracle
+### R-004 — Analytic catastrophe-location oracles
 
-The existing one-dimensional fixture
+The existing one-dimensional replay fixture remains typed exactly as
 
 ```text
-Q = reshape([1,1], 2, 1)
-L = [[2,-1],[1,1]]
-theta = [0]
-phase = [0.4,0]
+Q = reshape([1.0,1.0], 2, 1)
+L = [[2.0,-1.0],[1.0,1.0]]
+theta = [0.0]
+phase = [0.4,0.0]   # Float64 input
 ```
 
-has zero-mode equation proportional to
+For an **exact decimal** phase `p = 0.4 = 2/5`, the zero-mode equation is
 
 ```math
-2\,10^{-k}\cos(0.8\pi) + 10^k = 0.
+2\,10^{-k}\cos(0.8\pi) + 10^k = 0,
 ```
 
-Therefore its exact root is
+with exact reference root
 
 ```math
-k_c
+k_{\phi}
 =
 \frac{1}{2}\log_{10}\!\left(\frac{1+\sqrt{5}}{2}\right)
 \approx
-0.10449382012498937.
+0.1044938201249893668846360446.
 ```
 
-The corrected scan/refinement SHALL reproduce this root within a predeclared
-absolute tolerance no looser than `1e-12` in Float64-facing evidence and
-within the helper's arbitrary-precision refinement tolerance where BigFloat is
-used.
+However, the frozen replay witness begins as `Float64(0.4)`. Its exact binary
+value is
+
+```text
+p64 = 3602879701896397 / 9007199254740992
+    = 0.40000000000000002220446049250313080847263336181640625.
+```
+
+The analytic root of the **actual frozen typed input** is therefore
+
+```math
+k_{64}
+=
+\frac{1}{2}\log_{10}\!\left[-2\cos(2\pi p_{64})\right]
+\approx
+0.1044938201249893888954169152.
+```
+
+The two references have different purposes and MUST NOT be conflated:
+
+1. the arbitrary-precision bisection/refinement, with stopping tolerance
+   `1e-20`, SHALL converge to the root of the actual Float64-origin function
+   and agree with `k64` at a tolerance justified by the final bisection
+   interval;
+2. comparison of the frozen Float64 witness to the exact-decimal golden-ratio
+   reference `k_phi` is a scientific cross-check only and SHALL use the
+   predeclared absolute acceptance tolerance `1e-12`.
+
+The `1e-20` value is a numerical refinement tolerance, not a claim that the
+Float64-origin input equals exact decimal `2/5` to that accuracy.
 
 ### R-005 — Historical/corrected scaling relation
 
@@ -265,16 +291,20 @@ theta = [0.0]
 phase = [0.4, 0.0]
 k_grid = range(0.05, 0.20; length=4)
 precision_bits = 256
-refinement tolerance = 1e-20
+bisection/refinement stopping tolerance = 1e-20
+Float64-facing exact-decimal oracle acceptance = 1e-12
 expected coarse sign-change bracket = [0.10, 0.15]
-analytic root = 0.5*log10((1+sqrt(5))/2)
+typed phase = p64 = 3602879701896397 / 9007199254740992
+typed-input analytic root = 0.5*log10(-2*cos(2*pi*p64))
+exact-decimal cross-check root = 0.5*log10((1+sqrt(5))/2)
 ```
 
 The exact pre-correction historical helper and the corrected helper SHALL be
 evaluated on those same inputs. The evidence SHALL compare:
 
 - the coarse sign-change bracket `[0.10, 0.15]`;
-- refined `k_c`;
+- refined `k_c`, checked against the typed-input oracle `k64` at the
+  refinement-justified tolerance and against `k_phi` only at `1e-12`;
 - catastrophe type / branch classification;
 - eigenvalue signs on both sides of the bracket;
 - the factor-two Hessian/eigenvalue magnitude relation where finite.
@@ -362,15 +392,18 @@ Required evidence includes:
 
 1. the identity `4π² I₂` fixture;
 2. one general nontrivial analytic closed-form fixture;
-3. the exact analytic `k_c = 0.5 log10(phi)` detuning fixture;
-4. historical-vs-corrected factor-two and sign invariance;
-5. the exact R-006 golden-ratio replay witness, using the frozen inputs and
-   source identities above;
-6. focused package tests containing the phase/volume-detuning testset;
-7. `scripts/agent_verify.py diff-check`;
-8. broader package verification as practical, with the known pre-correction
+3. the typed-input analytic root
+   `k64 = 0.5*log10(-2*cos(2*pi*p64))` for the frozen Float64 phase;
+4. the exact-decimal golden-ratio cross-check
+   `k_phi = 0.5*log10(phi)` with absolute acceptance `1e-12`;
+5. historical-vs-corrected factor-two and sign invariance;
+6. the exact R-006 replay witness, using the frozen inputs and source identities
+   above;
+7. focused package tests containing the phase/volume-detuning testset;
+8. `scripts/agent_verify.py diff-check`;
+9. broader package verification as practical, with the known pre-correction
    Hessian failure treated as the target defect rather than hidden baseline;
-9. exact candidate independent Scientific/Numerical Review.
+10. exact candidate independent Scientific/Numerical Review.
 
 Unobserved checks are not PASS.
 
