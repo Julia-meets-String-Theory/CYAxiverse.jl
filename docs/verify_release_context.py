@@ -84,15 +84,27 @@ def verify(args: argparse.Namespace) -> int:
         return fail(f"publication evidence is unavailable: {error}")
     evidence_digest = hashlib.sha256(evidence_bytes).hexdigest()
     lifecycle_records = None
+    canonical_tags = None
+    github_releases = None
     if args.require_complete_lifecycle:
-        if args.lifecycle_index is None:
-            return fail("complete lifecycle index is required")
+        if (
+            args.lifecycle_index is None
+            or args.canonical_tags is None
+            or args.github_releases is None
+        ):
+            return fail("complete release-universe observations are required")
         try:
             lifecycle_records = json.loads(
                 args.lifecycle_index.read_text(encoding="utf-8")
             )
+            canonical_tags = json.loads(
+                args.canonical_tags.read_text(encoding="utf-8")
+            )
+            github_releases = json.loads(
+                args.github_releases.read_text(encoding="utf-8")
+            )
         except (OSError, UnicodeError, json.JSONDecodeError) as error:
-            return fail(f"complete lifecycle index is invalid: {error}")
+            return fail(f"complete release universe is invalid: {error}")
     result = validate_release_consistency(
         released, publication,
         public_tag=args.tag, tag_commit=args.tag_sha, tag_tree=args.tag_tree,
@@ -105,6 +117,8 @@ def verify(args: argparse.Namespace) -> int:
         candidate_ref=args.candidate_ref,
         candidate_commit=args.candidate_commit,
         candidate_tree=args.candidate_tree,
+        canonical_tag_observations=canonical_tags,
+        github_release_observations=github_releases,
         require_complete_namespace=args.require_complete_lifecycle,
     )
     if result.get("status") != PASS and result.get("status") != "terminal_consistent":
@@ -157,6 +171,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--publication-manifest", type=Path)
     result.add_argument("--publication-evidence", type=Path)
     result.add_argument("--lifecycle-index", type=Path)
+    result.add_argument("--canonical-tags", type=Path)
+    result.add_argument("--github-releases", type=Path)
     result.add_argument("--tag")
     result.add_argument("--tag-ref")
     result.add_argument("--tag-sha")

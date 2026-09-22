@@ -423,7 +423,10 @@ class ManifestTests(unittest.TestCase):
             **authorization_fields(), "transaction_id": "tx-chain",
             "static_iteration_snapshot": "a" * 64, "lifecycle_ref_snapshot": "b" * 64,
             "final_version": "1.2.3", "release_line": "principal", "candidate_id": "candidate-1",
-            "candidate_ref": candidate["candidate_ref"], "withdrawal_evidence": {"reason": "no-tag"},
+            "candidate_ref": candidate["candidate_ref"],
+            "withdrawal_evidence": {
+                "public_tag_ref": "refs/tags/v1.2.3", "tag_absent": True,
+            },
         }
         withdrawn_draft.pop("manifest_id", None)
         withdrawn = seal_manifest(withdrawn_draft)
@@ -588,6 +591,61 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ManifestError, "allocation view"):
             validate_complete_lifecycle_refs(records)
 
+    def test_graph_rejects_multiple_active_reservations_for_one_line(self) -> None:
+        first = seal_manifest(self.prepared_draft())
+        second = seal_manifest(self.prepared_draft(
+            timestamp_utc="2026-09-22T00:01:00Z",
+            final_version="1.2.4",
+            reserved_final="1.2.4",
+            intended_dev_version="1.2.4-DEV",
+        ))
+        with self.assertRaisesRegex(ManifestError, "multiple active reservations"):
+            validate_complete_lifecycle_refs({
+                lifecycle_ref_for_manifest(item): item for item in (first, second)
+            })
+
+    def test_withdrawal_requires_exact_proof_and_remote_tag_absence(self) -> None:
+        candidate = next(
+            item for item in self.chain()
+            if item["manifest_type"] == "candidate-opened"
+        )
+        draft = {
+            "schema_version": 1,
+            "manifest_type": "candidate-withdrawn",
+            "timestamp_utc": "2026-09-22T00:20:00Z",
+            "predecessor_refs": [lifecycle_ref_for_manifest(candidate)],
+            **authorization_fields(),
+            "transaction_id": "tx-chain",
+            "static_iteration_snapshot": "a" * 64,
+            "lifecycle_ref_snapshot": "b" * 64,
+            "final_version": "1.2.3",
+            "release_line": "principal",
+            "candidate_id": "candidate-1",
+            "candidate_ref": candidate["candidate_ref"],
+            "withdrawal_evidence": {
+                "public_tag_ref": "refs/tags/v1.2.3",
+                "tag_absent": True,
+            },
+        }
+        withdrawn = seal_manifest(draft)
+        invalid = dict(draft)
+        invalid["withdrawal_evidence"] = {"tag_absent": True}
+        with self.assertRaisesRegex(ManifestError, "exact absent canonical"):
+            validate_manifest(seal_manifest(invalid))
+
+        import version_lifecycle.manifests as module
+        writer = object.__new__(CreateOnlyLifecycleWriter)
+        writer.repository = Path(".")
+        writer.remote = "origin"
+        advertisement = (
+            f"{'f' * 40}\trefs/tags/v1.2.3\n".encode("ascii")
+        )
+        with patch.object(module, "_git", return_value=advertisement):
+            with self.assertRaisesRegex(ManifestConflict, "PUBLIC_TAG_ALREADY_EXISTS"):
+                writer._require_no_public_tag(withdrawn)
+        with patch.object(module, "_git", return_value=b""):
+            writer._require_no_public_tag(withdrawn)
+
     def test_publication_must_match_released_manifest_exactly(self) -> None:
         chain = self.chain()
 
@@ -656,6 +714,9 @@ class ManifestTests(unittest.TestCase):
             (work / "base").write_text("base", encoding="utf-8")
             subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
             subprocess.run(["git", "-C", str(work), "commit", "-qm", "base"], check=True)
+            root_parent = subprocess.check_output(
+                ["git", "-C", str(work), "rev-parse", "HEAD"], text=True
+            ).strip()
             authority = ManifestAuthority()
             manifest = authority.bind(self.prepared_draft())
             protection = ProtectionEvidence("fixture", "refs/heads/lifecycle/v1/*", "0" * 64, "2026-09-22T00:00:00Z", True, True, True)
@@ -668,6 +729,7 @@ class ManifestTests(unittest.TestCase):
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
                 repository_identity="fixture-repository",
+                root_parent_commit=root_parent,
             )
             first = writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
             second = writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
@@ -679,6 +741,7 @@ class ManifestTests(unittest.TestCase):
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
                 repository_identity="fixture-repository",
+                root_parent_commit=root_parent,
             )
             retry = retry_writer.create(
                 manifest, protection, authorization_context=WRITER_CONTEXT
@@ -704,6 +767,20 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(second.status, "IDEMPOTENT")
             self.assertEqual(retry.status, "IDEMPOTENT")
             self.assertEqual(successor.status, "CREATED")
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "-C", str(work), "rev-parse", f"{first.commit}^"],
+                    text=True,
+                ).strip(),
+                root_parent,
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "-C", str(work), "rev-parse", f"{successor.commit}^"],
+                    text=True,
+                ).strip(),
+                first.commit,
+            )
             entries = subprocess.check_output(["git", "-C", str(work), "ls-tree", "--name-only", first.tree], text=True).splitlines()
             self.assertEqual(entries, ["manifest.json"])
             ref = first.ref
@@ -725,6 +802,9 @@ class ManifestTests(unittest.TestCase):
             (work / "base").write_text("base", encoding="utf-8")
             subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
             subprocess.run(["git", "-C", str(work), "commit", "-qm", "base"], check=True)
+            root_parent = subprocess.check_output(
+                ["git", "-C", str(work), "rev-parse", "HEAD"], text=True
+            ).strip()
             authority = ManifestAuthority()
             manifest = authority.bind(self.prepared_draft())
             protection = ProtectionEvidence("fixture", "refs/heads/lifecycle/v1/*", "0" * 64, "2026-09-22T00:00:00Z", True, True, True)
@@ -749,6 +829,7 @@ class ManifestTests(unittest.TestCase):
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
                 repository_identity="fixture-repository",
+                root_parent_commit=root_parent,
             )
             with self.assertRaisesRegex(ManifestError, "SNAPSHOT_STALE"):
                 writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
@@ -770,6 +851,7 @@ class ManifestTests(unittest.TestCase):
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
                 repository_identity="fixture-repository",
+                root_parent_commit=root_parent,
             )
             with self.assertRaisesRegex(Exception, "bytes changed"):
                 writer.create(
@@ -786,6 +868,7 @@ class ManifestTests(unittest.TestCase):
                 owner_authorization_authority=authority,
                 authorization_reference=authority.reference,
                 repository_identity="fixture-repository",
+                root_parent_commit=root_parent,
             )
             import version_lifecycle.manifests as module
             real_git = module._git

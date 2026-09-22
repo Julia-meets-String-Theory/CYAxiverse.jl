@@ -616,6 +616,33 @@ class TransactionTests(unittest.TestCase):
                          ("BLOCKED", "UNSUPPORTED_CERTIFICATION_BINDING", False))
         self.assertNotIn("tag", port.calls)
 
+    def test_evidence_references_require_duplicate_free_string_lists(self):
+        port = PrincipalReleaseFixture()
+        original_certify = port.certify_candidate
+
+        def string_evidence(intent, candidate):
+            record = original_certify(intent, candidate)
+            record["evidence_refs"] = "evidence/candidate.json"
+            return record
+
+        port.certify_candidate = string_evidence
+        result = run_release(port, self.release_intent)
+        self.assertEqual(result.reason_code, "CERTIFICATION_IDENTITY_UNPROVEN")
+        self.assertNotIn("tag", port.calls)
+
+        port = PrincipalReleaseFixture()
+        original_promote = port.promote_principal
+
+        def mapping_evidence(intent, candidate, certification, freeze):
+            final = original_promote(intent, candidate, certification, freeze)
+            final["evidence_refs"] = {"ref": "evidence/released.json"}
+            return final
+
+        port.promote_principal = mapping_evidence
+        result = run_release(port, self.release_intent)
+        self.assertEqual(result.reason_code, "RELEASE_EVIDENCE_INVALID")
+        self.assertNotIn("tag", port.calls)
+
     def test_missing_tag_protection_blocks_before_intent_or_tag(self):
         port = NoTagProtectionReleaseFixture()
         result = run_release(port, self.release_intent)

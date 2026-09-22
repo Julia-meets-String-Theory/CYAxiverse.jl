@@ -15,11 +15,12 @@ from version_lifecycle.manifests import (  # noqa: E402
     lifecycle_ref_for_manifest,
     seal_manifest,
 )
-from test_version_lifecycle_manifests import ManifestTests  # noqa: E402
+import test_version_lifecycle_manifests as manifest_tests  # noqa: E402
 from version_lifecycle.release import (  # noqa: E402
     BLOCKED,
     PUBLICATION_RECONCILIATION_PENDING,
     TERMINAL_CONSISTENT,
+    validate_publication_evidence,
     validate_release_consistency,
     validate_released_manifest,
 )
@@ -108,29 +109,51 @@ def publication(release: dict[str, object], **overrides: object) -> dict[str, ob
 
 
 class ReleaseTests(unittest.TestCase):
-    def test_terminal_validation_replays_complete_namespace_and_direct_identities(self) -> None:
-        chain = ManifestTests().chain()
+    @staticmethod
+    def complete_context() -> tuple[
+        dict[str, object], dict[str, object], dict[str, object]
+    ]:
+        chain = manifest_tests.ManifestTests().chain()
         release = next(item for item in chain if item["manifest_type"] == "released")
         publication_manifest = next(
             item for item in chain if item["manifest_type"] == "publication"
         )
         records = {lifecycle_ref_for_manifest(item): item for item in chain}
+        kwargs: dict[str, object] = {
+            "public_tag": publication_manifest["public_tag"],
+            "tag_commit": publication_manifest["tag_commit"],
+            "tag_tree": publication_manifest["tag_tree"],
+            "certified_tree": release["anchor_tree"],
+            "github_release_id": publication_manifest["github_release_id"],
+            "publication_evidence_digest": publication_manifest[
+                "publication_evidence_digest"
+            ],
+            "lifecycle_records": records,
+            "anchor_tag_object": release["anchor_sha"],
+            "anchor_tree": release["anchor_tree"],
+            "candidate_ref": release["candidate_ref"],
+            "candidate_commit": release["candidate_sha"],
+            "candidate_tree": release["candidate_tree"],
+            "canonical_tag_observations": [{
+                "ref": f"refs/tags/{publication_manifest['public_tag']}",
+                "tag": publication_manifest["public_tag"],
+                "commit": publication_manifest["tag_commit"],
+                "tree": publication_manifest["tag_tree"],
+            }],
+            "github_release_observations": [{
+                "id": publication_manifest["github_release_id"],
+                "tag": publication_manifest["public_tag"],
+            }],
+            "require_complete_namespace": True,
+        }
+        return release, publication_manifest, kwargs
+
+    def test_terminal_validation_replays_complete_namespace_and_direct_identities(self) -> None:
+        release, publication_manifest, kwargs = self.complete_context()
         result = validate_release_consistency(
             release,
             publication_manifest,
-            public_tag=publication_manifest["public_tag"],
-            tag_commit=publication_manifest["tag_commit"],
-            tag_tree=publication_manifest["tag_tree"],
-            certified_tree=release["anchor_tree"],
-            github_release_id=publication_manifest["github_release_id"],
-            publication_evidence_digest=publication_manifest["publication_evidence_digest"],
-            lifecycle_records=records,
-            anchor_tag_object=release["anchor_sha"],
-            anchor_tree=release["anchor_tree"],
-            candidate_ref=release["candidate_ref"],
-            candidate_commit=release["candidate_sha"],
-            candidate_tree=release["candidate_tree"],
-            require_complete_namespace=True,
+            **kwargs,
         )
         self.assertEqual(result["status"], TERMINAL_CONSISTENT)
         missing = validate_release_consistency(
@@ -138,7 +161,33 @@ class ReleaseTests(unittest.TestCase):
             publication_manifest,
             require_complete_namespace=True,
         )
-        self.assertEqual(missing["reason_code"], "COMPLETE_LIFECYCLE_NAMESPACE_UNAVAILABLE")
+        self.assertEqual(missing["reason_code"], "COMPLETE_RELEASE_UNIVERSE_UNAVAILABLE")
+        extra_tags = list(kwargs["canonical_tag_observations"])
+        extra_tags.append({
+            "ref": "refs/tags/v1.2.4", "tag": "v1.2.4",
+            "commit": "f" * 40, "tree": "e" * 40,
+        })
+        mismatch = validate_release_consistency(
+            release,
+            publication_manifest,
+            **{**kwargs, "canonical_tag_observations": extra_tags},
+        )
+        self.assertEqual(
+            mismatch["reason_code"], "COMPLETE_RELEASE_UNIVERSE_MISMATCH"
+        )
+        rogue_github_release = list(kwargs["github_release_observations"])
+        rogue_github_release.append({"id": 2, "tag": "nightly"})
+        invalid = validate_release_consistency(
+            release,
+            publication_manifest,
+            **{
+                **kwargs,
+                "github_release_observations": rogue_github_release,
+            },
+        )
+        self.assertEqual(
+            invalid["reason_code"], "COMPLETE_RELEASE_UNIVERSE_INVALID"
+        )
 
     def test_checked_in_principal_fixture_is_internally_consistent(self) -> None:
         fixture_path = (
@@ -148,19 +197,11 @@ class ReleaseTests(unittest.TestCase):
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
         release = fixture["released_manifest"]
         publication_manifest = fixture["publication_manifest"]
-        result = validate_release_consistency(
-            release,
-            publication_manifest,
-            public_tag=publication_manifest["public_tag"],
-            tag_commit=publication_manifest["tag_commit"],
-            tag_tree=publication_manifest["tag_tree"],
-            certified_tree=publication_manifest["tag_tree"],
-            github_release_id=publication_manifest["github_release_id"],
-            publication_evidence_digest=publication_manifest[
-                "publication_evidence_digest"
-            ],
+        self.assertEqual(validate_released_manifest(release)["status"], "PASS")
+        self.assertEqual(
+            validate_publication_evidence(publication_manifest, release)["status"],
+            "PASS",
         )
-        self.assertEqual(result["status"], TERMINAL_CONSISTENT)
 
     def test_missing_released_manifest_is_blocked(self) -> None:
         self.assertEqual(validate_release_consistency()["status"], BLOCKED)
@@ -170,16 +211,11 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(result["status"], PUBLICATION_RECONCILIATION_PENDING)
 
     def test_exact_release_and_publication_are_terminal(self) -> None:
-        release = released()
+        release, publication_manifest, kwargs = self.complete_context()
         result = validate_release_consistency(
             release,
-            publication(release),
-            public_tag="v1.2.3",
-            tag_commit=SHA,
-            tag_tree=TREE,
-            certified_tree=TREE,
-            github_release_id=9001,
-            publication_evidence_digest="1" * 64,
+            publication_manifest,
+            **kwargs,
         )
         self.assertEqual(result["status"], TERMINAL_CONSISTENT)
 

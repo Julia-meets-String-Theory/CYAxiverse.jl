@@ -452,6 +452,23 @@ def _validate_type_specific(manifest: Mapping[str, Any]) -> None:
                 raise ManifestError(f"{field} is not canonical evidence") from error
             if not is_safe_public_value(manifest[field], key=field):
                 raise ManifestError(f"{field} contains a nonpublic value")
+    if kind in {"candidate-withdrawn", "release-intent-aborted"}:
+        field = (
+            "withdrawal_evidence"
+            if kind == "candidate-withdrawn"
+            else "no_public_tag_evidence"
+        )
+        proof = manifest[field]
+        expected_tag_ref = f"refs/tags/v{manifest['final_version']}"
+        if (
+            not isinstance(proof, Mapping)
+            or set(proof) != {"public_tag_ref", "tag_absent"}
+            or proof.get("public_tag_ref") != expected_tag_ref
+            or proof.get("tag_absent") is not True
+        ):
+            raise ManifestError(
+                f"{field} must bind the exact absent canonical public tag"
+            )
     for field in ("abort_reason", "terminal_disposition", "certification_binding"):
         if field in manifest:
             _check_identity_text(manifest[field], field)
@@ -932,7 +949,7 @@ def validate_lifecycle_graph(
 
     # Singleton and active-state constraints are graph properties, not ref-name checks.
     singleton: dict[tuple[str, str], str] = {}
-    active_reservations: dict[tuple[str, str], str] = {}
+    active_reservations: dict[str, str] = {}
     for ref, manifest in by_ref.items():
         kind = str(manifest["manifest_type"])
         version = manifest.get("final_version")
@@ -950,9 +967,9 @@ def validate_lifecycle_graph(
             by_ref[child]["manifest_type"] in {"reservation-aborted", "reservation-consumed"}
             for child in children[ref]
         ):
-            key = (str(manifest["owner_line"]), str(manifest["intended_dev_version"]))
+            key = str(manifest["owner_line"])
             if key in active_reservations:
-                raise ManifestError("duplicate active reservation identity")
+                raise ManifestError("owner line has multiple active reservations")
             active_reservations[key] = ref
     pre_entry_aborted = {
         predecessor
@@ -1288,6 +1305,7 @@ class CreateOnlyLifecycleWriter:
         owner_authorization_authority: Any,
         authorization_reference: Callable[[str, str, str], str],
         repository_identity: str,
+        root_parent_commit: str,
     ) -> None:
         self.repository = Path(repository)
         self.remote = validate_remote(remote)
@@ -1299,12 +1317,21 @@ class CreateOnlyLifecycleWriter:
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
         if not isinstance(repository_identity, str) or not repository_identity:
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+        if not isinstance(root_parent_commit, str) or not SHA1_RE.fullmatch(
+            root_parent_commit
+        ):
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+        try:
+            _git(self.repository, "cat-file", "-e", f"{root_parent_commit}^{{commit}}")
+        except ManifestError as error:
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED") from error
         self.exclusion = exclusion_lease
         self.snapshot_callback = snapshot_callback
         self.expected_snapshot = expected_snapshot
         self.owner_authorization_authority = owner_authorization_authority
         self.authorization_reference = authorization_reference
         self.repository_identity = repository_identity
+        self.root_parent_commit = root_parent_commit
 
     @contextmanager
     def _governed_boundary(self) -> Any:
@@ -1353,6 +1380,39 @@ class CreateOnlyLifecycleWriter:
         records = parse_remote_ref_advertisements(output)
         return records.get(ref)
 
+    def _expected_parent(
+        self,
+        manifest: Mapping[str, Any],
+        records: Mapping[str, Mapping[str, Any]],
+    ) -> str:
+        predecessors = manifest["predecessor_refs"]
+        if not predecessors:
+            return self.root_parent_commit
+        if len(predecessors) != 1:
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+        predecessor = records.get(predecessors[0])
+        if predecessor is None or not SHA1_RE.fullmatch(str(predecessor.get("commit", ""))):
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+        return str(predecessor["commit"])
+
+    def _require_commit_parent(self, commit: str, expected_parent: str) -> None:
+        line = _git(
+            self.repository, "rev-list", "--parents", "-n", "1", commit
+        ).decode("ascii").strip().split()
+        if line != [commit, expected_parent]:
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+
+    def _require_no_public_tag(self, manifest: Mapping[str, Any]) -> None:
+        kind = manifest["manifest_type"]
+        if kind not in {"candidate-withdrawn", "release-intent-aborted"}:
+            return
+        tag_ref = f"refs/tags/v{manifest['final_version']}"
+        output = _git(
+            self.repository, "ls-remote", "--refs", self.remote, tag_ref
+        )
+        if parse_remote_ref_advertisements(output):
+            raise ManifestConflict("PUBLIC_TAG_ALREADY_EXISTS")
+
     def _complete_graph_records(self) -> dict[str, dict[str, Any]]:
         output = _git(
             self.repository,
@@ -1389,6 +1449,9 @@ class CreateOnlyLifecycleWriter:
         if parse_remote_ref_advertisements(final_output) != advertisements:
             raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
         validate_lifecycle_graph(records)
+        for record in records.values():
+            expected_parent = self._expected_parent(record["manifest"], records)
+            self._require_commit_parent(str(record["commit"]), expected_parent)
         return records
 
     @staticmethod
@@ -1503,14 +1566,23 @@ class CreateOnlyLifecycleWriter:
             proposed_records = dict(records)
             proposed_records[ref] = {"ref": ref, "manifest": checked}
             validate_lifecycle_graph(proposed_records)
+            self._require_no_public_tag(checked)
             self._find_manifest_id_elsewhere(checked["manifest_id"], ref)
-            commit = make_manifest_commit(self.repository, checked, message=f"lifecycle: {checked['manifest_type']}\n")
+            parent = self._expected_parent(checked, records)
+            commit = make_manifest_commit(
+                self.repository,
+                checked,
+                parent=parent,
+                message=f"lifecycle: {checked['manifest_type']}\n",
+            )
+            self._require_commit_parent(commit, parent)
             tree = _resolve_tree(self.repository, commit)
             # Revalidate immediately before the create-once remote operation;
             # the surrounding governed exclusion remains held until reread.
             before_push_snapshot, before_push_fingerprint = self._snapshot()
             if before_push_fingerprint != fingerprint:
                 raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
+            self._require_no_public_tag(checked)
             verify_authorization()
             try:
                 _git(self.repository, "push", "--porcelain", f"--force-with-lease={ref}:", self.remote, f"{commit}:{ref}")

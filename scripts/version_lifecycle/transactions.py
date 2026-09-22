@@ -720,12 +720,23 @@ def _validate_certification(record: Any, candidate: dict[str, Any]) -> str:
             or not is_safe_public_value(record[key], key=key)
         ):
             raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
-    if (
-        not record.get("evidence_refs")
-        or not is_safe_public_value(record["evidence_refs"], key="evidence_refs")
+    if not _validated_evidence_refs(
+        record.get("evidence_refs"), "CERTIFICATION_IDENTITY_UNPROVEN"
     ):
         raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
     return binding
+
+
+def _validated_evidence_refs(value: Any, reason: str) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item for item in value)
+        or len(set(value)) != len(value)
+        or not is_safe_public_value(value, key="evidence_refs")
+    ):
+        raise TransactionError(reason)
+    return list(value)
 
 
 def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
@@ -907,6 +918,10 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         else:
             evidence["final_certification"] = dict(certification)
 
+        final_evidence_refs = _validated_evidence_refs(
+            final.get("evidence_refs"), "RELEASE_EVIDENCE_INVALID"
+        )
+
         if not hasattr(port, "verify_public_tag_ruleset"):
             raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE")
         protection = _call(port, "verify_public_tag_ruleset", intent, f"refs/tags/{intent.public_tag}")
@@ -989,7 +1004,7 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             "main_at_release_version": final.get("main_at_release_version"),
             "main_at_candidate_sha": main_candidate_sha,
             "main_at_candidate_version": main_candidate_version,
-            "evidence_refs": sorted(final.get("evidence_refs", [])),
+            "evidence_refs": sorted(final_evidence_refs),
         }
         if transfer_evidence is not None:
             release_fields["certification_transfer_evidence"] = dict(

@@ -181,6 +181,8 @@ def validate_release_consistency(
     candidate_ref: str | None = None,
     candidate_commit: str | None = None,
     candidate_tree: str | None = None,
+    canonical_tag_observations: Iterable[Mapping[str, Any]] | None = None,
+    github_release_observations: Iterable[Mapping[str, Any]] | None = None,
     require_complete_namespace: bool = False,
 ) -> dict[str, Any]:
     """Perform bidirectional tag/release/publication consistency checks."""
@@ -203,39 +205,49 @@ def validate_release_consistency(
         return publication_result
     if github_release_id is not None and publication.get("github_release_id") != github_release_id:
         return _result(INVALID, "GITHUB_RELEASE_ID_MISMATCH")
-    if require_complete_namespace:
-        if lifecycle_records is None:
-            return _result(BLOCKED, "COMPLETE_LIFECYCLE_NAMESPACE_UNAVAILABLE")
-        try:
-            graph = validate_lifecycle_graph(lifecycle_records)
-        except ManifestError as error:
-            return _result(INVALID, "LIFECYCLE_NAMESPACE_INVALID", [str(error)])
-        released_ref = lifecycle_ref_for_manifest(released)
-        publication_ref_name = lifecycle_ref_for_manifest(publication)
-        if graph.manifests_by_ref.get(released_ref) != released:
-            return _result(INVALID, "RELEASED_MANIFEST_NAMESPACE_MISMATCH")
-        if graph.manifests_by_ref.get(publication_ref_name) != publication:
-            return _result(INVALID, "PUBLICATION_MANIFEST_NAMESPACE_MISMATCH")
-        observations = (
-            anchor_tag_object,
-            anchor_tree,
-            candidate_ref,
-            candidate_commit,
-            candidate_tree,
-        )
-        if any(value is None for value in observations):
-            return _result(BLOCKED, "DIRECT_IDENTITY_OBSERVATION_INCOMPLETE")
-        if (
-            released.get("anchor_sha") != anchor_tag_object
-            or released.get("anchor_tree") != anchor_tree
-        ):
-            return _result(INVALID, "ANCHOR_IDENTITY_MISMATCH")
-        if (
-            released.get("candidate_ref") != candidate_ref
-            or released.get("candidate_sha") != candidate_commit
-            or released.get("candidate_tree") != candidate_tree
-        ):
-            return _result(INVALID, "CANDIDATE_IDENTITY_MISMATCH")
+    if (
+        lifecycle_records is None
+        or canonical_tag_observations is None
+        or github_release_observations is None
+    ):
+        return _result(BLOCKED, "COMPLETE_RELEASE_UNIVERSE_UNAVAILABLE")
+    try:
+        graph = validate_lifecycle_graph(lifecycle_records)
+        tags = _canonical_tag_index(canonical_tag_observations)
+        github_releases = _github_release_index(github_release_observations)
+    except (ManifestError, TypeError, ValueError) as error:
+        return _result(INVALID, "COMPLETE_RELEASE_UNIVERSE_INVALID", [str(error)])
+    universe = _validate_complete_release_universe(
+        graph.manifests_by_ref, tags, github_releases
+    )
+    if universe is not None:
+        return universe
+    released_ref = lifecycle_ref_for_manifest(released)
+    publication_ref_name = lifecycle_ref_for_manifest(publication)
+    if graph.manifests_by_ref.get(released_ref) != released:
+        return _result(INVALID, "RELEASED_MANIFEST_NAMESPACE_MISMATCH")
+    if graph.manifests_by_ref.get(publication_ref_name) != publication:
+        return _result(INVALID, "PUBLICATION_MANIFEST_NAMESPACE_MISMATCH")
+    observations = (
+        anchor_tag_object,
+        anchor_tree,
+        candidate_ref,
+        candidate_commit,
+        candidate_tree,
+    )
+    if any(value is None for value in observations):
+        return _result(BLOCKED, "DIRECT_IDENTITY_OBSERVATION_INCOMPLETE")
+    if (
+        released.get("anchor_sha") != anchor_tag_object
+        or released.get("anchor_tree") != anchor_tree
+    ):
+        return _result(INVALID, "ANCHOR_IDENTITY_MISMATCH")
+    if (
+        released.get("candidate_ref") != candidate_ref
+        or released.get("candidate_sha") != candidate_commit
+        or released.get("candidate_tree") != candidate_tree
+    ):
+        return _result(INVALID, "CANDIDATE_IDENTITY_MISMATCH")
     if any(
         value is None
         for value in (
@@ -249,6 +261,107 @@ def validate_release_consistency(
     ):
         return _result(BLOCKED, "TERMINAL_OBSERVATION_INCOMPLETE")
     return _result(TERMINAL_CONSISTENT, released_manifest_id=released["manifest_id"], publication_id=publication["publication_id"], public_tag=released["public_tag"])
+
+
+def _canonical_tag_index(
+    observations: Iterable[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for raw in observations:
+        if not isinstance(raw, Mapping):
+            raise ValueError("canonical tag observation must be an object")
+        value = dict(raw)
+        if set(value) != {"ref", "tag", "commit", "tree"}:
+            raise ValueError("canonical tag observation fields are invalid")
+        tag = value["tag"]
+        if (
+            not is_canonical_public_tag(tag)
+            or value["ref"] != f"refs/tags/{tag}"
+            or not isinstance(value["commit"], str)
+            or not isinstance(value["tree"], str)
+        ):
+            raise ValueError("canonical tag observation is invalid")
+        if tag in result:
+            raise ValueError("duplicate canonical tag observation")
+        result[tag] = value
+    return result
+
+
+def _github_release_index(
+    observations: Iterable[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    ids: set[int] = set()
+    for raw in observations:
+        if not isinstance(raw, Mapping):
+            raise ValueError("GitHub Release observation must be an object")
+        value = dict(raw)
+        if set(value) != {"id", "tag"}:
+            raise ValueError("GitHub Release observation fields are invalid")
+        tag = value["tag"]
+        release_id = value["id"]
+        if tag == LEGACY_PUBLIC_TAG:
+            continue
+        if not is_canonical_public_tag(tag):
+            raise ValueError("GitHub Release tag is not canonical")
+        if (
+            isinstance(release_id, bool)
+            or not isinstance(release_id, int)
+            or release_id <= 0
+            or tag in result
+            or release_id in ids
+        ):
+            raise ValueError("duplicate or invalid GitHub Release observation")
+        result[tag] = value
+        ids.add(release_id)
+    return result
+
+
+def _validate_complete_release_universe(
+    manifests_by_ref: Mapping[str, Mapping[str, Any]],
+    tags: Mapping[str, Mapping[str, Any]],
+    github_releases: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    released_by_tag: dict[str, list[Mapping[str, Any]]] = {}
+    publications_by_tag: dict[str, list[Mapping[str, Any]]] = {}
+    for manifest in manifests_by_ref.values():
+        kind = manifest["manifest_type"]
+        if kind == "released":
+            released_by_tag.setdefault(str(manifest["public_tag"]), []).append(manifest)
+        elif kind == "publication":
+            publications_by_tag.setdefault(str(manifest["public_tag"]), []).append(manifest)
+    names = set(tags)
+    if names != set(released_by_tag) or names != set(publications_by_tag) or names != set(github_releases):
+        return _result(INVALID, "COMPLETE_RELEASE_UNIVERSE_MISMATCH")
+    for tag in sorted(names):
+        releases = released_by_tag[tag]
+        publications = publications_by_tag[tag]
+        if len(releases) != 1 or len(publications) != 1:
+            return _result(INVALID, "COMPLETE_RELEASE_UNIVERSE_MISMATCH")
+        released = releases[0]
+        publication = publications[0]
+        tag_observation = tags[tag]
+        github_release = github_releases[tag]
+        released_result = validate_released_manifest(
+            released,
+            public_tag=tag,
+            tag_commit=str(tag_observation["commit"]),
+            tag_tree=str(tag_observation["tree"]),
+            certified_tree=str(released["anchor_tree"]),
+        )
+        if released_result["status"] != PASS:
+            return released_result
+        publication_result = validate_publication_evidence(
+            publication,
+            released,
+            tag_commit=str(tag_observation["commit"]),
+            tag_tree=str(tag_observation["tree"]),
+        )
+        if publication_result["status"] != PASS:
+            return publication_result
+        if publication["github_release_id"] != github_release["id"]:
+            return _result(INVALID, "GITHUB_RELEASE_ID_MISMATCH")
+    return None
 
 
 def validate_bidirectional_consistency(*args: Any, **kwargs: Any) -> dict[str, Any]:

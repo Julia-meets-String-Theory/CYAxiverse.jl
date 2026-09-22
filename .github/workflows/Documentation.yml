@@ -106,6 +106,53 @@ jobs:
               encoding="utf-8",
           )
           PY
+          git fetch --no-tags origin 'refs/tags/v*:refs/tags/v*'
+          python3 - "$RUNNER_TEMP/canonical-tags.json" <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          import sys
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.release import is_canonical_public_tag
+          refs = subprocess.check_output(
+              ["git", "for-each-ref", "--format=%(refname)", "refs/tags/"],
+              text=True,
+          ).splitlines()
+          observations = []
+          for ref in refs:
+              tag = ref.removeprefix("refs/tags/")
+              if not is_canonical_public_tag(tag):
+                  continue
+              observations.append({
+                  "ref": ref,
+                  "tag": tag,
+                  "commit": subprocess.check_output(
+                      ["git", "rev-parse", f"{ref}^{{commit}}"], text=True
+                  ).strip(),
+                  "tree": subprocess.check_output(
+                      ["git", "rev-parse", f"{ref}^{{tree}}"], text=True
+                  ).strip(),
+              })
+          pathlib.Path(sys.argv[1]).write_text(
+              json.dumps(observations, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.id, .tag_name] | @tsv' > "$RUNNER_TEMP/github-releases.tsv"
+          python3 - "$RUNNER_TEMP/github-releases.tsv" "$RUNNER_TEMP/github-releases.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+          rows = []
+          for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+              release_id, tag = line.split("\t", 1)
+              rows.append({"id": int(release_id), "tag": tag})
+          pathlib.Path(sys.argv[2]).write_text(
+              json.dumps(rows, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
           python3 - "$RUNNER_TEMP/released-manifest.json" "$RUNNER_TEMP/publication-manifest.json" "$RUNNER_TEMP/direct-refs" <<'PY'
           import json
           import pathlib
@@ -158,6 +205,8 @@ jobs:
             --publication-manifest "$RUNNER_TEMP/publication-manifest.json" \
             --publication-evidence "$RUNNER_TEMP/publication-evidence" \
             --lifecycle-index "$RUNNER_TEMP/lifecycle-index.json" \
+            --canonical-tags "$RUNNER_TEMP/canonical-tags.json" \
+            --github-releases "$RUNNER_TEMP/github-releases.json" \
             --require-complete-lifecycle \
             --tag-ref "$GITHUB_REF" \
             --tag "$GITHUB_REF_NAME" \
