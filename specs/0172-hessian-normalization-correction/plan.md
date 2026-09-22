@@ -15,7 +15,8 @@ until CYAX-0172 G0 is satisfied and durable owner approval is recorded.
 | R-001 | Change only the Hessian prefactor in `scripts/phase_volume_detuning_scan.jl` from `2π²` to `4π²` / `(2π)^2` | Closed-form analytic matrix comparison |
 | R-002 | Preserve/update identity fixture | `4π² I₂` package test |
 | R-003 | Add one nontrivial direct-formula fixture | Independent matrix assembly, no `_hessian` reuse |
-| R-004 | Freeze both the typed-input and exact-decimal analytic roots | Compare 256-bit refinement to `k64` at refinement-justified tolerance; compare to `k_phi` only at absolute `1e-12` |
+| R-004 | Preserve A/Float64 typed-input and exact-decimal cross-check semantics | Compare 256-bit A refinement to `k64` at refinement-justified tolerance; compare A to `k_phi` only at absolute `1e-12` |
+| R-004B | Add separate exact/high-precision `p=2/5` mathematical fixture | Construct phase/bracket with BigFloat strings, refine at 256 bits with `1e-20`, require `abs(k_B-k_phi) <= 1e-20` |
 | R-005 | Reconstruct historical formula only inside test/evidence code | Verify factor-two scaling and eigenvalue-sign invariance |
 | R-006 | Replay the exact predeclared R-004 golden-ratio fixture on identical before/after inputs | Verify `[0.10,0.15]` bracket, refined `k_c`, type, side signatures and factor-two scaling |
 | R-007 | No change to potential/homotopy/claim fields | Exact diff + focused assertions |
@@ -48,7 +49,8 @@ is moved by this work.
 3. Strengthen focused tests with:
    - direct identity oracle;
    - nontrivial direct analytic matrix oracle;
-   - typed-input analytic `k64` oracle plus the separate exact-decimal golden-ratio `k_phi` cross-check;
+   - **B:** a distinct exact/high-precision `p=2/5` fixture constructed with `BigFloat("0.4")` (or exact `2//5` converted without Float64 round-trip), refined at 256 bits with `1e-20` stopping tolerance and requiring `abs(k_B-k_phi) <= 1e-20`;
+   - **A:** the preserved Float64 typed-input `k64` oracle plus the separate exact-decimal `k_phi` cross-check at `1e-12`;
    - historical-vs-corrected factor-two relation.
 4. Run the exact R-004 golden-ratio fixture as the sole predeclared R-006/G2
    replay witness on identical before/after inputs: `Q=[1,1]` as a 2×1 matrix,
@@ -62,6 +64,14 @@ is moved by this work.
 8. Return to Control Desk. Do not merge or close the Issue automatically.
 
 ## Numerical/oracle design
+
+The approved evidence model is **B+A**.
+
+- **B** proves mathematical correctness with an exact/high-precision `p=2/5`
+  fixture and `1e-20` golden-ratio acceptance.
+- **A** preserves the existing Float64 fixture as the sole historical/regression
+  replay witness, with typed-input root `k64` and the exact-decimal comparison
+  only at `1e-12`.
 
 The primary oracle is analytic, not finite-difference-based:
 
