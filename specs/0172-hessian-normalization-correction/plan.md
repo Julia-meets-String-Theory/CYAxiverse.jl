@@ -15,7 +15,7 @@ until CYAX-0172 G0 is satisfied and durable owner approval is recorded.
 | R-001 | Change only the Hessian prefactor in `scripts/phase_volume_detuning_scan.jl` from `2π²` to `4π²` / `(2π)^2` | Closed-form analytic matrix comparison |
 | R-002 | Preserve/update identity fixture | `4π² I₂` package test |
 | R-003 | Add one nontrivial direct-formula fixture | Independent matrix assembly, no `_hessian` reuse |
-| R-004 | Freeze analytic one-dimensional root | Compare refined result to `0.5*log10(phi)` |
+| R-004 | Freeze both the typed-input and exact-decimal analytic roots | Compare 256-bit refinement to `k64` at refinement-justified tolerance; compare to `k_phi` only at absolute `1e-12` |
 | R-005 | Reconstruct historical formula only inside test/evidence code | Verify factor-two scaling and eigenvalue-sign invariance |
 | R-006 | Replay the exact predeclared R-004 golden-ratio fixture on identical before/after inputs | Verify `[0.10,0.15]` bracket, refined `k_c`, type, side signatures and factor-two scaling |
 | R-007 | No change to potential/homotopy/claim fields | Exact diff + focused assertions |
@@ -48,7 +48,7 @@ is moved by this work.
 3. Strengthen focused tests with:
    - direct identity oracle;
    - nontrivial direct analytic matrix oracle;
-   - analytic golden-ratio `k_c` oracle;
+   - typed-input analytic `k64` oracle plus the separate exact-decimal golden-ratio `k_phi` cross-check;
    - historical-vs-corrected factor-two relation.
 4. Run the exact R-004 golden-ratio fixture as the sole predeclared R-006/G2
    replay witness on identical before/after inputs: `Q=[1,1]` as a 2×1 matrix,
@@ -69,14 +69,29 @@ The primary oracle is analytic, not finite-difference-based:
 H = (2π)^2 Q^T diag(A cos(2π(Qθ+δ))) Q.
 ```
 
-The one-dimensional zero-mode root is also analytic:
+The one-dimensional zero-mode root is analytic at both relevant input
+representations:
 
 ```math
-k_c = 0.5 log10((1+sqrt(5))/2).
+k_{64} = 0.5 log10(-2 cos(2 pi p64)),
+p64 = 3602879701896397 / 9007199254740992,
 ```
 
-This avoids a tolerance-sensitive finite-difference oracle and directly repairs
-the self-consistency weakness identified in the prior r5 handoff review.
+for the actual frozen Float64 replay witness, and
+
+```math
+k_{phi} = 0.5 log10((1+sqrt(5))/2)
+```
+
+for exact decimal `p=2/5`.
+
+The BigFloat bisection tolerance `1e-20` governs numerical refinement of the
+actual typed-input function. It does not assert that Float64(0.4) equals exact
+decimal 2/5. Agreement to the exact-decimal golden-ratio cross-check is judged
+only at absolute tolerance `1e-12`.
+
+This avoids both the old tolerance-sensitive finite-difference oracle and the
+r2 typed-input/oracle conflation.
 
 ## Data/API/schema impact
 
@@ -92,7 +107,7 @@ Focused first:
 
 - targeted phase/volume-detuning testset;
 - analytic matrix fixture;
-- analytic `k_c` fixture;
+- typed-input `k64` analytic fixture and separate exact-decimal `k_phi` cross-check;
 - historical/corrected scaling relation;
 - the exact R-006 golden-ratio replay witness, with frozen source identities,
   inputs, `[0.10,0.15]` bracket and analytic root.
