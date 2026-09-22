@@ -1,7 +1,7 @@
 # CYAX-0182 Stage-0 provenance-bound Handoff Review runtime
 
-Status: **draft, pending independent Spec Review**  
-Risk class: **S1 bounded infrastructure engineering**  
+Status: **draft, pending independent Spec Review**
+Risk class: **S1 bounded infrastructure engineering**
 Scientific Review: **NOT_APPLICABLE**. This slice changes review infrastructure only; it cannot change Julia behavior, scientific meaning, public APIs, or persisted scientific data.
 
 ## Authority and provenance
@@ -56,7 +56,7 @@ Authority roots, module/dependency plan, frame classes/IDs/order, and output con
 
 ### R-07 — Canonical manifest and reconstruction
 
-The Stage-0 manifest is serialized **only** with RFC 8785/JCS to UTF-8 JSON without extra whitespace or trailing newline. Its detached SHA-256 covers exact canonical bytes. Identity integers remain in the interoperable exact domain; changing canonicalization requires new reviewed format identity. It binds format/framing/ordering versions; task authority and currentness roots; compiler implementation, predicate table, reviewed inventory; source fragments and dependencies; every runtime input and its recovery information; every frame identity/linkage; validator and deterministic facts; and final runtime byte length/SHA-256. The manifest never becomes an authority source.
+The Stage-0 manifest shall be a JSON value that validates against a versioned, independently reviewed Stage-0 manifest schema whose exact identity is bound into implementation evidence. It is serialized **only** with RFC 8785/JCS to UTF-8 JSON without extra whitespace or trailing newline. Its detached SHA-256 covers exact canonical bytes. Ordinals, byte lengths, and other integer identity fields remain in the exact interoperable domain required by that reviewed schema; implementations may neither round nor reformat them. Changing canonicalization requires new reviewed format identity. It binds format/framing/ordering versions; task authority and currentness roots; compiler implementation, predicate table, reviewed inventory; source fragments and dependencies; every runtime input and its recovery information; every frame identity/linkage; validator and deterministic facts; and final runtime byte length/SHA-256. The manifest never becomes an authority source.
 
 A clean environment must reconstruct every bound input using only its manifest recovery information and immutable artifacts, reassemble byte-identical runtime output, and verify the final hash. A final hash comparison without clean reconstruction does not satisfy this requirement.
 
@@ -64,7 +64,7 @@ A clean environment must reconstruct every bound input using only its manifest r
 
 Compiler execution may emit local/stdout/test artifacts but shall make no durable repository, GitHub, exchange, or Review Desk write and shall launch no downstream agent. Focused verification must cover successful and adversarial frames, multibyte UTF-8 and fake delimiters, task-authority mismatches, pre/post-result state and currentness failures, all recovery modes/privacy rejection, RFC 8785 canonicalization, inventory dependency/context completeness, clean reconstruction, and absence of publication/launch. Existing exchange tests and validator suite must run. Every exchange write in the implementation branch must be absent from the pinned source file manifest and inside the create-new allowlist; all pre-existing bytes must remain identical.
 
-Historical replay is evidence only. Cases span `PASS`, `PASS_WITH_NONBLOCKING_FINDINGS`, `REQUEST_CHANGES`, `BLOCKED`, currentness-sensitive cases, and a supporting-review-evidence case if durable. Each case uses one fresh isolated non-authorizing comprehensive request and exact V0 state fixture shared byte-identically between baseline and modular arms. Historical production authority is comparison evidence, never asserted current. Record baseline/modular controlled runtime UTF-8 bytes and tokens, tokenizer/model/config/tool controls, opaque platform context separately, mandatory coverage, recovered evidence, findings, verdicts, and forensic explanations for differences.
+Historical replay is evidence only. Cases span `PASS`, `PASS_WITH_NONBLOCKING_FINDINGS`, `REQUEST_CHANGES`, `BLOCKED`, an exact-state/currentness-sensitive case, a case relying on separately produced Spec/Standards review evidence if available, and a distinct case relying on separately produced Scientific review evidence if available. Replay does not execute those reviewer functions. Each case uses one fresh isolated non-authorizing comprehensive request and exact V0 state fixture shared byte-identically between baseline and modular arms. Historical production authority is comparison evidence, never asserted current. Paired runs use fresh contexts, the same model family/version and reasoning effort where controllable, equivalent tool configuration, and frozen reviewer prompt/template and substantive candidate/evidence inputs. Bind exact baseline prompt, modular runtime, and manifest identities; record material environment differences and repeat pairs where feasible. Record baseline/modular controlled runtime UTF-8 bytes and tokens, tokenizer identity, observable platform context separately, opaque or uncontrolled context explicitly, mandatory coverage, recovered evidence, findings, verdicts, and forensic explanations for differences. Do not attribute a one-off model difference to prompt architecture without reconciliation.
 
 ## Gates and completion
 

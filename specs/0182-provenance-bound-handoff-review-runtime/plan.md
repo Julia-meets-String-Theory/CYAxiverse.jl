@@ -9,9 +9,9 @@ Status: draft with the exact `spec.md`; implementation is gated on independent S
 | P0 | Scope/authority | Live two-repository head/tree and Issue hashes; accepted r4 review/reconciliation; governing source blob/hash checks; pinned-source file manifest; absent spec and allowlist collisions | `PRECHECK_BOUND` or `BLOCKED_FOR_REBIND` before source edits |
 | S1 | R-01–R-08 | Exact public `spec.md`, `plan.md`, `tasks.md`; independent Spec Review record under adopted rubric | No blocking Spec finding on exact bytes |
 | I1 | R-02–R-04 | New private `prototypes/review_runtime_v0/rule-inventory-v1.json`, detached hash/identity, independent Standards Review | Exact inventory reviewed with no blocking finding before fragment-consuming assembler code |
-| I2 | R-01–R-07 | New private `cyax_exchange/review_runtime_v0/**`, standalone `tools/review_runtime_v0.py`; versioned compiler/fact and manifest identities | Deterministic non-mutating compile and clean reconstruction |
+| I2 | R-01–R-07 | New private `cyax_exchange/review_runtime_v0/**`, standalone `tools/review_runtime_v0.py`; versioned compiler/fact and manifest schema identities | Deterministic non-mutating compile and clean reconstruction; final manifest schema independently reviewed |
 | V3 | R-01–R-08 | New focused test/fixture paths; existing validator/test suite; CYAxiverse `git diff --check` and `scripts/agent_verify.py diff-check`; immutable-source proof | Exact commands, exit codes, counts, warnings, and attributable failures recorded |
-| E4 | R-08 | New private replay fixtures/reports with paired fresh non-authorizing request/state | Required outcome classes and controlled byte/token measurements, with reconciled differences |
+| E4 | R-08 | New private replay fixtures/reports with paired fresh non-authorizing request/state | All required outcome classes, distinct conditional Spec/Standards and Scientific supporting-evidence cases, frozen prompts/inputs and exact baseline prompt/runtime/manifest identities, controlled byte/token measurements, and reconciled differences |
 | R5 | All | One frozen two-repository candidate/evidence set; independent Spec and Standards reviews | No blocking finding; exact identities and residual limits handed back |
 
 ## Technical approach
@@ -30,8 +30,8 @@ The first slice consumes durable exact state bytes/fixtures. If correctness need
 | R-04 modules/inventory | Fixed Handoff-only module plan, dependency/context closure, excluded reviewer-role instructions, reviewed inventory hash equality | Frozen inventory bytes, independent review and exact compiler input identity |
 | R-05 recovery | Three closed modes, strict Base64, mutable/unrecoverable and privacy-rejected inputs | Recovery fixture hashes and clean recovery result |
 | R-06 frames | Emit/parse round trip; fake `@FRAME`/`@END`, Markdown/XML/JSON/role labels, multibyte UTF-8, CRLF, bad order/ID/ordinal/hash/length/terminator/trailing data | Runtime/frame hashes and focused test results |
-| R-07 manifest | RFC 8785 vectors, no newline, all identity fields, clean manifest-only reconstruction | Canonical manifest hash, compiler/validator identities, reconstructed runtime hash |
-| R-08 non-mutation/replay | Instrumented absence of writes/launch; existing suite; allowlist/source preservation; paired outcome-class replay | Commands, counts, warnings, replay controls and forensic differences |
+| R-07 manifest | Reviewed Stage-0 schema identity and validation, invalid-schema negatives, exact integer-domain checks, RFC 8785 vectors, no newline, all identity fields, clean manifest-only reconstruction | Exact schema/review and canonical manifest hashes, compiler/validator identities, reconstructed runtime hash |
+| R-08 non-mutation/replay | Instrumented absence of writes/launch; existing suite; allowlist/source preservation; paired outcome-class replay with separate Spec/Standards and Scientific supporting-evidence cases if available | Commands, counts, warnings, frozen reviewer prompt/template and inputs, exact baseline prompt/modular runtime/manifest identities, model/tool/environment controls, and forensic differences |
 
 ## Review and handback
 
