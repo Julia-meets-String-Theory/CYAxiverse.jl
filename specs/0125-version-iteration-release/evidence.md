@@ -4,10 +4,11 @@ This record belongs to a provisional premerge Gate A worktree candidate. It
 does not designate a historical release, adopt a DEV version, close an
 iteration, publish a release, or establish live GitHub protection. The exact
 normative amendment reviewed for I2 is commit
-`705031fddf943603922daf2779096138c2613ffa` (tree
-`f1d646ec46d48a209ee0e37a504863d5691c0994`). The reduced implementation is
-frozen at commit `90653bf6b5603617bf8ac16275f5e253f1a084d2` (tree
-`526c4151a1dd449104183911348878c8e820065b`). The feature branch
+`2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
+`7620f1c966cb37c5d2c7ed5c54778758ed2c12eb`). The latest correction
+implementation is frozen at commit
+`9314c05592e0a0659dc9e405e278f5b33da91a74` (tree
+`7fc158e1dfd743dcfc633003e2066b4739ea6615`). The feature branch
 uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
 execution base.
 
@@ -46,11 +47,11 @@ this reduced candidate.
 ## Current reduced-candidate checks
 
 The exact reviewed normative authority is commit
-`705031fddf943603922daf2779096138c2613ffa` (tree
-`f1d646ec46d48a209ee0e37a504863d5691c0994`). Independent SPEC and STANDARDS
+`2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
+`7620f1c966cb37c5d2c7ed5c54778758ed2c12eb`). Independent SPEC and STANDARDS
 reviews both returned `PASS` using `gpt-5.6-sol` at `high` reasoning. External
-approval record `reviews/n1-approval-v2.json`, SHA-256
-`3b46763a981d66092b1084d2d75792d64825b98f8bd3d6c74792a256c8004861`, binds
+approval record `reviews/n1-approval-v3.json`, SHA-256
+`cf0cce050dd39ec508a4528464b889a5a0784807d6ce844f3868a742aee6057c`, binds
 that exact five-file revision and both exact review records without changing
 the reviewed normative bytes.
 
@@ -60,7 +61,7 @@ candidate, including this record, still requires fresh exact-state review.
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 95 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 122 tests. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 6 tests. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'` | Passed: 3 tests. |
 | `python3 scripts/check_version_bump.py --base 20b3935ace0e01fcee2808681c56595e3afa7667 --head HEAD` | Passed: no package implementation or `Project.toml` change requires a version bump. |
@@ -70,6 +71,13 @@ candidate, including this record, still requires fresh exact-state review.
 | `python3 scripts/agent_verify.py package` | Failed at the unchanged `test/runtests.jl:1267` Hessian baseline: expected `4π²`, observed `2π²`. The same failure is already recorded below and `src`, `test`, `Project.toml`, `Manifest.toml`, and `bin/audit.jl` have no candidate delta. |
 | `julia --project=. bin/audit.jl` | Failed with the same two unchanged JET undefined-`i` reports in `reduced_models.jl` and `poly102_inflation.jl` recorded below. The audited source and audit script have no candidate delta. |
 | Remote CI for the exact implementation candidate | Pending until the candidate is committed and pushed; no result is claimed. |
+
+The superseded correction candidate `aa3795610ba67784fb9c4546be73aa4bbf325db1`
+(tree `e1546855d82ac2653ee52878327f481734ab52bf`) received independent SPEC and
+STANDARDS `REQUEST_CHANGES` verdicts. Those verdicts remain attached only to
+that immutable candidate. Commit `9314c05592e0a0659dc9e405e278f5b33da91a74`
+is the bounded implementation correction and has no review verdict. The exact
+successor containing this evidence update requires fresh independent review.
 
 ## Historical predecessor review history (non-authoritative)
 
