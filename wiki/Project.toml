@@ -8,6 +8,12 @@ HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
+
 [compat]
 julia = "1.12"
 Dates = "1"
