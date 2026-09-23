@@ -146,11 +146,19 @@ def verify(args: argparse.Namespace) -> int:
     if result.get("status") != PASS and result.get("status") != "terminal_consistent":
         return fail(f"immutable release/publication validation failed: {result}")
     try:
+        if args.anchor_observations is None or args.stable_publication_evidence is None:
+            return fail("independent stable-release authority observations are required")
+        anchor_observations = json.loads(
+            args.anchor_observations.read_text(encoding="utf-8")
+        )
+        stable_evidence_bytes = args.stable_publication_evidence.read_bytes()
         stable_tag = _verified_current_principal_tag(
             args.main_sha, main_version.canonical,
             lifecycle_records, canonical_tags, github_releases,
+            anchor_observations, stable_evidence_bytes,
         )
-    except (ManifestError, TypeError, ValueError) as error:
+    except (OSError, UnicodeError, json.JSONDecodeError, ManifestError,
+            TypeError, ValueError) as error:
         return fail(f"current stable-selector authority is invalid: {error}")
     is_current_principal = (
         released.get("release_line") == "principal"
@@ -188,8 +196,10 @@ def verify_stable_context(args: argparse.Namespace) -> int:
         args.lifecycle_index is None
         or args.canonical_tags is None
         or args.github_releases is None
+        or args.anchor_observations is None
+        or args.stable_publication_evidence is None
     ):
-        return fail("complete immutable release-universe observations are required")
+        return fail("complete immutable release and anchor observations are required")
     try:
         lifecycle_records = json.loads(
             args.lifecycle_index.read_text(encoding="utf-8")
@@ -200,9 +210,14 @@ def verify_stable_context(args: argparse.Namespace) -> int:
         github_releases = json.loads(
             args.github_releases.read_text(encoding="utf-8")
         )
+        anchor_observations = json.loads(
+            args.anchor_observations.read_text(encoding="utf-8")
+        )
+        stable_evidence_bytes = args.stable_publication_evidence.read_bytes()
         stable_tag = _verified_current_principal_tag(
             args.main_sha, version.canonical,
             lifecycle_records, canonical_tags, github_releases,
+            anchor_observations, stable_evidence_bytes,
         )
     except (OSError, UnicodeError, json.JSONDecodeError, ManifestError,
             TypeError, ValueError) as error:
@@ -224,11 +239,18 @@ def _verified_current_principal_tag(
     lifecycle_records: object,
     canonical_tags: object,
     github_releases: object,
+    anchor_observations: object,
+    stable_evidence_bytes: bytes,
 ) -> str | None:
     """Resolve stable only from a complete, terminal immutable release universe."""
 
-    if not isinstance(canonical_tags, list) or not isinstance(github_releases, list):
-        raise ValueError("tag and GitHub Release observations must be arrays")
+    if (
+        not isinstance(canonical_tags, list)
+        or not isinstance(github_releases, list)
+        or not isinstance(anchor_observations, list)
+        or not isinstance(stable_evidence_bytes, bytes)
+    ):
+        raise ValueError("release, tag and anchor observations must be exact arrays")
     graph = validate_lifecycle_graph(lifecycle_records)
     manifests = graph.manifests_by_ref
 
@@ -291,47 +313,39 @@ def _verified_current_principal_tag(
                 raise ValueError("duplicate publication public tag")
             publications_by_tag[tag] = dict(manifest)
 
+    anchors_by_tag: dict[str, dict[str, object]] = {}
+    expected_anchor_fields = {
+        "public_tag", "released_manifest_id", "anchor_ref", "tag_object",
+        "commit", "tree", "closure_timestamp_utc",
+    }
+    for value in anchor_observations:
+        if (
+            not isinstance(value, dict)
+            or set(value) != expected_anchor_fields
+        ):
+            raise ValueError("iteration anchor observation fields are invalid")
+        tag = value["public_tag"]
+        if (
+            not is_canonical_public_tag(tag)
+            or not _full_sha(value["tag_object"])
+            or not _full_sha(value["commit"])
+            or not _full_sha(value["tree"])
+            or not isinstance(value["anchor_ref"], str)
+            or not isinstance(value["closure_timestamp_utc"], str)
+            or tag in anchors_by_tag
+        ):
+            raise ValueError("iteration anchor observation is invalid or duplicated")
+        anchors_by_tag[tag] = value
+
     if (
         set(tags_by_name) != set(released_by_tag)
         or set(tags_by_name) != set(publications_by_tag)
         or set(tags_by_name) != set(releases_by_tag)
+        or set(tags_by_name) != set(anchors_by_tag)
     ):
-        raise ValueError("complete public tag/release/lifecycle universe disagrees")
-    if not released_by_tag:
-        return None
-
-    # One full-universe validation checks every release, publication, canonical
-    # tag and GitHub Release. The representative is selected from immutable
-    # manifests, not from a caller-supplied tag.
-    representative_tag = sorted(released_by_tag)[0]
-    released = released_by_tag[representative_tag]
-    publication = publications_by_tag[representative_tag]
-    tag_observation = tags_by_name[representative_tag]
-    github_release = releases_by_tag[representative_tag]
-    result = validate_release_consistency(
-        released,
-        publication,
-        public_tag=representative_tag,
-        tag_commit=str(tag_observation["commit"]),
-        tag_tree=str(tag_observation["tree"]),
-        certified_tree=str(released["anchor_tree"]),
-        github_release_id=github_release["id"],
-        publication_evidence_digest=str(
-            publication["publication_evidence_digest"]
-        ),
-        lifecycle_records=lifecycle_records,
-        anchor_tag_object=str(released["anchor_sha"]),
-        anchor_tree=str(released["anchor_tree"]),
-        anchor_closure_timestamp_utc=str(released["closure_timestamp_utc"]),
-        candidate_ref=str(released["candidate_ref"]),
-        candidate_commit=str(released["candidate_sha"]),
-        candidate_tree=str(released["candidate_tree"]),
-        canonical_tag_observations=canonical_tags,
-        github_release_observations=github_releases,
-        require_complete_namespace=True,
-    )
-    if result.get("status") != TERMINAL_CONSISTENT:
-        raise ValueError(f"release universe is not terminal and consistent: {result}")
+        raise ValueError(
+            "complete public tag/release/lifecycle/anchor universe disagrees"
+        )
 
     current = [
         tag
@@ -342,7 +356,75 @@ def _verified_current_principal_tag(
     ]
     if len(current) > 1:
         raise ValueError("multiple terminal principal releases match current main")
-    return current[0] if current else None
+    selected_tag = current[0] if current else None
+
+    if selected_tag is not None:
+        released = released_by_tag[selected_tag]
+        publication = publications_by_tag[selected_tag]
+        tag_observation = tags_by_name[selected_tag]
+        try:
+            parse_publication_evidence(
+                stable_evidence_bytes,
+                released,
+                public_tag=selected_tag,
+                tag_commit=str(tag_observation["commit"]),
+                tag_tree=str(tag_observation["tree"]),
+            )
+        except PublicationEvidenceError as error:
+            raise ValueError("current principal publication evidence is invalid") from error
+        stable_evidence_digest = hashlib.sha256(stable_evidence_bytes).hexdigest()
+        if stable_evidence_digest != publication["publication_evidence_digest"]:
+            raise ValueError("current principal publication evidence digest mismatch")
+
+    # Validate each released manifest against an independently observed
+    # annotated iteration anchor. The observations are generated from fetched
+    # Git objects, not copied from the released manifest fields.
+    for tag in sorted(released_by_tag):
+        released = released_by_tag[tag]
+        publication = publications_by_tag[tag]
+        tag_observation = tags_by_name[tag]
+        github_release = releases_by_tag[tag]
+        anchor = anchors_by_tag[tag]
+        if (
+            anchor["released_manifest_id"] != released["manifest_id"]
+            or anchor["anchor_ref"] != released["anchor_ref"]
+            or anchor["tag_object"] != released["anchor_sha"]
+            or anchor["tree"] != released["anchor_tree"]
+            or anchor["closure_timestamp_utc"]
+            != released["closure_timestamp_utc"]
+        ):
+            raise ValueError(f"released manifest {tag} does not match its observed anchor")
+        evidence_digest = (
+            stable_evidence_digest
+            if tag == selected_tag
+            else str(publication["publication_evidence_digest"])
+        )
+        result = validate_release_consistency(
+            released,
+            publication,
+            public_tag=tag,
+            tag_commit=str(tag_observation["commit"]),
+            tag_tree=str(tag_observation["tree"]),
+            certified_tree=str(anchor["tree"]),
+            github_release_id=github_release["id"],
+            publication_evidence_digest=evidence_digest,
+            lifecycle_records=lifecycle_records,
+            anchor_tag_object=str(anchor["tag_object"]),
+            anchor_tree=str(anchor["tree"]),
+            anchor_closure_timestamp_utc=str(anchor["closure_timestamp_utc"]),
+            candidate_ref=str(released["candidate_ref"]),
+            candidate_commit=str(released["candidate_sha"]),
+            candidate_tree=str(released["candidate_tree"]),
+            canonical_tag_observations=canonical_tags,
+            github_release_observations=github_releases,
+            require_complete_namespace=True,
+        )
+        if result.get("status") != TERMINAL_CONSISTENT:
+            raise ValueError(
+                f"release universe is not terminal and consistent for {tag}: {result}"
+            )
+
+    return selected_tag
 
 
 def parser() -> argparse.ArgumentParser:
@@ -353,6 +435,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--lifecycle-index", type=Path)
     result.add_argument("--canonical-tags", type=Path)
     result.add_argument("--github-releases", type=Path)
+    result.add_argument("--anchor-observations", type=Path)
+    result.add_argument("--stable-publication-evidence", type=Path)
     result.add_argument("--tag")
     result.add_argument("--tag-ref")
     result.add_argument("--tag-sha")

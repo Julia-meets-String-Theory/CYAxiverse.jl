@@ -186,6 +186,8 @@ def write_complete_context(
     lifecycle_path = root / "lifecycle.json"
     tags_path = root / "canonical-tags.json"
     github_releases_path = root / "github-releases.json"
+    anchor_observations_path = root / "anchor-observations.json"
+    stable_evidence_path = root / "stable-publication-evidence.txt"
     release_path.write_bytes(canonical_manifest_bytes(release))
     publication_path.write_bytes(canonical_manifest_bytes(publication_manifest))
     evidence_path.write_bytes(publication_evidence_bytes(release))
@@ -199,6 +201,19 @@ def write_complete_context(
         json.dumps(observations["github_releases"], sort_keys=True),
         encoding="utf-8",
     )
+    anchor_observations_path.write_text(
+        json.dumps([{
+            "public_tag": release["public_tag"],
+            "released_manifest_id": release["manifest_id"],
+            "anchor_ref": release["anchor_ref"],
+            "tag_object": release["anchor_sha"],
+            "commit": "e" * 40,
+            "tree": release["anchor_tree"],
+            "closure_timestamp_utc": release["closure_timestamp_utc"],
+        }], sort_keys=True),
+        encoding="utf-8",
+    )
+    stable_evidence_path.write_bytes(publication_evidence_bytes(release))
     complete_args = [
         "--manifest", str(release_path),
         "--publication-manifest", str(publication_path),
@@ -207,6 +222,8 @@ def write_complete_context(
         "--lifecycle-index", str(lifecycle_path),
         "--canonical-tags", str(tags_path),
         "--github-releases", str(github_releases_path),
+        "--anchor-observations", str(anchor_observations_path),
+        "--stable-publication-evidence", str(stable_evidence_path),
         "--anchor-tag-object", str(release["anchor_sha"]),
         "--anchor-tree", str(release["anchor_tree"]),
         "--anchor-closure-timestamp-utc",
@@ -223,18 +240,40 @@ def write_stable_selector_context(
     lifecycle_records: object,
     canonical_tags: object,
     github_releases: object,
+    anchor_observations: object | None = None,
+    stable_evidence: bytes = b"",
 ) -> list[str]:
     lifecycle_path = root / "stable-lifecycle.json"
     tags_path = root / "stable-tags.json"
     releases_path = root / "stable-releases.json"
+    anchors_path = root / "stable-anchors.json"
+    evidence_path = root / "stable-publication-evidence.txt"
     lifecycle_path.write_text(json.dumps(lifecycle_records, sort_keys=True), encoding="utf-8")
     tags_path.write_text(json.dumps(canonical_tags, sort_keys=True), encoding="utf-8")
     releases_path.write_text(json.dumps(github_releases, sort_keys=True), encoding="utf-8")
+    anchors_path.write_text(
+        json.dumps([] if anchor_observations is None else anchor_observations, sort_keys=True),
+        encoding="utf-8",
+    )
+    evidence_path.write_bytes(stable_evidence)
     return [
         "--lifecycle-index", str(lifecycle_path),
         "--canonical-tags", str(tags_path),
         "--github-releases", str(releases_path),
+        "--anchor-observations", str(anchors_path),
+        "--stable-publication-evidence", str(evidence_path),
     ]
+
+
+def stable_authority_args(complete_args: list[str]) -> list[str]:
+    arguments: list[str] = []
+    for name in (
+        "--lifecycle-index", "--canonical-tags", "--github-releases",
+        "--anchor-observations", "--stable-publication-evidence",
+    ):
+        index = complete_args.index(name)
+        arguments.extend(complete_args[index:index + 2])
+    return arguments
 
 
 class DocumentationRoutingTests(unittest.TestCase):
@@ -258,6 +297,15 @@ class DocumentationRoutingTests(unittest.TestCase):
         self.assertIn("stable-lifecycle-index.json", workflow)
         self.assertIn("stable-canonical-tags.json", workflow)
         self.assertIn("stable-github-releases.json", workflow)
+        self.assertEqual(workflow.count("python3 docs/prepare_release_authority.py"), 2)
+        self.assertIn("stable-anchor-observations.json", workflow)
+        self.assertIn("stable-publication-evidence", workflow)
+        self.assertIn("--anchor-observations", workflow)
+        self.assertIn("--stable-publication-evidence", workflow)
+        self.assertLess(
+            workflow.index("Prepare independent stable-selector authority"),
+            workflow.index("Verify immutable release context for tag documentation"),
+        )
         self.assertIn(
             '--lifecycle-index "$RUNNER_TEMP/stable-lifecycle-index.json"',
             workflow,
@@ -340,10 +388,7 @@ class DocumentationRoutingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             release, publication, complete_args = write_complete_context(root)
-            authority_args = []
-            for name in ("--lifecycle-index", "--canonical-tags", "--github-releases"):
-                index = complete_args.index(name)
-                authority_args.extend(complete_args[index:index + 2])
+            authority_args = stable_authority_args(complete_args)
             env_path = root / "github.env"
             verified = subprocess.run(
                 [
@@ -390,7 +435,70 @@ class DocumentationRoutingTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(verified.returncode, 2)
-            self.assertIn("complete public tag/release/lifecycle universe disagrees", verified.stderr)
+            self.assertIn("complete public tag/release/lifecycle/anchor universe disagrees", verified.stderr)
+
+    def test_stable_only_rejects_missing_or_mismatched_observed_anchor(self) -> None:
+        for mutation in ("missing", "mismatched"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                release, _publication, complete_args = write_complete_context(root)
+                anchors_path = Path(
+                    complete_args[complete_args.index("--anchor-observations") + 1]
+                )
+                if mutation == "missing":
+                    anchors_path.write_text("[]", encoding="utf-8")
+                else:
+                    anchors = json.loads(anchors_path.read_text(encoding="utf-8"))
+                    anchors[0]["tree"] = "f" * 40
+                    anchors_path.write_text(json.dumps(anchors), encoding="utf-8")
+                env_path = root / "github.env"
+                verified = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "docs/verify_release_context.py"),
+                        "--stable-only",
+                        "--main-sha", str(release["final_release_sha"]),
+                        "--main-version", str(release["final_version"]),
+                        *stable_authority_args(complete_args),
+                        "--github-env", str(env_path),
+                    ],
+                    cwd=ROOT,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(verified.returncode, 2)
+                self.assertFalse(env_path.exists())
+
+    def test_stable_only_rejects_missing_or_mismatched_publication_asset(self) -> None:
+        for mutation in ("missing", "mismatched"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                release, _publication, complete_args = write_complete_context(root)
+                evidence_path = Path(
+                    complete_args[complete_args.index("--stable-publication-evidence") + 1]
+                )
+                evidence_path.write_bytes(
+                    b"" if mutation == "missing" else b'{"public_tag":"v1.2.3"}'
+                )
+                env_path = root / "github.env"
+                verified = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "docs/verify_release_context.py"),
+                        "--stable-only",
+                        "--main-sha", str(release["final_release_sha"]),
+                        "--main-version", str(release["final_version"]),
+                        *stable_authority_args(complete_args),
+                        "--github-env", str(env_path),
+                    ],
+                    cwd=ROOT,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(verified.returncode, 2)
+                self.assertFalse(env_path.exists())
 
     def test_manifest_pair_is_terminal_only_when_both_bind(self) -> None:
         release, publication_manifest, observations = complete_fixture()
@@ -617,6 +725,78 @@ class DocumentationRoutingTests(unittest.TestCase):
             self.assertIn("CYAX_DOCS_STABLE_TAG=\n", exported)
 
     @unittest.skipUnless(shutil.which("julia"), "Julia is required for Documenter route checks")
+    def test_maintenance_dispatch_remains_on_its_versioned_route(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release, publication, complete_args = write_complete_context(
+                root, maintenance=True
+            )
+            env_path = root / "github.env"
+            tag_ref = f"refs/tags/{publication['public_tag']}"
+            verified = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "docs/verify_release_context.py"),
+                    *complete_args,
+                    "--tag-ref", tag_ref,
+                    "--tag", str(publication["public_tag"]),
+                    "--tag-sha", str(publication["tag_commit"]),
+                    "--tag-tree", str(publication["tag_tree"]),
+                    "--tag-version", str(release["final_version"]),
+                    "--main-sha", "d" * 40,
+                    "--main-version", "2.1.0",
+                    "--github-release-id", str(publication["github_release_id"]),
+                    "--github-env", str(env_path),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            doc_context = json.loads(verified.stdout)
+            self.assertEqual(doc_context["CYAX_DOCS_STABLE"], "false")
+            self.assertEqual(doc_context["CYAX_DOCS_STABLE_TAG"], "")
+
+            environment = os.environ.copy()
+            environment.update(doc_context)
+            environment.update({
+                "CYAX_DOCS_ROUTE_ONLY": "true",
+                "CYAX_DOCS_REF": tag_ref,
+                "CYAX_DOCS_TAG_REF": tag_ref,
+                "GITHUB_EVENT_NAME": "workflow_dispatch",
+                "GITHUB_REF": "refs/heads/vmm",
+            })
+            route = subprocess.run(
+                ["julia", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(route.returncode, 0, route.stderr)
+            self.assertEqual(route.stdout.strip(), "versioned")
+
+            environment["CYAX_DOCS_ROUTE_ONLY"] = "documenter"
+            environment.update({
+                "GITHUB_REPOSITORY": "Julia-meets-String-Theory/CYAxiverse.jl",
+                "GITHUB_ACTOR": "fixture-owner",
+                "GITHUB_TOKEN": "synthetic-token-for-routing-only",
+            })
+            selected = subprocess.run(
+                ["julia", "--project=docs/", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(selected.stdout.strip().splitlines()[-1], "v1.2.3")
+
+    @unittest.skipUnless(shutil.which("julia"), "Julia is required for Documenter route checks")
     def test_vmm_before_first_release_does_not_fabricate_stable_selector(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -706,14 +886,7 @@ class DocumentationRoutingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             release, publication, complete_args = write_complete_context(root)
-            authority_args = [
-                complete_args[complete_args.index("--lifecycle-index")],
-                complete_args[complete_args.index("--lifecycle-index") + 1],
-                complete_args[complete_args.index("--canonical-tags")],
-                complete_args[complete_args.index("--canonical-tags") + 1],
-                complete_args[complete_args.index("--github-releases")],
-                complete_args[complete_args.index("--github-releases") + 1],
-            ]
+            authority_args = stable_authority_args(complete_args)
             env_path = root / "github.env"
             verified = subprocess.run(
                 [

@@ -13,6 +13,7 @@ on:
       - 'docs/src/**'
       - 'docs/make.jl'
       - 'docs/verify_release_context.py'
+      - 'docs/prepare_release_authority.py'
       - 'docs/Project.toml'
       - 'src/**'
       - 'ext/**'
@@ -23,6 +24,7 @@ on:
       - 'docs/src/**'
       - 'docs/make.jl'
       - 'docs/verify_release_context.py'
+      - 'docs/prepare_release_authority.py'
       - 'docs/Project.toml'
       - 'src/**'
       - 'ext/**'
@@ -277,6 +279,21 @@ jobs:
             echo "immutable publication evidence asset is unavailable" >&2
             exit 2
           fi
+      - name: Prepare independent stable-selector authority
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 docs/prepare_release_authority.py \
+            --repository "$GITHUB_WORKSPACE" \
+            --github-repository "$GITHUB_REPOSITORY" \
+            --lifecycle-index "$RUNNER_TEMP/lifecycle-index.json" \
+            --canonical-tags "$RUNNER_TEMP/canonical-tags.json" \
+            --github-releases "$RUNNER_TEMP/github-releases.json" \
+            --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --anchor-observations "$RUNNER_TEMP/anchor-observations.json" \
+            --stable-evidence "$RUNNER_TEMP/stable-publication-evidence"
       - name: Verify immutable release context for tag documentation
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -289,6 +306,8 @@ jobs:
             --lifecycle-index "$RUNNER_TEMP/lifecycle-index.json" \
             --canonical-tags "$RUNNER_TEMP/canonical-tags.json" \
             --github-releases "$RUNNER_TEMP/github-releases.json" \
+            --anchor-observations "$RUNNER_TEMP/anchor-observations.json" \
+            --stable-publication-evidence "$RUNNER_TEMP/stable-publication-evidence" \
             --require-complete-lifecycle \
             --tag-ref "$CYAX_DOCS_TAG_REF" \
             --tag "$CYAX_DOCS_TAG" \
@@ -408,6 +427,16 @@ jobs:
               encoding="utf-8",
           )
           PY
+          python3 docs/prepare_release_authority.py \
+            --repository "$GITHUB_WORKSPACE" \
+            --github-repository "$GITHUB_REPOSITORY" \
+            --lifecycle-index "$RUNNER_TEMP/stable-lifecycle-index.json" \
+            --canonical-tags "$RUNNER_TEMP/stable-canonical-tags.json" \
+            --github-releases "$RUNNER_TEMP/stable-github-releases.json" \
+            --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --anchor-observations "$RUNNER_TEMP/stable-anchor-observations.json" \
+            --stable-evidence "$RUNNER_TEMP/stable-publication-evidence"
           python3 docs/verify_release_context.py \
             --stable-only \
             --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
@@ -415,6 +444,8 @@ jobs:
             --lifecycle-index "$RUNNER_TEMP/stable-lifecycle-index.json" \
             --canonical-tags "$RUNNER_TEMP/stable-canonical-tags.json" \
             --github-releases "$RUNNER_TEMP/stable-github-releases.json" \
+            --anchor-observations "$RUNNER_TEMP/stable-anchor-observations.json" \
+            --stable-publication-evidence "$RUNNER_TEMP/stable-publication-evidence" \
             --github-env "$GITHUB_ENV"
       - name: Install dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
