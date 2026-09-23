@@ -13,10 +13,15 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
+from unittest.mock import patch
 
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(ROOT / "docs"))
 
 import test_version_lifecycle_manifests as manifest_tests  # noqa: E402
+import prepare_release_authority as release_authority  # noqa: E402
 from version_lifecycle.manifests import (  # noqa: E402
     canonical_manifest_bytes,
     lifecycle_ref_for_manifest,
@@ -26,9 +31,12 @@ from version_lifecycle.publication_evidence import (  # noqa: E402
     canonical_publication_evidence_bytes,
     publication_evidence_for_tag,
 )
-from version_lifecycle.release import TERMINAL_CONSISTENT, validate_release_consistency  # noqa: E402
+from version_lifecycle.release import (  # noqa: E402
+    LEGACY_PUBLIC_TAG,
+    TERMINAL_CONSISTENT,
+    validate_release_consistency,
+)
 
-ROOT = Path(__file__).resolve().parents[1]
 SHA = "a" * 40
 MAIN_SHA = "c" * 40
 TREE = "b" * 40
@@ -276,6 +284,40 @@ def stable_authority_args(complete_args: list[str]) -> list[str]:
     return arguments
 
 
+def write_authority_preparer_args(
+    root: Path,
+    release: dict[str, object],
+    observations: dict[str, object],
+    github_releases: list[dict[str, object]],
+    canonical_tags: list[dict[str, object]] | None = None,
+) -> Namespace:
+    lifecycle_path = root / "preparer-lifecycle.json"
+    tags_path = root / "preparer-tags.json"
+    releases_path = root / "preparer-releases.json"
+    lifecycle_path.write_text(
+        json.dumps(observations["records"], sort_keys=True), encoding="utf-8"
+    )
+    tags_path.write_text(
+        json.dumps(
+            observations["canonical_tags"] if canonical_tags is None else canonical_tags,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    releases_path.write_text(json.dumps(github_releases, sort_keys=True), encoding="utf-8")
+    return Namespace(
+        repository=root,
+        github_repository="Julia-meets-String-Theory/CYAxiverse.jl",
+        lifecycle_index=lifecycle_path,
+        canonical_tags=tags_path,
+        github_releases=releases_path,
+        main_sha=str(release["final_release_sha"]),
+        main_version=str(release["final_version"]),
+        anchor_observations=root / "preparer-anchors.json",
+        stable_evidence=root / "preparer-stable-evidence.json",
+    )
+
+
 class DocumentationRoutingTests(unittest.TestCase):
     def test_workflow_uses_only_immutable_manifest_authority(self) -> None:
         workflow = (ROOT / ".github/workflows/Documentation.yml").read_text(
@@ -324,6 +366,105 @@ class DocumentationRoutingTests(unittest.TestCase):
         self.assertNotIn(
             'git show "$GITHUB_REF:$PUBLICATION_EVIDENCE_REF"', workflow
         )
+
+    def test_preparer_excludes_only_exact_legacy_release_from_matching(self) -> None:
+        release, publication, observations = complete_fixture()
+        evidence = publication_evidence_bytes(release)
+        canonical_github_release = dict(observations["github_releases"][0])
+        legacy_github_release = {
+            "id": int(canonical_github_release["id"]) + 1,
+            "tag": LEGACY_PUBLIC_TAG,
+            "url": "https://github.com/example/project/releases/tag/legacy",
+        }
+        release_detail = {
+            "id": publication["github_release_id"],
+            "tag_name": publication["public_tag"],
+            "html_url": publication["github_release_url"],
+            "assets": [{
+                "id": 77,
+                "name": publication["publication_evidence_ref"],
+            }],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = write_authority_preparer_args(
+                root,
+                release,
+                observations,
+                [legacy_github_release, canonical_github_release],
+            )
+            with (
+                patch.object(
+                    release_authority,
+                    "_git",
+                    side_effect=[str(release["anchor_sha"]), "f" * 40, str(release["anchor_tree"])],
+                ),
+                patch.object(
+                    release_authority,
+                    "_annotated_anchor_payload",
+                    return_value=str(release["closure_timestamp_utc"]),
+                ),
+                patch.object(release_authority.subprocess, "run") as fetch,
+                patch.object(
+                    release_authority.subprocess,
+                    "check_output",
+                    side_effect=[json.dumps(release_detail).encode(), evidence],
+                ),
+            ):
+                release_authority.prepare(args)
+            fetch.assert_called_once()
+            self.assertEqual(args.stable_evidence.read_bytes(), evidence)
+            self.assertEqual(
+                json.loads(args.anchor_observations.read_text(encoding="utf-8"))[0]["public_tag"],
+                release["public_tag"],
+            )
+
+    def test_preparer_rejects_other_malformed_and_duplicate_github_releases(self) -> None:
+        release, _publication, observations = complete_fixture()
+        canonical_github_release = dict(observations["github_releases"][0])
+        legacy_github_release = {
+            "id": int(canonical_github_release["id"]) + 1,
+            "tag": LEGACY_PUBLIC_TAG,
+            "url": "https://github.com/example/project/releases/tag/legacy",
+        }
+        bad_tag_release = {
+            "id": int(canonical_github_release["id"]) + 2,
+            "tag": LEGACY_PUBLIC_TAG + "-malformed",
+            "url": "https://github.com/example/project/releases/tag/malformed",
+        }
+        for rows, message in (
+            ([legacy_github_release, canonical_github_release, bad_tag_release], "not canonical"),
+            ([legacy_github_release, canonical_github_release, legacy_github_release], "duplicate"),
+        ):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary:
+                args = write_authority_preparer_args(
+                    Path(temporary), release, observations, rows
+                )
+                with self.assertRaisesRegex(ValueError, message):
+                    release_authority.prepare(args)
+                self.assertFalse(args.anchor_observations.exists())
+                self.assertFalse(args.stable_evidence.exists())
+
+    def test_preparer_does_not_admit_legacy_tag_as_canonical_git_tag(self) -> None:
+        release, _publication, observations = complete_fixture()
+        canonical_tags = list(observations["canonical_tags"])
+        canonical_tags.append({
+            "ref": f"refs/tags/{LEGACY_PUBLIC_TAG}",
+            "tag": LEGACY_PUBLIC_TAG,
+            "commit": "f" * 40,
+            "tree": "e" * 40,
+        })
+        with tempfile.TemporaryDirectory() as temporary:
+            args = write_authority_preparer_args(
+                Path(temporary),
+                release,
+                observations,
+                list(observations["github_releases"]),
+                canonical_tags=canonical_tags,
+            )
+            with self.assertRaisesRegex(ValueError, "canonical tag observation"):
+                release_authority.prepare(args)
+            self.assertFalse(args.anchor_observations.exists())
 
     def test_development_verification_only_runs_for_vmm_push(self) -> None:
         workflow = (ROOT / ".github/workflows/Documentation.yml").read_text(

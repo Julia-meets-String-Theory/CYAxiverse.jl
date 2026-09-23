@@ -25,7 +25,10 @@ from version_lifecycle.publication_evidence import (  # noqa: E402
     PublicationEvidenceError,
     parse_publication_evidence,
 )
-from version_lifecycle.release import is_canonical_public_tag  # noqa: E402
+from version_lifecycle.release import (  # noqa: E402
+    LEGACY_PUBLIC_TAG,
+    is_canonical_public_tag,
+)
 from version_lifecycle.static import (  # noqa: E402
     StaticValidationError,
     _annotated_anchor_payload,
@@ -37,6 +40,68 @@ def _git(repository: Path, *arguments: str) -> str:
     return subprocess.check_output(
         ["git", *arguments], cwd=repository, text=True
     ).strip()
+
+
+def _canonical_tag_index(observations: object) -> dict[str, dict[str, Any]]:
+    if not isinstance(observations, list):
+        raise ValueError("canonical tag observations must be an array")
+    result: dict[str, dict[str, Any]] = {}
+    for value in observations:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"ref", "tag", "commit", "tree"}
+            or not is_canonical_public_tag(value.get("tag"))
+            or not isinstance(value.get("commit"), str)
+            or not FULL_SHA1.fullmatch(value["commit"])
+            or not isinstance(value.get("tree"), str)
+            or not FULL_SHA1.fullmatch(value["tree"])
+        ):
+            raise ValueError("canonical tag observation is invalid")
+        tag = value["tag"]
+        if value["ref"] != f"refs/tags/{tag}" or tag in result:
+            raise ValueError("canonical tag observation is inconsistent or duplicated")
+        result[tag] = value
+    return result
+
+
+def _canonical_github_release_index(
+    observations: object,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(observations, list):
+        raise ValueError("GitHub Release observations must be an array")
+    result: dict[str, dict[str, Any]] = {}
+    seen_tags: set[str] = set()
+    seen_ids: set[int] = set()
+    for value in observations:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"id", "tag", "url"}
+        ):
+            raise ValueError("GitHub Release observation fields are invalid")
+        tag = value["tag"]
+        release_id = value["id"]
+        release_url = value["url"]
+        if (
+            not isinstance(tag, str)
+            or tag in seen_tags
+            or isinstance(release_id, bool)
+            or not isinstance(release_id, int)
+            or release_id <= 0
+            or release_id in seen_ids
+            or not isinstance(release_url, str)
+            or not release_url
+        ):
+            raise ValueError("duplicate or invalid GitHub Release observation")
+        seen_tags.add(tag)
+        seen_ids.add(release_id)
+        if tag == LEGACY_PUBLIC_TAG:
+            # GitHub still advertises the grandfathered legacy release. It is
+            # not a canonical public tag and must not enter lifecycle matching.
+            continue
+        if not is_canonical_public_tag(tag):
+            raise ValueError("GitHub Release tag is not canonical")
+        result[tag] = value
+    return result
 
 
 def _stable_release(
@@ -82,41 +147,8 @@ def prepare(args: argparse.Namespace) -> None:
     main_version = parse_package_version(args.main_version)
     if main_version.is_dev:
         raise ValueError("principal main must not carry a DEV version")
-    if not isinstance(canonical_tags, list) or not isinstance(github_releases, list):
-        raise ValueError("canonical tag and GitHub Release observations must be arrays")
-
-    tag_observations = {}
-    for value in canonical_tags:
-        if (
-            not isinstance(value, dict)
-            or set(value) != {"ref", "tag", "commit", "tree"}
-            or not is_canonical_public_tag(value.get("tag"))
-            or not FULL_SHA1.fullmatch(value.get("commit", ""))
-            or not FULL_SHA1.fullmatch(value.get("tree", ""))
-        ):
-            raise ValueError("canonical tag observation is invalid")
-        if value.get("ref") != f"refs/tags/{value['tag']}":
-            raise ValueError("canonical tag ref does not match its tag")
-        if value["tag"] in tag_observations:
-            raise ValueError("duplicate canonical tag observation")
-        tag_observations[value["tag"]] = value
-
-    releases_by_tag = {}
-    for value in github_releases:
-        if (
-            not isinstance(value, dict)
-            or set(value) != {"id", "tag", "url"}
-            or isinstance(value.get("id"), bool)
-            or not isinstance(value.get("id"), int)
-            or value["id"] <= 0
-            or not is_canonical_public_tag(value.get("tag"))
-            or not isinstance(value.get("url"), str)
-            or not value["url"]
-        ):
-            raise ValueError("GitHub Release observation fields are invalid")
-        if value["tag"] in releases_by_tag:
-            raise ValueError("duplicate GitHub Release observation")
-        releases_by_tag[value["tag"]] = value
+    tag_observations = _canonical_tag_index(canonical_tags)
+    releases_by_tag = _canonical_github_release_index(github_releases)
 
     anchor_observations = []
     released_manifests = sorted(
