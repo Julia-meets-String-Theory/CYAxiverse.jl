@@ -124,10 +124,11 @@ def verify(args: argparse.Namespace) -> int:
     )
     if result.get("status") != PASS and result.get("status") != "terminal_consistent":
         return fail(f"immutable release/publication validation failed: {result}")
-    if released.get("main_at_release_sha") != args.main_sha:
-        return fail("released manifest does not bind current principal main SHA")
-    if released.get("main_at_release_version") != args.main_version:
-        return fail("released manifest does not bind current principal main version")
+    if released.get("release_line") == "principal":
+        if released.get("main_at_release_sha") != args.main_sha:
+            return fail("released manifest does not bind current principal main SHA")
+        if released.get("main_at_release_version") != args.main_version:
+            return fail("released manifest does not bind current principal main version")
     values = {
         "CYAX_DOCS_MANIFEST_STATUS": "verified",
         "CYAX_DOCS_RELEASE_LINE": str(released["release_line"]),

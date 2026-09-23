@@ -966,7 +966,8 @@ def validate_lifecycle_graph(
 
     # Singleton and active-state constraints are graph properties, not ref-name checks.
     singleton: dict[tuple[str, str], str] = {}
-    active_reservations: dict[str, str] = {}
+    active_reservations_by_line: dict[str, str] = {}
+    active_reservations_by_version: dict[str, tuple[str, str]] = {}
     for ref, manifest in by_ref.items():
         kind = str(manifest["manifest_type"])
         version = manifest.get("final_version")
@@ -977,17 +978,30 @@ def validate_lifecycle_graph(
             if key in singleton:
                 raise ManifestError("duplicate singleton lifecycle identity")
             singleton[key] = ref
-        if kind in {"reservation-prepared", "reservation-opened"} and not any(
-            by_ref[child]["manifest_type"] in _ACTIVE_TYPES
+        child_types = {
+            str(by_ref[child]["manifest_type"])
             for child in children[ref]
-        ) and not any(
-            by_ref[child]["manifest_type"] in {"reservation-aborted", "reservation-consumed"}
-            for child in children[ref]
-        ):
-            key = str(manifest["owner_line"])
-            if key in active_reservations:
+        }
+        prepared_is_active = (
+            kind == "reservation-prepared"
+            and not child_types.intersection({
+                "reservation-opened", "reservation-aborted", "reservation-consumed"
+            })
+        )
+        opened_is_active = (
+            kind == "reservation-opened"
+            and "reservation-consumed" not in child_types
+        )
+        if prepared_is_active or opened_is_active:
+            owner_line = str(manifest["owner_line"])
+            final_version = str(manifest["final_version"])
+            if owner_line in active_reservations_by_line:
                 raise ManifestError("owner line has multiple active reservations")
-            active_reservations[key] = ref
+            active_reservations_by_line[owner_line] = ref
+            existing = active_reservations_by_version.get(final_version)
+            if existing is not None and existing[0] != owner_line:
+                raise ManifestError("final version has multiple active owner lines")
+            active_reservations_by_version[final_version] = (owner_line, ref)
     pre_entry_aborted = {
         predecessor
         for manifest in by_ref.values()
@@ -1067,6 +1081,11 @@ def _validate_transition_identity(
         same("final_version")
     if current_kind == "candidate-opened":
         same("final_version")
+        if (
+            previous_kind == "version-claimed"
+            and previous.get("owner_line") != current.get("release_line")
+        ):
+            raise ManifestError("candidate-opened changes claim owner line")
     if current_kind == "candidate-withdrawn":
         for field in ("candidate_id", "candidate_ref", "final_version", "release_line"):
             same(field)
@@ -1562,6 +1581,40 @@ class CreateOnlyLifecycleWriter:
             if value.get("manifest_id") == manifest_identity:
                 raise ManifestConflict("CREATE_ONCE_CONFLICT")
 
+    @staticmethod
+    def _authorization_scope(
+        manifest: Mapping[str, Any],
+        records: Mapping[str, Mapping[str, Any]],
+    ) -> tuple[str, str, str]:
+        transaction_id = manifest.get("transaction_id")
+        owner_line = manifest.get("owner_line", manifest.get("release_line"))
+        final_version = manifest.get("final_version")
+        if not all(isinstance(value, str) for value in (
+            transaction_id, owner_line, final_version
+        )):
+            predecessors = manifest.get("predecessor_refs")
+            if not isinstance(predecessors, list) or len(predecessors) != 1:
+                raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+            predecessor_record = records.get(predecessors[0])
+            if predecessor_record is None:
+                raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+            predecessor = predecessor_record.get("manifest")
+            if not isinstance(predecessor, Mapping):
+                raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+            if not isinstance(transaction_id, str):
+                transaction_id = predecessor.get("transaction_id")
+            if not isinstance(owner_line, str):
+                owner_line = predecessor.get(
+                    "owner_line", predecessor.get("release_line")
+                )
+            if not isinstance(final_version, str):
+                final_version = predecessor.get("final_version")
+        if not all(isinstance(value, str) for value in (
+            transaction_id, owner_line, final_version
+        )):
+            raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+        return transaction_id, owner_line, final_version
+
     def create(
         self,
         manifest: Mapping[str, Any],
@@ -1579,10 +1632,11 @@ class CreateOnlyLifecycleWriter:
         if set(authorization_context) != required_context:
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
 
-        def verify_authorization() -> None:
+        def verify_authorization(scope: tuple[str, str, str]) -> None:
+            transaction_id, owner_line, final_version = scope
             reference = self.authorization_reference(
                 authorization_context["action"], ref,
-                authorization_context["final_version"],
+                final_version,
             )
             try:
                 authorization_now = self.authorization_clock()
@@ -1594,10 +1648,10 @@ class CreateOnlyLifecycleWriter:
                 self.owner_authorization_authority,
                 reference,
                 repository=self.repository_identity,
-                transaction_id=authorization_context["transaction_id"],
+                transaction_id=transaction_id,
                 action=authorization_context["action"],
-                owner_line=authorization_context["owner_line"],
-                final_version=authorization_context["final_version"],
+                owner_line=owner_line,
+                final_version=final_version,
                 target_ref=ref,
                 now_utc=authorization_now,
             )
@@ -1612,8 +1666,13 @@ class CreateOnlyLifecycleWriter:
         snapshot = self.expected_snapshot
         with self._governed_boundary():
             observed_snapshot, fingerprint = self._snapshot()
-            verify_authorization()
             records = self._complete_graph_records()
+            authorization_scope = self._authorization_scope(checked, records)
+            if tuple(authorization_context[field] for field in (
+                "transaction_id", "owner_line", "final_version"
+            )) != authorization_scope:
+                raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+            verify_authorization(authorization_scope)
             self._snapshot_matches_records(observed_snapshot, records)
             current_record = records.get(ref)
             current = None if current_record is None else str(current_record["commit"])
@@ -1662,7 +1721,7 @@ class CreateOnlyLifecycleWriter:
             if before_push_fingerprint != fingerprint:
                 raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
             self._require_no_public_tag(checked)
-            verify_authorization()
+            verify_authorization(authorization_scope)
             try:
                 _git(self.repository, "push", "--porcelain", f"--force-with-lease={ref}:", self.remote, f"{commit}:{ref}")
             except ManifestError as error:

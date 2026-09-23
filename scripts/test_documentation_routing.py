@@ -36,8 +36,32 @@ def complete_fixture(
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     chain = manifest_tests.ManifestTests().chain()
     if maintenance:
+        prepared = dict(chain[0])
+        prepared.pop("manifest_id")
+        prepared["owner_line"] = "maintenance/1.2"
+        prepared = seal_manifest(prepared)
+
+        opened = dict(chain[1])
+        opened.pop("manifest_id")
+        opened["owner_line"] = "maintenance/1.2"
+        opened["predecessor_refs"] = [lifecycle_ref_for_manifest(prepared)]
+        opened = seal_manifest(opened)
+
+        claim = dict(chain[2])
+        claim.pop("manifest_id")
+        claim["owner_line"] = "maintenance/1.2"
+        claim["predecessor_refs"] = [lifecycle_ref_for_manifest(opened)]
+        claim = seal_manifest(claim)
+
+        consumed = dict(chain[3])
+        consumed.pop("manifest_id")
+        consumed["owner_line"] = "maintenance/1.2"
+        consumed["predecessor_refs"] = [lifecycle_ref_for_manifest(opened)]
+        consumed = seal_manifest(consumed)
+
         candidate = dict(chain[4])
         candidate.pop("manifest_id")
+        candidate["predecessor_refs"] = [lifecycle_ref_for_manifest(claim)]
         candidate["release_line"] = "maintenance/1.2"
         candidate = seal_manifest(candidate)
 
@@ -58,7 +82,7 @@ def complete_fixture(
         release["main_at_candidate_sha"] = MAIN_SHA
         release["main_at_candidate_version"] = "2.0.0"
         release = seal_manifest(release)
-        prefix = chain[:4]
+        prefix = [prepared, opened, claim, consumed]
     else:
         release = chain[6]
         prefix = chain[:6]
@@ -263,6 +287,34 @@ class DocumentationRoutingTests(unittest.TestCase):
             )
             self.assertIn("CYAX_DOCS_STABLE_TAG=v1.2.3", exported)
 
+    def test_principal_verifier_rejects_current_main_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release, publication_manifest, complete_args = write_complete_context(root)
+            env_path = root / "github.env"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "docs/verify_release_context.py"),
+                    *complete_args,
+                    "--tag-ref", f"refs/tags/{publication_manifest['public_tag']}",
+                    "--tag", str(publication_manifest["public_tag"]),
+                    "--tag-sha", str(publication_manifest["tag_commit"]),
+                    "--tag-tree", str(publication_manifest["tag_tree"]),
+                    "--tag-version", str(release["final_version"]),
+                    "--main-sha", "d" * 40,
+                    "--main-version", "2.1.0",
+                    "--github-release-id", str(publication_manifest["github_release_id"]),
+                    "--github-env", str(env_path),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("current principal main SHA", result.stderr)
+
     def test_maintenance_verifier_preserves_current_principal_stable_tag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -280,8 +332,8 @@ class DocumentationRoutingTests(unittest.TestCase):
                     "--tag-sha", str(publication_manifest["tag_commit"]),
                     "--tag-tree", str(publication_manifest["tag_tree"]),
                     "--tag-version", "1.2.3",
-                    "--main-sha", str(release["main_at_release_sha"]),
-                    "--main-version", str(release["main_at_release_version"]),
+                    "--main-sha", "d" * 40,
+                    "--main-version", "2.1.0",
                     "--github-release-id", str(publication_manifest["github_release_id"]),
                     "--github-env", str(env_path),
                 ],
@@ -293,7 +345,8 @@ class DocumentationRoutingTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             exported = env_path.read_text(encoding="utf-8")
             self.assertIn("CYAX_DOCS_STABLE=false", exported)
-            self.assertIn("CYAX_DOCS_STABLE_TAG=v2.0.0", exported)
+            self.assertIn("CYAX_DOCS_PRINCIPAL_MAIN_SHA=" + "d" * 40, exported)
+            self.assertIn("CYAX_DOCS_STABLE_TAG=v2.1.0", exported)
 
     @unittest.skipUnless(shutil.which("julia"), "Julia is required for route checks")
     def test_julia_route_requires_verified_manifest_status(self) -> None:

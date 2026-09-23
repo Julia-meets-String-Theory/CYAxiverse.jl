@@ -613,6 +613,44 @@ class ManifestTests(unittest.TestCase):
                 lifecycle_ref_for_manifest(item): item for item in (first, second)
             })
 
+    def test_graph_keeps_claimed_reservation_active_until_consumed(self) -> None:
+        prepared, opened, claim = self.chain()[:3]
+        second = seal_manifest(self.prepared_draft(
+            timestamp_utc="2026-09-22T00:01:00Z",
+            final_version="1.2.4",
+            reserved_final="1.2.4",
+            intended_dev_version="1.2.4-DEV",
+        ))
+        with self.assertRaisesRegex(ManifestError, "multiple active reservations"):
+            validate_complete_lifecycle_refs({
+                lifecycle_ref_for_manifest(item): item
+                for item in (prepared, opened, claim, second)
+            })
+
+    def test_graph_rejects_cross_line_version_ownership(self) -> None:
+        principal = seal_manifest(self.prepared_draft())
+        maintenance = seal_manifest(self.prepared_draft(
+            timestamp_utc="2026-09-22T00:01:00Z",
+            owner_line="maintenance/1.2",
+        ))
+        with self.assertRaisesRegex(ManifestError, "multiple active owner lines"):
+            validate_complete_lifecycle_refs({
+                lifecycle_ref_for_manifest(item): item
+                for item in (principal, maintenance)
+            })
+
+    def test_candidate_must_preserve_claim_owner_line(self) -> None:
+        chain = self.chain()
+        candidate = dict(chain[4])
+        candidate.pop("manifest_id")
+        candidate["release_line"] = "maintenance/1.2"
+        candidate = seal_manifest(candidate)
+        with self.assertRaisesRegex(ManifestError, "changes claim owner line"):
+            validate_complete_lifecycle_refs({
+                lifecycle_ref_for_manifest(item): item
+                for item in [*chain[:4], candidate]
+            })
+
     def test_withdrawal_requires_exact_proof_and_remote_tag_absence(self) -> None:
         candidate = next(
             item for item in self.chain()
@@ -807,6 +845,81 @@ class ManifestTests(unittest.TestCase):
             conflicting = authority.bind(self.prepared_draft(timestamp_utc="2026-09-22T00:00:01Z"))
             with self.assertRaises(ManifestError):
                 writer.create(conflicting, protection, authorization_context=WRITER_CONTEXT)
+
+    def test_writer_rejects_authorization_scope_mismatch_without_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            remote = root / "origin.git"
+            work = root / "work"
+            subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+            subprocess.run(["git", "init", "-q", str(work)], check=True)
+            for key, value in (
+                ("user.name", "Fixture"),
+                ("user.email", "fixture@example.invalid"),
+            ):
+                subprocess.run(
+                    ["git", "-C", str(work), "config", key, value], check=True
+                )
+            subprocess.run(
+                ["git", "-C", str(work), "remote", "add", "origin", str(remote)],
+                check=True,
+            )
+            (work / "base").write_text("base", encoding="utf-8")
+            subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
+            subprocess.run(
+                ["git", "-C", str(work), "commit", "-qm", "base"], check=True
+            )
+            root_parent = subprocess.check_output(
+                ["git", "-C", str(work), "rev-parse", "HEAD"], text=True
+            ).strip()
+            authority = ManifestAuthority()
+            manifest = authority.bind(self.prepared_draft())
+            protection = ProtectionEvidence(
+                "fixture", "refs/heads/lifecycle/v1/*", "0" * 64,
+                "2026-09-22T00:00:00Z", True, True, True,
+            )
+            snapshot = remote_writer_snapshot(work)
+            writer = CreateOnlyLifecycleWriter(
+                work,
+                exclusion_lease=lambda: nullcontext(True),
+                snapshot_callback=lambda: remote_writer_snapshot(work),
+                expected_snapshot=snapshot,
+                owner_authorization_authority=authority,
+                authorization_reference=authority.reference,
+                authorization_clock=lambda: "2026-09-22T00:00:00Z",
+                repository_identity="fixture-repository",
+                root_parent_commit=root_parent,
+            )
+            mismatches = (
+                {**WRITER_CONTEXT, "transaction_id": "tx-other"},
+                {**WRITER_CONTEXT, "owner_line": "maintenance/1.2"},
+                {**WRITER_CONTEXT, "final_version": "1.2.4"},
+            )
+            for context in mismatches:
+                with self.subTest(context=context), self.assertRaisesRegex(
+                    ManifestError, "OWNER_AUTHORIZATION_UNVERIFIED"
+                ):
+                    writer.create(
+                        manifest, protection, authorization_context=context
+                    )
+                self.assertEqual(
+                    subprocess.check_output(
+                        ["git", "-C", str(work), "ls-remote", "--heads", "origin"],
+                        text=True,
+                    ),
+                    "",
+                )
+
+    def test_publication_authorization_scope_comes_from_released_predecessor(self) -> None:
+        chain = self.chain()
+        records = {
+            lifecycle_ref_for_manifest(item): {"manifest": item}
+            for item in chain[:-1]
+        }
+        self.assertEqual(
+            CreateOnlyLifecycleWriter._authorization_scope(chain[-1], records),
+            ("tx-chain", "principal", "1.2.3"),
+        )
 
     def test_authoritative_reader_rejects_invalid_commit_parent_topology(self) -> None:
         for topology in ("rootless", "wrong-parent", "multi-parent"):
