@@ -806,6 +806,7 @@ _TERMINAL_TYPES = frozenset(
 _ACTIVE_TYPES = frozenset(
     {"version-claimed", "reservation-prepared", "reservation-opened", "candidate-opened", "release-intent-prepared"}
 )
+_LIFECYCLE_MANIFEST_AUTHORIZATION_ACTION = "create-release-manifest"
 
 
 @dataclass(frozen=True, slots=True)
@@ -966,18 +967,19 @@ def validate_lifecycle_graph(
 
     # Singleton and active-state constraints are graph properties, not ref-name checks.
     singleton: dict[tuple[str, str], str] = {}
-    active_reservations_by_line: dict[str, str] = {}
-    active_reservations_by_version: dict[str, tuple[str, str]] = {}
     for ref, manifest in by_ref.items():
         kind = str(manifest["manifest_type"])
         version = manifest.get("final_version")
-        if not isinstance(version, str):
-            version = None
-        if kind in {"version-claimed", "released"} and version is not None:
+        if kind in {"version-claimed", "released"} and isinstance(version, str):
             key = (kind, version)
             if key in singleton:
                 raise ManifestError("duplicate singleton lifecycle identity")
             singleton[key] = ref
+
+    active_reservations_by_line: dict[str, str] = {}
+    active_reservations_by_version: dict[str, tuple[str, str]] = {}
+    for ref, manifest in by_ref.items():
+        kind = str(manifest["manifest_type"])
         child_types = {
             str(by_ref[child]["manifest_type"])
             for child in children[ref]
@@ -1002,6 +1004,25 @@ def validate_lifecycle_graph(
             if existing is not None and existing[0] != owner_line:
                 raise ManifestError("final version has multiple active owner lines")
             active_reservations_by_version[final_version] = (owner_line, ref)
+            linked_claims = {
+                child
+                for child in children[ref]
+                if by_ref[child]["manifest_type"] == "version-claimed"
+            }
+            if kind == "reservation-prepared":
+                for child in children[ref]:
+                    if by_ref[child]["manifest_type"] == "reservation-opened":
+                        linked_claims.update(
+                            grandchild
+                            for grandchild in children[child]
+                            if by_ref[grandchild]["manifest_type"]
+                            == "version-claimed"
+                        )
+            permanent_claim = singleton.get(("version-claimed", final_version))
+            if permanent_claim is not None and permanent_claim not in linked_claims:
+                raise ManifestError(
+                    "active reservation final version is permanently occupied"
+                )
     pre_entry_aborted = {
         predecessor
         for manifest in by_ref.values()
@@ -1190,14 +1211,14 @@ def validate_lifecycle_ref_snapshot(
 def _validate_lifecycle_commit_topology(
     repository: str | Path,
     records: Mapping[str, Any] | Iterable[Mapping[str, Any]],
-    root_parent_commit: str,
-) -> None:
+    static_source_commit: str,
+) -> str:
     root = Path(repository)
-    if not isinstance(root_parent_commit, str) or not SHA1_RE.fullmatch(
-        root_parent_commit
+    if not isinstance(static_source_commit, str) or not SHA1_RE.fullmatch(
+        static_source_commit
     ):
         raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
-    _git(root, "cat-file", "-e", f"{root_parent_commit}^{{commit}}")
+    _git(root, "cat-file", "-e", f"{static_source_commit}^{{commit}}")
     normalized = _normalise_graph_records(records)
     commits: dict[str, str] = {}
     manifests: dict[str, Mapping[str, Any]] = {}
@@ -1207,22 +1228,44 @@ def _validate_lifecycle_commit_topology(
             raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
         commits[ref] = commit
         manifests[ref] = manifest
+    root_parents: set[str] = set()
+    observed_parents: dict[str, str] = {}
     for ref, manifest in manifests.items():
         predecessors = manifest.get("predecessor_refs")
         if not isinstance(predecessors, list):
-            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
-        if not predecessors:
-            expected_parent = root_parent_commit
-        elif len(predecessors) == 1 and predecessors[0] in commits:
-            expected_parent = commits[predecessors[0]]
-        else:
             raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
         commit = commits[ref]
         parents = _git(
             root, "rev-list", "--parents", "-n", "1", commit
         ).decode("ascii").strip().split()
-        if parents != [commit, expected_parent]:
+        if len(parents) != 2 or parents[0] != commit:
             raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+        observed_parents[ref] = parents[1]
+        if not predecessors:
+            root_parents.add(parents[1])
+    if not manifests:
+        return static_source_commit
+    if len(root_parents) != 1:
+        raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+    lifecycle_genesis_commit = next(iter(root_parents))
+    try:
+        _git(
+            root, "merge-base", "--is-ancestor",
+            lifecycle_genesis_commit, static_source_commit,
+        )
+    except ManifestError as error:
+        raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED") from error
+    for ref, manifest in manifests.items():
+        predecessors = manifest["predecessor_refs"]
+        if not predecessors:
+            expected_parent = lifecycle_genesis_commit
+        elif len(predecessors) == 1 and predecessors[0] in commits:
+            expected_parent = commits[predecessors[0]]
+        else:
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+        if observed_parents[ref] != expected_parent:
+            raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
+    return lifecycle_genesis_commit
 
 
 def build_lifecycle_ref_snapshot(
@@ -1230,7 +1273,7 @@ def build_lifecycle_ref_snapshot(
     remote: str = "origin",
     *,
     source_repository: str | None = None,
-    root_parent_commit: str,
+    static_source_commit: str,
 ) -> LifecycleRefSnapshot:
     """Resolve and validate the complete protected lifecycle-ref namespace."""
 
@@ -1263,7 +1306,7 @@ def build_lifecycle_ref_snapshot(
         raise ManifestError("lifecycle ref namespace changed during snapshot")
     graph = validate_lifecycle_graph(graph_records)
     _validate_lifecycle_commit_topology(
-        root, graph_records, root_parent_commit
+        root, graph_records, static_source_commit
     )
     data: dict[str, Any] = {
         "snapshot_schema_version": SCHEMA_VERSION,
@@ -1389,7 +1432,7 @@ class CreateOnlyLifecycleWriter:
         authorization_reference: Callable[[str, str, str], str],
         authorization_clock: Callable[[], str],
         repository_identity: str,
-        root_parent_commit: str,
+        static_source_commit: str,
     ) -> None:
         self.repository = Path(repository)
         self.remote = validate_remote(remote)
@@ -1405,16 +1448,16 @@ class CreateOnlyLifecycleWriter:
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
         if not isinstance(repository_identity, str) or not repository_identity:
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
-        if not isinstance(root_parent_commit, str) or not SHA1_RE.fullmatch(
-            root_parent_commit
+        if not isinstance(static_source_commit, str) or not SHA1_RE.fullmatch(
+            static_source_commit
         ):
             raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
         try:
-            _git(self.repository, "cat-file", "-e", f"{root_parent_commit}^{{commit}}")
+            _git(self.repository, "cat-file", "-e", f"{static_source_commit}^{{commit}}")
         except ManifestError as error:
             raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED") from error
         static_data, _lifecycle_data = _snapshot_components(expected_snapshot)
-        if static_data.get("source_commit") != root_parent_commit:
+        if static_data.get("source_commit") != static_source_commit:
             raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
         self.exclusion = exclusion_lease
         self.snapshot_callback = snapshot_callback
@@ -1423,7 +1466,8 @@ class CreateOnlyLifecycleWriter:
         self.authorization_reference = authorization_reference
         self.authorization_clock = authorization_clock
         self.repository_identity = repository_identity
-        self.root_parent_commit = root_parent_commit
+        self.static_source_commit = static_source_commit
+        self.lifecycle_genesis_commit = static_source_commit
 
     @contextmanager
     def _governed_boundary(self) -> Any:
@@ -1479,7 +1523,7 @@ class CreateOnlyLifecycleWriter:
     ) -> str:
         predecessors = manifest["predecessor_refs"]
         if not predecessors:
-            return self.root_parent_commit
+            return self.lifecycle_genesis_commit
         if len(predecessors) != 1:
             raise ManifestError("LIFECYCLE_PARENT_UNVERIFIED")
         predecessor = records.get(predecessors[0])
@@ -1541,10 +1585,24 @@ class CreateOnlyLifecycleWriter:
         if parse_remote_ref_advertisements(final_output) != advertisements:
             raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
         validate_lifecycle_graph(records)
-        _validate_lifecycle_commit_topology(
-            self.repository, records, self.root_parent_commit
+        self.lifecycle_genesis_commit = _validate_lifecycle_commit_topology(
+            self.repository, records, self.static_source_commit
         )
         return records
+
+    @staticmethod
+    def _require_reservation_available(
+        manifest: Mapping[str, Any], snapshot: Any
+    ) -> None:
+        if manifest.get("manifest_type") != "reservation-prepared":
+            return
+        static_data, lifecycle_data = _snapshot_components(snapshot)
+        occupied = {
+            *static_data["occupied_versions"],
+            *lifecycle_data["occupied_versions"],
+        }
+        if manifest.get("final_version") in occupied:
+            raise ManifestError("RESERVATION_VERSION_UNAVAILABLE")
 
     @staticmethod
     def _snapshot_matches_records(snapshot: Any, records: Mapping[str, Mapping[str, Any]]) -> None:
@@ -1631,11 +1689,16 @@ class CreateOnlyLifecycleWriter:
         }
         if set(authorization_context) != required_context:
             raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
+        if (
+            authorization_context["action"]
+            != _LIFECYCLE_MANIFEST_AUTHORIZATION_ACTION
+        ):
+            raise ManifestError("OWNER_AUTHORIZATION_UNVERIFIED")
 
         def verify_authorization(scope: tuple[str, str, str]) -> None:
             transaction_id, owner_line, final_version = scope
             reference = self.authorization_reference(
-                authorization_context["action"], ref,
+                _LIFECYCLE_MANIFEST_AUTHORIZATION_ACTION, ref,
                 final_version,
             )
             try:
@@ -1649,7 +1712,7 @@ class CreateOnlyLifecycleWriter:
                 reference,
                 repository=self.repository_identity,
                 transaction_id=transaction_id,
-                action=authorization_context["action"],
+                action=_LIFECYCLE_MANIFEST_AUTHORIZATION_ACTION,
                 owner_line=owner_line,
                 final_version=final_version,
                 target_ref=ref,
@@ -1701,6 +1764,7 @@ class CreateOnlyLifecycleWriter:
                 raise ManifestConflict("CREATE_ONCE_CONFLICT")
             if fingerprint != _snapshot_fingerprint(snapshot):
                 raise ManifestError("LIFECYCLE_SNAPSHOT_STALE")
+            self._require_reservation_available(checked, observed_snapshot)
             proposed_records = dict(records)
             proposed_records[ref] = {"ref": ref, "manifest": checked}
             validate_lifecycle_graph(proposed_records)

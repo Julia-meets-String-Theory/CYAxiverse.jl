@@ -130,16 +130,16 @@ def _static_report(args: argparse.Namespace) -> tuple[dict[str, Any], StaticSnap
 def _lifecycle_report(
     args: argparse.Namespace,
     source_repository: str | None = None,
-    root_parent_commit: str | None = None,
+    static_source_commit: str | None = None,
 ) -> tuple[dict[str, Any], LifecycleRefSnapshot | None]:
     try:
-        if root_parent_commit is None:
-            raise ValueError("canonical lifecycle root parent is unavailable")
+        if static_source_commit is None:
+            raise ValueError("canonical static source commit is unavailable")
         snapshot = lifecycle_ref_snapshot(
             args.authority_repo,
             remote=args.authority_remote,
             source_repository=source_repository or args.source_repository,
-            root_parent_commit=root_parent_commit,
+            static_source_commit=static_source_commit,
         )
     except (OSError, ValueError, RuntimeError) as error:
         return _blocked("LIFECYCLE_REF_SNAPSHOT_UNAVAILABLE", str(error), remote=args.remote, namespace="refs/heads/lifecycle/v1/*"), None

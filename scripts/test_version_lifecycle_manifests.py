@@ -62,7 +62,12 @@ class ManifestAuthority:
         self.records: dict[str, dict[str, object]] = {}
         self.references: dict[str, str] = {}
 
-    def bind(self, manifest: dict[str, object]) -> dict[str, object]:
+    def bind(
+        self,
+        manifest: dict[str, object],
+        *,
+        action: str = "create-release-manifest",
+    ) -> dict[str, object]:
         provisional = seal_manifest(manifest)
         target = lifecycle_ref_for_manifest(provisional)
         reference = f"owner-authority://fixture/manifest-{len(self.records) + 1}"
@@ -76,7 +81,7 @@ class ManifestAuthority:
             "transaction_id": "tx-1",
             "owner_line": "principal",
             "final_version": str(manifest["final_version"]),
-            "authorized_actions": ["create-release-manifest"],
+            "authorized_actions": [action],
             "target_refs": [target],
         })
         self.records[reference] = record
@@ -108,7 +113,10 @@ WRITER_CONTEXT = {
 
 
 def writer_snapshot(
-    occupied: list[str] | None = None, *, source_commit: str = "a" * 40
+    occupied: list[str] | None = None,
+    *,
+    static_occupied: list[str] | None = None,
+    source_commit: str = "a" * 40,
 ) -> object:
     from test_version_lifecycle_static import (  # noqa: PLC0415
         lifecycle_snapshot,
@@ -117,7 +125,7 @@ def writer_snapshot(
     from version_lifecycle.allocation import global_allocation_view  # noqa: PLC0415
 
     return global_allocation_view(
-        static_snapshot(source_commit=source_commit),
+        static_snapshot(static_occupied, source_commit=source_commit),
         lifecycle_snapshot(occupied or []),
     )
 
@@ -139,7 +147,7 @@ def remote_writer_snapshot(repository: Path) -> object:
     lifecycle = build_lifecycle_ref_snapshot(
         repository,
         source_repository=SOURCE_REPOSITORY,
-        root_parent_commit=root_parent,
+        static_source_commit=root_parent,
     )
     return global_allocation_view(static, lifecycle)
 
@@ -639,6 +647,21 @@ class ManifestTests(unittest.TestCase):
                 for item in (principal, maintenance)
             })
 
+    def test_graph_rejects_reservation_for_permanently_occupied_version(self) -> None:
+        chain = self.chain()
+        competing = seal_manifest(self.prepared_draft(
+            timestamp_utc="2026-09-22T00:30:00Z",
+            owner_line="maintenance/1.2",
+        ))
+        for history in (chain[:4], chain):
+            with self.subTest(history=history[-1]["manifest_type"]), self.assertRaisesRegex(
+                ManifestError, "permanently occupied"
+            ):
+                validate_complete_lifecycle_refs({
+                    lifecycle_ref_for_manifest(item): item
+                    for item in [*history, competing]
+                })
+
     def test_candidate_must_preserve_claim_owner_line(self) -> None:
         chain = self.chain()
         candidate = dict(chain[4])
@@ -785,7 +808,7 @@ class ManifestTests(unittest.TestCase):
                 authorization_reference=authority.reference,
                 authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
-                root_parent_commit=root_parent,
+                static_source_commit=root_parent,
             )
             first = writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
             second = writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
@@ -798,7 +821,7 @@ class ManifestTests(unittest.TestCase):
                 authorization_reference=authority.reference,
                 authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
-                root_parent_commit=root_parent,
+                static_source_commit=root_parent,
             )
             retry = retry_writer.create(
                 manifest, protection, authorization_context=WRITER_CONTEXT
@@ -888,7 +911,7 @@ class ManifestTests(unittest.TestCase):
                 authorization_reference=authority.reference,
                 authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
-                root_parent_commit=root_parent,
+                static_source_commit=root_parent,
             )
             mismatches = (
                 {**WRITER_CONTEXT, "transaction_id": "tx-other"},
@@ -909,6 +932,84 @@ class ManifestTests(unittest.TestCase):
                     ),
                     "",
                 )
+            wrong_action_manifest = authority.bind(
+                self.prepared_draft(), action="create-tag"
+            )
+            with self.assertRaisesRegex(
+                ManifestError, "OWNER_AUTHORIZATION_UNVERIFIED"
+            ):
+                writer.create(
+                    wrong_action_manifest,
+                    protection,
+                    authorization_context={**WRITER_CONTEXT, "action": "create-tag"},
+                )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "-C", str(work), "ls-remote", "--heads", "origin"],
+                    text=True,
+                ),
+                "",
+            )
+
+    def test_writer_rejects_static_reservation_collision_without_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            remote = root / "origin.git"
+            work = root / "work"
+            subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+            subprocess.run(["git", "init", "-q", str(work)], check=True)
+            for key, value in (
+                ("user.name", "Fixture"),
+                ("user.email", "fixture@example.invalid"),
+            ):
+                subprocess.run(
+                    ["git", "-C", str(work), "config", key, value], check=True
+                )
+            subprocess.run(
+                ["git", "-C", str(work), "remote", "add", "origin", str(remote)],
+                check=True,
+            )
+            (work / "base").write_text("base", encoding="utf-8")
+            subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
+            subprocess.run(
+                ["git", "-C", str(work), "commit", "-qm", "base"], check=True
+            )
+            source_commit = subprocess.check_output(
+                ["git", "-C", str(work), "rev-parse", "HEAD"], text=True
+            ).strip()
+            authority = ManifestAuthority()
+            manifest = authority.bind(self.prepared_draft())
+            protection = ProtectionEvidence(
+                "fixture", "refs/heads/lifecycle/v1/*", "0" * 64,
+                "2026-09-22T00:00:00Z", True, True, True,
+            )
+            snapshot = writer_snapshot(
+                static_occupied=["1.2.3"], source_commit=source_commit
+            )
+            writer = CreateOnlyLifecycleWriter(
+                work,
+                exclusion_lease=lambda: nullcontext(True),
+                snapshot_callback=lambda: snapshot,
+                expected_snapshot=snapshot,
+                owner_authorization_authority=authority,
+                authorization_reference=authority.reference,
+                authorization_clock=lambda: "2026-09-22T00:00:00Z",
+                repository_identity="fixture-repository",
+                static_source_commit=source_commit,
+            )
+            with self.assertRaisesRegex(
+                ManifestError, "RESERVATION_VERSION_UNAVAILABLE"
+            ):
+                writer.create(
+                    manifest, protection, authorization_context=WRITER_CONTEXT
+                )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "-C", str(work), "ls-remote", "--heads", "origin"],
+                    text=True,
+                ),
+                "",
+            )
 
     def test_publication_authorization_scope_comes_from_released_predecessor(self) -> None:
         chain = self.chain()
@@ -989,8 +1090,84 @@ class ManifestTests(unittest.TestCase):
                     build_lifecycle_ref_snapshot(
                         work,
                         source_repository="fixture-repository",
-                        root_parent_commit=root_parent,
+                        static_source_commit=root_parent,
                     )
+
+    def test_lifecycle_genesis_survives_static_source_advance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            remote = root / "origin.git"
+            work = root / "work"
+            subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+            subprocess.run(["git", "init", "-q", str(work)], check=True)
+            for key, value in (
+                ("user.name", "Fixture"),
+                ("user.email", "fixture@example.invalid"),
+            ):
+                subprocess.run(
+                    ["git", "-C", str(work), "config", key, value], check=True
+                )
+            subprocess.run(
+                ["git", "-C", str(work), "remote", "add", "origin", str(remote)],
+                check=True,
+            )
+            (work / "base").write_text("base", encoding="utf-8")
+            subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
+            subprocess.run(
+                ["git", "-C", str(work), "commit", "-qm", "base"], check=True
+            )
+            lifecycle_genesis = subprocess.check_output(
+                ["git", "-C", str(work), "rev-parse", "HEAD"], text=True
+            ).strip()
+            manifest = seal_manifest(self.prepared_draft())
+            commit = make_manifest_commit(
+                work, manifest, parent=lifecycle_genesis
+            )
+            ref = lifecycle_ref_for_manifest(manifest)
+            subprocess.run(
+                ["git", "-C", str(work), "push", "-q", "origin", f"{commit}:{ref}"],
+                check=True,
+            )
+            (work / "base").write_text("advanced", encoding="utf-8")
+            subprocess.run(["git", "-C", str(work), "add", "base"], check=True)
+            subprocess.run(
+                ["git", "-C", str(work), "commit", "-qm", "advance vmm"],
+                check=True,
+            )
+            current_static = subprocess.check_output(
+                ["git", "-C", str(work), "rev-parse", "HEAD"], text=True
+            ).strip()
+            subprocess.run(
+                [
+                    "git", "-C", str(work), "push", "-q", "origin",
+                    "HEAD:refs/heads/vmm",
+                ],
+                check=True,
+            )
+            snapshot = build_lifecycle_ref_snapshot(
+                work,
+                source_repository="fixture-repository",
+                static_source_commit=current_static,
+            )
+            self.assertEqual(len(snapshot.ref_bindings), 1)
+
+            combined = remote_writer_snapshot(work)
+            authority = ManifestAuthority()
+            writer = CreateOnlyLifecycleWriter(
+                work,
+                exclusion_lease=lambda: nullcontext(True),
+                snapshot_callback=lambda: remote_writer_snapshot(work),
+                expected_snapshot=combined,
+                owner_authorization_authority=authority,
+                authorization_reference=authority.reference,
+                authorization_clock=lambda: "2026-09-22T00:00:00Z",
+                repository_identity="fixture-repository",
+                static_source_commit=current_static,
+            )
+            self.assertEqual(len(writer._complete_graph_records()), 1)
+            self.assertEqual(
+                writer.lifecycle_genesis_commit, lifecycle_genesis
+            )
 
     def test_create_revalidates_snapshot_inside_exclusion_and_blocks_uncertain_create(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1035,7 +1212,7 @@ class ManifestTests(unittest.TestCase):
                 authorization_reference=authority.reference,
                 authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
-                root_parent_commit=root_parent,
+                static_source_commit=root_parent,
             )
             with self.assertRaisesRegex(ManifestError, "SNAPSHOT_STALE"):
                 writer.create(manifest, protection, authorization_context=WRITER_CONTEXT)
@@ -1058,7 +1235,7 @@ class ManifestTests(unittest.TestCase):
                 authorization_reference=authority.reference,
                 authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
-                root_parent_commit=root_parent,
+                static_source_commit=root_parent,
             )
             with self.assertRaisesRegex(Exception, "bytes changed"):
                 writer.create(
@@ -1076,7 +1253,7 @@ class ManifestTests(unittest.TestCase):
                 authorization_reference=authority.reference,
                 authorization_clock=lambda: "2026-09-22T00:00:00Z",
                 repository_identity="fixture-repository",
-                root_parent_commit=root_parent,
+                static_source_commit=root_parent,
             )
             import version_lifecycle.manifests as module
             real_git = module._git
