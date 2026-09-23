@@ -55,9 +55,14 @@ approval record `reviews/n1-approval-v3.json`, SHA-256
 that exact five-file revision and both exact review records without changing
 the reviewed normative bytes.
 
-These observations apply to the frozen implementation commit above. This
-evidence-only successor changes no implementation bytes. The complete final
-candidate, including this record, still requires fresh exact-state review.
+These observations apply to the frozen implementation commit above. Its exact
+evidence successor was commit `6dbec5fafbec8b8d08c14b2b34b43689a2ba37b0`
+(tree `6243bec45d9651f1782519667f810f7399b621ec`). Independent SPEC and
+STANDARDS reviews using `gpt-6-sol` at `high` both returned `PASS` with no
+actionable findings; those verdicts remain attached only to that exact
+candidate. This evidence-only convergence successor changes no implementation
+bytes and requires final exact-state confirmation. It does not itself
+authorize merge, release, readiness, or closure.
 
 | Check | Observed result |
 | --- | --- |
@@ -160,8 +165,14 @@ evidence successor was commit
 STANDARDS reviews using `gpt-6-sol` at `high` both returned
 `REQUEST_CHANGES`; those verdicts remain attached only to that exact
 candidate. Commit `9eca0ba436f521eefbc2258307c535c30587576d` is the next
-bounded correction implementation and has no review verdict. Its evidence
-successor requires fresh exact-state reviews.
+bounded correction implementation and has no review verdict. Its exact
+evidence successor was commit
+`6dbec5fafbec8b8d08c14b2b34b43689a2ba37b0` (tree
+`6243bec45d9651f1782519667f810f7399b621ec`). Independent SPEC and STANDARDS
+reviews using `gpt-6-sol` at `high` both returned `PASS` with no actionable
+findings; those verdicts remain attached only to that exact candidate. This
+evidence-only convergence successor requires final exact-state confirmation
+and does not itself authorize merge, release, readiness, or closure.
 
 ## Historical predecessor review history (non-authoritative)
 
