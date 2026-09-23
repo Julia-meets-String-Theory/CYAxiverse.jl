@@ -2,7 +2,10 @@
 
 ## Rules
 
-- No source implementation before CYAX-0176 G0 passes.
+- No source implementation before **both CYAX-0176 G0 and G0.5 pass**.
+- G0 review completion authorizes implementation-handoff preparation only.
+- Control Desk does not launch Manager; owner manual dispatch of the exact
+  reviewed `READY_TO_DISPATCH` packet is required before source mutation.
 - PR #158 head is an exact dependency; material drift requires rebind.
 - Core CYAxiverse must remain Python-free.
 - No task may make MOSEK universally mandatory without owner/spec re-review.
@@ -21,8 +24,25 @@
   - Input: PR #158 head
     `8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45`.
   - Verify exact interpreter helper, extension integration, and privacy
-    guarantees before mutation.
+    guarantees before handoff preparation and again before mutation.
   - Escalate on material PR #158 drift.
+
+## Phase 0.5 — Implementation handoff / dispatch gate
+
+- [ ] **T050 [CYAX-0176 G0.5] Prepare exact Manager-facing implementation handoff**
+  - Entry: G0 Spec+Standards reviews have no blocking finding.
+  - Bind the exact reviewed S1 spec/plan/tasks and exact PR #158/equivalent base.
+  - Include Control Desk ledger/runtime/exchange requirements applicable to
+    delegation.
+  - This task does not authorize execution.
+
+- [ ] **T051 [CYAX-0176 G0.5] Handoff Review and owner manual dispatch**
+  - Obtain comprehensive independent Handoff Review of the exact Manager packet.
+  - Control Desk reconciles an unchanged passing packet to `READY_TO_DISPATCH`.
+  - Owner manually dispatches that exact packet to Manager.
+  - Manager re-runs exact preflight.
+  - Source mutation is forbidden before all four conditions above are satisfied.
+  - Escalate on packet/base drift or any need to change reviewed S1 intent.
 
 ## Phase 1 — Initialization boundary
 
