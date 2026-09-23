@@ -7,7 +7,10 @@ Candidate specification:
 
 Implementation is stacked on exact PR #158 head
 `8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45`.
-No source mutation may begin until CYAX-0176 G0 passes.
+No source mutation may begin until **both** CYAX-0176 G0 and G0.5 pass:
+the exact S1 contract must clear Spec+Standards review, then a fresh exact
+Manager-facing implementation handoff must clear Handoff Review, be reconciled
+`READY_TO_DISPATCH`, and be manually dispatched by the owner.
 
 ## Coverage
 
@@ -40,26 +43,33 @@ unchanged unless a separately reviewed interpreter-contract defect is found.
 ## Proposed approach
 
 1. Rebind exact PR #158 head and privacy/interpreter files.
-2. Remove MOSEK setup/license calls from wrapper `__init__()`.
-3. Make `enable_cytools!()` establish CYTools readiness without requiring
+2. Freeze the reviewed S1 contract and, after G0 passes, prepare a fresh exact
+   Manager-facing implementation handoff bound to those reviewed bytes and the
+   exact PR #158/equivalent base.
+3. Obtain comprehensive Handoff Review of that exact packet, reconcile the
+   unchanged passing packet to `READY_TO_DISPATCH`, and wait for owner manual
+   dispatch. Control Desk does not launch Manager.
+4. Manager re-runs exact preflight. Only then begin source mutation.
+5. Remove MOSEK setup/license calls from wrapper `__init__()`.
+6. Make `enable_cytools!()` establish CYTools readiness without requiring
    active MOSEK.
-4. Introduce a small explicit solver-state/configuration layer that:
+7. Introduce a small explicit solver-state/configuration layer that:
    - never assumes HOME;
    - calls `mosek_is_activated()` rather than returning the function object;
    - distinguishes enabled-active, enabled-inactive-license-failed, and
      restart-required;
    - permits supported upstream fallback.
-5. Guard all CYTools-wrapper public entry points behind the enable boundary,
+8. Guard all CYTools-wrapper public entry points behind the enable boundary,
    including `hilbert_save`, while ensuring a rejected pre-enable
    `hilbert_save` performs zero writes.
-6. Build an operation capability matrix from executed/inspected upstream call
+9. Build an operation capability matrix from executed/inspected upstream call
    paths rather than name-based inference.
-7. Test direct and transitive solver consultation:
+10. Test direct and transitive solver consultation:
    fair triangulation, stored-simplices reconstruction, standard geometry
    generation, and Hilbert paths.
-8. Freeze the implementation candidate and obtain independent Spec/Standards
+11. Freeze the implementation candidate and obtain independent Spec/Standards
    review.
-9. Return to Control Desk; do not merge automatically.
+12. Return to Control Desk; do not merge automatically.
 
 ## License-path strategy
 
@@ -111,6 +121,8 @@ Users without MOSEK must retain supported non-MOSEK CYTools functionality.
 
 Stop/rebind if:
 
+- G0.5 is not satisfied before source mutation;
+- the reviewed implementation packet or its exact base drifts before execution;
 - PR #158 base changes materially;
 - implementation requires weakening interpreter/privacy guarantees;
 - actual CYTools behavior contradicts the reviewed operation matrix assumptions;
