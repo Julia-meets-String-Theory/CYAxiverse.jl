@@ -7,8 +7,8 @@ normative amendment reviewed for I2 is commit
 `2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
 `7620f1c966cb37c5d2c7ed5c54778758ed2c12eb`). The latest correction
 implementation is frozen at commit
-`dd5f9fa36cc22ef3c052f5e31a38214e981c2476` (tree
-`c1189ca1bb038c7bf9a8e043a8b18ef1b27bc7b6`). The feature branch
+`adabe4d23b11ac673582d2a5243ce61e74f26e89` (tree
+`5fc0e0dee542ac62dc28e8f5a719c837580dbd47`). The feature branch
 uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
 execution base.
 
@@ -61,8 +61,8 @@ candidate, including this record, still requires fresh exact-state review.
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 113 tests. |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 6 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 118 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 7 tests. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'` | Passed: 3 tests. |
 | `python3 scripts/check_version_bump.py --base 20b3935ace0e01fcee2808681c56595e3afa7667 --head HEAD` | Passed: no package implementation or `Project.toml` change requires a version bump. |
 | `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed: worktree snapshot captured and no whitespace errors. |
@@ -95,6 +95,12 @@ implementation. Its evidence successor was commit
 reviews both returned `REQUEST_CHANGES`, and those verdicts remain attached
 only to that immutable candidate. Commit
 `dd5f9fa36cc22ef3c052f5e31a38214e981c2476` is the next bounded correction
+implementation. Its evidence successor was commit
+`1d623ca11b96d57abcb1d9c8041a559cdd11c1d9` (tree
+`ed8f836f7f2091c2345535135553e463537ba780`); independent SPEC and STANDARDS
+reviews both returned `REQUEST_CHANGES`, and those verdicts remain attached
+only to that immutable candidate. Commit
+`adabe4d23b11ac673582d2a5243ce61e74f26e89` is the next bounded correction
 implementation and has no review verdict. The exact successor containing this
 evidence update requires fresh independent review.
 
