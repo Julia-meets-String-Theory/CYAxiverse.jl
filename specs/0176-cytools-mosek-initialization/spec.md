@@ -366,8 +366,31 @@ fresh verification.
 - independent Standards Review has no blocking finding;
 - exact reviewed spec/plan/tasks are bound to the chosen implementation base.
 
-A passing review permits preparation/dispatch of the bounded implementation
-handoff; it does not authorize merge or Issue closure.
+A passing review permits **preparation only** of a fresh exact Manager-facing
+implementation handoff bound to the reviewed S1 bytes and the exact
+privacy/interpreter-safe base. It does not authorize dispatch, source mutation,
+merge, or Issue closure.
+
+### CYAX-0176 G0.5 — Reviewed implementation handoff and owner dispatch
+
+**Objective:** preserve the Control Desk execution boundary between reviewed S1
+intent and source mutation.
+
+**Acceptance:**
+
+- a fresh exact Manager-facing implementation packet is prepared from the
+  reviewed S1 contract and exact PR #158/equivalent base;
+- that packet receives independent comprehensive Handoff Review with no blocking
+  finding;
+- Control Desk reconciles the unchanged reviewed packet to `READY_TO_DISPATCH`;
+- the owner manually dispatches that exact packet to Manager;
+- Manager re-runs exact preflight before any source mutation.
+
+**Stop condition:** packet/base drift, unresolved Handoff Review finding, missing
+owner dispatch, or any need to change reviewed S1 intent.
+
+G0.5 does not authorize merge or Issue closure. Control Desk does not launch
+Manager.
 
 ### CYAX-0176 G1 — Initialization boundary
 
@@ -453,6 +476,7 @@ decision and re-review.
 
 ## Completion criterion
 
-CYAX-0176 is complete when the reviewed S1 contract is implemented on an exact
-privacy/interpreter-safe base, G1-G3 evidence is satisfied, exact candidate
-Spec/Standards review has no blocker, and Control Desk reconciles the result.
+CYAX-0176 is complete when the reviewed S1 contract has passed G0 and G0.5,
+has been implemented on an exact privacy/interpreter-safe base, G1-G3 evidence
+is satisfied, exact candidate Spec/Standards review has no blocker, and Control
+Desk reconciles the result.
