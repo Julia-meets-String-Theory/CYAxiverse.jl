@@ -28,7 +28,11 @@ from .authorization import (
     validate_authorization_reference,
     verify_owner_authorization,
 )
-from .certification import is_safe_public_value
+from .certification import (
+    is_safe_public_environment,
+    is_safe_public_reference,
+    is_safe_public_value,
+)
 from .git_refs import (
     canonical_remote_authority,
     GitIdentityError,
@@ -224,8 +228,16 @@ def _check_publication_evidence_ref(value: Any) -> None:
         or any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
     ):
         raise ManifestError("publication_evidence_ref must be a safe relative path")
-    if not is_safe_public_value(value, key="publication_evidence_ref"):
+    if not is_safe_public_reference(value, key="publication_evidence_ref"):
         raise ManifestError("publication_evidence_ref contains a nonpublic value")
+
+
+def validate_publication_evidence_ref(value: Any) -> str:
+    """Validate and return one exact repository-relative publication target."""
+
+    _check_publication_evidence_ref(value)
+    assert isinstance(value, str)
+    return value
 
 
 def _check_github_release_url(value: Any, public_tag: str) -> None:
@@ -513,15 +525,18 @@ def _validate_type_specific(manifest: Mapping[str, Any]) -> None:
                 raise ManifestError(f"{field} must be a nonempty string array")
             if len(set(values)) != len(values) or values != sorted(values, key=lambda item: item.encode("utf-8")):
                 raise ManifestError(f"{field} must be a sorted duplicate-free set array")
-            if not is_safe_public_value(values, key=field):
+            if not is_safe_public_reference(values, key=field):
                 raise ManifestError(f"{field} contains a nonpublic value")
     for field in (
-        "certification_environment", "certification_policy_revision",
-        "certification_harness_revision", "github_release_url",
-        "publication_evidence_ref",
+        "certification_policy_revision", "certification_harness_revision",
+        "github_release_url", "publication_evidence_ref",
     ):
         if field in manifest and not is_safe_public_value(manifest[field], key=field):
             raise ManifestError(f"{field} contains a nonpublic value")
+    if "certification_environment" in manifest and not is_safe_public_environment(
+        manifest["certification_environment"]
+    ):
+        raise ManifestError("certification_environment contains a nonpublic value")
     if kind in {"candidate-opened", "candidate-withdrawn", "release-intent-prepared"}:
         expected_candidate_ref = (
             f"refs/heads/candidates/v{manifest['final_version']}/"
@@ -1894,4 +1909,5 @@ __all__ = [
     "publication_id", "publication_key", "publication_key_fixture", "publication_ref",
     "replay_lifecycle_graph", "validate_complete_lifecycle_refs", "validate_lifecycle_graph",
     "validate_lifecycle_ref_snapshot", "validate_manifest",
+    "validate_publication_evidence_ref",
 ]

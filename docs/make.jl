@@ -121,13 +121,50 @@ function _deploy_versions(route)
     versions
 end
 
+function _prepare_documenter_context!(route)
+    get(ENV, "GITHUB_EVENT_NAME", "") == "workflow_dispatch" || return nothing
+    route.channel === :versioned || throw(DocsRouteError(
+        "DOCS_DISPATCH_INVALID: workflow_dispatch requires a verified versioned tag"))
+    get(ENV, "CYAX_DOCS_MANIFEST_STATUS", "") == "verified" || throw(DocsRouteError(
+        "DOCS_DISPATCH_UNVERIFIED: workflow_dispatch requires verified manifest evidence"))
+    verified_ref = "refs/tags/$(route.tag)"
+    get(ENV, "CYAX_DOCS_REF", "") == verified_ref || throw(DocsRouteError(
+        "DOCS_DISPATCH_REF_MISMATCH: verified documentation ref is not exact"))
+    get(ENV, "CYAX_DOCS_TAG_REF", "") == verified_ref || throw(DocsRouteError(
+        "DOCS_DISPATCH_REF_MISMATCH: verified tag ref is not exact"))
+
+    # Documenter 1.19 selects release vs dev from GITHUB_REF.  On manual
+    # publication dispatch, use only the tag already validated against the
+    # immutable publication/released manifests above.
+    ENV["GITHUB_REF"] = verified_ref
+    nothing
+end
+
+function _documenter_subfolder(route, documenter)
+    _prepare_documenter_context!(route)
+    decision = documenter.deploy_folder(
+        documenter.GitHubActions();
+        branch = "gh-pages",
+        repo = "github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
+        devbranch = "vmm",
+        devurl = "dev",
+        push_preview = true,
+    )
+    decision.all_ok || throw(DocsRouteError(
+        "DOCS_DEPLOY_CONTEXT_INVALID: Documenter rejected the deployment context"))
+    documenter.determine_deploy_subfolder(decision, _deploy_versions(route))
+end
+
 # Keep routing tests independent of the documentation dependencies.
 route_only = get(ENV, "CYAX_DOCS_ROUTE_ONLY", "")
-if route_only == "true" || route_only == "versions"
+if route_only == "true" || route_only == "versions" || route_only == "documenter"
     route = docs_route_from_environment()
     if route_only == "versions"
         println(join((item isa Pair ? string(first(item), ":", last(item)) : item
                       for item in _deploy_versions(route)), ","))
+    elseif route_only == "documenter"
+        @eval using Documenter
+        println(Base.invokelatest(_documenter_subfolder, route, getfield(Main, :Documenter)))
     else
         println(route.channel)
     end
@@ -167,6 +204,7 @@ makedocs(
 if _env_bool("DOCS_DEPLOY")
     route.channel === :preview && throw(DocsRouteError(
         "DOCS_ROUTE_INVALID: preview builds cannot deploy documentation"))
+    _prepare_documenter_context!(route)
     deploydocs(
         branch = "gh-pages",
         repo = "github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",

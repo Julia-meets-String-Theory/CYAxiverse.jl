@@ -124,11 +124,11 @@ def verify(args: argparse.Namespace) -> int:
     )
     if result.get("status") != PASS and result.get("status") != "terminal_consistent":
         return fail(f"immutable release/publication validation failed: {result}")
-    if released.get("release_line") == "principal":
-        if released.get("main_at_release_sha") != args.main_sha:
-            return fail("released manifest does not bind current principal main SHA")
-        if released.get("main_at_release_version") != args.main_version:
-            return fail("released manifest does not bind current principal main version")
+    is_current_principal = (
+        released.get("release_line") == "principal"
+        and released.get("final_release_sha") == args.main_sha
+        and released.get("final_version") == main_version.canonical
+    )
     values = {
         "CYAX_DOCS_MANIFEST_STATUS": "verified",
         "CYAX_DOCS_RELEASE_LINE": str(released["release_line"]),
@@ -137,7 +137,7 @@ def verify(args: argparse.Namespace) -> int:
         "CYAX_DOCS_RELEASE_MANIFEST_ID": str(released["manifest_id"]),
         "CYAX_DOCS_PUBLICATION_ID": str(publication["publication_id"]),
         "CYAX_DOCS_PRINCIPAL_MAIN_SHA": args.main_sha,
-        "CYAX_DOCS_STABLE": "true" if released["release_line"] == "principal" else "false",
+        "CYAX_DOCS_STABLE": "true" if is_current_principal else "false",
         # Pin Documenter's stable selector to the current principal main
         # version.  For maintenance tags this preserves stable while the
         # maintenance version receives its own immutable directory.

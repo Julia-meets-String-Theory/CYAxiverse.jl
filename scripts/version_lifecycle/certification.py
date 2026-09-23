@@ -52,6 +52,17 @@ _TOKEN_SHAPED_VALUE = re.compile(
     r")",
     re.I,
 )
+_HTTP_URL_IN_TEXT = re.compile(r"https?://[^\s,;\"'<>]+", re.I)
+_PRIVATE_SHARE_URL = re.compile(
+    r"(?:chatgpt\.com|chat\.openai\.com)/share(?:/|[?#\s]|$)", re.I
+)
+_EMBEDDED_UNIX_ABSOLUTE_PATH = re.compile(
+    r"(?<![A-Za-z0-9_./-])/(?:[^/\s,;\"'<>]+/)*[^/\s,;\"'<>]+"
+)
+_EMBEDDED_WINDOWS_ABSOLUTE_PATH = re.compile(
+    r"(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/]|~[\\/]|"
+    r"\\\\(?:\?\\|\.\\)?[^\\/\s,;\"'<>]+[\\/])"
+)
 
 
 def _version_identity(value: str, key: str | None) -> bool:
@@ -133,6 +144,19 @@ def _contains_nonpublic_locator(value: str) -> bool:
     return False
 
 
+def _contains_embedded_absolute_path(value: str) -> bool:
+    """Find Unix, Windows-drive, or home paths embedded in durable labels."""
+
+    # URLs have their own host/path validation below. Remove them before
+    # looking for filesystem paths so the ``//`` in a URL is not mistaken for
+    # a UNC or Unix path prefix.
+    non_url_text = _HTTP_URL_IN_TEXT.sub(" ", value)
+    return (
+        _EMBEDDED_UNIX_ABSOLUTE_PATH.search(non_url_text) is not None
+        or _EMBEDDED_WINDOWS_ABSOLUTE_PATH.search(non_url_text) is not None
+    )
+
+
 def is_safe_public_value(value: Any, *, key: str | None = None) -> bool:
     """Return whether a durable value is safe to expose publicly.
 
@@ -155,6 +179,10 @@ def is_safe_public_value(value: Any, *, key: str | None = None) -> bool:
     if any(ord(character) < 0x20 or ord(character) > 0x7E for character in value):
         return False
     if _TOKEN_SHAPED_VALUE.search(value) is not None:
+        return False
+    if _PRIVATE_SHARE_URL.search(value) is not None:
+        return False
+    if _contains_embedded_absolute_path(value):
         return False
     if "%" in value:
         # Percent escapes can hide a private host or local path in an
@@ -239,6 +267,29 @@ def is_safe_public_value(value: Any, *, key: str | None = None) -> bool:
         "127.0.0.1",
     )
     return not any(marker in lowered for marker in forbidden)
+
+
+def is_safe_public_reference(value: Any, *, key: str | None = None) -> bool:
+    """Validate a durable public reference or an array of such references."""
+
+    if isinstance(value, str):
+        return (
+            bool(value)
+            and "?" not in value
+            and "#" not in value
+            and is_safe_public_value(value, key=key)
+        )
+    if isinstance(value, (list, tuple)):
+        return all(is_safe_public_reference(item, key=key) for item in value)
+    return False
+
+
+def is_safe_public_environment(value: Any) -> bool:
+    """Validate public certification-environment data recursively."""
+
+    return isinstance(value, (str, Mapping, list, tuple)) and is_safe_public_value(
+        value, key="certification_environment"
+    )
 
 
 def has_token_shape(value: str) -> bool:
@@ -500,6 +551,8 @@ __all__ = [
     "certification_binding",
     "certify_exact_tree",
     "is_safe_public_value",
+    "is_safe_public_reference",
+    "is_safe_public_environment",
     "validate_certification",
     "validate_certification_identity",
     "validate_certification_transfer",

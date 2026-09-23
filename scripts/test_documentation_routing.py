@@ -329,9 +329,10 @@ class DocumentationRoutingTests(unittest.TestCase):
             self.assertIn(
                 f"CYAX_DOCS_RELEASE_SHA={release['final_release_sha']}", exported
             )
+            self.assertIn("CYAX_DOCS_STABLE=true", exported)
             self.assertIn("CYAX_DOCS_STABLE_TAG=v1.2.3", exported)
 
-    def test_principal_verifier_rejects_current_main_drift(self) -> None:
+    def test_historical_principal_tag_remains_versioned_when_main_advances(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             release, publication_manifest, complete_args = write_complete_context(root)
@@ -356,8 +357,44 @@ class DocumentationRoutingTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("current principal main SHA", result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            exported = env_path.read_text(encoding="utf-8")
+            self.assertIn("CYAX_DOCS_STABLE=false", exported)
+            self.assertIn("CYAX_DOCS_STABLE_TAG=v2.1.0", exported)
+            self.assertIn(
+                f"CYAX_DOCS_RELEASE_VERSION={release['final_version']}",
+                exported,
+            )
+
+    def test_principal_commit_without_current_version_does_not_advance_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release, publication_manifest, complete_args = write_complete_context(root)
+            env_path = root / "github.env"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "docs/verify_release_context.py"),
+                    *complete_args,
+                    "--tag-ref", f"refs/tags/{publication_manifest['public_tag']}",
+                    "--tag", str(publication_manifest["public_tag"]),
+                    "--tag-sha", str(publication_manifest["tag_commit"]),
+                    "--tag-tree", str(publication_manifest["tag_tree"]),
+                    "--tag-version", str(release["final_version"]),
+                    "--main-sha", str(release["final_release_sha"]),
+                    "--main-version", "2.1.0",
+                    "--github-release-id", str(publication_manifest["github_release_id"]),
+                    "--github-env", str(env_path),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            exported = env_path.read_text(encoding="utf-8")
+            self.assertIn("CYAX_DOCS_STABLE=false", exported)
+            self.assertIn("CYAX_DOCS_STABLE_TAG=v2.1.0", exported)
 
     def test_maintenance_verifier_preserves_current_principal_stable_tag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -410,6 +447,76 @@ class DocumentationRoutingTests(unittest.TestCase):
         verified["CYAX_DOCS_MANIFEST_STATUS"] = "verified"
         result = subprocess.run(["julia", "--startup-file=no", "docs/make.jl"], cwd=ROOT, env=verified, check=False, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(shutil.which("julia"), "Julia is required for Documenter route checks")
+    def test_workflow_dispatch_uses_verified_tag_for_documenter_channel(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release, publication_manifest, complete_args = write_complete_context(root)
+            env_path = root / "github.env"
+            tag_ref = f"refs/tags/{publication_manifest['public_tag']}"
+            verified = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "docs/verify_release_context.py"),
+                    *complete_args,
+                    "--tag-ref", tag_ref,
+                    "--tag", str(publication_manifest["public_tag"]),
+                    "--tag-sha", str(publication_manifest["tag_commit"]),
+                    "--tag-tree", str(publication_manifest["tag_tree"]),
+                    "--tag-version", str(release["final_version"]),
+                    "--main-sha", "d" * 40,
+                    "--main-version", "2.1.0",
+                    "--github-release-id", str(publication_manifest["github_release_id"]),
+                    "--github-env", str(env_path),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            doc_context = json.loads(verified.stdout)
+            self.assertEqual(doc_context["CYAX_DOCS_STABLE"], "false")
+
+            environment = os.environ.copy()
+            environment.update(doc_context)
+            environment.update({
+                "CYAX_DOCS_ROUTE_ONLY": "documenter",
+                "CYAX_DOCS_REF": tag_ref,
+                "CYAX_DOCS_TAG_REF": tag_ref,
+                "GITHUB_EVENT_NAME": "workflow_dispatch",
+                "GITHUB_REF": "refs/heads/vmm",
+                "GITHUB_REPOSITORY": "Julia-meets-String-Theory/CYAxiverse.jl",
+                "GITHUB_ACTOR": "fixture-owner",
+                "GITHUB_TOKEN": "synthetic-token-for-routing-only",
+            })
+            selected = subprocess.run(
+                ["julia", "--project=docs/", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(selected.stdout.strip().splitlines()[-1], "v1.2.3")
+            self.assertNotIn("deploying devbranch build", selected.stderr)
+
+            wrong_tag = dict(environment)
+            wrong_tag["CYAX_DOCS_TAG_REF"] = "refs/tags/v9.9.9"
+            rejected = subprocess.run(
+                ["julia", "--project=docs/", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=wrong_tag,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("DOCS_DISPATCH_REF_MISMATCH", rejected.stderr)
 
 
 if __name__ == "__main__":

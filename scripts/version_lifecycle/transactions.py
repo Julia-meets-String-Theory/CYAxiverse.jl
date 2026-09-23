@@ -16,15 +16,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 import re
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
-from .codec import sha256_hex
+from .codec import canonical_json, sha256_hex
 from .authorization import AuthorizationError, verify_owner_authorization
 from .certification import is_safe_public_value
 from .manifests import (
     canonical_manifest_bytes,
     lifecycle_ref_for_manifest,
     seal_manifest,
+    validate_publication_evidence_ref,
     validate_manifest,
 )
 from .versions import parse_package_version
@@ -150,6 +151,22 @@ class ImmutableLifecyclePort(Protocol):
     """Port contract used by the coordinator's create-once fixture."""
 
     def create_manifest(self, manifest_type: str, manifest: dict[str, Any]) -> Any: ...
+
+    def publication_evidence_target(
+        self, intent: Any, released: Mapping[str, Any], tag: Mapping[str, Any]
+    ) -> str: ...
+
+    def publication_evidence_payload(
+        self, intent: Any, released: Mapping[str, Any], tag: Mapping[str, Any]
+    ) -> Mapping[str, Any]: ...
+
+    def persist_publication_evidence(
+        self, intent: Any, target: str, payload: bytes
+    ) -> Any: ...
+
+    def publish_github_release(
+        self, intent: Any, released: Mapping[str, Any]
+    ) -> Any: ...
 
     def dispatch_documentation(self, publication_ref: str) -> Any: ...
 
@@ -1119,28 +1136,65 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
 
         if not hasattr(port, "publish_github_release"):
             raise TransactionError("PUBLICATION_RECONCILIATION_REQUIRED")
+        if not all(hasattr(port, name) for name in (
+            "publication_evidence_target",
+            "publication_evidence_payload",
+            "persist_publication_evidence",
+        )):
+            raise TransactionError("PUBLICATION_EVIDENCE_UNAVAILABLE")
+        evidence_target_value = _call(
+            port, "publication_evidence_target", intent, released, tag
+        )
+        try:
+            evidence_target = validate_publication_evidence_ref(
+                evidence_target_value
+            )
+        except (TypeError, ValueError) as error:
+            raise TransactionError(
+                "PUBLICATION_EVIDENCE_TARGET_INVALID", str(error)
+            ) from error
+        evidence_payload_value = _call(
+            port, "publication_evidence_payload", intent, released, tag
+        )
+        if not isinstance(evidence_payload_value, Mapping):
+            raise TransactionError("PUBLICATION_EVIDENCE_INVALID")
+        if not is_safe_public_value(evidence_payload_value):
+            raise TransactionError("PUBLICATION_EVIDENCE_UNSAFE")
+        try:
+            evidence_payload_bytes = canonical_json(evidence_payload_value)
+        except (TypeError, ValueError) as error:
+            raise TransactionError(
+                "PUBLICATION_EVIDENCE_INVALID", str(error)
+            ) from error
+        evidence_payload_digest = sha256_hex(evidence_payload_bytes)
+
+        # Validate and authorize the exact evidence target before publishing
+        # the GitHub Release; revalidate authorization immediately before the
+        # later create-once evidence write.
+        _authorize(port, intent, "create-release-manifest", evidence_target)
         _authorize(port, intent, "create-release-manifest", f"refs/tags/{intent.public_tag}")
         publication = _as_mapping(_call(port, "publish_github_release", intent, released), "PUBLICATION_IDENTITY_MISMATCH")
         release_id = publication.get("id", publication.get("github_release_id"))
         if (publication.get("tag", publication.get("public_tag")) != intent.public_tag
-                or isinstance(release_id, bool) or not isinstance(release_id, int) or release_id <= 0):
+                or isinstance(release_id, bool) or not isinstance(release_id, int) or release_id <= 0
+                or not is_safe_public_value(publication)):
             raise TransactionError("PUBLICATION_IDENTITY_MISMATCH")
         evidence["github_release"] = publication
         phase = "github_release_published"
-        if not hasattr(port, "persist_publication_evidence"):
-            raise TransactionError("PUBLICATION_EVIDENCE_UNAVAILABLE")
-        if not hasattr(port, "publication_evidence_target"):
-            raise TransactionError("PUBLICATION_EVIDENCE_UNAVAILABLE")
-        evidence_target = _call(
-            port, "publication_evidence_target", intent, released, publication
-        )
-        if not isinstance(evidence_target, str) or not evidence_target:
-            raise TransactionError("PUBLICATION_EVIDENCE_UNAVAILABLE")
         _authorize(port, intent, "create-release-manifest", evidence_target)
-        publication_evidence = _as_mapping(_call(port, "persist_publication_evidence", intent, released, publication), "PUBLICATION_EVIDENCE_MISMATCH")
+        publication_evidence = _as_mapping(
+            _call(
+                port,
+                "persist_publication_evidence",
+                intent,
+                evidence_target,
+                evidence_payload_bytes,
+            ),
+            "PUBLICATION_EVIDENCE_MISMATCH",
+        )
         if (publication_evidence.get("ref") != evidence_target
-                or not isinstance(publication_evidence.get("digest"), str)
-                or not re.fullmatch(r"[0-9a-f]{64}", publication_evidence["digest"])):
+                or publication_evidence.get("digest") != evidence_payload_digest
+                or not is_safe_public_value(publication_evidence)):
             raise TransactionError("PUBLICATION_EVIDENCE_MISMATCH")
         evidence["publication_evidence"] = publication_evidence
         release_ref = lifecycle_ref_for_manifest(released)
@@ -1161,7 +1215,7 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             "github_release_url": publication.get("url", publication.get("github_release_url", "")),
             "published_at_utc": publication.get("published_at_utc", intent.timestamp_utc),
             "publication_evidence_ref": publication_evidence["ref"],
-            "publication_evidence_digest": publication_evidence["digest"],
+            "publication_evidence_digest": evidence_payload_digest,
         }
         evidence["publication"] = _as_mapping(_typed_manifest(
             port, "publication", publication_payload,

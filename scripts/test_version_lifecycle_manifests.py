@@ -454,6 +454,55 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ManifestError, "nonpublic value"):
             validate_manifest(seal_manifest(unsafe))
 
+    def test_durable_references_and_environment_reject_private_locators(self) -> None:
+        intent = dict(self.chain()[5])
+        released = dict(self.chain()[6])
+        private_share = "https://chatgpt.com/share/synthetic-private-conversation"
+        for manifest, field in (
+            (intent, "certification_evidence_refs"),
+            (released, "evidence_refs"),
+        ):
+            for reference in (
+                private_share,
+                "evidence/report.json?view=private",
+                "evidence/report.json#local-copy",
+            ):
+                unsafe = dict(manifest)
+                unsafe.pop("manifest_id")
+                unsafe[field] = [reference]
+                with self.subTest(field=field, reference=reference), self.assertRaisesRegex(
+                    ManifestError, "nonpublic value"
+                ):
+                    validate_manifest(seal_manifest(unsafe))
+
+        publication = dict(self.chain()[7])
+        for reference in (
+            "evidence/chatgpt.com/share/synthetic-private-conversation",
+            "evidence/publication.json?token-locator",
+            "evidence/publication.json#private-copy",
+        ):
+            unsafe = dict(publication)
+            unsafe.pop("manifest_id")
+            unsafe.pop("publication_id")
+            unsafe["publication_evidence_ref"] = reference
+            with self.subTest(reference=reference), self.assertRaisesRegex(
+                ManifestError, "nonpublic value"
+            ):
+                validate_manifest(seal_manifest(unsafe))
+
+        for environment in (
+            "python=/opt/lab/venv/bin/python",
+            r"python=C:\Users\researcher\venv\Scripts\python.exe",
+            "python=~/venv/bin/python",
+        ):
+            unsafe = dict(intent)
+            unsafe.pop("manifest_id")
+            unsafe["certification_environment"] = environment
+            with self.subTest(environment=environment), self.assertRaisesRegex(
+                ManifestError, "certification_environment.*nonpublic"
+            ):
+                validate_manifest(seal_manifest(unsafe))
+
     def test_duplicate_key_raw_json_and_one_file_commit_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

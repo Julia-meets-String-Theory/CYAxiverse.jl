@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from hashlib import sha256
 from dataclasses import replace
 from pathlib import Path
 
@@ -240,6 +241,9 @@ class PrincipalReleaseFixture:
         self.static_epoch = 0
         self.lifecycle_epoch = 1
         self.now_utc = "2026-09-20T13:00:00Z"
+        self.publication_evidence_ref = "evidence/publication.json"
+        self.publication_evidence_override = None
+        self.persisted_publication_evidence_payload = None
         self.authorization = IssuingAuthority("tx-release")
         self.owner_authorization_authority = self.authorization
 
@@ -348,15 +352,32 @@ class PrincipalReleaseFixture:
                 "url": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/releases/tag/v0.3.0",
                 "published_at_utc": "2026-09-20T13:30:00Z"}
 
-    def persist_publication_evidence(self, intent, released, publication):
+    def publication_evidence_target(self, intent, released, tag):
+        self.calls.append("publication-evidence-target")
+        if self.fail == "unsafe-publication-evidence-ref":
+            return "evidence/chatgpt.com/share/private"
+        return self.publication_evidence_ref
+
+    def publication_evidence_payload(self, intent, released, tag):
+        self.calls.append("publication-evidence-payload")
+        if self.fail == "unsafe-publication-evidence-payload":
+            return {"share": "https://chatgpt.com/share/synthetic-private-chat"}
+        if self.publication_evidence_override is not None:
+            return self.publication_evidence_override
+        return {
+            "schema_version": 1,
+            "public_tag": intent.public_tag,
+            "released_manifest_id": released["manifest_id"],
+            "tag_commit": tag["commit"],
+            "tag_tree": tag["tree"],
+        }
+
+    def persist_publication_evidence(self, intent, target, payload):
         self.calls.append("publication-evidence")
         if self.fail == "publication-evidence":
             raise RuntimeError("publication evidence timeout")
-        return {"ref": "evidence/publication.json", "digest": "f" * 64,
-                "public_tag": intent.public_tag, "github_release_id": publication["id"]}
-
-    def publication_evidence_target(self, intent, released, publication):
-        return "evidence/publication.json"
+        self.persisted_publication_evidence_payload = payload
+        return {"ref": target, "digest": sha256(payload).hexdigest()}
 
     def verify_released(self, intent, released, certification, final):
         self.calls.append("verify-released")
@@ -670,9 +691,16 @@ class TransactionTests(unittest.TestCase):
                          ["candidate-opened", "release-intent-prepared", "released", "publication"])
         self.assertLess(port.calls.index("tag"), port.calls.index("manifest:released"))
         self.assertLess(port.calls.index("manifest:released"), port.calls.index("manifest:publication"))
+        self.assertLess(port.calls.index("publication-evidence-target"), port.calls.index("github-release"))
+        self.assertLess(port.calls.index("publication-evidence-payload"), port.calls.index("github-release"))
+        self.assertLess(port.calls.index("github-release"), port.calls.index("publication-evidence"))
         self.assertLess(port.calls.index("terminal"), port.calls.index("documentation-dispatch"))
         self.assertLess(port.calls.index("documentation-dispatch"), port.calls.index("release-exclusion"))
         self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze-main"])
+        self.assertEqual(
+            port.manifests[-1]["publication_evidence_digest"],
+            sha256(port.persisted_publication_evidence_payload).hexdigest(),
+        )
         allocation_manifests = [
             manifest for manifest in port.manifests
             if manifest["manifest_type"] != "publication"
@@ -833,6 +861,23 @@ class TransactionTests(unittest.TestCase):
         self.assertTrue(result.evidence["documentation_dispatch_reconciliation_required"])
         self.assertNotIn("release-exclusion", port.calls)
         self.assertNotIn("unfreeze-main", port.calls)
+
+    def test_publication_evidence_preflight_blocks_unsafe_values_before_persist(self):
+        for failure, reason in (
+            ("unsafe-publication-evidence-ref", "PUBLICATION_EVIDENCE_TARGET_INVALID"),
+            ("unsafe-publication-evidence-payload", "PUBLICATION_EVIDENCE_UNSAFE"),
+        ):
+            with self.subTest(failure=failure):
+                port = PrincipalReleaseFixture(fail=failure)
+                result = run_release(port, self.release_intent)
+                self.assertEqual(
+                    (result.status, result.reason_code, result.frozen),
+                    ("publication_reconciliation_pending", reason, True),
+                )
+                self.assertNotIn("publication-evidence", port.calls)
+                self.assertNotIn("github-release", port.calls)
+                self.assertNotIn("manifest:publication", port.calls)
+                self.assertNotIn("unfreeze-main", port.calls)
 
     def test_maintenance_bootstrap_and_rare_recovery_are_deferred(self):
         bootstrap = run_maintenance_bootstrap(
