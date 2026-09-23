@@ -206,6 +206,21 @@ class DocumentationRoutingTests(unittest.TestCase):
         self.assertIn("releases/assets", workflow)
         self.assertIn("--require-complete-lifecycle", workflow)
         self.assertIn("canonical_manifest_bytes", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("publication_ref:", workflow)
+        self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
+        self.assertNotIn("tags: 'v*.*.*'", workflow)
+        self.assertIn('value.startswith(prefix)', workflow)
+        self.assertIn('parse_public_tag(parts[0])', workflow)
+        self.assertLess(
+            workflow.index('publication_ref is not an exact publication ref'),
+            workflow.index('PUBLICATION_REF="refs/remotes/origin/'),
+        )
+        self.assertLess(
+            workflow.index("triggering immutable publication manifest"),
+            workflow.index("matching immutable released manifest"),
+        )
+        self.assertIn('git checkout --detach "$CYAX_DOCS_RELEASE_SHA"', workflow)
         self.assertIn('git fetch --no-tags -- origin "$ANCHOR_REF:$ANCHOR_REF"', workflow)
         self.assertIn("--anchor-closure-timestamp-utc", workflow)
         self.assertNotIn(

@@ -151,6 +151,8 @@ class ImmutableLifecyclePort(Protocol):
 
     def create_manifest(self, manifest_type: str, manifest: dict[str, Any]) -> Any: ...
 
+    def dispatch_documentation(self, publication_ref: str) -> Any: ...
+
 
 def _sha(value: Any) -> bool:
     return isinstance(value, str) and SHA1_RE.fullmatch(value) is not None
@@ -808,6 +810,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
     lease: Any = None
     tag_created = False
     released_created = False
+    documentation_dispatch_attempted = False
+    documentation_dispatch_proven = False
     try:
         if (intent.release_line or intent.owner_line) != "principal":
             raise TransactionError("DEFERRED_MAINTENANCE_RELEASE")
@@ -1173,6 +1177,30 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             publication_evidence,
         )
         phase = "terminal_verified"
+        publication_manifest = evidence["publication"]
+        publication_manifest_ref = lifecycle_ref_for_manifest(
+            publication_manifest
+        )
+        documentation_dispatch_attempted = True
+        if not hasattr(port, "dispatch_documentation"):
+            raise TransactionError("DOCS_DEPLOY_DISPATCH_UNAVAILABLE")
+        documentation_dispatch = _as_mapping(
+            _call(
+                port,
+                "dispatch_documentation",
+                publication_manifest_ref,
+            ),
+            "DOCS_DEPLOY_DISPATCH_MISMATCH",
+        )
+        if (
+            documentation_dispatch.get("status") != "requested"
+            or documentation_dispatch.get("publication_ref")
+            != publication_manifest_ref
+        ):
+            raise TransactionError("DOCS_DEPLOY_DISPATCH_MISMATCH")
+        evidence["documentation_dispatch"] = documentation_dispatch
+        documentation_dispatch_proven = True
+        phase = "documentation_dispatched"
 
         lease_to_release = lease
         lease = None
@@ -1181,12 +1209,17 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         token = None
         return TransactionResult("COMPLETE", evidence=evidence, phase="unfrozen")
     except TransactionError as error:
-        try:
-            if lease is not None:
+        if lease is not None and not (
+            documentation_dispatch_attempted and not documentation_dispatch_proven
+        ):
+            try:
                 _release_exclusion(port, lease)
-        except Exception:
-            pass
-        if error.reason_code == "OWNER_AUTHORIZATION_UNVERIFIED":
+            except Exception:
+                pass
+        if documentation_dispatch_attempted and not documentation_dispatch_proven:
+            evidence["documentation_dispatch_reconciliation_required"] = True
+            status = "publication_reconciliation_pending"
+        elif error.reason_code == "OWNER_AUTHORIZATION_UNVERIFIED":
             status = "BLOCKED"
         elif error.reason_code.endswith("_MISMATCH"):
             status = "INVALID"
@@ -1198,14 +1231,20 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             status = "BLOCKED"
         return TransactionResult(status, error.reason_code, error.detail, evidence, frozen=token is not None, phase=phase)
     except Exception as error:
-        try:
-            if lease is not None:
+        if lease is not None and not (
+            documentation_dispatch_attempted and not documentation_dispatch_proven
+        ):
+            try:
                 _release_exclusion(port, lease)
-        except Exception:
-            pass
+            except Exception:
+                pass
         evidence["error_type"] = type(error).__name__
-        status = ("publication_reconciliation_pending" if released_created else
-                  "tag_reconciliation_pending" if tag_created else "BLOCKED")
+        if documentation_dispatch_attempted and not documentation_dispatch_proven:
+            evidence["documentation_dispatch_reconciliation_required"] = True
+            status = "publication_reconciliation_pending"
+        else:
+            status = ("publication_reconciliation_pending" if released_created else
+                      "tag_reconciliation_pending" if tag_created else "BLOCKED")
         return TransactionResult(status, "RELEASE_OUTCOME_UNCERTAIN", str(error), evidence, frozen=token is not None, phase=phase)
 
 

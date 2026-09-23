@@ -107,6 +107,34 @@ class AuthorizationTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(AuthorizationError):
                 validate_authorization(tampered)
 
+    def test_private_or_noncanonical_authority_reference_is_rejected(self):
+        unsafe = (
+            "file:///Users/alice/private/grant.json",
+            "/Users/alice/private/grant.json",
+            "https://authority.example/grant-001",
+            "owner-authority://alice:password@synthetic/grant-001",
+            "owner-authority://synthetic/../grant-001",
+            "owner-authority://synthetic/secret-token",
+            "owner-authority://synthetic/grant-001?token=value",
+            "owner-authority://synthetic/grant-001?",
+            "owner-authority://synthetic/grant-001#",
+            "owner-authority://synthetic/grant-001#secret-locator",
+            "owner-authority://synthetic/ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            "owner-authority://synthetic/sk-live-abcdefghijklmnopqrstuvwxyz012345",
+            "owner-authority://synthetic/grant%2Fprivate",
+            "OWNER-AUTHORITY://synthetic/grant-001",
+            "owner-authority://localhost/grant-001",
+            "owner-authority://127.0.0.1/grant-001",
+            "owner-authority://synthetic/Users/alice/grant-001",
+        )
+        for reference in unsafe:
+            value = vector_record()
+            value["authority_source_ref"] = reference
+            with self.subTest(reference=reference), self.assertRaises(
+                AuthorizationError
+            ):
+                seal_authorization(value)
+
     def test_changed_bytes_or_owner_assertion_blocks(self):
         record = seal_authorization(vector_record())
         reference = str(record["authority_source_ref"])

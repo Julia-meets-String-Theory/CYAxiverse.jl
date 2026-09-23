@@ -299,6 +299,30 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(canonical_manifest_bytes(value), json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
         self.assertEqual(lifecycle_ref_for_manifest(value), "refs/heads/lifecycle/v1/claims/v1.2.3")
 
+    def test_manifests_reject_private_authorization_references(self) -> None:
+        unsafe = (
+            "file:///Users/alice/private/grant.json",
+            "/Users/alice/private/grant.json",
+            "owner-authority://alice:password@synthetic/grant",
+            "owner-authority://synthetic/grant?secret=value",
+            "owner-authority://synthetic/grant#token-locator",
+            "owner-authority://synthetic/secret-grant",
+            "owner-authority://synthetic/ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            "owner-authority://localhost/grant",
+            "owner-authority://synthetic/Users/alice/grant",
+        )
+        for reference in unsafe:
+            allocation = self.draft(owner_authorization_ref=reference)
+            publication = dict(self.chain()[-1])
+            publication.pop("manifest_id")
+            publication.pop("publication_id")
+            publication["owner_authorization_ref"] = reference
+            for manifest in (allocation, publication):
+                with self.subTest(
+                    kind=manifest["manifest_type"], reference=reference
+                ), self.assertRaisesRegex(ManifestError, "public-safe"):
+                    validate_manifest(seal_manifest(manifest))
+
     def test_authorization_binding_does_not_create_identity_cycle(self) -> None:
         first = seal_manifest(self.draft())
         second = seal_manifest(self.draft(

@@ -25,6 +25,7 @@ from .codec import canonical_json, sha256_hex
 from .authorization import (
     AUTHORIZATION_ID_RE,
     AuthorizationError,
+    validate_authorization_reference,
     verify_owner_authorization,
 )
 from .certification import is_safe_public_value
@@ -199,6 +200,13 @@ def _check_identity_text(value: Any, name: str) -> None:
         raise ManifestError(f"{name} must be nonempty printable ASCII")
     if name not in {"github_release_url", "publication_evidence_ref", "owner_authorization_ref"} and ("/" in value or ".." in value):
         raise ManifestError(f"{name} contains a forbidden ref component")
+
+
+def _check_authorization_reference(value: Any) -> None:
+    try:
+        validate_authorization_reference(value)
+    except AuthorizationError as error:
+        raise ManifestError("owner_authorization_ref is not public-safe") from error
 
 
 def _check_publication_evidence_ref(value: Any) -> None:
@@ -390,7 +398,7 @@ def _validate_publication(manifest: Mapping[str, Any]) -> None:
     _check_identity_text(manifest["owner_authorization"], "owner_authorization")
     if not AUTHORIZATION_ID_RE.fullmatch(manifest["owner_authorization"]):
         raise ManifestError("invalid owner_authorization")
-    _check_identity_text(manifest["owner_authorization_ref"], "owner_authorization_ref")
+    _check_authorization_reference(manifest["owner_authorization_ref"])
     if not _is_sha256(manifest["owner_authorization_digest"]):
         raise ManifestError("invalid owner_authorization_digest")
     _check_github_release_url(manifest["github_release_url"], manifest["public_tag"])
@@ -568,7 +576,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         _check_identity_text(manifest["owner_authorization"], "owner_authorization")
         if not AUTHORIZATION_ID_RE.fullmatch(manifest["owner_authorization"]):
             raise ManifestError("invalid owner_authorization")
-        _check_identity_text(manifest["owner_authorization_ref"], "owner_authorization_ref")
+        _check_authorization_reference(manifest["owner_authorization_ref"])
         if not _is_sha256(manifest["owner_authorization_digest"]):
             raise ManifestError("invalid owner_authorization_digest")
     for field in _SHA_FIELDS:

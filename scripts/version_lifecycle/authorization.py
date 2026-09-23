@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import ipaddress
 import re
 from typing import Any, Callable, Mapping, Protocol
+from urllib.parse import urlsplit
 
 from .codec import canonical_json, sha256_hex
 from .versions import parse_package_version
@@ -29,6 +31,27 @@ AUTHORIZATION_FIELDS = frozenset(
         "transaction_id", "owner_line", "final_version", "authorized_actions",
         "target_refs", "owner_authorization_digest",
     }
+)
+_AUTHORITY_COMPONENT_RE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$"
+)
+_PRIVATE_REFERENCE_MARKER_RE = re.compile(
+    r"(?:credential|password|passwd|secret|token|bearer|api[-_]?key)", re.I
+)
+_TOKEN_SHAPED_REFERENCE_RE = re.compile(
+    r"(?:^|[/_-])(?:"
+    r"gh[pousr]_[A-Za-z0-9_]{20,}|"
+    r"github_pat_[A-Za-z0-9_]{20,}|"
+    r"sk-[A-Za-z0-9_-]{16,}|"
+    r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
+    r"AKIA[0-9A-Z]{16}|"
+    r"AIza[A-Za-z0-9_-]{30,}|"
+    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
+    r")(?:$|[/_-])",
+    re.I,
+)
+_LOCAL_REFERENCE_COMPONENTS = frozenset(
+    {"codex", "home", "private", "tmp", "users", "var"}
 )
 
 
@@ -54,6 +77,59 @@ def _text(value: Any, field: str) -> None:
         raise AuthorizationError(f"{field} is not printable ASCII")
     if any(ord(char) < 0x20 or ord(char) > 0x7E for char in value):
         raise AuthorizationError(f"{field} is not printable ASCII")
+
+
+def validate_authorization_reference(value: Any) -> str:
+    """Return one public, immutable owner-authority reference."""
+
+    _text(value, "authority_source_ref")
+    assert isinstance(value, str)
+    if (
+        len(value) > 256
+        or not value.startswith("owner-authority://")
+        or "?" in value
+        or "#" in value
+        or "%" in value
+        or _PRIVATE_REFERENCE_MARKER_RE.search(value)
+        or _TOKEN_SHAPED_REFERENCE_RE.search(value)
+    ):
+        raise AuthorizationError("authority_source_ref is not public-safe")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as error:
+        raise AuthorizationError("authority_source_ref is not canonical") from error
+    try:
+        authority_ip = ipaddress.ip_address(parsed.netloc)
+    except ValueError:
+        authority_ip = None
+    components = parsed.path.removeprefix("/").split("/")
+    local_authority = parsed.netloc.lower() in {
+        "localhost", "localhost.localdomain", "local", "private"
+    }
+    if (
+        parsed.scheme != "owner-authority"
+        or not parsed.netloc
+        or parsed.netloc != parsed.netloc.lower()
+        or authority_ip is not None
+        or local_authority
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+        or not _AUTHORITY_COMPONENT_RE.fullmatch(parsed.netloc)
+        or not parsed.path.startswith("/")
+        or not components
+        or any(
+            component in {"", ".", ".."}
+            or component.lower() in _LOCAL_REFERENCE_COMPONENTS
+            or _AUTHORITY_COMPONENT_RE.fullmatch(component) is None
+            for component in components
+        )
+    ):
+        raise AuthorizationError("authority_source_ref is not canonical")
+    return value
 
 
 def _utc(value: Any, field: str) -> datetime:
@@ -142,8 +218,9 @@ def validate_authorization(record: Mapping[str, Any]) -> dict[str, Any]:
         raise AuthorizationError("invalid owner_authorization_digest")
     if record["owner_authorization_digest"] != authorization_digest(record):
         raise AuthorizationError("owner_authorization_digest mismatch")
-    for field in ("repository", "owner_account", "authority_source_ref", "transaction_id", "owner_line"):
+    for field in ("repository", "owner_account", "transaction_id", "owner_line"):
         _text(record[field], field)
+    validate_authorization_reference(record["authority_source_ref"])
     _canonical_version(record["final_version"])
     issued = _utc(record["issued_at_utc"], "issued_at_utc")
     expires = _utc(record["expires_at_utc"], "expires_at_utc")

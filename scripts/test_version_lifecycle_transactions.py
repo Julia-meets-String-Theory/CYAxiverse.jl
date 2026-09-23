@@ -368,6 +368,14 @@ class PrincipalReleaseFixture:
             raise RuntimeError("terminal proof unavailable")
         return {"verified": True}
 
+    def dispatch_documentation(self, publication_ref):
+        self.calls.append("documentation-dispatch")
+        if self.fail == "documentation-dispatch":
+            raise RuntimeError("documentation dispatch unavailable")
+        if self.fail == "documentation-dispatch-mismatch":
+            return {"status": "requested", "publication_ref": "refs/heads/wrong"}
+        return {"status": "requested", "publication_ref": publication_ref}
+
     def unfreeze_main(self, token):
         self.calls.append("unfreeze-main")
 
@@ -662,6 +670,8 @@ class TransactionTests(unittest.TestCase):
                          ["candidate-opened", "release-intent-prepared", "released", "publication"])
         self.assertLess(port.calls.index("tag"), port.calls.index("manifest:released"))
         self.assertLess(port.calls.index("manifest:released"), port.calls.index("manifest:publication"))
+        self.assertLess(port.calls.index("terminal"), port.calls.index("documentation-dispatch"))
+        self.assertLess(port.calls.index("documentation-dispatch"), port.calls.index("release-exclusion"))
         self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze-main"])
         allocation_manifests = [
             manifest for manifest in port.manifests
@@ -802,6 +812,26 @@ class TransactionTests(unittest.TestCase):
         result = run_release(port, self.release_intent)
         self.assertEqual((result.status, result.reason_code, result.frozen),
                          ("publication_reconciliation_pending", "PORT_OPERATION_FAILED", True))
+        self.assertNotIn("unfreeze-main", port.calls)
+
+        port = PrincipalReleaseFixture(fail="documentation-dispatch")
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code, result.frozen),
+                         ("publication_reconciliation_pending", "PORT_OPERATION_FAILED", True))
+        self.assertIn("manifest:publication", port.calls)
+        self.assertIn("terminal", port.calls)
+        self.assertTrue(result.evidence["documentation_dispatch_reconciliation_required"])
+        self.assertNotIn("release-exclusion", port.calls)
+        self.assertNotIn("unfreeze-main", port.calls)
+
+        port = PrincipalReleaseFixture(fail="documentation-dispatch-mismatch")
+        result = run_release(port, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.phase),
+            ("publication_reconciliation_pending", "DOCS_DEPLOY_DISPATCH_MISMATCH", True, "terminal_verified"),
+        )
+        self.assertTrue(result.evidence["documentation_dispatch_reconciliation_required"])
+        self.assertNotIn("release-exclusion", port.calls)
         self.assertNotIn("unfreeze-main", port.calls)
 
     def test_maintenance_bootstrap_and_rare_recovery_are_deferred(self):
