@@ -6,12 +6,31 @@ GitHub, source code, approved specifications, validation artifacts, and durable
 owner decisions remain authoritative. Notion is a derived human-readable
 knowledge layer.
 
-## Privacy boundary
+## v1 architecture
 
-The public manifest deliberately contains **no Notion page IDs**. Copy
-`pages.local.example.yaml` to `pages.local.yaml` and fill the mapping
-locally, or supply the same mapping as JSON through `NOTION_PAGE_MAP_JSON`.
-The real mapping is private and gitignored.
+The Julia tool does **not** call the Notion API and does not use a Notion token.
+
+```text
+GitHub / repository
+       |
+       v
+wiki_refresh.jl
+  detect drift
+  emit packet
+       |
+       v
+Work / ChatGPT
+connected Notion integration
+  read authoritative sources
+  update affected wiki page
+       |
+       v
+wiki_refresh.jl reconcile --accept ...
+  advance local state only
+```
+
+This keeps credentials and private page locators out of the public repository
+tooling while preserving deterministic drift detection.
 
 ## Setup
 
@@ -19,12 +38,8 @@ The real mapping is private and gitignored.
 julia --project=wiki -e 'using Pkg; Pkg.instantiate()'
 ```
 
-Optional environment variables:
-
-- `GITHUB_TOKEN` — recommended for API rate limits.
-- `NOTION_TOKEN` — required only for private Notion verification / accepted
-  metadata writes.
-- `NOTION_PAGE_MAP_JSON` — optional private page-key → page-ID mapping.
+`GITHUB_TOKEN` is optional but recommended for API rate limits. The tool
+requires no Notion credential.
 
 ## Commands
 
@@ -41,7 +56,7 @@ julia --project=wiki scripts/wiki_refresh.jl check --page cytools_boundary
 julia --project=wiki scripts/wiki_refresh.jl verify
 ```
 
-With no Notion credentials this verifies the public repository side only.
+This validates tracked public repository sources.
 
 ### Reconcile
 
@@ -49,17 +64,26 @@ With no Notion credentials this verifies the public repository side only.
 julia --project=wiki scripts/wiki_refresh.jl reconcile
 ```
 
-Semantic drift produces packets under `wiki/.wiki-refresh/packets/`; it does
-not rewrite the wiki.
+Semantic drift produces packets under:
 
-After the affected Notion page has been reviewed and reconciled:
-
-```sh
-julia --project=wiki scripts/wiki_refresh.jl reconcile --accept cytools_boundary
+```text
+wiki/.wiki-refresh/packets/
 ```
 
-The accept step requires a private page mapping plus `NOTION_TOKEN`. It
-updates only an existing `Verified against` marker and the local state file.
+The packet is given to Work/ChatGPT, which updates the corresponding Notion
+page through the connected Notion integration.
+
+After that update has been checked, advance the local baseline explicitly:
+
+```sh
+julia --project=wiki scripts/wiki_refresh.jl reconcile \
+  --accept cytools_boundary \
+  --reconciled-commit <EXACT_CURRENT_VMM_SHA>
+```
+
+The accept step does not contact Notion. It refuses to advance state unless the
+provided commit is exactly the current `vmm` head and all tracked source paths
+still exist.
 
 ## Exit codes
 
@@ -72,6 +96,6 @@ updates only an existing `Verified against` marker and the local state file.
 
 ## Scheduled operation
 
-The GitHub Action is deliberately read-only and receives no Notion token.
-It runs the test suite and weekly drift check. A drift result is a signal to
-reconcile; the script never makes GitHub changes.
+The GitHub Action is deliberately read-only. It runs the test suite and weekly
+drift check. A drift result is a signal to reconcile; the script never makes
+GitHub or Notion changes.

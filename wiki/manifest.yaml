@@ -7,9 +7,6 @@ repository:
 
 initial_verified_commit: "995163f0058488ea183ac645045ed8b1636bef4a"
 
-notion:
-  api_version: "2026-03-11"
-
 pages:
   current_status:
     title: "Current Development Status"

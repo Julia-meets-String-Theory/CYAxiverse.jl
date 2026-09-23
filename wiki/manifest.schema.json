@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "CYAxiverse wiki refresh manifest",
   "type": "object",
-  "required": ["schema_version", "repository", "initial_verified_commit", "notion", "pages"],
+  "required": ["schema_version", "repository", "initial_verified_commit", "pages"],
   "properties": {
     "schema_version": {"const": 1},
     "repository": {
@@ -16,12 +16,6 @@
       "additionalProperties": false
     },
     "initial_verified_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "notion": {
-      "type": "object",
-      "required": ["api_version"],
-      "properties": {"api_version": {"type": "string"}},
-      "additionalProperties": false
-    },
     "pages": {
       "type": "object",
       "additionalProperties": {
@@ -36,7 +30,6 @@
           "issues": {"type": "array", "items": {"type": "integer"}},
           "pull_requests": {"type": "array", "items": {"type": "integer"}}
         },
-        "not": {"required": ["notion_page_id"]},
         "additionalProperties": false
       }
     }

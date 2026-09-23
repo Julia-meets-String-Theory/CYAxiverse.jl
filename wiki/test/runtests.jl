@@ -3,18 +3,6 @@ using CYAxiverseWikiRefresh
 
 const W = CYAxiverseWikiRefresh
 
-@testset "verification marker" begin
-    md = """
-## Example
-
-**Status:** Reviewed
-**Verified against:** `vmm@995163f0058488ea183ac645045ed8b1636bef4a`
-"""
-    @test W._verified_marker(md) ==
-        "**Verified against:** `vmm@995163f0058488ea183ac645045ed8b1636bef4a`"
-    @test W._verified_marker("No verification metadata here") === nothing
-end
-
 @testset "manifest validation and privacy" begin
     manifest = Dict{String,Any}(
         "schema_version" => 1,
@@ -35,6 +23,10 @@ end
     private["pages"]["example"]["notion_page_id"] = "private-id"
     @test_throws ArgumentError W._validate_manifest(private)
 
+    api_config = deepcopy(manifest)
+    api_config["notion"] = Dict("api_version" => "2026-03-11")
+    @test_throws ArgumentError W._validate_manifest(api_config)
+
     broken = deepcopy(manifest)
     broken["pages"]["example"]["mode"] = "autonomous-scientific-rewrite"
     @test_throws ArgumentError W._validate_manifest(broken)
@@ -51,6 +43,13 @@ end
             "before_blob" => "1", "after_blob" => "2")],
         Dict{String,Any}[], Dict{String,Any}[])
     @test W.material(changed)
+end
+
+@testset "external reconciliation acceptance guard" begin
+    sha = "995163f0058488ea183ac645045ed8b1636bef4a"
+    @test W._accept_commit_guard(sha, sha)
+    @test !W._accept_commit_guard(sha,
+        "c4ec7316580fa6ff9a1d7d361841ef8fc0533174")
 end
 
 @testset "exit contract" begin
