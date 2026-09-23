@@ -7,8 +7,8 @@ normative amendment reviewed for I2 is commit
 `2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
 `7620f1c966cb37c5d2c7ed5c54778758ed2c12eb`). The latest correction
 implementation is frozen at commit
-`74b53bbf62be52c649524a8182ca7e82f12b375d` (tree
-`4353e36a8da0a580e341b360bdd774a651154cd4`). The feature branch
+`dc8cb513d9a20a9c20ebc7a370477aac6d8a111e` (tree
+`6b698382ff44d28a5fe25f6642a0e20462eafb45`). The feature branch
 uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
 execution base.
 
@@ -61,8 +61,8 @@ candidate, including this record, still requires fresh exact-state review.
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 125 tests. |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 8 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 127 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 10 tests. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'` | Passed: 3 tests. |
 | `python3 scripts/check_version_bump.py --base 20b3935ace0e01fcee2808681c56595e3afa7667 --head HEAD` | Passed: no package implementation or `Project.toml` change requires a version bump. |
 | `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed: worktree snapshot captured and no whitespace errors. |
@@ -121,7 +121,13 @@ STANDARDS reviews using `gpt-6-sol` at `high` both returned
 `REQUEST_CHANGES`; those verdicts remain attached only to that exact
 candidate. Commit `74b53bbf62be52c649524a8182ca7e82f12b375d` is the next
 bounded correction implementation and has no review verdict. Its evidence
-successor requires fresh exact-state review.
+successor is commit `9c58514648fe2fef1389a3e8fb3a615540103d23` (tree
+`f6e6c2b124c8fb043ddb78ebf1b8a9807474fc46`). Independent SPEC and STANDARDS
+reviews using `gpt-6-sol` at `high` both returned `REQUEST_CHANGES`; those
+verdicts remain attached only to that exact candidate. Commit
+`dc8cb513d9a20a9c20ebc7a370477aac6d8a111e` is the next bounded correction
+implementation and has no review verdict. Its evidence successor requires
+fresh exact-state review.
 
 ## Historical predecessor review history (non-authoritative)
 
