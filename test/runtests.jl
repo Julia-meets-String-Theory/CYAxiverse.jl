@@ -1264,21 +1264,130 @@ end
         @test length(phases) == 9
         @test phases[1] == [0.0, 0.0]
         @test S.potential([0.0, 0.0], Q, L, phases[1]) ≈ 0
-        @test S.hessian([0.0, 0.0], Q, L, phases[1]) ≈
-            4π^2 * Matrix{Float64}(I, 2, 2)
+        expected_identity_hessian = (2π)^2 .* Matrix{Float64}(I, 2, 2)
+        @test S.hessian([0.0, 0.0], Q, L, phases[1]) ≈ expected_identity_hessian
+
+        Q_general = [1.0 2.0; -1.0 1.0; 2.0 0.0]
+        L_general = [1.5 -0.3; 0.7 0.4; 2.3 -0.1]
+        theta_general = [0.17, -0.23]
+        phase_general = [0.11, -0.07, 0.19]
+        k_general = 0.8
+        amplitudes_general = L_general[:, 1] .* 10.0 .^ (k_general .* L_general[:, 2])
+        angles_general = 2π .* (Q_general * theta_general .+ phase_general)
+        expected_general_hessian = (2π)^2 .* (
+            transpose(Q_general) *
+            Diagonal(amplitudes_general .* cos.(angles_general)) * Q_general)
+        @test S.hessian(theta_general, Q_general, L_general, phase_general;
+            k=k_general) ≈ expected_general_hessian
+
+        historical_hessian = function(theta, Q, L, phase, k)
+            T = eltype(theta)
+            amplitudes = T.(L[:, 1]) .* T(10) .^ (T(k) .* T.(L[:, 2]))
+            angles = T(2) * T(π) .* (Q * theta .+ T.(phase))
+            weighted = amplitudes .* cos.(angles)
+            T(2) * T(π)^2 .* (transpose(Q) * (weighted .* Q))
+        end
+        zero_mode = hessian -> begin
+            values = eigvals(Symmetric(hessian))
+            values[argmin(abs.(values))]
+        end
         @test_throws ArgumentError S.scan([0.0, 0.0], Q, L; k_grid=[1.0, 0.5])
 
         # A two-instanton phase detuning has a reproducible zero of the
         # one-dimensional Hessian as the relative hierarchy is varied.
         q1 = reshape([1.0, 1.0], 2, 1)
         l1 = [2.0 -1.0; 1.0 1.0]
+        theta1 = [0.0]
+        phase1 = [0.4, 0.0]
+        k_grid1 = range(0.05, 0.20; length=4)
         result = S.scan([0.0], q1, l1;
-            k_grid=range(0.05, 0.2; length=4),
-            phases=[[0.4, 0.0]], tolerance=big"1e-20")
+            k_grid=k_grid1, phases=[phase1], precision_bits=256,
+            tolerance=big"1e-20")
         @test length(result) == 1
         @test all(candidate.scale_status == :homotopy_only for candidate in result)
         @test result[1].k_low < result[1].k_c < result[1].k_high
         @test result[1].n_e === missing
+
+        setprecision(BigFloat, 256) do
+            p64 = BigFloat(phase1[1])
+            p64_rational = BigFloat(big"3602879701896397") /
+                BigFloat(big"9007199254740992")
+            @test p64 == p64_rational
+            k64 = BigFloat("0.5") * log10(-BigFloat(2) *
+                cos(BigFloat(2) * BigFloat(π) * p64))
+            phi = (BigFloat(1) + sqrt(BigFloat(5))) / BigFloat(2)
+            k_phi = log10(phi) / BigFloat(2)
+            @test abs(result[1].k_c - k64) <= BigFloat("1e-20")
+            @test abs(result[1].k_c - k_phi) <= BigFloat("1e-12")
+            @test (result[1].k_low, result[1].k_high) ==
+                (BigFloat(0.10), BigFloat(0.15))
+
+            exact_Q = reshape([1, 1], 2, 1)
+            exact_L = [2 -1; 1 1]
+            exact_theta = BigFloat[BigFloat("0")]
+            exact_phase = BigFloat[BigFloat("0.4"), BigFloat("0")]
+            exact_low = BigFloat("0.10")
+            exact_high = BigFloat("0.15")
+            exact_hessian = S.hessian(exact_theta, exact_Q, exact_L, exact_phase;
+                k=BigFloat("0.12"), precision_bits=256)
+            @test eltype(exact_hessian) == BigFloat
+            k_B = S.refine_catastrophe(exact_theta, exact_Q, exact_L, exact_phase,
+                exact_low, exact_high; precision_bits=256,
+                tolerance=BigFloat("1e-20"))
+            @test abs(k_B - k_phi) <= BigFloat("1e-20")
+
+            theta1_big = BigFloat.(theta1)
+            phase1_big = BigFloat.(phase1)
+            ks = collect(k_grid1)
+            historical_values = [zero_mode(historical_hessian(theta1_big, q1, l1,
+                phase1_big, BigFloat(k))) for k in ks]
+            historical_bracket_index = findfirst(i ->
+                signbit(historical_values[i]) != signbit(historical_values[i + 1]),
+                1:(length(ks) - 1))
+            @test historical_bracket_index == 2
+            @test (ks[historical_bracket_index], ks[historical_bracket_index + 1]) ==
+                (0.10, 0.15)
+            @test signbit(historical_values[historical_bracket_index]) ==
+                signbit(result[1].eigenvalue_low)
+            @test signbit(historical_values[historical_bracket_index + 1]) ==
+                signbit(result[1].eigenvalue_high)
+            @test (historical_values[historical_bracket_index] < 0 ? :fold : :reverse_fold) ==
+                result[1].catastrophe_type == :fold
+
+            historical_root = begin
+                lo = BigFloat(ks[historical_bracket_index])
+                hi = BigFloat(ks[historical_bracket_index + 1])
+                flo = historical_values[historical_bracket_index]
+                refined = (lo + hi) / BigFloat(2)
+                for _ in 1:160
+                    refined = (lo + hi) / BigFloat(2)
+                    fmid = zero_mode(historical_hessian(theta1_big, q1, l1,
+                        phase1_big, refined))
+                    if abs(hi - lo) <= BigFloat("1e-20")
+                        break
+                    elseif signbit(flo) == signbit(fmid)
+                        lo, flo = refined, fmid
+                    else
+                        hi = refined
+                    end
+                end
+                refined
+            end
+            @test abs(result[1].k_c - historical_root) <= BigFloat("1e-20")
+
+            for k in (BigFloat(ks[historical_bracket_index]),
+                    BigFloat(ks[historical_bracket_index + 1]))
+                corrected_hessian = S.hessian(theta1_big, q1, l1, phase1_big;
+                    k, precision_bits=256)
+                historical_matrix = historical_hessian(theta1_big, q1, l1,
+                    phase1_big, k)
+                @test corrected_hessian ≈ BigFloat(2) .* historical_matrix
+                corrected_eigenvalues = eigvals(Symmetric(corrected_hessian))
+                historical_eigenvalues = eigvals(Symmetric(historical_matrix))
+                @test signbit.(corrected_eigenvalues) == signbit.(historical_eigenvalues)
+                @test corrected_eigenvalues ≈ BigFloat(2) .* historical_eigenvalues
+            end
+        end
     end
 end
 
