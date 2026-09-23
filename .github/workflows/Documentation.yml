@@ -309,7 +309,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: git checkout --detach "$CYAX_DOCS_RELEASE_SHA"
       - name: Verify development documentation context
-        if: github.ref == 'refs/heads/vmm'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/vmm'
         run: |
           git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
           python3 docs/verify_release_context.py \

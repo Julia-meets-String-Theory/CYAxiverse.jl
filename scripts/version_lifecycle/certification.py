@@ -38,6 +38,20 @@ _DOTTED_IP_CANDIDATE = re.compile(
     r"(?<![0-9A-Za-z])(?:0[xX][0-9A-Fa-f]+|[0-9]+)"
     r"(?:\.(?:0[xX][0-9A-Fa-f]+|[0-9]+)){1,3}(?![0-9])"
 )
+_TOKEN_SHAPED_VALUE = re.compile(
+    r"(?:"
+    r"gh[pousr]_[A-Za-z0-9_]{20,}|"
+    r"github_pat_[A-Za-z0-9_]{20,}|"
+    r"sk-[A-Za-z0-9_-]{16,}|"
+    r"sk_(?:live|test|proj)_?[A-Za-z0-9_-]{16,}|"
+    r"rk_(?:live|test)_[A-Za-z0-9]{16,}|"
+    r"AKIA[0-9A-Z]{16}|"
+    r"AIza[A-Za-z0-9_-]{30,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{16,}|"
+    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
+    r")",
+    re.I,
+)
 
 
 def _version_identity(value: str, key: str | None) -> bool:
@@ -140,6 +154,8 @@ def is_safe_public_value(value: Any, *, key: str | None = None) -> bool:
         return True
     if any(ord(character) < 0x20 or ord(character) > 0x7E for character in value):
         return False
+    if _TOKEN_SHAPED_VALUE.search(value) is not None:
+        return False
     if "%" in value:
         # Percent escapes can hide a private host or local path in an
         # otherwise ordinary durable label.
@@ -223,6 +239,12 @@ def is_safe_public_value(value: Any, *, key: str | None = None) -> bool:
         "127.0.0.1",
     )
     return not any(marker in lowered for marker in forbidden)
+
+
+def has_token_shape(value: str) -> bool:
+    """Return whether a string contains a common credential-shaped token."""
+
+    return _TOKEN_SHAPED_VALUE.search(value) is not None
 
 
 def _value(record: Mapping[str, Any], *names: str) -> Any:

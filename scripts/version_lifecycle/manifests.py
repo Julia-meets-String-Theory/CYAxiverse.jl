@@ -200,6 +200,8 @@ def _check_identity_text(value: Any, name: str) -> None:
         raise ManifestError(f"{name} must be nonempty printable ASCII")
     if name not in {"github_release_url", "publication_evidence_ref", "owner_authorization_ref"} and ("/" in value or ".." in value):
         raise ManifestError(f"{name} contains a forbidden ref component")
+    if not is_safe_public_value(value, key=name):
+        raise ManifestError(f"{name} contains a nonpublic value")
 
 
 def _check_authorization_reference(value: Any) -> None:
@@ -222,6 +224,8 @@ def _check_publication_evidence_ref(value: Any) -> None:
         or any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
     ):
         raise ManifestError("publication_evidence_ref must be a safe relative path")
+    if not is_safe_public_value(value, key="publication_evidence_ref"):
+        raise ManifestError("publication_evidence_ref contains a nonpublic value")
 
 
 def _check_github_release_url(value: Any, public_tag: str) -> None:
@@ -252,6 +256,8 @@ def _check_github_release_url(value: Any, public_tag: str) -> None:
         )
     ):
         raise ManifestError("github_release_url must be a sanitized HTTPS URL")
+    if not is_safe_public_value(value, key="github_release_url"):
+        raise ManifestError("github_release_url contains a nonpublic value")
 
 
 def _check_positive_decimal(value: Any, field: str) -> None:

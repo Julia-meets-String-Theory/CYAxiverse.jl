@@ -122,6 +122,7 @@ class AuthorizationTests(unittest.TestCase):
             "owner-authority://synthetic/ghp_abcdefghijklmnopqrstuvwxyz0123456789",
             "owner-authority://synthetic/sk-live-abcdefghijklmnopqrstuvwxyz012345",
             "owner-authority://synthetic/grant%2Fprivate",
+            "owner-authority://synthetic/prefixghp_abcdefghijklmnopqrstuvwxyz0123456789",
             "OWNER-AUTHORITY://synthetic/grant-001",
             "owner-authority://localhost/grant-001",
             "owner-authority://127.0.0.1/grant-001",
@@ -134,6 +135,12 @@ class AuthorizationTests(unittest.TestCase):
                 AuthorizationError
             ):
                 seal_authorization(value)
+
+    def test_token_shaped_transaction_id_is_rejected(self):
+        value = vector_record()
+        value["transaction_id"] = "prefixghp_abcdefghijklmnopqrstuvwxyz0123456789"
+        with self.assertRaisesRegex(AuthorizationError, "safe public value"):
+            seal_authorization(value)
 
     def test_changed_bytes_or_owner_assertion_blocks(self):
         record = seal_authorization(vector_record())

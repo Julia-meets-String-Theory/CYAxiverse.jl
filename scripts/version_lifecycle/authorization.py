@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlsplit
 
 from .codec import canonical_json, sha256_hex
+from .certification import has_token_shape, is_safe_public_value
 from .versions import parse_package_version
 
 
@@ -37,18 +38,6 @@ _AUTHORITY_COMPONENT_RE = re.compile(
 )
 _PRIVATE_REFERENCE_MARKER_RE = re.compile(
     r"(?:credential|password|passwd|secret|token|bearer|api[-_]?key)", re.I
-)
-_TOKEN_SHAPED_REFERENCE_RE = re.compile(
-    r"(?:^|[/_-])(?:"
-    r"gh[pousr]_[A-Za-z0-9_]{20,}|"
-    r"github_pat_[A-Za-z0-9_]{20,}|"
-    r"sk-[A-Za-z0-9_-]{16,}|"
-    r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
-    r"AKIA[0-9A-Z]{16}|"
-    r"AIza[A-Za-z0-9_-]{30,}|"
-    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
-    r")(?:$|[/_-])",
-    re.I,
 )
 _LOCAL_REFERENCE_COMPONENTS = frozenset(
     {"codex", "home", "private", "tmp", "users", "var"}
@@ -91,7 +80,7 @@ def validate_authorization_reference(value: Any) -> str:
         or "#" in value
         or "%" in value
         or _PRIVATE_REFERENCE_MARKER_RE.search(value)
-        or _TOKEN_SHAPED_REFERENCE_RE.search(value)
+        or has_token_shape(value)
     ):
         raise AuthorizationError("authority_source_ref is not public-safe")
     try:
@@ -220,6 +209,8 @@ def validate_authorization(record: Mapping[str, Any]) -> dict[str, Any]:
         raise AuthorizationError("owner_authorization_digest mismatch")
     for field in ("repository", "owner_account", "transaction_id", "owner_line"):
         _text(record[field], field)
+        if not is_safe_public_value(record[field], key=field):
+            raise AuthorizationError(f"{field} is not a safe public value")
     validate_authorization_reference(record["authority_source_ref"])
     _canonical_version(record["final_version"])
     issued = _utc(record["issued_at_utc"], "issued_at_utc")

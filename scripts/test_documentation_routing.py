@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -226,6 +227,34 @@ class DocumentationRoutingTests(unittest.TestCase):
         self.assertNotIn(
             'git show "$GITHUB_REF:$PUBLICATION_EVIDENCE_REF"', workflow
         )
+
+    def test_development_verification_only_runs_for_vmm_push(self) -> None:
+        workflow = (ROOT / ".github/workflows/Documentation.yml").read_text(
+            encoding="utf-8"
+        )
+        step = re.search(
+            r"(?ms)^      - name: Verify development documentation context\n"
+            r"        if: ([^\n]+)\n",
+            workflow,
+        )
+        self.assertIsNotNone(step)
+        condition = step.group(1)
+        self.assertEqual(
+            condition,
+            "github.event_name == 'push' && github.ref == 'refs/heads/vmm'",
+        )
+        comparisons = re.findall(
+            r"github\.(event_name|ref) == '([^']+)'", condition
+        )
+        self.assertEqual(len(comparisons), 2)
+
+        def condition_matches(event_name: str, ref: str) -> bool:
+            context = {"event_name": event_name, "ref": ref}
+            return all(context[field] == value for field, value in comparisons)
+
+        self.assertFalse(condition_matches("workflow_dispatch", "refs/heads/vmm"))
+        self.assertTrue(condition_matches("push", "refs/heads/vmm"))
+        self.assertFalse(condition_matches("push", "refs/heads/main"))
 
     def test_manifest_pair_is_terminal_only_when_both_bind(self) -> None:
         release, publication_manifest, observations = complete_fixture()

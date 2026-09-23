@@ -308,6 +308,7 @@ class ManifestTests(unittest.TestCase):
             "owner-authority://synthetic/grant#token-locator",
             "owner-authority://synthetic/secret-grant",
             "owner-authority://synthetic/ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            "owner-authority://synthetic/prefixghp_abcdefghijklmnopqrstuvwxyz0123456789",
             "owner-authority://localhost/grant",
             "owner-authority://synthetic/Users/alice/grant",
         )
@@ -322,6 +323,25 @@ class ManifestTests(unittest.TestCase):
                     kind=manifest["manifest_type"], reference=reference
                 ), self.assertRaisesRegex(ManifestError, "public-safe"):
                     validate_manifest(seal_manifest(manifest))
+
+    def test_manifest_identity_values_reject_credential_shaped_tokens(self) -> None:
+        credential = "prefixghp_abcdefghijklmnopqrstuvwxyz0123456789"
+        allocation = self.draft(transaction_id=credential)
+        released = dict(self.chain()[6])
+        released.pop("manifest_id")
+        released["transaction_id"] = credential
+        for manifest in (allocation, released):
+            with self.subTest(kind=manifest["manifest_type"]), self.assertRaisesRegex(
+                ManifestError, "nonpublic"
+            ):
+                validate_manifest(seal_manifest(manifest))
+
+        candidate = dict(self.chain()[4])
+        candidate.pop("manifest_id")
+        candidate["candidate_id"] = credential
+        candidate["candidate_ref"] = f"refs/heads/candidates/v1.2.3/{credential}"
+        with self.assertRaisesRegex(ManifestError, "nonpublic"):
+            validate_manifest(seal_manifest(candidate))
 
     def test_authorization_binding_does_not_create_identity_cycle(self) -> None:
         first = seal_manifest(self.draft())
