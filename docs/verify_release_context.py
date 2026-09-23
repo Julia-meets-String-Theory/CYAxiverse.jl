@@ -21,13 +21,20 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from version_lifecycle.manifests import (  # noqa: E402
     ManifestError,
     canonical_manifest_bytes,
+    validate_lifecycle_graph,
     validate_manifest,
 )
 from version_lifecycle.publication_evidence import (  # noqa: E402
     PublicationEvidenceError,
     parse_publication_evidence,
 )
-from version_lifecycle.release import PASS, validate_release_consistency, is_canonical_public_tag  # noqa: E402
+from version_lifecycle.release import (  # noqa: E402
+    LEGACY_PUBLIC_TAG,
+    PASS,
+    TERMINAL_CONSISTENT,
+    is_canonical_public_tag,
+    validate_release_consistency,
+)
 from version_lifecycle.versions import parse_package_version  # noqa: E402
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -138,10 +145,18 @@ def verify(args: argparse.Namespace) -> int:
     )
     if result.get("status") != PASS and result.get("status") != "terminal_consistent":
         return fail(f"immutable release/publication validation failed: {result}")
+    try:
+        stable_tag = _verified_current_principal_tag(
+            args.main_sha, main_version.canonical,
+            lifecycle_records, canonical_tags, github_releases,
+        )
+    except (ManifestError, TypeError, ValueError) as error:
+        return fail(f"current stable-selector authority is invalid: {error}")
     is_current_principal = (
         released.get("release_line") == "principal"
         and released.get("final_release_sha") == args.main_sha
         and released.get("final_version") == main_version.canonical
+        and stable_tag == args.tag
     )
     values = {
         "CYAX_DOCS_MANIFEST_STATUS": "verified",
@@ -152,10 +167,8 @@ def verify(args: argparse.Namespace) -> int:
         "CYAX_DOCS_PUBLICATION_ID": str(publication["publication_id"]),
         "CYAX_DOCS_PRINCIPAL_MAIN_SHA": args.main_sha,
         "CYAX_DOCS_STABLE": "true" if is_current_principal else "false",
-        # Pin Documenter's stable selector to the current principal main
-        # version.  For maintenance tags this preserves stable while the
-        # maintenance version receives its own immutable directory.
-        "CYAX_DOCS_STABLE_TAG": f"v{main_version.canonical}",
+        # Empty is an explicit clearing of any inherited/unverified value.
+        "CYAX_DOCS_STABLE_TAG": stable_tag or "",
     }
     write_environment(args.github_env, values)
     print(json.dumps(values, sort_keys=True))
@@ -171,17 +184,165 @@ def verify_stable_context(args: argparse.Namespace) -> int:
         return fail(f"principal main version is not canonical: {error}")
     if version.is_dev:
         return fail("principal main must not carry a DEV version")
+    if (
+        args.lifecycle_index is None
+        or args.canonical_tags is None
+        or args.github_releases is None
+    ):
+        return fail("complete immutable release-universe observations are required")
+    try:
+        lifecycle_records = json.loads(
+            args.lifecycle_index.read_text(encoding="utf-8")
+        )
+        canonical_tags = json.loads(
+            args.canonical_tags.read_text(encoding="utf-8")
+        )
+        github_releases = json.loads(
+            args.github_releases.read_text(encoding="utf-8")
+        )
+        stable_tag = _verified_current_principal_tag(
+            args.main_sha, version.canonical,
+            lifecycle_records, canonical_tags, github_releases,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ManifestError,
+            TypeError, ValueError) as error:
+        return fail(f"current stable-selector authority is invalid: {error}")
     values = {
         "CYAX_DOCS_PRINCIPAL_MAIN_SHA": args.main_sha,
         "CYAX_DOCS_STABLE": "false",
-        # Development builds keep the stable selector bound to the verified
-        # current-main package version, without treating the vmm build as
-        # stable or accepting a caller-provided tag.
-        "CYAX_DOCS_STABLE_TAG": f"v{version.canonical}",
+        # Do not let an inherited or caller-provided tag become a selector.
+        "CYAX_DOCS_STABLE_TAG": stable_tag or "",
     }
     write_environment(args.github_env, values)
     print(json.dumps(values, sort_keys=True))
     return 0
+
+
+def _verified_current_principal_tag(
+    main_sha: str,
+    main_version: str,
+    lifecycle_records: object,
+    canonical_tags: object,
+    github_releases: object,
+) -> str | None:
+    """Resolve stable only from a complete, terminal immutable release universe."""
+
+    if not isinstance(canonical_tags, list) or not isinstance(github_releases, list):
+        raise ValueError("tag and GitHub Release observations must be arrays")
+    graph = validate_lifecycle_graph(lifecycle_records)
+    manifests = graph.manifests_by_ref
+
+    tags_by_name: dict[str, dict[str, object]] = {}
+    for value in canonical_tags:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"ref", "tag", "commit", "tree"}
+        ):
+            raise ValueError("canonical tag observation fields are invalid")
+        tag = value["tag"]
+        if (
+            not is_canonical_public_tag(tag)
+            or value["ref"] != f"refs/tags/{tag}"
+            or not _full_sha(value["commit"])
+            or not _full_sha(value["tree"])
+            or tag in tags_by_name
+        ):
+            raise ValueError("canonical tag observation is invalid or duplicated")
+        tags_by_name[tag] = value
+
+    releases_by_tag: dict[str, dict[str, object]] = {}
+    seen_release_ids: set[int] = set()
+    for value in github_releases:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"id", "tag", "url"}
+        ):
+            raise ValueError("GitHub Release observation fields are invalid")
+        tag = value["tag"]
+        release_id = value["id"]
+        if tag == LEGACY_PUBLIC_TAG:
+            continue
+        if (
+            not is_canonical_public_tag(tag)
+            or isinstance(release_id, bool)
+            or not isinstance(release_id, int)
+            or release_id <= 0
+            or not isinstance(value["url"], str)
+            or not value["url"]
+            or tag in releases_by_tag
+            or release_id in seen_release_ids
+        ):
+            raise ValueError("GitHub Release observation is invalid or duplicated")
+        releases_by_tag[tag] = value
+        seen_release_ids.add(release_id)
+
+    released_by_tag: dict[str, dict[str, object]] = {}
+    publications_by_tag: dict[str, dict[str, object]] = {}
+    for manifest in manifests.values():
+        kind = manifest["manifest_type"]
+        if kind == "released":
+            tag = str(manifest["public_tag"])
+            if tag in released_by_tag:
+                raise ValueError("duplicate released public tag")
+            released_by_tag[tag] = dict(manifest)
+        elif kind == "publication":
+            tag = str(manifest["public_tag"])
+            if tag in publications_by_tag:
+                raise ValueError("duplicate publication public tag")
+            publications_by_tag[tag] = dict(manifest)
+
+    if (
+        set(tags_by_name) != set(released_by_tag)
+        or set(tags_by_name) != set(publications_by_tag)
+        or set(tags_by_name) != set(releases_by_tag)
+    ):
+        raise ValueError("complete public tag/release/lifecycle universe disagrees")
+    if not released_by_tag:
+        return None
+
+    # One full-universe validation checks every release, publication, canonical
+    # tag and GitHub Release. The representative is selected from immutable
+    # manifests, not from a caller-supplied tag.
+    representative_tag = sorted(released_by_tag)[0]
+    released = released_by_tag[representative_tag]
+    publication = publications_by_tag[representative_tag]
+    tag_observation = tags_by_name[representative_tag]
+    github_release = releases_by_tag[representative_tag]
+    result = validate_release_consistency(
+        released,
+        publication,
+        public_tag=representative_tag,
+        tag_commit=str(tag_observation["commit"]),
+        tag_tree=str(tag_observation["tree"]),
+        certified_tree=str(released["anchor_tree"]),
+        github_release_id=github_release["id"],
+        publication_evidence_digest=str(
+            publication["publication_evidence_digest"]
+        ),
+        lifecycle_records=lifecycle_records,
+        anchor_tag_object=str(released["anchor_sha"]),
+        anchor_tree=str(released["anchor_tree"]),
+        anchor_closure_timestamp_utc=str(released["closure_timestamp_utc"]),
+        candidate_ref=str(released["candidate_ref"]),
+        candidate_commit=str(released["candidate_sha"]),
+        candidate_tree=str(released["candidate_tree"]),
+        canonical_tag_observations=canonical_tags,
+        github_release_observations=github_releases,
+        require_complete_namespace=True,
+    )
+    if result.get("status") != TERMINAL_CONSISTENT:
+        raise ValueError(f"release universe is not terminal and consistent: {result}")
+
+    current = [
+        tag
+        for tag, manifest in released_by_tag.items()
+        if manifest.get("release_line") == "principal"
+        and manifest.get("final_release_sha") == main_sha
+        and manifest.get("final_version") == main_version
+    ]
+    if len(current) > 1:
+        raise ValueError("multiple terminal principal releases match current main")
+    return current[0] if current else None
 
 
 def parser() -> argparse.ArgumentParser:

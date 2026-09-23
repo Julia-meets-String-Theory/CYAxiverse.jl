@@ -108,10 +108,9 @@ function _deploy_versions(route)
         _canonical_tag(stable_tag) || throw(DocsRouteError(
             "DOCS_STABLE_CONTEXT_INVALID: stable principal tag is not canonical"))
         push!(versions, "stable" => stable_tag)
-    elseif route.channel !== :development
-        throw(DocsRouteError(
-            "DOCS_STABLE_CONTEXT_MISSING: verified principal tag is required"))
     end
+    # Without a verified target, omit the pair: Documenter must not create or
+    # replace the stable symlink, so an existing deployed pointer is preserved.
     # Keep one persistent selector for every canonical vX.Y.Z tag and dev.
     # The patch selector is a string entry; pairs are literal selector labels
     # and target directories. `devbranch` below selects the source branch that
