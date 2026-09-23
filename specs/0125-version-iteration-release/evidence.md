@@ -7,8 +7,8 @@ normative amendment reviewed for I2 is commit
 `2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
 `7620f1c966cb37c5d2c7ed5c54778758ed2c12eb`). The latest correction
 implementation is frozen at commit
-`dc8cb513d9a20a9c20ebc7a370477aac6d8a111e` (tree
-`6b698382ff44d28a5fe25f6642a0e20462eafb45`). The feature branch
+`c7dbc89a66b9a90ec439cf169536770b6f3ec7b7` (tree
+`38eb58efcf78f7fc79460f212654ea4ceba3fda6`). The feature branch
 uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
 execution base.
 
@@ -61,8 +61,8 @@ candidate, including this record, still requires fresh exact-state review.
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 127 tests. |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 10 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 133 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 12 tests. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'` | Passed: 3 tests. |
 | `python3 scripts/check_version_bump.py --base 20b3935ace0e01fcee2808681c56595e3afa7667 --head HEAD` | Passed: no package implementation or `Project.toml` change requires a version bump. |
 | `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed: worktree snapshot captured and no whitespace errors. |
@@ -126,8 +126,14 @@ successor is commit `9c58514648fe2fef1389a3e8fb3a615540103d23` (tree
 reviews using `gpt-6-sol` at `high` both returned `REQUEST_CHANGES`; those
 verdicts remain attached only to that exact candidate. Commit
 `dc8cb513d9a20a9c20ebc7a370477aac6d8a111e` is the next bounded correction
-implementation and has no review verdict. Its evidence successor requires
-fresh exact-state review.
+implementation and has no review verdict. The exact evidence successor was
+commit `00c19f4bc1df6bf0d4e0a573b039fca072fafe63` (tree
+`868216628080e92b27edbe26d7e8db04292ca2f1`). Its independent SPEC and
+STANDARDS reviews using `gpt-6-sol` at `high` both returned
+`REQUEST_CHANGES`; those verdicts remain attached only to that exact
+candidate. Commit `c7dbc89a66b9a90ec439cf169536770b6f3ec7b7` is the next
+bounded correction implementation and has no review verdict. Its evidence
+successor requires fresh exact-state review.
 
 ## Historical predecessor review history (non-authoritative)
 
