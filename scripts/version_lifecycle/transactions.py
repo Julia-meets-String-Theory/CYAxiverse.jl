@@ -18,15 +18,19 @@ from datetime import datetime
 import re
 from typing import Any, Mapping, Protocol
 
-from .codec import canonical_json, sha256_hex
+from .codec import sha256_hex
 from .authorization import AuthorizationError, verify_owner_authorization
-from .certification import is_safe_public_value
+from .certification import is_safe_public_environment, is_safe_public_value
 from .manifests import (
     canonical_manifest_bytes,
     lifecycle_ref_for_manifest,
     seal_manifest,
     validate_publication_evidence_ref,
     validate_manifest,
+)
+from .publication_evidence import (
+    PublicationEvidenceError,
+    canonical_publication_evidence_bytes,
 )
 from .versions import parse_package_version
 
@@ -792,13 +796,15 @@ def _validate_certification(record: Any, candidate: dict[str, Any]) -> str:
     if (subject_sha != candidate.get("sha") or subject_tree != candidate.get("tree")
             or not _sha(subject_sha) or not _sha(subject_tree)):
         raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
-    for key in ("policy_revision", "harness_revision", "environment"):
+    for key in ("policy_revision", "harness_revision"):
         if (
             not isinstance(record.get(key), str)
             or not record[key]
             or not is_safe_public_value(record[key], key=key)
         ):
             raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
+    if not is_safe_public_environment(record.get("environment")):
+        raise TransactionError("CERTIFICATION_IDENTITY_UNPROVEN")
     if not _validated_evidence_refs(
         record.get("evidence_refs"), "CERTIFICATION_IDENTITY_UNPROVEN"
     ):
@@ -1156,15 +1162,17 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         evidence_payload_value = _call(
             port, "publication_evidence_payload", intent, released, tag
         )
-        if not isinstance(evidence_payload_value, Mapping):
-            raise TransactionError("PUBLICATION_EVIDENCE_INVALID")
-        if not is_safe_public_value(evidence_payload_value):
-            raise TransactionError("PUBLICATION_EVIDENCE_UNSAFE")
         try:
-            evidence_payload_bytes = canonical_json(evidence_payload_value)
-        except (TypeError, ValueError) as error:
+            evidence_payload_bytes = canonical_publication_evidence_bytes(
+                evidence_payload_value,
+                released,
+                public_tag=intent.public_tag,
+                tag_commit=tag.get("commit", tag.get("tag_commit", "")),
+                tag_tree=tag.get("tree", tag.get("tag_tree", "")),
+            )
+        except PublicationEvidenceError as error:
             raise TransactionError(
-                "PUBLICATION_EVIDENCE_INVALID", str(error)
+                "PUBLICATION_EVIDENCE_MISMATCH", str(error)
             ) from error
         evidence_payload_digest = sha256_hex(evidence_payload_bytes)
 

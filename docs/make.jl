@@ -123,8 +123,8 @@ end
 
 function _prepare_documenter_context!(route)
     get(ENV, "GITHUB_EVENT_NAME", "") == "workflow_dispatch" || return nothing
-    route.channel === :versioned || throw(DocsRouteError(
-        "DOCS_DISPATCH_INVALID: workflow_dispatch requires a verified versioned tag"))
+    route.channel in (:versioned, :stable) || throw(DocsRouteError(
+        "DOCS_DISPATCH_INVALID: workflow_dispatch requires a verified principal or versioned tag"))
     get(ENV, "CYAX_DOCS_MANIFEST_STATUS", "") == "verified" || throw(DocsRouteError(
         "DOCS_DISPATCH_UNVERIFIED: workflow_dispatch requires verified manifest evidence"))
     verified_ref = "refs/tags/$(route.tag)"

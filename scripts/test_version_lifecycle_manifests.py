@@ -32,6 +32,7 @@ from version_lifecycle.manifests import (  # noqa: E402
     seal_manifest,
     validate_manifest,
 )
+from version_lifecycle.certification import is_safe_public_environment  # noqa: E402
 from version_lifecycle.git_refs import (  # noqa: E402
     ProtectionEvidence,
     canonical_remote_authority,
@@ -489,6 +490,36 @@ class ManifestTests(unittest.TestCase):
                 ManifestError, "nonpublic value"
             ):
                 validate_manifest(seal_manifest(unsafe))
+
+        for environment in (
+            {
+                "schema_version": 1,
+                "environment_id": "ci-linux",
+                "local_hostname": "runner-17",
+            },
+            {
+                "schema_version": 1,
+                "environment_id": "ci-linux",
+                "session_id": "session-123",
+            },
+            {
+                "schema_version": 1,
+                "environment_id": "ci-linux",
+                "python_version": "/opt/lab/python",
+            },
+        ):
+            unsafe = dict(intent)
+            unsafe.pop("manifest_id")
+            unsafe["certification_environment"] = environment
+            with self.subTest(environment=environment), self.assertRaisesRegex(
+                ManifestError, "certification_environment.*nonpublic"
+            ):
+                validate_manifest(seal_manifest(unsafe))
+
+        self.assertFalse(is_safe_public_environment({
+            "schema_version": 1.0,
+            "environment_id": "ci-linux",
+        }))
 
         for environment in (
             "python=/opt/lab/venv/bin/python",

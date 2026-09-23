@@ -18,7 +18,9 @@ from version_lifecycle.manifests import (  # noqa: E402
 import test_version_lifecycle_manifests as manifest_tests  # noqa: E402
 from version_lifecycle.release import (  # noqa: E402
     BLOCKED,
+    INVALID,
     PUBLICATION_RECONCILIATION_PENDING,
+    TAG_RECONCILIATION_PENDING,
     TERMINAL_CONSISTENT,
     validate_publication_evidence,
     validate_release_consistency,
@@ -109,6 +111,34 @@ def publication(release: dict[str, object], **overrides: object) -> dict[str, ob
 
 
 class ReleaseTests(unittest.TestCase):
+    @staticmethod
+    def pending_tag_context() -> tuple[
+        dict[str, object], list[dict[str, object]], dict[str, object]
+    ]:
+        chain = manifest_tests.ManifestTests().chain()
+        prefix = chain[: next(
+            index for index, item in enumerate(chain)
+            if item["manifest_type"] == "release-intent-prepared"
+        ) + 1]
+        intent = prefix[-1]
+        records = {lifecycle_ref_for_manifest(item): item for item in prefix}
+        observations = [{
+            "ref": f"refs/tags/{intent['public_tag']}",
+            "tag": intent["public_tag"],
+            "commit": intent["final_release_sha"],
+            "tree": intent["final_release_tree"],
+        }]
+        kwargs: dict[str, object] = {
+            "public_tag": intent["public_tag"],
+            "tag_commit": intent["final_release_sha"],
+            "tag_tree": intent["final_release_tree"],
+            "lifecycle_records": records,
+            "canonical_tag_observations": observations,
+            "github_release_observations": [],
+            "require_complete_namespace": True,
+        }
+        return intent, observations, kwargs
+
     @staticmethod
     def complete_context() -> tuple[
         dict[str, object], dict[str, object], dict[str, object]
@@ -232,6 +262,71 @@ class ReleaseTests(unittest.TestCase):
 
     def test_missing_released_manifest_is_blocked(self) -> None:
         self.assertEqual(validate_release_consistency()["status"], BLOCKED)
+
+    def test_matching_intent_and_canonical_tag_reconstruct_pending_boundary(self) -> None:
+        intent, _, kwargs = self.pending_tag_context()
+        result = validate_release_consistency(**kwargs)
+        self.assertEqual(result["status"], TAG_RECONCILIATION_PENDING)
+        self.assertEqual(result["intent_ref"], lifecycle_ref_for_manifest(intent))
+        self.assertEqual(result["public_tag"], intent["public_tag"])
+
+    def test_intent_tag_mismatch_and_release_without_released_manifest_are_invalid(self) -> None:
+        _, observations, kwargs = self.pending_tag_context()
+        wrong_commit = [dict(item) for item in observations]
+        wrong_commit[0]["commit"] = OTHER_SHA
+        mismatch = validate_release_consistency(
+            **{**kwargs, "canonical_tag_observations": wrong_commit}
+        )
+        self.assertEqual(mismatch["status"], INVALID)
+        self.assertEqual(
+            mismatch["reason_code"], "TAG_RECONCILIATION_IDENTITY_MISMATCH"
+        )
+
+        with_release = validate_release_consistency(
+            **{**kwargs, "github_release_id": 9001}
+        )
+        self.assertEqual(with_release["status"], INVALID)
+        self.assertEqual(
+            with_release["reason_code"], "GITHUB_RELEASE_WITHOUT_RELEASED_MANIFEST"
+        )
+
+    def test_complete_universe_allows_only_matching_pending_tag(self) -> None:
+        _, observations, kwargs = self.pending_tag_context()
+        exact = validate_release_consistency(**kwargs)
+        self.assertEqual(exact["status"], TAG_RECONCILIATION_PENDING)
+
+        extra_tag = [*observations, {
+            "ref": "refs/tags/v1.2.4", "tag": "v1.2.4",
+            "commit": "f" * 40, "tree": "e" * 40,
+        }]
+        mismatch = validate_release_consistency(
+            **{**kwargs, "canonical_tag_observations": extra_tag}
+        )
+        self.assertEqual(mismatch["status"], INVALID)
+        self.assertEqual(
+            mismatch["reason_code"], "COMPLETE_RELEASE_UNIVERSE_MISMATCH"
+        )
+
+    def test_absent_tag_is_not_misreported_as_post_boundary_pending(self) -> None:
+        _, _, kwargs = self.pending_tag_context()
+        result = validate_release_consistency(
+            **{
+                **kwargs,
+                "canonical_tag_observations": [],
+                "tag_commit": None,
+                "tag_tree": None,
+            }
+        )
+        self.assertEqual(result["status"], BLOCKED)
+        self.assertEqual(result["reason_code"], "PUBLIC_TAG_UNAVAILABLE")
+
+        omitted_tag = validate_release_consistency(
+            **{**kwargs, "canonical_tag_observations": []}
+        )
+        self.assertEqual(omitted_tag["status"], INVALID)
+        self.assertEqual(
+            omitted_tag["reason_code"], "CANONICAL_TAG_OBSERVATION_MISMATCH"
+        )
 
     def test_missing_publication_is_forward_pending(self) -> None:
         result = validate_release_consistency(released())

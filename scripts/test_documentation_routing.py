@@ -22,14 +22,31 @@ from version_lifecycle.manifests import (  # noqa: E402
     lifecycle_ref_for_manifest,
     seal_manifest,
 )
+from version_lifecycle.publication_evidence import (  # noqa: E402
+    canonical_publication_evidence_bytes,
+    publication_evidence_for_tag,
+)
 from version_lifecycle.release import TERMINAL_CONSISTENT, validate_release_consistency  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SHA = "a" * 40
 MAIN_SHA = "c" * 40
 TREE = "b" * 40
-PUBLICATION_EVIDENCE = b"synthetic publication evidence\n"
-PUBLICATION_EVIDENCE_DIGEST = hashlib.sha256(PUBLICATION_EVIDENCE).hexdigest()
+
+def publication_evidence_bytes(release: dict[str, object]) -> bytes:
+    tag = {
+        "name": release["public_tag"],
+        "commit": release["final_release_sha"],
+        "tree": release["final_release_tree"],
+    }
+    record = publication_evidence_for_tag(release, tag)
+    return canonical_publication_evidence_bytes(
+        record,
+        release,
+        public_tag=str(release["public_tag"]),
+        tag_commit=str(release["final_release_sha"]),
+        tag_tree=str(release["final_release_tree"]),
+    )
 
 
 def complete_fixture(
@@ -88,6 +105,10 @@ def complete_fixture(
         release = chain[6]
         prefix = chain[:6]
 
+    exact_publication_evidence = publication_evidence_bytes(release)
+    exact_publication_evidence_digest = hashlib.sha256(
+        exact_publication_evidence
+    ).hexdigest()
     publication_manifest = dict(chain[7])
     publication_manifest.pop("manifest_id")
     publication_manifest.pop("publication_id")
@@ -102,7 +123,7 @@ def complete_fixture(
         canonical_manifest_bytes(release)
     ).hexdigest()
     publication_manifest["publication_evidence_digest"] = (
-        PUBLICATION_EVIDENCE_DIGEST
+        exact_publication_evidence_digest
     )
     publication_manifest = seal_manifest(publication_manifest)
     records = {
@@ -137,7 +158,9 @@ def complete_validation_kwargs(
         "tag_tree": publication_manifest["tag_tree"],
         "certified_tree": release["anchor_tree"],
         "github_release_id": publication_manifest["github_release_id"],
-        "publication_evidence_digest": PUBLICATION_EVIDENCE_DIGEST,
+        "publication_evidence_digest": hashlib.sha256(
+            publication_evidence_bytes(release)
+        ).hexdigest(),
         "lifecycle_records": observations["records"],
         "anchor_tag_object": release["anchor_sha"],
         "anchor_tree": release["anchor_tree"],
@@ -165,7 +188,7 @@ def write_complete_context(
     github_releases_path = root / "github-releases.json"
     release_path.write_bytes(canonical_manifest_bytes(release))
     publication_path.write_bytes(canonical_manifest_bytes(publication_manifest))
-    evidence_path.write_bytes(PUBLICATION_EVIDENCE)
+    evidence_path.write_bytes(publication_evidence_bytes(release))
     lifecycle_path.write_text(
         json.dumps(observations["records"], sort_keys=True), encoding="utf-8"
     )
@@ -331,6 +354,57 @@ class DocumentationRoutingTests(unittest.TestCase):
             )
             self.assertIn("CYAX_DOCS_STABLE=true", exported)
             self.assertIn("CYAX_DOCS_STABLE_TAG=v1.2.3", exported)
+
+    def test_python_verifier_rejects_contradictory_publication_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release, publication_manifest, complete_args = write_complete_context(root)
+            evidence_path = root / "publication-evidence.txt"
+            evidence = json.loads(evidence_path.read_bytes())
+            evidence["tag_tree"] = "f" * 40
+            evidence_raw = json.dumps(
+                evidence, sort_keys=True, separators=(",", ":")
+            ).encode("ascii")
+            evidence_path.write_bytes(evidence_raw)
+
+            publication_manifest["publication_evidence_digest"] = hashlib.sha256(
+                evidence_raw
+            ).hexdigest()
+            publication_manifest.pop("manifest_id")
+            publication_manifest.pop("publication_id")
+            publication_manifest = seal_manifest(publication_manifest)
+            publication_path = root / "publication.json"
+            publication_path.write_bytes(canonical_manifest_bytes(publication_manifest))
+            lifecycle_path = root / "lifecycle.json"
+            records = json.loads(lifecycle_path.read_text(encoding="utf-8"))
+            records[lifecycle_ref_for_manifest(publication_manifest)] = publication_manifest
+            lifecycle_path.write_text(
+                json.dumps(records, sort_keys=True), encoding="utf-8"
+            )
+
+            env_path = root / "github.env"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "docs/verify_release_context.py"),
+                    *complete_args,
+                    "--tag-ref", f"refs/tags/{publication_manifest['public_tag']}",
+                    "--tag", str(publication_manifest["public_tag"]),
+                    "--tag-sha", str(publication_manifest["tag_commit"]),
+                    "--tag-tree", str(publication_manifest["tag_tree"]),
+                    "--tag-version", str(release["final_version"]),
+                    "--main-sha", str(release["main_at_release_sha"]),
+                    "--main-version", str(release["main_at_release_version"]),
+                    "--github-release-id", str(publication_manifest["github_release_id"]),
+                    "--github-env", str(env_path),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("publication evidence is invalid", result.stderr)
 
     def test_historical_principal_tag_remains_versioned_when_main_advances(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -517,6 +591,76 @@ class DocumentationRoutingTests(unittest.TestCase):
             )
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("DOCS_DISPATCH_REF_MISMATCH", rejected.stderr)
+
+    @unittest.skipUnless(shutil.which("julia"), "Julia is required for Documenter route checks")
+    def test_current_principal_workflow_dispatch_uses_stable_route_and_exact_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release, publication_manifest, complete_args = write_complete_context(root)
+            env_path = root / "github.env"
+            tag_ref = f"refs/tags/{publication_manifest['public_tag']}"
+            verified = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "docs/verify_release_context.py"),
+                    *complete_args,
+                    "--tag-ref", tag_ref,
+                    "--tag", str(publication_manifest["public_tag"]),
+                    "--tag-sha", str(publication_manifest["tag_commit"]),
+                    "--tag-tree", str(publication_manifest["tag_tree"]),
+                    "--tag-version", str(release["final_version"]),
+                    "--main-sha", str(release["final_release_sha"]),
+                    "--main-version", str(release["final_version"]),
+                    "--github-release-id", str(publication_manifest["github_release_id"]),
+                    "--github-env", str(env_path),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            doc_context = json.loads(verified.stdout)
+            self.assertEqual(doc_context["CYAX_DOCS_STABLE"], "true")
+
+            environment = os.environ.copy()
+            environment.update(doc_context)
+            environment.update({
+                "CYAX_DOCS_ROUTE_ONLY": "true",
+                "CYAX_DOCS_REF": tag_ref,
+                "CYAX_DOCS_TAG_REF": tag_ref,
+                "GITHUB_EVENT_NAME": "workflow_dispatch",
+                "GITHUB_REF": "refs/heads/vmm",
+            })
+            route = subprocess.run(
+                ["julia", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(route.returncode, 0, route.stderr)
+            self.assertEqual(route.stdout.strip(), "stable")
+
+            environment.update({
+                "CYAX_DOCS_ROUTE_ONLY": "documenter",
+                "GITHUB_REPOSITORY": "Julia-meets-String-Theory/CYAxiverse.jl",
+                "GITHUB_ACTOR": "fixture-owner",
+                "GITHUB_TOKEN": "synthetic-token-for-routing-only",
+            })
+            selected = subprocess.run(
+                ["julia", "--project=docs/", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(selected.stdout.strip().splitlines()[-1], "v1.2.3")
+            self.assertNotIn("deploying devbranch build", selected.stderr)
 
 
 if __name__ == "__main__":

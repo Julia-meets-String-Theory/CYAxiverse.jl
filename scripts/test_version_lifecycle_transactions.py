@@ -21,6 +21,9 @@ from version_lifecycle.manifests import (  # noqa: E402
     validate_complete_lifecycle_refs,
     validate_manifest,
 )
+from version_lifecycle.publication_evidence import (  # noqa: E402
+    publication_evidence_for_tag,
+)
 from version_lifecycle.transactions import (  # noqa: E402
     AllocationView,
     BootstrapIntent,
@@ -364,13 +367,7 @@ class PrincipalReleaseFixture:
             return {"share": "https://chatgpt.com/share/synthetic-private-chat"}
         if self.publication_evidence_override is not None:
             return self.publication_evidence_override
-        return {
-            "schema_version": 1,
-            "public_tag": intent.public_tag,
-            "released_manifest_id": released["manifest_id"],
-            "tag_commit": tag["commit"],
-            "tag_tree": tag["tree"],
-        }
+        return publication_evidence_for_tag(released, tag)
 
     def persist_publication_evidence(self, intent, target, payload):
         self.calls.append("publication-evidence")
@@ -763,6 +760,27 @@ class TransactionTests(unittest.TestCase):
                          ("BLOCKED", "UNSUPPORTED_CERTIFICATION_BINDING", False))
         self.assertNotIn("tag", port.calls)
 
+    def test_local_certification_environment_is_rejected_before_intent_or_tag(self):
+        port = PrincipalReleaseFixture()
+        original = port.certify_candidate
+
+        def private_environment(intent, candidate):
+            certification = original(intent, candidate)
+            certification["environment"] = {
+                "schema_version": 1,
+                "environment_id": "ci-linux",
+                "local_hostname": "runner-17",
+            }
+            return certification
+
+        port.certify_candidate = private_environment
+        result = run_release(port, self.release_intent)
+        self.assertEqual(result.reason_code, "CERTIFICATION_IDENTITY_UNPROVEN")
+        self.assertNotIn("manifest:release-intent-prepared", port.calls)
+        self.assertNotIn("tag", port.calls)
+        self.assertNotIn("manifest:released", port.calls)
+        self.assertFalse(any("certification_environment" in item for item in port.manifests))
+
     def test_evidence_references_require_duplicate_free_string_lists(self):
         port = PrincipalReleaseFixture()
         original_certify = port.certify_candidate
@@ -862,22 +880,57 @@ class TransactionTests(unittest.TestCase):
         self.assertNotIn("release-exclusion", port.calls)
         self.assertNotIn("unfreeze-main", port.calls)
 
-    def test_publication_evidence_preflight_blocks_unsafe_values_before_persist(self):
+    def test_publication_evidence_preflight_blocks_invalid_values_before_persist(self):
         for failure, reason in (
             ("unsafe-publication-evidence-ref", "PUBLICATION_EVIDENCE_TARGET_INVALID"),
-            ("unsafe-publication-evidence-payload", "PUBLICATION_EVIDENCE_UNSAFE"),
+            ("unsafe-publication-evidence-payload", "PUBLICATION_EVIDENCE_MISMATCH"),
         ):
             with self.subTest(failure=failure):
                 port = PrincipalReleaseFixture(fail=failure)
                 result = run_release(port, self.release_intent)
                 self.assertEqual(
                     (result.status, result.reason_code, result.frozen),
-                    ("publication_reconciliation_pending", reason, True),
+                    ("publication_reconciliation_pending" if failure == "unsafe-publication-evidence-ref" else "INVALID", reason, True),
                 )
                 self.assertNotIn("publication-evidence", port.calls)
                 self.assertNotIn("github-release", port.calls)
                 self.assertNotIn("manifest:publication", port.calls)
                 self.assertNotIn("unfreeze-main", port.calls)
+
+    def test_contradictory_publication_evidence_identity_is_rejected_before_publication(self):
+        port = PrincipalReleaseFixture()
+        port.publication_evidence_override = {
+            "schema_version": 1,
+            "public_tag": "v9.9.9",
+            "released_manifest_id": "LIF-SHA256-" + "a" * 64,
+            "released_manifest_ref": "refs/heads/lifecycle/v1/releases/v0.3.0",
+            "released_manifest_digest": "b" * 64,
+            "tag_commit": SHA_A,
+            "tag_tree": TREE,
+        }
+        result = run_release(port, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("INVALID", "PUBLICATION_EVIDENCE_MISMATCH", True),
+        )
+        self.assertNotIn("github-release", port.calls)
+        self.assertNotIn("publication-evidence", port.calls)
+        self.assertNotIn("manifest:publication", port.calls)
+        self.assertNotIn("unfreeze-main", port.calls)
+
+        port = PrincipalReleaseFixture()
+        original_payload = port.publication_evidence_payload
+
+        def floating_schema_version(intent, released, tag):
+            payload = original_payload(intent, released, tag)
+            payload["schema_version"] = 1.0
+            return payload
+
+        port.publication_evidence_payload = floating_schema_version
+        result = run_release(port, self.release_intent)
+        self.assertEqual(result.reason_code, "PUBLICATION_EVIDENCE_MISMATCH")
+        self.assertNotIn("github-release", port.calls)
+        self.assertNotIn("publication-evidence", port.calls)
 
     def test_maintenance_bootstrap_and_rare_recovery_are_deferred(self):
         bootstrap = run_maintenance_bootstrap(

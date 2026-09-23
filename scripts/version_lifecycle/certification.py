@@ -63,6 +63,20 @@ _EMBEDDED_WINDOWS_ABSOLUTE_PATH = re.compile(
     r"(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/]|~[\\/]|"
     r"\\\\(?:\?\\|\.\\)?[^\\/\s,;\"'<>]+[\\/])"
 )
+_PUBLIC_ENVIRONMENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_PUBLIC_ENVIRONMENT_FIELDS = frozenset({
+    "schema_version",
+    "environment_id",
+    "os",
+    "architecture",
+    "julia_version",
+    "python_version",
+    "ci_provider",
+    "harness_runtime",
+    "runner_image_digest",
+    "container_image_digest",
+})
+_PUBLIC_IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _version_identity(value: str, key: str | None) -> bool:
@@ -285,11 +299,37 @@ def is_safe_public_reference(value: Any, *, key: str | None = None) -> bool:
 
 
 def is_safe_public_environment(value: Any) -> bool:
-    """Validate public certification-environment data recursively."""
+    """Validate a public environment label or the exact typed v1 object."""
 
-    return isinstance(value, (str, Mapping, list, tuple)) and is_safe_public_value(
-        value, key="certification_environment"
-    )
+    if isinstance(value, str):
+        return (
+            _PUBLIC_ENVIRONMENT_ID.fullmatch(value) is not None
+            and is_safe_public_value(value, key="certification_environment")
+        )
+    if not isinstance(value, Mapping):
+        return False
+    keys = set(value)
+    if (
+        not {"schema_version", "environment_id"} <= keys
+        or not keys <= _PUBLIC_ENVIRONMENT_FIELDS
+        or type(value.get("schema_version")) is not int
+        or value.get("schema_version") != 1
+    ):
+        return False
+    for key, item in value.items():
+        if key == "schema_version":
+            continue
+        if (
+            not isinstance(item, str)
+            or not item
+            or not is_safe_public_value(item, key=key)
+        ):
+            return False
+        if key == "environment_id" and _PUBLIC_ENVIRONMENT_ID.fullmatch(item) is None:
+            return False
+        if key in {"runner_image_digest", "container_image_digest"} and _PUBLIC_IMAGE_DIGEST.fullmatch(item) is None:
+            return False
+    return True
 
 
 def has_token_shape(value: str) -> bool:
@@ -352,6 +392,10 @@ def validate_certification_identity(record: Mapping[str, Any]) -> dict[str, Any]
     if not isinstance(record, Mapping):
         return _result(BLOCKED, "CERTIFICATION_RECORD_UNAVAILABLE")
     if not is_safe_public_value(record):
+        return _result(INVALID, "UNSAFE_PUBLIC_EVIDENCE")
+
+    environment = _value(record, "environment", "environment_id", "environment_ref")
+    if not is_safe_public_environment(environment):
         return _result(INVALID, "UNSAFE_PUBLIC_EVIDENCE")
 
     binding = certification_binding(record)

@@ -23,6 +23,10 @@ from version_lifecycle.manifests import (  # noqa: E402
     canonical_manifest_bytes,
     validate_manifest,
 )
+from version_lifecycle.publication_evidence import (  # noqa: E402
+    PublicationEvidenceError,
+    parse_publication_evidence,
+)
 from version_lifecycle.release import PASS, validate_release_consistency, is_canonical_public_tag  # noqa: E402
 from version_lifecycle.versions import parse_package_version  # noqa: E402
 
@@ -82,6 +86,16 @@ def verify(args: argparse.Namespace) -> int:
         return fail(str(error))
     except OSError as error:
         return fail(f"publication evidence is unavailable: {error}")
+    try:
+        parse_publication_evidence(
+            evidence_bytes,
+            released,
+            public_tag=args.tag,
+            tag_commit=args.tag_sha,
+            tag_tree=args.tag_tree,
+        )
+    except PublicationEvidenceError as error:
+        return fail(f"publication evidence is invalid: {error}")
     evidence_digest = hashlib.sha256(evidence_bytes).hexdigest()
     lifecycle_records = None
     canonical_tags = None
