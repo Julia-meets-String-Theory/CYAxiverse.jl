@@ -1,0 +1,15 @@
+# Private runtime mapping — DO NOT COMMIT REAL IDS.
+# Copy to wiki/pages.local.yaml and fill from your private Notion workspace.
+pages:
+  current_status: "<notion-page-id>"
+  axion_spectra: "<notion-page-id>"
+  vacua_inflation: "<notion-page-id>"
+  cytools_boundary: "<notion-page-id>"
+  tests_validation: "<notion-page-id>"
+  durable_memory: "<notion-page-id>"
+  temporal_provenance: "<notion-page-id>"
+  sdd: "<notion-page-id>"
+  lessons: "<notion-page-id>"
+  privacy: "<notion-page-id>"
+  versioning: "<notion-page-id>"
+  optional_dependencies: "<notion-page-id>"
