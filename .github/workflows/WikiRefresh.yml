@@ -37,6 +37,21 @@ jobs:
         run: |
           julia --project=wiki scripts/wiki_refresh.jl verify
 
+      - name: Exercise read-only drift checker
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          julia --project=wiki scripts/wiki_refresh.jl check
+          code=$?
+          set -e
+          if [[ "$code" -ne 0 && "$code" -ne 10 ]]; then
+            echo "Unexpected wiki-refresh exit code: $code"
+            exit "$code"
+          fi
+
   drift:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
