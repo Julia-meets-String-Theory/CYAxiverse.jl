@@ -503,6 +503,91 @@ class DocumentationRoutingTests(unittest.TestCase):
             self.assertIn("CYAX_DOCS_PRINCIPAL_MAIN_SHA=" + "d" * 40, exported)
             self.assertIn("CYAX_DOCS_STABLE_TAG=v2.1.0", exported)
 
+    @unittest.skipUnless(shutil.which("julia"), "Julia is required for Documenter route checks")
+    def test_vmm_development_verification_keeps_current_main_stable_selector(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env_path = root / "github.env"
+            env_path.write_text("CYAX_DOCS_STABLE_TAG=v9.9.9\n", encoding="utf-8")
+            verification_environment = os.environ.copy()
+            verification_environment["CYAX_DOCS_STABLE_TAG"] = "v9.9.9"
+            verified = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "docs/verify_release_context.py"),
+                    "--stable-only",
+                    "--main-sha", SHA,
+                    "--main-version", "2.1.0",
+                    "--github-env", str(env_path),
+                ],
+                cwd=ROOT,
+                env=verification_environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            context = json.loads(verified.stdout)
+            self.assertEqual(context["CYAX_DOCS_STABLE"], "false")
+            self.assertEqual(context["CYAX_DOCS_STABLE_TAG"], "v2.1.0")
+            self.assertEqual(
+                env_path.read_text(encoding="utf-8").splitlines()[-1],
+                "CYAX_DOCS_STABLE_TAG=v2.1.0",
+            )
+
+            environment = os.environ.copy()
+            environment.update(context)
+            environment.update({
+                "CYAX_DOCS_REF": "refs/heads/vmm",
+                "CYAX_DOCS_ROUTE_ONLY": "true",
+                "GITHUB_EVENT_NAME": "push",
+                "GITHUB_REF": "refs/heads/vmm",
+            })
+            route = subprocess.run(
+                ["julia", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(route.returncode, 0, route.stderr)
+            self.assertEqual(route.stdout.strip(), "development")
+
+            environment["CYAX_DOCS_ROUTE_ONLY"] = "versions"
+            versions = subprocess.run(
+                ["julia", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(versions.returncode, 0, versions.stderr)
+            self.assertEqual(
+                versions.stdout.strip(),
+                "stable:v2.1.0,v#.#.#,dev:dev",
+            )
+
+            environment.update({
+                "CYAX_DOCS_ROUTE_ONLY": "documenter",
+                "GITHUB_ACTIONS": "true",
+                "GITHUB_REPOSITORY": "Julia-meets-String-Theory/CYAxiverse.jl",
+                "GITHUB_ACTOR": "fixture-owner",
+                "GITHUB_TOKEN": "synthetic-token-for-routing-only",
+            })
+            selected = subprocess.run(
+                ["julia", "--project=docs/", "--startup-file=no", "docs/make.jl"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(selected.returncode, 0, selected.stderr)
+            self.assertEqual(selected.stdout.strip().splitlines()[-1], "dev")
+
     @unittest.skipUnless(shutil.which("julia"), "Julia is required for route checks")
     def test_julia_route_requires_verified_manifest_status(self) -> None:
         base = {

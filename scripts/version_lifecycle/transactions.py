@@ -31,6 +31,7 @@ from .manifests import (
 from .publication_evidence import (
     PublicationEvidenceError,
     canonical_publication_evidence_bytes,
+    parse_publication_evidence,
 )
 from .versions import parse_package_version
 
@@ -167,6 +168,10 @@ class ImmutableLifecyclePort(Protocol):
     def persist_publication_evidence(
         self, intent: Any, target: str, payload: bytes
     ) -> Any: ...
+
+    def read_publication_evidence(
+        self, intent: Any, target: str
+    ) -> dict[str, Any]: ...
 
     def publish_github_release(
         self, intent: Any, released: Mapping[str, Any]
@@ -833,6 +838,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
     lease: Any = None
     tag_created = False
     released_created = False
+    publication_evidence_persist_attempted = False
+    publication_evidence_readback_proven = False
     documentation_dispatch_attempted = False
     documentation_dispatch_proven = False
     try:
@@ -1146,6 +1153,7 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             "publication_evidence_target",
             "publication_evidence_payload",
             "persist_publication_evidence",
+            "read_publication_evidence",
         )):
             raise TransactionError("PUBLICATION_EVIDENCE_UNAVAILABLE")
         evidence_target_value = _call(
@@ -1190,6 +1198,7 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         evidence["github_release"] = publication
         phase = "github_release_published"
         _authorize(port, intent, "create-release-manifest", evidence_target)
+        publication_evidence_persist_attempted = True
         publication_evidence = _as_mapping(
             _call(
                 port,
@@ -1198,13 +1207,50 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
                 evidence_target,
                 evidence_payload_bytes,
             ),
-            "PUBLICATION_EVIDENCE_MISMATCH",
+            "PUBLICATION_EVIDENCE_PERSIST_ACK_UNPROVEN",
         )
         if (publication_evidence.get("ref") != evidence_target
                 or publication_evidence.get("digest") != evidence_payload_digest
                 or not is_safe_public_value(publication_evidence)):
-            raise TransactionError("PUBLICATION_EVIDENCE_MISMATCH")
-        evidence["publication_evidence"] = publication_evidence
+            raise TransactionError("PUBLICATION_EVIDENCE_PERSIST_ACK_UNPROVEN")
+        evidence["publication_evidence_persist_ack"] = publication_evidence
+
+        # A create acknowledgement is not evidence that the immutable object
+        # can be read back from the requested public reference. Fetch it again
+        # through the port and bind the publication manifest to those exact
+        # canonical bytes before creating that manifest.
+        readback = _call(
+            port, "read_publication_evidence", intent, evidence_target
+        )
+        if (
+            not isinstance(readback, dict)
+            or set(readback) != {"ref", "bytes"}
+            or readback.get("ref") != evidence_target
+            or type(readback.get("bytes")) is not bytes
+        ):
+            raise TransactionError("PUBLICATION_EVIDENCE_READBACK_UNPROVEN")
+        readback_bytes = readback["bytes"]
+        try:
+            readback_record = parse_publication_evidence(
+                readback_bytes,
+                released,
+                public_tag=intent.public_tag,
+                tag_commit=tag.get("commit", tag.get("tag_commit", "")),
+                tag_tree=tag.get("tree", tag.get("tag_tree", "")),
+            )
+        except PublicationEvidenceError as error:
+            raise TransactionError(
+                "PUBLICATION_EVIDENCE_READBACK_UNPROVEN", str(error)
+            ) from error
+        readback_digest = sha256_hex(readback_bytes)
+        if readback_digest != evidence_payload_digest:
+            raise TransactionError("PUBLICATION_EVIDENCE_READBACK_UNPROVEN")
+        publication_evidence_readback_proven = True
+        evidence["publication_evidence"] = {
+            "ref": evidence_target,
+            "digest": readback_digest,
+            "record": readback_record,
+        }
         release_ref = lifecycle_ref_for_manifest(released)
         publication_payload = {
             "schema_version": 1, "manifest_type": "publication",
@@ -1272,7 +1318,11 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         return TransactionResult("COMPLETE", evidence=evidence, phase="unfrozen")
     except TransactionError as error:
         if lease is not None and not (
-            documentation_dispatch_attempted and not documentation_dispatch_proven
+            (documentation_dispatch_attempted and not documentation_dispatch_proven)
+            or (
+                publication_evidence_persist_attempted
+                and not publication_evidence_readback_proven
+            )
         ):
             try:
                 _release_exclusion(port, lease)
@@ -1280,6 +1330,12 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
                 pass
         if documentation_dispatch_attempted and not documentation_dispatch_proven:
             evidence["documentation_dispatch_reconciliation_required"] = True
+            status = "publication_reconciliation_pending"
+        elif (
+            publication_evidence_persist_attempted
+            and not publication_evidence_readback_proven
+        ):
+            evidence["publication_evidence_readback_reconciliation_required"] = True
             status = "publication_reconciliation_pending"
         elif error.reason_code == "OWNER_AUTHORIZATION_UNVERIFIED":
             status = "BLOCKED"
@@ -1294,7 +1350,11 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         return TransactionResult(status, error.reason_code, error.detail, evidence, frozen=token is not None, phase=phase)
     except Exception as error:
         if lease is not None and not (
-            documentation_dispatch_attempted and not documentation_dispatch_proven
+            (documentation_dispatch_attempted and not documentation_dispatch_proven)
+            or (
+                publication_evidence_persist_attempted
+                and not publication_evidence_readback_proven
+            )
         ):
             try:
                 _release_exclusion(port, lease)
@@ -1303,6 +1363,12 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         evidence["error_type"] = type(error).__name__
         if documentation_dispatch_attempted and not documentation_dispatch_proven:
             evidence["documentation_dispatch_reconciliation_required"] = True
+            status = "publication_reconciliation_pending"
+        elif (
+            publication_evidence_persist_attempted
+            and not publication_evidence_readback_proven
+        ):
+            evidence["publication_evidence_readback_reconciliation_required"] = True
             status = "publication_reconciliation_pending"
         else:
             status = ("publication_reconciliation_pending" if released_created else

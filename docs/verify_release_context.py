@@ -174,7 +174,10 @@ def verify_stable_context(args: argparse.Namespace) -> int:
     values = {
         "CYAX_DOCS_PRINCIPAL_MAIN_SHA": args.main_sha,
         "CYAX_DOCS_STABLE": "false",
-        "CYAX_DOCS_STABLE_TAG": "",
+        # Development builds keep the stable selector bound to the verified
+        # current-main package version, without treating the vmm build as
+        # stable or accepting a caller-provided tag.
+        "CYAX_DOCS_STABLE_TAG": f"v{version.canonical}",
     }
     write_environment(args.github_env, values)
     print(json.dumps(values, sort_keys=True))

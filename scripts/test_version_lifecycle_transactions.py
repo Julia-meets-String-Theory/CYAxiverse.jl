@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from hashlib import sha256
@@ -373,8 +374,22 @@ class PrincipalReleaseFixture:
         self.calls.append("publication-evidence")
         if self.fail == "publication-evidence":
             raise RuntimeError("publication evidence timeout")
-        self.persisted_publication_evidence_payload = payload
+        if self.fail != "publication-evidence-no-store":
+            self.persisted_publication_evidence_payload = payload
         return {"ref": target, "digest": sha256(payload).hexdigest()}
+
+    def read_publication_evidence(self, intent, target):
+        self.calls.append("publication-evidence-readback")
+        if self.persisted_publication_evidence_payload is None:
+            return None
+        payload = self.persisted_publication_evidence_payload
+        if self.fail == "publication-evidence-readback-mismatch":
+            record = json.loads(payload)
+            record["tag_tree"] = "f" * 40
+            payload = json.dumps(
+                record, sort_keys=True, separators=(",", ":")
+            ).encode("ascii")
+        return {"ref": target, "bytes": payload}
 
     def verify_released(self, intent, released, certification, final):
         self.calls.append("verify-released")
@@ -691,6 +706,8 @@ class TransactionTests(unittest.TestCase):
         self.assertLess(port.calls.index("publication-evidence-target"), port.calls.index("github-release"))
         self.assertLess(port.calls.index("publication-evidence-payload"), port.calls.index("github-release"))
         self.assertLess(port.calls.index("github-release"), port.calls.index("publication-evidence"))
+        self.assertLess(port.calls.index("publication-evidence"), port.calls.index("publication-evidence-readback"))
+        self.assertLess(port.calls.index("publication-evidence-readback"), port.calls.index("manifest:publication"))
         self.assertLess(port.calls.index("terminal"), port.calls.index("documentation-dispatch"))
         self.assertLess(port.calls.index("documentation-dispatch"), port.calls.index("release-exclusion"))
         self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze-main"])
@@ -878,6 +895,45 @@ class TransactionTests(unittest.TestCase):
         )
         self.assertTrue(result.evidence["documentation_dispatch_reconciliation_required"])
         self.assertNotIn("release-exclusion", port.calls)
+        self.assertNotIn("unfreeze-main", port.calls)
+
+    def test_publication_manifest_requires_exact_durable_evidence_readback(self):
+        for failure in (
+            "publication-evidence-no-store",
+            "publication-evidence-readback-mismatch",
+        ):
+            with self.subTest(failure=failure):
+                port = PrincipalReleaseFixture(fail=failure)
+                result = run_release(port, self.release_intent)
+                self.assertEqual(
+                    (result.status, result.reason_code, result.frozen),
+                    (
+                        "publication_reconciliation_pending",
+                        "PUBLICATION_EVIDENCE_READBACK_UNPROVEN",
+                        True,
+                    ),
+                )
+                self.assertIn("publication-evidence-readback", port.calls)
+                self.assertNotIn("manifest:publication", port.calls)
+                self.assertNotIn("terminal", port.calls)
+                self.assertNotIn("documentation-dispatch", port.calls)
+                self.assertNotIn("release-exclusion", port.calls)
+                self.assertNotIn("unfreeze-main", port.calls)
+                self.assertTrue(
+                    result.evidence[
+                        "publication_evidence_readback_reconciliation_required"
+                    ]
+                )
+
+    def test_missing_publication_evidence_readback_port_blocks_publication(self):
+        port = MissingReleaseProofFixture("read_publication_evidence")
+        result = run_release(port, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen),
+            ("publication_reconciliation_pending", "PUBLICATION_EVIDENCE_UNAVAILABLE", True),
+        )
+        self.assertNotIn("github-release", port.calls)
+        self.assertNotIn("manifest:publication", port.calls)
         self.assertNotIn("unfreeze-main", port.calls)
 
     def test_publication_evidence_preflight_blocks_invalid_values_before_persist(self):
