@@ -7,8 +7,8 @@ normative amendment reviewed for I2 is commit
 `2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
 `7620f1c966cb37c5d2c7ed5c54778758ed2c12eb`). The latest correction
 implementation is frozen at commit
-`b3b2343f56b0c90d5f21f5dd4cd8e361ed3a653f` (tree
-`dace237050066b4ca91be7197cb06e090eb5322a`). The feature branch
+`9eca0ba436f521eefbc2258307c535c30587576d` (tree
+`cbabc1f8335ec107cc95947cc7e870a4b4b86de1`). The feature branch
 uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
 execution base.
 
@@ -62,7 +62,7 @@ candidate, including this record, still requires fresh exact-state review.
 | Check | Observed result |
 | --- | --- |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 135 tests. |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 20 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 23 tests. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'` | Passed: 3 tests. |
 | `python3 scripts/check_version_bump.py --base 20b3935ace0e01fcee2808681c56595e3afa7667 --head HEAD` | Passed: no package implementation or `Project.toml` change requires a version bump. |
 | `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed: worktree snapshot captured and no whitespace errors. |
@@ -153,6 +153,13 @@ commit `dc0b6bd1cdb3f6c107ea775840c4753c00110263` (tree
 STANDARDS reviews using `gpt-6-sol` at `high` both returned
 `REQUEST_CHANGES`; those verdicts remain attached only to that exact
 candidate. Commit `b3b2343f56b0c90d5f21f5dd4cd8e361ed3a653f` is the next
+bounded correction implementation and has no review verdict. Its exact
+evidence successor was commit
+`3bd7c2a903d94dd44870b2f971d1ec264587b125` (tree
+`4c51638ee69c5128712d3187a5a88fc2d32d2a67`). Its independent SPEC and
+STANDARDS reviews using `gpt-6-sol` at `high` both returned
+`REQUEST_CHANGES`; those verdicts remain attached only to that exact
+candidate. Commit `9eca0ba436f521eefbc2258307c535c30587576d` is the next
 bounded correction implementation and has no review verdict. Its evidence
 successor requires fresh exact-state reviews.
 
