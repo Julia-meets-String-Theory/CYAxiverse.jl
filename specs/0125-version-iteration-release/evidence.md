@@ -7,8 +7,8 @@ normative amendment reviewed for I2 is commit
 `2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
 `7620f1c966cb37c5d2c7ed5c54778758ed2c12eb`). The latest correction
 implementation is frozen at commit
-`adabe4d23b11ac673582d2a5243ce61e74f26e89` (tree
-`5fc0e0dee542ac62dc28e8f5a719c837580dbd47`). The feature branch
+`f89709ed62b64cd4eb896160479075362254c4b8` (tree
+`05f7e6619f36cafcd893bd249c204214f788ee78`). The feature branch
 uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
 execution base.
 
@@ -61,7 +61,7 @@ candidate, including this record, still requires fresh exact-state review.
 
 | Check | Observed result |
 | --- | --- |
-| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 118 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 121 tests. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 7 tests. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'` | Passed: 3 tests. |
 | `python3 scripts/check_version_bump.py --base 20b3935ace0e01fcee2808681c56595e3afa7667 --head HEAD` | Passed: no package implementation or `Project.toml` change requires a version bump. |
@@ -101,6 +101,12 @@ implementation. Its evidence successor was commit
 reviews both returned `REQUEST_CHANGES`, and those verdicts remain attached
 only to that immutable candidate. Commit
 `adabe4d23b11ac673582d2a5243ce61e74f26e89` is the next bounded correction
+implementation. Its evidence successor was commit
+`8d4e14ae103013850a22ce0d0e43f7a50cf05b50` (tree
+`e2b60caab5c54bf733ff5834389acf4af997aaec`); independent SPEC and STANDARDS
+reviews both returned `REQUEST_CHANGES`, and those verdicts remain attached
+only to that immutable candidate. Commit
+`f89709ed62b64cd4eb896160479075362254c4b8` is the next bounded correction
 implementation and has no review verdict. The exact successor containing this
 evidence update requires fresh independent review.
 
