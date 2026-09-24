@@ -320,7 +320,7 @@ function _validate_state(manifest::Dict{String,Any}, state)
         expected_prs = Set(string(Int(x)) for x in manifest["pages"][key]["pull_requests"])
         Set(String.(collect(keys(issues)))) == expected_issues ||
             throw(StateValidationError("state.pages.$key Issue keys do not match manifest"))
-        Set(String.(collect(keys(prs))) == expected_prs ||
+        Set(String.(collect(keys(prs)))) == expected_prs ||
             throw(StateValidationError("state.pages.$key PR keys do not match manifest"))
         for number in expected_issues
             _validate_issue_snapshot(issues[number], parse(Int, number),
