@@ -420,3 +420,27 @@ cited public incident proof.
 
 Superseded by: N/A
 Promotion status: not promoted
+
+
+## L-0010 — Do not delegate directly executable owner-authorized repository actions
+
+ID: L-0010
+Status: candidate
+Date: 2026-09-24
+Type: workflow
+Scope / tags: Control Desk, owner authorization, GitHub actions, delegation boundary, handoff minimization
+
+Observed failure: A bounded repository action that had already reached its owner-decision boundary and was directly executable through the available authenticated GitHub surface was redirected to a separate execution context. This introduced an unnecessary handoff and extra owner coordination even though no downstream implementation worker was required.
+
+Correction: Distinguish downstream delegated implementation from direct owner-authorized repository administration. When the owner explicitly authorizes a bounded action, all governing gates are already satisfied, and the current surface can execute the action directly, verify the exact current state and perform the action on that surface. Use a Manager, Work, or other downstream execution context only when the task actually requires delegated implementation, local execution, unavailable capability, or another governed execution role.
+
+Root cause: The no-automatic-downstream-launch boundary was overgeneralized into a rule that repository mutations should be redirected to another execution surface. Orchestration role boundaries were conflated with direct connector capability and explicit owner authorization.
+
+Preventive rule / check: Before creating or proposing a handoff, ask whether the requested action requires a downstream implementation worker or is an already-authorized direct action available on the current surface. If it is direct, bounded, gated, and executable here, perform it after exact-state verification rather than inventing a new execution boundary. Never use a handoff merely because the action mutates GitHub.
+
+Applicability / exceptions: This lesson does not bypass specifications, required review, merge gates, scientific gates, privacy constraints, or owner-controlled authorization. If the action requires code changes, local testing, unavailable permissions, a distinct evidential role, or another execution context required by the governing contract, use the applicable handoff path instead.
+
+Evidence / durable reference: Sanitized owner-redirection-derived pattern. The repository's delegation and lesson-lifecycle rules provide adjacent mechanism support; no private transcript, private URL, or resolving conversation reference is retained here.
+
+Superseded by: N/A
+Promotion status: not promoted
