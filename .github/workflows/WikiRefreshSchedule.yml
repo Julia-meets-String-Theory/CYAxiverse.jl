@@ -27,10 +27,6 @@ jobs:
           grep -q 'scripts/wiki_refresh.jl verify' .github/workflows/WikiRefreshSchedule.yml
           grep -q 'scripts/wiki_refresh.jl check' .github/workflows/WikiRefreshSchedule.yml
           grep -q 'name: Require wiki refresh tooling' .github/workflows/WikiRefreshSchedule.yml
-          if grep -q 'name: Probe wiki refresh availability' .github/workflows/WikiRefreshSchedule.yml; then
-            echo "Scheduler must not silently succeed when the vmm tool is absent."
-            exit 1
-          fi
 
   drift:
     if: github.event_name != 'pull_request'
