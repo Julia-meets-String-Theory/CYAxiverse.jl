@@ -10,6 +10,7 @@ export main, Drift, material, StateValidationError, BrokenSourceError,
        _validate_manifest, _validate_state, _validate_page_key,
        _snapshot_digest, _validate_packet, _atomic_text_write,
        _locked_atomic_json_write, _file_digest, _packet_object,
+       _state_page_digest,
        EXIT_CLEAN, EXIT_DRIFT, EXIT_BROKEN_SOURCE, EXIT_OWNER_REVIEW
 
 const EXIT_CLEAN = 0
@@ -601,6 +602,36 @@ function _canonical_pr_changes(changes)
     ], by=x -> x.number)
 end
 
+function _state_page_baseline(page)
+    page isa AbstractDict ||
+        throw(StateValidationError("state page baseline must be an object"))
+    try
+        issues = get(page, "issues", nothing)
+        prs = get(page, "pull_requests", nothing)
+        issues isa AbstractDict ||
+            throw(StateValidationError("state page baseline issues must be an object"))
+        prs isa AbstractDict ||
+            throw(StateValidationError("state page baseline pull_requests must be an object"))
+        (
+            verified_commit = String(page["verified_commit"]),
+            issues = sort([
+                _issue_tuple(item) for (_, item) in pairs(issues)
+            ], by=x -> x.number),
+            pull_requests = sort([
+                _pr_tuple(item) for (_, item) in pairs(prs)
+            ], by=x -> x.number),
+        )
+    catch error
+        error isa StateValidationError && rethrow()
+        throw(StateValidationError(
+            "invalid state page baseline: $(sprint(showerror, error))"))
+    end
+end
+
+_state_page_digest(page) =
+    bytes2hex(SHA.sha256(Vector{UInt8}(codeunits(
+        JSON3.write(_state_page_baseline(page))))))
+
 const PACKET_EXECUTION_SURFACE =
     "Work/ChatGPT with connected Notion integration"
 
@@ -615,12 +646,15 @@ const PACKET_INSTRUCTIONS = [
     "Verify the Notion edit and explicitly attest that this exact packet_id was reconciled.",
 ]
 
-function _packet_payload(drift::Drift, snapshot)
+function _packet_payload(drift::Drift, snapshot, baseline_state_digest::String)
+    occursin(r"^[0-9a-f]{64}$", baseline_state_digest) ||
+        throw(StateValidationError("baseline_state_digest must be SHA-256 hex"))
     (
         schema_version = 1,
         kind = "cyaxiverse-wiki-reconciliation",
         snapshot = snapshot,
         baseline_verified_commit = drift.verified_commit,
+        baseline_state_digest = baseline_state_digest,
         changes = (
             head_changed = drift.head_changed,
             sources = _canonical_change_sources(drift.changed_sources),
@@ -635,8 +669,8 @@ end
 _packet_digest(payload) =
     bytes2hex(SHA.sha256(Vector{UInt8}(codeunits(JSON3.write(payload)))))
 
-function _packet_object(drift::Drift, snapshot)
-    payload = _packet_payload(drift, snapshot)
+function _packet_object(drift::Drift, snapshot, baseline_page)
+    payload = _packet_payload(drift, snapshot, _state_page_digest(baseline_page))
     merge((packet_id=_packet_digest(payload),), payload)
 end
 
@@ -655,6 +689,7 @@ function _packet_payload_from_dict(packet)
             kind = String(packet["kind"]),
             snapshot = _snapshot_from_dict(packet["snapshot"]),
             baseline_verified_commit = String(packet["baseline_verified_commit"]),
+            baseline_state_digest = String(packet["baseline_state_digest"]),
             changes = (
                 head_changed = Bool(changes["head_changed"]),
                 sources = _canonical_change_sources(changes["sources"]),
@@ -671,6 +706,9 @@ function _packet_payload_from_dict(packet)
         _valid_sha(payload.baseline_verified_commit) ||
             throw(StateValidationError(
                 "packet baseline_verified_commit must be a 40-hex SHA"))
+        occursin(r"^[0-9a-f]{64}$", payload.baseline_state_digest) ||
+            throw(StateValidationError(
+                "packet baseline_state_digest must be SHA-256 hex"))
         payload
     catch error
         error isa StateValidationError && rethrow()
@@ -909,8 +947,8 @@ function _print_drift(d::Drift)
     end
 end
 
-function _write_packet(directory::AbstractString, drift::Drift, snapshot)
-    packet = _packet_object(drift, snapshot)
+function _write_packet(directory::AbstractString, drift::Drift, snapshot, baseline_page)
+    packet = _packet_object(drift, snapshot, baseline_page)
     short_id = first(packet.packet_id, 12)
     path = joinpath(directory, "$(drift.key)-$(short_id).json")
     _atomic_text_write(path, string(JSON3.write(packet), "\n"))
@@ -1025,7 +1063,11 @@ function _accept_page!(manifest, state, state_digest, github,
     packet_payload.baseline_verified_commit ==
         String(state["pages"][key]["verified_commit"]) ||
         throw(StateValidationError(
-            "packet baseline no longer matches current wiki state"))
+            "packet baseline commit no longer matches current wiki state"))
+    packet_payload.baseline_state_digest ==
+        _state_page_digest(state["pages"][key]) ||
+        throw(StateValidationError(
+            "packet baseline state no longer matches current wiki state"))
 
     repo = manifest["repository"]
     packet_snapshot.repository.owner == String(repo["owner"]) &&
@@ -1104,7 +1146,7 @@ function _command_reconcile(manifest, state, state_digest, github, options)
         _print_drift(drift)
         count += 1
         path, packet_id = _write_packet(String(options["packet_dir"]),
-            drift, snapshots[drift.key])
+            drift, snapshots[drift.key], state["pages"][drift.key])
         println("  reconciliation packet: ", path)
         println("  packet_id: ", packet_id)
     end
