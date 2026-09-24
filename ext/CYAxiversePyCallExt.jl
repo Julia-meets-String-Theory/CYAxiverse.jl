@@ -15,6 +15,15 @@ const _mosek_state = Ref(:CYTOOLS_DISABLED)
 const _mosek_license_path = Ref{Union{Nothing, String}}(nothing)
 const _mosek_diagnostic = Ref("CYTools is disabled. Call enable_cytools!() before using CYTools-backed wrappers.")
 const _operation_context_key = gensym(:cytools_operation_context)
+const _mosek_fallback_gate_synchronized = Ref(false)
+
+const _operations_with_optimizer_consultation = Set((
+    :fair_triangulation,
+    :stored_simplices_reconstruction,
+    :standard_geometry_tip,
+    :standard_geometry_generation,
+    :stored_tip_hilbert_generation,
+))
 
 const _operation_backend_policies = Dict{Symbol, String}(
     :fetch_polytopes => "CYTools database lookup; no optimizer or MOSEK consultation.",
@@ -57,8 +66,21 @@ function _failed_mosek_diagnostic(phase::Symbol, error, state::Symbol)
     return "MOSEK check failed during $(_phase_label(phase)) (cause type: $cause). CYTools remains enabled without MOSEK. Correct the license configuration, then call refresh_mosek_state!() or enable_cytools!(; mosek_license_path=...)."
 end
 
-function _run_cytools_operation(f::Function, operation::Symbol)
+function _run_cytools_operation(f::Function, operation::Symbol; requires_mosek=false)
     ensure_cytools!()
+    if requires_mosek && _mosek_state[] !== :ENABLED_ACTIVE
+        diagnostic = "CYTools downstream wrapped operation `$operation` requires active MOSEK (state: $(_mosek_state[])). Correct the license configuration and establish a fresh activation state, or restart Julia and call enable_cytools!() again. No downstream operation was started."
+        _mosek_diagnostic[] = diagnostic
+        throw(ErrorException(diagnostic))
+    end
+
+    if operation in _operations_with_optimizer_consultation &&
+            _mosek_state[] !== :ENABLED_ACTIVE && !_mosek_fallback_gate_synchronized[]
+        diagnostic = "CYTools downstream wrapped operation `$operation` cannot safely select its supported non-MOSEK fallback after license state became $(_mosek_state[]). Restart Julia, correct the license configuration, then call enable_cytools!() again. No downstream operation was started."
+        _mosek_diagnostic[] = diagnostic
+        throw(ErrorException(diagnostic))
+    end
+
     storage = task_local_storage()
     haskey(storage, _operation_context_key) && return f()
 
@@ -75,6 +97,16 @@ function _run_cytools_operation(f::Function, operation::Symbol)
     finally
         delete!(storage, _operation_context_key)
     end
+end
+
+function _set_upstream_restart_gate!(restart_required::Bool)
+    try
+        pycall(py"_cyaxiverse_set_restart_required", Nothing, restart_required)
+        _mosek_fallback_gate_synchronized[] = true
+    catch
+        _mosek_fallback_gate_synchronized[] = false
+    end
+    return _mosek_fallback_gate_synchronized[]
 end
 
 function _load_extension_submodule!(path::AbstractString, name::Symbol)
@@ -125,17 +157,31 @@ function _define_mosek_helpers!()
     import contextlib
     import io
 
+    _cyaxiverse_original_mosek_is_activated = config.mosek_is_activated
+    _cyaxiverse_restart_required = False
+
+    def _cyaxiverse_guarded_mosek_is_activated():
+        if _cyaxiverse_restart_required:
+            return False
+        return bool(_cyaxiverse_original_mosek_is_activated())
+
+    config.mosek_is_activated = _cyaxiverse_guarded_mosek_is_activated
+
+    def _cyaxiverse_set_restart_required(restart_required):
+        global _cyaxiverse_restart_required
+        _cyaxiverse_restart_required = bool(restart_required)
+
     def _cyaxiverse_check_mosek():
         # License diagnostics may contain local paths. Keep them out of the
         # Julia console and return only the activation boolean.
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             config.check_mosek_license()
-        return bool(config.mosek_is_activated())
+        return bool(_cyaxiverse_original_mosek_is_activated())
 
     def _cyaxiverse_set_mosek_path(path):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             config.set_mosek_path(path)
-        return bool(config.mosek_is_activated())
+        return bool(_cyaxiverse_original_mosek_is_activated())
 
     """
     return nothing
@@ -157,12 +203,20 @@ function _record_mosek_state!(; license_path=nothing, restart_on_failure=false, 
     catch error
         _mosek_state[] = restart_on_failure ? :RESTART_REQUIRED : :ENABLED_INACTIVE_LICENSE_FAILED
         _mosek_diagnostic[] = _failed_mosek_diagnostic(phase, error, _mosek_state[])
+        if !_set_upstream_restart_gate!(true)
+            _mosek_diagnostic[] *= " The non-MOSEK selector could not be synchronized; restart Julia before using solver-dependent workflows."
+        end
         return _mosek_state[]
     end
 
     _mosek_state[] = activated ? :ENABLED_ACTIVE : :ENABLED_INACTIVE_LICENSE_FAILED
     _mosek_diagnostic[] = activated ?
         "MOSEK activation is active." : _inactive_mosek_diagnostic(phase)
+    if !_set_upstream_restart_gate!(false)
+        _mosek_state[] = :RESTART_REQUIRED
+        _set_upstream_restart_gate!(true)
+        _mosek_diagnostic[] = "MOSEK activation state could not be synchronized with CYTools backend selection after $(_phase_label(phase)). Restart Julia, correct the license configuration, then call enable_cytools!() again."
+    end
     return _mosek_state[]
 end
 

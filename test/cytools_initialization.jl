@@ -36,6 +36,11 @@ function _cytools_python_stub(root::AbstractString)
         def toric_kahler_cone(self): return _GeometryTipCone()
     def fetch_polytopes(*args, **kwargs):
         return []
+    def select_optimizer_for_test():
+        from cytools import config
+        backend = "mosek" if config.mosek_is_activated() else "highs"
+        _record_solver("selected_backend:" + backend)
+        return backend
     """)
     write(joinpath(cytools, "config.py"), """
     import os
@@ -105,6 +110,7 @@ function _run_cytools_initialization_smoke()
 
             read_calls() = isfile(call_log) ? readlines(call_log) : String[]
             read_solver_calls() = isfile(solver_call_log) ? readlines(solver_call_log) : String[]
+            select_test_optimizer() = pycall(pyimport("cytools")[:select_optimizer_for_test], String)
             expect_disabled(f) = begin
                 error_value = try
                     f()
@@ -185,6 +191,24 @@ function _run_cytools_initialization_smoke()
             @assert occursin("activation was false", inactive_diagnostic)
             @assert occursin("refresh_mosek_state!()", inactive_diagnostic)
             @assert !occursin(license_path, inactive_diagnostic)
+            @assert extension._run_cytools_operation(select_test_optimizer, :fair_triangulation) == "highs"
+            inactive_solver_calls = read_solver_calls()
+            @assert last(inactive_solver_calls) == "selected_backend:highs"
+            # The CYTools 1.4.12 matrix has no mandatory-MOSEK row; exercise
+            # the operation boundary with a separately named synthetic case.
+            inactive_mandatory_error = try
+                extension._run_cytools_operation(select_test_optimizer, :fixture_mandatory_mosek;
+                    requires_mosek=true)
+                nothing
+            catch error
+                error
+            end
+            inactive_mandatory_message = sprint(showerror, inactive_mandatory_error)
+            @assert inactive_mandatory_error isa ErrorException
+            @assert occursin("operation `fixture_mandatory_mosek` requires active MOSEK", inactive_mandatory_message)
+            @assert occursin("state: ENABLED_INACTIVE_LICENSE_FAILED", inactive_mandatory_message)
+            @assert read_solver_calls() == inactive_solver_calls
+            after_enable = read_calls()
 
             write(operation_fail_path, "fail")
             operation_error = try
@@ -231,6 +255,9 @@ function _run_cytools_initialization_smoke()
             write(activation_path, "1")
             @assert extension.refresh_mosek_state!() == :ENABLED_ACTIVE
             @assert read_calls()[end-1:end] == ["check_mosek_license", "mosek_is_activated"]
+            @assert extension._run_cytools_operation(select_test_optimizer, :fair_triangulation) == "mosek"
+            active_solver_calls = read_solver_calls()
+            @assert last(active_solver_calls) == "selected_backend:mosek"
 
             write(refresh_fail_path, "1")
             @assert extension.refresh_mosek_state!() == :RESTART_REQUIRED
@@ -240,6 +267,26 @@ function _run_cytools_initialization_smoke()
             @assert occursin("restart Julia", refresh_diagnostic)
             @assert occursin("enable_cytools!()", refresh_diagnostic)
             @assert !occursin(license_path, refresh_diagnostic)
+            @assert extension.mosek_state() == :RESTART_REQUIRED
+            @assert wrapper.cytools_version() == "cytools-fixture"
+            @assert extension._run_cytools_operation(select_test_optimizer, :fair_triangulation) == "highs"
+            fallback_solver_calls = read_solver_calls()
+            @assert fallback_solver_calls == vcat(active_solver_calls, "selected_backend:highs")
+            calls_before_mandatory_failure = copy(fallback_solver_calls)
+            mandatory_error = try
+                extension._run_cytools_operation(select_test_optimizer, :fixture_mandatory_mosek;
+                    requires_mosek=true)
+                nothing
+            catch error
+                error
+            end
+            mandatory_message = sprint(showerror, mandatory_error)
+            @assert mandatory_error isa ErrorException
+            @assert occursin("operation `fixture_mandatory_mosek` requires active MOSEK", mandatory_message)
+            @assert occursin("state: RESTART_REQUIRED", mandatory_message)
+            @assert occursin("No downstream operation was started", mandatory_message)
+            @assert read_solver_calls() == calls_before_mandatory_failure
+            @assert extension.mosek_state() == :RESTART_REQUIRED
             rm(refresh_fail_path)
 
             write(activation_path, "0")
@@ -255,6 +302,7 @@ function _run_cytools_initialization_smoke()
 
             write(activation_path, "1")
             @assert extension.refresh_mosek_state!() == :ENABLED_ACTIVE
+            @assert extension._run_cytools_operation(select_test_optimizer, :fair_triangulation) == "mosek"
             invalid_path_error = try
                 extension.enable_cytools!(; mosek_license_path=joinpath(data_root, "missing.lic"))
                 nothing
@@ -416,46 +464,46 @@ end
 # optional source probe below checks the key Python call-chain anchors without
 # constructing scientific objects or invoking an optimizer.
 const _CYTOOLS_1_4_12_CAPABILITY_MATRIX = (
-    (operation=:fast_triangulation, direct_optimizer=false,
+    (operation=:fast_triangulation, readiness_required=true, direct_optimizer=false,
         transitive_optimizer=false, backend="CGAL by default",
         mandatory_mosek=false,
         fallback="No optimizer fallback is needed on the fast heights path.",
         failure="Triangulation backend errors or the generator retry limit.",
         runtime_observation="No real geometry or optimizer execution; CYTools 1.4.12 source probe only."),
-    (operation=:fair_triangulation, direct_optimizer=false,
+    (operation=:fair_triangulation, readiness_required=true, direct_optimizer=false,
         transitive_optimizer=true, backend="Cone.is_solid -> find_interior_point; Mosek only when active and dimension >= 25, otherwise Highs",
         mandatory_mosek=false,
-        fallback="Highs when MOSEK is inactive or dimension is below 25.",
+        fallback="Highs when MOSEK is inactive, state is RESTART_REQUIRED, or dimension is below 25.",
         failure="Cone feasibility may fail or return a false negative; fair walks can stall or raise RuntimeError.",
         runtime_observation="No real geometry or optimizer execution; CYTools 1.4.12 source probe only."),
-    (operation=:stored_simplices_reconstruction, direct_optimizer=false,
+    (operation=:stored_simplices_reconstruction, readiness_required=true, direct_optimizer=false,
         transitive_optimizer=true, backend="Triangulation.is_valid -> Cone.is_solid -> find_interior_point; Mosek only when active and dimension >= 25, otherwise Highs",
         mandatory_mosek=false,
-        fallback="Highs when MOSEK is inactive or dimension is below 25.",
+        fallback="Highs when MOSEK is inactive, state is RESTART_REQUIRED, or dimension is below 25.",
         failure="Invalid simplices raise ValueError; cone feasibility can affect validity checks.",
         runtime_observation="No real geometry or optimizer execution; CYTools 1.4.12 source probe only."),
-    (operation=:standard_geometry_tip, direct_optimizer=true,
+    (operation=:standard_geometry_tip, readiness_required=true, direct_optimizer=true,
         transitive_optimizer=false, backend="tip_of_stretched_cone: OSQP below 25; Mosek when active at dimension >= 25; otherwise Highs",
         mandatory_mosek=false,
-        fallback="OSQP or Highs, depending on dimension and activation.",
+        fallback="OSQP below 25; Highs at dimension 25 or above when inactive or RESTART_REQUIRED.",
         failure="CYTools can return no tip or warn on an invalid optimizer result; later geometry work can then fail.",
         runtime_observation="No real geometry or optimizer execution; CYTools 1.4.12 source probe only."),
-    (operation=:hilbert_basis, direct_optimizer=false,
+    (operation=:hilbert_basis, readiness_required=true, direct_optimizer=false,
         transitive_optimizer=false, backend="External Normaliz executable",
         mandatory_mosek=false,
         fallback="No solver fallback; Normaliz is a separate requirement.",
         failure="CYTools raises RuntimeError if Normaliz is unavailable or its output cannot be read.",
         runtime_observation="No real Normaliz execution; CYTools 1.4.12 source probe only."),
-    (operation=:hilbert_save, direct_optimizer=false,
+    (operation=:hilbert_save, readiness_required=true, direct_optimizer=false,
         transitive_optimizer=false, backend="HDF5 only",
         mandatory_mosek=false,
         fallback="No solver is consulted.",
         failure="Requires an existing HDF5 file; writes cytools/geometric/hilbert_basis with deflate level 9.",
         runtime_observation="Synthetic HDF5 fixture only; no real CYTools geometry was used."),
-    (operation=:stored_tip_hilbert_generation, direct_optimizer=false,
+    (operation=:stored_tip_hilbert_generation, readiness_required=true, direct_optimizer=false,
         transitive_optimizer=true, backend="Stored-simplices validation can reach Cone.is_solid; no new tip solve",
         mandatory_mosek=false,
-        fallback="Any transitive cone check uses Highs when MOSEK is inactive or dimension is below 25.",
+        fallback="Any transitive cone check uses Highs when MOSEK is inactive, state is RESTART_REQUIRED, or dimension is below 25.",
         failure="Reconstruction validity checks can fail; stored geometry and Hilbert data must exist.",
         runtime_observation="No real geometry or optimizer execution; wrapper/source paths inspected only."),
 )
@@ -554,6 +602,7 @@ end
         :stored_simplices_reconstruction, :standard_geometry_tip, :hilbert_basis,
         :hilbert_save, :stored_tip_hilbert_generation))
     @test Set(row.operation for row in _CYTOOLS_1_4_12_CAPABILITY_MATRIX) == expected_operations
+    @test all(row.readiness_required for row in _CYTOOLS_1_4_12_CAPABILITY_MATRIX)
     @test all(!row.mandatory_mosek for row in _CYTOOLS_1_4_12_CAPABILITY_MATRIX)
     @test all(!isempty(row.backend) && !isempty(row.fallback) && !isempty(row.failure)
         for row in _CYTOOLS_1_4_12_CAPABILITY_MATRIX)
