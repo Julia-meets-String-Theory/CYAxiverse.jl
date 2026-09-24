@@ -259,16 +259,21 @@ end
                 take!(release)
             end,
         )
-        take!(ready)
 
-        @test_throws W.StateValidationError W._locked_atomic_json_write(
-            path, Dict("a" => 3); expected_digest=digest)
-
-        put!(release, true)
-        wait(first)
-        final = W._plain(JSON3.read(read(path, String)))
-        @test final["a"] == 2
-        @test !isdir(path * ".lock")
+        status = timedwait(() -> isready(ready) || istaskdone(first), 5.0)
+        @test status == :ok
+        if istaskdone(first)
+            wait(first)  # surfaces the worker failure instead of hanging
+        else
+            take!(ready)
+            @test_throws W.StateValidationError W._locked_atomic_json_write(
+                path, Dict("a" => 3); expected_digest=digest)
+            put!(release, true)
+            wait(first)
+            final = W._plain(JSON3.read(read(path, String)))
+            @test final["a"] == 2
+            @test !isdir(path * ".lock")
+        end
     end
 end
 
