@@ -300,7 +300,7 @@ function _validate_state(manifest::Dict{String,Any}, state)
     state_pages isa AbstractDict ||
         throw(StateValidationError("state.pages is required"))
     manifest_keys = Set(String.(collect(keys(manifest["pages"]))))
-    state_keys = Set(String.(collect(keys(state_pages)))
+    state_keys = Set(String.(collect(keys(state_pages))))
     manifest_keys == state_keys ||
         throw(StateValidationError("state page keys do not exactly match manifest page keys"))
     for key in sort!(collect(manifest_keys))
