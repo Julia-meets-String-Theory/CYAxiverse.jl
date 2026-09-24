@@ -2,23 +2,27 @@
 
 This record belongs to a provisional premerge Gate A worktree candidate. It
 does not designate a historical release, adopt a DEV version, close an
-iteration, publish a release, or establish live GitHub protection. The exact
-normative amendment reviewed for I2 is commit
-`2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
-`7620f1c966cb37c5d2c7ed5c54778758ed2c12eb`). The latest correction
-implementation is frozen at commit
-`9eca0ba436f521eefbc2258307c535c30587576d` (tree
-`cbabc1f8335ec107cc95947cc7e870a4b4b86de1`). The feature branch
-uses target PR head `20b3935ace0e01fcee2808681c56595e3afa7667` as its
-execution base.
+iteration, publish a release, or establish live GitHub protection. The
+integrated implementation source candidate addressed here is commit
+`b324f04aff37758541b63bf5fd7928d169c862f7` (tree
+`82ed1100bdb2d22dd2ddee83dbfe79c3af7cc2fb`). Its exact N1 normative subject
+is commit `251467a6b12f44bca7c9540ec3fd0cdf18ffe8e2` (tree
+`a08f7041a5ba8a251bab2606d87bbdfb1423bdcb`), and the controlling manager
+handoff is revision 8 with SHA-256
+`ba1c83b7f25679ff2baed827e79821f5ed9f0c4edf1684c4e04f51828fff14e2`. The
+integrated candidate checks below give the exact review records and approval.
 
-The manager is operating under the exact handoff packet SHA
+The older amendment candidate `2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb`,
+correction implementation `9eca0ba436f521eefbc2258307c535c30587576d`, PR base
+`20b3935ace0e01fcee2808681c56595e3afa7667`, r2 handoff SHA-256
 `19fa93e2b4b1439b1cc4217cf7ff9e42846980d46df66793156f72789894e40a`, review
-result SHA
-`a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf`, owner
-approval receipt SHA
-`140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c`, and
-canonical review-rubric SHA
+result SHA-256
+`a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf`, and
+owner approval receipt SHA-256
+`140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c` belong to
+the superseded preintegration snapshot. They are retained for historical
+provenance only and do not control the integrated I2 candidate. The canonical
+review-rubric SHA-256 is
 `418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72`.
 
 ## Canonical storage and synthetic release packet
@@ -44,7 +48,61 @@ production maintenance writer. The predecessor event-ledger packet and its
 review chronology below remain historical evidence and are not authority for
 this reduced candidate.
 
-## Current reduced-candidate checks
+## Integrated candidate checks
+
+The exact integrated implementation source candidate is commit
+`b324f04aff37758541b63bf5fd7928d169c862f7` (tree
+`82ed1100bdb2d22dd2ddee83dbfe79c3af7cc2fb`). Its P0 integration ancestor is
+`10381ac58fb4037609840e423482ae2886cf5d6e` (tree
+`450e80af4ea6621f8a9847dd492c91bbceb2e1b7`), integrating PR head
+`e82a9b2388637bf7863b90d62bb59d63ae42d678` and live `vmm`
+`f02621377c3c01f1c5ae85ef5ffd00a219aa8b8d`. The controlling r8 handoff SHA-256
+is `ba1c83b7f25679ff2baed827e79821f5ed9f0c4edf1684c4e04f51828fff14e2`.
+
+N1 approved only the exact five-file subject at commit
+`251467a6b12f44bca7c9540ec3fd0cdf18ffe8e2` (tree
+`a08f7041a5ba8a251bab2606d87bbdfb1423bdcb`). Fresh independent SPEC and
+STANDARDS reviews by `gpt-6-sol` at `high` both returned `PASS`; approval
+`reviews/n1-approval-v4.json` has SHA-256
+`c275f222d2bfb572f828d040502a1e2a9d9a50a08bf2f4485c696f6ffefae79b`.
+`AGENTS.md`, `.agents/skills/cyaxiverse-integration-release/SKILL.md`,
+`specs/0125-version-iteration-release/spec.md`, `plan.md`, and `tasks.md` remain
+byte-identical to that reviewed subject. This approval authorizes scoped I2
+implementation only.
+
+The following local implementation checks ran on the clean source candidate
+above. This evidence-only successor changes no implementation files; the
+package, audit, documentation, and remote CI results below are bound to
+`b324f04` and were not rerun on this evidence-only successor.
+Local depot path values are redacted as
+`[writable temporary depot]:[existing host depot]`; the exact command flags and
+observed outcomes remain recorded.
+
+| Check | Observed result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 135 lifecycle tests, including adversarial and failure cases. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'` | Passed: 3 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'` | Passed: 23 tests. |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest test_agent_verify` | Passed: 16 tests. |
+| Python AST compilation of repository control-plane scripts | Passed: 106 files; bytecode writing disabled. |
+| Ruby YAML parse of `.github/workflows/CI.yml` and `.github/workflows/Documentation.yml` | Passed. |
+| `python3 scripts/agent_verify.py snapshot` and `python3 scripts/agent_verify.py diff-check` | Passed. |
+| `git diff --check f02621377c3c01f1c5ae85ef5ffd00a219aa8b8d..HEAD` | Passed: no whitespace errors. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_version_bump.py --base f02621377c3c01f1c5ae85ef5ffd00a219aa8b8d --head HEAD` | Passed: no package version bump is required; package remains at `0.2.0`. |
+| `JULIA_DEPOT_PATH=[writable temporary depot]:[existing host depot] PYTHONDONTWRITEBYTECODE=1 CYAXIVERSE_TEST_FULL=0 python3 scripts/agent_verify.py package` | Passed: Fast Julia package suite and `Pkg.test()` completed (402.412 seconds). A writable temporary depot was required because the default usage lock is read-only. |
+| `JULIA_DEPOT_PATH=[writable temporary depot]:[existing host depot] DOCS_DEPLOY=false CYAX_DOCS_REF=refs/heads/vmm julia --compiled-modules=no --project=docs/ docs/make.jl` | Passed: doctests, document checks, and HTML rendering completed. Documenter warned that remote HEAD could not be read for `edit_link` and defaulted to `master`. |
+| Python-unavailable `using CYAxiverse` import with `PYTHON` and `PYTHONHOME` set to unavailable paths | Passed after 51 dependencies precompiled. |
+| Full `python3 scripts/agent_verify.py package` (`CYAXIVERSE_TEST_FULL=1`) | Failed after the distributed worker tests passed: 98 tests passed and one unchanged protected-source error occurred, `UndefVarError: i not defined` at `src/paper_benchmarks/reduced_models.jl:106`. The first sandbox attempt also hit worker-socket `EPERM`; the permitted retry reached the scientific tests. |
+| `JULIA_DEPOT_PATH=[writable temporary depot]:[existing host depot] PYTHONDONTWRITEBYTECODE=1 python3 scripts/agent_verify.py run -- julia --project=. bin/audit.jl` | Failed: JET reports undefined `i` at `src/paper_benchmarks/reduced_models.jl:106` and `src/paper_benchmarks/poly102_inflation.jl:649`. The run also emitted repeated Revise FolderMonitor `EMFILE` warnings after analysis. |
+| `git diff --exit-code f02621377c3c01f1c5ae85ef5ffd00a219aa8b8d -- src test Project.toml Manifest.toml bin/audit.jl` | Passed: protected scientific source/tests, package metadata, and audit script have no integrated-candidate delta. |
+| Remote CI for exact source candidate `b324f04` | Fast Julia tests **PASS** (28m28s): [run/job 35948689132/107472290717](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/actions/runs/35948689132/job/107472290717). Version lifecycle **PASS** (7m9s): [run/job 35948689132/107472290864](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/actions/runs/35948689132/job/107472290864). Documentation build **PASS** (8m49s): [run/job 35948689119/107472290747](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/actions/runs/35948689119/job/107472290747). Full test suite **SKIPPED** by workflow: [run/job 35948689132/107472291711](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/actions/runs/35948689132/job/107472291711). |
+
+The full-suite and audit failures are outside the permitted implementation
+scope: each failing scientific file is unchanged from integrated `vmm`. They
+are recorded as failures, not as Gate A passes. No production lifecycle action,
+release, public tag, Gate B action, or Issue closure was performed.
+
+## Historical reduced-candidate checks (superseded source snapshot)
 
 The exact reviewed normative authority is commit
 `2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb` (tree
