@@ -276,44 +276,60 @@ end
 function _validate_manifest(manifest)
     manifest isa AbstractDict ||
         throw(StateValidationError("manifest root must be an object"))
-    Int(get(manifest, "schema_version", 0)) == 1 ||
-        throw(StateValidationError("unsupported manifest schema_version"))
-    repository = get(manifest, "repository", nothing)
-    repository isa AbstractDict ||
-        throw(StateValidationError("manifest.repository is required"))
-    for key in ("owner", "name", "branch")
-        haskey(repository, key) ||
-            throw(StateValidationError("repository.$key is required"))
-        isempty(strip(String(repository[key]))) &&
-            throw(StateValidationError("repository.$key must not be empty"))
-    end
-    initial = get(manifest, "initial_verified_commit", nothing)
-    _valid_sha(initial) ||
-        throw(StateValidationError("initial_verified_commit must be a 40-hex SHA"))
-    haskey(manifest, "notion") &&
-        throw(StateValidationError("public manifest must not contain Notion API configuration"))
-    pages = get(manifest, "pages", nothing)
-    pages isa AbstractDict && !isempty(pages) ||
-        throw(StateValidationError("manifest.pages must be a non-empty mapping"))
-    for (key, page) in pages
-        page isa AbstractDict ||
-            throw(StateValidationError("$key must be a mapping"))
-        haskey(page, "notion_page_id") &&
-            throw(StateValidationError("$key must not publish a private notion_page_id"))
-        for required in ("title", "authority", "mode", "sources", "issues", "pull_requests")
-            haskey(page, required) ||
-                throw(StateValidationError("$key.$required is required"))
+    try
+        Int(get(manifest, "schema_version", 0)) == 1 ||
+            throw(StateValidationError("unsupported manifest schema_version"))
+        repository = get(manifest, "repository", nothing)
+        repository isa AbstractDict ||
+            throw(StateValidationError("manifest.repository is required"))
+        for key in ("owner", "name", "branch")
+            haskey(repository, key) ||
+                throw(StateValidationError("repository.$key is required"))
+            isempty(strip(String(repository[key]))) &&
+                throw(StateValidationError("repository.$key must not be empty"))
         end
-        String(page["mode"]) in ("semantic", "mechanical") ||
-            throw(StateValidationError("$key.mode must be semantic or mechanical"))
-        page["sources"] isa AbstractVector ||
-            throw(StateValidationError("$key.sources must be a list"))
-        page["issues"] isa AbstractVector ||
-            throw(StateValidationError("$key.issues must be a list"))
-        page["pull_requests"] isa AbstractVector ||
-            throw(StateValidationError("$key.pull_requests must be a list"))
+        initial = get(manifest, "initial_verified_commit", nothing)
+        _valid_sha(initial) ||
+            throw(StateValidationError("initial_verified_commit must be a 40-hex SHA"))
+        haskey(manifest, "notion") &&
+            throw(StateValidationError(
+                "public manifest must not contain Notion API configuration"))
+        pages = get(manifest, "pages", nothing)
+        pages isa AbstractDict && !isempty(pages) ||
+            throw(StateValidationError("manifest.pages must be a non-empty mapping"))
+        for (key, page) in pages
+            page isa AbstractDict ||
+                throw(StateValidationError("$key must be a mapping"))
+            haskey(page, "notion_page_id") &&
+                throw(StateValidationError(
+                    "$key must not publish a private notion_page_id"))
+            for required in (
+                    "title", "authority", "mode", "sources",
+                    "issues", "pull_requests")
+                haskey(page, required) ||
+                    throw(StateValidationError("$key.$required is required"))
+            end
+            String(page["mode"]) in ("semantic", "mechanical") ||
+                throw(StateValidationError(
+                    "$key.mode must be semantic or mechanical"))
+            page["sources"] isa AbstractVector ||
+                throw(StateValidationError("$key.sources must be a list"))
+            page["issues"] isa AbstractVector ||
+                throw(StateValidationError("$key.issues must be a list"))
+            page["pull_requests"] isa AbstractVector ||
+                throw(StateValidationError("$key.pull_requests must be a list"))
+            String(page["title"])
+            String(page["authority"])
+            String.(page["sources"])
+            Int.(page["issues"])
+            Int.(page["pull_requests"])
+        end
+        true
+    catch error
+        error isa StateValidationError && rethrow()
+        throw(StateValidationError(
+            "invalid manifest structure: $(sprint(showerror, error))"))
     end
-    true
 end
 
 function _validate_issue_snapshot(snapshot, expected_number::Int, context::String)
@@ -343,55 +359,80 @@ end
 function _validate_state(manifest::Dict{String,Any}, state)
     state isa AbstractDict ||
         throw(StateValidationError("wiki state is missing"))
-    Int(get(state, "schema_version", 0)) == 1 ||
-        throw(StateValidationError("unsupported state schema_version"))
-    repository = get(state, "repository", nothing)
-    repository isa AbstractDict ||
-        throw(StateValidationError("state.repository is required"))
-    String(get(repository, "branch", "")) == String(manifest["repository"]["branch"]) ||
-        throw(StateValidationError("state branch does not match manifest"))
-    _valid_sha(get(repository, "head", nothing)) ||
-        throw(StateValidationError("state.repository.head must be a 40-hex SHA"))
-    state_pages = get(state, "pages", nothing)
-    state_pages isa AbstractDict ||
-        throw(StateValidationError("state.pages is required"))
-    manifest_keys = Set(String.(collect(keys(manifest["pages"]))))
-    state_keys = Set(String.(collect(keys(state_pages))))
-    manifest_keys == state_keys ||
-        throw(StateValidationError("state page keys do not exactly match manifest page keys"))
-    for key in sort!(collect(manifest_keys))
-        page = state_pages[key]
-        page isa AbstractDict || throw(StateValidationError("state.pages.$key must be an object"))
-        _valid_sha(get(page, "verified_commit", nothing)) ||
-            throw(StateValidationError("state.pages.$key.verified_commit must be a 40-hex SHA"))
-        haskey(page, "reconciled_at") ||
-            throw(StateValidationError("state.pages.$key.reconciled_at is required"))
-        issues = get(page, "issues", nothing)
-        prs = get(page, "pull_requests", nothing)
-        issues isa AbstractDict ||
-            throw(StateValidationError("state.pages.$key.issues must be an object"))
-        prs isa AbstractDict ||
-            throw(StateValidationError("state.pages.$key.pull_requests must be an object"))
-        expected_issues = Set(string(Int(x)) for x in manifest["pages"][key]["issues"])
-        expected_prs = Set(string(Int(x)) for x in manifest["pages"][key]["pull_requests"])
-        Set(String.(collect(keys(issues)))) == expected_issues ||
-            throw(StateValidationError("state.pages.$key Issue keys do not match manifest"))
-        Set(String.(collect(keys(prs)))) == expected_prs ||
-            throw(StateValidationError("state.pages.$key PR keys do not match manifest"))
-        for number in expected_issues
-            _validate_issue_snapshot(issues[number], parse(Int, number),
-                "state.pages.$key.issues.$number")
+    try
+        Int(get(state, "schema_version", 0)) == 1 ||
+            throw(StateValidationError("unsupported state schema_version"))
+        repository = get(state, "repository", nothing)
+        repository isa AbstractDict ||
+            throw(StateValidationError("state.repository is required"))
+        String(get(repository, "branch", "")) ==
+            String(manifest["repository"]["branch"]) ||
+            throw(StateValidationError("state branch does not match manifest"))
+        _valid_sha(get(repository, "head", nothing)) ||
+            throw(StateValidationError(
+                "state.repository.head must be a 40-hex SHA"))
+        state_pages = get(state, "pages", nothing)
+        state_pages isa AbstractDict ||
+            throw(StateValidationError("state.pages is required"))
+        manifest_keys = Set(String.(collect(keys(manifest["pages"]))))
+        state_keys = Set(String.(collect(keys(state_pages))))
+        manifest_keys == state_keys ||
+            throw(StateValidationError(
+                "state page keys do not exactly match manifest page keys"))
+        for key in sort!(collect(manifest_keys))
+            page = state_pages[key]
+            page isa AbstractDict ||
+                throw(StateValidationError(
+                    "state.pages.$key must be an object"))
+            _valid_sha(get(page, "verified_commit", nothing)) ||
+                throw(StateValidationError(
+                    "state.pages.$key.verified_commit must be a 40-hex SHA"))
+            haskey(page, "reconciled_at") ||
+                throw(StateValidationError(
+                    "state.pages.$key.reconciled_at is required"))
+            String(page["reconciled_at"])
+            issues = get(page, "issues", nothing)
+            prs = get(page, "pull_requests", nothing)
+            issues isa AbstractDict ||
+                throw(StateValidationError(
+                    "state.pages.$key.issues must be an object"))
+            prs isa AbstractDict ||
+                throw(StateValidationError(
+                    "state.pages.$key.pull_requests must be an object"))
+            expected_issues =
+                Set(string(Int(x)) for x in manifest["pages"][key]["issues"])
+            expected_prs =
+                Set(string(Int(x)) for x in manifest["pages"][key]["pull_requests"])
+            Set(String.(collect(keys(issues)))) == expected_issues ||
+                throw(StateValidationError(
+                    "state.pages.$key Issue keys do not match manifest"))
+            Set(String.(collect(keys(prs)))) == expected_prs ||
+                throw(StateValidationError(
+                    "state.pages.$key PR keys do not match manifest"))
+            for number in expected_issues
+                _validate_issue_snapshot(
+                    issues[number], parse(Int, number),
+                    "state.pages.$key.issues.$number")
+            end
+            for number in expected_prs
+                _validate_pr_snapshot(
+                    prs[number], parse(Int, number),
+                    "state.pages.$key.pull_requests.$number")
+            end
+            if haskey(page, "accepted_packet_id")
+                occursin(
+                    r"^[0-9a-f]{64}$",
+                    String(page["accepted_packet_id"])) ||
+                    throw(StateValidationError(
+                        "state.pages.$key.accepted_packet_id must be SHA-256 hex"))
+            end
         end
-        for number in expected_prs
-            _validate_pr_snapshot(prs[number], parse(Int, number),
-                "state.pages.$key.pull_requests.$number")
-        end
-        if haskey(page, "accepted_packet_id")
-            occursin(r"^[0-9a-f]{64}$", String(page["accepted_packet_id"])) ||
-                throw(StateValidationError("state.pages.$key.accepted_packet_id must be SHA-256 hex"))
-        end
+        true
+    catch error
+        error isa StateValidationError && rethrow()
+        throw(StateValidationError(
+            "invalid state structure: $(sprint(showerror, error))"))
     end
-    true
 end
 
 function _validate_page_key(manifest::Dict{String,Any}, key::AbstractString)
@@ -1094,6 +1135,8 @@ function main(args=ARGS)
         error isa BrokenSourceError && return EXIT_BROKEN_SOURCE
         error isa StateValidationError && return EXIT_OWNER_REVIEW
         error isa ArgumentError && return EXIT_OWNER_REVIEW
+        error isa SystemError && return EXIT_OWNER_REVIEW
+        error isa Base.IOError && return EXIT_OWNER_REVIEW
         rethrow()
     end
 end
