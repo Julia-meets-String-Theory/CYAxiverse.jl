@@ -133,6 +133,10 @@ end
     manifest = minimal_manifest()
     @test W._validate_manifest(manifest)
 
+    tracks_head = deepcopy(manifest)
+    tracks_head["pages"]["example"]["track_head"] = true
+    @test W._validate_manifest(tracks_head)
+
     private = deepcopy(manifest)
     private["pages"]["example"]["notion_page_id"] = "private-id"
     @test_throws W.StateValidationError W._validate_manifest(private)
@@ -154,6 +158,21 @@ end
     wrong_issue_type = deepcopy(manifest)
     wrong_issue_type["pages"]["example"]["issues"] = ["not-an-integer"]
     @test_throws W.StateValidationError W._validate_manifest(wrong_issue_type)
+
+    unknown_key_mutators = [
+        p -> (p["unexpected_manifest_field"] = true),
+        p -> (p["repository"]["token"] = "secret-looking"),
+        p -> (p["pages"]["example"]["reconciled_at"] = "2026-09-23T00:00:00Z"),
+    ]
+    for mutate! in unknown_key_mutators
+        extra = deepcopy(manifest)
+        mutate!(extra)
+        @test_throws W.StateValidationError W._validate_manifest(extra)
+    end
+
+    wrong_track_head = deepcopy(manifest)
+    wrong_track_head["pages"]["example"]["track_head"] = "true"
+    @test_throws W.StateValidationError W._validate_manifest(wrong_track_head)
 end
 
 @testset "state validation" begin
@@ -233,6 +252,61 @@ end
         "snapshot" => Dict("schema_version" => 1),
     )
     @test_throws W.StateValidationError W._validate_packet(malformed)
+
+    # The packet is closed-world at every canonical object layer. These extras
+    # include private and actionable-looking fields that must never be ignored.
+    unknown_key_mutators = [
+        p -> (p["notion_page_id"] = "private-page-id"),
+        p -> (p["snapshot"]["accept"] = true),
+        p -> (p["snapshot"]["repository"]["token"] = "secret-looking"),
+        p -> (p["snapshot"]["page"]["notion_page_id"] = "private-page-id"),
+        p -> (p["snapshot"]["sources"][1]["content"] = "replacement"),
+        p -> (p["snapshot"]["issues"][1]["url"] = "private-locator"),
+        p -> (p["snapshot"]["pull_requests"][1]["merge"] = true),
+        p -> (p["changes"]["attested"] = true),
+        p -> (p["changes"]["sources"][1]["replacement"] = "new-content"),
+        p -> (p["changes"]["issues"][1]["resolution"] = "accepted"),
+        p -> (p["changes"]["issues"][1]["before"]["notion_page_id"] = "private-id"),
+        p -> (p["changes"]["issues"][1]["after"]["reconciled"] = true),
+        p -> (p["changes"]["pull_requests"][1]["merge"] = true),
+        p -> (p["changes"]["pull_requests"][1]["before"]["notion_url"] = "private-locator"),
+        p -> (p["changes"]["pull_requests"][1]["after"]["accepted"] = true),
+    ]
+    for mutate! in unknown_key_mutators
+        tampered = deepcopy(raw)
+        mutate!(tampered)
+        @test_throws W.StateValidationError W._validate_packet(tampered)
+    end
+end
+
+@testset "parseable malformed packet uses owner-review exit" begin
+    mktempdir() do dir
+        manifest_path = joinpath(dir, "manifest.yaml")
+        state_path = joinpath(dir, "state.json")
+        packet_path = joinpath(dir, "packet.json")
+        manifest = minimal_manifest(tracked=true)
+        state = minimal_state(tracked=true)
+        packet = W._packet_object(
+            tracked_drift(), tracked_snapshot(manifest, current_fake()),
+            state["pages"]["example"])
+        malformed = W._plain(JSON3.read(JSON3.write(packet)))
+        malformed["snapshot"]["page"]["accept"] = true
+
+        # JSON is a valid YAML subset, so main exercises the real manifest load
+        # and CLI error mapping without contacting GitHub before packet parsing.
+        open(manifest_path, "w") do io
+            write(io, JSON3.write(manifest))
+        end
+        write_state(state_path, state)
+        write_packet(packet_path, malformed)
+
+        @test W.main([
+            "reconcile", "--manifest", manifest_path,
+            "--state", state_path, "--accept", "example",
+            "--packet", packet_path, "--reconciled-commit", SHA1,
+            "--attest-notion-reconciled",
+        ]) == W.EXIT_OWNER_REVIEW
+    end
 end
 
 @testset "packet emission uses one frozen GitHub snapshot" begin

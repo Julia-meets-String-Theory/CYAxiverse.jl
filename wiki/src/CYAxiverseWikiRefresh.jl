@@ -73,6 +73,27 @@ function _plain(x)
     end
 end
 
+function _require_exact_keys(object, required::Tuple, context::AbstractString;
+        optional::Tuple=())
+    object isa AbstractDict ||
+        throw(StateValidationError("$context must be an object"))
+    actual = String[]
+    for key in keys(object)
+        key isa AbstractString || throw(StateValidationError(
+            "$context keys must be strings"))
+        push!(actual, String(key))
+    end
+    actual_keys = Set(actual)
+    required_keys = Set(String.(required))
+    allowed_keys = union(required_keys, Set(String.(optional)))
+    missing = sort!(collect(setdiff(required_keys, actual_keys)))
+    unexpected = sort!(collect(setdiff(actual_keys, allowed_keys)))
+    isempty(missing) && isempty(unexpected) || throw(StateValidationError(
+        "$context keys are invalid (missing: $(join(missing, ", ")); " *
+        "unexpected: $(join(unexpected, ", ")))"))
+    true
+end
+
 function _json_read(text::AbstractString)
     isempty(strip(text)) && return Dict{String,Any}()
     try
@@ -278,11 +299,19 @@ function _validate_manifest(manifest)
     manifest isa AbstractDict ||
         throw(StateValidationError("manifest root must be an object"))
     try
+        haskey(manifest, "notion") &&
+            throw(StateValidationError(
+                "public manifest must not contain Notion API configuration"))
+        _require_exact_keys(manifest,
+            ("schema_version", "repository", "initial_verified_commit", "pages"),
+            "manifest")
         Int(get(manifest, "schema_version", 0)) == 1 ||
             throw(StateValidationError("unsupported manifest schema_version"))
         repository = get(manifest, "repository", nothing)
         repository isa AbstractDict ||
             throw(StateValidationError("manifest.repository is required"))
+        _require_exact_keys(repository, ("owner", "name", "branch"),
+            "manifest.repository")
         for key in ("owner", "name", "branch")
             haskey(repository, key) ||
                 throw(StateValidationError("repository.$key is required"))
@@ -292,9 +321,6 @@ function _validate_manifest(manifest)
         initial = get(manifest, "initial_verified_commit", nothing)
         _valid_sha(initial) ||
             throw(StateValidationError("initial_verified_commit must be a 40-hex SHA"))
-        haskey(manifest, "notion") &&
-            throw(StateValidationError(
-                "public manifest must not contain Notion API configuration"))
         pages = get(manifest, "pages", nothing)
         pages isa AbstractDict && !isempty(pages) ||
             throw(StateValidationError("manifest.pages must be a non-empty mapping"))
@@ -304,6 +330,9 @@ function _validate_manifest(manifest)
             haskey(page, "notion_page_id") &&
                 throw(StateValidationError(
                     "$key must not publish a private notion_page_id"))
+            _require_exact_keys(page,
+                ("title", "authority", "mode", "sources", "issues", "pull_requests"),
+                "manifest.pages.$key"; optional=("track_head",))
             for required in (
                     "title", "authority", "mode", "sources",
                     "issues", "pull_requests")
@@ -324,6 +353,10 @@ function _validate_manifest(manifest)
             String.(page["sources"])
             Int.(page["issues"])
             Int.(page["pull_requests"])
+            if haskey(page, "track_head") && !(page["track_head"] isa Bool)
+                throw(StateValidationError(
+                    "$key.track_head must be a boolean"))
+            end
         end
         true
     catch error
@@ -336,9 +369,11 @@ end
 function _validate_issue_snapshot(snapshot, expected_number::Int, context::String)
     snapshot isa AbstractDict ||
         throw(StateValidationError("$context must be an object"))
+    _require_exact_keys(snapshot,
+        ("number", "title", "state", "state_reason", "closed_at"), context)
     Int(get(snapshot, "number", -1)) == expected_number ||
         throw(StateValidationError("$context number mismatch"))
-    for field in ("title", "state")
+    for field in ("title", "state", "state_reason", "closed_at")
         haskey(snapshot, field) || throw(StateValidationError("$context.$field is required"))
     end
     true
@@ -347,9 +382,12 @@ end
 function _validate_pr_snapshot(snapshot, expected_number::Int, context::String)
     snapshot isa AbstractDict ||
         throw(StateValidationError("$context must be an object"))
+    _require_exact_keys(snapshot,
+        ("number", "title", "state", "draft", "merged_at", "head_sha", "base_ref"),
+        context)
     Int(get(snapshot, "number", -1)) == expected_number ||
         throw(StateValidationError("$context number mismatch"))
-    for field in ("title", "state", "draft", "head_sha", "base_ref")
+    for field in ("title", "state", "draft", "merged_at", "head_sha", "base_ref")
         haskey(snapshot, field) || throw(StateValidationError("$context.$field is required"))
     end
     _valid_sha(String(snapshot["head_sha"])) ||
@@ -442,23 +480,32 @@ function _validate_page_key(manifest::Dict{String,Any}, key::AbstractString)
     String(key)
 end
 
-_issue_tuple(snapshot) = (
-    number = Int(snapshot["number"]),
-    title = String(snapshot["title"]),
-    state = String(snapshot["state"]),
-    state_reason = get(snapshot, "state_reason", nothing),
-    closed_at = get(snapshot, "closed_at", nothing),
-)
+function _issue_tuple(snapshot; context="Issue snapshot")
+    _require_exact_keys(snapshot,
+        ("number", "title", "state", "state_reason", "closed_at"), context)
+    (
+        number = Int(snapshot["number"]),
+        title = String(snapshot["title"]),
+        state = String(snapshot["state"]),
+        state_reason = snapshot["state_reason"],
+        closed_at = snapshot["closed_at"],
+    )
+end
 
-_pr_tuple(snapshot) = (
-    number = Int(snapshot["number"]),
-    title = String(snapshot["title"]),
-    state = String(snapshot["state"]),
-    draft = Bool(snapshot["draft"]),
-    merged_at = get(snapshot, "merged_at", nothing),
-    head_sha = String(snapshot["head_sha"]),
-    base_ref = String(snapshot["base_ref"]),
-)
+function _pr_tuple(snapshot; context="PR snapshot")
+    _require_exact_keys(snapshot,
+        ("number", "title", "state", "draft", "merged_at", "head_sha", "base_ref"),
+        context)
+    (
+        number = Int(snapshot["number"]),
+        title = String(snapshot["title"]),
+        state = String(snapshot["state"]),
+        draft = Bool(snapshot["draft"]),
+        merged_at = snapshot["merged_at"],
+        head_sha = String(snapshot["head_sha"]),
+        base_ref = String(snapshot["base_ref"]),
+    )
+end
 
 function _snapshot_payload(manifest::Dict{String,Any}, key::String,
         page::Dict{String,Any}, head::String, tree::Dict{String,String},
@@ -507,12 +554,20 @@ function _snapshot_from_dict(snapshot)
     snapshot isa AbstractDict ||
         throw(StateValidationError("packet snapshot must be an object"))
     try
+        _require_exact_keys(snapshot,
+            ("schema_version", "repository", "page", "current_head", "sources",
+                "issues", "pull_requests"),
+            "packet snapshot")
         repository = snapshot["repository"]
         page = snapshot["page"]
         repository isa AbstractDict ||
             throw(StateValidationError("packet snapshot.repository must be an object"))
         page isa AbstractDict ||
             throw(StateValidationError("packet snapshot.page must be an object"))
+        _require_exact_keys(repository, ("owner", "name", "branch"),
+            "packet snapshot.repository")
+        _require_exact_keys(page, ("key", "title", "authority"),
+            "packet snapshot.page")
         sources_raw = snapshot["sources"]
         issues_raw = snapshot["issues"]
         prs_raw = snapshot["pull_requests"]
@@ -524,7 +579,11 @@ function _snapshot_from_dict(snapshot)
             throw(StateValidationError("packet snapshot.pull_requests must be a list"))
 
         sources = sort([
-            (path=String(item["path"]), blob=String(item["blob"]))
+            begin
+                _require_exact_keys(item, ("path", "blob"),
+                    "packet snapshot source")
+                (path=String(item["path"]), blob=String(item["blob"]))
+            end
             for item in sources_raw
         ], by=x -> x.path)
         issues = sort([
@@ -570,11 +629,15 @@ function _canonical_change_sources(changes)
     changes isa AbstractVector ||
         throw(StateValidationError("packet changes.sources must be a list"))
     sort([
-        (
-            path=String(item["path"]),
-            before_blob=get(item, "before_blob", nothing),
-            after_blob=get(item, "after_blob", nothing),
-        ) for item in changes
+        begin
+            _require_exact_keys(item, ("path", "before_blob", "after_blob"),
+                "packet source change")
+            (
+                path=String(item["path"]),
+                before_blob=item["before_blob"],
+                after_blob=item["after_blob"],
+            )
+        end for item in changes
     ], by=x -> x.path)
 end
 
@@ -582,11 +645,15 @@ function _canonical_issue_changes(changes)
     changes isa AbstractVector ||
         throw(StateValidationError("packet changes.issues must be a list"))
     sort([
-        (
-            number=Int(item["number"]),
-            before=item["before"] === nothing ? nothing : _issue_tuple(item["before"]),
-            after=_issue_tuple(item["after"]),
-        ) for item in changes
+        begin
+            _require_exact_keys(item, ("number", "before", "after"),
+                "packet Issue change")
+            (
+                number=Int(item["number"]),
+                before=item["before"] === nothing ? nothing : _issue_tuple(item["before"]),
+                after=_issue_tuple(item["after"]),
+            )
+        end for item in changes
     ], by=x -> x.number)
 end
 
@@ -594,11 +661,15 @@ function _canonical_pr_changes(changes)
     changes isa AbstractVector ||
         throw(StateValidationError("packet changes.pull_requests must be a list"))
     sort([
-        (
-            number=Int(item["number"]),
-            before=item["before"] === nothing ? nothing : _pr_tuple(item["before"]),
-            after=_pr_tuple(item["after"]),
-        ) for item in changes
+        begin
+            _require_exact_keys(item, ("number", "before", "after"),
+                "packet PR change")
+            (
+                number=Int(item["number"]),
+                before=item["before"] === nothing ? nothing : _pr_tuple(item["before"]),
+                after=_pr_tuple(item["after"]),
+            )
+        end for item in changes
     ], by=x -> x.number)
 end
 
@@ -678,9 +749,17 @@ function _packet_payload_from_dict(packet)
     packet isa AbstractDict ||
         throw(StateValidationError("packet root must be an object"))
     try
+        _require_exact_keys(packet,
+            ("packet_id", "schema_version", "kind", "snapshot",
+                "baseline_verified_commit", "baseline_state_digest", "changes",
+                "execution_surface", "instructions"),
+            "packet")
         changes = packet["changes"]
         changes isa AbstractDict ||
             throw(StateValidationError("packet changes must be an object"))
+        _require_exact_keys(changes,
+            ("head_changed", "sources", "issues", "pull_requests"),
+            "packet changes")
         instructions = packet["instructions"]
         instructions isa AbstractVector ||
             throw(StateValidationError("packet instructions must be a list"))
