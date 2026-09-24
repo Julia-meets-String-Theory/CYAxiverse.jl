@@ -22,6 +22,7 @@ const _FULL = get(ENV, "CYAXIVERSE_TEST_FULL", "1") == "1"
 end
 
 include(joinpath(@__DIR__, "optional_plotting.jl"))
+include(joinpath(@__DIR__, "cytools_initialization.jl"))
 include(joinpath(@__DIR__, "path_remediation.jl"))
 
 # The bounded synthetic geometry-flow test below exercises this helper in both
@@ -1181,6 +1182,7 @@ function _load_geometries_generate_fixture()
     expression === nothing && error("geometries_generate definition not found in $source_path")
     fixture_module = Module(:GeometriesGenerateFixture)
     Core.eval(fixture_module, :(using LinearAlgebra))
+    Core.eval(fixture_module, :(_ensure_cytools_ready() = nothing))
     Core.eval(fixture_module, :(cytools_version() = "0.8.0"))
     Core.eval(fixture_module, expression)
     return Base.invokelatest(getproperty, fixture_module, :geometries_generate)
