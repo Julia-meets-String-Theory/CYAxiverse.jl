@@ -3,9 +3,12 @@ module CYAxiverseWikiRefresh
 using Dates
 using HTTP
 using JSON3
+using SHA
 using YAML
 
-export main, Drift, material, _accept_commit_guard,
+export main, Drift, material, StateValidationError, BrokenSourceError,
+       _validate_manifest, _validate_state, _validate_page_key,
+       _snapshot_digest, _validate_packet, _atomic_json_write,
        EXIT_CLEAN, EXIT_DRIFT, EXIT_BROKEN_SOURCE, EXIT_OWNER_REVIEW
 
 const EXIT_CLEAN = 0
@@ -14,6 +17,7 @@ const EXIT_BROKEN_SOURCE = 11
 const EXIT_OWNER_REVIEW = 12
 
 const GITHUB_API = "https://api.github.com"
+const SHA40_RE = r"^[0-9a-f]{40}$"
 
 struct RemoteError <: Exception
     status::Int
@@ -21,8 +25,18 @@ struct RemoteError <: Exception
     body::String
 end
 
+struct BrokenSourceError <: Exception
+    message::String
+end
+
+struct StateValidationError <: Exception
+    message::String
+end
+
 Base.showerror(io::IO, e::RemoteError) =
     print(io, "remote request failed: HTTP $(e.status) $(e.url)\n$(e.body)")
+Base.showerror(io::IO, e::BrokenSourceError) = print(io, e.message)
+Base.showerror(io::IO, e::StateValidationError) = print(io, e.message)
 
 struct GitHubClient
     owner::String
@@ -57,37 +71,89 @@ function _plain(x)
     end
 end
 
-_json_read(text::AbstractString) =
-    isempty(strip(text)) ? Dict{String,Any}() : _plain(JSON3.read(text))
-
-function _json_write_file(path::AbstractString, object)
-    mkpath(dirname(path))
-    open(path, "w") do io
-        JSON3.write(io, object)
-        write(io, '\n')
+function _json_read(text::AbstractString)
+    isempty(strip(text)) && return Dict{String,Any}()
+    try
+        _plain(JSON3.read(text))
+    catch error
+        throw(StateValidationError("invalid JSON: $(sprint(showerror, error))"))
     end
 end
 
 function _load_manifest(path::AbstractString)
-    isfile(path) || throw(ArgumentError("manifest not found: $path"))
-    _plain(YAML.load_file(path))
+    isfile(path) || throw(StateValidationError("manifest not found: $path"))
+    try
+        _plain(YAML.load_file(path))
+    catch error
+        throw(StateValidationError("invalid manifest YAML: $(sprint(showerror, error))"))
+    end
+end
+
+function _file_digest(path::AbstractString)
+    isfile(path) || return nothing
+    bytes2hex(SHA.sha256(read(path)))
 end
 
 function _load_state(path::AbstractString)
-    isfile(path) || return nothing
-    open(path, "r") do io
+    isfile(path) || return nothing, nothing
+    digest = _file_digest(path)
+    state = open(path, "r") do io
         _json_read(read(io, String))
     end
+    state, digest
+end
+
+function _atomic_text_write(path::AbstractString, text::AbstractString;
+        expected_digest::Union{Nothing,String}=nothing,
+        require_absent::Bool=false)
+    mkpath(dirname(path))
+    if require_absent && isfile(path)
+        throw(StateValidationError("refusing write: $path appeared concurrently"))
+    end
+    if expected_digest !== nothing
+        current = _file_digest(path)
+        current == expected_digest || throw(StateValidationError(
+            "refusing write: $path changed concurrently"))
+    end
+    tmp = tempname(dirname(path))
+    try
+        open(tmp, "w") do io
+            write(io, text)
+            flush(io)
+        end
+        mv(tmp, path; force=true)
+    finally
+        isfile(tmp) && rm(tmp; force=true)
+    end
+    nothing
+end
+
+function _atomic_json_write(path::AbstractString, object;
+        expected_digest::Union{Nothing,String}=nothing,
+        require_absent::Bool=false)
+    _atomic_text_write(path, string(JSON3.write(object), "\n");
+        expected_digest, require_absent)
 end
 
 function _request_json(method::AbstractString, url::AbstractString,
         headers::Vector{Pair{String,String}})
-    response = HTTP.request(method, url, headers;
-        status_exception=false, readtimeout=30)
-    text = String(response.body)
-    200 <= response.status < 300 ||
-        throw(RemoteError(response.status, String(url), text))
-    isempty(strip(text)) ? Dict{String,Any}() : _json_read(text)
+    last_response = nothing
+    for attempt in 1:3
+        response = HTTP.request(method, url, headers;
+            status_exception=false, readtimeout=30)
+        last_response = response
+        if 200 <= response.status < 300
+            text = String(response.body)
+            return isempty(strip(text)) ? Dict{String,Any}() : _json_read(text)
+        end
+        if response.status == 429 || 500 <= response.status < 600
+            attempt < 3 && sleep(2.0^(attempt - 1))
+            continue
+        end
+        throw(RemoteError(response.status, String(url), String(response.body)))
+    end
+    response = last_response
+    throw(RemoteError(response.status, String(url), String(response.body)))
 end
 
 function _github_headers(client::GitHubClient)
@@ -115,8 +181,8 @@ end
 function _tree_blobs(client::GitHubClient, ref::AbstractString)
     commit_sha, tree_sha = _commit_info(client, ref)
     data = _github_get(client, "git/trees/$tree_sha?recursive=1")
-    get(data, "truncated", false) &&
-        error("GitHub returned a truncated repository tree for $ref")
+    get(data, "truncated", false) && throw(BrokenSourceError(
+        "GitHub returned a truncated repository tree for $ref"))
     blobs = Dict{String,String}()
     for entry in data["tree"]
         get(entry, "type", "") == "blob" || continue
@@ -149,43 +215,326 @@ function _pr_snapshot(client::GitHubClient, number::Integer)
     )
 end
 
+function _valid_sha(value)
+    value isa AbstractString && occursin(SHA40_RE, String(value))
+end
+
 function _validate_manifest(manifest::Dict{String,Any})
     Int(get(manifest, "schema_version", 0)) == 1 ||
-        throw(ArgumentError("unsupported manifest schema_version"))
-    repository = manifest["repository"]
+        throw(StateValidationError("unsupported manifest schema_version"))
+    repository = get(manifest, "repository", nothing)
+    repository isa AbstractDict ||
+        throw(StateValidationError("manifest.repository is required"))
     for key in ("owner", "name", "branch")
         haskey(repository, key) ||
-            throw(ArgumentError("repository.$key is required"))
+            throw(StateValidationError("repository.$key is required"))
+        isempty(strip(String(repository[key]))) &&
+            throw(StateValidationError("repository.$key must not be empty"))
     end
-    haskey(manifest, "initial_verified_commit") ||
-        throw(ArgumentError("initial_verified_commit is required"))
+    initial = get(manifest, "initial_verified_commit", nothing)
+    _valid_sha(initial) ||
+        throw(StateValidationError("initial_verified_commit must be a 40-hex SHA"))
     haskey(manifest, "notion") &&
-        throw(ArgumentError("public manifest must not contain Notion API configuration"))
-    for (key, page) in manifest["pages"]
+        throw(StateValidationError("public manifest must not contain Notion API configuration"))
+    pages = get(manifest, "pages", nothing)
+    pages isa AbstractDict && !isempty(pages) ||
+        throw(StateValidationError("manifest.pages must be a non-empty mapping"))
+    for (key, page) in pages
+        page isa AbstractDict ||
+            throw(StateValidationError("$key must be a mapping"))
         haskey(page, "notion_page_id") &&
-            throw(ArgumentError("$key must not publish a private notion_page_id"))
+            throw(StateValidationError("$key must not publish a private notion_page_id"))
         for required in ("title", "authority", "mode", "sources", "issues", "pull_requests")
             haskey(page, required) ||
-                throw(ArgumentError("$key.$required is required"))
+                throw(StateValidationError("$key.$required is required"))
         end
         String(page["mode"]) in ("semantic", "mechanical") ||
-            throw(ArgumentError("$key.mode must be semantic or mechanical"))
+            throw(StateValidationError("$key.mode must be semantic or mechanical"))
+        page["sources"] isa AbstractVector ||
+            throw(StateValidationError("$key.sources must be a list"))
+        page["issues"] isa AbstractVector ||
+            throw(StateValidationError("$key.issues must be a list"))
+        page["pull_requests"] isa AbstractVector ||
+            throw(StateValidationError("$key.pull_requests must be a list"))
     end
     true
 end
 
-function _snapshot_page(page::Dict{String,Any}, head::String, github::GitHubClient,
-        issue_cache::Dict{Int,Dict{String,Any}},
+function _validate_issue_snapshot(snapshot, expected_number::Int, context::String)
+    snapshot isa AbstractDict ||
+        throw(StateValidationError("$context must be an object"))
+    Int(get(snapshot, "number", -1)) == expected_number ||
+        throw(StateValidationError("$context number mismatch"))
+    for field in ("title", "state")
+        haskey(snapshot, field) || throw(StateValidationError("$context.$field is required"))
+    end
+    true
+end
+
+function _validate_pr_snapshot(snapshot, expected_number::Int, context::String)
+    snapshot isa AbstractDict ||
+        throw(StateValidationError("$context must be an object"))
+    Int(get(snapshot, "number", -1)) == expected_number ||
+        throw(StateValidationError("$context number mismatch"))
+    for field in ("title", "state", "draft", "head_sha", "base_ref")
+        haskey(snapshot, field) || throw(StateValidationError("$context.$field is required"))
+    end
+    _valid_sha(String(snapshot["head_sha"])) ||
+        throw(StateValidationError("$context.head_sha must be a 40-hex SHA"))
+    true
+end
+
+function _validate_state(manifest::Dict{String,Any}, state)
+    state isa AbstractDict ||
+        throw(StateValidationError("wiki state is missing"))
+    Int(get(state, "schema_version", 0)) == 1 ||
+        throw(StateValidationError("unsupported state schema_version"))
+    repository = get(state, "repository", nothing)
+    repository isa AbstractDict ||
+        throw(StateValidationError("state.repository is required"))
+    String(get(repository, "branch", "")) == String(manifest["repository"]["branch"]) ||
+        throw(StateValidationError("state branch does not match manifest"))
+    _valid_sha(get(repository, "head", nothing)) ||
+        throw(StateValidationError("state.repository.head must be a 40-hex SHA"))
+    state_pages = get(state, "pages", nothing)
+    state_pages isa AbstractDict ||
+        throw(StateValidationError("state.pages is required"))
+    manifest_keys = Set(String.(collect(keys(manifest["pages"]))))
+    state_keys = Set(String.(collect(keys(state_pages)))
+    manifest_keys == state_keys ||
+        throw(StateValidationError("state page keys do not exactly match manifest page keys"))
+    for key in sort!(collect(manifest_keys))
+        page = state_pages[key]
+        page isa AbstractDict || throw(StateValidationError("state.pages.$key must be an object"))
+        _valid_sha(get(page, "verified_commit", nothing)) ||
+            throw(StateValidationError("state.pages.$key.verified_commit must be a 40-hex SHA"))
+        haskey(page, "reconciled_at") ||
+            throw(StateValidationError("state.pages.$key.reconciled_at is required"))
+        issues = get(page, "issues", nothing)
+        prs = get(page, "pull_requests", nothing)
+        issues isa AbstractDict ||
+            throw(StateValidationError("state.pages.$key.issues must be an object"))
+        prs isa AbstractDict ||
+            throw(StateValidationError("state.pages.$key.pull_requests must be an object"))
+        expected_issues = Set(string(Int(x)) for x in manifest["pages"][key]["issues"])
+        expected_prs = Set(string(Int(x)) for x in manifest["pages"][key]["pull_requests"])
+        Set(String.(collect(keys(issues)))) == expected_issues ||
+            throw(StateValidationError("state.pages.$key Issue keys do not match manifest"))
+        Set(String.(collect(keys(prs))) == expected_prs ||
+            throw(StateValidationError("state.pages.$key PR keys do not match manifest"))
+        for number in expected_issues
+            _validate_issue_snapshot(issues[number], parse(Int, number),
+                "state.pages.$key.issues.$number")
+        end
+        for number in expected_prs
+            _validate_pr_snapshot(prs[number], parse(Int, number),
+                "state.pages.$key.pull_requests.$number")
+        end
+        if haskey(page, "accepted_packet_id")
+            occursin(r"^[0-9a-f]{64}$", String(page["accepted_packet_id"])) ||
+                throw(StateValidationError("state.pages.$key.accepted_packet_id must be SHA-256 hex"))
+        end
+    end
+    true
+end
+
+function _validate_page_key(manifest::Dict{String,Any}, key::AbstractString)
+    haskey(manifest["pages"], String(key)) ||
+        throw(StateValidationError("unknown wiki page key: $key"))
+    String(key)
+end
+
+_issue_tuple(snapshot) = (
+    number = Int(snapshot["number"]),
+    title = String(snapshot["title"]),
+    state = String(snapshot["state"]),
+    state_reason = get(snapshot, "state_reason", nothing),
+    closed_at = get(snapshot, "closed_at", nothing),
+)
+
+_pr_tuple(snapshot) = (
+    number = Int(snapshot["number"]),
+    title = String(snapshot["title"]),
+    state = String(snapshot["state"]),
+    draft = Bool(snapshot["draft"]),
+    merged_at = get(snapshot, "merged_at", nothing),
+    head_sha = String(snapshot["head_sha"]),
+    base_ref = String(snapshot["base_ref"]),
+)
+
+function _snapshot_payload(manifest::Dict{String,Any}, key::String,
+        page::Dict{String,Any}, head::String, tree::Dict{String,String},
+        github::GitHubClient, issue_cache::Dict{Int,Dict{String,Any}},
+        pr_cache::Dict{Int,Dict{String,Any}})
+    sources = NamedTuple[]
+    for path in sort(String.(page["sources"]))
+        haskey(tree, path) || throw(BrokenSourceError("tracked source missing at $head: $path"))
+        push!(sources, (path=path, blob=tree[path]))
+    end
+    issues = NamedTuple[]
+    for number in sort(Int.(page["issues"]))
+        snap = get!(issue_cache, number) do
+            _issue_snapshot(github, number)
+        end
+        push!(issues, _issue_tuple(snap))
+    end
+    prs = NamedTuple[]
+    for number in sort(Int.(page["pull_requests"]))
+        snap = get!(pr_cache, number) do
+            _pr_snapshot(github, number)
+        end
+        push!(prs, _pr_tuple(snap))
+    end
+    repo = manifest["repository"]
+    (
+        schema_version = 1,
+        repository = (
+            owner = String(repo["owner"]),
+            name = String(repo["name"]),
+            branch = String(repo["branch"]),
+        ),
+        page = (
+            key = key,
+            title = String(page["title"]),
+            authority = String(page["authority"]),
+        ),
+        current_head = head,
+        sources = sources,
+        issues = issues,
+        pull_requests = prs,
+    )
+end
+
+function _snapshot_from_dict(snapshot::AbstractDict)
+    repository = snapshot["repository"]
+    page = snapshot["page"]
+    sources = sort([
+        (path=String(item["path"]), blob=String(item["blob"]))
+        for item in snapshot["sources"]
+    ], by=x -> x.path)
+    issues = sort([
+        _issue_tuple(item) for item in snapshot["issues"]
+    ], by=x -> x.number)
+    prs = sort([
+        _pr_tuple(item) for item in snapshot["pull_requests"]
+    ], by=x -> x.number)
+    (
+        schema_version = Int(snapshot["schema_version"]),
+        repository = (
+            owner = String(repository["owner"]),
+            name = String(repository["name"]),
+            branch = String(repository["branch"]),
+        ),
+        page = (
+            key = String(page["key"]),
+            title = String(page["title"]),
+            authority = String(page["authority"]),
+        ),
+        current_head = String(snapshot["current_head"]),
+        sources = sources,
+        issues = issues,
+        pull_requests = prs,
+    )
+end
+
+_snapshot_digest(snapshot) =
+    bytes2hex(SHA.sha256(Vector{UInt8}(codeunits(JSON3.write(snapshot)))))
+
+function _canonical_change_sources(changes)
+    sort([
+        (
+            path=String(item["path"]),
+            before_blob=get(item, "before_blob", nothing),
+            after_blob=get(item, "after_blob", nothing),
+        ) for item in changes
+    ], by=x -> x.path)
+end
+
+function _canonical_issue_changes(changes)
+    sort([
+        (
+            number=Int(item["number"]),
+            before=item["before"] === nothing ? nothing : _issue_tuple(item["before"]),
+            after=_issue_tuple(item["after"]),
+        ) for item in changes
+    ], by=x -> x.number)
+end
+
+function _canonical_pr_changes(changes)
+    sort([
+        (
+            number=Int(item["number"]),
+            before=item["before"] === nothing ? nothing : _pr_tuple(item["before"]),
+            after=_pr_tuple(item["after"]),
+        ) for item in changes
+    ], by=x -> x.number)
+end
+
+function _packet_object(manifest, drift::Drift, snapshot)
+    packet_id = _snapshot_digest(snapshot)
+    (
+        schema_version = 1,
+        kind = "cyaxiverse-wiki-reconciliation",
+        packet_id = packet_id,
+        snapshot = snapshot,
+        baseline_verified_commit = drift.verified_commit,
+        changes = (
+            head_changed = drift.head_changed,
+            sources = _canonical_change_sources(drift.changed_sources),
+            issues = _canonical_issue_changes(drift.issue_changes),
+            pull_requests = _canonical_pr_changes(drift.pr_changes),
+        ),
+        execution_surface = "Work/ChatGPT with connected Notion integration",
+        instructions = [
+            "Read the authoritative changed sources before editing Notion.",
+            "Locate exactly one page with the packet title under the CYAxiverse wiki hierarchy.",
+            "If zero or multiple exact-title matches exist, stop for resolution.",
+            "Update only the affected page.",
+            "Preserve superseded history where relevant.",
+            "Do not infer owner decisions or scientific acceptance.",
+            "Do not write to GitHub.",
+            "Verify the Notion edit and explicitly attest that this exact packet_id was reconciled.",
+        ],
+    )
+end
+
+function _validate_packet(packet::Dict{String,Any})
+    Int(get(packet, "schema_version", 0)) == 1 ||
+        throw(StateValidationError("unsupported packet schema_version"))
+    String(get(packet, "kind", "")) == "cyaxiverse-wiki-reconciliation" ||
+        throw(StateValidationError("invalid packet kind"))
+    haskey(packet, "snapshot") ||
+        throw(StateValidationError("packet snapshot is required"))
+    snapshot = _snapshot_from_dict(packet["snapshot"])
+    packet_id = String(get(packet, "packet_id", ""))
+    occursin(r"^[0-9a-f]{64}$", packet_id) ||
+        throw(StateValidationError("packet_id must be SHA-256 hex"))
+    _snapshot_digest(snapshot) == packet_id ||
+        throw(StateValidationError("packet digest does not match snapshot"))
+    packet_id, snapshot
+end
+
+function _load_packet(path::AbstractString)
+    isfile(path) || throw(StateValidationError("packet not found: $path"))
+    packet = open(path, "r") do io
+        _json_read(read(io, String))
+    end
+    packet_id, snapshot = _validate_packet(packet)
+    packet, packet_id, snapshot
+end
+
+function _snapshot_page(page::Dict{String,Any}, head::String,
+        github::GitHubClient, issue_cache::Dict{Int,Dict{String,Any}},
         pr_cache::Dict{Int,Dict{String,Any}})
     issues = Dict{String,Any}()
-    for raw in get(page, "issues", Any[])
+    for raw in page["issues"]
         number = Int(raw)
         issues[string(number)] = get!(issue_cache, number) do
             _issue_snapshot(github, number)
         end
     end
     prs = Dict{String,Any}()
-    for raw in get(page, "pull_requests", Any[])
+    for raw in page["pull_requests"]
         number = Int(raw)
         prs[string(number)] = get!(pr_cache, number) do
             _pr_snapshot(github, number)
@@ -199,11 +548,43 @@ function _snapshot_page(page::Dict{String,Any}, head::String, github::GitHubClie
     )
 end
 
+function _state_page_from_snapshot(snapshot, packet_id::String)
+    issues = Dict{String,Any}()
+    for item in snapshot.issues
+        issues[string(item.number)] = Dict{String,Any}(
+            "number" => item.number,
+            "title" => item.title,
+            "state" => item.state,
+            "state_reason" => item.state_reason,
+            "closed_at" => item.closed_at,
+        )
+    end
+    prs = Dict{String,Any}()
+    for item in snapshot.pull_requests
+        prs[string(item.number)] = Dict{String,Any}(
+            "number" => item.number,
+            "title" => item.title,
+            "state" => item.state,
+            "draft" => item.draft,
+            "merged_at" => item.merged_at,
+            "head_sha" => item.head_sha,
+            "base_ref" => item.base_ref,
+        )
+    end
+    Dict{String,Any}(
+        "verified_commit" => snapshot.current_head,
+        "reconciled_at" => string(now(UTC)),
+        "accepted_packet_id" => packet_id,
+        "issues" => issues,
+        "pull_requests" => prs,
+    )
+end
+
 function _bootstrap_state(manifest::Dict{String,Any}, github::GitHubClient)
     branch = String(manifest["repository"]["branch"])
     head, _ = _tree_blobs(github, branch)
     expected = String(manifest["initial_verified_commit"])
-    head == expected || throw(ArgumentError(
+    head == expected || throw(StateValidationError(
         "refusing bootstrap: current $branch head is $head, expected $expected"))
     issue_cache = Dict{Int,Dict{String,Any}}()
     pr_cache = Dict{Int,Dict{String,Any}}()
@@ -221,19 +602,18 @@ end
 
 function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
         github::GitHubClient; only_page::Union{Nothing,String}=nothing)
+    only_page === nothing || _validate_page_key(manifest, only_page)
     branch = String(manifest["repository"]["branch"])
     current_head, current_tree = _tree_blobs(github, branch)
     baseline_trees = Dict{String,Dict{String,String}}()
     issue_cache = Dict{Int,Dict{String,Any}}()
     pr_cache = Dict{Int,Dict{String,Any}}()
-    state_pages = get(state, "pages", Dict{String,Any}())
+    state_pages = state["pages"]
     drifts = Drift[]
     broken_sources = Dict{String,Any}[]
 
     for (key, page) in manifest["pages"]
         only_page !== nothing && key != only_page && continue
-        haskey(state_pages, key) ||
-            throw(ArgumentError("page '$key' has no baseline state"))
         baseline = state_pages[key]
         verified_commit = String(baseline["verified_commit"])
         baseline_tree = get!(baseline_trees, verified_commit) do
@@ -242,7 +622,7 @@ function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
         end
 
         changed_sources = Dict{String,Any}[]
-        for rawpath in get(page, "sources", Any[])
+        for rawpath in page["sources"]
             path = String(rawpath)
             before = get(baseline_tree, path, nothing)
             after = get(current_tree, path, nothing)
@@ -250,32 +630,30 @@ function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
                 push!(broken_sources, Dict("page" => key, "path" => path))
             elseif before != after
                 push!(changed_sources, Dict(
-                    "path" => path,
-                    "before_blob" => before,
-                    "after_blob" => after))
+                    "path" => path, "before_blob" => before, "after_blob" => after))
             end
         end
 
         issue_changes = Dict{String,Any}[]
-        old_issues = get(baseline, "issues", Dict{String,Any}())
-        for raw in get(page, "issues", Any[])
+        old_issues = baseline["issues"]
+        for raw in page["issues"]
             number = Int(raw)
             current = get!(issue_cache, number) do
                 _issue_snapshot(github, number)
             end
-            old = get(old_issues, string(number), nothing)
+            old = old_issues[string(number)]
             old == current || push!(issue_changes,
                 Dict("number" => number, "before" => old, "after" => current))
         end
 
         pr_changes = Dict{String,Any}[]
-        old_prs = get(baseline, "pull_requests", Dict{String,Any}())
-        for raw in get(page, "pull_requests", Any[])
+        old_prs = baseline["pull_requests"]
+        for raw in page["pull_requests"]
             number = Int(raw)
             current = get!(pr_cache, number) do
                 _pr_snapshot(github, number)
             end
-            old = get(old_prs, string(number), nothing)
+            old = old_prs[string(number)]
             old == current || push!(pr_changes,
                 Dict("number" => number, "before" => old, "after" => current))
         end
@@ -287,7 +665,7 @@ function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
             changed_sources, issue_changes, pr_changes)
         material(drift) && push!(drifts, drift)
     end
-    current_head, drifts, broken_sources
+    current_head, current_tree, drifts, broken_sources
 end
 
 _short(sha::AbstractString) = first(String(sha), min(7, length(sha)))
@@ -305,60 +683,40 @@ function _print_drift(d::Drift)
             " -> ", _short(String(source["after_blob"])))
     end
     for item in d.issue_changes
-        before = item["before"]
-        after = item["after"]
+        before = item["before"]; after = item["after"]
         println("  * issue #", item["number"], ": ",
-            before === nothing ? "<unbaselined>" : get(before, "state", "?"),
-            " -> ", get(after, "state", "?"))
+            get(before, "state", "?"), " -> ", get(after, "state", "?"))
     end
     for item in d.pr_changes
-        before = item["before"]
-        after = item["after"]
+        before = item["before"]; after = item["after"]
         println("  * PR #", item["number"], ": ",
-            before === nothing ? "<unbaselined>" : get(before, "state", "?"),
-            " -> ", get(after, "state", "?"),
+            get(before, "state", "?"), " -> ", get(after, "state", "?"),
             get(after, "merged_at", nothing) === nothing ? "" : " (merged)")
     end
 end
 
-function _write_packet(directory::AbstractString, drift::Drift)
-    mkpath(directory)
-    path = joinpath(directory, "$(drift.key).json")
-    packet = Dict{String,Any}(
-        "schema_version" => 1,
-        "kind" => "cyaxiverse-wiki-reconciliation",
-        "page_key" => drift.key,
-        "page_title" => drift.title,
-        "authority" => drift.authority,
-        "verified_commit" => drift.verified_commit,
-        "current_head" => drift.current_head,
-        "head_changed" => drift.head_changed,
-        "changed_sources" => drift.changed_sources,
-        "issue_changes" => drift.issue_changes,
-        "pull_request_changes" => drift.pr_changes,
-        "execution_surface" => "Work/ChatGPT with connected Notion integration",
-        "instructions" => [
-            "Read the authoritative changed sources before editing Notion.",
-            "Use the connected Notion integration; do not request or expose a raw Notion token.",
-            "Locate the wiki page by the supplied stable title/key.",
-            "Update only the affected page.",
-            "Preserve superseded history where relevant.",
-            "Do not infer owner decisions or scientific acceptance.",
-            "Do not write to GitHub.",
-            "Verify the Notion edit, then report the exact current_head as the reconciled commit.",
-            "After verification, run reconcile --accept PAGE --reconciled-commit CURRENT_HEAD.",
-        ],
-    )
-    _json_write_file(path, packet)
-    path
+function _write_packet(directory::AbstractString, manifest, drift::Drift,
+        tree::Dict{String,String}, github::GitHubClient)
+    page = manifest["pages"][drift.key]
+    issue_cache = Dict{Int,Dict{String,Any}}()
+    pr_cache = Dict{Int,Dict{String,Any}}()
+    snapshot = _snapshot_payload(manifest, drift.key, page, drift.current_head,
+        tree, github, issue_cache, pr_cache)
+    packet = _packet_object(manifest, drift, snapshot)
+    short_id = first(packet.packet_id, 12)
+    path = joinpath(directory, "$(drift.key)-$(short_id).json")
+    _atomic_text_write(path, string(JSON3.write(packet), "\n"))
+    path, packet.packet_id
 end
 
-function _verify_remote(manifest::Dict{String,Any}, github::GitHubClient)
+function _verify_remote(manifest::Dict{String,Any}, state::Dict{String,Any},
+        github::GitHubClient)
+    _validate_state(manifest, state)
     branch = String(manifest["repository"]["branch"])
     head, tree = _tree_blobs(github, branch)
     failures = String[]
     for (key, page) in manifest["pages"]
-        for rawpath in get(page, "sources", Any[])
+        for rawpath in page["sources"]
             path = String(rawpath)
             haskey(tree, path) || push!(failures,
                 "$key: tracked source missing at $branch: $path")
@@ -367,9 +725,6 @@ function _verify_remote(manifest::Dict{String,Any}, github::GitHubClient)
     println("Verified repository head: ", head)
     failures
 end
-
-_accept_commit_guard(current_head::AbstractString, reconciled_commit::AbstractString) =
-    String(current_head) == String(reconciled_commit)
 
 _default_manifest() = normpath(joinpath(@__DIR__, "..", "manifest.yaml"))
 _default_state() = normpath(joinpath(@__DIR__, "..", "state.json"))
@@ -382,7 +737,9 @@ function _parse_options(args::Vector{String})
         "packet_dir" => _default_packet_dir(),
         "page" => nothing,
         "accept" => nothing,
+        "packet" => nothing,
         "reconciled_commit" => nothing,
+        "attest_notion_reconciled" => false,
         "bootstrap" => false,
     )
     i = 1
@@ -391,13 +748,16 @@ function _parse_options(args::Vector{String})
         if arg == "--bootstrap"
             options["bootstrap"] = true
             i += 1
+        elseif arg == "--attest-notion-reconciled"
+            options["attest_notion_reconciled"] = true
+            i += 1
         elseif arg in ("--manifest", "--state", "--packet-dir", "--page",
-                "--accept", "--reconciled-commit")
-            i == length(args) && throw(ArgumentError("$arg requires a value"))
+                "--accept", "--packet", "--reconciled-commit")
+            i == length(args) && throw(StateValidationError("$arg requires a value"))
             options[replace(arg[3:end], "-" => "_")] = args[i + 1]
             i += 2
         else
-            throw(ArgumentError("unknown argument: $arg"))
+            throw(StateValidationError("unknown argument: $arg"))
         end
     end
     options
@@ -410,11 +770,10 @@ function _client(manifest::Dict{String,Any})
 end
 
 function _command_check(manifest, state, github; only_page=nothing)
-    state === nothing && begin
-        println("No wiki/state.json exists; baseline review is required.")
-        return EXIT_OWNER_REVIEW
-    end
-    head, drifts, broken = _collect_drifts(manifest, state, github; only_page)
+    state === nothing && throw(StateValidationError("wiki state is missing"))
+    _validate_state(manifest, state)
+    only_page === nothing || _validate_page_key(manifest, only_page)
+    head, _, drifts, broken = _collect_drifts(manifest, state, github; only_page)
     println("CYAxiverse Wiki Reconciliation")
     println("Current vmm head: ", head)
     if !isempty(broken)
@@ -433,8 +792,9 @@ function _command_check(manifest, state, github; only_page=nothing)
     EXIT_DRIFT
 end
 
-function _command_verify(manifest, github)
-    failures = _verify_remote(manifest, github)
+function _command_verify(manifest, state, github)
+    state === nothing && throw(StateValidationError("wiki state is missing"))
+    failures = _verify_remote(manifest, state, github)
     isempty(failures) && begin
         println("VERIFY: PASS")
         return EXIT_CLEAN
@@ -444,37 +804,54 @@ function _command_verify(manifest, github)
     EXIT_BROKEN_SOURCE
 end
 
-function _accept_page!(manifest, state, github, state_path::AbstractString,
-        key::String, reconciled_commit::String)
-    pages = manifest["pages"]
-    haskey(pages, key) || throw(ArgumentError("unknown page key: $key"))
-    page = pages[key]
-    branch = String(manifest["repository"]["branch"])
+function _accept_page!(manifest, state, state_digest, github,
+        state_path::AbstractString, key::String, packet_path::String,
+        reconciled_commit::String, attested::Bool)
+    attested || throw(StateValidationError(
+        "--accept requires --attest-notion-reconciled"))
+    _validate_page_key(manifest, key)
+    packet, packet_id, packet_snapshot = _load_packet(packet_path)
+    packet_snapshot.page.key == key ||
+        throw(StateValidationError("packet page key does not match --accept"))
+    repo = manifest["repository"]
+    packet_snapshot.repository.owner == String(repo["owner"]) &&
+    packet_snapshot.repository.name == String(repo["name"]) &&
+    packet_snapshot.repository.branch == String(repo["branch"]) ||
+        throw(StateValidationError("packet repository identity does not match manifest"))
+    packet_snapshot.current_head == reconciled_commit ||
+        throw(StateValidationError("packet head does not match --reconciled-commit"))
+
+    branch = String(repo["branch"])
     head, tree = _tree_blobs(github, branch)
-    _accept_commit_guard(head, reconciled_commit) || throw(ArgumentError(
+    head == reconciled_commit || throw(StateValidationError(
         "refusing acceptance: reconciled commit $reconciled_commit " *
         "does not equal current $branch head $head"))
-    for rawpath in get(page, "sources", Any[])
-        haskey(tree, String(rawpath)) ||
-            throw(ArgumentError("cannot accept page with missing source: $rawpath"))
-    end
+
+    page = manifest["pages"][key]
     issue_cache = Dict{Int,Dict{String,Any}}()
     pr_cache = Dict{Int,Dict{String,Any}}()
-    state["pages"][key] = _snapshot_page(page, head, github, issue_cache, pr_cache)
+    live_snapshot = _snapshot_payload(manifest, key, page, head, tree,
+        github, issue_cache, pr_cache)
+    _snapshot_digest(live_snapshot) == packet_id || throw(StateValidationError(
+        "GitHub state changed since reconciliation packet; generate and reconcile a fresh packet"))
+
+    state["pages"][key] = _state_page_from_snapshot(packet_snapshot, packet_id)
     state["repository"] = Dict("head" => head, "branch" => branch)
     state["updated_at"] = string(now(UTC))
-    _json_write_file(state_path, state)
-    println("Accepted external Notion reconciliation for ", key, " at ", head)
+    _atomic_json_write(state_path, state; expected_digest=state_digest)
+    println("Accepted exact reconciliation packet ", packet_id)
+    println("Page: ", key, "  vmm: ", head)
     println("No GitHub or Notion writes were made by this command.")
     EXIT_CLEAN
 end
 
-function _command_reconcile(manifest, state, github, options)
+function _command_reconcile(manifest, state, state_digest, github, options)
     state_path = String(options["state"])
     if Bool(options["bootstrap"])
-        state !== nothing &&
-            throw(ArgumentError("state already exists; refusing bootstrap"))
-        _json_write_file(state_path, _bootstrap_state(manifest, github))
+        state === nothing ||
+            throw(StateValidationError("state already exists; refusing bootstrap"))
+        bootstrapped = _bootstrap_state(manifest, github)
+        _atomic_json_write(state_path, bootstrapped; require_absent=true)
         println("Created initial wiki state at ", state_path)
         println("No GitHub or Notion writes were made.")
         return EXIT_CLEAN
@@ -482,18 +859,23 @@ function _command_reconcile(manifest, state, github, options)
 
     accept = options["accept"]
     if accept !== nothing
-        state === nothing &&
-            throw(ArgumentError("cannot --accept without state"))
+        state === nothing && throw(StateValidationError("cannot --accept without state"))
+        _validate_state(manifest, state)
+        packet = options["packet"]
         reconciled = options["reconciled_commit"]
-        reconciled === nothing && throw(ArgumentError(
-            "--accept requires --reconciled-commit with the exact Notion-reconciled vmm SHA"))
-        return _accept_page!(manifest, state, github, state_path,
-            String(accept), String(reconciled))
+        packet === nothing && throw(StateValidationError("--accept requires --packet"))
+        reconciled === nothing &&
+            throw(StateValidationError("--accept requires --reconciled-commit"))
+        return _accept_page!(manifest, state, state_digest, github, state_path,
+            String(accept), String(packet), String(reconciled),
+            Bool(options["attest_notion_reconciled"]))
     end
 
-    state === nothing && return EXIT_OWNER_REVIEW
+    state === nothing && throw(StateValidationError("wiki state is missing"))
+    _validate_state(manifest, state)
     only_page = options["page"]
-    _, drifts, broken = _collect_drifts(manifest, state, github;
+    only_page === nothing || _validate_page_key(manifest, String(only_page))
+    _, tree, drifts, broken = _collect_drifts(manifest, state, github;
         only_page = only_page === nothing ? nothing : String(only_page))
     !isempty(broken) && return EXIT_BROKEN_SOURCE
     isempty(drifts) && begin
@@ -505,8 +887,10 @@ function _command_reconcile(manifest, state, github, options)
     for drift in drifts
         _print_drift(drift)
         count += 1
-        packet = _write_packet(String(options["packet_dir"]), drift)
-        println("  reconciliation packet: ", packet)
+        path, packet_id = _write_packet(String(options["packet_dir"]),
+            manifest, drift, tree, github)
+        println("  reconciliation packet: ", path)
+        println("  packet_id: ", packet_id)
     end
     println("\n", count, " page(s) require Work/Notion reconciliation.")
     EXIT_OWNER_REVIEW
@@ -519,19 +903,21 @@ function main(args=ARGS)
         options = _parse_options(argv)
         manifest = _load_manifest(String(options["manifest"]))
         _validate_manifest(manifest)
-        state = _load_state(String(options["state"]))
+        state, state_digest = _load_state(String(options["state"]))
         github = _client(manifest)
 
         command == "check" && return _command_check(manifest, state, github;
             only_page = options["page"] === nothing ? nothing : String(options["page"]))
-        command == "verify" && return _command_verify(manifest, github)
-        command == "reconcile" &&
-            return _command_reconcile(manifest, state, github, options)
+        command == "verify" && return _command_verify(manifest, state, github)
+        command == "reconcile" && return _command_reconcile(
+            manifest, state, state_digest, github, options)
         println(stderr, "Unknown command: $command")
         return 2
     catch error
         println(stderr, "wiki-refresh error: ", sprint(showerror, error))
         error isa RemoteError && return EXIT_BROKEN_SOURCE
+        error isa BrokenSourceError && return EXIT_BROKEN_SOURCE
+        error isa StateValidationError && return EXIT_OWNER_REVIEW
         error isa ArgumentError && return EXIT_OWNER_REVIEW
         rethrow()
     end

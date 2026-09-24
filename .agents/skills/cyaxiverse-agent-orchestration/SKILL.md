@@ -11,6 +11,11 @@ description: >
 Use this skill only when coordinating delegated work. It is an on-demand
 manager workflow, not an additional repository-wide policy source.
 
+Execution-surface selection, dispatch authority, role/surface separation,
+permission boundaries, and fresh-context independent-review requirements are
+governed by `.agents/POLICIES/SURFACE_ALLOCATION.md`. This skill describes
+Manager procedure and does not override that policy.
+
 ## 1. Manager role
 
 The manager owns:

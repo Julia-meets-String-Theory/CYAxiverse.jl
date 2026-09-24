@@ -16,21 +16,19 @@ GitHub / repository
        v
 wiki_refresh.jl
   detect drift
-  emit packet
+  emit exact snapshot-bound packet
        |
        v
-Work / ChatGPT
-connected Notion integration
-  read authoritative sources
-  update affected wiki page
+Work / ChatGPT + connected Notion integration
+  require exactly one matching wiki page
+  reconcile that exact packet
+  verify the edit
        |
        v
 wiki_refresh.jl reconcile --accept ...
-  advance local state only
+  validate packet/live GitHub equality
+  atomically advance local state
 ```
-
-This keeps credentials and private page locators out of the public repository
-tooling while preserving deterministic drift detection.
 
 ## Setup
 
@@ -50,13 +48,15 @@ julia --project=wiki scripts/wiki_refresh.jl check
 julia --project=wiki scripts/wiki_refresh.jl check --page cytools_boundary
 ```
 
+An unknown page key fails closed.
+
 ### Verify — read only
 
 ```sh
 julia --project=wiki scripts/wiki_refresh.jl verify
 ```
 
-This validates tracked public repository sources.
+This validates manifest/state integrity and tracked public repository sources.
 
 ### Reconcile
 
@@ -64,26 +64,33 @@ This validates tracked public repository sources.
 julia --project=wiki scripts/wiki_refresh.jl reconcile
 ```
 
-Semantic drift produces packets under:
+Packets are emitted under:
 
 ```text
 wiki/.wiki-refresh/packets/
 ```
 
-The packet is given to Work/ChatGPT, which updates the corresponding Notion
-page through the connected Notion integration.
+Each deterministic packet has a `packet_id` bound to the exact repository,
+page, `vmm` head, source blobs, Issue snapshots, and PR snapshots presented
+to Work.
 
-After that update has been checked, advance the local baseline explicitly:
+Work/ChatGPT uses the connected Notion integration to reconcile exactly that
+packet. It must find exactly one matching page title under the CYAxiverse wiki;
+zero or multiple matches require resolution.
+
+After the Notion edit has been verified:
 
 ```sh
 julia --project=wiki scripts/wiki_refresh.jl reconcile \
   --accept cytools_boundary \
-  --reconciled-commit <EXACT_CURRENT_VMM_SHA>
+  --packet wiki/.wiki-refresh/packets/cytools_boundary-<id>.json \
+  --reconciled-commit <EXACT_PACKET_VMM_SHA> \
+  --attest-notion-reconciled
 ```
 
-The accept step does not contact Notion. It refuses to advance state unless the
-provided commit is exactly the current `vmm` head and all tracked source paths
-still exist.
+Acceptance re-fetches GitHub and refuses if any tracked source/Issue/PR state
+differs from the packet. It then atomically advances `wiki/state.json` to the
+packet snapshot. The Julia process still makes no Notion or GitHub write.
 
 ## Exit codes
 
@@ -92,10 +99,13 @@ still exist.
 | 0 | clean / successful |
 | 10 | material wiki drift |
 | 11 | broken canonical source / remote verification failure |
-| 12 | semantic or owner review required |
+| 12 | validation, semantic, or owner review required |
 
-## Scheduled operation
+## Scheduling
 
-The GitHub Action is deliberately read-only. It runs the test suite and weekly
-drift check. A drift result is a signal to reconcile; the script never makes
-GitHub or Notion changes.
+GitHub scheduled workflows run from the repository default branch, which is
+`main`. The core `vmm` workflow is therefore PR/manual verification only.
+
+Issue #183 uses a companion workflow on `main` that explicitly checks out
+`vmm` before running this tool. The Issue is not complete until that scheduler
+is merged and verified after the core tool is available on `vmm`.

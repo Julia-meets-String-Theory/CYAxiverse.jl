@@ -20,17 +20,20 @@ The v1 boundary is intentionally split:
 Julia refresher
   -> reads GitHub/repository state
   -> detects material drift
-  -> emits bounded reconciliation packet
+  -> emits an exact snapshot-bound reconciliation packet
   -> stops
 
 Work / ChatGPT with connected Notion integration
+  -> locates exactly one matching wiki page under the CYAxiverse wiki
   -> reads the packet and authoritative sources
   -> updates the affected Notion page through the connector
-  -> reports the exact reconciled vmm commit
+  -> verifies the edit
+  -> explicitly attests that the exact packet was reconciled
 
 Julia refresher
-  -> explicit accept of that exact commit
-  -> advances wiki/state.json only
+  -> validates the packet digest and replays its GitHub snapshot
+  -> requires live GitHub state to match that exact packet
+  -> advances wiki/state.json atomically
 ```
 
 The Julia utility has **no direct Notion API client and no Notion credential
@@ -49,13 +52,11 @@ handling**.
    to this public repository.
 7. Notion reads/writes occur through an already-authorized connected Notion
    integration in the human/agent reconciliation step.
-8. A semantic reconciliation advances its local baseline only after an explicit
-   acceptance action bound to the exact current `vmm` commit.
+8. A reconciliation acceptance MUST be bound to one exact packet snapshot, not
+   merely to a Git commit.
 9. Missing/ambiguous authoritative evidence is a reason to abstain, not infer.
 
-## Required behavior
-
-### Manifest
+## Manifest
 
 A versioned public manifest maps stable wiki page keys to:
 - page title and authority class;
@@ -65,57 +66,113 @@ A versioned public manifest maps stable wiki page keys to:
 
 It contains no private Notion locators or credentials.
 
-### State
+## State
 
 A versioned state file records, per tracked page:
 - exact last reconciled `vmm` commit;
 - last reconciled tracked Issue snapshots;
-- last reconciled tracked PR snapshots.
+- last reconciled tracked PR snapshots;
+- accepted packet identity when a packet-based reconciliation has occurred.
 
-### `check`
+The state file is operational reconciliation state, not project authority.
+
+## `check`
 
 Read-only. Compare current `vmm` state to the page baseline using exact Git
 blob identity and tracked Issue/PR state. Report material drift and exit with a
 distinct status.
 
-### `verify`
+A requested `--page` key MUST exist in the manifest; an unknown key MUST fail
+closed rather than reporting clean.
 
-Read-only. Validate current tracked repository paths and manifest/state
-integrity. It does not contact Notion.
+## `verify`
 
-### `reconcile`
+Read-only. Validate:
+- manifest structure and privacy constraints;
+- state structure and manifest/state page coverage;
+- repository/branch identity;
+- tracked source-path existence at current `vmm`.
 
-For affected semantic pages, emit a bounded reconciliation packet suitable for
-Work/ChatGPT with the connected Notion integration. It MUST NOT rewrite Notion
-or scientific prose itself.
+It does not contact Notion.
 
-### `reconcile --accept PAGE --reconciled-commit SHA`
+## `reconcile`
 
-After Work/ChatGPT has completed and verified the Notion reconciliation, an
-explicit accept step MAY advance only local `wiki/state.json`.
+For each affected page, emit a deterministic packet with a cryptographic
+`packet_id` covering at minimum:
+- repository owner/name/branch;
+- page key/title;
+- exact current `vmm` head;
+- exact tracked source blob identities;
+- exact tracked Issue snapshots;
+- exact tracked PR snapshots.
 
-Acceptance MUST:
-- require the exact reconciled commit as an argument;
-- require that commit to equal the current authoritative `vmm` head;
-- verify all tracked source paths still exist;
-- refresh the tracked Issue/PR snapshots;
-- make no GitHub or Notion write.
+The packet also carries the baseline/change summary and instructions for the
+connected-Notion reconciliation. Work MUST require exactly one matching title
+under the CYAxiverse wiki hierarchy; zero or multiple matches require
+resolution rather than a guessed edit.
+
+## `reconcile --accept`
+
+Acceptance requires:
+
+```text
+--accept PAGE
+--packet PATH
+--reconciled-commit SHA
+--attest-notion-reconciled
+```
+
+The explicit attestation is the trusted S1 boundary that the connected-Notion
+edit occurred. The Julia tool does not independently inspect Notion.
+
+Before state advances, acceptance MUST:
+
+1. validate the packet schema and recompute its digest;
+2. require packet page key == `PAGE`;
+3. require packet repository/branch == manifest repository/branch;
+4. require packet head == `--reconciled-commit`;
+5. require that head to equal current authoritative `vmm`;
+6. re-fetch current source blobs and Issue/PR snapshots;
+7. require the resulting current GitHub snapshot digest to equal the packet ID;
+8. persist the packet's exact attested Issue/PR/source baseline, not a silently
+   newer snapshot;
+9. atomically replace `wiki/state.json` using an expected-old-state digest so
+   concurrent writers fail closed.
+
+If GitHub changes after the packet is reconciled but before acceptance, the
+accept operation MUST refuse. A fresh packet/reconciliation is then required.
 
 ## Exit codes
 
 - `0`: clean / successful operation
 - `10`: material drift detected
 - `11`: broken canonical source or remote verification failure
-- `12`: semantic/owner review required
+- `12`: validation, semantic, or owner review required
 
-## CI
+Recognized repository-evidence failures, including truncated Git trees, MUST
+map to the documented contract rather than escaping as unclassified errors.
 
-The scheduled CI job:
-- has read-only repository/Issue/PR permissions;
-- runs unit tests and read-only drift checks;
-- has no Notion credential or connector write action.
+## Scheduled operation
 
-PR CI tests the tool but does not make external writes.
+GitHub scheduled workflows execute from the default branch. Because CYAxiverse
+develops this tool on `vmm` while the repository default branch is `main`,
+the scheduler is a **companion default-branch workflow** tracked under Issue
+#183. It exists on `main` and explicitly checks out `vmm` before invoking
+the refresher.
+
+The `vmm` workflow in this PR is therefore PR/manual verification only; it
+does not claim that a schedule declared solely on `vmm` would run.
+
+Issue #183 MUST NOT close until:
+- the companion scheduler workflow is merged to `main`;
+- the core tool is available on `vmm`; and
+- one post-merge default-branch manual/scheduled execution verifies the path.
+
+## State-write safety
+
+State replacement MUST use a temporary file in the same directory plus atomic
+rename. Mutating operations MUST compare the current on-disk state digest with
+the digest loaded at command start and refuse on concurrent modification.
 
 ## Non-scope
 
@@ -129,12 +186,13 @@ PR CI tests the tool but does not make external writes.
 
 ## Verification
 
-Required before convergence:
+Before convergence:
 - isolated Julia 1.12 environment instantiates;
-- unit tests pass;
-- public manifest contains no private Notion IDs;
-- source contains no Notion token/client/API path;
+- focused unit tests cover manifest/state validation, page filtering, packet
+  determinism/tampering, exact packet acceptance guards, atomic/CAS state
+  writes, and exit-code classification;
+- public source contains no Notion token/client/API path or private page ID;
 - tracked source paths verify against current `vmm`;
-- read-only `check` behaves correctly on the frozen initial baseline;
-- acceptance refuses a reconciled commit that differs from current `vmm`;
-- workflow permissions are read-only.
+- read-only `check` exercises real drift against the committed baseline;
+- the companion default-branch scheduler design is independently reviewed;
+- successor candidate receives a fresh exact-state independent review.
