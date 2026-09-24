@@ -146,6 +146,14 @@ end
     @test_throws W.StateValidationError W._validate_manifest(broken)
 
     @test_throws W.StateValidationError W._validate_manifest(Any[1, 2, 3])
+
+    wrong_type = deepcopy(manifest)
+    wrong_type["schema_version"] = "one"
+    @test_throws W.StateValidationError W._validate_manifest(wrong_type)
+
+    wrong_issue_type = deepcopy(manifest)
+    wrong_issue_type["pages"]["example"]["issues"] = ["not-an-integer"]
+    @test_throws W.StateValidationError W._validate_manifest(wrong_issue_type)
 end
 
 @testset "state validation" begin
@@ -162,6 +170,10 @@ end
     @test_throws W.StateValidationError W._validate_state(manifest, badsha)
 
     @test_throws W.StateValidationError W._validate_state(manifest, Any["wrong-root"])
+
+    wrong_type = deepcopy(state)
+    wrong_type["schema_version"] = "one"
+    @test_throws W.StateValidationError W._validate_state(manifest, wrong_type)
 end
 
 @testset "page filters fail closed" begin
