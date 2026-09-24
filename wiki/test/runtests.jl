@@ -1,4 +1,5 @@
-using JSON3\nusing Test
+using JSON3
+using Test
 using CYAxiverseWikiRefresh
 
 const W = CYAxiverseWikiRefresh
