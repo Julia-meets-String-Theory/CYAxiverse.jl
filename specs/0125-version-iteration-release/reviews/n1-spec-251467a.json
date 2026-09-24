@@ -1,0 +1,94 @@
+{
+  "authority": {
+    "authorizes_gate_b": false,
+    "authorizes_i2_without_successor_external_approval": false,
+    "authorizes_issue_closure": false,
+    "authorizes_merge": false,
+    "authorizes_production_lifecycle_actions": false,
+    "review_only": true
+  },
+  "axis": "SPEC",
+  "candidate": {
+    "base_commit": "f02621377c3c01f1c5ae85ef5ffd00a219aa8b8d",
+    "commit": "251467a6b12f44bca7c9540ec3fd0cdf18ffe8e2",
+    "files": [
+      {
+        "git_blob_sha": "35a9845224f5bdb3f2ee182a16083e940ef11020",
+        "path": "AGENTS.md",
+        "sha256": "42f67acfe6cc9e0ef70104e196a98a099110a5c41dbc4aa925db369b428b3dff"
+      },
+      {
+        "git_blob_sha": "06308e3e5cc6c12c932d96378a5571beb69907ad",
+        "path": ".agents/skills/cyaxiverse-integration-release/SKILL.md",
+        "sha256": "0565bc27330520dae5263e491976b90c181bc20d328dcdc9a66995dec5d202dd"
+      },
+      {
+        "git_blob_sha": "4ab4b12715353c71b55ce88b4ac9502abc264e52",
+        "path": "specs/0125-version-iteration-release/spec.md",
+        "sha256": "c02867bf077f2feda530c1ce39b2f0c06af3b7588d91d21b803adea3b5b4b93b"
+      },
+      {
+        "git_blob_sha": "93ed30540bfcc7d5bfc6a291ce967541269c16df",
+        "path": "specs/0125-version-iteration-release/plan.md",
+        "sha256": "97e9d47bb0797aca779213616d89449a36df0b3d7577d0fc16d516446247d282"
+      },
+      {
+        "git_blob_sha": "d1aaaf75e5e5a010cb9d287637cfc3491e537d15",
+        "path": "specs/0125-version-iteration-release/tasks.md",
+        "sha256": "7beb89edd19c8502b9a71f7b50429c3443723154d1f76e2981a96b3ec8cafa8c"
+      }
+    ],
+    "scope": [
+      "AGENTS.md",
+      ".agents/skills/cyaxiverse-integration-release/SKILL.md",
+      "specs/0125-version-iteration-release/spec.md",
+      "specs/0125-version-iteration-release/plan.md",
+      "specs/0125-version-iteration-release/tasks.md"
+    ],
+    "tree": "a08f7041a5ba8a251bab2606d87bbdfb1423bdcb"
+  },
+  "checks": [
+    "Verified exact commit/tree/five Git blobs and clean worktree",
+    "Read r8 handoff, canonical rubric, and owner receipt with SHA-256 checks",
+    "Compared historical r2 references with current r8 authority; prior approval-reference defect resolved",
+    "Mapped R-001 through R-046 to plan and task coverage; positive/negative checks are planned, not executed",
+    "git diff --check"
+  ],
+  "dimension_dispositions": {
+    "SPEC-01": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-02": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-03": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-04": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-05": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-06": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-07": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-08": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-09": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-10": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-11": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE",
+    "SPEC-12": "COMPLETED_SATISFIED_FOR_N1_NORMATIVE_SCOPE"
+  },
+  "findings": [],
+  "governing_input": {
+    "handoff_review_result_sha256": "4cad226acf09c19ab57607a05d6f523e287e0ad84d4cb57175f4b657b05eafd9",
+    "manager_handoff_id": "cyax-0125-pr181-reduction-manager-handoff",
+    "manager_handoff_revision": 8,
+    "manager_handoff_sha256": "ba1c83b7f25679ff2baed827e79821f5ed9f0c4edf1684c4e04f51828fff14e2",
+    "owner_dispatch_receipt_sha256": "c4e978a26b5be9e1514e2c34f269fb2bea443d80d0431b94406fc3266b74e8d3",
+    "rubric_path": "protocol/review-rubrics/spec-and-standards-v1.md",
+    "rubric_sha256": "418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72"
+  },
+  "limitations": [
+    "Normative five-file review only; implementation tests, remote CI, and final candidate review are later gates.",
+    "Dispatch configuration is recorded by Manager; runtime self-attestation is unavailable."
+  ],
+  "record_type": "cyax-spec-standards-review",
+  "reviewer": {
+    "dispatch_model": "gpt-6-sol",
+    "dispatch_reasoning_effort": "high",
+    "fresh_context": true,
+    "runtime_self_attestation": "unavailable"
+  },
+  "verdict": "PASS",
+  "version": 1
+}
