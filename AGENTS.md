@@ -176,6 +176,11 @@ For scientific, numerical, sampling, benchmark, or persisted-data changes:
   review, PR state, and handoff. Delegate to a subagent only when bounded
   implementation, parallel investigation, or independent verification has real
   value.
+- Execution-surface selection, initial and downstream dispatch authority,
+  role/surface separation, permission boundaries, and fresh-context independent
+  review are governed by `.agents/POLICIES/SURFACE_ALLOCATION.md`. Apply that
+  policy whenever work crosses Chat, Work, Codex app, Codex IDE, or delegated
+  agent boundaries.
 - AI-assisted commits should retain an appropriate `Co-Authored-By:` trailer
   when the tool authors the commit. The human submitter remains responsible for
   reviewing the contribution.
