@@ -21,6 +21,11 @@ function _ensure_cytools_ready()
     return nothing
 end
 
+function _run_cytools_operation(f::Function, operation::Symbol)
+    parent = parentmodule(@__MODULE__)
+    return getfield(parent, :_run_cytools_operation)(f, operation)
+end
+
 function _initialize_python_api!()
     py"""
     import cytools
@@ -85,41 +90,39 @@ function _legacy_topology_matrix(records::Vector{_TopologyRecord})
 end
 
 
-fetch_polytopes(h11, limit; lattice="N", as_list=false, favorable=false) = begin
-    _ensure_cytools_ready()
+fetch_polytopes(h11, limit; lattice="N", as_list=false, favorable=false) = _run_cytools_operation(:fetch_polytopes) do
     py"_cyaxiverse_fetch_polytopes(h11=$h11,limit=$limit, lattice=$lattice, as_list=$as_list, favorable=$favorable)"
 end
 
-poly(points; backend=nothing) = begin
-    _ensure_cytools_ready()
+poly(points; backend=nothing) = _run_cytools_operation(:poly) do
     py"_cyaxiverse_poly($points, backend=$backend)"
 end
 
-cone(rays; hyperplanes=nothing, check=true) = begin
-    _ensure_cytools_ready()
+cone(rays; hyperplanes=nothing, check=true) = _run_cytools_operation(:cone) do
     py"_cyaxiverse_cone($rays, hyperplanes=$hyperplanes, check=$check)"
 end
 
-cytools_version() = begin
-    _ensure_cytools_ready()
+cytools_version() = _run_cytools_operation(:cytools_version) do
     py"_cyaxiverse_cytools_version()"
 end
 
 function hilbert_basis(rays::Matrix)
-    _ensure_cytools_ready()
-	cone(Matrix{Integer}(rays)).hilbert_basis()
+    _run_cytools_operation(:hilbert_basis) do
+	    cone(Matrix{Integer}(rays)).hilbert_basis()
+    end
 end
 
 function hilbert_save(geom_idx::GeometryIndex, basis::Matrix)
-    _ensure_cytools_ready()
-    h5open(cyax_file(geom_idx), "r+") do file
-        file["cytools/geometric/hilbert_basis",deflate=9] = basis
+    _run_cytools_operation(:hilbert_save) do
+        h5open(cyax_file(geom_idx), "r+") do file
+            file["cytools/geometric/hilbert_basis",deflate=9] = basis
+        end
     end
 end
 
 
 function topologies_generate_fast(h11,n)
-    _ensure_cytools_ready()
+    _run_cytools_operation(:fast_triangulation) do
     tri_test    = Vector{PyObject}(undef, 0)
     tri_test_m = Vector{PyObject}(undef, 0)
     #Generate list of $n polytopes at $h11
@@ -163,11 +166,12 @@ function topologies_generate_fast(h11,n)
         push!(cy,tri_test[t].get_cy())
     end
     _TopologyBatch(m, tri_test, tri_test_m, points, simplices, cy)
+    end
 end
 
 
 function topologies_generate_fair(h11,n)
-    _ensure_cytools_ready()
+    _run_cytools_operation(:fair_triangulation) do
     tri_test = Vector{PyObject}(undef, 0)
     tri_test_m = Vector{PyObject}(undef, 0)
     #Generate list of $n polytopes at $h11
@@ -210,6 +214,7 @@ function topologies_generate_fair(h11,n)
         push!(cy,tri_test[t].get_cy())
     end
     _TopologyBatch(m, tri_test, tri_test_m, points, simplices, cy)
+    end
 end
 """
     topologies(h11::Int, n::Int)
@@ -221,7 +226,7 @@ Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 
 """
 function topologies(h11::Int, n::Int; fast = true)
-    _ensure_cytools_ready()
+    _run_cytools_operation(fast ? :fast_triangulation : :fair_triangulation) do
     h11list_temp = _TopologyRecord[]
     if fast
         top_data = topologies_generate_fast(h11, n)
@@ -285,6 +290,7 @@ function topologies(h11::Int, n::Int; fast = true)
     h11list = _legacy_topology_matrix(h11list_temp)
     GC.gc()
     return h11list
+    end
 end
 
 """
@@ -295,7 +301,7 @@ Generates triangulations from already computed `points` and `simplices` of polyt
 Returns [XXX, PyObject (triangulation), YYYYYYY, ZZZZZZZ]
 """
 function cy_from_poly(h11)
-    _ensure_cytools_ready()
+    _run_cytools_operation(:stored_simplices_reconstruction) do
     h11list_temp = _TopologyRecord[]
     h11list_inds = np_path_generate(h11)[2]
     for col in eachcol(h11list_inds)
@@ -310,19 +316,21 @@ function cy_from_poly(h11)
     h11list = _legacy_topology_matrix(h11list_temp)
     GC.gc()
     return h11list
+    end
 end
 
 function cy_from_poly(geom_idx::GeometryIndex)
-    _ensure_cytools_ready()
+    _run_cytools_operation(:stored_simplices_reconstruction) do
     top_data = topology(geom_idx.h11, geom_idx.polytope, geom_idx.frst)
     points, simplices = top_data.points, top_data.simplices
     p = poly(points)
     t = p.triangulate(simplices=simplices)
     cy = t.get_cy()
     return (; h11 = geom_idx.h11, cy = cy, tri = geom_idx.polytope, cy_i = geom_idx.frst)
+    end
 end
 function geometries_generate(h11,cy; rational_Q = false)
-    _ensure_cytools_ready()
+    _run_cytools_operation(:standard_geometry_tip) do
     #Locator for h21s for saving
     h21::Int = cy.h21()
     #GLSM basis for saving
@@ -417,10 +425,11 @@ function geometries_generate(h11,cy; rational_Q = false)
     keys = ["h21", "glsm", "basis", "tip", "tip_prefactor", "CY_volume", "PTD_volumes", "Kinv", "L", "Q"]
     vals = [h21, Int.(glsm), Int.(basis), Float64.(tip), Float64.(tip_prefactor), Float64(V), Float64.(tau), Float64.(Kinv), hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), q]
     return Dict(zip(keys, vals))
+    end
 end
 
 function geometries_generate_hilbert(geom_idx::GeometryIndex)
-    _ensure_cytools_ready()
+    _run_cytools_operation(:stored_tip_hilbert_generation) do
 	cy = cy_from_poly(geom_idx).cy
 	geom_data = geometry(geom_idx)
     basis = geom_data.basis
@@ -500,10 +509,11 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
     #concatenate L1 and L2
     L = vcat(L1,L2)
 	return (; basis = Int.(basis), tip = Float64.(tip), tip_prefactor = Float64.(tip_prefactor), CY_volume = Float64(V), τ_volumes = Float64.(tau), Kinv = Float64.(Kinv), L = hcat(sign.(L[:,1]), log10.(abs.(L[:,1])) .+ L[:,2]), Q = q)
+    end
 end
 
 function geometries(h11,cy,tri,cy_i=1)
-    _ensure_cytools_ready()
+    _run_cytools_operation(:standard_geometry_generation) do
     geom_data = geometries_generate(h11, cy)
     h5open(cyax_file(h11,tri,cy_i), "r+") do file
         if haskey(file, "cytools/geometric/h21")
@@ -526,10 +536,11 @@ function geometries(h11,cy,tri,cy_i=1)
     end
     GC.gc()
     # return [h11,tri,cy_i]
+    end
 end
 
 function geometries_hilbert(geom_idx::GeometryIndex)
-    _ensure_cytools_ready()
+    _run_cytools_operation(:stored_tip_hilbert_generation) do
     geom_data = geometries_generate_hilbert(geom_idx)
     h5open(cyax_file(geom_idx), "r+") do file
         if haskey(file, "cytools/hilbert/")
@@ -549,6 +560,7 @@ function geometries_hilbert(geom_idx::GeometryIndex)
     end
     GC.gc()
     # return [h11,tri,cy_i]
+    end
 end
 
 end

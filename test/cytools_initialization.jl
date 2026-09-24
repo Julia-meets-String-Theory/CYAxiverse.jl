@@ -22,7 +22,18 @@ function _cytools_python_stub(root::AbstractString)
             self.rays = rays
         def hilbert_basis(self):
             _record_solver("hilbert_basis")
+            if os.path.exists(os.environ["CYTOOLS_STUB_OPERATION_FAIL_FILE"]):
+                raise RuntimeError(os.environ["CYTOOLS_STUB_FAILURE_DETAIL"])
             return [[1, 0], [0, 1]]
+    class _GeometryTipCone:
+        def tip_of_stretched_cone(self, *args, **kwargs):
+            if os.path.exists(os.environ["CYTOOLS_STUB_OPERATION_FAIL_FILE"]):
+                raise RuntimeError(os.environ["CYTOOLS_STUB_FAILURE_DETAIL"])
+    class GeometryFixture:
+        def h21(self): return 1
+        def glsm_charge_matrix(self, include_origin=False): return [[1]]
+        def divisor_basis(self): return [0]
+        def toric_kahler_cone(self): return _GeometryTipCone()
     def fetch_polytopes(*args, **kwargs):
         return []
     """)
@@ -68,6 +79,7 @@ function _run_cytools_initialization_smoke()
         license_path = joinpath(root, "mosek.lic")
         activation_path = joinpath(root, "mosek-active")
         refresh_fail_path = joinpath(root, "mosek-refresh-fail")
+        operation_fail_path = joinpath(root, "operation-fail")
         write(license_path, "synthetic license fixture")
         write(activation_path, "0")
         repo_root = normpath(joinpath(@__DIR__, ".."))
@@ -87,6 +99,7 @@ function _run_cytools_initialization_smoke()
             license_path = $(_repr_for_julia(license_path))
             activation_path = $(_repr_for_julia(activation_path))
             refresh_fail_path = $(_repr_for_julia(refresh_fail_path))
+            operation_fail_path = $(_repr_for_julia(operation_fail_path))
             ENV["CYAXIVERSE_DATA_DIR"] = data_root
             ENV["CYAXIVERSE_PYTHON"] = PyCall.python
 
@@ -173,6 +186,45 @@ function _run_cytools_initialization_smoke()
             @assert occursin("refresh_mosek_state!()", inactive_diagnostic)
             @assert !occursin(license_path, inactive_diagnostic)
 
+            write(operation_fail_path, "fail")
+            operation_error = try
+                wrapper.hilbert_basis([1 0; 0 1])
+                nothing
+            catch error
+                error
+            end
+            rm(operation_fail_path)
+            operation_message = sprint(showerror, operation_error)
+            @assert operation_error isa ErrorException
+            @assert occursin("downstream wrapped operation `hilbert_basis` failed", operation_message)
+            @assert occursin("cause type: PyError", operation_message)
+            @assert occursin("Normaliz", operation_message)
+            @assert occursin("MOSEK activation/configuration state: ENABLED_INACTIVE_LICENSE_FAILED", operation_message)
+            @assert occursin("supported fallback", operation_message)
+            @assert !occursin(license_path, operation_message)
+            @assert !occursin(license_path, extension.mosek_diagnostic())
+            @assert extension.mosek_state() == :ENABLED_INACTIVE_LICENSE_FAILED
+
+            geometry_fixture = pycall(pyimport("cytools")[:GeometryFixture], PyObject)
+            write(operation_fail_path, "fail")
+            geometry_error = try
+                wrapper.geometries_generate(1, geometry_fixture)
+                nothing
+            catch error
+                error
+            end
+            rm(operation_fail_path)
+            geometry_message = sprint(showerror, geometry_error)
+            @assert geometry_error isa ErrorException
+            @assert occursin("downstream wrapped operation `standard_geometry_tip` failed", geometry_message)
+            @assert occursin("cause type: PyError", geometry_message)
+            @assert occursin("tip_of_stretched_cone", geometry_message)
+            @assert occursin("OSQP below dimension 25", geometry_message)
+            @assert occursin("Highs otherwise", geometry_message)
+            @assert occursin("MOSEK activation/configuration state: ENABLED_INACTIVE_LICENSE_FAILED", geometry_message)
+            @assert !occursin(license_path, geometry_message)
+            @assert extension.mosek_state() == :ENABLED_INACTIVE_LICENSE_FAILED
+
             extension.enable_cytools!()
             @assert read_calls() == after_enable
 
@@ -241,6 +293,7 @@ function _run_cytools_initialization_smoke()
             "CYTOOLS_STUB_FAILURE_DETAIL" => license_path,
             "CYTOOLS_STUB_ACTIVATION_FILE" => activation_path,
             "CYTOOLS_STUB_REFRESH_FAIL_FILE" => refresh_fail_path,
+            "CYTOOLS_STUB_OPERATION_FAIL_FILE" => operation_fail_path,
         )
         output = IOBuffer()
         process = run(pipeline(ignorestatus(command), stdout=output, stderr=output))
@@ -311,6 +364,47 @@ function _run_cytools_import_failure_smoke()
                 get(ENV, "PYTHONPATH", ""),
             ),
         )
+        output = IOBuffer()
+        process = run(pipeline(ignorestatus(command), stdout=output, stderr=output))
+        result = _sanitize_cytools_output(String(take!(output)); fixture_root=root)
+        return success(process), result
+    end
+end
+
+function _run_cytools_submodule_load_failure_smoke()
+    Base.find_package("PyCall") === nothing && return false, "PyCall is unavailable"
+    mktempdir() do root
+        secret_path = joinpath(root, "private-module-detail")
+        submodule_path = joinpath(root, "broken-submodule.jl")
+        write(submodule_path, "error(" * _repr_for_julia(secret_path) * ")\n")
+        active_project = something(Base.active_project(), normpath(joinpath(@__DIR__, "..")))
+        child_source = """
+            using CYAxiverse
+            using PyCall
+            extension = Base.get_extension(CYAxiverse, :CYAxiversePyCallExt)
+            secret_path = $(_repr_for_julia(secret_path))
+            submodule_path = $(_repr_for_julia(submodule_path))
+            error_value = try
+                extension._load_extension_submodule!(submodule_path, :cytools_wrapper)
+                nothing
+            catch error
+                error
+            end
+            @assert error_value isa ErrorException
+            diagnostic = extension.mosek_diagnostic()
+            @assert occursin("extension/submodule load failed", diagnostic)
+            @assert occursin("cytools_wrapper", diagnostic)
+            @assert occursin("cause type: ErrorException", diagnostic)
+            @assert occursin("enable_cytools!()", diagnostic)
+            @assert occursin("MOSEK activation/configuration", diagnostic)
+            @assert occursin("No downstream wrapped operation/backend selection was reached", diagnostic)
+            @assert !occursin(secret_path, diagnostic)
+            @assert !occursin(submodule_path, diagnostic)
+            @assert !occursin(secret_path, sprint(showerror, error_value))
+            @assert extension.mosek_state() == :CYTOOLS_DISABLED
+            println("CYTools submodule-load diagnostic smoke passed")
+        """
+        command = `$(Base.julia_cmd()) --startup-file=no --project=$active_project -e $child_source`
         output = IOBuffer()
         process = run(pipeline(ignorestatus(command), stdout=output, stderr=output))
         result = _sanitize_cytools_output(String(take!(output)); fixture_root=root)
@@ -452,6 +546,8 @@ end
     @test !occursin("function __init__()", wrapper_source)
     @test occursin("mosek_is_activated()", extension_source)
     @test occursin("pycall(py\"_cyaxiverse_check_mosek\", Bool)", extension_source)
+    @test occursin("_load_extension_submodule!", extension_source)
+    @test occursin("_run_cytools_operation", extension_source)
     @test occursin("_ensure_cytools_ready()", wrapper_source)
 
     expected_operations = Set((:fast_triangulation, :fair_triangulation,
@@ -484,14 +580,21 @@ end
         "function geometries_generate_hilbert(")
     @test occursin("random_triangulations_fast", fast_source)
     @test occursin("random_triangulations_fair", fair_source)
+    @test occursin("_run_cytools_operation(:fast_triangulation) do", fast_source)
+    @test occursin("_run_cytools_operation(:fair_triangulation) do", fair_source)
     @test occursin("p.triangulate(simplices=simplices)", reconstruction_source)
+    @test occursin("_run_cytools_operation(:stored_simplices_reconstruction) do", reconstruction_source)
     @test occursin("tip_of_stretched_cone", geometry_source)
+    @test occursin("_run_cytools_operation(:standard_geometry_tip) do", geometry_source)
     @test occursin(".hilbert_basis()", hilbert_source)
+    @test occursin("_run_cytools_operation(:hilbert_basis) do", hilbert_source)
     @test occursin("cytools/geometric/hilbert_basis", save_source)
+    @test occursin("_run_cytools_operation(:hilbert_save) do", save_source)
     @test occursin("deflate=9", save_source)
     @test occursin("cy_from_poly(geom_idx).cy", stored_tip_hilbert_source)
     @test occursin("tip = geom_data.tip", stored_tip_hilbert_source)
     @test !occursin("tip_of_stretched_cone", stored_tip_hilbert_source)
+    @test occursin("_run_cytools_operation(:stored_tip_hilbert_generation) do", stored_tip_hilbert_source)
 
     probe_status, _ = _run_cytools_1_4_12_source_probe()
     if probe_status === :unavailable
@@ -509,5 +612,8 @@ end
         import_failure_passed, import_failure_output = _run_cytools_import_failure_smoke()
         @test import_failure_passed
         @test occursin("CYTools import failure diagnostic smoke passed", import_failure_output)
+        submodule_failure_passed, submodule_failure_output = _run_cytools_submodule_load_failure_smoke()
+        @test submodule_failure_passed
+        @test occursin("CYTools submodule-load diagnostic smoke passed", submodule_failure_output)
     end
 end
