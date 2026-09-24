@@ -243,37 +243,29 @@ end
     end
 end
 
-@testset "locked state replacement serializes concurrent writers" begin
+@testset "locked state replacement closes compare/replace race" begin
     mktempdir() do dir
         path = joinpath(dir, "state.json")
         write_state(path, Dict("a" => 1))
         digest = W._file_digest(path)
 
-        ready = Channel{Bool}(1)
-        release = Channel{Bool}(1)
-        first = @async W._locked_atomic_json_write(
+        # Simulate an external/concurrent mutation after the initial digest check
+        # but before replacement. The second in-lock digest check must reject
+        # instead of overwriting the intervening writer.
+        @test_throws W.StateValidationError W._locked_atomic_json_write(
             path, Dict("a" => 2);
             expected_digest=digest,
-            before_replace=() -> begin
-                put!(ready, true)
-                take!(release)
-            end,
+            before_replace=() -> write_state(path, Dict("a" => 9)),
         )
+        final = W._plain(JSON3.read(read(path, String)))
+        @test final["a"] == 9
+        @test !isdir(path * ".lock")
 
-        status = timedwait(() -> isready(ready) || istaskdone(first), 5.0)
-        @test status == :ok
-        if istaskdone(first)
-            wait(first)  # surfaces the worker failure instead of hanging
-        else
-            take!(ready)
-            @test_throws W.StateValidationError W._locked_atomic_json_write(
-                path, Dict("a" => 3); expected_digest=digest)
-            put!(release, true)
-            wait(first)
-            final = W._plain(JSON3.read(read(path, String)))
-            @test final["a"] == 2
-            @test !isdir(path * ".lock")
-        end
+        # A supported concurrent writer holding the lock also fails closed.
+        mkdir(path * ".lock")
+        @test_throws W.StateValidationError W._locked_atomic_json_write(
+            path, Dict("a" => 3); expected_digest=W._file_digest(path))
+        rm(path * ".lock"; recursive=true, force=true)
     end
 end
 
