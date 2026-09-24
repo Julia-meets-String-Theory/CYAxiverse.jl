@@ -14,14 +14,14 @@ prior_approved_revision: cf0f9c39256b7a58e179af92a46fbf1cb651ff76
 prior_approval_refs:
   - "Issue #125 comment 5746793852"
   - "Issue #125 comment 5752268640"
-amendment_basis:
+historical_amendment_basis:
   - "manager handoff packet 19fa93e2b4b1439b1cc4217cf7ff9e42846980d46df66793156f72789894e40a"
   - "handoff-review result a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf"
   - "owner-dispatch receipt 140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c"
   - "target PR head 20b3935ace0e01fcee2808681c56595e3afa7667"
 approval_refs:
-  - "handoff-reviews/cyax-0125-pr181-reduction-manager-handoff/r2/owner-dispatch-approval-v1.json sha256 140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c"
-  - "specs/0125-version-iteration-release/reviews/n1-approval-v2.json"
+  - "handoff-reviews/cyax-0125-pr181-reduction-manager-handoff/r8/owner-dispatch-approval-v1.json sha256 c4e978a26b5be9e1514e2c34f269fb2bea443d80d0431b94406fc3266b74e8d3"
+  - "specs/0125-version-iteration-release/reviews/n1-approval-v4.json (effective only after exact five-file SPEC and STANDARDS PASS records bind this revision)"
 review_records:
   - "external approval record supplies the exact SPEC and STANDARDS record identities"
 review_rubric_sha256: 418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72

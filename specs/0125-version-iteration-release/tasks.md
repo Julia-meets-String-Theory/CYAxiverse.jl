@@ -16,11 +16,14 @@ new requirements.
 
 ## Preconditions and review
 
-- [x] Record exact handoff identity
-  `19fa93e2b4b1439b1cc4217cf7ff9e42846980d46df66793156f72789894e40a`, target
-  PR head `20b3935ace0e01fcee2808681c56595e3afa7667`, and owner approval
-  receipt SHA `140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c`.
-  This establishes dispatch context only.
+- [x] Record current r8 handoff SHA
+  `ba1c83b7f25679ff2baed827e79821f5ed9f0c4edf1684c4e04f51828fff14e2`,
+  PR #181 preintegration head `e82a9b2388637bf7863b90d62bb59d63ae42d678`,
+  current-vmm integration base `f02621377c3c01f1c5ae85ef5ffd00a219aa8b8d`,
+  and r8 owner-dispatch receipt SHA
+  `c4e978a26b5be9e1514e2c34f269fb2bea443d80d0431b94406fc3266b74e8d3`.
+  Earlier r2 dispatch identities remain historical provenance only. This
+  establishes dispatch context, not N1 approval.
 - [x] Bind canonical Spec/Standards rubric SHA-256
   `418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72`; no
   successor is adopted.
