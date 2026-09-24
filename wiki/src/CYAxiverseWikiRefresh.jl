@@ -8,7 +8,8 @@ using YAML
 
 export main, Drift, material, StateValidationError, BrokenSourceError,
        _validate_manifest, _validate_state, _validate_page_key,
-       _snapshot_digest, _validate_packet, _atomic_json_write,
+       _snapshot_digest, _validate_packet, _atomic_text_write,
+       _locked_atomic_json_write, _file_digest, _packet_object,
        EXIT_CLEAN, EXIT_DRIFT, EXIT_BROKEN_SOURCE, EXIT_OWNER_REVIEW
 
 const EXIT_CLEAN = 0
@@ -82,11 +83,14 @@ end
 
 function _load_manifest(path::AbstractString)
     isfile(path) || throw(StateValidationError("manifest not found: $path"))
-    try
+    data = try
         _plain(YAML.load_file(path))
     catch error
         throw(StateValidationError("invalid manifest YAML: $(sprint(showerror, error))"))
     end
+    data isa AbstractDict ||
+        throw(StateValidationError("manifest root must be an object"))
+    Dict{String,Any}(String(k) => v for (k, v) in pairs(data))
 end
 
 function _file_digest(path::AbstractString)
@@ -103,18 +107,25 @@ function _load_state(path::AbstractString)
     state, digest
 end
 
-function _atomic_text_write(path::AbstractString, text::AbstractString;
-        expected_digest::Union{Nothing,String}=nothing,
-        require_absent::Bool=false)
+function _with_state_lock(path::AbstractString, f::Function)
     mkpath(dirname(path))
-    if require_absent && isfile(path)
-        throw(StateValidationError("refusing write: $path appeared concurrently"))
+    lockdir = string(path, ".lock")
+    try
+        mkdir(lockdir)
+    catch error
+        isdir(lockdir) && throw(StateValidationError(
+            "state lock is already held: $lockdir"))
+        rethrow(error)
     end
-    if expected_digest !== nothing
-        current = _file_digest(path)
-        current == expected_digest || throw(StateValidationError(
-            "refusing write: $path changed concurrently"))
+    try
+        return f()
+    finally
+        isdir(lockdir) && rm(lockdir; recursive=true, force=true)
     end
+end
+
+function _atomic_text_write(path::AbstractString, text::AbstractString)
+    mkpath(dirname(path))
     tmp = tempname(dirname(path))
     try
         open(tmp, "w") do io
@@ -128,11 +139,54 @@ function _atomic_text_write(path::AbstractString, text::AbstractString;
     nothing
 end
 
-function _atomic_json_write(path::AbstractString, object;
+function _locked_atomic_text_write(path::AbstractString, text::AbstractString;
         expected_digest::Union{Nothing,String}=nothing,
-        require_absent::Bool=false)
-    _atomic_text_write(path, string(JSON3.write(object), "\n");
-        expected_digest, require_absent)
+        require_absent::Bool=false,
+        before_replace::Union{Nothing,Function}=nothing)
+    _with_state_lock(path) do
+        if require_absent && isfile(path)
+            throw(StateValidationError("refusing write: $path already exists"))
+        end
+        if expected_digest !== nothing
+            _file_digest(path) == expected_digest || throw(StateValidationError(
+                "refusing write: $path changed before lock acquisition"))
+        end
+
+        tmp = tempname(dirname(path))
+        try
+            open(tmp, "w") do io
+                write(io, text)
+                flush(io)
+            end
+            before_replace === nothing || before_replace()
+
+            # Re-check while the interprocess lock is still held. Every supported
+            # mutating invocation uses this lock, making compare + replace one
+            # serialized transaction.
+            if expected_digest !== nothing
+                _file_digest(path) == expected_digest || throw(StateValidationError(
+                    "refusing write: $path changed during locked transaction"))
+            elseif require_absent && isfile(path)
+                throw(StateValidationError(
+                    "refusing write: $path appeared during locked transaction"))
+            end
+
+            mv(tmp, path; force=true)
+        finally
+            isfile(tmp) && rm(tmp; force=true)
+        end
+        nothing
+    end
+end
+
+function _locked_atomic_json_write(path::AbstractString, object;
+        expected_digest::Union{Nothing,String}=nothing,
+        require_absent::Bool=false,
+        before_replace::Union{Nothing,Function}=nothing)
+    _locked_atomic_text_write(path, string(JSON3.write(object), "\n");
+        expected_digest=expected_digest,
+        require_absent=require_absent,
+        before_replace=before_replace)
 end
 
 function _request_json(method::AbstractString, url::AbstractString,
@@ -219,7 +273,9 @@ function _valid_sha(value)
     value isa AbstractString && occursin(SHA40_RE, String(value))
 end
 
-function _validate_manifest(manifest::Dict{String,Any})
+function _validate_manifest(manifest)
+    manifest isa AbstractDict ||
+        throw(StateValidationError("manifest root must be an object"))
     Int(get(manifest, "schema_version", 0)) == 1 ||
         throw(StateValidationError("unsupported manifest schema_version"))
     repository = get(manifest, "repository", nothing)
@@ -364,7 +420,7 @@ _pr_tuple(snapshot) = (
 
 function _snapshot_payload(manifest::Dict{String,Any}, key::String,
         page::Dict{String,Any}, head::String, tree::Dict{String,String},
-        github::GitHubClient, issue_cache::Dict{Int,Dict{String,Any}},
+        github, issue_cache::Dict{Int,Dict{String,Any}},
         pr_cache::Dict{Int,Dict{String,Any}})
     sources = NamedTuple[]
     for path in sort(String.(page["sources"]))
@@ -405,42 +461,72 @@ function _snapshot_payload(manifest::Dict{String,Any}, key::String,
     )
 end
 
-function _snapshot_from_dict(snapshot::AbstractDict)
-    repository = snapshot["repository"]
-    page = snapshot["page"]
-    sources = sort([
-        (path=String(item["path"]), blob=String(item["blob"]))
-        for item in snapshot["sources"]
-    ], by=x -> x.path)
-    issues = sort([
-        _issue_tuple(item) for item in snapshot["issues"]
-    ], by=x -> x.number)
-    prs = sort([
-        _pr_tuple(item) for item in snapshot["pull_requests"]
-    ], by=x -> x.number)
-    (
-        schema_version = Int(snapshot["schema_version"]),
-        repository = (
-            owner = String(repository["owner"]),
-            name = String(repository["name"]),
-            branch = String(repository["branch"]),
-        ),
-        page = (
-            key = String(page["key"]),
-            title = String(page["title"]),
-            authority = String(page["authority"]),
-        ),
-        current_head = String(snapshot["current_head"]),
-        sources = sources,
-        issues = issues,
-        pull_requests = prs,
-    )
+function _snapshot_from_dict(snapshot)
+    snapshot isa AbstractDict ||
+        throw(StateValidationError("packet snapshot must be an object"))
+    try
+        repository = snapshot["repository"]
+        page = snapshot["page"]
+        repository isa AbstractDict ||
+            throw(StateValidationError("packet snapshot.repository must be an object"))
+        page isa AbstractDict ||
+            throw(StateValidationError("packet snapshot.page must be an object"))
+        sources_raw = snapshot["sources"]
+        issues_raw = snapshot["issues"]
+        prs_raw = snapshot["pull_requests"]
+        sources_raw isa AbstractVector ||
+            throw(StateValidationError("packet snapshot.sources must be a list"))
+        issues_raw isa AbstractVector ||
+            throw(StateValidationError("packet snapshot.issues must be a list"))
+        prs_raw isa AbstractVector ||
+            throw(StateValidationError("packet snapshot.pull_requests must be a list"))
+
+        sources = sort([
+            (path=String(item["path"]), blob=String(item["blob"]))
+            for item in sources_raw
+        ], by=x -> x.path)
+        issues = sort([
+            _issue_tuple(item) for item in issues_raw
+        ], by=x -> x.number)
+        prs = sort([
+            _pr_tuple(item) for item in prs_raw
+        ], by=x -> x.number)
+
+        snapshot_nt = (
+            schema_version = Int(snapshot["schema_version"]),
+            repository = (
+                owner = String(repository["owner"]),
+                name = String(repository["name"]),
+                branch = String(repository["branch"]),
+            ),
+            page = (
+                key = String(page["key"]),
+                title = String(page["title"]),
+                authority = String(page["authority"]),
+            ),
+            current_head = String(snapshot["current_head"]),
+            sources = sources,
+            issues = issues,
+            pull_requests = prs,
+        )
+        snapshot_nt.schema_version == 1 ||
+            throw(StateValidationError("unsupported packet snapshot schema_version"))
+        _valid_sha(snapshot_nt.current_head) ||
+            throw(StateValidationError("packet snapshot current_head must be a 40-hex SHA"))
+        snapshot_nt
+    catch error
+        error isa StateValidationError && rethrow()
+        throw(StateValidationError(
+            "invalid packet snapshot structure: $(sprint(showerror, error))"))
+    end
 end
 
 _snapshot_digest(snapshot) =
     bytes2hex(SHA.sha256(Vector{UInt8}(codeunits(JSON3.write(snapshot)))))
 
 function _canonical_change_sources(changes)
+    changes isa AbstractVector ||
+        throw(StateValidationError("packet changes.sources must be a list"))
     sort([
         (
             path=String(item["path"]),
@@ -451,6 +537,8 @@ function _canonical_change_sources(changes)
 end
 
 function _canonical_issue_changes(changes)
+    changes isa AbstractVector ||
+        throw(StateValidationError("packet changes.issues must be a list"))
     sort([
         (
             number=Int(item["number"]),
@@ -461,6 +549,8 @@ function _canonical_issue_changes(changes)
 end
 
 function _canonical_pr_changes(changes)
+    changes isa AbstractVector ||
+        throw(StateValidationError("packet changes.pull_requests must be a list"))
     sort([
         (
             number=Int(item["number"]),
@@ -470,12 +560,24 @@ function _canonical_pr_changes(changes)
     ], by=x -> x.number)
 end
 
-function _packet_object(manifest, drift::Drift, snapshot)
-    packet_id = _snapshot_digest(snapshot)
+const PACKET_EXECUTION_SURFACE =
+    "Work/ChatGPT with connected Notion integration"
+
+const PACKET_INSTRUCTIONS = [
+    "Read the authoritative changed sources before editing Notion.",
+    "Locate exactly one page with the packet title under the CYAxiverse wiki hierarchy.",
+    "If zero or multiple exact-title matches exist, stop for resolution.",
+    "Update only the affected page.",
+    "Preserve superseded history where relevant.",
+    "Do not infer owner decisions or scientific acceptance.",
+    "Do not write to GitHub.",
+    "Verify the Notion edit and explicitly attest that this exact packet_id was reconciled.",
+]
+
+function _packet_payload(drift::Drift, snapshot)
     (
         schema_version = 1,
         kind = "cyaxiverse-wiki-reconciliation",
-        packet_id = packet_id,
         snapshot = snapshot,
         baseline_verified_commit = drift.verified_commit,
         changes = (
@@ -484,34 +586,71 @@ function _packet_object(manifest, drift::Drift, snapshot)
             issues = _canonical_issue_changes(drift.issue_changes),
             pull_requests = _canonical_pr_changes(drift.pr_changes),
         ),
-        execution_surface = "Work/ChatGPT with connected Notion integration",
-        instructions = [
-            "Read the authoritative changed sources before editing Notion.",
-            "Locate exactly one page with the packet title under the CYAxiverse wiki hierarchy.",
-            "If zero or multiple exact-title matches exist, stop for resolution.",
-            "Update only the affected page.",
-            "Preserve superseded history where relevant.",
-            "Do not infer owner decisions or scientific acceptance.",
-            "Do not write to GitHub.",
-            "Verify the Notion edit and explicitly attest that this exact packet_id was reconciled.",
-        ],
+        execution_surface = PACKET_EXECUTION_SURFACE,
+        instructions = copy(PACKET_INSTRUCTIONS),
     )
 end
 
-function _validate_packet(packet::Dict{String,Any})
-    Int(get(packet, "schema_version", 0)) == 1 ||
-        throw(StateValidationError("unsupported packet schema_version"))
-    String(get(packet, "kind", "")) == "cyaxiverse-wiki-reconciliation" ||
-        throw(StateValidationError("invalid packet kind"))
-    haskey(packet, "snapshot") ||
-        throw(StateValidationError("packet snapshot is required"))
-    snapshot = _snapshot_from_dict(packet["snapshot"])
-    packet_id = String(get(packet, "packet_id", ""))
+_packet_digest(payload) =
+    bytes2hex(SHA.sha256(Vector{UInt8}(codeunits(JSON3.write(payload)))))
+
+function _packet_object(drift::Drift, snapshot)
+    payload = _packet_payload(drift, snapshot)
+    merge((packet_id=_packet_digest(payload),), payload)
+end
+
+function _packet_payload_from_dict(packet)
+    packet isa AbstractDict ||
+        throw(StateValidationError("packet root must be an object"))
+    try
+        changes = packet["changes"]
+        changes isa AbstractDict ||
+            throw(StateValidationError("packet changes must be an object"))
+        instructions = packet["instructions"]
+        instructions isa AbstractVector ||
+            throw(StateValidationError("packet instructions must be a list"))
+        payload = (
+            schema_version = Int(packet["schema_version"]),
+            kind = String(packet["kind"]),
+            snapshot = _snapshot_from_dict(packet["snapshot"]),
+            baseline_verified_commit = String(packet["baseline_verified_commit"]),
+            changes = (
+                head_changed = Bool(changes["head_changed"]),
+                sources = _canonical_change_sources(changes["sources"]),
+                issues = _canonical_issue_changes(changes["issues"]),
+                pull_requests = _canonical_pr_changes(changes["pull_requests"]),
+            ),
+            execution_surface = String(packet["execution_surface"]),
+            instructions = String.(instructions),
+        )
+        payload.schema_version == 1 ||
+            throw(StateValidationError("unsupported packet schema_version"))
+        payload.kind == "cyaxiverse-wiki-reconciliation" ||
+            throw(StateValidationError("invalid packet kind"))
+        _valid_sha(payload.baseline_verified_commit) ||
+            throw(StateValidationError(
+                "packet baseline_verified_commit must be a 40-hex SHA"))
+        payload
+    catch error
+        error isa StateValidationError && rethrow()
+        throw(StateValidationError(
+            "invalid packet structure: $(sprint(showerror, error))"))
+    end
+end
+
+function _validate_packet(packet)
+    payload = _packet_payload_from_dict(packet)
+    packet_id = try
+        String(packet["packet_id"])
+    catch error
+        throw(StateValidationError(
+            "packet_id is required: $(sprint(showerror, error))"))
+    end
     occursin(r"^[0-9a-f]{64}$", packet_id) ||
         throw(StateValidationError("packet_id must be SHA-256 hex"))
-    _snapshot_digest(snapshot) == packet_id ||
-        throw(StateValidationError("packet digest does not match snapshot"))
-    packet_id, snapshot
+    _packet_digest(payload) == packet_id ||
+        throw(StateValidationError("packet digest does not match full reconciliation payload"))
+    packet_id, payload.snapshot, payload
 end
 
 function _load_packet(path::AbstractString)
@@ -519,8 +658,8 @@ function _load_packet(path::AbstractString)
     packet = open(path, "r") do io
         _json_read(read(io, String))
     end
-    packet_id, snapshot = _validate_packet(packet)
-    packet, packet_id, snapshot
+    packet_id, snapshot, payload = _validate_packet(packet)
+    packet, packet_id, snapshot, payload
 end
 
 function _snapshot_page(page::Dict{String,Any}, head::String,
@@ -601,7 +740,7 @@ function _bootstrap_state(manifest::Dict{String,Any}, github::GitHubClient)
 end
 
 function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
-        github::GitHubClient; only_page::Union{Nothing,String}=nothing)
+        github; only_page::Union{Nothing,String}=nothing)
     only_page === nothing || _validate_page_key(manifest, only_page)
     branch = String(manifest["repository"]["branch"])
     current_head, current_tree = _tree_blobs(github, branch)
@@ -611,6 +750,7 @@ function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
     state_pages = state["pages"]
     drifts = Drift[]
     broken_sources = Dict{String,Any}[]
+    snapshots = Dict{String,Any}()
 
     for (key, page) in manifest["pages"]
         only_page !== nothing && key != only_page && continue
@@ -621,11 +761,32 @@ function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
             tree
         end
 
+        # Fetch every tracked Issue/PR exactly once into shared caches, then
+        # derive both the actionable snapshot and the display change summary
+        # from those same objects.
+        for raw in page["issues"]
+            number = Int(raw)
+            get!(issue_cache, number) do
+                _issue_snapshot(github, number)
+            end
+        end
+        for raw in page["pull_requests"]
+            number = Int(raw)
+            get!(pr_cache, number) do
+                _pr_snapshot(github, number)
+            end
+        end
+
+        snapshot = _snapshot_payload(manifest, key, page, current_head,
+            current_tree, github, issue_cache, pr_cache)
+        snapshots[key] = snapshot
+
         changed_sources = Dict{String,Any}[]
+        current_sources = Dict(item.path => item.blob for item in snapshot.sources)
         for rawpath in page["sources"]
             path = String(rawpath)
             before = get(baseline_tree, path, nothing)
-            after = get(current_tree, path, nothing)
+            after = get(current_sources, path, nothing)
             if after === nothing
                 push!(broken_sources, Dict("page" => key, "path" => path))
             elseif before != after
@@ -635,27 +796,39 @@ function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
         end
 
         issue_changes = Dict{String,Any}[]
-        old_issues = baseline["issues"]
+        current_issues = Dict(string(item.number) => item for item in snapshot.issues)
         for raw in page["issues"]
             number = Int(raw)
-            current = get!(issue_cache, number) do
-                _issue_snapshot(github, number)
-            end
-            old = old_issues[string(number)]
-            old == current || push!(issue_changes,
-                Dict("number" => number, "before" => old, "after" => current))
+            old = baseline["issues"][string(number)]
+            current = current_issues[string(number)]
+            current_dict = Dict{String,Any}(
+                "number" => current.number,
+                "title" => current.title,
+                "state" => current.state,
+                "state_reason" => current.state_reason,
+                "closed_at" => current.closed_at,
+            )
+            old == current_dict || push!(issue_changes,
+                Dict("number" => number, "before" => old, "after" => current_dict))
         end
 
         pr_changes = Dict{String,Any}[]
-        old_prs = baseline["pull_requests"]
+        current_prs = Dict(string(item.number) => item for item in snapshot.pull_requests)
         for raw in page["pull_requests"]
             number = Int(raw)
-            current = get!(pr_cache, number) do
-                _pr_snapshot(github, number)
-            end
-            old = old_prs[string(number)]
-            old == current || push!(pr_changes,
-                Dict("number" => number, "before" => old, "after" => current))
+            old = baseline["pull_requests"][string(number)]
+            current = current_prs[string(number)]
+            current_dict = Dict{String,Any}(
+                "number" => current.number,
+                "title" => current.title,
+                "state" => current.state,
+                "draft" => current.draft,
+                "merged_at" => current.merged_at,
+                "head_sha" => current.head_sha,
+                "base_ref" => current.base_ref,
+            )
+            old == current_dict || push!(pr_changes,
+                Dict("number" => number, "before" => old, "after" => current_dict))
         end
 
         head_changed = Bool(get(page, "track_head", false)) &&
@@ -665,7 +838,7 @@ function _collect_drifts(manifest::Dict{String,Any}, state::Dict{String,Any},
             changed_sources, issue_changes, pr_changes)
         material(drift) && push!(drifts, drift)
     end
-    current_head, current_tree, drifts, broken_sources
+    current_head, current_tree, drifts, broken_sources, snapshots
 end
 
 _short(sha::AbstractString) = first(String(sha), min(7, length(sha)))
@@ -695,22 +868,16 @@ function _print_drift(d::Drift)
     end
 end
 
-function _write_packet(directory::AbstractString, manifest, drift::Drift,
-        tree::Dict{String,String}, github::GitHubClient)
-    page = manifest["pages"][drift.key]
-    issue_cache = Dict{Int,Dict{String,Any}}()
-    pr_cache = Dict{Int,Dict{String,Any}}()
-    snapshot = _snapshot_payload(manifest, drift.key, page, drift.current_head,
-        tree, github, issue_cache, pr_cache)
-    packet = _packet_object(manifest, drift, snapshot)
+function _write_packet(directory::AbstractString, drift::Drift, snapshot)
+    packet = _packet_object(drift, snapshot)
     short_id = first(packet.packet_id, 12)
     path = joinpath(directory, "$(drift.key)-$(short_id).json")
     _atomic_text_write(path, string(JSON3.write(packet), "\n"))
     path, packet.packet_id
 end
 
-function _verify_remote(manifest::Dict{String,Any}, state::Dict{String,Any},
-        github::GitHubClient)
+function _verify_remote(manifest::Dict{String,Any}, state,
+        github)
     _validate_state(manifest, state)
     branch = String(manifest["repository"]["branch"])
     head, tree = _tree_blobs(github, branch)
@@ -773,7 +940,7 @@ function _command_check(manifest, state, github; only_page=nothing)
     state === nothing && throw(StateValidationError("wiki state is missing"))
     _validate_state(manifest, state)
     only_page === nothing || _validate_page_key(manifest, only_page)
-    head, _, drifts, broken = _collect_drifts(manifest, state, github; only_page)
+    head, _, drifts, broken, _ = _collect_drifts(manifest, state, github; only_page)
     println("CYAxiverse Wiki Reconciliation")
     println("Current vmm head: ", head)
     if !isempty(broken)
@@ -810,9 +977,15 @@ function _accept_page!(manifest, state, state_digest, github,
     attested || throw(StateValidationError(
         "--accept requires --attest-notion-reconciled"))
     _validate_page_key(manifest, key)
-    packet, packet_id, packet_snapshot = _load_packet(packet_path)
+    _, packet_id, packet_snapshot, packet_payload = _load_packet(packet_path)
+
     packet_snapshot.page.key == key ||
         throw(StateValidationError("packet page key does not match --accept"))
+    packet_payload.baseline_verified_commit ==
+        String(state["pages"][key]["verified_commit"]) ||
+        throw(StateValidationError(
+            "packet baseline no longer matches current wiki state"))
+
     repo = manifest["repository"]
     packet_snapshot.repository.owner == String(repo["owner"]) &&
     packet_snapshot.repository.name == String(repo["name"]) &&
@@ -832,13 +1005,15 @@ function _accept_page!(manifest, state, state_digest, github,
     pr_cache = Dict{Int,Dict{String,Any}}()
     live_snapshot = _snapshot_payload(manifest, key, page, head, tree,
         github, issue_cache, pr_cache)
-    _snapshot_digest(live_snapshot) == packet_id || throw(StateValidationError(
-        "GitHub state changed since reconciliation packet; generate and reconcile a fresh packet"))
+    _snapshot_digest(live_snapshot) == _snapshot_digest(packet_snapshot) ||
+        throw(StateValidationError(
+            "GitHub state changed since reconciliation packet; " *
+            "generate and reconcile a fresh packet"))
 
     state["pages"][key] = _state_page_from_snapshot(packet_snapshot, packet_id)
     state["repository"] = Dict("head" => head, "branch" => branch)
     state["updated_at"] = string(now(UTC))
-    _atomic_json_write(state_path, state; expected_digest=state_digest)
+    _locked_atomic_json_write(state_path, state; expected_digest=state_digest)
     println("Accepted exact reconciliation packet ", packet_id)
     println("Page: ", key, "  vmm: ", head)
     println("No GitHub or Notion writes were made by this command.")
@@ -851,7 +1026,7 @@ function _command_reconcile(manifest, state, state_digest, github, options)
         state === nothing ||
             throw(StateValidationError("state already exists; refusing bootstrap"))
         bootstrapped = _bootstrap_state(manifest, github)
-        _atomic_json_write(state_path, bootstrapped; require_absent=true)
+        _locked_atomic_json_write(state_path, bootstrapped; require_absent=true)
         println("Created initial wiki state at ", state_path)
         println("No GitHub or Notion writes were made.")
         return EXIT_CLEAN
@@ -875,7 +1050,7 @@ function _command_reconcile(manifest, state, state_digest, github, options)
     _validate_state(manifest, state)
     only_page = options["page"]
     only_page === nothing || _validate_page_key(manifest, String(only_page))
-    _, tree, drifts, broken = _collect_drifts(manifest, state, github;
+    _, _, drifts, broken, snapshots = _collect_drifts(manifest, state, github;
         only_page = only_page === nothing ? nothing : String(only_page))
     !isempty(broken) && return EXIT_BROKEN_SOURCE
     isempty(drifts) && begin
@@ -888,7 +1063,7 @@ function _command_reconcile(manifest, state, state_digest, github, options)
         _print_drift(drift)
         count += 1
         path, packet_id = _write_packet(String(options["packet_dir"]),
-            manifest, drift, tree, github)
+            drift, snapshots[drift.key])
         println("  reconciliation packet: ", path)
         println("  packet_id: ", packet_id)
     end
