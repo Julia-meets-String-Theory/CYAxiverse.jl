@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CYAxiverse wiki refresh manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "repository",
+    "initial_verified_commit",
+    "pages"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "repository": {
+      "type": "object",
+      "required": [
+        "owner",
+        "name",
+        "branch"
+      ],
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "initial_verified_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "pages": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "title",
+          "authority",
+          "mode",
+          "sources",
+          "issues",
+          "pull_requests"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "authority": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "semantic",
+              "mechanical"
+            ]
+          },
+          "track_head": {
+            "type": "boolean"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "pull_requests": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

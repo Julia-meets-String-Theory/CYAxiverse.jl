@@ -1,0 +1,148 @@
+schema_version: 1
+
+repository:
+  owner: Julia-meets-String-Theory
+  name: CYAxiverse.jl
+  branch: vmm
+
+initial_verified_commit: "995163f0058488ea183ac645045ed8b1636bef4a"
+
+pages:
+  current_status:
+    title: "Current Development Status"
+    authority: explanatory
+    mode: semantic
+    track_head: true
+    sources:
+      - Project.toml
+    issues: [125, 157, 162, 176]
+    pull_requests: [181]
+
+  axion_spectra:
+    title: "Axion Spectra Pipeline"
+    authority: repository-backed
+    mode: semantic
+    sources:
+      - src/generate.jl
+      - src/structs.jl
+      - scripts/batch_physical_spectrum.jl
+      - docs/src/userguide.md
+      - validation/physical_evidence_audit_20260825.md
+    issues: []
+    pull_requests: []
+
+  vacua_inflation:
+    title: "Vacua and Inflation Pipeline"
+    authority: repository-backed
+    mode: semantic
+    sources:
+      - src/jlm_reduced.jl
+      - src/inflation_points.jl
+      - validation/vacua_stage4_5.md
+      - validation/inflation_reproduction_results.md
+      - validation/inflation_physical_scale_derivation.md
+    issues: [148]
+    pull_requests: [149]
+
+  cytools_boundary:
+    title: "CYTools Boundary"
+    authority: repository-backed
+    mode: semantic
+    sources:
+      - Project.toml
+      - ext/CYAxiversePyCallExt.jl
+      - docs/src/installation.md
+    issues: [174, 176]
+    pull_requests: []
+
+  tests_validation:
+    title: "Tests and Validation"
+    authority: repository-backed
+    mode: semantic
+    sources:
+      - AGENTS.md
+      - test/runtests.jl
+      - validation/p0_numerical_equivalence/numerical_equivalence_contract-v1.md
+      - validation/p0_numerical_equivalence/evidence_index.md
+      - validation/p0_numerical_equivalence/independent_review_v3.md
+    issues: []
+    pull_requests: []
+
+  durable_memory:
+    title: "Durable Agent Memory"
+    authority: issue-backed-research
+    mode: semantic
+    sources:
+      - AGENTS.md
+      - specs/0151-sdd-v1/spec.md
+      - specs/0155-private-safe-chat-checkpoints/spec.md
+      - specs/0159-lessons-corrections/spec.md
+    issues: [151, 155, 159, 162, 163]
+    pull_requests: []
+
+  temporal_provenance:
+    title: "Temporal Provenance and Knowledge-Graph Experiment"
+    authority: durable-research-evidence
+    mode: semantic
+    sources:
+      - specs/0163-temporal-provenance-memory/spec.md
+      - research/temporal_provenance/README.md
+      - research/temporal_provenance/record.schema.json
+      - research/temporal_provenance/context_builder.py
+    issues: [163]
+    pull_requests: [164, 165]
+
+  sdd:
+    title: "Issue Lifecycle and Specification-Driven Development"
+    authority: repository-policy
+    mode: semantic
+    sources:
+      - AGENTS.md
+      - .agents/skills/cyaxiverse-sdd/SKILL.md
+      - specs/0151-sdd-v1/spec.md
+      - specs/0151-sdd-v1/clarification-a.md
+    issues: [151]
+    pull_requests: []
+
+  lessons:
+    title: "Lessons and Corrections"
+    authority: advisory-registry
+    mode: semantic
+    sources:
+      - .agents/LESSONS.md
+      - .agents/skills/cyaxiverse-sdd/SKILL.md
+      - specs/0159-lessons-corrections/spec.md
+    issues: [159]
+    pull_requests: [160]
+
+  privacy:
+    title: "Privacy and Publication Boundary"
+    authority: repository-policy
+    mode: semantic
+    sources:
+      - AGENTS.md
+      - specs/0155-private-safe-chat-checkpoints/spec.md
+    issues: [155, 157]
+    pull_requests: [156, 158]
+
+  versioning:
+    title: "Versioning and Release Boundary"
+    authority: repository-policy
+    mode: semantic
+    sources:
+      - Project.toml
+      - AGENTS.md
+    issues: [125]
+    pull_requests: [181]
+
+  optional_dependencies:
+    title: "Optional-Dependency Boundary"
+    authority: repository-backed
+    mode: semantic
+    sources:
+      - Project.toml
+      - src/CYAxiverse.jl
+      - ext/CYAxiversePyCallExt.jl
+      - docs/src/installation.md
+    issues: [174, 176]
+    pull_requests: []
