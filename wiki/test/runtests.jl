@@ -200,7 +200,8 @@ end
     fake = current_fake()
     snapshot = tracked_snapshot(manifest, fake)
     drift = tracked_drift()
-    packet_nt = W._packet_object(drift, snapshot)
+    baseline = minimal_state(tracked=true)["pages"]["example"]
+    packet_nt = W._packet_object(drift, snapshot, baseline)
     raw = W._plain(JSON3.read(JSON3.write(packet_nt)))
 
     packet_id, parsed, payload = W._validate_packet(raw)
@@ -211,6 +212,7 @@ end
     mutators = [
         p -> (p["snapshot"]["current_head"] = SHA0),
         p -> (p["baseline_verified_commit"] = SHA2),
+        p -> (p["baseline_state_digest"] = repeat("a", 64)),
         p -> (p["changes"]["head_changed"] = false),
         p -> (p["changes"]["sources"][1]["after_blob"] = BLOB0),
         p -> (p["changes"]["issues"][1]["after"]["state"] = "open"),
@@ -245,7 +247,8 @@ end
     fake.prs[2] = pr_snapshot("open"; head_sha=SHA2)
 
     mktempdir() do dir
-        path, _ = W._write_packet(dir, drift, snapshot)
+        baseline = minimal_state(tracked=true)["pages"]["example"]
+        path, _ = W._write_packet(dir, drift, snapshot, baseline)
         packet = W._plain(JSON3.read(read(path, String)))
         _, parsed, payload = W._validate_packet(packet)
         @test parsed.issues[1].state == "closed"
@@ -291,7 +294,9 @@ end
 
         fake = current_fake()
         snapshot = tracked_snapshot(manifest, fake)
-        packet = W._packet_object(drift, snapshot)
+        packet = W._packet_object(
+            drift, snapshot,
+            minimal_state(tracked=true)["pages"]["example"])
         write_packet(packet_path, packet)
 
         state = minimal_state(tracked=true)
@@ -314,7 +319,9 @@ end
         packet_path = joinpath(dir, "packet.json")
         state_path = joinpath(dir, "state.json")
         fake = current_fake()
-        packet = W._packet_object(drift, tracked_snapshot(manifest, fake))
+        packet = W._packet_object(
+            drift, tracked_snapshot(manifest, fake),
+            minimal_state(tracked=true)["pages"]["example"])
         write_packet(packet_path, packet)
         state = minimal_state(tracked=true)
         write_state(state_path, state)
@@ -330,7 +337,9 @@ end
         packet_path = joinpath(dir, "packet.json")
         state_path = joinpath(dir, "state.json")
         fake = current_fake()
-        packet = W._packet_object(drift, tracked_snapshot(manifest, fake))
+        packet = W._packet_object(
+            drift, tracked_snapshot(manifest, fake),
+            minimal_state(tracked=true)["pages"]["example"])
         write_packet(packet_path, packet)
         state = minimal_state(tracked=true)
         write_state(state_path, state)
@@ -346,7 +355,9 @@ end
         packet_path = joinpath(dir, "packet.json")
         state_path = joinpath(dir, "state.json")
         fake = current_fake()
-        packet = W._packet_object(drift, tracked_snapshot(manifest, fake))
+        packet = W._packet_object(
+            drift, tracked_snapshot(manifest, fake),
+            minimal_state(tracked=true)["pages"]["example"])
         write_packet(packet_path, packet)
         state = minimal_state(tracked=true)
         write_state(state_path, state)
@@ -354,6 +365,24 @@ end
         fake.head = SHA2
         @test_throws W.StateValidationError W._accept_page!(
             manifest, state, digest, fake, state_path,
+            "example", packet_path, SHA1, true)
+    end
+
+    # A changed local page baseline at the same vmm commit invalidates the packet.
+    mktempdir() do dir
+        packet_path = joinpath(dir, "packet.json")
+        state_path = joinpath(dir, "state.json")
+        fake = current_fake()
+        baseline = minimal_state(tracked=true)["pages"]["example"]
+        packet = W._packet_object(
+            drift, tracked_snapshot(manifest, fake), baseline)
+        write_packet(packet_path, packet)
+
+        state = minimal_state(tracked=true)
+        state["pages"]["example"]["issues"]["1"] = issue_snapshot("closed")
+        write_state(state_path, state)
+        @test_throws W.StateValidationError W._accept_page!(
+            manifest, state, W._file_digest(state_path), fake, state_path,
             "example", packet_path, SHA1, true)
     end
 
@@ -366,7 +395,9 @@ end
 
         wrong_page_snapshot = merge(base_snapshot, (
             page=(key="other", title="Other", authority="repository-backed"),))
-        write_packet(packet_path, W._packet_object(drift, wrong_page_snapshot))
+        write_packet(packet_path, W._packet_object(
+            drift, wrong_page_snapshot,
+            minimal_state(tracked=true)["pages"]["example"]))
         state = minimal_state(tracked=true)
         write_state(state_path, state)
         @test_throws W.StateValidationError W._accept_page!(
@@ -375,7 +406,9 @@ end
 
         wrong_repo_snapshot = merge(base_snapshot, (
             repository=(owner="other", name="repo", branch="vmm"),))
-        write_packet(packet_path, W._packet_object(drift, wrong_repo_snapshot))
+        write_packet(packet_path, W._packet_object(
+            drift, wrong_repo_snapshot,
+            minimal_state(tracked=true)["pages"]["example"]))
         state = minimal_state(tracked=true)
         write_state(state_path, state)
         @test_throws W.StateValidationError W._accept_page!(
