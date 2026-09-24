@@ -107,7 +107,7 @@ function _load_state(path::AbstractString)
     state, digest
 end
 
-function _with_state_lock(path::AbstractString, f::Function)
+function _with_state_lock(f::Function, path::AbstractString)
     mkpath(dirname(path))
     lockdir = string(path, ".lock")
     try
