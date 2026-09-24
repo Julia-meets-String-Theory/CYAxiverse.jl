@@ -95,9 +95,73 @@ For scientific, numerical, sampling, benchmark, or persisted-data changes:
   reader/writer contract, persisted schema, supported environment, or scientific
   behavior. State any intentional compatibility break explicitly.
 - `Project.toml` is the package version source of truth. Feature branches state
-  version impact but normally do not bump it. Apply the reviewed release bump at
-  the `vmm -> main` integration boundary. Keep scientific artifact/schema
-  versions separate from the package version.
+  version impact but normally do not bump it. A reviewed closure adopts the
+  final package version on its owner line; principal promotion then verifies
+  that the certified release tree and version reach `main` at the deliberate
+  `vmm -> main` integration boundary. Keep scientific artifact/schema versions
+  separate from the package version. Pre-retrofit work keeps its historical
+  declaration and evidence under the approved transition rules.
+
+### Package iteration and release lifecycle
+
+- `vmm` is the principal development line. Under the adopted lifecycle, `main`
+  is intended to carry the latest certified principal release after reviewed
+  reconciliation; pre-retrofit `main` history is not retroactively certified
+  by this policy and never carries a `-DEV` package version. A
+  `maintenance/X.Y` line may carry exact-tree certified maintenance releases
+  on that `X.Y` lineage without moving the principal `main` line backward.
+- Record a stable target-iteration identity before assigning a final SemVer.
+  For CYAX-0125 Gate A the target is `version-lifecycle-retrofit-2026-09`, the
+  package infrastructure impact is `patch`, and the package remains at
+  `0.2.0`; this gate does not adopt a development version or publish a release.
+- An active `X.Y.Z-DEV` reserves final `X.Y.Z` globally for its owner line.
+  Other lines cannot close, candidate, or publish that version. Closing the
+  reserved final consumes it; closing a different final records the reserved
+  identity as `CONSUMED_UNUSED_DEV_RESERVATION`. Closed, candidate, withdrawn,
+  released, and consumed versions are never reused. A reservation with proven
+  pre-entry abort may be made available again under the recovery rules;
+  uncertain outcomes remain unavailable.
+- Lifecycle state is represented by protected create-once Git refs and small
+  immutable canonical evidence manifests, together with `iterations.toml`,
+  immutable annotated iteration-anchor tag objects, and protected public tags.
+  Static snapshots bind each anchor's direct tag-object SHA, peeled commit/tree,
+  object type, and validated closure UTC payload; a matching commit/tree alone
+  is not sufficient. A lifecycle ref is
+  never deleted, repointed, force-updated, or treated as mutable ledger state;
+  no `release-events` branch/stream is canonical. Claim, reservation,
+  candidate, intent, release and publication object types remain distinct;
+  progression is an immutable predecessor-ref graph. Allocation and transition writers use
+  create-if-absent/CAS, exact snapshot/ref verification, and a freshly verified
+  immutable owner-authorization record bound to the repository, transaction,
+  action, owner line, version, target refs, and validity interval. Mere presence
+  of an authorization string is never sufficient. Writers fail closed on a
+  missing, stale, changed, or cross-operation grant and on an uncertain remote
+  result. A proven pre-entry reservation
+  abort consumes its reservation identity but may release only an unclaimed
+  final version; uncertainty keeps that version unavailable.
+- A release candidate is certified against an immutable exact tree and retains
+  its candidate, commit, tree, version, tag intent, certification, and release
+  evidence identities in those immutable refs/manifests. Public canonical tags
+  are irreversible and are checked against the corresponding release manifest
+  and publication evidence.
+- Gate A requires and tests automation for the first principal lifecycle path
+  (principal allocation/reservation, closure/anchor, candidate, certification,
+  canonical tag and release evidence). It does not perform historical
+  designation, package-version adoption, a production `-DEV` transition,
+  closure, public-tag creation, publication, or `vmm -> main` reconciliation.
+  Maintenance-line bootstrap/release and rare recovery automation are deferred
+  to a later approved S2 gate. Gate B and the deliberate `vmm -> main` release
+  boundary handle those actions.
+- Tracked installation and documentation source remains release-neutral. The
+  verified ref and release manifest select development, principal-versioned,
+  maintenance-versioned, or stable documentation channels; a public release
+  must not require editing tracked source files.
+- Python used by lifecycle scripts is bounded repository/CI control-plane
+  tooling only. It is not a runtime dependency of the Julia package, and
+  `using CYAxiverse` remains operable without Python, PyCall/CYTools, or their
+  scientific environments. These rules do not change Julia APIs, scientific
+  behavior, persisted scientific schemas, package-version grammar, or the
+  Gate A/Gate B boundary.
 
 ## 6. Git, PRs, and agent delegation
 

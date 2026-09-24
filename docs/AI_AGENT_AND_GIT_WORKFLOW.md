@@ -163,7 +163,59 @@ then open the PR when the diff is ready for review. The important point is that
 **merging** is the last step; PR creation may be early or late depending on
 whether it helps coordination.
 
-## 4. Recommended agent workflow
+## 4. Package iterations and release-neutral documentation
+
+The package lifecycle has two kinds of release line. `vmm` is the principal
+development line and, under the adopted lifecycle, `main` is intended to carry
+the latest certified principal release after reviewed reconciliation. Existing
+pre-retrofit `main` history is not retroactively certified by this policy.
+Maintenance work uses a `maintenance/X.Y` line and keeps its releases on that
+same `X.Y` lineage without moving the principal line backward. Every iteration
+gets a stable target identity before it gets a final version.
+
+An active `X.Y.Z-DEV` identity reserves `X.Y.Z` globally for its owner line.
+Another line cannot close, candidate, or publish the reserved final. Closing a
+different final permanently consumes the unused reservation as
+`CONSUMED_UNUSED_DEV_RESERVATION`; every closed, candidate, withdrawn, released,
+or consumed version remains unavailable. A reservation with proven pre-entry
+abort may be made available again under the recovery rules, while uncertain
+outcomes remain unavailable. This rule applies across principal and maintenance
+lines.
+
+Candidates are certified from an immutable exact tree. Candidate, certification,
+commit/tree, tag intent, released-manifest, and publication evidence identities stay
+available for audit. A canonical public tag is irreversible and must agree with
+the corresponding released and publication manifests.
+
+Documentation source is release-neutral. The deployment context selects one of
+these channels:
+
+- `vmm` deploys the development channel;
+- a verified principal canonical tag deploys its immutable versioned channel
+  and may advance `stable` only when its certified release commit equals the
+  current principal `main` commit;
+- a verified maintenance canonical tag deploys its immutable versioned channel
+  and does not advance `stable`.
+
+The documentation workflow resolves the stable selector from the one verified
+principal release whose final commit and version match current `main`. It fails
+closed when that context is unavailable. A canonical tag likewise fails closed
+unless its released/publication manifests and line-specific identities have
+been verified. Gate A may therefore deploy only `vmm` development docs without
+inventing a stable target. This release-neutral route does not require
+a tracked edit to `docs/make.jl`, the
+installation guide, or any generated API page. Gate A installs and tests this
+routing machinery while the
+package remains at its current version; it does not adopt a `-DEV` version,
+close an iteration, create a public tag, publish a release, or reconcile
+`vmm -> main`.
+
+Gate A's lifecycle implementation and synthetic evidence cover the first
+principal path and immutable-manifest authority. Maintenance bootstrap/release
+and rare-recovery automation remain deferred to a later approved S2 gate; this
+workflow guide must not be read as evidence that those paths are live.
+
+## 5. Recommended agent workflow
 
 ### Main agent
 
@@ -208,7 +260,7 @@ normally contributes toward the main deliverable unless it is genuinely
 producing an independently mergeable change. This reduces the branch/worktree
 sprawl seen during the August/September development burst.
 
-## 5. Long-running subagents, supervision, and stall recovery
+## 6. Long-running subagents, supervision, and stall recovery
 
 Frequent manager resumptions can be expensive. A continuation with "low
 reasoning" is not necessarily cheap when it carries a very large manager
@@ -264,7 +316,7 @@ is preferable to frequent expensive manager resumptions. Classify each task as
 can guide effort/model choice, lease, escalation rules, and reviewer
 requirements. These are operating heuristics, not correctness criteria.
 
-## 6. Issues, branches, PRs, specs, and handoffs: what each is for
+## 7. Issues, branches, PRs, specs, and handoffs: what each is for
 
 | Object | Use it for | Do not use it as |
 | --- | --- | --- |
@@ -282,7 +334,7 @@ tests should be enough to continue later. If a continuation record is necessary,
 keep it concise unless genuinely machine-readable state cannot be reconstructed
 from Git/artifacts.
 
-## 7. How to use the project skills
+## 8. How to use the project skills
 
 Skills are **on demand**, not prerequisites for every run.
 
@@ -311,7 +363,7 @@ or autoresearch may still be valuable. Keep them local and invoke them
 explicitly when the task benefits from them rather than imposing them on every
 repository interaction.
 
-## 8. Relationship to the repository consolidation plan
+## 9. Relationship to the repository consolidation plan
 
 Treat SDD as an extension of the existing **control plane**, not a separate
 management system.
@@ -333,7 +385,7 @@ Do not create another always-on ledger. The GitHub Project introduced by SDD is
 a visual/state view over Issues and PRs; it does not supersede `AGENTS.md`,
 feature specs, Git history, or evidence artifacts.
 
-## 9. Local migration after this PR merges
+## 10. Local migration after this PR merges
 
 Your uploaded working tree had local modifications. Before pulling the merged
 cleanup, inspect them rather than blindly updating:
@@ -383,7 +435,7 @@ git status --short
 Your personal settings should be ignored and the tracked project files should
 be clean.
 
-## 10. Suggested working rhythm
+## 11. Suggested working rhythm
 
 For a normal piece of work:
 

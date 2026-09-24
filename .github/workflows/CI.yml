@@ -13,9 +13,13 @@ on:
       - 'scripts/**'
       - 'add_functions/**'
       - 'jlm_python/**'
+      - 'docs/Project.toml'
+      - 'docs/Manifest.toml'
+      - 'docs/make.jl'
       - 'bin/**'
       - 'Project.toml'
       - 'Manifest.toml'
+      - 'iterations.toml'
       - '.github/workflows/CI.yml'
   workflow_dispatch:
 
@@ -27,6 +31,23 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 jobs:
+  lifecycle:
+    name: Version lifecycle checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - name: Install documentation routing test dependencies
+        run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+      - name: Check lifecycle, version, and documentation routing fixtures
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'
+          python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'
+          python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'
+
   fast:
     name: Fast tests
     if: github.event_name == 'pull_request'

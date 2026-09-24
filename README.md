@@ -7,11 +7,12 @@ inflation diagnostics, benchmark models, and local axion–photon observables.
 
 The package is under active development on the
 [`vmm` branch](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/tree/vmm).
-This README is a provisional development front door. `main` is still the
-temporary default branch while [Issue #125](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/125)
-governs branch-history and release reconciliation. The current branch
-arrangement is transitional; it does not establish a permanent canonical
-branch or stable release.
+This README is a development front door. `main` carries the latest certified
+principal release when a release has been reconciled; [Issue #125](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/125)
+governs the branch-history and release lifecycle during this transition. The
+current Gate A work targets `version-lifecycle-retrofit-2026-09` with reviewed
+package-infrastructure `patch` impact. It keeps the package version at `0.2.0`
+and does not create a release.
 
 ## Installation and setup
 
@@ -23,6 +24,48 @@ using Pkg
 Pkg.add(url = "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
         rev = "vmm")
 ```
+
+Use `rev = "vmm"` for active development. After a canonical release exists,
+install an immutable principal or maintenance release with its exact public
+tag, for example:
+
+```julia
+Pkg.add(url = "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
+        rev = "vX.Y.Z")
+```
+
+The tag must be a canonical `vX.Y.Z` identity published by the release
+workflow. The legacy `v-0.1` tag remains historical and is not a canonical
+future release identity. The installation guide describes the development and
+immutable release routes without requiring a tracked documentation edit at
+release time.
+
+## Iterations and release lines
+
+`vmm` carries principal development iterations. Under the adopted lifecycle,
+`main` is intended to carry the latest certified principal release after
+reviewed reconciliation; pre-retrofit `main` history is not retroactively
+certified by this policy and `main` never carries a `-DEV` package version. A
+`maintenance/X.Y` line carries exact-tree certified maintenance releases on
+its declared `X.Y` lineage and does not move principal `main` backward.
+
+An active `X.Y.Z-DEV` reserves final `X.Y.Z` globally for its owner line.
+Other lines cannot close, candidate, or publish that version. The reservation
+is consumed when its final closes; if the owner closes a different final, the
+unused identity is permanently recorded as
+`CONSUMED_UNUSED_DEV_RESERVATION`. Closed, candidate, withdrawn, released, and
+consumed versions are never reused. A reservation with proven pre-entry abort
+may be made available again under the recovery rules; uncertain outcomes
+remain unavailable.
+
+Gate A builds and tests the immutable-manifest primitives and first principal
+lifecycle path with synthetic evidence. Maintenance bootstrap/release and
+rare-recovery automation remain deferred to a later approved S2 gate; this
+README records that contract but does not claim those paths are implemented.
+Gate A does not adopt a development version, assign real historical
+designations, close an iteration, create a public tag, publish a release, or
+reconcile `vmm -> main`. A stable target identity and reviewed package-impact
+statement are recorded before later release work assigns a final version.
 
 The core package does not require Python, CYTools, Docker, a geometry database,
 or a graphical backend. Existing-data workflows require a separately supplied

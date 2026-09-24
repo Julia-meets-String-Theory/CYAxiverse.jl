@@ -1,0 +1,78 @@
+{
+  "record_type": "cyax-n1-normative-approval",
+  "version": 3,
+  "status": "APPROVED_FOR_I2_IMPLEMENTATION",
+  "reviewed_candidate": {
+    "commit": "2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb",
+    "tree": "7620f1c966cb37c5d2c7ed5c54778758ed2c12eb",
+    "base_commit": "20b3935ace0e01fcee2808681c56595e3afa7667",
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "git_blob_sha": "76e0f0cbe4489bb09a540d4fa218c25ad8c20c76",
+        "sha256": "0a8c58bee0a260ee583e52c35de56ac9364051edcba88bfd4677d5a91453b930"
+      },
+      {
+        "path": ".agents/skills/cyaxiverse-integration-release/SKILL.md",
+        "git_blob_sha": "06308e3e5cc6c12c932d96378a5571beb69907ad",
+        "sha256": "0565bc27330520dae5263e491976b90c181bc20d328dcdc9a66995dec5d202dd"
+      },
+      {
+        "path": "specs/0125-version-iteration-release/spec.md",
+        "git_blob_sha": "0f37246409f43cd6bc1ba621b3b16a8b03d88519",
+        "sha256": "cbf7e6809f6ee01ceda208e932682baef6bb4b05fa53baf418dd10cc4de0c3c3"
+      },
+      {
+        "path": "specs/0125-version-iteration-release/plan.md",
+        "git_blob_sha": "d69d8074f52332c8171b8b5dcff9d2c7f02e6f88",
+        "sha256": "70345b2153bbe995bda4c090fd2e8fd33a454a3377092a22eec144b9eede1460"
+      },
+      {
+        "path": "specs/0125-version-iteration-release/tasks.md",
+        "git_blob_sha": "38a98494792242e3bfa4f8dad445c7f782f64801",
+        "sha256": "d5328bb209dac5487b1e2455935004927a58d644234f3d3951ca017e7d70a7f3"
+      }
+    ]
+  },
+  "owner_approval": {
+    "path": "handoff-reviews/cyax-0125-pr181-reduction-manager-handoff/r2/owner-dispatch-approval-v1.json",
+    "sha256": "140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c",
+    "decision": "AUTHORIZE_EXECUTION_OF_EXACT_REVIEWED_R2_MANAGER_PACKET"
+  },
+  "manager_handoff": {
+    "sha256": "19fa93e2b4b1439b1cc4217cf7ff9e42846980d46df66793156f72789894e40a",
+    "review_result_sha256": "a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf"
+  },
+  "canonical_review_policy": {
+    "path": "protocol/review-rubrics/spec-and-standards-v1.md",
+    "sha256": "418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72"
+  },
+  "reviews": [
+    {
+      "axis": "SPEC",
+      "path": "specs/0125-version-iteration-release/reviews/n1-spec-2c65bfd.json",
+      "sha256": "ee28ff1aa774f0566e9b4ebcfe11fc4db36ad029917a9b0390e0fd4b2b15bac8",
+      "reviewer_model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "verdict": "PASS"
+    },
+    {
+      "axis": "STANDARDS",
+      "path": "specs/0125-version-iteration-release/reviews/n1-standards-2c65bfd.json",
+      "sha256": "3f57af6d4f13274f75626b1511f44c7e8b20d8f1be56d047ebcf9a705c7304dc",
+      "reviewer_model": "gpt-5.6-sol",
+      "reasoning_effort": "high",
+      "verdict": "PASS"
+    }
+  ],
+  "decision": "APPROVE_EXACT_REVIEWED_N1_NORMATIVE_CONTENT_FOR_I2",
+  "immutability_rule": "This external record does not change the reviewed five-file authority set. Any byte change to that set requires fresh exact-candidate SPEC and STANDARDS review and a new external approval record.",
+  "authority": {
+    "authorizes_i2_implementation_within_reviewed_scope": true,
+    "authorizes_merge": false,
+    "authorizes_production_lifecycle_actions": false,
+    "authorizes_public_tag_or_release": false,
+    "authorizes_gate_b": false,
+    "authorizes_issue_closure": false
+  }
+}

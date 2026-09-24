@@ -1,0 +1,44 @@
+{
+  "record_type": "cyax-spec-standards-review",
+  "version": 1,
+  "axis": "SPEC",
+  "reviewer": {
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "high"
+  },
+  "candidate": {
+    "commit": "2c65bfd5b332f57b9bc2b3e4ab11e9bfdd336aeb",
+    "tree": "7620f1c966cb37c5d2c7ed5c54778758ed2c12eb",
+    "base_commit": "20b3935ace0e01fcee2808681c56595e3afa7667",
+    "scope": [
+      "AGENTS.md",
+      ".agents/skills/cyaxiverse-integration-release/SKILL.md",
+      "specs/0125-version-iteration-release/spec.md",
+      "specs/0125-version-iteration-release/plan.md",
+      "specs/0125-version-iteration-release/tasks.md"
+    ]
+  },
+  "governing_input": {
+    "manager_handoff_sha256": "19fa93e2b4b1439b1cc4217cf7ff9e42846980d46df66793156f72789894e40a",
+    "handoff_review_result_sha256": "a88d7dde2f19b867152ad0bd1b858bf1aaa6008abddae61df1a316fafc3da0bf",
+    "owner_dispatch_receipt_sha256": "140d1fe1c7c09db3d40a04c66c1b258f18e8c42025a3453c2472ed682124637c",
+    "rubric_path": "protocol/review-rubrics/spec-and-standards-v1.md",
+    "rubric_sha256": "418f2d5a276cbdb74b8ad331b532d59219ef33b4e9fabc2b3d4a21c55bc06c72"
+  },
+  "verdict": "PASS",
+  "findings": [],
+  "checks": [
+    "noncircular manifest identity and exact-target authorization order",
+    "immutable full-manifest byte and Git object binding",
+    "R-001 through R-046 continuity and plan/task consistency",
+    "465-byte authorization fixed-vector reproduction",
+    "git diff --check"
+  ],
+  "authority": {
+    "review_only": true,
+    "authorizes_merge": false,
+    "authorizes_production_lifecycle_actions": false,
+    "authorizes_gate_b": false,
+    "authorizes_issue_closure": false
+  }
+}

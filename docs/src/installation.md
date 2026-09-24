@@ -15,6 +15,19 @@ Pkg.add(url = "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
         rev = "vmm")
 ```
 
+Use `vmm` for active principal development. A certified principal or
+maintenance release is installed from its immutable canonical public tag:
+
+```julia
+Pkg.add(url = "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl.git",
+        rev = "vX.Y.Z")
+```
+
+Replace `vX.Y.Z` with the exact published tag. The release evidence identifies
+whether that tag belongs to principal `main` or a `maintenance/X.Y` line. Do
+not use a moving branch when an immutable release is required. The historical
+`v-0.1` tag is retained for compatibility and is not a canonical future tag.
+
 Load the package and run a small check:
 
 ```julia
@@ -35,6 +48,35 @@ cd CYAxiverse.jl
 julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
 julia --project=. --startup-file=no -e 'using CYAxiverse; println(CYAxiverse.greet_CYAxiverse())'
 ```
+
+## Iteration and release lifecycle
+
+The package uses `vmm` for principal development. Under the adopted lifecycle,
+`main` is intended to carry the latest certified principal release after
+reviewed reconciliation; pre-retrofit `main` history and the historical
+`v-0.1` tag are not retroactively certified by this policy. Maintenance
+releases use a `maintenance/X.Y` line and remain on that `X.Y` lineage. An
+active `X.Y.Z-DEV` reserves final `X.Y.Z` globally for its owner line;
+competing lines cannot close, candidate, or publish the reserved version.
+Consumed, closed, candidate, withdrawn, and released identities remain
+unavailable for reuse. A reservation with proven pre-entry abort may be made
+available again under the recovery rules, while uncertain outcomes remain
+unavailable.
+
+Documentation is generated from release-neutral source. The verified ref and
+canonical release/publication manifests select the development, immutable
+versioned, or stable
+documentation channel. A principal tag can advance `stable` only when its
+certified release commit equals current principal `main`; a maintenance tag
+does not advance `stable`. A public release does not require editing this file
+or other tracked documentation source.
+
+Gate A tests immutable-manifest routing and the first principal lifecycle path
+with synthetic evidence. Maintenance bootstrap/release and rare-recovery
+automation are deferred to a later approved S2 gate and are not claimed by
+this guide. Gate A keeps the package version unchanged and does not perform
+adoption, historical designation, production `-DEV`, closure, tag creation,
+publication, or `vmm -> main` reconciliation.
 
 ## Data-backed workflows
 

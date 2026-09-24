@@ -1,0 +1,9 @@
+schema_version = 1
+target_iteration = "version-lifecycle-retrofit-2026-09"
+
+# Gate A defines the registry shape.  Real retrospective designations are
+# deliberately deferred to Gate B; this file therefore has no occupied
+# iteration entries at this stage.
+iterations = []
+prospective = []
+retrospective = []
