@@ -565,12 +565,16 @@ class GitHubProtectionAdapter:
             immutable is None or creation is None
             or (immutable.name, immutable.target, immutable.enforcement, immutable.include, immutable.exclude)
             != ("CYAx canonical release tags immutable", *common)
+            or immutable.conditions_extra
             or self._rule_types(immutable) != ("deletion", "non_fast_forward", "update")
             or self._exact_actors(immutable)
+            or any(rule.get("parameters") for rule in immutable.rules)
             or (creation.name, creation.target, creation.enforcement, creation.include, creation.exclude)
             != ("CYAx canonical release tag creation", *common)
+            or creation.conditions_extra
             or self._rule_types(creation) != ("creation",)
             or self._exact_actors(creation) != ((5, "RepositoryRole", "always"),)
+            or any(rule.get("parameters") for rule in creation.rules)
         ):
             raise GitHubProtectionError("PUBLIC_TAG_PROTECTION_INVALID")
         protection = ProtectionEvidence(
@@ -598,13 +602,19 @@ class GitHubProtectionAdapter:
     def is_live_protection_evidence(
         self, evidence: Any, *, ref: str, repository: str
     ) -> bool:
-        return (
+        if not (
             isinstance(evidence, VerifiedProtectionEvidence)
             and evidence._adapter_nonce is self._nonce
             and evidence.repository == self.repository == repository
             and evidence.target_ref == ref
             and re.fullmatch(r"[0-9a-f]{64}", evidence.snapshot_sha256) is not None
-        )
+        ):
+            return False
+        try:
+            current = self.read_snapshot()
+        except GitHubProtectionError:
+            return False
+        return current.snapshot_sha256 == evidence.snapshot_sha256
 
     def observe_rules_for_ref(self, ref: str) -> RuleEvaluationObservation:
         """Read the non-mutating GitHub effective-rules evaluation for a ref."""

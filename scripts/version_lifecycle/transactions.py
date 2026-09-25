@@ -1141,6 +1141,16 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             raise TransactionError(
                 reason_code if isinstance(reason_code, str) else "PUBLIC_TAG_RULESET_UNAVAILABLE"
             ) from error
+        try:
+            live = adapter.is_live_protection_evidence(
+                protection,
+                ref=f"refs/tags/{intent.public_tag}",
+                repository=intent.repository,
+            )
+        except Exception as error:
+            raise TransactionError("PUBLIC_TAG_PROTECTION_INVALID") from error
+        if live is not True:
+            raise TransactionError("PUBLIC_TAG_PROTECTION_INVALID")
         if protection is None or not hasattr(protection, "require_public_tag"):
             raise TransactionError("PUBLIC_TAG_RULESET_UNAVAILABLE")
         try:

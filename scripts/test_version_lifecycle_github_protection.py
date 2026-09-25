@@ -96,6 +96,28 @@ def freeze_rulesets() -> list[dict[str, object]]:
     ]
 
 
+def public_tag_rulesets() -> list[dict[str, object]]:
+    return [
+        ruleset(
+            23948086,
+            "CYAx canonical release tags immutable",
+            target="tag",
+            include=["refs/tags/v*.*.*"],
+            exclude=["refs/tags/v-0.1"],
+            rules=[rule("update"), rule("deletion"), rule("non_fast_forward")],
+        ),
+        ruleset(
+            23948090,
+            "CYAx canonical release tag creation",
+            target="tag",
+            include=["refs/tags/v*.*.*"],
+            exclude=["refs/tags/v-0.1"],
+            rules=[rule("creation")],
+            actors=[{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+        ),
+    ]
+
+
 class FakeGitHub:
     def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
         self.rows = rows if rows is not None else candidate_rulesets() + freeze_rulesets()
@@ -280,6 +302,45 @@ class GitHubProtectionTests(unittest.TestCase):
         self.assertFalse(other.is_live_protection_evidence(
             evidence, ref=OBSERVATION_REF, repository=REPOSITORY
         ))
+
+    def test_live_protection_evidence_rejects_changed_snapshot_and_read_failure(self) -> None:
+        fake = FakeGitHub()
+        adapter = adapter_for(fake)
+        evidence = adapter.verify_candidate_ref(OBSERVATION_REF)
+        self.assertTrue(adapter.is_live_protection_evidence(
+            evidence, ref=OBSERVATION_REF, repository=REPOSITORY
+        ))
+        target = next(row for row in fake.rows if row["id"] == 23967983)
+        target["updated_at"] = "2026-09-24T15:00:03Z"
+        self.assertFalse(adapter.is_live_protection_evidence(
+            evidence, ref=OBSERVATION_REF, repository=REPOSITORY
+        ))
+
+        fake.fail_next = True
+        self.assertFalse(adapter.is_live_protection_evidence(
+            evidence, ref=OBSERVATION_REF, repository=REPOSITORY
+        ))
+
+    def test_public_tag_protection_rejects_extra_conditions_and_parameters(self) -> None:
+        cases = ("immutable-condition", "creation-condition", "immutable-parameters", "creation-parameters")
+        for case in cases:
+            with self.subTest(case=case):
+                fake = FakeGitHub()
+                fake.rows.extend(public_tag_rulesets())
+                immutable = next(row for row in fake.rows if row["id"] == 23948086)
+                creation = next(row for row in fake.rows if row["id"] == 23948090)
+                if case == "immutable-condition":
+                    immutable["conditions"]["repository_id"] = 42
+                elif case == "creation-condition":
+                    creation["conditions"]["repository_id"] = 42
+                elif case == "immutable-parameters":
+                    immutable["rules"][0]["parameters"] = {"unexpected": True}
+                else:
+                    creation["rules"][0]["parameters"] = {"unexpected": True}
+                with self.assertRaisesRegex(
+                    GitHubProtectionError, "PUBLIC_TAG_PROTECTION_INVALID"
+                ):
+                    adapter_for(fake).verify_public_tag("refs/tags/v0.3.0")
 
     def test_updated_at_preserves_fractional_provider_precision(self) -> None:
         self.assertEqual(
