@@ -548,27 +548,29 @@ attempt. This observes live rule applicability to synthetic branch inputs;
 it does not claim an observed rejected production push. No candidate branch
 was created.
 
-The bounded implementation commit is
-`70d6a231c08d0337661f0e1c171701345c168129` (tree
-`a96de6fbb844e9eb63e991bd95fd92ce0a7b731f`). It adds an authenticated
+The bounded implementation and fail-closed corrections end at commit
+`d34630ab867a9a1b0f469f30db698a6d45e3b527` (tree
+`9ac1c8411e1c2388c0352519a60be7902ac3669e`). They add an authenticated
 GitHub ruleset/detail adapter, exact candidate-pair verification before a
 candidate creation path, live rule evaluation, and guarded `vmm`/`main`
-freeze acquisition and release. The transaction coordinator requires the
-concrete adapter for production protection and freeze evidence. The existing
+freeze acquisition and release. Real network requests are pinned to
+`https://api.github.com`. The transaction coordinator requires the concrete
+adapter for production protection and freeze evidence. The existing
 CLI remains read-only; this attempt did not run a production transaction or
 toggle a freeze control.
 
 Manager verification on Python 3.14.6 passed the five required focused test
-files (88 tests) and the complete `test_version_lifecycle_*.py` discovery
-(152 tests). `python3 scripts/agent_verify.py diff-check`, `git diff --check`,
-and `scripts/check_version_bump.py --base 74fea608... --head HEAD` passed.
+files (91 tests) and the complete `test_version_lifecycle_*.py` discovery
+(155 tests). `python3 scripts/agent_verify.py diff-check`, `git diff --check`,
+and `python3 scripts/check_version_bump.py --base
+74fea608684eae746f25ae45b18512f89b862fb0 --head HEAD` passed.
 The `src`, `test`, `Project.toml`, `Manifest.toml`, and `bin/audit.jl` paths
 match the rebound `vmm` base. Python-free `using CYAxiverse` passed with
 `PYTHON` and `PYTHONHOME` set to unavailable paths, using an offline temporary
 Julia QA project and a writable temporary depot; the governed source tree
 received no Julia dependency or manifest files. Julia version was 1.12.6.
 
-The exact combined source/settings/evidence review identity and any remote
-CI result remain pending. This attempt does not authorize merge, Gate A
-completion, Gate B, a version change, or any production lifecycle
-transaction.
+The exact combined source/settings/evidence review identity and remote CI
+result are recorded in the Manager handback when available. This attempt
+does not authorize merge, Gate A completion, Gate B, a version change, or
+any production lifecycle transaction.
