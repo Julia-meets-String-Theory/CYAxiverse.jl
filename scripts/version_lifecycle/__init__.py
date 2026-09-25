@@ -26,6 +26,16 @@ from .authorization import (
     verify_owner_authorization,
 )
 from .codec import canonical_json, sha256_hex
+from .github_protection import (
+    ApiResponse,
+    CanonicalRuleset,
+    FreezeLease,
+    GitHubProtectionAdapter,
+    GitHubProtectionError,
+    RuleEvaluationObservation,
+    RulesetSnapshot,
+    VerifiedProtectionEvidence,
+)
 from .manifests import (
     CreateOnlyLifecycleWriter,
     CreateOutcomeUncertain,
@@ -110,6 +120,14 @@ __all__ = [
     "build_static_snapshot",
     "compute_static_snapshot",
     "canonical_json",
+    "ApiResponse",
+    "CanonicalRuleset",
+    "FreezeLease",
+    "GitHubProtectionAdapter",
+    "GitHubProtectionError",
+    "RuleEvaluationObservation",
+    "RulesetSnapshot",
+    "VerifiedProtectionEvidence",
     "canonical_authorization_bytes",
     "final_version",
     "global_allocation_view",
