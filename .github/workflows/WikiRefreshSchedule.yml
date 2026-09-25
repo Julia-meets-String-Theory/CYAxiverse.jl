@@ -1,0 +1,61 @@
+name: CYAxiverse wiki drift schedule
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/WikiRefreshSchedule.yml"
+  schedule:
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  validate-definition:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Confirm scheduler targets vmm and fails closed
+        shell: bash
+        run: |
+          grep -q 'ref: vmm' .github/workflows/WikiRefreshSchedule.yml
+          grep -q 'scripts/wiki_refresh.jl verify' .github/workflows/WikiRefreshSchedule.yml
+          grep -q 'scripts/wiki_refresh.jl check' .github/workflows/WikiRefreshSchedule.yml
+          grep -q 'name: Require wiki refresh tooling' .github/workflows/WikiRefreshSchedule.yml
+
+  drift:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current vmm
+        uses: actions/checkout@v5
+        with:
+          ref: vmm
+
+      - name: Require wiki refresh tooling
+        shell: bash
+        run: |
+          test -f wiki/Project.toml
+          test -f scripts/wiki_refresh.jl
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.12"
+
+      - name: Instantiate wiki tooling
+        run: julia --project=wiki -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Verify tracked sources and state
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: julia --project=wiki scripts/wiki_refresh.jl verify
+
+      - name: Read-only wiki drift check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: julia --project=wiki scripts/wiki_refresh.jl check
