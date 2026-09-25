@@ -1,0 +1,31 @@
+{
+  "schema": "cyax-0173-spectrum-matching-v1",
+  "frozen_for": "CYAX-0173 r3 N=5 B6 diagnostic",
+  "identity": "matching-declaration-v1",
+  "matrix_normalization": "divide each symmetrically assembled leading-Hessian matrix by its spectral 2-norm; report unscaled log-mass conversion using the source formula separately",
+  "eigenvalue_order": "ascending source log10 mass; ties broken by ascending absolute eigenvalue, then original solver column index",
+  "sign_matching": "positive, negative, and zeroish modes are compared in separate groups; a group cardinality mismatch is reported and never repaired by cross-sign matching",
+  "cluster_rule": {
+    "quantity": "dimensionless eigenvalue gap relative to the maximum of matrix spectral norm and the two absolute eigenvalues",
+    "threshold": 1e-8,
+    "construction": "sort eigenvalues by numeric value and join adjacent values when their normalized gap is at most threshold; connected components define clusters"
+  },
+  "coordinate_metric": "all reported mass-basis eigenvectors are in the canonical whitened coordinates phi with theta=C*phi and C=inv(cholesky(K).L'); the canonical metric is G_phi=C'*K*C=I. If vectors are represented in theta coordinates, compare them with the K inner product and normalize each vector by sqrt(v'*K*v). Thus canonical Euclidean overlaps and theta-coordinate K-weighted overlaps are the same invariant quantity.",
+  "one_to_one_assignment": {
+    "candidate_set": "within each sign group, consider every bijection between the two mode sets; do not assign across signs",
+    "objective": "maximize the sum of squared absolute metric-normalized overlaps; for canonical coordinates each overlap is abs(dot(u_left,u_right))",
+    "tie_tolerance": 1e-12,
+    "tie_break": "among assignments whose objective differs from the maximum by at most tie_tolerance, choose the lexicographically smallest sequence of right-side source indices in ascending left-side source-index order"
+  },
+  "subspace_comparison": "for equal-cardinality clusters of the same sign, compute singular values of U_left' * G * U_right using G=I in canonical coordinates or G=K in theta coordinates after metric normalization; report principal angles acos(clamp(sigma,0,1)); compare invariant subspaces without assigning individual vectors inside a cluster",
+  "individual_identity_withheld_when": [
+    "either endpoint mode belongs to a cluster with more than one mode under cluster_rule",
+    "the best assignment objective is within tie_tolerance of a different assignment objective",
+    "the assigned absolute metric-normalized overlap is below 0.5",
+    "a same-sign group has different cardinality at the two endpoints"
+  ],
+  "mode_comparison": "outside clusters with unambiguous assignments, use the one_to_one_assignment; report signed log-mass deltas, assigned metric-normalized overlaps, and normalized eigenpair residuals",
+  "light_sector": "report the span of the first three ascending-mass modes as a predeclared aggregate, with principal angles and projector distance; retain per-mode values only as ordered diagnostics",
+  "failure_policy": "do not change thresholds, reorder across sign groups, or replace the declared rule after observing ladder results; emit unresolved/ambiguous matches when cardinality or cluster structure differs",
+  "quartic_matching": "match self terms by mode index and mixed terms by the exact canonical index tuples returned by the API after any predeclared mode/subspace mapping; report basis-sensitive quartics as diagnostics and do not infer authority from them alone"
+}

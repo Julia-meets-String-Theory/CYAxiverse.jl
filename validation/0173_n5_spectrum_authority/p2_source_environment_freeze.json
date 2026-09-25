@@ -1,0 +1,51 @@
+{
+  "record_type": "CYAX-0173 pre-diagnosis source and environment freeze",
+  "frozen_at_utc": "2026-09-25 13:59:08 UTC",
+  "diagnostic_state_at_freeze": "P1 exact replay complete; no P2 precision-ladder output has been produced or inspected",
+  "reference_commit": "7a40285bb5c313f7e8746b90644d5f45bb67be44",
+  "reference_tree": "ef79ad720ea0ed1ad2193b2616a97319d8282a61",
+  "reference_checkout": "ephemeral git archive checkout; its source root was used as the active CYAxiverse path dependency",
+  "candidate_base_commit": "74fea608684eae746f25ae45b18512f89b862fb0",
+  "p0_currentness_record_sha256": "404a932ee8c5a8f6ed7e139b54babde98652fdd2ce9dcec42c7868f13199ecef",
+  "p0_environment": {
+    "julia_version": "1.12.6",
+    "benchmark_project_sha256": "f42fcc77faac53ac2ce271605b59ef3e677c018e7510dfe306f04ebb5fa95cec",
+    "benchmark_manifest_sha256": "5370a09f21ad09488d6cf81aab67bb648e016d5fbb850881786ab145609c8b84",
+    "p0_benchmark_script_sha256": "906c471fa79e2633014e3f88c56eb586f1307da6ae812a04d0e2cafed9feee98",
+    "p0_benchmark_tsv_sha256": "274ba44db46e394f53cdf47c07155048c9772891d348ecded7b0ff0ce3d7692a",
+    "p0_benchmark_metadata_sha256": "81541ae468698e900f25b422ae527504054b23767fa47cfbdf11a271fe53a22a",
+    "reference_checkout_project_sha256": "f42fcc77faac53ac2ce271605b59ef3e677c018e7510dfe306f04ebb5fa95cec",
+    "reference_checkout_manifest_sha256": "5370a09f21ad09488d6cf81aab67bb648e016d5fbb850881786ab145609c8b84"
+  },
+  "b6_fixture": {
+    "p0_digest": "68261b5571df88e6afe75f985eafac27a144390779306d3e4c416a6fc1caf6ef",
+    "Q_sha256_repr": "f9b757e31f7119ece95140aa76d9a542259cc6ae51b174cf9a7c9ccdf2a526c2",
+    "L_sha256_repr": "bfa754884f13994ddab5f0bc6119bbdb9477d45b848b10a5ae82d2ea3770054e",
+    "K_hermitian_sha256_repr": "6937ae91f5f6437d9916d479572cb1b5175e419fec56f9b70b5523a394b09726",
+    "C_float64_sha256_repr": "f4b19e6cec6410d8940f423f22d4729a2e10761208a591ccd5cc5a46b6d55e70",
+    "Qtilde_sha256_repr": "e6668ec2804d90b427da0a37f7e104e84ec0d0676f2a04267c77351e561e4e1d",
+    "Ltilde_sha256_repr": "9cd9318ec979eacbf685f92eb3e960b157a554175de266142a69c4fcac3c339d",
+    "route_flags": {
+      "float64_mixing_correction": "float64",
+      "high_precision_mixing_correction": "high_precision",
+      "high_precision_prec_decimal_digits": 80,
+      "quartic_diagnostics": true,
+      "mass_basis_diagnostics": true,
+      "hierarchy_diagnostics": true
+    }
+  },
+  "reference_source_sha256": {
+    "src/generate.jl": "d55d53a1bd1201bfd4783d59b854f53d99bfef37ec0f080a93a972e1f7292e58",
+    "src/structs.jl": "2bb117cf7ca39d6b0eec1474d2f2b658ca0add64c4c353b6c265e2be688b667a",
+    "src/paper_benchmarks.jl": "f67e019bd19a34c7c2c7ac7d89cc50035c5a7d193e21e851cf01ba522ff73a86",
+    "src/paper_benchmarks/compatibility.jl": "5eda42b7d9451d4661b8819e9d1aac7e1ef49fc001a6c51f381b7919c1f4c6fd",
+    "src/paper_benchmarks/reduced_models.jl": "9036c725dee3109e9e83abd9f956f3fec9c68650657621502d1fdf28c684985c",
+    "src/paper_benchmarks/poly102_inflation.jl": "a4177d68bf0011bfb7b0f5fccbef5687f4a77a40420ba1fc0f5c3c6a40ea174a"
+  },
+  "replay_reference_report_sha256": "4d744919ad56a65cf237962891481b1b147e3ce27aef990b05ea208f2c5ee1b1",
+  "matching_declaration": {
+    "path": "validation/0173_n5_spectrum_authority/matching_declaration.json",
+    "sha256": "ef40308b2e1241bda488b7ba7e7c3fceb17d92b69155087d8782eb6fd9ea56ee",
+    "frozen_at_utc": "2026-09-25 13:43:47 UTC"
+  }
+}

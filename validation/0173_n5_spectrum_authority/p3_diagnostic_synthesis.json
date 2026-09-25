@@ -1,0 +1,625 @@
+{
+  "causal_classification": {
+    "classification": "FLOAT64_CANCELLATION_OR_CONDITIONING",
+    "conditioning_scale": "The reciprocal leading-Hessian condition is about 2.87e-74; a 3.98e-17 relative matrix perturbation is roughly 1.4e57 times that small-mode scale.",
+    "conversion_finding": "Direct ArbFloat promotion of the frozen Float64 C and Ltilde values round-trips exactly at all ladder precisions. The reported shortest-decimal expansion gap is not a conversion-error estimate. The independently computed high-precision K whitening reproduces the 80-digit masses from 80 digits upward.",
+    "mechanism_detail": {
+      "condition_amplification": "The leading-Hessian condition is about 3.48e73, giving a reciprocal scale of about 2.87e-74; the Float64 matrix perturbation is about 1.4e57 times that relative low-mode scale.",
+      "matrix_assembly": "The relative infinity-norm difference between the high-precision matrix assembled from the frozen inputs and the scaled Float64-assembled matrix is about 3.98e-17. Promoting and high-precision-solving the Float64 matrix still gives light masses about 13.238, 13.843, and 13.999 with signs (+,+,-), so the low-mode information is already absent from the Float64 matrix entries.",
+      "metric_and_conversion": "The Float64 K-whitening residual is about 2.13e-15, while high-precision K-factor whitening at 80 digits is about 4.45e-87; both high-precision K-factor and converted-Float64-C results reproduce the frozen 80-digit masses from 80 digits upward. Direct Float64-to-ArbFloat promotion round-trips exactly.",
+      "solver_contribution": "The Float64 solver changes the already-damaged promoted-matrix light masses from about 13.238, 13.843, and 13.999 to the P0 Float64 values about 13.861, 14.074, and 14.230, and changes the first sign to negative. Matrix formation is sufficient to lose low-mode information; solver behavior contributes additional variation."
+    },
+    "other_downstream_observables": {
+      "authority": "restricted; no inference beyond reported mass/sign, quartic, and light-subspace diagnostics",
+      "status": "not computed"
+    },
+    "precision_finding": "64 decimal digits shifts the smallest mass by about 6.582e-5; 80, 128, 256, and 512 decimal digits agree with the frozen 80-digit masses at the reported Float64 conversion. Quartic 31 sign flags retain eight differences at 64 and 80 digits relative to 512, and agree from 128 digits upward.",
+    "smallest_supported_mechanism": "The Float64-assembled canonical Hessian loses the low-eigenvalue information before the eigensolver: its scaled matrix differs from the high-precision matrix built from the same frozen inputs by about 3.98e-17 in relative infinity norm, while the leading Hessian condition number is about 3.48e73. A high-precision eigensolve of the promoted Float64 matrix still yields low-mode masses near 13.238, 13.843, and 13.999 with signs (+,+,-), rather than the frozen-input high-precision values near -12.919, -4.598, and -1.963 with all-positive signs. The Float64 solver changes these already damaged modes further to the P0 Float64 observations. Thus Float64 assembly precision is sufficient to explain loss of low modes in this fixture; solver sensitivity contributes to the final observed values.",
+    "uncertainty": "This is a bounded diagnosis of one frozen N=5 B6 fixture. It establishes numerical resolvability behavior for these inputs; it does not declare either route a universal oracle or support a production change. The exact full-precision physical inputs are the retained P0 Float64 data promoted to ArbFloat, not an external symbolic specification."
+  },
+  "claim_boundary": "Diagnostic evidence only. Neither implementation route is declared an oracle; no production correction, spectrum migration, merge, or Issue closure is authorized by this record.",
+  "created_at_utc": "2026-09-25 14:34:34 UTC",
+  "downstream_effects": {
+    "light_sector_aggregate": {
+      "absolute_delta": 7.105427357601002e-15,
+      "float64_log10_frobenius": -53.28824358573999,
+      "high_precision80_log10_frobenius": -53.288243585739984,
+      "subspace_projector_frobenius_distance": 3.581437341294552e-16
+    },
+    "mass_and_sign": {
+      "float64_masses": [
+        13.860912539123262,
+        14.073585277123616,
+        14.230434590975188,
+        21.948959703416346,
+        22.352482675621758
+      ],
+      "float64_minus_high_precision80_mass_deltas": [
+        26.779470982547643,
+        18.671386239586216,
+        16.193459902009778,
+        0.0,
+        0.0
+      ],
+      "float64_signs": [
+        -1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "high_precision80_masses": [
+        -12.91855844342438,
+        -4.5978009624626,
+        -1.9630253110345888,
+        21.948959703416346,
+        22.352482675621758
+      ],
+      "high_precision80_signs": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "identity_policy": "individual mode identity is withheld; these are output-index effects, not assigned physical-mode deltas",
+      "raw_sorted_index_comparison_only_due_to_withheld_identity": true,
+      "same_sorted_index_sign_mismatch_count": 1
+    },
+    "other_downstream_observables": {
+      "authority": "restricted; no conclusion about inflation trajectories, observables, or production consumers follows",
+      "status": "not computed in this bounded packet"
+    },
+    "quartic_raw_sorted_index_comparison": {
+      "22": {
+        "comparison_status": "raw sorted-index diagnostics only; individual mode identity is withheld by frozen sign-cardinality/cluster policy",
+        "component_count": 10,
+        "max_absolute_log10_magnitude_delta": 17.337296590928496,
+        "raw_same_index_sign_mismatch_count": 0
+      },
+      "31": {
+        "comparison_status": "raw sorted-index diagnostics only; individual mode identity is withheld by frozen sign-cardinality/cluster policy",
+        "component_count": 20,
+        "max_absolute_log10_magnitude_delta": 18.081622722176142,
+        "raw_same_index_sign_mismatch_count": 13
+      },
+      "self": {
+        "comparison_status": "raw sorted-index diagnostics only; individual mode identity is withheld by frozen sign-cardinality/cluster policy",
+        "component_count": 5,
+        "max_absolute_log10_magnitude_delta": 18.825165970058137,
+        "raw_same_index_sign_mismatch_count": 0
+      }
+    }
+  },
+  "equations_and_methods": {
+    "canonical_leading_hessian": "H_theta=Qtilde*diag(sign(Ltilde[1,:])*10^Ltilde[2,:])*Qtilde'; W=C'*H_theta*C; W*u=lambda*u is equivalent to H_theta*v=lambda*K*v when v=C*u and C is the exact K-whitening factor",
+    "coordinate_transform": "C=inv(cholesky(K).U); theta=C*phi; C'*K*C=I; Q_phi=Q'*C",
+    "direct_rank_one_check": "diagnostic accumulates each nonzero-supported Q column's signed scale times q*q' into H_theta, then forms C'*H_theta*C; this mirrors the package helper's accumulation order and checks formula/input-path agreement, not an independent physical oracle",
+    "float64_canonical_matrix": "source leading_hessian_matrix_float64_scaled(C,Ltilde,Qtilde), with its common scale recorded and restored in mass conversion",
+    "independent_metric_cross_check": "recompute C_K=inv(cholesky(K_high_precision).U), solve C_K'*H_theta*C_K, and evaluate the generalized H_theta*v=lambda*K*v residuals; this checks the metric transform independently from C converted from Float64",
+    "normwise_generalized_residual": "||H_theta*v-lambda*K*v||_2/(||H_theta||_2*||v||_2+abs(lambda)*||K||_2*||v||_2); 2-norms and theta coordinates",
+    "normwise_whitened_residual": "||W*u-lambda*u||_2/(||W||_2*||u||_2+abs(lambda)*||u||_2); 2-norms and canonical whitened coordinates",
+    "precision_conversion": "frozen Float64 C and Ltilde entries are promoted directly to ArbFloat; round-trip equality verifies input preservation, while the separately recorded shortest-decimal expansion gap is not a conversion-error estimate"
+  },
+  "matching": {
+    "angle_interpretation": "Angles from 1.49e-8 to 2.58e-8 radians with projector Frobenius distances 0 to 3.6e-16 are acos(Float64 singular-value) resolution floor; do not interpret them as physical subspace rotation.",
+    "declaration_sha256": "ef40308b2e1241bda488b7ba7e7c3fceb17d92b69155087d8782eb6fd9ea56ee",
+    "float64_vs_high_precision80_same_sign_assignment": {
+      "-1": {
+        "left_indices": [
+          1
+        ],
+        "right_indices": [],
+        "status": "cardinality_mismatch"
+      },
+      "0": {
+        "status": "empty"
+      },
+      "1": {
+        "left_indices": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "right_indices": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "status": "cardinality_mismatch"
+      }
+    },
+    "individual_identity_withheld": true,
+    "light_sector_principal_angles_radians_float64_vs_512": [
+      0.0,
+      1.4901161193847656e-08,
+      2.580956827951785e-08
+    ],
+    "light_sector_principal_angles_radians_float64_vs_high_precision80": [
+      0.0,
+      1.4901161193847656e-08,
+      2.580956827951785e-08
+    ],
+    "light_sector_projector_frobenius_distance_float64_vs_high_precision80": 3.581437341294552e-16,
+    "metric_and_assignment_method_frozen_before_ladder": true
+  },
+  "matrix_algorithm_layer_evidence": {
+    "float64_normwise_generalized_residual_formula": "||H_theta*v-lambda*K*v||_2/(||H_theta||_2*||v||_2+abs(lambda)*||K||_2*||v||_2); H_theta and K are Float64, v=C*u in theta coordinates.",
+    "float64_normwise_generalized_residuals": [
+      "2.9253768578894264e-17",
+      "1.601377734736374e-16",
+      "2.976773552770487e-17",
+      "4.325705488386288e-17",
+      "1.8266012952294083e-17"
+    ],
+    "float64_normwise_whitened_residual_formula": "||W*u-lambda*u||_2/(||W||_2*||u||_2+abs(lambda)*||u||_2); W is the Float64-assembled scaled canonical matrix and u is in canonical coordinates.",
+    "float64_normwise_whitened_residuals": [
+      "7.345739125005942e-18",
+      "8.378061126849993e-17",
+      "4.961359933671422e-17",
+      "2.433617751988934e-17",
+      "1.103541919752112e-16"
+    ],
+    "float64_whitening_error_inf": 2.128005632487427e-15,
+    "high_precision_source_vs_direct_rank_one_check_limit": "diagnostic accumulates each nonzero-supported Q column's signed scale times q*q' into H_theta, then forms C'*H_theta*C; this mirrors the package helper's accumulation order and checks formula/input-path agreement, not an independent physical oracle",
+    "kinetic_metric_condition_number_2": 140.48775681362062,
+    "precision_ladder": [
+      {
+        "actual_arbfloat_bits_readback": 215,
+        "condition_number": "34829769377003585930747951671242664365973150215165693935222388318462977.1875",
+        "direct_rank_one_matrix_relative_error": "0",
+        "float64_input_promoted_to_arbfloat_roundtrip_exact": true,
+        "float64_matrix_construction_relative_error": "3.98134837777284412808321581949475272541804994616952722274327612859627877664896339866988935400422156378690486e-17",
+        "high_precision_K_whitening_masses": [
+          -12.91900565940822,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "high_precision_solve_of_promoted_float64_matrix": {
+          "masses": [
+            13.238179298077366,
+            13.843308526910718,
+            13.998657518779794,
+            21.948959703416342,
+            22.352482675621758
+          ],
+          "max_normwise_eigenpair_residual": "3.17588076217106220531735830127137768112569026945124293968862951538681852996824133728649530989424385981106165e-72",
+          "signs": [
+            1,
+            1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "light_sector_quartic_tensor_log10_frobenius": -53.288243585739984,
+        "mass_max_abs_delta_vs_512": 6.58196382445908e-05,
+        "masses": [
+          -12.918492623786136,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "max_normwise_canonical_eigenpair_residual": "2.44436355988993948708617090633147591824570270846683602045900696559977097653064732482175959308040514223510329e-72",
+        "max_normwise_generalized_Htheta_K_residual": "9.66635459198064510862850461808562030725354267043056205234635478846880921793076980999500164449540206831450107e-73",
+        "quartic_deltas_vs_512": {
+          "quartic22": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          },
+          "quartic31": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 8
+          },
+          "quartic_self": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          }
+        },
+        "requested_decimal_digits": 64,
+        "shortest_decimal_expansion_gap_max_not_conversion_error": "4.72523648990318179130554199218750000000000000000000000000000046579676971828224612018217281896582009993240134e-15",
+        "signs": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "actual_arbfloat_bits_readback": 268,
+        "condition_number": "34840328250712850099515735651974690835362299044631285459492411525775649.71293316208840264158741462097168550826609134674072265625",
+        "direct_rank_one_matrix_relative_error": "0",
+        "float64_input_promoted_to_arbfloat_roundtrip_exact": true,
+        "float64_matrix_construction_relative_error": "3.9813483777728441280832158194947527254180499461695272226941923940431384103416642712706082849880402880359299260177585386812017192179634e-17",
+        "high_precision_K_whitening_masses": [
+          -12.91855844342438,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "high_precision_solve_of_promoted_float64_matrix": {
+          "masses": [
+            13.238179298077366,
+            13.843308526910718,
+            13.998657518779794,
+            21.948959703416342,
+            22.352482675621758
+          ],
+          "max_normwise_eigenpair_residual": "1.8965372525628424073354463326909709985118941837501596319498058085509781132765379042810494257503300507333746320173393944483045039013348e-88",
+          "signs": [
+            1,
+            1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "light_sector_quartic_tensor_log10_frobenius": -53.288243585739984,
+        "mass_max_abs_delta_vs_512": 0.0,
+        "masses": [
+          -12.91855844342438,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "max_normwise_canonical_eigenpair_residual": "6.911888574702712408816587689004154164310514942865784956521149952344201814075860789754656701378723861924450257339620046846728844029353e-88",
+        "max_normwise_generalized_Htheta_K_residual": "1.9086716271272813177641714480664123949371598018970449552914521888982592688056988747209737113656947067194403160621336697228472312624747e-88",
+        "quartic_deltas_vs_512": {
+          "quartic22": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          },
+          "quartic31": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 8
+          },
+          "quartic_self": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          }
+        },
+        "requested_decimal_digits": 80,
+        "shortest_decimal_expansion_gap_max_not_conversion_error": "4.7252364899031817913055419921875000000000000000000000000000004657967697182822461201821728189658200999324013369608431405243584840876521e-15",
+        "signs": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "actual_arbfloat_bits_readback": 427,
+        "condition_number": "34840328250712850035225755991849978112023102273141984350299849007833826.68775604867869885389650502809275655659237356366926893326332522671580661138993315926728841102693662956314193754727166184575000755402966057985589",
+        "direct_rank_one_matrix_relative_error": "0",
+        "float64_input_promoted_to_arbfloat_roundtrip_exact": true,
+        "float64_matrix_construction_relative_error": "3.981348377772844128083215819494752725418049946169527222694192394043138420572436577998385374937007357133764741087013106574919031064533381173453983463247867521435059759288420683698845163813971821922284944357178719112e-17",
+        "high_precision_K_whitening_masses": [
+          -12.91855844342438,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "high_precision_solve_of_promoted_float64_matrix": {
+          "masses": [
+            13.238179298077366,
+            13.843308526910718,
+            13.998657518779794,
+            21.948959703416342,
+            22.352482675621758
+          ],
+          "max_normwise_eigenpair_residual": "3.833307156322977488468994496498449394822222143182028377422092303831989861586438208592140576882542413995429376785671517435881055102063060167282686048699110016022636613320630110642765928643490593289186803554407507234e-136",
+          "signs": [
+            1,
+            1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "light_sector_quartic_tensor_log10_frobenius": -53.288243585739984,
+        "mass_max_abs_delta_vs_512": 0.0,
+        "masses": [
+          -12.91855844342438,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "max_normwise_canonical_eigenpair_residual": "2.536794333091632171378491372367787550526793941532850263801958206928053156622195709929610890615928037787055904046983061175837400495302175551674738068997137487742818954820319276893406881785215426293558784408236600904e-136",
+        "max_normwise_generalized_Htheta_K_residual": "1.682212854149453106113628141090349641969404774303776247759225535069589981396428280215647655772006811426443623449162051166963867292537072228579690929884143454832404720036077459536169215701302990071838653432764412011e-136",
+        "quartic_deltas_vs_512": {
+          "quartic22": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          },
+          "quartic31": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          },
+          "quartic_self": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          }
+        },
+        "requested_decimal_digits": 128,
+        "shortest_decimal_expansion_gap_max_not_conversion_error": "4.725236489903181791305541992187500000000000000000000000000000465796769718282246120182172818965820099932401336960843140524358484087652113761771676973507805008326522575489381977962469261189343088490344424457134664408e-15",
+        "signs": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "actual_arbfloat_bits_readback": 853,
+        "condition_number": "34840328250712850035225755991849978112023102273141984350299849007877809.21971961461783581156019532039046813623624806986799389725632871573555774098013395569683022024128008072264100292448520903093249238299452419328465163650548852646757303567604548328664159965397998746887453458401328409514671195981899721505739735057945930918475381816080155250004546039291085454659605435946731876405512209184778111800862558896471151148258351653713",
+        "direct_rank_one_matrix_relative_error": "0",
+        "float64_input_promoted_to_arbfloat_roundtrip_exact": true,
+        "float64_matrix_construction_relative_error": "3.981348377772844128083215819494752725418049946169527222694192394043138420572436577998385374937007357133764741087013106590529112337158418684624243427705409959806850613496354759330637407102635884248950194509435186146590090303640105282890715307901262350057841934171523937944760935868641586346416665776053084941058667448333290348262156453509081901256101085417323585779550014485184101227956280557993078575833195492258818785171614953e-17",
+        "high_precision_K_whitening_masses": [
+          -12.91855844342438,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "high_precision_solve_of_promoted_float64_matrix": {
+          "masses": [
+            13.238179298077366,
+            13.843308526910718,
+            13.998657518779794,
+            21.948959703416342,
+            22.352482675621758
+          ],
+          "max_normwise_eigenpair_residual": "1.608311109890812251173050434026774038996111095692508650050670970445050975596032520930392859329602776309637908164210166137527367361854384142364580245509873104658597937650566129996631210090902097666354670549493199502374326105215845414793859978810369554036922029068589241108128440858433723624214337635205931838971576917624121454843003233690445475128627772992469431526800940248739706693697728499257562216252050966106947029103941187e-264",
+          "signs": [
+            1,
+            1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "light_sector_quartic_tensor_log10_frobenius": -53.288243585739984,
+        "mass_max_abs_delta_vs_512": 0.0,
+        "masses": [
+          -12.91855844342438,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "max_normwise_canonical_eigenpair_residual": "1.272901705253262983105884474516416342357724562885556945324372925761886287111577327157243091918682799297671838935995341228823349738109346615794328412181754573702224453295607916020675283794574732014016313223365438168889752628580004635286608891023427676830325974672357016247334604572119609496715443522089384280865238111509594355103980170822326331651489547346113833397363986256503682712133324333963180551466180923082609625800827409e-264",
+        "max_normwise_generalized_Htheta_K_residual": "1.585060415269930110522863821054635149173082793175387980653282316814427286042594631474563430874332295900358390349321347729527759601595744956585678228431912449487428778775193265144064382086240721154585180664449236358327576385957629538339108322537631998012003541891290695531976687554603110123879015692137784842719770384379041284044133112827602134011196982526042432155697816237886987706333676523000903198859510616265333189983501155e-264",
+        "quartic_deltas_vs_512": {
+          "quartic22": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          },
+          "quartic31": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          },
+          "quartic_self": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          }
+        },
+        "requested_decimal_digits": 256,
+        "shortest_decimal_expansion_gap_max_not_conversion_error": "4.725236489903181791305541992187500000000000000000000000000000465796769718282246120182172818965820099932401336960843140524358484087652113761771676973507805008326522575489381977962469261189343088490344424457134664407931268215179443359375e-15",
+        "signs": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "actual_arbfloat_bits_readback": 1703,
+        "condition_number": "34840328250712850035225755991849978112023102273141984350299849007877809.2197196146178358115601953203904681362362480698679938972563287157355577409801339556968302202412800807226410029244852090309325672515050305878512160669761845240430446351108766640002625972472698032189085310187481108809715597245951462813290379330306977742638532187561995703602209419435028120977324104787475504651515996187767604402814205321651048415357873736445635209011382074530131439231683067266225509553661915787670293132967105201305712939564878692760087551088111474293822615515206062726774014284360023755153579580048598817088851880309601858041211003718169939383177985863281633049210722500092937838129847963190491583302105715267003796545670658000922359451775715253243915118823149576749754587786443485145650533212071910550865257065704020982129200372375256755085337951055884592574986338",
+        "direct_rank_one_matrix_relative_error": "0",
+        "float64_input_promoted_to_arbfloat_roundtrip_exact": true,
+        "float64_matrix_construction_relative_error": "3.98134837777284412808321581949475272541804994616952722269419239404313842057243657799838537493700735713376474108701310659052911233715841868462424342770540995980685061349635475933063740710263588424895019450943518614659009030364010528289071530790126243647902556951697014414595673336656999757813951594498325039382400294480765920953702078605563284520695453887779766490627555449787575986465250454904365076734275135638478846445669257828104666357630808113860703028525565005992467158459451188308274746736376012711934891873174418931291210739589712416822464067173133452751067043873395138956997640580770959452767599380774195047970458937091860265005955361510566004050262005187779904858235653405702140080014198308008089442042598434864616221959538216595953605543220274973433727874469024863725171282079282075764986008996408376752030362104039126949063091453727413732835e-17",
+        "high_precision_K_whitening_masses": [
+          -12.91855844342438,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "high_precision_solve_of_promoted_float64_matrix": {
+          "masses": [
+            13.238179298077366,
+            13.843308526910718,
+            13.998657518779794,
+            21.948959703416342,
+            22.352482675621758
+          ],
+          "max_normwise_eigenpair_residual": "1.47870231774462545699279460363345320661974181029844582512333383151389965969405112117726873605271056543221454421225302666394549838029309799878487315553202262012357786827256033709933856313821853019246633879518752552400988693594252309138779613970038927388001640857154807547325775400338197784707254232276732283031830765687849361251633024839227157293894972881965473475608663376682934444530281511161452405599771117996516169824612667451735254270266040440777417833356412397290528119395580167469284966485400396322967596023470014220393204612863694967577617931313983436273593056635369469049170933993579108883634463805692058960115844681781369463022092027797540374300234632572769077576975396900315265594224151982675267973910624767651551248441566287802177396876300359261194149711824966558015806469344435755699116147431994638420651890344784005216539336086806059783567e-521",
+          "signs": [
+            1,
+            1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "light_sector_quartic_tensor_log10_frobenius": -53.288243585739984,
+        "mass_max_abs_delta_vs_512": 0.0,
+        "masses": [
+          -12.91855844342438,
+          -4.5978009624626,
+          -1.9630253110345883,
+          21.948959703416342,
+          22.352482675621758
+        ],
+        "max_normwise_canonical_eigenpair_residual": "2.32904369671820930170505972205672620673737475534940444521414473026786433959888007638352497306079088149546239371534026759501355816399050480523862195274186542608142809359634809520462520359192942199518808367391698213163880118720167001033741379388631204868436463696394441712435252649229987789582285339241931574141945900935485004450538110482997263845141223017559563451980683408783385530049496072534580354482586334397598257742599789208481015496045094266093155873551254727888142730513670177365113702473920779196922174074041688705274877060777457602383400448147975721435576023606676131621137141864441241332170400085880384852419786787388157383665803424257351231718032532663991318726513166798129430762624421725508881630148029890491091610032230167913990301971756676655969727615726040631592785140352348100565094219711156037250086988101689797826118024389573903235314e-520",
+        "max_normwise_generalized_Htheta_K_residual": "1.45902693835252312055990597819456859355630504959446212314816269292908370269074452720037226395849450171444707755986398273496057589521468981091946012761464580899069870985209129687021744864978922440747223839190001445666396990775312502433971759135007252894565758731447145674010292762768290199685023320121221718611169778577015563935963207301094001563740028511820196819551953268431541284690599330071840950506530556659216379958339295993992977640583465645757999128017958802372895994164018909025422669175927532589235323276707151360902173220481792179489406215274339106975287114310570184931827755889709890795770951844143248189073782823434242206330888455843162570028748074370786943676182491869166992109794831170891011022134189296711905512556095171661362805855041175345988439875653254239007104988757520292598397446450182632965083809860830600595936188935794980913072e-520",
+        "quartic_deltas_vs_512": {
+          "quartic22": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          },
+          "quartic31": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          },
+          "quartic_self": {
+            "max_abs_log10_delta_vs_512": 0.0,
+            "sign_mismatch_count_vs_512": 0
+          }
+        },
+        "requested_decimal_digits": 512,
+        "shortest_decimal_expansion_gap_max_not_conversion_error": "4.725236489903181791305541992187500000000000000000000000000000465796769718282246120182172818965820099932401336960843140524358484087652113761771676973507805008326522575489381977962469261189343088490344424457134664407931268215179443359375e-15",
+        "signs": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    ],
+    "separately_retained_builtin_float64_residuals": [
+      0.022731565901217474,
+      0.25926111094949195,
+      0.15353047307110929,
+      1.803985874641314e-16,
+      2.2070838395042235e-16
+    ],
+    "separately_retained_builtin_mass_basis_accuracy_definition": "||W*u-lambda*u||_2/max(abs(lambda),eps(Float64)*||W||_infinity); retained as a separate source diagnostic, not the normwise formula above."
+  },
+  "p1_reference_replay": {
+    "p0_digest": "68261b5571df88e6afe75f985eafac27a144390779306d3e4c416a6fc1caf6ef",
+    "reference_commit": "7a40285bb5c313f7e8746b90644d5f45bb67be44",
+    "results": {
+      "float64_masses": [
+        13.860912539123262,
+        14.073585277123616,
+        14.230434590975188,
+        21.948959703416346,
+        22.352482675621758
+      ],
+      "float64_signs": [
+        -1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "high_precision80_masses": [
+        -12.91855844342438,
+        -4.5978009624626,
+        -1.9630253110345888,
+        21.948959703416346,
+        22.352482675621758
+      ],
+      "high_precision80_signs": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "precision_bits_after_restore": 104,
+      "precision_bits_readback": 268,
+      "restored": true
+    },
+    "secondary_comparison_base": "74fea608684eae746f25ae45b18512f89b862fb0",
+    "secondary_masses_and_signs_match_reference": true
+  },
+  "provenance": {
+    "benchmark_manifest_sha256": "5370a09f21ad09488d6cf81aab67bb648e016d5fbb850881786ab145609c8b84",
+    "benchmark_project_sha256": "f42fcc77faac53ac2ce271605b59ef3e677c018e7510dfe306f04ebb5fa95cec",
+    "comparison_base_commit": "74fea608684eae746f25ae45b18512f89b862fb0",
+    "environment": {
+      "arbfloat_precision_bits_after_all_runs": 104,
+      "arbfloat_precision_bits_before": 104,
+      "arbfloat_precision_restored": true,
+      "arch": "aarch64",
+      "blas_threads": 8,
+      "blas_vendor": "lbt",
+      "julia_build_commit": "15346901f0039751c5488744f1f62de7d87510a8",
+      "julia_threads": 1,
+      "julia_version": "1.12.6",
+      "machine": "arm64-apple-darwin24.0.0"
+    },
+    "frozen_pre_result_evidence": {
+      "freeze_sha256": "401732a216a51f208ba6d264111277558d9bdb724f18a8a171f1fdc28c4006bb",
+      "freeze_statement": "P1 exact replay complete; no P2 precision-ladder output has been produced or inspected",
+      "freeze_time_utc": "2026-09-25 13:59:08 UTC",
+      "matching_declaration_frozen_at_utc": "2026-09-25 13:43:47 UTC",
+      "matching_declaration_sha256": "ef40308b2e1241bda488b7ba7e7c3fceb17d92b69155087d8782eb6fd9ea56ee"
+    },
+    "inputs_sha256": {
+      "diagnostic_script": "b925bae2d9bda3d9466841331ee3b2da10231c50ee84f57da5af01b4b0c2fc47",
+      "matching_declaration": "ef40308b2e1241bda488b7ba7e7c3fceb17d92b69155087d8782eb6fd9ea56ee",
+      "p1_reference_replay": "4d744919ad56a65cf237962891481b1b147e3ce27aef990b05ea208f2c5ee1b1",
+      "p1_secondary_base_replay": "e7b95ced976b269e8828f40d75508e7e4bdd8f7cc414970b4c1800afd733347c",
+      "p2_ladder": "c059f2f6ef266e64157881f7a87bb608697b15d6ddcf8349ba03acecbc20dce7",
+      "replay_script": "135405da582b3827a63558d4e7bdd2b12e53a5e0fe80aff13e189df57cf19505",
+      "source_environment_freeze": "401732a216a51f208ba6d264111277558d9bdb724f18a8a171f1fdc28c4006bb"
+    },
+    "p0_fixture_digest": "68261b5571df88e6afe75f985eafac27a144390779306d3e4c416a6fc1caf6ef",
+    "reference_checkout_id": "temporary_archive_checkout_at_7a40285bb5c313f7e8746b90644d5f45bb67be44",
+    "reference_commit": "7a40285bb5c313f7e8746b90644d5f45bb67be44",
+    "reference_source_sha256": {
+      "src/generate.jl": "d55d53a1bd1201bfd4783d59b854f53d99bfef37ec0f080a93a972e1f7292e58",
+      "src/paper_benchmarks/poly102_inflation.jl": "a4177d68bf0011bfb7b0f5fccbef5687f4a77a40420ba1fc0f5c3c6a40ea174a",
+      "src/paper_benchmarks/reduced_models.jl": "9036c725dee3109e9e83abd9f956f3fec9c68650657621502d1fdf28c684985c",
+      "src/structs.jl": "2bb117cf7ca39d6b0eec1474d2f2b658ca0add64c4c353b6c265e2be688b667a"
+    },
+    "reference_tree": "ef79ad720ea0ed1ad2193b2616a97319d8282a61",
+    "source_hashes_frozen_before_ladder": {
+      "src/generate.jl": "d55d53a1bd1201bfd4783d59b854f53d99bfef37ec0f080a93a972e1f7292e58",
+      "src/paper_benchmarks.jl": "f67e019bd19a34c7c2c7ac7d89cc50035c5a7d193e21e851cf01ba522ff73a86",
+      "src/paper_benchmarks/compatibility.jl": "5eda42b7d9451d4661b8819e9d1aac7e1ef49fc001a6c51f381b7919c1f4c6fd",
+      "src/paper_benchmarks/poly102_inflation.jl": "a4177d68bf0011bfb7b0f5fccbef5687f4a77a40420ba1fc0f5c3c6a40ea174a",
+      "src/paper_benchmarks/reduced_models.jl": "9036c725dee3109e9e83abd9f956f3fec9c68650657621502d1fdf28c684985c",
+      "src/structs.jl": "2bb117cf7ca39d6b0eec1474d2f2b658ca0add64c4c353b6c265e2be688b667a"
+    }
+  },
+  "quartic_and_downstream_evidence": {
+    "basis_sensitive_quartic_authority": "P1/P2 provide per-mode self and mixed 31/22 terms, but the r3 matching policy withholds individual identity where clusters or sign cardinalities differ. The shared light-subspace tensor norm is the mode/subspace aggregate; no per-mode authority is inferred.",
+    "float64_vs_high_precision80_same_sorted_index_raw_comparison": {
+      "22": {
+        "comparison_status": "raw sorted-index diagnostics only; individual mode identity is withheld by frozen sign-cardinality/cluster policy",
+        "component_count": 10,
+        "max_absolute_log10_magnitude_delta": 17.337296590928496,
+        "raw_same_index_sign_mismatch_count": 0
+      },
+      "31": {
+        "comparison_status": "raw sorted-index diagnostics only; individual mode identity is withheld by frozen sign-cardinality/cluster policy",
+        "component_count": 20,
+        "max_absolute_log10_magnitude_delta": 18.081622722176142,
+        "raw_same_index_sign_mismatch_count": 13
+      },
+      "self": {
+        "comparison_status": "raw sorted-index diagnostics only; individual mode identity is withheld by frozen sign-cardinality/cluster policy",
+        "component_count": 5,
+        "max_absolute_log10_magnitude_delta": 18.825165970058137,
+        "raw_same_index_sign_mismatch_count": 0
+      }
+    },
+    "light_sector_tensor_log10_frobenius_abs_delta": 7.105427357601002e-15,
+    "light_sector_tensor_log10_frobenius_float64": -53.28824358573999,
+    "light_sector_tensor_log10_frobenius_high_precision80": -53.288243585739984,
+    "same_index_comparison_caveat": "These are raw sorted-index diagnostics, not mode-aligned claims: the frozen sign-group cardinalities differ, and identity is withheld."
+  },
+  "record_type": "CYAX-0173 bounded diagnostic synthesis",
+  "schema": "cyax-0173-spectrum-diagnostic-synthesis-v1",
+  "work_item": "Issue #173 frozen N=5 B6 diagnostic, r3"
+}
