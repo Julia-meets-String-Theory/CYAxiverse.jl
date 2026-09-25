@@ -214,6 +214,8 @@ class GitHubProtectionAdapter:
         parts = repository.split("/") if isinstance(repository, str) else []
         if len(parts) != 2 or any(_REPOSITORY_PART.fullmatch(part) is None for part in parts):
             raise GitHubProtectionError("REPOSITORY_IDENTITY_INVALID")
+        if not isinstance(api_base, str):
+            raise GitHubProtectionError("API_ORIGIN_INVALID")
         parsed = urlsplit(api_base)
         if (
             parsed.scheme != "https"
@@ -224,9 +226,22 @@ class GitHubProtectionAdapter:
             or parsed.fragment
         ):
             raise GitHubProtectionError("API_ORIGIN_INVALID")
+        if transport is None:
+            try:
+                github_api_origin = (
+                    parsed.hostname == "api.github.com"
+                    and parsed.port in {None, 443}
+                    and parsed.path in {"", "/"}
+                )
+            except ValueError:
+                github_api_origin = False
+            if not github_api_origin:
+                raise GitHubProtectionError("API_ORIGIN_INVALID")
         self.repository = "/".join(parts)
         self.owner, self.repo = parts
-        self.api_base = api_base.rstrip("/")
+        self.api_base = (
+            "https://api.github.com" if transport is None else api_base.rstrip("/")
+        )
         self._token = token if token is not None else (
             os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
         )

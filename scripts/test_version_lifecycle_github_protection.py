@@ -188,6 +188,25 @@ def adapter_for(fake: FakeGitHub, *, gate=None) -> GitHubProtectionAdapter:
 
 
 class GitHubProtectionTests(unittest.TestCase):
+    def test_real_transport_is_pinned_to_the_governed_github_api_host(self) -> None:
+        with self.assertRaisesRegex(GitHubProtectionError, "API_ORIGIN_INVALID"):
+            GitHubProtectionAdapter(
+                REPOSITORY,
+                token="private-token",
+                api_base="https://api.github.com.attacker.example",
+            )
+
+        # A supplied transport is the test seam and never sends Authorization
+        # headers through api_base.
+        fake = FakeGitHub()
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY,
+            token="private-token",
+            api_base="https://fixture.invalid",
+            transport=fake,
+        )
+        self.assertEqual(adapter.read_snapshot().repository, REPOSITORY)
+
     def test_snapshot_is_canonical_and_digested_from_exact_details(self) -> None:
         fake = FakeGitHub()
         adapter = adapter_for(fake)
