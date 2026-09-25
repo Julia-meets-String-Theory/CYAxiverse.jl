@@ -1,9 +1,10 @@
 # CYAX-0125 Gate A candidate evidence
 
-This record belongs to a provisional premerge Gate A worktree candidate. It
-does not designate a historical release, adopt a DEV version, close an
-iteration, publish a release, or establish live GitHub protection. The
-integrated implementation source candidate addressed here is commit
+The historical premerge record below belongs to a provisional Gate A
+worktree candidate. It did not designate a historical release, adopt a DEV
+version, close an iteration, publish a release, or establish live GitHub
+protection. The current closure-repair attempt is recorded at the end of this
+file. The integrated implementation source candidate addressed below is commit
 `b324f04aff37758541b63bf5fd7928d169c862f7` (tree
 `82ed1100bdb2d22dd2ddee83dbfe79c3af7cc2fb`). Its exact N1 normative subject
 is commit `251467a6b12f44bca7c9540ec3fd0cdf18ffe8e2` (tree
@@ -507,9 +508,9 @@ scientific normalization and benchmark code are outside this approved
 lifecycle change, `Project.toml` remains `0.2.0`, and no production release
 state changed. Remote CI and fresh exact-candidate SPEC/STANDARDS reviews are
 observed on `cea78c0`; the evidence-only convergence successor requires final
-exact-state confirmation. Live protection/event-authority setup, an explicit owner
-merge decision, and fresh post-settings review remain later work; Gate B stays
-separate.
+exact-state confirmation. At that historical point, live
+protection/event-authority setup, an explicit owner merge decision, and fresh
+post-settings review remained later work; Gate B stayed separate.
 
 ## Gate A closure-repair attempt 002 (current, pending exact-state review)
 
