@@ -32,6 +32,18 @@ function relative_inf_difference(left, right)
         opnorm(left - right, Inf) / denominator
 end
 
+function source_mass_order(eigenvalues, masses)
+    sortperm(eachindex(masses);
+        by=index -> (masses[index], abs(eigenvalues[index]), index),
+        alg=MergeSort)
+end
+
+function float64_source_masses(eigenvalues, L)
+    reference_log = G.instanton_scale_precision_diagnostics(L).reference_log10
+    0.5 .* (log10.(abs.(eigenvalues)) .+ reference_log) .+
+        9 .+ log10(2.435e18) .+ log10(2π)
+end
+
 function float64_theta_hessian_scaled(L, Q)
     reference_log = maximum(L[2, :])
     floor_log = log10(floatmin(Float64))
@@ -40,6 +52,37 @@ function float64_theta_hessian_scaled(L, Q)
     H = zeros(Float64, size(Q, 1), size(Q, 1))
     for a in eachindex(scales), i in axes(Q, 1), j in axes(Q, 1)
         H[i, j] += scales[a] * Q[i, a] * Q[j, a]
+    end
+    Hermitian(H)
+end
+
+function float64_scaled_instanton_terms(L)
+    reference_log = maximum(L[2, :])
+    floor_log = log10(floatmin(Float64))
+    [L[2, a] - reference_log < floor_log ? 0.0 :
+        L[1, a] * 10.0^(L[2, a] - reference_log) for a in axes(L, 2)]
+end
+
+function float64_theta_hessian_column_order(L, Q, column_order)
+    scales = float64_scaled_instanton_terms(L)
+    H = zeros(Float64, size(Q, 1), size(Q, 1))
+    for a in column_order, i in axes(Q, 1), j in axes(Q, 1)
+        H[i, j] += scales[a] * Q[i, a] * Q[j, a]
+    end
+    Hermitian(H)
+end
+
+function float64_theta_hessian_magnitude_sorted(L, Q)
+    scales = float64_scaled_instanton_terms(L)
+    H = zeros(Float64, size(Q, 1), size(Q, 1))
+    for i in axes(Q, 1), j in axes(Q, 1)
+        terms = [scales[a] * Q[i, a] * Q[j, a] for a in axes(Q, 2)]
+        sort!(terms; by=abs, alg=MergeSort)
+        total = 0.0
+        for term in terms
+            total += term
+        end
+        H[i, j] = total
     end
     Hermitian(H)
 end
@@ -66,8 +109,9 @@ function generalized_normwise_residuals(H, K, C, basis, eigenvalues)
         for i in eachindex(eigenvalues)]
 end
 
-function clusters_by_mass(eigenvalues, masses; threshold=1e-8)
-    order = sortperm(masses)
+function clusters_by_eigenvalue(eigenvalues; threshold=1e-8)
+    order = sortperm(eachindex(eigenvalues);
+        by=index -> (eigenvalues[index], index), alg=MergeSort)
     scale = max_abs_value(eigenvalues)
     groups = Vector{Vector{Int}}()
     for index in order
@@ -77,14 +121,71 @@ function clusters_by_mass(eigenvalues, masses; threshold=1e-8)
         end
         previous = last(groups[end])
         gap_scale = max(scale, abs(eigenvalues[index]), abs(eigenvalues[previous]))
-        same_sign = sign(eigenvalues[index]) == sign(eigenvalues[previous])
-        if same_sign && abs(eigenvalues[index] - eigenvalues[previous]) <= threshold * gap_scale
+        if abs(eigenvalues[index] - eigenvalues[previous]) <= threshold * gap_scale
             push!(groups[end], index)
         else
             push!(groups, [index])
         end
     end
     groups
+end
+
+function float64_reduction_order_sensitivity(C, L, Q, source_matrix,
+        source_eigenvalues_by_mass, source_masses, source_signs)
+    H_forward = Matrix(float64_theta_hessian_column_order(L, Q, axes(Q, 2)))
+    H_reverse = Matrix(float64_theta_hessian_column_order(L, Q,
+        reverse(collect(axes(Q, 2)))))
+    H_magnitude_sorted = Matrix(float64_theta_hessian_magnitude_sorted(L, Q))
+    matrix_variants = [
+        ("source_forward_column_order", Matrix(source_matrix),
+            "package scaled rank-one accumulation in ascending source-column order, then (C' * H) * C"),
+        ("reverse_column_order", Matrix(transpose(C) * H_reverse * C),
+            "same signed rank-one terms and fixed Qtilde/Ltilde/C; reverse source-column accumulation, then (C' * H) * C"),
+        ("ascending_magnitude_per_entry", Matrix(transpose(C) * H_magnitude_sorted * C),
+            "same signed rank-one terms and fixed Qtilde/Ltilde/C; sort each entry's terms by ascending absolute magnitude before serial summation, then (C' * H) * C"),
+        ("right_associated_whitening_product", Matrix(transpose(C) *
+            (H_forward * C)),
+            "same forward-order H and fixed Qtilde/Ltilde/C; compute C' * (H * C) instead of (C' * H) * C")]
+    maximum(abs, H_forward - Matrix(float64_theta_hessian_scaled(L, Q))) == 0.0 ||
+        error("forward-order sensitivity control differs from the diagnostic source assembly")
+
+    records = Dict{String,Any}[]
+    for (name, matrix, method) in matrix_variants
+        decomposition = eigen(Hermitian(matrix))
+        eigenvalues = collect(decomposition.values)
+        masses = float64_source_masses(eigenvalues, L)
+        order = source_mass_order(eigenvalues, masses)
+        ordered_eigenvalues = eigenvalues[order]
+        ordered_masses = masses[order]
+        signs = Int.(sign.(ordered_eigenvalues))
+        push!(records, Dict(
+            "name" => name,
+            "accumulation_or_product_order" => method,
+            "relative_inf_matrix_difference_from_source" =>
+                relative_inf_difference(matrix, source_matrix),
+            "signed_eigenvalues_by_mass" => vector_strings(ordered_eigenvalues),
+            "signed_eigenvalue_deltas_vs_source" => vector_strings(
+                ordered_eigenvalues .- source_eigenvalues_by_mass),
+            "masses" => ordered_masses,
+            "mass_deltas_vs_source" => ordered_masses .- source_masses,
+            "signs" => signs,
+            "sign_mismatch_count_vs_source" => count(
+                i -> signs[i] != source_signs[i], eachindex(signs)),
+            "light_modes" => [Dict(
+                "mass_index" => i,
+                "signed_eigenvalue" => string(ordered_eigenvalues[i]),
+                "mass" => ordered_masses[i],
+                "mass_delta_vs_source" => ordered_masses[i] - source_masses[i],
+                "sign" => signs[i],
+                "sign_changed_vs_source" => signs[i] != source_signs[i])
+                for i in 1:min(3, length(ordered_masses))]))
+    end
+    Dict(
+        "physical_inputs_held_fixed" => true,
+        "fixture_digest" => "68261b5571df88e6afe75f985eafac27a144390779306d3e4c416a6fc1caf6ef",
+        "fixed_inputs" => "the same frozen Float64 C, Qtilde, and Ltilde from the B6 fixture are used in every variant; only rank-one accumulation order or dense multiplication association changes",
+        "common_scaling" => "all terms use the source Float64 common-log scaling, with the same underflow floor and mass restoration",
+        "variants" => records)
 end
 
 function all_permutations(values::Vector{Int})
@@ -242,7 +343,7 @@ function one_precision(digits, K, Ltilde, Qtilde, Kmatrix, C, Q, L,
         offset = 9.0 + Float64(log10(G.constants()["MPlanck"])) +
             Float64(G.constants()["log2π"])
         raw_masses = Float64.(0.5 .* log10.(abs.(raw_eigenvalues))) .+ offset
-        order = sortperm(raw_masses)
+        order = source_mass_order(raw_eigenvalues, raw_masses)
         ordered_eigenvalues = raw_eigenvalues[order]
         masses = raw_masses[order]
         signs = Int.(sign.(ordered_eigenvalues))
@@ -265,7 +366,8 @@ function one_precision(digits, K, Ltilde, Qtilde, Kmatrix, C, Q, L,
         promoted_raw_masses = Float64.(0.5 .* log10.(
             abs.(promoted_float_eigenvalues))) .+
             0.5 * Float64(promoted_reference_log) .+ promoted_offset
-        promoted_order = sortperm(promoted_raw_masses)
+        promoted_order = source_mass_order(promoted_float_eigenvalues,
+            promoted_raw_masses)
         promoted_float_masses = promoted_raw_masses[promoted_order]
         promoted_float_signs = Int.(sign.(
             promoted_float_eigenvalues[promoted_order]))
@@ -289,7 +391,8 @@ function one_precision(digits, K, Ltilde, Qtilde, Kmatrix, C, Q, L,
         hp_whitened_eigenvalues = collect(hp_whitened_decomposition.values)
         hp_whitened_eigenvectors = Matrix(hp_whitened_decomposition.vectors)
         hp_whitened_masses = Float64.(0.5 .* log10.(abs.(hp_whitened_eigenvalues))) .+ offset
-        hp_whitened_order = sortperm(hp_whitened_masses)
+        hp_whitened_order = source_mass_order(hp_whitened_eigenvalues,
+            hp_whitened_masses)
         hp_generalized_residuals = generalized_normwise_residuals(
             pieces.Htheta, K_hp, C_hp, hp_whitened_eigenvectors,
             hp_whitened_eigenvalues)
@@ -304,7 +407,7 @@ function one_precision(digits, K, Ltilde, Qtilde, Kmatrix, C, Q, L,
         end
 
         light_tensor = light_quartic_tensor(Q, L, C, basis)
-        light_clusters = clusters_by_mass(ordered_eigenvalues, masses)
+        light_clusters = clusters_by_eigenvalue(ordered_eigenvalues)
         public_mass_difference = maximum(abs.(masses .- result.m))
         (; result, route_bits, pieces, matrix, raw_eigenvalues, eigenvectors,
             ordered_eigenvalues, masses, signs, basis, order, scale,
@@ -408,15 +511,29 @@ function main()
     float_matrix = G.leading_hessian_matrix_float64_scaled(C,
         selection.Ltilde, selection.Qtilde)
     float_eigen = eigen(float_matrix)
+    float_solver_eigenvalues = collect(float_eigen.values)
+    float_solver_masses = float64_source_masses(float_solver_eigenvalues,
+        selection.Ltilde)
+    float_solver_mass_order = source_mass_order(float_solver_eigenvalues,
+        float_solver_masses)
+    float_ordered_eigenvalues = float_solver_eigenvalues[float_solver_mass_order]
     float_mass, float_sign, float_basis =
         G.leading_hessian_mass_basis_float64(K, selection.Ltilde,
             selection.Qtilde)
     isapprox(float_mass, BASELINE_FLOAT_MASSES; rtol=2e-13, atol=2e-13) ||
         error("Float64 source matrix no longer reproduces frozen masses")
     float_sign == BASELINE_FLOAT_SIGNS || error("Float64 source signs changed")
+    isapprox(float_solver_masses[float_solver_mass_order], float_mass;
+        rtol=2e-13, atol=2e-13) || error("paired Float64 solver values do not reproduce the mass basis")
+    Int.(sign.(float_ordered_eigenvalues)) == float_sign ||
+        error("paired Float64 solver eigenvalues do not reproduce source mass-basis signs")
     float_mass_basis = Matrix(float_basis)
-    float_ordered_eigenvalues = [dot(@view(float_basis[:, i]),
-        float_matrix * @view(float_basis[:, i])) for i in axes(float_basis, 2)]
+    float_solver_vectors_by_mass = Matrix(
+        float_eigen.vectors[:, float_solver_mass_order])
+    float_solver_vector_overlaps = [abs(dot(@view(float_mass_basis[:, i]),
+        @view(float_solver_vectors_by_mass[:, i]))) for i in axes(float_mass_basis, 2)]
+    all(overlap >= 1.0 - 1e-12 for overlap in float_solver_vector_overlaps) ||
+        error("Float64 reported basis columns do not pair with the solver eigenvectors")
     float_whitened_residuals = whitened_normwise_residuals(float_matrix,
         float_mass_basis, float_ordered_eigenvalues)
     float_theta_matrix = float64_theta_hessian_scaled(selection.Ltilde,
@@ -424,6 +541,9 @@ function main()
     float_generalized_residuals = generalized_normwise_residuals(
         float_theta_matrix, Kmatrix, C, float_mass_basis,
         float_ordered_eigenvalues)
+    reduction_order_sensitivity = float64_reduction_order_sensitivity(C,
+        selection.Ltilde, selection.Qtilde, float_matrix,
+        float_ordered_eigenvalues, float_mass, float_sign)
 
     precision_records = [one_precision(digits, K, selection.Ltilde,
         selection.Qtilde, Kmatrix, C, potential.Q, potential.L, float_matrix)
@@ -440,7 +560,7 @@ function main()
         error("light-sector quartic tensor norm is not finite")
 
     reference_high = precision_records[2]
-    float_clusters = clusters_by_mass(float_ordered_eigenvalues, float_mass)
+    float_clusters = clusters_by_eigenvalue(float_ordered_eigenvalues)
     reference_clusters = reference_high.light_clusters
     comparison_float = deterministic_assignment(float_mass_basis,
         float_sign, float_clusters, reference_high.basis,
@@ -505,6 +625,8 @@ function main()
                 "frozen Float64 C and Ltilde entries are promoted directly to ArbFloat; round-trip equality verifies input preservation, while the separately recorded shortest-decimal expansion gap is not a conversion-error estimate",
             "direct_rank_one_check" =>
                 "diagnostic accumulates each nonzero-supported Q column's signed scale times q*q' into H_theta, then forms C'*H_theta*C; this mirrors the package helper's accumulation order and checks formula/input-path agreement, not an independent physical oracle",
+            "fixed_input_reduction_order_sensitivity" =>
+                "hold the frozen Float64 C, Qtilde, Ltilde, common log scale, and underflow floor fixed; compare the source forward column order with reverse column order, ascending-magnitude per-entry term reduction, and right-associated dense whitening multiplication, then report each scaled matrix/eigenspectrum change",
             "normwise_whitened_residual" =>
                 "||W*u-lambda*u||_2/(||W||_2*||u||_2+abs(lambda)*||u||_2); 2-norms and canonical whitened coordinates",
             "normwise_generalized_residual" =>
@@ -569,6 +691,15 @@ function main()
                 "||H_theta*v-lambda*K*v||_2/(||H_theta||_2*||v||_2+abs(lambda)*||K||_2*||v||_2); H_theta and K are Float64, v=C*u in theta coordinates.",
             "float64_normwise_generalized_residuals_float64_assembled_Htheta_K" =>
                 vector_strings(float_generalized_residuals),
+            "float64_solver_eigenvalues_paired_by_reported_mass_order" =>
+                vector_strings(float_ordered_eigenvalues),
+            "absolute_overlap_reported_mass_basis_vs_paired_solver_vectors" =>
+                vector_strings(float_solver_vector_overlaps),
+            "float64_light_eigenvalue_clusters_numeric_eigenvalue_order" =>
+                float_clusters,
+            "high_precision80_light_eigenvalue_clusters_numeric_eigenvalue_order" =>
+                reference_clusters,
+            "fixed_input_reduction_order_sensitivity" => reduction_order_sensitivity,
             "reference_replay_builtin_mass_basis_accuracy_residual_definition" =>
                 "||W*u-lambda*u||_2/max(abs(lambda),eps(Float64)*||W||_infinity); retained as a separate source diagnostic, not the normwise formula above.",
             "same_sign_one_to_one_assignment" => comparison_float.assignments,

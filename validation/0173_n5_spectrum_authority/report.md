@@ -24,6 +24,14 @@ The matching declaration was frozen at `2026-09-25 13:43:47 UTC` (SHA-256 `ef403
 
 The direct sparse rank-one matrix check mirrors the package helper’s accumulation order. Exact agreement checks the assembly formula and inputs; it is not an independent physical oracle. The stronger metric check recomputes the whitening factor from high precision K and measures the generalized `H_theta*v = lambda*K*v` residual.
 
+## P6 specification repair
+
+The Float64 normwise residuals use each eigensolver’s eigenvalue paired with its reported mass-basis vector. Absolute overlaps against the vectors from the same eigensolver range from `0.9999999999999999` to `1.0000000000000002`, confirming the pairing up to Float64 roundoff. The paired Float64 eigenvalues, in reported mass order, are `[-8.847741104041705e-14, 2.356014083237243e-13, 4.851505296555931e-13, 1327.1705458222668, 8510.84495988584]`. The whitened residuals are `[8.16e-18, 8.88e-17, 7.04e-17, 5.55e-16, 1.10e-16]`; the generalized H/K residuals are `[2.12e-17, 1.14e-16, 1.03e-16, 1.38e-16, 1.83e-17]`.
+
+The original matching declaration remains unchanged. Applying its numeric-eigenvalue cluster rule gives `[[1,2,3],[4],[5]]` for both Float64 and high precision 80. Sign-restricted matching remains separate and reports cardinality mismatches: Float64 has one negative and four positive modes, while high precision 80 has five positive modes. Individual identity remains withheld.
+
+The fixed-input sensitivity check holds C, Qtilde, Ltilde, scaling, and underflow floor constant. Reversing rank-one column order, summing each entry’s terms in ascending absolute magnitude, and using a right-associated whitening product each produced a bitwise-identical Float64 matrix. All had zero light-mass deltas and retained signs `(-,+,+)`. These tested reduction and product order changes do not explain the disputed modes.
+
 ## Commands and status
 
 The reference checkout was a temporary archive at the commit and tree above. `WRITABLE_DEPOT`, `RETAINED_DEPOT`, and `REFERENCE_CHECKOUT` below name the runtime paths used for those locations; the durable artifacts contain no machine-local paths.
@@ -57,3 +65,5 @@ julia --startup-file=no --project="$REFERENCE_CHECKOUT/validation/p0_numerical_e
 python3 -m json.tool validation/0173_n5_spectrum_authority/p3_diagnostic_synthesis.json >/dev/null
 # exit 0
 ```
+
+P6 regeneration used the same command above for `diagnose_ladder.jl`, with exit 0 and `P2_LADDER_PASS`; it read back ArbFloat precision at 215, 268, 427, 853, and 1703 bits and restored the global setting to 104 bits. The updated diagnostic script SHA-256 is `ab697396771ef29e366860ac32818e99023b8a8774e938e0bf19f5cd147a01e4`; the regenerated ladder SHA-256 is `48cc2419d453b911b5decdf77299727c24330031796492a086c5f382fefa48e5`.

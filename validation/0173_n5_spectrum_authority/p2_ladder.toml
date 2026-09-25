@@ -38,15 +38,19 @@ p0_digest = "68261b5571df88e6afe75f985eafac27a144390779306d3e4c416a6fc1caf6ef"
 transformation = "C=inv(cholesky(K).U); theta=C*phi; C'*K*C=I; Q_phi=Q'*C; H_theta=Qtilde*diag(sign(Ltilde[1,:])*10^Ltilde[2,:])*Qtilde'; W=C'*H_theta*C; W*u=lambda*u is equivalent to H_theta*v=lambda*K*v for v=C*u"
 
 [float64_vs_reference_high_precision80]
+absolute_overlap_reported_mass_basis_vs_paired_solver_vectors = ["1.0", "1.0000000000000002", "0.9999999999999999", "1.0000000000000002", "1.0000000000000002"]
 float64_eigenpair_residuals_from_reference_replay = [0.022731565901217474, 0.25926111094949195, 0.15353047307110929, 1.803985874641314e-16, 2.2070838395042235e-16]
+float64_light_eigenvalue_clusters_numeric_eigenvalue_order = [[1, 2, 3], [4], [5]]
 float64_light_sector_quartic_tensor_log10_frobenius = -53.28824358573999
 float64_masses = [13.860912539123262, 14.073585277123616, 14.230434590975188, 21.948959703416346, 22.352482675621758]
 float64_normwise_generalized_residual_definition = "||H_theta*v-lambda*K*v||_2/(||H_theta||_2*||v||_2+abs(lambda)*||K||_2*||v||_2); H_theta and K are Float64, v=C*u in theta coordinates."
-float64_normwise_generalized_residuals_float64_assembled_Htheta_K = ["2.9253768578894264e-17", "1.601377734736374e-16", "2.976773552770487e-17", "4.325705488386288e-17", "1.8266012952294083e-17"]
+float64_normwise_generalized_residuals_float64_assembled_Htheta_K = ["2.1173178929315638e-17", "1.1367816742186975e-16", "1.0334263847651344e-16", "1.3792897258433783e-16", "1.8266012952294083e-17"]
 float64_normwise_whitened_residual_definition = "||W*u-lambda*u||_2/(||W||_2*||u||_2+abs(lambda)*||u||_2); W is the Float64-assembled scaled canonical matrix and u is in canonical coordinates."
-float64_normwise_whitened_residuals_float64_assembled_matrix = ["7.345739125005942e-18", "8.378061126849993e-17", "4.961359933671422e-17", "2.433617751988934e-17", "1.103541919752112e-16"]
+float64_normwise_whitened_residuals_float64_assembled_matrix = ["8.15691148976788e-18", "8.875650371713707e-17", "7.03879442312315e-17", "5.547100474963676e-16", "1.103541919752112e-16"]
 float64_signs = [-1, 1, 1, 1, 1]
+float64_solver_eigenvalues_paired_by_reported_mass_order = ["-8.847741104041705e-14", "2.356014083237243e-13", "4.851505296555931e-13", "1327.1705458222668", "8510.84495988584"]
 high_precision80_eigenpair_residuals_from_reference_replay = [0.13880469798367817, 0.06769877611749449, 0.04922746846121679, 1.0016073232804368e-17, 1.1947650250507238e-16]
+high_precision80_light_eigenvalue_clusters_numeric_eigenvalue_order = [[1, 2, 3], [4], [5]]
 high_precision80_light_sector_quartic_tensor_log10_frobenius = -53.288243585739984
 high_precision80_masses = [-12.91855844342438, -4.5978009624626, -1.9630253110345888, 21.948959703416346, 22.352482675621758]
 high_precision80_signs = [1, 1, 1, 1, 1]
@@ -56,6 +60,141 @@ light_subspace_projector_frobenius_distance_float64_vs_80 = 3.581437341294552e-1
 metric_consistent_light_subspace_principal_angles_radians = [0.0, 1.4901161193847656e-8, 2.580956827951785e-8]
 principal_angle_roundoff_note = "Angles from 1.49e-8 to 2.58e-8 radians with projector Frobenius distances 0 to 3.6e-16 are acos(Float64 singular-value) resolution floor; do not interpret them as physical subspace rotation."
 reference_replay_builtin_mass_basis_accuracy_residual_definition = "||W*u-lambda*u||_2/max(abs(lambda),eps(Float64)*||W||_infinity); retained as a separate source diagnostic, not the normwise formula above."
+
+    [float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity]
+    common_scaling = "all terms use the source Float64 common-log scaling, with the same underflow floor and mass restoration"
+    fixed_inputs = "the same frozen Float64 C, Qtilde, and Ltilde from the B6 fixture are used in every variant; only rank-one accumulation order or dense multiplication association changes"
+    fixture_digest = "68261b5571df88e6afe75f985eafac27a144390779306d3e4c416a6fc1caf6ef"
+    physical_inputs_held_fixed = true
+
+        [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants]]
+        accumulation_or_product_order = "package scaled rank-one accumulation in ascending source-column order, then (C' * H) * C"
+        mass_deltas_vs_source = [0.0, 0.0, 0.0, 0.0, 0.0]
+        masses = [13.860912539123262, 14.073585277123616, 14.230434590975188, 21.948959703416346, 22.352482675621758]
+        name = "source_forward_column_order"
+        relative_inf_matrix_difference_from_source = 0.0
+        sign_mismatch_count_vs_source = 0
+        signed_eigenvalue_deltas_vs_source = ["0.0", "0.0", "0.0", "0.0", "0.0"]
+        signed_eigenvalues_by_mass = ["-8.847741104041705e-14", "2.356014083237243e-13", "4.851505296555931e-13", "1327.1705458222668", "8510.84495988584"]
+        signs = [-1, 1, 1, 1, 1]
+
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 13.860912539123262
+            mass_delta_vs_source = 0.0
+            mass_index = 1
+            sign = -1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "-8.847741104041705e-14"
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 14.073585277123616
+            mass_delta_vs_source = 0.0
+            mass_index = 2
+            sign = 1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "2.356014083237243e-13"
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 14.230434590975188
+            mass_delta_vs_source = 0.0
+            mass_index = 3
+            sign = 1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "4.851505296555931e-13"
+        [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants]]
+        accumulation_or_product_order = "same signed rank-one terms and fixed Qtilde/Ltilde/C; reverse source-column accumulation, then (C' * H) * C"
+        mass_deltas_vs_source = [0.0, 0.0, 0.0, 0.0, 0.0]
+        masses = [13.860912539123262, 14.073585277123616, 14.230434590975188, 21.948959703416346, 22.352482675621758]
+        name = "reverse_column_order"
+        relative_inf_matrix_difference_from_source = 0.0
+        sign_mismatch_count_vs_source = 0
+        signed_eigenvalue_deltas_vs_source = ["0.0", "0.0", "0.0", "0.0", "0.0"]
+        signed_eigenvalues_by_mass = ["-8.847741104041705e-14", "2.356014083237243e-13", "4.851505296555931e-13", "1327.1705458222668", "8510.84495988584"]
+        signs = [-1, 1, 1, 1, 1]
+
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 13.860912539123262
+            mass_delta_vs_source = 0.0
+            mass_index = 1
+            sign = -1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "-8.847741104041705e-14"
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 14.073585277123616
+            mass_delta_vs_source = 0.0
+            mass_index = 2
+            sign = 1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "2.356014083237243e-13"
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 14.230434590975188
+            mass_delta_vs_source = 0.0
+            mass_index = 3
+            sign = 1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "4.851505296555931e-13"
+        [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants]]
+        accumulation_or_product_order = "same signed rank-one terms and fixed Qtilde/Ltilde/C; sort each entry's terms by ascending absolute magnitude before serial summation, then (C' * H) * C"
+        mass_deltas_vs_source = [0.0, 0.0, 0.0, 0.0, 0.0]
+        masses = [13.860912539123262, 14.073585277123616, 14.230434590975188, 21.948959703416346, 22.352482675621758]
+        name = "ascending_magnitude_per_entry"
+        relative_inf_matrix_difference_from_source = 0.0
+        sign_mismatch_count_vs_source = 0
+        signed_eigenvalue_deltas_vs_source = ["0.0", "0.0", "0.0", "0.0", "0.0"]
+        signed_eigenvalues_by_mass = ["-8.847741104041705e-14", "2.356014083237243e-13", "4.851505296555931e-13", "1327.1705458222668", "8510.84495988584"]
+        signs = [-1, 1, 1, 1, 1]
+
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 13.860912539123262
+            mass_delta_vs_source = 0.0
+            mass_index = 1
+            sign = -1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "-8.847741104041705e-14"
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 14.073585277123616
+            mass_delta_vs_source = 0.0
+            mass_index = 2
+            sign = 1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "2.356014083237243e-13"
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 14.230434590975188
+            mass_delta_vs_source = 0.0
+            mass_index = 3
+            sign = 1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "4.851505296555931e-13"
+        [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants]]
+        accumulation_or_product_order = "same forward-order H and fixed Qtilde/Ltilde/C; compute C' * (H * C) instead of (C' * H) * C"
+        mass_deltas_vs_source = [0.0, 0.0, 0.0, 0.0, 0.0]
+        masses = [13.860912539123262, 14.073585277123616, 14.230434590975188, 21.948959703416346, 22.352482675621758]
+        name = "right_associated_whitening_product"
+        relative_inf_matrix_difference_from_source = 0.0
+        sign_mismatch_count_vs_source = 0
+        signed_eigenvalue_deltas_vs_source = ["0.0", "0.0", "0.0", "0.0", "0.0"]
+        signed_eigenvalues_by_mass = ["-8.847741104041705e-14", "2.356014083237243e-13", "4.851505296555931e-13", "1327.1705458222668", "8510.84495988584"]
+        signs = [-1, 1, 1, 1, 1]
+
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 13.860912539123262
+            mass_delta_vs_source = 0.0
+            mass_index = 1
+            sign = -1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "-8.847741104041705e-14"
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 14.073585277123616
+            mass_delta_vs_source = 0.0
+            mass_index = 2
+            sign = 1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "2.356014083237243e-13"
+            [[float64_vs_reference_high_precision80.fixed_input_reduction_order_sensitivity.variants.light_modes]]
+            mass = 14.230434590975188
+            mass_delta_vs_source = 0.0
+            mass_index = 3
+            sign = 1
+            sign_changed_vs_source = false
+            signed_eigenvalue = "4.851505296555931e-13"
 
     [float64_vs_reference_high_precision80.same_sign_one_to_one_assignment.-1]
     left_indices = [1]
@@ -300,6 +439,7 @@ light_subspace_projector_frobenius_distance_vs_512 = 0.0
 canonical_leading_hessian = "H_theta=Qtilde*diag(sign(Ltilde[1,:])*10^Ltilde[2,:])*Qtilde'; W=C'*H_theta*C; W*u=lambda*u is equivalent to H_theta*v=lambda*K*v when v=C*u and C is the exact K-whitening factor"
 coordinate_transform = "C=inv(cholesky(K).U); theta=C*phi; C'*K*C=I; Q_phi=Q'*C"
 direct_rank_one_check = "diagnostic accumulates each nonzero-supported Q column's signed scale times q*q' into H_theta, then forms C'*H_theta*C; this mirrors the package helper's accumulation order and checks formula/input-path agreement, not an independent physical oracle"
+fixed_input_reduction_order_sensitivity = "hold the frozen Float64 C, Qtilde, Ltilde, common log scale, and underflow floor fixed; compare the source forward column order with reverse column order, ascending-magnitude per-entry term reduction, and right-associated dense whitening multiplication, then report each scaled matrix/eigenspectrum change"
 float64_canonical_matrix = "source leading_hessian_matrix_float64_scaled(C,Ltilde,Qtilde), with its common scale recorded and restored in mass conversion"
 independent_metric_cross_check = "recompute C_K=inv(cholesky(K_high_precision).U), solve C_K'*H_theta*C_K, and evaluate the generalized H_theta*v=lambda*K*v residuals; this checks the metric transform independently from C converted from Float64"
 normwise_generalized_residual = "||H_theta*v-lambda*K*v||_2/(||H_theta||_2*||v||_2+abs(lambda)*||K||_2*||v||_2); 2-norms and theta coordinates"

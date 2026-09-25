@@ -5,7 +5,7 @@
     "conversion_finding": "Direct ArbFloat promotion of the frozen Float64 C and Ltilde values round-trips exactly at all ladder precisions. The reported shortest-decimal expansion gap is not a conversion-error estimate. The independently computed high-precision K whitening reproduces the 80-digit masses from 80 digits upward.",
     "mechanism_detail": {
       "condition_amplification": "The leading-Hessian condition is about 3.48e73, giving a reciprocal scale of about 2.87e-74; the Float64 matrix perturbation is about 1.4e57 times that relative low-mode scale.",
-      "matrix_assembly": "The relative infinity-norm difference between the high-precision matrix assembled from the frozen inputs and the scaled Float64-assembled matrix is about 3.98e-17. Promoting and high-precision-solving the Float64 matrix still gives light masses about 13.238, 13.843, and 13.999 with signs (+,+,-), so the low-mode information is already absent from the Float64 matrix entries.",
+      "matrix_assembly": "The relative infinity-norm difference between the high-precision matrix assembled from frozen inputs and the scaled Float64 matrix is about 3.98e-17. With frozen Float64 C, Qtilde, Ltilde, common scaling, and underflow floor held fixed, reverse column accumulation, ascending-magnitude per-entry reduction, and right-associated whitening all produced a bitwise-identical Float64 matrix, with zero light-mass deltas and unchanged light signs (-,+,+). Those tested reduction/product order changes do not explain the disputed light modes. Promoting and high-precision-solving the Float64 matrix still gives light masses about 13.238, 13.843, and 13.999 with signs (+,+,-), so the low-mode information is already absent from the Float64 matrix entries.",
       "metric_and_conversion": "The Float64 K-whitening residual is about 2.13e-15, while high-precision K-factor whitening at 80 digits is about 4.45e-87; both high-precision K-factor and converted-Float64-C results reproduce the frozen 80-digit masses from 80 digits upward. Direct Float64-to-ArbFloat promotion round-trips exactly.",
       "solver_contribution": "The Float64 solver changes the already-damaged promoted-matrix light masses from about 13.238, 13.843, and 13.999 to the P0 Float64 values about 13.861, 14.074, and 14.230, and changes the first sign to negative. Matrix formation is sufficient to lose low-mode information; solver behavior contributes additional variation."
     },
@@ -18,7 +18,7 @@
     "uncertainty": "This is a bounded diagnosis of one frozen N=5 B6 fixture. It establishes numerical resolvability behavior for these inputs; it does not declare either route a universal oracle or support a production change. The exact full-precision physical inputs are the retained P0 Float64 data promoted to ArbFloat, not an external symbolic specification."
   },
   "claim_boundary": "Diagnostic evidence only. Neither implementation route is declared an oracle; no production correction, spectrum migration, merge, or Issue closure is authorized by this record.",
-  "created_at_utc": "2026-09-25 14:34:34 UTC",
+  "created_at_utc": "2026-09-25 15:09:00 UTC",
   "downstream_effects": {
     "light_sector_aggregate": {
       "absolute_delta": 7.105427357601002e-15,
@@ -99,7 +99,9 @@
     "independent_metric_cross_check": "recompute C_K=inv(cholesky(K_high_precision).U), solve C_K'*H_theta*C_K, and evaluate the generalized H_theta*v=lambda*K*v residuals; this checks the metric transform independently from C converted from Float64",
     "normwise_generalized_residual": "||H_theta*v-lambda*K*v||_2/(||H_theta||_2*||v||_2+abs(lambda)*||K||_2*||v||_2); 2-norms and theta coordinates",
     "normwise_whitened_residual": "||W*u-lambda*u||_2/(||W||_2*||u||_2+abs(lambda)*||u||_2); 2-norms and canonical whitened coordinates",
-    "precision_conversion": "frozen Float64 C and Ltilde entries are promoted directly to ArbFloat; round-trip equality verifies input preservation, while the separately recorded shortest-decimal expansion gap is not a conversion-error estimate"
+    "precision_conversion": "frozen Float64 C and Ltilde entries are promoted directly to ArbFloat; round-trip equality verifies input preservation, while the separately recorded shortest-decimal expansion gap is not a conversion-error estimate",
+    "frozen_matching_rule": "eigenvalues are sorted by numeric value; adjacent values join when their gap divided by max(spectral 2-norm, both absolute eigenvalues) is <= 1e-8; connected components are clusters. Sign-restricted one-to-one assignment is applied separately.",
+    "fixed_input_reduction_order_sensitivity": "Same fixed Float64 C, Qtilde, Ltilde, scaling, and underflow floor; compare forward and reversed source-column accumulation, ascending-absolute-magnitude serial reduction per entry, and right-associated dense whitening multiplication."
   },
   "matching": {
     "angle_interpretation": "Angles from 1.49e-8 to 2.58e-8 radians with projector Frobenius distances 0 to 3.6e-16 are acos(Float64 singular-value) resolution floor; do not interpret them as physical subspace rotation.",
@@ -144,23 +146,50 @@
       2.580956827951785e-08
     ],
     "light_sector_projector_frobenius_distance_float64_vs_high_precision80": 3.581437341294552e-16,
-    "metric_and_assignment_method_frozen_before_ladder": true
+    "metric_and_assignment_method_frozen_before_ladder": true,
+    "float64_light_eigenvalue_clusters_numeric_eigenvalue_order": [
+      [
+        1,
+        2,
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "high_precision80_light_eigenvalue_clusters_numeric_eigenvalue_order": [
+      [
+        1,
+        2,
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ]
+    ],
+    "cluster_rule_applied": "eigenvalues are sorted by numeric value; adjacent values join when their gap divided by max(spectral 2-norm, both absolute eigenvalues) is <= 1e-8; connected components are clusters. Sign-restricted one-to-one assignment is applied separately."
   },
   "matrix_algorithm_layer_evidence": {
     "float64_normwise_generalized_residual_formula": "||H_theta*v-lambda*K*v||_2/(||H_theta||_2*||v||_2+abs(lambda)*||K||_2*||v||_2); H_theta and K are Float64, v=C*u in theta coordinates.",
     "float64_normwise_generalized_residuals": [
-      "2.9253768578894264e-17",
-      "1.601377734736374e-16",
-      "2.976773552770487e-17",
-      "4.325705488386288e-17",
+      "2.1173178929315638e-17",
+      "1.1367816742186975e-16",
+      "1.0334263847651344e-16",
+      "1.3792897258433783e-16",
       "1.8266012952294083e-17"
     ],
     "float64_normwise_whitened_residual_formula": "||W*u-lambda*u||_2/(||W||_2*||u||_2+abs(lambda)*||u||_2); W is the Float64-assembled scaled canonical matrix and u is in canonical coordinates.",
     "float64_normwise_whitened_residuals": [
-      "7.345739125005942e-18",
-      "8.378061126849993e-17",
-      "4.961359933671422e-17",
-      "2.433617751988934e-17",
+      "8.15691148976788e-18",
+      "8.875650371713707e-17",
+      "7.03879442312315e-17",
+      "5.547100474963676e-16",
       "1.103541919752112e-16"
     ],
     "float64_whitening_error_inf": 2.128005632487427e-15,
@@ -500,7 +529,60 @@
       1.803985874641314e-16,
       2.2070838395042235e-16
     ],
-    "separately_retained_builtin_mass_basis_accuracy_definition": "||W*u-lambda*u||_2/max(abs(lambda),eps(Float64)*||W||_infinity); retained as a separate source diagnostic, not the normwise formula above."
+    "separately_retained_builtin_mass_basis_accuracy_definition": "||W*u-lambda*u||_2/max(abs(lambda),eps(Float64)*||W||_infinity); retained as a separate source diagnostic, not the normwise formula above.",
+    "float64_solver_eigenvalues_paired_by_reported_mass_order": [
+      "-8.847741104041705e-14",
+      "2.356014083237243e-13",
+      "4.851505296555931e-13",
+      "1327.1705458222668",
+      "8510.84495988584"
+    ],
+    "float64_residual_eigenvalue_pairing": "Each Float64 normwise residual uses the eigenvalue returned by the same solver eigensystem and paired to the corresponding reported mass-basis eigenvector by the frozen source-mass ordering; absolute vector overlaps are checked to be at least 1-1e-12; no Rayleigh quotient replaces the solver eigenvalue.",
+    "fixed_input_reduction_order_sensitivity": {
+      "physical_inputs_held_fixed": true,
+      "fixture_digest": "68261b5571df88e6afe75f985eafac27a144390779306d3e4c416a6fc1caf6ef",
+      "variants_compared": [
+        "reverse_column_order",
+        "ascending_magnitude_per_entry",
+        "right_associated_whitening_product"
+      ],
+      "relative_inf_matrix_difference_from_source_for_each_variant": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "light_mass_deltas_vs_source_for_each_variant": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "light_signs_source_and_each_variant": [
+        -1,
+        1,
+        1
+      ],
+      "effect": "The tested accumulation and product order changes do not alter any disputed light mode for this fixed fixture; complete variant eigenvalue and mass records are in the P2 artifact."
+    },
+    "fixed_input_reduction_order_result": "For the source order, reversed rank-one column order, ascending-magnitude per-entry reduction, and right-associated dense whitening product, the Float64 scaled canonical matrices were bitwise identical. All three alternative orders had zero reported light-mass deltas and preserved light-mode signs (-,+,+); these tested order changes do not account for the disputed light modes in this fixture.",
+    "absolute_overlap_reported_mass_basis_vs_paired_solver_vectors": [
+      "1.0",
+      "1.0000000000000002",
+      "0.9999999999999999",
+      "1.0000000000000002",
+      "1.0000000000000002"
+    ]
   },
   "p1_reference_replay": {
     "p0_digest": "68261b5571df88e6afe75f985eafac27a144390779306d3e4c416a6fc1caf6ef",
@@ -565,11 +647,11 @@
       "matching_declaration_sha256": "ef40308b2e1241bda488b7ba7e7c3fceb17d92b69155087d8782eb6fd9ea56ee"
     },
     "inputs_sha256": {
-      "diagnostic_script": "b925bae2d9bda3d9466841331ee3b2da10231c50ee84f57da5af01b4b0c2fc47",
+      "diagnostic_script": "ab697396771ef29e366860ac32818e99023b8a8774e938e0bf19f5cd147a01e4",
       "matching_declaration": "ef40308b2e1241bda488b7ba7e7c3fceb17d92b69155087d8782eb6fd9ea56ee",
       "p1_reference_replay": "4d744919ad56a65cf237962891481b1b147e3ce27aef990b05ea208f2c5ee1b1",
       "p1_secondary_base_replay": "e7b95ced976b269e8828f40d75508e7e4bdd8f7cc414970b4c1800afd733347c",
-      "p2_ladder": "c059f2f6ef266e64157881f7a87bb608697b15d6ddcf8349ba03acecbc20dce7",
+      "p2_ladder": "48cc2419d453b911b5decdf77299727c24330031796492a086c5f382fefa48e5",
       "replay_script": "135405da582b3827a63558d4e7bdd2b12e53a5e0fe80aff13e189df57cf19505",
       "source_environment_freeze": "401732a216a51f208ba6d264111277558d9bdb724f18a8a171f1fdc28c4006bb"
     },
@@ -621,5 +703,103 @@
   },
   "record_type": "CYAX-0173 bounded diagnostic synthesis",
   "schema": "cyax-0173-spectrum-diagnostic-synthesis-v1",
-  "work_item": "Issue #173 frozen N=5 B6 diagnostic, r3"
+  "work_item": "Issue #173 frozen N=5 B6 diagnostic, r3",
+  "spec_review_repairs": {
+    "fixed_input_reduction_order_sensitivity": {
+      "status": "measured",
+      "result": "For the source order, reversed rank-one column order, ascending-magnitude per-entry reduction, and right-associated dense whitening product, the Float64 scaled canonical matrices were bitwise identical. All three alternative orders had zero reported light-mass deltas and preserved light-mode signs (-,+,+); these tested order changes do not account for the disputed light modes in this fixture.",
+      "details_artifact": "p2_ladder.toml",
+      "details_sha256": "48cc2419d453b911b5decdf77299727c24330031796492a086c5f382fefa48e5"
+    },
+    "float64_residual_pairing": {
+      "eigenvalues_by_reported_mass_order": [
+        "-8.847741104041705e-14",
+        "2.356014083237243e-13",
+        "4.851505296555931e-13",
+        "1327.1705458222668",
+        "8510.84495988584"
+      ],
+      "generalized_normwise_residuals": [
+        "2.1173178929315638e-17",
+        "1.1367816742186975e-16",
+        "1.0334263847651344e-16",
+        "1.3792897258433783e-16",
+        "1.8266012952294083e-17"
+      ],
+      "method": "Each Float64 normwise residual uses the eigenvalue returned by the same solver eigensystem and paired to the corresponding reported mass-basis eigenvector by the frozen source-mass ordering; no Rayleigh quotient replaces the solver eigenvalue.",
+      "status": "corrected",
+      "whitened_normwise_residuals": [
+        "8.15691148976788e-18",
+        "8.875650371713707e-17",
+        "7.03879442312315e-17",
+        "5.547100474963676e-16",
+        "1.103541919752112e-16"
+      ],
+      "reported_basis_vs_solver_vector_absolute_overlaps": [
+        "1.0",
+        "1.0000000000000002",
+        "0.9999999999999999",
+        "1.0000000000000002",
+        "1.0000000000000002"
+      ]
+    },
+    "frozen_cluster_rule": {
+      "declaration_sha256": "ef40308b2e1241bda488b7ba7e7c3fceb17d92b69155087d8782eb6fd9ea56ee",
+      "float64_clusters": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ]
+      ],
+      "high_precision80_clusters": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ]
+      ],
+      "sign_restricted_assignment": {
+        "-1": {
+          "left_indices": [
+            1
+          ],
+          "right_indices": [],
+          "status": "cardinality_mismatch"
+        },
+        "0": {
+          "status": "empty"
+        },
+        "1": {
+          "left_indices": [
+            2,
+            3,
+            4,
+            5
+          ],
+          "right_indices": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "status": "cardinality_mismatch"
+        }
+      },
+      "status": "applied_without_changing_pre_result_declaration"
+    }
+  }
 }
