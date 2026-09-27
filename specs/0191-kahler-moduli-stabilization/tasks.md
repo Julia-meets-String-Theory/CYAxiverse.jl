@@ -76,10 +76,11 @@ separate implementation handoff authorizes them.
     independent Spec and Standards returns, checks, limits, and the owner
     decision requested.
   - Verify: both reviews bind the same final normative bytes and pass without
-    blocking findings; owner final approval is separately recorded in
-    `approval_ref` after Control Desk reconciliation.
+    blocking findings; return the exact candidate to Control Desk with owner
+    final approval requested. Record any later owner approval separately in
+    `approval_ref` before an implementation handoff.
   - Escalate if: candidate or governing inputs drift, either review is blocked,
-    or separate owner approval is absent.
+    or the handback cannot preserve the separate owner-approval boundary.
 
 ## Phase 2 — Geometry boundary and model foundations
 
@@ -149,9 +150,9 @@ and a separate implementation handoff authorizes scientific work.
   - Escalate if: any oracle requires altering the scientific convention.
 
 - [ ] **T203 [R-010, R-012, R-016; CYAX-0191 Gate B] Freeze numerical scaling and acceptance rules.**
-  - Expected output: benchmark-independent declared precision, field and
-    potential scales, residual tolerance, solver criteria, and spectral
-    thresholds.
+  - Expected output: precision, field and potential scales, residual tolerance,
+    solver criteria, and spectral thresholds predeclared for each benchmark
+    independently of its observed results.
   - Verify: manifest review occurs before Gate C execution; scaled residual
     uses a maximum of individually scaled components; cancellation-suppressed
     energy is not the sole potential scale.
@@ -178,8 +179,10 @@ and a separate implementation handoff authorizes scientific work.
     location at source precision; derive `xihat` from its definition; reproduce
     equation-defined energy; preserve the approximately factor-100 table
     energy difference without parameter or normalization tuning.
-  - Escalate if: the discrepancy's cause is not established or a proposed fix
-    would alter the approved source convention.
+  - Escalate if: the equation-defined location or energy cannot be reproduced
+    under the declared inputs, the source anomaly cannot be preserved, or a
+    proposed fix would alter the approved source convention. The anomaly's
+    cause may remain unresolved.
 
 - [ ] **T303 [R-010, R-011, R-015, R-017; CYAX-0191 Gate C] Reproduce P0-B3 publisher-PDF E5.**
   - Expected output: source manifest, refined critical point, domain evidence,
