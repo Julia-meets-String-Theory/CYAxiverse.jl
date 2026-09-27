@@ -71,9 +71,10 @@ normalization, frame, and units.
 Implement the 2020 model as a validated model consumed by generic evaluation
 and differentiation interfaces. Preserve separately testable BBHL,
 non-perturbative linear, non-perturbative quadratic, and optional uplift
-contributions. Keep uplift off by default and make correction switches
-consistent across the Kähler potential, metric/inverse metric, and potential.
-Keep stored geometry-derived values separate from active switch state.
+contributions. Keep uplift off by default and enable it only through its
+explicit model switch. Apply the BBHL correction switch consistently across
+the active Kähler potential, metric/inverse metric, and potential. Keep stored
+geometry-derived values separate from active switch state.
 
 Encode the declared full-metric Schur-complement prescription rather than
 freezing and reinverting only the retained metric block. Use the adopted

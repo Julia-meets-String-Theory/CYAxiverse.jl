@@ -134,8 +134,9 @@ Phase 0 does not require or claim:
   loop/higher-derivative corrections;
 - reimplementation of CYTools, runtime CYTools coupling to the numerical hot
   path, or stable public-API promotion;
-- importing WSI, GV, explicit uplift, or other correction physics into Phase 0
-  without an approved extension;
+- importing WSI, GV, or other additional correction physics into Phase 0
+  without an approved extension, or enabling optional explicit uplift without
+  its declared model switch;
 - treating the planned, non-public KahlerJAX package/API as an available
   dependency;
 - direct axion-pipeline integration or follow-on programme validation.
@@ -252,9 +253,10 @@ and normalization stay attached to its validation artifact.
 
 For the source basis-divisor model,
 `V = V_alpha'^3 + V_np1 + V_np2 + V_optional_uplift`. Each term is independently
-testable; explicit uplift is off by default. When enabled, a model switch must
-apply consistently to the Kähler potential, active metric/inverse metric, and
-potential, while stored geometric metadata remains unchanged.
+testable. The BBHL correction switch must apply consistently to the active
+Kähler potential, metric/inverse metric, and potential while stored geometric
+metadata remains unchanged. Optional explicit uplift is a potential
+contribution, off by default and enabled only by its explicit model switch.
 
 The published master formula's printed quadratic phase is equivalent to
 `a_i rho_i - a_j rho_j - phi_i + phi_i`, while Appendix A.2 Eq. (A.3) and direct
