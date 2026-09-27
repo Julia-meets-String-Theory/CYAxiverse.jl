@@ -25,8 +25,7 @@ historical data, or spectrum migration acceptance criteria.
 
 This draft is not approval to run the study. Before implementation or fixture
 outcome inspection, the exact `spec.md`, `plan.md`, and `tasks.md` bytes must
-receive fresh independent Spec and Scientific `PASS` (or
-`PASS_WITH_NONBLOCKING_FINDINGS` with no blocking finding), followed by a
+receive fresh independent Spec and Scientific `PASS`, followed by a
 separate final S2 owner approval tied to the reviewed revision by `approval_ref`.
 A later execution handoff must bind those exact documents and that approval.
 The present contract preparation stops at the owner approval gate.
@@ -70,8 +69,10 @@ or corrupt authoritative input is established before either route produces a
 numerical outcome. Use the next unused hash-ranked ID in the same block and
 record the reason and both identities. After any outcome, retain the selected
 fixture and classify failure or unresolved status. Freeze a prior-outcome
-exposure register before any new route output; prior exposure never changes
-selection. A holdout fixture exposed to relevant prior Float64 or HP outcomes
+exposure register before any new route output. For each known Float64 or HP
+outcome, cite its durable, publication-safe source identity in that register;
+prior exposure never changes selection. A holdout fixture exposed to relevant
+prior Float64 or HP outcomes
 can be reported descriptively but makes scalar-boundary support inconclusive.
 All 30 selected IDs remain in every disposition denominator.
 
@@ -92,7 +93,8 @@ replay to exit `0` with `P1_REPLAY_PASS`. With no tolerance retuning, require:
    `[13.238179298077366, 13.843308526910718, 13.998657518779794]`, signs
    `[+1,+1,-1]`.
 4. Float64/HP three-lowest-mode projector Frobenius distance at most `1e-12`;
-   HP versus Float64 assembly relative matrix error at most `1e-15`; HP
+   HP versus Float64 assembly relative *infinity-norm* matrix error, as in
+   the frozen B6 diagnostic, at most `1e-15`; HP
    canonical-Hessian 2-norm condition number at least `1e70`.
 5. Aggregate three-lowest-mode quartic-tensor log10 Frobenius absolute delta
    at most `1e-12` where defined. The frozen fixed-input reduction/product-order

@@ -10,7 +10,7 @@ future evidence; it reports no fixture selection or study execution.
 | --- | --- | --- | --- |
 | S2 approval | Frozen `spec.md`/`plan.md`/`tasks.md` | Fresh independent Spec and Scientific PASS on the same candidate; separate owner `approval_ref`. No study work before this gate. | XFV-01–14 |
 | P0 currentness | S2 approval and a new execution handoff | Recheck live `vmm`, Issue #173, route source, B6 pins, capability policy, canonical data and scope. Material drift returns `BLOCKED_FOR_REBIND`. | XFV-01, XFV-13–14 |
-| P0 manifest | Passing currentness | Metadata-only eligibility, N=5q+r ordered blocks, hash ranks, 30 selections, 20/10 labels, consumed-input provenance and prior-exposure register; freeze exact manifest/digest before outcomes. Insufficient inventory stops. | XFV-01–03 |
+| P0 manifest | Passing currentness | Metadata-only eligibility, N=5q+r ordered blocks, hash ranks, 30 selections, 20/10 labels, consumed-input provenance and prior-exposure register with durable source citations for known route outcomes; freeze exact manifest/digest before outcomes. Insufficient inventory stops. | XFV-01–03 |
 | B6 control | Frozen manifest and exact B6 pins | Replay `B6-XFV2` fixed checks and retain exact output; failure stops interpretation without retuning. | XFV-04 |
 | Discovery | Passing B6 | Execute only the approved ladder/route diagnostics for 20 discovery fixtures; preserve total endpoint states, precision readback, residuals, predictors, assembly/solve legs and raw evidence. | XFV-05–10 |
 | Discovery freeze | Complete discovery accounting | Freeze correlations, candidate adjacent-partition boundary or exact negative/inconclusive status, code SHA-256 and all parameters before opening holdout. | XFV-10–11 |
