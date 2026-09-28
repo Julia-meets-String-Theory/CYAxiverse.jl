@@ -1,8 +1,9 @@
 """Source-approximation helpers for the Appendix-B BHSR likelihood.
 
 These functions implement the projected one-dimensional Gaussian method and
-probability products. The source Table I does not define a complete set of
-Gaussian sigmas, so they do not manufacture the unavailable source-wide result.
+probability products. Caller-supplied curves and sigmas produce diagnostics
+only. The source Table I does not define a complete Gaussian-sigma set, so no
+authoritative probability or source-wide threshold is returned.
 """
 
 if !isdefined(@__MODULE__, :BHSR_SI)
@@ -21,6 +22,14 @@ const BHSR_OBSERVATIONAL_MANIFEST_SHA256 =
 const _BHSR_OBSERVATIONAL_MANIFEST_TEXT =
     _bhsr_verified_manifest(BHSR_OBSERVATIONAL_MANIFEST,
                             BHSR_OBSERVATIONAL_MANIFEST_SHA256)
+const _BHSR_APPENDIX_B_MANIFEST_SECTION = let found = match(
+    r"\"reference_2018_appendix_b\"\s*:\s*\{(.*?)\n\s*\},\s*\"reference_2021_analytic_dataset\""s,
+    _BHSR_OBSERVATIONAL_MANIFEST_TEXT)
+    found === nothing && error("frozen observational manifest lacks the Appendix-B section")
+    String(found.captures[1])
+end
+const BHSR_APPENDIX_B_SOURCE_SIGMA_STATUS =
+    _bhsr_json_string_field(_BHSR_APPENDIX_B_MANIFEST_SECTION, "status")
 
 struct BHSRBHIdentityEnsemble
     route_identity::String
@@ -33,11 +42,7 @@ function bhsr_bh_identity_ensemble(route_identity::AbstractString = BHSR_APPENDI
     route = String(route_identity)
     route == BHSR_APPENDIX_B_ROUTE ||
         throw(ArgumentError("the frozen observational manifest does not enumerate BH identities for route '$route'"))
-    section_match = match(
-        r"\"reference_2018_appendix_b\"\s*:\s*\{(.*?)\n\s*\},\s*\"reference_2021_analytic_dataset\""s,
-        _BHSR_OBSERVATIONAL_MANIFEST_TEXT)
-    section_match === nothing && error("frozen observational manifest lacks the Appendix-B section")
-    section = String(section_match.captures[1])
+    section = _BHSR_APPENDIX_B_MANIFEST_SECTION
     rows = _bhsr_json_object_blocks(_bhsr_json_array_text(section, "rows"))
     ids = [_bhsr_json_string_field(row, "name") for row in rows]
     expected_count = _bhsr_json_int_field(section, "row_count")
@@ -93,9 +98,10 @@ function bhsr_union_boundary_function(contours::AbstractVector;
         labels == source_order ||
             throw(ArgumentError("contour mode identities must retain frozen manifest order"))
     end
+    # A caller-supplied closure and mode labels do not prove source provenance.
     return BHSRUnionContour(contours, id, BHSR_APPENDIX_B_ROUTE,
         BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
-        BHSR_SOURCE_MODE_MANIFEST_SHA256, labels, !isempty(labels))
+        BHSR_SOURCE_MODE_MANIFEST_SHA256, labels, false)
 end
 
 function _bhsr_contour_identity(contour, model_id::AbstractString)
@@ -106,7 +112,11 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
             throw(ArgumentError("contour method-manifest identity is stale"))
         contour.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256 ||
             throw(ArgumentError("contour source-mode manifest identity is stale"))
-        return (; source_backed = contour.source_grid,
+        # The exact numerical recipe can be reproduced, but the frozen
+        # manifest has no digitized Fig. 3 targets or authorized sigma set.
+        return (; source_backed = false,
+                contour_provenance_status = contour.source_grid ?
+                    :matching_recipe_without_source_target_data : :custom_grid,
                 mode_labels = getfield.(contour.modes, :label),
                 contour_route_identity = contour.route_identity,
                 contour_mass_support_solar =
@@ -117,12 +127,16 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
             throw(ArgumentError("contour method-manifest identity is stale"))
         contour.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256 ||
             throw(ArgumentError("contour source-mode manifest identity is stale"))
-        return (; source_backed = contour.source_backed,
+        # `source_backed` on the public wrapper is never accepted as proof.
+        return (; source_backed = false,
+                contour_provenance_status = :caller_supplied_contour_functions,
                 mode_labels = contour.mode_labels,
                 contour_route_identity = contour.route_identity,
                 contour_mass_support_solar = missing)
     end
-    return (; source_backed = false, mode_labels = String[],
+    return (; source_backed = false,
+            contour_provenance_status = :unsupported_contour_type,
+            mode_labels = String[],
             contour_route_identity = "UNSPECIFIED_CONTOUR",
             contour_mass_support_solar = missing)
 end
@@ -143,12 +157,21 @@ function _bhsr_likelihood_metadata(contour, model_id::AbstractString,
             likelihood_route_identity = BHSR_APPENDIX_B_ROUTE,
             contour_route_identity = contour_identity.contour_route_identity,
             contour_mass_support_solar = contour_identity.contour_mass_support_solar,
+            contour_provenance_status = contour_identity.contour_provenance_status,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             bh_ensemble_id = ensemble.manifest_id,
             observational_manifest_sha256 = ensemble.observational_manifest_sha256,
             mode_labels = contour_identity.mode_labels,
-            source_backed = contour_identity.source_backed)
+            source_backed = false,
+            authority_status = :unavailable_source_sigma_set,
+            source_sigma_manifest_status = BHSR_APPENDIX_B_SOURCE_SIGMA_STATUS,
+            diagnostic_only = true,
+            diagnostic_status = :not_evaluated,
+            diagnostic_probability_allowed = missing,
+            diagnostic_probability_disallowed_between_branches = missing,
+            probability_disallowed_between_branches = missing,
+            probability_allowed = missing)
 end
 
 function _bhsr_contour_value(f, x::BigFloat)
@@ -211,7 +234,7 @@ function bhsr_projected_sigma_x(sigma_x::Real, sigma_y::Real, inverse_derivative
     return sqrt(sx^2 + gp^2 * sy^2)
 end
 
-"Eq. (97): allowed probability for a contour y=f(x) defined at xbar."
+"Diagnostic calculation of the Eq. (97) projection for y=f(x) at xbar."
 function bhsr_allowed_probability_direct(xbar::Real, ybar::Real,
                                           sigma_x::Real, sigma_y::Real,
                                           f; lower::Real = -Inf,
@@ -267,10 +290,12 @@ function bhsr_allowed_probability_direct(xbar::Real, ybar::Real,
     probability = bhsr_standard_normal_cdf((fbar - yb) / sigma_eff)
     return merge(identity, (;
             projection = :y_of_x,
-            status = :evaluated,
+            status = :nonauthoritative_diagnostic,
+            diagnostic_status = :evaluated,
             derivative,
             sigma_effective = sigma_eff,
-            probability_allowed = probability))
+            diagnostic_probability_allowed = probability,
+            probability_allowed = missing))
 end
 
 function _bhsr_monotone_inverse_branches(grid::BHSRContourGrid)
@@ -329,7 +354,7 @@ function _bhsr_inverse_root_on_branch(grid::BHSRContourGrid, branch,
     return :root_nonconvergence
 end
 
-"""Eq. (98), evaluated only for a source grid with exactly two inverse roots.
+"""Diagnostic calculation of Eq. (98) for a grid with exactly two inverse roots.
 
 The root locations are bracketed on the frozen mass grid and refined against
 the analytic union contour. One-root, more-than-two-root, support-gap, and
@@ -432,13 +457,16 @@ function bhsr_allowed_probability_inverse(xbar::Real, ybar::Real,
         bhsr_standard_normal_cdf((low - xb) / sigma_eff)
     p_allowed = clamp(BigFloat(1) - p_inside, BigFloat(0), BigFloat(1))
     return merge(identity, (; projection = :inverse_x,
-            status = :evaluated,
+            status = :nonauthoritative_diagnostic,
+            diagnostic_status = :evaluated,
             inverse_roots = roots,
             nearest_branch = nearest,
             inverse_derivative = slopes[nearest],
             sigma_effective = sigma_eff,
-            probability_disallowed_between_branches = p_inside,
-            probability_allowed = p_allowed,
+            diagnostic_probability_disallowed_between_branches = p_inside,
+            probability_disallowed_between_branches = missing,
+            diagnostic_probability_allowed = p_allowed,
+            probability_allowed = missing,
             detail = "two source-grid-bracketed inverse roots"))
 end
 
@@ -462,7 +490,9 @@ function _bhsr_tree_incomplete(model_id, axion_ids, ensemble, received;
                                missing_terms = Tuple{String,String}[],
                                unexpected_axions = String[],
                                unexpected_bh_ids = String[],
-                               unresolved_terms = Tuple{String,String}[])
+                               unresolved_terms = Tuple{String,String}[],
+                               source_sigma_gate_status::Symbol = :not_checked,
+                               authority_status::Symbol = :unavailable_incomplete_coverage)
     return (; model_id,
             route_identity = BHSR_APPENDIX_B_ROUTE,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
@@ -477,6 +507,8 @@ function _bhsr_tree_incomplete(model_id, axion_ids, ensemble, received;
             unexpected_axions,
             unexpected_bh_ids,
             unresolved_terms,
+            source_sigma_gate_status,
+            authority_status,
             status = :unavailable,
             single_axion_allowed = fill(missing, length(axion_ids)),
             geometry_allowed = missing,
@@ -490,7 +522,10 @@ Each element must be a named likelihood result with `axion_id`, `bh_id`, the
 frozen manifest hashes, `model_id`, and a resolved probability. The caller must
 state every source-relevant axion identity. The BH identity set comes from an
 explicit, hash-verified observational ensemble; this release enumerates the
-2018 Table-I ensemble only.
+2018 Table-I ensemble only. Caller-supplied contour functions and sigma values
+remain formula diagnostics. The frozen observational manifest declares no
+complete source-defined Gaussian sigma set, so this version never returns an
+authoritative geometry probability or threshold result.
 """
 function bhsr_probability_tree(likelihood_results::AbstractVector;
                                model_id::AbstractString,
@@ -562,6 +597,16 @@ function bhsr_probability_tree(likelihood_results::AbstractVector;
             unexpected_bh_ids = sort!(collect(unexpected_bhs)), unresolved_terms = unique(unresolved))
     end
 
+    source_sigma_gate = bhsr_sigma_gate(Any[]; bh_ensemble = ensemble)
+    if !source_sigma_gate.source_authoritative
+        sigma_unresolved = [("<source-defined-Gaussian-sigma-set>",
+                             source_sigma_gate.source_manifest_status)]
+        return _bhsr_tree_incomplete(id, axion_ids, ensemble, received;
+            unresolved_terms = sigma_unresolved,
+            source_sigma_gate_status = source_sigma_gate.status,
+            authority_status = :unavailable_source_sigma_set)
+    end
+
     single_axion_allowed = BigFloat[]
     for axion in axion_ids
         terms = [seen[(axion, bh)].probability_allowed for bh in ensemble.bh_ids]
@@ -583,6 +628,8 @@ function bhsr_probability_tree(likelihood_results::AbstractVector;
             unexpected_axions = String[],
             unexpected_bh_ids = String[],
             unresolved_terms = Tuple{String,String}[],
+            source_sigma_gate_status = source_sigma_gate.status,
+            authority_status = :authoritative,
             status = :evaluated,
             single_axion_allowed,
             geometry_allowed,
@@ -594,7 +641,7 @@ function _bhsr_positive_finite_sigma(value)
     return !ismissing(value) && value isa Real && isfinite(value) && value > 0
 end
 
-"""Audit exact source row coverage and source-defined one-sigma provenance."""
+"""Audit row coverage and provenance shape; caller rows cannot establish source authority."""
 function bhsr_sigma_gate(rows; bh_ensemble::BHSRBHIdentityEnsemble)
     ensemble = _bhsr_validate_bh_ensemble(bh_ensemble)
     counts = Dict{String,Int}()
@@ -637,8 +684,11 @@ function bhsr_sigma_gate(rows; bh_ensemble::BHSRBHIdentityEnsemble)
             !isempty(strip(row.sigma_spin_provenance))
         complete || push!(unresolved, name)
     end
-    status = isempty(duplicate_ids) && isempty(missing_ids) &&
+    diagnostic_input_status = isempty(duplicate_ids) && isempty(missing_ids) &&
         isempty(invalid_rows) && isempty(unresolved) ? :complete : :unavailable
+    source_authoritative = diagnostic_input_status == :complete &&
+        BHSR_APPENDIX_B_SOURCE_SIGMA_STATUS == "COMPLETE_SOURCE_DEFINED_GAUSSIAN_SIGMA_SET"
+    status = source_authoritative ? :complete : :unavailable
     return (; model_id = "APPENDIX-B-SIGMA-GATE",
             route_identity = ensemble.route_identity,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
@@ -652,6 +702,9 @@ function bhsr_sigma_gate(rows; bh_ensemble::BHSRBHIdentityEnsemble)
             missing_ids,
             invalid_rows,
             unresolved,
+            source_manifest_status = BHSR_APPENDIX_B_SOURCE_SIGMA_STATUS,
+            source_authoritative,
+            diagnostic_input_status,
             status)
 end
 

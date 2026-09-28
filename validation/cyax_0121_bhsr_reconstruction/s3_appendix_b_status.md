@@ -9,17 +9,27 @@ manifest `7b9c1cf9e4787372801125d7c195288d36f3cb9e094b0a2ec179493c8e8392d5`,
 and observational-data manifest
 `9da9f70efc6e654e3c38d963bf6a9e5ad9bec791a56ff2b43025bf019a7a87db`.
 
-The implementation covers the zero-covariance one-dimensional projection for
+The formula routines cover the zero-covariance one-dimensional projection for
 both `y=f(x)` and inverse `x=g(y)` branches, nearest inverse-branch derivative,
 Gaussian interval between two inverse branches, source finite-difference
 rules, conservative total-contour cusp projection, Eq. (96) products, and
-Eq. (95) `P_ex=1-P_allowed`. The probability tree multiplies probabilities
-over the complete declared black-hole ensemble for each axion, then over the
-explicit complete set of source-relevant axions. It fails closed on missing,
-duplicate, unresolved, or unsupported rows, ambiguous inverse topology, and
-contour or derivative evaluation outside the supplied support. It does not
-insert neutral probabilities or extrapolate. The exclusion threshold is the
-strict `P_ex > 0.9545` criterion.
+Eq. (95) `P_ex=1-P_allowed`. Numerical outputs from caller-supplied contours
+and sigmas are labeled diagnostics: they carry a diagnostic probability field,
+while the authoritative probability field remains missing. Caller-supplied
+mode labels or a `source_backed` flag do not establish provenance. The sigma
+gate distinguishes a structurally complete diagnostic input from the frozen
+manifest's source authority; it reports `status=unavailable` even when a
+synthetic input fixture has complete-looking rows.
+
+The probability tree still checks the complete declared black-hole ensemble
+for each axion and the explicit complete set of source-relevant axions. It
+fails closed on missing, duplicate, unresolved, or unsupported rows, ambiguous
+inverse topology, contour or derivative evaluation outside supplied support,
+and the absent source-defined Gaussian sigma set. Under the current frozen
+manifest, even fully populated caller-asserted rows return missing geometry
+probabilities and no threshold result. The strict `P_ex > 0.9545` criterion is
+reported only when an authoritative source sigma set exists; that condition is
+not met here.
 
 ## Source ensemble and contour support
 

@@ -6,7 +6,7 @@ function _bhsr_tree_fixture_row(axion_id, bh_id, probability, ensemble;
                                 model_id = "geometry-fixture",
                                 method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
                                 source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
-                                source_backed = true,
+                                source_backed = false,
                                 status = :evaluated)
     return (; model_id, axion_id, bh_id,
             route_identity = BHSR_APPENDIX_B_ROUTE,
@@ -68,7 +68,8 @@ function _bhsr_complete_sigma_fixture(ensemble)
 end
 
 function _bhsr_contour_fixture(masses, spins, evaluator; model_id = "inverse-fixture",
-                               active_modes = fill("|211>", length(masses)))
+                               active_modes = fill("|211>", length(masses)),
+                               source_grid = false)
     mode = only(filter(item -> item.label == "|211>", bhsr_nodeless_modes()))
     rows = Any[(; model_id, mass_solar = _bhsr_big(masses[i]),
                 union_spin = ismissing(spins[i]) ? missing : _bhsr_big(spins[i]),
@@ -81,7 +82,7 @@ function _bhsr_contour_fixture(masses, spins, evaluator; model_id = "inverse-fix
         BigFloat.(_bhsr_big.(masses)),
         Union{Missing,BigFloat}[ismissing(spin) ? missing : _bhsr_big(spin) for spin in spins],
         rows, [mode], big"4.3e-12", big"1e10", big"0.1", 256, 140, big"1e-40",
-        log10(_bhsr_big(first(masses))), log10(_bhsr_big(last(masses))), false, evaluator)
+        log10(_bhsr_big(first(masses))), log10(_bhsr_big(last(masses))), source_grid, evaluator)
 end
 
 @testset "CYAX-0121 BHSR analytic reconstruction" begin
@@ -198,14 +199,18 @@ end
         direct_curve; model_id = "direct-fixture", axion_id = "axion-test",
         bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
     @test direct.projection == :y_of_x
-    @test direct.status == :evaluated
-    @test direct.probability_allowed == big"0.5"
+    @test direct.status == :nonauthoritative_diagnostic
+    @test direct.diagnostic_status == :evaluated
+    @test direct.diagnostic_probability_allowed == big"0.5"
+    @test ismissing(direct.probability_allowed)
+    @test direct.authority_status == :unavailable_source_sigma_set
     @test direct.model_id == "direct-fixture"
     @test direct.axion_id == "axion-test"
     @test direct.bh_id == first(ensemble.bh_ids)
     @test direct.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
     @test direct.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test !direct.source_backed
+    @test direct.contour_provenance_status == :caller_supplied_contour_functions
     outside = bhsr_allowed_probability_direct(big"1.1", big"0", big"0.3", big"0.4",
         direct_curve; lower = 0, upper = 1, model_id = "direct-fixture",
         axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
@@ -227,11 +232,52 @@ end
     @test bhsr_contour_derivative(cusp, big"0") ≈ 0 atol = big"1e-25"
     @test bhsr_union_boundary([missing, big"0.4", big"0.3"]) == big"0.3"
 
+    source_modes = getfield.(modes, :label)
+    constant_curves = [x -> big"0.5" for _ in modes]
+    labeled_constant = bhsr_union_boundary_function(constant_curves;
+        model_id = "forged-source-closure", mode_labels = source_modes)
+    @test labeled_constant.mode_labels == source_modes
+    @test !labeled_constant.source_backed
+    @test labeled_constant(big"1") == big"0.5"
+    direct_forged_closure = bhsr_allowed_probability_direct(big"1", big"0.5",
+        big"1", big"0.1", labeled_constant; lower = 0, upper = 2,
+        model_id = "forged-source-closure", axion_id = "axion-211",
+        bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    @test direct_forged_closure.status == :nonauthoritative_diagnostic
+    @test direct_forged_closure.diagnostic_probability_allowed == big"0.5"
+    @test ismissing(direct_forged_closure.probability_allowed)
+    @test !direct_forged_closure.source_backed
+
+    manually_forged_union = BHSRUnionContour(constant_curves, "forged-struct",
+        BHSR_APPENDIX_B_ROUTE, BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+        BHSR_SOURCE_MODE_MANIFEST_SHA256, source_modes, true)
+    forged_struct_result = bhsr_allowed_probability_direct(big"1", big"0.5",
+        big"1", big"0.1", manually_forged_union; lower = 0, upper = 2,
+        model_id = "forged-struct", axion_id = "axion-211",
+        bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    @test manually_forged_union.source_backed
+    @test !forged_struct_result.source_backed
+    @test forged_struct_result.contour_provenance_status == :caller_supplied_contour_functions
+    @test ismissing(forged_struct_result.probability_allowed)
+
+    asserted_source_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2;
+        source_grid = true)
+    asserted_grid_result = bhsr_allowed_probability_direct(big"2", big"4", big"0.1",
+        big"0.2", asserted_source_grid; model_id = "inverse-fixture",
+        axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    @test asserted_source_grid.source_grid
+    @test !asserted_grid_result.source_backed
+    @test asserted_grid_result.contour_provenance_status ==
+        :matching_recipe_without_source_target_data
+    @test ismissing(asserted_grid_result.probability_allowed)
+
     boundary_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2)
     boundary_likelihood = bhsr_allowed_probability_direct(big"1", big"1", big"0.1",
         big"0.2", boundary_grid; model_id = "inverse-fixture", axion_id = "axion-test",
         bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
-    @test boundary_likelihood.status == :evaluated
+    @test boundary_likelihood.status == :nonauthoritative_diagnostic
+    @test boundary_likelihood.diagnostic_status == :evaluated
+    @test ismissing(boundary_likelihood.probability_allowed)
     @test boundary_likelihood.derivative ≈ 2 atol = big"1e-8"
     @test boundary_likelihood.contour_route_identity == "SYNTHETIC_FIXTURE"
     @test boundary_likelihood.contour_mass_support_solar == (big"1", big"3")
@@ -244,12 +290,15 @@ end
     inverse = bhsr_allowed_probability_inverse(big"0.5", big"0.75", big"0.1", big"0.2",
         two_root_grid; model_id = "inverse-fixture", axion_id = "axion-test",
         bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
-    @test inverse.status == :evaluated
+    @test inverse.status == :nonauthoritative_diagnostic
+    @test inverse.diagnostic_status == :evaluated
     @test inverse.inverse_roots ≈ [big"1.5", big"2.5"] atol = big"1e-11"
     @test inverse.nearest_branch == 1
     @test inverse.inverse_derivative ≈ 1 atol = big"1e-6"
-    @test 0 < inverse.probability_disallowed_between_branches < 1
-    @test 0 < inverse.probability_allowed < 1
+    @test 0 < inverse.diagnostic_probability_disallowed_between_branches < 1
+    @test 0 < inverse.diagnostic_probability_allowed < 1
+    @test ismissing(inverse.probability_disallowed_between_branches)
+    @test ismissing(inverse.probability_allowed)
     @test inverse.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
     @test inverse.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test !inverse.source_backed
@@ -287,15 +336,20 @@ end
     @test ismissing(gap.probability_allowed)
 
     axion_ids = ["axion-a", "axion-b"]
-    complete_tree_rows = [_bhsr_tree_fixture_row(axion, bh, big"0.5", ensemble)
+    complete_tree_rows = [_bhsr_tree_fixture_row(axion, bh, big"0.5", ensemble;
+                          source_backed = true)
                           for axion in axion_ids for bh in ensemble.bh_ids]
     tree = bhsr_probability_tree(complete_tree_rows; model_id = "geometry-fixture",
         source_relevant_axion_ids = axion_ids, bh_ensemble = ensemble)
-    @test tree.status == :evaluated
-    @test tree.single_axion_allowed == fill(big"0.5"^24, 2)
-    @test tree.geometry_allowed == big"0.5"^48
-    @test tree.geometry_excluded == 1 - big"0.5"^48
-    @test tree.threshold_exceeded
+    @test tree.status == :unavailable
+    @test tree.source_sigma_gate_status == :unavailable
+    @test tree.authority_status == :unavailable_source_sigma_set
+    @test ismissing(tree.single_axion_allowed[1])
+    @test ismissing(tree.geometry_allowed)
+    @test ismissing(tree.geometry_excluded)
+    @test ismissing(tree.threshold_exceeded)
+    @test ("<source-defined-Gaussian-sigma-set>",
+           BHSR_APPENDIX_B_SOURCE_SIGMA_STATUS) in tree.unresolved_terms
     @test tree.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
     @test tree.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test_throws ArgumentError bhsr_probability_tree(complete_tree_rows;
@@ -341,18 +395,53 @@ end
     @test arbitrary_subset.status == :unavailable
     @test ismissing(arbitrary_subset.geometry_allowed)
 
-    threshold_rows = Any[_bhsr_tree_fixture_row("axion-one", bh, BigFloat(1), ensemble)
+    adversarial_axion_ids = ["axion-" * replace(label, "|" => "") for label in source_modes]
+    adversarial_rows = NamedTuple[]
+    for axion_id in adversarial_axion_ids, bh_id in ensemble.bh_ids
+        diagnostic = bhsr_allowed_probability_direct(big"1", big"0.5", big"1", big"0.1",
+            labeled_constant; lower = 0, upper = 2, model_id = "forged-source-closure",
+            axion_id, bh_id, bh_ensemble = ensemble)
+        # Simulate a caller copying invented sigmas and asserting the result is
+        # source-backed/evaluated. The frozen source manifest must still block it.
+        push!(adversarial_rows, merge(diagnostic,
+            (; model_id = "forged-source-closure", source_backed = true,
+               status = :evaluated,
+               probability_allowed = diagnostic.diagnostic_probability_allowed)))
+    end
+    @test length(adversarial_rows) == 5 * 24
+    invented_sigma_gate = bhsr_sigma_gate(_bhsr_complete_sigma_fixture(ensemble);
+        bh_ensemble = ensemble)
+    @test invented_sigma_gate.diagnostic_input_status == :complete
+    @test invented_sigma_gate.status == :unavailable
+    @test !invented_sigma_gate.source_authoritative
+    forged_complete_tree = bhsr_probability_tree(adversarial_rows;
+        model_id = "forged-source-closure", source_relevant_axion_ids = adversarial_axion_ids,
+        bh_ensemble = ensemble)
+    @test 1 - big"0.5"^(5 * 24) > big"0.9545"
+    @test forged_complete_tree.status == :unavailable
+    @test forged_complete_tree.authority_status == :unavailable_source_sigma_set
+    @test all(ismissing, forged_complete_tree.single_axion_allowed)
+    @test ismissing(forged_complete_tree.geometry_allowed)
+    @test ismissing(forged_complete_tree.geometry_excluded)
+    @test ismissing(forged_complete_tree.threshold_exceeded)
+
+    threshold_rows = Any[_bhsr_tree_fixture_row("axion-one", bh, BigFloat(1), ensemble;
+                            source_backed = true)
                       for bh in ensemble.bh_ids]
     threshold_rows[end] = _bhsr_tree_fixture_row("axion-one", last(ensemble.bh_ids),
                                                  big"0.0455", ensemble)
     threshold_equal = bhsr_probability_tree(threshold_rows; model_id = "geometry-fixture",
         source_relevant_axion_ids = ["axion-one"], bh_ensemble = ensemble)
-    @test threshold_equal.geometry_excluded == big"0.9545"
-    @test !threshold_equal.threshold_exceeded
+    @test threshold_equal.status == :unavailable
+    @test ismissing(threshold_equal.geometry_excluded)
+    @test ismissing(threshold_equal.threshold_exceeded)
 
     sigma_rows = _bhsr_complete_sigma_fixture(ensemble)
     gate = bhsr_sigma_gate(sigma_rows; bh_ensemble = ensemble)
-    @test gate.status == :complete
+    @test gate.status == :unavailable
+    @test gate.diagnostic_input_status == :complete
+    @test gate.source_manifest_status == BHSR_APPENDIX_B_SOURCE_SIGMA_STATUS
+    @test !gate.source_authoritative
     @test gate.expected_rows == 24
     @test length(gate.expected_bh_ids) == 24
     duplicate_sigma_rows = copy(sigma_rows)
