@@ -66,6 +66,16 @@ The implementation reports these as unsupported and does not evaluate the
 available as a digitized source table in this reconstruction, so no
 published-contour comparison is claimed.
 
+Result identities distinguish formula calculations from the Fig. 3 target.
+Scalar topology and per-mass rows carry generic Eq. (12)-(14) target IDs for
+the two listed stellar ages. A contour grid receives a Fig. 3 target ID only
+when it uses the full 1201-point `0.1`-to-`100 M_sun` mass range, fixed
+`mu=4.3e-12 eV`, the complete frozen mode family, and the frozen numerical
+settings. Other grids carry the generic equation target ID and remain
+diagnostic. Grid requests outside the Fig. 3 mass range fail closed. Likelihood
+metadata carries the contour target ID and its `tau_years`; caller-supplied
+closures have missing target and age metadata.
+
 ## Why the source-wide probability is unavailable
 
 The frozen observational manifest identifies all 24 2018 rows and records

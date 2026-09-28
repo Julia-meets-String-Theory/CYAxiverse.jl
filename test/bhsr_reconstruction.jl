@@ -73,7 +73,9 @@ function _bhsr_contour_fixture(masses, spins, evaluator; model_id = "inverse-fix
                                active_modes = fill("|211>", length(masses)),
                                source_grid = false,
                                contour_topology_status = nothing,
-                               topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256)
+                               topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
+                               target_identity = "SYNTHETIC-FIXTURE-TARGET",
+                               tau_years = big"1e10")
     mode = only(filter(item -> item.label == "|211>", bhsr_nodeless_modes()))
     rows = Any[]
     for i in eachindex(masses)
@@ -84,13 +86,13 @@ function _bhsr_contour_fixture(masses, spins, evaluator; model_id = "inverse-fix
         push!(rows, contour_topology_status === nothing ? row :
             merge(row, (; contour_topology_status)))
     end
-    return BHSRContourGrid(model_id, "SYNTHETIC_FIXTURE", "SYNTHETIC-FIXTURE-TARGET",
+    return BHSRContourGrid(model_id, "SYNTHETIC_FIXTURE", target_identity,
         BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
         topology_method_addendum_sha256,
         BHSR_SOURCE_MODE_MANIFEST_SHA256,
         BigFloat.(_bhsr_big.(masses)),
         Union{Missing,BigFloat}[ismissing(spin) ? missing : _bhsr_big(spin) for spin in spins],
-        rows, [mode], big"4.3e-12", big"1e10", big"0.1", 256, 140, big"1e-40",
+        rows, [mode], big"4.3e-12", _bhsr_big(tau_years), big"0.1", 256, 140, big"1e-40",
         log10(_bhsr_big(first(masses))), log10(_bhsr_big(last(masses))), source_grid, evaluator)
 end
 
@@ -99,6 +101,12 @@ end
     @test [mode.label for mode in modes] == ["|211>", "|322>", "|433>", "|544>", "|655>"]
     @test [bhsr_principal_number(mode) for mode in modes] == 2:6
     @test all(mode -> mode.n_r == 0 && mode.m == mode.l, modes)
+    @test _bhsr_is_frozen_fig3_grid(big"4.3e-12", big"1e10", modes,
+        big"-1", big"2", 1201, big"0.1", 256, 140, big"1e-40")
+    @test !_bhsr_is_frozen_fig3_grid(big"1e-12", big"1e10", modes,
+        big"-1", big"2", 1201, big"0.1", 256, 140, big"1e-40")
+    @test !_bhsr_is_frozen_fig3_grid(big"4.3e-12", big"1e10", modes,
+        big"-2", big"2", 1201, big"0.1", 256, 140, big"1e-40")
     @test BHSR_SOURCE_MODE_MANIFEST_SHA256 ==
         bytes2hex(sha256(read(BHSR_SOURCE_MODE_MANIFEST)))
     @test BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 ==
@@ -147,10 +155,19 @@ end
                                   mode211, big"1e10") > 0
     low_alpha_free = bhsr_critical_spin_topology(big"1", big"4.3e-12", mode211,
         big"1e10"; model_id = "low-alpha-free-topology")
-    @test low_alpha_free.target_identity == "SOURCE-2020-FIG3-STELLAR-TAU-1E10YR"
+    @test low_alpha_free.target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
     short_fig3_target = bhsr_critical_spin_topology(big"10", big"4.3e-12",
         mode211, big"4.5e6"; model_id = "fig3-short-timescale-target")
-    @test short_fig3_target.target_identity == "SOURCE-2020-FIG3-STELLAR-TAU-4P5E6YR"
+    @test short_fig3_target.target_identity == "SOURCE-2020-EQ12-14-TAU-4P5E6YR"
+    off_coupling_topology = bhsr_critical_spin_topology(big"10", big"1e-12",
+        mode211, big"1e10"; model_id = "off-fig3-coupling-diagnostic")
+    @test off_coupling_topology.target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
+    off_mass_topology = bhsr_critical_spin_topology(big"1000", big"4.3e-12",
+        mode211, big"1e10"; model_id = "off-fig3-mass-diagnostic")
+    @test off_mass_topology.target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
+    off_support_row = bhsr_regge_row(big"1000", big"4.3e-12", big"1e10",
+        [mode211]; model_id = "off-fig3-mass-row-diagnostic")
+    @test off_support_row.target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
     @test_throws ArgumentError bhsr_critical_spin_topology(big"10",
         big"4.3e-12", mode211, big"1e9")
     @test_throws ArgumentError bhsr_critical_spin(big"10",
@@ -183,7 +200,7 @@ end
     @test low_alpha_row.union_spin == first(low_alpha_free.roots)
     @test low_alpha_row.union_intervals == low_alpha_free.intervals
     @test low_alpha_row.contour_topology_status == :bounded_efficiency_interval
-    @test low_alpha_row.target_identity == "SOURCE-2020-FIG3-STELLAR-TAU-1E10YR"
+    @test low_alpha_row.target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
     @test low_alpha_row.tau_years == big"1e10"
     @test low_alpha_row.mode_identities == [(label = "|211>", n_r = 0, l = 1, m = 1)]
     @test low_alpha_row.delta_a == big"0.1" && low_alpha_row.precision_bits == 256
@@ -420,11 +437,24 @@ end
     @test first(grid[3].per_mode).first == mode211.label
     @test grid[3].union_spin == last(grid[3].per_mode[1])
     @test grid.model_id == "three-point-regge-fixture"
-    @test grid.target_identity == "SOURCE-2020-FIG3-STELLAR-TAU-1E10YR"
+    @test grid.target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
     @test grid.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
     @test grid.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test grid.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test !grid.source_grid
+    off_coupling_grid = bhsr_regge_grid(big"1e-12", big"1e10";
+        mass_log10_min = -1, mass_log10_max = 0, points = 2,
+        modes = [mode211], model_id = "off-fig3-coupling-grid-diagnostic")
+    @test !off_coupling_grid.source_grid
+    @test off_coupling_grid.target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
+    @test_throws ArgumentError bhsr_regge_grid(big"4.3e-12", big"1e10";
+        mass_log10_min = -2, mass_log10_max = 0, points = 2,
+        modes = [mode211], model_id = "off-fig3-mass-grid")
+    grid_45e6 = bhsr_regge_grid(big"4.3e-12", big"4.5e6";
+        mass_log10_min = -1, mass_log10_max = 1, points = 3,
+        modes = [mode211], model_id = "three-point-short-timescale-grid")
+    @test !grid_45e6.source_grid
+    @test grid_45e6.target_identity == "SOURCE-2020-EQ12-14-TAU-4P5E6YR"
 
     @test isapprox(bhsr_standard_normal_cdf(big"1"),
                    big"0.841344746068542948585232545632"; rtol = big"1e-28")
@@ -438,6 +468,18 @@ end
     @test length(ensemble.bh_ids) == BHSR_APPENDIX_B_EXPECTED_ROWS
     @test length(unique(ensemble.bh_ids)) == length(ensemble.bh_ids)
     @test ensemble.observational_manifest_sha256 == BHSR_OBSERVATIONAL_MANIFEST_SHA256
+
+    direct_long_grid = bhsr_allowed_probability_direct(big"1", big"0", big"0.1",
+        big"0.2", grid; model_id = grid.model_id, axion_id = "axion-grid-test",
+        bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    direct_short_grid = bhsr_allowed_probability_direct(big"1", big"0", big"0.1",
+        big"0.2", grid_45e6; model_id = grid_45e6.model_id,
+        axion_id = "axion-grid-test", bh_id = first(ensemble.bh_ids),
+        bh_ensemble = ensemble)
+    @test direct_long_grid.tau_years == big"1e10"
+    @test direct_long_grid.contour_target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
+    @test direct_short_grid.tau_years == big"4.5e6"
+    @test direct_short_grid.contour_target_identity == "SOURCE-2020-EQ12-14-TAU-4P5E6YR"
     @test_throws ArgumentError bhsr_bh_identity_ensemble("REFERENCE_2021_POPULATION")
 
     direct_curve = bhsr_union_boundary_function([x -> 2x + 1]; model_id = "direct-fixture")
@@ -458,6 +500,8 @@ end
     @test direct.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test !direct.source_backed
     @test direct.contour_provenance_status == :caller_supplied_contour_functions
+    @test ismissing(direct.contour_target_identity)
+    @test ismissing(direct.tau_years)
     outside = bhsr_allowed_probability_direct(big"1.1", big"0", big"0.3", big"0.4",
         direct_curve; lower = 0, upper = 1, model_id = "direct-fixture",
         axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
@@ -555,12 +599,37 @@ end
     @test boundary_likelihood.derivative ≈ 2 atol = big"1e-8"
     @test boundary_likelihood.contour_route_identity == "SYNTHETIC_FIXTURE"
     @test boundary_likelihood.contour_mass_support_solar == (big"1", big"3")
+    @test boundary_likelihood.contour_target_identity == "SYNTHETIC-FIXTURE-TARGET"
+    @test boundary_likelihood.tau_years == big"1e10"
     @test boundary_likelihood.likelihood_route_identity == BHSR_APPENDIX_B_ROUTE
+
+    long_tau_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2;
+        model_id = "same-model-two-targets",
+        target_identity = "SOURCE-2020-EQ12-14-TAU-1E10YR", tau_years = big"1e10")
+    short_tau_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2;
+        model_id = "same-model-two-targets",
+        target_identity = "SOURCE-2020-EQ12-14-TAU-4P5E6YR", tau_years = big"4.5e6")
+    long_tau_direct = bhsr_allowed_probability_direct(big"2", big"3", big"0.1",
+        big"0.2", long_tau_grid; model_id = "same-model-two-targets",
+        axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    short_tau_direct = bhsr_allowed_probability_direct(big"2", big"3", big"0.1",
+        big"0.2", short_tau_grid; model_id = "same-model-two-targets",
+        axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    @test long_tau_direct.tau_years == big"1e10"
+    @test long_tau_direct.contour_target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
+    @test short_tau_direct.tau_years == big"4.5e6"
+    @test short_tau_direct.contour_target_identity == "SOURCE-2020-EQ12-14-TAU-4P5E6YR"
 
     two_root_grid = _bhsr_contour_fixture(
         [big"0.5", 1, big"1.5", 2, big"2.5", 3, big"3.5"],
         [missing, 0, big"0.75", 1, big"0.75", 0, missing],
-        x -> 1 <= x <= 3 ? big"1" - (x - 2)^2 : missing)
+        x -> 1 <= x <= 3 ? big"1" - (x - 2)^2 : missing;
+        target_identity = "SOURCE-2020-EQ12-14-TAU-1E10YR", tau_years = big"1e10")
+    short_two_root_grid = _bhsr_contour_fixture(
+        [big"0.5", 1, big"1.5", 2, big"2.5", 3, big"3.5"],
+        [missing, 0, big"0.75", 1, big"0.75", 0, missing],
+        x -> 1 <= x <= 3 ? big"1" - (x - 2)^2 : missing;
+        target_identity = "SOURCE-2020-EQ12-14-TAU-4P5E6YR", tau_years = big"4.5e6")
     inverse = bhsr_allowed_probability_inverse(big"0.5", big"0.75", big"0.1", big"0.2",
         two_root_grid; model_id = "inverse-fixture", axion_id = "axion-test",
         bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
@@ -576,6 +645,13 @@ end
     @test inverse.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
     @test inverse.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test inverse.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
+    @test inverse.tau_years == big"1e10"
+    @test inverse.contour_target_identity == "SOURCE-2020-EQ12-14-TAU-1E10YR"
+    short_tau_inverse = bhsr_allowed_probability_inverse(big"0.5", big"0.75",
+        big"0.1", big"0.2", short_two_root_grid; model_id = "inverse-fixture",
+        axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    @test short_tau_inverse.tau_years == big"4.5e6"
+    @test short_tau_inverse.contour_target_identity == "SOURCE-2020-EQ12-14-TAU-4P5E6YR"
     @test !inverse.source_backed
     tangent = bhsr_allowed_probability_inverse(big"0.5", big"1", big"0.1", big"0.2",
         two_root_grid; model_id = "inverse-fixture", axion_id = "axion-test",

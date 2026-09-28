@@ -78,6 +78,10 @@ const BHSR_FIG3_TARGET_IDENTITIES = (
     ("1e10", "SOURCE-2020-FIG3-STELLAR-TAU-1E10YR"),
     ("4.5e6", "SOURCE-2020-FIG3-STELLAR-TAU-4P5E6YR"),
 )
+const BHSR_ANALYTIC_EQUATION_TARGET_IDENTITIES = (
+    ("1e10", "SOURCE-2020-EQ12-14-TAU-1E10YR"),
+    ("4.5e6", "SOURCE-2020-EQ12-14-TAU-4P5E6YR"),
+)
 
 _bhsr_big(x::BigFloat) = x
 _bhsr_big(x::AbstractFloat) = parse(BigFloat, string(x))
@@ -186,6 +190,21 @@ function _bhsr_reference_target_identity(tau_years::Real, targets, route_label::
         allowed = join(first.(targets), ", ")
         throw(ArgumentError("$route_label reference route only defines timescales: $allowed years"))
     end
+end
+
+function _bhsr_is_frozen_fig3_grid(mu_eV::Real, tau_years::Real,
+                                   modes::AbstractVector{BHSRMode},
+                                   lower::Real, upper::Real, points::Integer,
+                                   delta_a::Real, precision_bits::Integer,
+                                   max_iterations::Integer, absolute_tolerance::Real)
+    return points == 1201 && _bhsr_big(lower) == big"-1" &&
+        _bhsr_big(upper) == big"2" &&
+        getfield.(modes, :label) == getfield.(_BHSR_SOURCE_MODES, :label) &&
+        precision_bits == 256 && max_iterations == 140 &&
+        _bhsr_big(absolute_tolerance) == big"1e-40" &&
+        _bhsr_big(delta_a) == big"0.1" &&
+        _bhsr_big(mu_eV) == big"4.3e-12" &&
+        _bhsr_big(tau_years) in (big"1e10", big"4.5e6")
 end
 
 function _bhsr_model_id(model_id::AbstractString)
@@ -559,7 +578,7 @@ function bhsr_critical_spin_topology(mass_solar::Real, mu_eV::Real,
     _bhsr_validate_reference_delta_a(delta_a)
     _bhsr_validate_reference_mode(mode)
     target_identity = _bhsr_reference_target_identity(tau_years,
-        BHSR_FIG3_TARGET_IDENTITIES, "2020 Fig. 3")
+        BHSR_ANALYTIC_EQUATION_TARGET_IDENTITIES, "2020 analytic equations (12)-(14)")
     id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         f(a) = bhsr_free_field_residual(mass_solar, mu_eV, a, mode, tau_years;
@@ -622,7 +641,7 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
     _bhsr_validate_reference_delta_a(delta_a)
     _bhsr_validate_modes(modes)
     target_identity = _bhsr_reference_target_identity(tau_years,
-        BHSR_FIG3_TARGET_IDENTITIES, "2020 Fig. 3")
+        BHSR_ANALYTIC_EQUATION_TARGET_IDENTITIES, "2020 analytic equations (12)-(14)")
     id = _bhsr_model_id(model_id)
     topologies = [bhsr_critical_spin_topology(mass_solar, mu_eV, mode,
         tau_years; model_id = id, delta_a, precision_bits, max_iterations,
@@ -684,14 +703,22 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
                                                absolute_tolerance)
     _bhsr_validate_reference_delta_a(delta_a)
     _bhsr_validate_modes(modes)
-    target_identity = _bhsr_reference_target_identity(tau_years,
-        BHSR_FIG3_TARGET_IDENTITIES, "2020 Fig. 3")
     points >= 2 || throw(ArgumentError("mass grid needs at least two points"))
     mass_log10_max > mass_log10_min || throw(ArgumentError("mass grid bounds are reversed"))
     id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         lower = BigFloat(mass_log10_min)
-        width = BigFloat(mass_log10_max) - lower
+        upper = BigFloat(mass_log10_max)
+        width = upper - lower
+        lower >= -1 && upper <= 2 ||
+            throw(ArgumentError("2020 Fig. 3 stellar mass support is 0.1 to 100 solar masses"))
+        source_grid = _bhsr_is_frozen_fig3_grid(mu_eV, tau_years, modes,
+            lower, upper, points, delta_a, precision_bits, max_iterations,
+            absolute_tolerance)
+        target_identity = _bhsr_reference_target_identity(tau_years,
+            source_grid ? BHSR_FIG3_TARGET_IDENTITIES :
+                BHSR_ANALYTIC_EQUATION_TARGET_IDENTITIES,
+            source_grid ? "2020 Fig. 3" : "2020 analytic equations (12)-(14)")
         masses = [BigFloat(10)^(lower + width * BigFloat(i - 1) / (points - 1))
                   for i in 1:points]
         rows = Any[bhsr_regge_row(mass, mu_eV, tau_years, modes;
@@ -701,13 +728,6 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
         union_spins = Union{Missing,BigFloat}[
             row.contour_topology_status != :single_onset_to_extremal_spin ||
             ismissing(row.union_spin) ? missing : row.union_spin for row in rows]
-        source_grid = points == 1201 && lower == -1 && width == 3 &&
-            getfield.(modes, :label) == getfield.(_BHSR_SOURCE_MODES, :label) &&
-            precision_bits == 256 && max_iterations == 140 &&
-            _bhsr_big(absolute_tolerance) == big"1e-40" &&
-            _bhsr_big(delta_a) == big"0.1" &&
-            _bhsr_big(mu_eV) == big"4.3e-12" &&
-            _bhsr_big(tau_years) in (big"1e10", big"4.5e6")
         return BHSRContourGrid(id, "REFERENCE_2021_ANALYTIC", target_identity,
             BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
             BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,

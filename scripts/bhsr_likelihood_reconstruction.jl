@@ -140,6 +140,8 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
                 topology_method_addendum_sha256 = contour.topology_method_addendum_sha256,
                 mode_labels = getfield.(contour.modes, :label),
                 contour_route_identity = contour.route_identity,
+                target_identity = contour.target_identity,
+                tau_years = contour.tau_years,
                 contour_mass_support_solar =
                     (first(contour.mass_solar), last(contour.mass_solar)))
     elseif contour isa BHSRUnionContour
@@ -155,6 +157,8 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
                 topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
                 mode_labels = contour.mode_labels,
                 contour_route_identity = contour.route_identity,
+                target_identity = missing,
+                tau_years = missing,
                 contour_mass_support_solar = missing)
     end
     return (; source_backed = false,
@@ -163,6 +167,8 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
             topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             mode_labels = String[],
             contour_route_identity = "UNSPECIFIED_CONTOUR",
+            target_identity = missing,
+            tau_years = missing,
             contour_mass_support_solar = missing)
 end
 
@@ -181,6 +187,8 @@ function _bhsr_likelihood_metadata(contour, model_id::AbstractString,
             route_identity = BHSR_APPENDIX_B_ROUTE,
             likelihood_route_identity = BHSR_APPENDIX_B_ROUTE,
             contour_route_identity = contour_identity.contour_route_identity,
+            contour_target_identity = contour_identity.target_identity,
+            tau_years = contour_identity.tau_years,
             contour_mass_support_solar = contour_identity.contour_mass_support_solar,
             contour_provenance_status = contour_identity.contour_provenance_status,
             contour_topology_status = contour_identity.contour_topology_status,
