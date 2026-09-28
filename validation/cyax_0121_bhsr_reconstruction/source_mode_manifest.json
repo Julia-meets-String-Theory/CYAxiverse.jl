@@ -1,0 +1,38 @@
+{
+  "manifest_id": "CYAX-0121-REFERENCE-2021-ANALYTIC-MODES-r1",
+  "handoff_sha256": "39f5a823a67edca0ffc0a2b4221ba68901e6f2438efb5e6bbbe3ae2d8ceef170",
+  "route_identity": "REFERENCE_2021_ANALYTIC",
+  "source_locators": [
+    {
+      "source": "arXiv:2009.07206v1",
+      "url": "https://arxiv.org/pdf/2009.07206v1",
+      "locators": ["Sec. II.1.1, Eqs. (12)-(14)", "Sec. II.1.1, fastest-growing |211> paragraph", "Fig. 3 caption"]
+    },
+    {
+      "source": "arXiv:1411.2263v3",
+      "url": "https://arxiv.org/html/1411.2263v3",
+      "locators": ["Sec. II.1, Eqs. (2)-(5)", "Fig. 1 caption"]
+    },
+    {
+      "source": "arXiv:2103.06812v2",
+      "url": "https://arxiv.org/html/2103.06812v2",
+      "locators": ["Sec. 3.1, principal quantum number convention", "Sec. 3.1, Eq. (13)"]
+    }
+  ],
+  "convention": {
+    "principal_quantum_number": "N",
+    "radial_overtone": "n_r",
+    "relation": "N = n_r + l + 1",
+    "included_family": "n_r = 0, m = l, l = 1..5",
+    "source_notation_note": "The 2020 source labels |211> as n=2 and writes its hydrogenic denominator as n+l+1, while its Eq. (13) coefficient has the radial-index factorial form. The source prose also says it uses n for principal n. To avoid variable overloading, this manifest records N and n_r separately. The |211> identification and the n=l+1 nodeless family are explicitly shown in arXiv:1411.2263v3 Fig. 1; the 2020 Fig. 3 caption explicitly requires l=m=1..5. For Eq. (13), n_r is the factorial index and the denominator is N. For the Bose occupation n^4, use N, as specified in arXiv:2103.06812v2 Sec. 3.1 Eq. (13).",
+    "mode_selection_basis": "For each source-required l=m, select the lowest nodeless principal level N=l+1. The 2020 source identifies |211> as fastest for l=1 and calls l=m=1..5 dominant in Fig. 3; the source hydrogenic convention identifies the nodeless sequence.",
+    "modes": [
+      {"label": "|211>", "N": 2, "l": 1, "m": 1, "n_r": 0},
+      {"label": "|322>", "N": 3, "l": 2, "m": 2, "n_r": 0},
+      {"label": "|433>", "N": 4, "l": 3, "m": 3, "n_r": 0},
+      {"label": "|544>", "N": 5, "l": 4, "m": 4, "n_r": 0},
+      {"label": "|655>", "N": 6, "l": 5, "m": 5, "n_r": 0}
+    ]
+  },
+  "status": "FROZEN_BEFORE_TARGET_COMPARISON"
+}

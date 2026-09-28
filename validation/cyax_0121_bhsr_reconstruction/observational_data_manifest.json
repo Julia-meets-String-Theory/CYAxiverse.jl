@@ -1,0 +1,56 @@
+{
+  "manifest_id": "CYAX-0121-BHSR-OBSERVATIONAL-SOURCES-r1",
+  "handoff_sha256": "39f5a823a67edca0ffc0a2b4221ba68901e6f2438efb5e6bbbe3ae2d8ceef170",
+  "reference_2018_appendix_b": {
+    "source": "arXiv:1805.02016v2",
+    "url": "https://arxiv.org/html/1805.02016v2",
+    "table_locator": "Table 1, lines 274-302 of source HTML",
+    "appendix_locator": "Appendix B, Eqs. (95)-(98), source lines 597-619",
+    "row_count": 24,
+    "rows": [
+      {"name": "GW150914 (Primary)", "group": "GW", "reported_level": "90% mass; 90% spin"},
+      {"name": "GW150914 (Secondary)", "group": "GW", "reported_level": "90% mass; 90% spin"},
+      {"name": "GW151226 (Primary)", "group": "GW", "reported_level": "90% mass; 90% spin"},
+      {"name": "GW151226 (Secondary)", "group": "GW", "reported_level": "90% mass; 90% spin"},
+      {"name": "GW170104 (Primary)", "group": "GW", "reported_level": "90% mass; 90% spin"},
+      {"name": "GW170104 (Secondary)", "group": "GW", "reported_level": "90% mass; 90% spin"},
+      {"name": "Cygnus X-1", "group": "XRB", "reported_level": "1 sigma mass; 3 sigma spin lower bound"},
+      {"name": "XTE J1550-564", "group": "XRB", "reported_level": "1 sigma mass; 90% spin interval"},
+      {"name": "A 0620-00", "group": "XRB", "reported_level": "1 sigma mass; 1 sigma spin"},
+      {"name": "4U 1543-475", "group": "XRB", "reported_level": "1 sigma mass; 1 sigma spin"},
+      {"name": "GRO J1655-40", "group": "XRB", "reported_level": "95% mass; 1 sigma spin"},
+      {"name": "GRS 1915+105", "group": "XRB", "reported_level": "1 sigma mass; 1 sigma spin lower bound"},
+      {"name": "LMC X-1", "group": "XRB", "reported_level": "1 sigma mass; 1 sigma asymmetric spin interval"},
+      {"name": "LMC X-3", "group": "XRB", "reported_level": "1 sigma mass; 1 sigma asymmetric spin interval"},
+      {"name": "M33 X-7", "group": "XRB", "reported_level": "1 sigma mass; 1 sigma spin"},
+      {"name": "Mrk 335", "group": "SMBH", "reported_level": "1 sigma mass; 90% asymmetric spin interval"},
+      {"name": "Fairall 9", "group": "SMBH", "reported_level": "1 sigma mass; 90% asymmetric spin interval"},
+      {"name": "Mrk 79", "group": "SMBH", "reported_level": "1 sigma mass; 90% spin"},
+      {"name": "NGC 3783", "group": "SMBH", "reported_level": "1 sigma mass; 90% spin lower bound"},
+      {"name": "MCG-6-30-15", "group": "SMBH", "reported_level": "1 sigma asymmetric mass; 90% spin lower bound"},
+      {"name": "NGC 7469", "group": "SMBH", "reported_level": "1 sigma mass; 90% spin"},
+      {"name": "Ark 120", "group": "SMBH", "reported_level": "1 sigma mass; 90% asymmetric spin interval"},
+      {"name": "Mrk 110", "group": "SMBH", "reported_level": "1 sigma mass; 90% spin lower bound"},
+      {"name": "NGC 4051", "group": "SMBH", "reported_level": "1 sigma mass; 90% spin lower bound"}
+    ],
+    "known_censored_spin_rows": ["Cygnus X-1", "GRS 1915+105", "NGC 3783", "MCG-6-30-15", "Mrk 110", "NGC 4051"],
+    "known_non_1sigma_or_asymmetric_rows": ["GW150914 (Primary)", "GW150914 (Secondary)", "GW151226 (Primary)", "GW151226 (Secondary)", "GW170104 (Primary)", "GW170104 (Secondary)", "XTE J1550-564", "GRO J1655-40", "LMC X-1", "LMC X-3", "Mrk 335", "Fairall 9", "NGC 3783", "MCG-6-30-15", "NGC 7469", "Ark 120", "Mrk 110", "NGC 4051"],
+    "status": "NO_COMPLETE_SOURCE_DEFINED_GAUSSIAN_SIGMA_SET",
+    "blocker": "Appendix B defines Gaussian mass/spin standard deviations but does not state how to map one-sided lower bounds, 90%/95% intervals, or asymmetric intervals to those standard deviations. The source prose says its selected objects have upper and lower bounds on both mass and spin, but Table 1 contradicts that statement for the six listed spin lower bounds. No source-defined complete subset was located."
+  },
+  "reference_2021_analytic_dataset": {
+    "source": "arXiv:2009.07206v1",
+    "url": "https://arxiv.org/pdf/2009.07206v1",
+    "locators": ["Fig. 3 left-panel caption", "Appendix A Tables IV-VI", "Appendix D Tables VII-IX"],
+    "scope": "Fig. 3 source example fixes mu0=4.3e-12 eV, l=m=1..5, and stellar timescales 1e10 yr and 4.5e6 yr. The data overlay is identified as Tables IV and V; full ensemble tables are IV-VI.",
+    "uncertainty_status": "NOT_USED_FOR_S1_FORMULA_BOUNDARIES; INCOMPLETE_FOR_SOURCE_WIDE_S3_S4",
+    "audit_note": "Appendix table entries also retain one-sided spin bounds. They do not provide an alternate complete Gaussian-sigma convention for the required Appendix-B likelihood."
+  },
+  "rules": {
+    "missing_or_censored_sigma": "FAIL_CLOSED",
+    "symmetric_sigma_inference": "PROHIBITED",
+    "silent_row_omission": "PROHIBITED",
+    "authoritative_population_products": "UNAVAILABLE_UNTIL_SOURCE_CONVENTION_IS_RESOLVED",
+    "partial_subset_products": "diagnostic only; must name the subset and must not be called source-equivalent"
+  }
+}

@@ -27,6 +27,7 @@ include(joinpath(@__DIR__, "optional_plotting.jl"))
 # fast and full modes. Keep the implementation boundary available without
 # loading the other full-mode drivers.
 include(joinpath(@__DIR__, "..", "scripts", "inflation_candidate_refinement.jl"))
+include(joinpath(@__DIR__, "bhsr_reconstruction.jl"))
 
 if _FULL
     include(joinpath(@__DIR__, "..", "scripts", "vacua_pipeline.jl"))
