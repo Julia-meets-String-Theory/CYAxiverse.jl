@@ -1,0 +1,73 @@
+{
+  "schema": "CYAX-0115-r4-verification-run-report-v1",
+  "manifest_sha256": "04254692b901a0b2a2d18d2bb21d7647af9aa48e0ce7d7173307a82ff6563263",
+  "commands": [
+    {
+      "command": "python3 -m py_compile scripts/validate_uniform_frst_ensemble.py validation/cyax_0115_uniform_frst/local_verification.py validation/cyax_0115_uniform_frst/local_comparisons.py validation/cyax_0115_uniform_frst/write_evidence_summary.py; then import all four modules",
+      "exit_code": 0,
+      "result": "PASS; all four validation modules compiled and imported"
+    },
+    {
+      "command": "python3 scripts/agent_verify.py python-regressions",
+      "exit_code": 1,
+      "result": "FAILED because system Python 3.14 has no NumPy or h5py; import errors in test_build_orientifold_axion_database and test_qed_divisor_assignment. Eight other tests passed.",
+      "stdout_log": "/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_rud5xv57/python_regressions.stdout.log",
+      "stderr_log": "/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_rud5xv57/python_regressions.stderr.log"
+    },
+    {
+      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python scripts/agent_verify.py python-regressions",
+      "exit_code": 0,
+      "result": "PASS; repository Python regression runner, 10 tests"
+    },
+    {
+      "command": "python3 -m unittest test_geometry_sampler (cwd=scripts)",
+      "exit_code": 1,
+      "result": "FAILED at import because system Python has no NumPy"
+    },
+    {
+      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python -m unittest test_geometry_sampler (cwd=scripts)",
+      "exit_code": 1,
+      "result": "19 tests ran; 17 passed and 2 pre-existing NTFE mock-contract tests failed. test_ntfe_schema_contract_arguments_route_to_cytools expected the ntfe call dictionary but observed face_triangs arguments; test_ntfe_uses_direct_extension_with_bounded_face_pool expected call[0]=='ntfe' but observed 'face_triangs'. The tested sampler and test files are unchanged from the exact dispatch base.",
+      "failures": [
+        "test_ntfe_schema_contract_arguments_route_to_cytools",
+        "test_ntfe_uses_direct_extension_with_bounded_face_pool"
+      ]
+    },
+    {
+      "command": "python3 scripts/agent_verify.py diff-check",
+      "exit_code": 0,
+      "result": "PASS; no whitespace errors"
+    },
+    {
+      "command": "git diff --check HEAD",
+      "exit_code": 0,
+      "result": "PASS; staged evidence and source additions have no whitespace errors"
+    },
+    {
+      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python validation/cyax_0115_uniform_frst/local_verification.py",
+      "exit_code": 0,
+      "result": "PASS; 246 exact-support states, full and two-face identities, polytope identities, exact-AST duplicate/retry termination replay, atomic collision protection, and torn-tail recovery"
+    },
+    {
+      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python validation/cyax_0115_uniform_frst/local_comparisons.py",
+      "exit_code": 0,
+      "result": "PASS; all six bounded biased-comparison cells completed 100/100 paired proposal seeds without timeout, no-yield, or generator errors"
+    },
+    {
+      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python validation/cyax_0115_uniform_frst/write_evidence_summary.py",
+      "exit_code": 0,
+      "result": "PASS; froze six-cell early-termination table and per-proposal comparison report"
+    }
+  ],
+  "not_run": [
+    {
+      "command": "julia --project -e 'using Pkg; Pkg.test()'",
+      "reason": "No Julia source or package code changed; the implementation and evidence changes are Python-only."
+    },
+    {
+      "command": "Full task-scheduling replay over the first eight restart IDs",
+      "reason": "The first frozen restart fails the early-termination gate in every cell; r4 requires stopping that cell and forbids later restart seeds."
+    }
+  ],
+  "known_regression_warning": "The focused geometry-sampler suite exposes two NTFE test/source expectation mismatches already present at the exact dispatch base. No production sampler or test source file was changed in this candidate."
+}
