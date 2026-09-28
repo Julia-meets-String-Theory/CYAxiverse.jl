@@ -74,6 +74,11 @@ const BHSR_SI = (
     year_s = "31557600",
 )
 
+const BHSR_FIG3_TARGET_IDENTITIES = (
+    ("1e10", "SOURCE-2020-FIG3-STELLAR-TAU-1E10YR"),
+    ("4.5e6", "SOURCE-2020-FIG3-STELLAR-TAU-4P5E6YR"),
+)
+
 _bhsr_big(x::BigFloat) = x
 _bhsr_big(x::AbstractFloat) = parse(BigFloat, string(x))
 _bhsr_big(x::Real) = BigFloat(x)
@@ -172,6 +177,17 @@ end
 _bhsr_mode_identity(mode::BHSRMode) =
     (; label = mode.label, n_r = mode.n_r, l = mode.l, m = mode.m)
 
+function _bhsr_reference_target_identity(tau_years::Real, targets, route_label::AbstractString)
+    return setprecision(BigFloat, 256) do
+        tau = _bhsr_big(tau_years)
+        for (source_tau, target_id) in targets
+            tau == parse(BigFloat, source_tau) && return target_id
+        end
+        allowed = join(first.(targets), ", ")
+        throw(ArgumentError("$route_label reference route only defines timescales: $allowed years"))
+    end
+end
+
 function _bhsr_model_id(model_id::AbstractString)
     id = String(strip(String(model_id)))
     isempty(id) && throw(ArgumentError("model_id must be explicit and nonempty"))
@@ -181,6 +197,7 @@ end
 struct BHSRContourGrid
     model_id::String
     route_identity::String
+    target_identity::String
     method_manifest_sha256::String
     topology_method_addendum_sha256::String
     source_mode_manifest_sha256::String
@@ -541,6 +558,8 @@ function bhsr_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                                                absolute_tolerance)
     _bhsr_validate_reference_delta_a(delta_a)
     _bhsr_validate_reference_mode(mode)
+    target_identity = _bhsr_reference_target_identity(tau_years,
+        BHSR_FIG3_TARGET_IDENTITIES, "2020 Fig. 3")
     id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         f(a) = bhsr_free_field_residual(mass_solar, mu_eV, a, mode, tau_years;
@@ -553,6 +572,7 @@ function bhsr_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                 method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
                 topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
                 source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+                target_identity,
                 mass_solar = _bhsr_big(mass_solar), mu_eV = _bhsr_big(mu_eV),
                 tau_years = _bhsr_big(tau_years), mode_label = mode.label,
                 mode_identity = _bhsr_mode_identity(mode),
@@ -601,6 +621,8 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
                                                absolute_tolerance)
     _bhsr_validate_reference_delta_a(delta_a)
     _bhsr_validate_modes(modes)
+    target_identity = _bhsr_reference_target_identity(tau_years,
+        BHSR_FIG3_TARGET_IDENTITIES, "2020 Fig. 3")
     id = _bhsr_model_id(model_id)
     topologies = [bhsr_critical_spin_topology(mass_solar, mu_eV, mode,
         tau_years; model_id = id, delta_a, precision_bits, max_iterations,
@@ -628,9 +650,11 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
             topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            target_identity,
             mode_labels = getfield.(modes, :label),
             mode_identities = _bhsr_mode_identity.(modes),
             mass_solar = _bhsr_big(mass_solar),
+            tau_years = _bhsr_big(tau_years),
             per_mode = roots,
             per_mode_topology = topologies,
             union_mode = union_item === nothing ? missing : union_item.mode,
@@ -660,6 +684,8 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
                                                absolute_tolerance)
     _bhsr_validate_reference_delta_a(delta_a)
     _bhsr_validate_modes(modes)
+    target_identity = _bhsr_reference_target_identity(tau_years,
+        BHSR_FIG3_TARGET_IDENTITIES, "2020 Fig. 3")
     points >= 2 || throw(ArgumentError("mass grid needs at least two points"))
     mass_log10_max > mass_log10_min || throw(ArgumentError("mass grid bounds are reversed"))
     id = _bhsr_model_id(model_id)
@@ -682,7 +708,7 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
             _bhsr_big(delta_a) == big"0.1" &&
             _bhsr_big(mu_eV) == big"4.3e-12" &&
             _bhsr_big(tau_years) in (big"1e10", big"4.5e6")
-        return BHSRContourGrid(id, "REFERENCE_2021_ANALYTIC",
+        return BHSRContourGrid(id, "REFERENCE_2021_ANALYTIC", target_identity,
             BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
             BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             BHSR_SOURCE_MODE_MANIFEST_SHA256, masses, union_spins, rows,
@@ -717,6 +743,11 @@ end
 
 const BHSR_BOSENOVA_ROUTE = "REFERENCE_2021_BOSENOVA"
 const BHSR_BOSENOVA_TIMESCALES_YEARS = ("1e10", "4.5e7", "4.5e6")
+const BHSR_BOSENOVA_TARGET_IDENTITIES = (
+    ("1e10", "SOURCE-2021-BOSENOVA-EQ26-TAU-1E10YR"),
+    ("4.5e7", "SOURCE-2021-BOSENOVA-EQ26-TAU-4P5E7YR"),
+    ("4.5e6", "SOURCE-2021-BOSENOVA-EQ26-TAU-4P5E6YR"),
+)
 
 "Source Eq. (13) quantities, retaining the signed diagonal quartic as provenance."
 function bhsr_bosenova_details(mass_solar::Real, mu_eV::Real, mode::BHSRMode,
@@ -793,6 +824,8 @@ function bhsr_bosenova_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                                                absolute_tolerance)
     _bhsr_validate_reference_bosenova_parameters(c_bose, reduced_planck_GeV, delta_a)
     _bhsr_validate_reference_mode(mode)
+    target_identity = _bhsr_reference_target_identity(tau_years,
+        BHSR_BOSENOVA_TARGET_IDENTITIES, "2021 bosenova")
     id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         residual(a) = bhsr_bosenova_residual(mass_solar, mu_eV, a, mode,
@@ -807,6 +840,7 @@ function bhsr_bosenova_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                 method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
                 topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
                 source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+                target_identity,
                 mass_solar = _bhsr_big(mass_solar), mu_eV = _bhsr_big(mu_eV),
                 lambda_iiii = _bhsr_big(lambda_iiii), tau_years = _bhsr_big(tau_years),
                 mode_label = mode.label, mode_identity = _bhsr_mode_identity(mode),
@@ -855,6 +889,8 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
                                                absolute_tolerance)
     _bhsr_validate_reference_bosenova_parameters(c_bose, reduced_planck_GeV, delta_a)
     _bhsr_validate_modes(modes)
+    target_identity = _bhsr_reference_target_identity(tau_years,
+        BHSR_BOSENOVA_TARGET_IDENTITIES, "2021 bosenova")
     id = _bhsr_model_id(model_id)
     topologies = [bhsr_bosenova_critical_spin_topology(mass_solar, mu_eV, mode,
         lambda_iiii, tau_years; model_id = id, delta_a, c_bose,
@@ -876,9 +912,11 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
             topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            target_identity,
             mode_labels = getfield.(modes, :label),
             mode_identities = _bhsr_mode_identity.(modes),
             mass_solar = _bhsr_big(mass_solar),
+            tau_years = _bhsr_big(tau_years),
             delta_a = _bhsr_big(delta_a), c_bose = _bhsr_big(c_bose),
             reduced_planck_GeV = _bhsr_big(reduced_planck_GeV),
             per_mode = roots,

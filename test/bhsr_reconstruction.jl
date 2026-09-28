@@ -84,7 +84,7 @@ function _bhsr_contour_fixture(masses, spins, evaluator; model_id = "inverse-fix
         push!(rows, contour_topology_status === nothing ? row :
             merge(row, (; contour_topology_status)))
     end
-    return BHSRContourGrid(model_id, "SYNTHETIC_FIXTURE",
+    return BHSRContourGrid(model_id, "SYNTHETIC_FIXTURE", "SYNTHETIC-FIXTURE-TARGET",
         BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
         topology_method_addendum_sha256,
         BHSR_SOURCE_MODE_MANIFEST_SHA256,
@@ -147,6 +147,18 @@ end
                                   mode211, big"1e10") > 0
     low_alpha_free = bhsr_critical_spin_topology(big"1", big"4.3e-12", mode211,
         big"1e10"; model_id = "low-alpha-free-topology")
+    @test low_alpha_free.target_identity == "SOURCE-2020-FIG3-STELLAR-TAU-1E10YR"
+    short_fig3_target = bhsr_critical_spin_topology(big"10", big"4.3e-12",
+        mode211, big"4.5e6"; model_id = "fig3-short-timescale-target")
+    @test short_fig3_target.target_identity == "SOURCE-2020-FIG3-STELLAR-TAU-4P5E6YR"
+    @test_throws ArgumentError bhsr_critical_spin_topology(big"10",
+        big"4.3e-12", mode211, big"1e9")
+    @test_throws ArgumentError bhsr_critical_spin(big"10",
+        big"4.3e-12", mode211, big"1e9")
+    @test_throws ArgumentError bhsr_regge_row(big"10", big"4.3e-12",
+        big"1e9", [mode211]; model_id = "unbound-free-target-row")
+    @test_throws ArgumentError bhsr_regge_grid(big"4.3e-12", big"1e9";
+        points = 2, modes = [mode211], model_id = "unbound-free-target-grid")
     low_alpha_free_mid = bhsr_free_field_residual(big"1", big"4.3e-12", big"0.5",
         mode211, big"1e10")
     low_alpha_free_extremal = bhsr_free_field_residual(big"1", big"4.3e-12", big"1",
@@ -171,6 +183,8 @@ end
     @test low_alpha_row.union_spin == first(low_alpha_free.roots)
     @test low_alpha_row.union_intervals == low_alpha_free.intervals
     @test low_alpha_row.contour_topology_status == :bounded_efficiency_interval
+    @test low_alpha_row.target_identity == "SOURCE-2020-FIG3-STELLAR-TAU-1E10YR"
+    @test low_alpha_row.tau_years == big"1e10"
     @test low_alpha_row.mode_identities == [(label = "|211>", n_r = 0, l = 1, m = 1)]
     @test low_alpha_row.delta_a == big"0.1" && low_alpha_row.precision_bits == 256
     @test low_alpha_row.root_max_iterations == 140
@@ -247,6 +261,10 @@ end
     @test_throws ArgumentError bhsr_bosenova_details(big"10", big"4.3e-12",
         mode211, big"-1e-73"; delta_a = big"0.2")
     @test BHSR_BOSENOVA_TIMESCALES_YEARS == ("1e10", "4.5e7", "4.5e6")
+    @test BHSR_BOSENOVA_TARGET_IDENTITIES == (
+        ("1e10", "SOURCE-2021-BOSENOVA-EQ26-TAU-1E10YR"),
+        ("4.5e7", "SOURCE-2021-BOSENOVA-EQ26-TAU-4P5E7YR"),
+        ("4.5e6", "SOURCE-2021-BOSENOVA-EQ26-TAU-4P5E6YR"))
     @test !bhsr_bosenova_efficient(-big"1e-30")
     @test !bhsr_bosenova_efficient(big"0")
     @test bhsr_bosenova_efficient(big"1e-30")
@@ -272,6 +290,27 @@ end
     @test low_alpha_bose.intervals[1][1] ≈ big"0.1281665047765220283893719384" atol = big"1e-27"
     @test low_alpha_bose.intervals[1][2] ≈ big"0.9999999989528558771827878312" atol = big"1e-27"
     @test low_alpha_bose.topology_status == :bounded_efficiency_interval
+    @test low_alpha_bose.target_identity == "SOURCE-2021-BOSENOVA-EQ26-TAU-1E10YR"
+    bose_45e7_target = bhsr_bosenova_critical_spin_topology(big"10",
+        big"4.3e-12", mode211, big"-1e-73", big"4.5e7";
+        model_id = "bosenova-45e7-target")
+    bose_45e6_target = bhsr_bosenova_critical_spin_topology(big"10",
+        big"4.3e-12", mode211, big"-1e-73", big"4.5e6";
+        model_id = "bosenova-45e6-target")
+    @test bose_45e7_target.target_identity == "SOURCE-2021-BOSENOVA-EQ26-TAU-4P5E7YR"
+    @test bose_45e6_target.target_identity == "SOURCE-2021-BOSENOVA-EQ26-TAU-4P5E6YR"
+    @test isapprox(bose_45e7_target.onset_spin,
+        big"0.9052031016679705996302132257"; rtol = big"1e-24")
+    @test isapprox(bose_45e6_target.onset_spin,
+        big"0.9052031017619465031581628351"; rtol = big"1e-24")
+    @test_throws ArgumentError bhsr_bosenova_critical_spin_topology(big"10",
+        big"4.3e-12", mode211, big"-1e-73", big"1e9")
+    @test_throws ArgumentError bhsr_bosenova_critical_spin(big"10",
+        big"4.3e-12", mode211, big"-1e-73", big"1e9")
+    @test_throws ArgumentError bhsr_bosenova_regge_row(big"10", big"4.3e-12",
+        big"-1e-73", big"1e9", [mode211]; model_id = "unbound-bose-target-row")
+    @test isfinite(bhsr_bosenova_residual(big"10", big"4.3e-12", big"1",
+        mode211, big"-1e-73", big"1e9"))
     tangent_bose_lambda = big"-1.7180957110518061656012412304276707960189280606045e-65"
     tangent_bose = bhsr_bosenova_critical_spin_topology(big"1", big"4.3e-12",
         mode211, tangent_bose_lambda, big"1e10";
@@ -350,6 +389,8 @@ end
     @test bose_row.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test bose_row.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test bose_row.route_identity == "REFERENCE_2021_BOSENOVA"
+    @test bose_row.target_identity == "SOURCE-2021-BOSENOVA-EQ26-TAU-1E10YR"
+    @test bose_row.tau_years == big"1e10"
     @test bose_row.mode_identities == [(label = m.label, n_r = m.n_r, l = m.l, m = m.m) for m in modes]
     @test bose_row.delta_a == big"0.1" && bose_row.c_bose == big"5"
     @test bose_row.reduced_planck_GeV == big"2.435e18"
@@ -363,8 +404,10 @@ end
     @test bose_row.per_mode_topology[4].topology_status == :bounded_efficiency_interval
     @test_throws ArgumentError bhsr_bosenova_critical_spin(big"10", big"4.3e-12",
         mode211, big"-1e-73", big"1e10"; max_iterations = 1)
-    @test ismissing(bhsr_bosenova_critical_spin(big"10", big"4.3e-12", mode211,
-        big"-1e-73", big"1e-50"))
+    tiny_age_residual = bhsr_bosenova_residual(big"10", big"4.3e-12", big"1",
+        mode211, big"-1e-73", big"1e-50")
+    @test tiny_age_residual < 0
+    @test !bhsr_bosenova_efficient(tiny_age_residual)
 
     grid = bhsr_regge_grid(big"4.3e-12", big"1e10";
                            mass_log10_min = -1, mass_log10_max = 1,
@@ -377,6 +420,7 @@ end
     @test first(grid[3].per_mode).first == mode211.label
     @test grid[3].union_spin == last(grid[3].per_mode[1])
     @test grid.model_id == "three-point-regge-fixture"
+    @test grid.target_identity == "SOURCE-2020-FIG3-STELLAR-TAU-1E10YR"
     @test grid.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
     @test grid.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test grid.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
