@@ -665,6 +665,7 @@ end
                 ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir
             end
         end
+
     end
 end
 
@@ -1257,12 +1258,32 @@ end
 
     @testset "phase and volume detuning scan" begin
         include(joinpath(@__DIR__, "..", "scripts", "phase_volume_detuning_scan.jl"))
+        include(joinpath(@__DIR__, "..", "validation",
+            "cyax_0131_low_n_inflation", "run_bounded_pipeline.jl"))
         S = Main.PhaseVolumeDetuningScan
+        config = cyax131_scan_configuration()
+        @test config.schema_version == "cyax-0131-low-n-inflation-r2"
+        @test config.k_homotopy.scale_status == "homotopy_only"
+        @test config.k_physical.convention == "VOLUME_SCALING_CONVENTION"
+        @test config.stop_rules.no_homotopy_to_physical_transfer
+        @test config.n8.physical_trajectory_time_horizons == [1e4, 1e5]
+        @test config.n8.physical_trajectory_precision_bits == 100
+        @test config.n8.physical_trajectory_reltol == "1.0e-8"
+        @test config.n8.physical_trajectory_abstol == "1.0e-10"
+        @test config.n8.physical_trajectory_maxiters == 1_000_000
+        stable_manifest = Dict{String,Any}(
+            "z" => 3,
+            "a" => Dict("values" => [1.0, 2.0], "enabled" => true))
+        first_manifest = cyax131_manifest_text(stable_manifest)
+        @test cyax131_manifest_text(stable_manifest) == first_manifest
+        @test CYAX131_TOML.parse(first_manifest) == stable_manifest
         Q = [1.0 0.0; 0.0 1.0]
         L = [1.0 0.0; 1.0 0.0]
         phases = S.phase_vectors(2; values=(-0.25, 0.25), pair_limit=4)
         @test length(phases) == 9
         @test phases[1] == [0.0, 0.0]
+        @test phases == S.phase_vectors(2; values=(-0.25, 0.25), pair_limit=4)
+        @test_throws ArgumentError S.phase_vectors(2; pair_limit=-1)
         @test S.potential([0.0, 0.0], Q, L, phases[1]) ≈ 0
         expected_identity_hessian = (2π)^2 .* Matrix{Float64}(I, 2, 2)
         @test S.hessian([0.0, 0.0], Q, L, phases[1]) ≈ expected_identity_hessian
@@ -1305,8 +1326,47 @@ end
             tolerance=big"1e-20")
         @test length(result) == 1
         @test all(candidate.scale_status == :homotopy_only for candidate in result)
-        @test result[1].k_low < result[1].k_c < result[1].k_high
+        @test result[1].k_homotopy_low < result[1].k_homotopy_c < result[1].k_homotopy_high
         @test result[1].n_e === missing
+        detailed = S.scan_detailed([0.0], q1, l1;
+            k_homotopy_grid=k_grid1, phases=[phase1], precision_bits=256,
+            tolerance=big"1e-20")
+        @test detailed.coverage_status == :complete
+        @test detailed.scale_status == :homotopy_only
+        @test detailed.phase_count == 1
+        @test detailed.k_point_count == 4
+        @test detailed.interval_denominator == 3
+        @test detailed.success_count == 1
+        @test detailed.rejected_count == 2
+        @test detailed.failure_count == 0
+        @test all(candidate.crossing_type == :negative_to_positive for
+            candidate in detailed.candidates)
+        @test all(candidate.scale_status == :homotopy_only &&
+            ismissing(candidate.n_e) && ismissing(candidate.n_s) &&
+            ismissing(candidate.scalar_amplitude) && ismissing(candidate.r)
+            for candidate in detailed.candidates)
+        @test count(attempt -> attempt.status == :zero_mode_crossing_refined,
+            detailed.attempts) == 1
+        @test detailed.attempts[2].refined_bracket_width <= big"1e-20"
+        failed_search = S.scan_detailed([0.0], q1, l1;
+            k_homotopy_grid=k_grid1, phases=[[NaN, 0.0]], precision_bits=128)
+        @test failed_search.coverage_status == :complete
+        @test failed_search.interval_denominator == 3
+        @test failed_search.failure_count == 3
+        @test all(attempt.status == :evaluation_failed for attempt in
+            failed_search.attempts)
+        rejected_search = S.scan_detailed([0.0, 0.0], Q, L;
+            k_homotopy_grid=[0.5, 1.0, 1.5], phases=[[0.0, 0.0]], precision_bits=128)
+        @test rejected_search.interval_denominator == 2
+        @test rejected_search.rejected_count == 2
+        @test rejected_search.success_count == 0
+        incomplete_refinement = S.scan_detailed([0.0], q1, l1;
+            k_homotopy_grid=k_grid1, phases=[phase1], precision_bits=128,
+            tolerance=big"1e-60", max_iterations=1)
+        @test incomplete_refinement.failure_count == 1
+        @test count(attempt -> attempt.status == :crossing_refinement_incomplete,
+            incomplete_refinement.attempts) == 1
+        @test isempty(incomplete_refinement.candidates)
 
         setprecision(BigFloat, 256) do
             p64 = BigFloat(phase1[1])
@@ -1317,9 +1377,9 @@ end
                 cos(BigFloat(2) * BigFloat(π) * p64))
             phi = (BigFloat(1) + sqrt(BigFloat(5))) / BigFloat(2)
             k_phi = log10(phi) / BigFloat(2)
-            @test abs(result[1].k_c - k64) <= BigFloat("1e-20")
-            @test abs(result[1].k_c - k_phi) <= BigFloat("1e-12")
-            @test (result[1].k_low, result[1].k_high) ==
+            @test abs(result[1].k_homotopy_c - k64) <= BigFloat("1e-20")
+            @test abs(result[1].k_homotopy_c - k_phi) <= BigFloat("1e-12")
+            @test (result[1].k_homotopy_low, result[1].k_homotopy_high) ==
                 (BigFloat(0.10), BigFloat(0.15))
 
             exact_Q = reshape([1, 1], 2, 1)
@@ -1331,7 +1391,7 @@ end
             exact_hessian = S.hessian(exact_theta, exact_Q, exact_L, exact_phase;
                 k=BigFloat("0.12"), precision_bits=256)
             @test eltype(exact_hessian) == BigFloat
-            k_B = S.refine_catastrophe(exact_theta, exact_Q, exact_L, exact_phase,
+            k_B = S.refine_zero_mode_crossing(exact_theta, exact_Q, exact_L, exact_phase,
                 exact_low, exact_high; precision_bits=256,
                 tolerance=BigFloat("1e-20"))
             @test abs(k_B - k_phi) <= BigFloat("1e-20")
@@ -1348,11 +1408,12 @@ end
             @test (ks[historical_bracket_index], ks[historical_bracket_index + 1]) ==
                 (0.10, 0.15)
             @test signbit(historical_values[historical_bracket_index]) ==
-                signbit(result[1].eigenvalue_low)
+                signbit(result[1].eigenvalue_at_k_homotopy_low)
             @test signbit(historical_values[historical_bracket_index + 1]) ==
-                signbit(result[1].eigenvalue_high)
-            @test (historical_values[historical_bracket_index] < 0 ? :fold : :reverse_fold) ==
-                result[1].catastrophe_type == :fold
+                signbit(result[1].eigenvalue_at_k_homotopy_high)
+            @test (historical_values[historical_bracket_index] < 0 ?
+                :negative_to_positive : :positive_to_negative) ==
+                result[1].crossing_type == :negative_to_positive
 
             historical_root = begin
                 lo = BigFloat(ks[historical_bracket_index])
@@ -1373,7 +1434,7 @@ end
                 end
                 refined
             end
-            @test abs(result[1].k_c - historical_root) <= BigFloat("1e-20")
+            @test abs(result[1].k_homotopy_c - historical_root) <= BigFloat("1e-20")
 
             for k in (BigFloat(ks[historical_bracket_index]),
                     BigFloat(ks[historical_bracket_index + 1]))
@@ -1387,6 +1448,47 @@ end
                 @test signbit.(corrected_eigenvalues) == signbit.(historical_eigenvalues)
                 @test corrected_eigenvalues ≈ BigFloat(2) .* historical_eigenvalues
             end
+        end
+
+        if get(ENV, "CYAX131_RUN_BOUNDED_PIPELINE", "0") == "1"
+            output_dir = joinpath(@__DIR__, "..", "validation",
+                "cyax_0131_low_n_inflation")
+            manifest = run_cyax131_bounded_pipeline(output_dir)
+            @test manifest["n5_physical_reduced_model"]["status"] == "completed"
+            @test manifest["n8_physical_reestablishment"]["homotopy_candidates_promoted"] == 0
+            @test occursin("N5 kc=1.7700681326109957",
+                manifest["source"]["historical_document_discrepancy"])
+            n5_homotopy = manifest["configuration"]["n5_homotopy"]
+            @test n5_homotopy["phase_probe_source_status"] ==
+                "deterministic single-instanton probe; not a paper-supplied full phase vector"
+            @test n5_homotopy["phase_probe_values_differ"]
+            @test !iszero(parse(BigFloat,
+                n5_homotopy["phase_probe_absolute_value_difference"]))
+            @test n5_homotopy["phase_probe_physical_observables"] == "NOT_USED"
+            @test manifest["n8_physical_reestablishment"]["input_precision_bits"] == 53
+            @test occursin("Float64",
+                manifest["n8_physical_reestablishment"]["critical_point_precision_note"])
+            @test manifest["n8_twelve_row_table1_replay"][
+                "catastrophe_diagnostic_status"] != "NOT_REACHED"
+            n8_trajectory = manifest["n8_physical_trajectory"]
+            @test n8_trajectory["precision_bits"] == 100
+            @test n8_trajectory["sample_index_convention"] ==
+                "1-based exact stored sample index; 0 means no sample"
+            @test n8_trajectory["sample_interpretation"] ==
+                "last stored sample at the observed finite exit; diagnostic only, not an observational pivot or viability test"
+            @test n8_trajectory["scalar_amplitude_convention"] in
+                ("paper_delta_H", "NOT_REACHED")
+            @test n8_trajectory["full_physical_benchmark_replay"] in
+                ("OBSERVED_FINITE_EXIT", "NOT_VERIFIED")
+            @test n8_trajectory["n8_ne_e_folds_validated_tight_step_reference"] ==
+                "approximately 60.00336 (bound validation/inflation_reproduction_results.md; tight-step convergence, not an exact acceptance target)"
+            @test n8_trajectory["n8_ne_e_folds_acceptance_tolerance"] ==
+                "none defined for this approximate tight-step reference; difference reported without acceptance"
+            @test n8_trajectory["n8_coarse_float64_bdf_efolds_provenance"] ==
+                "59.690642055250756; coarse Float64 BDF max_step=100 value retained as provenance only, not the governing physical-flow reference"
+            @test isfile(joinpath(output_dir, "scan_manifest.toml"))
+            @test isfile(joinpath(output_dir, "homotopy_attempts.csv"))
+            @test isfile(joinpath(output_dir, "n8_trajectory_attempts.csv"))
         end
     end
 end
@@ -3597,6 +3699,12 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         probe_observables = benchmark.trajectory_observables(n8_probe)
         @test probe_observables.scalar_amplitude_convention == :paper_delta_H
         @test isfinite(probe_observables.n_s)
+        indexed_observables = benchmark.trajectory_observables(n8_probe;
+            sample_index=2)
+        @test indexed_observables.sample_index == 2
+        @test indexed_observables.n_s == n8_probe.samples[2].n_s
+        @test indexed_observables.delta_H == n8_probe.samples[2].delta_H
+        @test indexed_observables.scalar_amplitude_convention == :paper_delta_H
         @test all(hasproperty(sample, :tangent) &&
             hasproperty(sample, :n_s) &&
             hasproperty(sample, :scalar_amplitude) for sample in n8_probe.samples)

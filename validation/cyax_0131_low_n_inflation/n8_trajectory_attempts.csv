@@ -1,0 +1,2 @@
+max_time,wall_seconds,status,end_event,terminated,precision_bits,reltol,abstol,maxiters,entered_slow_roll,sample_count,N_e_value,accepted_steps,rejected_steps,rhs_evaluations,jacobian_evaluations,wall_budget_seconds,error
+10000.0,8.09973406791687,finite_exit,eta_parallel,true,100,1.0e-8,1.0e-10,1000000,true,20,60.006354132181679315584233375102,343,65,3264,343,,

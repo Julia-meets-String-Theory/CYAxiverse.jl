@@ -1,0 +1,293 @@
+schema_version = "cyax-0131-low-n-inflation-r2"
+
+[[bounded_scans]]
+candidates = 1
+coverage_status = "complete"
+failure_count = 0
+interval_denominator = 8
+k_point_count = 5
+phase_count = 2
+rejected_count = 7
+scale_status = "homotopy_only"
+scan_id = "n5_poly102_homotopy_screen"
+success_count = 1
+[[bounded_scans]]
+candidates = 0
+coverage_status = "complete"
+failure_count = 0
+interval_denominator = 10
+k_point_count = 6
+phase_count = 2
+rejected_count = 10
+scale_status = "homotopy_only"
+scan_id = "n8_poly102_homotopy_screen"
+success_count = 0
+
+[claim_boundary]
+dynamical_saxion_stabilisation = "NOT_REACHED"
+fixed_saxions = true
+issue_131_closure = "NOT_AUTHORIZED"
+issue_131_observational_stretch_goal = "NOT_REACHED_IN_R2"
+merge = "NOT_AUTHORIZED"
+observational_viability = "NOT_CLAIMED"
+population_scan = "NOT_REACHED"
+
+[compatibility_impact]
+intentional_break = true
+legacy_scan_k_grid_keyword = "retained by scan wrapper; returned candidate fields use the scientifically explicit names"
+package_api_or_project_metadata_changed = false
+reason = "fixed-configuration eigenvalue crossings do not establish stationarity, branch merger, or catastrophe classification"
+renamed_candidate_fields = "k_low/k_high/k_c/eigenvalue_low/eigenvalue_high/catastrophe_type now state k_homotopy and crossing_type explicitly"
+renamed_refinement_function = "refine_catastrophe -> refine_zero_mode_crossing"
+scope = "script-local PhaseVolumeDetuningScan helper API"
+
+[configuration.n5_homotopy]
+benchmark_basis = "n5_potential(k=1.0) Eq. (32) leading eight-row L values"
+coordinate_conversion = "raw theta radians divided by 2pi; additive phase radians divided by 2pi to cycles"
+input_precision_bits = 53
+k_homotopy_grid = ["0.5", "0.75", "1.0", "1.25", "1.5"]
+k_homotopy_input_precision_bits = 53
+k_semantics = "k_homotopy"
+phase_fixture_assignment = "single_instanton_probe"
+phase_fixture_convention = "additive_argument_radians"
+phase_fixture_vector_radians = [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+phase_probe_absolute_value_difference = "2.035481148648063484733180605379006103080003772134467549855592060773992746651921e-19"
+phase_probe_comparison_rule = "reported fixed-point diagnostic only; no paper-supplied expected value or acceptance tolerance"
+phase_probe_diagnostic_model = "eight-row N5 leading-term homotopy potential"
+phase_probe_diagnostic_point = "theta=zeros(5) period-one coordinates; k_homotopy=1.0"
+phase_probe_diagnostic_precision_bits = 128
+phase_probe_physical_observables = "NOT_USED"
+phase_probe_source_status = "deterministic single-instanton probe; not a paper-supplied full phase vector"
+phase_probe_value = "2.03548114864806348473318060537900610308e-19"
+phase_probe_values_differ = true
+phase_probe_zero_phase_value = "0.0"
+phase_vectors_cycles = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.006366197723675814, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
+scale_status = "homotopy_only"
+theta_cycles = [0.0, 0.0, 0.0, 0.0, 0.0]
+
+[configuration.n5_search]
+event_scale_tolerance = "1e-20"
+gradient_tolerance = "1e-30"
+hessian_tolerance = "1e-20"
+k_physical_offsets_from_kc = ["-1e-3", "-2e-4", "+2e-4", "+1e-3"]
+method = "zero-phase reduced-model continuation"
+precision_bits = 128
+
+[configuration.n8_homotopy]
+k_homotopy_grid = ["0.5", "0.59999999999999997779553950749686919152736663818359375", "0.6999999999999999555910790149937383830547332763671875", "0.8000000000000000444089209850062616169452667236328125", "0.90000000000000002220446049250313080847263336181640625", "1.0"]
+k_homotopy_input_precision_bits = 53
+k_semantics = "k_homotopy"
+phase_convention = "raw theta radians and benchmark probe radians divided by 2pi; helper uses cycles"
+phase_probe_source_status = "deterministic diagnostic probe; full nonzero vector not supplied by paper"
+phase_vectors_cycles = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.006366197723675814, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
+precision_bits = 128
+scale_status = "homotopy_only"
+source_input_precision_bits = 53
+theta_cycles = "n8_degenerate_point.theta / 2pi"
+tolerance = "1e-24"
+
+[execution]
+architecture = "aarch64"
+candidate_commit_tree_binding = "external handback; not self-embedded"
+execution_base_commit = "74fea608684eae746f25ae45b18512f89b862fb0"
+homotopy_helper_sha256 = "0cbfc1d9ae429af82efa76ee616551b2f7dea243f14888ff184f3b0b1e60978f"
+julia_version = "1.12.6"
+scan_driver_sha256 = "4a517df15220589658b35fb67cdd9e7e6b89975c56b24016839078b0c596ee2a"
+threads = 1
+
+[handoff]
+detached_control_desk_state = "READY_TO_DISPATCH"
+handoff_review_sha256 = "da89c0ace19bbfcb995d87355d9ca53092ff25f5ab42d87cae6fdf52cdbbd2c9"
+id = "cyax-0131-low-n-inflation-manager-handoff"
+revision = 2
+sha256 = "6d76d0e43d005f63a40f10c8e3c7d3b8635e031df15bd8e8633ce7ee6d126b9e"
+
+[n5_physical_reduced_model]
+branch = "pi"
+catastrophe_events = 2
+continuation_steps = 4
+converged_steps = 4
+critical_scale = "1.770068132610995629125239519150256394278"
+diagnostic_classification = "cusp"
+diagnostic_precision_bits = 120
+euler = -140
+full_physical_N5_trajectory_observables = "NOT_REACHED"
+geometry_identity = "poly-102 N5 appendix-B named fixture"
+h11 = 5
+h21 = 75
+phase_probe_assignment = "single_instanton_probe"
+phase_probe_convention = "additive_argument_radians"
+phase_probe_source_status = "deterministic diagnostic probe; not a paper-supplied full phase vector"
+phase_probe_vector_radians = [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+status = "completed"
+
+    [[n5_physical_reduced_model.continued_critical_points]]
+    branch_identity = "pi"
+    catastrophe_detected = false
+    converged = true
+    delta_k_physical_from_kc = "-0.001000000000000000000000000000000000001598672317118311010837481690622254121833385"
+    gradient_residual = "1.479517933277067599147693446617411202143e-42"
+    k_physical = "1.769068132610995629125239519150256394276"
+    theta_radians = "3.141592653589793238462643383279502884195"
+    [[n5_physical_reduced_model.continued_critical_points]]
+    branch_identity = "pi"
+    catastrophe_detected = true
+    converged = true
+    delta_k_physical_from_kc = "-0.0001999999999999999999999999999999999991442401126013746941987598009022051465480115"
+    gradient_residual = "2.958106331039055821929012939778703844243e-43"
+    k_physical = "1.769868132610995629125239519150256394279"
+    theta_radians = "3.141592653589793238462643383279502884195"
+    [[n5_physical_reduced_model.continued_critical_points]]
+    branch_identity = "pi"
+    catastrophe_detected = true
+    converged = true
+    delta_k_physical_from_kc = "0.0001999999999999999999999999999999999991442401126013746941987598009022051465480115"
+    gradient_residual = "2.957641709275412658383090385285991798601e-43"
+    k_physical = "1.770268132610995629125239519150256394277"
+    theta_radians = "3.141592653589793238462643383279502884195"
+    [[n5_physical_reduced_model.continued_critical_points]]
+    branch_identity = "pi"
+    catastrophe_detected = false
+    converged = true
+    delta_k_physical_from_kc = "0.001000000000000000000000000000000000001598672317118311010837481690622254121833385"
+    gradient_residual = "7.75033009229273275814990877633145360404e-42"
+    k_physical = "1.77106813261099562912523951915025639428"
+    theta_radians = "3.141592653589793238462643383279502884207"
+
+    [[n5_physical_reduced_model.reduced_efold_anchors]]
+    N_e = "27349.0"
+    delta_k = "1.0e-7"
+    [[n5_physical_reduced_model.reduced_efold_anchors]]
+    N_e = "60.00000000000001"
+    delta_k = "6.65e-5"
+
+[n8_catastrophe_point_diagnostic]
+classification = "unresolved"
+normal_form = "unresolved"
+point_identity = "n8_degenerate_point zero-phase ten-row theta and k"
+point_input_precision_bits = 53
+precision_bits = 120
+tolerance = "1e-8"
+transverse_hessian_eigenvalues = ["4.1996746712670902208215996046261632126e-29", "3.4987187211092023554204974843072659441e-26", "7.5552543781888168029077293017688123165e-26", "8.3488324471798636863576751286945846794e-26", "3.2210509913993666346341138331501605445e-23", "4.5879548485546334084818570083873470117e-23", "4.2867335520534527526981349755322806353e-22"]
+
+[n8_phase_probe_diagnostic]
+absolute_value_difference = "0.0007998933390219714"
+comparison_tolerance = "0.0; exact Float64 value inequality only, with no source-matched expected value"
+input_precision_bits = 53
+phase_convention = "additive_argument_radians"
+phase_probe_assignment = "single_instanton_probe"
+phase_probe_vector_radians = [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+physical_observables_from_probe = "NOT_USED"
+point_identity = "N8_BEST_X; ten-row trajectory source; physical benchmark k=kc; diagnostic evaluation only"
+probe_kind = "deterministic single-instanton 0.04-radian diagnostic probe"
+probe_source_status = "not a paper-supplied complete nonzero phase vector"
+single_instanton_probe_value = "0.008369661116038082"
+values_differ = true
+zero_phase_value = "0.007569767777016111"
+
+[n8_physical_reestablishment]
+critical_point_precision_note = "n8_degenerate_point and its k are Float64 (53-bit input) at the source-defined 1e-11 tolerance; the 120-bit diagnostic and 100-bit trajectory do not refine this critical scale"
+critical_scale_binding_tolerance = "9.999999999999999999999999999999999999999999999999999999999999999999999999999957e-12"
+critical_scale_offset_from_trajectory_anchor = "0.0"
+euler = -40
+geometry_identity = "poly-102 N8 appendix-C named fixture"
+gradient_residual = "2.021453022468334e-15"
+h11 = 8
+h21 = 28
+homotopy_candidates_promoted = 0
+input_precision_bits = 53
+iterations = 0
+k_physical = "0.674506370003365"
+model = "existing ten-row poly-102 trajectory truncation"
+null_residual = "6.258470461730165e-13"
+route = "n8_degenerate_point; zero phase; paper benchmark physical k"
+solver_tolerance = "1.0e-11"
+status = "completed"
+
+[n8_physical_trajectory]
+A_s_conversion_and_acceptance_windows = "NOT_REACHED"
+N_e = "60.006354132181679315584233375102"
+N_e_lower_bound_at_tmax = "NOT_APPLICABLE"
+N_e_status = "finite_exit"
+arithmetic_precision_claim = "100-bit BigFloat arithmetic; explicit 1e-8 relative and 1e-10 absolute solver error tolerances do not imply 100-bit observable accuracy"
+cumulative_turning = "0.3704249914752820576175404167508662700342505367804098265006954313997261547731398"
+end_event = "eta_parallel"
+error = ""
+full_physical_benchmark_replay = "OBSERVED_FINITE_EXIT"
+initial_step = 1.0e-5
+integration_abstol = "1.0e-10"
+integration_reltol = "1.0e-8"
+k_physical = "0.67603842486544482907016850870008"
+max_step = 100
+maxiters = 1000000
+measured_delta_k_physical_from_reestablished_kc = "0.00153205486207983235767693397377797737135551869869232177734375"
+n8_coarse_float64_bdf_difference = "0.3157120769309233155842333751020174957697741361130057240191870704393295454790526"
+n8_coarse_float64_bdf_efolds_provenance = "59.690642055250756; coarse Float64 BDF max_step=100 value retained as provenance only, not the governing physical-flow reference"
+n8_ne_e_folds_acceptance_tolerance = "none defined for this approximate tight-step reference; difference reported without acceptance"
+n8_ne_e_folds_tight_step_difference = "0.00299413218167931558423337510201749576977413611300572401918707043932954547932125"
+n8_ne_e_folds_validated_tight_step_reference = "approximately 60.00336 (bound validation/inflation_reproduction_results.md; tight-step convergence, not an exact acceptance target)"
+n_s = "-1.000000009920294575658745474265924151497062772702948813610093138507938231746771"
+n_s_acceptance_window = "NOT_REACHED"
+paper_delta_H = "926.2487312767956635587995923229765130921319079091054012497304852301878726619106"
+precision_bits = 100
+requested_delta_input_precision_bits = 53
+requested_delta_k_physical_from_anchor = "0.0015320548620798324"
+sample_coordinate_n = "60.006354132181679315584233375102"
+sample_count = 20
+sample_index = 20
+sample_index_convention = "1-based exact stored sample index; 0 means no sample"
+sample_interpretation = "last stored sample at the observed finite exit; diagnostic only, not an observational pivot or viability test"
+scalar_amplitude_convention = "paper_delta_H"
+scan_step = 5
+slow_roll_window_efolds = "59.552700444561993393661981898763"
+status = "finite_exit"
+tensor_to_scalar_ratio_r = "NOT_REACHED"
+terminated = true
+trajectory_detuning_binding_residual = "0.0"
+trajectory_detuning_binding_tolerance = "9.999999999999999999999999999999999999999999999999999999999999999999999999999957e-12"
+trajectory_route = "existing n8_physical_gradient_flow / n8_author_trajectory"
+
+    [[n8_physical_trajectory.trajectory_attempts]]
+    N_e_value = "60.006354132181679315584233375102"
+    abstol = 1.0e-10
+    accepted_steps = 343
+    end_event = "eta_parallel"
+    entered_slow_roll = true
+    jacobian_evaluations = 343
+    max_time = 10000.0
+    maxiters = 1000000
+    precision_bits = 100
+    rejected_steps = 65
+    reltol = 1.0e-8
+    rhs_evaluations = 3264
+    sample_count = 20
+    status = "finite_exit"
+    terminated = true
+    wall_seconds = 8.09973406791687
+
+[n8_twelve_row_table1_replay]
+catastrophe_diagnostic_error = ""
+catastrophe_diagnostic_point_identity = "12-row Table 1 augmented replay returned theta and k; diagnostic uses twelve-row source model"
+catastrophe_diagnostic_precision_bits = 120
+catastrophe_diagnostic_status = "unresolved"
+catastrophe_diagnostic_tolerance = "1e-8"
+error = ""
+gradient_residual = "2.4873142859848615e-15"
+input_seed_period_one = [0.0, 0.00499839, 0.99500161, 0.75995156, 0.75004523, 0.24995477, 0.0, 0.75495317]
+iterations = 3
+k_physical = "0.6745063700033533"
+model_identity = "paper Table 1 source; twelve instanton rows"
+null_residual = "4.7779859664277034e-15"
+physical_trajectory_authorized = false
+route = "paper_benchmarks.n8_degenerate_point augmented solve"
+status = "converged"
+
+[source]
+catastrophe_diagnostics_source_sha256 = "560bd48be7855c2211497d8ea03877ddf56ddfd8e7e034fcbf9f6d5c7f6c339c"
+counting_unit = "geometry"
+historical_document_discrepancy = "validation/inflation_reproduction_results.md retains N5 reduced kc=0.674506370003365; current poly102_inflation.jl and reduced_models.jl source/test route gives N5 kc=1.7700681326109957 (Issue #148 G1 correction, commit 2a4e495ccdd838cc5b1e884fbac136115a7d433f); 0.674506370003365 is N8_KC. Bound document left unchanged."
+input_digest = "ce017090fcbd18496c068cee913c63429efc3c28e0658457e457c99011df48d4"
+paper_identifier = "arXiv:2608.14780v1"
+paper_sha256 = "b0f5539bf0fb40e401d93b8cfcbe3e725ba8849efdde2519646103d5f004d2e6"
+poly102_source_sha256 = "26f71937e30845f09e6f2b5fb315952082380ec449cc0fabf1af4b30eb949dec"
+selection_route = "paper_named_appendix_fixtures"
