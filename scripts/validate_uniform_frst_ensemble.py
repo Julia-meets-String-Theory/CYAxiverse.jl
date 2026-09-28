@@ -782,7 +782,7 @@ class SamplerObserver:
 def _observe_call(event_name, reason=None):
     positional = [ast.Constant(value=event_name)]
     keywords = []
-    if event_name != "terminal":
+    if event_name in ("raw_candidate", "duplicate_branch", "first_discovery"):
         keywords.extend(
             [
                 ast.keyword(arg="triangulation", value=ast.Name(id="temp_tri", ctx=ast.Load())),
