@@ -244,41 +244,260 @@ function bhsr_free_field_residual(mass_solar::Real, mu_eV::Real, spin::Real,
     end
 end
 
-"Solve the source's direct spin contour by bisection; return `missing` if absent."
-function bhsr_critical_spin(mass_solar::Real, mu_eV::Real, mode::BHSRMode,
-                            tau_years::Real; delta_a::Real = 0.1,
-                            precision_bits::Integer = 256,
-                            max_iterations::Integer = 140,
-                            absolute_tolerance::Real = big"1e-40")
-    precision_bits > 0 || throw(ArgumentError("precision_bits must be positive"))
+const BHSR_SPIN_TOPOLOGY_SCAN_POINTS = 257
+
+function _bhsr_refine_spin_extremum(f, lower::BigFloat, upper::BigFloat,
+                                    maximize::Bool, x_tolerance::BigFloat,
+                                    max_iterations::Integer)
+    golden = (sqrt(BigFloat(5)) - 1) / 2
+    left, right = lower, upper
+    x1 = right - golden * (right - left)
+    x2 = left + golden * (right - left)
+    f1, f2 = f(x1), f(x2)
+    for _ in 1:max_iterations
+        right - left <= x_tolerance && break
+        better = maximize ? f1 > f2 : f1 < f2
+        if better
+            right, x2, f2 = x2, x1, f1
+            x1 = right - golden * (right - left)
+            f1 = f(x1)
+        else
+            left, x1, f1 = x1, x2, f2
+            x2 = left + golden * (right - left)
+            f2 = f(x2)
+        end
+    end
+    right - left <= x_tolerance ||
+        error("spin-topology extremum refinement did not meet tolerance")
+    point = (left + right) / 2
+    return point, f(point)
+end
+
+function _bhsr_refine_spin_root(f, lower::BigFloat, upper::BigFloat,
+                                f_lower::BigFloat, f_upper::BigFloat,
+                                x_tolerance::BigFloat,
+                                max_iterations::Integer)
+    iszero(f_lower) && return lower
+    iszero(f_upper) && return upper
+    sign(f_lower) != sign(f_upper) || return nothing
+    left, right = lower, upper
+    fleft = f_lower
+    for _ in 1:max_iterations
+        right - left <= x_tolerance && break
+        midpoint = (left + right) / 2
+        fmid = f(midpoint)
+        iszero(fmid) && return midpoint
+        if sign(fmid) == sign(fleft)
+            left, fleft = midpoint, fmid
+        else
+            right = midpoint
+        end
+    end
+    right - left <= x_tolerance ||
+        error("spin-topology root did not meet absolute tolerance")
+    return (left + right) / 2
+end
+
+function _bhsr_spin_topology_status(intervals, roots)
+    isempty(intervals) && return isempty(roots) ? :no_efficient_spin : :isolated_threshold_points
+    length(intervals) > 1 && return :multiple_efficiency_intervals
+    lower, upper = only(intervals)
+    lower == 0 && upper == 1 && return :all_spins_efficient
+    lower == 0 && return :efficiency_from_zero_bounded_above
+    upper == 1 && return :single_onset_to_extremal_spin
+    return :bounded_efficiency_interval
+end
+
+function _bhsr_isolate_positive_spin_intervals_at_resolution(f, scan_points::Integer;
+        max_iterations::Integer = 140,
+        absolute_tolerance::Real = big"1e-40")
+    scan_points >= 3 || throw(ArgumentError("spin-topology scan needs at least three points"))
     max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
-    atol = BigFloat(absolute_tolerance)
-    atol > 0 || throw(ArgumentError("absolute_tolerance must be positive"))
+    x_tolerance = _bhsr_big(absolute_tolerance)
+    x_tolerance > 0 || throw(ArgumentError("absolute_tolerance must be positive"))
+    x_tolerance < 1 || throw(ArgumentError("absolute_tolerance must be less than the spin range"))
+    points = [BigFloat(index - 1) / BigFloat(scan_points - 1) for index in 1:scan_points]
+    values = BigFloat[f(point) for point in points]
+    all(isfinite, values) || throw(DomainError(values, "spin residual must be finite on [0,1]"))
+    nodes = Tuple{BigFloat,BigFloat}[(points[index], values[index])
+                                    for index in eachindex(points)]
+    extremum_tolerance = max(x_tolerance, big"1e-12")
+    for index in 2:(scan_points - 1)
+        previous, current, following = values[index - 1], values[index], values[index + 1]
+        is_maximum = current >= previous && current >= following &&
+                     (current > previous || current > following)
+        is_minimum = current <= previous && current <= following &&
+                     (current < previous || current < following)
+        if is_maximum || is_minimum
+            point, value = _bhsr_refine_spin_extremum(f, points[index - 1],
+                points[index + 1], is_maximum, extremum_tolerance, max_iterations)
+            push!(nodes, (point, value))
+        end
+    end
+    sort!(nodes; by = first)
+
+    roots = BigFloat[]
+    for (point, value) in nodes
+        iszero(value) && push!(roots, point)
+    end
+    for index in 1:(length(nodes) - 1)
+        lower, f_lower = nodes[index]
+        upper, f_upper = nodes[index + 1]
+        if !iszero(f_lower) && !iszero(f_upper) && sign(f_lower) != sign(f_upper)
+            root = _bhsr_refine_spin_root(f, lower, upper, f_lower, f_upper,
+                                           x_tolerance, max_iterations)
+            !isnothing(root) && push!(roots, root)
+        end
+    end
+    sort!(roots)
+    unique_roots = BigFloat[]
+    for root in roots
+        if isempty(unique_roots) || root - last(unique_roots) > 2x_tolerance
+            push!(unique_roots, root)
+        end
+    end
+
+    boundaries = sort!(unique!(vcat(BigFloat[0], unique_roots, BigFloat[1])))
+    intervals = Tuple{BigFloat,BigFloat}[]
+    for index in 1:(length(boundaries) - 1)
+        lower, upper = boundaries[index], boundaries[index + 1]
+        upper > lower || continue
+        f((lower + upper) / 2) > 0 && push!(intervals, (lower, upper))
+    end
+    return (; roots = unique_roots,
+            intervals,
+            status = _bhsr_spin_topology_status(intervals, unique_roots),
+            scan_points = Int(scan_points),
+            isolation_method = "uniform_scan_with_local_extremum_refinement")
+end
+
+function _bhsr_topology_endpoints_stable(previous, current, tolerance::BigFloat)
+    previous.status == current.status || return false
+    length(previous.roots) == length(current.roots) || return false
+    length(previous.intervals) == length(current.intervals) || return false
+    all(abs(previous.roots[index] - current.roots[index]) <= tolerance
+        for index in eachindex(previous.roots)) || return false
+    all(abs(previous.intervals[index][endpoint] - current.intervals[index][endpoint]) <= tolerance
+        for index in eachindex(previous.intervals) for endpoint in 1:2) || return false
+    return true
+end
+
+"Refine spin-topology isolation until crossings and intervals stabilize."
+function _bhsr_isolate_positive_spin_intervals(f;
+        scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS,
+        max_iterations::Integer = 140,
+        absolute_tolerance::Real = big"1e-40")
+    scan_points >= 3 || throw(ArgumentError("spin-topology scan needs at least three points"))
+    tolerance = _bhsr_big(absolute_tolerance)
+    stability_tolerance = max(tolerance * 10, big"1e-30")
+    resolutions = [Int(scan_points), 2Int(scan_points) - 1, 4Int(scan_points) - 3]
+    results = [_bhsr_isolate_positive_spin_intervals_at_resolution(f, points;
+        max_iterations, absolute_tolerance) for points in resolutions]
+    stable = _bhsr_topology_endpoints_stable(results[1], results[2], stability_tolerance) &&
+             _bhsr_topology_endpoints_stable(results[2], results[3], stability_tolerance)
+    final = last(results)
+    if !stable
+        return (; roots = final.roots, intervals = Tuple{BigFloat,BigFloat}[],
+                candidate_intervals = final.intervals,
+                status = :unavailable_topology_resolution,
+                scan_points = final.scan_points,
+                resolution_ladder = resolutions,
+                resolution_status = :unstable,
+                isolation_method = final.isolation_method)
+    end
+    return (; roots = final.roots, intervals = final.intervals,
+            candidate_intervals = final.intervals,
+            status = final.status,
+            scan_points = final.scan_points,
+            resolution_ladder = resolutions,
+            resolution_status = :stable,
+            isolation_method = final.isolation_method)
+end
+
+function _bhsr_union_spin_intervals(per_mode_topologies)
+    intervals = Tuple{BigFloat,BigFloat}[]
+    for topology in per_mode_topologies
+        append!(intervals, topology.intervals)
+    end
+    isempty(intervals) && return intervals
+    sort!(intervals; by = first)
+    merged = Tuple{BigFloat,BigFloat}[]
+    for (lower, upper) in intervals
+        if isempty(merged) || lower >= last(merged)[2]
+            push!(merged, (lower, upper))
+        else
+            previous_lower, previous_upper = pop!(merged)
+            push!(merged, (previous_lower, max(previous_upper, upper)))
+        end
+    end
+    return merged
+end
+
+function _bhsr_contour_topology_status(intervals)
+    isempty(intervals) && return :no_efficient_spin
+    length(intervals) > 1 && return :multiple_boundaries_required
+    lower, upper = only(intervals)
+    lower == 0 && upper == 1 && return :all_spins_efficient
+    lower == 0 && return :bounded_efficiency_from_zero
+    upper == 1 && return :single_onset_to_extremal_spin
+    return :bounded_efficiency_interval
+end
+
+"""Resolve spin crossings and efficient intervals for the source rate.
+
+The frozen scalar `critical_spin` API returns only the first onset. This
+result retains the crossings and positive intervals found by the recorded
+resolution-stability audit on `[0,1]`.
+"""
+function bhsr_critical_spin_topology(mass_solar::Real, mu_eV::Real,
+                                     mode::BHSRMode, tau_years::Real;
+                                     model_id::AbstractString = "BHSR-CRITICAL-SPIN-TOPOLOGY",
+                                     delta_a::Real = 0.1,
+                                     precision_bits::Integer = 256,
+                                     max_iterations::Integer = 140,
+                                     absolute_tolerance::Real = big"1e-40",
+                                     scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS)
+    precision_bits > 0 || throw(ArgumentError("precision_bits must be positive"))
+    id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         f(a) = bhsr_free_field_residual(mass_solar, mu_eV, a, mode, tau_years;
                                         delta_a, precision_bits)
-        lo = BigFloat(0)
-        hi = BigFloat(1)
-        flo = f(lo)
-        fhi = f(hi)
-        flo >= 0 && return lo
-        fhi < 0 && return missing
-        fhi == 0 && return hi
-        for _ in 1:max_iterations
-            hi - lo <= atol && break
-            mid = (lo + hi) / 2
-            if f(mid) >= 0
-                hi = mid
-            else
-                lo = mid
-            end
-        end
-        hi - lo <= atol || error("critical-spin bisection did not meet absolute_tolerance=$atol after $max_iterations iterations")
-        (lo + hi) / 2
+        isolated = _bhsr_isolate_positive_spin_intervals(f; scan_points,
+            max_iterations, absolute_tolerance)
+        onset = isolated.status == :unavailable_topology_resolution ||
+                isempty(isolated.intervals) ? missing : first(isolated.intervals)[1]
+        return (; model_id = id, route_identity = "REFERENCE_2021_ANALYTIC",
+                method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+                source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+                mass_solar = _bhsr_big(mass_solar), mu_eV = _bhsr_big(mu_eV),
+                tau_years = _bhsr_big(tau_years), mode_label = mode.label,
+                onset_spin = onset, roots = isolated.roots,
+                intervals = isolated.intervals,
+                candidate_intervals = isolated.candidate_intervals,
+                topology_status = isolated.status,
+                contour_topology_status = isolated.status == :unavailable_topology_resolution ?
+                    :unavailable_topology_resolution : _bhsr_contour_topology_status(isolated.intervals),
+                scan_points = isolated.scan_points,
+                resolution_ladder = isolated.resolution_ladder,
+                resolution_status = isolated.resolution_status,
+                isolation_method = isolated.isolation_method)
     end
 end
 
-"Per-mode direct roots and the union boundary (lowest spin threshold)."
+"""Return only the first efficiency onset spin.
+
+This scalar does not describe the full efficient region. Call
+`bhsr_critical_spin_topology` to inspect all crossings and intervals. A bounded
+interval or multiple intervals cannot be represented as a single exclusion
+contour and must be treated as unavailable by contour consumers.
+"""
+function bhsr_critical_spin(mass_solar::Real, mu_eV::Real, mode::BHSRMode,
+                            tau_years::Real; kwargs...)
+    return bhsr_critical_spin_topology(mass_solar, mu_eV, mode, tau_years;
+                                       kwargs...).onset_spin
+end
+
+"Per-mode onsets and full interval union, with contour representability status."
 function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
                         modes::AbstractVector{BHSRMode} = bhsr_nodeless_modes();
                         model_id::AbstractString, delta_a::Real = big"0.1",
@@ -287,15 +506,27 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
                         absolute_tolerance::Real = big"1e-40")
     _bhsr_validate_modes(modes)
     id = _bhsr_model_id(model_id)
+    topologies = [bhsr_critical_spin_topology(mass_solar, mu_eV, mode,
+        tau_years; model_id = id, delta_a, precision_bits, max_iterations,
+        absolute_tolerance)
+        for mode in modes]
     roots = Pair{String,Union{Missing,BigFloat}}[]
-    for mode in modes
-        push!(roots, mode.label => bhsr_critical_spin(mass_solar, mu_eV, mode,
-            tau_years; delta_a, precision_bits, max_iterations, absolute_tolerance))
+    for (mode, topology) in zip(modes, topologies)
+        push!(roots, mode.label => topology.onset_spin)
     end
-    present = [(mode = first(value), spin = last(value)) for value in roots
-               if !ismissing(last(value))]
-    union_item = isempty(present) ? nothing : present[argmin(getfield.(present, :spin))]
+    topology_resolved = all(topology -> topology.topology_status !=
+        :unavailable_topology_resolution, topologies)
+    union_intervals = topology_resolved ? _bhsr_union_spin_intervals(topologies) :
+        Tuple{BigFloat,BigFloat}[]
+    union_item = isempty(union_intervals) ? nothing : begin
+        onset = first(union_intervals)[1]
+        matching = findfirst(topology -> any(interval -> interval[1] == onset,
+                                              topology.intervals), topologies)
+        (; mode = matching === nothing ? missing : modes[matching].label, spin = onset)
+    end
     union_spin = union_item === nothing ? missing : union_item.spin
+    contour_status = !topology_resolved ? :unavailable_topology_resolution :
+        _bhsr_contour_topology_status(union_intervals)
     return (; model_id = id,
             route_identity = "REFERENCE_2021_ANALYTIC",
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
@@ -303,8 +534,13 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
             mode_labels = getfield.(modes, :label),
             mass_solar = _bhsr_big(mass_solar),
             per_mode = roots,
+            per_mode_topology = topologies,
             union_mode = union_item === nothing ? missing : union_item.mode,
             union_spin,
+            union_intervals,
+            topology_status = topology_resolved ? :resolved : :unavailable_topology_resolution,
+            contour_topology_status = contour_status,
+            onset_only = true,
             delta_a = _bhsr_big(delta_a),
             precision_bits)
 end
@@ -334,6 +570,7 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
                                   max_iterations, absolute_tolerance)
                    for mass in masses]
         union_spins = Union{Missing,BigFloat}[
+            row.contour_topology_status != :single_onset_to_extremal_spin ||
             ismissing(row.union_spin) ? missing : row.union_spin for row in rows]
         source_grid = points == 1201 && lower == -1 && width == 3 &&
             getfield.(modes, :label) == getfield.(_BHSR_SOURCE_MODES, :label) &&
@@ -359,15 +596,13 @@ function _bhsr_union_spin_at_mass(grid::BHSRContourGrid, mass_solar::Real)
             throw(ArgumentError("contour evaluator must return a finite spin or missing"))
         return _bhsr_big(value)
     end
-    roots = Union{Missing,BigFloat}[
-        bhsr_critical_spin(mass_solar, grid.mu_eV, mode, grid.tau_years;
-                           delta_a = grid.delta_a,
-                           precision_bits = grid.precision_bits,
-                           max_iterations = grid.root_max_iterations,
-                           absolute_tolerance = grid.root_absolute_tolerance)
-        for mode in grid.modes]
-    present = BigFloat[value for value in roots if !ismissing(value)]
-    return isempty(present) ? missing : minimum(present)
+    row = bhsr_regge_row(mass_solar, grid.mu_eV, grid.tau_years, grid.modes;
+        model_id = grid.model_id, delta_a = grid.delta_a,
+        precision_bits = grid.precision_bits,
+        max_iterations = grid.root_max_iterations,
+        absolute_tolerance = grid.root_absolute_tolerance)
+    row.contour_topology_status == :single_onset_to_extremal_spin || return missing
+    return row.union_spin
 end
 
 function (grid::BHSRContourGrid)(mass_solar::Real)
@@ -430,33 +665,49 @@ end
 "Strict Eq. (26) decision: equality is the transition and is not efficient."
 bhsr_bosenova_efficient(residual::Real) = residual > 0
 
-function bhsr_bosenova_critical_spin(mass_solar::Real, mu_eV::Real,
-                                     mode::BHSRMode, lambda_iiii::Real,
-                                     tau_years::Real; precision_bits::Integer = 256,
-                                     max_iterations::Integer = 140,
-                                     absolute_tolerance::Real = big"1e-40",
-                                     kwargs...)
+"""Resolve spin crossings and efficient intervals for source Eq. (26)."""
+function bhsr_bosenova_critical_spin_topology(mass_solar::Real, mu_eV::Real,
+        mode::BHSRMode, lambda_iiii::Real, tau_years::Real;
+        model_id::AbstractString = "BHSR-BOSENOVA-SPIN-TOPOLOGY",
+        precision_bits::Integer = 256,
+        max_iterations::Integer = 140,
+        absolute_tolerance::Real = big"1e-40",
+        scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS,
+        kwargs...)
+    precision_bits > 0 || throw(ArgumentError("precision_bits must be positive"))
+    id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         residual(a) = bhsr_bosenova_residual(mass_solar, mu_eV, a, mode,
                                              lambda_iiii, tau_years;
                                              precision_bits, kwargs...)
-        lo, hi = BigFloat(0), BigFloat(1)
-        flo, fhi = residual(lo), residual(hi)
-        flo >= 0 && return lo
-        fhi < 0 && return missing
-        for _ in 1:max_iterations
-            hi - lo <= BigFloat(absolute_tolerance) && break
-            mid = (lo + hi) / 2
-            if residual(mid) > 0
-                hi = mid
-            else
-                lo = mid
-            end
-        end
-        hi - lo <= BigFloat(absolute_tolerance) ||
-            error("bosenova critical-spin bisection did not meet tolerance")
-        (lo + hi) / 2
+        isolated = _bhsr_isolate_positive_spin_intervals(residual; scan_points,
+            max_iterations, absolute_tolerance)
+        onset = isolated.status == :unavailable_topology_resolution ||
+                isempty(isolated.intervals) ? missing : first(isolated.intervals)[1]
+        return (; model_id = id, route_identity = BHSR_BOSENOVA_ROUTE,
+                method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+                source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+                mass_solar = _bhsr_big(mass_solar), mu_eV = _bhsr_big(mu_eV),
+                lambda_iiii = _bhsr_big(lambda_iiii), tau_years = _bhsr_big(tau_years),
+                mode_label = mode.label, onset_spin = onset, roots = isolated.roots,
+                intervals = isolated.intervals,
+                candidate_intervals = isolated.candidate_intervals,
+                topology_status = isolated.status,
+                contour_topology_status = isolated.status == :unavailable_topology_resolution ?
+                    :unavailable_topology_resolution : _bhsr_contour_topology_status(isolated.intervals),
+                scan_points = isolated.scan_points,
+                resolution_ladder = isolated.resolution_ladder,
+                resolution_status = isolated.resolution_status,
+                isolation_method = isolated.isolation_method)
     end
+end
+
+"Return only the first Eq. (26) efficiency onset spin; inspect full topology separately."
+function bhsr_bosenova_critical_spin(mass_solar::Real, mu_eV::Real,
+                                     mode::BHSRMode, lambda_iiii::Real,
+                                     tau_years::Real; kwargs...)
+    return bhsr_bosenova_critical_spin_topology(mass_solar, mu_eV, mode,
+        lambda_iiii, tau_years; kwargs...).onset_spin
 end
 
 "Per-mode self-interaction transitions and their source-mode union boundary."
@@ -471,15 +722,21 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
                                   absolute_tolerance::Real = big"1e-40")
     _bhsr_validate_modes(modes)
     id = _bhsr_model_id(model_id)
+    topologies = [bhsr_bosenova_critical_spin_topology(mass_solar, mu_eV, mode,
+        lambda_iiii, tau_years; model_id = id, delta_a, c_bose,
+        reduced_planck_GeV, precision_bits, max_iterations, absolute_tolerance)
+        for mode in modes]
     roots = Pair{String,Union{Missing,BigFloat}}[]
-    for mode in modes
-        root = bhsr_bosenova_critical_spin(mass_solar, mu_eV, mode,
-            lambda_iiii, tau_years; delta_a, c_bose, reduced_planck_GeV,
-            precision_bits, max_iterations, absolute_tolerance)
-        push!(roots, mode.label => root)
+    for (mode, topology) in zip(modes, topologies)
+        push!(roots, mode.label => topology.onset_spin)
     end
-    present = BigFloat[last(pair) for pair in roots if !ismissing(last(pair))]
-    union_spin = isempty(present) ? missing : minimum(present)
+    topology_resolved = all(topology -> topology.topology_status !=
+        :unavailable_topology_resolution, topologies)
+    union_intervals = topology_resolved ? _bhsr_union_spin_intervals(topologies) :
+        Tuple{BigFloat,BigFloat}[]
+    union_spin = isempty(union_intervals) ? missing : first(union_intervals)[1]
+    contour_status = !topology_resolved ? :unavailable_topology_resolution :
+        _bhsr_contour_topology_status(union_intervals)
     return (; model_id = id,
             route_identity = BHSR_BOSENOVA_ROUTE,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
@@ -487,7 +744,12 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
             mode_labels = getfield.(modes, :label),
             mass_solar = _bhsr_big(mass_solar),
             per_mode = roots,
-            union_spin)
+            per_mode_topology = topologies,
+            union_spin,
+            union_intervals,
+            topology_status = topology_resolved ? :resolved : :unavailable_topology_resolution,
+            contour_topology_status = contour_status,
+            onset_only = true)
 end
 """Continued-fraction scalar bound-state validation for CYAX-0121.
 

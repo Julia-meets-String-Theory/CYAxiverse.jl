@@ -112,11 +112,27 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
             throw(ArgumentError("contour method-manifest identity is stale"))
         contour.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256 ||
             throw(ArgumentError("contour source-mode manifest identity is stale"))
+        topology_status = if all(row -> hasproperty(row, :contour_topology_status), contour.rows)
+            statuses = Symbol[]
+            for row in contour.rows
+                push!(statuses, row.contour_topology_status)
+            end
+            isempty(statuses) ? :unverified_source_contour_topology :
+            any(==(:unavailable_topology_resolution), statuses) ?
+                :unavailable_topology_resolution :
+            all(==(:single_onset_to_extremal_spin), statuses) ?
+                :single_onset_to_extremal_spin : :ambiguous_source_spin_region_topology
+        elseif contour.source_grid
+            :unverified_source_contour_topology
+        else
+            :caller_supplied_diagnostic_grid
+        end
         # The exact numerical recipe can be reproduced, but the frozen
         # manifest has no digitized Fig. 3 targets or authorized sigma set.
         return (; source_backed = false,
                 contour_provenance_status = contour.source_grid ?
                     :matching_recipe_without_source_target_data : :custom_grid,
+                contour_topology_status = topology_status,
                 mode_labels = getfield.(contour.modes, :label),
                 contour_route_identity = contour.route_identity,
                 contour_mass_support_solar =
@@ -130,12 +146,14 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
         # `source_backed` on the public wrapper is never accepted as proof.
         return (; source_backed = false,
                 contour_provenance_status = :caller_supplied_contour_functions,
+                contour_topology_status = :caller_supplied_diagnostic_contour,
                 mode_labels = contour.mode_labels,
                 contour_route_identity = contour.route_identity,
                 contour_mass_support_solar = missing)
     end
     return (; source_backed = false,
             contour_provenance_status = :unsupported_contour_type,
+            contour_topology_status = :unverified_contour_topology,
             mode_labels = String[],
             contour_route_identity = "UNSPECIFIED_CONTOUR",
             contour_mass_support_solar = missing)
@@ -158,6 +176,7 @@ function _bhsr_likelihood_metadata(contour, model_id::AbstractString,
             contour_route_identity = contour_identity.contour_route_identity,
             contour_mass_support_solar = contour_identity.contour_mass_support_solar,
             contour_provenance_status = contour_identity.contour_provenance_status,
+            contour_topology_status = contour_identity.contour_topology_status,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             bh_ensemble_id = ensemble.manifest_id,
@@ -246,6 +265,15 @@ function bhsr_allowed_probability_direct(xbar::Real, ybar::Real,
     identity = _bhsr_likelihood_metadata(f, model_id, axion_id, bh_id, bh_ensemble)
     xb, yb = _bhsr_big(xbar), _bhsr_big(ybar)
     lo, hi = _bhsr_big(lower), _bhsr_big(upper)
+    if f isa BHSRContourGrid &&
+       identity.contour_topology_status != :caller_supplied_diagnostic_grid &&
+       identity.contour_topology_status != :single_onset_to_extremal_spin
+        status = identity.contour_topology_status == :unavailable_topology_resolution ?
+            :unavailable_topology_resolution : :ambiguous_source_spin_region_topology
+        return merge(identity, (; projection = :y_of_x, status,
+                derivative = missing, sigma_effective = missing,
+                probability_allowed = missing))
+    end
     if f isa BHSRContourGrid &&
        !(first(f.mass_solar) <= xb <= last(f.mass_solar))
         return merge(identity, (; projection = :y_of_x,
@@ -384,6 +412,13 @@ function bhsr_allowed_probability_inverse(xbar::Real, ybar::Real,
                           sigma_effective = missing,
                           probability_allowed = missing,
                           detail))
+
+    if identity.contour_topology_status != :caller_supplied_diagnostic_grid &&
+       identity.contour_topology_status != :single_onset_to_extremal_spin
+        status = identity.contour_topology_status == :unavailable_topology_resolution ?
+            :unavailable_topology_resolution : :ambiguous_source_spin_region_topology
+        return unavailable(status)
+    end
 
     (first(grid.mass_solar) <= xb <= last(grid.mass_solar)) ||
         return unavailable(:outside_frozen_mass_support)

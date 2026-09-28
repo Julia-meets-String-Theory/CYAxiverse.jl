@@ -69,13 +69,18 @@ end
 
 function _bhsr_contour_fixture(masses, spins, evaluator; model_id = "inverse-fixture",
                                active_modes = fill("|211>", length(masses)),
-                               source_grid = false)
+                               source_grid = false,
+                               contour_topology_status = nothing)
     mode = only(filter(item -> item.label == "|211>", bhsr_nodeless_modes()))
-    rows = Any[(; model_id, mass_solar = _bhsr_big(masses[i]),
-                union_spin = ismissing(spins[i]) ? missing : _bhsr_big(spins[i]),
-                union_mode = ismissing(spins[i]) ? missing : active_modes[i],
-                per_mode = ["|211>" => (ismissing(spins[i]) ? missing : _bhsr_big(spins[i]))])
-               for i in eachindex(masses)]
+    rows = Any[]
+    for i in eachindex(masses)
+        row = (; model_id, mass_solar = _bhsr_big(masses[i]),
+               union_spin = ismissing(spins[i]) ? missing : _bhsr_big(spins[i]),
+               union_mode = ismissing(spins[i]) ? missing : active_modes[i],
+               per_mode = ["|211>" => (ismissing(spins[i]) ? missing : _bhsr_big(spins[i]))])
+        push!(rows, contour_topology_status === nothing ? row :
+            merge(row, (; contour_topology_status)))
+    end
     return BHSRContourGrid(model_id, "SYNTHETIC_FIXTURE",
         BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
         BHSR_SOURCE_MODE_MANIFEST_SHA256,
@@ -115,6 +120,33 @@ end
                                   mode211, big"1e10") < 0
     @test bhsr_free_field_residual(big"10", big"4.3e-12", critical + big"1e-6",
                                   mode211, big"1e10") > 0
+    low_alpha_free = bhsr_critical_spin_topology(big"1", big"4.3e-12", mode211,
+        big"1e10"; model_id = "low-alpha-free-topology")
+    low_alpha_free_mid = bhsr_free_field_residual(big"1", big"4.3e-12", big"0.5",
+        mode211, big"1e10")
+    low_alpha_free_extremal = bhsr_free_field_residual(big"1", big"4.3e-12", big"1",
+        mode211, big"1e10")
+    @test low_alpha_free_mid ≈ big"2.8136713513e7" rtol = big"1e-11"
+    @test low_alpha_free_extremal ≈ big"-172.50682646" rtol = big"1e-11"
+    @test length(low_alpha_free.roots) == 2
+    @test low_alpha_free.intervals[1][1] ≈ big"0.1281682643098299286975054649" atol = big"1e-27"
+    @test low_alpha_free.intervals[1][2] ≈ big"0.9999990663471144156736753704" atol = big"1e-27"
+    @test low_alpha_free.topology_status == :bounded_efficiency_interval
+    @test low_alpha_free.resolution_ladder == [257, 513, 1025]
+    @test low_alpha_free.resolution_status == :stable
+    low_alpha_row = bhsr_regge_row(big"1", big"4.3e-12", big"1e10", [mode211];
+        model_id = "low-alpha-free-row")
+    @test low_alpha_row.union_spin == first(low_alpha_free.roots)
+    @test low_alpha_row.union_intervals == low_alpha_free.intervals
+    @test low_alpha_row.contour_topology_status == :bounded_efficiency_interval
+    @test low_alpha_row.onset_only
+
+    narrow_pocket(x) = big"1.1" * exp(-((x - big"0.501") / big"0.0003")^2) - x
+    unresolved_topology = _bhsr_isolate_positive_spin_intervals(narrow_pocket)
+    @test unresolved_topology.status == :unavailable_topology_resolution
+    @test unresolved_topology.resolution_status == :unstable
+    @test isempty(unresolved_topology.intervals)
+    @test length(unresolved_topology.candidate_intervals) == 1
     @test_throws ErrorException bhsr_critical_spin(big"10", big"4.3e-12", mode211,
         big"1e10"; max_iterations = 1)
 
@@ -151,6 +183,18 @@ end
     @test bose_below < 0 < bose_above
     @test !bhsr_bosenova_efficient(bose_below)
     @test bhsr_bosenova_efficient(bose_above)
+    low_alpha_bose = bhsr_bosenova_critical_spin_topology(big"1", big"4.3e-12",
+        mode211, big"-1e-73", big"1e10"; model_id = "low-alpha-bose-topology")
+    low_alpha_bose_mid = bhsr_bosenova_residual(big"1", big"4.3e-12", big"0.5",
+        mode211, big"-1e-73", big"1e10")
+    low_alpha_bose_extremal = bhsr_bosenova_residual(big"1", big"4.3e-12", big"1",
+        mode211, big"-1e-73", big"1e10")
+    @test low_alpha_bose_mid ≈ big"2.5238411056e10" rtol = big"1e-11"
+    @test low_alpha_bose_extremal ≈ big"-173.56198036" rtol = big"1e-11"
+    @test length(low_alpha_bose.roots) == 2
+    @test low_alpha_bose.intervals[1][1] ≈ big"0.1281665047765220283893719384" atol = big"1e-27"
+    @test low_alpha_bose.intervals[1][2] ≈ big"0.9999999989528558771827878312" atol = big"1e-27"
+    @test low_alpha_bose.topology_status == :bounded_efficiency_interval
     bose_row = bhsr_bosenova_regge_row(big"10", big"4.3e-12", big"-1e-73",
                                       big"1e10", modes; model_id = "bosenova-10-solar-mass")
     @test bose_row.model_id == "bosenova-10-solar-mass"
@@ -159,7 +203,10 @@ end
     @test bose_row.route_identity == "REFERENCE_2021_BOSENOVA"
     @test bose_row.union_spin < last(bose_row.per_mode[1])
     @test isapprox(bose_row.union_spin,
-                   big"0.408959402721713939807860399649"; rtol = big"1e-24")
+                   big"0.319053261183905135751996850325"; rtol = big"1e-24")
+    @test bose_row.contour_topology_status == :single_onset_to_extremal_spin
+    @test length(bose_row.per_mode_topology[4].roots) == 2
+    @test bose_row.per_mode_topology[4].topology_status == :bounded_efficiency_interval
     @test_throws ErrorException bhsr_bosenova_critical_spin(big"10", big"4.3e-12",
         mode211, big"-1e-73", big"1e10"; max_iterations = 1)
     @test ismissing(bhsr_bosenova_critical_spin(big"10", big"4.3e-12", mode211,
@@ -269,6 +316,21 @@ end
     @test !asserted_grid_result.source_backed
     @test asserted_grid_result.contour_provenance_status ==
         :matching_recipe_without_source_target_data
+    @test asserted_grid_result.contour_topology_status == :unverified_source_contour_topology
+    @test asserted_grid_result.status == :ambiguous_source_spin_region_topology
+
+    bounded_source_formula_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2;
+        contour_topology_status = :bounded_efficiency_interval)
+    bounded_direct = bhsr_allowed_probability_direct(big"2", big"4", big"0.1",
+        big"0.2", bounded_source_formula_grid; model_id = "inverse-fixture",
+        axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    @test bounded_direct.status == :ambiguous_source_spin_region_topology
+    @test ismissing(bounded_direct.diagnostic_probability_allowed)
+    bounded_inverse = bhsr_allowed_probability_inverse(big"0.5", big"0.75", big"0.1",
+        big"0.2", bounded_source_formula_grid; model_id = "inverse-fixture",
+        axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    @test bounded_inverse.status == :ambiguous_source_spin_region_topology
+    @test ismissing(bounded_inverse.diagnostic_probability_allowed)
     @test ismissing(asserted_grid_result.probability_allowed)
 
     boundary_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2)

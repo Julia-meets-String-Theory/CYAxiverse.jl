@@ -31,6 +31,15 @@ probabilities and no threshold result. The strict `P_ex > 0.9545` criterion is
 reported only when an authoritative source sigma set exists; that condition is
 not met here.
 
+The source-bound 2021 contour path also checks the full spin-region topology.
+It returns unavailable if its mode union has a bounded interval, disjoint
+intervals, or scan-resolution instability. A first crossing alone does not
+establish that all larger spins are excluded. The exact 2020 Eq. (14) rate
+factor differs from the 2018 Eq. (15) factor, and the 2020 prose describes a
+single spin bound. That source-interpretation discrepancy remains unresolved;
+the 2021 contour is not treated as an Appendix-B contour when its full topology
+cannot be represented by one onset boundary.
+
 ## Source ensemble and contour support
 
 The 24 black-hole identities in the frozen observational manifest are the
