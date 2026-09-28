@@ -32,9 +32,7 @@ SCRIPT_PATH = Path(__file__).resolve()
 REPOSITORY_ROOT = SCRIPT_PATH.parent.parent
 DEFAULT_VALIDATION_ROOT = REPOSITORY_ROOT / "validation" / "cyax_0115_uniform_frst"
 REGISTRATION_PATH = DEFAULT_VALIDATION_ROOT / "preregistration_candidates.json"
-CYTOOLS_SITE_PACKAGES = Path(
-    "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/lib/python3.14/site-packages"
-)
+DEFAULT_CACHE_DIR = Path(tempfile.gettempdir()) / "cyax-0115-cytools-cache"
 EXPECTED_SOURCE_BLOBS = {
     "polytope.py": "c54a01651b850842128df00589fef981cf09c05c",
     "triangulation.py": "d83758d7c10ba9092fac66453a378e39e314d7a2",
@@ -181,11 +179,14 @@ def load_registration(path: Path = REGISTRATION_PATH):
 
 
 def bootstrap_cytools(cache_dir: Path | None = None):
-    if cache_dir is not None:
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        os.environ["XDG_CACHE_HOME"] = str(cache_dir)
-    if str(CYTOOLS_SITE_PACKAGES) not in sys.path:
-        sys.path.insert(0, str(CYTOOLS_SITE_PACKAGES))
+    cache_dir = DEFAULT_CACHE_DIR if cache_dir is None else cache_dir
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["XDG_CACHE_HOME"] = str(cache_dir)
+    try:
+        import platformdirs
+    except ImportError as exc:
+        raise ValidationError("CYTools requires platformdirs in the active Python environment") from exc
+    platformdirs.user_cache_dir = lambda *args, **kwargs: str(cache_dir)
     import cytools
     import cytools.polytope as polytope_module
     import cytools.triangulation as triangulation_module
@@ -1472,7 +1473,7 @@ def main(argv=None):
     )
     parser.add_argument("--registration", type=Path, default=REGISTRATION_PATH)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_VALIDATION_ROOT / "exact_support")
-    parser.add_argument("--cache-dir", type=Path, default=Path("/private/tmp/cyax-0115-cytools-cache"))
+    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--candidate-id")
     parser.add_argument("--support-cap", type=int)
     parser.add_argument("--time-cap", type=float)

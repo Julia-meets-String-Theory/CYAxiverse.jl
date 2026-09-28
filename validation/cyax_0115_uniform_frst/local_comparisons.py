@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -16,7 +17,7 @@ VALIDATION = ROOT / "validation/cyax_0115_uniform_frst"
 SUPPORT_DIR = VALIDATION / "exact_support_hard_capped"
 MANIFEST = SUPPORT_DIR / "validation_manifest.json"
 MANIFEST_SHA = "04254692b901a0b2a2d18d2bb21d7647af9aa48e0ce7d7173307a82ff6563263"
-CACHE_ROOT = Path("/private/tmp/cyax-0115-comparison-cache")
+CACHE_ROOT = Path(tempfile.gettempdir()) / "cyax-0115-comparison-cache"
 PROPOSAL_COUNT = 100
 WALL_CAP_SECONDS = 300
 
@@ -48,11 +49,7 @@ def run_worker(fixture_id: str, method: str, seed: int, result_path: Path):
     support_ids = {state["full_triangulation_sha256"] for state in support["states"]}
     cache_dir = CACHE_ROOT / f"{fixture_id}-{method}"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    # platformdirs uses ~/Library/Caches on macOS, which is outside this task's
-    # writable roots. Redirect only CYTools' runtime cache to this task cache.
-    import platformdirs
-
-    platformdirs.user_cache_dir = lambda *args, **kwargs: str(cache_dir)
+    cytools, _, _, _ = v.bootstrap_cytools(cache_dir)
     sys.path.insert(0, str(ROOT / "scripts"))
     generation_path = ROOT / "scripts/generate_geometric_data_multitriangulation.py"
     generation_spec = importlib.util.spec_from_file_location(
@@ -63,7 +60,6 @@ def run_worker(fixture_id: str, method: str, seed: int, result_path: Path):
     generation = importlib.util.module_from_spec(generation_spec)
     sys.modules[generation_spec.name] = generation
     generation_spec.loader.exec_module(generation)
-    cytools, _, _, _ = v.bootstrap_cytools(cache_dir)
     poly = v.construct_candidate(cytools, fixture["source_fixture"])
     journal = result_path.with_suffix(".progress.jsonl")
     if method not in ("fast", "ntfe_fast"):

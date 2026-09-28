@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -17,7 +18,7 @@ SUPPORT_DIR = VALIDATION / "exact_support_hard_capped"
 MANIFEST = SUPPORT_DIR / "validation_manifest.json"
 EXPECTED_MANIFEST_SHA256 = "04254692b901a0b2a2d18d2bb21d7647af9aa48e0ce7d7173307a82ff6563263"
 EXPECTED_SCHEDULE_SHA256 = "a351d05ce60a5cb00f6298b567e045d8e6e18d9ab49055453919872f16feb92d"
-CYTOOLS_CACHE = Path("/private/tmp/cyax-0115-local-verification-cache")
+CYTOOLS_CACHE = Path(tempfile.gettempdir()) / "cyax-0115-local-verification-cache"
 
 
 def load_validator():
@@ -271,7 +272,15 @@ def check_atomic_collision_and_torn_tail(v):
         }
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=VALIDATION / "calibration/local-verification.json",
+        help="Write this verification result to a new JSON file",
+    )
+    args = parser.parse_args(argv)
     v = load_validator()
     identity, manifest, cytools, poly_mod, tri_mod = check_manifest_and_supports(v)
     state_machine = check_duplicate_retry_state_machine(v, manifest, cytools, poly_mod, tri_mod)
@@ -291,8 +300,7 @@ def main():
         },
         "overall_status": "PASS_LOCAL_INVARIANTS_WITH_SAMPLER_GATES_CLOSED",
     }
-    output_path = VALIDATION / "calibration/local-verification.json"
-    v.atomic_json_create(output_path, result)
+    v.atomic_json_create(args.output, result)
     print(json.dumps(result, sort_keys=True, indent=2))
 
 

@@ -10,28 +10,28 @@
     {
       "command": "python3 scripts/agent_verify.py python-regressions",
       "exit_code": 1,
-      "result": "FAILED because system Python 3.14 has no NumPy or h5py; import errors in test_build_orientifold_axion_database and test_qed_divisor_assignment. Eight other tests passed.",
-      "stdout_log": "/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_rud5xv57/python_regressions.stdout.log",
-      "stderr_log": "/var/folders/jd/gst5c4ys0313mjw6knrpxy0m0000gp/T/agent_verify_rud5xv57/python_regressions.stderr.log"
+      "result": "FAILED because the system Python environment has no NumPy or h5py; import errors in test_build_orientifold_axion_database and test_qed_divisor_assignment. Eight other tests passed."
     },
     {
-      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python scripts/agent_verify.py python-regressions",
+      "command": "python scripts/agent_verify.py python-regressions",
       "exit_code": 0,
-      "result": "PASS; repository Python regression runner, 10 tests"
+      "result": "PASS; repository Python regression runner, 10 tests",
+      "environment": "CYTools Python environment"
     },
     {
       "command": "python3 -m unittest test_geometry_sampler (cwd=scripts)",
       "exit_code": 1,
-      "result": "FAILED at import because system Python has no NumPy"
+      "result": "FAILED at import because the system Python environment has no NumPy"
     },
     {
-      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python -m unittest test_geometry_sampler (cwd=scripts)",
+      "command": "python -m unittest test_geometry_sampler (cwd=scripts)",
       "exit_code": 1,
       "result": "19 tests ran; 17 passed and 2 pre-existing NTFE mock-contract tests failed. test_ntfe_schema_contract_arguments_route_to_cytools expected the ntfe call dictionary but observed face_triangs arguments; test_ntfe_uses_direct_extension_with_bounded_face_pool expected call[0]=='ntfe' but observed 'face_triangs'. The tested sampler and test files are unchanged from the exact dispatch base.",
       "failures": [
         "test_ntfe_schema_contract_arguments_route_to_cytools",
         "test_ntfe_uses_direct_extension_with_bounded_face_pool"
-      ]
+      ],
+      "environment": "CYTools Python environment"
     },
     {
       "command": "python3 scripts/agent_verify.py diff-check",
@@ -44,19 +44,67 @@
       "result": "PASS; staged evidence and source additions have no whitespace errors"
     },
     {
-      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python validation/cyax_0115_uniform_frst/local_verification.py",
+      "command": "python validation/cyax_0115_uniform_frst/local_verification.py (pre-portability repair; original evidence run)",
+      "exit_code": 0,
+      "result": "PASS; 246 exact-support states, full and two-face identities, polytope identities, exact-AST duplicate/retry termination replay, atomic collision protection, and torn-tail recovery",
+      "environment": "CYTools Python environment"
+    },
+    {
+      "command": "python validation/cyax_0115_uniform_frst/local_comparisons.py (pre-portability repair; original evidence run)",
+      "exit_code": 0,
+      "result": "PASS; all six bounded biased-comparison cells completed 100/100 paired proposal seeds without timeout, no-yield, or generator errors",
+      "environment": "CYTools Python environment"
+    },
+    {
+      "command": "python validation/cyax_0115_uniform_frst/write_evidence_summary.py (pre-portability repair; original evidence run)",
+      "exit_code": 0,
+      "result": "PASS; froze six-cell early-termination table and per-proposal comparison report",
+      "environment": "CYTools Python environment"
+    },
+    {
+      "command": "CYTools environment: python scripts/validate_uniform_frst_ensemble.py --phase verify-frozen --manifest validation/cyax_0115_uniform_frst/exact_support_hard_capped/validation_manifest.json --manifest-sha256 04254692b901a0b2a2d18d2bb21d7647af9aa48e0ce7d7173307a82ff6563263",
+      "environment": "CYTools Python environment",
+      "exit_code": 0,
+      "result": "PASS_EXISTING_FROZEN_MANIFEST_VERIFIED; 60,000 scheduled restart slots and six frozen seed schedules; no manifest bytes written"
+    },
+    {
+      "command": "CYTools environment: python validation/cyax_0115_uniform_frst/local_verification.py --output validation/cyax_0115_uniform_frst/calibration/portability-repair-local-verification.json",
+      "environment": "CYTools Python environment",
       "exit_code": 0,
       "result": "PASS; 246 exact-support states, full and two-face identities, polytope identities, exact-AST duplicate/retry termination replay, atomic collision protection, and torn-tail recovery"
     },
     {
-      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python validation/cyax_0115_uniform_frst/local_comparisons.py",
+      "command": "CYTools environment: import comparison helper, bootstrap CYTools from active Python environment, and import comparison route (no proposals generated)",
+      "environment": "CYTools Python environment",
       "exit_code": 0,
-      "result": "PASS; all six bounded biased-comparison cells completed 100/100 paired proposal seeds without timeout, no-yield, or generator errors"
+      "result": "PASS; CYTools 1.4.12 and comparison route imported with portable cache setup"
     },
     {
-      "command": "/opt/homebrew/Caskroom/miniforge/base/envs/cytools/bin/python validation/cyax_0115_uniform_frst/write_evidence_summary.py",
+      "command": "python3 -m py_compile validation scripts; import all four validation modules",
+      "environment": "System Python",
       "exit_code": 0,
-      "result": "PASS; froze six-cell early-termination table and per-proposal comparison report"
+      "result": "PASS; all four validation modules compiled and imported without fixed dependency paths"
+    },
+    {
+      "command": "CYTools environment: python validation/cyax_0115_uniform_frst/local_verification.py (default output)",
+      "environment": "CYTools Python environment",
+      "exit_code": 1,
+      "result": "Output creation was refused because the earlier create-only result already exists; the existing artifact was preserved. The same post-repair verification then passed with a new explicit output path."
+    },
+    {
+      "command": "git diff --cached --check",
+      "exit_code": 0,
+      "result": "PASS; staged source and evidence changes have no whitespace errors"
+    },
+    {
+      "command": "Repository regression diff-check runner: python3 scripts/agent_verify.py diff-check",
+      "exit_code": 0,
+      "result": "PASS; no whitespace errors"
+    },
+    {
+      "command": "Path and private-identifier scan across changed additions",
+      "exit_code": 0,
+      "result": "PASS; 57 files scanned, no absolute host paths, local usernames, local worktree paths, or temporary session identifiers found"
     }
   ],
   "not_run": [
@@ -69,5 +117,13 @@
       "reason": "The first frozen restart fails the early-termination gate in every cell; r4 requires stopping that cell and forbids later restart seeds."
     }
   ],
-  "known_regression_warning": "The focused geometry-sampler suite exposes two NTFE test/source expectation mismatches already present at the exact dispatch base. No production sampler or test source file was changed in this candidate."
+  "known_regression_warning": "The focused geometry-sampler suite exposes two NTFE test/source expectation mismatches already present at the exact dispatch base. No production sampler or test source file was changed in this candidate.",
+  "portability_repair": {
+    "status": "PASS_PORTABLE_RUNTIME_PATHS",
+    "validation_manifest_sha256": "04254692b901a0b2a2d18d2bb21d7647af9aa48e0ce7d7173307a82ff6563263",
+    "seed_schedule_identity_sha256": "a351d05ce60a5cb00f6298b567e045d8e6e18d9ab49055453919872f16feb92d",
+    "validation_driver_git_blob_sha1_after_repair": "67c54f28253849f310a6629409f0c521717c5294",
+    "runtime_changes": "CYTools is imported from the active Python environment. Runtime cache defaults use the system temporary-directory API and redirect platformdirs before CYTools import. No sampler parameters or scientific outputs changed.",
+    "frozen_sampler_results": "The six first-seed public, hash-observed, and instrumented results remain bound to the pre-repair validation-driver blob 3fdc2c7ceec014f8b289979d4e06f926dec2e99a. No calibration seed was rerun; the portability smoke imported CYTools and the comparison route without generating proposals."
+  }
 }
