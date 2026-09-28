@@ -5,6 +5,59 @@ scalar masses in eV, and returned rates in s^-1. This implements the source's
 analytic approximation; it does not claim a digitized Fig. 3 comparison.
 """
 
+using SHA
+
+const BHSR_VALIDATION_DIR = normpath(joinpath(@__DIR__, "..", "validation",
+                                               "cyax_0121_bhsr_reconstruction"))
+const BHSR_SOURCE_MODE_MANIFEST = joinpath(BHSR_VALIDATION_DIR, "source_mode_manifest.json")
+const BHSR_NUMERICAL_METHOD_MANIFEST = joinpath(BHSR_VALIDATION_DIR, "numerical_method_manifest.json")
+const BHSR_SOURCE_MODE_MANIFEST_SHA256 =
+    "a891735d45dd80e57689917416577203e43a68ec0c7e96b23897cb7c306725ed"
+const BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 =
+    "7b9c1cf9e4787372801125d7c195288d36f3cb9e094b0a2ec179493c8e8392d5"
+
+function _bhsr_verified_manifest(path::AbstractString, expected_sha256::AbstractString)
+    isfile(path) || error("required frozen BHSR manifest is absent: $path")
+    bytes = read(path)
+    actual = bytes2hex(sha256(bytes))
+    actual == expected_sha256 || error("frozen BHSR manifest hash mismatch for $(basename(path))")
+    return String(bytes)
+end
+
+const _BHSR_SOURCE_MODE_MANIFEST_TEXT =
+    _bhsr_verified_manifest(BHSR_SOURCE_MODE_MANIFEST, BHSR_SOURCE_MODE_MANIFEST_SHA256)
+const _BHSR_METHOD_MANIFEST_TEXT =
+    _bhsr_verified_manifest(BHSR_NUMERICAL_METHOD_MANIFEST,
+                            BHSR_NUMERICAL_METHOD_MANIFEST_SHA256)
+
+function _bhsr_json_string_field(object_text::AbstractString, key::AbstractString)
+    pattern = Regex("\"" * key * "\"\\s*:\\s*\"([^\"]*)\"")
+    found = match(pattern, object_text)
+    found === nothing && error("frozen BHSR manifest is missing string field '$key'")
+    return String(found.captures[1])
+end
+
+function _bhsr_json_int_field(object_text::AbstractString, key::AbstractString)
+    pattern = Regex("\"" * key * "\"\\s*:\\s*(-?[0-9]+)")
+    found = match(pattern, object_text)
+    found === nothing && error("frozen BHSR manifest is missing integer field '$key'")
+    return parse(Int, found.captures[1])
+end
+
+function _bhsr_json_object_blocks(array_text::AbstractString)
+    return [String(found.captures[1]) for found in eachmatch(r"\{([^{}]*)\}"s, array_text)]
+end
+
+function _bhsr_json_array_text(manifest_text::AbstractString, key::AbstractString;
+                               following_key::Union{Nothing,String} = nothing)
+    ending = following_key === nothing ? "\\]" :
+        "\\]\\s*,\\s*\"" * following_key * "\""
+    pattern = Regex("\"" * key * "\"\\s*:\\s*\\[(.*?)" * ending, "s")
+    found = match(pattern, manifest_text)
+    found === nothing && error("frozen BHSR manifest is missing array '$key'")
+    return String(found.captures[1])
+end
+
 const BHSR_SI = (
     G = "6.67430e-11",
     c = "299792458",
@@ -31,10 +84,82 @@ struct BHSRMode
     end
 end
 
-"The frozen nodeless family n_r=0, m=l, with principal number N=l+1."
-bhsr_nodeless_modes() = [BHSRMode(0, l, l, "|$(l + 1)$(l)$(l)>") for l in 1:5]
+function _bhsr_modes_from_manifest()
+    array_text = _bhsr_json_array_text(_BHSR_SOURCE_MODE_MANIFEST_TEXT, "modes")
+    modes = BHSRMode[]
+    for block in _bhsr_json_object_blocks(array_text)
+        label = _bhsr_json_string_field(block, "label")
+        N = _bhsr_json_int_field(block, "N")
+        l = _bhsr_json_int_field(block, "l")
+        m = _bhsr_json_int_field(block, "m")
+        n_r = _bhsr_json_int_field(block, "n_r")
+        mode = BHSRMode(n_r, l, m, label)
+        n_r + l + 1 == N ||
+            error("frozen source mode has inconsistent principal number: $label")
+        push!(modes, mode)
+    end
+    isempty(modes) && error("frozen source mode manifest contains no modes")
+    length(unique(mode.label for mode in modes)) == length(modes) ||
+        error("frozen source mode manifest contains duplicate labels")
+    return modes
+end
+
+const _BHSR_SOURCE_MODES = _bhsr_modes_from_manifest()
+
+"The nodeless family loaded from the hash-verified frozen source-mode manifest."
+bhsr_nodeless_modes() = copy(_BHSR_SOURCE_MODES)
 
 bhsr_principal_number(mode::BHSRMode) = mode.n_r + mode.l + 1
+
+function _bhsr_validate_modes(modes::AbstractVector{BHSRMode})
+    isempty(modes) && throw(ArgumentError("at least one source-manifest mode is required"))
+    labels = getfield.(modes, :label)
+    length(unique(labels)) == length(labels) ||
+        throw(ArgumentError("mode selection contains duplicate source-mode identities"))
+    allowed = Dict(mode.label => mode for mode in _BHSR_SOURCE_MODES)
+    all(label -> haskey(allowed, label), labels) ||
+        throw(ArgumentError("mode selection contains a mode absent from the frozen source manifest"))
+    all(i -> modes[i].n_r == allowed[labels[i]].n_r &&
+             modes[i].l == allowed[labels[i]].l &&
+             modes[i].m == allowed[labels[i]].m,
+        eachindex(modes)) ||
+        throw(ArgumentError("mode data do not match the frozen source-mode identity"))
+    source_order = [mode.label for mode in _BHSR_SOURCE_MODES if mode.label in labels]
+    labels == source_order ||
+        throw(ArgumentError("mode selection must retain frozen source-manifest order"))
+    return modes
+end
+
+function _bhsr_model_id(model_id::AbstractString)
+    id = String(strip(String(model_id)))
+    isempty(id) && throw(ArgumentError("model_id must be explicit and nonempty"))
+    return id
+end
+
+struct BHSRContourGrid
+    model_id::String
+    route_identity::String
+    method_manifest_sha256::String
+    source_mode_manifest_sha256::String
+    mass_solar::Vector{BigFloat}
+    union_spin::Vector{Union{Missing,BigFloat}}
+    rows::Vector{Any}
+    modes::Vector{BHSRMode}
+    mu_eV::BigFloat
+    tau_years::BigFloat
+    delta_a::BigFloat
+    precision_bits::Int
+    root_max_iterations::Int
+    root_absolute_tolerance::BigFloat
+    mass_log10_min::BigFloat
+    mass_log10_max::BigFloat
+    source_grid::Bool
+    contour_evaluator::Any
+end
+
+Base.length(grid::BHSRContourGrid) = length(grid.rows)
+Base.getindex(grid::BHSRContourGrid, i::Int) = grid.rows[i]
+Base.iterate(grid::BHSRContourGrid, state...) = iterate(grid.rows, state...)
 
 function _bhsr_constants()
     (; (k => parse(BigFloat, v) for (k, v) in pairs(BHSR_SI))...)
@@ -155,15 +280,33 @@ end
 
 "Per-mode direct roots and the union boundary (lowest spin threshold)."
 function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
-                        modes::AbstractVector{BHSRMode} = bhsr_nodeless_modes(); kwargs...)
+                        modes::AbstractVector{BHSRMode} = bhsr_nodeless_modes();
+                        model_id::AbstractString, delta_a::Real = big"0.1",
+                        precision_bits::Integer = 256,
+                        max_iterations::Integer = 140,
+                        absolute_tolerance::Real = big"1e-40")
+    _bhsr_validate_modes(modes)
+    id = _bhsr_model_id(model_id)
     roots = Pair{String,Union{Missing,BigFloat}}[]
     for mode in modes
         push!(roots, mode.label => bhsr_critical_spin(mass_solar, mu_eV, mode,
-                                                       tau_years; kwargs...))
+            tau_years; delta_a, precision_bits, max_iterations, absolute_tolerance))
     end
-    present = BigFloat[last(value) for value in roots if !ismissing(last(value))]
-    union_spin = isempty(present) ? missing : minimum(present)
-    return (; mass_solar = _bhsr_big(mass_solar), per_mode = roots, union_spin)
+    present = [(mode = first(value), spin = last(value)) for value in roots
+               if !ismissing(last(value))]
+    union_item = isempty(present) ? nothing : present[argmin(getfield.(present, :spin))]
+    union_spin = union_item === nothing ? missing : union_item.spin
+    return (; model_id = id,
+            route_identity = "REFERENCE_2021_ANALYTIC",
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            mode_labels = getfield.(modes, :label),
+            mass_solar = _bhsr_big(mass_solar),
+            per_mode = roots,
+            union_mode = union_item === nothing ? missing : union_item.mode,
+            union_spin,
+            delta_a = _bhsr_big(delta_a),
+            precision_bits)
 end
 
 "Direct logarithmic mass grid specified by the frozen Fig. 3 method manifest."
@@ -172,15 +315,65 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
                          mass_log10_max::Real = 2,
                          points::Integer = 1201,
                          modes::AbstractVector{BHSRMode} = bhsr_nodeless_modes(),
-                         kwargs...)
+                         model_id::AbstractString,
+                         delta_a::Real = big"0.1",
+                         precision_bits::Integer = 256,
+                         max_iterations::Integer = 140,
+                         absolute_tolerance::Real = big"1e-40")
+    _bhsr_validate_modes(modes)
     points >= 2 || throw(ArgumentError("mass grid needs at least two points"))
     mass_log10_max > mass_log10_min || throw(ArgumentError("mass grid bounds are reversed"))
-    return setprecision(BigFloat, get(kwargs, :precision_bits, 256)) do
+    id = _bhsr_model_id(model_id)
+    return setprecision(BigFloat, precision_bits) do
         lower = BigFloat(mass_log10_min)
         width = BigFloat(mass_log10_max) - lower
-        [bhsr_regge_row(BigFloat(10)^(lower + width * BigFloat(i - 1) / (points - 1)),
-                        mu_eV, tau_years, modes; kwargs...) for i in 1:points]
+        masses = [BigFloat(10)^(lower + width * BigFloat(i - 1) / (points - 1))
+                  for i in 1:points]
+        rows = Any[bhsr_regge_row(mass, mu_eV, tau_years, modes;
+                                  model_id = id, delta_a, precision_bits,
+                                  max_iterations, absolute_tolerance)
+                   for mass in masses]
+        union_spins = Union{Missing,BigFloat}[
+            ismissing(row.union_spin) ? missing : row.union_spin for row in rows]
+        source_grid = points == 1201 && lower == -1 && width == 3 &&
+            getfield.(modes, :label) == getfield.(_BHSR_SOURCE_MODES, :label) &&
+            precision_bits == 256 && max_iterations == 140 &&
+            _bhsr_big(absolute_tolerance) == big"1e-40" &&
+            _bhsr_big(delta_a) == big"0.1" &&
+            _bhsr_big(mu_eV) == big"4.3e-12" &&
+            _bhsr_big(tau_years) in (big"1e10", big"4.5e6")
+        return BHSRContourGrid(id, "REFERENCE_2021_ANALYTIC",
+            BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            BHSR_SOURCE_MODE_MANIFEST_SHA256, masses, union_spins, rows,
+            collect(modes), _bhsr_big(mu_eV), _bhsr_big(tau_years),
+            _bhsr_big(delta_a), Int(precision_bits), Int(max_iterations),
+            _bhsr_big(absolute_tolerance), lower, lower + width, source_grid, nothing)
     end
+end
+
+function _bhsr_union_spin_at_mass(grid::BHSRContourGrid, mass_solar::Real)
+    if grid.contour_evaluator !== nothing
+        value = grid.contour_evaluator(_bhsr_big(mass_solar))
+        ismissing(value) && return missing
+        value isa Real && isfinite(value) ||
+            throw(ArgumentError("contour evaluator must return a finite spin or missing"))
+        return _bhsr_big(value)
+    end
+    roots = Union{Missing,BigFloat}[
+        bhsr_critical_spin(mass_solar, grid.mu_eV, mode, grid.tau_years;
+                           delta_a = grid.delta_a,
+                           precision_bits = grid.precision_bits,
+                           max_iterations = grid.root_max_iterations,
+                           absolute_tolerance = grid.root_absolute_tolerance)
+        for mode in grid.modes]
+    present = BigFloat[value for value in roots if !ismissing(value)]
+    return isempty(present) ? missing : minimum(present)
+end
+
+function (grid::BHSRContourGrid)(mass_solar::Real)
+    mass = _bhsr_big(mass_solar)
+    (first(grid.mass_solar) <= mass <= last(grid.mass_solar)) || return missing
+    return _bhsr_union_spin_at_mass(grid, mass)
 end
 
 const BHSR_BOSENOVA_ROUTE = "REFERENCE_2021_BOSENOVA"
@@ -269,17 +462,383 @@ end
 "Per-mode self-interaction transitions and their source-mode union boundary."
 function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
                                   lambda_iiii::Real, tau_years::Real,
-                                  modes::AbstractVector{BHSRMode} = bhsr_nodeless_modes(); kwargs...)
+                                  modes::AbstractVector{BHSRMode} = bhsr_nodeless_modes();
+                                  model_id::AbstractString, delta_a::Real = big"0.1",
+                                  c_bose::Real = big"5",
+                                  reduced_planck_GeV::Real = big"2.435e18",
+                                  precision_bits::Integer = 256,
+                                  max_iterations::Integer = 140,
+                                  absolute_tolerance::Real = big"1e-40")
+    _bhsr_validate_modes(modes)
+    id = _bhsr_model_id(model_id)
     roots = Pair{String,Union{Missing,BigFloat}}[]
     for mode in modes
         root = bhsr_bosenova_critical_spin(mass_solar, mu_eV, mode,
-                                            lambda_iiii, tau_years; kwargs...)
+            lambda_iiii, tau_years; delta_a, c_bose, reduced_planck_GeV,
+            precision_bits, max_iterations, absolute_tolerance)
         push!(roots, mode.label => root)
     end
     present = BigFloat[last(pair) for pair in roots if !ismissing(last(pair))]
     union_spin = isempty(present) ? missing : minimum(present)
-    return (; route_identity = BHSR_BOSENOVA_ROUTE,
+    return (; model_id = id,
+            route_identity = BHSR_BOSENOVA_ROUTE,
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            mode_labels = getfield.(modes, :label),
             mass_solar = _bhsr_big(mass_solar),
             per_mode = roots,
             union_spin)
+end
+"""Continued-fraction scalar bound-state validation for CYAX-0121.
+
+The radial recurrence follows Dolan, arXiv:0705.2880, Eqs. (33)-(48), which
+matches arXiv:1805.02016v2 Appendix A.4 Eqs. (77)-(94) after the source-typo
+correction to chi authorized for this reconstruction. Frequencies are in M=1
+units. The angular eigenvalue is computed by truncating the normalized
+associated-Legendre basis to the requested number of modes.
+"""
+
+
+const BHSR_CF_ROUTE = "CF_2018_VALIDATION"
+const BHSR_DOLAN_SOURCE = "arXiv:0705.2880v2"
+
+function _bhsr_json_object_text(json_text::AbstractString, key::AbstractString)
+    marker = match(Regex("\\\"" * key * "\\\"\\s*:\\s*\\{"), json_text)
+    marker === nothing && error("frozen BHSR method manifest lacks object '$key'")
+    start = marker.offset + ncodeunits(marker.match)
+    depth = 1
+    for index in start:lastindex(json_text)
+        character = json_text[index]
+        character == '{' && (depth += 1)
+        character == '}' && (depth -= 1)
+        depth == 0 && return String(SubString(json_text, start, prevind(json_text, index)))
+    end
+    error("unterminated object '$key' in frozen BHSR method manifest")
+end
+
+function _bhsr_json_int_array(object_text::AbstractString, key::AbstractString)
+    found = match(Regex("\\\"" * key * "\\\"\\s*:\\s*\\[([^]]*)\\]"), object_text)
+    found === nothing && error("frozen BHSR method manifest lacks integer array '$key'")
+    values = [parse(Int, strip(token)) for token in split(found.captures[1], ',')
+              if !isempty(strip(token))]
+    isempty(values) && error("frozen BHSR method manifest has empty integer array '$key'")
+    return values
+end
+
+"Read the CF target and refinement ladders from the hash-verified frozen manifest."
+function bhsr_cf_method_spec()
+    section = _bhsr_json_object_text(_BHSR_METHOD_MANIFEST_TEXT,
+                                     "continued_fraction_method")
+    target = _bhsr_json_object_text(section, "target")
+    mode_label = _bhsr_json_string_field(target, "mode")
+    mode_index = findfirst(mode -> mode.label == mode_label, _BHSR_SOURCE_MODES)
+    mode_index === nothing && error("CF target mode is absent from frozen source-mode manifest")
+    mode = _BHSR_SOURCE_MODES[mode_index]
+    _bhsr_json_int_field(target, "N") == bhsr_principal_number(mode) ||
+        error("CF target principal number does not match frozen mode identity")
+    _bhsr_json_int_field(target, "l") == mode.l || error("CF target l does not match frozen mode")
+    _bhsr_json_int_field(target, "m") == mode.m || error("CF target m does not match frozen mode")
+    residual_text = _bhsr_json_string_field(section, "root_residual_tolerance")
+    acceptance_text = _bhsr_json_string_field(section, "convergence_acceptance")
+    return (; route_identity = BHSR_CF_ROUTE,
+            alpha = parse(BigFloat, _bhsr_json_string_field(target, "alpha")),
+            spin = parse(BigFloat, _bhsr_json_string_field(target, "spin")),
+            mode,
+            precision_ladder_bits = _bhsr_json_int_array(section, "precision_ladder_bits"),
+            continued_fraction_orders = _bhsr_json_int_array(section, "continued_fraction_orders"),
+            angular_spheroidal_truncations =
+                _bhsr_json_int_array(section, "angular_spheroidal_truncations"),
+            root_residual_tolerance = parse(BigFloat, residual_text),
+            convergence_acceptance = acceptance_text,
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256)
+end
+
+_bhsr_cf_complex(x::Complex) = Complex{BigFloat}(_bhsr_big(real(x)), _bhsr_big(imag(x)))
+_bhsr_cf_complex(x::Real) = Complex{BigFloat}(_bhsr_big(x), BigFloat(0))
+
+function _bhsr_cf_cosine_coefficient(j::Int, m::Int)
+    j < m && return BigFloat(0)
+    return sqrt(BigFloat(j^2 - m^2) / BigFloat(4j^2 - 1))
+end
+
+"Angular separation eigenvalue Lambda near l(l+1), by a real-basis truncation."
+function bhsr_cf_angular_eigenvalue(l::Integer, m::Integer, c_squared::Number;
+                                    truncation::Integer, precision_bits::Integer = 256)
+    0 <= m <= l || throw(ArgumentError("angular mode must satisfy 0 <= m <= l"))
+    truncation >= 2 || throw(ArgumentError("angular truncation must include at least two basis modes"))
+    return setprecision(BigFloat, precision_bits) do
+        c2 = _bhsr_cf_complex(c_squared)
+    angular_l = collect(Int(l):2:(Int(l) + 2 * (Int(truncation) - 1)))
+        diagonal = Complex{BigFloat}[]
+        offdiagonal = Complex{BigFloat}[]
+        for j in angular_l
+            lower = _bhsr_cf_cosine_coefficient(j, Int(m))
+            upper = _bhsr_cf_cosine_coefficient(j + 1, Int(m))
+            push!(diagonal, Complex{BigFloat}(BigFloat(j * (j + 1))) -
+                             c2 * (lower^2 + upper^2))
+        end
+        for index in 1:(length(angular_l) - 1)
+            j = angular_l[index]
+            push!(offdiagonal, -c2 * _bhsr_cf_cosine_coefficient(j + 1, Int(m)) *
+                               _bhsr_cf_cosine_coefficient(j + 2, Int(m)))
+        end
+
+        eigenvalue = Complex{BigFloat}(BigFloat(l * (l + 1)))
+        step_tolerance = BigFloat(2)^(-precision_bits + 16)
+        for _ in 1:100
+            p_previous, dp_previous = Complex{BigFloat}(1), Complex{BigFloat}(0)
+            p_current, dp_current = diagonal[1] - eigenvalue, Complex{BigFloat}(-1)
+            for index in 2:length(diagonal)
+                p_next = (diagonal[index] - eigenvalue) * p_current -
+                         offdiagonal[index - 1]^2 * p_previous
+                dp_next = -p_current + (diagonal[index] - eigenvalue) * dp_current -
+                          offdiagonal[index - 1]^2 * dp_previous
+                p_previous, dp_previous, p_current, dp_current =
+                    p_current, dp_current, p_next, dp_next
+            end
+            derivative = dp_current
+            iszero(derivative) && error("angular eigenvalue Newton derivative vanished")
+            step = p_current / derivative
+            eigenvalue -= step
+            abs(step) <= step_tolerance && return eigenvalue
+        end
+        error("angular spheroidal eigenvalue did not converge")
+    end
+end
+
+function _bhsr_cf_recurrence(omega::Complex{BigFloat}, alpha::BigFloat,
+                             spin::BigFloat, mode::BHSRMode,
+                             angular_truncation::Int, precision_bits::Int)
+    b = sqrt(1 - spin^2)
+    q = -sqrt(Complex{BigFloat}(alpha^2) - omega^2)
+    real(q) < 0 || throw(DomainError(q, "bound-state branch requires Re(q) < 0"))
+    r_plus = 1 + b
+    omega_h = spin * mode.m / (2r_plus)
+    sigma = 2r_plus * (omega - omega_h) / (2b)
+    c_squared = spin^2 * (omega^2 - alpha^2)
+    lambda = bhsr_cf_angular_eigenvalue(mode.l, mode.m, c_squared;
+        truncation = angular_truncation, precision_bits)
+    c0 = 1 - 2im * omega - (2im / b) * (omega - spin * mode.m / 2)
+    c1 = -4 + 4im * (omega - im * q * (1 + b)) +
+         (4im / b) * (omega - spin * mode.m / 2) - 2 * (omega^2 + q^2) / q
+    c2 = 3 - 2im * omega - 2 * (q^2 - omega^2) / q -
+         (2im / b) * (omega - spin * mode.m / 2)
+    c3 = 2im * (omega - im * q)^3 / q + 2 * (omega - im * q)^2 * b +
+         q^2 * spin^2 + 2im * q * spin * mode.m - lambda - 1 -
+         (omega - im * q)^2 / q + 2q * b +
+         (2im / b) * ((omega - im * q)^2 / q + 1) * (omega - spin * mode.m / 2)
+    c4 = (omega - im * q)^4 / q^2 +
+         2im * omega * (omega - im * q)^2 / q -
+         (2im / (b * q)) * (omega - im * q)^2 * (omega - spin * mode.m / 2)
+    alpha_n(n) = n^2 + (c0 + 1) * n + c0
+    beta_n(n) = -2n^2 + (c1 + 2) * n + c3
+    gamma_n(n) = n^2 + (c2 - 3) * n + c4
+    return alpha_n, beta_n, gamma_n, q, lambda, sigma
+end
+
+"Evaluate the truncated Leaver continued-fraction eigenvalue residual."
+function bhsr_cf_residual(omega::Complex, alpha::Real, spin::Real, mode::BHSRMode;
+                          order::Integer, angular_truncation::Integer,
+                          precision_bits::Integer = 256)
+    order >= 2 || throw(ArgumentError("continued-fraction order must be at least two"))
+    0 < alpha < 1 || throw(ArgumentError("bound-state target requires 0 < M*mu < 1"))
+    0 <= spin < 1 || throw(ArgumentError("Kerr spin must lie in [0,1)"))
+    _bhsr_validate_modes([mode])
+    return setprecision(BigFloat, precision_bits) do
+        w, a = _bhsr_cf_complex(omega), _bhsr_big(alpha)
+        an, bn, gn, _, _, _ = _bhsr_cf_recurrence(
+            w, a, _bhsr_big(spin), mode, Int(angular_truncation), Int(precision_bits))
+        denominator = bn(Int(order))
+        for n in (Int(order) - 1):-1:1
+            iszero(denominator) && throw(DomainError(denominator, "CF denominator is zero"))
+            denominator = bn(n) - an(n) * gn(n + 1) / denominator
+        end
+        iszero(denominator) && throw(DomainError(denominator, "CF denominator is zero"))
+        bn(0) - an(0) * gn(1) / denominator
+    end
+end
+
+function _bhsr_cf_analytic_seed(alpha::BigFloat, spin::BigFloat, mode::BHSRMode)
+    principal = bhsr_principal_number(mode)
+    omega_r = alpha * (1 - alpha^2 / (2BigFloat(principal)^2))
+    r_plus = 1 + sqrt(1 - spin^2)
+    omega_h = spin / (2r_plus)
+    product = prod(BigFloat(j^2) * (1 - spin^2) +
+                   4r_plus^2 * (BigFloat(mode.m) * omega_r - alpha)^2
+                   for j in 1:mode.l)
+    gamma_seed = 2alpha * r_plus * (BigFloat(mode.m) * omega_h - omega_r) *
+                 alpha^(4mode.l + 4) * _bhsr_A(mode) * product
+    return Complex{BigFloat}(omega_r, gamma_seed / 2)
+end
+
+"Solve one M=1 bound-state frequency by damped complex Newton iteration."
+function bhsr_cf_solve(alpha::Real, spin::Real, mode::BHSRMode;
+                       order::Integer, angular_truncation::Integer,
+                       precision_bits::Integer = 256,
+                       root_residual_tolerance::Real = big"1e-24",
+                       max_iterations::Integer = 80,
+                       initial_frequency::Union{Nothing,Complex} = nothing,
+                       model_id::AbstractString = "CF-2018-DOLAN-VALIDATION")
+    id = _bhsr_model_id(model_id)
+    alpha > 0 || throw(ArgumentError("M*mu must be positive"))
+    0 <= spin < 1 || throw(ArgumentError("Kerr spin must lie in [0,1)"))
+    tolerance = _bhsr_big(root_residual_tolerance)
+    tolerance > 0 || throw(ArgumentError("root residual tolerance must be positive"))
+    max_iterations > 0 || throw(ArgumentError("Newton iteration limit must be positive"))
+    return setprecision(BigFloat, precision_bits) do
+        a = _bhsr_big(alpha)
+        astar = _bhsr_big(spin)
+        omega = isnothing(initial_frequency) ? _bhsr_cf_analytic_seed(a, astar, mode) :
+                _bhsr_cf_complex(initial_frequency)
+        finite_difference_step = max(BigFloat("1e-25"), abs(omega) * BigFloat("1e-20"))
+        residual = bhsr_cf_residual(omega, a, astar, mode; order,
+            angular_truncation, precision_bits)
+        for iteration in 1:max_iterations
+            if abs(residual) <= tolerance
+                recurrence = _bhsr_cf_recurrence(omega, a, astar, mode,
+                    Int(angular_truncation), Int(precision_bits))
+                q = recurrence[4]
+                return (; model_id = id,
+                        route_identity = BHSR_CF_ROUTE,
+                        method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+                        source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+                        source_id = BHSR_DOLAN_SOURCE,
+                        alpha = a,
+                        spin = astar,
+                        mode_label = mode.label,
+                        principal_number = bhsr_principal_number(mode),
+                        omega_M = omega,
+                        real_omega_M = real(omega),
+                        imaginary_omega_M = imag(omega),
+                        gamma_amplitude_M = imag(omega),
+                        gamma_occupation_M = 2imag(omega),
+                        q_bound_branch = q,
+                        continued_fraction_order = Int(order),
+                        angular_spheroidal_truncation = Int(angular_truncation),
+                        precision_bits = Int(precision_bits),
+                        root_residual = abs(residual),
+                        root_residual_tolerance = tolerance,
+                        iterations = iteration - 1,
+                        status = :evaluated)
+            end
+            derivative = (bhsr_cf_residual(omega + finite_difference_step, a, astar,
+                mode; order, angular_truncation, precision_bits) -
+                bhsr_cf_residual(omega - finite_difference_step, a, astar,
+                mode; order, angular_truncation, precision_bits)) /
+                (2finite_difference_step)
+            iszero(derivative) && error("CF Newton derivative vanished")
+            correction = residual / derivative
+            # A short backtracking search keeps the iterate on the bound-state
+            # branch and requires the eigenvalue residual to decrease.
+            accepted = false
+            scale = BigFloat(1)
+            for _ in 1:12
+                candidate = omega - scale * correction
+                candidate_residual = bhsr_cf_residual(candidate, a, astar, mode;
+                    order, angular_truncation, precision_bits)
+                if abs(candidate_residual) < abs(residual)
+                    omega, residual, accepted = candidate, candidate_residual, true
+                    break
+                end
+                scale /= 2
+            end
+            accepted || error("CF Newton iteration could not reduce the residual")
+        end
+        error("CF eigenfrequency did not reach residual tolerance $tolerance")
+    end
+end
+
+function _bhsr_cf_relative_change(a::Complex, b::Complex)
+    return abs(a - b) / max(abs(a), abs(b), eps(BigFloat))
+end
+
+function _bhsr_cf_relative_change(a::Real, b::Real)
+    return abs(a - b) / max(abs(a), abs(b), eps(BigFloat))
+end
+
+"Run the frozen precision, CF-order, and angular-truncation ladders."
+function bhsr_cf_manifest_refinement(; model_id::AbstractString = "CF-2018-FROZEN-TARGET")
+    spec = bhsr_cf_method_spec()
+    results = NamedTuple[]
+    for precision in spec.precision_ladder_bits,
+        order in spec.continued_fraction_orders,
+        angular in spec.angular_spheroidal_truncations
+        push!(results, bhsr_cf_solve(spec.alpha, spec.spin, spec.mode;
+            order, angular_truncation = angular, precision_bits = precision,
+            root_residual_tolerance = spec.root_residual_tolerance, model_id))
+    end
+    at(precision, order, angular) = only(filter(result ->
+        result.precision_bits == precision &&
+        result.continued_fraction_order == order &&
+        result.angular_spheroidal_truncation == angular, results))
+    p0, p1 = last(spec.precision_ladder_bits),
+             spec.precision_ladder_bits[end - 1]
+    n0, n1 = last(spec.continued_fraction_orders),
+             spec.continued_fraction_orders[end - 1]
+    a0, a1 = last(spec.angular_spheroidal_truncations),
+             spec.angular_spheroidal_truncations[end - 1]
+    precision_pair = (at(p1, n0, a0), at(p0, n0, a0))
+    order_pair = (at(p0, n1, a0), at(p0, n0, a0))
+    angular_pair = (at(p0, n0, a1), at(p0, n0, a0))
+    compare(pair) = (; omega_relative_change =
+            _bhsr_cf_relative_change(pair[1].omega_M, pair[2].omega_M),
+        gamma_relative_change =
+            _bhsr_cf_relative_change(pair[1].gamma_amplitude_M, pair[2].gamma_amplitude_M))
+    changes = (; precision = compare(precision_pair),
+                continued_fraction_order = compare(order_pair),
+                angular_truncation = compare(angular_pair))
+    threshold = big"1e-8"
+    all(result -> result.root_residual <= spec.root_residual_tolerance, results) ||
+        error("at least one frozen CF root missed its residual tolerance")
+    converged = all(pair -> pair.omega_relative_change <= threshold &&
+                            pair.gamma_relative_change <= threshold, values(changes))
+    return (; model_id = _bhsr_model_id(model_id), route_identity = spec.route_identity,
+            method_manifest_sha256 = spec.method_manifest_sha256,
+            source_mode_manifest_sha256 = spec.source_mode_manifest_sha256,
+            target = (; alpha = spec.alpha, spin = spec.spin, mode = spec.mode.label),
+            results, refinement_changes = changes,
+            relative_change_tolerance = threshold,
+            status = converged ? :converged : :unavailable_refinement_convergence)
+end
+
+"Diagnostic CF solve at a published Dolan growth-rate table point."
+function bhsr_cf_dolan_table_benchmark(alpha::Real, spin::Real;
+                                       orders::AbstractVector{<:Integer} = [512, 1024, 2048],
+                                       angular_truncations::AbstractVector{<:Integer} = [9, 13, 17],
+                                       precision_bits::Integer = 256,
+                                       published_growth_M::Real,
+                                       model_id::AbstractString)
+    mode = only(filter(item -> item.label == "|211>", _BHSR_SOURCE_MODES))
+    results = NamedTuple[]
+    for order in orders, angular in angular_truncations
+        push!(results, bhsr_cf_solve(alpha, spin, mode; order,
+            angular_truncation = angular, precision_bits,
+            root_residual_tolerance = big"1e-24", model_id))
+    end
+    reference = _bhsr_big(published_growth_M)
+    final_order = last(orders)
+    final_angular = last(angular_truncations)
+    final = only(filter(result -> result.continued_fraction_order == final_order &&
+        result.angular_spheroidal_truncation == final_angular, results))
+    penultimate_order = orders[end - 1]
+    penultimate_angular = angular_truncations[end]
+    penultimate = only(filter(result ->
+        result.continued_fraction_order == penultimate_order &&
+        result.angular_spheroidal_truncation == penultimate_angular, results))
+    return (; model_id = _bhsr_model_id(model_id),
+            route_identity = BHSR_CF_ROUTE,
+            source_id = BHSR_DOLAN_SOURCE,
+            benchmark_locator = "Dolan, Phys. Rev. D 76, 084001 (2007), Table III, PDF p. 11; arXiv:0705.2880v2 HTML Table 1, lines 278-282: maximum M*Im(omega)",
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            alpha = _bhsr_big(alpha), spin = _bhsr_big(spin),
+            mode_label = mode.label, published_growth_M = reference,
+            results,
+            final_growth_M = final.gamma_amplitude_M,
+            relative_table_difference = abs(final.gamma_amplitude_M - reference) / reference,
+            final_order_relative_change =
+                _bhsr_cf_relative_change(penultimate.gamma_amplitude_M,
+                                         final.gamma_amplitude_M),
+            status = :diagnostic_benchmark)
 end

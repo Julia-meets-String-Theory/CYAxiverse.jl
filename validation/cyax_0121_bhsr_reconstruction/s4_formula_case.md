@@ -1,8 +1,12 @@
 # S4 bosenova formula check
 
-Route identity: `REFERENCE_2021_BOSENOVA`. This uses the frozen mode and method
-manifests, source Eq. (9), Eq. (13) of arXiv:2103.06812v2, and the strict Eq.
-(26) criterion of arXiv:2009.07206v1. It uses 256-bit `BigFloat`,
+Model ID: `bosenova-10-solar-mass`. Route identity:
+`REFERENCE_2021_BOSENOVA`. This uses the frozen source-mode manifest
+`a891735d45dd80e57689917416577203e43a68ec0c7e96b23897cb7c306725ed` and
+numerical method manifest
+`7b9c1cf9e4787372801125d7c195288d36f3cb9e094b0a2ec179493c8e8392d5`, source
+Eq. (9), Eq. (13) of arXiv:2103.06812v2, and the strict Eq. (26) criterion of
+arXiv:2009.07206v1. It uses 256-bit `BigFloat`,
 `c_Bose=5`, reduced `M_Pl=2.435e18 GeV`, and the three frozen timescales.
 
 The named regression input is `M_BH=10 M_sun`, `mu=4.3e-12 eV`, mode `|211>`,

@@ -1,9 +1,13 @@
 # S1 higher-l material effect
 
-This run uses method identity `REFERENCE_2021_ANALYTIC`, the frozen source and
-numerical method manifests, Eq. (9) and Eqs. (12)-(14) of arXiv:2009.07206v1,
-256-bit `BigFloat`, direct bisection on spin `[0,1]`, tolerance `1e-40`, and a
-maximum of 140 iterations. The handoff SHA-256 is
+This run uses model ID `analytic-10-solar-mass` and method identity
+`REFERENCE_2021_ANALYTIC`, with the frozen source-mode manifest
+`a891735d45dd80e57689917416577203e43a68ec0c7e96b23897cb7c306725ed` and
+numerical method manifest
+`7b9c1cf9e4787372801125d7c195288d36f3cb9e094b0a2ec179493c8e8392d5`.
+It applies Eq. (9) and Eqs. (12)-(14) of arXiv:2009.07206v1, 256-bit
+`BigFloat`, direct bisection on spin `[0,1]`, tolerance `1e-40`, and a maximum
+of 140 iterations. The handoff SHA-256 is
 `39f5a823a67edca0ffc0a2b4221ba68901e6f2438efb5e6bbbe3ae2d8ceef170`.
 
 Inputs: `M_BH=10 M_sun`, `mu=4.3e-12 eV`, `tau=1e10 yr`,

@@ -14,6 +14,142 @@ const BHSR_APPENDIX_B_EXPECTED_ROWS = 24
 const BHSR_APPENDIX_B_UNRESOLVED_ROWS = (
     "Cygnus X-1", "GRS 1915+105", "NGC 3783", "MCG-6-30-15", "Mrk 110", "NGC 4051",
 )
+const BHSR_OBSERVATIONAL_MANIFEST = joinpath(BHSR_VALIDATION_DIR,
+                                              "observational_data_manifest.json")
+const BHSR_OBSERVATIONAL_MANIFEST_SHA256 =
+    "9da9f70efc6e654e3c38d963bf6a9e5ad9bec791a56ff2b43025bf019a7a87db"
+const _BHSR_OBSERVATIONAL_MANIFEST_TEXT =
+    _bhsr_verified_manifest(BHSR_OBSERVATIONAL_MANIFEST,
+                            BHSR_OBSERVATIONAL_MANIFEST_SHA256)
+
+struct BHSRBHIdentityEnsemble
+    route_identity::String
+    manifest_id::String
+    observational_manifest_sha256::String
+    bh_ids::Vector{String}
+end
+
+function bhsr_bh_identity_ensemble(route_identity::AbstractString = BHSR_APPENDIX_B_ROUTE)
+    route = String(route_identity)
+    route == BHSR_APPENDIX_B_ROUTE ||
+        throw(ArgumentError("the frozen observational manifest does not enumerate BH identities for route '$route'"))
+    section_match = match(
+        r"\"reference_2018_appendix_b\"\s*:\s*\{(.*?)\n\s*\},\s*\"reference_2021_analytic_dataset\""s,
+        _BHSR_OBSERVATIONAL_MANIFEST_TEXT)
+    section_match === nothing && error("frozen observational manifest lacks the Appendix-B section")
+    section = String(section_match.captures[1])
+    rows = _bhsr_json_object_blocks(_bhsr_json_array_text(section, "rows"))
+    ids = [_bhsr_json_string_field(row, "name") for row in rows]
+    expected_count = _bhsr_json_int_field(section, "row_count")
+    length(ids) == expected_count || error("frozen Appendix-B BH row count is inconsistent")
+    length(unique(ids)) == length(ids) || error("frozen Appendix-B BH identities are duplicated")
+    manifest_id = _bhsr_json_string_field(_BHSR_OBSERVATIONAL_MANIFEST_TEXT,
+                                          "manifest_id")
+    return BHSRBHIdentityEnsemble(route, manifest_id,
+                                  BHSR_OBSERVATIONAL_MANIFEST_SHA256, ids)
+end
+
+function _bhsr_validate_bh_ensemble(ensemble::BHSRBHIdentityEnsemble)
+    expected = bhsr_bh_identity_ensemble(ensemble.route_identity)
+    ensemble.manifest_id == expected.manifest_id ||
+        throw(ArgumentError("BH ensemble manifest identity is stale or unsupported"))
+    ensemble.observational_manifest_sha256 == expected.observational_manifest_sha256 ||
+        throw(ArgumentError("BH ensemble observational manifest hash is stale"))
+    ensemble.bh_ids == expected.bh_ids ||
+        throw(ArgumentError("BH ensemble identity set does not match its source manifest"))
+    return ensemble
+end
+
+struct BHSRUnionContour{C}
+    contours::C
+    model_id::String
+    route_identity::String
+    method_manifest_sha256::String
+    source_mode_manifest_sha256::String
+    mode_labels::Vector{String}
+    source_backed::Bool
+end
+
+function (contour::BHSRUnionContour)(x)
+    return bhsr_union_boundary([curve(x) for curve in contour.contours])
+end
+
+"Union contour wrapper with explicit model and frozen-manifest identity."
+function bhsr_union_boundary_function(contours::AbstractVector;
+                                      model_id::AbstractString,
+                                      mode_labels::AbstractVector{<:AbstractString} = String[])
+    isempty(contours) && throw(ArgumentError("at least one mode contour is required"))
+    id = _bhsr_model_id(model_id)
+    labels = String.(mode_labels)
+    if !isempty(labels)
+        length(labels) == length(contours) ||
+            throw(DimensionMismatch("each source contour needs one mode identity"))
+        canonical = getfield.(_BHSR_SOURCE_MODES, :label)
+        length(unique(labels)) == length(labels) ||
+            throw(ArgumentError("contour mode identities must be unique"))
+        all(label -> label in canonical, labels) ||
+            throw(ArgumentError("contour mode identity is absent from the frozen source manifest"))
+        source_order = [label for label in canonical if label in labels]
+        labels == source_order ||
+            throw(ArgumentError("contour mode identities must retain frozen manifest order"))
+    end
+    return BHSRUnionContour(contours, id, BHSR_APPENDIX_B_ROUTE,
+        BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+        BHSR_SOURCE_MODE_MANIFEST_SHA256, labels, !isempty(labels))
+end
+
+function _bhsr_contour_identity(contour, model_id::AbstractString)
+    id = _bhsr_model_id(model_id)
+    if contour isa BHSRContourGrid
+        contour.model_id == id || throw(ArgumentError("contour and likelihood model_id differ"))
+        contour.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 ||
+            throw(ArgumentError("contour method-manifest identity is stale"))
+        contour.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256 ||
+            throw(ArgumentError("contour source-mode manifest identity is stale"))
+        return (; source_backed = contour.source_grid,
+                mode_labels = getfield.(contour.modes, :label),
+                contour_route_identity = contour.route_identity,
+                contour_mass_support_solar =
+                    (first(contour.mass_solar), last(contour.mass_solar)))
+    elseif contour isa BHSRUnionContour
+        contour.model_id == id || throw(ArgumentError("contour and likelihood model_id differ"))
+        contour.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 ||
+            throw(ArgumentError("contour method-manifest identity is stale"))
+        contour.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256 ||
+            throw(ArgumentError("contour source-mode manifest identity is stale"))
+        return (; source_backed = contour.source_backed,
+                mode_labels = contour.mode_labels,
+                contour_route_identity = contour.route_identity,
+                contour_mass_support_solar = missing)
+    end
+    return (; source_backed = false, mode_labels = String[],
+            contour_route_identity = "UNSPECIFIED_CONTOUR",
+            contour_mass_support_solar = missing)
+end
+
+function _bhsr_likelihood_metadata(contour, model_id::AbstractString,
+                                   axion_id::AbstractString, bh_id::AbstractString,
+                                   bh_ensemble::BHSRBHIdentityEnsemble)
+    id = _bhsr_model_id(model_id)
+    axion = strip(String(axion_id))
+    bh = strip(String(bh_id))
+    isempty(axion) && throw(ArgumentError("axion_id must be explicit and nonempty"))
+    isempty(bh) && throw(ArgumentError("bh_id must be explicit and nonempty"))
+    ensemble = _bhsr_validate_bh_ensemble(bh_ensemble)
+    bh in ensemble.bh_ids || throw(ArgumentError("bh_id is absent from the declared source ensemble"))
+    contour_identity = _bhsr_contour_identity(contour, id)
+    return (; model_id = id, axion_id = axion, bh_id = bh,
+            route_identity = BHSR_APPENDIX_B_ROUTE,
+            likelihood_route_identity = BHSR_APPENDIX_B_ROUTE,
+            contour_route_identity = contour_identity.contour_route_identity,
+            contour_mass_support_solar = contour_identity.contour_mass_support_solar,
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            bh_ensemble_id = ensemble.manifest_id,
+            observational_manifest_sha256 = ensemble.observational_manifest_sha256,
+            mode_labels = contour_identity.mode_labels,
+            source_backed = contour_identity.source_backed)
+end
 
 function _bhsr_contour_value(f, x::BigFloat)
     value = f(x)
@@ -79,95 +215,237 @@ end
 function bhsr_allowed_probability_direct(xbar::Real, ybar::Real,
                                           sigma_x::Real, sigma_y::Real,
                                           f; lower::Real = -Inf,
-                                          upper::Real = Inf)
+                                          upper::Real = Inf,
+                                          model_id::AbstractString,
+                                          axion_id::AbstractString,
+                                          bh_id::AbstractString,
+                                          bh_ensemble::BHSRBHIdentityEnsemble)
+    identity = _bhsr_likelihood_metadata(f, model_id, axion_id, bh_id, bh_ensemble)
     xb, yb = _bhsr_big(xbar), _bhsr_big(ybar)
     lo, hi = _bhsr_big(lower), _bhsr_big(upper)
+    if f isa BHSRContourGrid &&
+       !(first(f.mass_solar) <= xb <= last(f.mass_solar))
+        return merge(identity, (; projection = :y_of_x,
+                status = :outside_frozen_mass_support,
+                derivative = missing,
+                sigma_effective = missing,
+                probability_allowed = missing))
+    end
     if xb < lo || xb > hi
-        return (; route_identity = BHSR_APPENDIX_B_ROUTE,
+        return merge(identity, (;
                 projection = :y_of_x,
                 status = :outside_contour_support,
                 derivative = missing,
                 sigma_effective = missing,
-                probability_allowed = missing)
+                probability_allowed = missing))
     end
     fbar = _bhsr_contour_value(f, xb)
     if ismissing(fbar)
-        return (; route_identity = BHSR_APPENDIX_B_ROUTE,
+        return merge(identity, (;
                 projection = :y_of_x,
                 status = :missing_contour_value,
                 derivative = missing,
                 sigma_effective = missing,
-                probability_allowed = missing)
+                probability_allowed = missing))
     end
-    derivative = bhsr_contour_derivative(f, xb; lower, upper)
+    derivative_lower, derivative_upper = lo, hi
+    if f isa BHSRContourGrid
+        derivative_lower = max(lo, first(f.mass_solar))
+        derivative_upper = min(hi, last(f.mass_solar))
+    end
+    derivative = bhsr_contour_derivative(f, xb;
+        lower = derivative_lower, upper = derivative_upper)
     if ismissing(derivative)
-        return (; route_identity = BHSR_APPENDIX_B_ROUTE,
+        return merge(identity, (;
                 projection = :y_of_x,
                 status = :incomplete_derivative_support,
                 derivative = missing,
                 sigma_effective = missing,
-                probability_allowed = missing)
+                probability_allowed = missing))
     end
     sigma_eff = bhsr_projected_sigma_y(sigma_x, sigma_y, derivative)
     probability = bhsr_standard_normal_cdf((fbar - yb) / sigma_eff)
-    return (; route_identity = BHSR_APPENDIX_B_ROUTE,
+    return merge(identity, (;
             projection = :y_of_x,
             status = :evaluated,
             derivative,
             sigma_effective = sigma_eff,
-            probability_allowed = probability)
+            probability_allowed = probability))
 end
 
-"""Eq. (98) inverse branch treatment: nearest branch sets sigma_x; the
-probability between both inverse roots is disallowed."""
-function bhsr_allowed_probability_inverse(xbar::Real, sigma_x::Real,
-                                           sigma_y::Real,
-                                           inverse_roots::AbstractVector,
-                                           inverse_derivatives::AbstractVector)
-    length(inverse_roots) == length(inverse_derivatives) ||
-        throw(DimensionMismatch("each inverse branch needs its derivative"))
-    isempty(inverse_roots) && throw(ArgumentError("at least one inverse branch is required"))
-    length(inverse_roots) <= 2 ||
-        throw(ArgumentError("Appendix-B inverse treatment is specified for at most two branches"))
-    any(ismissing, inverse_roots) && throw(ArgumentError("inverse roots must be defined on source support"))
-    any(ismissing, inverse_derivatives) && throw(ArgumentError("inverse branch derivative is unavailable"))
-    all(x -> x isa Real, inverse_roots) || throw(ArgumentError("inverse roots must be real"))
-    all(x -> x isa Real && isfinite(x), inverse_derivatives) ||
-        throw(ArgumentError("inverse branch derivatives must be finite and real"))
-    roots = map(_bhsr_big, inverse_roots)
-    slopes = map(_bhsr_big, inverse_derivatives)
-    length(unique(roots)) == length(roots) ||
-        throw(ArgumentError("coincident inverse roots are ambiguous at a contour cusp"))
-    xb = _bhsr_big(xbar)
+function _bhsr_monotone_inverse_branches(grid::BHSRContourGrid)
+    y = grid.union_spin
+    finite_indices = findall(value -> !ismissing(value), y)
+    isempty(finite_indices) && return nothing, :no_finite_contour_support
+    first_finite, last_finite = first(finite_indices), last(finite_indices)
+    any(ismissing, y[first_finite:last_finite]) &&
+        return nothing, :internal_contour_support_gap
+    first_finite < last_finite || return nothing, :insufficient_contour_support
+
+    branches = NamedTuple[]
+    start_index = first_finite
+    direction = sign(y[start_index + 1] - y[start_index])
+    iszero(direction) && return nothing, :plateau_or_ambiguous_branch
+    for i in (start_index + 1):(last_finite - 1)
+        next_direction = sign(y[i + 1] - y[i])
+        iszero(next_direction) && return nothing, :plateau_or_ambiguous_branch
+        if next_direction != direction
+            push!(branches, (; first_index = start_index, last_index = i))
+            start_index = i
+            direction = next_direction
+        end
+    end
+    push!(branches, (; first_index = start_index, last_index = last_finite))
+    return branches, :supported
+end
+
+function _bhsr_inverse_root_on_branch(grid::BHSRContourGrid, branch,
+                                      target_spin::BigFloat;
+                                      absolute_tolerance::BigFloat = big"1e-12",
+                                      max_iterations::Integer = 180)
+    first_index, last_index = branch.first_index, branch.last_index
+    left, right = grid.mass_solar[first_index], grid.mass_solar[last_index]
+    yleft, yright = grid.union_spin[first_index], grid.union_spin[last_index]
+    min(yleft, yright) <= target_spin <= max(yleft, yright) || return nothing
+    fleft, fright = yleft - target_spin, yright - target_spin
+    iszero(fleft) && return (; mass_solar = left, branch)
+    iszero(fright) && return (; mass_solar = right, branch)
+    sign(fleft) != sign(fright) || return nothing
+
+    for _ in 1:max_iterations
+        right - left <= absolute_tolerance &&
+            return (; mass_solar = (left + right) / 2, branch)
+        midpoint = (left + right) / 2
+        ymid = _bhsr_union_spin_at_mass(grid, midpoint)
+        ismissing(ymid) && return :unsupported_support
+        fmid = ymid - target_spin
+        iszero(fmid) && return (; mass_solar = midpoint, branch)
+        if sign(fmid) == sign(fleft)
+            left, fleft = midpoint, fmid
+        else
+            right = midpoint
+        end
+    end
+    return :root_nonconvergence
+end
+
+"""Eq. (98), evaluated only for a source grid with exactly two inverse roots.
+
+The root locations are bracketed on the frozen mass grid and refined against
+the analytic union contour. One-root, more-than-two-root, support-gap, and
+mode-switch cases fail closed because Appendix B specifies the interval only
+for its two-valued inverse.
+"""
+function bhsr_allowed_probability_inverse(xbar::Real, ybar::Real,
+                                           sigma_x::Real, sigma_y::Real,
+                                           grid::BHSRContourGrid;
+                                           model_id::AbstractString,
+                                           axion_id::AbstractString,
+                                           bh_id::AbstractString,
+                                           bh_ensemble::BHSRBHIdentityEnsemble,
+                                           absolute_tolerance::Real = big"1e-12",
+                                           max_iterations::Integer = 180)
+    identity = _bhsr_likelihood_metadata(grid, model_id, axion_id, bh_id, bh_ensemble)
+    xb, yb = _bhsr_big(xbar), _bhsr_big(ybar)
+    atol = _bhsr_big(absolute_tolerance)
+    atol > 0 || throw(ArgumentError("inverse root tolerance must be positive"))
+    max_iterations > 0 || throw(ArgumentError("inverse root iteration limit must be positive"))
+    unavailable(status; roots = BigFloat[], detail = "") =
+        merge(identity, (; projection = :inverse_x, status,
+                          inverse_roots = roots,
+                          probability_disallowed_between_branches = missing,
+                          nearest_branch = missing,
+                          inverse_derivative = missing,
+                          sigma_effective = missing,
+                          probability_allowed = missing,
+                          detail))
+
+    (first(grid.mass_solar) <= xb <= last(grid.mass_solar)) ||
+        return unavailable(:outside_frozen_mass_support)
+    !ismissing(grid(xb)) && return unavailable(:direct_contour_is_defined)
+    branches, branch_status = _bhsr_monotone_inverse_branches(grid)
+    branches === nothing && return unavailable(branch_status)
+
+    # A union-envelope switch between source modes is a cusp. Do not bracket
+    # across that unresolved branch switch or assign it a one-sided derivative.
+    for i in 1:(length(grid.mass_solar) - 1)
+        y1, y2 = grid.union_spin[i], grid.union_spin[i + 1]
+        if !ismissing(y1) && !ismissing(y2) &&
+           grid.rows[i].union_mode != grid.rows[i + 1].union_mode &&
+           min(y1, y2) <= yb <= max(y1, y2)
+            return unavailable(:ambiguous_mode_switch_bracket)
+        end
+    end
+
+    roots_with_branches = NamedTuple[]
+    for branch in branches
+        root = _bhsr_inverse_root_on_branch(grid, branch, yb;
+            absolute_tolerance = atol, max_iterations)
+        root === nothing && continue
+        root isa Symbol && return unavailable(root)
+        push!(roots_with_branches, root)
+    end
+    sort!(roots_with_branches; by = item -> item.mass_solar)
+    roots = BigFloat[]
+    unique_roots = NamedTuple[]
+    for root in roots_with_branches
+        if isempty(roots) || abs(root.mass_solar - last(roots)) > atol
+            push!(roots, root.mass_solar)
+            push!(unique_roots, root)
+        end
+    end
+    length(roots) == 2 || return unavailable(
+        length(roots) == 1 ? :unsupported_single_inverse_branch :
+        length(roots) > 2 ? :unsupported_inverse_topology : :no_inverse_roots;
+        roots)
+
+    slopes = BigFloat[]
+    for root in unique_roots
+        branch = root.branch
+        lower_spin = min(grid.union_spin[branch.first_index],
+                         grid.union_spin[branch.last_index])
+        upper_spin = max(grid.union_spin[branch.first_index],
+                         grid.union_spin[branch.last_index])
+        inverse_function(y) = begin
+            refined = _bhsr_inverse_root_on_branch(grid, branch, _bhsr_big(y);
+                absolute_tolerance = atol, max_iterations)
+            refined isa NamedTuple ? refined.mass_solar : missing
+        end
+        slope = try
+            bhsr_contour_derivative(inverse_function, yb;
+                                    lower = lower_spin, upper = upper_spin)
+        catch error
+            error isa ArgumentError || rethrow()
+            missing
+        end
+        ismissing(slope) && return unavailable(:incomplete_inverse_derivative_support; roots)
+        push!(slopes, slope)
+    end
     distances = abs.(roots .- xb)
     nearest_distance = minimum(distances)
     count(==(nearest_distance), distances) == 1 ||
-        throw(ArgumentError("nearest inverse branch is ambiguous at xbar"))
+        return unavailable(:ambiguous_nearest_inverse_branch; roots)
     nearest = findfirst(==(nearest_distance), distances)
     sigma_eff = bhsr_projected_sigma_x(sigma_x, sigma_y, slopes[nearest])
     low, high = extrema(roots)
     p_inside = bhsr_standard_normal_cdf((high - xb) / sigma_eff) -
         bhsr_standard_normal_cdf((low - xb) / sigma_eff)
     p_allowed = clamp(BigFloat(1) - p_inside, BigFloat(0), BigFloat(1))
-    return (; route_identity = BHSR_APPENDIX_B_ROUTE,
-            projection = :inverse_x,
+    return merge(identity, (; projection = :inverse_x,
+            status = :evaluated,
+            inverse_roots = roots,
             nearest_branch = nearest,
             inverse_derivative = slopes[nearest],
             sigma_effective = sigma_eff,
             probability_disallowed_between_branches = p_inside,
-            probability_allowed = p_allowed)
+            probability_allowed = p_allowed,
+            detail = "two source-grid-bracketed inverse roots"))
 end
 
 "Union/envelope boundary from the per-mode exclusion thresholds at one mass."
 function bhsr_union_boundary(values::AbstractVector)
     present = [_bhsr_big(value) for value in values if !ismissing(value)]
     return isempty(present) ? missing : minimum(present)
-end
-
-"Return the total union boundary function, including finite mode supports."
-function bhsr_union_boundary_function(contours::AbstractVector)
-    isempty(contours) && throw(ArgumentError("at least one mode contour is required"))
-    return x -> bhsr_union_boundary([contour(x) for contour in contours])
 end
 
 function _bhsr_probability_product(values)
@@ -179,63 +457,224 @@ function _bhsr_probability_product(values)
     return prod(probabilities)
 end
 
-"Eq. (96), then the governed product over axions; missing terms fail closed."
-function bhsr_probability_tree(probabilities_by_axion_bh::AbstractVector)
-    isempty(probabilities_by_axion_bh) &&
-        throw(ArgumentError("at least one source-relevant axion is required"))
-    single_axion_allowed = [_bhsr_probability_product(values)
-                            for values in probabilities_by_axion_bh]
-    if any(ismissing, single_axion_allowed)
-        return (; route_identity = BHSR_APPENDIX_B_ROUTE,
-                single_axion_allowed,
-                geometry_allowed = missing,
-                geometry_excluded = missing,
-                threshold_exceeded = missing)
+function _bhsr_tree_incomplete(model_id, axion_ids, ensemble, received;
+                               duplicate_terms = Tuple{String,String}[],
+                               missing_terms = Tuple{String,String}[],
+                               unexpected_axions = String[],
+                               unexpected_bh_ids = String[],
+                               unresolved_terms = Tuple{String,String}[])
+    return (; model_id,
+            route_identity = BHSR_APPENDIX_B_ROUTE,
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            bh_ensemble_id = ensemble.manifest_id,
+            observational_manifest_sha256 = ensemble.observational_manifest_sha256,
+            source_relevant_axion_ids = axion_ids,
+            expected_bh_ids = ensemble.bh_ids,
+            received_terms = received,
+            duplicate_terms,
+            missing_terms,
+            unexpected_axions,
+            unexpected_bh_ids,
+            unresolved_terms,
+            status = :unavailable,
+            single_axion_allowed = fill(missing, length(axion_ids)),
+            geometry_allowed = missing,
+            geometry_excluded = missing,
+            threshold_exceeded = missing)
+end
+
+"""Eq. (96) product with explicit source-ensemble coverage.
+
+Each element must be a named likelihood result with `axion_id`, `bh_id`, the
+frozen manifest hashes, `model_id`, and a resolved probability. The caller must
+state every source-relevant axion identity. The BH identity set comes from an
+explicit, hash-verified observational ensemble; this release enumerates the
+2018 Table-I ensemble only.
+"""
+function bhsr_probability_tree(likelihood_results::AbstractVector;
+                               model_id::AbstractString,
+                               source_relevant_axion_ids::AbstractVector{<:AbstractString},
+                               bh_ensemble::BHSRBHIdentityEnsemble)
+    id = _bhsr_model_id(model_id)
+    axion_ids = strip.(String.(source_relevant_axion_ids))
+    isempty(axion_ids) && throw(ArgumentError("source-relevant axion identities must be explicit"))
+    any(isempty, axion_ids) && throw(ArgumentError("source-relevant axion identities cannot be empty"))
+    length(unique(axion_ids)) == length(axion_ids) ||
+        throw(ArgumentError("source-relevant axion identities must be unique"))
+    ensemble = _bhsr_validate_bh_ensemble(bh_ensemble)
+    expected_axions = Set(axion_ids)
+    expected_bhs = Set(ensemble.bh_ids)
+    received = Tuple{String,String}[]
+    duplicates = Tuple{String,String}[]
+    unresolved = Tuple{String,String}[]
+    unexpected_axions = Set{String}()
+    unexpected_bhs = Set{String}()
+    seen = Dict{Tuple{String,String},Any}()
+
+    for result in likelihood_results
+        if result === missing || !(result isa NamedTuple)
+            push!(unresolved, ("<missing-identity>", "<missing-identity>"))
+            continue
+        end
+        required = (:model_id, :axion_id, :bh_id, :method_manifest_sha256,
+                    :source_mode_manifest_sha256, :bh_ensemble_id,
+                    :observational_manifest_sha256, :source_backed, :status,
+                    :probability_allowed)
+        if !all(field -> hasproperty(result, field), required)
+            axion = hasproperty(result, :axion_id) ? String(result.axion_id) : "<missing-axion>"
+            bh = hasproperty(result, :bh_id) ? String(result.bh_id) : "<missing-bh>"
+            push!(unresolved, (axion, bh))
+            continue
+        end
+        axion, bh = strip(String(result.axion_id)), strip(String(result.bh_id))
+        pair = (axion, bh)
+        push!(received, pair)
+        axion in expected_axions || push!(unexpected_axions, axion)
+        bh in expected_bhs || push!(unexpected_bhs, bh)
+        if haskey(seen, pair)
+            push!(duplicates, pair)
+            continue
+        end
+        seen[pair] = result
+        valid_identity = result.model_id == id &&
+            result.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 &&
+            result.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256 &&
+            result.bh_ensemble_id == ensemble.manifest_id &&
+            result.observational_manifest_sha256 == ensemble.observational_manifest_sha256 &&
+            result.source_backed === true
+        probability_valid = result.status == :evaluated &&
+            !ismissing(result.probability_allowed) &&
+            result.probability_allowed isa Real &&
+            isfinite(result.probability_allowed) && 0 <= result.probability_allowed <= 1
+        (valid_identity && probability_valid && axion in expected_axions && bh in expected_bhs) ||
+            push!(unresolved, pair)
+    end
+
+    missing_terms = Tuple{String,String}[(axion, bh)
+        for axion in axion_ids for bh in ensemble.bh_ids
+        if !haskey(seen, (axion, bh))]
+    if !isempty(duplicates) || !isempty(missing_terms) || !isempty(unexpected_axions) ||
+       !isempty(unexpected_bhs) || !isempty(unresolved)
+        return _bhsr_tree_incomplete(id, axion_ids, ensemble, received;
+            duplicate_terms = unique(duplicates), missing_terms,
+            unexpected_axions = sort!(collect(unexpected_axions)),
+            unexpected_bh_ids = sort!(collect(unexpected_bhs)), unresolved_terms = unique(unresolved))
+    end
+
+    single_axion_allowed = BigFloat[]
+    for axion in axion_ids
+        terms = [seen[(axion, bh)].probability_allowed for bh in ensemble.bh_ids]
+        push!(single_axion_allowed, _bhsr_probability_product(terms))
     end
     geometry_allowed = _bhsr_probability_product(single_axion_allowed)
     geometry_excluded = BigFloat(1) - geometry_allowed
-    return (; route_identity = BHSR_APPENDIX_B_ROUTE,
+    return (; model_id = id,
+            route_identity = BHSR_APPENDIX_B_ROUTE,
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            bh_ensemble_id = ensemble.manifest_id,
+            observational_manifest_sha256 = ensemble.observational_manifest_sha256,
+            source_relevant_axion_ids = axion_ids,
+            expected_bh_ids = ensemble.bh_ids,
+            received_terms = received,
+            duplicate_terms = Tuple{String,String}[],
+            missing_terms = Tuple{String,String}[],
+            unexpected_axions = String[],
+            unexpected_bh_ids = String[],
+            unresolved_terms = Tuple{String,String}[],
+            status = :evaluated,
             single_axion_allowed,
             geometry_allowed,
             geometry_excluded,
             threshold_exceeded = geometry_excluded > big"0.9545")
 end
 
-"Fail-closed audit of source Table-I uncertainties; never infers sigma."
-function bhsr_sigma_gate(rows; expected_rows::Integer = BHSR_APPENDIX_B_EXPECTED_ROWS)
-    count = length(rows)
-    if count != expected_rows
-        return (; route_identity = BHSR_APPENDIX_B_ROUTE,
-                status = :unavailable,
-                expected_rows,
-                received_rows = count,
-                unresolved = String[])
-    end
+function _bhsr_positive_finite_sigma(value)
+    return !ismissing(value) && value isa Real && isfinite(value) && value > 0
+end
+
+"""Audit exact source row coverage and source-defined one-sigma provenance."""
+function bhsr_sigma_gate(rows; bh_ensemble::BHSRBHIdentityEnsemble)
+    ensemble = _bhsr_validate_bh_ensemble(bh_ensemble)
+    counts = Dict{String,Int}()
+    row_by_name = Dict{String,Any}()
     unresolved = String[]
-    for row in rows
-        name = String(getproperty(row, :name))
-        sigma_mass = getproperty(row, :sigma_mass)
-        sigma_spin = getproperty(row, :sigma_spin)
-        mass_source = hasproperty(row, :sigma_mass_source) ?
-            getproperty(row, :sigma_mass_source) : missing
-        spin_source = hasproperty(row, :sigma_spin_source) ?
-            getproperty(row, :sigma_spin_source) : missing
-        complete = !ismissing(sigma_mass) && !ismissing(sigma_spin) &&
-            isequal(mass_source, "source_defined") &&
-            isequal(spin_source, "source_defined")
+    invalid_rows = String[]
+    for (index, row) in enumerate(rows)
+        if !(row isa NamedTuple) || !hasproperty(row, :name) ||
+           !(row.name isa AbstractString) || isempty(strip(row.name))
+            push!(invalid_rows, "row[$index]:missing_identity")
+            continue
+        end
+        name = strip(String(row.name))
+        counts[name] = get(counts, name, 0) + 1
+        row_by_name[name] = row
+        name in ensemble.bh_ids || push!(invalid_rows, "$name:unexpected_identity")
+    end
+    duplicate_ids = sort!([name for (name, count) in counts if count > 1])
+    missing_ids = [name for name in ensemble.bh_ids if !haskey(counts, name)]
+    for name in ensemble.bh_ids
+        count = get(counts, name, 0)
+        count == 1 || continue
+        row = row_by_name[name]
+        fields = (:sigma_mass, :sigma_spin, :sigma_mass_source, :sigma_spin_source,
+                  :sigma_mass_confidence, :sigma_spin_confidence,
+                  :sigma_mass_provenance, :sigma_spin_provenance)
+        if !all(field -> hasproperty(row, field), fields)
+            push!(unresolved, "$name:missing_sigma_provenance_fields")
+            continue
+        end
+        complete = _bhsr_positive_finite_sigma(row.sigma_mass) &&
+            _bhsr_positive_finite_sigma(row.sigma_spin) &&
+            row.sigma_mass_source == "source_defined" &&
+            row.sigma_spin_source == "source_defined" &&
+            row.sigma_mass_confidence == "1sigma" &&
+            row.sigma_spin_confidence == "1sigma" &&
+            row.sigma_mass_provenance isa AbstractString &&
+            !isempty(strip(row.sigma_mass_provenance)) &&
+            row.sigma_spin_provenance isa AbstractString &&
+            !isempty(strip(row.sigma_spin_provenance))
         complete || push!(unresolved, name)
     end
-    return (; route_identity = BHSR_APPENDIX_B_ROUTE,
-            status = isempty(unresolved) ? :complete : :unavailable,
-            expected_rows,
-            received_rows = count,
-            unresolved)
+    status = isempty(duplicate_ids) && isempty(missing_ids) &&
+        isempty(invalid_rows) && isempty(unresolved) ? :complete : :unavailable
+    return (; model_id = "APPENDIX-B-SIGMA-GATE",
+            route_identity = ensemble.route_identity,
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            bh_ensemble_id = ensemble.manifest_id,
+            observational_manifest_sha256 = ensemble.observational_manifest_sha256,
+            expected_bh_ids = ensemble.bh_ids,
+            expected_rows = length(ensemble.bh_ids),
+            received_rows = length(rows),
+            duplicate_ids,
+            missing_ids,
+            invalid_rows,
+            unresolved,
+            status)
 end
 
 "The source audit found no complete source-defined Table-I sigma set."
-bhsr_sourcewide_likelihood_status() =
-    (; route_identity = BHSR_APPENDIX_B_ROUTE,
-       status = :unavailable,
-       source_rows = BHSR_APPENDIX_B_EXPECTED_ROWS,
-       unresolved_censored_spin_rows = collect(BHSR_APPENDIX_B_UNRESOLVED_ROWS),
-       reason = "no source-defined conversion for censored or mixed-confidence errors")
+function bhsr_sourcewide_likelihood_status(; model_id::AbstractString = "APPENDIX-B-SOURCEWIDE-UNAVAILABLE")
+    ensemble = bhsr_bh_identity_ensemble()
+    unsupported_smbh_rows = [
+        "Mrk 335", "Fairall 9", "Mrk 79", "NGC 3783", "MCG-6-30-15",
+        "NGC 7469", "Ark 120", "Mrk 110", "NGC 4051",
+    ]
+    return (; model_id = _bhsr_model_id(model_id),
+            route_identity = BHSR_APPENDIX_B_ROUTE,
+            likelihood_route_identity = BHSR_APPENDIX_B_ROUTE,
+            contour_model_id = "REFERENCE_2021_FIG3_STELLAR",
+            contour_route_identity = "REFERENCE_2021_ANALYTIC",
+            contour_mass_support_solar = (BigFloat("0.1"), BigFloat("100")),
+            unsupported_contour_support_bh_ids = unsupported_smbh_rows,
+            method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+            bh_ensemble_id = ensemble.manifest_id,
+            observational_manifest_sha256 = ensemble.observational_manifest_sha256,
+            status = :unavailable,
+            source_rows = length(ensemble.bh_ids),
+            unresolved_censored_spin_rows = collect(BHSR_APPENDIX_B_UNRESOLVED_ROWS),
+            reason = "no source-defined conversion for censored or mixed-confidence errors; the frozen 2021 Fig. 3 stellar contour has support only on 0.1-100 M_sun and cannot evaluate the nine 2018 Table-I SMBH rows outside that support")
+end
