@@ -15,6 +15,10 @@ const BHSR_SOURCE_MODE_MANIFEST_SHA256 =
     "a891735d45dd80e57689917416577203e43a68ec0c7e96b23897cb7c306725ed"
 const BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 =
     "7b9c1cf9e4787372801125d7c195288d36f3cb9e094b0a2ec179493c8e8392d5"
+const BHSR_TOPOLOGY_METHOD_ADDENDUM = joinpath(BHSR_VALIDATION_DIR,
+    "topology_method_addendum.md")
+const BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256 =
+    "909d283bd19af956ee2881537ee90dce07c0e1c7976717ac27cc7ca6402f7d39"
 
 function _bhsr_verified_manifest(path::AbstractString, expected_sha256::AbstractString)
     isfile(path) || error("required frozen BHSR manifest is absent: $path")
@@ -29,6 +33,9 @@ const _BHSR_SOURCE_MODE_MANIFEST_TEXT =
 const _BHSR_METHOD_MANIFEST_TEXT =
     _bhsr_verified_manifest(BHSR_NUMERICAL_METHOD_MANIFEST,
                             BHSR_NUMERICAL_METHOD_MANIFEST_SHA256)
+const _BHSR_TOPOLOGY_METHOD_ADDENDUM_TEXT =
+    _bhsr_verified_manifest(BHSR_TOPOLOGY_METHOD_ADDENDUM,
+                            BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256)
 
 function _bhsr_json_string_field(object_text::AbstractString, key::AbstractString)
     pattern = Regex("\"" * key * "\"\\s*:\\s*\"([^\"]*)\"")
@@ -140,6 +147,7 @@ struct BHSRContourGrid
     model_id::String
     route_identity::String
     method_manifest_sha256::String
+    topology_method_addendum_sha256::String
     source_mode_manifest_sha256::String
     mass_solar::Vector{BigFloat}
     union_spin::Vector{Union{Missing,BigFloat}}
@@ -245,6 +253,8 @@ function bhsr_free_field_residual(mass_solar::Real, mu_eV::Real, spin::Real,
 end
 
 const BHSR_SPIN_TOPOLOGY_SCAN_POINTS = 257
+const BHSR_SPIN_TOPOLOGY_EXTREMUM_MAX_ITERATIONS = 240
+const BHSR_SPIN_TOPOLOGY_NEAR_TANGENT_TOLERANCE = big"1e-40"
 
 function _bhsr_refine_spin_extremum(f, lower::BigFloat, upper::BigFloat,
                                     maximize::Bool, x_tolerance::BigFloat,
@@ -299,7 +309,7 @@ function _bhsr_refine_spin_root(f, lower::BigFloat, upper::BigFloat,
 end
 
 function _bhsr_spin_topology_status(intervals, roots)
-    isempty(intervals) && return isempty(roots) ? :no_efficient_spin : :isolated_threshold_points
+    isempty(intervals) && return isempty(roots) ? :no_positive_interval_resolved : :isolated_threshold_points
     length(intervals) > 1 && return :multiple_efficiency_intervals
     lower, upper = only(intervals)
     lower == 0 && upper == 1 && return :all_spins_efficient
@@ -310,18 +320,21 @@ end
 
 function _bhsr_isolate_positive_spin_intervals_at_resolution(f, scan_points::Integer;
         max_iterations::Integer = 140,
+        extremum_max_iterations::Integer = BHSR_SPIN_TOPOLOGY_EXTREMUM_MAX_ITERATIONS,
         absolute_tolerance::Real = big"1e-40")
     scan_points >= 3 || throw(ArgumentError("spin-topology scan needs at least three points"))
     max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
     x_tolerance = _bhsr_big(absolute_tolerance)
     x_tolerance > 0 || throw(ArgumentError("absolute_tolerance must be positive"))
     x_tolerance < 1 || throw(ArgumentError("absolute_tolerance must be less than the spin range"))
+    extremum_max_iterations > 0 || throw(ArgumentError("extremum iteration limit must be positive"))
     points = [BigFloat(index - 1) / BigFloat(scan_points - 1) for index in 1:scan_points]
     values = BigFloat[f(point) for point in points]
     all(isfinite, values) || throw(DomainError(values, "spin residual must be finite on [0,1]"))
     nodes = Tuple{BigFloat,BigFloat}[(points[index], values[index])
                                     for index in eachindex(points)]
-    extremum_tolerance = max(x_tolerance, big"1e-12")
+    extrema = Tuple{BigFloat,BigFloat}[]
+    extremum_tolerance = x_tolerance
     for index in 2:(scan_points - 1)
         previous, current, following = values[index - 1], values[index], values[index + 1]
         is_maximum = current >= previous && current >= following &&
@@ -330,8 +343,10 @@ function _bhsr_isolate_positive_spin_intervals_at_resolution(f, scan_points::Int
                      (current < previous || current < following)
         if is_maximum || is_minimum
             point, value = _bhsr_refine_spin_extremum(f, points[index - 1],
-                points[index + 1], is_maximum, extremum_tolerance, max_iterations)
+                points[index + 1], is_maximum, extremum_tolerance,
+                extremum_max_iterations)
             push!(nodes, (point, value))
+            push!(extrema, (point, value))
         end
     end
     sort!(nodes; by = first)
@@ -364,9 +379,15 @@ function _bhsr_isolate_positive_spin_intervals_at_resolution(f, scan_points::Int
         upper > lower || continue
         f((lower + upper) / 2) > 0 && push!(intervals, (lower, upper))
     end
+    near_tangent_extrema = [item for item in extrema
+        if abs(item[2]) <= BHSR_SPIN_TOPOLOGY_NEAR_TANGENT_TOLERANCE]
+    status = isempty(near_tangent_extrema) ?
+        _bhsr_spin_topology_status(intervals, unique_roots) : :unavailable_near_tangent
     return (; roots = unique_roots,
             intervals,
-            status = _bhsr_spin_topology_status(intervals, unique_roots),
+            status,
+            near_tangent_extrema,
+            refined_extrema = extrema,
             scan_points = Int(scan_points),
             isolation_method = "uniform_scan_with_local_extremum_refinement")
 end
@@ -386,33 +407,57 @@ end
 function _bhsr_isolate_positive_spin_intervals(f;
         scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS,
         max_iterations::Integer = 140,
+        extremum_max_iterations::Integer = BHSR_SPIN_TOPOLOGY_EXTREMUM_MAX_ITERATIONS,
         absolute_tolerance::Real = big"1e-40")
     scan_points >= 3 || throw(ArgumentError("spin-topology scan needs at least three points"))
     tolerance = _bhsr_big(absolute_tolerance)
     stability_tolerance = max(tolerance * 10, big"1e-30")
     resolutions = [Int(scan_points), 2Int(scan_points) - 1, 4Int(scan_points) - 3]
     results = [_bhsr_isolate_positive_spin_intervals_at_resolution(f, points;
-        max_iterations, absolute_tolerance) for points in resolutions]
+        max_iterations, extremum_max_iterations, absolute_tolerance) for points in resolutions]
+    near_tangent_detected = any(result -> !isempty(result.near_tangent_extrema), results)
     stable = _bhsr_topology_endpoints_stable(results[1], results[2], stability_tolerance) &&
              _bhsr_topology_endpoints_stable(results[2], results[3], stability_tolerance)
     final = last(results)
     if !stable
-        return (; roots = final.roots, intervals = Tuple{BigFloat,BigFloat}[],
+        return (; roots = BigFloat[], candidate_roots = final.roots,
+                intervals = Tuple{BigFloat,BigFloat}[],
                 candidate_intervals = final.intervals,
-                status = :unavailable_topology_resolution,
+                status = near_tangent_detected ? :unavailable_near_tangent :
+                    :unavailable_topology_resolution,
                 scan_points = final.scan_points,
                 resolution_ladder = resolutions,
-                resolution_status = :unstable,
+                resolution_status = near_tangent_detected ? :near_tangent : :unstable,
+                near_tangent_extrema = final.near_tangent_extrema,
+                refined_extrema = final.refined_extrema,
                 isolation_method = final.isolation_method)
     end
-    return (; roots = final.roots, intervals = final.intervals,
+    if near_tangent_detected
+        return (; roots = BigFloat[], candidate_roots = final.roots,
+                intervals = Tuple{BigFloat,BigFloat}[],
+                candidate_intervals = final.intervals,
+                status = :unavailable_near_tangent,
+                scan_points = final.scan_points,
+                resolution_ladder = resolutions,
+                resolution_status = :near_tangent,
+                near_tangent_extrema = final.near_tangent_extrema,
+                refined_extrema = final.refined_extrema,
+                isolation_method = final.isolation_method)
+    end
+    return (; roots = final.roots, candidate_roots = final.roots,
+            intervals = final.intervals,
             candidate_intervals = final.intervals,
             status = final.status,
             scan_points = final.scan_points,
             resolution_ladder = resolutions,
             resolution_status = :stable,
+            near_tangent_extrema = final.near_tangent_extrema,
+            refined_extrema = final.refined_extrema,
             isolation_method = final.isolation_method)
 end
+
+_bhsr_topology_unavailable(status::Symbol) =
+    status in (:unavailable_topology_resolution, :unavailable_near_tangent)
 
 function _bhsr_union_spin_intervals(per_mode_topologies)
     intervals = Tuple{BigFloat,BigFloat}[]
@@ -434,7 +479,7 @@ function _bhsr_union_spin_intervals(per_mode_topologies)
 end
 
 function _bhsr_contour_topology_status(intervals)
-    isempty(intervals) && return :no_efficient_spin
+    isempty(intervals) && return :no_positive_interval_resolved
     length(intervals) > 1 && return :multiple_boundaries_required
     lower, upper = only(intervals)
     lower == 0 && upper == 1 && return :all_spins_efficient
@@ -464,22 +509,28 @@ function bhsr_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                                         delta_a, precision_bits)
         isolated = _bhsr_isolate_positive_spin_intervals(f; scan_points,
             max_iterations, absolute_tolerance)
-        onset = isolated.status == :unavailable_topology_resolution ||
+        onset = _bhsr_topology_unavailable(isolated.status) ||
                 isempty(isolated.intervals) ? missing : first(isolated.intervals)[1]
         return (; model_id = id, route_identity = "REFERENCE_2021_ANALYTIC",
                 method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+                topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
                 source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
                 mass_solar = _bhsr_big(mass_solar), mu_eV = _bhsr_big(mu_eV),
                 tau_years = _bhsr_big(tau_years), mode_label = mode.label,
                 onset_spin = onset, roots = isolated.roots,
+                candidate_roots = isolated.candidate_roots,
                 intervals = isolated.intervals,
                 candidate_intervals = isolated.candidate_intervals,
+                refined_extrema = isolated.refined_extrema,
                 topology_status = isolated.status,
-                contour_topology_status = isolated.status == :unavailable_topology_resolution ?
-                    :unavailable_topology_resolution : _bhsr_contour_topology_status(isolated.intervals),
+                contour_topology_status = _bhsr_topology_unavailable(isolated.status) ?
+                    isolated.status : _bhsr_contour_topology_status(isolated.intervals),
                 scan_points = isolated.scan_points,
                 resolution_ladder = isolated.resolution_ladder,
                 resolution_status = isolated.resolution_status,
+                near_tangent_extrema = isolated.near_tangent_extrema,
+                near_tangent_residual_tolerance = BHSR_SPIN_TOPOLOGY_NEAR_TANGENT_TOLERANCE,
+                extremum_max_iterations = BHSR_SPIN_TOPOLOGY_EXTREMUM_MAX_ITERATIONS,
                 isolation_method = isolated.isolation_method)
     end
 end
@@ -514,8 +565,7 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
     for (mode, topology) in zip(modes, topologies)
         push!(roots, mode.label => topology.onset_spin)
     end
-    topology_resolved = all(topology -> topology.topology_status !=
-        :unavailable_topology_resolution, topologies)
+    topology_resolved = all(topology -> !_bhsr_topology_unavailable(topology.topology_status), topologies)
     union_intervals = topology_resolved ? _bhsr_union_spin_intervals(topologies) :
         Tuple{BigFloat,BigFloat}[]
     union_item = isempty(union_intervals) ? nothing : begin
@@ -525,11 +575,13 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
         (; mode = matching === nothing ? missing : modes[matching].label, spin = onset)
     end
     union_spin = union_item === nothing ? missing : union_item.spin
-    contour_status = !topology_resolved ? :unavailable_topology_resolution :
-        _bhsr_contour_topology_status(union_intervals)
+    failure_index = findfirst(topology -> _bhsr_topology_unavailable(topology.topology_status), topologies)
+    contour_status = failure_index === nothing ? _bhsr_contour_topology_status(union_intervals) :
+        topologies[failure_index].topology_status
     return (; model_id = id,
             route_identity = "REFERENCE_2021_ANALYTIC",
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             mode_labels = getfield.(modes, :label),
             mass_solar = _bhsr_big(mass_solar),
@@ -538,7 +590,7 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
             union_mode = union_item === nothing ? missing : union_item.mode,
             union_spin,
             union_intervals,
-            topology_status = topology_resolved ? :resolved : :unavailable_topology_resolution,
+            topology_status = topology_resolved ? :resolved : contour_status,
             contour_topology_status = contour_status,
             onset_only = true,
             delta_a = _bhsr_big(delta_a),
@@ -581,6 +633,7 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
             _bhsr_big(tau_years) in (big"1e10", big"4.5e6")
         return BHSRContourGrid(id, "REFERENCE_2021_ANALYTIC",
             BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             BHSR_SOURCE_MODE_MANIFEST_SHA256, masses, union_spins, rows,
             collect(modes), _bhsr_big(mu_eV), _bhsr_big(tau_years),
             _bhsr_big(delta_a), Int(precision_bits), Int(max_iterations),
@@ -682,22 +735,28 @@ function bhsr_bosenova_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                                              precision_bits, kwargs...)
         isolated = _bhsr_isolate_positive_spin_intervals(residual; scan_points,
             max_iterations, absolute_tolerance)
-        onset = isolated.status == :unavailable_topology_resolution ||
+        onset = _bhsr_topology_unavailable(isolated.status) ||
                 isempty(isolated.intervals) ? missing : first(isolated.intervals)[1]
         return (; model_id = id, route_identity = BHSR_BOSENOVA_ROUTE,
                 method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+                topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
                 source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
                 mass_solar = _bhsr_big(mass_solar), mu_eV = _bhsr_big(mu_eV),
                 lambda_iiii = _bhsr_big(lambda_iiii), tau_years = _bhsr_big(tau_years),
                 mode_label = mode.label, onset_spin = onset, roots = isolated.roots,
+                candidate_roots = isolated.candidate_roots,
                 intervals = isolated.intervals,
                 candidate_intervals = isolated.candidate_intervals,
+                refined_extrema = isolated.refined_extrema,
                 topology_status = isolated.status,
-                contour_topology_status = isolated.status == :unavailable_topology_resolution ?
-                    :unavailable_topology_resolution : _bhsr_contour_topology_status(isolated.intervals),
+                contour_topology_status = _bhsr_topology_unavailable(isolated.status) ?
+                    isolated.status : _bhsr_contour_topology_status(isolated.intervals),
                 scan_points = isolated.scan_points,
                 resolution_ladder = isolated.resolution_ladder,
                 resolution_status = isolated.resolution_status,
+                near_tangent_extrema = isolated.near_tangent_extrema,
+                near_tangent_residual_tolerance = BHSR_SPIN_TOPOLOGY_NEAR_TANGENT_TOLERANCE,
+                extremum_max_iterations = BHSR_SPIN_TOPOLOGY_EXTREMUM_MAX_ITERATIONS,
                 isolation_method = isolated.isolation_method)
     end
 end
@@ -730,16 +789,17 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
     for (mode, topology) in zip(modes, topologies)
         push!(roots, mode.label => topology.onset_spin)
     end
-    topology_resolved = all(topology -> topology.topology_status !=
-        :unavailable_topology_resolution, topologies)
+    topology_resolved = all(topology -> !_bhsr_topology_unavailable(topology.topology_status), topologies)
     union_intervals = topology_resolved ? _bhsr_union_spin_intervals(topologies) :
         Tuple{BigFloat,BigFloat}[]
     union_spin = isempty(union_intervals) ? missing : first(union_intervals)[1]
-    contour_status = !topology_resolved ? :unavailable_topology_resolution :
-        _bhsr_contour_topology_status(union_intervals)
+    failure_index = findfirst(topology -> _bhsr_topology_unavailable(topology.topology_status), topologies)
+    contour_status = failure_index === nothing ? _bhsr_contour_topology_status(union_intervals) :
+        topologies[failure_index].topology_status
     return (; model_id = id,
             route_identity = BHSR_BOSENOVA_ROUTE,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             mode_labels = getfield.(modes, :label),
             mass_solar = _bhsr_big(mass_solar),
@@ -747,7 +807,7 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
             per_mode_topology = topologies,
             union_spin,
             union_intervals,
-            topology_status = topology_resolved ? :resolved : :unavailable_topology_resolution,
+            topology_status = topology_resolved ? :resolved : contour_status,
             contour_topology_status = contour_status,
             onset_only = true)
 end

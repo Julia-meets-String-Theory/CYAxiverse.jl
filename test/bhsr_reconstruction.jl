@@ -5,12 +5,14 @@ include(joinpath(@__DIR__, "..", "scripts", "bhsr_likelihood_reconstruction.jl")
 function _bhsr_tree_fixture_row(axion_id, bh_id, probability, ensemble;
                                 model_id = "geometry-fixture",
                                 method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+                                topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
                                 source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
                                 source_backed = false,
                                 status = :evaluated)
     return (; model_id, axion_id, bh_id,
             route_identity = BHSR_APPENDIX_B_ROUTE,
             method_manifest_sha256,
+            topology_method_addendum_sha256,
             source_mode_manifest_sha256,
             bh_ensemble_id = ensemble.manifest_id,
             observational_manifest_sha256 = ensemble.observational_manifest_sha256,
@@ -70,7 +72,8 @@ end
 function _bhsr_contour_fixture(masses, spins, evaluator; model_id = "inverse-fixture",
                                active_modes = fill("|211>", length(masses)),
                                source_grid = false,
-                               contour_topology_status = nothing)
+                               contour_topology_status = nothing,
+                               topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256)
     mode = only(filter(item -> item.label == "|211>", bhsr_nodeless_modes()))
     rows = Any[]
     for i in eachindex(masses)
@@ -83,6 +86,7 @@ function _bhsr_contour_fixture(masses, spins, evaluator; model_id = "inverse-fix
     end
     return BHSRContourGrid(model_id, "SYNTHETIC_FIXTURE",
         BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+        topology_method_addendum_sha256,
         BHSR_SOURCE_MODE_MANIFEST_SHA256,
         BigFloat.(_bhsr_big.(masses)),
         Union{Missing,BigFloat}[ismissing(spin) ? missing : _bhsr_big(spin) for spin in spins],
@@ -99,6 +103,8 @@ end
         bytes2hex(sha256(read(BHSR_SOURCE_MODE_MANIFEST)))
     @test BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 ==
         bytes2hex(sha256(read(BHSR_NUMERICAL_METHOD_MANIFEST)))
+    @test BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256 ==
+        bytes2hex(sha256(read(BHSR_TOPOLOGY_METHOD_ADDENDUM)))
     @test_throws ArgumentError _bhsr_validate_modes([BHSRMode(0, 6, 6, "|766>")])
 
     mode211 = only(filter(mode -> mode.label == "|211>", modes))
@@ -132,14 +138,42 @@ end
     @test low_alpha_free.intervals[1][1] ≈ big"0.1281682643098299286975054649" atol = big"1e-27"
     @test low_alpha_free.intervals[1][2] ≈ big"0.9999990663471144156736753704" atol = big"1e-27"
     @test low_alpha_free.topology_status == :bounded_efficiency_interval
+    @test low_alpha_free.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test low_alpha_free.resolution_ladder == [257, 513, 1025]
     @test low_alpha_free.resolution_status == :stable
+    @test bhsr_critical_spin(big"1", big"4.3e-12", mode211, big"1e10") ==
+        first(low_alpha_free.roots)
     low_alpha_row = bhsr_regge_row(big"1", big"4.3e-12", big"1e10", [mode211];
         model_id = "low-alpha-free-row")
     @test low_alpha_row.union_spin == first(low_alpha_free.roots)
     @test low_alpha_row.union_intervals == low_alpha_free.intervals
     @test low_alpha_row.contour_topology_status == :bounded_efficiency_interval
     @test low_alpha_row.onset_only
+
+    tangent_free_mass = big"0.21554620150829444416845426694618320734"
+    tangent_free = bhsr_critical_spin_topology(tangent_free_mass, big"4.3e-12",
+        mode211, big"1e10"; model_id = "near-tangent-free-regression")
+    free_peak = only(tangent_free.refined_extrema)
+    @test free_peak[1] ≈ big"0.5876767437668640383645201551" atol = big"1e-28"
+    @test free_peak[2] ≈ big"1.345994205450331216276227928e-24" rtol = big"1e-16"
+    @test tangent_free.roots[1] ≈ big"0.5876767437668230485381096634" atol = big"1e-28"
+    @test tangent_free.roots[2] ≈ big"0.5876767437669050281909306458" atol = big"1e-28"
+    @test tangent_free.topology_status == :bounded_efficiency_interval
+    @test tangent_free.resolution_ladder == [257, 513, 1025]
+    @test tangent_free.resolution_status == :stable
+    @test tangent_free.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
+
+    near_zero_peak(x) = big"5e-41" - (x - big"0.5")^2
+    near_zero_topology = _bhsr_isolate_positive_spin_intervals(near_zero_peak)
+    @test near_zero_topology.status == :unavailable_near_tangent
+    @test near_zero_topology.resolution_status == :near_tangent
+    @test isempty(near_zero_topology.roots)
+    @test isempty(near_zero_topology.intervals)
+    @test length(near_zero_topology.candidate_roots) == 2
+    unresolved_tangent_row = bhsr_regge_row(tangent_free_mass, big"4.3e-12",
+        big"1e10", [mode211]; model_id = "near-tangent-row")
+    @test unresolved_tangent_row.union_spin == tangent_free.roots[1]
+    @test unresolved_tangent_row.contour_topology_status == :bounded_efficiency_interval
 
     narrow_pocket(x) = big"1.1" * exp(-((x - big"0.501") / big"0.0003")^2) - x
     unresolved_topology = _bhsr_isolate_positive_spin_intervals(narrow_pocket)
@@ -154,6 +188,7 @@ end
                                   model_id = "analytic-10-solar-mass")
     @test all_mode_row.model_id == "analytic-10-solar-mass"
     @test all_mode_row.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
+    @test all_mode_row.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test all_mode_row.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test all_mode_row.mode_labels == getfield.(modes, :label)
     @test all_mode_row.union_spin < critical
@@ -195,10 +230,24 @@ end
     @test low_alpha_bose.intervals[1][1] ≈ big"0.1281665047765220283893719384" atol = big"1e-27"
     @test low_alpha_bose.intervals[1][2] ≈ big"0.9999999989528558771827878312" atol = big"1e-27"
     @test low_alpha_bose.topology_status == :bounded_efficiency_interval
+    tangent_bose_lambda = big"-1.7180957110518061656012412304276707960189280606045e-65"
+    tangent_bose = bhsr_bosenova_critical_spin_topology(big"1", big"4.3e-12",
+        mode211, tangent_bose_lambda, big"1e10";
+        model_id = "near-tangent-bosenova-regression")
+    bose_peak = only(tangent_bose.refined_extrema)
+    @test bose_peak[1] ≈ big"0.6257692360535021388397666715" atol = big"1e-28"
+    @test bose_peak[2] ≈ big"1.593503808487069909134855922e-27" rtol = big"1e-16"
+    @test tangent_bose.roots[1] ≈ big"0.6257692360535008233366463567" atol = big"1e-28"
+    @test tangent_bose.roots[2] ≈ big"0.6257692360535034543428869862" atol = big"1e-28"
+    @test tangent_bose.topology_status == :bounded_efficiency_interval
+    @test tangent_bose.resolution_ladder == [257, 513, 1025]
+    @test tangent_bose.resolution_status == :stable
+    @test tangent_bose.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     bose_row = bhsr_bosenova_regge_row(big"10", big"4.3e-12", big"-1e-73",
                                       big"1e10", modes; model_id = "bosenova-10-solar-mass")
     @test bose_row.model_id == "bosenova-10-solar-mass"
     @test bose_row.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
+    @test bose_row.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test bose_row.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test bose_row.route_identity == "REFERENCE_2021_BOSENOVA"
     @test bose_row.union_spin < last(bose_row.per_mode[1])
@@ -224,6 +273,7 @@ end
     @test grid[3].union_spin == last(grid[3].per_mode[1])
     @test grid.model_id == "three-point-regge-fixture"
     @test grid.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
+    @test grid.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test grid.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test !grid.source_grid
 
@@ -255,6 +305,7 @@ end
     @test direct.axion_id == "axion-test"
     @test direct.bh_id == first(ensemble.bh_ids)
     @test direct.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
+    @test direct.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test direct.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test !direct.source_backed
     @test direct.contour_provenance_status == :caller_supplied_contour_functions
@@ -318,6 +369,11 @@ end
         :matching_recipe_without_source_target_data
     @test asserted_grid_result.contour_topology_status == :unverified_source_contour_topology
     @test asserted_grid_result.status == :ambiguous_source_spin_region_topology
+    stale_topology_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2;
+        topology_method_addendum_sha256 = repeat("0", 64))
+    @test_throws ArgumentError bhsr_allowed_probability_direct(big"2", big"4", big"0.1",
+        big"0.2", stale_topology_grid; model_id = "inverse-fixture",
+        axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
 
     bounded_source_formula_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2;
         contour_topology_status = :bounded_efficiency_interval)
@@ -331,6 +387,13 @@ end
         axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
     @test bounded_inverse.status == :ambiguous_source_spin_region_topology
     @test ismissing(bounded_inverse.diagnostic_probability_allowed)
+    tangent_source_formula_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2;
+        contour_topology_status = :unavailable_near_tangent)
+    tangent_likelihood = bhsr_allowed_probability_direct(big"2", big"4", big"0.1",
+        big"0.2", tangent_source_formula_grid; model_id = "inverse-fixture",
+        axion_id = "axion-test", bh_id = first(ensemble.bh_ids), bh_ensemble = ensemble)
+    @test tangent_likelihood.status == :unavailable_near_tangent
+    @test ismissing(tangent_likelihood.diagnostic_probability_allowed)
     @test ismissing(asserted_grid_result.probability_allowed)
 
     boundary_grid = _bhsr_contour_fixture([1, 2, 3], [1, 4, 9], x -> x^2)
@@ -362,6 +425,7 @@ end
     @test ismissing(inverse.probability_disallowed_between_branches)
     @test ismissing(inverse.probability_allowed)
     @test inverse.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
+    @test inverse.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test inverse.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test !inverse.source_backed
     tangent = bhsr_allowed_probability_inverse(big"0.5", big"1", big"0.1", big"0.2",
@@ -413,6 +477,7 @@ end
     @test ("<source-defined-Gaussian-sigma-set>",
            BHSR_APPENDIX_B_SOURCE_SIGMA_STATUS) in tree.unresolved_terms
     @test tree.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
+    @test tree.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test tree.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test_throws ArgumentError bhsr_probability_tree(complete_tree_rows;
         model_id = "geometry-fixture", source_relevant_axion_ids = String[], bh_ensemble = ensemble)
@@ -443,6 +508,13 @@ end
     wrong_manifest_tree = bhsr_probability_tree(wrong_manifest_rows; model_id = "geometry-fixture",
         source_relevant_axion_ids = axion_ids, bh_ensemble = ensemble)
     @test wrong_manifest_tree.status == :unavailable
+    wrong_topology_rows = copy(complete_tree_rows)
+    wrong_topology_rows[1] = merge(first(wrong_topology_rows),
+        (; topology_method_addendum_sha256 = repeat("0", 64)))
+    wrong_topology_tree = bhsr_probability_tree(wrong_topology_rows;
+        model_id = "geometry-fixture", source_relevant_axion_ids = axion_ids,
+        bh_ensemble = ensemble)
+    @test wrong_topology_tree.status == :unavailable
     wrong_model_tree = bhsr_probability_tree(complete_tree_rows; model_id = "different-model",
         source_relevant_axion_ids = axion_ids, bh_ensemble = ensemble)
     @test wrong_model_tree.status == :unavailable
@@ -476,6 +548,7 @@ end
     @test invented_sigma_gate.diagnostic_input_status == :complete
     @test invented_sigma_gate.status == :unavailable
     @test !invented_sigma_gate.source_authoritative
+    @test invented_sigma_gate.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     forged_complete_tree = bhsr_probability_tree(adversarial_rows;
         model_id = "forged-source-closure", source_relevant_axion_ids = adversarial_axion_ids,
         bh_ensemble = ensemble)
@@ -529,6 +602,7 @@ end
     sourcewide = bhsr_sourcewide_likelihood_status()
     @test sourcewide.status == :unavailable
     @test sourcewide.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
+    @test sourcewide.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test sourcewide.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test length(sourcewide.unresolved_censored_spin_rows) == 6
     @test sourcewide.contour_mass_support_solar == (big"0.1", big"100")

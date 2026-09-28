@@ -110,6 +110,8 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
         contour.model_id == id || throw(ArgumentError("contour and likelihood model_id differ"))
         contour.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 ||
             throw(ArgumentError("contour method-manifest identity is stale"))
+        contour.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256 ||
+            throw(ArgumentError("contour topology-method addendum identity is stale"))
         contour.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256 ||
             throw(ArgumentError("contour source-mode manifest identity is stale"))
         topology_status = if all(row -> hasproperty(row, :contour_topology_status), contour.rows)
@@ -118,8 +120,10 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
                 push!(statuses, row.contour_topology_status)
             end
             isempty(statuses) ? :unverified_source_contour_topology :
-            any(==(:unavailable_topology_resolution), statuses) ?
-                :unavailable_topology_resolution :
+            any(status -> status in (:unavailable_topology_resolution,
+                                     :unavailable_near_tangent), statuses) ?
+                first(filter(status -> status in (:unavailable_topology_resolution,
+                                                  :unavailable_near_tangent), statuses)) :
             all(==(:single_onset_to_extremal_spin), statuses) ?
                 :single_onset_to_extremal_spin : :ambiguous_source_spin_region_topology
         elseif contour.source_grid
@@ -133,6 +137,7 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
                 contour_provenance_status = contour.source_grid ?
                     :matching_recipe_without_source_target_data : :custom_grid,
                 contour_topology_status = topology_status,
+                topology_method_addendum_sha256 = contour.topology_method_addendum_sha256,
                 mode_labels = getfield.(contour.modes, :label),
                 contour_route_identity = contour.route_identity,
                 contour_mass_support_solar =
@@ -147,6 +152,7 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
         return (; source_backed = false,
                 contour_provenance_status = :caller_supplied_contour_functions,
                 contour_topology_status = :caller_supplied_diagnostic_contour,
+                topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
                 mode_labels = contour.mode_labels,
                 contour_route_identity = contour.route_identity,
                 contour_mass_support_solar = missing)
@@ -154,6 +160,7 @@ function _bhsr_contour_identity(contour, model_id::AbstractString)
     return (; source_backed = false,
             contour_provenance_status = :unsupported_contour_type,
             contour_topology_status = :unverified_contour_topology,
+            topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             mode_labels = String[],
             contour_route_identity = "UNSPECIFIED_CONTOUR",
             contour_mass_support_solar = missing)
@@ -178,6 +185,7 @@ function _bhsr_likelihood_metadata(contour, model_id::AbstractString,
             contour_provenance_status = contour_identity.contour_provenance_status,
             contour_topology_status = contour_identity.contour_topology_status,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            topology_method_addendum_sha256 = contour_identity.topology_method_addendum_sha256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             bh_ensemble_id = ensemble.manifest_id,
             observational_manifest_sha256 = ensemble.observational_manifest_sha256,
@@ -268,8 +276,9 @@ function bhsr_allowed_probability_direct(xbar::Real, ybar::Real,
     if f isa BHSRContourGrid &&
        identity.contour_topology_status != :caller_supplied_diagnostic_grid &&
        identity.contour_topology_status != :single_onset_to_extremal_spin
-        status = identity.contour_topology_status == :unavailable_topology_resolution ?
-            :unavailable_topology_resolution : :ambiguous_source_spin_region_topology
+        status = identity.contour_topology_status in
+            (:unavailable_topology_resolution, :unavailable_near_tangent) ?
+            identity.contour_topology_status : :ambiguous_source_spin_region_topology
         return merge(identity, (; projection = :y_of_x, status,
                 derivative = missing, sigma_effective = missing,
                 probability_allowed = missing))
@@ -415,8 +424,9 @@ function bhsr_allowed_probability_inverse(xbar::Real, ybar::Real,
 
     if identity.contour_topology_status != :caller_supplied_diagnostic_grid &&
        identity.contour_topology_status != :single_onset_to_extremal_spin
-        status = identity.contour_topology_status == :unavailable_topology_resolution ?
-            :unavailable_topology_resolution : :ambiguous_source_spin_region_topology
+        status = identity.contour_topology_status in
+            (:unavailable_topology_resolution, :unavailable_near_tangent) ?
+            identity.contour_topology_status : :ambiguous_source_spin_region_topology
         return unavailable(status)
     end
 
@@ -531,6 +541,7 @@ function _bhsr_tree_incomplete(model_id, axion_ids, ensemble, received;
     return (; model_id,
             route_identity = BHSR_APPENDIX_B_ROUTE,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             bh_ensemble_id = ensemble.manifest_id,
             observational_manifest_sha256 = ensemble.observational_manifest_sha256,
@@ -588,6 +599,7 @@ function bhsr_probability_tree(likelihood_results::AbstractVector;
             continue
         end
         required = (:model_id, :axion_id, :bh_id, :method_manifest_sha256,
+                    :topology_method_addendum_sha256,
                     :source_mode_manifest_sha256, :bh_ensemble_id,
                     :observational_manifest_sha256, :source_backed, :status,
                     :probability_allowed)
@@ -609,6 +621,7 @@ function bhsr_probability_tree(likelihood_results::AbstractVector;
         seen[pair] = result
         valid_identity = result.model_id == id &&
             result.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256 &&
+            result.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256 &&
             result.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256 &&
             result.bh_ensemble_id == ensemble.manifest_id &&
             result.observational_manifest_sha256 == ensemble.observational_manifest_sha256 &&
@@ -652,6 +665,7 @@ function bhsr_probability_tree(likelihood_results::AbstractVector;
     return (; model_id = id,
             route_identity = BHSR_APPENDIX_B_ROUTE,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             bh_ensemble_id = ensemble.manifest_id,
             observational_manifest_sha256 = ensemble.observational_manifest_sha256,
@@ -727,6 +741,7 @@ function bhsr_sigma_gate(rows; bh_ensemble::BHSRBHIdentityEnsemble)
     return (; model_id = "APPENDIX-B-SIGMA-GATE",
             route_identity = ensemble.route_identity,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             bh_ensemble_id = ensemble.manifest_id,
             observational_manifest_sha256 = ensemble.observational_manifest_sha256,
@@ -758,6 +773,7 @@ function bhsr_sourcewide_likelihood_status(; model_id::AbstractString = "APPENDI
             contour_mass_support_solar = (BigFloat("0.1"), BigFloat("100")),
             unsupported_contour_support_bh_ids = unsupported_smbh_rows,
             method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+            topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             bh_ensemble_id = ensemble.manifest_id,
             observational_manifest_sha256 = ensemble.observational_manifest_sha256,

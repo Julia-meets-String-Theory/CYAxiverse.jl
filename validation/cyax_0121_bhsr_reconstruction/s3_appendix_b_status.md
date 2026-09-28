@@ -40,6 +40,14 @@ single spin bound. That source-interpretation discrepancy remains unresolved;
 the 2021 contour is not treated as an Appendix-B contour when its full topology
 cannot be represented by one onset boundary.
 
+Every Regge row/grid and dependent likelihood result also carries the
+content-addressed corrective topology-method addendum SHA-256
+`909d283bd19af956ee2881537ee90dce07c0e1c7976717ac27cc7ca6402f7d39`, in
+addition to the unchanged frozen numerical-method manifest hash. The addendum
+records the 257/513/1025 scan, refined extrema and roots, the `1e-40`
+near-tangent margin, endpoint stability rule, interval union, and fail-closed
+contour conditions. The original manifest remains byte-identical.
+
 ## Source ensemble and contour support
 
 The 24 black-hole identities in the frozen observational manifest are the
