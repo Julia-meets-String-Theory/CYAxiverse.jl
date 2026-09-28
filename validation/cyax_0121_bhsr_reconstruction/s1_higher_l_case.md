@@ -76,6 +76,16 @@ cross-source discrepancy and the 2020 prose description of a single spin
 bound remain unresolved. A bounded interval does not establish equivalence
 to the published Fig. 3 single-curve interpretation or an Appendix-B contour.
 
+## Overtone scope and source equivalence
+
+The frozen mode manifest uses `n_r=0` for each of the `l=m=1..5` modes. The
+2020 Fig. 3 caption specifies `l=m=1..5` but does not state an overtone. The
+2018 source describes `n_r=0` as subdominant for `l=m>=4`, so equivalence of
+this frozen nodeless family to the 2020 plotted family is unverified. A
+separate `M_BH=11 M_sun` overtone sensitivity check reports that including
+`n_r=1, l=m=4` shifts the envelope onset by `0.0117489`. This sensitivity
+result does not change the frozen mode manifest or the S1 reference output.
+
 No digitized numerical target points from Fig. 3 are present in the frozen
 source manifest. This is formula-level evidence only; no published-plot
 agreement is claimed.

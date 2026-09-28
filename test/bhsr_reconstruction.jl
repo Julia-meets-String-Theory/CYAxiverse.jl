@@ -181,7 +181,7 @@ end
     @test unresolved_topology.resolution_status == :unstable
     @test isempty(unresolved_topology.intervals)
     @test length(unresolved_topology.candidate_intervals) == 1
-    @test_throws ErrorException bhsr_critical_spin(big"10", big"4.3e-12", mode211,
+    @test_throws ArgumentError bhsr_critical_spin(big"10", big"4.3e-12", mode211,
         big"1e10"; max_iterations = 1)
 
     all_mode_row = bhsr_regge_row(big"10", big"4.3e-12", big"1e10", modes;
@@ -243,6 +243,35 @@ end
     @test tangent_bose.resolution_ladder == [257, 513, 1025]
     @test tangent_bose.resolution_status == :stable
     @test tangent_bose.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
+
+    # The reference route must reject caller tolerances or iteration/precision
+    # overrides before they can turn these near-tangent cases into reference
+    # labelled empty topologies. This applies to each public topology wrapper.
+    @test_throws ArgumentError bhsr_critical_spin_topology(tangent_free_mass,
+        big"4.3e-12", mode211, big"1e10"; absolute_tolerance = big"1e-12")
+    @test_throws ArgumentError bhsr_critical_spin(tangent_free_mass,
+        big"4.3e-12", mode211, big"1e10"; absolute_tolerance = big"1e-6")
+    @test_throws ArgumentError bhsr_regge_row(tangent_free_mass,
+        big"4.3e-12", big"1e10", [mode211]; model_id = "noncanonical-free-row",
+        absolute_tolerance = big"1e-12")
+    @test_throws ArgumentError bhsr_regge_grid(big"4.3e-12", big"1e10";
+        mass_log10_min = -1, mass_log10_max = 1, points = 2, modes = [mode211],
+        model_id = "noncanonical-free-grid", absolute_tolerance = big"1e-6")
+    @test_throws ArgumentError bhsr_critical_spin_topology(tangent_free_mass,
+        big"4.3e-12", mode211, big"1e10"; precision_bits = 128)
+    @test_throws ArgumentError bhsr_critical_spin_topology(tangent_free_mass,
+        big"4.3e-12", mode211, big"1e10"; max_iterations = 139)
+
+    @test_throws ArgumentError bhsr_bosenova_critical_spin_topology(big"1",
+        big"4.3e-12", mode211, tangent_bose_lambda, big"1e10";
+        absolute_tolerance = big"1e-12")
+    @test_throws ArgumentError bhsr_bosenova_critical_spin(big"1",
+        big"4.3e-12", mode211, tangent_bose_lambda, big"1e10";
+        absolute_tolerance = big"1e-6")
+    @test_throws ArgumentError bhsr_bosenova_regge_row(big"1", big"4.3e-12",
+        tangent_bose_lambda, big"1e10", [mode211];
+        model_id = "noncanonical-bose-row", absolute_tolerance = big"1e-12")
+
     bose_row = bhsr_bosenova_regge_row(big"10", big"4.3e-12", big"-1e-73",
                                       big"1e10", modes; model_id = "bosenova-10-solar-mass")
     @test bose_row.model_id == "bosenova-10-solar-mass"
@@ -256,7 +285,7 @@ end
     @test bose_row.contour_topology_status == :single_onset_to_extremal_spin
     @test length(bose_row.per_mode_topology[4].roots) == 2
     @test bose_row.per_mode_topology[4].topology_status == :bounded_efficiency_interval
-    @test_throws ErrorException bhsr_bosenova_critical_spin(big"10", big"4.3e-12",
+    @test_throws ArgumentError bhsr_bosenova_critical_spin(big"10", big"4.3e-12",
         mode211, big"-1e-73", big"1e10"; max_iterations = 1)
     @test ismissing(bhsr_bosenova_critical_spin(big"10", big"4.3e-12", mode211,
         big"-1e-73", big"1e-50"))

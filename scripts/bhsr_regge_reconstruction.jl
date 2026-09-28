@@ -78,6 +78,17 @@ _bhsr_big(x::BigFloat) = x
 _bhsr_big(x::AbstractFloat) = parse(BigFloat, string(x))
 _bhsr_big(x::Real) = BigFloat(x)
 
+function _bhsr_validate_reference_topology_contract(precision_bits::Integer,
+        max_iterations::Integer, absolute_tolerance::Real)
+    precision_bits == 256 || throw(ArgumentError(
+        "reference topology requires canonical precision_bits=256"))
+    max_iterations == 140 || throw(ArgumentError(
+        "reference topology requires canonical max_iterations=140"))
+    _bhsr_big(absolute_tolerance) == big"1e-40" || throw(ArgumentError(
+        "reference topology requires canonical absolute_tolerance=1e-40"))
+    return nothing
+end
+
 struct BHSRMode
     n_r::Int
     l::Int
@@ -411,7 +422,7 @@ function _bhsr_isolate_positive_spin_intervals(f;
         absolute_tolerance::Real = big"1e-40")
     scan_points >= 3 || throw(ArgumentError("spin-topology scan needs at least three points"))
     tolerance = _bhsr_big(absolute_tolerance)
-    stability_tolerance = max(tolerance * 10, big"1e-30")
+    stability_tolerance = big"1e-30"
     resolutions = [Int(scan_points), 2Int(scan_points) - 1, 4Int(scan_points) - 3]
     results = [_bhsr_isolate_positive_spin_intervals_at_resolution(f, points;
         max_iterations, extremum_max_iterations, absolute_tolerance) for points in resolutions]
@@ -502,7 +513,8 @@ function bhsr_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                                      max_iterations::Integer = 140,
                                      absolute_tolerance::Real = big"1e-40",
                                      scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS)
-    precision_bits > 0 || throw(ArgumentError("precision_bits must be positive"))
+    _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
+                                               absolute_tolerance)
     id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         f(a) = bhsr_free_field_residual(mass_solar, mu_eV, a, mode, tau_years;
@@ -555,6 +567,8 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
                         precision_bits::Integer = 256,
                         max_iterations::Integer = 140,
                         absolute_tolerance::Real = big"1e-40")
+    _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
+                                               absolute_tolerance)
     _bhsr_validate_modes(modes)
     id = _bhsr_model_id(model_id)
     topologies = [bhsr_critical_spin_topology(mass_solar, mu_eV, mode,
@@ -608,6 +622,8 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
                          precision_bits::Integer = 256,
                          max_iterations::Integer = 140,
                          absolute_tolerance::Real = big"1e-40")
+    _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
+                                               absolute_tolerance)
     _bhsr_validate_modes(modes)
     points >= 2 || throw(ArgumentError("mass grid needs at least two points"))
     mass_log10_max > mass_log10_min || throw(ArgumentError("mass grid bounds are reversed"))
@@ -727,7 +743,8 @@ function bhsr_bosenova_critical_spin_topology(mass_solar::Real, mu_eV::Real,
         absolute_tolerance::Real = big"1e-40",
         scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS,
         kwargs...)
-    precision_bits > 0 || throw(ArgumentError("precision_bits must be positive"))
+    _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
+                                               absolute_tolerance)
     id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         residual(a) = bhsr_bosenova_residual(mass_solar, mu_eV, a, mode,
@@ -779,6 +796,8 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
                                   precision_bits::Integer = 256,
                                   max_iterations::Integer = 140,
                                   absolute_tolerance::Real = big"1e-40")
+    _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
+                                               absolute_tolerance)
     _bhsr_validate_modes(modes)
     id = _bhsr_model_id(model_id)
     topologies = [bhsr_bosenova_critical_spin_topology(mass_solar, mu_eV, mode,
