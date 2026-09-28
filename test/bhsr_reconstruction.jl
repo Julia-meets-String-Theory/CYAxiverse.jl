@@ -108,6 +108,25 @@ end
     @test_throws ArgumentError _bhsr_validate_modes([BHSRMode(0, 6, 6, "|766>")])
 
     mode211 = only(filter(mode -> mode.label == "|211>", modes))
+    forged_mode211 = BHSRMode(1, 1, 1, "|211>")
+    @test_throws ArgumentError bhsr_critical_spin_topology(big"10",
+        big"4.3e-12", forged_mode211, big"1e10")
+    @test_throws ArgumentError bhsr_critical_spin(big"10",
+        big"4.3e-12", forged_mode211, big"1e10")
+    @test_throws ArgumentError bhsr_regge_row(big"10", big"4.3e-12",
+        big"1e10", [forged_mode211]; model_id = "forged-free-row")
+    @test_throws ArgumentError bhsr_regge_grid(big"4.3e-12", big"1e10";
+        points = 2, modes = [forged_mode211], model_id = "forged-free-grid")
+    @test_throws ArgumentError bhsr_critical_spin_topology(big"10",
+        big"4.3e-12", mode211, big"1e10"; delta_a = big"0.2")
+    @test_throws ArgumentError bhsr_critical_spin(big"10",
+        big"4.3e-12", mode211, big"1e10"; delta_a = big"0.2")
+    @test_throws ArgumentError bhsr_regge_row(big"10", big"4.3e-12",
+        big"1e10", [mode211]; model_id = "noncanonical-delta-row",
+        delta_a = big"0.2")
+    @test_throws ArgumentError bhsr_regge_grid(big"4.3e-12", big"1e10";
+        points = 2, modes = [mode211], model_id = "noncanonical-delta-grid",
+        delta_a = big"0.2")
     alpha = bhsr_alpha(big"10", big"4.3e-12")
     @test isapprox(alpha, big"0.3217847"; rtol = big"1e-6")
 
@@ -138,6 +157,10 @@ end
     @test low_alpha_free.intervals[1][1] ≈ big"0.1281682643098299286975054649" atol = big"1e-27"
     @test low_alpha_free.intervals[1][2] ≈ big"0.9999990663471144156736753704" atol = big"1e-27"
     @test low_alpha_free.topology_status == :bounded_efficiency_interval
+    @test low_alpha_free.mode_identity == (label = "|211>", n_r = 0, l = 1, m = 1)
+    @test low_alpha_free.delta_a == big"0.1" && low_alpha_free.precision_bits == 256
+    @test low_alpha_free.root_max_iterations == 140
+    @test low_alpha_free.root_absolute_tolerance == big"1e-40"
     @test low_alpha_free.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test low_alpha_free.resolution_ladder == [257, 513, 1025]
     @test low_alpha_free.resolution_status == :stable
@@ -148,6 +171,10 @@ end
     @test low_alpha_row.union_spin == first(low_alpha_free.roots)
     @test low_alpha_row.union_intervals == low_alpha_free.intervals
     @test low_alpha_row.contour_topology_status == :bounded_efficiency_interval
+    @test low_alpha_row.mode_identities == [(label = "|211>", n_r = 0, l = 1, m = 1)]
+    @test low_alpha_row.delta_a == big"0.1" && low_alpha_row.precision_bits == 256
+    @test low_alpha_row.root_max_iterations == 140
+    @test low_alpha_row.root_absolute_tolerance == big"1e-40"
     @test low_alpha_row.onset_only
 
     tangent_free_mass = big"0.21554620150829444416845426694618320734"
@@ -191,6 +218,7 @@ end
     @test all_mode_row.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test all_mode_row.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test all_mode_row.mode_labels == getfield.(modes, :label)
+    @test all_mode_row.mode_identities == [(label = m.label, n_r = m.n_r, l = m.l, m = m.m) for m in modes]
     @test all_mode_row.union_spin < critical
     @test first(all_mode_row.per_mode).first == mode211.label
     @test isapprox(all_mode_row.union_spin,
@@ -203,7 +231,21 @@ end
     @test bose_negative.lambda_iiii_magnitude == bose_positive.lambda_iiii_magnitude
     @test bose_negative.f_pert_GeV == bose_positive.f_pert_GeV
     @test bose_negative.n_bose == bose_positive.n_bose
+    @test bose_negative.method_manifest_sha256 == BHSR_NUMERICAL_METHOD_MANIFEST_SHA256
+    @test bose_negative.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
+    @test bose_negative.mode_identity == (label = "|211>", n_r = 0, l = 1, m = 1)
+    @test bose_negative.precision_bits == 256
+    @test bose_negative.reduced_planck_GeV == big"2.435e18"
+    @test bose_negative.c_bose == big"5" && bose_negative.delta_a == big"0.1"
     @test bose_negative.omitted_interactions == ("off_diagonal_quartics", "cubic_interactions")
+    @test_throws ArgumentError bhsr_bosenova_details(big"10", big"4.3e-12",
+        forged_mode211, big"-1e-73")
+    @test_throws ArgumentError bhsr_bosenova_details(big"10", big"4.3e-12",
+        mode211, big"-1e-73"; c_bose = big"6")
+    @test_throws ArgumentError bhsr_bosenova_details(big"10", big"4.3e-12",
+        mode211, big"-1e-73"; reduced_planck_GeV = big"2.4e18")
+    @test_throws ArgumentError bhsr_bosenova_details(big"10", big"4.3e-12",
+        mode211, big"-1e-73"; delta_a = big"0.2")
     @test BHSR_BOSENOVA_TIMESCALES_YEARS == ("1e10", "4.5e7", "4.5e6")
     @test !bhsr_bosenova_efficient(-big"1e-30")
     @test !bhsr_bosenova_efficient(big"0")
@@ -243,6 +285,35 @@ end
     @test tangent_bose.resolution_ladder == [257, 513, 1025]
     @test tangent_bose.resolution_status == :stable
     @test tangent_bose.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
+    @test tangent_bose.mode_identity == (label = "|211>", n_r = 0, l = 1, m = 1)
+    @test tangent_bose.delta_a == big"0.1" && tangent_bose.c_bose == big"5"
+    @test tangent_bose.reduced_planck_GeV == big"2.435e18"
+    @test tangent_bose.precision_bits == 256
+    @test tangent_bose.root_max_iterations == 140
+    @test tangent_bose.root_absolute_tolerance == big"1e-40"
+    @test_throws ArgumentError bhsr_bosenova_critical_spin_topology(big"1",
+        big"4.3e-12", forged_mode211, tangent_bose_lambda, big"1e10")
+    @test_throws ArgumentError bhsr_bosenova_critical_spin(big"1",
+        big"4.3e-12", forged_mode211, tangent_bose_lambda, big"1e10")
+    @test_throws ArgumentError bhsr_bosenova_regge_row(big"1", big"4.3e-12",
+        tangent_bose_lambda, big"1e10", [forged_mode211];
+        model_id = "forged-bose-row")
+    @test_throws ArgumentError bhsr_bosenova_critical_spin_topology(big"1",
+        big"4.3e-12", mode211, tangent_bose_lambda, big"1e10"; c_bose = big"6")
+    @test_throws ArgumentError bhsr_bosenova_critical_spin_topology(big"1",
+        big"4.3e-12", mode211, tangent_bose_lambda, big"1e10";
+        reduced_planck_GeV = big"2.4e18")
+    @test_throws ArgumentError bhsr_bosenova_critical_spin_topology(big"1",
+        big"4.3e-12", mode211, tangent_bose_lambda, big"1e10"; delta_a = big"0.2")
+    @test_throws ArgumentError bhsr_bosenova_regge_row(big"1", big"4.3e-12",
+        tangent_bose_lambda, big"1e10", [mode211];
+        model_id = "noncanonical-bose-cbose", c_bose = big"6")
+    @test_throws ArgumentError bhsr_bosenova_regge_row(big"1", big"4.3e-12",
+        tangent_bose_lambda, big"1e10", [mode211]; model_id = "noncanonical-bose-planck",
+        reduced_planck_GeV = big"2.4e18")
+    @test_throws ArgumentError bhsr_bosenova_regge_row(big"1", big"4.3e-12",
+        tangent_bose_lambda, big"1e10", [mode211];
+        model_id = "noncanonical-bose-delta", delta_a = big"0.2")
 
     # The reference route must reject caller tolerances or iteration/precision
     # overrides before they can turn these near-tangent cases into reference
@@ -279,6 +350,11 @@ end
     @test bose_row.topology_method_addendum_sha256 == BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256
     @test bose_row.source_mode_manifest_sha256 == BHSR_SOURCE_MODE_MANIFEST_SHA256
     @test bose_row.route_identity == "REFERENCE_2021_BOSENOVA"
+    @test bose_row.mode_identities == [(label = m.label, n_r = m.n_r, l = m.l, m = m.m) for m in modes]
+    @test bose_row.delta_a == big"0.1" && bose_row.c_bose == big"5"
+    @test bose_row.reduced_planck_GeV == big"2.435e18"
+    @test bose_row.precision_bits == 256 && bose_row.root_max_iterations == 140
+    @test bose_row.root_absolute_tolerance == big"1e-40"
     @test bose_row.union_spin < last(bose_row.per_mode[1])
     @test isapprox(bose_row.union_spin,
                    big"0.319053261183905135751996850325"; rtol = big"1e-24")

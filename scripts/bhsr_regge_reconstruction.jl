@@ -89,6 +89,22 @@ function _bhsr_validate_reference_topology_contract(precision_bits::Integer,
     return nothing
 end
 
+function _bhsr_validate_reference_delta_a(delta_a::Real)
+    _bhsr_big(delta_a) == big"0.1" || throw(ArgumentError(
+        "reference routes require frozen delta_a=0.1"))
+    return nothing
+end
+
+function _bhsr_validate_reference_bosenova_parameters(c_bose::Real,
+        reduced_planck_GeV::Real, delta_a::Real)
+    _bhsr_big(c_bose) == big"5" || throw(ArgumentError(
+        "reference bosenova route requires frozen c_bose=5"))
+    _bhsr_big(reduced_planck_GeV) == big"2.435e18" || throw(ArgumentError(
+        "reference bosenova route requires frozen reduced_planck_GeV=2.435e18"))
+    _bhsr_validate_reference_delta_a(delta_a)
+    return nothing
+end
+
 struct BHSRMode
     n_r::Int
     l::Int
@@ -147,6 +163,14 @@ function _bhsr_validate_modes(modes::AbstractVector{BHSRMode})
         throw(ArgumentError("mode selection must retain frozen source-manifest order"))
     return modes
 end
+
+function _bhsr_validate_reference_mode(mode::BHSRMode)
+    _bhsr_validate_modes(BHSRMode[mode])
+    return mode
+end
+
+_bhsr_mode_identity(mode::BHSRMode) =
+    (; label = mode.label, n_r = mode.n_r, l = mode.l, m = mode.m)
 
 function _bhsr_model_id(model_id::AbstractString)
     id = String(strip(String(model_id)))
@@ -515,6 +539,8 @@ function bhsr_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                                      scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS)
     _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
                                                absolute_tolerance)
+    _bhsr_validate_reference_delta_a(delta_a)
+    _bhsr_validate_reference_mode(mode)
     id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         f(a) = bhsr_free_field_residual(mass_solar, mu_eV, a, mode, tau_years;
@@ -529,6 +555,10 @@ function bhsr_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                 source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
                 mass_solar = _bhsr_big(mass_solar), mu_eV = _bhsr_big(mu_eV),
                 tau_years = _bhsr_big(tau_years), mode_label = mode.label,
+                mode_identity = _bhsr_mode_identity(mode),
+                delta_a = _bhsr_big(delta_a), precision_bits = Int(precision_bits),
+                root_max_iterations = Int(max_iterations),
+                root_absolute_tolerance = _bhsr_big(absolute_tolerance),
                 onset_spin = onset, roots = isolated.roots,
                 candidate_roots = isolated.candidate_roots,
                 intervals = isolated.intervals,
@@ -569,6 +599,7 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
                         absolute_tolerance::Real = big"1e-40")
     _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
                                                absolute_tolerance)
+    _bhsr_validate_reference_delta_a(delta_a)
     _bhsr_validate_modes(modes)
     id = _bhsr_model_id(model_id)
     topologies = [bhsr_critical_spin_topology(mass_solar, mu_eV, mode,
@@ -598,6 +629,7 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
             topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             mode_labels = getfield.(modes, :label),
+            mode_identities = _bhsr_mode_identity.(modes),
             mass_solar = _bhsr_big(mass_solar),
             per_mode = roots,
             per_mode_topology = topologies,
@@ -608,7 +640,9 @@ function bhsr_regge_row(mass_solar::Real, mu_eV::Real, tau_years::Real,
             contour_topology_status = contour_status,
             onset_only = true,
             delta_a = _bhsr_big(delta_a),
-            precision_bits)
+            precision_bits = Int(precision_bits),
+            root_max_iterations = Int(max_iterations),
+            root_absolute_tolerance = _bhsr_big(absolute_tolerance))
 end
 
 "Direct logarithmic mass grid specified by the frozen Fig. 3 method manifest."
@@ -624,6 +658,7 @@ function bhsr_regge_grid(mu_eV::Real, tau_years::Real;
                          absolute_tolerance::Real = big"1e-40")
     _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
                                                absolute_tolerance)
+    _bhsr_validate_reference_delta_a(delta_a)
     _bhsr_validate_modes(modes)
     points >= 2 || throw(ArgumentError("mass grid needs at least two points"))
     mass_log10_max > mass_log10_min || throw(ArgumentError("mass grid bounds are reversed"))
@@ -689,6 +724,10 @@ function bhsr_bosenova_details(mass_solar::Real, mu_eV::Real, mode::BHSRMode,
                                 reduced_planck_GeV::Real = big"2.435e18",
                                 delta_a::Real = big"0.1",
                                 precision_bits::Integer = 256)
+    precision_bits == 256 || throw(ArgumentError(
+        "reference bosenova details require canonical precision_bits=256"))
+    _bhsr_validate_reference_bosenova_parameters(c_bose, reduced_planck_GeV, delta_a)
+    _bhsr_validate_reference_mode(mode)
     lambda = _bhsr_big(lambda_iiii)
     !iszero(lambda) || throw(DomainError(lambda, "lambda_iiii must be nonzero for finite f_pert"))
     c_bose > 0 || throw(ArgumentError("c_bose must be positive"))
@@ -703,6 +742,11 @@ function bhsr_bosenova_details(mass_solar::Real, mu_eV::Real, mode::BHSRMode,
             (f_pert_GeV / _bhsr_big(reduced_planck_GeV))^2
         n_max = bhsr_nmax(mass_solar, mode; delta_a, precision_bits)
         return (; route_identity = BHSR_BOSENOVA_ROUTE,
+                method_manifest_sha256 = BHSR_NUMERICAL_METHOD_MANIFEST_SHA256,
+                source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
+                mode_identity = _bhsr_mode_identity(mode),
+                precision_bits = Int(precision_bits),
+                reduced_planck_GeV = _bhsr_big(reduced_planck_GeV),
                 lambda_iiii_signed = lambda,
                 lambda_iiii_magnitude = abs(lambda),
                 principal_number = N,
@@ -738,18 +782,23 @@ bhsr_bosenova_efficient(residual::Real) = residual > 0
 function bhsr_bosenova_critical_spin_topology(mass_solar::Real, mu_eV::Real,
         mode::BHSRMode, lambda_iiii::Real, tau_years::Real;
         model_id::AbstractString = "BHSR-BOSENOVA-SPIN-TOPOLOGY",
+        delta_a::Real = big"0.1",
+        c_bose::Real = big"5",
+        reduced_planck_GeV::Real = big"2.435e18",
         precision_bits::Integer = 256,
         max_iterations::Integer = 140,
         absolute_tolerance::Real = big"1e-40",
-        scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS,
-        kwargs...)
+        scan_points::Integer = BHSR_SPIN_TOPOLOGY_SCAN_POINTS)
     _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
                                                absolute_tolerance)
+    _bhsr_validate_reference_bosenova_parameters(c_bose, reduced_planck_GeV, delta_a)
+    _bhsr_validate_reference_mode(mode)
     id = _bhsr_model_id(model_id)
     return setprecision(BigFloat, precision_bits) do
         residual(a) = bhsr_bosenova_residual(mass_solar, mu_eV, a, mode,
                                              lambda_iiii, tau_years;
-                                             precision_bits, kwargs...)
+                                             precision_bits, delta_a, c_bose,
+                                             reduced_planck_GeV)
         isolated = _bhsr_isolate_positive_spin_intervals(residual; scan_points,
             max_iterations, absolute_tolerance)
         onset = _bhsr_topology_unavailable(isolated.status) ||
@@ -760,7 +809,13 @@ function bhsr_bosenova_critical_spin_topology(mass_solar::Real, mu_eV::Real,
                 source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
                 mass_solar = _bhsr_big(mass_solar), mu_eV = _bhsr_big(mu_eV),
                 lambda_iiii = _bhsr_big(lambda_iiii), tau_years = _bhsr_big(tau_years),
-                mode_label = mode.label, onset_spin = onset, roots = isolated.roots,
+                mode_label = mode.label, mode_identity = _bhsr_mode_identity(mode),
+                delta_a = _bhsr_big(delta_a), c_bose = _bhsr_big(c_bose),
+                reduced_planck_GeV = _bhsr_big(reduced_planck_GeV),
+                precision_bits = Int(precision_bits),
+                root_max_iterations = Int(max_iterations),
+                root_absolute_tolerance = _bhsr_big(absolute_tolerance),
+                onset_spin = onset, roots = isolated.roots,
                 candidate_roots = isolated.candidate_roots,
                 intervals = isolated.intervals,
                 candidate_intervals = isolated.candidate_intervals,
@@ -798,6 +853,7 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
                                   absolute_tolerance::Real = big"1e-40")
     _bhsr_validate_reference_topology_contract(precision_bits, max_iterations,
                                                absolute_tolerance)
+    _bhsr_validate_reference_bosenova_parameters(c_bose, reduced_planck_GeV, delta_a)
     _bhsr_validate_modes(modes)
     id = _bhsr_model_id(model_id)
     topologies = [bhsr_bosenova_critical_spin_topology(mass_solar, mu_eV, mode,
@@ -821,14 +877,20 @@ function bhsr_bosenova_regge_row(mass_solar::Real, mu_eV::Real,
             topology_method_addendum_sha256 = BHSR_TOPOLOGY_METHOD_ADDENDUM_SHA256,
             source_mode_manifest_sha256 = BHSR_SOURCE_MODE_MANIFEST_SHA256,
             mode_labels = getfield.(modes, :label),
+            mode_identities = _bhsr_mode_identity.(modes),
             mass_solar = _bhsr_big(mass_solar),
+            delta_a = _bhsr_big(delta_a), c_bose = _bhsr_big(c_bose),
+            reduced_planck_GeV = _bhsr_big(reduced_planck_GeV),
             per_mode = roots,
             per_mode_topology = topologies,
             union_spin,
             union_intervals,
             topology_status = topology_resolved ? :resolved : contour_status,
             contour_topology_status = contour_status,
-            onset_only = true)
+            onset_only = true,
+            precision_bits = Int(precision_bits),
+            root_max_iterations = Int(max_iterations),
+            root_absolute_tolerance = _bhsr_big(absolute_tolerance))
 end
 """Continued-fraction scalar bound-state validation for CYAX-0121.
 
