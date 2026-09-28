@@ -13,6 +13,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import signal
 import platform
 import shutil
 import subprocess
@@ -79,6 +80,87 @@ def atomic_json_create(path: Path, value) -> None:
     atomic_create(path, canonical_json_bytes(value) + b"\n")
 
 
+def append_jsonl_fsync(path: Path, value) -> None:
+    """Append one durable progress event for recovery after a hard kill."""
+    encoded = canonical_json_bytes(value) + b"\n"
+    with path.open("ab") as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def run_bounded_process(command, timeout_seconds: float):
+    """Run a process group with a hard wall-clock cap, including blocked C calls."""
+    started = time.monotonic()
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    timed_out = False
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            tail_out, tail_err = process.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            tail_out, tail_err = process.communicate()
+        stdout = tail_out or stdout
+        stderr = tail_err or stderr
+    if isinstance(stdout, bytes):
+        stdout = stdout.decode("utf-8", errors="replace")
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    return {
+        "returncode": process.returncode,
+        "stdout": stdout,
+        "stderr": stderr,
+        "timed_out": timed_out,
+        "elapsed_wall_seconds": time.monotonic() - started,
+    }
+
+
+def read_progress_journal(path: Path):
+    """Read complete durable lines and retain the identity of any torn tail."""
+    if not path.is_file():
+        return {
+            "events": [],
+            "journal_sha256": None,
+            "unterminated_tail_sha256": None,
+            "unterminated_tail_bytes": 0,
+        }
+    raw = path.read_bytes()
+    lines = raw.splitlines(keepends=True)
+    events = []
+    tail = b""
+    for index, line in enumerate(lines):
+        if not line.endswith(b"\n"):
+            tail = line
+            if index != len(lines) - 1:
+                raise ValidationError(f"non-final unterminated progress line in {path}")
+            break
+        events.append(json.loads(line))
+    return {
+        "events": events,
+        "journal_sha256": sha256_bytes(raw),
+        "unterminated_tail_sha256": sha256_bytes(tail) if tail else None,
+        "unterminated_tail_bytes": len(tail),
+    }
+
+
 def load_json(path: Path):
     with path.open("r", encoding="utf-8") as stream:
         return json.load(stream)
@@ -120,8 +202,13 @@ def environment_provenance(cytools, numpy_module):
         "cytools_version": importlib.metadata.version("cytools"),
         "installed_cytools_git_blob_sha": source_hashes,
         "platform": platform.system() + "-" + platform.machine(),
-        "topcom": command_version("points2nall"),
-        "cgal_backend": "CYTools 1.4.12 installed compiled triangulation backend; requested backend=cgal",
+        "enumeration_backend": {
+            "polytope_all_triangulations_backend_argument": None,
+            "triangulation_engine": "bundled CYTools triangulumancer extension",
+            "regularity_backend_argument": None,
+            "regularity_optimizer_default": "highs",
+            "topcom_executed": False,
+        },
     }
 
 
@@ -207,8 +294,15 @@ def construct_candidate(cytools, candidate):
     return poly
 
 
-def enumerate_candidate(cytools, candidate, output_dir: Path, cap: int, time_cap: int):
-    started = time.monotonic()
+def enumerate_candidate(
+    cytools,
+    candidate,
+    output_dir: Path,
+    cap: int,
+    time_cap: int,
+    progress_path: Path,
+    started: float,
+):
     poly = construct_candidate(cytools, candidate)
     if not poly.is_reflexive():
         result = {
@@ -223,7 +317,17 @@ def enumerate_candidate(cytools, candidate, output_dir: Path, cap: int, time_cap
             "elapsed_wall_seconds": time.monotonic() - started,
             "enumerator_script_git_blob_sha1": git_blob_sha1(SCRIPT_PATH.read_bytes()),
         }
-        atomic_json_create(output_dir / f"support-{candidate['candidate_id']}.json", result)
+        append_jsonl_fsync(
+            progress_path,
+            {
+                "event": "candidate_complete",
+                "candidate_id": candidate["candidate_id"],
+                "status": result["status"],
+                "elapsed_wall_seconds": result["elapsed_wall_seconds"],
+                "support_count_or_lower_bound": 0,
+                "support_sha256": result["full_frst_support_sha256"],
+            },
+        )
         return result
 
     point_rows = [list(map(int, row)) for row in poly.points().tolist()]
@@ -263,6 +367,14 @@ def enumerate_candidate(cytools, candidate, output_dir: Path, cap: int, time_cap
             "two_face_sha256": sha256_bytes(canonical_json_bytes(two_face_rows)),
             "simplices_as_point_indices": simplex_rows,
         }
+        append_jsonl_fsync(
+            progress_path,
+            {
+                "event": "enumerated_state",
+                "index": len(state_records) + 1,
+                "state": state,
+            },
+        )
         support[full_id] = state
         state_records.append(state)
         if len(state_records) >= cap:
@@ -313,7 +425,242 @@ def enumerate_candidate(cytools, candidate, output_dir: Path, cap: int, time_cap
             "as_list": False,
         },
     }
-    atomic_json_create(output_dir / f"support-{candidate['candidate_id']}.json", result)
+    append_jsonl_fsync(
+        progress_path,
+        {
+            "event": "candidate_complete",
+            "candidate_id": candidate["candidate_id"],
+            "status": status,
+            "terminal_reason": terminal_reason,
+            "elapsed_wall_seconds": result["elapsed_wall_seconds"],
+            "support_count_or_lower_bound": count,
+            "support_sha256": result["full_frst_support_sha256"],
+        },
+    )
+    return result
+
+
+def incomplete_candidate_record(
+    candidate,
+    output_dir: Path,
+    progress_path: Path,
+    timeout_result,
+    limit_seconds: float,
+    candidate_limit_seconds: float,
+    terminal_reason: str,
+):
+    journal = read_progress_journal(progress_path)
+    states = [
+        event["state"]
+        for event in journal["events"]
+        if event.get("event") == "enumerated_state"
+    ]
+    state_ids = [state["full_triangulation_sha256"] for state in states]
+    if len(set(state_ids)) != len(state_ids):
+        raise ValidationError(
+            f"durable partial exact-support journal contains duplicate states: {candidate['candidate_id']}"
+        )
+    ordered_ids = sorted(state_ids)
+    return {
+        "candidate_id": candidate["candidate_id"],
+        "source_locator": candidate["source_locator"],
+        "source_coordinates": candidate["vertices"],
+        "construction": candidate["construction"],
+        "status": "enumeration_incomplete",
+        "support_complete": False,
+        "terminal_reason": terminal_reason,
+        "elapsed_wall_seconds": timeout_result["elapsed_wall_seconds"],
+        "full_frst_support_count_or_lower_bound": len(states),
+        "full_frst_support_sha256": sha256_bytes(canonical_json_bytes(ordered_ids)),
+        "states": states,
+        "enumerator_script_git_blob_sha1": git_blob_sha1(SCRIPT_PATH.read_bytes()),
+        "external_hard_cap": {
+            "process_group_timeout_enforced": True,
+            "per_candidate_limit_seconds": candidate_limit_seconds,
+            "effective_deadline_seconds": limit_seconds,
+            "timed_out": timeout_result["timed_out"],
+            "process_returncode": timeout_result["returncode"],
+            "termination_method": "SIGTERM then SIGKILL to isolated process group",
+            "elapsed_wall_seconds": timeout_result["elapsed_wall_seconds"],
+        },
+        "progress_journal": {
+            "path": progress_path.name,
+            **journal,
+            "complete_event_count": len(journal["events"]),
+            "partial_state_count": len(states),
+        },
+        "worker_stdout_sha256": sha256_bytes(timeout_result["stdout"].encode("utf-8")),
+        "worker_stderr_sha256": sha256_bytes(timeout_result["stderr"].encode("utf-8")),
+    }
+
+
+def enumerate_candidate_process(
+    registration_path: Path,
+    candidate,
+    output_dir: Path,
+    cache_dir: Path,
+    support_cap: int,
+    candidate_time_cap: float,
+    effective_time_cap: float,
+):
+    progress_path = output_dir / f"progress-{candidate['candidate_id']}.jsonl"
+    support_path = output_dir / f"support-{candidate['candidate_id']}.json"
+    command = [
+        sys.executable,
+        str(SCRIPT_PATH),
+        "--phase",
+        "enumerate-candidate",
+        "--registration",
+        str(registration_path),
+        "--output-dir",
+        str(output_dir),
+        "--cache-dir",
+        str(cache_dir),
+        "--candidate-id",
+        candidate["candidate_id"],
+        "--support-cap",
+        str(support_cap),
+        "--time-cap",
+        str(candidate_time_cap),
+    ]
+    outcome = run_bounded_process(command, effective_time_cap)
+    if outcome["timed_out"] or outcome["returncode"] != 0:
+        terminal_reason = (
+            "external_hard_wall_clock_cap"
+            if effective_time_cap >= candidate_time_cap
+            else "external_cumulative_wall_clock_cap"
+        ) if outcome["timed_out"] else "enumeration_worker_failed"
+        result = incomplete_candidate_record(
+            candidate,
+            output_dir,
+            progress_path,
+            outcome,
+            effective_time_cap,
+            candidate_time_cap,
+            terminal_reason,
+        )
+        atomic_json_create(support_path, result)
+        return result
+
+    try:
+        result = json.loads(outcome["stdout"])
+    except json.JSONDecodeError as exc:
+        failed_outcome = dict(outcome)
+        failed_outcome["stderr"] += f"\ninvalid worker JSON: {exc}"
+        result = incomplete_candidate_record(
+            candidate,
+            output_dir,
+            progress_path,
+            failed_outcome,
+            effective_time_cap,
+            candidate_time_cap,
+            "enumeration_worker_output_invalid",
+        )
+        atomic_json_create(support_path, result)
+        return result
+
+    journal = read_progress_journal(progress_path)
+    result["external_hard_cap"] = {
+        "process_group_timeout_enforced": True,
+        "per_candidate_limit_seconds": candidate_time_cap,
+        "effective_deadline_seconds": effective_time_cap,
+        "timed_out": False,
+        "process_returncode": outcome["returncode"],
+        "termination_method": "isolated process group; deadline expired only if incomplete",
+        "elapsed_wall_seconds": outcome["elapsed_wall_seconds"],
+    }
+    result["progress_journal"] = {
+        "path": progress_path.name,
+        **journal,
+        "complete_event_count": len(journal["events"]),
+        "partial_state_count": sum(
+            event.get("event") == "enumerated_state" for event in journal["events"]
+        ),
+    }
+    atomic_json_create(support_path, result)
+    return result
+
+
+def enumerate_one_candidate(
+    registration_path: Path,
+    candidate_id: str,
+    output_dir: Path,
+    cache_dir: Path,
+    support_cap: int,
+    time_cap: float,
+):
+    started = time.monotonic()
+    registration = load_registration(registration_path)
+    candidates = registration["candidate_fixture_selection"]["candidates"]
+    candidate = next(
+        (item for item in candidates if item["candidate_id"] == candidate_id), None
+    )
+    if candidate is None:
+        raise ValidationError(f"candidate is not present in frozen registration: {candidate_id}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = output_dir / f"progress-{candidate_id}.jsonl"
+    atomic_create(
+        progress_path,
+        canonical_json_bytes(
+            {
+                "event": "candidate_worker_started",
+                "candidate_id": candidate_id,
+                "monotonic_start": started,
+                "wall_start_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "candidate_wall_cap_seconds": time_cap,
+            }
+        )
+        + b"\n",
+    )
+    cytools, _, _, np = bootstrap_cytools(cache_dir)
+    environment = environment_provenance(cytools, np)
+    verify_source_bindings(registration, environment)
+    append_jsonl_fsync(
+        progress_path,
+        {
+            "event": "candidate_operation_started",
+            "candidate_id": candidate_id,
+            "monotonic_start": started,
+            "environment_sha256": sha256_bytes(canonical_json_bytes(environment)),
+        },
+    )
+    result = enumerate_candidate(
+        cytools,
+        candidate,
+        output_dir,
+        support_cap,
+        time_cap,
+        progress_path,
+        started,
+    )
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
+def verify_external_timeout_self_test(output_dir: Path):
+    test_timeout_seconds = 1.0
+    outcome = run_bounded_process(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('WORKER_READY', flush=True); time.sleep(10)",
+        ],
+        test_timeout_seconds,
+    )
+    result = {
+        "schema": "CYAX-0115-hard-timeout-self-test-v1",
+        "method": "subprocess process-group deadline with SIGTERM/SIGKILL fallback",
+        "test_timeout_seconds": test_timeout_seconds,
+        "timed_out": outcome["timed_out"],
+        "worker_ready_marker_observed": "WORKER_READY" in outcome["stdout"],
+        "worker_returncode": outcome["returncode"],
+        "elapsed_wall_seconds": outcome["elapsed_wall_seconds"],
+        "worker_stdout_sha256": sha256_bytes(outcome["stdout"].encode("utf-8")),
+        "worker_stderr_sha256": sha256_bytes(outcome["stderr"].encode("utf-8")),
+    }
+    if not result["timed_out"] or not result["worker_ready_marker_observed"]:
+        raise ValidationError(f"external timeout self-test failed: {result}")
+    atomic_json_create(output_dir / "hard-timeout-self-test.json", result)
     return result
 
 
@@ -329,13 +676,48 @@ def enumerate_frozen_candidates(registration_path: Path, output_dir: Path, cache
 
     policy = registration["candidate_fixture_selection"]
     support_cap = policy["support_window"]["enumeration_stop_after_count"]
-    time_cap = registration["resource_caps_and_stops"]["exact_support_cap"][
+    resource_caps = registration["resource_caps_and_stops"]["exact_support_cap"]
+    time_cap = resource_caps[
         "wall_clock_seconds_per_candidate"
     ]
+    cumulative_cap = resource_caps["cumulative_enumeration_wall_clock_seconds"]
+    hard_cap_self_test = verify_external_timeout_self_test(output_dir)
+    cumulative_started = time.monotonic()
     results = []
     eligible = []
     for candidate in policy["candidates"]:
-        result = enumerate_candidate(cytools, candidate, output_dir, support_cap, time_cap)
+        cumulative_remaining = cumulative_cap - (time.monotonic() - cumulative_started)
+        if cumulative_remaining <= 0:
+            result = incomplete_candidate_record(
+                candidate,
+                output_dir,
+                output_dir / f"progress-{candidate['candidate_id']}.jsonl",
+                {
+                    "elapsed_wall_seconds": 0.0,
+                    "timed_out": True,
+                    "returncode": None,
+                    "stdout": "",
+                    "stderr": "",
+                },
+                0.0,
+                time_cap,
+                "external_cumulative_wall_clock_cap",
+            )
+            atomic_json_create(
+                output_dir / f"support-{candidate['candidate_id']}.json", result
+            )
+            results.append(result)
+            break
+        effective_cap = min(time_cap, cumulative_remaining)
+        result = enumerate_candidate_process(
+            registration_path,
+            candidate,
+            output_dir,
+            cache_dir,
+            support_cap,
+            time_cap,
+            effective_cap,
+        )
         results.append(result)
         if result["status"] == "qualified":
             eligible.append(result)
@@ -347,11 +729,24 @@ def enumerate_frozen_candidates(registration_path: Path, output_dir: Path, cache
     summary = {
         "registration_sha256": registration_sha,
         "environment": environment,
+        "resource_cap_enforcement": {
+            "mechanism": "one spawned subprocess process group per candidate; communicate(timeout); SIGTERM then SIGKILL",
+            "per_candidate_limit_seconds": time_cap,
+            "cumulative_limit_seconds": cumulative_cap,
+            "hard_timeout_self_test_file_sha256": file_sha256(
+                output_dir / "hard-timeout-self-test.json"
+            ),
+            "hard_timeout_self_test": hard_cap_self_test,
+            "total_elapsed_wall_seconds": time.monotonic() - cumulative_started,
+        },
         "candidate_results": [
             {
                 "candidate_id": result["candidate_id"],
                 "status": result["status"],
                 "support_complete": result["support_complete"],
+                "terminal_reason": result.get("terminal_reason"),
+                "elapsed_wall_seconds": result.get("elapsed_wall_seconds"),
+                "external_hard_cap": result.get("external_hard_cap"),
                 "support_count_or_lower_bound": result[
                     "full_frst_support_count_or_lower_bound"
                 ],
@@ -520,14 +915,32 @@ def freeze_validation_manifest(registration_path: Path, output_dir: Path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=("enumerate", "freeze"), required=True)
+    parser.add_argument(
+        "--phase", choices=("enumerate", "enumerate-candidate", "freeze"), required=True
+    )
     parser.add_argument("--registration", type=Path, default=REGISTRATION_PATH)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_VALIDATION_ROOT / "exact_support")
     parser.add_argument("--cache-dir", type=Path, default=Path("/private/tmp/cyax-0115-cytools-cache"))
+    parser.add_argument("--candidate-id")
+    parser.add_argument("--support-cap", type=int)
+    parser.add_argument("--time-cap", type=float)
     args = parser.parse_args(argv)
     try:
         if args.phase == "enumerate":
             result = enumerate_frozen_candidates(args.registration, args.output_dir, args.cache_dir)
+        elif args.phase == "enumerate-candidate":
+            if not args.candidate_id or args.support_cap is None or args.time_cap is None:
+                raise ValidationError(
+                    "enumerate-candidate requires --candidate-id, --support-cap, and --time-cap"
+                )
+            return enumerate_one_candidate(
+                args.registration,
+                args.candidate_id,
+                args.output_dir,
+                args.cache_dir,
+                args.support_cap,
+                args.time_cap,
+            )
         else:
             result = freeze_validation_manifest(args.registration, args.output_dir)
         print(json.dumps(result, sort_keys=True, indent=2))
