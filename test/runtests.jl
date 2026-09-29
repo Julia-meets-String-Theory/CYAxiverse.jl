@@ -2025,6 +2025,12 @@ end
     fixed_volume = CYAxiverse.paper_benchmarks.n8_full_potential(
         k=2.0, volume_normalization=:fixed)
     full_volume = CYAxiverse.paper_benchmarks.n8_full_potential(k=2.0)
+    cross_phase_probe = collect(1.0:12.0)
+    phased_full = CYAxiverse.paper_benchmarks.n8_full_potential(phases=cross_phase_probe)
+    expected_cross_phases = [
+        cross_phase_probe[j] - cross_phase_probe[i]
+        for i in 1:11 for j in (i + 1):12
+    ]
     @test length(truncated.amplitudes) == 12
     @test length(full.amplitudes) == 78
     @test norm(truncated.gradient, Inf) / maximum(abs, truncated.amplitudes) < 1e-10
@@ -2033,6 +2039,8 @@ end
     @test isapprox(fixed_volume.volume, 126.0; atol=0)
     @test isapprox(full_volume.volume, 126.0 * 2.0^(3 / 2); rtol=1e-14)
     @test full_volume.Q == fixed_volume.Q
+    @test phased_full.phases[13:end] == expected_cross_phases
+    @test length(phased_full.phases) == 78
     @test full_volume.L[1, :] == fixed_volume.L[1, :]
     @test all(isapprox.(full_volume.L[2, :] .- fixed_volume.L[2, :],
         fill(-3log10(2.0), 78); atol=1e-12))
@@ -3436,6 +3444,82 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         @test size(appendix.Q) == (8, 12)
         @test appendix.qdotτ[end-1:end] == [25.0, 45.0]
 
+        author_phase_probe = collect(1.0:12.0)
+        author_full = benchmark.author_inflation.n8_full_potential(
+            phases=author_phase_probe)
+        expected_author_cross_phases = [
+            author_phase_probe[j] - author_phase_probe[i]
+            for i in 1:11 for j in (i + 1):12
+        ]
+        @test size(author_full.Q) == (8, 78)
+        @test author_full.diagonal_count == 12
+        @test author_full.cross_count == 66
+        @test author_full.phases[1:12] == author_phase_probe
+        @test author_full.phases[13:end] == expected_author_cross_phases
+
+        author = benchmark.author_inflation
+        @test author.N8_DIVISOR_VOLUMES ==
+            [45.0, 17.0, 17.0, 14.5, 14.5, 15.5, 15.5, 25.0]
+        @test author.N8_TAU ==
+            [14.0, 14.5, 14.5, 15.5, 15.5, 15.5, 15.5, 16.0, 17.0, 17.0, 25.0, 45.0]
+        @test [dot(q, author.N8_DIVISOR_VOLUMES)
+            for q in eachrow(author.N8_Q)] == author.N8_TAU
+
+        function eq19_coefficients(qrows, kinv, tau, volume)
+            coefficients = Float64[]
+            qdotτ = Float64[]
+            for q in eachrow(qrows)
+                action = dot(q, tau)
+                push!(qdotτ, action)
+                push!(coefficients, (8π / volume^2) * action)
+            end
+            for i in 1:(size(qrows, 1) - 1), j in (i + 1):size(qrows, 1)
+                qi, qj = qrows[i, :], qrows[j, :]
+                action = dot(qi + qj, tau)
+                push!(qdotτ, action)
+                push!(coefficients,
+                    (8π / volume^2) * (π * dot(qi, kinv * qj) + action))
+            end
+            coefficients, qdotτ
+        end
+
+        for k in (author.N8_KC, 1.0)
+            tau = k .* author.N8_DIVISOR_VOLUMES
+            @test isapprox([dot(q, tau) for q in eachrow(author.N8_Q)],
+                k .* author.N8_TAU; rtol=1e-14, atol=1e-14)
+            volume = author.N8_VOLUME * k^(3 / 2)
+            author_kinv = k^2 .* inv(author.N8_K_RAW)
+            source_coefficients, source_actions = eq19_coefficients(
+                author.N8_Q, author_kinv, tau, volume)
+            author_full = author.n8_full_potential(k=k)
+            decoded_coefficients = vec(author_full.L[1, :]) .*
+                10.0 .^ (vec(author_full.L[2, :]) .+
+                    2π .* source_actions .* log10(exp(1)))
+            @test all(isfinite, source_coefficients)
+            @test all(!iszero, source_coefficients)
+            @test sign.(decoded_coefficients) == sign.(source_coefficients)
+            @test all(isapprox.(decoded_coefficients, source_coefficients;
+                rtol=1e-12, atol=1e-14))
+
+            reduced_geometry = benchmark.n8_geometry()
+            reduced_kinv = k^2 .* inv(Matrix(reduced_geometry.kinetic))
+            reduced_coefficients, reduced_actions = eq19_coefficients(
+                author.N8_Q, reduced_kinv, tau, volume)
+            reduced_full = benchmark.n8_full_potential(k=k)
+            reduced_decoded = vec(reduced_full.L[1, :]) .*
+                10.0 .^ (vec(reduced_full.L[2, :]) .+
+                    2π .* reduced_actions .* log10(exp(1)))
+            @test all(isapprox.(reduced_decoded, reduced_coefficients;
+                rtol=1e-12, atol=1e-14))
+            relative_differences = abs.(decoded_coefficients .-
+                reduced_coefficients) ./ abs.(reduced_coefficients)
+            log10_differences = abs.(log10.(abs.(decoded_coefficients)) .-
+                log10.(abs.(reduced_coefficients)))
+            @test sign.(decoded_coefficients) == sign.(reduced_coefficients)
+            @test maximum(relative_differences) <= 0.02
+            @test maximum(log10_differences) <= 0.01
+        end
+
         geometry = benchmark.n8_geometry()
         @test length(geometry.divisor_volumes) == 8
         @test length(geometry.instanton_actions) == 12
@@ -3523,9 +3607,9 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         @test abs(n5_kc_path[catastrophe_index].catastrophe_hessian) <= 1e-10
         @test n5_kc_path[catastrophe_index].catastrophe_residual <= 1e-10
         @test isapprox(n5_kc_path[catastrophe_index].catastrophe_theta, π; atol=1e-10)
-        @test catastrophe_index > 1
-        @test isfinite(n5_kc_path[catastrophe_index - 1].catastrophe_k)
-        @test n5_kc_path[catastrophe_index - 1].catastrophe_detected
+        @test catastrophe_index < length(n5_kc_path)
+        @test isfinite(n5_kc_path[catastrophe_index + 1].catastrophe_k)
+        @test n5_kc_path[catastrophe_index + 1].catastrophe_detected
         n5_below_pi_idx = argmin(abs.(n5_below.theta .- π))
         n5_above_pi_idx = argmin(abs.(n5_above.theta .- π))
         @test n5_below.minima == 2

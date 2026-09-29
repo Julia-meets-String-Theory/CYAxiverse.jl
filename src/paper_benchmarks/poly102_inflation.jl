@@ -624,7 +624,7 @@ end
 function n8_full_potential(; k::Real=1.0, phases=nothing)
     p = n8_potential(k=k, phases=phases)
     qrows = Matrix(p.Q')
-    tau = Float64(k) .* N8_TAU
+    tau = Float64(k) .* N8_DIVISOR_VOLUMES
     kinv = Float64(k)^2 .* inv(N8_K_RAW)
     volume = 126.0 * Float64(k)^(3 / 2)
     rows = Vector{Vector{Int}}()
@@ -640,8 +640,8 @@ function n8_full_potential(; k::Real=1.0, phases=nothing)
     for i in 1:(size(qrows, 1) - 1), j in (i + 1):size(qrows, 1)
         qi, qj = qrows[i, :], qrows[j, :]
         qτ = dot(qi + qj, tau)
-        coeff = (8π^2 / volume^2) *
-            (dot(qi, kinv * qj) + qτ)
+        coeff = (8π / volume^2) *
+            (π * dot(qi, kinv * qj) + qτ)
         push!(rows, collect(qj - qi))
         push!(signs, sign(coeff))
         push!(logs, log10(abs(coeff)) - 2π * qτ * log10(exp(1)))
@@ -649,7 +649,7 @@ function n8_full_potential(; k::Real=1.0, phases=nothing)
     (; Q=hcat(rows...), L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
        qdotτ=nothing, phases=vcat(p.phases, [
            p.phases[j] - p.phases[i]
-           for i in 1:(size(qrows, 1) - 1), j in (i + 1):size(qrows, 1)
+           for i in 1:(size(qrows, 1) - 1) for j in (i + 1):size(qrows, 1)
        ]), diagonal_count=12, cross_count=66)
 end
 

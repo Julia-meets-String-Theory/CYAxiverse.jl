@@ -105,7 +105,7 @@ function n8_full_potential(; k::Real=1.0, volume_normalization::Symbol=:full,
     diagonal_phases = diagonal.phases
     cross_phases = [
         diagonal_phases[j] - diagonal_phases[i]
-        for i in 1:(size(qprime, 1) - 1), j in (i + 1):size(qprime, 1)
+        for i in 1:(size(qprime, 1) - 1) for j in (i + 1):size(qprime, 1)
     ]
     (; Q=qmatrix, L=vcat(reshape(signs, 1, :), reshape(logs, 1, :)),
        phases=vcat(diagonal_phases, cross_phases), volume,
@@ -133,6 +133,7 @@ function n8_geometry()
          0  1  0  0
     ]
     divisor_volumes = Float64[45, 17, 17, 14.5, 14.5, 15.5, 15.5, 25]
+    instanton_actions = _n8_potential().qdotτ
     kinetic = [
          2.6937457327178650e-4 -1.2716296987824437e-4 -1.2716296987824437e-4 -6.8885337504783278e-5 -8.4054971458841178e-5 -7.5848169770289675e-6 -7.5848169770289362e-6 -1.3445696123930552e-4
         -1.2716296987824445e-4  4.6738170793316663e-4 -1.0927188745945053e-6 -3.0579145970921500e-5  3.9983215158785611e-5  1.4551045746079736e-4 -7.4948096331090282e-5  1.8007412665194919e-4
@@ -144,7 +145,8 @@ function n8_geometry()
         -1.3445696123930555e-4  1.8007412665194914e-4  1.8007412665194911e-4  1.0189510632448509e-7  4.3432789070812349e-6  2.1206919003783668e-6  2.1206919003783244e-6  2.3000909719509292e-4
     ]
     (; vertices, h11=8, h21=28, euler=-40, volume=126.0,
-       divisor_volumes, curve_volume_range=(1.0, 3.0), kinetic=Hermitian(kinetic))
+       divisor_volumes, instanton_actions, curve_volume_range=(1.0, 3.0),
+       kinetic=Hermitian(kinetic))
 end
 
 """Exact volume scale of the cusp catastrophe in the reduced N=5 model."""
