@@ -1,0 +1,20 @@
+{
+  "schema": "CYAX-0115-r4-original-freeze-cli-error-v1",
+  "phase": "freeze",
+  "original_exit_code": 2,
+  "exception_type": "ValueError",
+  "source_commit": "5b481e79cb4689763cfc42b7376d6045a17ee377",
+  "source_script_git_blob_sha1": "0b5310cefcdc145325155be5dcc573becb78b450",
+  "failure_site": "Path.relative_to used for a relative validation_manifest path against the absolute repository root while formatting the completed freeze result",
+  "failure_message_reproduced": "ValueError: a relative validation_manifest path cannot be made relative to an absolute repository root",
+  "artifact_writes_preceded_cli_error": true,
+  "manifest_sha256_after_original_exit": "04254692b901a0b2a2d18d2bb21d7647af9aa48e0ce7d7173307a82ff6563263",
+  "seed_schedule_identity_sha256_after_original_exit": "a351d05ce60a5cb00f6298b567e045d8e6e18d9ab49055453919872f16feb92d",
+  "corrected_check": {
+    "path": "validation/cyax_0115_uniform_frst/audit/corrected-frozen-manifest-check.json",
+    "status": "PASS_EXISTING_FROZEN_MANIFEST_VERIFIED",
+    "sha256": "f6b6ada8dc60d2841763f470df928ddaef88b9c08e1b1ae38859cb695d353eaa",
+    "no_manifest_bytes_written": true
+  },
+  "frozen_manifest_rewritten_after_initial_freeze": false
+}
