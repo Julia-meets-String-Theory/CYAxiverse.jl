@@ -1111,29 +1111,50 @@ end
 function _load_geometries_generate_fixture()
     source_path = joinpath(@__DIR__, "..", "add_functions", "cytools_wrapper.jl")
     source = read(source_path, String)
-    function find_definition(expression)
+    function find_definition(expression, name)
         expression isa Expr || return nothing
         if expression.head === :function
             signature = expression.args[1]
             if signature isa Expr && signature.head === :call &&
-                    signature.args[1] === :geometries_generate
+                    signature.args[1] === name
                 return expression
             end
         end
         for argument in expression.args
-            definition = find_definition(argument)
+            definition = find_definition(argument, name)
             definition === nothing || return definition
         end
         nothing
     end
 
-    expression = find_definition(Meta.parseall(source))
-    expression === nothing && error("geometries_generate definition not found in $source_path")
+    parsed_source = Meta.parseall(source)
+    generate_expression = find_definition(parsed_source, :geometries_generate)
+    generate_expression === nothing &&
+        error("geometries_generate definition not found in $source_path")
+    hilbert_expression = find_definition(parsed_source, :geometries_generate_hilbert)
+    hilbert_expression === nothing &&
+        error("geometries_generate_hilbert definition not found in $source_path")
     fixture_module = Module(:GeometriesGenerateFixture)
     Core.eval(fixture_module, :(using LinearAlgebra))
     Core.eval(fixture_module, :(cytools_version() = "0.8.0"))
-    Core.eval(fixture_module, expression)
-    return Base.invokelatest(getproperty, fixture_module, :geometries_generate)
+    Core.eval(fixture_module, quote
+        struct GeometryIndex
+            h11::Int
+            cy::Any
+            geometry_data::Any
+        end
+        cy_from_poly(geom_idx::GeometryIndex) = (; cy=geom_idx.cy)
+        geometry(geom_idx::GeometryIndex) = geom_idx.geometry_data
+    end)
+    Core.eval(fixture_module, generate_expression)
+    Core.eval(fixture_module, hilbert_expression)
+    return (;
+        geometries_generate=Base.invokelatest(getproperty, fixture_module,
+            :geometries_generate),
+        geometries_generate_hilbert=Base.invokelatest(getproperty, fixture_module,
+            :geometries_generate_hilbert),
+        fixture_module,
+    )
 end
 
 struct _SyntheticKahlerCone
@@ -1157,6 +1178,8 @@ end
 struct _SyntheticCY
     tau_coefficient::Float64
     metric_coefficient::Float64
+    metric_shape::Matrix{Float64}
+    charges::Matrix{Float64}
     divisor_points::Vector{Vector{Float64}}
     metric_points::Vector{Vector{Float64}}
     volume_points::Vector{Vector{Float64}}
@@ -1164,66 +1187,79 @@ end
 
 function Base.getproperty(cy::_SyntheticCY, name::Symbol)
     name === :h21 && return () -> 0
-    name === :glsm_charge_matrix && return (; include_origin=false) -> reshape([1], 1, 1)
-    name === :divisor_basis && return () -> [1]
-    name === :toric_kahler_cone && return () -> _SyntheticKahlerCone([1.0])
+    n = size(getfield(cy, :metric_shape), 1)
+    name === :glsm_charge_matrix &&
+        return (; include_origin=false) -> Matrix{Int}(I, n, n)
+    name === :divisor_basis && return () -> collect(1:n)
+    name === :toric_kahler_cone && return () -> _SyntheticKahlerCone(ones(n))
     name === :toric_effective_cone &&
-        return () -> _SyntheticEffectiveCone(reshape([-1.0, 2.0], 2, 1))
+        return () -> _SyntheticEffectiveCone(copy(getfield(cy, :charges)))
     if name === :compute_divisor_volumes
         return point -> begin
             push!(getfield(cy, :divisor_points), copy(point))
-            [getfield(cy, :tau_coefficient) * point[1]^2]
+            getfield(cy, :tau_coefficient) .* point.^2
         end
     end
     if name === :compute_inverse_kahler_metric || name === :compute_Kinv
         return point -> begin
             push!(getfield(cy, :metric_points), copy(point))
-            reshape([getfield(cy, :metric_coefficient) * point[1]^4], 1, 1)
+            getfield(cy, :metric_coefficient) * point[1]^4 .* getfield(cy, :metric_shape)
         end
     end
     if name === :compute_cy_volume
         return point -> begin
             push!(getfield(cy, :volume_points), copy(point))
-            point[1]^3
+            (sum(point) / length(point))^3
         end
     end
     getfield(cy, name)
 end
 
-@testset "CYTools geometry fields share the final evaluation point" begin
+@testset "CYTools Eq21 scaling and final geometry fields" begin
     geometries_generate_fixture = _load_geometries_generate_fixture()
     cases = (
-        (name="unscaled", tau=2.0, metric=1.0, expect_m=false, expect_n=false),
-        (name="m scaling", tau=2.0, metric=1e-8, expect_m=true, expect_n=false),
-        (name="m then n scaling", tau=0.1, metric=1e-2, expect_m=true, expect_n=true),
+        (name="Eq21 accepts at the base point", tau=2.0, metric=1e-8,
+            expect_m=false, expect_n=false),
+        (name="Eq21 rejection triggers radial m scaling", tau=2.0,
+            metric=exp(12π - abs(log(4.0) - 8π) + 0.01) / (2π),
+            expect_m=true, expect_n=false),
+        (name="radial m scaling followed by n scaling", tau=0.5,
+            metric=exp(π + 0.01) / (2π), expect_m=true, expect_n=true),
     )
+    charges = reshape([1.0, 2.0], 2, 1)
     for case in cases
         divisor_points = Vector{Float64}[]
         metric_points = Vector{Float64}[]
         volume_points = Vector{Float64}[]
-        cy = _SyntheticCY(case.tau, case.metric, divisor_points,
-            metric_points, volume_points)
-        result = geometries_generate_fixture(1, cy)
+        cy = _SyntheticCY(case.tau, case.metric, ones(1, 1), charges,
+            divisor_points, metric_points, volume_points)
+        result = geometries_generate_fixture.geometries_generate(1, cy)
         radial_scale = prod(result["tip_prefactor"])
         final_tip = result["tip"]
         tau = result["PTD_volumes"]
         Kinv = result["Kinv"]
         volume = result["CY_volume"]
 
+        q_i, q_j = charges[2, 1], charges[1, 1]
+        lhs0 = abs(log(abs(π * q_i * case.metric * q_j)) -
+            2π * case.tau * (q_i + q_j))
+        rhs0 = abs(log(abs(case.tau * q_i)) - 2π * case.tau * q_i)
+
         @testset "$(case.name)" begin
+            @test (lhs0 <= rhs0) == case.expect_m
             @test (result["tip_prefactor"][2] > 1.0) == case.expect_m
             @test (result["tip_prefactor"][1] > 1.0) == case.expect_n
-            @test final_tip ≈ [radial_scale]
+            @test final_tip ≈ fill(radial_scale, 1)
             @test divisor_points[end] ≈ final_tip
             @test metric_points[end] ≈ final_tip
             @test volume_points[end] ≈ final_tip
             @test tau ≈ [case.tau * radial_scale^2]
-            @test Kinv ≈ reshape([1.5 * case.metric * radial_scale^4], 1, 1)
+            @test Kinv ≈ reshape([case.metric * radial_scale^4], 1, 1)
             @test volume ≈ radial_scale^3
 
             # Use simple algebraic charges to exercise the potential formula;
             # these are not an effective-cone scientific fixture.
-            qprime = reshape([-1.0, 2.0], 2, 1)
+            qprime = charges
             expected_coefficients = [
                 (8pi / volume^2) * dot(qprime[1, :], tau),
                 (8pi / volume^2) * dot(qprime[2, :], tau),
@@ -1241,6 +1277,42 @@ end
             @test result["L"] ≈ expected_L
         end
     end
+
+    # Antisymmetric numerical noise in Kinv must not affect the Eq21 decision,
+    # radial scale, potential, or returned symmetric inverse metric.
+    symmetric_metric = [2.0 0.3; 0.3 1.0]
+    skew_metric = [0.0 0.4; -0.4 0.0]
+    charges_2d = [1.0 0.0; 0.0 1.0; 1.0 1.0]
+    outputs = map((symmetric_metric + skew_metric,
+            symmetric_metric - skew_metric)) do metric_shape
+        cy = _SyntheticCY(2.0, 1.0, metric_shape, charges_2d,
+            Vector{Float64}[], Vector{Float64}[], Vector{Float64}[])
+        geometries_generate_fixture.geometries_generate(2, cy)
+    end
+    @test outputs[1]["tip"] ≈ outputs[2]["tip"]
+    @test outputs[1]["tip_prefactor"] ≈ outputs[2]["tip_prefactor"]
+    @test outputs[1]["PTD_volumes"] ≈ outputs[2]["PTD_volumes"]
+    @test outputs[1]["Kinv"] ≈ outputs[2]["Kinv"]
+    @test outputs[1]["Kinv"] ≈ symmetric_metric
+    @test issymmetric(outputs[1]["Kinv"])
+    @test outputs[1]["L"] ≈ outputs[2]["L"]
+
+    # The Hilbert-basis path starts from persisted Kinv and evaluates the
+    # final metric with CYTools. It must apply the same symmetric projection.
+    hilbert_outputs = map((symmetric_metric + skew_metric,
+            symmetric_metric - skew_metric)) do metric_shape
+        cy = _SyntheticCY(2.0, 1.0, metric_shape, charges_2d,
+            Vector{Float64}[], Vector{Float64}[], Vector{Float64}[])
+        geometry_data = (; basis=[1, 2], tip=ones(2), kinv=metric_shape,
+            τ_volumes=fill(2.0, 2), hilbert_basis=charges_2d)
+        index_type = getproperty(geometries_generate_fixture.fixture_module,
+            :GeometryIndex)
+        geom_idx = Base.invokelatest(index_type, 2, cy, geometry_data)
+        geometries_generate_fixture.geometries_generate_hilbert(geom_idx)
+    end
+    @test hilbert_outputs[1].Kinv ≈ hilbert_outputs[2].Kinv
+    @test hilbert_outputs[1].Kinv ≈ symmetric_metric
+    @test issymmetric(hilbert_outputs[1].Kinv)
 end
 
 @testset "CYAxiverse.jl" begin

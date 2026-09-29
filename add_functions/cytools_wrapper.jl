@@ -356,7 +356,7 @@ function geometries_generate(h11,cy; rational_Q = false)
     use_legacy_kinv = cytools_version() < "0.8.0"
     Kinv0 = use_legacy_kinv ? cy.compute_Kinv(tip0) :
                             cy.compute_inverse_kahler_metric(tip0)
-    Kinv0 = Hermitian(0.5 * Kinv0 + Kinv0')
+    Kinv0 = Hermitian(0.5 * (Kinv0 + Kinv0'))
     tau  = copy(tau0)
     Kinv = copy(Kinv0)
 
@@ -378,7 +378,7 @@ function geometries_generate(h11,cy; rational_Q = false)
 
         converged = true
         @inbounds for i in 1:nq, j in 1:i-1
-            lhs_constraint[i,j] >= rhs_constraint[i] && (converged = false; break)
+            lhs_constraint[i,j] <= rhs_constraint[i] && (converged = false; break)
         end
         converged && break
         m   += 1e-2
@@ -395,7 +395,7 @@ function geometries_generate(h11,cy; rational_Q = false)
     tau = cy.compute_divisor_volumes(tip)[basis]
     #Kinv at the final point -- save this or save K?
     Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
-    Kinv = Hermitian(0.5 * Kinv + Kinv')
+    Kinv = Hermitian(0.5 * (Kinv + Kinv'))
     tip_prefactor = [sqrt(n),m]
     #Volume of CY3 at tip
     V = cy.compute_cy_volume(tip)
@@ -432,7 +432,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
 	geom_data = geometry(geom_idx)
     basis = geom_data.basis
     tip = geom_data.tip
-    Kinv0 = Hermitian(geom_data.kinv)
+    Kinv0 = Hermitian(0.5 * (geom_data.kinv + geom_data.kinv'))
     tau0 = geom_data.τ_volumes
     qprime = geom_data.hilbert_basis
     nq = size(qprime, 1)
@@ -461,7 +461,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
 
         converged = true
         @inbounds for i in 1:nq, j in 1:i-1
-            lhs_constraint[i,j] >= rhs_constraint[i] && (converged = false; break)
+            lhs_constraint[i,j] <= rhs_constraint[i] && (converged = false; break)
         end
         converged && break
         m   += 1e-2
@@ -478,7 +478,7 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
         tau = cy.compute_divisor_volumes(tip)[basis]
         #Kinv at tip -- save this or save K?
         Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
-        Kinv = Hermitian(1/2 * Kinv + Kinv')
+        Kinv = Hermitian(0.5 * (Kinv + Kinv'))
     end
     tip_prefactor = [sqrt(n),m]
     #Volume of CY3 at tip
