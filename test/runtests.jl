@@ -1215,6 +1215,19 @@ function Base.getproperty(cy::_SyntheticCY, name::Symbol)
     getfield(cy, name)
 end
 
+function _synthetic_eq21_margins(qprime, tau, Kinv)
+    margins = Float64[]
+    for i in 1:size(qprime, 1), j in 1:i-1
+        qi = @view qprime[i, :]
+        qj = @view qprime[j, :]
+        pair_log = log(abs(π * dot(qi, Kinv * qj))) -
+            2π * dot(tau, qi .+ qj)
+        single_log = log(abs(dot(tau, qi))) - 2π * dot(tau, qi)
+        push!(margins, abs(pair_log) - abs(single_log))
+    end
+    margins
+end
+
 @testset "CYTools Eq21 scaling and final geometry fields" begin
     geometries_generate_fixture = _load_geometries_generate_fixture()
     cases = (
@@ -1234,11 +1247,36 @@ end
         cy = _SyntheticCY(case.tau, case.metric, ones(1, 1), charges,
             divisor_points, metric_points, volume_points)
         result = geometries_generate_fixture.geometries_generate(1, cy)
+        hilbert_divisor_points = Vector{Float64}[]
+        hilbert_metric_points = Vector{Float64}[]
+        hilbert_volume_points = Vector{Float64}[]
+        hilbert_cy = _SyntheticCY(case.tau, case.metric, ones(1, 1), charges,
+            hilbert_divisor_points, hilbert_metric_points, hilbert_volume_points)
+        geometry_data = (; basis=[1], tip=[1.0],
+            kinv=reshape([case.metric], 1, 1), τ_volumes=[case.tau],
+            hilbert_basis=charges)
+        index_type = getproperty(geometries_generate_fixture.fixture_module,
+            :GeometryIndex)
+        geom_idx = Base.invokelatest(index_type, 1, hilbert_cy, geometry_data)
+        hilbert_result = geometries_generate_fixture.geometries_generate_hilbert(geom_idx)
         radial_scale = prod(result["tip_prefactor"])
         final_tip = result["tip"]
         tau = result["PTD_volumes"]
         Kinv = result["Kinv"]
         volume = result["CY_volume"]
+        next_m = 1.01
+        base_margins = _synthetic_eq21_margins(charges, [case.tau],
+            reshape([case.metric], 1, 1))
+        next_margins = _synthetic_eq21_margins(charges,
+            [case.tau * next_m^2], reshape([case.metric * next_m^4], 1, 1))
+        final_margins = _synthetic_eq21_margins(charges, tau, Kinv)
+        hilbert_base_margins = _synthetic_eq21_margins(charges,
+            geometry_data.τ_volumes, geometry_data.kinv)
+        hilbert_next_margins = _synthetic_eq21_margins(charges,
+            geometry_data.τ_volumes .* next_m^2,
+            geometry_data.kinv .* next_m^4)
+        hilbert_final_margins = _synthetic_eq21_margins(charges,
+            hilbert_result.τ_volumes, hilbert_result.Kinv)
 
         q_i, q_j = charges[2, 1], charges[1, 1]
         lhs0 = abs(log(abs(π * q_i * case.metric * q_j)) -
@@ -1249,6 +1287,16 @@ end
             @test (lhs0 <= rhs0) == case.expect_m
             @test (result["tip_prefactor"][2] > 1.0) == case.expect_m
             @test (result["tip_prefactor"][1] > 1.0) == case.expect_n
+            @test all(>(0), base_margins) == !case.expect_m
+            @test hilbert_base_margins ≈ base_margins
+            if case.expect_m
+                @test minimum(next_margins) > minimum(base_margins)
+                @test all(>(0), next_margins)
+                @test minimum(hilbert_next_margins) >
+                    minimum(hilbert_base_margins)
+                @test all(>(0), hilbert_next_margins)
+            end
+            @test all(>(0), final_margins)
             @test final_tip ≈ fill(radial_scale, 1)
             @test divisor_points[end] ≈ final_tip
             @test metric_points[end] ≈ final_tip
@@ -1256,6 +1304,16 @@ end
             @test tau ≈ [case.tau * radial_scale^2]
             @test Kinv ≈ reshape([case.metric * radial_scale^4], 1, 1)
             @test volume ≈ radial_scale^3
+
+            @test hilbert_result.tip ≈ final_tip
+            @test hilbert_result.tip_prefactor ≈ result["tip_prefactor"]
+            @test hilbert_result.τ_volumes ≈ tau
+            @test hilbert_result.Kinv ≈ Kinv
+            @test hilbert_result.CY_volume ≈ volume
+            @test hilbert_divisor_points[end] ≈ hilbert_result.tip
+            @test hilbert_metric_points[end] ≈ hilbert_result.tip
+            @test hilbert_volume_points[end] ≈ hilbert_result.tip
+            @test all(>(0), hilbert_final_margins)
 
             # Use simple algebraic charges to exercise the potential formula;
             # these are not an effective-cone scientific fixture.
@@ -1296,6 +1354,8 @@ end
     @test outputs[1]["Kinv"] ≈ symmetric_metric
     @test issymmetric(outputs[1]["Kinv"])
     @test outputs[1]["L"] ≈ outputs[2]["L"]
+    @test all(>(0), _synthetic_eq21_margins(charges_2d,
+        outputs[1]["PTD_volumes"], outputs[1]["Kinv"]))
 
     # The Hilbert-basis path starts from persisted Kinv and evaluates the
     # final metric with CYTools. It must apply the same symmetric projection.
@@ -1313,6 +1373,10 @@ end
     @test hilbert_outputs[1].Kinv ≈ hilbert_outputs[2].Kinv
     @test hilbert_outputs[1].Kinv ≈ symmetric_metric
     @test issymmetric(hilbert_outputs[1].Kinv)
+    @test hilbert_outputs[1].tip ≈ ones(2)
+    @test hilbert_outputs[1].τ_volumes ≈ fill(2.0, 2)
+    @test all(>(0), _synthetic_eq21_margins(charges_2d,
+        hilbert_outputs[1].τ_volumes, hilbert_outputs[1].Kinv))
 end
 
 @testset "CYAxiverse.jl" begin

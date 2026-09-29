@@ -470,16 +470,14 @@ function geometries_generate_hilbert(geom_idx::GeometryIndex)
         tau  = m2 .* tau0
         Kinv = m4 .* Kinv0
     end
-    if (minimum(tau) > 1.)
-    else
+    if minimum(tau) <= 1.
         n = 1. / minimum(tau)
-        tip = sqrt(n) .* tip
-        #PTD volumes at tip
-        tau = cy.compute_divisor_volumes(tip)[basis]
-        #Kinv at tip -- save this or save K?
-        Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
-        Kinv = Hermitian(0.5 * (Kinv + Kinv'))
     end
+    tip = (m * sqrt(n)) .* tip
+    # Recompute every returned geometric field at the final radial point.
+    tau = cy.compute_divisor_volumes(tip)[basis]
+    Kinv = use_legacy_kinv ? cy.compute_Kinv(tip) : cy.compute_inverse_kahler_metric(tip)
+    Kinv = Hermitian(0.5 * (Kinv + Kinv'))
     tip_prefactor = [sqrt(n),m]
     #Volume of CY3 at tip
     V = cy.compute_cy_volume(tip)
