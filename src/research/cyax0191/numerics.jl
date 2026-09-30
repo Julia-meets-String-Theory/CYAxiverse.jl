@@ -10,10 +10,17 @@ end
 
 function gradient!(out::AbstractVector{T}, ::CentralDifferenceBackend, f,
         x::AbstractVector{T}; scales=ones(T, length(x))) where {T<:AbstractFloat}
+    _with_model_precision(x, scales) do
+        _gradient_at_precision!(out, CentralDifferenceBackend(), f, x; scales)
+    end
+end
+
+function _gradient_at_precision!(out::AbstractVector{T}, backend::CentralDifferenceBackend, f,
+        x::AbstractVector{T}; scales=ones(T, length(x))) where {T<:AbstractFloat}
     length(out) == length(x) == length(scales) || throw(DimensionMismatch("gradient dimensions do not match"))
     xp, xm = copy(x), copy(x)
     for i in eachindex(x)
-        h = _difference_step(CentralDifferenceBackend(), x[i], T(scales[i]), 1)
+        h = _difference_step(backend, x[i], T(scales[i]), 1)
         xp[i], xm[i] = x[i] + h, x[i] - h
         out[i] = (f(xp) - f(xm)) / (T(2) * h)
         xp[i] = xm[i] = x[i]
@@ -23,11 +30,18 @@ end
 
 function hessian!(out::AbstractMatrix{T}, ::CentralDifferenceBackend, f,
         x::AbstractVector{T}; scales=ones(T, length(x))) where {T<:AbstractFloat}
+    _with_model_precision(x, scales) do
+        _hessian_at_precision!(out, CentralDifferenceBackend(), f, x; scales)
+    end
+end
+
+function _hessian_at_precision!(out::AbstractMatrix{T}, backend::CentralDifferenceBackend, f,
+        x::AbstractVector{T}; scales=ones(T, length(x))) where {T<:AbstractFloat}
     n = length(x)
     size(out) == (n, n) && length(scales) == n || throw(DimensionMismatch("Hessian dimensions do not match"))
     xp, xm = copy(x), copy(x)
     f0 = f(x)
-    steps = [_difference_step(CentralDifferenceBackend(), x[i], T(scales[i]), 2) for i in 1:n]
+    steps = [_difference_step(backend, x[i], T(scales[i]), 2) for i in 1:n]
     for i in 1:n
         xp[i], xm[i] = x[i] + steps[i], x[i] - steps[i]
         out[i, i] = (f(xp) - T(2) * f0 + f(xm)) / steps[i]^2
@@ -52,18 +66,29 @@ end
 
 function finite_difference_gradient(backend::DifferentiationBackend, f,
         x::AbstractVector{T}; scales=ones(T, length(x))) where {T<:AbstractFloat}
-    out = zeros(T, length(x))
-    gradient!(out, backend, f, x; scales)
+    _with_model_precision(x, scales) do
+        out = zeros(T, length(x))
+        gradient!(out, backend, f, x; scales)
+    end
 end
 
 function finite_difference_hessian(backend::DifferentiationBackend, f,
         x::AbstractVector{T}; scales=ones(T, length(x))) where {T<:AbstractFloat}
-    out = zeros(T, length(x), length(x))
-    hessian!(out, backend, f, x; scales)
+    _with_model_precision(x, scales) do
+        out = zeros(T, length(x), length(x))
+        hessian!(out, backend, f, x; scales)
+    end
 end
 
 """Maximum of individually scaled stationarity components."""
 function scaled_stationarity_residual(gradient::AbstractVector,
+        field_scales::AbstractVector, potential_scale)
+    _with_model_precision(gradient, field_scales, potential_scale) do
+        _scaled_stationarity_residual_at_precision(gradient, field_scales, potential_scale)
+    end
+end
+
+function _scaled_stationarity_residual_at_precision(gradient::AbstractVector,
         field_scales::AbstractVector, potential_scale)
     length(gradient) == length(field_scales) || throw(DimensionMismatch("stationarity scales do not match"))
     isfinite(potential_scale) && potential_scale > zero(potential_scale) ||
@@ -117,6 +142,12 @@ struct SearchCriteria{T<:AbstractFloat}
             potential_scale_rule, potential_scale_rule_identity,
             field_scale_rule, String(field_scale_rule_identity))
     end
+end
+
+function _model_precision(criteria::SearchCriteria)
+    maximum(_model_precision(getfield(criteria, name)) for name in
+        (:field_scales, :potential_scale, :stationarity_tolerance,
+         :backtracking_factor, :minimum_step))
 end
 
 function Base.getproperty(criteria::SearchCriteria, name::Symbol)
@@ -177,6 +208,14 @@ end
 
 function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVector{T},
         criteria::SearchCriteria{T}; differentiation=backend.differentiation) where {T<:AbstractFloat}
+    _with_model_precision(initial, criteria) do
+        _search_stationary_at_precision(backend, f, initial, criteria; differentiation)
+    end
+end
+
+function _search_stationary_at_precision(backend::DampedNewtonSearch, f,
+        initial::AbstractVector{T}, criteria::SearchCriteria{T};
+        differentiation=backend.differentiation) where {T<:AbstractFloat}
     length(initial) == length(criteria.field_scales) || throw(DimensionMismatch("search scale dimension does not match"))
     x = copy(initial)
     failures = String[]
@@ -306,6 +345,14 @@ end
 
 function critical_point_state(geometry::GeometryRecord, t::AbstractVector{T},
         rho::AbstractVector{T}; axion_elimination=nothing) where {T<:Real}
+    _with_model_precision(geometry, t, rho, axion_elimination) do
+        _critical_point_state_at_precision(geometry, t, rho; axion_elimination)
+    end
+end
+
+function _critical_point_state_at_precision(geometry::GeometryRecord,
+        t::AbstractVector{T}, rho::AbstractVector{T};
+        axion_elimination=nothing) where {T<:Real}
     length(t) == length(rho) == geometry.intersections.n ||
         throw(DimensionMismatch("critical-point coordinates must match geometry dimension"))
     tau = divisor_volumes(geometry, t)
@@ -343,6 +390,22 @@ struct GeneralizedEigenBackend <: FluctuationBackend end
 function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix{T},
         kinetic_metric::AbstractMatrix{T}; at_critical_point=true,
         covariant_hessian=nothing,
+        absolute_zero_threshold=T(1e-12), relative_zero_threshold=T(1e-10),
+        potential_scale=one(T), field_scales=ones(T, size(hessian, 1)),
+        active_charges=nothing, ads_radius_squared=nothing) where {T<:AbstractFloat}
+    _with_model_precision(hessian, kinetic_metric, covariant_hessian,
+        absolute_zero_threshold, relative_zero_threshold, potential_scale,
+        field_scales, active_charges, ads_radius_squared) do
+        _fluctuation_analysis_at_precision(GeneralizedEigenBackend(), hessian,
+            kinetic_metric; at_critical_point, covariant_hessian,
+            absolute_zero_threshold, relative_zero_threshold, potential_scale,
+            field_scales, active_charges, ads_radius_squared)
+    end
+end
+
+function _fluctuation_analysis_at_precision(::GeneralizedEigenBackend,
+        hessian::AbstractMatrix{T}, kinetic_metric::AbstractMatrix{T};
+        at_critical_point=true, covariant_hessian=nothing,
         absolute_zero_threshold=T(1e-12), relative_zero_threshold=T(1e-10),
         potential_scale=one(T), field_scales=ones(T, size(hessian, 1)),
         active_charges=nothing, ads_radius_squared=nothing) where {T<:AbstractFloat}
@@ -665,19 +728,23 @@ function change_charge_basis(charges::AbstractMatrix{<:Integer}, B::AbstractMatr
 end
 
 function change_model_basis(model::KahlerModel, B::AbstractMatrix{<:Integer})
-    Qnew = change_charge_basis(model.charges, B)
-    KahlerModel(; w0_magnitude=model.w0_magnitude, theta0=model.theta0,
-        gs=model.gs, kcs=model.kcs, amplitudes=model.amplitudes,
-        actions=model.actions, phases=model.phases, charges=Qnew,
-        convention=model.convention, switches=model.switches,
-        uplift=model.uplift, identity="$(model.identity)|basis=$(repr(Matrix{BigInt}(B)))")
+    _with_model_precision(model, B) do
+        Qnew = change_charge_basis(model.charges, B)
+        KahlerModel(; w0_magnitude=model.w0_magnitude, theta0=model.theta0,
+            gs=model.gs, kcs=model.kcs, amplitudes=model.amplitudes,
+            actions=model.actions, phases=model.phases, charges=Qnew,
+            convention=model.convention, switches=model.switches,
+            uplift=model.uplift, identity="$(model.identity)|basis=$(repr(Matrix{BigInt}(B)))")
+    end
 end
 
 function change_coordinate_basis(t::AbstractVector, rho::AbstractVector,
         B::AbstractMatrix{<:Integer})
     size(B, 1) == size(B, 2) == length(t) == length(rho) ||
         throw(DimensionMismatch("coordinate and basis dimensions differ"))
-    Binv = _integer_inverse(B)
-    exact_basis = BigInt.(B)
-    (Binv' * _widen_exact_array(t), exact_basis * _widen_exact_array(rho))
+    _with_model_precision(t, rho) do
+        Binv = _integer_inverse(B)
+        exact_basis = BigInt.(B)
+        (Binv' * _widen_exact_array(t), exact_basis * _widen_exact_array(rho))
+    end
 end

@@ -1,6 +1,32 @@
 const _ZETA3_DECIMAL = "1.2020569031595942853997381615114499907649862923404988817922715553418382057863"
 
-_zeta3(::Type{T}) where {T<:AbstractFloat} = convert(T, parse(BigFloat, _ZETA3_DECIMAL))
+# Apéry's alternating series is evaluated with 32 guard bits; the alternating
+# tail is bounded by the first omitted term.
+function _zeta3(::Type{BigFloat})
+    requested_precision = precision(BigFloat)
+    setprecision(BigFloat, requested_precision + 32) do
+        total = zero(BigFloat)
+        n = 1
+        while true
+            central_binomial = binomial(big(2n), big(n))
+            term = BigFloat(5) /
+                (BigFloat(2) * BigFloat(n)^3 * BigFloat(central_binomial))
+            iseven(n) && (term = -term)
+            total += term
+            abs(term) <= eps(BigFloat) * abs(total) && break
+            n += 1
+        end
+        setprecision(BigFloat, requested_precision) do
+            total + zero(BigFloat)
+        end
+    end
+end
+
+function _zeta3(::Type{T}) where {T<:AbstractFloat}
+    setprecision(BigFloat, max(precision(BigFloat), 256)) do
+        convert(T, parse(BigFloat, _ZETA3_DECIMAL))
+    end
+end
 
 """Explicit coordinate, unit, phase, and retained/frozen-field identity."""
 struct ModelConvention
@@ -180,12 +206,14 @@ function charge_coordinates(charges::AbstractMatrix{<:Integer}, tau::AbstractVec
         rho::AbstractVector)
     size(charges, 2) == length(tau) == length(rho) ||
         throw(DimensionMismatch("Q must have one column per divisor coordinate"))
-    charge_times(values) = if all(value -> value isa Integer || value isa Rational, values)
-        BigInt.(charges) * _widen_exact_array(values)
-    else
-        charges * values
+    _with_model_precision(charges, tau, rho) do
+        charge_times(values) = if all(value -> value isa Integer || value isa Rational, values)
+            BigInt.(charges) * _widen_exact_array(values)
+        else
+            charges * values
+        end
+        (; tau=charge_times(tau), rho=charge_times(rho))
     end
-    (; tau=charge_times(tau), rho=charge_times(rho))
 end
 
 """Contract a retained metric or inverse metric into the charged-divisor basis."""
@@ -193,12 +221,14 @@ function charge_metric_contraction(charges::AbstractMatrix{<:Integer},
         metric::AbstractMatrix)
     size(metric, 1) == size(metric, 2) == size(charges, 2) ||
         throw(DimensionMismatch("Q and metric dimensions differ"))
-    if all(value -> value isa Integer || value isa Rational, metric)
-        exact_charges = BigInt.(charges)
-        exact_metric = _widen_exact_array(metric)
-        exact_charges * exact_metric * exact_charges'
-    else
-        charges * metric * charges'
+    _with_model_precision(charges, metric) do
+        if all(value -> value isa Integer || value isa Rational, metric)
+            exact_charges = BigInt.(charges)
+            exact_metric = _widen_exact_array(metric)
+            exact_charges * exact_metric * exact_charges'
+        else
+            charges * metric * charges'
+        end
     end
 end
 
@@ -212,6 +242,12 @@ struct MetricAssessment{T}
 end
 
 function _metric_assessment(metric::AbstractMatrix{T}) where {T<:Real}
+    _with_model_precision(metric) do
+        _metric_assessment_at_precision(metric)
+    end
+end
+
+function _metric_assessment_at_precision(metric::AbstractMatrix{T}) where {T<:Real}
     finite = all(isfinite, metric)
     if !finite
         return MetricAssessment{T}(:FAIL, false, false, false, nothing)
@@ -256,12 +292,52 @@ struct ModelEvaluation{T<:Real}
     geometry_identity::String
 end
 
+_model_precision(::Nothing) = 0
+_model_precision(value::BigFloat) = precision(value)
+_model_precision(value::FrozenScalar{BigFloat}) = getfield(value, :encoded)[1]
+_model_precision(value::FrozenScalar) = 0
+_model_precision(value::Pair) =
+    max(_model_precision(first(value)), _model_precision(last(value)))
+_model_precision(value::Tuple) =
+    maximum((_model_precision(item) for item in value); init=0)
+_model_precision(value::NamedTuple) =
+    maximum((_model_precision(item) for item in values(value)); init=0)
+_model_precision(value::AbstractArray) =
+    maximum((_model_precision(item) for item in value); init=0)
+_model_precision(value::CanonicalIntersectionTensor) =
+    _model_precision(value.coefficients)
+_model_precision(value::GeometryRecord) =
+    max(_model_precision(value.intersections), _model_precision(value.domain_inequalities))
+function _model_precision(value::KahlerModel)
+    maximum(_model_precision(getfield(value, name)) for name in
+        (:w0_magnitude, :theta0, :gs, :kcs, :amplitudes, :actions, :phases))
+end
+_model_precision(value) = 0
+
+function _with_model_precision(f, values...)
+    stored_precision = maximum(_model_precision, values; init=0)
+    bits = stored_precision == 0 ? precision(BigFloat) : stored_precision
+    setprecision(f, BigFloat, bits)
+end
+
 function _kahler_data(model::KahlerModel, geometry::GeometryRecord,
-        t::AbstractVector)
+        t::AbstractVector; rho=nothing)
     n = geometry.intersections.n
     length(t) == n || throw(DimensionMismatch("wrong two-cycle vector length"))
-    R = promote_type(eltype(t), typeof(model.gs))
+    rho === nothing || length(rho) == n || throw(DimensionMismatch("wrong axion vector length"))
+    R = promote_type(eltype(t), typeof(model.gs),
+        rho === nothing ? typeof(model.gs) : eltype(rho),
+        eltype(geometry.intersections.coefficients) <: BigFloat ? BigFloat : typeof(model.gs),
+        eltype(geometry.domain_inequalities) <: BigFloat ? BigFloat : typeof(model.gs))
     R <: AbstractFloat || throw(ArgumentError("evaluation coordinates must be floating point"))
+    _with_model_precision(model, geometry, t, rho) do
+        _kahler_data_at_precision(model, geometry, t, R)
+    end
+end
+
+function _kahler_data_at_precision(model::KahlerModel, geometry::GeometryRecord,
+        t::AbstractVector, R::Type{<:AbstractFloat})
+    n = geometry.intersections.n
     tt = R.(t)
     gs, kcs = R(model.gs), R(model.kcs)
     s = inv(gs)
@@ -309,6 +385,12 @@ function _kahler_data(model::KahlerModel, geometry::GeometryRecord,
 end
 
 function _model_terms(model::KahlerModel, data, rho::AbstractVector)
+    _with_model_precision(model, data, rho) do
+        _model_terms_at_precision(model, data, rho)
+    end
+end
+
+function _model_terms_at_precision(model::KahlerModel, data, rho::AbstractVector)
     n = length(data.tau)
     length(rho) == n || throw(DimensionMismatch("wrong axion vector length"))
     R = data.R
@@ -341,6 +423,13 @@ end
 
 function _potential_contributions(model::KahlerModel, geometry::GeometryRecord,
         data, terms, rho::AbstractVector)
+    _with_model_precision(model, geometry, data, terms, rho) do
+        _potential_contributions_at_precision(model, geometry, data, terms, rho)
+    end
+end
+
+function _potential_contributions_at_precision(model::KahlerModel,
+        geometry::GeometryRecord, data, terms, rho::AbstractVector)
     M = data.full_inverse_tt_metric
     R = data.R
     alpha = data.expK * (real(dot(terms.d0, M * terms.d0)) - R(3) * abs2(terms.w0))
@@ -370,47 +459,51 @@ end
 """Scale stationarity by active-term magnitudes, with a no-scale fallback."""
 function characteristic_potential_scale(model::KahlerModel,
         geometry::GeometryRecord, t::AbstractVector, rho::AbstractVector)
-    data = _kahler_data(model, geometry, t)
-    data.domain_status === :PASS ||
-        throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
-    terms = _model_terms(model, data, rho)
-    potential_parts = _potential_contributions(model, geometry, data, terms, rho)
-    scale = sum(abs, values(potential_parts.active))
-    if iszero(scale)
-        superpotential_envelope = abs(terms.w0) + sum(abs, terms.z_terms)
-        scale = abs(data.expK) * superpotential_envelope^2
-        iszero(scale) && (scale = one(data.R))
+    _with_model_precision(model, geometry, t, rho) do
+        data = _kahler_data(model, geometry, t; rho)
+        data.domain_status === :PASS ||
+            throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
+        terms = _model_terms(model, data, rho)
+        potential_parts = _potential_contributions(model, geometry, data, terms, rho)
+        scale = sum(abs, values(potential_parts.active))
+        if iszero(scale)
+            superpotential_envelope = abs(terms.w0) + sum(abs, terms.z_terms)
+            scale = abs(data.expK) * superpotential_envelope^2
+            iszero(scale) && (scale = one(data.R))
+        end
+        isfinite(scale) && scale > zero(scale) ||
+            throw(DomainError(scale, "the declared model has no finite positive characteristic potential scale"))
+        scale
     end
-    isfinite(scale) && scale > zero(scale) ||
-        throw(DomainError(scale, "the declared model has no finite positive characteristic potential scale"))
-    scale
 end
 
 """Evaluate the declared potential, retaining the full heavy-field Schur block."""
 function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
         t::AbstractVector, rho::AbstractVector; enforce_domain=true)
-    data = _kahler_data(model, geometry, t)
-    enforce_domain && data.domain_status !== :PASS &&
-        throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
-    terms = _model_terms(model, data, rho)
-    potential_parts = _potential_contributions(model, geometry, data, terms, rho)
-    contributions, active, value = potential_parts.contributions, potential_parts.active,
-        potential_parts.value
-    n = length(data.tau)
-    retained_real = zeros(data.R, 2n, 2n)
-    tau_jacobian = data.R.(divisor_volume_jacobian(geometry, data.tt))
-    retained_real[1:n, 1:n] .= data.R(2) .* (
-        tau_jacobian' * data.retained_kinetic_metric * tau_jacobian)
-    retained_real[(n + 1):end, (n + 1):end] .= data.R(2) .* data.retained_kinetic_metric
-    all(isfinite, data.parent_metric) && all(isfinite, data.retained_kinetic_metric) &&
-        all(isfinite, data.full_inverse_tt_metric) && all(isfinite, retained_real) ||
-        throw(DomainError(retained_real, "potential evaluation produced a nonfinite kinetic metric"))
-    ModelEvaluation(value, contributions, active, data.V, data.tau,
-        data.R.(rho), data.xi, data.xihat, data.xihat_half, data.Y,
-        data.parent_metric, data.retained_kinetic_metric, retained_real,
-        data.full_inverse_tt_metric, _metric_assessment(data.parent_metric),
-        _metric_assessment(retained_real), data.domain_status,
-        model.identity, geometry.artifact_sha256)
+    _with_model_precision(model, geometry, t, rho) do
+        data = _kahler_data(model, geometry, t; rho)
+        enforce_domain && data.domain_status !== :PASS &&
+            throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
+        terms = _model_terms(model, data, rho)
+        potential_parts = _potential_contributions(model, geometry, data, terms, rho)
+        contributions, active, value = potential_parts.contributions, potential_parts.active,
+            potential_parts.value
+        n = length(data.tau)
+        retained_real = zeros(data.R, 2n, 2n)
+        tau_jacobian = data.R.(divisor_volume_jacobian(geometry, data.tt))
+        retained_real[1:n, 1:n] .= data.R(2) .* (
+            tau_jacobian' * data.retained_kinetic_metric * tau_jacobian)
+        retained_real[(n + 1):end, (n + 1):end] .= data.R(2) .* data.retained_kinetic_metric
+        all(isfinite, data.parent_metric) && all(isfinite, data.retained_kinetic_metric) &&
+            all(isfinite, data.full_inverse_tt_metric) && all(isfinite, retained_real) ||
+            throw(DomainError(retained_real, "potential evaluation produced a nonfinite kinetic metric"))
+        ModelEvaluation(value, contributions, active, data.V, data.tau,
+            data.R.(rho), data.xi, data.xihat, data.xihat_half, data.Y,
+            data.parent_metric, data.retained_kinetic_metric, retained_real,
+            data.full_inverse_tt_metric, _metric_assessment(data.parent_metric),
+            _metric_assessment(retained_real), data.domain_status,
+            model.identity, geometry.artifact_sha256)
+    end
 end
 
 """Full retained potential in the Julia convention `T=tau+i*rho`."""
@@ -419,14 +512,18 @@ potential(model::KahlerModel, geometry::GeometryRecord, t, rho; kwargs...) =
 
 """Adopted unequal-index phase: a_i rho_i - a_j rho_j - phi_i + phi_j."""
 function quadratic_phase(action_i, rho_i, phase_i, action_j, rho_j, phase_j)
-    action_i * rho_i - action_j * rho_j - phase_i + phase_j
+    _with_model_precision(action_i, rho_i, phase_i, action_j, rho_j, phase_j) do
+        action_i * rho_i - action_j * rho_j - phase_i + phase_j
+    end
 end
 
 function direct_complex_interference_phase(action_i, q_i, rho, phase_i,
         action_j, q_j, phase_j)
-    z_i = exp(complex(zero(action_i), phase_i - action_i * dot(q_i, rho)))
-    z_j = exp(complex(zero(action_j), phase_j - action_j * dot(q_j, rho)))
-    angle(z_i * conj(z_j))
+    _with_model_precision(action_i, q_i, rho, phase_i, action_j, q_j, phase_j) do
+        z_i = exp(complex(zero(action_i), phase_i - action_i * dot(q_i, rho)))
+        z_j = exp(complex(zero(action_j), phase_j - action_j * dot(q_j, rho)))
+        angle(z_i * conj(z_j))
+    end
 end
 
 """Independent analytic axion derivative of the reduced potential."""
@@ -434,32 +531,34 @@ function analytic_axion_gradient(model::KahlerModel, geometry::GeometryRecord,
         t::AbstractVector, rho::AbstractVector)
     model.switches.uplift_enabled &&
         throw(ArgumentError("the supplied uplift has no declared analytic axion derivative"))
-    data = _kahler_data(model, geometry, t)
-    data.domain_status === :PASS || throw(DomainError(t, "coordinates violate the imported cone"))
-    terms = _model_terms(model, data, rho)
-    n, na = length(data.tau), length(model.amplitudes)
-    R = data.R
-    grad = zeros(R, n)
-    for j in 1:n
-        dwn = zero(Complex{R})
-        ddw = zeros(Complex{R}, n)
-        for a in 1:na
-            action = R(model.actions[a])
-            qj = R(model.charges[a, j])
-            z = terms.z_terms[a]
-            dz = -im * action * qj * z
-            dwn += dz
-            for i in 1:n
-                ddw[i] += im * action^2 * R(model.charges[a, i]) * qj * z
+    _with_model_precision(model, geometry, t, rho) do
+        data = _kahler_data(model, geometry, t; rho)
+        data.domain_status === :PASS || throw(DomainError(t, "coordinates violate the imported cone"))
+        terms = _model_terms(model, data, rho)
+        n, na = length(data.tau), length(model.amplitudes)
+        R = data.R
+        grad = zeros(R, n)
+        for j in 1:n
+            dwn = zero(Complex{R})
+            ddw = zeros(Complex{R}, n)
+            for a in 1:na
+                action = R(model.actions[a])
+                qj = R(model.charges[a, j])
+                z = terms.z_terms[a]
+                dz = -im * action * qj * z
+                dwn += dz
+                for i in 1:n
+                    ddw[i] += im * action^2 * R(model.charges[a, i]) * qj * z
+                end
             end
+            ddn = ddw + data.k_t .* dwn
+            derivative_linear = R(2) * real(dot(terms.d0, data.full_inverse_tt_metric * ddn)) -
+                R(6) * real(conj(terms.w0) * dwn)
+            derivative_quadratic = R(2) * real(dot(terms.dn, data.full_inverse_tt_metric * ddn)) -
+                R(6) * real(conj(terms.wn) * dwn)
+            grad[j] = data.expK * ((model.switches.np_linear_enabled ? derivative_linear : zero(R)) +
+                (model.switches.np_quadratic_enabled ? derivative_quadratic : zero(R)))
         end
-        ddn = ddw + data.k_t .* dwn
-        derivative_linear = R(2) * real(dot(terms.d0, data.full_inverse_tt_metric * ddn)) -
-            R(6) * real(conj(terms.w0) * dwn)
-        derivative_quadratic = R(2) * real(dot(terms.dn, data.full_inverse_tt_metric * ddn)) -
-            R(6) * real(conj(terms.wn) * dwn)
-        grad[j] = data.expK * ((model.switches.np_linear_enabled ? derivative_linear : zero(R)) +
-            (model.switches.np_quadratic_enabled ? derivative_quadratic : zero(R)))
+        grad
     end
-    grad
 end

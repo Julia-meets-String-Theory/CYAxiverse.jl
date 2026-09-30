@@ -1140,4 +1140,137 @@ end
         @test getfield(big_criteria, :potential_scale).encoded[1] == 128
         @test_throws MethodError Base.MPFR.nextfloat!(getfield(big_criteria, :potential_scale))
     end
+
+    high_precision_model_inputs = setprecision(BigFloat, 512) do
+        model = fixture_model(1; charges=reshape([1], 1, 1),
+            w0=BigFloat("0.75"), theta0=BigFloat("0.2"),
+            gs=BigFloat("0.3"), kcs=BigFloat("0.1"),
+            amplitudes=BigFloat[BigFloat("0.2")],
+            actions=BigFloat[BigFloat("0.6")], phases=BigFloat[BigFloat("0.4")])
+        t = BigFloat[BigFloat("1.234567890123456789")]
+        rho = BigFloat[BigFloat("0.314159265358979323")]
+        (; model, t, rho)
+    end
+    high_precision_model_reference = setprecision(BigFloat, 512) do
+        model = high_precision_model_inputs.model
+        geometry = one_modulus_geometry(id="model-precision-context-v1")
+        t, rho = high_precision_model_inputs.t, high_precision_model_inputs.rho
+        (; geometry,
+           evaluation=evaluate_potential(model, geometry, t, rho),
+           axion_gradient=analytic_axion_gradient(model, geometry, t, rho),
+           characteristic_scale=characteristic_potential_scale(model, geometry, t, rho),
+           kahler_data=CYAX0191._kahler_data(model, geometry, t; rho),
+           critical_state=critical_point_state(geometry, t, rho))
+    end
+    default_precision_model_evaluation = evaluate_potential(
+        high_precision_model_inputs.model, high_precision_model_reference.geometry,
+        high_precision_model_inputs.t, high_precision_model_inputs.rho)
+    high_ambient_model_evaluation = setprecision(BigFloat, 1024) do
+        evaluate_potential(high_precision_model_inputs.model,
+            high_precision_model_reference.geometry,
+            high_precision_model_inputs.t, high_precision_model_inputs.rho)
+    end
+    default_precision_axion_gradient = analytic_axion_gradient(
+        high_precision_model_inputs.model, high_precision_model_reference.geometry,
+        high_precision_model_inputs.t, high_precision_model_inputs.rho)
+    default_precision_characteristic_scale = characteristic_potential_scale(
+        high_precision_model_inputs.model, high_precision_model_reference.geometry,
+        high_precision_model_inputs.t, high_precision_model_inputs.rho)
+    default_precision_kahler_data = CYAX0191._kahler_data(
+        high_precision_model_inputs.model, high_precision_model_reference.geometry,
+        high_precision_model_inputs.t; rho=high_precision_model_inputs.rho)
+    default_precision_critical_state = critical_point_state(
+        high_precision_model_reference.geometry, high_precision_model_inputs.t,
+        high_precision_model_inputs.rho)
+    @test precision(BigFloat) == 256
+    @test precision(default_precision_model_evaluation.value) == 512
+    @test default_precision_model_evaluation.value ==
+        high_precision_model_reference.evaluation.value
+    @test precision(high_ambient_model_evaluation.value) == 512
+    @test high_ambient_model_evaluation.value == high_precision_model_reference.evaluation.value
+    @test default_precision_model_evaluation.xi == high_precision_model_reference.evaluation.xi
+    @test precision(default_precision_model_evaluation.xi) == 512
+    @test default_precision_model_evaluation.retained_inverse_metric ==
+        high_precision_model_reference.evaluation.retained_inverse_metric
+    @test default_precision_axion_gradient == high_precision_model_reference.axion_gradient
+    @test all(value -> precision(value) == 512, default_precision_axion_gradient)
+    @test default_precision_characteristic_scale ==
+        high_precision_model_reference.characteristic_scale
+    @test precision(default_precision_characteristic_scale) == 512
+    @test default_precision_kahler_data.xi == high_precision_model_reference.kahler_data.xi
+    @test precision(default_precision_kahler_data.V) == 512
+    @test default_precision_critical_state.tau ==
+        high_precision_model_reference.critical_state.tau
+    @test all(value -> precision(value) == 512, default_precision_critical_state.tau)
+
+    high_precision_numeric_inputs = setprecision(BigFloat, 512) do
+        x = BigFloat[BigFloat("1.125")]
+        scales = BigFloat[1]
+        target = BigFloat("1.25")
+        criteria = SearchCriteria(scales, BigFloat(1), BigFloat("1e-40");
+            max_iterations=8, minimum_step=BigFloat("1e-30"))
+        f = let target=target
+            point -> (point[1] - target)^2
+        end
+        (; x, scales, target, criteria, f)
+    end
+    high_precision_numeric_reference = setprecision(BigFloat, 512) do
+        inputs = high_precision_numeric_inputs
+        gradient = finite_difference_gradient(CentralDifferenceBackend(),
+            inputs.f, inputs.x; scales=inputs.scales)
+        hessian = finite_difference_hessian(CentralDifferenceBackend(),
+            inputs.f, inputs.x; scales=inputs.scales)
+        residual = scaled_stationarity_residual(gradient, inputs.scales, BigFloat(1))
+        search = search_stationary(DampedNewtonSearch(), inputs.f, inputs.x,
+            inputs.criteria)
+        (; gradient, hessian, residual, search)
+    end
+    default_precision_numeric_gradient = finite_difference_gradient(
+        CentralDifferenceBackend(), high_precision_numeric_inputs.f,
+        high_precision_numeric_inputs.x; scales=high_precision_numeric_inputs.scales)
+    default_precision_numeric_hessian = finite_difference_hessian(
+        CentralDifferenceBackend(), high_precision_numeric_inputs.f,
+        high_precision_numeric_inputs.x; scales=high_precision_numeric_inputs.scales)
+    default_precision_numeric_residual = scaled_stationarity_residual(
+        default_precision_numeric_gradient, high_precision_numeric_inputs.scales, BigFloat(1))
+    default_precision_numeric_search = search_stationary(DampedNewtonSearch(),
+        high_precision_numeric_inputs.f, high_precision_numeric_inputs.x,
+        high_precision_numeric_inputs.criteria)
+    @test precision(default_precision_numeric_gradient[1]) == 512
+    @test default_precision_numeric_gradient == high_precision_numeric_reference.gradient
+    @test precision(default_precision_numeric_hessian[1, 1]) == 512
+    @test default_precision_numeric_hessian == high_precision_numeric_reference.hessian
+    @test precision(default_precision_numeric_residual) == 512
+    @test default_precision_numeric_residual == high_precision_numeric_reference.residual
+    @test default_precision_numeric_search.status == :converged
+    @test default_precision_numeric_search.point == high_precision_numeric_reference.search.point
+    @test default_precision_numeric_search.value == high_precision_numeric_reference.search.value
+    @test precision(default_precision_numeric_search.value) == 512
+
+    high_precision_fluctuation_inputs = setprecision(BigFloat, 512) do
+        (; hessian=BigFloat[1 0; 0 2], metric=Matrix{BigFloat}(I, 2, 2))
+    end
+    high_precision_fluctuation_reference = setprecision(BigFloat, 512) do
+        fluctuation_analysis(GeneralizedEigenBackend(),
+            high_precision_fluctuation_inputs.hessian,
+            high_precision_fluctuation_inputs.metric)
+    end
+    default_precision_fluctuation = fluctuation_analysis(GeneralizedEigenBackend(),
+        high_precision_fluctuation_inputs.hessian,
+        high_precision_fluctuation_inputs.metric)
+    @test precision(default_precision_fluctuation.generalized_mass_eigenvalues[1]) == 512
+    @test default_precision_fluctuation.generalized_mass_eigenvalues ==
+        high_precision_fluctuation_reference.generalized_mass_eigenvalues
+
+    zeta3_512 = setprecision(BigFloat, 512) do
+        CYAX0191._zeta3(BigFloat)
+    end
+    zeta3_256 = setprecision(BigFloat, 256) do
+        CYAX0191._zeta3(BigFloat)
+    end
+    @test precision(zeta3_512) == 512
+    @test setprecision(BigFloat, 512) do
+        zeta3_512 != BigFloat(zeta3_256) &&
+            abs(zeta3_512 - parse(BigFloat, CYAX0191._ZETA3_DECIMAL)) < BigFloat("1e-76")
+    end
 end
