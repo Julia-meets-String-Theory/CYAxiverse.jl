@@ -64,7 +64,10 @@
     state, schemas, authorized execution surface, model identities, and scope.
   - Verify: handoff explicitly carries implementation limits, allowed
     commands, required identity/evidence fields, and numerical acceptance
-    criteria approved for execution.
+    criteria approved for execution. It pins which source field or interval
+    defines reported `N_e` and its window, plus the sample/index identity used.
+    The source distinguishes total `efolds`, `slow_roll_efolds`, and sample
+    `n`; the task selects none of them.
   - Escalate if: current source contradicts the approved contract, a required
     scientific threshold or model convention is missing, or owner rebind is
     needed.
@@ -129,12 +132,18 @@ dispatches them.
 - [ ] **T206 [R-006, R-007, CYAX-0131 diagnostics] Report the permitted sample diagnostics after the physical-k gate**
   - Precondition: T205 passes.
   - Expected output: only `N_e`, `n_s`, `paper_delta_H` scalar amplitude, and
-    cumulative turning from the concrete N8 author trajectory/sample route;
-    transverse-Hessian eigenvalues, if reported, are attached to a named
-    catastrophe point.
-  - Verify: each quantity has sample/source identity, units, scale category,
-    metric/basis and point identity where relevant. State that transverse
-    eigenvalues are not pivot-scale or along-trajectory spectra.
+    cumulative turning from the concrete N8 author trajectory/sample route,
+    labeled as the 10-row author trajectory with the raw-radian coordinate
+    convention and the rounded/reconstructed author metric identified where
+    applicable; transverse-Hessian eigenvalues, if reported, are attached to a
+    named catastrophe point.
+  - Verify: the implementation handoff pins the source field/interval and
+    window for `N_e` plus the sample/index identity; this task does not choose
+    among total `efolds`, `slow_roll_efolds`, or sample `n`. Each quantity has
+    sample/source identity, units, scale category, and the required coordinate
+    and metric labels; point identity and metric/basis are recorded where
+    relevant. State that transverse eigenvalues are not pivot-scale or
+    along-trajectory spectra.
   - Escalate if: a new diagnostic, acceptance window, or physical
     interpretation is needed.
 

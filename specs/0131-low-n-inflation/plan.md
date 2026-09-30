@@ -19,7 +19,7 @@ current-schema implementation handoff is separately reviewed and dispatched.
 | R-003 / CYAX-0131 cross-check | Run/report the separate 12-row P96/Table-1 continuation only as a cross-check | Separate model labels, row count, source route, and result identity; no certification of the 10-row model |
 | R-004 / CYAX-0131 N5 replay | Use the reduced two-cosine light-direction model, set the second cosine to `π/4`, and re-solve/refine the shifted fold | Model and phase identity plus re-solved fold evidence; absent an explicit full-map source, mark the full eight-row mapping `NOT_VERIFIABLE` |
 | R-005 / CYAX-0131 physical gate | Keep homotopy `k` in discovery/calibration; independently re-establish physical `k` before physical trajectory diagnostics | Distinct recorded scale categories and evidence for the physical-k re-establishment |
-| R-006 / CYAX-0131 diagnostics | After physical-k re-establishment, report only `N_e`, `n_s`, `paper_delta_H` scalar amplitude, and cumulative turning through the concrete N8 trajectory/sample route | Per-quantity sample/source identity, units and diagnostic provenance; no new acceptance window |
+| R-006 / CYAX-0131 diagnostics | After physical-k re-establishment, report only `N_e`, `n_s`, `paper_delta_H` scalar amplitude, and cumulative turning through the concrete N8 trajectory/sample route; label as the 10-row author trajectory using the raw-radian coordinate convention and identify the rounded/reconstructed author metric where applicable | Per-quantity sample/source identity, units and diagnostic provenance; implementation handoff pins the source field/interval and window for `N_e` plus its sample/index identity; no new acceptance window |
 | R-007 / CYAX-0131 catastrophe diagnostic | Attach transverse-Hessian eigenvalues to a named catastrophe point with its model, phase, coordinate, scale, metric/basis, and source/code identity | Point identity and Hessian basis; explicit statement that values are neither pivot-scale nor along-trajectory spectra |
 | R-008 / CYAX-0131 scope boundary | Keep the five observational items `NOT_REACHED` | Explicit scope/status record for each item; no optimization result |
 | R-009 / CYAX-0131 claim boundary | State fixed-saxion effective-theory scope in every result summary | Claim review against prohibited population, stabilization, string-cosmology, and full-KS language |
@@ -50,8 +50,12 @@ then-current source tree, Issue/dependency state, current schemas, and exact
 execution capability. Submit that handoff for its own review and dispatch.
 The implementation handoff must carry any numerical acceptance criteria,
 solver tolerances, witness identity details, permitted command surface, and
-output schema required for the authorized implementation. This plan does not
-fill in scientific choices that the owner has not approved.
+output schema required for the authorized implementation. Before `N_e` is
+reported, it must pin which source field or interval defines the reported
+value and window, plus the sample/index identity used. The source distinguishes
+total `efolds`, `slow_roll_efolds`, and sample `n`; this plan selects none of
+them. This plan does not fill in scientific choices that the owner has not
+approved.
 
 ### Stage 2 — Conditional calibration and bounded discovery
 
@@ -68,8 +72,12 @@ Only to the extent explicitly authorized by the new implementation handoff:
 5. Classify all homotopy `k` results as discovery/calibration evidence. Before
    any physical trajectory diagnostic, independently re-establish physical
    `k` under the reviewed handoff's convention and evidence rules.
-6. After the physical-k gate, report only the permitted N8 sample diagnostics
-   and name the catastrophe point for transverse-Hessian eigenvalues.
+6. After the physical-k gate and after the implementation handoff pins the
+   `N_e` field/interval, window, and sample/index identity, report only the
+   permitted diagnostics. Label them as the 10-row author trajectory, retain
+   the raw-radian coordinate convention, and identify the rounded/reconstructed
+   author metric where applicable. Name the catastrophe point for
+   transverse-Hessian eigenvalues.
 7. Keep all five observational items `NOT_REACHED` unless a later, separate
    owner-approved specification governs them.
 

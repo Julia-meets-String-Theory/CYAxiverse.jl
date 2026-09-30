@@ -168,11 +168,17 @@ diagnostics alone.
 6. **Scale hierarchy:** a homotopy `k` supports discovery/calibration only.
    Independently re-establish a physical `k` before reporting any physical
    trajectory observable. Record the scale category with every result.
-7. **Diagnostic eligibility:** after physical-k re-establishment, the only
-   permitted N=8 trajectory diagnostics in this contract are `N_e`, `n_s`,
-   scalar amplitude under the `paper_delta_H` convention, and cumulative
-   turning. Use the concrete N=8 trajectory and its sample records as the
-   data route.
+7. **Diagnostic eligibility and labels:** after physical-k re-establishment,
+   the only permitted N=8 trajectory diagnostics in this contract are `N_e`,
+   `n_s`, scalar amplitude under the `paper_delta_H` convention, and
+   cumulative turning. Label the result as the **10-row author trajectory**,
+   preserve the **raw-radian coordinate convention**, and identify the
+   **rounded/reconstructed author metric where applicable**. Use the concrete
+   N8 trajectory and its sample records as the data route. The later reviewed
+   implementation handoff must specify which source field or interval defines
+   reported `N_e` and its window, and identify the sample/index used. The
+   source distinguishes total `efolds`, `slow_roll_efolds`, and sample `n`;
+   this specification selects none of them.
 8. **Transverse Hessian:** bind transverse-Hessian eigenvalues to a named
    catastrophe diagnostic point, including model, phase vector, coordinates,
    scale category, metric/basis, and source/code identity. Do not describe
@@ -244,8 +250,14 @@ Only after R-005 is satisfied, the N=8 trajectory diagnostic set MAY include
 `N_e`, `n_s`, `paper_delta_H` scalar amplitude, and cumulative turning. The
 evidence SHALL identify the `author_inflation.n8_author_trajectory(...)`
 execution and the returned sample records from which each quantity is
-reported. This requirement does not create an observational acceptance
-criterion.
+reported. Label the result as the **10-row author trajectory**, preserve the
+**raw-radian coordinate convention**, and identify the
+**rounded/reconstructed author metric where applicable**. Before reporting
+`N_e`, the later reviewed implementation handoff SHALL specify the source
+field or interval that defines the reported value and its window, plus the
+sample/index identity used. The source distinguishes total `efolds`,
+`slow_roll_efolds`, and sample `n`; this specification selects none of them.
+This requirement does not create an observational acceptance criterion.
 
 ### R-007 — Bind transverse-Hessian values to a named catastrophe point
 
