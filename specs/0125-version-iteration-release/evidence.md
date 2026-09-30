@@ -1,9 +1,10 @@
 # CYAX-0125 Gate A candidate evidence
 
-This record belongs to a provisional premerge Gate A worktree candidate. It
-does not designate a historical release, adopt a DEV version, close an
-iteration, publish a release, or establish live GitHub protection. The
-integrated implementation source candidate addressed here is commit
+The historical premerge record below belongs to a provisional Gate A
+worktree candidate. It did not designate a historical release, adopt a DEV
+version, close an iteration, publish a release, or establish live GitHub
+protection. The current closure-repair attempt is recorded at the end of this
+file. The integrated implementation source candidate addressed below is commit
 `b324f04aff37758541b63bf5fd7928d169c862f7` (tree
 `82ed1100bdb2d22dd2ddee83dbfe79c3af7cc2fb`). Its exact N1 normative subject
 is commit `251467a6b12f44bca7c9540ec3fd0cdf18ffe8e2` (tree
@@ -507,6 +508,70 @@ scientific normalization and benchmark code are outside this approved
 lifecycle change, `Project.toml` remains `0.2.0`, and no production release
 state changed. Remote CI and fresh exact-candidate SPEC/STANDARDS reviews are
 observed on `cea78c0`; the evidence-only convergence successor requires final
-exact-state confirmation. Live protection/event-authority setup, an explicit owner
-merge decision, and fresh post-settings review remain later work; Gate B stays
-separate.
+exact-state confirmation. At that historical point, live
+protection/event-authority setup, an explicit owner merge decision, and fresh
+post-settings review remained later work; Gate B stayed separate.
+
+## Gate A closure-repair attempt 002 (current, pending exact-state review)
+
+The owner-dispatched revision 3 closure-repair handoff has SHA-256
+`80397047bdf102da79d94a8bcf42ad12f1bf151c92f6047ac8f1e8db10090d13`.
+Control Desk readiness v2 has SHA-256
+`fc8b5e392b999d3cc94469ba3e18fe7ed7a90f86da22edc1b20044dbfe22ba2a`.
+Manager P0 passed against `vmm`
+`74fea608684eae746f25ae45b18512f89b862fb0`, `main`
+`ff85a36b6f5d2efb9c841dbd073c86a5c609778c`, open Issue #125, all nine
+then-existing live ruleset definitions, the bound governing/source blobs, and
+the current canonical private Control Desk policy. Direct canonical-source
+policy validation was used; no fallback attestation was used. The package
+version remained `0.2.0`.
+
+After P0, the Manager created the exact reviewed candidate-ref ruleset pair
+for `refs/heads/candidates/**/*`. Active ruleset `23967983` has no bypass
+actors and guards update, deletion, and non-fast-forward operations. Active
+ruleset `23967991` guards creation with the sole `RepositoryRole` actor `5`
+`always` bypass. Both were reread after creation. The pre-existing nine
+rulesets remained definition-identical, and the `vmm`/`main` freeze rulesets
+remained disabled. The full eleven-ruleset snapshot has SHA-256
+`ee838f2f460500f96baff179bce35ee92a24c75595bc1cd4f00bea06319ad66c`.
+
+The authenticated, read-only GitHub rules-for-branch endpoint returned both
+candidate rulesets and all four expected rule types for each of two
+nonexistent synthetic candidate branch names, one nested and one single
+segment. It returned no rules for a nearby out-of-namespace branch name.
+The two positive response bodies each have SHA-256
+`7e2ab8bb25f15dae4e49df907c8c3f1fd5f713c96ed4716097648a05fe7e710f`;
+the negative response body has SHA-256
+`4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`.
+Provider request IDs, response times, ETags, exact bodies, and the full
+ruleset definitions are held in the Manager-execution evidence for this
+attempt. This observes live rule applicability to synthetic branch inputs;
+it does not claim an observed rejected production push. No candidate branch
+was created.
+
+The bounded implementation and fail-closed corrections end at commit
+`d34630ab867a9a1b0f469f30db698a6d45e3b527` (tree
+`9ac1c8411e1c2388c0352519a60be7902ac3669e`). They add an authenticated
+GitHub ruleset/detail adapter, exact candidate-pair verification before a
+candidate creation path, live rule evaluation, and guarded `vmm`/`main`
+freeze acquisition and release. Real network requests are pinned to
+`https://api.github.com`. The transaction coordinator requires the concrete
+adapter for production protection and freeze evidence. The existing
+CLI remains read-only; this attempt did not run a production transaction or
+toggle a freeze control.
+
+Manager verification on Python 3.14.6 passed the five required focused test
+files (91 tests) and the complete `test_version_lifecycle_*.py` discovery
+(155 tests). `python3 scripts/agent_verify.py diff-check`, `git diff --check`,
+and `python3 scripts/check_version_bump.py --base
+74fea608684eae746f25ae45b18512f89b862fb0 --head HEAD` passed.
+The `src`, `test`, `Project.toml`, `Manifest.toml`, and `bin/audit.jl` paths
+match the rebound `vmm` base. Python-free `using CYAxiverse` passed with
+`PYTHON` and `PYTHONHOME` set to unavailable paths, using an offline temporary
+Julia QA project and a writable temporary depot; the governed source tree
+received no Julia dependency or manifest files. Julia version was 1.12.6.
+
+The exact combined source/settings/evidence review identity and remote CI
+result are recorded in the Manager handback when available. This attempt
+does not authorize merge, Gate A completion, Gate B, a version change, or
+any production lifecycle transaction.

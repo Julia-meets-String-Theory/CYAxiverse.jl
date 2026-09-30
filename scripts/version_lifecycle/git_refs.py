@@ -474,9 +474,18 @@ class ProtectionEvidence:
     canonical_public_tags_globally_guarded: bool = False
 
     def _matches(self, ref: str) -> bool:
-        # Only exact names and validated trailing-star prefixes are accepted
-        # here; GitHub's broader ruleset pattern language needs a separate
-        # live matcher before its result can be represented by this evidence.
+        # The candidate namespace uses one specifically approved GitHub glob.
+        # Its shape is narrow enough to validate locally after the adapter has
+        # verified the exact live ruleset definition.
+        if self.pattern == "refs/heads/candidates/**/*":
+            suffix = ref.removeprefix("refs/heads/candidates/")
+            return (
+                ref.startswith("refs/heads/candidates/")
+                and bool(suffix)
+                and all(suffix.split("/"))
+            )
+        # Other GitHub patterns need a separate live matcher before their
+        # result can be represented by this evidence.
         return self.pattern == ref or (
             self.pattern.endswith("*") and ref.startswith(self.pattern[:-1])
         )
