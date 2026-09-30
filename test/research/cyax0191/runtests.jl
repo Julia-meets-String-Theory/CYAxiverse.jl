@@ -1270,6 +1270,70 @@ end
     @test precision(default_precision_model_evaluation.xi) == 512
     @test default_precision_model_evaluation.retained_inverse_metric ==
         high_precision_model_reference.evaluation.retained_inverse_metric
+
+    constructor_inputs = setprecision(BigFloat, 512) do
+        h = BigFloat(1) / BigFloat(7)
+        (; w0=BigInt(1) // BigInt(3), theta0=h, gs=h, kcs=h,
+           amplitudes=BigFloat[h], actions=BigFloat[h], phases=BigFloat[h],
+           charges=reshape([1], 1, 1))
+    end
+    make_precision_sensitive_model() = fixture_model(1; constructor_inputs...,
+        identity="constructor-precision-rational-input-v1")
+    model_constructed_at_128 = setprecision(BigFloat, 128) do
+        make_precision_sensitive_model()
+    end
+    model_constructed_at_512 = setprecision(BigFloat, 512) do
+        make_precision_sensitive_model()
+    end
+    model_constructed_at_1024 = setprecision(BigFloat, 1024) do
+        make_precision_sensitive_model()
+    end
+    expected_rational_w0 = setprecision(BigFloat, 512) do
+        BigFloat(constructor_inputs.w0)
+    end
+    for model in (model_constructed_at_128, model_constructed_at_512,
+            model_constructed_at_1024)
+        @test precision(model.w0_magnitude) == 512
+        @test model.w0_magnitude == expected_rational_w0
+        @test precision(model.gs) == 512
+        @test precision(model.amplitudes[1]) == 512
+        @test precision(model.actions[1]) == 512
+        @test precision(model.phases[1]) == 512
+    end
+    typed_model_from_128_context = setprecision(BigFloat, 128) do
+        model = model_constructed_at_128
+        KahlerModel{BigFloat,Nothing}(getfield(model, :w0_magnitude),
+            getfield(model, :theta0), getfield(model, :gs), getfield(model, :kcs),
+            getfield(model, :amplitudes), getfield(model, :actions),
+            getfield(model, :phases), getfield(model, :charges), model.convention,
+            model.switches, nothing, model.identity)
+    end
+    @test precision(typed_model_from_128_context.w0_magnitude) == 512
+    constructor_geometry = one_modulus_geometry(id="constructor-precision-geometry-v1")
+    constructor_coordinates = setprecision(BigFloat, 512) do
+        (BigFloat[BigFloat("1.25")], BigFloat[BigFloat("0.2")])
+    end
+    constructor_evaluations = map((model_constructed_at_128,
+            model_constructed_at_512, model_constructed_at_1024)) do model
+        evaluate_potential(model, constructor_geometry,
+            constructor_coordinates[1], constructor_coordinates[2])
+    end
+    @test all(evaluation -> precision(evaluation.value) == 512,
+        constructor_evaluations)
+    @test all(evaluation -> evaluation.value == constructor_evaluations[1].value,
+        constructor_evaluations)
+    constructor_manifest(model) = replay_manifest(NativeReplayBackend(), model,
+        constructor_geometry; code_revision="constructor-precision-test",
+        selected_source_route="native_fixture", counting_unit="geometry fixture",
+        numeric_type="BigFloat", precision_bits=512,
+        backend_versions=(julia="1.12.6",),
+        solver_configuration=(method="none",),
+        scales=(field=BigFloat(1), potential=BigFloat(1)))
+    constructor_manifests = map(constructor_manifest,
+        (model_constructed_at_128, model_constructed_at_512,
+         model_constructed_at_1024))
+    @test constructor_manifests[1] == constructor_manifests[2] == constructor_manifests[3]
+
     @test default_precision_axion_gradient == high_precision_model_reference.axion_gradient
     @test all(value -> precision(value) == 512, default_precision_axion_gradient)
     @test default_precision_characteristic_scale ==

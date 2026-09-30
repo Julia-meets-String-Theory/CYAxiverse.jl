@@ -157,13 +157,36 @@ function Base.getproperty(model::KahlerModel, name::Symbol)
     getfield(model, name)
 end
 
+_model_parameter_float_type(value::BigFloat) = BigFloat
+_model_parameter_float_type(value::AbstractFloat) = typeof(value)
+_model_parameter_float_type(::Rational{BigInt}) = BigFloat
+_model_parameter_float_type(::Rational) = Float64
+_model_parameter_float_type(::BigInt) = BigFloat
+_model_parameter_float_type(::Integer) = Float64
+_model_parameter_float_type(value::Real) = typeof(float(value))
+_model_parameter_float_type(value) =
+    throw(ArgumentError("model parameters must be real numbers; got $(typeof(value))"))
+
+_model_parameter_precision(value::BigFloat) = precision(value)
+_model_parameter_precision(value) = 0
+
 function KahlerModel(; w0_magnitude, theta0, gs, kcs, amplitudes,
         actions, phases, charges, convention::ModelConvention,
         switches=ModelSwitches(), uplift=nothing, identity="CYAX-0191-source-model-v1")
-    T = promote_type(typeof(float(w0_magnitude)), typeof(float(theta0)),
-        typeof(float(gs)), typeof(float(kcs)), eltype(float.(amplitudes)),
-        eltype(float.(actions)), eltype(float.(phases)))
+    parameter_values = (w0_magnitude, theta0, gs, kcs,
+        Tuple(amplitudes)..., Tuple(actions)..., Tuple(phases)...)
+    T = promote_type((_model_parameter_float_type(value) for value in parameter_values)...)
     T <: AbstractFloat || throw(ArgumentError("model parameters must promote to an AbstractFloat"))
+    input_precision = maximum(_model_parameter_precision, parameter_values; init=0)
+    bits = input_precision == 0 ? precision(BigFloat) : input_precision
+    construct() = _construct_kahler_model(T, w0_magnitude, theta0, gs, kcs,
+        amplitudes, actions, phases, charges, convention, switches, uplift, identity)
+    T === BigFloat ? setprecision(construct, BigFloat, bits) : construct()
+end
+
+function _construct_kahler_model(::Type{T}, w0_magnitude, theta0, gs, kcs,
+        amplitudes, actions, phases, charges, convention, switches, uplift,
+        identity) where {T<:AbstractFloat}
     amps, aa, ph = T.(amplitudes), T.(actions), T.(phases)
     Q = BigInt.(charges)
     length(amps) == length(aa) == length(ph) == size(Q, 1) ||
