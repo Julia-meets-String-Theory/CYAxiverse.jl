@@ -113,8 +113,10 @@ struct KahlerModel{T<:AbstractFloat,U}
         length(amplitudes) == length(actions) == length(phases) == size(charges, 1) ||
             throw(DimensionMismatch("one amplitude, action, and phase is required per charge row"))
         !isempty(identity) || throw(ArgumentError("model identity must be nonempty"))
-        switches.uplift_enabled && uplift === nothing &&
-            throw(ArgumentError("uplift cannot be enabled without an explicit uplift function"))
+        (uplift === nothing || uplift isa UpliftSpec) ||
+            throw(ArgumentError("uplift must be a validated UpliftSpec or nothing"))
+        switches.uplift_enabled && !(uplift isa UpliftSpec) &&
+            throw(ArgumentError("uplift cannot be enabled without a validated UpliftSpec"))
         new{T,U}(w0_magnitude, theta0, gs, kcs, amplitudes, actions, phases,
             charges, convention, switches, uplift, identity)
     end
@@ -148,8 +150,10 @@ function KahlerModel(; w0_magnitude, theta0, gs, kcs, amplitudes,
     coupling > zero(T) || throw(ArgumentError("g_s must be positive"))
     all(>=(zero(T)), amps) || throw(ArgumentError("instanton amplitudes must be nonnegative"))
     all(>(zero(T)), aa) || throw(ArgumentError("instanton actions must be positive"))
-    switches.uplift_enabled && uplift === nothing &&
-        throw(ArgumentError("uplift cannot be enabled without an explicit uplift function"))
+    (uplift === nothing || uplift isa UpliftSpec) ||
+        throw(ArgumentError("uplift must be a validated UpliftSpec or nothing"))
+    switches.uplift_enabled && !(uplift isa UpliftSpec) &&
+        throw(ArgumentError("uplift cannot be enabled without a validated UpliftSpec"))
     KahlerModel{T,typeof(uplift)}(FrozenScalar(wmag), FrozenScalar(theta),
         FrozenScalar(coupling), FrozenScalar(kconstant),
         FrozenArray(amps), FrozenArray(aa), FrozenArray(ph), FrozenArray(Q),

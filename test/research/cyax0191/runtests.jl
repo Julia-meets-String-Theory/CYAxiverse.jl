@@ -5,6 +5,19 @@ using Test
 include(joinpath(@__DIR__, "../../../src/research/cyax0191/CYAX0191.jl"))
 using .CYAX0191
 
+mutable struct MutableManifestString <: AbstractString
+    value::String
+end
+
+Base.ncodeunits(value::MutableManifestString) = ncodeunits(value.value)
+Base.codeunit(::Type{MutableManifestString}) = UInt8
+Base.codeunit(value::MutableManifestString, index::Integer) = codeunit(value.value, index)
+Base.isvalid(value::MutableManifestString, index::Integer) = isvalid(value.value, index)
+Base.iterate(value::MutableManifestString) = iterate(value.value)
+Base.iterate(value::MutableManifestString, state::Integer) = iterate(value.value, state)
+Base.length(value::MutableManifestString) = length(value.value)
+Base.getindex(value::MutableManifestString, index::Integer) = getindex(value.value, index)
+
 struct DomainRejectingBackend <: DifferentiationBackend end
 
 function CYAX0191.gradient!(out::AbstractVector{T}, ::DomainRejectingBackend, f,
@@ -407,6 +420,14 @@ end
     mutable_uplift = args -> mutable_uplift_capture[1]
     @test_throws ArgumentError UpliftSpec(mutable_uplift,
         "mutable synthetic uplift", "must not retain mutable state")
+    mutable_uplift_ref = Ref(0.125)
+    mutable_ref_uplift = args -> mutable_uplift_ref[]
+    @test_throws ArgumentError UpliftSpec(mutable_ref_uplift,
+        "mutable Ref uplift", "must not retain mutable state")
+    @test_throws ArgumentError fixture_model(1; common...,
+        switches=ModelSwitches(bbhl_correction_enabled=false,
+            np_linear_enabled=false, np_quadratic_enabled=false, uplift_enabled=true),
+        uplift=42)
     uplift = UpliftSpec(args -> 0.125, "constant synthetic uplift", "Gate B switch fixture")
     uplift_model = fixture_model(1; common...,
         switches=ModelSwitches(bbhl_correction_enabled=false,
@@ -600,6 +621,11 @@ end
     @test_throws ArgumentError SearchCriteria([1.0], 1.0, 1e-8;
         potential_scale_rule=mutable_scale_rule,
         potential_scale_rule_identity="mutable-scale-test")
+    mutable_field_scale_capture = Ref(1.0)
+    mutable_field_scale_rule = x -> [mutable_field_scale_capture[]]
+    @test_throws ArgumentError SearchCriteria([1.0], 1.0, 1e-8;
+        field_scale_rule=mutable_field_scale_rule,
+        field_scale_rule_identity="mutable-field-scale-test")
 
     f(x) = x[1]^2 + 3x[1] * x[2] + 2x[2]^2
     point = [0.4, -0.7]
@@ -775,6 +801,11 @@ end
         getfield(model, :kcs), getfield(model, :amplitudes), getfield(model, :actions),
         getfield(model, :phases), getfield(model, :charges), model.convention,
         model.switches, nothing, model.identity)
+    @test_throws ArgumentError CYAX0191.KahlerModel{Float64,Int}(
+        getfield(model, :w0_magnitude), getfield(model, :theta0),
+        getfield(model, :gs), getfield(model, :kcs), getfield(model, :amplitudes),
+        getfield(model, :actions), getfield(model, :phases), getfield(model, :charges),
+        model.convention, model.switches, 42, model.identity)
     manifest = replay_manifest(NativeReplayBackend(), model, geometry;
         code_revision="synthetic-code-revision", selected_source_route="analytic-fixture",
         counting_unit="one synthetic model state", numeric_type="Float64",
@@ -791,6 +822,16 @@ end
     @test Tuple(Tuple(value.decimal for value in row)
         for row in manifest.model_parameters.charges) == (("1", "0"), ("0", "1"))
     @test manifest.model_parameters.uplift === nothing
+    mutable_string = MutableManifestString("backend-origin-a")
+    string_manifest = replay_manifest(NativeReplayBackend(), model, geometry;
+        code_revision="synthetic-code-revision", selected_source_route="analytic-fixture",
+        counting_unit="one synthetic model state", numeric_type="Float64",
+        precision_bits=53, backend_versions=(; origin=mutable_string),
+        solver_configuration=(; method="damped-newton"),
+        scales=(; fields=(1.0, 1.0, 1.0, 1.0), potential=1.0))
+    mutable_string.value = "backend-origin-b"
+    @test string_manifest.backend_versions.origin == "backend-origin-a"
+    @test string_manifest.backend_versions.origin isa String
     backend_versions_input = ["backend-v1", "numerics-v1"]
     solver_steps_input = [8, 16]
     field_scales_input = [1.0, 2.0, 3.0, 4.0]
@@ -867,7 +908,10 @@ end
     @test all(p -> length(p.coordinate_order) == length(p.field_scales), policies)
     @test all(p -> p.potential_scale > 0 && p.potential_scale_rule !== "", policies)
     @test all(p -> p.stationarity_scale_rule !== "", policies)
+    @test all(p -> p.stationarity_field_scale_rule !== "", policies)
     @test policy_manifest(frozen_policy(:P0_B3)).frozen_before_gate_c
+    @test policy_manifest(frozen_policy(:P0_B3)).stationarity_field_scale_rule ==
+        frozen_policy(:P0_B3).stationarity_field_scale_rule
     policy_copy = policy_b1.potential_scale
     @test policy_copy isa BigFloat
     @test precision(policy_copy) == 256
@@ -923,6 +967,8 @@ end
         @test local_scale == sum(abs, values(active_at_reference))
         @test pointwise_criteria.potential_scale_rule_identity ==
             scale_policy.stationarity_scale_rule
+        @test pointwise_criteria.field_scale_rule_identity ==
+            scale_policy.stationarity_field_scale_rule
 
         x_asymptotic = BigFloat[1000, 0]
         x_tail = BigFloat[5000, 0]
@@ -953,6 +999,18 @@ end
         @test active_search.status != :converged
         @test active_search.scaled_residual > scale_policy.stationarity_tolerance
         @test asymptotic_active_scale < asymptotic_legacy_scale / 1_000_000
+
+        runaway_criteria = policy_search_criteria(scale_policy, scale_model,
+            scale_geometry; max_iterations=1)
+        for t_runaway in (BigFloat("1e13"), BigFloat("1e14"))
+            x_runaway = BigFloat[t_runaway, 0]
+            runaway_scales = CYAX0191._search_field_scales(runaway_criteria, x_runaway)
+            @test runaway_scales == BigFloat[t_runaway, 1]
+            runaway_search = search_stationary(DampedNewtonSearch(), scale_objective,
+                x_runaway, runaway_criteria)
+            @test runaway_search.status == :failed
+            @test runaway_search.scaled_residual > scale_policy.stationarity_tolerance
+        end
     end
 
     setprecision(BigFloat, 128) do

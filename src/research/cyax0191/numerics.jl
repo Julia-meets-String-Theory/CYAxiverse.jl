@@ -82,11 +82,14 @@ struct SearchCriteria{T<:AbstractFloat}
     minimum_step::FrozenScalar{T}
     potential_scale_rule::Any
     potential_scale_rule_identity::String
+    field_scale_rule::Any
+    field_scale_rule_identity::String
 
     function SearchCriteria{T}(field_scales::AbstractVector{T}, potential_scale::T,
             stationarity_tolerance::T, max_iterations::Int, backtracking_factor::T,
             minimum_step::T, potential_scale_rule,
-            potential_scale_rule_identity::String) where {T<:AbstractFloat}
+            potential_scale_rule_identity::String, field_scale_rule=nothing,
+            field_scale_rule_identity="") where {T<:AbstractFloat}
         !isempty(field_scales) || throw(ArgumentError("at least one field scale is required"))
         all(value -> isfinite(value) && value > zero(T), field_scales) ||
             throw(ArgumentError("field scales must be finite and positive"))
@@ -103,11 +106,16 @@ struct SearchCriteria{T<:AbstractFloat}
             throw(ArgumentError("a pointwise potential scale rule and its identity must be supplied together"))
         potential_scale_rule === nothing || _manifest_value_is_immutable(potential_scale_rule) ||
             throw(ArgumentError("pointwise scale rules must not retain mutable state"))
+        (field_scale_rule === nothing) == isempty(field_scale_rule_identity) ||
+            throw(ArgumentError("a pointwise field scale rule and its identity must be supplied together"))
+        field_scale_rule === nothing || _manifest_value_is_immutable(field_scale_rule) ||
+            throw(ArgumentError("pointwise field scale rules must not retain mutable state"))
         scales = FrozenArray(collect(field_scales))
         new{T}(scales, FrozenScalar(potential_scale),
             FrozenScalar(stationarity_tolerance), max_iterations,
             FrozenScalar(backtracking_factor), FrozenScalar(minimum_step),
-            potential_scale_rule, potential_scale_rule_identity)
+            potential_scale_rule, potential_scale_rule_identity,
+            field_scale_rule, String(field_scale_rule_identity))
     end
 end
 
@@ -120,10 +128,12 @@ end
 function SearchCriteria(field_scales::AbstractVector{T}, potential_scale::T,
         stationarity_tolerance::T; max_iterations=1_000,
         backtracking_factor=T(0.5), minimum_step=T(2.0)^(-20),
-        potential_scale_rule=nothing, potential_scale_rule_identity="") where {T<:AbstractFloat}
+        potential_scale_rule=nothing, potential_scale_rule_identity="",
+        field_scale_rule=nothing, field_scale_rule_identity="") where {T<:AbstractFloat}
     SearchCriteria{T}(collect(field_scales), potential_scale, stationarity_tolerance,
         Int(max_iterations), T(backtracking_factor), T(minimum_step), potential_scale_rule,
-        String(potential_scale_rule_identity))
+        String(potential_scale_rule_identity), field_scale_rule,
+        String(field_scale_rule_identity))
 end
 
 function _search_potential_scale(criteria::SearchCriteria{T}, x::AbstractVector) where {T}
@@ -133,6 +143,19 @@ function _search_potential_scale(criteria::SearchCriteria{T}, x::AbstractVector)
     isfinite(value) && value > zero(T) ||
         throw(DomainError(value, "the search potential scale must be finite and positive"))
     value
+end
+
+function _search_field_scales(criteria::SearchCriteria{T}, x::AbstractVector) where {T}
+    length(x) == length(criteria.field_scales) ||
+        throw(DimensionMismatch("search point and field scales do not match"))
+    raw = criteria.field_scale_rule === nothing ? criteria.field_scales :
+        criteria.field_scale_rule(x)
+    scales = T.(collect(raw))
+    length(scales) == length(criteria.field_scales) ||
+        throw(DimensionMismatch("pointwise field scale rule returned the wrong dimension"))
+    all(value -> isfinite(value) && value > zero(T), scales) ||
+        throw(DomainError(scales, "search field scales must be finite and positive"))
+    scales
 end
 
 struct DampedNewtonSearch{D<:DifferentiationBackend} <: SearchBackend
@@ -178,9 +201,19 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
                 "damped-newton-gradient-residual", failures)
         end
         last_value = value
+        current_scales = try
+            _search_field_scales(criteria, x)
+        catch error
+            if error isa DomainError
+                push!(failures, "pointwise field scale rejected the current iterate at iteration $iteration")
+                return SearchResult(:failed, x, value, T(Inf), iteration,
+                    "damped-newton-gradient-residual", failures)
+            end
+            rethrow()
+        end
         residual = try
-            gradient!(g, differentiation, f, x; scales=criteria.field_scales)
-            T(scaled_stationarity_residual(g, criteria.field_scales,
+            gradient!(g, differentiation, f, x; scales=current_scales)
+            T(scaled_stationarity_residual(g, current_scales,
                 _search_potential_scale(criteria, x)))
         catch error
             if error isa DomainError
@@ -201,7 +234,7 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
                 "damped-newton-gradient-residual", failures)
         end
         try
-            hessian!(H, differentiation, f, x; scales=criteria.field_scales)
+            hessian!(H, differentiation, f, x; scales=current_scales)
         catch error
             if error isa DomainError
                 push!(failures, "Hessian evaluation rejected the current iterate at iteration $iteration")
@@ -224,8 +257,9 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
         while alpha >= criteria.minimum_step
             trial .= x .+ alpha .* step
             trial_residual = try
-                gradient!(trial_gradient, differentiation, f, trial; scales=criteria.field_scales)
-                T(scaled_stationarity_residual(trial_gradient, criteria.field_scales,
+                trial_scales = _search_field_scales(criteria, trial)
+                gradient!(trial_gradient, differentiation, f, trial; scales=trial_scales)
+                T(scaled_stationarity_residual(trial_gradient, trial_scales,
                     _search_potential_scale(criteria, trial)))
             catch error
                 if error isa DomainError
@@ -533,20 +567,23 @@ function Base.getindex(array::FrozenManifestArray{N}, indices::Vararg{Int,N}) wh
     getfield(array, :values)[LinearIndices(array)[indices...]]
 end
 
-_manifest_value_is_immutable(value) = isbitstype(typeof(value))
-_manifest_value_is_immutable(value::AbstractString) = true
+function _manifest_fields_are_immutable(value)
+    T = typeof(value)
+    ismutabletype(T) && return false
+    all(index -> _manifest_value_is_immutable(getfield(value, index)), 1:fieldcount(T))
+end
+function _manifest_value_is_immutable(value)
+    isbitstype(typeof(value)) && return true
+    _manifest_fields_are_immutable(value)
+end
+_manifest_value_is_immutable(value::AbstractString) =
+    value isa String || _manifest_fields_are_immutable(value)
 _manifest_value_is_immutable(value::Symbol) = true
 _manifest_value_is_immutable(::Nothing) = true
 _manifest_value_is_immutable(::Missing) = true
 _manifest_value_is_immutable(value::Tuple) = all(_manifest_value_is_immutable, value)
 _manifest_value_is_immutable(value::NamedTuple) =
     all(_manifest_value_is_immutable, values(value))
-function _manifest_value_is_immutable(value)
-    ismutabletype(typeof(value)) && return false
-    all(index -> _manifest_value_is_immutable(getfield(value, index)),
-        1:fieldcount(typeof(value)))
-end
-
 _snapshot_manifest(value::BigInt) =
     (; numeric_type="BigInt", decimal=string(value))
 _snapshot_manifest(value::BigFloat) =
@@ -554,6 +591,7 @@ _snapshot_manifest(value::BigFloat) =
 _snapshot_manifest(value::Rational{BigInt}) =
     (; numeric_type="Rational{BigInt}", numerator=string(numerator(value)),
        denominator=string(denominator(value)))
+_snapshot_manifest(value::AbstractString) = String(value)
 _snapshot_manifest(value::NamedTuple) =
     NamedTuple{keys(value)}(map(_snapshot_manifest, values(value)))
 _snapshot_manifest(value::Tuple) = map(_snapshot_manifest, value)
