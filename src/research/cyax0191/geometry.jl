@@ -1,0 +1,372 @@
+"""A sparse, canonical representation of a symmetric triple-intersection tensor."""
+struct CanonicalIntersectionTensor{T<:Number}
+    n::Int
+    triples::Vector{NTuple{3,Int}}
+    coefficients::Vector{T}
+end
+
+function CanonicalIntersectionTensor(n::Integer, terms::AbstractVector{<:Pair})
+    n > 0 || throw(ArgumentError("the divisor dimension must be positive"))
+    accum = Dict{NTuple{3,Int},Any}()
+    for item in terms
+        length(item.first) == 3 || throw(ArgumentError("intersection keys must be triples"))
+        key = Tuple(sort!(collect(Int, item.first)))
+        all(i -> 1 <= i <= n, key) || throw(BoundsError(1:n, key))
+        accum[key] = get(accum, key, zero(item.second)) + item.second
+    end
+    keys_sorted = sort!(collect(keys(accum)))
+    isempty(keys_sorted) && throw(ArgumentError("the intersection tensor cannot be empty"))
+    values_sorted = [accum[key] for key in keys_sorted if !iszero(accum[key])]
+    triples_sorted = [key for key in keys_sorted if !iszero(accum[key])]
+    isempty(triples_sorted) && throw(ArgumentError("the intersection tensor cannot be identically zero"))
+    T = promote_type(map(typeof, values_sorted)...)
+    CanonicalIntersectionTensor{T}(Int(n), triples_sorted, T.(values_sorted))
+end
+
+function _permuted_entries(i::Int, j::Int, k::Int)
+    if i == k
+        return ((i, j, k),)
+    elseif i == j
+        return ((i, i, k), (i, k, i), (k, i, i))
+    elseif j == k
+        return ((i, j, j), (j, i, j), (j, j, i))
+    end
+    ((i, j, k), (i, k, j), (j, i, k), (j, k, i), (k, i, j), (k, j, i))
+end
+
+function _full_entries(tensor::CanonicalIntersectionTensor)
+    ((i, j, k, value)
+     for (triple, value) in zip(tensor.triples, tensor.coefficients)
+     for (i, j, k) in _permuted_entries(triple...))
+end
+
+function dense_intersections(tensor::CanonicalIntersectionTensor{T}) where {T}
+    dense = zeros(T, tensor.n, tensor.n, tensor.n)
+    for (i, j, k, value) in _full_entries(tensor)
+        dense[i, j, k] = value
+    end
+    dense
+end
+
+"""Immutable identity and importer provenance for one geometry source."""
+struct GeometrySourceIdentity
+    source_kind::Symbol
+    source_id::String
+    source_revision::String
+    source_locator::String
+    source_sha256::String
+    polytope_identity::String
+    triangulation_identity::String
+    cytools_revision::Union{Nothing,String}
+    importer_id::String
+end
+
+function GeometrySourceIdentity(; source_kind::Symbol, source_id::AbstractString,
+        source_revision::AbstractString, source_locator::AbstractString,
+        source_sha256::AbstractString, polytope_identity="not_applicable:native_fixture",
+        triangulation_identity="not_applicable:native_fixture", cytools_revision=nothing,
+        importer_id::AbstractString)
+    source_kind in (:cytools_export, :native_fixture, :other) ||
+        throw(ArgumentError("unsupported geometry source kind: $source_kind"))
+    all(!isempty, (source_id, source_revision, source_locator, importer_id,
+        polytope_identity, triangulation_identity)) ||
+        throw(ArgumentError("geometry source identity strings must be nonempty"))
+    occursin(r"^[0-9a-f]{64}$", source_sha256) ||
+        throw(ArgumentError("source_sha256 must be 64 lowercase hexadecimal characters"))
+    cytools = cytools_revision === nothing ? nothing : String(cytools_revision)
+    source_kind === :cytools_export && (cytools === nothing || isempty(cytools)) &&
+        throw(ArgumentError("a CYTools export must record its exact CYTools revision"))
+    source_kind === :cytools_export &&
+        (startswith(polytope_identity, "not_applicable:") ||
+         startswith(triangulation_identity, "not_applicable:")) &&
+        throw(ArgumentError("a CYTools export must identify its polytope and triangulation"))
+    GeometrySourceIdentity(source_kind, String(source_id), String(source_revision),
+        String(source_locator), String(source_sha256), String(polytope_identity),
+        String(triangulation_identity), cytools, String(importer_id))
+end
+
+"""Provenance for imported cone inequalities. A toric inference is not completeness evidence."""
+struct ConeProvenance
+    status::Symbol
+    construction::String
+    normalization::String
+    completeness::Symbol
+    source_locator::String
+    function ConeProvenance(status::Symbol, construction::AbstractString,
+            normalization::AbstractString, completeness::Symbol,
+            source_locator::AbstractString)
+        status in (:torically_inferred, :independently_established, :unknown) ||
+            throw(ArgumentError("invalid cone provenance status"))
+        completeness in (:established, :not_established, :unknown) ||
+            throw(ArgumentError("invalid cone completeness status"))
+        all(!isempty, (construction, normalization, source_locator)) ||
+            throw(ArgumentError("cone provenance fields must be nonempty"))
+        status === :torically_inferred && completeness === :established &&
+            throw(ArgumentError("toric inference alone cannot establish cone completeness"))
+        new(status, String(construction), String(normalization), completeness,
+            String(source_locator))
+    end
+end
+
+"""Versioned native geometry data. Treat array fields as immutable after construction."""
+struct GeometryRecord{K<:Number,C<:Number}
+    schema_version::String
+    intersections::CanonicalIntersectionTensor{K}
+    euler_characteristic::Int
+    ordered_divisors::Tuple{Vararg{String}}
+    ordered_curves::Tuple{Vararg{String}}
+    divisor_basis_map::Matrix{Int}
+    dual_curve_basis_map::Matrix{Int}
+    domain_inequalities::Matrix{C}
+    cone_provenance::ConeProvenance
+    precision::String
+    exactness::Symbol
+    units::String
+    source::GeometrySourceIdentity
+    basis_history::Tuple{Vararg{String}}
+    artifact_sha256::String
+end
+
+function _integer_determinant(matrix::AbstractMatrix{<:Integer})
+    n, m = size(matrix)
+    n == m || throw(DimensionMismatch("basis maps must be square"))
+    A = BigInt.(matrix)
+    n == 0 && return BigInt(1)
+    sign = BigInt(1)
+    previous = BigInt(1)
+    for k in 1:(n - 1)
+        pivot_row = findfirst(i -> !iszero(A[i, k]), k:n)
+        pivot_row === nothing && return BigInt(0)
+        pivot = first(pivot_row) + k - 1
+        if pivot != k
+            A[k, :], A[pivot, :] = copy(A[pivot, :]), copy(A[k, :])
+            sign = -sign
+        end
+        pivot_value = A[k, k]
+        for i in (k + 1):n, j in (k + 1):n
+            A[i, j] = div(A[i, j] * pivot_value - A[i, k] * A[k, j], previous)
+        end
+        for i in (k + 1):n
+            A[i, k] = 0
+        end
+        previous = pivot_value
+    end
+    sign * A[n, n]
+end
+
+function _integer_inverse(matrix::AbstractMatrix{<:Integer})
+    abs(_integer_determinant(matrix)) == 1 ||
+        throw(ArgumentError("basis covariance requires a unimodular integer matrix"))
+    rational_inverse = inv(Rational{BigInt}.(matrix))
+    all(x -> denominator(x) == 1, rational_inverse) ||
+        throw(ArgumentError("unimodular inverse unexpectedly has nonintegral entries"))
+    Int.(numerator.(rational_inverse))
+end
+
+function _geometry_digest(schema, intersections, euler, divisors, curves,
+        divisor_map, curve_map, inequalities, cone, precision, exactness,
+        units, source, basis_history)
+    payload = join((string(schema), string(intersections.n),
+        join(("$(intersections.triples[i])=$(repr(intersections.coefficients[i]))"
+            for i in eachindex(intersections.triples)), ";"), string(euler),
+        join(divisors, ","), join(curves, ","), repr(divisor_map),
+        repr(curve_map), repr(inequalities), string(cone.status), cone.construction,
+        cone.normalization, string(cone.completeness), cone.source_locator,
+        precision, string(exactness), units, source.source_id,
+        source.source_revision, source.source_locator, source.source_sha256,
+        source.polytope_identity, source.triangulation_identity,
+        string(source.cytools_revision), source.importer_id,
+        join(basis_history, ";")), "|")
+    bytes2hex(sha256(codeunits(payload)))
+end
+
+function GeometryRecord(intersections::CanonicalIntersectionTensor{K};
+        schema_version="cyax0191-geometry-v1", euler_characteristic::Integer,
+        ordered_divisors, ordered_curves, divisor_basis_map,
+        dual_curve_basis_map, domain_inequalities, cone_provenance::ConeProvenance,
+        precision::AbstractString, exactness::Symbol, units::AbstractString,
+        source::GeometrySourceIdentity, basis_history=()) where {K}
+    n = intersections.n
+    divisors = Tuple(String.(ordered_divisors))
+    curves = Tuple(String.(ordered_curves))
+    length(divisors) == n || throw(DimensionMismatch("one ordered divisor is required per modulus"))
+    length(curves) == n || throw(DimensionMismatch("one dual curve is required per modulus"))
+    length(unique(divisors)) == n || throw(ArgumentError("ordered divisor labels must be unique"))
+    length(unique(curves)) == n || throw(ArgumentError("ordered curve labels must be unique"))
+    dmap = Matrix{Int}(divisor_basis_map)
+    cmap = Matrix{Int}(dual_curve_basis_map)
+    size(dmap) == (n, n) || throw(DimensionMismatch("divisor basis map must be n×n"))
+    size(cmap) == (n, n) || throw(DimensionMismatch("dual curve basis map must be n×n"))
+    _integer_determinant(dmap) != 0 || throw(ArgumentError("divisor basis map is singular"))
+    _integer_determinant(cmap) != 0 || throw(ArgumentError("dual curve basis map is singular"))
+    dmap' * cmap == Matrix{Int}(I, n, n) ||
+        throw(ArgumentError("divisor and dual curve basis maps are not dual"))
+    inequalities = Matrix(domain_inequalities)
+    size(inequalities, 2) == n || throw(DimensionMismatch("cone inequalities must have n columns"))
+    size(inequalities, 1) > 0 || throw(ArgumentError("at least one imported cone inequality is required"))
+    all(isfinite, inequalities) || throw(ArgumentError("cone inequalities must be finite"))
+    exactness in (:exact, :rational, :approximate) || throw(ArgumentError("invalid geometry exactness"))
+    all(!isempty, (schema_version, precision, units)) || throw(ArgumentError("geometry metadata must be nonempty"))
+    history = Tuple(String.(basis_history))
+    all(!isempty, history) || throw(ArgumentError("basis history entries must be nonempty"))
+    artifact_sha = _geometry_digest(schema_version, intersections, Int(euler_characteristic),
+        divisors, curves, dmap, cmap, inequalities, cone_provenance, precision,
+        exactness, units, source, history)
+    GeometryRecord{K,eltype(inequalities)}(String(schema_version), intersections,
+        Int(euler_characteristic), divisors, curves, dmap, cmap, inequalities,
+        cone_provenance, String(precision), exactness, String(units), source,
+        history, artifact_sha)
+end
+
+abstract type AbstractGeometryImporter end
+
+"""Importer for a serialized CYTools/native payload; it never calls Python."""
+struct NativePayloadImporter <: AbstractGeometryImporter end
+
+function import_geometry(::NativePayloadImporter, payload::NamedTuple)
+    required = (:intersections, :euler_characteristic, :ordered_divisors,
+        :ordered_curves, :divisor_basis_map, :dual_curve_basis_map,
+        :domain_inequalities, :cone_provenance, :precision, :exactness,
+        :units, :source)
+    all(key -> hasproperty(payload, key), required) ||
+        throw(ArgumentError("serialized geometry payload is missing required fields"))
+    GeometryRecord(payload.intersections;
+        euler_characteristic=payload.euler_characteristic,
+        ordered_divisors=payload.ordered_divisors,
+        ordered_curves=payload.ordered_curves,
+        divisor_basis_map=payload.divisor_basis_map,
+        dual_curve_basis_map=payload.dual_curve_basis_map,
+        domain_inequalities=payload.domain_inequalities,
+        cone_provenance=payload.cone_provenance, precision=payload.precision,
+        exactness=payload.exactness, units=payload.units, source=payload.source,
+        schema_version=hasproperty(payload, :schema_version) ? payload.schema_version : "cyax0191-geometry-v1",
+        basis_history=hasproperty(payload, :basis_history) ? payload.basis_history : ())
+end
+
+"""Return the dense symmetric tensor, retaining exact element type where possible."""
+function _dense(tensor::CanonicalIntersectionTensor{T}) where {T}
+    dense_intersections(tensor)
+end
+
+"""Calabi–Yau volume from the canonical sparse tensor."""
+function calabi_yau_volume(geometry::GeometryRecord, t::AbstractVector)
+    length(t) == geometry.intersections.n || throw(DimensionMismatch("wrong two-cycle vector length"))
+    total = (t[1]^3 * geometry.intersections.coefficients[1]) * (0 // 1)
+    for (i, j, k, value) in _full_entries(geometry.intersections)
+        total += (value * t[i] * t[j] * t[k]) * (1 // 6)
+    end
+    total
+end
+
+"""Divisor four-cycle volumes tau_i = 1/2 kappa_ijk t^j t^k."""
+function divisor_volumes(geometry::GeometryRecord, t::AbstractVector)
+    n = geometry.intersections.n
+    length(t) == n || throw(DimensionMismatch("wrong two-cycle vector length"))
+    values = [zero(t[1] * t[1] * geometry.intersections.coefficients[1]) * (1 // 1) for _ in 1:n]
+    for (i, j, k, value) in _full_entries(geometry.intersections)
+        values[i] += (value * t[j] * t[k]) * (1 // 2)
+    end
+    values
+end
+
+"""Jacobian d tau_i/d t_j = kappa_ijk t^k."""
+function divisor_volume_jacobian(geometry::GeometryRecord, t::AbstractVector)
+    n = geometry.intersections.n
+    length(t) == n || throw(DimensionMismatch("wrong two-cycle vector length"))
+    J = [zero(t[1] * geometry.intersections.coefficients[1]) for _ in 1:n, _ in 1:n]
+    for (i, j, k, value) in _full_entries(geometry.intersections)
+        J[i, j] += value * t[k]
+    end
+    J
+end
+
+"""Imported cone margins A*t. These are not physical curve volumes."""
+cone_margins(geometry::GeometryRecord, t::AbstractVector) = geometry.domain_inequalities * t
+
+function imported_domain_status(geometry::GeometryRecord, t::AbstractVector)
+    margins = cone_margins(geometry, t)
+    all(isfinite, margins) && all(>(zero(eltype(margins))), margins) ? :PASS : :FAIL
+end
+
+function geometry_identity(geometry::GeometryRecord)
+    (; schema_version=geometry.schema_version,
+       artifact_sha256=geometry.artifact_sha256,
+       source_id=geometry.source.source_id,
+       source_revision=geometry.source.source_revision,
+       source_locator=geometry.source.source_locator,
+       source_sha256=geometry.source.source_sha256,
+       polytope_identity=geometry.source.polytope_identity,
+       triangulation_identity=geometry.source.triangulation_identity,
+       cytools_revision=geometry.source.cytools_revision,
+       importer_id=geometry.source.importer_id,
+       euler_characteristic=geometry.euler_characteristic,
+       ordered_divisors=geometry.ordered_divisors,
+       ordered_curves=geometry.ordered_curves,
+       divisor_basis_map=copy(geometry.divisor_basis_map),
+       dual_curve_basis_map=copy(geometry.dual_curve_basis_map),
+       cone_status=geometry.cone_provenance.status,
+       cone_completeness=geometry.cone_provenance.completeness,
+       precision=geometry.precision, exactness=geometry.exactness,
+       units=geometry.units)
+end
+
+"""Apply a unimodular divisor-basis change D_new = B*D_old."""
+function change_divisor_basis(geometry::GeometryRecord, B::AbstractMatrix{<:Integer})
+    n = geometry.intersections.n
+    size(B) == (n, n) || throw(DimensionMismatch("basis change must be n×n"))
+    Binv = _integer_inverse(B)
+    dense = _dense(geometry.intersections)
+    transformed = zeros(eltype(dense), n, n, n)
+    for a in 1:n, b in 1:n, c in 1:n, i in 1:n, j in 1:n, k in 1:n
+        transformed[a, b, c] += B[i, a] * B[j, b] * B[k, c] * dense[i, j, k]
+    end
+    terms = Pair{NTuple{3,Int},eltype(dense)}[]
+    for a in 1:n, b in a:n, c in b:n
+        !iszero(transformed[a, b, c]) && push!(terms, (a, b, c) => transformed[a, b, c])
+    end
+    tensor = CanonicalIntersectionTensor(n, terms)
+    divisors = ["basis$(length(geometry.basis_history)+1)_D$i" for i in 1:n]
+    curves = ["basis$(length(geometry.basis_history)+1)_C$i" for i in 1:n]
+    history_entry = "D_new=$(repr(Matrix{Int}(B)))*D_old"
+    GeometryRecord(tensor;
+        schema_version=geometry.schema_version,
+        euler_characteristic=geometry.euler_characteristic,
+        ordered_divisors=divisors, ordered_curves=curves,
+        divisor_basis_map=geometry.divisor_basis_map * Matrix{Int}(B),
+        dual_curve_basis_map=geometry.dual_curve_basis_map * Binv',
+        domain_inequalities=geometry.domain_inequalities * B,
+        cone_provenance=geometry.cone_provenance,
+        precision=geometry.precision, exactness=geometry.exactness,
+        units=geometry.units, source=geometry.source,
+        basis_history=(geometry.basis_history..., history_entry))
+end
+
+"""A small exact native fixture used by Gate B and the local architecture tests."""
+function synthetic_geometry_fixture()
+    tensor = CanonicalIntersectionTensor(2, Pair[
+        (1, 1, 1) => 3,
+        (1, 1, 2) => 1,
+        (1, 2, 2) => 1,
+        (2, 2, 2) => 4,
+    ])
+    fixture_bytes = "cyax0191-native-geometry-v1|k111=3|k112=1|k122=1|k222=4|chi=-2|A=[1 1;1 -1]"
+    source = GeometrySourceIdentity(source_kind=:native_fixture,
+        source_id="cyax0191-two-modulus-fixture-v1",
+        source_revision="fixture-v1", source_locator="test/research/cyax0191/fixtures.jl",
+        source_sha256=bytes2hex(sha256(codeunits(fixture_bytes))),
+        polytope_identity="not_applicable:synthetic-two-modulus-fixture-v1",
+        triangulation_identity="not_applicable:synthetic-two-modulus-fixture-v1",
+        cytools_revision=nothing, importer_id="CYAX0191.NativePayloadImporter/v1")
+    cone = ConeProvenance(:torically_inferred,
+        "synthetic two-inequality fixture", "dimensionless row-normalized cone margins",
+        :not_established, "test/research/cyax0191/fixtures.jl")
+    payload = (; intersections=tensor, euler_characteristic=-2,
+        ordered_divisors=("D1", "D2"), ordered_curves=("C1", "C2"),
+        divisor_basis_map=Matrix{Int}(I, 2, 2),
+        dual_curve_basis_map=Matrix{Int}(I, 2, 2),
+        domain_inequalities=Int[1 1; 1 -1], cone_provenance=cone,
+        precision="exact integer intersections; exact rational coordinates supported",
+        exactness=:exact, units="dimensionless synthetic geometry",
+        source=source, schema_version="cyax0191-geometry-v1")
+    import_geometry(NativePayloadImporter(), payload)
+end

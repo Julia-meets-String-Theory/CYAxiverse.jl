@@ -6,6 +6,8 @@ using Test
 using HDF5
 using ArbNumerics: ArbFloat, precision, setprecision
 
+include(joinpath(@__DIR__, "research", "cyax0191", "runtests.jl"))
+
 const _FULL = get(ENV, "CYAXIVERSE_TEST_FULL", "1") == "1"
 
 @testset "Core plotting API stays optional" begin
