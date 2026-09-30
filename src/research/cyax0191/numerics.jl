@@ -167,7 +167,16 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
                 "damped-newton-gradient-residual", failures)
         end
         iteration == criteria.max_iterations && break
-        hessian!(H, differentiation, f, x; scales=criteria.field_scales)
+        try
+            hessian!(H, differentiation, f, x; scales=criteria.field_scales)
+        catch error
+            if error isa DomainError
+                push!(failures, "Hessian evaluation rejected the current iterate at iteration $iteration")
+                return SearchResult(:failed, x, value, residual, iteration,
+                    "damped-newton-gradient-residual", failures)
+            end
+            rethrow()
+        end
         step = try
             -(H \ g)
         catch error

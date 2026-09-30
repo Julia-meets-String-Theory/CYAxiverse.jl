@@ -49,6 +49,28 @@ _thaw_frozen(::Type{T}, value::T) where {T} = value
 _safe_frozen_encoding(value) = isbitstype(typeof(value))
 _safe_frozen_encoding(value::Tuple) = all(_safe_frozen_encoding, value)
 
+"""Immutable encoded storage for a scalar whose numeric representation can mutate."""
+struct FrozenScalar{T<:AbstractFloat}
+    encoded::Any
+
+    function FrozenScalar{T}(encoded, ::Val{:encoded}) where {T<:AbstractFloat}
+        _safe_frozen_encoding(encoded) ||
+            throw(ArgumentError("frozen scalar storage must contain only immutable encodings"))
+        valid = try
+            _thaw_frozen(T, encoded) isa T
+        catch
+            false
+        end
+        valid || throw(ArgumentError("frozen scalar contains an invalid value encoding"))
+        new{T}(encoded)
+    end
+end
+
+FrozenScalar(value::T) where {T<:AbstractFloat} =
+    FrozenScalar{T}(_freeze_value(value), Val(:encoded))
+_thaw_scalar(value::FrozenScalar{T}) where {T<:AbstractFloat} =
+    _thaw_frozen(T, getfield(value, :encoded))
+
 function FrozenArray(array::AbstractArray{T,N}) where {T,N}
     values = Tuple(_freeze_value(value) for value in array)
     FrozenArray{T,N,length(values)}(values, size(array), Val(:encoded))
@@ -74,6 +96,22 @@ struct CanonicalIntersectionTensor{T<:Number}
     n::Int
     triples::Tuple{Vararg{NTuple{3,Int}}}
     coefficients::FrozenArray{T,1}
+
+    function CanonicalIntersectionTensor{T}(n::Int,
+            triples::Tuple{Vararg{NTuple{3,Int}}},
+            coefficients::FrozenArray{T,1}) where {T<:Number}
+        n > 0 || throw(ArgumentError("the divisor dimension must be positive"))
+        !isempty(triples) || throw(ArgumentError("the intersection tensor cannot be empty"))
+        length(triples) == length(coefficients) ||
+            throw(DimensionMismatch("intersection keys and coefficients must have equal length"))
+        all(triple -> 1 <= triple[1] <= triple[2] <= triple[3] <= n, triples) ||
+            throw(ArgumentError("intersection triples must be ordered and within the divisor basis"))
+        issorted(triples) && length(unique(triples)) == length(triples) ||
+            throw(ArgumentError("intersection triples must be sorted and unique"))
+        all(value -> !iszero(value) && isfinite(value), coefficients) ||
+            throw(ArgumentError("intersection coefficients must be finite and nonzero"))
+        new{T}(n, triples, coefficients)
+    end
 end
 
 _widen_exact(value::Integer) = BigInt(value)
@@ -136,6 +174,28 @@ struct GeometrySourceIdentity
     triangulation_identity::String
     cytools_revision::Union{Nothing,String}
     importer_id::String
+
+    function GeometrySourceIdentity(source_kind::Symbol, source_id::String,
+            source_revision::String, source_locator::String, source_sha256::String,
+            polytope_identity::String, triangulation_identity::String,
+            cytools_revision::Union{Nothing,String}, importer_id::String)
+        source_kind in (:cytools_export, :native_fixture, :other) ||
+            throw(ArgumentError("unsupported geometry source kind: $source_kind"))
+        all(!isempty, (source_id, source_revision, source_locator, importer_id,
+            polytope_identity, triangulation_identity)) ||
+            throw(ArgumentError("geometry source identity strings must be nonempty"))
+        occursin(r"^[0-9a-f]{64}$", source_sha256) ||
+            throw(ArgumentError("source_sha256 must be 64 lowercase hexadecimal characters"))
+        source_kind === :cytools_export &&
+            (cytools_revision === nothing || isempty(cytools_revision)) &&
+            throw(ArgumentError("a CYTools export must record its exact CYTools revision"))
+        source_kind === :cytools_export &&
+            (startswith(polytope_identity, "not_applicable:") ||
+             startswith(triangulation_identity, "not_applicable:")) &&
+            throw(ArgumentError("a CYTools export must identify its polytope and triangulation"))
+        new(source_kind, source_id, source_revision, source_locator, source_sha256,
+            polytope_identity, triangulation_identity, cytools_revision, importer_id)
+    end
 end
 
 function GeometrySourceIdentity(; source_kind::Symbol, source_id::AbstractString,
@@ -210,6 +270,10 @@ struct GeometryRecord{K<:Number,C<:Number}
             domain_inequalities::FrozenArray{C,2}, cone_provenance::ConeProvenance,
             precision::String, exactness::Symbol, units::String,
             source::GeometrySourceIdentity, basis_history::Tuple{Vararg{String}}) where {K<:Number,C<:Number}
+        _validate_geometry_record_components(intersections, euler_characteristic,
+            ordered_divisors, ordered_curves, divisor_basis_map, dual_curve_basis_map,
+            domain_inequalities, cone_provenance, schema_version, precision,
+            exactness, units, source, basis_history)
         artifact_sha = _geometry_digest(schema_version, intersections, euler_characteristic,
             ordered_divisors, ordered_curves, divisor_basis_map, dual_curve_basis_map,
             domain_inequalities, cone_provenance, precision, exactness, units, source,
@@ -255,6 +319,55 @@ function _integer_inverse(matrix::AbstractMatrix{<:Integer})
     all(x -> denominator(x) == 1, rational_inverse) ||
         throw(ArgumentError("unimodular inverse unexpectedly has nonintegral entries"))
     BigInt.(numerator.(rational_inverse))
+end
+
+function _validate_geometry_record_components(intersections::CanonicalIntersectionTensor,
+        euler_characteristic::Integer, divisors, curves, divisor_map, curve_map,
+        inequalities, cone::ConeProvenance, schema_version::AbstractString,
+        precision::AbstractString, exactness::Symbol, units::AbstractString,
+        source::GeometrySourceIdentity, basis_history)
+    n = intersections.n
+    length(divisors) == n || throw(DimensionMismatch("one ordered divisor is required per modulus"))
+    length(curves) == n || throw(DimensionMismatch("one dual curve is required per modulus"))
+    all(!isempty, divisors) || throw(ArgumentError("ordered divisor labels must be nonempty"))
+    all(!isempty, curves) || throw(ArgumentError("ordered curve labels must be nonempty"))
+    length(unique(divisors)) == n || throw(ArgumentError("ordered divisor labels must be unique"))
+    length(unique(curves)) == n || throw(ArgumentError("ordered curve labels must be unique"))
+    size(divisor_map) == (n, n) || throw(DimensionMismatch("divisor basis map must be n×n"))
+    size(curve_map) == (n, n) || throw(DimensionMismatch("dual curve basis map must be n×n"))
+    all(value -> value isa Integer, divisor_map) ||
+        throw(ArgumentError("divisor basis map must be integral"))
+    all(value -> value isa Integer, curve_map) ||
+        throw(ArgumentError("dual curve basis map must be integral"))
+    _integer_determinant(divisor_map) != 0 || throw(ArgumentError("divisor basis map is singular"))
+    _integer_determinant(curve_map) != 0 || throw(ArgumentError("dual curve basis map is singular"))
+    BigInt.(divisor_map)' * BigInt.(curve_map) == Matrix{BigInt}(I, n, n) ||
+        throw(ArgumentError("divisor and dual curve basis maps are not dual"))
+    size(inequalities, 2) == n || throw(DimensionMismatch("cone inequalities must have n columns"))
+    size(inequalities, 1) > 0 || throw(ArgumentError("at least one imported cone inequality is required"))
+    all(isfinite, inequalities) || throw(ArgumentError("cone inequalities must be finite"))
+    exactness in (:exact, :rational, :approximate) || throw(ArgumentError("invalid geometry exactness"))
+    all(!isempty, (schema_version, precision, units)) ||
+        throw(ArgumentError("geometry metadata must be nonempty"))
+    history = Tuple(String.(basis_history))
+    all(!isempty, history) || throw(ArgumentError("basis history entries must be nonempty"))
+    # Calling the typed source constructor here would copy every string. Validate
+    # its invariants directly because the fields are already immutable Strings.
+    source.source_kind in (:cytools_export, :native_fixture, :other) ||
+        throw(ArgumentError("unsupported geometry source kind: $(source.source_kind)"))
+    all(!isempty, (source.source_id, source.source_revision, source.source_locator,
+        source.importer_id, source.polytope_identity, source.triangulation_identity)) ||
+        throw(ArgumentError("geometry source identity strings must be nonempty"))
+    occursin(r"^[0-9a-f]{64}$", source.source_sha256) ||
+        throw(ArgumentError("source_sha256 must be 64 lowercase hexadecimal characters"))
+    source.source_kind === :cytools_export &&
+        (source.cytools_revision === nothing || isempty(source.cytools_revision)) &&
+        throw(ArgumentError("a CYTools export must record its exact CYTools revision"))
+    source.source_kind === :cytools_export &&
+        (startswith(source.polytope_identity, "not_applicable:") ||
+         startswith(source.triangulation_identity, "not_applicable:")) &&
+        throw(ArgumentError("a CYTools export must identify its polytope and triangulation"))
+    true
 end
 
 function _push_digest_matrix!(parts::Vector{String}, name::String, matrix::AbstractMatrix)

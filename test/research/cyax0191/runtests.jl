@@ -252,6 +252,17 @@ end
         precision=one_geometry.precision, exactness=one_geometry.exactness,
         units=one_geometry.units, source=one_geometry.source)
 
+    geometry = synthetic_geometry_fixture()
+    K = eltype(geometry.intersections.coefficients)
+    C = eltype(geometry.domain_inequalities)
+    malformed_cone = CYAX0191.FrozenArray(reshape([1, 0, 0], 1, 3))
+    @test_throws DimensionMismatch GeometryRecord{K,C}(
+        geometry.schema_version, geometry.intersections, geometry.euler_characteristic,
+        geometry.ordered_divisors, geometry.ordered_curves, geometry.divisor_basis_map,
+        geometry.dual_curve_basis_map, malformed_cone, geometry.cone_provenance,
+        geometry.precision, geometry.exactness, geometry.units, geometry.source,
+        geometry.basis_history)
+
     large_n = 24
     sparse_tensor = CanonicalIntersectionTensor(large_n,
         Pair[(1, 1, 1) => 2, (large_n, large_n, large_n) => 3])
@@ -280,6 +291,13 @@ end
 end
 
 @testset "CYAX-0191 Gate B no-scale, BBHL, and full-metric discriminator" begin
+    convention = fixture_convention()
+    @test_throws ArgumentError ModelConvention("", convention.axion_periodicity,
+        convention.condensate_branch, convention.frame,
+        convention.length_and_alpha_prime_units, convention.planck_normalization,
+        convention.kcs_treatment, convention.active_fields, convention.frozen_fields,
+        convention.flux_assumptions, convention.heavy_field_reduction,
+        convention.source_convention)
     geometry = one_modulus_geometry()
     common = (; w0=1.0, theta0=0.0, gs=0.5, kcs=0.1,
         amplitudes=[0.0], actions=[1.0], phases=[0.0], charges=reshape([1], 1, 1))
@@ -565,6 +583,17 @@ end
     @test any(occursin("rejected the current iterate", failure)
         for failure in near_domain_search.failures)
 
+    hessian_domain_objective(x) = x[1] < 1 ? x[1]^2 :
+        throw(DomainError(x[1], "outside test domain"))
+    hessian_domain_search = search_stationary(DampedNewtonSearch(),
+        hessian_domain_objective, [0.99999],
+        SearchCriteria([1.0], 1.0, 1e-12; max_iterations=3))
+    @test hessian_domain_search.status == :failed
+    @test hessian_domain_search.point == [0.99999]
+    @test hessian_domain_search.value ≈ 0.99999^2
+    @test any(occursin("Hessian evaluation rejected", failure)
+        for failure in hessian_domain_search.failures)
+
     fluct = fluctuation_analysis(GeneralizedEigenBackend(),
         [-0.5 0.0 0.0 0.0; 0.0 0.0 0.0 0.0; 0.0 0.0 5e-11 0.0; 0.0 0.0 0.0 2.0],
         [2.0 0.0 0.0 0.0; 0.0 1.0 0.0 0.0; 0.0 0.0 1.0 0.0; 0.0 0.0 0.0 1.0];
@@ -712,8 +741,18 @@ end
     @test_throws MethodError Base.GMP.MPZ.set!(exposed_charge_from_values, BigInt(77))
     @test_throws MethodError CYAX0191.FrozenArray{BigInt,1,1}((BigInt(3),), (1,))
     exposed_w0 = immutable_model.w0_magnitude
-    @test exposed_w0 !== getfield(immutable_model, :w0_magnitude)
-    @test getfield(exposed_w0, :d) != getfield(model_w0_input, :d)
+    @test exposed_w0 == model_w0_input
+    @test precision(exposed_w0) == precision(model_w0_input)
+    @test getfield(immutable_model, :w0_magnitude) isa CYAX0191.FrozenScalar{BigFloat}
+    @test getfield(getfield(immutable_model, :w0_magnitude), :encoded)[1] ==
+        precision(model_w0_input)
+    @test_throws MethodError Base.MPFR.nextfloat!(getfield(immutable_model, :w0_magnitude))
+    for field in (:w0_magnitude, :theta0, :gs, :kcs)
+        @test getfield(immutable_model, field) isa CYAX0191.FrozenScalar{BigFloat}
+        @test_throws MethodError Base.MPFR.nextfloat!(getfield(immutable_model, field))
+    end
+    Base.MPFR.nextfloat!(exposed_w0)
+    @test immutable_model.w0_magnitude == model_w0_input
     @test immutable_model.charges[1, 1] == 1
     @test immutable_model.amplitudes[1] == 0.2
     @test immutable_model.actions[1] == 0.7
@@ -733,7 +772,22 @@ end
     @test all(p -> p.stationarity_scale_rule !== "", policies)
     @test policy_manifest(frozen_policy(:P0_B3)).frozen_before_gate_c
     policy_copy = policy_b1.potential_scale
-    @test policy_copy !== getfield(policy_b1, :potential_scale)
+    @test policy_copy isa BigFloat
+    @test precision(policy_copy) == 256
+    @test getfield(policy_b1, :potential_scale) isa CYAX0191.FrozenScalar{BigFloat}
+    @test getfield(getfield(policy_b1, :potential_scale), :encoded)[1] == 256
+    @test_throws MethodError Base.MPFR.nextfloat!(getfield(policy_b1, :potential_scale))
+    for field in (:potential_scale, :stationarity_tolerance, :root_tolerance,
+            :optimizer_gradient_tolerance, :backtracking_factor, :minimum_step,
+            :absolute_spectral_threshold, :relative_spectral_threshold)
+        @test getfield(policy_b1, field) isa CYAX0191.FrozenScalar{BigFloat}
+        @test_throws MethodError Base.MPFR.nextfloat!(getfield(policy_b1, field))
+    end
+    @test all(value isa CYAX0191.FrozenScalar{BigFloat}
+        for value in getfield(policy_b1, :field_scales))
+    original_policy_scale = string(policy_b1.potential_scale)
+    Base.MPFR.nextfloat!(policy_copy)
+    @test string(policy_b1.potential_scale) == original_policy_scale
     @test policy_manifest(policy_b1).stationarity_scale_rule == policy_b1.stationarity_scale_rule
     @test_throws KeyError frozen_policy(:unknown)
     @test scaled_stationarity_residual([1e-7, 1e-7], [1.0, 2.0], 1e-6) ≈ 0.2
@@ -822,13 +876,16 @@ end
         @test precision(eval_big.value) >= 128
         @test CYAX0191._metric_assessment(eval_big.parent_metric).status == :PASS
         exposed_big_w0 = model_big.w0_magnitude
-        @test exposed_big_w0 !== getfield(model_big, :w0_magnitude)
+        @test exposed_big_w0 isa BigFloat
+        @test precision(exposed_big_w0) == 128
+        @test getfield(model_big, :w0_magnitude) isa CYAX0191.FrozenScalar{BigFloat}
         big_hessian = BigFloat[1 0; 0 2]
         big_fluctuation = fluctuation_analysis(GeneralizedEigenBackend(),
             big_hessian, Matrix{BigFloat}(I, 2, 2))
         @test eltype(big_fluctuation.generalized_mass_eigenvalues) === BigFloat
         @test big_fluctuation.generalized_mass_eigenvalues == BigFloat[1, 2]
         big_policy_scale = policy_b1.potential_scale
-        @test big_policy_scale !== getfield(policy_b1, :potential_scale)
+        @test big_policy_scale isa BigFloat
+        @test getfield(policy_b1, :potential_scale) isa CYAX0191.FrozenScalar{BigFloat}
     end
 end

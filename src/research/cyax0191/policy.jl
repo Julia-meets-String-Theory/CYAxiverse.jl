@@ -3,31 +3,83 @@ struct FrozenNumericalPolicy{T<:AbstractFloat}
     benchmark_id::Symbol
     precision_bits::Int
     coordinate_order::Tuple{Vararg{String}}
-    field_scales::Tuple{Vararg{T}}
-    potential_scale::T
+    field_scales::Tuple{Vararg{FrozenScalar{T}}}
+    potential_scale::FrozenScalar{T}
     potential_scale_rule::String
     stationarity_scale_rule::String
-    stationarity_tolerance::T
-    root_tolerance::T
-    optimizer_gradient_tolerance::T
+    stationarity_tolerance::FrozenScalar{T}
+    root_tolerance::FrozenScalar{T}
+    optimizer_gradient_tolerance::FrozenScalar{T}
     solver_method::String
     maximum_iterations::Int
-    backtracking_factor::T
-    minimum_step::T
+    backtracking_factor::FrozenScalar{T}
+    minimum_step::FrozenScalar{T}
     search_seed::Int
     search_budget::Int
     duplicate_rule::String
-    absolute_spectral_threshold::T
-    relative_spectral_threshold::T
+    absolute_spectral_threshold::FrozenScalar{T}
+    relative_spectral_threshold::FrozenScalar{T}
     spectral_normalization::String
     frozen_before_gate_c::Bool
+
+    function FrozenNumericalPolicy{T}(benchmark_id::Symbol, precision_bits::Int,
+            coordinate_order::Tuple{Vararg{String}},
+            field_scales::Tuple{Vararg{FrozenScalar{T}}},
+            potential_scale::FrozenScalar{T}, potential_scale_rule::String,
+            stationarity_scale_rule::String, stationarity_tolerance::FrozenScalar{T},
+            root_tolerance::FrozenScalar{T}, optimizer_gradient_tolerance::FrozenScalar{T},
+            solver_method::String, maximum_iterations::Int,
+            backtracking_factor::FrozenScalar{T}, minimum_step::FrozenScalar{T},
+            search_seed::Int, search_budget::Int, duplicate_rule::String,
+            absolute_spectral_threshold::FrozenScalar{T},
+            relative_spectral_threshold::FrozenScalar{T}, spectral_normalization::String,
+            frozen_before_gate_c::Bool) where {T<:AbstractFloat}
+        values = (_thaw_scalar.(field_scales)..., _thaw_scalar(potential_scale),
+            _thaw_scalar(stationarity_tolerance), _thaw_scalar(root_tolerance),
+            _thaw_scalar(optimizer_gradient_tolerance), _thaw_scalar(backtracking_factor),
+            _thaw_scalar(minimum_step), _thaw_scalar(absolute_spectral_threshold),
+            _thaw_scalar(relative_spectral_threshold))
+        all(isfinite, values) || throw(ArgumentError("frozen policy values must be finite"))
+        !isempty(coordinate_order) && all(!isempty, coordinate_order) &&
+            length(unique(coordinate_order)) == length(coordinate_order) ||
+            throw(ArgumentError("frozen policy coordinates must be nonempty and unique"))
+        length(field_scales) == length(coordinate_order) ||
+            throw(DimensionMismatch("field scales must match the frozen coordinate order"))
+        all(>(zero(T)), _thaw_scalar.(field_scales)) ||
+            throw(ArgumentError("frozen field scales must be positive"))
+        _thaw_scalar(potential_scale) > zero(T) ||
+            throw(ArgumentError("frozen potential scale must be positive"))
+        all(>(zero(T)), (_thaw_scalar(stationarity_tolerance),
+            _thaw_scalar(root_tolerance), _thaw_scalar(optimizer_gradient_tolerance))) ||
+            throw(ArgumentError("frozen solver tolerances must be positive"))
+        zero(T) < _thaw_scalar(backtracking_factor) < one(T) ||
+            throw(ArgumentError("frozen backtracking factor must lie in (0,1)"))
+        zero(T) < _thaw_scalar(minimum_step) <= one(T) ||
+            throw(ArgumentError("frozen minimum step must lie in (0,1]"))
+        all(>=(zero(T)), (_thaw_scalar(absolute_spectral_threshold),
+            _thaw_scalar(relative_spectral_threshold))) ||
+            throw(ArgumentError("frozen spectral thresholds must be nonnegative"))
+        precision_bits > 0 && maximum_iterations > 0 && search_budget > 0 ||
+            throw(ArgumentError("frozen precision and search budgets must be positive"))
+        search_seed >= 0 || throw(ArgumentError("frozen search seed must be nonnegative"))
+        all(!isempty, (potential_scale_rule, stationarity_scale_rule, solver_method,
+            duplicate_rule, spectral_normalization)) ||
+            throw(ArgumentError("frozen policy rules must be explicit"))
+        frozen_before_gate_c ||
+            throw(ArgumentError("a frozen Gate C policy must be frozen before Gate C"))
+        new{T}(benchmark_id, precision_bits, coordinate_order, field_scales,
+            potential_scale, potential_scale_rule, stationarity_scale_rule,
+            stationarity_tolerance, root_tolerance, optimizer_gradient_tolerance,
+            solver_method, maximum_iterations, backtracking_factor, minimum_step,
+            search_seed, search_budget, duplicate_rule, absolute_spectral_threshold,
+            relative_spectral_threshold, spectral_normalization, frozen_before_gate_c)
+    end
 end
 
 function Base.getproperty(policy::FrozenNumericalPolicy, name::Symbol)
     value = getfield(policy, name)
-    value isa BigFloat && return deepcopy(value)
-    value isa Tuple && any(item -> item isa BigFloat, value) &&
-        return Tuple(deepcopy(item) for item in value)
+    name === :field_scales && return Tuple(_thaw_scalar(item) for item in value)
+    value isa FrozenScalar && return _thaw_scalar(value)
     value
 end
 
@@ -45,14 +97,16 @@ function _frozen_policy(benchmark_id::Symbol, chi::Int, gs_text::String,
         vscale = exp(kcs) * gs * w0^2 / (T(2) * yref^2)
         names = Tuple(String.(coordinate_order))
         policy = FrozenNumericalPolicy{T}(benchmark_id, 256, names,
-            Tuple(fill(one(T), length(names))), vscale,
+            Tuple(FrozenScalar(one(T)) for _ in names), FrozenScalar(vscale),
             "e^(K_cs)*g_s*|W0|^2/(2*Y_ref^2), evaluated at V_ref=1; independent of any stationary point",
             "sum_i|V_active,i| at each search point; if all active terms vanish, use e^K*(|W0|+sum_a|W_NP,a|)^2, or 1 for identically zero superpotential; no cancellation-suppressed |V|",
-            parse(T, "1e-12"), parse(T, "1e-12"), parse(T, "1e-12"),
+            FrozenScalar(parse(T, "1e-12")), FrozenScalar(parse(T, "1e-12")),
+            FrozenScalar(parse(T, "1e-12")),
             "damped Newton on the maximum componentwise scaled stationarity residual",
-            10_000, parse(T, "0.5"), T(2)^(-20), 191019, 10_000,
+            10_000, FrozenScalar(parse(T, "0.5")), FrozenScalar(T(2)^(-20)),
+            191019, 10_000,
             "canonical axion representatives; duplicates require scaled coordinate distance <= 1e-10",
-            parse(T, "1e-12"), parse(T, "1e-10"),
+            FrozenScalar(parse(T, "1e-12")), FrozenScalar(parse(T, "1e-10")),
             "generalized eigenvalues of S*H*S/V_scale and S*G*S, with frozen field scales S; equivalently m^2/V_scale",
             true)
         all(>(zero(T)), policy.field_scales) || error("frozen field scales must be positive")

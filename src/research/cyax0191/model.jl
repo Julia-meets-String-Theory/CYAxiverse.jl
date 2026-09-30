@@ -16,6 +16,22 @@ struct ModelConvention
     flux_assumptions::Tuple{Vararg{String}}
     heavy_field_reduction::String
     source_convention::String
+
+    function ModelConvention(coordinate_map::String, axion_periodicity::String,
+            condensate_branch::String, frame::String, length_and_alpha_prime_units::String,
+            planck_normalization::String, kcs_treatment::String,
+            active_fields::Tuple{Vararg{String}}, frozen_fields::Tuple{Vararg{String}},
+            flux_assumptions::Tuple{Vararg{String}}, heavy_field_reduction::String,
+            source_convention::String)
+        strings = (coordinate_map, axion_periodicity, condensate_branch, frame,
+            length_and_alpha_prime_units, planck_normalization, kcs_treatment,
+            heavy_field_reduction, source_convention)
+        all(!isempty, strings) || throw(ArgumentError("model convention fields must be explicit"))
+        new(coordinate_map, axion_periodicity, condensate_branch, frame,
+            length_and_alpha_prime_units, planck_normalization, kcs_treatment,
+            active_fields, frozen_fields, flux_assumptions, heavy_field_reduction,
+            source_convention)
+    end
 end
 
 function ModelConvention(; coordinate_map, axion_periodicity, condensate_branch,
@@ -62,10 +78,10 @@ end
 
 """Phase-0 retained Kähler potential with a generic integer charge matrix."""
 struct KahlerModel{T<:AbstractFloat,U}
-    w0_magnitude::T
-    theta0::T
-    gs::T
-    kcs::T
+    w0_magnitude::FrozenScalar{T}
+    theta0::FrozenScalar{T}
+    gs::FrozenScalar{T}
+    kcs::FrozenScalar{T}
     amplitudes::FrozenArray{T,1}
     actions::FrozenArray{T,1}
     phases::FrozenArray{T,1}
@@ -74,11 +90,37 @@ struct KahlerModel{T<:AbstractFloat,U}
     switches::ModelSwitches
     uplift::U
     identity::String
+
+    function KahlerModel{T,U}(w0_magnitude::FrozenScalar{T},
+            theta0::FrozenScalar{T}, gs::FrozenScalar{T}, kcs::FrozenScalar{T},
+            amplitudes::FrozenArray{T,1}, actions::FrozenArray{T,1},
+            phases::FrozenArray{T,1}, charges::FrozenArray{BigInt,2},
+            convention::ModelConvention, switches::ModelSwitches, uplift::U,
+            identity::String) where {T<:AbstractFloat,U}
+        wmag, theta, coupling, kconstant = _thaw_scalar(w0_magnitude),
+            _thaw_scalar(theta0), _thaw_scalar(gs), _thaw_scalar(kcs)
+        all(isfinite, (wmag, theta, coupling, kconstant)) &&
+            all(isfinite, amplitudes) && all(isfinite, actions) && all(isfinite, phases) ||
+            throw(ArgumentError("model parameters must be finite"))
+        wmag >= zero(T) || throw(ArgumentError("|W0| must be nonnegative"))
+        coupling > zero(T) || throw(ArgumentError("g_s must be positive"))
+        all(>=(zero(T)), amplitudes) ||
+            throw(ArgumentError("instanton amplitudes must be nonnegative"))
+        all(>(zero(T)), actions) ||
+            throw(ArgumentError("instanton actions must be positive"))
+        length(amplitudes) == length(actions) == length(phases) == size(charges, 1) ||
+            throw(DimensionMismatch("one amplitude, action, and phase is required per charge row"))
+        !isempty(identity) || throw(ArgumentError("model identity must be nonempty"))
+        switches.uplift_enabled && uplift === nothing &&
+            throw(ArgumentError("uplift cannot be enabled without an explicit uplift function"))
+        new{T,U}(w0_magnitude, theta0, gs, kcs, amplitudes, actions, phases,
+            charges, convention, switches, uplift, identity)
+    end
 end
 
 function Base.getproperty(model::KahlerModel, name::Symbol)
     if name in (:w0_magnitude, :theta0, :gs, :kcs)
-        return deepcopy(getfield(model, name))
+        return _thaw_scalar(getfield(model, name))
     end
     getfield(model, name)
 end
@@ -106,7 +148,8 @@ function KahlerModel(; w0_magnitude, theta0, gs, kcs, amplitudes,
     all(>(zero(T)), aa) || throw(ArgumentError("instanton actions must be positive"))
     switches.uplift_enabled && uplift === nothing &&
         throw(ArgumentError("uplift cannot be enabled without an explicit uplift function"))
-    KahlerModel{T,typeof(uplift)}(wmag, theta, coupling, kconstant,
+    KahlerModel{T,typeof(uplift)}(FrozenScalar(wmag), FrozenScalar(theta),
+        FrozenScalar(coupling), FrozenScalar(kconstant),
         FrozenArray(amps), FrozenArray(aa), FrozenArray(ph), FrozenArray(Q),
         convention, switches, uplift, String(identity))
 end
