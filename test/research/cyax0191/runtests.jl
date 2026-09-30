@@ -59,7 +59,9 @@ function fixture_model(n; charges=Matrix{Int}(I, n, n), w0=1.2, theta0=0.21,
         switches, uplift, identity)
 end
 
-function one_modulus_geometry(; kappa=1, chi=-2, inequality=reshape([1], 1, 1), id="one-modulus-fixture-v1")
+function one_modulus_geometry(; kappa=1, chi=-2, inequality=reshape([1], 1, 1),
+        id="one-modulus-fixture-v1", precision="exact integer intersections",
+        exactness=:exact)
     tensor = CanonicalIntersectionTensor(1, [(1, 1, 1) => kappa])
     source = GeometrySourceIdentity(source_kind=:native_fixture, source_id=id,
         source_revision="fixture-v1", source_locator="test/research/cyax0191/runtests.jl",
@@ -74,8 +76,8 @@ function one_modulus_geometry(; kappa=1, chi=-2, inequality=reshape([1], 1, 1), 
     GeometryRecord(tensor; euler_characteristic=chi, ordered_divisors=("D1",),
         ordered_curves=("C1",), divisor_basis_map=reshape([1], 1, 1),
         dual_curve_basis_map=reshape([1], 1, 1), domain_inequalities=inequality,
-        cone_provenance=cone, precision="exact integer intersections",
-        exactness=:exact, units="dimensionless synthetic geometry", source)
+        cone_provenance=cone, precision, exactness,
+        units="dimensionless synthetic geometry", source)
 end
 
 function geometry_with_source(geometry::GeometryRecord, source::GeometrySourceIdentity)
@@ -1348,6 +1350,42 @@ end
         precision_bits=512, scales=(field=external_scale_1024,))
     @test constructor_manifest(model_constructed_at_128;
         precision_bits=1024, scales=(field=external_scale_1024,)).precision_bits == 1024
+
+    float32_replay_model = fixture_model(1; w0=Float32(1.2),
+        theta0=Float32(0.21), gs=Float32(0.2), kcs=Float32(0.4),
+        amplitudes=Float32[0], actions=Float32[0.8], phases=Float32[0])
+    float32_replay_geometry = one_modulus_geometry(id="float32-replay-geometry-v1")
+    replay_float32(; geometry=float32_replay_geometry,
+            numeric_type="Float32", precision_bits=24,
+            solver_configuration=(; method="none", tolerance=Float32(1)),
+            scales=(; field=Float32(1), potential=Float32(1))) =
+        replay_manifest(NativeReplayBackend(), float32_replay_model, geometry;
+            code_revision="mixed-float-replay-test",
+            selected_source_route="native_fixture",
+            counting_unit="one synthetic model state", numeric_type,
+            precision_bits, backend_versions=(; runtime="test"),
+            solver_configuration, scales)
+    @test replay_float32().numeric_type == "Float32"
+    @test_throws ArgumentError replay_float32(
+        scales=(; field=Float64(1), potential=Float32(1)))
+    @test_throws ArgumentError replay_float32(
+        scales=(; field=Dict("field" => Float64(1)), potential=Float32(1)))
+    @test_throws ArgumentError replay_float32(
+        solver_configuration=(; method="none", tolerance=Float64(1)))
+    float64_replay_geometry = one_modulus_geometry(kappa=Float64(1),
+        inequality=reshape(Float64[1], 1, 1),
+        id="float64-replay-geometry-v1",
+        precision="Float64 approximate fixture geometry", exactness=:approximate)
+    @test_throws ArgumentError replay_float32(geometry=float64_replay_geometry)
+    mixed_bigfloat_control = setprecision(BigFloat, 32) do
+        BigFloat(1)
+    end
+    @test_throws ArgumentError replay_float32(numeric_type="Float64",
+        precision_bits=53,
+        solver_configuration=(; method="none", tolerance=mixed_bigfloat_control))
+    @test replay_float32(numeric_type="BigFloat", precision_bits=53,
+        solver_configuration=(; method="none", tolerance=mixed_bigfloat_control)).numeric_type ==
+        "BigFloat"
 
     @test default_precision_axion_gradient == high_precision_model_reference.axion_gradient
     @test all(value -> precision(value) == 512, default_precision_axion_gradient)

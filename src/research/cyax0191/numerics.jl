@@ -694,6 +694,49 @@ function _replay_fixed_float_precision(name::String)
     nothing
 end
 
+_replay_numeric_profile(::Nothing) = (0, false)
+_replay_numeric_profile(value::BigFloat) = (precision(value), true)
+_replay_numeric_profile(value::AbstractFloat) = (precision(typeof(value)), false)
+_replay_numeric_profile(value::FrozenScalar{BigFloat}) =
+    (getfield(value, :encoded)[1], true)
+_replay_numeric_profile(::FrozenScalar{T}) where {T<:AbstractFloat} =
+    (precision(T), false)
+
+function _combine_replay_numeric_profiles(values)
+    profiles = [_replay_numeric_profile(value) for value in values]
+    maximum(first, profiles; init=0), any(last, profiles)
+end
+
+_replay_numeric_profile(value::Pair) =
+    _combine_replay_numeric_profiles((first(value), last(value)))
+_replay_numeric_profile(value::Tuple) = _combine_replay_numeric_profiles(value)
+_replay_numeric_profile(value::NamedTuple) =
+    _combine_replay_numeric_profiles(values(value))
+function _replay_numeric_profile(value::AbstractArray{T}) where {T<:AbstractFloat}
+    isempty(value) && return (0, false)
+    T === BigFloat && return _combine_replay_numeric_profiles(value)
+    precision(T), false
+end
+_replay_numeric_profile(value::AbstractArray) =
+    _combine_replay_numeric_profiles(value)
+function _replay_numeric_profile(value::AbstractDict)
+    _combine_replay_numeric_profiles(Iterators.flatten(
+        ((pair.first, pair.second) for pair in pairs(value))))
+end
+_replay_numeric_profile(value::CanonicalIntersectionTensor) =
+    _replay_numeric_profile(value.coefficients)
+function _replay_numeric_profile(value::GeometryRecord)
+    _combine_replay_numeric_profiles((value.intersections,
+        value.domain_inequalities))
+end
+function _replay_numeric_profile(value::KahlerModel)
+    _combine_replay_numeric_profiles((getfield(value, :w0_magnitude),
+        getfield(value, :theta0), getfield(value, :gs), getfield(value, :kcs),
+        getfield(value, :amplitudes), getfield(value, :actions),
+        getfield(value, :phases)))
+end
+_replay_numeric_profile(value) = (0, false)
+
 function _validate_replay_numeric_identity(model::KahlerModel,
         geometry::GeometryRecord, numeric_type::AbstractString,
         precision_bits::Integer, scales::NamedTuple,
@@ -702,10 +745,14 @@ function _validate_replay_numeric_identity(model::KahlerModel,
     precision_bits > 0 || throw(ArgumentError("precision_bits must be positive"))
     precision_bits <= typemax(Int) ||
         throw(ArgumentError("precision_bits exceeds the supported integer range"))
+    recorded_bits, has_bigfloat = _combine_replay_numeric_profiles((model,
+        geometry, scales, solver_configuration))
     fixed_precision = _replay_fixed_float_precision(name)
     if name == "BigFloat"
         declared_bits = Int(precision_bits)
     elseif fixed_precision !== nothing
+        has_bigfloat &&
+            throw(ArgumentError("numeric_type must be BigFloat when recorded replay inputs contain BigFloat values"))
         declared_bits = fixed_precision
         precision_bits == declared_bits ||
             throw(ArgumentError("precision_bits must match the declared $name precision ($declared_bits bits)"))
@@ -713,20 +760,12 @@ function _validate_replay_numeric_identity(model::KahlerModel,
         throw(ArgumentError("unsupported replay numeric type: $name"))
     end
 
-    stored_types = DataType[typeof(model.gs)]
-    eltype(geometry.intersections.coefficients) <: BigFloat && push!(stored_types, BigFloat)
-    eltype(geometry.domain_inequalities) <: BigFloat && push!(stored_types, BigFloat)
-    stored_type = promote_type(stored_types...)
-    stored_bits = stored_type === BigFloat ?
-        max(_model_precision(model), _model_precision(geometry)) : precision(stored_type)
-    stored_bits = max(stored_bits, _model_precision(scales),
-        _model_precision(solver_configuration))
-
-    # The floor also includes numeric scales and solver settings. replay_manifest
-    # has no coordinate arguments, so a higher BigFloat declaration can describe
-    # external evaluation inputs; a lower one cannot represent recorded inputs.
-    declared_bits >= stored_bits ||
-        throw(ArgumentError("replay numeric precision is below the stored model/geometry precision floor ($stored_bits bits)"))
+    # The declaration covers the promoted floating inputs recorded with the
+    # model, including fixed-width geometry, scale, and solver values. Replay
+    # coordinates are external, so a higher declaration may cover them, but a
+    # lower declaration cannot represent any of the recorded inputs.
+    declared_bits >= recorded_bits ||
+        throw(ArgumentError("replay numeric precision is below the recorded model/geometry/scale/solver precision floor ($recorded_bits bits)"))
     true
 end
 
