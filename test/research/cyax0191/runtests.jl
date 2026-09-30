@@ -1322,17 +1322,32 @@ end
         constructor_evaluations)
     @test all(evaluation -> evaluation.value == constructor_evaluations[1].value,
         constructor_evaluations)
-    constructor_manifest(model) = replay_manifest(NativeReplayBackend(), model,
+    constructor_manifest(model; numeric_type="BigFloat", precision_bits=512,
+            scales=(field=BigFloat(1), potential=BigFloat(1))) =
+        replay_manifest(NativeReplayBackend(), model,
         constructor_geometry; code_revision="constructor-precision-test",
         selected_source_route="native_fixture", counting_unit="geometry fixture",
-        numeric_type="BigFloat", precision_bits=512,
+        numeric_type, precision_bits,
         backend_versions=(julia="1.12.6",),
         solver_configuration=(method="none",),
-        scales=(field=BigFloat(1), potential=BigFloat(1)))
+        scales)
     constructor_manifests = map(constructor_manifest,
         (model_constructed_at_128, model_constructed_at_512,
          model_constructed_at_1024))
     @test constructor_manifests[1] == constructor_manifests[2] == constructor_manifests[3]
+    @test_throws ArgumentError constructor_manifest(model_constructed_at_128;
+        numeric_type="Float64", precision_bits=53)
+    @test_throws ArgumentError constructor_manifest(model_constructed_at_128;
+        numeric_type="BigFloat", precision_bits=256)
+    @test constructor_manifest(model_constructed_at_128;
+        numeric_type="BigFloat", precision_bits=1024).precision_bits == 1024
+    external_scale_1024 = setprecision(BigFloat, 1024) do
+        BigFloat(1)
+    end
+    @test_throws ArgumentError constructor_manifest(model_constructed_at_128;
+        precision_bits=512, scales=(field=external_scale_1024,))
+    @test constructor_manifest(model_constructed_at_128;
+        precision_bits=1024, scales=(field=external_scale_1024,)).precision_bits == 1024
 
     @test default_precision_axion_gradient == high_precision_model_reference.axion_gradient
     @test all(value -> precision(value) == 512, default_precision_axion_gradient)

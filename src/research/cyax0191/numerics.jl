@@ -687,6 +687,49 @@ function _snapshot_manifest(value)
     (; type=string(typeof(value)), fields)
 end
 
+function _replay_fixed_float_precision(name::String)
+    name == "Float16" && return precision(Float16)
+    name == "Float32" && return precision(Float32)
+    name == "Float64" && return precision(Float64)
+    nothing
+end
+
+function _validate_replay_numeric_identity(model::KahlerModel,
+        geometry::GeometryRecord, numeric_type::AbstractString,
+        precision_bits::Integer, scales::NamedTuple,
+        solver_configuration::NamedTuple)
+    name = String(numeric_type)
+    precision_bits > 0 || throw(ArgumentError("precision_bits must be positive"))
+    precision_bits <= typemax(Int) ||
+        throw(ArgumentError("precision_bits exceeds the supported integer range"))
+    fixed_precision = _replay_fixed_float_precision(name)
+    if name == "BigFloat"
+        declared_bits = Int(precision_bits)
+    elseif fixed_precision !== nothing
+        declared_bits = fixed_precision
+        precision_bits == declared_bits ||
+            throw(ArgumentError("precision_bits must match the declared $name precision ($declared_bits bits)"))
+    else
+        throw(ArgumentError("unsupported replay numeric type: $name"))
+    end
+
+    stored_types = DataType[typeof(model.gs)]
+    eltype(geometry.intersections.coefficients) <: BigFloat && push!(stored_types, BigFloat)
+    eltype(geometry.domain_inequalities) <: BigFloat && push!(stored_types, BigFloat)
+    stored_type = promote_type(stored_types...)
+    stored_bits = stored_type === BigFloat ?
+        max(_model_precision(model), _model_precision(geometry)) : precision(stored_type)
+    stored_bits = max(stored_bits, _model_precision(scales),
+        _model_precision(solver_configuration))
+
+    # The floor also includes numeric scales and solver settings. replay_manifest
+    # has no coordinate arguments, so a higher BigFloat declaration can describe
+    # external evaluation inputs; a lower one cannot represent recorded inputs.
+    declared_bits >= stored_bits ||
+        throw(ArgumentError("replay numeric precision is below the stored model/geometry precision floor ($stored_bits bits)"))
+    true
+end
+
 function replay_manifest(::NativeReplayBackend, model::KahlerModel,
         geometry::GeometryRecord; code_revision::AbstractString,
         selected_source_route::AbstractString, counting_unit::AbstractString,
@@ -695,7 +738,8 @@ function replay_manifest(::NativeReplayBackend, model::KahlerModel,
         scales::NamedTuple, seed=nothing, budget=nothing)
     all(!isempty, (code_revision, selected_source_route, counting_unit,
         numeric_type)) || throw(ArgumentError("replay identity strings must be explicit"))
-    precision_bits > 0 || throw(ArgumentError("precision_bits must be positive"))
+    _validate_replay_numeric_identity(model, geometry, numeric_type, precision_bits,
+        scales, solver_configuration)
     uplift_identity = model.uplift === nothing ? nothing :
         (; identity=model.uplift.identity, provenance=model.uplift.provenance)
     model_parameters = (; w0_magnitude=string(model.w0_magnitude),
