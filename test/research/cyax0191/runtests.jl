@@ -125,6 +125,12 @@ end
     @test sequential.divisor_basis_map' * sequential.dual_curve_basis_map == I
     @test calabi_yau_volume(sequential, t_sequential) ≈ calabi_yau_volume(geometry, t_old)
     @test divisor_volumes(sequential, t_sequential) ≈ combined * divisor_volumes(geometry, t_old)
+    large_basis = Int[10_000_000 1; 1 0]
+    large_basis_geometry = change_divisor_basis(geometry, large_basis)
+    k111_index = findfirst(==((1, 1, 1)), large_basis_geometry.intersections.triples)
+    @test k111_index !== nothing
+    @test large_basis_geometry.intersections.coefficients[k111_index] ==
+        parse(BigInt, "3000000300000030000004")
     @test_throws MethodError setindex!(geometry.intersections.coefficients, 9, 1)
     @test_throws Base.CanonicalIndexError setindex!(geometry.divisor_basis_map, 9, 1, 1)
     @test_throws Base.CanonicalIndexError setindex!(geometry.domain_inequalities, 9, 1, 1)
@@ -142,6 +148,16 @@ end
         cytools_revision=nothing, importer_id=geometry.source.importer_id)
     alternate_kind = geometry_with_source(geometry, alternate_source)
     @test alternate_kind.artifact_sha256 != geometry.artifact_sha256
+    string_revision_source = GeometrySourceIdentity(source_kind=:native_fixture,
+        source_id=geometry.source.source_id,
+        source_revision=geometry.source.source_revision,
+        source_locator=geometry.source.source_locator,
+        source_sha256=geometry.source.source_sha256,
+        polytope_identity=geometry.source.polytope_identity,
+        triangulation_identity=geometry.source.triangulation_identity,
+        cytools_revision="nothing", importer_id=geometry.source.importer_id)
+    string_revision_geometry = geometry_with_source(geometry, string_revision_source)
+    @test string_revision_geometry.artifact_sha256 != geometry.artifact_sha256
     collision_left_source = GeometrySourceIdentity(source_kind=:native_fixture,
         source_id="A|B", source_revision="C", source_locator=geometry.source.source_locator,
         source_sha256=geometry.source.source_sha256,
@@ -156,6 +172,21 @@ end
         cytools_revision=nothing, importer_id=geometry.source.importer_id)
     @test geometry_with_source(geometry, collision_left_source).artifact_sha256 !=
         geometry_with_source(geometry, collision_right_source).artifact_sha256
+
+    one_geometry = one_modulus_geometry()
+    overflowing_dual_divisor = reshape([Int(4_294_967_297)], 1, 1)
+    overflowing_dual_curve = reshape([Int(-4_294_967_295)], 1, 1)
+    @test BigInt(overflowing_dual_divisor[1]) * BigInt(overflowing_dual_curve[1]) != 1
+    @test_throws ArgumentError GeometryRecord(one_geometry.intersections;
+        euler_characteristic=one_geometry.euler_characteristic,
+        ordered_divisors=one_geometry.ordered_divisors,
+        ordered_curves=one_geometry.ordered_curves,
+        divisor_basis_map=overflowing_dual_divisor,
+        dual_curve_basis_map=overflowing_dual_curve,
+        domain_inequalities=one_geometry.domain_inequalities,
+        cone_provenance=one_geometry.cone_provenance,
+        precision=one_geometry.precision, exactness=one_geometry.exactness,
+        units=one_geometry.units, source=one_geometry.source)
 
     large_n = 24
     sparse_tensor = CanonicalIntersectionTensor(large_n,

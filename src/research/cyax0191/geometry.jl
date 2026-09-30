@@ -223,8 +223,13 @@ function _geometry_digest(schema, intersections, euler, divisors, curves,
         string(cone.completeness), cone.source_locator, precision,
         string(exactness), units, string(source.source_kind), source.source_id,
         source.source_revision, source.source_locator, source.source_sha256,
-        source.polytope_identity, source.triangulation_identity,
-        string(source.cytools_revision), source.importer_id,
+        source.polytope_identity, source.triangulation_identity))
+    if source.cytools_revision === nothing
+        push!(parts, "cytools_revision:none", "")
+    else
+        push!(parts, "cytools_revision:string", source.cytools_revision)
+    end
+    append!(parts, (source.importer_id,
         string(length(basis_history))))
     append!(parts, basis_history)
     io = IOBuffer()
@@ -255,7 +260,7 @@ function GeometryRecord(intersections::CanonicalIntersectionTensor{K};
     size(cmap) == (n, n) || throw(DimensionMismatch("dual curve basis map must be n×n"))
     _integer_determinant(dmap) != 0 || throw(ArgumentError("divisor basis map is singular"))
     _integer_determinant(cmap) != 0 || throw(ArgumentError("dual curve basis map is singular"))
-    dmap' * cmap == Matrix{Int}(I, n, n) ||
+    BigInt.(dmap)' * BigInt.(cmap) == Matrix{BigInt}(I, n, n) ||
         throw(ArgumentError("divisor and dual curve basis maps are not dual"))
     inequalities = Matrix(domain_inequalities)
     size(inequalities, 2) == n || throw(DimensionMismatch("cone inequalities must have n columns"))
@@ -374,12 +379,13 @@ function change_divisor_basis(geometry::GeometryRecord, B::AbstractMatrix{<:Inte
     size(B) == (n, n) || throw(DimensionMismatch("basis change must be n×n"))
     basis = Matrix{Int}(B)
     Binv = _integer_inverse(basis)
+    basis_exact = BigInt.(basis)
     nonzero_rows = [findall(!iszero, view(basis, :, i)) for i in 1:n]
     transformed = Dict{NTuple{3,Int},Any}()
     for (i, j, k, value) in _full_entries(geometry.intersections)
         for a in nonzero_rows[i], b in nonzero_rows[j], c in nonzero_rows[k]
             key = (a, b, c)
-            contribution = basis[a, i] * basis[b, j] * basis[c, k] * value
+            contribution = basis_exact[a, i] * basis_exact[b, j] * basis_exact[c, k] * value
             transformed[key] = get(transformed, key, zero(contribution)) + contribution
         end
     end
@@ -395,9 +401,9 @@ function change_divisor_basis(geometry::GeometryRecord, B::AbstractMatrix{<:Inte
         schema_version=geometry.schema_version,
         euler_characteristic=geometry.euler_characteristic,
         ordered_divisors=divisors, ordered_curves=curves,
-        divisor_basis_map=basis * Matrix{Int}(geometry.divisor_basis_map),
-        dual_curve_basis_map=Binv' * Matrix{Int}(geometry.dual_curve_basis_map),
-        domain_inequalities=geometry.domain_inequalities * basis',
+        divisor_basis_map=basis_exact * BigInt.(Matrix{Int}(geometry.divisor_basis_map)),
+        dual_curve_basis_map=BigInt.(Binv)' * BigInt.(Matrix{Int}(geometry.dual_curve_basis_map)),
+        domain_inequalities=Matrix(geometry.domain_inequalities) * basis_exact',
         cone_provenance=geometry.cone_provenance,
         precision=geometry.precision, exactness=geometry.exactness,
         units=geometry.units, source=geometry.source,
