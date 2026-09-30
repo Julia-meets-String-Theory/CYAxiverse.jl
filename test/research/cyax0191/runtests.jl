@@ -993,13 +993,13 @@ end
         precision_bits=53, backend_versions=(; differentiation="central-difference-v1"),
         solver_configuration=(; method="damped-newton", budget=20),
         scales=(; fields=(1.0, 1.0, 1.0, 1.0), potential=1.0), seed=17, budget=20)
-    @test manifest.schema_version == "cyax0191-replay-v2"
+    @test manifest.schema_version == "cyax0191-replay-v3"
     @test manifest.geometry_artifact_sha256 == geometry.artifact_sha256
     @test manifest.selected_source_route == "analytic-fixture"
     @test manifest.counting_unit == "one synthetic model state"
     @test manifest.model_switches == model.switches
-    @test manifest.model_parameters.w0_magnitude == string(model.w0_magnitude)
-    @test manifest.model_parameters.amplitudes == Tuple(string.(model.amplitudes))
+    @test manifest.model_parameters.w0_magnitude == model.w0_magnitude
+    @test manifest.model_parameters.amplitudes == Tuple(model.amplitudes)
     @test Tuple(Tuple(value.decimal for value in row)
         for row in manifest.model_parameters.charges) == (("1", "0"), ("0", "1"))
     @test manifest.model_parameters.uplift === nothing
@@ -1382,6 +1382,52 @@ end
         precision_bits=512, scales=(field=external_scale_1024,))
     @test constructor_manifest(model_constructed_at_128;
         precision_bits=1024, scales=(field=external_scale_1024,)).precision_bits == 1024
+
+    replay_parameter_base = setprecision(BigFloat, 256) do
+        fixture_model(1; w0=BigFloat(1), theta0=BigFloat("0.2"),
+            gs=BigFloat("0.1"), kcs=BigFloat("0.4"),
+            amplitudes=BigFloat[BigFloat("0.2")],
+            actions=BigFloat[BigFloat("0.6")], phases=BigFloat[BigFloat("0.4")],
+            identity="mixed-model-parameter-precision-v1")
+    end
+    w0_parameter_128, w0_parameter_256 = setprecision(BigFloat, 128) do
+        low = BigFloat(1)
+        high = setprecision(BigFloat, 256) do
+            BigFloat(1)
+        end
+        (low, high)
+    end
+    function replay_parameter_model(w0)
+        base = replay_parameter_base
+        CYAX0191.KahlerModel{BigFloat,Nothing}(CYAX0191.FrozenScalar(w0),
+            getfield(base, :theta0), getfield(base, :gs), getfield(base, :kcs),
+            getfield(base, :amplitudes), getfield(base, :actions),
+            getfield(base, :phases), getfield(base, :charges), base.convention,
+            base.switches, nothing, base.identity)
+    end
+    replay_parameter_manifest(model) = replay_manifest(NativeReplayBackend(),
+        model, constructor_geometry; code_revision="model-parameter-precision-test",
+        selected_source_route="native_fixture", counting_unit="geometry fixture",
+        numeric_type="BigFloat", precision_bits=256,
+        backend_versions=(; runtime="test"),
+        solver_configuration=(; method="none"),
+        scales=(; field=BigFloat(1), potential=BigFloat(1)))
+    replay_parameter_manifest_128 = replay_parameter_manifest(
+        replay_parameter_model(w0_parameter_128))
+    replay_parameter_manifest_256 = replay_parameter_manifest(
+        replay_parameter_model(w0_parameter_256))
+    @test replay_parameter_manifest_128 != replay_parameter_manifest_256
+    @test replay_parameter_manifest_128.model_parameters.w0_magnitude.numeric_type ==
+        "BigFloat"
+    @test replay_parameter_manifest_128.model_parameters.w0_magnitude.precision_bits == 128
+    @test replay_parameter_manifest_256.model_parameters.w0_magnitude.precision_bits == 256
+    @test replay_parameter_manifest_128.model_parameters.theta0.precision_bits == 256
+    for field in (:gs, :kcs, :theta0, :amplitudes, :actions, :phases)
+        encoded_values = getproperty(replay_parameter_manifest_128.model_parameters, field)
+        values = encoded_values isa Tuple ? encoded_values : (encoded_values,)
+        @test all(value -> value.numeric_type == "BigFloat" &&
+            value.precision_bits == 256, values)
+    end
 
     float32_replay_model = fixture_model(1; w0=Float32(1.2),
         theta0=Float32(0.21), gs=Float32(0.2), kcs=Float32(0.4),

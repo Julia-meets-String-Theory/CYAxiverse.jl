@@ -787,13 +787,13 @@ function replay_manifest(::NativeReplayBackend, model::KahlerModel,
         scales, solver_configuration)
     uplift_identity = model.uplift === nothing ? nothing :
         (; identity=model.uplift.identity, provenance=model.uplift.provenance)
-    model_parameters = (; w0_magnitude=string(model.w0_magnitude),
-        theta0=string(model.theta0), gs=string(model.gs), kcs=string(model.kcs),
-        amplitudes=Tuple(string.(model.amplitudes)),
-        actions=Tuple(string.(model.actions)), phases=Tuple(string.(model.phases)),
+    model_parameters = (; w0_magnitude=model.w0_magnitude,
+        theta0=model.theta0, gs=model.gs, kcs=model.kcs,
+        amplitudes=Tuple(model.amplitudes),
+        actions=Tuple(model.actions), phases=Tuple(model.phases),
         charges=Tuple(Tuple(row) for row in eachrow(model.charges)),
         uplift=uplift_identity)
-    manifest = (; schema_version="cyax0191-replay-v2",
+    manifest = (; schema_version="cyax0191-replay-v3",
        code_revision=String(code_revision),
        source=geometry_identity(geometry),
        geometry_artifact_sha256=geometry.artifact_sha256,
