@@ -78,6 +78,9 @@ end
 
 @testset "CYAX-0191 Gate B geometry and importer boundary" begin
     geometry = synthetic_geometry_fixture()
+    duplicate_terms = CanonicalIntersectionTensor(1, Pair[
+        (1, 1, 1) => typemax(Int), (1, 1, 1) => 1])
+    @test duplicate_terms.coefficients == (BigInt(typemax(Int)) + 1,)
     t_exact = Rational{Int}[2, 1]
     @test calabi_yau_volume(geometry, t_exact) == 23 // 3
     @test divisor_volumes(geometry, t_exact) == Rational{Int}[17 // 2, 6]
@@ -99,6 +102,15 @@ end
     @test geometry.cone_provenance.completeness == :not_established
     @test cone_margins(geometry, [2.0, 1.0]) == [3.0, 1.0]
     @test imported_domain_status(geometry, [2.0, 1.0]) == :PASS
+    large_exact_coordinates = [2_000_000, 1]
+    @test calabi_yau_volume(geometry, large_exact_coordinates) ==
+        parse(BigInt, "12000006000003000002") // BigInt(3)
+    @test divisor_volumes(geometry, large_exact_coordinates) == Rational{BigInt}[
+        parse(BigInt, "12000004000001") // BigInt(2), BigInt(2_000_002_000_002) // BigInt(1)]
+    cone_edge = [typemax(Int), typemax(Int) - 1]
+    @test cone_margins(geometry, cone_edge) == BigInt[
+        2BigInt(typemax(Int)) - 1, 1]
+    @test imported_domain_status(geometry, cone_edge) == :PASS
 
     # D_new = B*D_old leaves the same point inside the imported cone, even
     # though one native two-cycle coordinate is negative.
@@ -123,6 +135,22 @@ end
     @test sequential.divisor_basis_map == combined
     @test sequential.dual_curve_basis_map == inv(combined)'
     @test sequential.divisor_basis_map' * sequential.dual_curve_basis_map == I
+    large_shear_value = BigInt(5_000_000_000)
+    large_shear_first = BigInt[1 large_shear_value; 0 1]
+    large_shear_second = BigInt[1 0; large_shear_value 1]
+    large_shear_combined = large_shear_second * large_shear_first
+    large_shear_geometry = change_divisor_basis(
+        change_divisor_basis(geometry, large_shear_first), large_shear_second)
+    @test maximum(abs, large_shear_combined) > BigInt(typemax(Int))
+    @test Matrix{BigInt}(large_shear_geometry.divisor_basis_map) == large_shear_combined
+    @test Matrix{BigInt}(large_shear_geometry.dual_curve_basis_map) ==
+        CYAX0191._integer_inverse(large_shear_combined)'
+    @test large_shear_geometry.divisor_basis_map' *
+        large_shear_geometry.dual_curve_basis_map == Matrix{BigInt}(I, 2, 2)
+    beyond_int_basis = BigInt[1 BigInt(typemax(Int)) + 1; 0 1]
+    beyond_int_geometry = change_divisor_basis(geometry, beyond_int_basis)
+    @test Matrix{BigInt}(beyond_int_geometry.divisor_basis_map) == beyond_int_basis
+    @test occursin(string(beyond_int_basis), last(beyond_int_geometry.basis_history))
     @test calabi_yau_volume(sequential, t_sequential) ≈ calabi_yau_volume(geometry, t_old)
     @test divisor_volumes(sequential, t_sequential) ≈ combined * divisor_volumes(geometry, t_old)
     large_basis = Int[10_000_000 1; 1 0]
@@ -267,6 +295,18 @@ end
     @test size(corrected.retained_real_kinetic_metric) == (2, 2)
     @test corrected.retained_real_kinetic_metric ≈
         2 .* Matrix{Float64}(I, 2, 2) .* corrected.retained_kinetic_metric[1, 1]
+    nonunit_eval = evaluate_potential(corrected_model, geometry, [1.2], rho)
+    nonunit_jacobian = divisor_volume_jacobian(geometry, [1.2])
+    @test nonunit_eval.retained_real_kinetic_metric[1, 1] /
+        nonunit_eval.retained_real_kinetic_metric[2, 2] ≈ 1.2^2
+    @test nonunit_eval.retained_real_kinetic_metric[1, 1] ≈
+        2 * nonunit_jacobian[1, 1]^2 * nonunit_eval.retained_kinetic_metric[1, 1]
+    @test nonunit_eval.retained_real_kinetic_metric[2, 2] ≈
+        2 * nonunit_eval.retained_kinetic_metric[1, 1]
+    nonunit_masses = fluctuation_analysis(GeneralizedEigenBackend(),
+        Matrix{Float64}(I, 2, 2), nonunit_eval.retained_real_kinetic_metric)
+    expected_nonunit_masses = sort(inv.(diag(nonunit_eval.retained_real_kinetic_metric)))
+    @test nonunit_masses.generalized_mass_eigenvalues ≈ expected_nonunit_masses
 
     uncorrected_model = fixture_model(1; common...,
         switches=ModelSwitches(bbhl_correction_enabled=false,
@@ -401,6 +441,40 @@ end
     @test dot(Q[3, :], tau_old) ≈ dot(model_new.charges[3, :], tau_new)
     @test charge_coordinates(Q, tau_old, rho_old).tau ≈ Q * tau_old
     @test charge_metric_contraction(Q, Matrix{Float64}(I, 2, 2)) == Q * Q'
+    large_charge = reshape([10_000_000_000], 1, 1)
+    large_charged_coordinates = charge_coordinates(large_charge,
+        BigInt[10_000_000_000], BigInt[0])
+    @test large_charged_coordinates.tau == reshape([big(10)^20], 1)
+    @test charge_metric_contraction(large_charge, reshape([1], 1, 1)) ==
+        reshape([big(10)^20], 1, 1)
+
+    charge_limit = BigInt(typemax(Int))
+    overflowing_q = reshape([typemax(Int), 1], 1, 2)
+    overflowing_basis = Int[1 0; -typemax(Int) 1]
+    @test change_charge_basis(overflowing_q, overflowing_basis) ==
+        reshape([2charge_limit, BigInt(1)], 1, 2)
+    transformed_t, transformed_rho = change_coordinate_basis(
+        [typemax(Int), 1], [0, typemax(Int)], overflowing_basis)
+    @test transformed_t == BigInt[2charge_limit, 1]
+    @test transformed_rho == BigInt[0, charge_limit]
+
+    large_shear = Int[1 4_000_000_000 0; 0 1 4_000_000_000; 0 0 1]
+    large_shear_inverse = CYAX0191._integer_inverse(large_shear)
+    shear = BigInt(4_000_000_000)
+    expected_shear_inverse = BigInt[1 -shear shear^2; 0 1 -shear; 0 0 1]
+    @test large_shear_inverse == expected_shear_inverse
+    @test BigInt.(large_shear) * large_shear_inverse == Matrix{BigInt}(I, 3, 3)
+    @test change_charge_basis(Int[1 0 0], large_shear) ==
+        reshape(expected_shear_inverse[1, :], 1, 3)
+    shear_t, _ = change_coordinate_basis([1, 0, 0], [0, 0, 0], large_shear)
+    @test shear_t == expected_shear_inverse[1, :]
+    shear_model = fixture_model(3; charges=Matrix{Int}(I, 3, 3))
+    @test change_model_basis(shear_model, large_shear).charges[1, :] ==
+        expected_shear_inverse[1, :]
+    beyond_int_model_basis = BigInt[1 BigInt(typemax(Int)) + 1; 0 1]
+    beyond_int_model = change_model_basis(model2, beyond_int_model_basis)
+    @test beyond_int_model.charges == change_charge_basis(Q, beyond_int_model_basis)
+    @test occursin(string(beyond_int_model_basis[1, 2]), beyond_int_model.identity)
     @test potential(model2, geometry2, t_old, rho_old) ≈
         potential(model_new, geometry_new, t_new, rho_new) rtol=2e-12 atol=1e-13
     state = critical_point_state(geometry2, t_old, rho_old)

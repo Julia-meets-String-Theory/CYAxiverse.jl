@@ -440,7 +440,7 @@ end
 function change_charge_basis(charges::AbstractMatrix{<:Integer}, B::AbstractMatrix{<:Integer})
     size(charges, 2) == size(B, 1) == size(B, 2) ||
         throw(DimensionMismatch("charge matrix and basis transform dimensions differ"))
-    Matrix{Int}(charges) * _integer_inverse(B)
+    BigInt.(charges) * _integer_inverse(B)
 end
 
 function change_model_basis(model::KahlerModel, B::AbstractMatrix{<:Integer})
@@ -449,7 +449,7 @@ function change_model_basis(model::KahlerModel, B::AbstractMatrix{<:Integer})
         gs=model.gs, kcs=model.kcs, amplitudes=model.amplitudes,
         actions=model.actions, phases=model.phases, charges=Qnew,
         convention=model.convention, switches=model.switches,
-        uplift=model.uplift, identity="$(model.identity)|basis=$(repr(Matrix{Int}(B)))")
+        uplift=model.uplift, identity="$(model.identity)|basis=$(repr(Matrix{BigInt}(B)))")
 end
 
 function change_coordinate_basis(t::AbstractVector, rho::AbstractVector,
@@ -457,5 +457,6 @@ function change_coordinate_basis(t::AbstractVector, rho::AbstractVector,
     size(B, 1) == size(B, 2) == length(t) == length(rho) ||
         throw(DimensionMismatch("coordinate and basis dimensions differ"))
     Binv = _integer_inverse(B)
-    (Binv' * t, B * rho)
+    exact_basis = BigInt.(B)
+    (Binv' * _widen_exact_array(t), exact_basis * _widen_exact_array(rho))
 end

@@ -5,6 +5,11 @@ struct CanonicalIntersectionTensor{T<:Number}
     coefficients::Tuple{Vararg{T}}
 end
 
+_widen_exact(value::Integer) = BigInt(value)
+_widen_exact(value::Rational) = Rational{BigInt}(value)
+_widen_exact(value) = value
+_widen_exact_array(values::AbstractArray) = map(_widen_exact, values)
+
 function CanonicalIntersectionTensor(n::Integer, terms::AbstractVector{<:Pair})
     n > 0 || throw(ArgumentError("the divisor dimension must be positive"))
     accum = Dict{NTuple{3,Int},Any}()
@@ -12,7 +17,8 @@ function CanonicalIntersectionTensor(n::Integer, terms::AbstractVector{<:Pair})
         length(item.first) == 3 || throw(ArgumentError("intersection keys must be triples"))
         key = Tuple(sort!(collect(Int, item.first)))
         all(i -> 1 <= i <= n, key) || throw(BoundsError(1:n, key))
-        accum[key] = get(accum, key, zero(item.second)) + item.second
+        value = _widen_exact(item.second)
+        accum[key] = get(accum, key, zero(value)) + value
     end
     keys_sorted = sort!(collect(keys(accum)))
     isempty(keys_sorted) && throw(ArgumentError("the intersection tensor cannot be empty"))
@@ -133,8 +139,8 @@ struct GeometryRecord{K<:Number,C<:Number}
     euler_characteristic::Int
     ordered_divisors::Tuple{Vararg{String}}
     ordered_curves::Tuple{Vararg{String}}
-    divisor_basis_map::FrozenArray{Int,2}
-    dual_curve_basis_map::FrozenArray{Int,2}
+    divisor_basis_map::FrozenArray{BigInt,2}
+    dual_curve_basis_map::FrozenArray{BigInt,2}
     domain_inequalities::FrozenArray{C,2}
     cone_provenance::ConeProvenance
     precision::String
@@ -147,7 +153,7 @@ struct GeometryRecord{K<:Number,C<:Number}
     function GeometryRecord{K,C}(schema_version::String,
             intersections::CanonicalIntersectionTensor{K}, euler_characteristic::Int,
             ordered_divisors::Tuple{Vararg{String}}, ordered_curves::Tuple{Vararg{String}},
-            divisor_basis_map::FrozenArray{Int,2}, dual_curve_basis_map::FrozenArray{Int,2},
+            divisor_basis_map::FrozenArray{BigInt,2}, dual_curve_basis_map::FrozenArray{BigInt,2},
             domain_inequalities::FrozenArray{C,2}, cone_provenance::ConeProvenance,
             precision::String, exactness::Symbol, units::String,
             source::GeometrySourceIdentity, basis_history::Tuple{Vararg{String}}) where {K<:Number,C<:Number}
@@ -195,7 +201,7 @@ function _integer_inverse(matrix::AbstractMatrix{<:Integer})
     rational_inverse = inv(Rational{BigInt}.(matrix))
     all(x -> denominator(x) == 1, rational_inverse) ||
         throw(ArgumentError("unimodular inverse unexpectedly has nonintegral entries"))
-    Int.(numerator.(rational_inverse))
+    BigInt.(numerator.(rational_inverse))
 end
 
 function _push_digest_matrix!(parts::Vector{String}, name::String, matrix::AbstractMatrix)
@@ -254,8 +260,8 @@ function GeometryRecord(intersections::CanonicalIntersectionTensor{K};
     length(curves) == n || throw(DimensionMismatch("one dual curve is required per modulus"))
     length(unique(divisors)) == n || throw(ArgumentError("ordered divisor labels must be unique"))
     length(unique(curves)) == n || throw(ArgumentError("ordered curve labels must be unique"))
-    dmap = Matrix{Int}(divisor_basis_map)
-    cmap = Matrix{Int}(dual_curve_basis_map)
+    dmap = BigInt.(divisor_basis_map)
+    cmap = BigInt.(dual_curve_basis_map)
     size(dmap) == (n, n) || throw(DimensionMismatch("divisor basis map must be n×n"))
     size(cmap) == (n, n) || throw(DimensionMismatch("dual curve basis map must be n×n"))
     _integer_determinant(dmap) != 0 || throw(ArgumentError("divisor basis map is singular"))
@@ -309,9 +315,10 @@ end
 """Calabi–Yau volume from the canonical sparse tensor."""
 function calabi_yau_volume(geometry::GeometryRecord, t::AbstractVector)
     length(t) == geometry.intersections.n || throw(DimensionMismatch("wrong two-cycle vector length"))
-    total = (t[1]^3 * geometry.intersections.coefficients[1]) * (0 // 1)
+    coordinates = _widen_exact_array(t)
+    total = zero(coordinates[1]^3 * geometry.intersections.coefficients[1] * (1 // 6))
     for (i, j, k, value) in _full_entries(geometry.intersections)
-        total += (value * t[i] * t[j] * t[k]) * (1 // 6)
+        total += (value * coordinates[i] * coordinates[j] * coordinates[k]) * (1 // 6)
     end
     total
 end
@@ -320,9 +327,11 @@ end
 function divisor_volumes(geometry::GeometryRecord, t::AbstractVector)
     n = geometry.intersections.n
     length(t) == n || throw(DimensionMismatch("wrong two-cycle vector length"))
-    values = [zero(t[1] * t[1] * geometry.intersections.coefficients[1]) * (1 // 1) for _ in 1:n]
+    coordinates = _widen_exact_array(t)
+    zero_volume = zero(coordinates[1]^2 * geometry.intersections.coefficients[1] * (1 // 2))
+    values = fill(zero_volume, n)
     for (i, j, k, value) in _full_entries(geometry.intersections)
-        values[i] += (value * t[j] * t[k]) * (1 // 2)
+        values[i] += (value * coordinates[j] * coordinates[k]) * (1 // 2)
     end
     values
 end
@@ -331,15 +340,20 @@ end
 function divisor_volume_jacobian(geometry::GeometryRecord, t::AbstractVector)
     n = geometry.intersections.n
     length(t) == n || throw(DimensionMismatch("wrong two-cycle vector length"))
-    J = [zero(t[1] * geometry.intersections.coefficients[1]) for _ in 1:n, _ in 1:n]
+    coordinates = _widen_exact_array(t)
+    J = fill(zero(coordinates[1] * geometry.intersections.coefficients[1]), n, n)
     for (i, j, k, value) in _full_entries(geometry.intersections)
-        J[i, j] += value * t[k]
+        J[i, j] += value * coordinates[k]
     end
     J
 end
 
 """Imported cone margins A*t. These are not physical curve volumes."""
-cone_margins(geometry::GeometryRecord, t::AbstractVector) = geometry.domain_inequalities * t
+function cone_margins(geometry::GeometryRecord, t::AbstractVector)
+    inequalities = _widen_exact_array(geometry.domain_inequalities)
+    coordinates = _widen_exact_array(t)
+    inequalities * coordinates
+end
 
 function imported_domain_status(geometry::GeometryRecord, t::AbstractVector)
     margins = cone_margins(geometry, t)
@@ -377,9 +391,9 @@ end
 function change_divisor_basis(geometry::GeometryRecord, B::AbstractMatrix{<:Integer})
     n = geometry.intersections.n
     size(B) == (n, n) || throw(DimensionMismatch("basis change must be n×n"))
-    basis = Matrix{Int}(B)
+    basis = Matrix{BigInt}(B)
     Binv = _integer_inverse(basis)
-    basis_exact = BigInt.(basis)
+    basis_exact = basis
     nonzero_rows = [findall(!iszero, view(basis, :, i)) for i in 1:n]
     transformed = Dict{NTuple{3,Int},Any}()
     for (i, j, k, value) in _full_entries(geometry.intersections)
@@ -396,14 +410,14 @@ function change_divisor_basis(geometry::GeometryRecord, B::AbstractMatrix{<:Inte
     tensor = CanonicalIntersectionTensor(n, terms)
     divisors = ["basis$(length(geometry.basis_history)+1)_D$i" for i in 1:n]
     curves = ["basis$(length(geometry.basis_history)+1)_C$i" for i in 1:n]
-    history_entry = "D_new=$(repr(Matrix{Int}(B)))*D_old"
+    history_entry = "D_new=$(repr(basis))*D_old"
     GeometryRecord(tensor;
         schema_version=geometry.schema_version,
         euler_characteristic=geometry.euler_characteristic,
         ordered_divisors=divisors, ordered_curves=curves,
-        divisor_basis_map=basis_exact * BigInt.(Matrix{Int}(geometry.divisor_basis_map)),
-        dual_curve_basis_map=BigInt.(Binv)' * BigInt.(Matrix{Int}(geometry.dual_curve_basis_map)),
-        domain_inequalities=Matrix(geometry.domain_inequalities) * basis_exact',
+        divisor_basis_map=basis_exact * Matrix{BigInt}(geometry.divisor_basis_map),
+        dual_curve_basis_map=Binv' * Matrix{BigInt}(geometry.dual_curve_basis_map),
+        domain_inequalities=_widen_exact_array(geometry.domain_inequalities) * basis_exact',
         cone_provenance=geometry.cone_provenance,
         precision=geometry.precision, exactness=geometry.exactness,
         units=geometry.units, source=geometry.source,

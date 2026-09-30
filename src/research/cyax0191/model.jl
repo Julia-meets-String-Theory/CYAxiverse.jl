@@ -69,7 +69,7 @@ struct KahlerModel{T<:AbstractFloat,U}
     amplitudes::Vector{T}
     actions::Vector{T}
     phases::Vector{T}
-    charges::Matrix{Int} # rows label instantons; columns label basis divisors
+    charges::Matrix{BigInt} # rows label instantons; columns label basis divisors
     convention::ModelConvention
     switches::ModelSwitches
     uplift::U
@@ -84,7 +84,7 @@ function KahlerModel(; w0_magnitude, theta0, gs, kcs, amplitudes,
         eltype(float.(actions)), eltype(float.(phases)))
     T <: AbstractFloat || throw(ArgumentError("model parameters must promote to an AbstractFloat"))
     amps, aa, ph = T.(amplitudes), T.(actions), T.(phases)
-    Q = Matrix{Int}(charges)
+    Q = BigInt.(charges)
     length(amps) == length(aa) == length(ph) == size(Q, 1) ||
         throw(DimensionMismatch("one amplitude, action, and phase is required per charge row"))
     !isempty(identity) || throw(ArgumentError("model identity must be nonempty"))
@@ -117,7 +117,12 @@ function charge_coordinates(charges::AbstractMatrix{<:Integer}, tau::AbstractVec
         rho::AbstractVector)
     size(charges, 2) == length(tau) == length(rho) ||
         throw(DimensionMismatch("Q must have one column per divisor coordinate"))
-    (; tau=charges * tau, rho=charges * rho)
+    charge_times(values) = if all(value -> value isa Integer || value isa Rational, values)
+        BigInt.(charges) * _widen_exact_array(values)
+    else
+        charges * values
+    end
+    (; tau=charge_times(tau), rho=charge_times(rho))
 end
 
 """Contract a retained metric or inverse metric into the charged-divisor basis."""
@@ -125,7 +130,13 @@ function charge_metric_contraction(charges::AbstractMatrix{<:Integer},
         metric::AbstractMatrix)
     size(metric, 1) == size(metric, 2) == size(charges, 2) ||
         throw(DimensionMismatch("Q and metric dimensions differ"))
-    charges * metric * charges'
+    if all(value -> value isa Integer || value isa Rational, metric)
+        exact_charges = BigInt.(charges)
+        exact_metric = _widen_exact_array(metric)
+        exact_charges * exact_metric * exact_charges'
+    else
+        charges * metric * charges'
+    end
 end
 
 """Status fields are deliberately separate; there is no aggregate stability flag."""
@@ -171,6 +182,7 @@ struct ModelEvaluation{T<:Real}
     parent_metric::Matrix{T}
     # Frozen-heavy-field kinetic pullback: the parent metric's retained TT block.
     retained_kinetic_metric::Matrix{T}
+    # Real coordinates are ordered (t,rho); the saxion block uses the tau(t) pullback.
     retained_real_kinetic_metric::Matrix{T}
     # TT block of the inverse full metric, used by the reduced potential.
     retained_inverse_metric::Matrix{T}
@@ -246,8 +258,9 @@ function _model_terms(model::KahlerModel, data, rho::AbstractVector)
         qtau = zero(R)
         qrho = zero(R)
         for i in 1:n
-            qtau += model.charges[a, i] * data.tau[i]
-            qrho += model.charges[a, i] * R(rho[i])
+            charge = R(model.charges[a, i])
+            qtau += charge * data.tau[i]
+            qrho += charge * R(rho[i])
         end
         action = R(model.actions[a])
         phase = R(model.phases[a]) - action * qrho
@@ -255,7 +268,7 @@ function _model_terms(model::KahlerModel, data, rho::AbstractVector)
         z_terms[a] = z
         wn += z
         for i in 1:n
-            dw[i] -= action * model.charges[a, i] * z
+            dw[i] -= action * R(model.charges[a, i]) * z
         end
     end
     d0 = data.k_t .* w0
@@ -293,7 +306,9 @@ function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
     value = active.alpha3 + active.np_linear + active.np_quadratic + active.optional_uplift
     n = length(data.tau)
     retained_real = zeros(data.R, 2n, 2n)
-    retained_real[1:n, 1:n] .= data.R(2) .* data.retained_kinetic_metric
+    tau_jacobian = data.R.(divisor_volume_jacobian(geometry, data.tt))
+    retained_real[1:n, 1:n] .= data.R(2) .* (
+        tau_jacobian' * data.retained_kinetic_metric * tau_jacobian)
     retained_real[(n + 1):end, (n + 1):end] .= data.R(2) .* data.retained_kinetic_metric
     ModelEvaluation(value, contributions, active, data.V, data.tau,
         data.R.(rho), data.xi, data.xihat, data.xihat_half, data.Y,
@@ -335,12 +350,12 @@ function analytic_axion_gradient(model::KahlerModel, geometry::GeometryRecord,
         ddw = zeros(Complex{R}, n)
         for a in 1:na
             action = R(model.actions[a])
-            qj = model.charges[a, j]
+            qj = R(model.charges[a, j])
             z = terms.z_terms[a]
             dz = -im * action * qj * z
             dwn += dz
             for i in 1:n
-                ddw[i] += im * action^2 * model.charges[a, i] * qj * z
+                ddw[i] += im * action^2 * R(model.charges[a, i]) * qj * z
             end
         end
         ddn = ddw + data.k_t .* dwn
