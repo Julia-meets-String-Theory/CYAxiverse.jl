@@ -274,13 +274,10 @@ function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix
         Assessment(:PASS, "the active charge matrix has no axionic shift kernel")
     else
         numeric_directions = T.(symmetry_directions)
-        hscale = max(maximum(abs, Hcov), floatmin(T))
-        direction_scale = max(maximum(abs, numeric_directions), one(T))
-        residual = maximum(abs, Hcov * numeric_directions)
-        validation_tolerance = T(64) * eps(T) * hscale * direction_scale
-        residual <= validation_tolerance ?
-            Assessment(:PASS, "the exact active-charge kernel is also annihilated by the covariant Hessian") :
-            Assessment(:FAIL, "the covariant Hessian does not annihilate the exact active-charge kernel")
+        residual = Hcov * numeric_directions
+        all(iszero, residual) ?
+            Assessment(:PASS, "the exact active-charge kernel is exactly annihilated by the supplied covariant Hessian") :
+            Assessment(:FAIL, "the supplied covariant Hessian has a nonzero residual on the exact active-charge kernel")
     end
     symmetry_subspace = zeros(T, size(G, 1), 0)
     if symmetry_status.status === :PASS && size(symmetry_directions, 2) > 0

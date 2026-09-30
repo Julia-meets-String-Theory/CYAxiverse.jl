@@ -198,21 +198,42 @@ function _integer_inverse(matrix::AbstractMatrix{<:Integer})
     Int.(numerator.(rational_inverse))
 end
 
+function _push_digest_matrix!(parts::Vector{String}, name::String, matrix::AbstractMatrix)
+    push!(parts, name, string(size(matrix, 1)), string(size(matrix, 2)), string(eltype(matrix)))
+    append!(parts, (repr(value) for value in matrix))
+end
+
 function _geometry_digest(schema, intersections, euler, divisors, curves,
         divisor_map, curve_map, inequalities, cone, precision, exactness,
         units, source, basis_history)
-    payload = join((string(schema), string(intersections.n),
-        join(("$(intersections.triples[i])=$(repr(intersections.coefficients[i]))"
-            for i in eachindex(intersections.triples)), ";"), string(euler),
-        join(divisors, ","), join(curves, ","), repr(Matrix(divisor_map)),
-        repr(Matrix(curve_map)), repr(Matrix(inequalities)), string(cone.status), cone.construction,
-        cone.normalization, string(cone.completeness), cone.source_locator,
-        precision, string(exactness), units, string(source.source_kind), source.source_id,
+    parts = String["cyax0191-geometry-digest-v2", string(schema),
+        string(intersections.n), string(eltype(intersections.coefficients)),
+        string(length(intersections.triples))]
+    for i in eachindex(intersections.triples)
+        push!(parts, repr(intersections.triples[i]), repr(intersections.coefficients[i]))
+    end
+    append!(parts, (string(euler), string(length(divisors))))
+    append!(parts, divisors)
+    push!(parts, string(length(curves)))
+    append!(parts, curves)
+    _push_digest_matrix!(parts, "divisor_basis_map", divisor_map)
+    _push_digest_matrix!(parts, "dual_curve_basis_map", curve_map)
+    _push_digest_matrix!(parts, "domain_inequalities", inequalities)
+    append!(parts, (string(cone.status), cone.construction, cone.normalization,
+        string(cone.completeness), cone.source_locator, precision,
+        string(exactness), units, string(source.source_kind), source.source_id,
         source.source_revision, source.source_locator, source.source_sha256,
         source.polytope_identity, source.triangulation_identity,
         string(source.cytools_revision), source.importer_id,
-        join(basis_history, ";")), "|")
-    bytes2hex(sha256(codeunits(payload)))
+        string(length(basis_history))))
+    append!(parts, basis_history)
+    io = IOBuffer()
+    for part in parts
+        encoded = codeunits(part)
+        write(io, string(length(encoded)), ':')
+        write(io, encoded)
+    end
+    bytes2hex(sha256(take!(io)))
 end
 
 function GeometryRecord(intersections::CanonicalIntersectionTensor{K};
@@ -375,7 +396,7 @@ function change_divisor_basis(geometry::GeometryRecord, B::AbstractMatrix{<:Inte
         euler_characteristic=geometry.euler_characteristic,
         ordered_divisors=divisors, ordered_curves=curves,
         divisor_basis_map=basis * Matrix{Int}(geometry.divisor_basis_map),
-        dual_curve_basis_map=geometry.dual_curve_basis_map * Binv',
+        dual_curve_basis_map=Binv' * Matrix{Int}(geometry.dual_curve_basis_map),
         domain_inequalities=geometry.domain_inequalities * basis',
         cone_provenance=geometry.cone_provenance,
         precision=geometry.precision, exactness=geometry.exactness,

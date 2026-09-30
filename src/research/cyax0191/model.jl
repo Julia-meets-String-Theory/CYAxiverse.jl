@@ -169,8 +169,10 @@ struct ModelEvaluation{T<:Real}
     xihat_over_two::T
     Y::T
     parent_metric::Matrix{T}
+    # Frozen-heavy-field kinetic pullback: the parent metric's retained TT block.
     retained_kinetic_metric::Matrix{T}
     retained_real_kinetic_metric::Matrix{T}
+    # TT block of the inverse full metric, used by the reduced potential.
     retained_inverse_metric::Matrix{T}
     parent_metric_assessment::MetricAssessment{T}
     retained_metric_assessment::MetricAssessment{T}
@@ -216,15 +218,18 @@ function _kahler_data(model::KahlerModel, geometry::GeometryRecord,
         end
     end
     parent_metric = hessian ./ R(4)
-    retained_metric = parent_metric[2:end, 2:end] -
+    retained_kinetic_metric = Matrix(Symmetric(parent_metric[2:end, 2:end]))
+    schur_complement_metric = retained_kinetic_metric -
         (parent_metric[2:end, 1:1] * parent_metric[1:1, 2:end]) / parent_metric[1, 1]
-    retained_metric = Matrix(Symmetric((retained_metric + retained_metric') / R(2)))
-    retained_inverse = inv(retained_metric)
+    schur_complement_metric = Matrix(Symmetric(
+        (schur_complement_metric + schur_complement_metric') / R(2)))
+    full_inverse_tt_metric = inv(schur_complement_metric)
     k_tau = -R(2) .* ytau ./ Y
     k_t = k_tau ./ R(2)
     K = kcs - log(R(2) * s) - R(2) * log(Y)
     (; R, tt, gs, kcs, s, V, tau, xi, xihat, xihat_half, Y,
-       parent_metric, retained_metric, retained_inverse, k_tau, k_t,
+       parent_metric, retained_kinetic_metric, schur_complement_metric,
+       full_inverse_tt_metric, k_tau, k_t,
        expK=exp(K), domain_status=imported_domain_status(geometry, tt))
 end
 
@@ -265,7 +270,7 @@ function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
     enforce_domain && data.domain_status !== :PASS &&
         throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
     terms = _model_terms(model, data, rho)
-    M = data.retained_inverse
+    M = data.full_inverse_tt_metric
     R = data.R
     alpha = data.expK * (real(dot(terms.d0, M * terms.d0)) - R(3) * abs2(terms.w0))
     linear = data.expK * (R(2) * real(dot(terms.d0, M * terms.dn)) -
@@ -288,12 +293,12 @@ function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
     value = active.alpha3 + active.np_linear + active.np_quadratic + active.optional_uplift
     n = length(data.tau)
     retained_real = zeros(data.R, 2n, 2n)
-    retained_real[1:n, 1:n] .= data.R(2) .* data.retained_metric
-    retained_real[(n + 1):end, (n + 1):end] .= data.R(2) .* data.retained_metric
+    retained_real[1:n, 1:n] .= data.R(2) .* data.retained_kinetic_metric
+    retained_real[(n + 1):end, (n + 1):end] .= data.R(2) .* data.retained_kinetic_metric
     ModelEvaluation(value, contributions, active, data.V, data.tau,
         data.R.(rho), data.xi, data.xihat, data.xihat_half, data.Y,
-        data.parent_metric, data.retained_metric, retained_real,
-        data.retained_inverse, _metric_assessment(data.parent_metric),
+        data.parent_metric, data.retained_kinetic_metric, retained_real,
+        data.full_inverse_tt_metric, _metric_assessment(data.parent_metric),
         _metric_assessment(retained_real), data.domain_status,
         model.identity, geometry.artifact_sha256)
 end
@@ -339,9 +344,9 @@ function analytic_axion_gradient(model::KahlerModel, geometry::GeometryRecord,
             end
         end
         ddn = ddw + data.k_t .* dwn
-        derivative_linear = R(2) * real(dot(terms.d0, data.retained_inverse * ddn)) -
+        derivative_linear = R(2) * real(dot(terms.d0, data.full_inverse_tt_metric * ddn)) -
             R(6) * real(conj(terms.w0) * dwn)
-        derivative_quadratic = R(2) * real(dot(terms.dn, data.retained_inverse * ddn)) -
+        derivative_quadratic = R(2) * real(dot(terms.dn, data.full_inverse_tt_metric * ddn)) -
             R(6) * real(conj(terms.wn) * dwn)
         grad[j] = data.expK * ((model.switches.np_linear_enabled ? derivative_linear : zero(R)) +
             (model.switches.np_quadratic_enabled ? derivative_quadratic : zero(R)))

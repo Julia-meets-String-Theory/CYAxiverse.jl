@@ -65,6 +65,17 @@ function one_modulus_geometry(; kappa=1, chi=-2, inequality=reshape([1], 1, 1), 
         exactness=:exact, units="dimensionless synthetic geometry", source)
 end
 
+function geometry_with_source(geometry::GeometryRecord, source::GeometrySourceIdentity)
+    GeometryRecord(geometry.intersections;
+        euler_characteristic=geometry.euler_characteristic,
+        ordered_divisors=geometry.ordered_divisors, ordered_curves=geometry.ordered_curves,
+        divisor_basis_map=geometry.divisor_basis_map,
+        dual_curve_basis_map=geometry.dual_curve_basis_map,
+        domain_inequalities=geometry.domain_inequalities,
+        cone_provenance=geometry.cone_provenance, precision=geometry.precision,
+        exactness=geometry.exactness, units=geometry.units, source)
+end
+
 @testset "CYAX-0191 Gate B geometry and importer boundary" begin
     geometry = synthetic_geometry_fixture()
     t_exact = Rational{Int}[2, 1]
@@ -105,6 +116,15 @@ end
     @test transformed.dual_curve_basis_map == inv(B)'
     @test transformed.divisor_basis_map' * transformed.dual_curve_basis_map == I
     @test transformed.artifact_sha256 != geometry.artifact_sha256
+    B2 = Int[1 0; 2 1]
+    sequential = change_divisor_basis(transformed, B2)
+    combined = B2 * B
+    t_sequential, rho_sequential = change_coordinate_basis(t_new, rho_new, B2)
+    @test sequential.divisor_basis_map == combined
+    @test sequential.dual_curve_basis_map == inv(combined)'
+    @test sequential.divisor_basis_map' * sequential.dual_curve_basis_map == I
+    @test calabi_yau_volume(sequential, t_sequential) ≈ calabi_yau_volume(geometry, t_old)
+    @test divisor_volumes(sequential, t_sequential) ≈ combined * divisor_volumes(geometry, t_old)
     @test_throws MethodError setindex!(geometry.intersections.coefficients, 9, 1)
     @test_throws Base.CanonicalIndexError setindex!(geometry.divisor_basis_map, 9, 1, 1)
     @test_throws Base.CanonicalIndexError setindex!(geometry.domain_inequalities, 9, 1, 1)
@@ -120,15 +140,22 @@ end
         polytope_identity=geometry.source.polytope_identity,
         triangulation_identity=geometry.source.triangulation_identity,
         cytools_revision=nothing, importer_id=geometry.source.importer_id)
-    alternate_kind = GeometryRecord(geometry.intersections;
-        euler_characteristic=geometry.euler_characteristic,
-        ordered_divisors=geometry.ordered_divisors, ordered_curves=geometry.ordered_curves,
-        divisor_basis_map=geometry.divisor_basis_map,
-        dual_curve_basis_map=geometry.dual_curve_basis_map,
-        domain_inequalities=geometry.domain_inequalities,
-        cone_provenance=geometry.cone_provenance, precision=geometry.precision,
-        exactness=geometry.exactness, units=geometry.units, source=alternate_source)
+    alternate_kind = geometry_with_source(geometry, alternate_source)
     @test alternate_kind.artifact_sha256 != geometry.artifact_sha256
+    collision_left_source = GeometrySourceIdentity(source_kind=:native_fixture,
+        source_id="A|B", source_revision="C", source_locator=geometry.source.source_locator,
+        source_sha256=geometry.source.source_sha256,
+        polytope_identity=geometry.source.polytope_identity,
+        triangulation_identity=geometry.source.triangulation_identity,
+        cytools_revision=nothing, importer_id=geometry.source.importer_id)
+    collision_right_source = GeometrySourceIdentity(source_kind=:native_fixture,
+        source_id="A", source_revision="B|C", source_locator=geometry.source.source_locator,
+        source_sha256=geometry.source.source_sha256,
+        polytope_identity=geometry.source.polytope_identity,
+        triangulation_identity=geometry.source.triangulation_identity,
+        cytools_revision=nothing, importer_id=geometry.source.importer_id)
+    @test geometry_with_source(geometry, collision_left_source).artifact_sha256 !=
+        geometry_with_source(geometry, collision_right_source).artifact_sha256
 
     large_n = 24
     sparse_tensor = CanonicalIntersectionTensor(large_n,
@@ -171,7 +198,7 @@ end
     c_full = 3x * (1 + 7x + x^2) / ((1 - x) * (2 + x)^2)
     c_frozen = 3x / (4 - x)
     c_difference = 81x^2 / ((4 - x) * (1 - x) * (2 + x)^2)
-    full_from_metric = data.k_t[1]^2 * data.retained_inverse[1, 1] - 3
+    full_from_metric = data.k_t[1]^2 * data.full_inverse_tt_metric[1, 1] - 3
     frozen_from_metric = data.k_t[1]^2 / data.parent_metric[2, 2] - 3
     @test full_from_metric ≈ c_full rtol=1e-11 atol=1e-12
     @test frozen_from_metric ≈ c_frozen rtol=1e-11 atol=1e-12
@@ -196,9 +223,19 @@ end
     @test !isapprox(numerical_t_derivative, frozen_t_derivative; rtol=1e-3, atol=1e-8)
     @test corrected.parent_metric_assessment.status == :PASS
     @test corrected.retained_metric_assessment.status == :PASS
+    @test abs(corrected.parent_metric[1, 2]) > 1e-8
+    @test corrected.retained_kinetic_metric ≈ corrected.parent_metric[2:2, 2:2]
+    @test corrected.retained_inverse_metric ≈ inv(data.schur_complement_metric)
+    @test data.schur_complement_metric ≈
+        data.retained_kinetic_metric - data.parent_metric[2:2, 1:1] *
+        data.parent_metric[1:1, 2:2] / data.parent_metric[1, 1]
+    @test !isapprox(corrected.retained_inverse_metric,
+        inv(corrected.retained_kinetic_metric); rtol=1e-8, atol=1e-12)
     @test size(corrected.parent_metric) == (2, 2)
     @test size(corrected.retained_kinetic_metric) == (1, 1)
     @test size(corrected.retained_real_kinetic_metric) == (2, 2)
+    @test corrected.retained_real_kinetic_metric ≈
+        2 .* Matrix{Float64}(I, 2, 2) .* corrected.retained_kinetic_metric[1, 1]
 
     uncorrected_model = fixture_model(1; common...,
         switches=ModelSwitches(bbhl_correction_enabled=false,
@@ -303,7 +340,7 @@ end
     D = data.k_t[1] * W - generic_model.actions[1] * z1 -
         2generic_model.actions[2] * z2
     independent_q_oracle = data.expK *
-        (data.retained_inverse[1, 1] * abs2(D) - 3abs2(W))
+        (data.full_inverse_tt_metric[1, 1] * abs2(D) - 3abs2(W))
     @test evaluation.value ≈ independent_q_oracle rtol=1e-13 atol=1e-14
 
     identity_eval = evaluate_potential(source_model, geometry, t, rho)
@@ -313,7 +350,7 @@ end
     single_W = w0 + single_z
     single_D = data.k_t[1] * single_W - source_model.actions[1] * single_z
     source_basis_oracle = data.expK *
-        (data.retained_inverse[1, 1] * abs2(single_D) - 3abs2(single_W))
+        (data.full_inverse_tt_metric[1, 1] * abs2(single_D) - 3abs2(single_W))
     @test identity_eval.value ≈ source_basis_oracle rtol=1e-13 atol=1e-14
 
     geometry2 = synthetic_geometry_fixture()
@@ -387,6 +424,12 @@ end
     @test [mode.disposition for mode in exact_shift.mode_dispositions] ==
         [:symmetry_protected_exact_zero, :lifted]
     @test exact_shift.symmetry_kernel_assessment.status == :PASS
+    tiny_lift = fluctuation_analysis(GeneralizedEigenBackend(),
+        [1.0 0.0; 0.0 1e-15], Matrix{Float64}(I, 2, 2);
+        active_charges=zeros(Int, 0, 1), absolute_zero_threshold=1e-12)
+    @test tiny_lift.symmetry_kernel_assessment.status == :FAIL
+    @test tiny_lift.symmetry_mode_assessment.status == :NOT_ASSESSED
+    @test tiny_lift.mode_dispositions[1].disposition == :numerically_unresolved_near_zero
     degenerate_shift = fluctuation_analysis(GeneralizedEigenBackend(),
         [1.0 0.0 0.0 0.0; 0.0 1.0 0.0 0.0; 0.0 0.0 0.0 0.0; 0.0 0.0 0.0 0.0],
         Matrix{Float64}(I, 4, 4); active_charges=Int[1 1])
