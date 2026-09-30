@@ -70,6 +70,8 @@ struct UpliftSpec{F}
     provenance::String
     function UpliftSpec(evaluate::F, identity::AbstractString,
             provenance::AbstractString) where {F}
+        evaluate isa Function ||
+            throw(ArgumentError("uplift evaluator must be a callable function"))
         all(!isempty, (identity, provenance)) ||
             throw(ArgumentError("uplift identity and provenance must be explicit"))
         _manifest_value_is_immutable(evaluate) ||

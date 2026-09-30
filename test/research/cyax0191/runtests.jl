@@ -424,6 +424,8 @@ end
     mutable_ref_uplift = args -> mutable_uplift_ref[]
     @test_throws ArgumentError UpliftSpec(mutable_ref_uplift,
         "mutable Ref uplift", "must not retain mutable state")
+    @test_throws ArgumentError UpliftSpec(42,
+        "non-callable uplift", "must fail at construction")
     @test_throws ArgumentError fixture_model(1; common...,
         switches=ModelSwitches(bbhl_correction_enabled=false,
             np_linear_enabled=false, np_quadratic_enabled=false, uplift_enabled=true),
@@ -832,6 +834,26 @@ end
     mutable_string.value = "backend-origin-b"
     @test string_manifest.backend_versions.origin == "backend-origin-a"
     @test string_manifest.backend_versions.origin isa String
+    heterogeneous_components = Any["alpha", 7]
+    heterogeneous_nested = Any["nested", 11]
+    heterogeneous_manifest = replay_manifest(NativeReplayBackend(), model, geometry;
+        code_revision="synthetic-code-revision", selected_source_route="analytic-fixture",
+        counting_unit="one synthetic model state", numeric_type="Float64",
+        precision_bits=53,
+        backend_versions=(; components=heterogeneous_components,
+            nested=(; values=heterogeneous_nested)),
+        solver_configuration=(; method="damped-newton"),
+        scales=(; fields=(1.0, 1.0, 1.0, 1.0), potential=1.0))
+    heterogeneous_components[1] = "changed"
+    heterogeneous_components[2] = 99
+    heterogeneous_nested[1] = "changed-nested"
+    heterogeneous_nested[2] = 99
+    @test heterogeneous_manifest.backend_versions.components[1] == "alpha"
+    @test heterogeneous_manifest.backend_versions.components[2] == 7
+    @test heterogeneous_manifest.backend_versions.nested.values[1] == "nested"
+    @test heterogeneous_manifest.backend_versions.nested.values[2] == 11
+    @test heterogeneous_manifest.backend_versions.components isa
+        CYAX0191.FrozenManifestArray{1}
     backend_versions_input = ["backend-v1", "numerics-v1"]
     solver_steps_input = [8, 16]
     field_scales_input = [1.0, 2.0, 3.0, 4.0]

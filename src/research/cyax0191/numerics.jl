@@ -595,14 +595,18 @@ _snapshot_manifest(value::AbstractString) = String(value)
 _snapshot_manifest(value::NamedTuple) =
     NamedTuple{keys(value)}(map(_snapshot_manifest, values(value)))
 _snapshot_manifest(value::Tuple) = map(_snapshot_manifest, value)
+function _snapshot_manifest_array(value::AbstractArray{T,N}) where {T,N}
+    elements = Tuple(_snapshot_manifest(item) for item in value)
+    FrozenManifestArray{N,length(elements)}(elements, size(value), Val(:frozen))
+end
 function _snapshot_manifest(value::AbstractArray{T,N}) where {T,N}
+    isconcretetype(T) || return _snapshot_manifest_array(value)
     try
         return FrozenArray(value)
     catch error
         error isa ArgumentError || rethrow()
     end
-    values = Tuple(_snapshot_manifest(item) for item in value)
-    FrozenManifestArray{N,length(values)}(values, size(value), Val(:frozen))
+    _snapshot_manifest_array(value)
 end
 function _snapshot_manifest(value::AbstractDict)
     entries = sort!(collect(pairs(value)); by=pair -> repr(pair.first))
