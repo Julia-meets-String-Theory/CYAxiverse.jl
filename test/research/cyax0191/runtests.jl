@@ -78,6 +78,23 @@ end
 
 @testset "CYAX-0191 Gate B geometry and importer boundary" begin
     geometry = synthetic_geometry_fixture()
+    source = geometry.source
+    @test_throws ArgumentError GeometrySourceIdentity(:invalid, source.source_id,
+        source.source_revision, source.source_locator, source.source_sha256,
+        source.polytope_identity, source.triangulation_identity,
+        source.cytools_revision, source.importer_id)
+    @test_throws ArgumentError CanonicalIntersectionTensor(1,
+        [(1, 1, 1) => ComplexF64(1)])
+    @test_throws ArgumentError CanonicalIntersectionTensor{ComplexF64}(1,
+        ((1, 1, 1),), CYAX0191.FrozenArray(ComplexF64[1 + 0im]))
+    @test_throws ArgumentError GeometryRecord(geometry.intersections;
+        euler_characteristic=geometry.euler_characteristic,
+        ordered_divisors=geometry.ordered_divisors, ordered_curves=geometry.ordered_curves,
+        divisor_basis_map=geometry.divisor_basis_map,
+        dual_curve_basis_map=geometry.dual_curve_basis_map,
+        domain_inequalities=complex.(geometry.domain_inequalities),
+        cone_provenance=geometry.cone_provenance, precision=geometry.precision,
+        exactness=geometry.exactness, units=geometry.units, source=geometry.source)
     duplicate_terms = CanonicalIntersectionTensor(1, Pair[
         (1, 1, 1) => typemax(Int), (1, 1, 1) => 1])
     @test collect(duplicate_terms.coefficients) == BigInt[BigInt(typemax(Int)) + 1]
@@ -262,6 +279,13 @@ end
         geometry.dual_curve_basis_map, malformed_cone, geometry.cone_provenance,
         geometry.precision, geometry.exactness, geometry.units, geometry.source,
         geometry.basis_history)
+    complex_cone = CYAX0191.FrozenArray(ComplexF64.(geometry.domain_inequalities))
+    @test_throws ArgumentError GeometryRecord{K,ComplexF64}(
+        geometry.schema_version, geometry.intersections, geometry.euler_characteristic,
+        geometry.ordered_divisors, geometry.ordered_curves, geometry.divisor_basis_map,
+        geometry.dual_curve_basis_map, complex_cone, geometry.cone_provenance,
+        geometry.precision, geometry.exactness, geometry.units, geometry.source,
+        geometry.basis_history)
 
     large_n = 24
     sparse_tensor = CanonicalIntersectionTensor(large_n,
@@ -379,6 +403,10 @@ end
     @test no_np.active_contributions.np_quadratic == 0
     @test_throws ArgumentError fixture_model(1; common...,
         switches=ModelSwitches(uplift_enabled=true))
+    mutable_uplift_capture = [0.125]
+    mutable_uplift = args -> mutable_uplift_capture[1]
+    @test_throws ArgumentError UpliftSpec(mutable_uplift,
+        "mutable synthetic uplift", "must not retain mutable state")
     uplift = UpliftSpec(args -> 0.125, "constant synthetic uplift", "Gate B switch fixture")
     uplift_model = fixture_model(1; common...,
         switches=ModelSwitches(bbhl_correction_enabled=false,
@@ -558,6 +586,21 @@ end
 
 @testset "CYAX-0191 Gate B numerical interfaces, reports, and frozen policy" begin
     backend = CentralDifferenceBackend()
+    @test_throws ArgumentError SearchCriteria{Float64}([1.0], 1.0, Inf,
+        10, 0.5, 1e-5, nothing, "")
+    source_scales = [1.0, 2.0]
+    frozen_criteria = SearchCriteria{Float64}(source_scales, 1.0, 1e-8,
+        10, 0.5, 1e-5, nothing, "")
+    source_scales[1] = 99.0
+    @test frozen_criteria.field_scales == [1.0, 2.0]
+    @test getfield(frozen_criteria, :field_scales) isa CYAX0191.FrozenArray{Float64,1}
+    @test_throws Base.CanonicalIndexError setindex!(frozen_criteria.field_scales, 7.0, 1)
+    mutable_scale_capture = [1.0]
+    mutable_scale_rule = x -> mutable_scale_capture[1]
+    @test_throws ArgumentError SearchCriteria([1.0], 1.0, 1e-8;
+        potential_scale_rule=mutable_scale_rule,
+        potential_scale_rule_identity="mutable-scale-test")
+
     f(x) = x[1]^2 + 3x[1] * x[2] + 2x[2]^2
     point = [0.4, -0.7]
     grad = finite_difference_gradient(backend, f, point)
@@ -593,6 +636,29 @@ end
     @test hessian_domain_search.value ≈ 0.99999^2
     @test any(occursin("Hessian evaluation rejected", failure)
         for failure in hessian_domain_search.failures)
+    nonfinite_objective(x) = iszero(x[1]) ? Inf : x[1]^2
+    nonfinite_search = search_stationary(DampedNewtonSearch(), nonfinite_objective,
+        [0.0], SearchCriteria([1.0], 1.0, 1e-8; max_iterations=2))
+    @test nonfinite_search.status == :failed
+    @test isinf(nonfinite_search.value)
+    @test any(occursin("objective returned a nonfinite value", failure)
+        for failure in nonfinite_search.failures)
+    final_recheck_calls = Ref(0)
+    function final_recheck_objective(x)
+        final_recheck_calls[] += 1
+        final_recheck_calls[] == 9 &&
+            throw(DomainError(x[1], "unexpected post-budget reevaluation"))
+        x[1] < 1 ? x[1]^2 : throw(DomainError(x[1], "outside test domain"))
+    end
+    exhausted_search = search_stationary(
+        DampedNewtonSearch(differentiation=DomainRejectingBackend()),
+        final_recheck_objective, [0.0], SearchCriteria([1.0], 1.0, 1e-8;
+            max_iterations=1, minimum_step=1 / 8))
+    @test exhausted_search.status == :failed
+    @test exhausted_search.point == [0.5]
+    @test final_recheck_calls[] == 8
+    @test any(occursin("iteration budget exhausted", failure)
+        for failure in exhausted_search.failures)
 
     fluct = fluctuation_analysis(GeneralizedEigenBackend(),
         [-0.5 0.0 0.0 0.0; 0.0 0.0 0.0 0.0; 0.0 0.0 5e-11 0.0; 0.0 0.0 0.0 2.0],
@@ -704,20 +770,51 @@ end
     geometry = synthetic_geometry_fixture()
     model = fixture_model(2; charges=Matrix{Int}(I, 2, 2),
         amplitudes=[0.2, 0.3], actions=[0.7, 0.9], phases=[0.1, -0.2])
+    @test_throws ArgumentError CYAX0191.KahlerModel{Float64,Nothing}(
+        CYAX0191.FrozenScalar(-1.0), getfield(model, :theta0), getfield(model, :gs),
+        getfield(model, :kcs), getfield(model, :amplitudes), getfield(model, :actions),
+        getfield(model, :phases), getfield(model, :charges), model.convention,
+        model.switches, nothing, model.identity)
     manifest = replay_manifest(NativeReplayBackend(), model, geometry;
         code_revision="synthetic-code-revision", selected_source_route="analytic-fixture",
         counting_unit="one synthetic model state", numeric_type="Float64",
         precision_bits=53, backend_versions=(; differentiation="central-difference-v1"),
         solver_configuration=(; method="damped-newton", budget=20),
         scales=(; fields=(1.0, 1.0, 1.0, 1.0), potential=1.0), seed=17, budget=20)
+    @test manifest.schema_version == "cyax0191-replay-v2"
     @test manifest.geometry_artifact_sha256 == geometry.artifact_sha256
     @test manifest.selected_source_route == "analytic-fixture"
     @test manifest.counting_unit == "one synthetic model state"
     @test manifest.model_switches == model.switches
     @test manifest.model_parameters.w0_magnitude == string(model.w0_magnitude)
     @test manifest.model_parameters.amplitudes == Tuple(string.(model.amplitudes))
-    @test manifest.model_parameters.charges == ((1, 0), (0, 1))
+    @test Tuple(Tuple(value.decimal for value in row)
+        for row in manifest.model_parameters.charges) == (("1", "0"), ("0", "1"))
     @test manifest.model_parameters.uplift === nothing
+    backend_versions_input = ["backend-v1", "numerics-v1"]
+    solver_steps_input = [8, 16]
+    field_scales_input = [1.0, 2.0, 3.0, 4.0]
+    nested_manifest = replay_manifest(NativeReplayBackend(), model, geometry;
+        code_revision="synthetic-code-revision", selected_source_route="analytic-fixture",
+        counting_unit="one synthetic model state", numeric_type="Float64",
+        precision_bits=53,
+        backend_versions=(; components=backend_versions_input,
+            provenance=(; tags=["cpu", "native"])),
+        solver_configuration=(; steps=solver_steps_input,
+            options=(; flags=[true, false])),
+        scales=(; fields=field_scales_input, blocks=(; axions=[1.0, 1.0])),
+        seed=17, budget=20)
+    backend_versions_input[1] = "changed"
+    solver_steps_input[1] = 999
+    field_scales_input[1] = 999.0
+    @test nested_manifest.backend_versions.components[1] == "backend-v1"
+    @test nested_manifest.backend_versions.provenance.tags[2] == "native"
+    @test nested_manifest.solver_configuration.steps[1] == 8
+    @test nested_manifest.solver_configuration.options.flags[2] == false
+    @test nested_manifest.scales.fields[1] == 1.0
+    @test nested_manifest.scales.blocks.axions[2] == 1.0
+    @test nested_manifest.source.divisor_basis_map[1, 1] == 1
+    @test_throws Base.CanonicalIndexError setindex!(nested_manifest.scales.fields, 42.0, 1)
     source_charges = BigInt[1 0]
     source_amplitudes = [0.2]
     source_actions = [0.7]
@@ -887,5 +984,13 @@ end
         big_policy_scale = policy_b1.potential_scale
         @test big_policy_scale isa BigFloat
         @test getfield(policy_b1, :potential_scale) isa CYAX0191.FrozenScalar{BigFloat}
+        big_criteria_scales = BigFloat[1, 2]
+        big_criteria = SearchCriteria(big_criteria_scales, BigFloat(1), BigFloat("1e-8");
+            max_iterations=10)
+        big_criteria_scales[1] = BigFloat(99)
+        @test big_criteria.field_scales[1] == 1
+        @test getfield(big_criteria, :potential_scale) isa CYAX0191.FrozenScalar{BigFloat}
+        @test getfield(big_criteria, :potential_scale).encoded[1] == 128
+        @test_throws MethodError Base.MPFR.nextfloat!(getfield(big_criteria, :potential_scale))
     end
 end

@@ -72,6 +72,8 @@ struct UpliftSpec{F}
             provenance::AbstractString) where {F}
         all(!isempty, (identity, provenance)) ||
             throw(ArgumentError("uplift identity and provenance must be explicit"))
+        _manifest_value_is_immutable(evaluate) ||
+            throw(ArgumentError("uplift evaluator must not retain mutable state"))
         new{F}(evaluate, String(identity), String(provenance))
     end
 end

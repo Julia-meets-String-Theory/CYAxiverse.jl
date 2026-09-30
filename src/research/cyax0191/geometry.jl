@@ -19,6 +19,10 @@ end
 
 _freeze_value(value::BigInt) = Tuple(codeunits(string(value)))
 _thaw_frozen(::Type{BigInt}, bytes::Tuple) = parse(BigInt, String(UInt8[bytes...]))
+_freeze_value(value::String) = Tuple(codeunits(value))
+_thaw_frozen(::Type{String}, bytes::Tuple) = String(UInt8[bytes...])
+_freeze_value(value::Symbol) = Tuple(codeunits(String(value)))
+_thaw_frozen(::Type{Symbol}, bytes::Tuple) = Symbol(String(UInt8[bytes...]))
 
 function _freeze_value(value::BigFloat)
     (precision(value), Tuple(codeunits(string(value))))
@@ -108,6 +112,8 @@ struct CanonicalIntersectionTensor{T<:Number}
             throw(ArgumentError("intersection triples must be ordered and within the divisor basis"))
         issorted(triples) && length(unique(triples)) == length(triples) ||
             throw(ArgumentError("intersection triples must be sorted and unique"))
+        all(value -> value isa Real, coefficients) ||
+            throw(ArgumentError("intersection coefficients must be real"))
         all(value -> !iszero(value) && isfinite(value), coefficients) ||
             throw(ArgumentError("intersection coefficients must be finite and nonzero"))
         new{T}(n, triples, coefficients)
@@ -126,6 +132,8 @@ function CanonicalIntersectionTensor(n::Integer, terms::AbstractVector{<:Pair})
         length(item.first) == 3 || throw(ArgumentError("intersection keys must be triples"))
         key = Tuple(sort!(collect(Int, item.first)))
         all(i -> 1 <= i <= n, key) || throw(BoundsError(1:n, key))
+        item.second isa Real ||
+            throw(ArgumentError("intersection coefficients must be real"))
         value = _widen_exact(item.second)
         accum[key] = get(accum, key, zero(value)) + value
     end
@@ -346,6 +354,8 @@ function _validate_geometry_record_components(intersections::CanonicalIntersecti
     size(inequalities, 2) == n || throw(DimensionMismatch("cone inequalities must have n columns"))
     size(inequalities, 1) > 0 || throw(ArgumentError("at least one imported cone inequality is required"))
     all(isfinite, inequalities) || throw(ArgumentError("cone inequalities must be finite"))
+    all(value -> value isa Real, inequalities) ||
+        throw(ArgumentError("cone inequalities must be real"))
     exactness in (:exact, :rational, :approximate) || throw(ArgumentError("invalid geometry exactness"))
     all(!isempty, (schema_version, precision, units)) ||
         throw(ArgumentError("geometry metadata must be nonempty"))

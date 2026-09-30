@@ -74,35 +74,55 @@ end
 abstract type SearchBackend end
 
 struct SearchCriteria{T<:AbstractFloat}
-    field_scales::Vector{T}
-    potential_scale::T
-    stationarity_tolerance::T
+    field_scales::FrozenArray{T,1}
+    potential_scale::FrozenScalar{T}
+    stationarity_tolerance::FrozenScalar{T}
     max_iterations::Int
-    backtracking_factor::T
-    minimum_step::T
+    backtracking_factor::FrozenScalar{T}
+    minimum_step::FrozenScalar{T}
     potential_scale_rule::Any
     potential_scale_rule_identity::String
+
+    function SearchCriteria{T}(field_scales::AbstractVector{T}, potential_scale::T,
+            stationarity_tolerance::T, max_iterations::Int, backtracking_factor::T,
+            minimum_step::T, potential_scale_rule,
+            potential_scale_rule_identity::String) where {T<:AbstractFloat}
+        !isempty(field_scales) || throw(ArgumentError("at least one field scale is required"))
+        all(value -> isfinite(value) && value > zero(T), field_scales) ||
+            throw(ArgumentError("field scales must be finite and positive"))
+        isfinite(potential_scale) && potential_scale > zero(T) ||
+            throw(ArgumentError("potential scale must be finite and positive"))
+        isfinite(stationarity_tolerance) && stationarity_tolerance > zero(T) ||
+            throw(ArgumentError("stationarity tolerance must be finite and positive"))
+        isfinite(backtracking_factor) && 0 < backtracking_factor < 1 ||
+            throw(ArgumentError("backtracking factor must be finite and between zero and one"))
+        isfinite(minimum_step) && minimum_step > zero(T) ||
+            throw(ArgumentError("minimum line-search step must be finite and positive"))
+        max_iterations > 0 || throw(ArgumentError("iteration budget must be positive"))
+        (potential_scale_rule === nothing) == isempty(potential_scale_rule_identity) ||
+            throw(ArgumentError("a pointwise potential scale rule and its identity must be supplied together"))
+        potential_scale_rule === nothing || _manifest_value_is_immutable(potential_scale_rule) ||
+            throw(ArgumentError("pointwise scale rules must not retain mutable state"))
+        scales = FrozenArray(collect(field_scales))
+        new{T}(scales, FrozenScalar(potential_scale),
+            FrozenScalar(stationarity_tolerance), max_iterations,
+            FrozenScalar(backtracking_factor), FrozenScalar(minimum_step),
+            potential_scale_rule, potential_scale_rule_identity)
+    end
+end
+
+function Base.getproperty(criteria::SearchCriteria, name::Symbol)
+    value = getfield(criteria, name)
+    value isa FrozenScalar && return _thaw_scalar(value)
+    value
 end
 
 function SearchCriteria(field_scales::AbstractVector{T}, potential_scale::T,
         stationarity_tolerance::T; max_iterations=1_000,
         backtracking_factor=T(0.5), minimum_step=T(2.0)^(-20),
         potential_scale_rule=nothing, potential_scale_rule_identity="") where {T<:AbstractFloat}
-    all(value -> isfinite(value) && value > zero(T), field_scales) ||
-        throw(ArgumentError("field scales must be finite and positive"))
-    isfinite(potential_scale) && potential_scale > zero(T) ||
-        throw(ArgumentError("potential scale must be finite and positive"))
-    isfinite(stationarity_tolerance) && stationarity_tolerance > zero(T) ||
-        throw(ArgumentError("stationarity tolerance must be finite and positive"))
-    isfinite(backtracking_factor) && 0 < backtracking_factor < 1 ||
-        throw(ArgumentError("backtracking factor must be finite and between zero and one"))
-    isfinite(minimum_step) && minimum_step > zero(T) ||
-        throw(ArgumentError("minimum line-search step must be finite and positive"))
-    max_iterations > 0 || throw(ArgumentError("iteration budget must be positive"))
-    (potential_scale_rule === nothing) == isempty(potential_scale_rule_identity) ||
-        throw(ArgumentError("a pointwise potential scale rule and its identity must be supplied together"))
     SearchCriteria{T}(collect(field_scales), potential_scale, stationarity_tolerance,
-        max_iterations, backtracking_factor, minimum_step, potential_scale_rule,
+        Int(max_iterations), T(backtracking_factor), T(minimum_step), potential_scale_rule,
         String(potential_scale_rule_identity))
 end
 
@@ -139,6 +159,8 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
     failures = String[]
     g = zeros(T, length(x))
     H = zeros(T, length(x), length(x))
+    last_value = T(NaN)
+    last_residual = T(Inf)
     for iteration in 0:criteria.max_iterations
         value = try
             T(f(x))
@@ -150,6 +172,12 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
             end
             rethrow()
         end
+        if !isfinite(value)
+            push!(failures, "objective returned a nonfinite value at iteration $iteration")
+            return SearchResult(:failed, x, value, T(Inf), iteration,
+                "damped-newton-gradient-residual", failures)
+        end
+        last_value = value
         residual = try
             gradient!(g, differentiation, f, x; scales=criteria.field_scales)
             T(scaled_stationarity_residual(g, criteria.field_scales,
@@ -162,11 +190,16 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
             end
             rethrow()
         end
+        last_residual = residual
         if residual <= criteria.stationarity_tolerance
             return SearchResult(:converged, x, value, residual, iteration,
                 "damped-newton-gradient-residual", failures)
         end
-        iteration == criteria.max_iterations && break
+        if iteration == criteria.max_iterations
+            push!(failures, "iteration budget exhausted at iteration $iteration")
+            return SearchResult(:failed, x, value, residual, iteration,
+                "damped-newton-gradient-residual", failures)
+        end
         try
             hessian!(H, differentiation, f, x; scales=criteria.field_scales)
         catch error
@@ -215,10 +248,7 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
                 "damped-newton-gradient-residual", failures)
         end
     end
-    gradient!(g, differentiation, f, x; scales=criteria.field_scales)
-    residual = T(scaled_stationarity_residual(g, criteria.field_scales,
-        _search_potential_scale(criteria, x)))
-    SearchResult(:failed, x, T(f(x)), residual, criteria.max_iterations,
+    SearchResult(:failed, x, last_value, last_residual, criteria.max_iterations,
         "damped-newton-gradient-residual", failures)
 end
 
@@ -482,6 +512,76 @@ end
 abstract type ReplayBackend end
 struct NativeReplayBackend <: ReplayBackend end
 
+"""Read-only snapshot of caller-supplied array data in a replay manifest."""
+struct FrozenManifestArray{N,L} <: AbstractArray{Any,N}
+    values::NTuple{L,Any}
+    dimensions::NTuple{N,Int}
+
+    function FrozenManifestArray{N,L}(values::NTuple{L,Any}, dimensions::NTuple{N,Int},
+            ::Val{:frozen}) where {N,L}
+        prod(dimensions) == L || throw(DimensionMismatch("manifest array shape does not match its data"))
+        all(_manifest_value_is_immutable, values) ||
+            throw(ArgumentError("manifest array storage must be recursively immutable"))
+        new{N,L}(values, dimensions)
+    end
+end
+
+Base.size(array::FrozenManifestArray) = getfield(array, :dimensions)
+Base.IndexStyle(::Type{<:FrozenManifestArray}) = IndexLinear()
+Base.getindex(array::FrozenManifestArray, index::Int) = getfield(array, :values)[index]
+function Base.getindex(array::FrozenManifestArray{N}, indices::Vararg{Int,N}) where {N}
+    getfield(array, :values)[LinearIndices(array)[indices...]]
+end
+
+_manifest_value_is_immutable(value) = isbitstype(typeof(value))
+_manifest_value_is_immutable(value::AbstractString) = true
+_manifest_value_is_immutable(value::Symbol) = true
+_manifest_value_is_immutable(::Nothing) = true
+_manifest_value_is_immutable(::Missing) = true
+_manifest_value_is_immutable(value::Tuple) = all(_manifest_value_is_immutable, value)
+_manifest_value_is_immutable(value::NamedTuple) =
+    all(_manifest_value_is_immutable, values(value))
+function _manifest_value_is_immutable(value)
+    ismutabletype(typeof(value)) && return false
+    all(index -> _manifest_value_is_immutable(getfield(value, index)),
+        1:fieldcount(typeof(value)))
+end
+
+_snapshot_manifest(value::BigInt) =
+    (; numeric_type="BigInt", decimal=string(value))
+_snapshot_manifest(value::BigFloat) =
+    (; numeric_type="BigFloat", precision_bits=precision(value), decimal=string(value))
+_snapshot_manifest(value::Rational{BigInt}) =
+    (; numeric_type="Rational{BigInt}", numerator=string(numerator(value)),
+       denominator=string(denominator(value)))
+_snapshot_manifest(value::NamedTuple) =
+    NamedTuple{keys(value)}(map(_snapshot_manifest, values(value)))
+_snapshot_manifest(value::Tuple) = map(_snapshot_manifest, value)
+function _snapshot_manifest(value::AbstractArray{T,N}) where {T,N}
+    try
+        return FrozenArray(value)
+    catch error
+        error isa ArgumentError || rethrow()
+    end
+    values = Tuple(_snapshot_manifest(item) for item in value)
+    FrozenManifestArray{N,length(values)}(values, size(value), Val(:frozen))
+end
+function _snapshot_manifest(value::AbstractDict)
+    entries = sort!(collect(pairs(value)); by=pair -> repr(pair.first))
+    (; entries=Tuple((key=_snapshot_manifest(pair.first),
+        value=_snapshot_manifest(pair.second)) for pair in entries))
+end
+_snapshot_manifest(value::Pair) =
+    (; first=_snapshot_manifest(first(value)), second=_snapshot_manifest(last(value)))
+function _snapshot_manifest(value)
+    _manifest_value_is_immutable(value) && return value
+    ismutabletype(typeof(value)) &&
+        throw(ArgumentError("mutable replay manifest value $(typeof(value)) has no immutable snapshot encoding"))
+    names = fieldnames(typeof(value))
+    fields = NamedTuple{names}(Tuple(_snapshot_manifest(getfield(value, name)) for name in names))
+    (; type=string(typeof(value)), fields)
+end
+
 function replay_manifest(::NativeReplayBackend, model::KahlerModel,
         geometry::GeometryRecord; code_revision::AbstractString,
         selected_source_route::AbstractString, counting_unit::AbstractString,
@@ -499,7 +599,7 @@ function replay_manifest(::NativeReplayBackend, model::KahlerModel,
         actions=Tuple(string.(model.actions)), phases=Tuple(string.(model.phases)),
         charges=Tuple(Tuple(row) for row in eachrow(model.charges)),
         uplift=uplift_identity)
-    (; schema_version="cyax0191-replay-v1",
+    manifest = (; schema_version="cyax0191-replay-v2",
        code_revision=String(code_revision),
        source=geometry_identity(geometry),
        geometry_artifact_sha256=geometry.artifact_sha256,
@@ -512,6 +612,7 @@ function replay_manifest(::NativeReplayBackend, model::KahlerModel,
        units=geometry.units, numeric_type=String(numeric_type),
        precision_bits=Int(precision_bits), backend_versions,
        solver_configuration, scales, seed, budget)
+    _snapshot_manifest(manifest)
 end
 
 """Rebase an integer charge matrix under D_new = B*D_old."""
