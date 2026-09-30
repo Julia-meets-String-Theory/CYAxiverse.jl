@@ -1,7 +1,7 @@
 ---
 id: CYAX-0121
 title: BHSR reference reconstruction tasks
-status: draft
+status: reviewed_pending_owner_approval
 governing_spec: specs/0121-bhsr-reference-reconstruction/spec.md
 ---
 
@@ -27,9 +27,9 @@ Verify: convergence ladder, cap failure behavior, source/published spot checks.
 
 ## T201 — Implement historical Appendix-B formula likelihood
 
-Outcome: REFERENCE_2018_APPENDIX_B_FORMULA reproduces source equations and branch/cusp logic where source uncertainty inputs are defined.
+Outcome: REFERENCE_2018_APPENDIX_B_FORMULA reproduces source Appendix-B equations labelled (B1)-(B4), corresponding to Eqs. 95-98 in the owner-approved r6 contract, and source branch/cusp logic where source uncertainty inputs are defined. The two equation numberings are identified explicitly; Eqs. 95-98 are not the printed Appendix-B labels in arXiv:1805.02016v2.
 
-Verify: equation-level fixtures and bounded limitation where source sigmas are not uniquely defined.
+Verify: source effective one-dimensional projected-error and standard error-function fixtures; f(x) and multivalued inverse g(y) cases with the nearest-xbar derivative branch and erf evaluated between g1 and g2; no generic two-dimensional surrogate; equation-level fixtures and bounded limitation where source sigmas are not uniquely defined.
 
 ## T202 — Implement censor-aware interim likelihood
 
@@ -39,9 +39,9 @@ Verify: censored-boundary fixtures around threshold 0.9545 and source-support fa
 
 ## T301 — Implement reference bosenova route
 
-Outcome: REFERENCE_2021_BOSENOVA implements source N_max, N_Bose, f_pert, and spin-down criterion with documented omissions.
+Outcome: REFERENCE_2021_BOSENOVA implements source N_max, N_Bose, f_pert, and the per-mode analytic-rate criterion Gamma_SR * tau_BH * (N_Bose/N_max) > ln(N_Bose), from Stott arXiv:2009.07206v1 Eq. 26, with documented omissions and provenance.
 
-Verify: formula fixtures, equality-boundary tests, sign/magnitude provenance checks.
+Verify: formula fixtures use the source Salpeter default tau_Sal approximately 4.5e7 yr; any target-specific alternative is source-bound and has a distinct target identity; boundaries use each mode's source analytic rate without an ad hoc multiplicative suppression factor; equality is the transition boundary with just-satisfied and just-unsatisfied tests that do not use tolerance-dependent reclassification; sign/magnitude provenance checks.
 
 ## T401 — Implement physical-spectrum post-processing adapter
 
@@ -63,9 +63,9 @@ Verify: failed/provisional/mixed fixtures with exact numerator/denominator asser
 
 ## T501 — Define Hoof migration/interface contract
 
-Outcome: future HOOF_2024_BAYESIAN_BHSR integration has explicit route/provenance, posterior/likelihood adapter, nuisance-parameter, and hierarchical-population extension interfaces.
+Outcome: independently governed Issue #192 has its own physics and inference branch consuming the common provenance-bound spectrum interface, with explicit route/provenance, posterior/likelihood adapter, nuisance-parameter, and hierarchical-population extension interfaces. Issue #192 never inherits the CYAX-0121 scientific BHSR calculation.
 
-Verify: interface fixtures only; no Hoof production code deployment.
+Verify: common-interface provenance and migration fixtures only; #192 physics and inference remain an independent branch; no Hoof production code deployment.
 
 ## T601 — Run bounded reconstruction/smoke evidence
 

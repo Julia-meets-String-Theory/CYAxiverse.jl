@@ -1,7 +1,7 @@
 ---
 id: CYAX-0121
 title: BHSR reference reconstruction implementation plan
-status: draft
+status: reviewed_pending_owner_approval
 governing_spec: specs/0121-bhsr-reference-reconstruction/spec.md
 ---
 
@@ -32,7 +32,7 @@ Implement CF_2018_VALIDATION with adaptive order doubling, relative target 1e-8,
 
 ### P3A — REFERENCE_2018_APPENDIX_B_FORMULA
 
-Implement historical equations, branch logic, projected-error treatment, and cusp approximation only where source inputs are defined. Missing unique source sigmas remain an explicit reproduction limitation.
+Implement source Appendix-B equations labelled (B1)-(B4), corresponding to Eqs. 95-98 in the owner-approved r6 contract; the latter are contract numbering, not the printed arXiv:1805.02016v2 labels. Preserve the source effective one-dimensional projected-error calculation and standard error function, zero covariance approximation, and branch/cusp logic. For multivalued inverse x=g(y), use the branch nearest xbar for derivative evaluation and evaluate the error function between g1 and g2. Do not substitute a generic two-dimensional surrogate. Missing unique source sigmas remain an explicit reproduction limitation.
 
 ### P3B — CYAX_BHSR_LIKELIHOOD_V1
 
@@ -40,7 +40,7 @@ Implement asymmetric and censored-data handling, probability bounds/intervals, e
 
 ## P4 — Reference bosenova route
 
-Implement REFERENCE_2021_BOSENOVA using source N_max, N_Bose, f_pert, spin-down efficiency, and deliberate omission/provenance rules.
+Implement REFERENCE_2021_BOSENOVA using source N_max, N_Bose, f_pert, and the per-mode analytic-rate criterion Gamma_SR * tau_BH * (N_Bose/N_max) > ln(N_Bose) from Stott arXiv:2009.07206v1 Eq. 26. Use tau_Sal approximately 4.5e7 yr for the source reference path; bind any target-specific alternative timescale to its source and a distinct target identity. Derive boundaries with the source analytic rate for each mode, with no ad hoc multiplicative suppression factor. Treat equality as the transition boundary and verify both adjacent sides without tolerance-dependent classification, alongside the deliberate omission/provenance rules.
 
 ## P5 — Physical-spectrum adapter and authority rules
 
@@ -50,7 +50,7 @@ Keep #173-disputed outputs route-specific. Fail closed on absent/ambiguous autho
 
 ## P6 — Hoof migration interface
 
-Define route/provenance interfaces, posterior/likelihood data adapters, nuisance-parameter hooks, and future hierarchical-population extension points. No Hoof production code deployment occurs.
+Define the common provenance-bound spectrum interface and route/provenance interfaces, posterior/likelihood data adapters, nuisance-parameter hooks, and future hierarchical-population extension points. Issue #192 remains independently governed and must define its own physics and inference branch consuming that common interface; it must not inherit the CYAX-0121 scientific BHSR calculation. No Hoof production code deployment occurs.
 
 ## P7 — Verification and exact-candidate review
 

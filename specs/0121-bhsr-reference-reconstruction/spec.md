@@ -1,7 +1,7 @@
 ---
 id: CYAX-0121
 title: Governed BHSR reference reconstruction and migration boundary
-status: draft
+status: reviewed_pending_owner_approval
 work_class: S2
 canonical_issue: https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/121
 ---
@@ -84,12 +84,18 @@ This identity reproduces the historical Appendix-B formula route where source in
 
 It preserves:
 
-- Eq. 95: P_ex = 1 - P_allowed;
-- Eq. 96: product over black-hole data points;
-- Eqs. 97-98 projected-error/branch treatment;
+- the source Appendix-B equations labelled (B1)-(B4), corresponding to the formula slots called Eqs. 95-98 in the owner-approved r6 contract; these are two numbering conventions, and Eqs. 95-98 are not the printed Appendix-B labels in arXiv:1805.02016v2;
+- (B1) / r6 Eq. 95: P_ex = 1 - P_allowed;
+- (B2) / r6 Eq. 96: product over black-hole data points;
+- (B3)-(B4) / r6 Eqs. 97-98: the projected-error formulas;
 - zero BH mass-spin covariance as in the source approximation;
-- source branch-nearest-xbar derivative handling;
+- the source effective one-dimensional projected-error calculation with the standard error function;
+- for a contour y=f(x), Sigma_y^2 = sigma_y^2 + f'(xbar)^2 sigma_x^2;
+- for an inverse contour x=g(y), Sigma_x^2 = sigma_x^2 + g'(ybar)^2 sigma_y^2; when g(y) is multivalued, select the inverse branch nearest xbar to evaluate the derivative, then evaluate the error function between g1 and g2;
+- the source branch selection and cusp rules described in Appendix-B prose;
 - source cusp approximation.
+
+A generic two-dimensional Mahalanobis, contour-integral, or other two-dimensional surrogate must not replace the source one-dimensional projected-error and error-function calculation under this identity.
 
 It must not claim an exactly source-equivalent 24-BH probability where the historical source does not provide a complete unique Gaussian-sigma convention.
 
@@ -118,8 +124,11 @@ It preserves the source equations and omissions, including:
 - N_max source scaling;
 - N_Bose source scaling;
 - f_pert = sqrt(m^2/abs(lambda_iiii));
-- the source bosenova-modified spin-down efficiency criterion;
-- source-default black-hole timescale where applicable;
+- the Eq. 26 criterion from Stott, arXiv:2009.07206v1, Section II.2: Gamma_SR * tau_BH * (N_Bose/N_max) > ln(N_Bose);
+- per-mode source analytic Gamma_SR rates and the source timescale when deriving each self-interaction-modified Regge boundary;
+- the reference Salpeter default tau_BH = tau_Sal approximately 4.5e7 yr where the source reference path uses it; any target-specific alternative timescale must be source-bound in the method manifest and carry a distinct target identity;
+- equality at the criterion is the transition boundary and must be tested on both just-satisfied and just-unsatisfied sides, without tolerance-dependent reclassification;
+- no ad hoc multiplicative suppression factor;
 - source use of abs(lambda_iiii) in the action-magnitude criterion while retaining interaction sign as provenance;
 - omission of off-diagonal flavor-changing processes and cubic interactions under the reference identity.
 
@@ -137,7 +146,7 @@ Under CYAX-0121, implementation may define only the migration/interface contract
 - nuisance-parameter hooks;
 - compatibility requirements for future hierarchical population modelling.
 
-CYAX-0121 does not authorize Hoof code vendoring/import as production runtime, backend deployment, production inference, or current-constraint publication.
+Issue #192 is independently governed and must define its own physics and inference branch. That branch may consume the common provenance-bound spectrum interface, but it must not inherit the CYAX-0121 scientific BHSR calculation. CYAX-0121 does not authorize Hoof code vendoring/import as production runtime, backend deployment, production inference, or current-constraint publication.
 
 ## 4. Physical-spectrum input authority
 
@@ -342,8 +351,6 @@ It may not by itself claim current-2026 BHSR constraints, authoritative populati
 
 ## 15. Approval and successor rule
 
-This document is draft until exact normative bytes receive independent SPEC and SCIENTIFIC review and final owner approval.
-
-Only after that approval may Control Desk construct a current-schema implementation handoff bound to the approved exact spec identity and submit it for a fresh Handoff Review.
+The frontmatter status is lifecycle metadata. `reviewed_pending_owner_approval` does not itself record or imply final owner approval. Exact normative bytes still require final owner approval before Control Desk constructs a current-schema implementation handoff bound to the approved exact spec identity and submits it for a fresh Handoff Review.
 
 No historical READY_TO_DISPATCH record for the pre-spec r3 baseline packet remains sufficient after current-source/schema/spec-policy drift.
