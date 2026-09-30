@@ -91,14 +91,34 @@ end
 
 function geometry_with_intersections(geometry::GeometryRecord,
         intersections::CanonicalIntersectionTensor)
+    values = (collect(intersections.coefficients)...,
+        collect(geometry.domain_inequalities)...)
+    exactness = if all(value -> value isa Integer, values)
+        geometry.exactness
+    elseif all(value -> value isa Integer || value isa Rational, values)
+        :rational
+    else
+        :approximate
+    end
+    precision_label = if exactness === :approximate
+        bigfloat_bits = maximum((precision(value) for value in values if value isa BigFloat);
+            init=0)
+        bigfloat_bits > 0 ?
+            "$(bigfloat_bits)-bit BigFloat intersection coefficients; exact integer cone inequalities" :
+            "approximate intersection or cone coefficients"
+    elseif exactness === :rational
+        "exact rational intersection coefficients; exact integer cone inequalities"
+    else
+        geometry.precision
+    end
     GeometryRecord(intersections;
         euler_characteristic=geometry.euler_characteristic,
         ordered_divisors=geometry.ordered_divisors, ordered_curves=geometry.ordered_curves,
         divisor_basis_map=geometry.divisor_basis_map,
         dual_curve_basis_map=geometry.dual_curve_basis_map,
         domain_inequalities=geometry.domain_inequalities,
-        cone_provenance=geometry.cone_provenance, precision=geometry.precision,
-        exactness=geometry.exactness, units=geometry.units, source=geometry.source)
+        cone_provenance=geometry.cone_provenance, precision=precision_label,
+        exactness, units=geometry.units, source=geometry.source)
 end
 
 @testset "CYAX-0191 Gate B geometry and importer boundary" begin
@@ -174,6 +194,36 @@ end
     end
     high_precision_geometry = geometry_with_intersections(high_precision_geometry_base,
         high_precision_tensor)
+    @test high_precision_geometry.exactness === :approximate
+    @test occursin("512-bit BigFloat", high_precision_geometry.precision)
+    @test_throws ArgumentError GeometryRecord(high_precision_tensor;
+        euler_characteristic=high_precision_geometry_base.euler_characteristic,
+        ordered_divisors=high_precision_geometry_base.ordered_divisors,
+        ordered_curves=high_precision_geometry_base.ordered_curves,
+        divisor_basis_map=high_precision_geometry_base.divisor_basis_map,
+        dual_curve_basis_map=high_precision_geometry_base.dual_curve_basis_map,
+        domain_inequalities=high_precision_geometry_base.domain_inequalities,
+        cone_provenance=high_precision_geometry_base.cone_provenance,
+        precision="exact rational intersection coefficients", exactness=:exact,
+        units=high_precision_geometry_base.units,
+        source=high_precision_geometry_base.source)
+    @test_throws ArgumentError GeometryRecord{eltype(high_precision_tensor.coefficients),
+            eltype(high_precision_geometry_base.domain_inequalities)}(
+        high_precision_geometry_base.schema_version, high_precision_tensor,
+        high_precision_geometry_base.euler_characteristic,
+        high_precision_geometry_base.ordered_divisors,
+        high_precision_geometry_base.ordered_curves,
+        high_precision_geometry_base.divisor_basis_map,
+        high_precision_geometry_base.dual_curve_basis_map,
+        high_precision_geometry_base.domain_inequalities,
+        high_precision_geometry_base.cone_provenance,
+        "exact rational intersection coefficients", :exact,
+        high_precision_geometry_base.units, high_precision_geometry_base.source, ())
+    rational_tensor = CanonicalIntersectionTensor(1,
+        [(1, 1, 1) => BigInt(1) // BigInt(3)])
+    rational_geometry = geometry_with_intersections(high_precision_geometry_base,
+        rational_tensor)
+    @test rational_geometry.exactness === :rational
     expected_duplicate_coefficient = setprecision(BigFloat, 512) do
         high_precision_coefficient + high_precision_coefficient
     end
@@ -187,6 +237,34 @@ end
         BigFloat[BigFloat(1) / 3, BigFloat(1) / 5]
     end
     expected_cone_margins = cone_margins(geometry, high_precision_cone_coordinates)
+    low_ambient_geometry = setprecision(BigFloat, 128) do
+        tensor = CanonicalIntersectionTensor(1,
+            Pair[(1, 1, 1) => high_precision_coefficient])
+        geometry_with_intersections(high_precision_geometry_base, tensor)
+    end
+    high_ambient_geometry = setprecision(BigFloat, 1024) do
+        tensor = CanonicalIntersectionTensor(1,
+            Pair[(1, 1, 1) => high_precision_coefficient])
+        geometry_with_intersections(high_precision_geometry_base, tensor)
+    end
+    @test low_ambient_geometry.artifact_sha256 == high_precision_geometry.artifact_sha256
+    @test high_ambient_geometry.artifact_sha256 == high_precision_geometry.artifact_sha256
+    @test precision(low_ambient_geometry.intersections.coefficients[1]) == 512
+    @test precision(high_ambient_geometry.intersections.coefficients[1]) == 512
+    low_ambient_rebase_digest = setprecision(BigFloat, 128) do
+        change_divisor_basis(high_precision_geometry, reshape([1], 1, 1)).artifact_sha256
+    end
+    high_ambient_rebase_digest = setprecision(BigFloat, 1024) do
+        change_divisor_basis(high_precision_geometry, reshape([1], 1, 1)).artifact_sha256
+    end
+    @test low_ambient_rebase_digest == high_ambient_rebase_digest
+    @test low_ambient_rebase_digest == change_divisor_basis(
+        high_precision_geometry, reshape([1], 1, 1)).artifact_sha256
+    high_ambient_volume = setprecision(BigFloat, 1024) do
+        calabi_yau_volume(high_precision_geometry, [high_precision_coordinate])
+    end
+    @test precision(high_ambient_volume) == 512
+    @test high_ambient_volume == expected_volume
     setprecision(BigFloat, 128) do
         imported_tensor = CanonicalIntersectionTensor(1,
             Pair[(1, 1, 1) => high_precision_coefficient])

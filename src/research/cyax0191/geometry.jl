@@ -135,7 +135,8 @@ _geometry_input_precision(value::AbstractArray) =
 _geometry_input_precision(value) = 0
 
 function _with_geometry_precision(f, values...)
-    bits = max(precision(BigFloat), maximum(_geometry_input_precision, values; init=0))
+    stored_precision = maximum(_geometry_input_precision, values; init=0)
+    bits = stored_precision == 0 ? precision(BigFloat) : stored_precision
     setprecision(f, BigFloat, bits)
 end
 
@@ -376,7 +377,7 @@ function _validate_geometry_record_components(intersections::CanonicalIntersecti
     all(isfinite, inequalities) || throw(ArgumentError("cone inequalities must be finite"))
     all(value -> value isa Real, inequalities) ||
         throw(ArgumentError("cone inequalities must be real"))
-    exactness in (:exact, :rational, :approximate) || throw(ArgumentError("invalid geometry exactness"))
+    _validate_geometry_exactness(intersections, inequalities, exactness)
     all(!isempty, (schema_version, precision, units)) ||
         throw(ArgumentError("geometry metadata must be nonempty"))
     history = Tuple(String.(basis_history))
@@ -397,6 +398,23 @@ function _validate_geometry_record_components(intersections::CanonicalIntersecti
         (startswith(source.polytope_identity, "not_applicable:") ||
          startswith(source.triangulation_identity, "not_applicable:")) &&
         throw(ArgumentError("a CYTools export must identify its polytope and triangulation"))
+    true
+end
+
+function _validate_geometry_exactness(intersections::CanonicalIntersectionTensor,
+        inequalities::AbstractArray, exactness::Symbol)
+    exactness in (:exact, :rational, :approximate) ||
+        throw(ArgumentError("invalid geometry exactness"))
+    coefficients = intersections.coefficients
+    if exactness === :exact
+        all(value -> value isa Integer, coefficients) &&
+            all(value -> value isa Integer, inequalities) ||
+            throw(ArgumentError("exact geometry metadata requires integer intersection and cone coefficients"))
+    elseif exactness === :rational
+        all(value -> value isa Integer || value isa Rational, coefficients) &&
+            all(value -> value isa Integer || value isa Rational, inequalities) ||
+            throw(ArgumentError("rational geometry metadata requires exact integer or rational coefficients"))
+    end
     true
 end
 
@@ -468,7 +486,7 @@ function GeometryRecord(intersections::CanonicalIntersectionTensor{K};
     size(inequalities, 2) == n || throw(DimensionMismatch("cone inequalities must have n columns"))
     size(inequalities, 1) > 0 || throw(ArgumentError("at least one imported cone inequality is required"))
     all(isfinite, inequalities) || throw(ArgumentError("cone inequalities must be finite"))
-    exactness in (:exact, :rational, :approximate) || throw(ArgumentError("invalid geometry exactness"))
+    _validate_geometry_exactness(intersections, inequalities, exactness)
     all(!isempty, (schema_version, precision, units)) || throw(ArgumentError("geometry metadata must be nonempty"))
     history = Tuple(String.(basis_history))
     all(!isempty, history) || throw(ArgumentError("basis history entries must be nonempty"))
