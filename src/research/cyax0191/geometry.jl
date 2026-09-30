@@ -420,17 +420,34 @@ end
 
 function _push_digest_matrix!(parts::Vector{String}, name::String, matrix::AbstractMatrix)
     push!(parts, name, string(size(matrix, 1)), string(size(matrix, 2)), string(eltype(matrix)))
-    append!(parts, (repr(value) for value in matrix))
+    for value in matrix
+        _push_geometry_digest_value!(parts, value)
+    end
+end
+
+_geometry_bigfloat_precisions(value::BigFloat) = (precision(value),)
+_geometry_bigfloat_precisions(value::Rational) = (
+    _geometry_bigfloat_precisions(numerator(value))...,
+    _geometry_bigfloat_precisions(denominator(value))...)
+_geometry_bigfloat_precisions(value::Complex) = (
+    _geometry_bigfloat_precisions(real(value))...,
+    _geometry_bigfloat_precisions(imag(value))...)
+_geometry_bigfloat_precisions(value) = ()
+
+function _push_geometry_digest_value!(parts::Vector{String}, value)
+    push!(parts, repr(value), repr(_geometry_bigfloat_precisions(value)))
+    nothing
 end
 
 function _geometry_digest(schema, intersections, euler, divisors, curves,
         divisor_map, curve_map, inequalities, cone, precision, exactness,
         units, source, basis_history)
-    parts = String["cyax0191-geometry-digest-v2", string(schema),
+    parts = String["cyax0191-geometry-digest-v3", string(schema),
         string(intersections.n), string(eltype(intersections.coefficients)),
         string(length(intersections.triples))]
     for i in eachindex(intersections.triples)
-        push!(parts, repr(intersections.triples[i]), repr(intersections.coefficients[i]))
+        push!(parts, repr(intersections.triples[i]))
+        _push_geometry_digest_value!(parts, intersections.coefficients[i])
     end
     append!(parts, (string(euler), string(length(divisors))))
     append!(parts, divisors)

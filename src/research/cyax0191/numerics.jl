@@ -697,6 +697,7 @@ end
 _replay_numeric_profile(::Nothing) = (0, false)
 _replay_numeric_profile(value::BigFloat) = (precision(value), true)
 _replay_numeric_profile(value::AbstractFloat) = (precision(typeof(value)), false)
+_replay_numeric_profile(::AbstractString) = (0, false)
 _replay_numeric_profile(value::FrozenScalar{BigFloat}) =
     (getfield(value, :encoded)[1], true)
 _replay_numeric_profile(::FrozenScalar{T}) where {T<:AbstractFloat} =
@@ -735,7 +736,12 @@ function _replay_numeric_profile(value::KahlerModel)
         getfield(value, :amplitudes), getfield(value, :actions),
         getfield(value, :phases)))
 end
-_replay_numeric_profile(value) = (0, false)
+function _replay_numeric_profile(value)
+    T = typeof(value)
+    ismutabletype(T) && return (0, false)
+    _combine_replay_numeric_profiles(
+        (getfield(value, index) for index in 1:fieldcount(T)))
+end
 
 function _validate_replay_numeric_identity(model::KahlerModel,
         geometry::GeometryRecord, numeric_type::AbstractString,

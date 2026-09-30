@@ -9,6 +9,10 @@ mutable struct MutableManifestString <: AbstractString
     value::String
 end
 
+struct NestedTolerance{T}
+    tolerance::T
+end
+
 Base.ncodeunits(value::MutableManifestString) = ncodeunits(value.value)
 Base.codeunit(::Type{MutableManifestString}) = UInt8
 Base.codeunit(value::MutableManifestString, index::Integer) = codeunit(value.value, index)
@@ -253,6 +257,34 @@ end
     @test high_ambient_geometry.artifact_sha256 == high_precision_geometry.artifact_sha256
     @test precision(low_ambient_geometry.intersections.coefficients[1]) == 512
     @test precision(high_ambient_geometry.intersections.coefficients[1]) == 512
+    digest_value_128, digest_value_256 = setprecision(BigFloat, 128) do
+        low = BigFloat(1)
+        high = setprecision(BigFloat, 256) do
+            BigFloat(1)
+        end
+        (low, high)
+    end
+    @test digest_value_128 == digest_value_256
+    @test precision(digest_value_128) == 128
+    @test precision(digest_value_256) == 256
+    same_metadata = "same approximate BigFloat geometry value"
+    intersection_precision_128 = one_modulus_geometry(kappa=digest_value_128,
+        id="geometry-digest-intersection-precision-v1", precision=same_metadata,
+        exactness=:approximate)
+    intersection_precision_256 = one_modulus_geometry(kappa=digest_value_256,
+        id="geometry-digest-intersection-precision-v1", precision=same_metadata,
+        exactness=:approximate)
+    @test intersection_precision_128.artifact_sha256 !=
+        intersection_precision_256.artifact_sha256
+    cone_precision_128 = one_modulus_geometry(
+        inequality=reshape([digest_value_128], 1, 1),
+        id="geometry-digest-cone-precision-v1", precision=same_metadata,
+        exactness=:approximate)
+    cone_precision_256 = one_modulus_geometry(
+        inequality=reshape([digest_value_256], 1, 1),
+        id="geometry-digest-cone-precision-v1", precision=same_metadata,
+        exactness=:approximate)
+    @test cone_precision_128.artifact_sha256 != cone_precision_256.artifact_sha256
     low_ambient_rebase_digest = setprecision(BigFloat, 128) do
         change_divisor_basis(high_precision_geometry, reshape([1], 1, 1)).artifact_sha256
     end
@@ -1386,6 +1418,16 @@ end
     @test replay_float32(numeric_type="BigFloat", precision_bits=53,
         solver_configuration=(; method="none", tolerance=mixed_bigfloat_control)).numeric_type ==
         "BigFloat"
+    nested_bigfloat_control = setprecision(BigFloat, 256) do
+        NestedTolerance(BigFloat(1))
+    end
+    @test_throws ArgumentError replay_float32(
+        solver_configuration=(; method="none", tolerance=nested_bigfloat_control))
+    nested_bigfloat_manifest = replay_float32(numeric_type="BigFloat",
+        precision_bits=256,
+        solver_configuration=(; method="none", tolerance=nested_bigfloat_control))
+    @test nested_bigfloat_manifest.solver_configuration.tolerance.fields.tolerance.precision_bits ==
+        256
 
     @test default_precision_axion_gradient == high_precision_model_reference.axion_gradient
     @test all(value -> precision(value) == 512, default_precision_axion_gradient)
