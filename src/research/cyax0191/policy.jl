@@ -43,7 +43,7 @@ function _frozen_policy(benchmark_id::Symbol, chi::Int, gs_text::String,
             10_000, parse(T, "0.5"), T(2)^(-20), 191019, 10_000,
             "canonical axion representatives; duplicates require scaled coordinate distance <= 1e-10",
             parse(T, "1e-12"), parse(T, "1e-10"),
-            "generalized masses normalized by the predeclared potential and field scales",
+            "generalized eigenvalues of S*H*S/V_scale and S*G*S, with frozen field scales S; equivalently m^2/V_scale",
             true)
         all(>(zero(T)), policy.field_scales) || error("frozen field scales must be positive")
         policy.potential_scale > zero(T) || error("frozen potential scale must be positive")

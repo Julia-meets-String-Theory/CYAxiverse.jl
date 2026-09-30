@@ -141,7 +141,16 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
         trial_gradient = similar(g)
         while alpha >= criteria.minimum_step
             trial .= x .+ alpha .* step
-            gradient!(trial_gradient, differentiation, f, trial; scales=criteria.field_scales)
+            try
+                gradient!(trial_gradient, differentiation, f, trial; scales=criteria.field_scales)
+            catch error
+                if error isa DomainError
+                    push!(failures, "domain rejected a line-search trial at iteration $iteration")
+                    alpha *= criteria.backtracking_factor
+                    continue
+                end
+                rethrow()
+            end
             trial_residual = T(scaled_stationarity_residual(trial_gradient,
                 criteria.field_scales, criteria.potential_scale))
             if isfinite(trial_residual) && trial_residual < residual
@@ -193,6 +202,7 @@ end
 
 struct ModeDisposition{T<:Real}
     eigenvalue::T
+    normalized_eigenvalue::T
     disposition::Symbol
     sign_status::Symbol
 end
@@ -202,8 +212,13 @@ struct FluctuationReport{T<:Real}
     covariant_hessian::Matrix{T}
     retained_kinetic_metric::Matrix{T}
     generalized_mass_eigenvalues::Vector{T}
+    normalized_generalized_mass_eigenvalues::Vector{T}
     mode_dispositions::Vector{ModeDisposition{T}}
-    symmetry_protected_directions::Matrix{Rational{BigInt}}
+    active_axionic_shift_directions::Matrix{Rational{BigInt}}
+    symmetry_kernel_assessment::Assessment
+    symmetry_mode_assessment::Assessment
+    spectral_potential_scale::T
+    spectral_field_scales::Vector{T}
     physical_mass_assessment::Assessment
     bf_assessment::Assessment
 end
@@ -213,8 +228,9 @@ struct GeneralizedEigenBackend <: FluctuationBackend end
 
 function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix{T},
         kinetic_metric::AbstractMatrix{T}; at_critical_point=true,
-        covariant_hessian=nothing, exact_zero_mode_indices=Int[],
+        covariant_hessian=nothing,
         absolute_zero_threshold=T(1e-12), relative_zero_threshold=T(1e-10),
+        potential_scale=one(T), field_scales=ones(T, size(hessian, 1)),
         active_charges=nothing, ads_radius_squared=nothing) where {T<:AbstractFloat}
     size(hessian) == size(kinetic_metric) || throw(DimensionMismatch("Hessian and kinetic metric dimensions differ"))
     size(hessian, 1) == size(hessian, 2) || throw(DimensionMismatch("fluctuation matrices must be square"))
@@ -228,14 +244,20 @@ function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix
     end
     G = Matrix(Symmetric((kinetic_metric + kinetic_metric') / T(2)))
     isposdef(Symmetric(G)) || throw(DomainError(G, "retained kinetic metric must be positive definite"))
+    potential_scale > zero(T) || throw(ArgumentError("spectral potential scale must be positive"))
+    length(field_scales) == size(Hcov, 1) ||
+        throw(DimensionMismatch("spectral field scales must match the retained fields"))
+    scales = collect(T.(field_scales))
+    all(>(zero(T)), scales) || throw(ArgumentError("spectral field scales must be positive"))
     L = cholesky(Symmetric(G)).L
     normalized = L \ Hcov / L'
-    values = eigvals(Symmetric((normalized + normalized') / T(2)))
-    scale = max(maximum(abs, values), one(T))
+    decomposition = eigen(Symmetric((normalized + normalized') / T(2)))
+    values = decomposition.values
+    mass_scale = T(potential_scale)
+    normalized_values = values ./ mass_scale
+    scale = max(maximum(abs, normalized_values), one(T))
     near_limit = max(absolute_zero_threshold, relative_zero_threshold * scale)
     dispositions = ModeDisposition{T}[]
-    exact = Set(Int.(exact_zero_mode_indices))
-    all(i -> 1 <= i <= length(values), exact) || throw(BoundsError(values, collect(exact)))
     symmetry_directions = if active_charges === nothing
         zeros(Rational{BigInt}, size(G, 1), 0)
     else
@@ -246,19 +268,60 @@ function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix
         directions[(size(G, 1) ÷ 2 + 1):end, :] .= kernel
         directions
     end
+    symmetry_status = if active_charges === nothing
+        Assessment(:NOT_ASSESSED, "active charges were not supplied")
+    elseif size(symmetry_directions, 2) == 0
+        Assessment(:PASS, "the active charge matrix has no axionic shift kernel")
+    else
+        numeric_directions = T.(symmetry_directions)
+        hscale = max(maximum(abs, Hcov), floatmin(T))
+        direction_scale = max(maximum(abs, numeric_directions), one(T))
+        residual = maximum(abs, Hcov * numeric_directions)
+        validation_tolerance = T(64) * eps(T) * hscale * direction_scale
+        residual <= validation_tolerance ?
+            Assessment(:PASS, "the exact active-charge kernel is also annihilated by the covariant Hessian") :
+            Assessment(:FAIL, "the covariant Hessian does not annihilate the exact active-charge kernel")
+    end
+    symmetry_subspace = zeros(T, size(G, 1), 0)
+    if symmetry_status.status === :PASS && size(symmetry_directions, 2) > 0
+        transformed_directions = L' * T.(symmetry_directions)
+        symmetry_subspace = svd(transformed_directions).U[:, 1:size(symmetry_directions, 2)]
+    end
+    near_indices = findall(value -> abs(value) <= near_limit, normalized_values)
+    symmetry_mode_status = if symmetry_status.status !== :PASS
+        Assessment(:NOT_ASSESSED, "exact symmetry-mode attribution requires a validated charge/Hessian kernel")
+    elseif size(symmetry_directions, 2) == 0
+        Assessment(:PASS, "no exact active-charge shift modes are present")
+    elseif isempty(near_indices)
+        Assessment(:FAIL, "the validated exact shift kernel is absent from the near-zero generalized eigenspace")
+    else
+        zero_subspace = decomposition.vectors[:, near_indices]
+        projection_residual = norm(symmetry_subspace -
+            zero_subspace * (zero_subspace' * symmetry_subspace))
+        subspace_tolerance = T(100) * sqrt(eps(T)) *
+            max(norm(symmetry_subspace), one(T))
+        projection_residual <= subspace_tolerance ?
+            Assessment(:PASS, "the exact charge kernel lies in the near-zero eigenspace; per-mode labels remain conservative under degenerate mixing") :
+            Assessment(:FAIL, "the near-zero eigenspace does not contain the validated exact charge kernel")
+    end
     for i in eachindex(values)
-        disposition = if i in exact && abs(values[i]) <= near_limit
+        symmetry_overlap = isempty(symmetry_subspace) ? zero(T) :
+            sum(abs2, symmetry_subspace' * decomposition.vectors[:, i])
+        entire_near_space_is_kernel = length(near_indices) == size(symmetry_directions, 2)
+        pure_symmetry_mode = symmetry_overlap >= one(T) - T(100) * sqrt(eps(T))
+        disposition = if symmetry_mode_status.status === :PASS &&
+                i in near_indices && (entire_near_space_is_kernel || pure_symmetry_mode)
             :symmetry_protected_exact_zero
-        elseif abs(values[i]) <= near_limit
+        elseif abs(normalized_values[i]) <= near_limit
             :numerically_unresolved_near_zero
         elseif values[i] < zero(T)
             :tachyonic
         else
             :lifted
         end
-        sign_status = values[i] < -near_limit ? :negative :
-            (values[i] > near_limit ? :positive : :zero_within_threshold)
-        push!(dispositions, ModeDisposition(values[i], disposition, sign_status))
+        sign_status = normalized_values[i] < -near_limit ? :negative :
+            (normalized_values[i] > near_limit ? :positive : :zero_within_threshold)
+        push!(dispositions, ModeDisposition(values[i], normalized_values[i], disposition, sign_status))
     end
     bf = if ads_radius_squared === nothing
         Assessment(:NOT_APPLICABLE, "no AdS radius was supplied")
@@ -268,8 +331,9 @@ function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix
             Assessment(:PASS, "all retained generalized masses satisfy m^2 L_AdS^2 >= -9/4") :
             Assessment(:FAIL, "at least one retained generalized mass violates the AdS4 BF bound")
     end
-    FluctuationReport(Hcoord, Hcov, G, collect(values), dispositions,
-        symmetry_directions,
+    FluctuationReport(Hcoord, Hcov, G, collect(values), collect(normalized_values),
+        dispositions, symmetry_directions, symmetry_status, symmetry_mode_status,
+        mass_scale, scales,
         Assessment(:PASS, "generalized eigenproblem H v = m^2 G v was solved"), bf)
 end
 
@@ -379,7 +443,7 @@ end
 function change_charge_basis(charges::AbstractMatrix{<:Integer}, B::AbstractMatrix{<:Integer})
     size(charges, 2) == size(B, 1) == size(B, 2) ||
         throw(DimensionMismatch("charge matrix and basis transform dimensions differ"))
-    Matrix{Int}(charges) * _integer_inverse(B)'
+    Matrix{Int}(charges) * _integer_inverse(B)
 end
 
 function change_model_basis(model::KahlerModel, B::AbstractMatrix{<:Integer})
@@ -396,5 +460,5 @@ function change_coordinate_basis(t::AbstractVector, rho::AbstractVector,
     size(B, 1) == size(B, 2) == length(t) == length(rho) ||
         throw(DimensionMismatch("coordinate and basis dimensions differ"))
     Binv = _integer_inverse(B)
-    (Binv * t, B' * rho)
+    (Binv' * t, B * rho)
 end

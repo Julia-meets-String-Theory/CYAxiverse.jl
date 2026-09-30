@@ -1,0 +1,16 @@
+schema_version=cyax0191-native-geometry-v1
+source_id=cyax0191-two-modulus-fixture-v1
+source_revision=fixture-v1
+euler_characteristic=-2
+ordered_divisors=D1,D2
+ordered_curves=C1,C2
+kappa_111=3
+kappa_112=1
+kappa_122=1
+kappa_222=4
+domain_row_1=1,1
+domain_row_2=1,-1
+cone_status=torically_inferred
+cone_construction=synthetic two-inequality fixture
+cone_normalization=dimensionless row-normalized cone margins
+cone_completeness=not_established

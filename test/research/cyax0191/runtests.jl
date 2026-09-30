@@ -5,6 +5,23 @@ using Test
 include(joinpath(@__DIR__, "../../../src/research/cyax0191/CYAX0191.jl"))
 using .CYAX0191
 
+struct DomainRejectingBackend <: DifferentiationBackend end
+
+function CYAX0191.gradient!(out::AbstractVector{T}, ::DomainRejectingBackend, f,
+        x::AbstractVector{T}; scales=ones(T, length(x))) where {T<:AbstractFloat}
+    f(x)
+    out[1] = x[1] - T(2)
+    out
+end
+
+function CYAX0191.hessian!(out::AbstractMatrix{T}, ::DomainRejectingBackend, f,
+        x::AbstractVector{T}; scales=ones(T, length(x))) where {T<:AbstractFloat}
+    f(x)
+    fill!(out, zero(T))
+    out[1, 1] = one(T)
+    out
+end
+
 function fixture_convention()
     ModelConvention(
         coordinate_map="T_paper=rho-i*tau; T_Julia=tau+i*rho=i*T_paper",
@@ -31,10 +48,9 @@ end
 
 function one_modulus_geometry(; kappa=1, chi=-2, inequality=reshape([1], 1, 1), id="one-modulus-fixture-v1")
     tensor = CanonicalIntersectionTensor(1, [(1, 1, 1) => kappa])
-    source_text = "$(id)|k111=$(kappa)|chi=$(chi)|A=$(repr(inequality))"
     source = GeometrySourceIdentity(source_kind=:native_fixture, source_id=id,
         source_revision="fixture-v1", source_locator="test/research/cyax0191/runtests.jl",
-        source_sha256=bytes2hex(sha256(codeunits(source_text))),
+        source_sha256=bytes2hex(sha256(read(@__FILE__))),
         polytope_identity="not_applicable:one-modulus-synthetic-fixture",
         triangulation_identity="not_applicable:one-modulus-synthetic-fixture",
         cytools_revision=nothing,
@@ -60,6 +76,11 @@ end
     @test tensor == permutedims(tensor, (2, 1, 3))
     @test tensor == permutedims(tensor, (3, 2, 1))
     @test geometry_identity(geometry).source_sha256 == geometry.source.source_sha256
+    @test geometry_identity(geometry).source_kind == :native_fixture
+    fixture_path = joinpath(@__DIR__, "../../../src/research/cyax0191/fixtures/cyax0191-two-modulus-v1.txt")
+    @test geometry.source.source_locator == "src/research/cyax0191/fixtures/cyax0191-two-modulus-v1.txt"
+    @test geometry.source.source_sha256 == bytes2hex(sha256(read(fixture_path)))
+    @test geometry.cone_provenance.source_locator == geometry.source.source_locator
     @test geometry_identity(geometry).cytools_revision === nothing
     @test geometry.exactness == :exact
     @test geometry.precision != ""
@@ -74,19 +95,66 @@ end
     t_old, rho_old = [2.0, 1.0], [0.31, -0.27]
     t_new, rho_new = change_coordinate_basis(t_old, rho_old, B)
     transformed = change_divisor_basis(geometry, B)
-    @test t_new[1] < 0
+    @test t_new[2] < 0
     @test imported_domain_status(transformed, t_new) == :PASS
     @test calabi_yau_volume(transformed, t_new) ≈ calabi_yau_volume(geometry, t_old)
-    @test divisor_volumes(transformed, t_new) ≈ B' * divisor_volumes(geometry, t_old)
+    @test divisor_volumes(transformed, t_new) ≈ B * divisor_volumes(geometry, t_old)
     @test divisor_volume_jacobian(transformed, t_new) ≈
-        B' * divisor_volume_jacobian(geometry, t_old) * B
+        B * divisor_volume_jacobian(geometry, t_old) * B'
     @test transformed.divisor_basis_map == B
     @test transformed.dual_curve_basis_map == inv(B)'
     @test transformed.divisor_basis_map' * transformed.dual_curve_basis_map == I
     @test transformed.artifact_sha256 != geometry.artifact_sha256
+    @test_throws MethodError setindex!(geometry.intersections.coefficients, 9, 1)
+    @test_throws Base.CanonicalIndexError setindex!(geometry.divisor_basis_map, 9, 1, 1)
+    @test_throws Base.CanonicalIndexError setindex!(geometry.domain_inequalities, 9, 1, 1)
     @test_throws ArgumentError GeometrySourceIdentity(source_kind=:cytools_export,
         source_id="bad", source_revision="r1", source_locator="fixture",
         source_sha256=repeat("0", 64), cytools_revision=nothing, importer_id="test")
+
+    alternate_source = GeometrySourceIdentity(source_kind=:other,
+        source_id=geometry.source.source_id,
+        source_revision=geometry.source.source_revision,
+        source_locator=geometry.source.source_locator,
+        source_sha256=geometry.source.source_sha256,
+        polytope_identity=geometry.source.polytope_identity,
+        triangulation_identity=geometry.source.triangulation_identity,
+        cytools_revision=nothing, importer_id=geometry.source.importer_id)
+    alternate_kind = GeometryRecord(geometry.intersections;
+        euler_characteristic=geometry.euler_characteristic,
+        ordered_divisors=geometry.ordered_divisors, ordered_curves=geometry.ordered_curves,
+        divisor_basis_map=geometry.divisor_basis_map,
+        dual_curve_basis_map=geometry.dual_curve_basis_map,
+        domain_inequalities=geometry.domain_inequalities,
+        cone_provenance=geometry.cone_provenance, precision=geometry.precision,
+        exactness=geometry.exactness, units=geometry.units, source=alternate_source)
+    @test alternate_kind.artifact_sha256 != geometry.artifact_sha256
+
+    large_n = 24
+    sparse_tensor = CanonicalIntersectionTensor(large_n,
+        Pair[(1, 1, 1) => 2, (large_n, large_n, large_n) => 3])
+    large_source = GeometrySourceIdentity(source_kind=:native_fixture,
+        source_id="sparse-basis-transform-fixture-v1", source_revision="fixture-v1",
+        source_locator="test/research/cyax0191/runtests.jl",
+        source_sha256=bytes2hex(sha256(read(@__FILE__))),
+        importer_id="CYAX0191.NativePayloadImporter/v1")
+    large_cone = ConeProvenance(:torically_inferred, "sparse test cone",
+        "unit row normalization", :not_established, large_source.source_locator)
+    large_geometry = GeometryRecord(sparse_tensor;
+        euler_characteristic=-2,
+        ordered_divisors=Tuple("D$i" for i in 1:large_n),
+        ordered_curves=Tuple("C$i" for i in 1:large_n),
+        divisor_basis_map=Matrix{Int}(I, large_n, large_n),
+        dual_curve_basis_map=Matrix{Int}(I, large_n, large_n),
+        domain_inequalities=Matrix{Int}(I, large_n, large_n),
+        cone_provenance=large_cone, precision="exact sparse fixture", exactness=:exact,
+        units="dimensionless synthetic geometry", source=large_source)
+    sparse_B = Matrix{Int}(I, large_n, large_n)
+    sparse_B[2, 1] = 1
+    sparse_changed = change_divisor_basis(large_geometry, sparse_B)
+    @test length(sparse_changed.intersections.triples) == 5
+    @test calabi_yau_volume(sparse_changed, inv(sparse_B)' * ones(large_n)) ≈
+        calabi_yau_volume(large_geometry, ones(large_n))
 end
 
 @testset "CYAX-0191 Gate B no-scale, BBHL, and full-metric discriminator" begin
@@ -110,6 +178,22 @@ end
     @test full_from_metric - frozen_from_metric ≈ c_difference rtol=1e-10 atol=1e-12
     @test !isapprox(frozen_from_metric, c_full; rtol=1e-6, atol=1e-9)
     @test corrected.value ≈ data.expK * corrected_model.w0_magnitude^2 * c_full
+    n = 3x * (1 + 7x + x^2)
+    d = (1 - x) * (2 + x)^2
+    nprime = 3 + 42x + 9x^2
+    dprime = -6x - 3x^2
+    c_full_prime = (nprime * d - n * dprime) / d^2
+    x_tau = -x * data.tau[1] / data.V
+    kt = -2data.tau[1] / data.Y
+    independent_t_derivative = data.expK * corrected_model.w0_magnitude^2 *
+        (kt * c_full + c_full_prime * x_tau)
+    numerical_t_derivative = finite_difference_gradient(CentralDifferenceBackend(),
+        tvar -> potential(corrected_model, geometry, tvar, rho), t)[1]
+    @test numerical_t_derivative ≈ independent_t_derivative rtol=2e-6 atol=2e-9
+    c_frozen_prime = 12 / (4 - x)^2
+    frozen_t_derivative = data.expK * corrected_model.w0_magnitude^2 *
+        (kt * c_frozen + c_frozen_prime * x_tau)
+    @test !isapprox(numerical_t_derivative, frozen_t_derivative; rtol=1e-3, atol=1e-8)
     @test corrected.parent_metric_assessment.status == :PASS
     @test corrected.retained_metric_assessment.status == :PASS
     @test size(corrected.parent_metric) == (2, 2)
@@ -244,7 +328,7 @@ end
     t_new, rho_new = change_coordinate_basis(t_old, rho_old, B)
     tau_old = divisor_volumes(geometry2, t_old)
     tau_new = divisor_volumes(geometry_new, t_new)
-    @test tau_new ≈ B' * tau_old
+    @test tau_new ≈ B * tau_old
     @test change_charge_basis(Q, B) == model_new.charges
     @test dot(Q[3, :], tau_old) ≈ dot(model_new.charges[3, :], tau_new)
     @test charge_coordinates(Q, tau_old, rho_old).tau ≈ Q * tau_old
@@ -263,8 +347,8 @@ end
     grad_old = finite_difference_gradient(CentralDifferenceBackend(), f_old, x_old)
     grad_new = finite_difference_gradient(CentralDifferenceBackend(), f_new, x_new)
     Binv = inv(B)
-    @test grad_new[1:2] ≈ B' * grad_old[1:2] rtol=2e-5 atol=2e-8
-    @test grad_new[3:4] ≈ Binv * grad_old[3:4] rtol=2e-5 atol=2e-8
+    @test grad_new[1:2] ≈ B * grad_old[1:2] rtol=2e-5 atol=2e-8
+    @test grad_new[3:4] ≈ Binv' * grad_old[3:4] rtol=2e-5 atol=2e-8
 end
 
 @testset "CYAX-0191 Gate B numerical interfaces, reports, and frozen policy" begin
@@ -286,30 +370,67 @@ end
     fluct = fluctuation_analysis(GeneralizedEigenBackend(),
         [-0.5 0.0 0.0 0.0; 0.0 0.0 0.0 0.0; 0.0 0.0 5e-11 0.0; 0.0 0.0 0.0 2.0],
         [2.0 0.0 0.0 0.0; 0.0 1.0 0.0 0.0; 0.0 0.0 1.0 0.0; 0.0 0.0 0.0 1.0];
-        exact_zero_mode_indices=[2], absolute_zero_threshold=1e-10,
+        absolute_zero_threshold=1e-10,
         relative_zero_threshold=1e-10, active_charges=Int[0 1])
     @test fluct.generalized_mass_eigenvalues ≈ [-0.25, 0.0, 5e-11, 2.0]
     @test [mode.disposition for mode in fluct.mode_dispositions] ==
-        [:tachyonic, :symmetry_protected_exact_zero,
+        [:tachyonic, :numerically_unresolved_near_zero,
          :numerically_unresolved_near_zero, :lifted]
     @test [mode.sign_status for mode in fluct.mode_dispositions] ==
         [:negative, :zero_within_threshold, :zero_within_threshold, :positive]
-    @test fluct.symmetry_protected_directions ==
+    @test fluct.active_axionic_shift_directions ==
         reshape(Rational{BigInt}[0, 0, 1, 0], 4, 1)
+    @test fluct.symmetry_kernel_assessment.status == :FAIL
+    exact_shift = fluctuation_analysis(GeneralizedEigenBackend(),
+        [1.0 0.0; 0.0 0.0], Matrix{Float64}(I, 2, 2);
+        active_charges=zeros(Int, 0, 1), absolute_zero_threshold=1e-12)
+    @test [mode.disposition for mode in exact_shift.mode_dispositions] ==
+        [:symmetry_protected_exact_zero, :lifted]
+    @test exact_shift.symmetry_kernel_assessment.status == :PASS
+    degenerate_shift = fluctuation_analysis(GeneralizedEigenBackend(),
+        [1.0 0.0 0.0 0.0; 0.0 1.0 0.0 0.0; 0.0 0.0 0.0 0.0; 0.0 0.0 0.0 0.0],
+        Matrix{Float64}(I, 4, 4); active_charges=Int[1 1])
+    @test degenerate_shift.symmetry_kernel_assessment.status == :PASS
+    @test degenerate_shift.symmetry_mode_assessment.status == :PASS
+    @test degenerate_shift.active_axionic_shift_directions ==
+        reshape(Rational{BigInt}[0, 0, -1, 1], 4, 1)
+    @test [mode.disposition for mode in degenerate_shift.mode_dispositions] ==
+        [:numerically_unresolved_near_zero, :numerically_unresolved_near_zero,
+         :lifted, :lifted]
+    policy_b1 = frozen_policy(:P0_B1)
+    scaled_fluct = fluctuation_analysis(GeneralizedEigenBackend(),
+        [1e-15 0.0; 0.0 1e-13], Matrix{Float64}(I, 2, 2);
+        potential_scale=policy_b1.potential_scale,
+        field_scales=policy_b1.field_scales,
+        absolute_zero_threshold=policy_b1.absolute_spectral_threshold,
+        relative_zero_threshold=policy_b1.relative_spectral_threshold)
+    @test scaled_fluct.normalized_generalized_mass_eigenvalues ≈
+        scaled_fluct.generalized_mass_eigenvalues ./ Float64(policy_b1.potential_scale)
+    @test scaled_fluct.normalized_generalized_mass_eigenvalues[1] > 1e-10
+    @test scaled_fluct.mode_dispositions[1].disposition == :lifted
     @test exact_axionic_shift_basis(Int[0 1]) ==
         reshape(Rational{BigInt}[1, 0], 2, 1)
     basis = Int[1 3; 0 1]
-    transformed_charges = change_charge_basis(Int[0 1], basis)
+    kernel_old = exact_axionic_shift_basis(Int[1 0])
+    transformed_charges = change_charge_basis(Int[1 0], basis)
     transformed_kernel = exact_axionic_shift_basis(transformed_charges)
     @test transformed_charges * transformed_kernel == zeros(Rational{BigInt}, 1, 1)
-    @test transformed_kernel[:, 1] ==
-        (basis' * exact_axionic_shift_basis(Int[0 1])[:, 1]) ./ 3
+    @test transformed_kernel[:, 1] == basis * kernel_old[:, 1]
     @test exact_axionic_shift_basis(zeros(Int, 0, 2)) == Matrix{Rational{BigInt}}(I, 2, 2)
     @test fluct.physical_mass_assessment.status == :PASS
     @test fluct.bf_assessment.status == :NOT_APPLICABLE
     @test_throws ArgumentError fluctuation_analysis(GeneralizedEigenBackend(),
         Matrix{Float64}(I, 2, 2), Matrix{Float64}(I, 2, 2);
         at_critical_point=false)
+
+    bounded_objective(x) = x[1] < 1 ? x[1]^2 : throw(DomainError(x[1], "outside test domain"))
+    boundary_search = search_stationary(
+        DampedNewtonSearch(differentiation=DomainRejectingBackend()),
+        bounded_objective, [0.0], SearchCriteria([1.0], 1.0, 1e-8;
+            max_iterations=1, minimum_step=1 / 8))
+    @test boundary_search.status == :failed
+    @test boundary_search.point == [0.5]
+    @test any(occursin("domain rejected", failure) for failure in boundary_search.failures)
 
     geometry = synthetic_geometry_fixture()
     model = fixture_model(2; charges=Matrix{Int}(I, 2, 2),
