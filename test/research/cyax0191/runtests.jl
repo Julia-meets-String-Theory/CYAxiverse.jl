@@ -103,12 +103,26 @@ end
     protected_digest = geometry.artifact_sha256
     protected_coefficient = geometry.intersections.coefficients[1]
     Base.GMP.MPZ.set!(protected_coefficient, BigInt(999))
-    protected_coefficient_from_values = geometry.intersections.coefficients.values[1]
-    Base.GMP.MPZ.set!(protected_coefficient_from_values, BigInt(998))
+    protected_coefficient_from_values =
+        getfield(geometry.intersections.coefficients, :values)[1]
+    @test protected_coefficient_from_values isa Tuple{Vararg{UInt8}}
+    @test_throws MethodError Base.GMP.MPZ.set!(protected_coefficient_from_values, BigInt(998))
     protected_basis_entry = geometry.divisor_basis_map[1, 1]
     Base.GMP.MPZ.set!(protected_basis_entry, BigInt(77))
-    protected_basis_entry_from_values = geometry.divisor_basis_map.values[1]
-    Base.GMP.MPZ.set!(protected_basis_entry_from_values, BigInt(76))
+    protected_basis_entry_from_values = getfield(geometry.divisor_basis_map, :values)[1]
+    @test protected_basis_entry_from_values isa Tuple{Vararg{UInt8}}
+    @test_throws MethodError Base.GMP.MPZ.set!(protected_basis_entry_from_values, BigInt(76))
+    @test_throws MethodError CYAX0191.FrozenArray{BigInt,1,1}((BigInt(3),), (1,))
+    rational_frozen = CYAX0191.FrozenArray(reshape(Rational{BigInt}[1 // 3], 1, 1))
+    @test rational_frozen[1, 1] == BigInt(1) // BigInt(3)
+    setprecision(BigFloat, 256) do
+        bigfloat_value = BigFloat(1) / BigFloat(7)
+        bigfloat_frozen = CYAX0191.FrozenArray([bigfloat_value])
+        @test bigfloat_frozen[1] == bigfloat_value
+        @test precision(bigfloat_frozen[1]) == 256
+        @test getfield(bigfloat_frozen, :values)[1][1] == 256
+        @test getfield(bigfloat_frozen, :values)[1][2] isa Tuple{Vararg{UInt8}}
+    end
     @test geometry.artifact_sha256 == protected_digest
     @test geometry.intersections.coefficients[1] == 3
     @test geometry.divisor_basis_map[1, 1] == 1
@@ -539,6 +553,17 @@ end
     @test search.status == :converged
     @test search.point ≈ zeros(2) atol=1e-6
     @test search.scaled_residual <= criteria.stationarity_tolerance
+    positive_domain_objective(x) = x[1] > 0 ? x[1]^2 :
+        throw(DomainError(x[1], "coordinate must stay positive"))
+    near_domain_search = search_stationary(DampedNewtonSearch(),
+        positive_domain_objective, [1e-8],
+        SearchCriteria([1.0], 1.0, 1e-8; max_iterations=10))
+    @test near_domain_search.status == :failed
+    @test near_domain_search.point == [1e-8]
+    @test near_domain_search.value ≈ 1e-16
+    @test isinf(near_domain_search.scaled_residual)
+    @test any(occursin("rejected the current iterate", failure)
+        for failure in near_domain_search.failures)
 
     fluct = fluctuation_analysis(GeneralizedEigenBackend(),
         [-0.5 0.0 0.0 0.0; 0.0 0.0 0.0 0.0; 0.0 0.0 5e-11 0.0; 0.0 0.0 0.0 2.0],
@@ -562,6 +587,21 @@ end
     @test exact_shift.symmetry_kernel_assessment.status == :PASS
     @test exact_shift.mode_dispositions[1].disposition == :symmetry_protected_exact_zero
     @test exact_shift.mode_dispositions[1].sign_status == :zero_within_threshold
+    charge_row = Int[1 3]
+    charge_hessian = zeros(4, 4)
+    charge_vector = Float64[1, 3]
+    charge_hessian[3:4, 3:4] .= 0.1 .* (charge_vector * charge_vector')
+    rounded_exact_shift = fluctuation_analysis(GeneralizedEigenBackend(),
+        charge_hessian, Matrix{Float64}(I, 4, 4); active_charges=charge_row,
+        absolute_zero_threshold=1e-12)
+    @test rounded_exact_shift.symmetry_kernel_assessment.status == :PASS
+    @test rounded_exact_shift.symmetry_mode_assessment.status == :PASS
+    @test abs.(rounded_exact_shift.active_axionic_shift_directions) ==
+        reshape(Rational{BigInt}[0, 0, 3, 1], 4, 1)
+    @test all(mode -> mode.disposition != :symmetry_protected_exact_zero,
+        rounded_exact_shift.mode_dispositions)
+    @test any(mode -> mode.disposition == :numerically_unresolved_near_zero,
+        rounded_exact_shift.mode_dispositions)
     for invalid_threshold in (NaN, Inf, -1.0)
         @test_throws ArgumentError fluctuation_analysis(GeneralizedEigenBackend(),
             Matrix{Float64}(I, 2, 2), Matrix{Float64}(I, 2, 2);
@@ -667,8 +707,10 @@ end
     source_phases[1] = 7.0
     exposed_charge = immutable_model.charges[1, 1]
     Base.GMP.MPZ.set!(exposed_charge, BigInt(88))
-    exposed_charge_from_values = immutable_model.charges.values[1]
-    Base.GMP.MPZ.set!(exposed_charge_from_values, BigInt(77))
+    exposed_charge_from_values = getfield(immutable_model.charges, :values)[1]
+    @test exposed_charge_from_values isa Tuple{Vararg{UInt8}}
+    @test_throws MethodError Base.GMP.MPZ.set!(exposed_charge_from_values, BigInt(77))
+    @test_throws MethodError CYAX0191.FrozenArray{BigInt,1,1}((BigInt(3),), (1,))
     exposed_w0 = immutable_model.w0_magnitude
     @test exposed_w0 !== getfield(immutable_model, :w0_magnitude)
     @test getfield(exposed_w0, :d) != getfield(model_w0_input, :d)

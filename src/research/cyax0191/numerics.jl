@@ -140,10 +140,28 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
     g = zeros(T, length(x))
     H = zeros(T, length(x), length(x))
     for iteration in 0:criteria.max_iterations
-        gradient!(g, differentiation, f, x; scales=criteria.field_scales)
-        residual = T(scaled_stationarity_residual(g, criteria.field_scales,
-            _search_potential_scale(criteria, x)))
-        value = T(f(x))
+        value = try
+            T(f(x))
+        catch error
+            if error isa DomainError
+                push!(failures, "objective rejected the current iterate at iteration $iteration")
+                return SearchResult(:failed, x, T(NaN), T(Inf), iteration,
+                    "damped-newton-gradient-residual", failures)
+            end
+            rethrow()
+        end
+        residual = try
+            gradient!(g, differentiation, f, x; scales=criteria.field_scales)
+            T(scaled_stationarity_residual(g, criteria.field_scales,
+                _search_potential_scale(criteria, x)))
+        catch error
+            if error isa DomainError
+                push!(failures, "gradient or pointwise scale rejected the current iterate at iteration $iteration")
+                return SearchResult(:failed, x, value, T(Inf), iteration,
+                    "damped-newton-gradient-residual", failures)
+            end
+            rethrow()
+        end
         if residual <= criteria.stationarity_tolerance
             return SearchResult(:converged, x, value, residual, iteration,
                 "damped-newton-gradient-residual", failures)
@@ -304,6 +322,7 @@ function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix
         directions[(size(G, 1) ÷ 2 + 1):end, :] .= kernel
         directions
     end
+    exact_symmetry_annihilation = false
     symmetry_status = if active_charges === nothing
         Assessment(:NOT_ASSESSED, "active charges were not supplied")
     elseif size(symmetry_directions, 2) == 0
@@ -311,9 +330,22 @@ function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix
     else
         numeric_directions = T.(symmetry_directions)
         residual = Hcov * numeric_directions
-        all(iszero, residual) ?
-            Assessment(:PASS, "the exact active-charge kernel is exactly annihilated by the supplied covariant Hessian") :
-            Assessment(:FAIL, "the supplied covariant Hessian has a nonzero residual on the exact active-charge kernel")
+        exact_symmetry_annihilation = all(iszero, residual)
+        residual_scale = opnorm(Hcov, Inf) * opnorm(numeric_directions, Inf)
+        residual_norm = norm(residual, Inf)
+        relative_residual = if !isfinite(residual_norm) || !isfinite(residual_scale)
+            T(Inf)
+        elseif iszero(residual_norm)
+            zero(T)
+        elseif iszero(residual_scale)
+            T(Inf)
+        else
+            residual_norm / residual_scale
+        end
+        kernel_tolerance = T(4) * eps(T)
+        isfinite(relative_residual) && relative_residual <= kernel_tolerance ?
+            Assessment(:PASS, "the exact charge kernel is annihilated within a precision-scaled residual tolerance; exact-zero labels still require exact Hessian annihilation") :
+            Assessment(:FAIL, "the covariant Hessian residual on the exact charge kernel exceeds the precision-scaled tolerance")
     end
     symmetry_subspace = zeros(T, size(G, 1), 0)
     if symmetry_status.status === :PASS && size(symmetry_directions, 2) > 0
@@ -343,7 +375,8 @@ function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix
         entire_near_space_is_kernel = length(near_indices) == size(symmetry_directions, 2)
         pure_symmetry_mode = symmetry_overlap >= one(T) - T(100) * sqrt(eps(T))
         disposition = if symmetry_mode_status.status === :PASS &&
-                i in near_indices && (entire_near_space_is_kernel || pure_symmetry_mode)
+                exact_symmetry_annihilation && i in near_indices &&
+                (entire_near_space_is_kernel || pure_symmetry_mode)
             :symmetry_protected_exact_zero
         elseif abs(normalized_values[i]) <= near_limit
             :numerically_unresolved_near_zero

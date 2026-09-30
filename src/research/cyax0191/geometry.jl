@@ -1,28 +1,73 @@
 """Tuple-backed array storage that cannot be changed after construction."""
 struct FrozenArray{T,N,L} <: AbstractArray{T,N}
-    values::NTuple{L,T}
+    values::NTuple{L,Any}
     dimensions::NTuple{N,Int}
+
+    function FrozenArray{T,N,L}(values::NTuple{L,Any}, dimensions::NTuple{N,Int},
+            ::Val{:encoded}) where {T,N,L}
+        prod(dimensions) == L || throw(DimensionMismatch("frozen storage dimensions do not match"))
+        all(_safe_frozen_encoding, values) ||
+            throw(ArgumentError("frozen storage must contain only immutable encodings"))
+        all(value -> try
+            _thaw_frozen(T, value) isa T
+        catch
+            false
+        end, values) || throw(ArgumentError("frozen storage contains an invalid value encoding"))
+        new{T,N,L}(values, dimensions)
+    end
 end
 
+_freeze_value(value::BigInt) = Tuple(codeunits(string(value)))
+_thaw_frozen(::Type{BigInt}, bytes::Tuple) = parse(BigInt, String(UInt8[bytes...]))
+
+function _freeze_value(value::BigFloat)
+    (precision(value), Tuple(codeunits(string(value))))
+end
+
+function _thaw_frozen(::Type{BigFloat}, encoded::Tuple{Int,<:Tuple})
+    setprecision(BigFloat, encoded[1]) do
+        parse(BigFloat, String(UInt8[encoded[2]...]))
+    end
+end
+
+_freeze_value(value::Rational{T}) where {T<:Integer} =
+    (_freeze_value(numerator(value)), _freeze_value(denominator(value)))
+_thaw_frozen(::Type{Rational{T}}, encoded::Tuple{Any,Any}) where {T<:Integer} =
+    _thaw_frozen(T, encoded[1]) // _thaw_frozen(T, encoded[2])
+
+_freeze_value(value::Complex) = (_freeze_value(real(value)), _freeze_value(imag(value)))
+_thaw_frozen(::Type{Complex{T}}, encoded::Tuple{Any,Any}) where {T<:Number} =
+    complex(_thaw_frozen(T, encoded[1]), _thaw_frozen(T, encoded[2]))
+
+function _freeze_value(value::T) where {T}
+    isbitstype(T) || throw(ArgumentError("unsupported mutable frozen-array element type $T"))
+    value
+end
+
+_thaw_frozen(::Type{T}, value::T) where {T} = value
+
+_safe_frozen_encoding(value) = isbitstype(typeof(value))
+_safe_frozen_encoding(value::Tuple) = all(_safe_frozen_encoding, value)
+
 function FrozenArray(array::AbstractArray{T,N}) where {T,N}
-    values = Tuple(deepcopy(value) for value in array)
-    FrozenArray{T,N,length(values)}(values, size(array))
+    values = Tuple(_freeze_value(value) for value in array)
+    FrozenArray{T,N,length(values)}(values, size(array), Val(:encoded))
 end
 
 function Base.getproperty(array::FrozenArray, name::Symbol)
-    name === :values && return Tuple(deepcopy(value) for value in getfield(array, :values))
+    name === :values && return getfield(array, :values)
     getfield(array, name)
 end
 
 Base.size(array::FrozenArray) = getfield(array, :dimensions)
 Base.IndexStyle(::Type{<:FrozenArray}) = IndexLinear()
-Base.getindex(array::FrozenArray, index::Int) = deepcopy(getfield(array, :values)[index])
+Base.getindex(array::FrozenArray{T}, index::Int) where {T} =
+    _thaw_frozen(T, getfield(array, :values)[index])
 function Base.getindex(array::FrozenArray{T,N}, indices::Vararg{Int,N}) where {T,N}
     linear_index = LinearIndices(array)[indices...]
-    deepcopy(getfield(array, :values)[linear_index])
+    _thaw_frozen(T, getfield(array, :values)[linear_index])
 end
-Base.copy(array::FrozenArray) = Array(reshape(
-    [deepcopy(value) for value in getfield(array, :values)], size(array)))
+Base.copy(array::FrozenArray) = Array(reshape([array[index] for index in eachindex(array)], size(array)))
 
 """A sparse, canonical representation of a symmetric triple-intersection tensor."""
 struct CanonicalIntersectionTensor{T<:Number}
