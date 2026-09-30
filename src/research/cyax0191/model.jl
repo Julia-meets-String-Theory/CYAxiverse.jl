@@ -288,33 +288,8 @@ function _model_terms(model::KahlerModel, data, rho::AbstractVector)
     (; w0, wn, z_terms, d0, dn)
 end
 
-"""Pointwise envelope `e^K (|W0| + sum |W_NP,a|)^2`, plus absolute uplift."""
-function characteristic_potential_scale(model::KahlerModel,
-        geometry::GeometryRecord, t::AbstractVector, rho::AbstractVector)
-    data = _kahler_data(model, geometry, t)
-    data.domain_status === :PASS ||
-        throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
-    terms = _model_terms(model, data, rho)
-    superpotential_envelope = abs(terms.w0) + sum(abs, terms.z_terms)
-    scale = abs(data.expK) * superpotential_envelope^2
-    if model.switches.uplift_enabled
-        uplift = data.R(model.uplift.evaluate((; geometry, t=data.tt, tau=data.tau,
-            rho=data.R.(rho), volume=data.V, xihat=data.xihat)))
-        isfinite(uplift) || throw(DomainError(uplift, "uplift returned a nonfinite value"))
-        scale += abs(uplift)
-    end
-    isfinite(scale) && scale > zero(scale) ||
-        throw(DomainError(scale, "the declared model has no finite positive characteristic potential scale"))
-    scale
-end
-
-"""Evaluate the declared potential, retaining the full heavy-field Schur block."""
-function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
-        t::AbstractVector, rho::AbstractVector; enforce_domain=true)
-    data = _kahler_data(model, geometry, t)
-    enforce_domain && data.domain_status !== :PASS &&
-        throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
-    terms = _model_terms(model, data, rho)
+function _potential_contributions(model::KahlerModel, geometry::GeometryRecord,
+        data, terms, rho::AbstractVector)
     M = data.full_inverse_tt_metric
     R = data.R
     alpha = data.expK * (real(dot(terms.d0, M * terms.d0)) - R(3) * abs2(terms.w0))
@@ -338,6 +313,38 @@ function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
     value = active.alpha3 + active.np_linear + active.np_quadratic + active.optional_uplift
     all(isfinite, (alpha, linear, quadratic, uplift_value, value)) ||
         throw(DomainError(value, "potential evaluation produced a nonfinite contribution"))
+    (; contributions, active, value)
+end
+
+"""Scale stationarity by active-term magnitudes, with a no-scale fallback."""
+function characteristic_potential_scale(model::KahlerModel,
+        geometry::GeometryRecord, t::AbstractVector, rho::AbstractVector)
+    data = _kahler_data(model, geometry, t)
+    data.domain_status === :PASS ||
+        throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
+    terms = _model_terms(model, data, rho)
+    potential_parts = _potential_contributions(model, geometry, data, terms, rho)
+    scale = sum(abs, values(potential_parts.active))
+    if iszero(scale)
+        superpotential_envelope = abs(terms.w0) + sum(abs, terms.z_terms)
+        scale = abs(data.expK) * superpotential_envelope^2
+        iszero(scale) && (scale = one(data.R))
+    end
+    isfinite(scale) && scale > zero(scale) ||
+        throw(DomainError(scale, "the declared model has no finite positive characteristic potential scale"))
+    scale
+end
+
+"""Evaluate the declared potential, retaining the full heavy-field Schur block."""
+function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
+        t::AbstractVector, rho::AbstractVector; enforce_domain=true)
+    data = _kahler_data(model, geometry, t)
+    enforce_domain && data.domain_status !== :PASS &&
+        throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
+    terms = _model_terms(model, data, rho)
+    potential_parts = _potential_contributions(model, geometry, data, terms, rho)
+    contributions, active, value = potential_parts.contributions, potential_parts.active,
+        potential_parts.value
     n = length(data.tau)
     retained_real = zeros(data.R, 2n, 2n)
     tau_jacobian = data.R.(divisor_volume_jacobian(geometry, data.tt))

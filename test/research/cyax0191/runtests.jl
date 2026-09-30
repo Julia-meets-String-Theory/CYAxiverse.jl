@@ -560,6 +560,16 @@ end
     @test [mode.disposition for mode in exact_shift.mode_dispositions] ==
         [:symmetry_protected_exact_zero, :lifted]
     @test exact_shift.symmetry_kernel_assessment.status == :PASS
+    @test exact_shift.mode_dispositions[1].disposition == :symmetry_protected_exact_zero
+    @test exact_shift.mode_dispositions[1].sign_status == :zero_within_threshold
+    for invalid_threshold in (NaN, Inf, -1.0)
+        @test_throws ArgumentError fluctuation_analysis(GeneralizedEigenBackend(),
+            Matrix{Float64}(I, 2, 2), Matrix{Float64}(I, 2, 2);
+            absolute_zero_threshold=invalid_threshold)
+        @test_throws ArgumentError fluctuation_analysis(GeneralizedEigenBackend(),
+            Matrix{Float64}(I, 2, 2), Matrix{Float64}(I, 2, 2);
+            relative_zero_threshold=invalid_threshold)
+    end
     tiny_lift = fluctuation_analysis(GeneralizedEigenBackend(),
         [1.0 0.0; 0.0 1e-15], Matrix{Float64}(I, 2, 2);
         active_charges=zeros(Int, 0, 1), absolute_zero_threshold=1e-12)
@@ -610,6 +620,17 @@ end
     @test boundary_search.status == :failed
     @test boundary_search.point == [0.5]
     @test any(occursin("domain rejected", failure) for failure in boundary_search.failures)
+
+    rejecting_scale = x -> x[1] > 1 ? throw(DomainError(x[1], "scale outside test domain")) : 1.0
+    scale_domain_search = search_stationary(
+        DampedNewtonSearch(differentiation=DomainRejectingBackend()), x -> x[1]^2,
+        [0.0], SearchCriteria([1.0], 1.0, 1e-8; max_iterations=1,
+            minimum_step=1 / 8, potential_scale_rule=rejecting_scale,
+            potential_scale_rule_identity="test-scale-domain-v1"))
+    @test scale_domain_search.status == :failed
+    @test scale_domain_search.point == [1.0]
+    @test any(occursin("pointwise scale rejected", failure)
+        for failure in scale_domain_search.failures)
 
     geometry = synthetic_geometry_fixture()
     model = fixture_model(2; charges=Matrix{Int}(I, 2, 2),
@@ -704,8 +725,41 @@ end
         local_scale = characteristic_potential_scale(scale_model, scale_geometry,
             view(x_large, 1:1), view(x_large, 2:2))
         @test local_scale < scale_policy.potential_scale / 1_000_000
+        active_at_reference = evaluate_potential(scale_model, scale_geometry,
+            view(x_large, 1:1), view(x_large, 2:2)).active_contributions
+        @test local_scale == sum(abs, values(active_at_reference))
         @test pointwise_criteria.potential_scale_rule_identity ==
             scale_policy.stationarity_scale_rule
+
+        x_asymptotic = BigFloat[1000, 0]
+        x_tail = BigFloat[5000, 0]
+        legacy_scale_rule = x -> begin
+            data = CYAX0191._kahler_data(scale_model, scale_geometry, view(x, 1:1))
+            terms = CYAX0191._model_terms(scale_model, data, view(x, 2:2))
+            abs(data.expK) * (abs(terms.w0) + sum(abs, terms.z_terms))^2
+        end
+        legacy_criteria = SearchCriteria(collect(scale_policy.field_scales),
+            scale_policy.potential_scale, scale_policy.stationarity_tolerance;
+            max_iterations=1, potential_scale_rule=legacy_scale_rule,
+            potential_scale_rule_identity="legacy-superpotential-envelope")
+        legacy_search = search_stationary(DampedNewtonSearch(), scale_objective,
+            x_tail, legacy_criteria)
+        active_search = search_stationary(DampedNewtonSearch(), scale_objective,
+            x_asymptotic, pointwise_criteria)
+        asymptotic_gradient = finite_difference_gradient(CentralDifferenceBackend(),
+            scale_objective, x_asymptotic)
+        asymptotic_active_scale = characteristic_potential_scale(scale_model,
+            scale_geometry, view(x_asymptotic, 1:1), view(x_asymptotic, 2:2))
+        asymptotic_legacy_scale = legacy_scale_rule(x_asymptotic)
+        tail_gradient = finite_difference_gradient(CentralDifferenceBackend(),
+            scale_objective, x_tail)
+        @test abs(asymptotic_gradient[1]) > BigFloat("1e-32")
+        @test abs(tail_gradient[1]) > BigFloat("1e-40")
+        @test legacy_search.status == :converged
+        @test legacy_search.scaled_residual <= scale_policy.stationarity_tolerance
+        @test active_search.status != :converged
+        @test active_search.scaled_residual > scale_policy.stationarity_tolerance
+        @test asymptotic_active_scale < asymptotic_legacy_scale / 1_000_000
     end
 
     setprecision(BigFloat, 128) do

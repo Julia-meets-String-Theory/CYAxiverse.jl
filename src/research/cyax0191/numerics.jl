@@ -163,18 +163,18 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
         trial_gradient = similar(g)
         while alpha >= criteria.minimum_step
             trial .= x .+ alpha .* step
-            try
+            trial_residual = try
                 gradient!(trial_gradient, differentiation, f, trial; scales=criteria.field_scales)
+                T(scaled_stationarity_residual(trial_gradient, criteria.field_scales,
+                    _search_potential_scale(criteria, trial)))
             catch error
                 if error isa DomainError
-                    push!(failures, "domain rejected a line-search trial at iteration $iteration")
+                    push!(failures, "domain rejected a line-search trial: objective, gradient, or pointwise scale rejected it at iteration $iteration")
                     alpha *= criteria.backtracking_factor
                     continue
                 end
                 rethrow()
             end
-            trial_residual = T(scaled_stationarity_residual(trial_gradient,
-                criteria.field_scales, _search_potential_scale(criteria, trial)))
             if isfinite(trial_residual) && trial_residual < residual
                 x .= trial
                 accepted = true
@@ -267,19 +267,32 @@ function fluctuation_analysis(::GeneralizedEigenBackend, hessian::AbstractMatrix
     end
     G = Matrix(Symmetric((kinetic_metric + kinetic_metric') / T(2)))
     isposdef(Symmetric(G)) || throw(DomainError(G, "retained kinetic metric must be positive definite"))
-    potential_scale > zero(T) || throw(ArgumentError("spectral potential scale must be positive"))
+    absolute_threshold = T(absolute_zero_threshold)
+    relative_threshold = T(relative_zero_threshold)
+    mass_scale = T(potential_scale)
+    isfinite(absolute_threshold) && absolute_threshold >= zero(T) ||
+        throw(ArgumentError("absolute spectral threshold must be finite and nonnegative"))
+    isfinite(relative_threshold) && relative_threshold >= zero(T) ||
+        throw(ArgumentError("relative spectral threshold must be finite and nonnegative"))
+    isfinite(mass_scale) && mass_scale > zero(T) ||
+        throw(ArgumentError("spectral potential scale must be finite and positive"))
     length(field_scales) == size(Hcov, 1) ||
         throw(DimensionMismatch("spectral field scales must match the retained fields"))
     scales = collect(T.(field_scales))
-    all(>(zero(T)), scales) || throw(ArgumentError("spectral field scales must be positive"))
+    all(value -> isfinite(value) && value > zero(T), scales) ||
+        throw(ArgumentError("spectral field scales must be finite and positive"))
     L = cholesky(Symmetric(G)).L
     normalized = L \ Hcov / L'
     decomposition = eigen(Symmetric((normalized + normalized') / T(2)))
     values = decomposition.values
-    mass_scale = T(potential_scale)
     normalized_values = values ./ mass_scale
+    all(isfinite, normalized_values) ||
+        throw(DomainError(normalized_values, "normalized generalized masses must be finite"))
     scale = max(maximum(abs, normalized_values), one(T))
-    near_limit = max(absolute_zero_threshold, relative_zero_threshold * scale)
+    relative_limit = relative_threshold * scale
+    isfinite(relative_limit) ||
+        throw(DomainError(relative_limit, "relative spectral threshold overflowed"))
+    near_limit = max(absolute_threshold, relative_limit)
     dispositions = ModeDisposition{T}[]
     symmetry_directions = if active_charges === nothing
         zeros(Rational{BigInt}, size(G, 1), 0)
