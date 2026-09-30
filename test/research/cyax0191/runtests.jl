@@ -89,6 +89,18 @@ function geometry_with_source(geometry::GeometryRecord, source::GeometrySourceId
         exactness=geometry.exactness, units=geometry.units, source)
 end
 
+function geometry_with_intersections(geometry::GeometryRecord,
+        intersections::CanonicalIntersectionTensor)
+    GeometryRecord(intersections;
+        euler_characteristic=geometry.euler_characteristic,
+        ordered_divisors=geometry.ordered_divisors, ordered_curves=geometry.ordered_curves,
+        divisor_basis_map=geometry.divisor_basis_map,
+        dual_curve_basis_map=geometry.dual_curve_basis_map,
+        domain_inequalities=geometry.domain_inequalities,
+        cone_provenance=geometry.cone_provenance, precision=geometry.precision,
+        exactness=geometry.exactness, units=geometry.units, source=geometry.source)
+end
+
 @testset "CYAX-0191 Gate B geometry and importer boundary" begin
     geometry = synthetic_geometry_fixture()
     source = geometry.source
@@ -152,6 +164,61 @@ end
         @test precision(bigfloat_frozen[1]) == 256
         @test getfield(bigfloat_frozen, :values)[1][1] == 256
         @test getfield(bigfloat_frozen, :values)[1][2] isa Tuple{Vararg{UInt8}}
+    end
+    high_precision_coefficient, high_precision_coordinate = setprecision(BigFloat, 512) do
+        (BigFloat(1) / BigFloat(7), BigFloat(1) / BigFloat(3))
+    end
+    high_precision_geometry_base = one_modulus_geometry(id="bigfloat-intersection-precision-v1")
+    high_precision_tensor = setprecision(BigFloat, 512) do
+        CanonicalIntersectionTensor(1, Pair[(1, 1, 1) => high_precision_coefficient])
+    end
+    high_precision_geometry = geometry_with_intersections(high_precision_geometry_base,
+        high_precision_tensor)
+    expected_duplicate_coefficient = setprecision(BigFloat, 512) do
+        high_precision_coefficient + high_precision_coefficient
+    end
+    expected_volume = calabi_yau_volume(high_precision_geometry,
+        [high_precision_coordinate])
+    expected_tau = divisor_volumes(high_precision_geometry,
+        [high_precision_coordinate])[1]
+    expected_jacobian = divisor_volume_jacobian(high_precision_geometry,
+        [high_precision_coordinate])[1, 1]
+    high_precision_cone_coordinates = setprecision(BigFloat, 512) do
+        BigFloat[BigFloat(1) / 3, BigFloat(1) / 5]
+    end
+    expected_cone_margins = cone_margins(geometry, high_precision_cone_coordinates)
+    setprecision(BigFloat, 128) do
+        imported_tensor = CanonicalIntersectionTensor(1,
+            Pair[(1, 1, 1) => high_precision_coefficient])
+        imported_coefficient = imported_tensor.coefficients[1]
+        @test imported_coefficient == high_precision_coefficient
+        @test precision(imported_coefficient) == 512
+        duplicate_tensor = CanonicalIntersectionTensor(1, Pair[
+            (1, 1, 1) => high_precision_coefficient,
+            (1, 1, 1) => high_precision_coefficient])
+        @test duplicate_tensor.coefficients[1] == expected_duplicate_coefficient
+        @test precision(duplicate_tensor.coefficients[1]) == 512
+        imported_geometry = geometry_with_intersections(high_precision_geometry_base,
+            imported_tensor)
+        @test imported_geometry.artifact_sha256 == high_precision_geometry.artifact_sha256
+        @test imported_geometry.intersections.coefficients[1] == high_precision_coefficient
+        @test precision(calabi_yau_volume(imported_geometry,
+            [high_precision_coordinate])) == 512
+        @test calabi_yau_volume(imported_geometry,
+            [high_precision_coordinate]) == expected_volume
+        tau = divisor_volumes(imported_geometry, [high_precision_coordinate])
+        @test precision(tau[1]) == 512
+        @test tau[1] == expected_tau
+        jacobian = divisor_volume_jacobian(imported_geometry,
+            [high_precision_coordinate])
+        @test precision(jacobian[1, 1]) == 512
+        @test jacobian[1, 1] == expected_jacobian
+        rebased = change_divisor_basis(imported_geometry, reshape([1], 1, 1))
+        @test rebased.intersections.coefficients[1] == high_precision_coefficient
+        @test precision(rebased.intersections.coefficients[1]) == 512
+        margins = cone_margins(geometry, high_precision_cone_coordinates)
+        @test all(value -> precision(value) == 512, margins)
+        @test margins == expected_cone_margins
     end
     @test geometry.artifact_sha256 == protected_digest
     @test geometry.intersections.coefficients[1] == 3

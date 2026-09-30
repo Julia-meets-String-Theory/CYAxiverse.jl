@@ -125,25 +125,45 @@ _widen_exact(value::Rational) = Rational{BigInt}(value)
 _widen_exact(value) = value
 _widen_exact_array(values::AbstractArray) = map(_widen_exact, values)
 
+_geometry_input_precision(value::BigFloat) = precision(value)
+_geometry_input_precision(value::Pair) =
+    max(_geometry_input_precision(first(value)), _geometry_input_precision(last(value)))
+_geometry_input_precision(value::Tuple) =
+    maximum((_geometry_input_precision(item) for item in value); init=0)
+_geometry_input_precision(value::AbstractArray) =
+    maximum((_geometry_input_precision(item) for item in value); init=0)
+_geometry_input_precision(value) = 0
+
+function _with_geometry_precision(f, values...)
+    bits = max(precision(BigFloat), maximum(_geometry_input_precision, values; init=0))
+    setprecision(f, BigFloat, bits)
+end
+
 function CanonicalIntersectionTensor(n::Integer, terms::AbstractVector{<:Pair})
     n > 0 || throw(ArgumentError("the divisor dimension must be positive"))
-    accum = Dict{NTuple{3,Int},Any}()
-    for item in terms
-        length(item.first) == 3 || throw(ArgumentError("intersection keys must be triples"))
-        key = Tuple(sort!(collect(Int, item.first)))
-        all(i -> 1 <= i <= n, key) || throw(BoundsError(1:n, key))
-        item.second isa Real ||
-            throw(ArgumentError("intersection coefficients must be real"))
-        value = _widen_exact(item.second)
-        accum[key] = get(accum, key, zero(value)) + value
+    _with_geometry_precision(terms) do
+        accum = Dict{NTuple{3,Int},Any}()
+        for item in terms
+            length(item.first) == 3 || throw(ArgumentError("intersection keys must be triples"))
+            key = Tuple(sort!(collect(Int, item.first)))
+            all(i -> 1 <= i <= n, key) || throw(BoundsError(1:n, key))
+            item.second isa Real ||
+                throw(ArgumentError("intersection coefficients must be real"))
+            value = _widen_exact(item.second)
+            if haskey(accum, key)
+                accum[key] = accum[key] + value
+            else
+                accum[key] = value
+            end
+        end
+        keys_sorted = sort!(collect(keys(accum)))
+        isempty(keys_sorted) && throw(ArgumentError("the intersection tensor cannot be empty"))
+        values_sorted = [accum[key] for key in keys_sorted if !iszero(accum[key])]
+        triples_sorted = [key for key in keys_sorted if !iszero(accum[key])]
+        isempty(triples_sorted) && throw(ArgumentError("the intersection tensor cannot be identically zero"))
+        T = promote_type(map(typeof, values_sorted)...)
+        CanonicalIntersectionTensor{T}(Int(n), Tuple(triples_sorted), FrozenArray(T.(values_sorted)))
     end
-    keys_sorted = sort!(collect(keys(accum)))
-    isempty(keys_sorted) && throw(ArgumentError("the intersection tensor cannot be empty"))
-    values_sorted = [accum[key] for key in keys_sorted if !iszero(accum[key])]
-    triples_sorted = [key for key in keys_sorted if !iszero(accum[key])]
-    isempty(triples_sorted) && throw(ArgumentError("the intersection tensor cannot be identically zero"))
-    T = promote_type(map(typeof, values_sorted)...)
-    CanonicalIntersectionTensor{T}(Int(n), Tuple(triples_sorted), FrozenArray(T.(values_sorted)))
 end
 
 function _permuted_entries(i::Int, j::Int, k::Int)
@@ -492,11 +512,14 @@ end
 function calabi_yau_volume(geometry::GeometryRecord, t::AbstractVector)
     length(t) == geometry.intersections.n || throw(DimensionMismatch("wrong two-cycle vector length"))
     coordinates = _widen_exact_array(t)
-    total = zero(coordinates[1]^3 * geometry.intersections.coefficients[1] * (1 // 6))
-    for (i, j, k, value) in _full_entries(geometry.intersections)
-        total += (value * coordinates[i] * coordinates[j] * coordinates[k]) * (1 // 6)
+    _with_geometry_precision(coordinates, geometry.intersections.coefficients) do
+        total = nothing
+        for (i, j, k, value) in _full_entries(geometry.intersections)
+            term = (value * coordinates[i] * coordinates[j] * coordinates[k]) * (1 // 6)
+            total = total === nothing ? term : total + term
+        end
+        total
     end
-    total
 end
 
 """Divisor four-cycle volumes tau_i = 1/2 kappa_ijk t^j t^k."""
@@ -504,12 +527,14 @@ function divisor_volumes(geometry::GeometryRecord, t::AbstractVector)
     n = geometry.intersections.n
     length(t) == n || throw(DimensionMismatch("wrong two-cycle vector length"))
     coordinates = _widen_exact_array(t)
-    zero_volume = zero(coordinates[1]^2 * geometry.intersections.coefficients[1] * (1 // 2))
-    values = fill(zero_volume, n)
-    for (i, j, k, value) in _full_entries(geometry.intersections)
-        values[i] += (value * coordinates[j] * coordinates[k]) * (1 // 2)
+    _with_geometry_precision(coordinates, geometry.intersections.coefficients) do
+        zero_volume = zero(coordinates[1]^2 * geometry.intersections.coefficients[1] * (1 // 2))
+        values = fill(zero_volume, n)
+        for (i, j, k, value) in _full_entries(geometry.intersections)
+            values[i] += (value * coordinates[j] * coordinates[k]) * (1 // 2)
+        end
+        values
     end
-    values
 end
 
 """Jacobian d tau_i/d t_j = kappa_ijk t^k."""
@@ -517,18 +542,22 @@ function divisor_volume_jacobian(geometry::GeometryRecord, t::AbstractVector)
     n = geometry.intersections.n
     length(t) == n || throw(DimensionMismatch("wrong two-cycle vector length"))
     coordinates = _widen_exact_array(t)
-    J = fill(zero(coordinates[1] * geometry.intersections.coefficients[1]), n, n)
-    for (i, j, k, value) in _full_entries(geometry.intersections)
-        J[i, j] += value * coordinates[k]
+    _with_geometry_precision(coordinates, geometry.intersections.coefficients) do
+        J = fill(zero(coordinates[1] * geometry.intersections.coefficients[1]), n, n)
+        for (i, j, k, value) in _full_entries(geometry.intersections)
+            J[i, j] += value * coordinates[k]
+        end
+        J
     end
-    J
 end
 
 """Imported cone margins A*t. These are not physical curve volumes."""
 function cone_margins(geometry::GeometryRecord, t::AbstractVector)
     inequalities = _widen_exact_array(geometry.domain_inequalities)
     coordinates = _widen_exact_array(t)
-    inequalities * coordinates
+    _with_geometry_precision(inequalities, coordinates) do
+        inequalities * coordinates
+    end
 end
 
 function imported_domain_status(geometry::GeometryRecord, t::AbstractVector)
@@ -567,37 +596,44 @@ end
 function change_divisor_basis(geometry::GeometryRecord, B::AbstractMatrix{<:Integer})
     n = geometry.intersections.n
     size(B) == (n, n) || throw(DimensionMismatch("basis change must be n×n"))
-    basis = Matrix{BigInt}(B)
-    Binv = _integer_inverse(basis)
-    basis_exact = basis
-    nonzero_rows = [findall(!iszero, view(basis, :, i)) for i in 1:n]
-    transformed = Dict{NTuple{3,Int},Any}()
-    for (i, j, k, value) in _full_entries(geometry.intersections)
-        for a in nonzero_rows[i], b in nonzero_rows[j], c in nonzero_rows[k]
-            key = (a, b, c)
-            contribution = basis_exact[a, i] * basis_exact[b, j] * basis_exact[c, k] * value
-            transformed[key] = get(transformed, key, zero(contribution)) + contribution
+    _with_geometry_precision(geometry.intersections.coefficients,
+            geometry.domain_inequalities) do
+        basis = Matrix{BigInt}(B)
+        Binv = _integer_inverse(basis)
+        basis_exact = basis
+        nonzero_rows = [findall(!iszero, view(basis, :, i)) for i in 1:n]
+        transformed = Dict{NTuple{3,Int},Any}()
+        for (i, j, k, value) in _full_entries(geometry.intersections)
+            for a in nonzero_rows[i], b in nonzero_rows[j], c in nonzero_rows[k]
+                key = (a, b, c)
+                contribution = basis_exact[a, i] * basis_exact[b, j] * basis_exact[c, k] * value
+                if haskey(transformed, key)
+                    transformed[key] = transformed[key] + contribution
+                else
+                    transformed[key] = contribution
+                end
+            end
         end
+        terms = Pair{NTuple{3,Int},Any}[]
+        for (key, value) in transformed
+            key[1] <= key[2] <= key[3] && !iszero(value) && push!(terms, key => value)
+        end
+        tensor = CanonicalIntersectionTensor(n, terms)
+        divisors = ["basis$(length(geometry.basis_history)+1)_D$i" for i in 1:n]
+        curves = ["basis$(length(geometry.basis_history)+1)_C$i" for i in 1:n]
+        history_entry = "D_new=$(repr(basis))*D_old"
+        GeometryRecord(tensor;
+            schema_version=geometry.schema_version,
+            euler_characteristic=geometry.euler_characteristic,
+            ordered_divisors=divisors, ordered_curves=curves,
+            divisor_basis_map=basis_exact * Matrix{BigInt}(geometry.divisor_basis_map),
+            dual_curve_basis_map=Binv' * Matrix{BigInt}(geometry.dual_curve_basis_map),
+            domain_inequalities=_widen_exact_array(geometry.domain_inequalities) * basis_exact',
+            cone_provenance=geometry.cone_provenance,
+            precision=geometry.precision, exactness=geometry.exactness,
+            units=geometry.units, source=geometry.source,
+            basis_history=(geometry.basis_history..., history_entry))
     end
-    terms = Pair{NTuple{3,Int},Any}[]
-    for (key, value) in transformed
-        key[1] <= key[2] <= key[3] && !iszero(value) && push!(terms, key => value)
-    end
-    tensor = CanonicalIntersectionTensor(n, terms)
-    divisors = ["basis$(length(geometry.basis_history)+1)_D$i" for i in 1:n]
-    curves = ["basis$(length(geometry.basis_history)+1)_C$i" for i in 1:n]
-    history_entry = "D_new=$(repr(basis))*D_old"
-    GeometryRecord(tensor;
-        schema_version=geometry.schema_version,
-        euler_characteristic=geometry.euler_characteristic,
-        ordered_divisors=divisors, ordered_curves=curves,
-        divisor_basis_map=basis_exact * Matrix{BigInt}(geometry.divisor_basis_map),
-        dual_curve_basis_map=Binv' * Matrix{BigInt}(geometry.dual_curve_basis_map),
-        domain_inequalities=_widen_exact_array(geometry.domain_inequalities) * basis_exact',
-        cone_provenance=geometry.cone_provenance,
-        precision=geometry.precision, exactness=geometry.exactness,
-        units=geometry.units, source=geometry.source,
-        basis_history=(geometry.basis_history..., history_entry))
 end
 
 """A small exact native fixture used by Gate B and the local architecture tests."""
