@@ -66,7 +66,8 @@ end
 function scaled_stationarity_residual(gradient::AbstractVector,
         field_scales::AbstractVector, potential_scale)
     length(gradient) == length(field_scales) || throw(DimensionMismatch("stationarity scales do not match"))
-    potential_scale > zero(potential_scale) || throw(ArgumentError("potential scale must be positive"))
+    isfinite(potential_scale) && potential_scale > zero(potential_scale) ||
+        throw(ArgumentError("potential scale must be finite and positive"))
     maximum(abs(field_scales[i] * gradient[i] / potential_scale) for i in eachindex(gradient))
 end
 
@@ -79,19 +80,39 @@ struct SearchCriteria{T<:AbstractFloat}
     max_iterations::Int
     backtracking_factor::T
     minimum_step::T
+    potential_scale_rule::Any
+    potential_scale_rule_identity::String
 end
 
 function SearchCriteria(field_scales::AbstractVector{T}, potential_scale::T,
         stationarity_tolerance::T; max_iterations=1_000,
-        backtracking_factor=T(0.5), minimum_step=T(2.0)^(-20)) where {T<:AbstractFloat}
-    all(>(zero(T)), field_scales) || throw(ArgumentError("field scales must be positive"))
-    potential_scale > zero(T) || throw(ArgumentError("potential scale must be positive"))
-    stationarity_tolerance > zero(T) || throw(ArgumentError("stationarity tolerance must be positive"))
-    0 < backtracking_factor < 1 || throw(ArgumentError("backtracking factor must be between zero and one"))
-    minimum_step > zero(T) || throw(ArgumentError("minimum line-search step must be positive"))
+        backtracking_factor=T(0.5), minimum_step=T(2.0)^(-20),
+        potential_scale_rule=nothing, potential_scale_rule_identity="") where {T<:AbstractFloat}
+    all(value -> isfinite(value) && value > zero(T), field_scales) ||
+        throw(ArgumentError("field scales must be finite and positive"))
+    isfinite(potential_scale) && potential_scale > zero(T) ||
+        throw(ArgumentError("potential scale must be finite and positive"))
+    isfinite(stationarity_tolerance) && stationarity_tolerance > zero(T) ||
+        throw(ArgumentError("stationarity tolerance must be finite and positive"))
+    isfinite(backtracking_factor) && 0 < backtracking_factor < 1 ||
+        throw(ArgumentError("backtracking factor must be finite and between zero and one"))
+    isfinite(minimum_step) && minimum_step > zero(T) ||
+        throw(ArgumentError("minimum line-search step must be finite and positive"))
     max_iterations > 0 || throw(ArgumentError("iteration budget must be positive"))
+    (potential_scale_rule === nothing) == isempty(potential_scale_rule_identity) ||
+        throw(ArgumentError("a pointwise potential scale rule and its identity must be supplied together"))
     SearchCriteria{T}(collect(field_scales), potential_scale, stationarity_tolerance,
-        max_iterations, backtracking_factor, minimum_step)
+        max_iterations, backtracking_factor, minimum_step, potential_scale_rule,
+        String(potential_scale_rule_identity))
+end
+
+function _search_potential_scale(criteria::SearchCriteria{T}, x::AbstractVector) where {T}
+    scale = criteria.potential_scale_rule === nothing ? criteria.potential_scale :
+        criteria.potential_scale_rule(x)
+    value = T(scale)
+    isfinite(value) && value > zero(T) ||
+        throw(DomainError(value, "the search potential scale must be finite and positive"))
+    value
 end
 
 struct DampedNewtonSearch{D<:DifferentiationBackend} <: SearchBackend
@@ -120,7 +141,8 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
     H = zeros(T, length(x), length(x))
     for iteration in 0:criteria.max_iterations
         gradient!(g, differentiation, f, x; scales=criteria.field_scales)
-        residual = T(scaled_stationarity_residual(g, criteria.field_scales, criteria.potential_scale))
+        residual = T(scaled_stationarity_residual(g, criteria.field_scales,
+            _search_potential_scale(criteria, x)))
         value = T(f(x))
         if residual <= criteria.stationarity_tolerance
             return SearchResult(:converged, x, value, residual, iteration,
@@ -152,7 +174,7 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
                 rethrow()
             end
             trial_residual = T(scaled_stationarity_residual(trial_gradient,
-                criteria.field_scales, criteria.potential_scale))
+                criteria.field_scales, _search_potential_scale(criteria, trial)))
             if isfinite(trial_residual) && trial_residual < residual
                 x .= trial
                 accepted = true
@@ -167,7 +189,8 @@ function search_stationary(backend::DampedNewtonSearch, f, initial::AbstractVect
         end
     end
     gradient!(g, differentiation, f, x; scales=criteria.field_scales)
-    residual = T(scaled_stationarity_residual(g, criteria.field_scales, criteria.potential_scale))
+    residual = T(scaled_stationarity_residual(g, criteria.field_scales,
+        _search_potential_scale(criteria, x)))
     SearchResult(:failed, x, T(f(x)), residual, criteria.max_iterations,
         "damped-newton-gradient-residual", failures)
 end

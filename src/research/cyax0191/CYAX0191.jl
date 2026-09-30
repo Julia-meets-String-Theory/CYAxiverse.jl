@@ -2,6 +2,7 @@
 module CYAX0191
 
 using LinearAlgebra
+using GenericLinearAlgebra
 using SHA
 
 include("geometry.jl")
@@ -16,6 +17,7 @@ export CanonicalIntersectionTensor, GeometrySourceIdentity, ConeProvenance,
     change_divisor_basis, synthetic_geometry_fixture,
     ModelConvention, ModelSwitches, UpliftSpec, KahlerModel, ModelEvaluation,
     source_basis_model, charge_coordinates, charge_metric_contraction,
+    characteristic_potential_scale,
     MetricAssessment, evaluate_potential, potential, quadratic_phase,
     direct_complex_interference_phase, analytic_axion_gradient,
     DifferentiationBackend, CentralDifferenceBackend, gradient!, hessian!,
@@ -28,6 +30,7 @@ export CanonicalIntersectionTensor, GeometrySourceIdentity, ConeProvenance,
     ControlReport, ResearchResult, unassessed_controls, ReplayBackend,
     NativeReplayBackend, replay_manifest, change_charge_basis,
     change_model_basis, change_coordinate_basis, FrozenNumericalPolicy,
-    FROZEN_GATE_C_POLICIES, frozen_policy, policy_manifest
+    FROZEN_GATE_C_POLICIES, frozen_policy, policy_manifest,
+    policy_search_criteria
 
 end

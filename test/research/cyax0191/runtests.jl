@@ -80,7 +80,7 @@ end
     geometry = synthetic_geometry_fixture()
     duplicate_terms = CanonicalIntersectionTensor(1, Pair[
         (1, 1, 1) => typemax(Int), (1, 1, 1) => 1])
-    @test duplicate_terms.coefficients == (BigInt(typemax(Int)) + 1,)
+    @test collect(duplicate_terms.coefficients) == BigInt[BigInt(typemax(Int)) + 1]
     t_exact = Rational{Int}[2, 1]
     @test calabi_yau_volume(geometry, t_exact) == 23 // 3
     @test divisor_volumes(geometry, t_exact) == Rational{Int}[17 // 2, 6]
@@ -100,6 +100,28 @@ end
     @test geometry.precision != ""
     @test geometry.cone_provenance.status == :torically_inferred
     @test geometry.cone_provenance.completeness == :not_established
+    protected_digest = geometry.artifact_sha256
+    protected_coefficient = geometry.intersections.coefficients[1]
+    Base.GMP.MPZ.set!(protected_coefficient, BigInt(999))
+    protected_coefficient_from_values = geometry.intersections.coefficients.values[1]
+    Base.GMP.MPZ.set!(protected_coefficient_from_values, BigInt(998))
+    protected_basis_entry = geometry.divisor_basis_map[1, 1]
+    Base.GMP.MPZ.set!(protected_basis_entry, BigInt(77))
+    protected_basis_entry_from_values = geometry.divisor_basis_map.values[1]
+    Base.GMP.MPZ.set!(protected_basis_entry_from_values, BigInt(76))
+    @test geometry.artifact_sha256 == protected_digest
+    @test geometry.intersections.coefficients[1] == 3
+    @test geometry.divisor_basis_map[1, 1] == 1
+    caller_basis = BigInt[1 0; 0 1]
+    copied_geometry = GeometryRecord(geometry.intersections;
+        euler_characteristic=geometry.euler_characteristic,
+        ordered_divisors=geometry.ordered_divisors, ordered_curves=geometry.ordered_curves,
+        divisor_basis_map=caller_basis, dual_curve_basis_map=caller_basis,
+        domain_inequalities=geometry.domain_inequalities,
+        cone_provenance=geometry.cone_provenance, precision=geometry.precision,
+        exactness=geometry.exactness, units=geometry.units, source=geometry.source)
+    Base.GMP.MPZ.set!(caller_basis[1, 1], BigInt(7))
+    @test copied_geometry.divisor_basis_map[1, 1] == 1
     @test cone_margins(geometry, [2.0, 1.0]) == [3.0, 1.0]
     @test imported_domain_status(geometry, [2.0, 1.0]) == :PASS
     large_exact_coordinates = [2_000_000, 1]
@@ -159,7 +181,7 @@ end
     @test k111_index !== nothing
     @test large_basis_geometry.intersections.coefficients[k111_index] ==
         parse(BigInt, "3000000300000030000004")
-    @test_throws MethodError setindex!(geometry.intersections.coefficients, 9, 1)
+    @test_throws Base.CanonicalIndexError setindex!(geometry.intersections.coefficients, 9, 1)
     @test_throws Base.CanonicalIndexError setindex!(geometry.divisor_basis_map, 9, 1, 1)
     @test_throws Base.CanonicalIndexError setindex!(geometry.domain_inequalities, 9, 1, 1)
     @test_throws ArgumentError GeometrySourceIdentity(source_kind=:cytools_export,
@@ -333,6 +355,15 @@ end
     uplift_value = evaluate_potential(uplift_model, geometry, t, rho)
     @test uplift_value.contributions.optional_uplift == 0.125
     @test uplift_value.value ≈ 0.125
+
+    @test_throws ArgumentError fixture_model(1; merge(common, (kcs=Inf,))...)
+    @test_throws ArgumentError fixture_model(1; merge(common, (theta0=NaN,))...)
+    @test_throws ArgumentError fixture_model(1; merge(common, (amplitudes=[Inf],))...)
+    overflowing_model = fixture_model(1; w0=1e308,
+        switches=ModelSwitches(bbhl_correction_enabled=true,
+            np_linear_enabled=false, np_quadratic_enabled=false))
+    @test_throws DomainError evaluate_potential(overflowing_model, one_modulus_geometry(),
+        [1.0], [0.0])
 
     split_model = fixture_model(1; w0=1.0, theta0=0.2, gs=0.5, kcs=0.1,
         amplitudes=[0.4], actions=[0.7], phases=[0.3], charges=reshape([1], 1, 1))
@@ -597,6 +628,36 @@ end
     @test manifest.model_parameters.amplitudes == Tuple(string.(model.amplitudes))
     @test manifest.model_parameters.charges == ((1, 0), (0, 1))
     @test manifest.model_parameters.uplift === nothing
+    source_charges = BigInt[1 0]
+    source_amplitudes = [0.2]
+    source_actions = [0.7]
+    source_phases = [0.1]
+    model_w0_input = BigFloat("0.75")
+    immutable_model = fixture_model(2; charges=source_charges,
+        amplitudes=source_amplitudes, actions=source_actions, phases=source_phases,
+        w0=model_w0_input)
+    immutable_geometry = synthetic_geometry_fixture()
+    immutable_point = ([2.0, 1.0], [0.2, -0.3])
+    immutable_value = potential(immutable_model, immutable_geometry, immutable_point...)
+    immutable_identity = immutable_model.identity
+    Base.GMP.MPZ.set!(source_charges[1, 1], BigInt(99))
+    source_amplitudes[1] = 8.0
+    source_actions[1] = 9.0
+    source_phases[1] = 7.0
+    exposed_charge = immutable_model.charges[1, 1]
+    Base.GMP.MPZ.set!(exposed_charge, BigInt(88))
+    exposed_charge_from_values = immutable_model.charges.values[1]
+    Base.GMP.MPZ.set!(exposed_charge_from_values, BigInt(77))
+    exposed_w0 = immutable_model.w0_magnitude
+    @test exposed_w0 !== getfield(immutable_model, :w0_magnitude)
+    @test getfield(exposed_w0, :d) != getfield(model_w0_input, :d)
+    @test immutable_model.charges[1, 1] == 1
+    @test immutable_model.amplitudes[1] == 0.2
+    @test immutable_model.actions[1] == 0.7
+    @test immutable_model.phases[1] == 0.1
+    @test immutable_model.identity == immutable_identity
+    @test potential(immutable_model, immutable_geometry, immutable_point...) == immutable_value
+    @test_throws Base.CanonicalIndexError setindex!(immutable_model.amplitudes, 4.0, 1)
     @test unassessed_controls().heavy_sector_stability.status == :NOT_ASSESSED
     @test unassessed_controls().global_compactification_consistency.status == :NOT_ASSESSED
 
@@ -606,9 +667,46 @@ end
     @test all(p -> p.precision_bits == 256 && p.frozen_before_gate_c, policies)
     @test all(p -> length(p.coordinate_order) == length(p.field_scales), policies)
     @test all(p -> p.potential_scale > 0 && p.potential_scale_rule !== "", policies)
+    @test all(p -> p.stationarity_scale_rule !== "", policies)
     @test policy_manifest(frozen_policy(:P0_B3)).frozen_before_gate_c
+    policy_copy = policy_b1.potential_scale
+    @test policy_copy !== getfield(policy_b1, :potential_scale)
+    @test policy_manifest(policy_b1).stationarity_scale_rule == policy_b1.stationarity_scale_rule
     @test_throws KeyError frozen_policy(:unknown)
     @test scaled_stationarity_residual([1e-7, 1e-7], [1.0, 2.0], 1e-6) ≈ 0.2
+
+    setprecision(BigFloat, 256) do
+        scale_geometry = one_modulus_geometry(chi=-126, id="pointwise-scale-regression-v1")
+        scale_model = fixture_model(1; w0=BigFloat(1), gs=BigFloat("0.1"),
+            kcs=BigFloat(1), amplitudes=BigFloat[0], actions=BigFloat[1],
+            phases=BigFloat[0], switches=ModelSwitches(bbhl_correction_enabled=true,
+                np_linear_enabled=false, np_quadratic_enabled=false))
+        scale_policy = CYAX0191._frozen_policy(:SYNTHETIC_SCALE_REGRESSION,
+            -126, "0.1", "1.0", "1.0", true, ("t_1", "rho_1"))
+        t_large = cbrt(BigFloat(6 * 154711))
+        x_large = BigFloat[t_large, 0]
+        scale_objective(x) = potential(scale_model, scale_geometry, view(x, 1:1), view(x, 2:2))
+        static_criteria = SearchCriteria(collect(scale_policy.field_scales),
+            scale_policy.potential_scale, scale_policy.stationarity_tolerance;
+            max_iterations=1)
+        static_search = search_stationary(DampedNewtonSearch(), scale_objective,
+            x_large, static_criteria)
+        large_gradient = finite_difference_gradient(CentralDifferenceBackend(),
+            scale_objective, x_large)
+        pointwise_criteria = policy_search_criteria(scale_policy, scale_model, scale_geometry)
+        pointwise_search = search_stationary(DampedNewtonSearch(), scale_objective,
+            x_large, pointwise_criteria)
+        @test static_search.status == :converged
+        @test static_search.scaled_residual <= scale_policy.stationarity_tolerance
+        @test abs(large_gradient[1]) > BigFloat("1e-18")
+        @test pointwise_search.status != :converged
+        @test pointwise_search.scaled_residual > scale_policy.stationarity_tolerance
+        local_scale = characteristic_potential_scale(scale_model, scale_geometry,
+            view(x_large, 1:1), view(x_large, 2:2))
+        @test local_scale < scale_policy.potential_scale / 1_000_000
+        @test pointwise_criteria.potential_scale_rule_identity ==
+            scale_policy.stationarity_scale_rule
+    end
 
     setprecision(BigFloat, 128) do
         geometry_big = one_modulus_geometry(id="bigfloat-geometry-v1")
@@ -626,5 +724,15 @@ end
         @test eltype(grad_big) === BigFloat
         @test eltype(state_big.tau) === BigFloat
         @test precision(eval_big.value) >= 128
+        @test CYAX0191._metric_assessment(eval_big.parent_metric).status == :PASS
+        exposed_big_w0 = model_big.w0_magnitude
+        @test exposed_big_w0 !== getfield(model_big, :w0_magnitude)
+        big_hessian = BigFloat[1 0; 0 2]
+        big_fluctuation = fluctuation_analysis(GeneralizedEigenBackend(),
+            big_hessian, Matrix{BigFloat}(I, 2, 2))
+        @test eltype(big_fluctuation.generalized_mass_eigenvalues) === BigFloat
+        @test big_fluctuation.generalized_mass_eigenvalues == BigFloat[1, 2]
+        big_policy_scale = policy_b1.potential_scale
+        @test big_policy_scale !== getfield(policy_b1, :potential_scale)
     end
 end

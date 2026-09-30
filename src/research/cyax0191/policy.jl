@@ -6,6 +6,7 @@ struct FrozenNumericalPolicy{T<:AbstractFloat}
     field_scales::Tuple{Vararg{T}}
     potential_scale::T
     potential_scale_rule::String
+    stationarity_scale_rule::String
     stationarity_tolerance::T
     root_tolerance::T
     optimizer_gradient_tolerance::T
@@ -20,6 +21,14 @@ struct FrozenNumericalPolicy{T<:AbstractFloat}
     relative_spectral_threshold::T
     spectral_normalization::String
     frozen_before_gate_c::Bool
+end
+
+function Base.getproperty(policy::FrozenNumericalPolicy, name::Symbol)
+    value = getfield(policy, name)
+    value isa BigFloat && return deepcopy(value)
+    value isa Tuple && any(item -> item isa BigFloat, value) &&
+        return Tuple(deepcopy(item) for item in value)
+    value
 end
 
 function _frozen_policy(benchmark_id::Symbol, chi::Int, gs_text::String,
@@ -38,6 +47,7 @@ function _frozen_policy(benchmark_id::Symbol, chi::Int, gs_text::String,
         policy = FrozenNumericalPolicy{T}(benchmark_id, 256, names,
             Tuple(fill(one(T), length(names))), vscale,
             "e^(K_cs)*g_s*|W0|^2/(2*Y_ref^2), evaluated at V_ref=1; independent of any stationary point",
+            "e^K*(|W0|+sum_a|W_NP,a|)^2 + |V_uplift|, recomputed at each search point; no cancellation-suppressed |V|",
             parse(T, "1e-12"), parse(T, "1e-12"), parse(T, "1e-12"),
             "damped Newton on the maximum componentwise scaled stationarity residual",
             10_000, parse(T, "0.5"), T(2)^(-20), 191019, 10_000,
@@ -49,6 +59,27 @@ function _frozen_policy(benchmark_id::Symbol, chi::Int, gs_text::String,
         policy.potential_scale > zero(T) || error("frozen potential scale must be positive")
         policy
     end
+end
+
+"""Build search criteria using the policy's pointwise characteristic potential envelope."""
+function policy_search_criteria(policy::FrozenNumericalPolicy{T}, model::KahlerModel,
+        geometry::GeometryRecord) where {T}
+    n = geometry.intersections.n
+    expected_order = (Tuple("t_$i" for i in 1:n)...,
+        Tuple("rho_$i" for i in 1:n)...)
+    policy.coordinate_order == expected_order ||
+        throw(ArgumentError("frozen coordinate order does not match geometry (t,rho) blocks"))
+    length(policy.field_scales) == 2n ||
+        throw(DimensionMismatch("frozen field scales do not match the retained coordinates"))
+    rule = x -> begin
+        length(x) == 2n || throw(DimensionMismatch("search point must contain t then rho"))
+        characteristic_potential_scale(model, geometry, view(x, 1:n), view(x, (n + 1):(2n)))
+    end
+    SearchCriteria(collect(policy.field_scales), policy.potential_scale,
+        policy.stationarity_tolerance; max_iterations=policy.maximum_iterations,
+        backtracking_factor=policy.backtracking_factor,
+        minimum_step=policy.minimum_step, potential_scale_rule=rule,
+        potential_scale_rule_identity=policy.stationarity_scale_rule)
 end
 
 const FROZEN_GATE_C_POLICIES = (
@@ -68,7 +99,7 @@ function frozen_policy(benchmark_id::Symbol)
 end
 
 function policy_manifest(policy::FrozenNumericalPolicy)
-    (; policy_version="cyax0191-gatec-numerics-v1",
+    (; policy_version="cyax0191-gatec-numerics-v2",
        benchmark_id=String(policy.benchmark_id),
        precision_bits=policy.precision_bits,
        numeric_type="BigFloat",
@@ -76,6 +107,7 @@ function policy_manifest(policy::FrozenNumericalPolicy)
        field_scales=Tuple(string.(policy.field_scales)),
        potential_scale=string(policy.potential_scale),
        potential_scale_rule=policy.potential_scale_rule,
+       stationarity_scale_rule=policy.stationarity_scale_rule,
        stationarity_tolerance=string(policy.stationarity_tolerance),
        root_tolerance=string(policy.root_tolerance),
        optimizer_gradient_tolerance=string(policy.optimizer_gradient_tolerance),

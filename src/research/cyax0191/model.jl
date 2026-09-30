@@ -66,14 +66,21 @@ struct KahlerModel{T<:AbstractFloat,U}
     theta0::T
     gs::T
     kcs::T
-    amplitudes::Vector{T}
-    actions::Vector{T}
-    phases::Vector{T}
-    charges::Matrix{BigInt} # rows label instantons; columns label basis divisors
+    amplitudes::FrozenArray{T,1}
+    actions::FrozenArray{T,1}
+    phases::FrozenArray{T,1}
+    charges::FrozenArray{BigInt,2} # rows label instantons; columns label basis divisors
     convention::ModelConvention
     switches::ModelSwitches
     uplift::U
     identity::String
+end
+
+function Base.getproperty(model::KahlerModel, name::Symbol)
+    if name in (:w0_magnitude, :theta0, :gs, :kcs)
+        return deepcopy(getfield(model, name))
+    end
+    getfield(model, name)
 end
 
 function KahlerModel(; w0_magnitude, theta0, gs, kcs, amplitudes,
@@ -88,15 +95,20 @@ function KahlerModel(; w0_magnitude, theta0, gs, kcs, amplitudes,
     length(amps) == length(aa) == length(ph) == size(Q, 1) ||
         throw(DimensionMismatch("one amplitude, action, and phase is required per charge row"))
     !isempty(identity) || throw(ArgumentError("model identity must be nonempty"))
-    wmag, theta, coupling, kconstant = T(w0_magnitude), T(theta0), T(gs), T(kcs)
+    wmag, theta, coupling, kconstant = deepcopy(T(w0_magnitude)),
+        deepcopy(T(theta0)), deepcopy(T(gs)), deepcopy(T(kcs))
+    all(isfinite, (wmag, theta, coupling, kconstant)) &&
+        all(isfinite, amps) && all(isfinite, aa) && all(isfinite, ph) ||
+        throw(ArgumentError("model parameters must be finite"))
     wmag >= zero(T) || throw(ArgumentError("|W0| must be nonnegative"))
     coupling > zero(T) || throw(ArgumentError("g_s must be positive"))
     all(>=(zero(T)), amps) || throw(ArgumentError("instanton amplitudes must be nonnegative"))
     all(>(zero(T)), aa) || throw(ArgumentError("instanton actions must be positive"))
     switches.uplift_enabled && uplift === nothing &&
         throw(ArgumentError("uplift cannot be enabled without an explicit uplift function"))
-    KahlerModel{T,typeof(uplift)}(wmag, theta, coupling, kconstant, amps, aa,
-        ph, Q, convention, switches, uplift, String(identity))
+    KahlerModel{T,typeof(uplift)}(wmag, theta, coupling, kconstant,
+        FrozenArray(amps), FrozenArray(aa), FrozenArray(ph), FrozenArray(Q),
+        convention, switches, uplift, String(identity))
 end
 
 """Construct the 2020 basis-divisor model, one instanton per basis divisor."""
@@ -276,6 +288,26 @@ function _model_terms(model::KahlerModel, data, rho::AbstractVector)
     (; w0, wn, z_terms, d0, dn)
 end
 
+"""Pointwise envelope `e^K (|W0| + sum |W_NP,a|)^2`, plus absolute uplift."""
+function characteristic_potential_scale(model::KahlerModel,
+        geometry::GeometryRecord, t::AbstractVector, rho::AbstractVector)
+    data = _kahler_data(model, geometry, t)
+    data.domain_status === :PASS ||
+        throw(DomainError(t, "two-cycle coordinates violate imported cone inequalities"))
+    terms = _model_terms(model, data, rho)
+    superpotential_envelope = abs(terms.w0) + sum(abs, terms.z_terms)
+    scale = abs(data.expK) * superpotential_envelope^2
+    if model.switches.uplift_enabled
+        uplift = data.R(model.uplift.evaluate((; geometry, t=data.tt, tau=data.tau,
+            rho=data.R.(rho), volume=data.V, xihat=data.xihat)))
+        isfinite(uplift) || throw(DomainError(uplift, "uplift returned a nonfinite value"))
+        scale += abs(uplift)
+    end
+    isfinite(scale) && scale > zero(scale) ||
+        throw(DomainError(scale, "the declared model has no finite positive characteristic potential scale"))
+    scale
+end
+
 """Evaluate the declared potential, retaining the full heavy-field Schur block."""
 function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
         t::AbstractVector, rho::AbstractVector; enforce_domain=true)
@@ -304,12 +336,17 @@ function evaluate_potential(model::KahlerModel, geometry::GeometryRecord,
         np_quadratic=switches.np_quadratic_enabled ? quadratic : zero(data.R),
         optional_uplift=switches.uplift_enabled ? uplift_value : zero(data.R))
     value = active.alpha3 + active.np_linear + active.np_quadratic + active.optional_uplift
+    all(isfinite, (alpha, linear, quadratic, uplift_value, value)) ||
+        throw(DomainError(value, "potential evaluation produced a nonfinite contribution"))
     n = length(data.tau)
     retained_real = zeros(data.R, 2n, 2n)
     tau_jacobian = data.R.(divisor_volume_jacobian(geometry, data.tt))
     retained_real[1:n, 1:n] .= data.R(2) .* (
         tau_jacobian' * data.retained_kinetic_metric * tau_jacobian)
     retained_real[(n + 1):end, (n + 1):end] .= data.R(2) .* data.retained_kinetic_metric
+    all(isfinite, data.parent_metric) && all(isfinite, data.retained_kinetic_metric) &&
+        all(isfinite, data.full_inverse_tt_metric) && all(isfinite, retained_real) ||
+        throw(DomainError(retained_real, "potential evaluation produced a nonfinite kinetic metric"))
     ModelEvaluation(value, contributions, active, data.V, data.tau,
         data.R.(rho), data.xi, data.xihat, data.xihat_half, data.Y,
         data.parent_metric, data.retained_kinetic_metric, retained_real,

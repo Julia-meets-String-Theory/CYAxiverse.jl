@@ -1,8 +1,34 @@
+"""Tuple-backed array storage that cannot be changed after construction."""
+struct FrozenArray{T,N,L} <: AbstractArray{T,N}
+    values::NTuple{L,T}
+    dimensions::NTuple{N,Int}
+end
+
+function FrozenArray(array::AbstractArray{T,N}) where {T,N}
+    values = Tuple(deepcopy(value) for value in array)
+    FrozenArray{T,N,length(values)}(values, size(array))
+end
+
+function Base.getproperty(array::FrozenArray, name::Symbol)
+    name === :values && return Tuple(deepcopy(value) for value in getfield(array, :values))
+    getfield(array, name)
+end
+
+Base.size(array::FrozenArray) = getfield(array, :dimensions)
+Base.IndexStyle(::Type{<:FrozenArray}) = IndexLinear()
+Base.getindex(array::FrozenArray, index::Int) = deepcopy(getfield(array, :values)[index])
+function Base.getindex(array::FrozenArray{T,N}, indices::Vararg{Int,N}) where {T,N}
+    linear_index = LinearIndices(array)[indices...]
+    deepcopy(getfield(array, :values)[linear_index])
+end
+Base.copy(array::FrozenArray) = Array(reshape(
+    [deepcopy(value) for value in getfield(array, :values)], size(array)))
+
 """A sparse, canonical representation of a symmetric triple-intersection tensor."""
 struct CanonicalIntersectionTensor{T<:Number}
     n::Int
     triples::Tuple{Vararg{NTuple{3,Int}}}
-    coefficients::Tuple{Vararg{T}}
+    coefficients::FrozenArray{T,1}
 end
 
 _widen_exact(value::Integer) = BigInt(value)
@@ -26,26 +52,8 @@ function CanonicalIntersectionTensor(n::Integer, terms::AbstractVector{<:Pair})
     triples_sorted = [key for key in keys_sorted if !iszero(accum[key])]
     isempty(triples_sorted) && throw(ArgumentError("the intersection tensor cannot be identically zero"))
     T = promote_type(map(typeof, values_sorted)...)
-    CanonicalIntersectionTensor{T}(Int(n), Tuple(triples_sorted), Tuple(T.(values_sorted)))
+    CanonicalIntersectionTensor{T}(Int(n), Tuple(triples_sorted), FrozenArray(T.(values_sorted)))
 end
-
-"""Tuple-backed array storage that cannot be changed after construction."""
-struct FrozenArray{T,N,L} <: AbstractArray{T,N}
-    values::NTuple{L,T}
-    dimensions::NTuple{N,Int}
-end
-
-function FrozenArray(array::AbstractArray{T,N}) where {T,N}
-    values = Tuple(vec(Array(array)))
-    FrozenArray{T,N,length(values)}(values, size(array))
-end
-
-Base.size(array::FrozenArray) = array.dimensions
-Base.IndexStyle(::Type{<:FrozenArray}) = IndexLinear()
-Base.getindex(array::FrozenArray, index::Int) = array.values[index]
-Base.getindex(array::FrozenArray{T,N}, indices::Vararg{Int,N}) where {T,N} =
-    array.values[LinearIndices(array)[indices...]]
-Base.copy(array::FrozenArray) = Array(reshape(collect(array.values), array.dimensions))
 
 function _permuted_entries(i::Int, j::Int, k::Int)
     if i == k
