@@ -18,20 +18,22 @@
 
 ## Phase 0 — Prepare and review the governing contract
 
-- [ ] **T001 [R-001–R-011, CYAX-0131 S2 contract] Create and reconcile the three normative documents**
+- [ ] **T001 [R-001–R-011, CYAX-0131 S2 contract] Repair governance metadata and reconcile the three normative documents**
   - Inputs: owner-approved scientific rebind and S2 contract approval;
     current source snapshot and handoff-bound source identities.
-  - Expected output: new `spec.md`, `plan.md`, and `tasks.md`, with a stable
-    requirement-to-plan-to-task map.
+  - Expected output: revised `spec.md`, `plan.md`, and `tasks.md`, with a
+    stable requirement-to-plan-to-task map and consistent governed-revision
+    and detached owner-approval semantics.
   - Verify: all eleven requirements and all specified model, phase, k,
-    diagnostic, observational, claim, and correction boundaries agree across
-    the three files; public diff contains only those three new paths.
+    diagnostic, observational, claim, and correction boundaries remain
+    unchanged and agree across the three files; public diff contains only the
+    three exact existing S2 document paths.
   - Escalate if: faithful drafting needs a new scientific convention, a path
     outside the three files, or a different source/model choice.
 
 - [ ] **T002 [R-011, CYAX-0131 S2 contract] Validate and freeze the exact document candidate**
-  - Expected output: exact candidate identity for all three files and the
-    combined commit/tree reviewed.
+  - Expected output: exact commit/tree and SHA-256, Git blob, and UTF-8 byte
+    identities for all three files.
   - Verify: `git diff --check` passes; documents are internally consistent;
     no absolute local path or unsupported execution authorization appears.
   - Escalate if: validation exposes a normative ambiguity or a public path
@@ -40,8 +42,9 @@
 - [ ] **T003 [R-011, CYAX-0131 S2 contract] Obtain independent SPEC and SCIENTIFIC review**
   - Inputs: one frozen exact candidate and the applicable canonical review
     rubrics.
-  - Expected output: both independent reviews bind the same exact candidate
-    and have no blocking findings.
+  - Expected output: both fresh independent reviews bind the same exact
+    commit/tree/document blobs and `CYAX-0131-S2-NORMATIVE-R2`, with no
+    blocking findings.
   - Verify: reviewer role, exact candidate identity, verdict, findings, and
     limitations are recorded; historical reviews do not substitute.
   - Escalate if: a finding requires changing an owner-approved scientific
@@ -50,10 +53,13 @@
 
 - [ ] **T004 [R-011, CYAX-0131 S2 contract] Reconcile and obtain exact-content owner approval**
   - Inputs: final specialist-reviewed candidate and reconciliation evidence.
-  - Expected output: separate owner approval bound to the exact normative
-    content.
-  - Verify: approval explicitly authorizes the final S2 contract; it does not
-    implicitly authorize numerical execution.
+  - Expected output: a later detached owner-final approval record bound to the
+    unchanged reviewed commit/tree/document blobs and
+    `CYAX-0131-S2-NORMATIVE-R2`.
+  - Verify: the record explicitly approves the final S2 contract after fresh
+    SPEC and SCIENTIFIC reviews and Control Desk reconciliation; it does not
+    implicitly authorize numerical execution, and the normative documents
+    are not edited merely to record the approval.
   - Escalate if: owner approval is absent, stale, or bound to different bytes.
 
 ## Phase 1 — Rebind the later implementation handoff

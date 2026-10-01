@@ -3,7 +3,7 @@ spec_id: CYAX-0131
 title: Low-N inflation calibration and bounded discovery contract
 issue: 131
 class: S2
-status: draft
+status: governed
 workstream: low-N inflation
 parent: null
 depends_on: [130, 172]
@@ -11,7 +11,7 @@ created: 2026-09-30
 last_reviewed: null
 review_required: independent Spec Reviewer + independent Scientific Reviewer
 drafting_authority_ref: CYAxiverse-agent-exchange@main:handoff-reviews/cyax-0131-low-n-inflation-manager-handoff/r3/evidence/owner-s2-scientific-contract-approval-v1.json (SHA-256 75e1f0a3c9ec89052dde98e0b30a9386425b68ee080ebfdcb27407be7cf22da4)
-approval_ref: N/A while draft; final owner S2 approval must bind the exact reviewed normative content
+approval_ref: CYAX-0131-S2-NORMATIVE-R2
 ---
 
 # Low-N inflation calibration and bounded discovery contract
@@ -24,6 +24,19 @@ how the approved phase benchmarks are defined, how homotopy and physical
 scales are distinguished, and when trajectory diagnostics may be reported.
 Any later scientific execution requires this specification to be approved and
 a separate, current implementation handoff to authorize the exact work.
+
+## Normative revision and approval state
+
+This specification identifies the governed normative revision
+`CYAX-0131-S2-NORMATIVE-R2`. The `governed` status and `approval_ref` identify
+the revision; they do not claim final owner approval of these bytes or
+authorize scientific execution. After fresh independent SPEC and SCIENTIFIC
+reviews and Control Desk reconciliation, a separate detached owner-final
+approval record must bind the unchanged final commit, tree, all three
+normative-document blobs, and this revision identifier. No future approval
+artifact locator or hash is declared here. Historical approval of the
+scientific choices authorizes their use in this contract but does not approve
+this successor candidate.
 
 ## Motivation and authority
 
@@ -290,23 +303,28 @@ correction.
 ### R-011 — Enforce approval and handoff gates
 
 No scientific search, catastrophe/trajectory numerical execution, candidate
-refinement, or observational optimization is authorized until (a) independent
-SPEC and SCIENTIFIC reviews accept the same exact S2 candidate, (b) Control
-Desk reconciliation is complete, (c) the owner approves the exact normative
-content, and (d) a new current-schema implementation handoff is separately
-reviewed and authorizes that execution. Any material source or scientific
-contract drift returns to the owner before execution.
+refinement, or observational optimization is authorized until (a) fresh
+independent SPEC and SCIENTIFIC reviews accept the same exact S2 candidate,
+(b) Control Desk reconciliation is complete, (c) a separate detached owner-
+final approval record binds the unchanged reviewed commit, tree, all three
+normative-document blobs, and `CYAX-0131-S2-NORMATIVE-R2`, and (d) a new
+current-schema implementation handoff is separately reviewed and authorizes
+that execution. Any material source or scientific contract drift returns to
+the owner before execution.
 
 ## Acceptance and review
 
 This candidate is complete for specification preparation when the three
-requested documents exist, all R-001–R-011 requirements map consistently
+normative documents exist, all R-001–R-011 requirements map consistently
 through plan and tasks, and document-only validation reports no path or
 formatting defect. S2 contract acceptance requires fresh independent SPEC and
-SCIENTIFIC reviews bound to the same exact final document candidate, Control
-Desk reconciliation, and a separate owner final approval bound to that exact
-normative content. A normative-byte change after review requires both reviews
-to be repeated.
+SCIENTIFIC reviews bound to the same exact final commit, tree, and document
+blobs; Control Desk reconciliation; and a separate detached owner-final
+approval record bound to those unchanged identities plus
+`CYAX-0131-S2-NORMATIVE-R2`. Until that record exists, this governed revision
+does not authorize scientific execution. A normative-byte change after review
+requires both reviews to be repeated; do not edit the documents merely to
+record the later approval.
 
 No numerical, physical, observational, population, or implementation result
 is an acceptance criterion for this specification-preparation tranche.

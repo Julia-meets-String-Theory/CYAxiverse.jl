@@ -4,11 +4,15 @@
 
 `specs/0131-low-n-inflation/spec.md`
 
-The specification is currently **draft**. This plan is subordinate to it.
-The owner-approved scientific contract authorizes drafting and review only.
-No scientific execution or production implementation is authorized until the
-exact S2 specification is finally approved by the owner and a new,
-current-schema implementation handoff is separately reviewed and dispatched.
+The specification is the governed normative revision
+`CYAX-0131-S2-NORMATIVE-R2`; its `approval_ref` identifies that revision, not
+an owner-approval record. This plan is subordinate to the specification. The
+governed status does not itself claim final owner approval or authorize
+scientific execution. A later detached owner-final approval record must bind
+the unchanged reviewed commit, tree, all three normative-document blobs, and
+the same revision identifier after fresh SPEC and SCIENTIFIC reviews and
+Control Desk reconciliation. A new, current-schema implementation handoff
+must then be separately reviewed and dispatched before execution.
 
 ## Coverage and gates
 
@@ -24,14 +28,16 @@ current-schema implementation handoff is separately reviewed and dispatched.
 | R-008 / CYAX-0131 scope boundary | Keep the five observational items `NOT_REACHED` | Explicit scope/status record for each item; no optimization result |
 | R-009 / CYAX-0131 claim boundary | State fixed-saxion effective-theory scope in every result summary | Claim review against prohibited population, stabilization, string-cosmology, and full-KS language |
 | R-010 / CYAX-0131 currentness | Preserve integrated Eq. 19 and Issue #172 correction ancestry | Current-source/diff review confirms the `q·tau`/cross-coefficient repair and `4π²` ancestry remain intact |
-| R-011 / contract gate | Obtain specialist review, reconciliation, exact owner approval, then a new implementation handoff before execution | Same-candidate independent SPEC and SCIENTIFIC reviews; final exact-content owner approval; separate reviewed handoff |
+| R-011 / contract gate | Obtain fresh specialist review, reconciliation, detached exact-byte owner approval, then a new implementation handoff before execution | Same-candidate independent SPEC and SCIENTIFIC reviews; owner record bound to unchanged commit/tree/document blobs plus `CYAX-0131-S2-NORMATIVE-R2`; separate reviewed handoff |
 
 ## Execution stages
 
 ### Stage 0 — Prepare and review this S2 contract
 
-1. Draft `spec.md`, `plan.md`, and `tasks.md` using only the owner-approved
-   scientific contract and bound source/currentness records.
+1. Reconcile `spec.md`, `plan.md`, and `tasks.md` using only the
+   owner-approved scientific contract and bound source/currentness records;
+   keep changes limited to approval-state, provenance, and directly dependent
+   consistency wording.
 2. Check that every requirement R-001–R-011 maps to a plan row and task.
 3. Run document-only checks, freeze one exact candidate, and obtain fresh
    independent SPEC and SCIENTIFIC reviews of that same candidate.
@@ -40,8 +46,10 @@ current-schema implementation handoff is separately reviewed and dispatched.
    to the owner. Any normative-byte repair requires both specialist reviews
    again on the same revised candidate.
 5. Return the exact reviewed candidate for Control Desk reconciliation and
-   separate final owner approval. Drafting, review, or reconciliation alone
-   does not authorize numerical work.
+   later detached owner-final approval. The owner record binds the unchanged
+   reviewed commit/tree/document blobs and `CYAX-0131-S2-NORMATIVE-R2`;
+   do not mutate normative bytes merely to record that approval. Preparation,
+   review, or reconciliation alone does not authorize numerical work.
 
 ### Stage 1 — Establish a separately reviewed implementation handoff
 
