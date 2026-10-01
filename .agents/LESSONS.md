@@ -104,7 +104,7 @@ GitHub history; they do not assert private conversation details.
 ## L-0001 — Candidate or repaired evidence is not scientific acceptance
 
 ID: L-0001
-Status: validated
+Status: superseded
 Date: 2026-09-11
 Type: scientific-error
 Scope / tags: scientific acceptance, candidate evidence, gate review, Issue #148
@@ -131,10 +131,15 @@ scientific acceptance.
 
 Evidence / durable reference: Issue #148 / PR #149 gate history, including the
 durable candidate/rejection and later fresh-independent-review acceptance
-records in repository history.
+records in repository history. Stronger current coverage is in `AGENTS.md`
+section 4 and the SDD Approved/Accepted lifecycle.
 
-Superseded by: N/A
-Promotion status: not promoted
+Superseded by: `AGENTS.md` section 4; `specs/0151-sdd-v1/spec.md` section 8;
+canonical Scientific Reviewer verdict/authority semantics in
+`protocol/review-rubrics/scientific-v1.md` in the CYAxiverse agent-exchange
+control plane.
+Promotion status: not promoted from this lesson; stronger normative
+scientific-claim, review, and acceptance rules were adopted independently.
 
 ## L-0002 — Namespace nested gates explicitly
 
@@ -172,7 +177,7 @@ Promotion status: not promoted
 ## L-0003 — Brownfield migration preserves supersession chronology
 
 ID: L-0003
-Status: validated
+Status: superseded
 Date: 2026-09-11
 Type: workflow
 Scope / tags: brownfield migration, supersession, SDD, historical traceability
@@ -202,13 +207,15 @@ need a fabricated historical chronology.
 Evidence / durable reference: `specs/0151-sdd-v1/clarification-a.md`, section 3,
 and its durable SDD migration history in Issue #151 / PR #154.
 
-Superseded by: N/A
-Promotion status: not promoted
+Superseded by: `specs/0151-sdd-v1/clarification-a.md` section 3 and
+`.agents/skills/cyaxiverse-sdd/SKILL.md` step 13.
+Promotion status: not promoted from this lesson; the brownfield supersession
+rule was adopted independently into the normative SDD workflow.
 
 ## L-0004 — `tasks.md` is not authoritative live status
 
 ID: L-0004
-Status: validated
+Status: superseded
 Date: 2026-09-11
 Type: state/provenance
 Scope / tags: tasks, GitHub status, Project, merge state, SDD
@@ -234,13 +241,15 @@ and evidence, but it must not become a second live status ledger.
 Evidence / durable reference: `specs/0151-sdd-v1/clarification-a.md`, section 5,
 and the corresponding Issue #151 clarification.
 
-Superseded by: N/A
-Promotion status: not promoted
+Superseded by: `specs/0151-sdd-v1/clarification-a.md` section 5 and
+`specs/0151-sdd-v1/spec.md` section 6, R-003.
+Promotion status: not promoted from this lesson; the same rule was adopted
+independently into the normative SDD contract.
 
 ## L-0005 — Do not falsify workflow state for advisory WIP limits
 
 ID: L-0005
-Status: validated
+Status: superseded
 Date: 2026-09-11
 Type: workflow
 Scope / tags: WIP, GitHub Project, state integrity, SDD G2
@@ -266,15 +275,19 @@ reporting. It does not change the approved status lifecycle or scientific gate
 criteria.
 
 Evidence / durable reference: Issue #151 G2 PASS comment `5625939343` and
-`specs/0151-sdd-v1/clarification-a.md`, section 6.
+`specs/0151-sdd-v1/clarification-a.md`, section 6. Deterministic
+`LifecycleProjection` / `ProjectStatus` machinery in CYAXControl provides
+additional enforcement evidence but is not the normative replacement.
 
-Superseded by: N/A
-Promotion status: not promoted
+Superseded by: `specs/0151-sdd-v1/clarification-a.md` section 6 and
+`specs/0151-sdd-v1/spec.md` sections 15.1 and 15.3.
+Promotion status: not promoted from this lesson; true-state/advisory-WIP
+semantics were adopted independently into the normative SDD contract.
 
 ## L-0006 — Machine-local paths are not scientific provenance
 
 ID: L-0006
-Status: validated
+Status: superseded
 Date: 2026-09-11
 Type: privacy
 Scope / tags: scientific provenance, privacy, reproducibility, public paths
@@ -301,17 +314,20 @@ references are allowed. Private local context may remain local; it is not
 made public by being useful for debugging. This lesson contains no
 Fuzzy/Table-1-specific claim.
 
-Evidence / durable reference: `AGENTS.md` privacy and scientific-claim
-boundaries; `specs/0155-private-safe-chat-checkpoints/spec.md`, R-001 and R-005;
-Issue #157 / PR #158 public-path remediation history.
+Evidence / durable reference: `AGENTS.md` sections 1 and 4;
+`specs/0155-private-safe-chat-checkpoints/spec.md`, R-001 and R-005; Issue #157
+/ PR #158 public-path remediation history. CYAXControl privacy preflight
+provides additional deterministic enforcement on generated exchange artifacts.
 
-Superseded by: N/A
-Promotion status: not promoted
+Superseded by: `AGENTS.md` section 1 privacy/publication boundary and section 4
+Scientific claim boundary.
+Promotion status: not promoted from this lesson; stronger repository-wide
+privacy and provenance rules were adopted independently.
 
 ## L-0007 — Handoff draft is not launch authorization
 
 ID: L-0007
-Status: candidate
+Status: superseded
 Date: 2026-09-11
 Type: owner-redirection
 Scope / tags: delegation launch, authorization semantics, state/provenance
@@ -337,47 +353,60 @@ Applicability / exceptions: Applies to owner-redirection and delegated workflows
 with explicit owner-governed execution. It does not replace scientific or merge
 gates already governed by higher sources.
 
-Evidence / durable reference: `AGENTS.md` section 6 and orchestration section 2
-provide adjacent delegation mechanisms only. This sanitized candidate has no
-cited public incident proof.
+Evidence / durable reference: Historical candidate retained for traceability.
+The current surface-allocation policy now gives the stronger owner-manual
+dispatch, pre-dispatch review, and Manager downstream-dispatch contract.
 
-Superseded by: N/A
-Promotion status: not promoted
+Superseded by: `.agents/POLICIES/SURFACE_ALLOCATION.md` sections 6.1, 8, 9,
+and 15.
+Promotion status: not promoted from this lesson; owner-dispatch semantics were
+adopted independently into the normative surface-allocation policy.
 
-## L-0008 — Delegation contract must name capability and budget
+## L-0008 — Bound delegated topology by role, not aggregate agent count
 
 ID: L-0008
 Status: candidate
 Date: 2026-09-11
 Type: workflow
-Scope / tags: delegation packet, capacity planning, escalation policy
+Scope / tags: delegation topology, role maxima, implementation continuity,
+independent review
 
-Observed failure: A delegated task was launched with implicit role, capability,
-and effort assumptions, which reduced contract clarity and made fallback behavior
-ambiguous.
+Observed failure: A delegated task can leave downstream role cardinality implicit
+or rely on one aggregate concurrency/agent-count limit. That can accidentally
+permit multiple implementers, allow undeclared roles merely because aggregate
+capacity remains, or conflict with the need for a fresh reviewer on a successor
+candidate.
 
-Correction: Before delegation, state the role, model/capability target, reasoning
-target, topology, ordered product-neutral fallback policy, effort budget/lease,
-escalation conditions, and worker-reuse expectations. Do not encode a
-concrete/current fallback sequence or model list.
+Correction: Before delegated execution, declare every permitted downstream role
+and its maximum simultaneous active cardinality. Undeclared roles have
+cardinality zero. Manager and Control Desk contexts are excluded from downstream
+role maxima. Preserve one implementation worker across ordinary
+diagnose/edit/test/correct/retest and review-driven repair unless governed
+replacement is required. Each required independent review axis may activate one
+fresh reviewer per review round or successor candidate; that fresh activation
+does not increase the role's simultaneous cardinality.
 
-Root cause: The packet lacked explicit operational bounds and fallback triggers.
+Root cause: Delegated topology was bounded by aggregate counts rather than by
+role-specific admissible cardinality and role lifecycle.
 
-Preventive rule / check: Reject a packet that omits any required contract field.
-Verify that its fallback policy is ordered and product-neutral without encoding a
-concrete/current sequence. Renew owner authorization only for a material change
-to any authorized scope or term. Ordinary diagnose/edit/check/correct/recheck
-loops and use of an already approved fallback or worker-reuse policy remain
-authorized.
+Preventive rule / check: Require structured role maxima equivalent to
+`implementer: 1`, `spec_reviewer: 1`, `standards_reviewer: 1`, and
+`scientific_reviewer: 1`; undeclared downstream roles default to zero. Do not
+use a global maximum-concurrency value or a lifetime activation cap as a
+substitute. Verify implementation-worker continuity through ordinary repair
+loops, and verify that each required successor review uses a fresh reviewer
+without concurrent duplication of that review role.
 
-Applicability / exceptions: Applies to multi-agent and handoff-based work where
-worker-level reuse is expected. Single-agent work without handoff may use a lighter
-form.
+Applicability / exceptions: Applies to delegated multi-agent work. The Manager
+and Control Desk are not counted against downstream role maxima. A maximum is a
+permission ceiling, not a requirement to activate the role; non-required review
+axes remain inactive. A governed replacement may replace the implementation
+worker when continuity is impossible or explicitly disallowed.
 
-Evidence / durable reference: `AGENTS.md` section 6 and orchestration sections
-2, 5, 7, and 8 provide only partial, adjacent mechanism support for packet
-fields and worker reuse. This sanitized candidate has no cited public incident
-proof.
+Evidence / durable reference: `.agents/POLICIES/SURFACE_ALLOCATION.md` and
+`.agents/skills/cyaxiverse-agent-orchestration/SKILL.md` provide adjacent
+role/topology, independence, delegation, and worker-continuity mechanisms. The
+role-specific-maxima residue remains a candidate pending fresh exact review.
 
 Superseded by: N/A
 Promotion status: not promoted
@@ -385,7 +414,7 @@ Promotion status: not promoted
 ## L-0009 — Handoff state follows observed execution outcome
 
 ID: L-0009
-Status: candidate
+Status: superseded
 Date: 2026-09-11
 Type: state/provenance
 Scope / tags: handoff state, status integrity, orchestration
@@ -412,11 +441,16 @@ Applicability / exceptions: Applies to workflows using explicit worker return
 contracts and observed execution results. Internal planning notes may be prepared
 before execution and do not by themselves move execution state.
 
-Evidence / durable reference: `AGENTS.md` section 6 and orchestration section 3
-provide adjacent support only for the later phase-2 `DONE`, `BLOCKED`, `FAILED`
-worker-return contract. These sources do not prove the phase-1 incident or
-define handoff-operation result semantics. This sanitized candidate has no
-cited public incident proof.
+Evidence / durable reference: The CYAXControl Issue #16 state machine now binds
+review currentness, readiness, explicit owner dispatch receipt, handback
+validation, and Control Desk reconciliation to observed exact evidence rather
+than inferred intent. `.agents/POLICIES/SURFACE_ALLOCATION.md` sections 8 and 9
+provide the corresponding public lifecycle/dispatch context.
 
-Superseded by: N/A
-Promotion status: not promoted
+Superseded by: CYAXControl deterministic state-transition contract in
+`vmmhep/CYAxiverse-agent-exchange/tools/CYAXControl/src/ControlPlane.jl` and
+its documented review/readiness/dispatch/handback flow, together with
+`.agents/POLICIES/SURFACE_ALLOCATION.md` sections 8 and 9.
+Promotion status: not promoted from this lesson; stronger deterministic
+state-transition semantics were adopted independently.
+
