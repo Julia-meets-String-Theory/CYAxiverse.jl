@@ -1,0 +1,881 @@
+---
+spec_id: CYAX-0197
+title: Native Julia schema-1.1 reconstruct-on-demand potential readers
+issue: 197
+class: S2
+status: draft
+workstream: Sampling / Ensembles
+parent: null
+depends_on: []
+created: 2026-10-01
+last_reviewed: null
+review_required: Spec Reviewer + Scientific/Numerical Reviewer
+approval_ref: N/A while draft
+version_impact: pre-1.0 minor reader capability; defer package bump to reviewed release boundary
+---
+
+# Native Julia schema-1.1 reconstruct-on-demand potential readers
+
+## Objective
+
+Make the existing Julia potential-reader boundary consume both:
+
+1. legacy CYAxiverse HDF5 artifacts that persist dense \`Q\`, \`L\`, and
+   \`Kinv\`; and
+2. schema-1.1 artifacts that persist a compact, deterministic
+   reconstruct-on-demand representation,
+
+while presenting the same downstream contracts through
+\`read.potential\`, \`potential_factored\`, and \`oriented_potential\`.
+
+Storage-schema branching belongs entirely inside the reader/data boundary.
+Vacua, spectrum kernels, and other consumers of \`AxionPotential\` must not
+learn HDF5 schema details.
+
+This is S2 work because it crosses a durable scientific schema boundary and
+reconstructs the numerical normalization of a scientific potential.
+
+## Motivation
+
+The schema-1.1 geometry pipeline deliberately stopped persisting dense
+potential arrays. It instead stores the final accepted Kähler point,
+intersection data, canonical effective-cone rays, reconstruction metadata,
+and integrity witnesses needed to recreate the axion potential without a live
+Python/CYTools object.
+
+The current Julia reader still assumes:
+
+~~~text
+cytools/potential/L
+cytools/potential/Q
+cytools/geometric/Kinv
+~~~
+
+This prevents a schema-1.1 artifact from flowing directly into the
+vacuum-only qualification pipeline even though the accepted producer already
+contains a deterministic reconstruction path.
+
+The correct repair is a general reader capability, not a vacua-specific
+adapter and not a change to the scientific solvers.
+
+## Current baseline
+
+The specification is bound to the following audit baseline:
+
+- \`vmm\`:
+  \`a5eacd8cd4a5905161cab239a461ba252c64e8e0\`
+- tree:
+  \`d419416514a44d943ddd20290885ac8ba4090999\`
+- \`src/read.jl\` blob:
+  \`9c54eb4f42da69c716a7f358800084e106f53d52\`
+- schema-1.1 writer
+  \`scripts/generate_geometric_data_multitriangulation.py\` blob:
+  \`52774fc2cab228af29b82a3a0b96797c1500bed5\`
+- schema helper \`scripts/glimmers_schema11.py\` blob:
+  \`49f4bbd206c08c73095ab3bcb9ceddb198430ba2\`
+- PR #195 is already included in the baseline.
+
+### Source / schema facts
+
+The accepted schema-1.1 writer identifies current compact artifacts with:
+
+~~~text
+file schema_version:
+  cyaxiverse-ks-cy3-v9-schema-1.1
+
+cytools/potential/storage_schema:
+  reconstruct_on_demand
+
+cytools/potential/schema_version:
+  cyaxiverse-potential-reconstruction-1.0
+~~~
+
+The potential group also records:
+
+- orientation;
+- difference convention;
+- pair ordering;
+- \`reconstruction_metadata_json\`.
+
+That reconstruction metadata contains at least:
+
+- direct source count;
+- pair source count;
+- \`q_direct_sha256\`;
+- \`pair_source_index_sha256\`;
+- replay \`rtol = 1e-10\`;
+- replay \`atol = 1e-10\`;
+- the source-dataset list.
+
+The file also persists \`cytools/geometric/CY_volume\`, which is an
+independent numerical witness for the reconstruction from \`kappa\` and
+\`tip\`.
+
+### Current implementation facts
+
+The current \`read.potential\` and \`potential_factored\` paths read dense
+datasets directly.
+
+The accepted Python schema-1.1 reconstruction already operates without a live
+CYTools object once the compact reference data have been read. Therefore this
+work is a cross-language deterministic reconstruction of an existing accepted
+contract, not a new physical model.
+
+## Scientific claim boundary
+
+### This specification may establish
+
+- deterministic native-Julia reconstruction of the schema-1.1 potential
+  representation;
+- numerical equivalence of reconstructed geometry/potential quantities to
+  the pinned accepted reference implementation and matched dense oracle
+  fixtures;
+- transparent use of compact and legacy artifacts through the same potential
+  reader APIs;
+- direct use of schema-1.1 artifacts by the existing vacuum-only pipeline.
+
+### This specification must not establish
+
+- a new Kähler-point prescription;
+- a new Eq. 21 control criterion;
+- a new sampling/population interpretation;
+- a new axion potential normalization;
+- a new vacua/minimizer algorithm;
+- correctness of arbitrary schema-1.1 geometry readers;
+- full \`compute_axion_data\` compatibility;
+- general schema-1.1 \`read.geometry\` support;
+- a physical Standard Model, orientifold, or EFT claim.
+
+A consumer that needs only the returned \`AxionPotential\` may be used as a
+downstream equivalence test. The full geometry/spectrum pipeline remains a
+separate follow-on because current \`read.geometry\` expects dense geometric
+datasets that schema 1.1 does not persist.
+
+## Scope
+
+This specification includes:
+
+- one canonical internal \`L,Q,Kinv\` reader/reconstruction boundary;
+- deterministic schema dispatch;
+- strict schema-1.1 metadata validation;
+- native-Julia reconstruction of \`tau\`, \`V\`, \`Kinv\`, \`Q\`, and \`L\`;
+- exact reconstruction-integrity checks;
+- transparent support in \`read.potential\`;
+- transparent support in \`potential_factored\`;
+- unchanged operation of \`oriented_potential\`;
+- analytic/synthetic tests;
+- matched dense/compact oracle tests;
+- vacuum-only downstream equivalence;
+- at least one non-vacua \`AxionPotential\` consumer equivalence check.
+
+## Non-scope
+
+This specification does not authorize:
+
+- changing \`read.geometry\`;
+- making \`compute_axion_data\` schema-1.1 compatible;
+- re-running Eq. 21 or searching for a new radial scale while reading;
+- selecting or repairing a Kähler point while reading;
+- changing the schema-1.1 writer;
+- persisting reconstructed dense arrays back into schema-1.1 HDF5;
+- changing legacy dense-generator semantics;
+- changing \`:auto\` vacua search ordering;
+- changing solver thresholds/tolerances;
+- changing Stage-1 FRST sampling;
+- changing Stage-2 Kähler selection;
+- changing spectrum physics;
+- unrelated reader refactors.
+
+## Fixed conventions and invariants
+
+### F-001 — Reader reconstruction is pure/read-only
+
+The schema-1.1 reader reconstructs scientific arrays transiently from the
+persisted final artifact. It performs no geometry optimization, Eq. 21 search,
+Kähler-point repair, resampling, or HDF5 mutation.
+
+PR #195 is regression/provenance context for the accepted conventions. The
+reader does not reproduce the PR #195 control-search procedure.
+
+### F-002 — No live Python/CYTools dependency
+
+Core Julia reading and \`using CYAxiverse\` remain independent of Python,
+PyCall, and CYTools.
+
+The reconstruction metadata JSON must be parsed in-process in Julia. The
+implementation may add one explicit pure-Julia JSON dependency if needed; it
+must not rely on an undeclared transitive dependency or invoke Python.
+
+### F-003 — Exact schema-1.1 identity
+
+The only compact schema accepted by this specification is:
+
+~~~text
+file schema_version = cyaxiverse-ks-cy3-v9-schema-1.1
+potential storage_schema = reconstruct_on_demand
+potential schema_version = cyaxiverse-potential-reconstruction-1.0
+~~~
+
+The accepted potential attributes are:
+
+~~~text
+orientation =
+  h11 x N_instanton; charge vectors are columns
+
+difference_convention =
+  q_pair[:, k] = q_direct[:, pair_j[k]] - q_direct[:, pair_i[k]]
+
+pair_ordering =
+  lexicographic_i_then_j_with_i_less_than_j
+~~~
+
+Unknown or contradictory schema markers fail closed.
+
+### F-004 — Sparse intersection representation
+
+Schema-1.1 \`kappa\` is a COO array with four columns:
+
+~~~text
+i, j, k, value
+~~~
+
+Indices are zero-based and must be finite exact integers within
+\`0:(h11-1)\`. Values must be finite.
+
+Each stored row represents a symmetric tensor entry. For each stored
+\`(i,j,k,value)\`, define \`P(i,j,k)\` to be the set of its distinct
+permutations.
+
+The reconstruction SHALL use every distinct permutation exactly once. Thus
+the multiplicity is:
+
+- 1 for \`iii\`;
+- 3 for \`iij\`;
+- 6 for \`ijk\` with all indices distinct.
+
+For \`t = tip\`, reconstruct:
+
+~~~math
+\mathcal V
+=
+\sum_{(i,j,k,v)}
+\frac{|P(i,j,k)|}{6}
+v\,t_i t_j t_k .
+~~~
+
+For every distinct permutation \`(a,b,c)\` of each COO row, accumulate:
+
+~~~math
+\kappa_{ab}(t) \mathrel{+}= v\,t_c,
+~~~
+
+and
+
+~~~math
+\tau_a \mathrel{+}=
+\frac{1}{2}v\,t_b t_c .
+~~~
+
+The resulting quantities must also satisfy the conventional identities
+
+~~~math
+\tau_i=\frac{1}{2}\kappa_{ijk}t^jt^k,
+\qquad
+\mathcal V=\frac{1}{6}\kappa_{ijk}t^it^jt^k .
+~~~
+
+### F-005 — Exact inverse-Kähler normalization
+
+The schema-1.1 inverse metric is reconstructed exactly as:
+
+~~~math
+K^{-1}
+=
+4\left(
+\tau\tau^T-\mathcal V\,\kappa(t)
+\right).
+~~~
+
+After construction it is symmetrized as:
+
+~~~math
+K^{-1}
+\leftarrow
+\frac{1}{2}
+\left(
+K^{-1}+(K^{-1})^T
+\right).
+~~~
+
+No alternative normalization may be selected by the implementer.
+
+The component helper must reject non-finite reconstructed values and
+non-positive/non-finite \`V\`. Existing public-reader post-processing remains
+authoritative for the physical kinetic-matrix/factorization checks.
+
+### F-006 — Effective-cone charge contract
+
+The persisted \`cytools/geometric/effective_cone\` dataset has shape:
+
+~~~text
+N_direct x h11
+~~~
+
+and is the canonical set of unique effective-cone rays.
+
+Before integer conversion the reader SHALL require:
+
+- a nonempty two-dimensional array;
+- finite entries;
+- every entry exactly equal to its nearest integer;
+- every integer representable by the selected Julia integer type;
+- exactly \`h11\` columns;
+- unique rows.
+
+Silent truncation or tolerance-based acceptance is forbidden at the persisted
+reader boundary.
+
+The geometry attributes SHALL be internally consistent:
+
+~~~text
+potential_charge_convention = unique_effective_cone_rays
+
+canonical_effective_cone_ray_count = N_direct
+raw_effective_cone_ray_count
+  = canonical_effective_cone_ray_count
+    + duplicate_effective_cone_rows_removed
+~~~
+
+The direct charge matrix is:
+
+~~~math
+Q_{\rm direct}
+=
+(\text{effective_cone})^T
+~~~
+
+with shape \`h11 x N_direct\`.
+
+### F-007 — Pair-source contract
+
+Let \`N=N_direct\`. Construct zero-based source-index arrays in the exact
+Python/\`itertools.combinations(range(N),2)\` order:
+
+~~~text
+(0,1), (0,2), ..., (0,N-1),
+(1,2), ..., (N-2,N-1)
+~~~
+
+Thus:
+
+~~~math
+N_{\rm pair}=\frac{N(N-1)}{2}.
+~~~
+
+For each source pair \`i<j\`:
+
+~~~math
+q_{ij}=q_j-q_i .
+~~~
+
+The final matrix is direct columns followed by pair columns:
+
+~~~math
+Q=[Q_{\rm direct}\;Q_{\rm pair}] .
+~~~
+
+### F-008 — Potential coefficient contract
+
+Define:
+
+~~~math
+P=\frac{8\pi}{\mathcal V^2},
+\qquad
+d_i=q_i\cdot\tau .
+~~~
+
+For each direct source:
+
+~~~math
+A_i=P\,d_i,
+\qquad
+e_i=-2\pi\log_{10}(e)\,d_i .
+~~~
+
+For each pair \`i<j\`:
+
+~~~math
+A_{ij}
+=
+P\left[
+\pi\,q_i^T K^{-1}q_j+d_i+d_j
+\right],
+~~~
+
+~~~math
+e_{ij}
+=
+-2\pi\log_{10}(e)(d_i+d_j).
+~~~
+
+Encode each coefficient \`a\` as:
+
+~~~math
+L_{1a}=\operatorname{sign}(A_a),
+\qquad
+L_{2a}=\log_{10}|A_a|+e_a .
+~~~
+
+Row 1 is specifically the sign, not an arbitrary mantissa. Every raw
+amplitude and exponent must be finite, and a zero raw amplitude is an error
+before \`log10\`.
+
+Direct columns precede pair columns in exactly the \`Q\` ordering above.
+
+### F-009 — Numerical replay tolerance
+
+Schema-1.1 potential reconstruction freezes:
+
+~~~text
+replay_rtol = 1e-10
+replay_atol = 1e-10
+~~~
+
+These are schema values, not implementation-tuned tolerances.
+
+The independently reconstructed \`V\` must be compared to persisted
+\`cytools/geometric/CY_volume\` with these tolerances.
+
+Matched dense/reference-oracle numerical comparisons use the same replay
+tolerances unless a test has a stricter independently justified exact
+criterion.
+
+### F-010 — Canonical hash serialization
+
+The schema hash algorithm is the accepted Python \`stable_hash\` contract:
+
+1. convert arrays/tuples to JSON arrays and dictionary keys to strings;
+2. require finite JSON values;
+3. serialize JSON with keys sorted lexicographically;
+4. use separators \`,\` and \`:\` with no additional whitespace;
+5. encode the JSON bytes as UTF-8;
+6. SHA-256 those exact bytes;
+7. compare lower-case hexadecimal digests.
+
+Normative witnesses:
+
+\`q_direct_sha256\` is the hash of the nested JSON array representation of
+\`Q_direct\` in \`h11 x N_direct\` orientation.
+
+\`pair_source_index_sha256\` is the hash of:
+
+~~~json
+{"pair_i":[...],"pair_j":[...]}
+~~~
+
+with the zero-based arrays defined by F-007.
+
+Cross-language tests must compare Julia-produced digests against frozen
+Python-reference digests.
+
+### F-011 — Public-reader post-processing remains distinct
+
+The new common boundary supplies \`L,Q,Kinv\`.
+
+After that boundary:
+
+- \`read.potential\` retains its existing
+  \`_kinetic_matrix\` plus \`_validate_kinetic_matrix\` semantics and returns
+  \`AxionPotential(L,Q,K)\`;
+- \`potential_factored\` retains its existing symmetric-\`Kinv\` Cholesky
+  semantics and returns \`(; L,Q,Kinv,C)\`.
+
+This task does not unify or alter those two existing post-processing/failure
+contracts.
+
+## Deterministic schema dispatch matrix
+
+The reader SHALL classify an artifact before reading scientific arrays.
+
+| File/potential state | Required behavior |
+| --- | --- |
+| Exact schema-1.1 file marker + exact reconstruct-on-demand marker + exact reconstruction schema + complete consistent metadata + no forbidden dense arrays | reconstruct compact representation |
+| No schema-1.1/reconstruction markers + complete legacy dense \`Q/L/Kinv\` datasets | use legacy dense path unchanged |
+| Exact schema-1.1 file marker + unknown/missing potential schema or storage marker | fail closed |
+| Exact schema-1.1 file marker + unexpected dense \`Q\` or \`L\` | fail closed as contradictory hybrid |
+| Exact schema-1.1 file marker + unexpected persisted dense \`Kinv\` or \`divisor_volumes\` | fail closed as contradictory hybrid |
+| Reconstruct-on-demand marker on an unrecognized file schema | fail closed |
+| Dense datasets plus any unrecognized storage/schema marker | fail closed rather than falling back to dense |
+| Partial reconstruction metadata or missing declared source dataset | fail closed |
+| Conflicting normative values between potential attributes and \`reconstruction_metadata_json\` | fail closed |
+| If duplicate construction metadata is present, conflicting overlapping normative reconstruction fields | fail closed |
+| Neither complete legacy dense nor exact supported compact schema | fail closed |
+
+Legacy artifacts are identified by the absence of schema-1.1/reconstruction
+markers together with the complete historical dense datasets. The new reader
+must not relabel a malformed compact artifact as legacy merely because some
+dense datasets happen to exist.
+
+## Requirements
+
+### R-001 — One canonical component boundary
+
+The reader SHALL provide one internal canonical path that returns:
+
+~~~julia
+(; L, Q, Kinv)
+~~~
+
+for both supported storage representations.
+
+\`read.potential\` and \`potential_factored\` SHALL share this input boundary.
+No vacua-specific reconstruction reader is permitted.
+
+### R-002 — Strict metadata/schema validation
+
+Before compact reconstruction, the reader SHALL validate:
+
+- exact F-003 schema identities;
+- potential orientation;
+- difference convention;
+- pair ordering;
+- \`kappa_format == "coo"\`;
+- \`kappa_index_base == 0\`;
+- accepted basis convention identifying all numerical vectors as living in the
+  persisted divisor basis;
+- required reconstruction source paths;
+- source counts;
+- F-009 replay tolerances;
+- F-010 integrity hashes;
+- F-006 raw/canonical/duplicate count consistency.
+
+The implementation SHALL parse metadata within Julia and fail closed when a
+required field is absent or malformed.
+
+### R-003 — Exact sparse-\`kappa\` reconstruction
+
+The reader SHALL implement F-004 exactly.
+
+Focused tests SHALL contain independent \`iii\`, \`iij\`, and \`ijk\`
+fixtures so that 1/3/6 multiplicity errors are separately detectable.
+
+### R-004 — Exact metric reconstruction
+
+The reader SHALL implement F-005 exactly.
+
+Tests must detect at least:
+
+- missing factor 4;
+- sign reversal of the \(\mathcal V\kappa\) term;
+- missing final symmetrization;
+- the historical PR #195 parenthesis/symmetrization mistake.
+
+### R-005 — Strict direct-charge reconstruction
+
+The reader SHALL implement F-006 exactly and reject malformed charge data
+before integer conversion.
+
+No tolerance-based rounding is permitted at the persisted schema-1.1 reader
+boundary.
+
+### R-006 — Exact pair reconstruction
+
+The reader SHALL implement F-007 exactly.
+
+The reconstructed \`Q\` must be integer-identical to the matched dense oracle,
+including column ordering.
+
+### R-007 — Exact \`L\` reconstruction
+
+The reader SHALL implement F-008 exactly.
+
+Tests SHALL separately exercise direct and mixed terms, positive and negative
+raw amplitudes where physically/mathematically valid for the fixture, and the
+zero-amplitude failure path.
+
+### R-008 — Reconstruction integrity
+
+The reader SHALL recompute and require exact equality of:
+
+- \`q_direct_sha256\`;
+- \`pair_source_index_sha256\`.
+
+It SHALL require exact agreement of recorded source counts and conventions.
+
+It SHALL independently reconstruct \(\mathcal V\) and require agreement with
+persisted \`cytools/geometric/CY_volume\` under F-009.
+
+A hash/count/tolerance mismatch is a terminal read error, not a warning.
+
+### R-009 — Legacy behavior preservation
+
+For legacy dense artifacts, existing \`read.potential\`,
+\`potential_factored\`, and \`oriented_potential\` scientific outputs and
+failure semantics SHALL remain unchanged.
+
+The common component helper may reorganize code, but it must not reinterpret
+historical dense artifacts.
+
+### R-010 — Public potential-reader equivalence
+
+For matched dense and compact representations of the same FRST at the same
+final Kähler point:
+
+- \`read.potential\` outputs SHALL agree under the approved numerical
+  tolerances;
+- \`potential_factored\` outputs SHALL agree under the approved numerical
+  tolerances;
+- \`oriented_potential\` SHALL require no schema-specific logic and SHALL agree.
+
+### R-011 — Vacuum-only downstream equivalence
+
+Using the same vacua configuration and matched dense/compact fixture, the
+existing vacuum-only path:
+
+~~~text
+compute_vacua_data
+  -> _vacua_core
+  -> read.potential
+~~~
+
+SHALL produce identical:
+
+- vacuum count;
+- \`search_classification\`;
+- \`auto_selected_method\`;
+- determinant/branch metadata where applicable.
+
+This requirement authorizes no vacua algorithm change.
+
+### R-012 — Non-vacua \`AxionPotential\` consumer equivalence
+
+At least one downstream consumer that takes the returned potential components
+directly SHALL demonstrate equivalent results for matched dense/compact reader
+outputs.
+
+This evidence must not depend on \`read.geometry\` and must not imply that the
+full \`compute_axion_data\` path is schema-1.1 compatible.
+
+### R-013 — Read-only persistence boundary
+
+Compact reconstruction SHALL NOT write dense \`Q\`, \`L\`, \`Kinv\`, \`K\`,
+or any cache back into the source HDF5 artifact.
+
+No derived cache becomes authoritative under this specification.
+
+### R-014 — Fail-closed malformed-data behavior
+
+Focused tests SHALL cover at least:
+
+- unknown file schema;
+- unknown potential reconstruction schema;
+- unknown storage marker;
+- contradictory compact+dense hybrid;
+- missing reconstruction metadata;
+- conflicting duplicated metadata;
+- malformed COO shape;
+- nonintegral/out-of-range COO index;
+- malformed/duplicate/nonintegral/out-of-range direct charge;
+- source-count mismatch;
+- hash mismatch;
+- persisted-volume replay mismatch;
+- non-finite reconstructed quantities;
+- zero raw potential amplitude;
+- singular/corrupt metric behavior at each existing public-reader boundary.
+
+### R-015 — No hidden runtime dependency
+
+The implementation SHALL keep package import Python-free.
+
+If a new JSON library is required, it SHALL be a declared direct pure-Julia
+dependency with normal package compatibility metadata. Reliance on a transitive
+JSON package is not acceptable.
+
+### R-016 — Exact evidence and review
+
+The implementation candidate SHALL record:
+
+- exact base commit/tree;
+- exact spec approval reference;
+- changed paths;
+- focused commands and observed results;
+- oracle fixture identities;
+- matched dense/compact reconstruction evidence;
+- downstream equivalence evidence;
+- final commit/tree.
+
+The exact implementation candidate SHALL receive fresh independent
+Scientific/Numerical Review after implementation verification.
+
+## Acceptance gates
+
+### CYAX-0197 G0 — Approve the S2 reconstruction contract
+
+**Objective:** establish the durable reader/scientific contract before source
+implementation.
+
+**Acceptance:**
+
+- exact \`spec.md\` receives independent Spec Review;
+- exact mathematical/schema reconstruction contract receives independent
+  Scientific/Numerical Review;
+- blocking findings are repaired and changed normative bytes are re-reviewed;
+- owner explicitly approves the reviewed revision;
+- \`status\` becomes \`approved\`;
+- \`approval_ref\` binds the exact reviewed normative revision/content.
+
+**Stop condition:** unresolved normalization, COO semantics, basis convention,
+schema-dispatch behavior, integrity semantics, or public-reader scope.
+
+### CYAX-0197 G1 — Analytic and schema-bound reconstruction
+
+**Objective:** implement the canonical compact reconstruction boundary.
+
+**Acceptance:**
+
+- R-001 through R-008 and R-013 through R-015 pass;
+- independent \`iii/iij/ijk\` tests pass;
+- canonical hash replay passes;
+- compact artifacts fail closed on every required malformed-state fixture.
+
+**Stop condition:** implementation requires a new scientific convention,
+writer/schema change, Python runtime, or undocumented recovery behavior.
+
+### CYAX-0197 G2 — Matched real-oracle reader equivalence
+
+**Objective:** prove the new reader reproduces the accepted scientific
+representation.
+
+Use matched dense/compact representations of the same FRST and final Kähler
+point. Representative oracle cells SHALL include at least:
+
+~~~text
+h11 = 4
+h11 = 10
+h11 = 50
+~~~
+
+plus one bounded higher-dimensional case chosen before observing comparison
+results.
+
+**Acceptance:**
+
+- R-009 and R-010 pass;
+- \`Q\` is exactly equal as integers;
+- \`tau\`, \`V\`, \`Kinv\`, and \`L\` satisfy the frozen replay tolerance;
+- signs and source ordering agree exactly;
+- no post-hoc tolerance tuning or fixture replacement is used.
+
+**Stop condition:** disagreement not attributable to a defect in the candidate
+reader or an independently demonstrated corrupt fixture.
+
+### CYAX-0197 G3 — Downstream qualification
+
+**Objective:** show the general potential reader unlocks the intended
+qualification path without changing downstream science.
+
+**Acceptance:**
+
+- R-011 vacuum-only equivalence passes;
+- R-012 non-vacua direct-consumer equivalence passes;
+- no \`read.geometry\` or full \`compute_axion_data\` claim is made.
+
+**Stop condition:** downstream equality requires changing vacua/spectrum
+scientific behavior.
+
+### CYAX-0197 G4 — Exact-candidate independent acceptance
+
+**Objective:** independently review the exact implementation and evidence.
+
+**Acceptance:**
+
+- required local verification passes or unavailable checks are explicitly
+  reported;
+- exact candidate commit/tree and evidence receive fresh independent
+  Scientific/Numerical Review with no blocking finding;
+- Control Desk/owner reconciliation accepts the candidate for the next
+  integration decision.
+
+A passing G4 review does not itself authorize merge or Issue closure.
+
+## Verification requirements
+
+Required evidence includes:
+
+1. synthetic \`iii\`, \`iij\`, \`ijk\` COO fixtures;
+2. analytic volume/tau/\`Kinv\` oracles;
+3. direct/pair \`Q\` ordering oracle;
+4. direct/pair \`L\` coefficient oracle;
+5. zero-amplitude and malformed-data failures;
+6. canonical JSON/SHA-256 cross-language hash fixtures;
+7. persisted-\`CY_volume\` replay check;
+8. matched dense/compact real fixtures at the G2 cells;
+9. public reader equivalence;
+10. vacuum-only downstream equivalence;
+11. one direct \`AxionPotential\` consumer equivalence check;
+12. existing legacy reader regression coverage;
+13. focused Julia tests;
+14. full local package tests;
+15. \`julia --project=. bin/audit.jl\`;
+16. \`python3 scripts/agent_verify.py diff-check\`;
+17. \`git diff --check\`;
+18. exact-candidate independent Scientific/Numerical Review.
+
+Unobserved checks are not PASS.
+
+## Interfaces and compatibility
+
+### Public API
+
+No public function removal is intended.
+
+Existing reader entry points retain their signatures. Schema-1.1 support is a
+new accepted input representation behind those interfaces.
+
+### Persisted schema
+
+No schema-1.1 writer or artifact layout change is authorized.
+
+### Runtime
+
+Core Julia remains Python-free. A declared pure-Julia JSON parser dependency is
+permitted only if needed for the persisted reconstruction metadata.
+
+### Package version
+
+This is a pre-1.0 durable reader capability and may warrant a minor package
+version at the reviewed release boundary. No feature-branch package bump is
+authorized by this specification.
+
+## Dependencies and blockers
+
+- PR #195 is included in the bound baseline.
+- The schema-1.1 writer/reference reconstruction is already present on the
+  bound baseline.
+- No \`read.geometry\` follow-on is required to complete the vacuum-only
+  qualification enabled by this specification.
+
+## Open owner decisions
+
+None are intentionally left open in the reconstruction mathematics or schema
+dispatch.
+
+If review or implementation finds that exact reconstruction requires changing
+the accepted schema, normalization, basis convention, population definition,
+or public scientific behavior, stop and return to the owner for a revised and
+re-reviewed specification.
+
+## Completion criterion
+
+CYAX-0197 is complete when:
+
+1. G0 is approved with durable exact-review provenance;
+2. the approved spec is implemented without changing its scientific boundary;
+3. G1-G3 evidence passes;
+4. G4 independent exact-candidate review has no blocking finding;
+5. spec/plan/tasks/implementation/tests/evidence/PR scope are converged;
+6. Control Desk/owner reconciliation accepts the result.
+
+Completion of CYAX-0197 establishes the potential-reader boundary needed for
+the planned vacua qualification dataset. It does not establish general
+schema-1.1 geometry-reader compatibility.
