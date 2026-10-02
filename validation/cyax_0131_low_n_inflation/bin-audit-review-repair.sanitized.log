@@ -1,0 +1,57 @@
+  Activating project at `<Julia-depot-path>
+Precompiling packages...
+   7382.3 ms  ✓ CYAxiverse
+  1 dependency successfully precompiled in 8 seconds. 313 already precompiled.
+Using cached audit environment: <local-path>
+=== 1. TYPE STABILITY AUDIT (JET.jl) ===
+[toplevel-info] Analyzing top-level definitions (progress: 0/1263 | interval: 50)
+[toplevel-info] Analyzing top-level definitions (progress: 50/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 100/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 150/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 200/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 250/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 300/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 350/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 400/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 450/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 500/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 550/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 600/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 650/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 700/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 750/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 800/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 850/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 900/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 950/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 1000/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 1050/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 1100/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 1150/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 1200/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 1250/1263)
+[toplevel-info] Analyzing top-level definitions (progress: 1263/1263)
+[toplevel-info] Analyzed all top-level definitions (all: 1263 | analyzed: 1263 | cached: 0 | took: 17.52 sec)
+No errors detected
+
+
+=== 2. PACKAGE HEALTH (Aqua.jl) ===
+Test Summary:           | Pass  Total  Time
+Unbound type parameters |    1      1  0.0s
+Test Summary:     | Pass  Total  Time
+Undefined exports |    1      1  0.0s
+Test Summary:                              | Pass  Total  Time
+Compare Project.toml and test/Project.toml |    1      1  0.0s
+Test Summary:      | Pass  Total  Time
+Stale dependencies |    1      1  5.6s
+Test Summary: | Pass  Total  Time
+Compat bounds |    4      4  0.1s
+Test Summary: | Pass  Total  Time
+Piracy        |    1      1  0.0s
+Test Summary:    | Pass  Total  Time
+Persistent tasks |    1      1  6.4s
+
+=== 3. PHYSICAL POTENTIAL SANITY CHECKS ===
+Potential, derivative, and positive-definiteness checks passed.
+
+ALL AUDITS PASSED CLEANLY!

@@ -29,12 +29,12 @@ is widened to force a pass.
 | Stage | Fixed budget and convention | Coverage/stop rule |
 |---|---|---|
 | N8 zero-phase author10 witness | `author_inflation.n8_degenerate_point()`, exact 10-row `trajectory=true` potential, ten zero phases; existing source checks `k≈0.674506370003365` at `1e-15`, gradient/null residuals `<1e-10` | One named source witness; failure stops N8 phase work |
-| N8 row-2 phase calibration | `phase[2]=0.04` radians, all other phases zero; 400 warm phase increments from the zero-phase source witness; Float64 corrector tolerance `1e-11`, maximum 1,000 iterations per phase; 128-bit BigFloat refinement at `1e-30`, maximum 1,000 iterations | 400 attempted increments retained; all must converge; refined gradient/null residual `<1e-10`; seven transverse modes positive |
+| N8 row-2 phase calibration | `phase[2]=0.04` radians, all other phases zero; 400 warm phase increments from the zero-phase source witness; Float64 corrector tolerance `1e-11`, maximum 1,000 iterations per phase; 128-bit BigFloat refinement at `1e-30`, maximum 1,000 iterations; refined phase is the exact returned Float64 phase vector converted at 128-bit precision | 400 attempted increments retained; all must converge; refined gradient/null residual `<1e-10`; seven transverse modes positive; physical diagnostics also require exact witness phase/coordinate/basis/metric/critical-`k` binding |
 | N8 critical identities | Continue from the refined author10 point at `k_c+10×10^-5`; fixed-k steps in `10^-5` increments through `k_c-10^-5`; trust-region tolerance `1e-13`, maximum 2,000 iterations per point | Twelve retained points including start, each convergence recorded; endpoint minimum-Hessian eigenvalues must have opposite signs; no displaced seed is silently substituted |
 | N5 reduced shifted fold | Reduced source two-cosine light-direction model; `π/4` applied only to the second cosine; 256-bit NLsolve trust region, `ftol=xtol=10^-70`, maximum 1,000 iterations | Re-solve the fold; require gradient `≤10^-9`, absolute Hessian `≤10^-10`, and residual `≤10^-70` |
 | N5 two-sided root coverage | At `k_c±10^-4`, scan 10,000 angular intervals on `[0,2π]` (10,001 nodes per side); each detected sign-change bracket receives at most 256 BigFloat bisections; locally refine detected lower-side roots at `10^-70` | Preserve both root lists, all local identities and residuals; record roots near the fold on each side and full-grid counts; no eight-row phase mapping |
 | P96 cross-check | Immutable 12-row Table-1 route; zero-phase start `theta=zeros(8)`, `k=0.68`; pseudo-arclength `ds=10^-5`, six continuation steps, tolerance `10^-10`, bounds `(0.67,0.69)` | Initial point plus six accepted steps; label only as P96 cross-check; never counts toward author10 gates |
-| N8 physical author trajectory | One existing reference detuning `delta_k=1.5320548620798324e-3`; `critical_k` is the refined row-2 author10 catastrophe; row-2 phase vector and refined theta passed to concrete `author_inflation.n8_author_trajectory`; Rodas5P; 100-bit precision; default source-derived tolerances; `max_time=10^6`, `maxiters=10^8`, `max_step=100`, `scan_step=5`, `initial_step=10^-5`; 20 returned samples | Promotion requires `refinement_status=:completed`, entered slow-roll, positive accepted steps, successful retcode, and exact source-precision equality `physical_k=critical_k+delta_k`. Report source `efolds=end_n` separately from `N_e=slow_roll_efolds=end_n-entry_n`, then emit permitted diagnostics for each explicitly indexed sample. Compare `N_e` with the source `reference_efolds().n8[2]` value 60.0 without a pass/fail threshold; that reference is the original default-zero-phase author-model anchor at this delta, not an expected value for the shifted row-2 phase. |
+| N8 physical author trajectory | One existing reference detuning `delta_k=1.5320548620798324e-3`; `critical_k` is the refined row-2 author10 catastrophe; row-2 phase vector and refined theta passed to concrete `author_inflation.n8_author_trajectory`; Rodas5P; 100-bit precision; default source-derived tolerances; `max_time=10^6`, `maxiters=10^8`, `max_step=100`, `scan_step=5`, `initial_step=10^-5`; 20 requested samples | Promotion requires a completed finite-exit slow-roll window, successful retcode, entered slow-roll, positive accepted steps, exact `physical_k=critical_k+delta_k`, and exact source witness phase/coordinate/basis/metric/critical-`k` binding. An open `:tmax` interval is censored: no completed `N_e`, end coordinates, or sample diagnostics. If a completed result is eligible, report source `efolds=end_n` separately from `N_e=slow_roll_efolds=end_n-entry_n`, and emit diagnostics by exact returned sample index. Compare `N_e` with `reference_efolds().n8[2]` value 60.0 without a pass/fail threshold; it is the default-zero-phase author-model anchor, not an expected shifted-phase value. |
 
 The earlier displaced-seed outcomes and their exact residuals remain in
 `n8_shifted_fold_audit.md`. They are retained as rejected identities; the
@@ -42,9 +42,10 @@ successful central stationary continuation is separately labeled.
 
 ## Commands and results
 
-The run uses the regular Julia 1.12.6 host executable, the candidate project,
-and the already pinned P0 environment on `JULIA_LOAD_PATH`. From repository
-root, the exact replay command is:
+The historical full replay used the regular Julia 1.12.6 host executable, the
+candidate project, and the already pinned P0 environment on `JULIA_LOAD_PATH`.
+It was owner-terminated before a trajectory result; no replay restart was made
+after the review repairs. The exact historical replay command is:
 
 ```sh
 repo_root="$(git rev-parse --show-toplevel)"
@@ -54,14 +55,24 @@ JULIA_LOAD_PATH="@:${repo_root}/validation/p0_numerical_equivalence/environment:
   > validation/cyax_0131_low_n_inflation/replay.log 2>&1
 ```
 
-The initial short phased
-physical-route probe produced `refinement_status=:completed`,
-`entered_slow_roll=true`, 41 accepted steps, and successful Rodas5P return at
-64-bit precision. That probe used `max_time=10`, two samples,
-`reltol=1e-8`, and `abstol=1e-10`; it is an eligibility-gate check, not the
-reported 100-bit calibration run. Its first diagnostics gate attempt exposed a
-precision mismatch in the independent `k` check; the gate now recomputes the
-same `critical_k + delta_k` arithmetic at the configured trajectory precision.
+The earlier short 64-bit route probe used `max_time=10`, two requested samples,
+`reltol=1e-8`, and `abstol=1e-10`. Its solver returned successfully with 41
+accepted steps and entered an interval that remained open at `:tmax`. The
+pre-review gate incorrectly treated that open interval as eligible; it is
+retained only as historical exploratory evidence, with no physical
+observables promoted. The repaired source returns it as censored, with no
+completed `N_e`, end coordinates, or samples. The exact `k` arithmetic is
+still checked at trajectory precision, and the gate now additionally binds
+the route to the completed author10 catastrophe witness.
+
+Fresh review repairs and exact phase provenance are recorded in
+`review-repair-record.md`. The repaired focused gate run passed 45/45
+assertions; its refined phase vector, `k`, residuals, stationary-branch
+bracket, and bounded censored solver counters are retained in
+`focused-regressions-review-repair.sanitized.log`. The full owner-terminated
+100-bit replay remains historical and was not restarted; see
+`trajectory-diagnostics-report.md` for its separate source identity and
+partial outcomes.
 
 An earlier replay checkpoint recorded 40 minutes 32 seconds of active
 execution. That checkpoint is historical and is superseded by the final
@@ -82,7 +93,7 @@ Independent static verification while the replay continued:
   no-cache mode. No tests ran. A regular cache-path run then passed the initial
   8/8 optionality assertions but stopped before the remaining suite because
   the pinned P0 manifest did not contain the declared test extra `CairoMakie`.
-- Focused regression command — passed:
+- Focused regression command before the review repair — passed:
 
   ```sh
   repo_root="$(git rev-parse --show-toplevel)"
@@ -93,13 +104,11 @@ Independent static verification while the replay continued:
     validation/cyax_0131_low_n_inflation/focused_regressions.jl
   ```
 
-  It passed;
-  30/30 assertions in 16.8 seconds. It exercises the shifted N8 calibration,
-  physical-k eligibility, selected-sample and N_e contract, and rejected
-  refinement/solver/zero-step/scale cases. One initial run had 29/30 because
-  the supplemental assertion recomputed the e-fold window at default BigFloat
-  precision; the corrected check uses the recorded 64-bit trajectory
-  precision and passes.
+  It passed 30/30 assertions in 16.8 seconds against the pre-review source.
+  That result is superseded for trajectory eligibility by the repaired test
+  below. An initial run had 29/30 because the supplemental assertion
+  recomputed the e-fold window at default BigFloat precision; the corrected
+  check used the recorded 64-bit trajectory precision.
 - Python-free import and optional-extension boundary — passed. The repository
   defines `PyCall` as a weak dependency and `CYAxiversePyCallExt` as its
   conditional extension. The command asserted the candidate source path,

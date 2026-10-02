@@ -986,8 +986,12 @@ function n8_row2_phase_catastrophe(; phase_steps::Int=400,
             bracket=nothing, sign_change=false)
     end
 
-    big_phase_vector = fill(BigFloat(0), 10)
-    big_phase_vector[2] = BigFloat("0.04")
+    # Refine the same represented phase vector used by continuation and by the
+    # author trajectory.  Converting the Float64 target at the requested
+    # precision preserves its exact source value across both routes.
+    big_phase_vector = setprecision(BigFloat, precision_bits) do
+        BigFloat.(target_phases)
+    end
     refined = _n8_refine_degenerate_point(catastrophe.theta,
         catastrophe.null_vector, catastrophe.k, big_phase_vector;
         precision_bits, tolerance=big_tolerance, max_iterations)
@@ -1029,7 +1033,8 @@ function n8_row2_phase_catastrophe(; phase_steps::Int=400,
        coordinate_convention=:raw_radians,
        metric_basis=:canonical_hessian_from_reconstructed_author_metric,
        scale_category=:author_model_catastrophe_calibration,
-       phase_path, catastrophe, refined, stationary_path, bracket,
+       phase_path, catastrophe, refined,
+       refined_phase_vector=copy(big_phase_vector), stationary_path, bracket,
        sign_change, converged)
 end
 
@@ -1489,9 +1494,8 @@ function n8_author_trajectory(delta_k::Real; critical_k::Real=N8_KC,
         # There can be short transient slow-roll windows before the final
         # inflationary interval. Retain every completed window and select the
         # longest one below, matching the reference's final-finite-exit policy.
-        # An open interval at the solver horizon is retained only when no
-        # completed interval exists, and is reported as :tmax rather than as a
-        # physical end event.
+        # Open intervals at the solver horizon are censored exploratory data,
+        # never candidates for the selected completed slow-roll window.
         completed_windows = Tuple{T, T, Symbol}[]
         entry_time = nothing
         previous_time = solution.t[1]
@@ -1535,15 +1539,40 @@ function n8_author_trajectory(delta_k::Real; critical_k::Real=N8_KC,
         end
         open_window = entry_time === nothing ? nothing :
             (entry_time, end_time, :tmax)
-        windows = if isempty(completed_windows)
-            open_window === nothing ? Tuple{T, T, Symbol}[] : [open_window]
-        else
-            completed_windows
-        end
-        if isempty(windows)
+        if isempty(completed_windows) && open_window !== nothing
+            entry_time, _, _ = open_window
+            entry_n = solution(entry_time)[9]
+            censored_end_n = solution(end_time)[9]
             return (; delta_k=T(delta_k), critical_k=k_critical, k,
                 scale_category=:physical_author_radial_k,
                 model=:n8_author_trajectory_10_row,
+                coordinate_convention=:raw_radians,
+                metric_convention=:rounded_reconstructed_author_metric,
+                entered_slow_roll=true,
+                end_event=:tmax, efolds=nothing,
+                slow_roll_efolds=nothing, terminated=false,
+                censored_slow_roll_window=(start_n=entry_n,
+                    end_n=censored_end_n,
+                    duration=censored_end_n - entry_n),
+                samples=NamedTuple[], initial=initial_state,
+                basis, basis_theta=copy(hilltop), basis_k=k,
+                critical_theta=copy(hilltop),
+                phases=copy(phase), precision_bits,
+                solver=(method, reltol=used_reltol,
+                    abstol=used_abstol, scan_step=T(scan_step),
+                    max_step=T(max_step), initial_step=T(initial_step),
+                    retcode=solution.retcode,
+                    accepted_steps=solution.stats.naccept,
+                    rejected_steps=solution.stats.nreject,
+                    rhs_evaluations=solution.stats.nf,
+                    jacobian_evaluations=solution.stats.njacs))
+        end
+        if isempty(completed_windows)
+            return (; delta_k=T(delta_k), critical_k=k_critical, k,
+                scale_category=:physical_author_radial_k,
+                model=:n8_author_trajectory_10_row,
+                coordinate_convention=:raw_radians,
+                metric_convention=:rounded_reconstructed_author_metric,
                 entered_slow_roll=false,
                 end_event=:no_slow_roll_window, efolds=zero(T),
                 slow_roll_efolds=zero(T),
@@ -1560,8 +1589,8 @@ function n8_author_trajectory(delta_k::Real; critical_k::Real=N8_KC,
                     rhs_evaluations=solution.stats.nf,
                     jacobian_evaluations=solution.stats.njacs))
         end
-        window_index = argmax(window[2] - window[1] for window in windows)
-        entry_time, exit_time, exit_event = windows[window_index]
+        window_index = argmax(window[2] - window[1] for window in completed_windows)
+        entry_time, exit_time, exit_event = completed_windows[window_index]
         entry_n = solution(entry_time)[9]
         end_n = solution(exit_time)[9]
         sample_ns = sample_count == 1 ? (entry_n,) :
@@ -1579,6 +1608,8 @@ function n8_author_trajectory(delta_k::Real; critical_k::Real=N8_KC,
         (; delta_k=T(delta_k), critical_k=k_critical, k,
             scale_category=:physical_author_radial_k,
             model=:n8_author_trajectory_10_row,
+            coordinate_convention=:raw_radians,
+            metric_convention=:rounded_reconstructed_author_metric,
             entered_slow_roll=true,
             entry_n, end_n, efolds=end_n,
             slow_roll_efolds=end_n - entry_n, end_event=exit_event,

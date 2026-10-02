@@ -1,0 +1,623 @@
+     Testing CYAxiverse
+      Status `<temporary-path>
+  [1520ce14] AbstractTrees v0.4.5
+  [7e558dbc] ArbNumerics v1.6.3
+  [e5e45d93] CYAxiverse v0.2.0 `<home-relative-path>
+  [13f3f980] CairoMakie v0.15.15
+  [35d6a980] ColorSchemes v3.31.0
+  [31c24e10] Distributions v0.25.131
+  [14197337] GenericLinearAlgebra v0.4.1
+⌃ [f67ccb44] HDF5 v0.17.3
+⌅ [d1acc4aa] IntervalArithmetic v0.22.36
+⌃ [d3d80556] LineSearches v7.5.1
+⌃ [7ed4a6bd] LinearSolve v5.17.4
+  [bdcacae8] LoopVectorization v0.12.174
+⌅ [2774e3e8] NLsolve v4.5.1
+⌃ [2edaba10] Nemo v0.56.1
+  [109d20d8] NormalForms v0.1.10
+⌅ [429524aa] Optim v1.13.3
+  [1dea7af3] OrdinaryDiffEq v7.8.1
+⌃ [90137ffa] StaticArrays v1.9.20
+  [10745b16] Statistics v1.11.5
+⌃ [a759f4b9] TimerOutputs v1.2.1
+  [bc48ee85] Tullio v0.3.9
+  [ade2ca70] Dates v1.11.0
+  [8ba89e20] Distributed v1.11.0
+  [37e2e46d] LinearAlgebra v1.12.0
+  [56ddb016] Logging v1.11.0
+  [de0858da] Printf v1.11.0
+  [9a3f8284] Random v1.11.0
+  [ea8e919c] SHA v0.7.0
+  [2f01184e] SparseArrays v1.12.0
+  [8dfed614] Test v1.11.0
+      Status `<temporary-path>
+  [47edcb42] ADTypes v1.24.0
+  [14f7f29c] AMD v0.5.4
+⌃ [c3fe647b] AbstractAlgebra v0.50.2
+  [621f4979] AbstractFFTs v1.5.0
+  [1520ce14] AbstractTrees v0.4.5
+  [7d9f7c33] Accessors v0.1.45
+⌃ [79e6a3ab] Adapt v4.7.0
+  [35492f91] AdaptivePredicates v1.2.0
+  [66dad0bd] AliasTables v1.1.3
+  [27a7e980] Animations v0.4.2
+  [7e558dbc] ArbNumerics v1.6.3
+  [4fba245c] ArrayInterface v7.30.2
+  [67c07d97] Automa v1.2.0
+  [13072b0f] AxisAlgorithms v1.1.0
+  [39de3d68] AxisArrays v0.4.8
+  [18cc8868] BaseDirs v1.4.0
+  [b2a6c25c] BinaryHeaps v1.1.0
+  [62783981] BitTwiddlingConvenienceFunctions v0.1.6
+⌃ [70df07ce] BracketingNonlinearSolve v1.12.7
+  [fa961155] CEnum v0.5.0
+  [2a0fbf3d] CPUSummary v0.2.7
+  [96374032] CRlibm v1.0.2
+  [e5e45d93] CYAxiverse v0.2.0 `<home-relative-path>
+  [159f3aea] Cairo v1.1.1
+  [13f3f980] CairoMakie v0.15.15
+  [d360d2e6] ChainRulesCore v1.26.1
+  [fb6a15b2] CloseOpenIntervals v0.1.13
+  [6b39b394] CodecZstd v0.8.7
+  [a2cac450] ColorBrewer v0.4.2
+  [35d6a980] ColorSchemes v3.31.0
+  [3da002f7] ColorTypes v0.12.3
+  [c3611d14] ColorVectorSpace v0.11.0
+  [5ae59095] Colors v0.13.2
+  [38540f10] CommonSolve v0.2.14
+  [bbf7d656] CommonSubexpressions v0.3.1
+  [f70d9fcc] CommonWorldInvalidations v1.2.2
+  [34da2185] Compat v4.18.1
+  [a33af91c] CompositionsBase v0.1.2
+  [95dc2771] ComputePipeline v0.1.8
+  [2569d6c7] ConcreteStructs v0.2.8
+  [187b0558] ConstructionBase v1.6.0
+  [d38c429a] Contour v0.6.3
+  [adafc99b] CpuId v0.3.1
+  [a8cc5b0e] Crayons v4.2.0
+  [9a962f9c] DataAPI v1.16.0
+  [864edb3b] DataStructures v0.19.6
+  [e2d170a0] DataValueInterfaces v1.0.0
+  [927a84f5] DelaunayTriangulation v1.6.7
+⌃ [2b5f629d] DiffEqBase v7.21.1
+  [163ba53b] DiffResults v1.1.0
+  [b552c78f] DiffRules v1.16.0
+  [a0c0ee7d] DifferentiationInterface v0.7.21
+  [b4f34e82] Distances v0.10.12
+  [31c24e10] Distributions v0.25.131
+  [ffbed154] DocStringExtensions v0.9.5
+  [4e289a0a] EnumX v1.0.7
+  [f151be2c] EnzymeCore v0.8.21
+  [429591f6] ExactPredicates v2.2.9
+  [e2ba6199] ExprTools v0.1.11
+  [b86e33f2] FFTA v0.3.1
+  [7034ab61] FastBroadcast v1.4.0
+  [9aa1b823] FastClosures v0.3.2
+  [a4df4552] FastPower v1.5.0
+  [5789e2e9] FileIO v1.20.0
+  [8fc22ac5] FilePaths v0.9.0
+  [48062228] FilePathsBase v0.9.24
+⌃ [1a297f60] FillArrays v1.17.0
+⌃ [64ca27bc] FindFirstFunctions v3.2.1
+  [6a86dc24] FiniteDiff v2.33.0
+⌅ [53c48c17] FixedPointNumbers v0.8.6
+  [1fa38f19] Format v1.3.7
+  [f6369f11] ForwardDiff v1.4.6
+  [b38be410] FreeType v4.1.1
+  [663a7486] FreeTypeAbstraction v0.10.8
+  [069b7b12] FunctionWrappers v1.1.3
+  [77dc65aa] FunctionWrappersWrappers v1.13.0
+⌃ [46192b85] GPUArraysCore v0.2.0
+  [a0844989] Gamma v1.2.0
+  [14197337] GenericLinearAlgebra v0.4.1
+  [5c1252a2] GeometryBasics v0.5.13
+  [a2bd30eb] Graphics v1.1.3
+  [3955a311] GridLayoutBase v0.11.3
+⌃ [f67ccb44] HDF5 v0.17.3
+  [3e5b6fbb] HostCPUFeatures v0.1.18
+  [34004b35] HypergeometricFunctions v0.3.30
+  [615f187c] IfElse v0.1.1
+  [2803e5a7] ImageAxes v0.6.12
+  [c817782e] ImageBase v0.1.7
+  [a09fc81d] ImageCore v0.10.5
+  [82e4d734] ImageIO v0.6.10
+  [bc367c6b] ImageMetadata v0.9.10
+  [9b13fd28] IndirectArrays v1.0.0
+  [d25df0c9] Inflate v0.1.5
+  [18e54dd8] IntegerMathUtils v0.1.4
+  [a98d9a8b] Interpolations v0.16.3
+⌅ [d1acc4aa] IntervalArithmetic v0.22.36
+  [8197267c] IntervalSets v0.7.14
+  [3587e190] InverseFunctions v0.1.17
+  [92d709cd] IrrationalConstants v0.2.6
+  [f1662d9f] Isoband v0.1.1
+  [c8e1da08] IterTools v1.10.0
+  [82899510] IteratorInterfaceExtensions v1.0.0
+  [692b3bcd] JLLWrappers v1.8.0
+  [682c06a0] JSON v1.10.0
+  [b835a17e] JpegTurbo v0.1.6
+  [5ab0869b] KernelDensity v0.6.12
+  [ba0b0d4f] Krylov v0.10.10
+  [2faa5264] LHLFactorization v2.2.2
+  [b964fa9f] LaTeXStrings v1.4.1
+  [10f19ff3] LayoutPointers v0.1.17
+  [8cdb02fc] LazyModules v0.3.1
+⌃ [87fe0de2] LineSearch v0.1.18
+⌃ [d3d80556] LineSearches v7.5.1
+⌃ [7ed4a6bd] LinearSolve v5.17.4
+⌃ [2ab3a3ac] LogExpFunctions v1.0.1
+  [e6f89c97] LoggingExtras v1.2.0
+  [bdcacae8] LoopVectorization v0.12.174
+  [3da0fdf6] MPIPreferences v0.1.12
+  [1914dd2f] MacroTools v0.5.16
+  [ee78f7c6] Makie v0.24.15
+  [d125e4d3] ManualMemory v0.1.8
+  [dbb5928d] MappedArrays v0.4.3
+  [0a4f8689] MathTeXEngine v0.6.9
+  [bb5d69b7] MaybeInplace v0.1.8
+  [e1d29d7a] Missings v1.2.0
+  [e94cdb99] MosaicViews v0.3.4
+  [46d2c3a1] MuladdMacro v0.2.7
+⌅ [d41bc354] NLSolversBase v7.10.0
+⌅ [2774e3e8] NLsolve v4.5.1
+  [77ba4419] NaNMath v1.1.4
+⌃ [2edaba10] Nemo v0.56.1
+  [f09324ee] Netpbm v1.1.1
+⌃ [8913a72c] NonlinearSolve v4.28.0
+⌃ [be0214bd] NonlinearSolveBase v2.50.0
+⌃ [5959db7a] NonlinearSolveFirstOrder v2.7.0
+  [9a2c21bd] NonlinearSolveQuasiNewton v1.15.3
+  [26075421] NonlinearSolveSpectralMethods v1.8.3
+  [109d20d8] NormalForms v0.1.10
+  [510215fc] Observables v0.5.5
+  [6fe1bfb0] OffsetArrays v1.17.0
+  [52e1d378] OpenEXR v0.3.3
+⌅ [429524aa] Optim v1.13.3
+  [bac558e1] OrderedCollections v2.0.1
+  [1dea7af3] OrdinaryDiffEq v7.8.1
+⌃ [6ad6398a] OrdinaryDiffEqBDF v2.4.10
+⌃ [bbf590c4] OrdinaryDiffEqCore v4.17.3
+  [50262376] OrdinaryDiffEqDefault v2.6.2
+⌃ [4302a76b] OrdinaryDiffEqDifferentiation v3.12.0
+⌃ [127b3ac7] OrdinaryDiffEqNonlinearSolve v2.9.8
+⌃ [43230ef6] OrdinaryDiffEqRosenbrock v2.7.3
+  [b4bd8bb3] OrdinaryDiffEqRosenbrockTableaus v2.4.2
+⌃ [2d112036] OrdinaryDiffEqSDIRK v2.9.5
+⌃ [b1df2697] OrdinaryDiffEqTsit5 v2.1.4
+⌃ [79d7bb75] OrdinaryDiffEqVerner v2.4.1
+  [90014a1f] PDMats v0.11.41
+  [f57f5aa1] PNGFiles v0.4.5
+  [19eb6ba3] Packing v0.5.1
+  [5432bcbf] PaddedViews v0.5.12
+  [69de0a69] Parsers v3.0.0
+  [eebad327] PkgVersion v0.3.3
+  [995b91a9] PlotUtils v1.5.0
+  [1d0040c9] PolyesterWeave v0.2.2
+  [647866c9] PolygonOps v0.1.2
+  [85a6dd25] PositiveFactorizations v0.2.4
+  [d236fae5] PreallocationTools v1.7.1
+  [aea7be01] PrecompileTools v1.3.4
+  [21216c6a] Preferences v1.6.0
+⌃ [08abe8d2] PrettyTables v3.4.8
+  [27ebfcd6] Primes v0.5.7
+  [92933f4c] ProgressMeter v1.11.0
+  [43287f4e] PtrArrays v1.4.0
+⌃ [0c0d3e7f] PureKLU v1.5.0
+  [4b34888f] QOI v1.0.2
+  [1fd47b50] QuadGK v2.11.3
+  [fb686558] RandomExtensions v0.4.4
+  [b3c3ace0] RangeArrays v0.3.2
+  [c84ed2f1] Ratios v0.4.5
+  [0d4725de] Readables v0.3.3
+⌃ [3cdcf5f2] RecipesBase v1.3.4
+⌃ [731186ca] RecursiveArrayTools v4.5.1
+  [189a3867] Reexport v1.2.2
+  [05181044] RelocatableFolders v1.0.1
+  [ae029012] Requires v1.3.1
+  [9fe22ead] RespecializeParams v1.3.0
+  [79098fc4] Rmath v0.9.0
+⌃ [f2b01f46] Roots v3.0.8
+  [5eaf0fd0] RoundingEmulator v0.2.1
+⌃ [7e49a35a] RuntimeGeneratedFunctions v0.5.26
+  [fdea26ae] SIMD v3.7.2
+  [94e857df] SIMDTypes v0.1.0
+  [476501e8] SLEEFPirates v0.6.46
+⌃ [0bca4576] SciMLBase v3.54.0
+  [19f34311] SciMLJacobianOperators v0.1.19
+  [a6db7da4] SciMLLogging v2.1.0
+⌃ [c0aeaf25] SciMLOperators v1.30.1
+  [431bcebd] SciMLPublic v1.3.0
+  [53ae85a6] SciMLStructures v1.10.5
+  [6c6a2e73] Scratch v1.3.0
+  [efcf1570] Setfield v1.1.2
+  [65257c39] ShaderAbstractions v0.5.1
+  [73760f76] SignedDistanceFields v0.4.1
+⌃ [727e6d20] SimpleNonlinearSolve v2.14.5
+  [699a6c99] SimpleTraits v0.9.6
+  [45858cf5] Sixel v0.1.5
+  [a2af1166] SortingAlgorithms v1.2.3
+  [a57abbd0] SparseColumnPivotedQR v2.1.8
+  [0a514795] SparseMatrixColorings v0.4.28
+  [276daf66] SpecialFunctions v2.9.0
+  [cae243ae] StackViews v0.1.2
+  [aedffcd0] Static v1.4.6
+  [0d7ed370] StaticArrayInterface v1.10.0
+⌃ [90137ffa] StaticArrays v1.9.20
+  [1e83bf80] StaticArraysCore v1.4.4
+  [10745b16] Statistics v1.11.5
+  [82ae8749] StatsAPI v1.8.0
+  [2913bbd2] StatsBase v0.34.13
+  [4c63d2b9] StatsFuns v2.2.1
+⌅ [892a3eda] StringManipulation v0.5.0
+  [09ab397b] StructArrays v0.7.3
+  [ec057cc2] StructUtils v2.9.2
+  [2efcf032] SymbolicIndexingInterface v0.3.55
+  [3783bdb8] TableTraits v1.0.1
+  [bd369af6] Tables v1.14.0
+  [62fd8b95] TensorCore v0.1.1
+  [8290d209] ThreadingUtilities v0.5.6
+  [731e570b] TiffImages v0.11.9
+⌃ [a759f4b9] TimerOutputs v1.2.1
+  [3bb67fe8] TranscodingStreams v0.11.3
+  [981d1d27] TriplotBase v0.1.0
+  [781d530d] TruncatedStacktraces v1.4.0
+  [bc48ee85] Tullio v0.3.9
+  [3a884ed6] UnPack v1.0.2
+  [1cfade01] UnicodeFun v0.4.1
+  [1986cc42] Unitful v1.29.0
+  [3d5dd08c] VectorizationBase v0.21.74
+  [e3aaa7dc] WebP v0.1.3
+  [efce3f68] WoodburyMatrices v1.1.0
+  [6e34b625] Bzip2_jll v1.0.9+0
+  [4e9b3aee] CRlibm_jll v1.0.1+0
+  [83423d85] Cairo_jll v1.18.8+0
+⌅ [5ae413db] EarCut_jll v2.2.4+0
+  [2e619515] Expat_jll v2.8.4+0
+  [b22a6f82] FFMPEG_jll v9.0.2+0
+  [e134572f] FLINT_jll v301.600.0+0
+  [a3f928ae] Fontconfig_jll v2.17.1+0
+  [d7e528f0] FreeType2_jll v2.14.3+1
+  [559328eb] FriBidi_jll v1.0.17+0
+⌅ [b0724c58] GettextRuntime_jll v0.22.4+0
+  [59f7168a] Giflib_jll v6.1.3+0
+  [7746bdde] Glib_jll v2.88.3+0
+  [3b182d85] Graphite2_jll v1.3.16+0
+⌅ [0234f1f7] HDF5_jll v2.1.2+0
+  [2e76f6c2] HarfBuzz_jll v100.14004.0+0
+⌃ [e33a78d0] Hwloc_jll v2.14.0+0
+  [905a6f67] Imath_jll v3.2.2+0
+  [1d5cc7b8] IntelOpenMP_jll v2025.2.0+0
+  [aacddb02] JpegTurbo_jll v3.2.0+1
+  [c1c5ebd0] LAME_jll v3.100.3+0
+  [88015f11] LERC_jll v4.2.0+0
+  [1d63c593] LLVMOpenMP_jll v23.1.1+0
+⌅ [e9f186c6] Libffi_jll v3.4.7+0
+  [7e76a0d4] Libglvnd_jll v1.7.1+1
+  [94ce4f54] Libiconv_jll v1.18.0+0
+  [4b2f31a3] Libmount_jll v2.42.0+0
+  [89763e89] Libtiff_jll v4.7.3+0
+  [38a345b3] Libuuid_jll v2.42.0+0
+  [856f044c] MKL_jll v2025.2.0+0
+⌅ [b5ada748] MPIABI_jll v0.1.5+0
+⌃ [7cb0a576] MPICH_jll v5.0.1+0
+  [f1f71cc9] MPItrampoline_jll v5.5.6+0
+  [9237b28f] MicrosoftMPI_jll v10.1.4+3
+  [e7412a2a] Ogg_jll v1.3.6+0
+  [656ef2d0] OpenBLAS32_jll v0.3.34+0
+  [6cdc7f73] OpenBLASConsistentFPCSR_jll v0.3.34+0
+  [18a262bb] OpenEXR_jll v3.4.15+0
+⌃ [fe0851c0] OpenMPI_jll v5.0.11+0
+  [efe28fd5] OpenSpecFun_jll v0.5.6+0
+  [91d4177d] Opus_jll v1.6.1+0
+  [36c8627f] Pango_jll v1.58.2+0
+  [30392449] Pixman_jll v0.46.4+0
+  [f50d1b31] Rmath_jll v0.5.2+0
+⌅ [02c8fc9c] XML2_jll v2.13.9+0
+  [ffd25f8a] XZ_jll v5.8.4+0
+  [4f6342f7] Xorg_libX11_jll v1.8.13+0
+  [0c0b7dd1] Xorg_libXau_jll v1.0.13+0
+  [a3789734] Xorg_libXdmcp_jll v1.1.6+0
+  [1082639a] Xorg_libXext_jll v1.3.8+0
+  [d091e8ba] Xorg_libXfixes_jll v6.0.2+0
+  [ea2f1a96] Xorg_libXrender_jll v0.9.12+0
+  [a65dc6b1] Xorg_libpciaccess_jll v0.19.0+0
+  [c7cfdc94] Xorg_libxcb_jll v1.17.1+0
+  [c5fb5394] Xorg_xtrans_jll v1.6.0+0
+  [3161d3a3] Zstd_jll v1.5.7+1
+⌅ [2b3700d1] aws_c_auth_jll v0.9.6+0
+⌅ [70f11efc] aws_c_cal_jll v0.9.13+0
+⌅ [73048d1d] aws_c_common_jll v0.12.6+0
+⌅ [73a04cd5] aws_c_compression_jll v0.3.2+0
+⌅ [3254fc65] aws_c_http_jll v0.10.15+0
+⌅ [13c41daa] aws_c_io_jll v0.26.3+0
+⌅ [bd1f34fb] aws_c_s3_jll v0.11.5+0
+⌅ [1282aa60] aws_c_sdkutils_jll v0.2.4+1
+⌅ [b2a88e68] aws_checksums_jll v0.2.10+0
+  [c4b69c83] dlfcn_win32_jll v1.4.2+0
+  [9a68df92] isoband_jll v0.2.3+0
+  [477f73a3] libaec_jll v1.1.7+0
+  [a4ae2306] libaom_jll v3.15.1+0
+  [0ac62f75] libass_jll v0.17.5+0
+  [8e53e030] libdrm_jll v2.4.134+0
+  [f638f0a6] libfdk_aac_jll v2.0.4+0
+  [b53b4c65] libpng_jll v1.6.59+0
+  [075b6546] libsixel_jll v1.10.5+0
+  [9a156e7d] libva_jll v2.23.0+0
+  [f27f6e37] libvorbis_jll v1.3.8+0
+  [c5f90fcd] libwebp_jll v1.6.1+0
+⌅ [9aeb927a] mpif_jll v0.1.7+0
+  [1317d2d5] oneTBB_jll v2022.3.0+0
+⌃ [cddc5d3d] s2n_tls_jll v1.7.9+0
+⌅ [1270edf5] x264_jll v10164.0.1+0
+  [dfaa095f] x265_jll v4.1.0+0
+  [0dad84c5] ArgTools v1.1.2
+  [56f22d72] Artifacts v1.11.0
+  [2a0f44e3] Base64 v1.11.0
+  [8bf52ea8] CRC32c v1.11.0
+  [ade2ca70] Dates v1.11.0
+  [8ba89e20] Distributed v1.11.0
+  [f43a241f] Downloads v1.7.0
+  [7b1f6079] FileWatching v1.11.0
+  [9fa8497b] Future v1.11.0
+  [b77e0a4c] InteractiveUtils v1.11.0
+  [ac6e5ff7] JuliaSyntaxHighlighting v1.12.0
+  [4af54fe1] LazyArtifacts v1.11.0
+  [b27032c2] LibCURL v0.6.4
+  [76f85450] LibGit2 v1.11.0
+  [8f399da3] Libdl v1.11.0
+  [37e2e46d] LinearAlgebra v1.12.0
+  [56ddb016] Logging v1.11.0
+  [d6f4376e] Markdown v1.11.0
+  [a63ad114] Mmap v1.11.0
+  [ca575930] NetworkOptions v1.3.0
+  [44cfe95a] Pkg v1.12.1
+  [de0858da] Printf v1.11.0
+  [3fa0cd96] REPL v1.11.0
+  [9a3f8284] Random v1.11.0
+  [ea8e919c] SHA v0.7.0
+  [9e88b42a] Serialization v1.11.0
+  [1a1011a3] SharedArrays v1.11.0
+  [6462fe0b] Sockets v1.11.0
+  [2f01184e] SparseArrays v1.12.0
+  [f489334b] StyledStrings v1.11.0
+  [4607b0f0] SuiteSparse
+  [fa267f1f] TOML v1.0.3
+  [a4e569a6] Tar v1.10.0
+  [8dfed614] Test v1.11.0
+  [cf7118a7] UUIDs v1.11.0
+  [4ec0a83e] Unicode v1.11.0
+  [e66e0078] CompilerSupportLibraries_jll v1.3.0+1
+  [781609d7] GMP_jll v6.3.0+2
+  [deac9b47] LibCURL_jll v8.15.0+0
+  [e37daf67] LibGit2_jll v1.9.0+0
+  [29816b5a] LibSSH2_jll v1.11.3+1
+  [3a97d323] MPFR_jll v4.2.2+0
+  [14a3606d] MozillaCACerts_jll v2025.11.4
+  [4536629a] OpenBLAS_jll v0.3.29+0
+  [05823500] OpenLibm_jll v0.8.7+0
+  [458c3c95] OpenSSL_jll v3.5.4+0
+  [efcefdf7] PCRE2_jll v10.44.0+1
+  [bea87d4a] SuiteSparse_jll v7.8.3+2
+  [83775a58] Zlib_jll v1.3.1+2
+  [8e850b90] libblastrampoline_jll v5.15.0+0
+  [8e850ede] nghttp2_jll v1.64.0+1
+  [3f19e933] p7zip_jll v17.7.0+0
+        Info Packages marked with ⌃ and ⌅ have new versions available. Those with ⌃ may be upgradable, but those with ⌅ are restricted by compatibility constraints from upgrading.
+     Testing Running tests...
+┌ Warning: log-domain linear-boundary truncation is used only for the Float64 seed; arbitrary-precision Hessian retains all instantons
+│   geometry = "matrix input"
+│   truncated_count = 1
+│   truncation_bound_log10 = -980.0
+└ @ CYAxiverse.generate <home-relative-path>
+┌ Warning: log-domain linear-boundary truncation is used only for the Float64 seed; arbitrary-precision Hessian retains all instantons
+│   geometry = "matrix input"
+│   truncated_count = 1
+│   truncation_bound_log10 = -980.0
+└ @ CYAxiverse.generate <home-relative-path>
+┌ Warning: log-domain linear-boundary truncation is used only for the Float64 seed; arbitrary-precision Hessian retains all instantons
+│   geometry = "matrix input"
+│   truncated_count = 1
+│   truncation_bound_log10 = -980.0
+└ @ CYAxiverse.generate <home-relative-path>
+┌ Warning: log-domain linear-boundary truncation is used only for the Float64 seed; arbitrary-precision Hessian retains all instantons
+│   geometry = "matrix input"
+│   truncated_count = 1
+│   truncation_bound_log10 = -980.0
+└ @ CYAxiverse.generate <home-relative-path>
+UNRECOGNISED spectrum/quart31/index in <temporary-path> stored order matches neither the old nor the current labelling -- not written
+
+Unrecognised index datasets (left untouched):
+  <temporary-path> :: spectrum/quart31/index
+UNRECOGNISED spectrum/quart31/index in <temporary-path> stored order matches neither the old nor the current labelling -- not written
+
+Unrecognised index datasets (left untouched):
+  <temporary-path> :: spectrum/quart31/index
+UNRECOGNISED spectrum/quart31/index in <temporary-path> stored order matches neither the old nor the current labelling -- not written
+
+Unrecognised index datasets (left untouched):
+  <temporary-path> :: spectrum/quart31/index
+[ Info: skipping orientifold axiverse database round-trip test: <local-path> not present on this machine
+[ Info: skipping Pipeline 2 real-data round-trip test: <local-path> not present on this machine
+Test Summary:                    | Pass  Total  Time
+Core plotting API stays optional |    8      8  0.5s
+Test Summary:                | Pass  Total   Time
+CairoMakie plotting pipeline |   14     14  26.5s
+Test Summary:                               | Pass  Total  Time
+Axion hierarchy and photon-coupling kernels |   30     30  1.5s
+Test Summary:                           | Pass  Total  Time
+Exact ordered rational rank certificate |  258    258  0.2s
+Test Summary:                     | Pass  Total  Time
+Visible-sector metadata roundtrip |    9      9  2.6s
+Test Summary:                          | Pass  Total  Time
+Axion-photon HDF5 write-read roundtrip |   51     51  2.0s
+Test Summary:                          | Pass  Total  Time
+Axion-photon persisted identity guards |   10     10  0.7s
+Test Summary:                                        | Pass  Total  Time
+Axion-photon configuration and input identity guards |   26     26  4.0s
+Test Summary:                                  | Pass  Total  Time
+Axion-photon HDF5 publication failure recovery |   17     17  5.3s
+Test Summary:                       | Pass  Total  Time
+Axion-photon HDF5 object boundaries |   10     10  0.1s
+Test Summary:             | Pass  Total  Time
+Data directory resolution |    8      8  0.0s
+Test Summary:                        | Pass  Total   Time
+Scale-continuation pilot diagnostics |  132    132  16.1s
+Test Summary:                                             | Pass  Total  Time
+Generic inflation point correction and precision boundary |   25     25  3.4s
+Test Summary:                                | Pass  Total  Time
+Inflation point APIs honor context precision |  145    145  2.4s
+Test Summary:                             | Pass  Total  Time
+Generic geometry mass-basis gradient flow |   21     21  3.1s
+Test Summary:                      | Pass  Total  Time
+Geometry-level LQtilde orientation |   14     14  0.2s
+Test Summary:                                                             | Pass  Total  Time
+Kinetic matrix construction and section-3 positive-definiteness invariant |   16     16  0.3s
+Test Summary:                    | Pass  Total  Time
+Log-shifted derivative workspace |    6      6  0.3s
+Test Summary:                        | Pass  Total  Time
+Structured pairwise charge evaluator |   19     19  0.2s
+Test Summary:                        | Pass  Total  Time
+Cached screening Hessian eigensolver |    6      6  0.2s
+Inflation scan-prep: 1 geometries max_branches=100000 leading_index=all
+data_dir=<temporary-path>
+shard=<temporary-path>
+run_id=test-stage5
+[1/1] h11=2 polytope=1 frst=1 status=success attempts=1 branches=4 seconds=0.080
+Finished: success=1 branch_cap=0 skipped=0 failed=0
+Inflation scan-prep: 1 geometries max_branches=100000 leading_index=all
+data_dir=<temporary-path>
+shard=<temporary-path>
+run_id=scan-prep-62897-1790904514
+[1/1] h11=2 polytope=1 frst=1 skipped resume
+Finished: success=0 branch_cap=0 skipped=1 failed=0
+Inflation scan-prep: 1 geometries max_branches=100000 leading_index=1:1
+data_dir=<temporary-path>
+shard=<temporary-path>
+run_id=scan-prep-62897-1790904514
+[1/1] h11=2 polytope=1 frst=1 status=success attempts=1 branches=2 seconds=0.019
+Finished: success=1 branch_cap=0 skipped=0 failed=0
+Inflation scan-prep: 1 geometries max_branches=1000000 leading_index=all
+data_dir=<temporary-path>
+shard=<temporary-path>
+run_id=scan-prep-62897-1790904515
+[1/1] h11=9 polytope=1 frst=1 status=failed attempts=2 branches=0 seconds=0.007
+Finished: success=0 branch_cap=0 skipped=0 failed=1
+Test Summary:                     | Pass  Total  Time
+Inflation append-only scan shards |   17     17  3.0s
+Test Summary:                                   | Pass  Total  Time
+Inflation stratified pilot selection and report |   21     21  1.1s
+Test Summary:                                  | Pass  Total  Time
+CYTools Eq21 scaling and final geometry fields |   91     91  1.7s
+Test Summary: | Pass  Total  Time
+CYAxiverse.jl |   30     30  2.4s
+Vacua pipeline batch: 1 geometries
+data_dir=<temporary-path>
+threshold=0.5 starts=17 method=legacy workers=1 blas_threads=1 force=false dry_run=true
+summary=<temporary-path>
+[1/1] h11=2 polytope=1 frst=1 skipped matching configuration
+Finished: done=0 skipped=1 blocked=0 failed=0 elapsed=0.049s
+Force targets:
+  <temporary-path>
+Vacua pipeline batch: 1 geometries
+data_dir=<temporary-path>
+threshold=0.5 starts=10000 method=legacy workers=2 blas_threads=1 force=true dry_run=false
+summary=<temporary-path>
+[1/1] h11=2 polytope=1 frst=1 failed: KeyError: key "cytools/potential/L" not found
+Finished: done=0 skipped=0 blocked=0 failed=1 elapsed=23.258s
+Vacua pipeline batch: 1 geometries
+data_dir=<temporary-path>
+threshold=0.6 starts=10000 method=legacy workers=1 blas_threads=1 force=false dry_run=true
+summary=<temporary-path>
+[1/1] h11=2 polytope=1 frst=1 blocked: completed result has different configuration; use --force
+Finished: done=0 skipped=0 blocked=1 failed=0 elapsed=0.089s
+Test Summary:                             | Pass  Total   Time
+Vacua pipeline persistence and validation |   47     47  32.4s
+Test Summary:                                                            | Pass  Total  Time
+Orientifold inflation persistence preserves precision and requires force |   31     31  1.5s
+Test Summary:                       | Pass  Total  Time
+Physical spectrum batch persistence |   38     38  1.1s
+Test Summary:                 | Pass  Total   Time
+Paper reproduction benchmarks |  239    239  11.8s
+Test Summary:                                      | Pass  Total  Time
+Fuzzy-axion h11=2 source-corrected role validation |    7      7  0.0s
+Test Summary:                        | Pass  Total  Time
+HP spectrum: one-axion analytic mass |   11     11  2.1s
+Test Summary:                                        | Pass  Total  Time
+HP spectrum: quartic labels match accumulated values |   44     44  2.6s
+Test Summary:                              | Pass  Total  Time
+basis_snf: id_coords is the matrix inverse |    7      7  0.2s
+Test Summary:                                | Pass  Total  Time
+read.L_arb: column-oriented instanton scales |    7      7  0.2s
+Test Summary:                                        | Pass  Total  Time
+Concrete arbitrary-precision scales and L_arb layout |    9      9  0.8s
+Test Summary:                | Pass  Total  Time
+Phase-hoisted Hessian parity |    8      8  0.8s
+Test Summary:                                                       | Pass  Total  Time
+Factored Kinv whitening remains stable when Kinv is ill-conditioned |    3      3  0.6s
+Test Summary:                             | Pass  Total  Time
+HP spectrum: raw and effective selections |    4      4  0.0s
+Test Summary:                                     | Pass  Total  Time
+PQ and HP spectrum: diagonal two-axion comparison |   51     51  5.3s
+Test Summary:                       | Pass  Total  Time
+PQ quartic cache and linear log-sum |   22     22  0.2s
+Test Summary:                                | Pass  Total  Time
+Float64 inertia certificate and Arb fallback |   14     14  6.3s
+Test Summary:                                       | Pass  Total  Time
+Hybrid spectrum: full fallback after nonconvergence |    3      3  1.1s
+Test Summary:                      | Pass  Total  Time
+PQ spectrum: mass-sign propagation |    3      3  0.0s
+Test Summary:              | Pass  Total  Time
+Instanton hierarchy blocks |   23     23  0.1s
+Test Summary:           | Pass  Total  Time
+PQ mass-window spectrum |   15     15  0.4s
+Test Summary:                              | Pass  Total  Time
+PQ mass-window scientific validation edges |   33     33  5.7s
+Test Summary:                            | Pass  Total  Time
+PQ spectrum: non-diagonal kinetic matrix |    8      8  0.0s
+Test Summary:          | Pass  Total  Time
+PQ-seeded HP alignment |    3      3  0.5s
+Test Summary:                          | Pass  Total   Time
+PQ vacua-pipeline spectrum persistence |  243    243  23.3s
+Test Summary:                                     | Pass  Total  Time
+CatastrophicInflationPopulationStudy (Issue #133) |   44     44  0.9s
+Test Summary:                                               | Pass  Total  Time
+analyze_inflation_candidates: whitened point classification |   54     54  1.1s
+Test Summary:                                        | Pass  Total  Time
+spectrum_mode_counts partitions a symmetric spectrum |   30     30  0.1s
+Quartic index migration: 2 geometries selected from <temporary-path> (dry run, nothing will be written)
+[1/2] h11=4 polytope=1 frst=1 quart31=would-migrate quart22=would-migrate
+[2/2] h11=4 polytope=2 frst=1 quart31=UNRECOGNISED
+
+Per-h11 counts:
+  h11=4    quart31  would-migrate=1 UNRECOGNISED=1
+  h11=4    quart22  would-migrate=1
+
+dry run: geometries=2 with-quartics=2 files-written=0 would-migrate=2 already-correct=0 unrecognised=1 h11-mismatch=0 failed=0
+Re-run with --apply to rewrite the index datasets listed above.
+Quartic index migration: 2 geometries selected from <temporary-path> (applying)
+[1/2] h11=4 polytope=1 frst=1 quart31=migrated quart22=migrated
+[2/2] h11=4 polytope=2 frst=1 quart31=UNRECOGNISED
+
+Per-h11 counts:
+  h11=4    quart31  migrated=1 UNRECOGNISED=1
+  h11=4    quart22  migrated=1
+
+applied: geometries=2 with-quartics=2 files-written=1 migrated=2 already-correct=0 unrecognised=1 h11-mismatch=0 failed=0
+Quartic index migration: 2 geometries selected from <temporary-path> (applying)
+[1/2] h11=4 polytope=1 frst=1 quart31=already-correct quart22=already-correct
+[2/2] h11=4 polytope=2 frst=1 quart31=UNRECOGNISED
+
+Per-h11 counts:
+  h11=4    quart31  already-correct=1 UNRECOGNISED=1
+  h11=4    quart22  already-correct=1
+
+applied: geometries=2 with-quartics=2 files-written=0 migrated=0 already-correct=2 unrecognised=1 h11-mismatch=0 failed=0
+Test Summary:                                              | Pass  Total  Time
+Quartic index migration: relabel old two-dimensional order |   36     36  1.5s
+Test Summary:                        | Pass  Total  Time
+Tier-A optimisations preserve values |   44     44  0.8s
+Test Summary:                                         | Pass  Total  Time
+Orientifold axiverse database bridge (Phase 1, h11=2) |    2      2  0.1s
+Test Summary:                                               | Pass  Total  Time
+Orientifold Pipeline 2 (vacua + inflation) writing boundary |   30     30  1.6s
+     Testing CYAxiverse tests passed

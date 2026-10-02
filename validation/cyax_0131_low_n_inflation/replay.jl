@@ -235,13 +235,30 @@ function main()
         allocated_bytes=summary.allocated_bytes,
         output_bytes=summary.output_bytes))
     eligible = summary.refinement_status === :completed &&
-        summary.entered_slow_roll && summary.accepted_steps > 0
+        summary.entered_slow_roll && summary.terminated &&
+        summary.end_event !== :tmax && summary.accepted_steps > 0
     if !eligible
         println((record=:stop, reason=:trajectory_eligibility_failed,
             refinement_status=summary.refinement_status,
             entered_slow_roll=summary.entered_slow_roll,
+            end_event=summary.end_event, terminated=summary.terminated,
             accepted_steps=summary.accepted_steps,
             error=summary.error))
+        println((record=:bounded_execution_stop,
+            reason=:bounded_null_before_physical_diagnostics,
+            n8_phase_steps=400, n8_branch_point_count=12,
+            n5_scan_intervals_per_side=10_000, p96_steps=6,
+            trajectory_candidates=1, samples=0,
+            observational_status=(new_As_conversion=:NOT_REACHED,
+                new_As_acceptance=:NOT_REACHED, new_ns_acceptance=:NOT_REACHED,
+                tensor_to_scalar_r=:NOT_REACHED,
+                full_physical_n5_trajectory=:NOT_REACHED,
+                issue131_observational_stretch_goal=:NOT_REACHED),
+            n5_full_eight_row_phase_mapping=:NOT_VERIFIABLE,
+            claim_boundary=:fixed_saxion_effective_theory_only,
+            population_prevalence=:NOT_ESTABLISHED,
+            dynamical_saxion_stabilization=:NOT_ESTABLISHED,
+            full_ks_claim=:NOT_ESTABLISHED))
         exit(2)
     end
     @assert length(refined.trajectory.samples) == 20
@@ -255,7 +272,7 @@ function main()
         sample_selection=:all_returned_samples_no_pivot))
     for sample_index in eachindex(refined.trajectory.samples)
         diagnostic = inflation_refinement_author_diagnostics(refined;
-            sample_index)
+            sample_index, physical_witness=shifted)
         println((record=:n8_sample, model=diagnostic.model,
             row_count=diagnostic.row_count,
             sample_index=diagnostic.sample_index,

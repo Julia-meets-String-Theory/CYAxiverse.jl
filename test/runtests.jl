@@ -3906,8 +3906,14 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         @test n8_phase_calibration.refined.solver.precision_bits == 128
         @test n8_phase_calibration.refined.gradient_residual < big"1e-30"
         @test n8_phase_calibration.refined.null_residual < big"1e-30"
+        @test n8_phase_calibration.refined_phase_vector ==
+            setprecision(BigFloat, 128) do
+                BigFloat.(n8_phase_calibration.phase_vector)
+            end
         @test length(n8_phase_calibration.refined.eigenvalues) == 8
-        @test count(>(0), n8_phase_calibration.refined.eigenvalues) == 7
+        @test minimum(abs, n8_phase_calibration.refined.eigenvalues) <=
+            sqrt(length(n8_phase_calibration.refined.null_vector)) *
+            n8_phase_calibration.refined.null_residual
         @test n8_phase_calibration.sign_change
         @test length(n8_phase_calibration.stationary_path) == 12
         @test n8_phase_calibration.bracket.width ≈ 2e-5 atol=1e-12
@@ -3972,7 +3978,10 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
                 precision_bits=64, max_time=10, max_step=1,
                 initial_step=1e-5, sample_count=1, reltol=1e-8,
                 abstol=1e-10, maxiters=1_000_000,
-                measurement_scope=:cold)
+                measurement_scope=:cold,
+                critical_k=n8_phase_calibration.refined.k,
+                phases=n8_phase_calibration.phase_vector,
+                basis_theta=n8_phase_calibration.refined.theta)
             @test Poly102RefinementModel === benchmark.author_inflation
             row2_config = inflation_refinement_config(
                 precision_bits=100, max_time=10, max_step=1,
@@ -3991,11 +4000,12 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
                     output_bytes=64))
             refined = refine_inflation_candidate(refinement_candidate;
                 config=refinement_config)
-            @test refined.summary.refinement_status == :completed
+            @test refined.summary.refinement_status == :censored
             @test refined.summary.event_policy == :final_finite_exit
             @test refined.summary.measurement_status == :completed
             @test refined.summary.measurement_scope == :cold
             @test refined.summary.accepted_steps > 0
+            @test refined.summary.phases == n8_phase_calibration.phase_vector
             @test _refinement_solver_status(RefinementReturnCode.Success) ==
                 (:completed, "")
             @test first(_refinement_solver_status(RefinementReturnCode.MaxIters)) ==
@@ -4004,34 +4014,102 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
             @test short_flow.entered_slow_roll
             @test short_flow.end_event == :tmax
             @test !short_flow.terminated
-            selected_sample = length(short_flow.samples)
+            @test isempty(short_flow.samples)
+            @test short_flow.censored_slow_roll_window.duration > 0
+            @test refined.summary.slow_roll_efolds === nothing
+            @test refined.summary.entry_n === nothing
+            @test refined.summary.end_n === nothing
+            @test refined.summary.censored_slow_roll_duration ==
+                short_flow.censored_slow_roll_window.duration
+            @test first(_refinement_solver_status(
+                RefinementReturnCode.Success, short_flow)) == :censored
+            @test_throws ArgumentError inflation_refinement_author_diagnostics(
+                refined; sample_index=1, physical_witness=n8_phase_calibration)
+
+            tangent_a = BigFloat[1, 0, 0, 0, 0, 0, 0, 0]
+            tangent_b = BigFloat[0, 1, 0, 0, 0, 0, 0, 0]
+            # Synthetic completed-window data exercise the gate only; no
+            # physical observables are attributed to this fixture.
+            synthetic_samples = [
+                (n=BigFloat(2), epsilon=BigFloat("0.01"),
+                 eta_parallel=BigFloat("-0.01"), potential=BigFloat(1),
+                 tangent=tangent_a),
+                (n=BigFloat(8), epsilon=BigFloat("0.02"),
+                 eta_parallel=BigFloat("-0.02"), potential=BigFloat(1),
+                 tangent=tangent_b),
+            ]
+            completed_flow = merge(short_flow, (; entered_slow_roll=true,
+                terminated=true, end_event=:epsilon, entry_n=BigFloat(2),
+                end_n=BigFloat(8), efolds=BigFloat(8),
+                slow_roll_efolds=BigFloat(6), samples=synthetic_samples))
+            completed_refined = merge(refined, (; trajectory=completed_flow,
+                summary=merge(refined.summary, (; refinement_status=:completed,
+                    entered_slow_roll=true, terminated=true,
+                    end_event=:epsilon, entry_n=BigFloat(2), end_n=BigFloat(8),
+                    efolds=BigFloat(8), slow_roll_efolds=BigFloat(6),
+                    ne_window=(BigFloat(2), BigFloat(8)),
+                    physical_k=completed_flow.k))))
+            selected_sample = length(completed_flow.samples)
             author_diagnostics = inflation_refinement_author_diagnostics(
-                refined; sample_index=selected_sample)
+                completed_refined; sample_index=selected_sample,
+                physical_witness=n8_phase_calibration)
             @test author_diagnostics.model == :n8_author_trajectory_10_row
             @test author_diagnostics.sample_index == selected_sample
-            @test author_diagnostics.sample_n == short_flow.samples[selected_sample].n
-            @test author_diagnostics.ne == short_flow.slow_roll_efolds
+            @test author_diagnostics.sample_n == completed_flow.samples[selected_sample].n
+            @test author_diagnostics.ne == completed_flow.slow_roll_efolds
             @test author_diagnostics.ne_window ==
-                (short_flow.entry_n, short_flow.end_n)
+                (completed_flow.entry_n, completed_flow.end_n)
+            @test author_diagnostics.physical_k_reestablished
             @test author_diagnostics.pivot_interpretation == :none
             @test author_diagnostics.observational_acceptance == :not_evaluated
             @test author_diagnostics.cumulative_turning ≈
-                benchmark.cumulative_turning(short_flow.samples[1:selected_sample])
-            failed_refinement = merge(refined, (; summary=merge(
-                refined.summary, (; refinement_status=:failed))))
+                benchmark.cumulative_turning(completed_flow.samples[1:selected_sample])
+            failed_refinement = merge(completed_refined, (; summary=merge(
+                completed_refined.summary, (; refinement_status=:failed))))
             @test_throws ArgumentError inflation_refinement_author_diagnostics(
-                failed_refinement; sample_index=selected_sample)
-            zero_step_flow = merge(short_flow, (; solver=merge(
-                short_flow.solver, (; accepted_steps=0))))
+                failed_refinement; sample_index=selected_sample,
+                physical_witness=n8_phase_calibration)
+            @test_throws ArgumentError inflation_refinement_author_diagnostics(
+                completed_refined; sample_index=selected_sample,
+                physical_witness=nothing)
+            wrong_phase_witness = merge(n8_phase_calibration,
+                (; phase_vector=copy(n8_phase_calibration.phase_vector)))
+            wrong_phase_witness.phase_vector[2] = nextfloat(0.04)
+            @test_throws ArgumentError inflation_refinement_author_diagnostics(
+                completed_refined; sample_index=selected_sample,
+                physical_witness=wrong_phase_witness)
+            wrong_metric_witness = merge(n8_phase_calibration,
+                (; metric_basis=:other_basis))
+            @test_throws ArgumentError inflation_refinement_author_diagnostics(
+                completed_refined; sample_index=selected_sample,
+                physical_witness=wrong_metric_witness)
+            wrong_k_refinement = merge(completed_refined, (; summary=merge(
+                completed_refined.summary,
+                (; critical_k=completed_refined.summary.critical_k + big"1e-10"))))
+            @test_throws ArgumentError inflation_refinement_author_diagnostics(
+                wrong_k_refinement; sample_index=selected_sample,
+                physical_witness=n8_phase_calibration)
+            wrong_coordinates = merge(completed_flow,
+                (; basis_theta=completed_flow.basis_theta .+ big"1e-20"))
+            wrong_coordinates = merge(wrong_coordinates,
+                (; critical_theta=copy(wrong_coordinates.basis_theta)))
             @test_throws ArgumentError inflation_author_trajectory_diagnostics(
-                zero_step_flow; sample_index=selected_sample)
-            failed_solver = merge(short_flow, (; solver=merge(
-                short_flow.solver, (; retcode=RefinementReturnCode.MaxIters))))
+                wrong_coordinates; sample_index=selected_sample,
+                physical_witness=n8_phase_calibration)
+            zero_step_flow = merge(completed_flow, (; solver=merge(
+                completed_flow.solver, (; accepted_steps=0))))
             @test_throws ArgumentError inflation_author_trajectory_diagnostics(
-                failed_solver; sample_index=selected_sample)
-            bad_k_flow = merge(short_flow, (; k=short_flow.k + big"1e-10"))
+                zero_step_flow; sample_index=selected_sample,
+                physical_witness=n8_phase_calibration)
+            failed_solver = merge(completed_flow, (; solver=merge(
+                completed_flow.solver, (; retcode=RefinementReturnCode.MaxIters))))
             @test_throws ArgumentError inflation_author_trajectory_diagnostics(
-                bad_k_flow; sample_index=selected_sample)
+                failed_solver; sample_index=selected_sample,
+                physical_witness=n8_phase_calibration)
+            bad_k_flow = merge(completed_flow, (; k=completed_flow.k + big"1e-10"))
+            @test_throws ArgumentError inflation_author_trajectory_diagnostics(
+                bad_k_flow; sample_index=selected_sample,
+                physical_witness=n8_phase_calibration)
             diagnostic_row = inflation_refinement_diagnostic_row(
                 refinement_candidate, refined)
             serialization = inflation_stage_measure(
@@ -4041,7 +4119,7 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
                 refinement_candidate, refined; serialization)
             @test diagnostic_row.screen_status == :candidate
             @test diagnostic_row.screen_epsilon == 0.5
-            @test diagnostic_row.refinement_status == :completed
+            @test diagnostic_row.refinement_status == :censored
             @test diagnostic_row.serialization_status == :completed
             @test diagnostic_row.serialization_measurement_scope == :warm
             @test diagnostic_row.serialization_output_bytes > 0

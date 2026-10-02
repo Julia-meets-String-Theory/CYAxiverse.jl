@@ -85,6 +85,7 @@ function inflation_refinement_diagnostic_row(candidate, refined;
        refinement_end_n=summary.end_n,
        refinement_efolds=summary.efolds,
        refinement_slow_roll_efolds=summary.slow_roll_efolds,
+       refinement_censored_slow_roll_duration=summary.censored_slow_roll_duration,
        refinement_ne_definition=summary.ne_definition,
        refinement_ne_window=summary.ne_window,
        refinement_accepted_steps=summary.accepted_steps,
@@ -113,14 +114,72 @@ Return explicitly selected diagnostics from the N8 author trajectory.
 carry the exact returned sample index and `samples[index].n`; selecting a
 sample does not define a pivot or an observational acceptance window.
 """
+function _inflation_require_author_witness(witness, trajectory; summary=nothing)
+    witness === nothing &&
+        throw(ArgumentError("physical diagnostics require a same-model catastrophe witness"))
+    witness.status === :completed && witness.converged && witness.sign_change ||
+        throw(ArgumentError("catastrophe witness did not pass its source gates"))
+    witness.model === :n8_author_trajectory_10_row && witness.row_count == 10 ||
+        throw(ArgumentError("catastrophe witness is not the ten-row N8 author model"))
+    witness.phase_convention === :additive_argument_radians ||
+        throw(ArgumentError("catastrophe witness phase convention does not match"))
+    witness.coordinate_convention === :raw_radians ||
+        throw(ArgumentError("catastrophe witness coordinates do not match"))
+    witness.metric_basis === :canonical_hessian_from_reconstructed_author_metric ||
+        throw(ArgumentError("catastrophe witness metric or basis does not match"))
+    trajectory.model === witness.model && trajectory.scale_category === :physical_author_radial_k ||
+        throw(ArgumentError("trajectory does not use the witnessed author model and physical scale"))
+    trajectory.coordinate_convention === witness.coordinate_convention &&
+        trajectory.metric_convention === :rounded_reconstructed_author_metric ||
+        throw(ArgumentError("trajectory coordinates or metric do not match the catastrophe witness"))
+    trajectory.basis === :canonical_hessian && trajectory.basis_k == trajectory.k ||
+        throw(ArgumentError("trajectory basis does not match the catastrophe witness"))
+    trajectory.critical_theta == trajectory.basis_theta ||
+        throw(ArgumentError("trajectory critical coordinates differ from its fixed basis coordinates"))
+    precision = trajectory.precision_bits
+    witness_values = setprecision(BigFloat, precision) do
+        (phases=BigFloat.(witness.phase_vector),
+         refined_phases=BigFloat.(witness.refined_phase_vector),
+         theta=BigFloat.(witness.refined.theta),
+         critical_k=BigFloat(witness.refined.k))
+    end
+    trajectory.phases == witness_values.phases == witness_values.refined_phases ||
+        throw(ArgumentError("trajectory phase encoding differs from the catastrophe witness"))
+    trajectory.basis_theta == witness_values.theta ||
+        throw(ArgumentError("trajectory coordinates differ from the refined catastrophe witness"))
+    trajectory.critical_k == witness_values.critical_k ||
+        throw(ArgumentError("trajectory critical k differs from the refined catastrophe witness"))
+    if summary !== nothing
+        summary.phases == witness.phase_vector ||
+            throw(ArgumentError("refinement phase encoding differs from the catastrophe witness"))
+        summary.basis === :canonical_hessian &&
+            summary.metric_convention === :rounded_reconstructed_author_metric &&
+            summary.coordinate_convention === :raw_radians ||
+            throw(ArgumentError("refinement coordinate, metric, or basis differs from the witness"))
+        summary_theta = setprecision(BigFloat, precision) do
+            BigFloat.(summary.basis_theta)
+        end
+        summary_theta == witness_values.theta ||
+            throw(ArgumentError("refinement coordinates differ from the refined catastrophe witness"))
+        summary_k = setprecision(BigFloat, precision) do
+            BigFloat(summary.critical_k)
+        end
+        summary_k == witness_values.critical_k ||
+            throw(ArgumentError("refinement critical k differs from the refined catastrophe witness"))
+    end
+    nothing
+end
+
 function inflation_author_trajectory_diagnostics(trajectory;
-        sample_index::Int)
+        sample_index::Int, physical_witness)
     trajectory.model === :n8_author_trajectory_10_row ||
         throw(ArgumentError("diagnostics require the ten-row N8 author trajectory"))
     trajectory.scale_category === :physical_author_radial_k ||
         throw(ArgumentError("physical k must be established before diagnostics"))
     trajectory.entered_slow_roll ||
         throw(ArgumentError("trajectory did not enter a slow-roll window"))
+    trajectory.terminated && trajectory.end_event !== :tmax ||
+        throw(ArgumentError("trajectory has no completed finite-exit slow-roll window"))
     hasproperty(trajectory, :solver) ||
         throw(ArgumentError("trajectory does not contain solver status"))
     success = CYAxiverse.paper_benchmarks.author_inflation.OrdinaryDiffEq.ReturnCode.Success
@@ -128,6 +187,7 @@ function inflation_author_trajectory_diagnostics(trajectory;
         throw(ArgumentError("trajectory solver did not complete successfully"))
     trajectory.solver.accepted_steps > 0 ||
         throw(ArgumentError("trajectory has no accepted solver steps"))
+    _inflation_require_author_witness(physical_witness, trajectory)
     expected_physical_k = setprecision(BigFloat, trajectory.precision_bits) do
         BigFloat(trajectory.critical_k) + BigFloat(trajectory.delta_k)
     end
@@ -164,18 +224,21 @@ function inflation_author_trajectory_diagnostics(trajectory;
        cumulative_turning_units=:radians,
        cumulative_turning_sample_index=sample_index,
        cumulative_turning_sample_n=sample.n,
+       physical_k_reestablished=true,
        pivot_interpretation=:none,
        observational_acceptance=:not_evaluated)
 end
 
 """Apply the refinement eligibility gate before author-trajectory reporting."""
 function inflation_refinement_author_diagnostics(refined;
-        sample_index::Int)
+        sample_index::Int, physical_witness)
     summary = refined.summary
     summary.refinement_status === :completed ||
         throw(ArgumentError("refinement status is not completed"))
     summary.entered_slow_roll ||
         throw(ArgumentError("refinement did not enter slow roll"))
+    summary.terminated && summary.end_event !== :tmax ||
+        throw(ArgumentError("refinement has no completed finite-exit slow-roll window"))
     summary.accepted_steps > 0 ||
         throw(ArgumentError("refinement has no accepted solver steps"))
     summary.model_route === :author_inflation_n8_author_trajectory ||
@@ -191,12 +254,13 @@ function inflation_refinement_author_diagnostics(refined;
         throw(ArgumentError("refinement physical k does not match critical_k + delta_k"))
     summary.physical_k == refined.trajectory.k ||
         throw(ArgumentError("refinement physical k differs from author trajectory k"))
+    _inflation_require_author_witness(
+        physical_witness, refined.trajectory; summary)
     diagnostics = inflation_author_trajectory_diagnostics(
-        refined.trajectory; sample_index)
+        refined.trajectory; sample_index, physical_witness)
     merge(diagnostics, (; refinement_status=summary.refinement_status,
         accepted_steps=summary.accepted_steps,
-        solver_retcode=summary.solver_retcode,
-        physical_k_reestablished=true))
+        solver_retcode=summary.solver_retcode))
 end
 
 function _inflation_diagnostic_csv_escape(value)

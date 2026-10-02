@@ -104,14 +104,18 @@ function _refinement_summary(candidate, config, status::Symbol;
        entered_slow_roll=trajectory === nothing ? false : trajectory.entered_slow_roll,
        end_event=trajectory === nothing ? :not_run : trajectory.end_event,
        terminated=trajectory === nothing ? false : trajectory.terminated,
-       entry_n=trajectory === nothing ? nothing :
+       entry_n=trajectory === nothing || trajectory.end_event === :tmax ? nothing :
            get(trajectory, :entry_n, nothing),
-       end_n=trajectory === nothing ? nothing :
+       end_n=trajectory === nothing || trajectory.end_event === :tmax ? nothing :
            get(trajectory, :end_n, nothing),
-       efolds=trajectory === nothing ? nothing : trajectory.efolds,
-       slow_roll_efolds=trajectory === nothing ? nothing : trajectory.slow_roll_efolds,
+       efolds=trajectory === nothing || trajectory.end_event === :tmax ? nothing : trajectory.efolds,
+       slow_roll_efolds=trajectory === nothing || trajectory.end_event === :tmax ? nothing : trajectory.slow_roll_efolds,
+       censored_slow_roll_duration=trajectory === nothing ||
+           !hasproperty(trajectory, :censored_slow_roll_window) ? nothing :
+           trajectory.censored_slow_roll_window.duration,
        ne_definition=:slow_roll_efolds,
-       ne_window=trajectory === nothing || !hasproperty(trajectory, :entry_n) ?
+       ne_window=trajectory === nothing || trajectory.end_event === :tmax ||
+           !hasproperty(trajectory, :entry_n) ?
            nothing : (trajectory.entry_n, trajectory.end_n),
        accepted_steps=solver === nothing ? 0 : solver.accepted_steps,
        rejected_steps=solver === nothing ? 0 : solver.rejected_steps,
@@ -122,8 +126,13 @@ function _refinement_summary(candidate, config, status::Symbol;
        output_bytes=measured === nothing ? 0 : measured.output_bytes)
 end
 
-function _refinement_solver_status(retcode)
-    retcode == RefinementReturnCode.Success && return (:completed, "")
+function _refinement_solver_status(retcode, trajectory=nothing)
+    if retcode == RefinementReturnCode.Success
+        if trajectory !== nothing && trajectory.end_event === :tmax
+            return (:censored, "slow-roll window remained open at the solver horizon")
+        end
+        return (:completed, "")
+    end
     (:failed, "trajectory solver retcode: $retcode")
 end
 
@@ -156,7 +165,7 @@ function refine_inflation_candidate(candidate;
     try
         trajectory = measured.value
         status, error_message = _refinement_solver_status(
-            trajectory.solver.retcode)
+            trajectory.solver.retcode, trajectory)
         (; summary=_refinement_summary(candidate, config, status;
                error_message, measured, trajectory), trajectory)
     catch error

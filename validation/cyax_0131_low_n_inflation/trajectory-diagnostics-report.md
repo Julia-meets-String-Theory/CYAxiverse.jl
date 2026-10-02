@@ -144,3 +144,35 @@ is explicit approval of the exact changed setting(s) and whether they are
 diagnostic-only or accepted for scientific verification, together with the
 unchanged scientific convergence gates. Until then, inherited settings and
 criteria remain unchanged and the physical result remains unestablished.
+
+## Review repair: phase identity and bounded-window disposition
+
+The measurements above are historical and used the pre-review trajectory
+source SHA-256 `578a6b44877f82082f50699dedc2830bc2d34f4efedc93394e3b2b255ac9a564`.
+That source refined the row-2 phase as decimal `BigFloat("0.04")`, producing
+`critical_k=0.5080234603138255193960987179021912891477`; the owner-terminated
+full replay and the two 100-bit probes retain that identity. They are not
+numerically merged with the repaired calibration.
+
+The repaired source SHA-256 is
+`f252962376de39784207f3d56f6db5271a0e80ac4649b383d10087a24af0dcaa`. It
+refines the exact returned Float64 phase vector at 128-bit precision, with
+`refined_phase_vector[2]=0.04000000000000000083266726846886740531772`. The
+repaired focused regression measured `critical_k=0.5080234603138255175832528546556562960302`,
+gradient residual `1.926019943173470684443306798976058396723e-37`, null
+residual `6.078716386972213161207930381283676849136e-34`, and minimum
+absolute Hessian eigenvalue `1.648814618691634454827763903154989763316e-34`.
+The 400 phase increments and 12 stationary points converged, and the recorded
+two-sided stationary-branch minimum-eigenvalue signs remain positive below
+and negative above the bracket. These exact representations and results are
+recorded separately; no phase-equivalence tolerance is introduced.
+
+On the repaired source, the focused 64-bit **BigFloat** open-window gate case
+used Rodas5P, `max_time=10`, `maxiters=1000000`, `reltol=1e-8`, and
+`abstol=1e-10`. The solver returned `Success` after 41 accepted and zero
+rejected steps, with 328 RHS and 41 Jacobian evaluations. It reached `:tmax`
+with `terminated=false`; the reported exploratory censored duration was
+`17.8028961864886779848`, while completed `N_e` was absent and sample count
+was zero. This is test evidence for the open-window gate, not a physical
+trajectory result or observation. No 100-bit full replay was restarted, and
+no physical observable or successful trajectory is claimed.
