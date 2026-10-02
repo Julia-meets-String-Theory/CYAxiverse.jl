@@ -102,13 +102,19 @@ cyaxiverse-ks-cy3-v8-qed-assignment
 historical dense_opt_in cyaxiverse-ks-cy3-v9-schema-1.1
 ~~~
 
-The same v9 top-level marker is also used by the compact schema. Therefore the
-potential sub-schema markers are part of dispatch identity:
+The same v9 top-level marker is also used by multiple historical/current
+potential storage contracts. Therefore the potential storage marker and, for
+the current compact path, the reconstruction schema are part of dispatch
+identity:
 
-- v9 + exact \`reconstruct_on_demand\` + exact reconstruction schema => compact;
-- v9 + complete dense \`Q/L/Kinv\` + both compact potential markers absent =>
-  transitional legacy dense;
-- partial/unknown/hybrid forms => fail closed.
+- v9 + \`storage_schema=reconstruct_on_demand\` + exact current reconstruction
+  schema => current compact path;
+- v9 + \`storage_schema=dense_opt_in\` + complete dense \`Q/L/Kinv\` + no
+  current reconstruct-on-demand reconstruction schema => historical dense
+  path;
+- v9 + \`storage_schema=factorized_canonical\` => unsupported historical compact
+  path / fail closed;
+- partial, unknown, or contradictory states => fail closed.
 
 For all dense classes the reader preserves stored \`Q/L\` orientation. It does
 not canonicalize row-oriented v2-v5 data at the component boundary.
