@@ -30,10 +30,14 @@ legacy dense HDF5
 schema-1.1 compact HDF5
     -> validate schema/metadata
     -> reconstruct tau, V, Kinv
-    -> reconstruct Q
-    -> reconstruct L
+    -> reconstruct direct+pair Q/L
+    -> reconstruct geometry-level selected QED term when normatively present
+    -> keep EFT assignment-pool augmentation outside GeometryIndex reader
     -> verify counts/hashes/witnesses
 ~~~
+
+For legacy dense inputs this boundary preserves raw stored Q/L orientation.
+Canonical orientation remains the responsibility of `oriented_potential`.
 
 After this point existing public readers retain their current semantics:
 
@@ -56,15 +60,15 @@ potential_factored
 | Requirement / Gate | Planned implementation | Planned verification |
 | --- | --- | --- |
 | R-001 | Add one shared component reader/reconstructor | Dense/compact unit tests; public-reader tests |
-| R-002 | Strict schema/metadata parser and validator | malformed/partial/conflicting metadata fixtures |
+| R-002 | Strict schema/metadata parser and validator, literal source conventions, h11 identity | malformed/partial/conflicting metadata + dimension/convention fixtures |
 | R-003 | Native COO reconstruction with distinct permutations | independent iii/iij/ijk analytic fixtures |
 | R-004 | Exact \`4*(tau*tau' - V*kappa(t))\` reconstruction + symmetrization | analytic matrices; normalization/sign/parentheses mutation tests |
 | R-005 | Strict integral unique effective-cone validation and transpose | malformed numeric fixtures + exact dense-oracle equality |
 | R-006 | Deterministic lexicographic pair-index generation | exact pair-index/Q fixtures |
 | R-007 | Direct/pair L reconstruction and signed-log encoding | independent coefficient oracles + zero-amplitude rejection |
-| R-008 | Source counts, canonical JSON hashes, persisted-volume replay | frozen cross-language hash vectors + corrupted witness tests |
-| R-009 | Preserve legacy dense path | baseline regression tests on legacy fixtures |
-| R-010 | Compare all public potential readers on matched artifacts | dense/compact reader equivalence |
+| R-008 | Source counts, canonical JSON hashes, persisted-volume replay, geometry-level QED / EFT-pool state | frozen cross-language hashes + QED/pool integrity fixtures |
+| R-009 | Preserve every supported historical dense class and raw orientation | marker-free/v5/v8/v8-QED/dense-v9 regressions |
+| R-010 | Compare public potential readers on matched canonical dense/compact artifacts plus QED/pool semantics | dense/compact reader equivalence + appended-QED + assignment-independent pool fixtures |
 | R-011 | Existing vacuum-only pipeline through \`:auto\` | exact classification/count comparison |
 | R-012 | One direct \`AxionPotential\` consumer | matched-output comparison without \`read.geometry\` |
 | R-013 | Read-only compact handling | before/after HDF5 digest / no-write assertion |
@@ -73,7 +77,7 @@ potential_factored
 | R-016 | Exact evidence/review | candidate commit/tree + independent review |
 | G0 | Approve exact S2 package | Spec + Scientific/Numerical review + owner approval |
 | G1 | Component reconstruction correctness | focused tests + malformed-state suite |
-| G2 | Matched real-oracle equivalence | h11=4,10,50,+frozen higher-dimensional fixture |
+| G2 | Matched real-oracle equivalence | h11=4,10,50,+frozen higher-dimensional fixture, legacy orientation regressions, appended-QED and assignment-pool cases |
 | G3 | Downstream equivalence | vacua-only + one direct potential consumer |
 | G4 | Exact-candidate acceptance | full verification + fresh independent review |
 
