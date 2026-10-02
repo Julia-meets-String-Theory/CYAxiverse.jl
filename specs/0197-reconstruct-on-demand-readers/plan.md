@@ -99,7 +99,7 @@ cyaxiverse-ks-cy3-v4
 cyaxiverse-ks-cy3-v5
 cyaxiverse-ks-cy3-v8
 cyaxiverse-ks-cy3-v8-qed-assignment
-transitional dense cyaxiverse-ks-cy3-v9-schema-1.1
+historical dense_opt_in cyaxiverse-ks-cy3-v9-schema-1.1
 ~~~
 
 The same v9 top-level marker is also used by the compact schema. Therefore the
@@ -369,7 +369,8 @@ Regression fixtures must cover the materially distinct legacy classes:
 - v5 row-oriented;
 - v8 column-oriented;
 - v8-QED-assignment with appended QED;
-- transitional dense v9.
+- dense-v9 `storage_schema=dense_opt_in`;
+- v9 `storage_schema=factorized_canonical` fail-closed regression.
 
 The dense component path preserves raw orientation; canonicalization remains an
 \`oriented_potential\` responsibility.
