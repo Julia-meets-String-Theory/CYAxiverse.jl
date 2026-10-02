@@ -269,7 +269,7 @@ cyaxiverse-ks-cy3-v4
 cyaxiverse-ks-cy3-v5
 cyaxiverse-ks-cy3-v8
 cyaxiverse-ks-cy3-v8-qed-assignment
-cyaxiverse-ks-cy3-v9-schema-1.1   [transitional dense form only]
+cyaxiverse-ks-cy3-v9-schema-1.1   [historical dense_opt_in form]
 ~~~
 
 A dense artifact is complete only when it contains all three historical
@@ -281,10 +281,26 @@ cytools/potential/L
 cytools/geometric/Kinv
 ~~~
 
-For the transitional dense v9 class, both
-\`cytools/potential/storage_schema\` and
-\`cytools/potential/schema_version\` must be absent. If either compact marker is
-present, the artifact is not eligible for dense fallback.
+For the historical dense v9 class, the exact accepted identity is:
+
+~~~text
+file schema_version = cyaxiverse-ks-cy3-v9-schema-1.1
+cytools/potential/storage_schema = dense_opt_in
+dense Q/L/Kinv present
+no cytools/potential schema_version identifying
+  cyaxiverse-potential-reconstruction-1.0
+~~~
+
+The same historical writer also emitted:
+
+~~~text
+cytools/potential/storage_schema = factorized_canonical
+~~~
+
+when dense materialization was not requested. That older factorized format is
+**not** the current \`reconstruct_on_demand\` schema governed by CYAX-0197 and
+is not supported by this specification. It SHALL fail closed rather than being
+silently interpreted as either legacy dense or current compact reconstruction.
 
 The absence of a top-level schema marker is itself a recognized historical
 legacy class when the dense datasets are complete. An unknown nonempty
@@ -716,13 +732,14 @@ The reader SHALL classify an artifact before reading scientific arrays.
 
 | File/potential state | Required behavior |
 | --- | --- |
-| Exact schema-1.1 file marker + exact reconstruct-on-demand marker + exact reconstruction schema + complete consistent metadata + no forbidden dense arrays | reconstruct compact representation |
+| Exact current schema-1.1 file marker + \`storage_schema=reconstruct_on_demand\` + exact reconstruction schema + complete consistent metadata + no forbidden dense arrays | reconstruct current compact representation |
 | Marker-free artifact + complete dense \`Q/L/Kinv\` + no potential schema/storage markers | use legacy dense path unchanged, preserving stored orientation |
 | Exact legacy marker v2/v3/v4/v5/v8/v8-QED-assignment + complete dense \`Q/L/Kinv\` + no potential schema/storage markers | use legacy dense path unchanged, preserving stored orientation |
-| Top-level \`cyaxiverse-ks-cy3-v9-schema-1.1\` + complete dense \`Q/L/Kinv\` + both potential schema/storage markers absent | use transitional dense-v9 legacy path unchanged |
+| Top-level \`cyaxiverse-ks-cy3-v9-schema-1.1\` + \`storage_schema=dense_opt_in\` + complete dense \`Q/L/Kinv\` + no current reconstruct-on-demand reconstruction schema | use historical dense-v9 legacy path unchanged, preserving stored orientation |
+| Top-level \`cyaxiverse-ks-cy3-v9-schema-1.1\` + \`storage_schema=factorized_canonical\` | unsupported historical compact format; fail closed |
 | Exact schema-1.1 file marker + unknown/partial potential schema or storage marker | fail closed |
-| Exact compact schema markers + unexpected dense \`Q\` or \`L\` | fail closed as contradictory hybrid |
-| Exact compact schema markers + unexpected persisted dense \`Kinv\` or \`divisor_volumes\` | fail closed as contradictory hybrid |
+| Exact current compact schema markers + unexpected dense \`Q\` or \`L\` | fail closed as contradictory hybrid |
+| Exact current compact schema markers + unexpected persisted dense \`Kinv\` or \`divisor_volumes\` | fail closed as contradictory hybrid |
 | Reconstruct-on-demand marker on an unrecognized file schema | fail closed |
 | Complete dense datasets plus an unknown top-level schema marker | fail closed |
 | Complete dense datasets plus any unknown potential storage/schema marker | fail closed |
@@ -731,12 +748,17 @@ The reader SHALL classify an artifact before reading scientific arrays.
 | If duplicate construction metadata is present, conflicting overlapping normative reconstruction fields | fail closed |
 | Compact visible-sector / QED state violating F-008A | fail closed |
 | Compact EFT assignment-pool state violating F-008B | fail closed |
-| Neither complete supported legacy dense nor exact supported compact schema | fail closed |
+| Neither complete supported legacy dense nor exact supported current compact schema | fail closed |
 
 The top-level v9 marker alone is therefore not sufficient to classify an
-artifact as compact because the accepted lineage contains a transitional dense
-v9 form. Compact classification requires the exact potential storage and
-reconstruction sub-schema markers.
+artifact. The potential storage marker is part of the identity:
+
+~~~text
+dense_opt_in          -> historical dense-v9 compatibility path
+factorized_canonical  -> unsupported historical compact path / fail closed
+reconstruct_on_demand -> current compact reconstruction path, only with the
+                         exact current reconstruction schema
+~~~
 
 A malformed compact artifact must never be relabeled as legacy merely because
 some dense datasets happen to exist.
@@ -784,9 +806,12 @@ The implementation SHALL parse metadata within Julia and fail closed when a
 required field is absent or malformed.
 
 Before taking a dense legacy path, it SHALL validate that the top-level marker
-belongs to F-003A (or is absent), compact potential markers are absent, the
-three dense datasets are complete, and any marker-specific historical layout
-fixture remains compatible with the stored arrays.
+belongs to F-003A (or is absent), the three dense datasets are complete, and
+the marker-specific storage contract is satisfied. In particular,
+historical dense v9 requires \`storage_schema=dense_opt_in\`; v2-v8/marker-free
+dense classes require the historical absence of compact potential markers.
+Any marker-specific historical layout fixture must remain compatible with the
+stored arrays.
 
 ### R-003 — Exact sparse-\`kappa\` reconstruction
 
@@ -866,8 +891,10 @@ class, including:
 - v5 row-oriented dense;
 - v8 column-oriented dense;
 - v8-QED-assignment with an appended QED column;
-- transitional dense v9 with the schema-1.1 top-level marker but no compact
-  potential sub-schema markers.
+- historical dense v9 with the schema-1.1 top-level marker,
+  \`storage_schema=dense_opt_in\`, and complete dense \`Q/L/Kinv\`;
+- historical v9 \`storage_schema=factorized_canonical\` as an explicit
+  fail-closed regression.
 
 ### R-010 — Public potential-reader equivalence
 
@@ -931,7 +958,8 @@ Focused tests SHALL cover at least:
 - unknown potential reconstruction schema;
 - unknown storage marker;
 - contradictory compact+dense hybrid;
-- supported dense-v9 transitional dispatch;
+- supported dense-v9 \`storage_schema=dense_opt_in\` dispatch;
+- unsupported historical v9 \`storage_schema=factorized_canonical\` failure;
 - missing reconstruction metadata;
 - conflicting duplicated metadata;
 - missing or reordered literal source-dataset metadata;
@@ -1092,7 +1120,9 @@ Required evidence includes:
 12. matched dense/compact real fixtures at the G2 cells;
 13. public reader equivalence;
 14. legacy dense dispatch/orientation regression fixtures for every material
-    historical class in R-009;
+    historical class in R-009, including an actual dense-v9
+    \`storage_schema=dense_opt_in\` artifact and an explicit
+    \`factorized_canonical\` fail-closed fixture;
 15. vacuum-only downstream equivalence;
 16. one direct \`AxionPotential\` consumer equivalence check;
 17. focused Julia tests;
