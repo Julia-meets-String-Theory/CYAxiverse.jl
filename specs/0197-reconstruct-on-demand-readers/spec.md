@@ -179,7 +179,8 @@ datasets that schema 1.1 does not persist.
 
 This specification includes:
 
-- one canonical internal \`L,Q,Kinv\` reader/reconstruction boundary;
+- one shared internal \`L,Q,Kinv\` reader/reconstruction boundary that
+  preserves historical dense raw orientation;
 - deterministic schema dispatch;
 - strict schema-1.1 metadata validation;
 - native-Julia reconstruction of \`tau\`, \`V\`, \`Kinv\`, \`Q\`, and \`L\`;
@@ -742,15 +743,20 @@ some dense datasets happen to exist.
 
 ## Requirements
 
-### R-001 — One canonical component boundary
+### R-001 — One shared component boundary
 
-The reader SHALL provide one internal canonical path that returns:
+The reader SHALL provide one internal storage-dispatch/reconstruction path that
+returns:
 
 ~~~julia
 (; L, Q, Kinv)
 ~~~
 
 for both supported storage representations.
+
+For compact schema-1.1 inputs, \`Q\` and \`L\` use the schema's canonical
+column orientation. For historical dense inputs, \`Q\` and \`L\` remain in
+their exact stored raw orientation according to F-003B.
 
 \`read.potential\` and \`potential_factored\` SHALL share this input boundary.
 No vacua-specific reconstruction reader is permitted.
