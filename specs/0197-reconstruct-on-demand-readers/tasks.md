@@ -32,15 +32,23 @@
 
 ## Phase 1 — Component reconstruction
 
-- [ ] **T101 [R-001, R-002, R-014, R-015, G1] Implement strict schema dispatch and metadata parsing**
+- [ ] **T101 [R-001, R-002, R-009, R-014, R-015, G1] Implement strict schema dispatch and metadata parsing**
   - Expected output: exact dense-vs-compact classification before scientific
     array reads.
   - Verify:
     - exact supported compact markers accepted;
-    - complete marker-free legacy dense artifacts accepted;
+    - marker-free dense accepted without changing stored orientation;
+    - v2/v3/v4/v5 dense classes accepted;
+    - v8 and v8-QED-assignment dense classes accepted;
+    - transitional dense v9 accepted only when compact potential markers are
+      absent;
     - unknown/partial/hybrid states fail closed;
     - metadata duplicate conflicts fail;
-    - source-path list is verified;
+    - exact source-dataset list and literal basis/intersection conventions are
+      verified;
+    - \`GeometryIndex.h11\`, persisted \`h11\`, tip/effective-cone/metric/Q
+      dimensions agree;
+    - compatible glsm/basis-matrix/prime-label dimensions agree;
     - parsing is native Julia with only declared dependencies.
   - Escalate if: a schema/writer change appears necessary.
 
@@ -66,7 +74,7 @@
     - exact dense-oracle equality on focused fixtures.
   - Escalate if: persisted charge semantics are insufficient or contradictory.
 
-- [ ] **T104 [R-007, G1] Implement and verify potential coefficients**
+- [ ] **T104 [R-007, G1] Implement and verify direct/pair potential coefficients**
   - Expected output: exact direct+pair signed/log10 \`L\`.
   - Verify:
     - independent direct coefficient oracle;
@@ -75,6 +83,33 @@
     - zero raw amplitude rejected before \`log10\`;
     - no thresholding/truncation occurs.
   - Escalate if: a coefficient convention differs from the approved spec.
+
+- [ ] **T104B [R-008, R-010, G1/G2] Implement and verify geometry-level QED lineage**
+  - Expected output:
+    - direct QED source reuses the existing direct column;
+    - \`appended_prime_divisor_e3\` appends exactly one charge/coefficient
+      column after the pair block;
+    - null geometry-level QED state leaves direct+pair unchanged.
+  - Verify:
+    - source index equals persisted metadata;
+    - exact integral \`qed_charge\` identity;
+    - source-kind attribute;
+    - appended coefficient uses the single-instanton formula;
+    - matched dense v8-QED oracle has identical oriented scientific potential.
+  - Escalate if: persisted visible-sector metadata cannot uniquely determine the
+    geometry-level term.
+
+- [ ] **T104C [R-008, R-010, G1/G2] Enforce EFT assignment-pool separation**
+  - Expected output: geometry-level \`read.potential(GeometryIndex)\` does not
+    select an assignment and returns direct+pair only for assignment-pool
+    artifacts.
+  - Verify:
+    - assignment pool requires absent geometry-level visible-sector group;
+    - \`qed_source_index\` is null;
+    - no extra QED term appears;
+    - contradictory states fail closed.
+  - Escalate if: row-level EFT semantics would need to be inferred or moved
+    into the geometry reader.
 
 - [ ] **T105 [R-008, G1] Implement reconstruction-integrity checks**
   - Expected output: required counts/hashes/witnesses gate every compact read.
@@ -92,7 +127,9 @@
   - Expected output: existing \`AxionPotential\` contract accepts both storage
     forms.
   - Verify:
-    - legacy dense regression unchanged;
+    - all F-003A legacy dense classes retain existing raw outputs;
+    - row-oriented dense artifacts remain row-oriented at this boundary;
+    - column-oriented dense artifacts remain column-oriented;
     - existing \`_kinetic_matrix\` and validation semantics unchanged;
     - compact reader passes synthetic fixtures.
 
@@ -112,12 +149,23 @@
 
 ## Phase 3 — Matched oracle evidence
 
-- [ ] **T301 [R-010, G2] Freeze matched real fixture identities before comparison**
-  - Required cells:
+- [ ] **T301 [R-009, R-010, G2] Freeze matched real and legacy fixture identities before comparison**
+  - Required compact/dense cells:
     - h11=4;
     - h11=10;
     - h11=50;
     - one bounded higher-dimensional fixture selected before comparison.
+  - Raw-reader equality oracle must be canonical column-oriented dense.
+  - Required legacy regressions:
+    - marker-free row-oriented;
+    - marker-free column-oriented;
+    - v5 row-oriented;
+    - v8 column-oriented;
+    - v8-QED-assignment with appended QED;
+    - transitional dense v9.
+  - Required compact semantic fixtures:
+    - one appended geometry-level QED case;
+    - one EFT assignment-pool case.
   - Record:
     - source commit/tree;
     - geometry/FRST identity;
@@ -128,10 +176,14 @@
 
 - [ ] **T302 [R-003-R-010, G2] Run exact matched reconstruction comparison**
   - Verify:
-    - \`Q\` exact integer equality;
+    - canonical column-oriented oracle has exact \`Q\` equality;
     - coefficient signs exact;
     - \`tau,V,Kinv,L\` within frozen replay tolerance;
     - public-reader equivalence;
+    - row-oriented legacy fixtures preserve raw outputs and agree through
+      \`oriented_potential\`;
+    - appended-QED compact fixture equals dense v8-QED scientific potential;
+    - assignment-pool fixture receives no geometry-level QED augmentation;
     - no tolerance tuning after results.
   - Escalate if: mismatch cannot be explained by an implementation defect or a
     separately demonstrated bad fixture.
