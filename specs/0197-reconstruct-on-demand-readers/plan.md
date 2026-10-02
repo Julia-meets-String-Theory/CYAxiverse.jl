@@ -84,20 +84,43 @@ potential_factored
 Add a strict dispatcher that examines schema markers before attempting any
 scientific read.
 
-Recommended order:
+The implementation must encode the full historical dense inventory from
+F-003A rather than treating "marker-free" as synonymous with legacy:
 
-1. read top-level file \`schema_version\` attribute, if present;
-2. inspect \`cytools/potential\` existence and schema attributes;
-3. classify exact schema-1.1 compact vs historical dense;
-4. reject unknown/contradictory hybrids before reading scientific arrays.
+~~~text
+marker-free
+cyaxiverse-ks-cy3-v2
+cyaxiverse-ks-cy3-v3
+cyaxiverse-ks-cy3-v4
+cyaxiverse-ks-cy3-v5
+cyaxiverse-ks-cy3-v8
+cyaxiverse-ks-cy3-v8-qed-assignment
+transitional dense cyaxiverse-ks-cy3-v9-schema-1.1
+~~~
+
+The same v9 top-level marker is also used by the compact schema. Therefore the
+potential sub-schema markers are part of dispatch identity:
+
+- v9 + exact \`reconstruct_on_demand\` + exact reconstruction schema => compact;
+- v9 + complete dense \`Q/L/Kinv\` + both compact potential markers absent =>
+  transitional legacy dense;
+- partial/unknown/hybrid forms => fail closed.
+
+For all dense classes the reader preserves stored \`Q/L\` orientation. It does
+not canonicalize row-oriented v2-v5 data at the component boundary.
 
 For compact artifacts:
 
-- parse \`reconstruction_metadata_json\` inside Julia;
-- compare the JSON normative fields to duplicated HDF5 attributes;
-- if full construction metadata is also present, require overlapping normative
-  reconstruction fields to agree;
-- verify every path declared by the reconstruction source list exists.
+1. parse \`reconstruction_metadata_json\` inside Julia;
+2. require the exact literal source-dataset list from F-003C;
+3. compare JSON normative fields to duplicated HDF5 attributes;
+4. if construction metadata duplicates a normative field, require agreement;
+5. verify every declared source path exists;
+6. enforce the exact basis/intersection/\`kappa\` convention strings;
+7. enforce \`GeometryIndex.h11 == persisted h11 == tip/effective-cone/metric/Q\`
+   dimensions;
+8. validate compatible \`glsm\`, \`basis_matrix\`, and
+   \`prime_toric_divisors\` dimensions.
 
 A direct pure-Julia JSON dependency may be added if needed. Prefer an established
 small parser rather than a bespoke parser. If added, it must be a direct
@@ -127,7 +150,7 @@ Algorithm:
 Keep this helper allocation-conscious but prioritize exact contract fidelity over
 premature optimization.
 
-### Slice C — charge and coefficient reconstruction
+### Slice C — charge, coefficient, and geometry-level QED reconstruction
 
 From validated \`effective_cone\`:
 
@@ -141,6 +164,22 @@ From validated \`effective_cone\`:
 8. encode row 1 as signs and row 2 as log10 magnitudes plus exponent;
 9. reject zero/non-finite raw amplitudes;
 10. verify source counts and canonical hashes.
+
+Then apply the exact compact geometry-level visible-sector rule:
+
+- null \`qed_source_index\` + no visible-sector group => direct+pair only;
+- direct QED source => verify charge/source identity and append nothing;
+- \`appended_prime_divisor_e3\` => append exactly one charge/coefficient column
+  after the pair block using the single-instanton coefficient formula.
+
+For an EFT assignment-pool geometry:
+
+- require no geometry-level visible-sector selection;
+- require null \`qed_source_index\`;
+- return direct+pair only;
+- never select an assignment or append an assignment-specific QED source.
+
+Contradictory visible-sector/assignment-pool states fail closed.
 
 ### Slice D — public readers
 
@@ -219,15 +258,28 @@ one higher-dimensional cell frozen before comparison
 For each, retain enough fixture identity to prove dense and compact data refer
 to the same FRST and final Kähler point.
 
+The raw \`read.potential\` equality oracle must be a canonical column-oriented
+dense artifact. Historical row-oriented fixtures are separate compatibility
+regressions and are compared after \`oriented_potential\`.
+
+In addition freeze:
+
+- one matched geometry-level visible-sector case whose QED charge is not a
+  direct effective-cone ray, so compact reconstruction must append the same
+  single QED source as the dense v8-QED predecessor;
+- one compact EFT assignment-pool artifact proving geometry-level
+  \`read.potential\` remains assignment-independent.
+
 Compare:
 
-- exact \`Q\`;
+- exact \`Q\` for the canonical column-oriented oracle;
 - exact coefficient signs;
 - \`tau\`;
 - \`V\`;
 - \`Kinv\`;
 - row 2 of \`L\`;
-- public-reader outputs.
+- public-reader outputs;
+- QED source index/charge/term count when geometry-level QED is present.
 
 ### Downstream fixtures
 
@@ -305,7 +357,23 @@ unverified.
 No persisted-data migration is required.
 
 Historical dense artifacts remain readable under their current representation.
-Schema-1.1 artifacts remain compact and immutable.
+
+Regression fixtures must cover the materially distinct legacy classes:
+
+- marker-free row-oriented;
+- marker-free column-oriented;
+- v5 row-oriented;
+- v8 column-oriented;
+- v8-QED-assignment with appended QED;
+- transitional dense v9.
+
+The dense component path preserves raw orientation; canonicalization remains an
+\`oriented_potential\` responsibility.
+
+Schema-1.1 artifacts remain compact and immutable. Geometry-level visible-sector
+QED lineage is reconstructed when explicitly persisted. EFT assignment-pool
+augmentation remains a separate row-level operation and is not performed by
+\`read.potential(GeometryIndex)\`.
 
 No writer rewrite is part of #197.
 
