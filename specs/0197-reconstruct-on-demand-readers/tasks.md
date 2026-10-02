@@ -40,8 +40,9 @@
     - marker-free dense accepted without changing stored orientation;
     - v2/v3/v4/v5 dense classes accepted;
     - v8 and v8-QED-assignment dense classes accepted;
-    - transitional dense v9 accepted only when compact potential markers are
-      absent;
+    - dense-v9 `storage_schema=dense_opt_in` accepted with complete dense
+      `Q/L/Kinv` and no current reconstruct-on-demand schema;
+    - v9 `storage_schema=factorized_canonical` fails closed as unsupported;
     - unknown/partial/hybrid states fail closed;
     - metadata duplicate conflicts fail;
     - exact source-dataset list and literal basis/intersection conventions are
@@ -162,7 +163,8 @@
     - v5 row-oriented;
     - v8 column-oriented;
     - v8-QED-assignment with appended QED;
-    - transitional dense v9.
+    - dense-v9 `storage_schema=dense_opt_in`;
+    - v9 `storage_schema=factorized_canonical` fail-closed fixture.
   - Required compact semantic fixtures:
     - one appended geometry-level QED case;
     - one EFT assignment-pool case.
