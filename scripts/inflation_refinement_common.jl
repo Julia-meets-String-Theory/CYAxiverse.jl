@@ -11,9 +11,10 @@ if !isdefined(@__MODULE__, :INFLATION_DIAGNOSTIC_SCHEMA_VERSION)
 end
 
 using CYAxiverse
-using OrdinaryDiffEq
 
-const Poly102RefinementModel = CYAxiverse.axion_benchmarks.poly102_inflation
+const Poly102RefinementModel = CYAxiverse.paper_benchmarks.author_inflation
+const Poly102TrajectorySolver = Poly102RefinementModel.OrdinaryDiffEq
+const RefinementReturnCode = Poly102TrajectorySolver.ReturnCode
 const N8_POLY102_REFINEMENT_MODEL = :n8_poly102
 
 """Build a validated, serializable configuration for one refinement call."""
@@ -24,6 +25,8 @@ function inflation_refinement_config(; precision_bits::Int=100,
         displacement::Real=1e-8, displacement_sign::Real=-1.0,
         basis::Symbol=:canonical_hessian,
         measurement_scope::Symbol=:unspecified,
+        critical_k::Real=Poly102RefinementModel.N8_KC,
+        phases::AbstractVector{<:Real}=zeros(10),
         basis_theta::AbstractVector{<:Real}=Poly102RefinementModel.N8_BEST_X)
     precision_bits >= 64 ||
         throw(ArgumentError("precision_bits must be at least 64"))
@@ -41,6 +44,10 @@ function inflation_refinement_config(; precision_bits::Int=100,
     _inflation_validate_measurement_scope(measurement_scope)
     all(isfinite, basis_theta) && length(basis_theta) == 8 ||
         throw(DimensionMismatch("poly-102 refinement requires eight finite basis coordinates"))
+    length(phases) == 10 && all(isfinite, phases) ||
+        throw(DimensionMismatch("the author trajectory refinement requires ten finite phases"))
+    isfinite(critical_k) && critical_k > 0 ||
+        throw(ArgumentError("critical_k must be positive and finite"))
     reltol === nothing || reltol > 0 || throw(ArgumentError("reltol must be positive"))
     abstol === nothing || abstol > 0 || throw(ArgumentError("abstol must be positive"))
     (; precision_bits, max_time=Float64(max_time), scan_step=Float64(scan_step),
@@ -50,7 +57,7 @@ function inflation_refinement_config(; precision_bits::Int=100,
        displacement=Float64(displacement),
        displacement_sign=Float64(displacement_sign), basis,
        measurement_scope,
-       basis_theta=Float64.(basis_theta),
+       critical_k, phases=collect(phases), basis_theta=collect(basis_theta),
        solver_method=:Rodas5P, event_policy=:final_finite_exit)
 end
 
@@ -67,8 +74,18 @@ end
 function _refinement_summary(candidate, config, status::Symbol;
         error_message="", measured=nothing, trajectory=nothing)
     solver = trajectory === nothing ? nothing : trajectory.solver
+    critical_k = config.critical_k
+    phases = config.phases
     (; candidate_id=candidate.candidate_id, model=candidate.model,
        delta_k=candidate.delta_k, screen_accepted=candidate.accepted,
+       model_route=:author_inflation_n8_author_trajectory,
+       row_count=10, phase_convention=:additive_argument_radians,
+       coordinate_convention=:raw_radians,
+       metric_convention=:rounded_reconstructed_author_metric,
+       scale_category=:physical_author_radial_k,
+       critical_k, physical_k=trajectory === nothing ?
+           critical_k + candidate.delta_k : trajectory.k,
+       phases=copy(phases), basis_theta=copy(config.basis_theta),
        refinement_status=status, error=error_message,
        measurement_status=measured === nothing ? :not_measured : measured.status,
        diagnostic_schema_version=INFLATION_DIAGNOSTIC_SCHEMA_VERSION,
@@ -77,7 +94,9 @@ function _refinement_summary(candidate, config, status::Symbol;
        precision_bits=config.precision_bits,
        solver_method=config.solver_method, event_policy=config.event_policy,
        solver_retcode=solver === nothing ? nothing : string(solver.retcode),
-       reltol=config.reltol, abstol=config.abstol,
+       reltol=solver === nothing ? config.reltol : solver.reltol,
+       abstol=solver === nothing ? config.abstol : solver.abstol,
+       maxiters=config.maxiters,
        max_time=config.max_time, scan_step=config.scan_step,
        max_step=config.max_step, initial_step=config.initial_step,
        displacement=config.displacement,
@@ -85,8 +104,15 @@ function _refinement_summary(candidate, config, status::Symbol;
        entered_slow_roll=trajectory === nothing ? false : trajectory.entered_slow_roll,
        end_event=trajectory === nothing ? :not_run : trajectory.end_event,
        terminated=trajectory === nothing ? false : trajectory.terminated,
+       entry_n=trajectory === nothing ? nothing :
+           get(trajectory, :entry_n, nothing),
+       end_n=trajectory === nothing ? nothing :
+           get(trajectory, :end_n, nothing),
        efolds=trajectory === nothing ? nothing : trajectory.efolds,
        slow_roll_efolds=trajectory === nothing ? nothing : trajectory.slow_roll_efolds,
+       ne_definition=:slow_roll_efolds,
+       ne_window=trajectory === nothing || !hasproperty(trajectory, :entry_n) ?
+           nothing : (trajectory.entry_n, trajectory.end_n),
        accepted_steps=solver === nothing ? 0 : solver.accepted_steps,
        rejected_steps=solver === nothing ? 0 : solver.rejected_steps,
        rhs_evaluations=solver === nothing ? 0 : solver.rhs_evaluations,
@@ -97,7 +123,7 @@ function _refinement_summary(candidate, config, status::Symbol;
 end
 
 function _refinement_solver_status(retcode)
-    retcode == ReturnCode.Success && return (:completed, "")
+    retcode == RefinementReturnCode.Success && return (:completed, "")
     (:failed, "trajectory solver retcode: $retcode")
 end
 
@@ -112,8 +138,9 @@ function refine_inflation_candidate(candidate;
         trajectory=nothing)
 
     measured = inflation_stage_measure(
-        () -> Poly102RefinementModel.n8_physical_gradient_flow(
+        () -> Poly102RefinementModel.n8_author_trajectory(
             candidate.delta_k; displacement=config.displacement,
+            critical_k=config.critical_k, phases=config.phases,
             displacement_sign=config.displacement_sign,
             max_time=config.max_time, scan_step=config.scan_step,
             sample_count=config.sample_count, max_step=config.max_step,

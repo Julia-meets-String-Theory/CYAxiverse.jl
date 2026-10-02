@@ -3676,6 +3676,7 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         @test isapprox(critical.k, 0.674506370003365; atol=1e-15)
         @test critical.gradient_residual < 1e-10
         @test critical.null_residual < 1e-10
+        @test benchmark.n8_potential(k=critical.k; trajectory=true).phases == zeros(10)
 
         mass_basis = poly102.n8_mass_eigenbasis(critical.k)
         @test mass_basis.basis == :mass_eigenbasis
@@ -3787,6 +3788,34 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
             BigFloat.([n5_kc - 1e-3, n5_kc + 1e-3]);
             seed_theta=big(π) + 1e-3,
             gradient_tolerance=big(1e-8), hessian_tolerance=big(1e-10))[1].converged
+        setprecision(BigFloat, 256) do
+            n5_phase_fold = poly102.n5_reduced_phase_fold(
+                second_phase=BigFloat(π) / 4, theta0=big"2.1",
+                k0=big"1.03", ftol=big"1e-70", xtol=big"1e-70",
+                max_iterations=1_000)
+            @test n5_phase_fold.model == :n5_reduced_two_cosine
+            @test n5_phase_fold.phase_assignment == :second_cosine
+            @test n5_phase_fold.second_phase == BigFloat(π) / 4
+            @test n5_phase_fold.converged
+            @test n5_phase_fold.solver.precision_bits == 256
+            @test n5_phase_fold.residual <= big"1e-70"
+            @test abs(n5_phase_fold.gradient) <= big"1e-9"
+            @test abs(n5_phase_fold.hessian) <= big"1e-10"
+            n5_phase_below = n5_phase_fold.k - big"1e-4"
+            n5_lower_root = poly102.n5_reduced_phase_critical_point(
+                n5_phase_below, big"2.1010760685781";
+                second_phase=n5_phase_fold.second_phase,
+                tolerance=big"1e-70")
+            n5_upper_root = poly102.n5_reduced_phase_critical_point(
+                n5_phase_below, big"2.1155477629889";
+                second_phase=n5_phase_fold.second_phase,
+                tolerance=big"1e-70")
+            @test n5_lower_root.converged && n5_upper_root.converged
+            @test abs(n5_lower_root.gradient) <= big"1e-70"
+            @test abs(n5_upper_root.gradient) <= big"1e-70"
+            @test n5_lower_root.hessian * n5_upper_root.hessian < 0
+            @test abs(n5_upper_root.theta - n5_lower_root.theta) > big"1e-3"
+        end
         @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
             [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=1.0)
         @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
@@ -3866,6 +3895,25 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         @test phased.phases == phase.phases
         @test phased_derivatives.value != unphased_derivatives.value
 
+        n8_phase_calibration = poly102.n8_row2_phase_catastrophe()
+        @test n8_phase_calibration.status == :completed
+        @test n8_phase_calibration.model == :n8_author_trajectory_10_row
+        @test n8_phase_calibration.row_count == 10
+        @test n8_phase_calibration.phase_vector == vcat(0.0, 0.04, zeros(8))
+        @test length(n8_phase_calibration.phase_path) == 400
+        @test all(step.converged for step in n8_phase_calibration.phase_path)
+        @test n8_phase_calibration.refined.converged
+        @test n8_phase_calibration.refined.solver.precision_bits == 128
+        @test n8_phase_calibration.refined.gradient_residual < big"1e-30"
+        @test n8_phase_calibration.refined.null_residual < big"1e-30"
+        @test length(n8_phase_calibration.refined.eigenvalues) == 8
+        @test count(>(0), n8_phase_calibration.refined.eigenvalues) == 7
+        @test n8_phase_calibration.sign_change
+        @test length(n8_phase_calibration.stationary_path) == 12
+        @test n8_phase_calibration.bracket.width ≈ 2e-5 atol=1e-12
+        @test n8_phase_calibration.bracket.lower_minimum_eigenvalue > 0
+        @test n8_phase_calibration.bracket.upper_minimum_eigenvalue < 0
+
         @testset "inflation trajectory contracts" begin
             maps = poly102.n8_coordinate_maps(k_detuned)
             @test maps.raw_to_canonical' * maps.raw_to_canonical ≈ maps.metric atol=1e-12
@@ -3925,6 +3973,16 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
                 initial_step=1e-5, sample_count=1, reltol=1e-8,
                 abstol=1e-10, maxiters=1_000_000,
                 measurement_scope=:cold)
+            @test Poly102RefinementModel === benchmark.author_inflation
+            row2_config = inflation_refinement_config(
+                precision_bits=100, max_time=10, max_step=1,
+                sample_count=2, critical_k=n8_phase_calibration.refined.k,
+                phases=n8_phase_calibration.phase_vector,
+                basis_theta=n8_phase_calibration.refined.theta,
+                measurement_scope=:cold)
+            @test row2_config.critical_k == n8_phase_calibration.refined.k
+            @test row2_config.phases == n8_phase_calibration.phase_vector
+            @test eltype(row2_config.basis_theta) == BigFloat
             refinement_candidate = inflation_refinement_candidate(
                 "trajectory-contract"; delta_k=1.5320548620798324e-3,
                 screening=(status=:candidate, measurement_scope=:cold,
@@ -3938,14 +3996,42 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
             @test refined.summary.measurement_status == :completed
             @test refined.summary.measurement_scope == :cold
             @test refined.summary.accepted_steps > 0
-            @test _refinement_solver_status(ReturnCode.Success) ==
+            @test _refinement_solver_status(RefinementReturnCode.Success) ==
                 (:completed, "")
-            @test first(_refinement_solver_status(ReturnCode.MaxIters)) ==
+            @test first(_refinement_solver_status(RefinementReturnCode.MaxIters)) ==
                 :failed
             short_flow = refined.trajectory
             @test short_flow.entered_slow_roll
             @test short_flow.end_event == :tmax
             @test !short_flow.terminated
+            selected_sample = length(short_flow.samples)
+            author_diagnostics = inflation_refinement_author_diagnostics(
+                refined; sample_index=selected_sample)
+            @test author_diagnostics.model == :n8_author_trajectory_10_row
+            @test author_diagnostics.sample_index == selected_sample
+            @test author_diagnostics.sample_n == short_flow.samples[selected_sample].n
+            @test author_diagnostics.ne == short_flow.slow_roll_efolds
+            @test author_diagnostics.ne_window ==
+                (short_flow.entry_n, short_flow.end_n)
+            @test author_diagnostics.pivot_interpretation == :none
+            @test author_diagnostics.observational_acceptance == :not_evaluated
+            @test author_diagnostics.cumulative_turning ≈
+                benchmark.cumulative_turning(short_flow.samples[1:selected_sample])
+            failed_refinement = merge(refined, (; summary=merge(
+                refined.summary, (; refinement_status=:failed))))
+            @test_throws ArgumentError inflation_refinement_author_diagnostics(
+                failed_refinement; sample_index=selected_sample)
+            zero_step_flow = merge(short_flow, (; solver=merge(
+                short_flow.solver, (; accepted_steps=0))))
+            @test_throws ArgumentError inflation_author_trajectory_diagnostics(
+                zero_step_flow; sample_index=selected_sample)
+            failed_solver = merge(short_flow, (; solver=merge(
+                short_flow.solver, (; retcode=RefinementReturnCode.MaxIters))))
+            @test_throws ArgumentError inflation_author_trajectory_diagnostics(
+                failed_solver; sample_index=selected_sample)
+            bad_k_flow = merge(short_flow, (; k=short_flow.k + big"1e-10"))
+            @test_throws ArgumentError inflation_author_trajectory_diagnostics(
+                bad_k_flow; sample_index=selected_sample)
             diagnostic_row = inflation_refinement_diagnostic_row(
                 refinement_candidate, refined)
             serialization = inflation_stage_measure(

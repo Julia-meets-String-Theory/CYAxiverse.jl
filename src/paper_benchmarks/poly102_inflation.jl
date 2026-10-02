@@ -218,6 +218,100 @@ function n5_reduced_ratio(k::Real)
         convert(T, N5_REDUCED_DELTA_Q))
 end
 
+"""Gradient of the reduced two-cosine N5 potential with a second-term phase."""
+function n5_reduced_phase_gradient(theta::Real, k::Real, second_phase::Real)
+    T = promote_type(_n5_numeric_type(typeof(theta)),
+        _n5_numeric_type(typeof(k)), _n5_numeric_type(typeof(second_phase)))
+    angle = T(theta)
+    phase = T(second_phase)
+    ratio = n5_reduced_ratio(T(k))
+    sin(angle) + 2 * ratio * sin(2 * angle + phase)
+end
+
+"""Hessian of the reduced two-cosine N5 potential with a second-term phase."""
+function n5_reduced_phase_hessian(theta::Real, k::Real, second_phase::Real)
+    T = promote_type(_n5_numeric_type(typeof(theta)),
+        _n5_numeric_type(typeof(k)), _n5_numeric_type(typeof(second_phase)))
+    angle = T(theta)
+    phase = T(second_phase)
+    ratio = n5_reduced_ratio(T(k))
+    cos(angle) + 4 * ratio * cos(2 * angle + phase)
+end
+
+"""
+    n5_reduced_phase_fold(; second_phase=π/4, theta0=2.1, k0=1.03, ...)
+
+Re-solve the fold of the source-defined reduced two-cosine N5 model. The phase
+is applied only to the second cosine; the function does not construct or infer
+an eight-row phase vector. Pass BigFloat inputs and tolerances inside a
+`setprecision` block for an arbitrary-precision replay.
+"""
+function n5_reduced_phase_fold(; second_phase::Real=Float64(π / 4),
+        theta0::Real=2.1, k0::Real=1.03,
+        ftol::Real=1e-12, xtol::Real=ftol, max_iterations::Int=1_000)
+    T = promote_type(typeof(float(theta0)), typeof(float(k0)),
+        typeof(float(second_phase)), typeof(float(ftol)), typeof(float(xtol)))
+    tolerance_f = T(ftol)
+    tolerance_x = T(xtol)
+    tolerance_f > zero(T) || throw(ArgumentError("ftol must be positive"))
+    tolerance_x > zero(T) || throw(ArgumentError("xtol must be positive"))
+    max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+    phase = T(second_phase)
+    equations!(out, state) = begin
+        theta, k = state
+        ratio = n5_reduced_ratio(k)
+        second_angle = 2 * theta + phase
+        out[1] = sin(theta) + 2 * ratio * sin(second_angle)
+        out[2] = cos(theta) + 4 * ratio * cos(second_angle)
+        nothing
+    end
+    result = nlsolve(equations!, T[T(theta0), T(k0)]; method=:trust_region,
+        ftol=tolerance_f, xtol=tolerance_x, iterations=max_iterations)
+    theta = mod(result.zero[1], 2 * T(π))
+    k = result.zero[2]
+    ratio = n5_reduced_ratio(k)
+    gradient = n5_reduced_phase_gradient(theta, k, phase)
+    hessian = n5_reduced_phase_hessian(theta, k, phase)
+    residual = max(abs(gradient), abs(hessian))
+    converged = (result.f_converged || result.x_converged) &&
+        residual <= max(tolerance_f, tolerance_x)
+    (; model=:n5_reduced_two_cosine, phase_assignment=:second_cosine,
+       second_phase=phase, theta, k, ratio, gradient, hessian, residual,
+       converged,
+       solver=(method=:nlsolve_trust_region, iterations=result.iterations,
+           residual_norm=result.residual_norm, ftol=tolerance_f,
+           xtol=tolerance_x, max_iterations,
+           precision_bits=T === BigFloat ? precision(theta) : nothing))
+end
+
+"""Correct one stationary point of the phased reduced N5 model from a seed."""
+function n5_reduced_phase_critical_point(k::Real, theta0::Real;
+        second_phase::Real=Float64(π / 4), tolerance::Real=1e-12,
+        max_iterations::Int=1_000)
+    T = promote_type(typeof(float(theta0)), typeof(float(k)),
+        typeof(float(second_phase)), typeof(float(tolerance)))
+    scale = T(k)
+    phase = T(second_phase)
+    tol = T(tolerance)
+    scale > zero(T) || throw(ArgumentError("k must be positive"))
+    tol > zero(T) || throw(ArgumentError("tolerance must be positive"))
+    max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+    equation!(out, state) = (out[1] = n5_reduced_phase_gradient(
+        state[1], scale, phase))
+    result = nlsolve(equation!, T[T(theta0)]; method=:trust_region,
+        ftol=tol, xtol=tol, iterations=max_iterations)
+    theta = mod(result.zero[1], 2 * T(π))
+    gradient = n5_reduced_phase_gradient(theta, scale, phase)
+    hessian = n5_reduced_phase_hessian(theta, scale, phase)
+    (; model=:n5_reduced_two_cosine, phase_assignment=:second_cosine,
+       second_phase=phase, k=scale, theta, gradient, hessian,
+       converged=(result.f_converged || result.x_converged) &&
+           abs(gradient) <= tol,
+       solver=(method=:nlsolve_trust_region, iterations=result.iterations,
+           residual_norm=result.residual_norm, tolerance=tol,
+           max_iterations, precision_bits=T === BigFloat ? precision(theta) : nothing))
+end
+
 """Exact reduced-model exponent implied by the N=5 draft charge data."""
 function n5_reduced_exponent(k::Real)
     T = _n5_numeric_type(typeof(k))
@@ -745,6 +839,200 @@ function n8_degenerate_point(initial_theta::AbstractVector{<:Real}=N8_BEST_X;
        iterations=result.iterations, tolerance=Float64(tolerance), max_iterations)
 end
 
+"""Refine an author-model N8 degeneracy using the source's BigFloat equations."""
+function _n8_refine_degenerate_point(initial_theta::AbstractVector{<:Real},
+        initial_null::AbstractVector{<:Real}, initial_k::Real,
+        phases::AbstractVector{<:Real}; precision_bits::Int=128,
+        tolerance::Real=big"1e-30", max_iterations::Int=1_000)
+    precision_bits >= 64 || throw(ArgumentError("precision_bits must be at least 64"))
+    length(initial_theta) == 8 || throw(DimensionMismatch("poly-102 needs eight coordinates"))
+    length(initial_null) == 8 || throw(DimensionMismatch("poly-102 needs eight null coordinates"))
+    length(phases) == 10 || throw(DimensionMismatch("the author trajectory model has ten phases"))
+    max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+    setprecision(BigFloat, precision_bits) do
+        T = BigFloat
+        q = T.(Matrix(N8_Q_TRAJECTORY'))
+        tau = T.(N8_TAU_TRAJECTORY)
+        phase = T.(phases)
+        raw_metric = T.(N8_K_RAW)
+        tolerance_big = T(tolerance)
+        theta₀ = T.(initial_theta)
+        null₀ = T.(initial_null)
+        k₀ = T(initial_k)
+        initial = vcat(theta₀, null₀, k₀)
+        function equations!(out, state)
+            theta = @view state[1:8]
+            null = @view state[9:16]
+            k = state[17]
+            derivatives = _n8_big_derivatives(theta, k, q, tau, phase)
+            metric = raw_metric / k^2
+            canonical_to_raw = _n8_big_symmetric_power(metric, -one(T) / 2)
+            hcanonical = transpose(canonical_to_raw) * derivatives.hessian *
+                canonical_to_raw
+            out[1:8] .= derivatives.gradient
+            out[9:16] .= hcanonical * null
+            out[17] = dot(null, null) - one(T)
+            nothing
+        end
+        result = nlsolve(equations!, initial; method=:trust_region,
+            ftol=tolerance_big, xtol=tolerance_big, iterations=max_iterations)
+        theta = mod.(result.zero[1:8], 2 * T(π))
+        null = result.zero[9:16]
+        k = result.zero[17]
+        derivatives = _n8_big_derivatives(theta, k, q, tau, phase)
+        metric = raw_metric / k^2
+        canonical_to_raw = _n8_big_symmetric_power(metric, -one(T) / 2)
+        hcanonical = transpose(canonical_to_raw) * derivatives.hessian *
+            canonical_to_raw
+        eigensystem = eigen(Symmetric(hcanonical))
+        gradient_residual = norm(derivatives.gradient, Inf)
+        null_residual = norm(hcanonical * null, Inf)
+        normalized_null_residual = abs(dot(null, null) - one(T))
+        converged = (result.f_converged || result.x_converged) &&
+            gradient_residual <= tolerance_big &&
+            null_residual <= tolerance_big &&
+            normalized_null_residual <= tolerance_big
+        (; model=:n8_author_trajectory_10_row, theta,
+           null_vector=null / norm(null), k,
+           eigenvalues=eigensystem.values, gradient_residual, null_residual,
+           normalized_null_residual, converged,
+           solver=(method=:nlsolve_trust_region, iterations=result.iterations,
+               residual_norm=result.residual_norm, tolerance=tolerance_big,
+               max_iterations, precision_bits))
+    end
+end
+
+"""Solve a stationary point of the exact ten-row N8 author model at fixed `k`."""
+function n8_author_stationary_point(initial_theta::AbstractVector{<:Real},
+        k::Real; phases::AbstractVector{<:Real}=zeros(10),
+        tolerance::Real=1e-13, max_iterations::Int=2_000)
+    length(initial_theta) == 8 || throw(DimensionMismatch("poly-102 needs eight coordinates"))
+    length(phases) == 10 || throw(DimensionMismatch("the author trajectory model has ten phases"))
+    k > 0 || throw(ArgumentError("k must be positive"))
+    tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
+    max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+    theta₀ = Float64.(initial_theta)
+    phase = Float64.(phases)
+    scale = Float64(k)
+    equations!(out, theta) = (out .= n8_potential_derivatives(theta, scale;
+        trajectory=true, phases=phase).gradient)
+    result = nlsolve(equations!, theta₀; method=:trust_region,
+        ftol=tolerance, xtol=tolerance, iterations=max_iterations)
+    theta = mod.(result.zero, 2π)
+    derivatives = n8_potential_derivatives(theta, scale;
+        trajectory=true, phases=phase)
+    maps = n8_coordinate_maps(scale)
+    hcanonical = transpose(maps.canonical_to_raw) * derivatives.hessian *
+        maps.canonical_to_raw
+    eigenvalues = eigen(Symmetric(hcanonical)).values
+    gradient_residual = norm(derivatives.gradient, Inf)
+    converged = (result.f_converged || result.x_converged) &&
+        gradient_residual <= tolerance
+    (; model=:n8_author_trajectory_10_row, theta, k=scale,
+       phases=phase, gradient_residual, hessian_eigenvalues=eigenvalues,
+       minimum_hessian_eigenvalue=first(eigenvalues), converged,
+       solver=(method=:nlsolve_trust_region, iterations=result.iterations,
+           residual_norm=result.residual_norm, tolerance=Float64(tolerance),
+           max_iterations))
+end
+
+"""
+    n8_row2_phase_catastrophe(; ...)
+
+Continue the ten-row author-model degeneracy from zero phase to the approved
+row-2 `0.04` radian benchmark, refine it in BigFloat, and continue one
+stationary identity through a bounded two-sided minimum-Hessian sign bracket.
+The independent zero-phase/P96 routes are not used by this calibration.
+"""
+function n8_row2_phase_catastrophe(; phase_steps::Int=400,
+        continuation_offsets::Int=10, bracket_step::Real=1e-5,
+        tolerance::Real=1e-11, precision_bits::Int=128,
+        big_tolerance::Real=big"1e-30", max_iterations::Int=1_000)
+    phase_steps > 0 || throw(ArgumentError("phase_steps must be positive"))
+    continuation_offsets > 1 ||
+        throw(ArgumentError("continuation_offsets must exceed one"))
+    bracket_step > 0 || throw(ArgumentError("bracket_step must be positive"))
+    tolerance > 0 || throw(ArgumentError("tolerance must be positive"))
+    target_phases = zeros(10)
+    target_phases[2] = 0.04
+    phase_increment = target_phases[2] / phase_steps
+    theta = copy(N8_BEST_X)
+    k = N8_KC
+    phase_path = NamedTuple[]
+    catastrophe = nothing
+    for index in 1:phase_steps
+        phases = zeros(10)
+        phases[2] = index * phase_increment
+        phase_fraction = index / phase_steps
+        catastrophe = n8_degenerate_point(theta; k0=k, tolerance,
+            max_iterations, phases)
+        push!(phase_path, (; step=index, phase_fraction,
+            phase_value=phases[2], k=catastrophe.k,
+            gradient_residual=catastrophe.gradient_residual,
+            null_residual=catastrophe.null_residual,
+            converged=catastrophe.converged,
+            iterations=catastrophe.iterations))
+        catastrophe.converged || break
+        theta = catastrophe.theta
+        k = catastrophe.k
+    end
+    path_converged = length(phase_path) == phase_steps &&
+        all(step.converged for step in phase_path)
+    if !path_converged
+        return (; status=:phase_continuation_failed,
+            model=:n8_author_trajectory_10_row, row_count=10,
+            phase_vector=target_phases, phase_path, catastrophe,
+            refined=nothing, stationary_path=NamedTuple[],
+            bracket=nothing, sign_change=false)
+    end
+
+    big_phase_vector = fill(BigFloat(0), 10)
+    big_phase_vector[2] = BigFloat("0.04")
+    refined = _n8_refine_degenerate_point(catastrophe.theta,
+        catastrophe.null_vector, catastrophe.k, big_phase_vector;
+        precision_bits, tolerance=big_tolerance, max_iterations)
+    step_size = Float64(bracket_step)
+    start_k = catastrophe.k + continuation_offsets * step_size
+    branch_point = n8_author_stationary_point(catastrophe.theta, start_k;
+        phases=target_phases, tolerance=1e-13, max_iterations=2_000)
+    stationary_path = NamedTuple[(; offset=continuation_offsets,
+        point=branch_point)]
+    if branch_point.converged
+        theta_branch = branch_point.theta
+        for offset in (continuation_offsets - 1):-1:-1
+            point = n8_author_stationary_point(theta_branch,
+                catastrophe.k + offset * step_size; phases=target_phases,
+                tolerance=1e-13, max_iterations=2_000)
+            push!(stationary_path, (; offset, point))
+            point.converged || break
+            theta_branch = point.theta
+        end
+    end
+    lower_entry = findfirst(entry -> entry.offset == -1, stationary_path)
+    upper_entry = findfirst(entry -> entry.offset == 1, stationary_path)
+    lower = lower_entry === nothing ? nothing : stationary_path[lower_entry].point
+    upper = upper_entry === nothing ? nothing : stationary_path[upper_entry].point
+    branch_converged = length(stationary_path) == continuation_offsets + 2 &&
+        all(entry.point.converged for entry in stationary_path)
+    sign_change = lower !== nothing && upper !== nothing &&
+        sign(lower.minimum_hessian_eigenvalue) !=
+            sign(upper.minimum_hessian_eigenvalue)
+    bracket = lower === nothing || upper === nothing ? nothing :
+        (; lower_k=lower.k, upper_k=upper.k,
+           width=upper.k - lower.k,
+           lower_minimum_eigenvalue=lower.minimum_hessian_eigenvalue,
+           upper_minimum_eigenvalue=upper.minimum_hessian_eigenvalue)
+    converged = refined.converged && branch_converged && sign_change
+    (; status=converged ? :completed : :critical_point_bracket_failed,
+       model=:n8_author_trajectory_10_row, row_count=10,
+       phase_vector=target_phases, phase_convention=:additive_argument_radians,
+       coordinate_convention=:raw_radians,
+       metric_basis=:canonical_hessian_from_reconstructed_author_metric,
+       scale_category=:author_model_catastrophe_calibration,
+       phase_path, catastrophe, refined, stationary_path, bracket,
+       sign_change, converged)
+end
+
 """
     n8_mass_eigenbasis(k=N8_KC; theta=N8_BEST_X)
 
@@ -1108,7 +1396,8 @@ to avoid counting a transient crossing. `efolds` is the total accumulated
 e-fold coordinate at the selected exit; `slow_roll_efolds` retains the
 duration of the selected window.
 """
-function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
+function n8_author_trajectory(delta_k::Real; critical_k::Real=N8_KC,
+        displacement::Real=1e-8,
         displacement_sign::Real=-1, max_time::Real=1e6,
         scan_step::Real=5, sample_count::Int=20,
         max_step::Real=100,
@@ -1120,6 +1409,7 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
         precision_bits::Int=100, reltol=nothing, abstol=nothing,
         maxiters::Int=10^8)
     delta_k > 0 || throw(ArgumentError("delta_k must be positive"))
+    critical_k > 0 || throw(ArgumentError("critical_k must be positive"))
     displacement > 0 || throw(ArgumentError("displacement must be positive"))
     scan_step > 0 || throw(ArgumentError("scan_step must be positive"))
     max_step > 0 || throw(ArgumentError("max_step must be positive"))
@@ -1132,7 +1422,8 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
     precision_bits >= 64 || throw(ArgumentError("precision_bits must be at least 64"))
     setprecision(BigFloat, precision_bits) do
         T = BigFloat
-        k = T(N8_KC) + T(delta_k)
+        k_critical = T(critical_k)
+        k = k_critical + T(delta_k)
         q = T.(Matrix(N8_Q_TRAJECTORY'))
         tau = T.(N8_TAU_TRAJECTORY)
         phase = phases === nothing ? zeros(T, length(tau)) : T.(phases)
@@ -1250,12 +1541,16 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
             completed_windows
         end
         if isempty(windows)
-            return (; delta_k=T(delta_k), k, entered_slow_roll=false,
+            return (; delta_k=T(delta_k), critical_k=k_critical, k,
+                scale_category=:physical_author_radial_k,
+                model=:n8_author_trajectory_10_row,
+                entered_slow_roll=false,
                 end_event=:no_slow_roll_window, efolds=zero(T),
                 slow_roll_efolds=zero(T),
                 terminated=false,
                 samples=NamedTuple[], initial=initial_state,
                 basis, basis_theta=copy(hilltop), basis_k=k,
+                critical_theta=copy(hilltop),
                 phases=copy(phase),
                 precision_bits,
                 solver=(method, reltol=used_reltol, abstol=used_abstol,
@@ -1281,12 +1576,16 @@ function n8_author_trajectory(delta_k::Real; displacement::Real=1e-8,
                 canonical_to_raw, phase)
             push!(samples, merge((n=target_n,), _trajectory_sample(state)))
         end
-        (; delta_k=T(delta_k), k, entered_slow_roll=true,
+        (; delta_k=T(delta_k), critical_k=k_critical, k,
+            scale_category=:physical_author_radial_k,
+            model=:n8_author_trajectory_10_row,
+            entered_slow_roll=true,
             entry_n, end_n, efolds=end_n,
             slow_roll_efolds=end_n - entry_n, end_event=exit_event,
             terminated=exit_event != :tmax,
             samples, initial=initial_state, basis, phases=copy(phase),
-            basis_theta=copy(hilltop), basis_k=k, basis_eigenvalues=eigensystem.values,
+            basis_theta=copy(hilltop), basis_k=k,
+            critical_theta=copy(hilltop), basis_eigenvalues=eigensystem.values,
             basis_raw_direction=raw_direction,
             basis_canonical_direction=canonical_direction, precision_bits,
             solver=(method, reltol=used_reltol,

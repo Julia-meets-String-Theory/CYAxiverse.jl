@@ -63,14 +63,30 @@ function inflation_refinement_diagnostic_row(candidate, refined;
        refinement_measurement_status=summary.measurement_status,
        refinement_measurement_scope=summary.measurement_scope,
        refinement_precision_bits=summary.precision_bits,
+       refinement_model_route=summary.model_route,
+       refinement_row_count=summary.row_count,
+       refinement_phase_convention=summary.phase_convention,
+       refinement_coordinate_convention=summary.coordinate_convention,
+       refinement_metric_convention=summary.metric_convention,
+       refinement_scale_category=summary.scale_category,
+       refinement_critical_k=summary.critical_k,
+       refinement_physical_k=summary.physical_k,
+       refinement_phases=summary.phases,
        refinement_solver_method=summary.solver_method,
        refinement_solver_retcode=summary.solver_retcode,
+       refinement_reltol=summary.reltol,
+       refinement_abstol=summary.abstol,
+       refinement_maxiters=summary.maxiters,
        refinement_event_policy=summary.event_policy,
        refinement_entered_slow_roll=summary.entered_slow_roll,
        refinement_end_event=summary.end_event,
        refinement_terminated=summary.terminated,
+       refinement_entry_n=summary.entry_n,
+       refinement_end_n=summary.end_n,
        refinement_efolds=summary.efolds,
        refinement_slow_roll_efolds=summary.slow_roll_efolds,
+       refinement_ne_definition=summary.ne_definition,
+       refinement_ne_window=summary.ne_window,
        refinement_accepted_steps=summary.accepted_steps,
        refinement_rejected_steps=summary.rejected_steps,
        refinement_rhs_evaluations=summary.rhs_evaluations,
@@ -88,6 +104,99 @@ function inflation_refinement_diagnostic_row(candidate, refined;
            serialization.bytes,
        serialization_output_bytes=serialization === nothing ? 0 :
            serialization.output_bytes)
+end
+
+"""
+Return explicitly selected diagnostics from the N8 author trajectory.
+
+`N_e` is the selected slow-roll window duration. Sample diagnostics always
+carry the exact returned sample index and `samples[index].n`; selecting a
+sample does not define a pivot or an observational acceptance window.
+"""
+function inflation_author_trajectory_diagnostics(trajectory;
+        sample_index::Int)
+    trajectory.model === :n8_author_trajectory_10_row ||
+        throw(ArgumentError("diagnostics require the ten-row N8 author trajectory"))
+    trajectory.scale_category === :physical_author_radial_k ||
+        throw(ArgumentError("physical k must be established before diagnostics"))
+    trajectory.entered_slow_roll ||
+        throw(ArgumentError("trajectory did not enter a slow-roll window"))
+    hasproperty(trajectory, :solver) ||
+        throw(ArgumentError("trajectory does not contain solver status"))
+    success = CYAxiverse.paper_benchmarks.author_inflation.OrdinaryDiffEq.ReturnCode.Success
+    trajectory.solver.retcode == success ||
+        throw(ArgumentError("trajectory solver did not complete successfully"))
+    trajectory.solver.accepted_steps > 0 ||
+        throw(ArgumentError("trajectory has no accepted solver steps"))
+    expected_physical_k = setprecision(BigFloat, trajectory.precision_bits) do
+        BigFloat(trajectory.critical_k) + BigFloat(trajectory.delta_k)
+    end
+    trajectory.k == expected_physical_k ||
+        throw(ArgumentError("trajectory physical k does not match critical_k + delta_k"))
+    hasproperty(trajectory, :entry_n) && hasproperty(trajectory, :end_n) ||
+        throw(ArgumentError("trajectory does not contain a completed slow-roll window"))
+    1 <= sample_index <= length(trajectory.samples) ||
+        throw(BoundsError(trajectory.samples, sample_index))
+    sample = trajectory.samples[sample_index]
+    observables = CYAxiverse.paper_benchmarks.trajectory_observables(
+        trajectory; sample_index)
+    cumulative_turning = CYAxiverse.paper_benchmarks.cumulative_turning(
+        trajectory.samples[1:sample_index])
+    (; model=:n8_author_trajectory_10_row, row_count=10,
+       source_route=:author_inflation_n8_author_trajectory,
+       phase_convention=:additive_argument_radians,
+       phases=copy(trajectory.phases),
+       coordinate_convention=:raw_radians,
+       metric_convention=:rounded_reconstructed_author_metric,
+       scale_category=trajectory.scale_category,
+       critical_k=trajectory.critical_k, physical_k=trajectory.k,
+       ne_definition=:slow_roll_efolds,
+       ne_window=(trajectory.entry_n, trajectory.end_n),
+       ne_units=:e_folds,
+       ne=trajectory.slow_roll_efolds,
+       sample_n_units=:e_folds,
+       n_s_units=:dimensionless,
+       sample_index, sample_n=sample.n,
+       n_s=observables.n_s, paper_delta_H=observables.delta_H,
+       paper_delta_H_units=:dimensionless,
+       scalar_amplitude_convention=observables.scalar_amplitude_convention,
+       cumulative_turning,
+       cumulative_turning_units=:radians,
+       cumulative_turning_sample_index=sample_index,
+       cumulative_turning_sample_n=sample.n,
+       pivot_interpretation=:none,
+       observational_acceptance=:not_evaluated)
+end
+
+"""Apply the refinement eligibility gate before author-trajectory reporting."""
+function inflation_refinement_author_diagnostics(refined;
+        sample_index::Int)
+    summary = refined.summary
+    summary.refinement_status === :completed ||
+        throw(ArgumentError("refinement status is not completed"))
+    summary.entered_slow_roll ||
+        throw(ArgumentError("refinement did not enter slow roll"))
+    summary.accepted_steps > 0 ||
+        throw(ArgumentError("refinement has no accepted solver steps"))
+    summary.model_route === :author_inflation_n8_author_trajectory ||
+        throw(ArgumentError("refinement did not use the N8 author trajectory route"))
+    summary.scale_category === :physical_author_radial_k ||
+        throw(ArgumentError("refinement k is not an author-model physical radial scale"))
+    refined.trajectory === nothing &&
+        throw(ArgumentError("completed refinement has no trajectory"))
+    expected_physical_k = setprecision(BigFloat, summary.precision_bits) do
+        BigFloat(summary.critical_k) + BigFloat(summary.delta_k)
+    end
+    expected_physical_k == refined.trajectory.k ||
+        throw(ArgumentError("refinement physical k does not match critical_k + delta_k"))
+    summary.physical_k == refined.trajectory.k ||
+        throw(ArgumentError("refinement physical k differs from author trajectory k"))
+    diagnostics = inflation_author_trajectory_diagnostics(
+        refined.trajectory; sample_index)
+    merge(diagnostics, (; refinement_status=summary.refinement_status,
+        accepted_steps=summary.accepted_steps,
+        solver_retcode=summary.solver_retcode,
+        physical_k_reestablished=true))
 end
 
 function _inflation_diagnostic_csv_escape(value)
