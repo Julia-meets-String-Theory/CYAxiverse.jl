@@ -293,7 +293,7 @@ def validate_case_pack(path: Path):
                 not isinstance(x, str) or not x.strip() for x in item[key]
             ):
                 raise CheckFailure("CASE_PACK_INVALID", f"{cid}.{key} is invalid")
-        if item["evidence_kind"] not in allowed_kind:
+        if not isinstance(item["evidence_kind"], str) or item["evidence_kind"] not in allowed_kind:
             raise CheckFailure("CASE_PACK_INVALID", f"{cid}.evidence_kind is invalid")
         expected_kind = CASE_KIND.get(cid, "assessed_reasoning")
         if item["evidence_kind"] != expected_kind:
@@ -481,17 +481,37 @@ def validate_evidence(path: Path, candidate: str, tree: str, checker_hash: str,
     _raw, receipt = parse_json(path)
     required = {"schema", "candidate_commit", "candidate_tree", "checker_sha256",
                 "case_pack_sha256", "procedure_sha256", "cases"}
-    if not isinstance(receipt, dict) or set(receipt) != required or receipt["schema"] != "cyax-skills-smoke-1":
+    if not isinstance(receipt, dict) or set(receipt) != required:
         raise CheckFailure("EVIDENCE_INVALID", "receipt has missing/unknown keys or schema")
+    if not isinstance(receipt["schema"], str) or receipt["schema"] != "cyax-skills-smoke-1":
+        raise CheckFailure("EVIDENCE_INVALID", "receipt schema is invalid")
+    for key in ("candidate_commit", "candidate_tree"):
+        if not isinstance(receipt[key], str) or not FULL_SHA.fullmatch(receipt[key]):
+            raise CheckFailure("EVIDENCE_INVALID", f"{key} must be a full lower-case Git identity")
     if receipt["candidate_commit"] != candidate or receipt["candidate_tree"] != tree:
         raise CheckFailure("EVIDENCE_CANDIDATE_MISMATCH", "receipt candidate identity differs")
+    for key in ("checker_sha256", "case_pack_sha256"):
+        if not isinstance(receipt[key], str) or not HASH.fullmatch(receipt[key]):
+            raise CheckFailure("EVIDENCE_INVALID", f"{key} must be a lower-case SHA-256")
     if receipt["checker_sha256"] != checker_hash or receipt["case_pack_sha256"] != case_hash:
         raise CheckFailure("EVIDENCE_HASH_MISMATCH", "receipt checker/case hash is stale")
     if receipt["procedure_sha256"] != procedure_hashes:
         raise CheckFailure("EVIDENCE_HASH_MISMATCH", "receipt procedure hashes are stale")
     cases = receipt["cases"]
-    if not isinstance(cases, list) or [c.get("id") for c in cases if isinstance(c, dict)] != CASE_IDS:
-        raise CheckFailure("CASE_ID_DUPLICATE", "receipt must contain each case exactly once in order")
+    if not isinstance(cases, list):
+        raise CheckFailure("EVIDENCE_INVALID", "receipt cases must be an array")
+    case_ids = []
+    seen_case_ids = set()
+    for case in cases:
+        if not isinstance(case, dict) or not isinstance(case.get("id"), str):
+            raise CheckFailure("EVIDENCE_INVALID", "receipt case id must be a string")
+        cid = case["id"]
+        if cid in seen_case_ids:
+            raise CheckFailure("CASE_ID_DUPLICATE", f"duplicate receipt case id {cid}")
+        seen_case_ids.add(cid)
+        case_ids.append(cid)
+    if case_ids != CASE_IDS:
+        raise CheckFailure("EVIDENCE_INCOMPLETE", "receipt must contain each case exactly once in order")
     ckeys = {"id", "evidence_status", "criterion_status", "simulated_action_status",
              "actor_ref", "assessment_ref", "evidence", "commands"}
     ekeys = {"artifact_ref", "local_path", "sha256", "bytes"}
@@ -502,11 +522,13 @@ def validate_evidence(path: Path, candidate: str, tree: str, checker_hash: str,
         cid = item["id"]
         if set(item) != ckeys:
             raise CheckFailure("EVIDENCE_INVALID", f"{cid} case has missing/unknown keys")
-        if item["evidence_status"] not in {"observed", "not_run"} or item["criterion_status"] not in {"met", "unmet", "unassessed"}:
+        if (not isinstance(item["evidence_status"], str) or item["evidence_status"] not in {"observed", "not_run"}
+                or not isinstance(item["criterion_status"], str) or item["criterion_status"] not in {"met", "unmet", "unassessed"}):
             raise CheckFailure("EVIDENCE_INVALID", f"{cid} status field is invalid")
         if item["evidence_status"] != "observed" or item["criterion_status"] != "met":
             raise CheckFailure("EVIDENCE_INCOMPLETE", f"{cid} is not observed and assessed met")
-        if item["simulated_action_status"] not in {"not_applicable", "BLOCKED"}:
+        if (not isinstance(item["simulated_action_status"], str)
+                or item["simulated_action_status"] not in {"not_applicable", "BLOCKED"}):
             raise CheckFailure("EVIDENCE_INVALID", f"{cid} simulated_action_status is invalid")
         if cid == "SK-12" and item["simulated_action_status"] != "BLOCKED":
             raise CheckFailure("EVIDENCE_INCOMPLETE", "SK-12 must record its simulated BLOCKED action")
@@ -520,7 +542,7 @@ def validate_evidence(path: Path, candidate: str, tree: str, checker_hash: str,
                 raise CheckFailure("EVIDENCE_INVALID", f"{cid} evidence record has wrong keys")
             for key in ("artifact_ref", "local_path"):
                 _string(ev[key], f"{cid}.{key}")
-            if not HASH.fullmatch(ev["sha256"]):
+            if not isinstance(ev["sha256"], str) or not HASH.fullmatch(ev["sha256"]):
                 raise CheckFailure("EVIDENCE_INVALID", f"{cid} evidence SHA-256 is malformed")
             _int(ev["bytes"], f"{cid}.evidence.bytes")
             rel = Path(ev["local_path"])
@@ -545,7 +567,7 @@ def validate_evidence(path: Path, candidate: str, tree: str, checker_hash: str,
             _int(command["sequence"], f"{cid}.sequence", 1)
             if isinstance(command["exit_code"], bool) or not isinstance(command["exit_code"], int):
                 raise CheckFailure("EVIDENCE_INVALID", f"{cid}.exit_code must be an integer")
-            if command["expected_exit"] not in {"zero", "nonzero"}:
+            if not isinstance(command["expected_exit"], str) or command["expected_exit"] not in {"zero", "nonzero"}:
                 raise CheckFailure("EVIDENCE_INVALID", f"{cid}.expected_exit is invalid")
             if (command["expected_exit"] == "zero") != (command["exit_code"] == 0):
                 raise CheckFailure("EVIDENCE_INVALID", f"{cid} expected_exit does not match the observed exit code")

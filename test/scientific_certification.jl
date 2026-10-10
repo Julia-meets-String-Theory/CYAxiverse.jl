@@ -445,6 +445,7 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
             tree=repeat("0", 40), clean=true)
         evidence_root = joinpath(parent, "replay-evidence")
         mkpath(joinpath(evidence_root, "commands"))
+        mkpath(joinpath(evidence_root, "replay"))
         @test_throws ErrorException ScientificCertificationFixtures._replay_receipt(
             "MX04_BAD_PROVENANCE", 256,
             Dict("path"=>dirname(certificate.certificate_path),
