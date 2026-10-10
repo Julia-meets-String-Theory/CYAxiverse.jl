@@ -197,6 +197,7 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
     upper_endpoint = upper_count::EndpointCount
     queue = Tuple{EndpointCount,EndpointCount}[(lower_endpoint, upper_endpoint)]
     final = Tuple{EndpointCount,EndpointCount}[]
+    refinement_stalled = false
     while !isempty(queue)
         ca, cb = popfirst!(queue)
         diff = cb.negative - ca.negative
@@ -218,6 +219,7 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
             count_result === nothing || (chosen = count_result; break)
         end
         if chosen === nothing
+            budget.used < budget.limit && (refinement_stalled = true)
             push!(final, (ca, cb))
             continue
         end
@@ -247,6 +249,7 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
     all_met = covered && !isempty(clusters) && all(c -> c.relative_width_met, clusters) &&
         (options.spectral_goal === :clusters || all(c -> c.population == 1, clusters))
     reason = all_met ? "goal_met" : budget.used >= budget.limit ? "budget_exhausted" :
+        refinement_stalled ? "refinement_inconclusive" :
         any(c -> c.sign === :unresolved, clusters) ? "sign_unresolved" :
         options.spectral_goal === :individuals && any(c -> c.population > 1, clusters) ?
             "individuals_unresolved" : "refinement_inconclusive"
@@ -271,8 +274,8 @@ function _diagonal_spectrum(H, K, bits, options::ProofOptions, metric_pivots)
     return result
 end
 
-function certify_generalized_spectrum(model::CertificationModel, root::RootResult;
-        options=ProofOptions(), budget=nothing)
+function _certify_generalized_spectrum(model::CertificationModel, root::RootResult,
+        options::ProofOptions, budget; reuse_hessian::Bool=false)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
     root.precision in options.precisions || throw(ArgumentError("root precision must be in options.precisions"))
     root.status === :CERTIFIED_ROOT || return _empty_spectrum(:INCONCLUSIVE, "root is not certified", options.spectral_goal, root.precision)
@@ -281,7 +284,7 @@ function certify_generalized_spectrum(model::CertificationModel, root::RootResul
     _backend_supported() || return _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", options.spectral_goal, root.precision)
     bits = root.precision
     return _with_precision(bits) do
-        _revalidate_root(model, root, bits) ||
+        _revalidate_root(model, root, bits; reuse_hessian) ||
             return _empty_spectrum(:INVALID_INPUT, "root witness does not match model", options.spectral_goal, bits)
         shared_budget = budget === nothing ?
             _InertiaBudget(options.max_inertia_evaluations, 0, String[]) : budget
@@ -316,6 +319,12 @@ function certify_generalized_spectrum(model::CertificationModel, root::RootResul
             _inertia_spectrum(H, K, bits, options, metric.pivots, shared_budget)
         end
     end
+end
+
+function certify_generalized_spectrum(model::CertificationModel, root::RootResult;
+        options=ProofOptions(), budget=nothing)
+    options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
+    return _certify_generalized_spectrum(model, root, options, budget)
 end
 
 function _with_attempts(root::RootResult, attempts::Vector{String})
@@ -364,10 +373,12 @@ function certify(model::CertificationModel, theta0; options=ProofOptions(), cand
                 nothing
             end
             root === nothing && (push!(attempts, "root p=$bits radius=$radius status=no_finite_witness"); continue)
+            push!(attempts, "root H LDL evaluations=1 method=$(root.hessian_method)")
             first_diagnostic === nothing && (first_diagnostic = root)
             push!(attempts, "root p=$bits radius=$radius status=$(root.status)")
             if root.status === :CERTIFIED_ROOT
-                spectrum = certify_generalized_spectrum(model, root; options, budget)
+                spectrum = _certify_generalized_spectrum(model, root, options, budget;
+                    reuse_hessian=true)
                 push!(attempts, "spectrum p=$bits radius=$radius status=$(spectrum.status) reason=$(spectrum.reason)")
                 push!(attempts, "spectrum budget p=$bits used=$(budget.used) limit=$(budget.limit)")
                 level = spectrum.status === :CERTIFIED_BOUNDS ? 2 : 1

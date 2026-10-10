@@ -236,7 +236,8 @@ def _walk_limits(value, depth=0):
 
 
 def parse_json(path: Path):
-    data = path.read_bytes()
+    with path.open("rb") as stream:
+        data = stream.read(4 * 1024 * 1024 + 1)
     if len(data) > 4 * 1024 * 1024:
         raise CheckFailure("JSON_RESOURCE_LIMIT", "JSON file exceeds 4 MiB", str(path))
     try:

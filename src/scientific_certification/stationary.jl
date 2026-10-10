@@ -9,6 +9,42 @@ struct ProofOptions
     spectral_goal::Symbol
     max_dimension::Int
     max_terms::Int
+
+    function ProofOptions(precisions, max_newton_steps, max_backtracks, box_radii,
+            max_expansions, max_inertia_evaluations, relative_width, spectral_goal,
+            max_dimension, max_terms)
+        precisions isa Tuple && all(x -> typeof(x) === Int, precisions) ||
+            throw(ArgumentError("precisions must be a tuple of integers"))
+        !isempty(precisions) && issorted(precisions) &&
+            length(unique(precisions)) == length(precisions) &&
+            all(x -> x in (256, 512), precisions) ||
+            throw(ArgumentError("precisions must be a nonempty increasing subsequence of (256, 512)"))
+        typeof(max_newton_steps) === Int && 0 <= max_newton_steps <= 20 ||
+            throw(ArgumentError("max_newton_steps must be in 0:20"))
+        typeof(max_backtracks) === Int && 0 <= max_backtracks <= 8 ||
+            throw(ArgumentError("max_backtracks must be in 0:8"))
+        box_radii isa Tuple && 1 <= length(box_radii) <= 4 &&
+            all(x -> x isa Rational{BigInt}, box_radii) ||
+            throw(ArgumentError("box_radii must contain one to four exact rational values"))
+        all(x -> 0 < x < 1//2, box_radii) &&
+            all(box_radii[i] > box_radii[i+1] for i in 1:length(box_radii)-1) ||
+            throw(ArgumentError("box_radii must be strictly decreasing values in (0, 1/2)"))
+        typeof(max_expansions) === Int && 0 <= max_expansions <= 32 ||
+            throw(ArgumentError("max_expansions must be in 0:32"))
+        typeof(max_inertia_evaluations) === Int && 0 <= max_inertia_evaluations <= 4096 ||
+            throw(ArgumentError("max_inertia_evaluations must be in 0:4096"))
+        relative_width isa Rational{BigInt} && 0 < relative_width <= big(1)//big(1048576) ||
+            throw(ArgumentError("relative_width must be positive and no larger than 2^-20"))
+        spectral_goal in (:clusters, :individuals) ||
+            throw(ArgumentError("spectral_goal must be :clusters or :individuals"))
+        typeof(max_dimension) === Int && 1 <= max_dimension <= 32 ||
+            throw(ArgumentError("max_dimension must be in 1:32"))
+        typeof(max_terms) === Int && 1 <= max_terms <= 2048 ||
+            throw(ArgumentError("max_terms must be in 1:2048"))
+        new(precisions, max_newton_steps, max_backtracks, box_radii,
+            max_expansions, max_inertia_evaluations, relative_width, spectral_goal,
+            max_dimension, max_terms)
+    end
 end
 
 function _option_int(name::String, value, lower::Int, upper::Int)
@@ -273,7 +309,7 @@ function _evaluate_root_claims(model::CertificationModel,
         box_bounds::Vector{Tuple{Rational{BigInt},Rational{BigInt}}},
         C::Matrix{Rational{BigInt}}, bits::Int, options::ProofOptions,
         provenance::Dict{String,String},
-        attempts::Vector{String})
+        attempts::Vector{String}; classify_hessian::Bool=true)
     n = length(center)
     box = [_iv(lo, hi, bits) for (lo, hi) in box_bounds]
     x0 = _point_intervals(center, bits)
@@ -299,10 +335,10 @@ function _evaluate_root_claims(model::CertificationModel,
     end
     included = all(_lo(W[i]) > _lo(box[i]) && _hi(W[i]) < _hi(box[i]) for i in 1:n)
     contracted = q < 1
-    ldl = _interval_ldl(H, bits)
-    class = _classify(ldl.signs, n)
-    method = ldl.ok ? :direct_ldl : :none
-    pivots = ldl.ok ? ldl.pivots : IA.Interval{BigFloat}[]
+    ldl = classify_hessian ? _interval_ldl(H, bits) : nothing
+    class = classify_hessian ? _classify(ldl.signs, n) : :UNRESOLVED
+    method = classify_hessian && ldl.ok ? :direct_ldl : :none
+    pivots = classify_hessian && ldl.ok ? ldl.pivots : IA.Interval{BigFloat}[]
     status = included && contracted ? :CERTIFIED_ROOT : :INCONCLUSIVE
     reason = status === :CERTIFIED_ROOT ? "strict inclusion and q<1" :
         included ? "contraction bound q is not below one" :
@@ -325,7 +361,7 @@ function _model_signature(model::CertificationModel)
     bytes2hex(sha256(codeunits(join(parts, "|"))))
 end
 
-_rational_bound(x::BigFloat) = Rational{BigInt}(x)
+_rational_bound(x::BigFloat) = _exact_bigfloat_rational(x)
 
 function _contained_claim(recomputed::IA.Interval{BigFloat}, stored::IA.Interval{BigFloat})
     IA.isguaranteed(recomputed) && IA.decoration(recomputed) == IA.com &&
@@ -334,7 +370,8 @@ function _contained_claim(recomputed::IA.Interval{BigFloat}, stored::IA.Interval
     _rational_bound(_hi(recomputed)) <= _rational_bound(_hi(stored))
 end
 
-function _revalidate_root(model::CertificationModel, root::RootResult, bits::Int)
+function _revalidate_root(model::CertificationModel, root::RootResult, bits::Int;
+        reuse_hessian::Bool=false)
     n = size(model.Q, 1)
     root.status === :CERTIFIED_ROOT || return false
     root.model_signature == _model_signature(model) || return false
@@ -357,7 +394,8 @@ function _revalidate_root(model::CertificationModel, root::RootResult, bits::Int
     evaluated = try
         _evaluate_root_claims(model, root.original_seed, root.translation,
             root.normalized_seed, root.center, bounds, root.preconditioner,
-            bits, root.options, root.candidate_provenance, root.attempts)
+            bits, root.options, root.candidate_provenance, root.attempts;
+            classify_hessian=!reuse_hessian)
     catch e
         e isa SingularException || e isa DomainError || e isa OverflowError || rethrow()
         return false
@@ -368,7 +406,23 @@ function _revalidate_root(model::CertificationModel, root::RootResult, bits::Int
     all(_contained_claim(evaluated.H_box[i,j], root.H_box[i,j]) for j in 1:n for i in 1:n) || return false
     all(_contained_claim(evaluated.W[i], root.W[i]) for i in 1:n) || return false
     all(_lo(evaluated.W[i]) > _lo(root.box[i]) && _hi(evaluated.W[i]) < _hi(root.box[i]) for i in 1:n) || return false
-    if root.hessian_method === :direct_ldl
+    if reuse_hessian
+        # The combined certifier uses this path only for its freshly created
+        # root. Recompute the root proof and exact H-box, then reuse the strict
+        # LDL evidence from that same box instead of factoring it twice.
+        all(_contained_claim(evaluated.H_box[i,j], root.H_box[i,j]) &&
+            _contained_claim(root.H_box[i,j], evaluated.H_box[i,j]) for j in 1:n for i in 1:n) || return false
+        if root.hessian_method === :direct_ldl
+            length(root.hessian_pivots) == n || return false
+            all(_isvalidproof(p) && (_lo(p) > 0 || _hi(p) < 0) for p in root.hessian_pivots) || return false
+            signs = Symbol[_lo(p) > 0 ? :positive : :negative for p in root.hessian_pivots]
+            _classify(signs,n) === root.hessian_classification || return false
+        elseif root.hessian_method === :none
+            isempty(root.hessian_pivots) && root.hessian_classification === :UNRESOLVED || return false
+        else
+            return false
+        end
+    elseif root.hessian_method === :direct_ldl
         length(root.hessian_pivots) == n && evaluated.hessian_method === :direct_ldl || return false
         all(_contained_claim(evaluated.hessian_pivots[i], root.hessian_pivots[i]) for i in 1:n) || return false
         evaluated.hessian_classification === root.hessian_classification || return false

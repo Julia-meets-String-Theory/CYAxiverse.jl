@@ -22,6 +22,8 @@ end
 @testset "Bounded scientific certification" begin
     @testset "exact input and phase conventions" begin
         @test_throws DimensionMismatch SC.prepare_model(reshape([1], 1, 1), [1 0 0], reshape([1], 1, 1))
+        @test_throws DimensionMismatch SC.prepare_model(zeros(Int,0,1),reshape([1,0],2,1),zeros(Int,0,0))
+        @test_throws DimensionMismatch SC.prepare_model(zeros(Int,1,0),zeros(Int,2,0),reshape([1],1,1))
         # The public scientific contract uses Q with shape n×M; unlike the
         # synthetic SK-02/SK-08 (term,axion) reader fixture, it is not M×n.
         q_transposed = [1 0; 0 1; 1 1]
@@ -45,6 +47,19 @@ end
         @test_throws ArgumentError SC.ProofOptions(box_radii=(true,))
         @test_throws ArgumentError SC.ProofOptions(relative_width=true)
         @test_throws ArgumentError SC.ProofOptions(spectral_goal=:physical)
+        positional_options=SC.ProofOptions()
+        @test SC.ProofOptions(positional_options.precisions,
+            positional_options.max_newton_steps,positional_options.max_backtracks,
+            positional_options.box_radii,positional_options.max_expansions,
+            positional_options.max_inertia_evaluations,positional_options.relative_width,
+            positional_options.spectral_goal,positional_options.max_dimension,
+            positional_options.max_terms).precisions==positional_options.precisions
+        @test_throws ArgumentError SC.ProofOptions((128,),
+            positional_options.max_newton_steps,positional_options.max_backtracks,
+            positional_options.box_radii,positional_options.max_expansions,
+            positional_options.max_inertia_evaluations,positional_options.relative_width,
+            positional_options.spectral_goal,positional_options.max_dimension,
+            positional_options.max_terms)
 
     limited_model = SC.prepare_model(reshape([1, 1], 1, 2), [1 1; 0 0], reshape([1], 1, 1))
     limited = SC.certify_stationary_point(limited_model, [0];
@@ -60,6 +75,43 @@ end
         q_input[1] = 7; l_input[1,1] = 9; k_input[1] = 11; phase_input[1] = 1//4
         @test copied.Q == reshape([1//1], 1, 1)
         @test copied.L[1,1] == 1 && copied.K[1,1] == 2 && copied.phases == [1//8]
+
+        exact_float=SC._exact_rational(0.1)
+        exact_bigfloat=setprecision(BigFloat,512) do
+            BigFloat(1)+BigFloat(2)^(-500)
+        end
+        negative_bigfloat=setprecision(BigFloat,512) do
+            -exact_bigfloat
+        end
+        exact_bigfloat_rational=(big(2)^500+1)//(big(2)^500)
+        @test SC._exact_rational(exact_bigfloat)==exact_bigfloat_rational
+        @test SC._exact_rational(negative_bigfloat)==-exact_bigfloat_rational
+        @test SC._exact_rational(BigFloat(0;precision=512))==0//1
+        high_precision_k=reshape([exact_bigfloat],1,1)
+        high_precision_phase=[exact_bigfloat]
+        high_precision_model=SC.prepare_model(reshape([1],1,1),
+            reshape([1,0],2,1),high_precision_k;phases=high_precision_phase)
+        @test high_precision_model.K[1,1]==exact_bigfloat_rational
+        @test high_precision_model.phases[1]==exact_bigfloat_rational
+        high_precision_k[1]=2
+        high_precision_phase[1]=BigFloat(0.2)
+        @test high_precision_model.K[1,1]==exact_bigfloat_rational
+        @test high_precision_model.phases[1]==exact_bigfloat_rational
+        @test exact_float!=1//10
+        @test high_precision_model.K[1,1]!=1//1
+        for value in (BigInt(1)//BigInt(10),0.1,exact_bigfloat,
+                negative_bigfloat,BigFloat(0;precision=512))
+            bits=value isa BigFloat ? 512 : 256
+            exact=SC._exact_rational(value)
+            interval=SC._with_precision(bits) do
+                SC._iv(exact,bits)
+            end
+            encoded=SC._interval_array_record([interval])["data"][1]
+            parsed=(SC._parse_rational(encoded[1]),SC._parse_rational(encoded[2]))
+            actual=(SC._rational_bound(SC._lo(interval)),SC._rational_bound(SC._hi(interval)))
+            @test parsed==actual
+            @test parsed[1]<=exact<=parsed[2]
+        end
 
         model = SC.prepare_model(reshape([1], 1, 1), reshape([1, 0], 2, 1), reshape([1], 1, 1);
             phases=[1//8])
@@ -198,9 +250,12 @@ end
 
         zero_second_coefficient = SC.prepare_model(Matrix{Int}(I,2,2),
             [1 0; 0 0], Matrix{Int}(I,2,2))
+        @test zero_second_coefficient.Q==Matrix{Rational{BigInt}}(I,2,2)
+        @test zero_second_coefficient.L[1,2]==0
         zero_second_result = SC.certify_stationary_point(zero_second_coefficient,[0,0];options)
         @test zero_second_result.status == :INCONCLUSIVE
         @test zero_second_result.hessian_classification == :UNRESOLVED
+        @test zero_second_result.status != :CERTIFIED_ROOT
 
         badmetric = SC.prepare_model(Matrix{Int}(I,2,2),[1 1;0 0],[1 0;0 -1])
         badroot = SC.certify_stationary_point(badmetric,[0,0];options)
@@ -506,6 +561,8 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
             combined.attempts)==length(radii)
         @test count(x->startswith(x,"metric LDL status=attempted"),
             combined.spectrum.attempts)==1
+        @test count(x->startswith(x,"root H LDL evaluations=1"),combined.attempts)==
+            count(x->startswith(x,"root p=256 radius=") && occursin("status=",x),combined.attempts)
         @test count(x->startswith(x,"trial="),combined.spectrum.attempts)==2
         @test combined.spectrum.status==:CERTIFIED_BOUNDS
         @test !combined.spectrum.resolution_met
@@ -541,6 +598,12 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
         @test [e.trial for e in quarter.spectrum.endpoint_counts]==[-2//1,1//1]
         @test [e.negative for e in quarter.spectrum.endpoint_counts]==[0,2]
         @test !(-1//1 in [e.trial for e in quarter.spectrum.endpoint_counts])
+
+        stalled=run_inertia(BigInt[0 1;1 0],Matrix{Rational{BigInt}}(I,2,2),20)
+        @test stalled.spectrum.status==:CERTIFIED_BOUNDS
+        @test !stalled.spectrum.resolution_met
+        @test stalled.spectrum.reason=="refinement_inconclusive"
+        @test stalled.budget.used==7 && stalled.budget.used<stalled.budget.limit
     end
 
     @testset "diagonal overlap bounds and honest weakening replay" begin
@@ -596,6 +659,23 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
     @testset "typed resource limits preserve invalid schema outcomes" begin
         @test_throws SC.ResourceLimitError SC.prepare_model(zeros(Int,33,1),
             reshape([1,0],2,1),Matrix{Int}(I,33,33))
+        @test_throws SC.ResourceLimitError SC.prepare_model(zeros(Int,1,2049),
+            zeros(Int,2,2049),reshape([1],1,1))
+        for (name,shape) in (("zero-n",(0,1)),("zero-M",(1,0)))
+            record=SC._input_record(SC.prepare_model(reshape([1],1,1),
+                reshape([1,0],2,1),reshape([1],1,1)))
+            if name=="zero-n"
+                record["n"]=0
+                record["Q"]=Dict("dims"=>[0,1],"data"=>String[])
+                record["K"]=Dict("dims"=>[0,0],"data"=>String[])
+            else
+                record["M"]=0
+                record["Q"]=Dict("dims"=>[1,0],"data"=>String[])
+                record["L"]=Dict("dims"=>[2,0],"data"=>String[])
+                record["phi"]=Dict("dims"=>[0],"data"=>String[])
+            end
+            @test_throws ArgumentError SC._parse_input(record)
+        end
         big_q=Matrix{Rational{BigInt}}(I,33,33)
         big_model=SC.CertificationModel(big_q,reshape(Rational{BigInt}[1//1,0//1],2,1),
             Matrix{Rational{BigInt}}(I,33,33),zeros(Rational{BigInt},1),BigInt(0)//BigInt(1))
@@ -603,6 +683,11 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
         @test result.status==:UNSUPPORTED
         @test result.root.reason=="RESOURCE_LIMIT"
         @test_throws SC.ResourceLimitError SC._parse_rational(repeat("1",4097)*"/1")
+        negative_4096=-(big(10)^4095)//big(1)
+        negative_4096_text=SC._ratstr(negative_4096)
+        @test SC._parse_rational(negative_4096_text)==negative_4096
+        @test SC._check_tree_limits(Dict("negative"=>negative_4096_text))===nothing
+        @test_throws SC.ResourceLimitError SC._parse_rational("-"*repeat("9",4097)*"/1")
         long_metadata=repeat("x",4097)
         @test_throws SC.ResourceLimitError SC._check_tree_limits(Dict("metadata"=>long_metadata))
         nested=Any[]
@@ -630,6 +715,29 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
             environment=(receipt_sha256=bytes2hex(sha256(envbytes)),artifact_name=basename(envpath))
             written=SC.write_certificate(joinpath(parent,"valid"),model,cert;
                 source_ref=source,environment_ref=environment)
+            for (name,dimension_key,array_records) in (
+                    ("zero-n","n",Dict("Q"=>Dict("dims"=>[0,1],"data"=>String[]),
+                        "K"=>Dict("dims"=>[0,0],"data"=>String[]))),
+                    ("zero-M","M",Dict("Q"=>Dict("dims"=>[1,0],"data"=>String[]),
+                        "L"=>Dict("dims"=>[2,0],"data"=>String[]),
+                        "phi"=>Dict("dims"=>[0],"data"=>String[]))))
+                input_doc=TOML.parsefile(written.input_path)
+                input_doc[dimension_key]=0
+                for (key,value) in array_records; input_doc[key]=value; end
+                input_bytes=SC._toml_bytes(input_doc)
+                input_path=joinpath(parent,"$name-input.toml");write(input_path,input_bytes)
+                input_sha=bytes2hex(sha256(input_bytes))
+                cert_doc=TOML.parsefile(written.certificate_path)
+                cert_doc["input_sha256"]=input_sha
+                cert_path=joinpath(parent,"$name-certificate.toml")
+                write(cert_path,SC._toml_bytes(cert_doc))
+                report=SC.verify_certificate(cert_path,input_path;
+                    expected_input_sha256=input_sha,
+                    expected_certificate_sha256=bytes2hex(sha256(read(cert_path))),
+                    require=:root_and_spectrum,precision_bits=256)
+                @test report.status==:INVALID
+                @test occursin("input schema invalid",report.reason)
+            end
             oversized_metadata=TOML.parsefile(written.certificate_path)
             oversized_metadata["candidate_provenance"]["source_ref"]=repeat("x",4097)
             metadata_path=joinpath(parent,"oversized-metadata.toml")
@@ -641,6 +749,12 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
                 require=:root_and_spectrum,precision_bits=256)
             @test metadata_report.status==:UNSUPPORTED
             @test metadata_report.reason=="RESOURCE_LIMIT"
+        wrong_metadata_hash=SC.verify_certificate(metadata_path,written.input_path;
+            expected_input_sha256=written.input_sha256,
+            expected_certificate_sha256=written.certificate_sha256,
+            require=:root_and_spectrum,precision_bits=256)
+        @test wrong_metadata_hash.status==:INVALID
+        @test occursin("certificate digest mismatch",wrong_metadata_hash.reason)
             maxbytes=16*1024*1024
             oversized_input=joinpath(parent,"oversized-input.toml")
             open(oversized_input,"w") do io; seek(io,maxbytes);write(io,UInt8(0));end

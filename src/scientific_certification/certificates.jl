@@ -21,7 +21,8 @@ function _parse_rational(x)
     x isa AbstractString || throw(ArgumentError("rational values must be quoted strings"))
     occursin(_RATIONAL_RE, x) || throw(ArgumentError("noncanonical rational"))
     left, right = split(x, '/'; limit=2)
-    (length(left) <= 4096 && length(right) <= 4096) || throw(ResourceLimitError("RESOURCE_LIMIT: rational digit limit exceeded"))
+    numerator_digits = length(left) - (startswith(left, "-") ? 1 : 0)
+    (numerator_digits <= 4096 && length(right) <= 4096) || throw(ResourceLimitError("RESOURCE_LIMIT: rational digit limit exceeded"))
     n, d = parse(BigInt, left), parse(BigInt, right)
     d > 0 || throw(ArgumentError("rational denominator must be positive"))
     gcd(abs(n), d) == 1 || throw(ArgumentError("rational must be reduced"))
@@ -221,7 +222,9 @@ function _check_tree_limits(value, depth=0)
     if value isa AbstractString
         if occursin(_RATIONAL_RE, value)
             parts = split(value, '/'; limit=2)
-            all(p -> length(p) <= 4096, parts) || throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+            numerator_digits = length(parts[1]) - (startswith(parts[1], "-") ? 1 : 0)
+            (numerator_digits <= 4096 && length(parts[2]) <= 4096) ||
+                throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
         else
             ncodeunits(value) <= 4096 || throw(ResourceLimitError("RESOURCE_LIMIT: metadata string limit exceeded"))
         end
@@ -234,11 +237,17 @@ function _check_tree_limits(value, depth=0)
     end
 end
 
-function _read_toml(path::AbstractString)
+function _read_toml_bytes(path::AbstractString)
     isfile(path) && !islink(path) || throw(ArgumentError("evidence path must be a regular file"))
-    size = filesize(path)
-    size <= 16*1024*1024 || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
-    bytes = read(path)
+    bytes = open(path, "r") do io
+        read(io, 16*1024*1024 + 1)
+    end
+    length(bytes) <= 16*1024*1024 ||
+        throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
+    bytes
+end
+
+function _parse_toml(bytes::Vector{UInt8})
     text = String(copy(bytes))
     isvalid(text) || throw(ArgumentError("input is not valid UTF-8"))
     record = try
@@ -247,14 +256,20 @@ function _read_toml(path::AbstractString)
         throw(ArgumentError("invalid TOML: $(sprint(showerror,e))"))
     end
     _check_tree_limits(record)
-    return bytes, record
+    return record
+end
+
+function _read_toml(path::AbstractString)
+    bytes = _read_toml_bytes(path)
+    return bytes, _parse_toml(bytes)
 end
 
 function _parse_input(record)
     _require_keys(record, ("schema","n","M","Q","L","K","phi","interpretation"), "input")
     record["schema"] == "cyax-scientific-input-v1" || throw(ArgumentError("unknown input schema"))
     n, M = _strict_int(record["n"], "n"), _strict_int(record["M"], "M")
-    1 <= n <= 32 && 1 <= M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: input dimensions exceed schema"))
+    n >= 1 && M >= 1 || throw(ArgumentError("input dimensions must be positive"))
+    n <= 32 && M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: input dimensions exceed schema"))
     q = _exact_claims(record["Q"], [n,M]); l = _exact_claims(record["L"], [2,M])
     k = _exact_claims(record["K"], [n,n]); phi = _exact_claims(record["phi"], [M])
     all(denominator(x)==1 for x in q) || throw(ArgumentError("Q entries must be integers"))
@@ -667,17 +682,25 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
     _valid_ref_hash(expected_input_sha256) || return _invalid("expected input SHA-256 is malformed")
     expected_certificate_sha256===nothing || _valid_ref_hash(expected_certificate_sha256) ||
         return _invalid("expected certificate SHA-256 is malformed")
-    input_bytes,input_record = try _read_toml(input_path) catch e
+    input_bytes = try _read_toml_bytes(input_path) catch e
         e isa ResourceLimitError && return _unsupported_resource()
-        return _invalid("input read/parse failed: $(sprint(showerror,e))")
+        return _invalid("input read failed: $(sprint(showerror,e))")
     end
-    cert_bytes,cert_record = try _read_toml(certificate_path) catch e
+    cert_bytes = try _read_toml_bytes(certificate_path) catch e
         e isa ResourceLimitError && return _unsupported_resource()
-        return _invalid("certificate read/parse failed: $(sprint(showerror,e))")
+        return _invalid("certificate read failed: $(sprint(showerror,e))")
     end
     input_digest=bytes2hex(sha256(input_bytes)); cert_digest=bytes2hex(sha256(cert_bytes))
     input_digest==expected_input_sha256 || return _invalid("input digest mismatch")
     expected_certificate_sha256===nothing || cert_digest==expected_certificate_sha256 || return _invalid("certificate digest mismatch")
+    input_record = try _parse_toml(input_bytes) catch e
+        e isa ResourceLimitError && return _unsupported_resource()
+        return _invalid("input parse failed: $(sprint(showerror,e))")
+    end
+    cert_record = try _parse_toml(cert_bytes) catch e
+        e isa ResourceLimitError && return _unsupported_resource()
+        return _invalid("certificate parse failed: $(sprint(showerror,e))")
+    end
     model, input_interpretation = try _parse_input(input_record) catch e
         e isa ResourceLimitError && return _unsupported_resource()
         return _invalid("input schema invalid: $(sprint(showerror,e))")

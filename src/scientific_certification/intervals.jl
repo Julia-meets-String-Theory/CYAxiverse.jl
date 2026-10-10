@@ -52,9 +52,16 @@ function _exact_rational(x)
         return BigInt(numerator(x)) // BigInt(denominator(x))
     elseif x isa Union{Float16,Float32,Float64,BigFloat}
         isfinite(x) || throw(ArgumentError("numeric inputs must be finite"))
+        x isa BigFloat && return _exact_bigfloat_rational(x)
         return Rational{BigInt}(x)
     end
     throw(ArgumentError("unsupported numeric input type $(typeof(x))"))
+end
+
+function _exact_bigfloat_rational(x::BigFloat)
+    return setprecision(BigFloat, precision(x)) do
+        Rational{BigInt}(x)
+    end
 end
 
 function _rational_interval(x::Rational{BigInt}, bits::Int)
@@ -217,8 +224,10 @@ function prepare_model(Q, L, K; phases=nothing)
     Q isa AbstractMatrix || throw(ArgumentError("Q must be a matrix"))
     Base.require_one_based_indexing(Q)
     n, M = size(Q)
-    1 <= n <= 32 || throw(ResourceLimitError("RESOURCE_LIMIT: n must be in 1:32"))
-    1 <= M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: M must be in 1:2048"))
+    n >= 1 || throw(DimensionMismatch("Q must have at least one row"))
+    M >= 1 || throw(DimensionMismatch("Q must have at least one column"))
+    n <= 32 || throw(ResourceLimitError("RESOURCE_LIMIT: n must be at most 32"))
+    M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: M must be at most 2048"))
     size(L) == (2, M) || throw(DimensionMismatch("L must have size (2,M)"))
     size(K) == (n, n) || throw(DimensionMismatch("K must have size (n,n)"))
     q = _effective_exact_matrix(Q, "Q")
