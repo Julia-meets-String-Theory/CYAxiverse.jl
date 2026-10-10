@@ -284,6 +284,7 @@ function _certify_generalized_spectrum(model::CertificationModel, root::RootResu
     _backend_supported() || return _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", options.spectral_goal, root.precision)
     bits = root.precision
     return _with_precision(bits) do
+        reuse_hessian = reuse_hessian || root.hessian_method === :spectral_counts
         _revalidate_root(model, root, bits; reuse_hessian) ||
             return _empty_spectrum(:INVALID_INPUT, "root witness does not match model", options.spectral_goal, bits)
         shared_budget = budget === nothing ?
@@ -322,9 +323,9 @@ function _certify_generalized_spectrum(model::CertificationModel, root::RootResu
 end
 
 function certify_generalized_spectrum(model::CertificationModel, root::RootResult;
-        options=ProofOptions(), budget=nothing)
+        options=ProofOptions())
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
-    return _certify_generalized_spectrum(model, root, options, budget)
+    return _certify_generalized_spectrum(model, root, options, nothing)
 end
 
 function _with_attempts(root::RootResult, attempts::Vector{String})
@@ -336,21 +337,39 @@ function _with_attempts(root::RootResult, attempts::Vector{String})
         copy(root.candidate_provenance), copy(attempts))
 end
 
+function _with_spectral_hessian(root::RootResult, spectrum::SpectrumResult)
+    root.hessian_method === :none || return root
+    spectrum.status === :CERTIFIED_BOUNDS || return root
+    n = length(root.original_seed)
+    classification = _count_classification(spectrum.negative_count,
+        spectrum.positive_count, spectrum.unresolved_count, n)
+    classification === :UNRESOLVED && return root
+    RootResult(root.status, root.model_signature, root.reason,
+        copy(root.original_seed), copy(root.translation), copy(root.normalized_seed),
+        copy(root.center), copy(root.box), copy(root.preconditioner),
+        copy(root.F_center), copy(root.H_box), copy(root.W), root.q_upper,
+        root.precision, root.options, classification, :spectral_counts,
+        IA.Interval{BigFloat}[], copy(root.candidate_provenance), copy(root.attempts))
+end
+
 function certify(model::CertificationModel, theta0; options=ProofOptions(), candidate_provenance=nothing)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
     seed = _exact_seed(theta0, size(model.Q, 1))
     translation, normalized = _normalize_seed(seed)
     provenance = _provenance(candidate_provenance)
+    model_signature = size(model.Q,1) <= 32 && size(model.Q,2) <= 2048 ? _model_signature(model) : ""
+    context = (; model_signature, translation, normalized_seed=normalized,
+        candidate_provenance=provenance)
     (length(seed) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
         return CertificationResult(:UNSUPPORTED,
-            _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options),
+            _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...),
             _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", options.spectral_goal), String[])
     _backend_supported() || return CertificationResult(:UNSUPPORTED,
-        _empty_root(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", seed, options),
+        _empty_root(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", seed, options; context...),
         _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", options.spectral_goal), String[])
     attempts = String[]
     first_diagnostic = nothing
-    best_root = _empty_root(:INCONCLUSIVE, "no root attempt", seed, options)
+    best_root = _empty_root(:INCONCLUSIVE, "no root attempt", seed, options; context...)
     best_spectrum = _empty_spectrum(:INCONCLUSIVE, "spectrum not attempted", options.spectral_goal)
     best_level = 0
     for bits in options.precisions
@@ -381,19 +400,20 @@ function certify(model::CertificationModel, theta0; options=ProofOptions(), cand
                     reuse_hessian=true)
                 push!(attempts, "spectrum p=$bits radius=$radius status=$(spectrum.status) reason=$(spectrum.reason)")
                 push!(attempts, "spectrum budget p=$bits used=$(budget.used) limit=$(budget.limit)")
+                classified_root = _with_spectral_hessian(root, spectrum)
                 level = spectrum.status === :CERTIFIED_BOUNDS ? 2 : 1
                 if level > best_level
-                    best_level = level; best_root = root; best_spectrum = spectrum
+                    best_level = level; best_root = classified_root; best_spectrum = spectrum
                 end
                 if spectrum.status === :CERTIFIED_BOUNDS && spectrum.resolution_met
-                    return CertificationResult(:CERTIFIED, _with_attempts(root, attempts),
+                    return CertificationResult(:CERTIFIED, _with_attempts(classified_root, attempts),
                         spectrum, attempts)
                 end
             end
         end
     end
     if best_level == 0
-        root = first_diagnostic === nothing ? best_root : _with_attempts(first_diagnostic, attempts)
+        root = first_diagnostic === nothing ? _with_attempts(best_root, attempts) : _with_attempts(first_diagnostic, attempts)
         return CertificationResult(root.status, root, best_spectrum, attempts)
     end
     status = best_level == 2 ? :INCONCLUSIVE_SPECTRUM : :CERTIFIED_ROOT

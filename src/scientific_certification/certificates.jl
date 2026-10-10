@@ -71,36 +71,126 @@ function _input_record(model::CertificationModel)
 end
 
 function _toml_bytes(record::Dict)
+    _check_tree_limits(record)
     io = IOBuffer()
     TOML.print(io, record; sorted=true)
     bytes = take!(io)
-    length(bytes) <= 16*1024*1024 || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
     (isempty(bytes) || last(bytes) != 0x0a) && push!(bytes, 0x0a)
+    length(bytes) <= 16*1024*1024 || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
     return bytes
 end
 
+function _normalized_record(value, label::String, allowed::Tuple)
+    value isa NamedTuple && (value = Dict{Any,Any}(pairs(value)))
+    value isa AbstractDict || throw(ArgumentError("$label must be a record"))
+    allowed_keys = Set(String.(allowed))
+    out = Dict{String,Any}()
+    for (raw_key, field_value) in pairs(value)
+        raw_key isa AbstractString || raw_key isa Symbol ||
+            throw(ArgumentError("$label keys must be strings or symbols"))
+        key = String(raw_key)
+        key in allowed_keys || throw(ArgumentError("$label has unknown key $key"))
+        haskey(out, key) && throw(ArgumentError("$label has duplicate string/symbol key $key"))
+        out[key] = field_value
+    end
+    out
+end
+
+function _metadata_string(value, label::String; nonempty::Bool=false)
+    value isa AbstractString || throw(ArgumentError("$label must be a string"))
+    text = String(value)
+    isvalid(text) || throw(ArgumentError("$label must be valid UTF-8"))
+    ncodeunits(text) <= 4096 || throw(ResourceLimitError("RESOURCE_LIMIT: metadata string limit exceeded"))
+    (!nonempty || !isempty(text)) || throw(ArgumentError("$label must be nonempty"))
+    text
+end
+
+function _windows_absolute_path(value::String)
+    startswith(value, "\\\\") || occursin(r"^[A-Za-z]:", value)
+end
+
+function _private_or_local_host(host::AbstractString)
+    name = lowercase(replace(host, "["=>"", "]"=>""))
+    name in ("localhost", "localhost.localdomain") && return true
+    any(endswith(name, suffix) for suffix in (".local", ".internal", ".private")) && return true
+    octets = tryparse.(Int, split(name, '.'))
+    if length(octets) == 4 && all(x -> x !== nothing && 0 <= x <= 255, octets)
+        a, b = octets
+        return a == 0 || a == 10 || a == 127 || (a == 169 && b == 254) ||
+            (a == 172 && 16 <= b <= 31) || (a == 192 && b == 168)
+    end
+    if occursin(':', name)
+        return name in ("::1", "0:0:0:0:0:0:0:1") || startswith(name, "fc") ||
+            startswith(name, "fd") || startswith(name, "fe80:")
+    end
+    false
+end
+
+function _public_safe_source_ref(value)
+    text = _metadata_string(value, "candidate source_ref"; nonempty=true)
+    lower = lowercase(text)
+    (startswith(text, "/") || text == "~" || startswith(text, "~/") || startswith(text, "~\\") ||
+        _windows_absolute_path(text) ||
+        startswith(lower, "file:")) && throw(ArgumentError("candidate source_ref must not expose a local path"))
+    occursin(r"(?i)(?:password|pass|token|access[_-]?token|secret|client[_-]?secret|api[_-]?key|authorization|auth)\s*=", text) &&
+        throw(ArgumentError("candidate source_ref must not contain credentials"))
+    if !occursin("://", text)
+        bare_host = first(split(text, ['/','?','#']; limit=2))
+        _private_or_local_host(first(split(bare_host, ':'; limit=2))) &&
+            throw(ArgumentError("candidate source_ref must not name a local/private host"))
+    end
+    if occursin("://", text)
+        authority = match(r"^[A-Za-z][A-Za-z0-9+.-]*://([^/?#]+)", text)
+        authority === nothing && throw(ArgumentError("candidate source_ref URL is malformed"))
+        hostport = authority.captures[1]
+        occursin('@', hostport) && throw(ArgumentError("candidate source_ref URL must not contain credentials"))
+        host_match = startswith(hostport, "[") ? match(r"^\[([^\]]+)\]", hostport) : nothing
+        host = host_match === nothing ? first(split(hostport, ':'; limit=2)) : host_match.captures[1]
+        _private_or_local_host(host) && throw(ArgumentError("candidate source_ref URL must not name a local/private host"))
+        host = lowercase(host)
+        if any(host == domain || endswith(host, "." * domain)
+                for domain in ("chatgpt.com", "chat.openai.com", "claude.ai"))
+            throw(ArgumentError("candidate source_ref must not contain a chat/share URL"))
+        end
+        path_and_query = replace(text, r"^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]+"=>"")
+        occursin(r"(?i)/(?:share|sharing)(?:/|\?|#|$)", path_and_query) &&
+            throw(ArgumentError("candidate source_ref must not contain a public-share URL"))
+        occursin(r"(?i)[?&](?:share|share_id|conversation_id|thread_id)=", path_and_query) &&
+            throw(ArgumentError("candidate source_ref must not contain a private share reference"))
+    end
+    text
+end
+
+function _safe_artifact_name(value)
+    name = _metadata_string(value, "artifact_name"; nonempty=true)
+    normalized = replace(name, '\\'=>'/')
+    (startswith(normalized, "/") || name == "~" || startswith(name, "~/") || startswith(name, "~\\") ||
+        _windows_absolute_path(name) ||
+        startswith(lowercase(name), "file:") || occursin(r"^[A-Za-z][A-Za-z0-9+.-]*:", name)) &&
+        throw(ArgumentError("artifact_name must be a relative name"))
+    any(==(".."), split(normalized, '/')) &&
+        throw(ArgumentError("artifact_name cannot traverse outside its evidence root"))
+    name
+end
+
 function _source_record(value)
-    value isa NamedTuple && (value = Dict(string(k)=>v for (k,v) in pairs(value)))
-    value isa AbstractDict || throw(ArgumentError("source_ref must be a record"))
-    getv(k) = haskey(value, k) ? value[k] : get(value, Symbol(k), nothing)
-    repository, commit, tree = getv("repository"), getv("commit"), getv("tree")
-    repository isa AbstractString && !isempty(repository) || throw(ArgumentError("repository is required"))
+    value = _normalized_record(value, "source_ref", ("repository","commit","tree"))
+    repository, commit, tree = get(value,"repository",nothing), get(value,"commit",nothing), get(value,"tree",nothing)
+    repository = _metadata_string(repository, "repository"; nonempty=true)
+    commit = _metadata_string(commit, "commit"; nonempty=true)
+    tree = _metadata_string(tree, "tree"; nonempty=true)
     commit isa AbstractString && occursin(_GIT_SHA_RE, commit) || throw(ArgumentError("commit must be lower-case Git SHA-1"))
     tree isa AbstractString && occursin(_GIT_SHA_RE, tree) || throw(ArgumentError("tree must be lower-case Git SHA-1"))
-    Dict("repository"=>String(repository), "commit"=>String(commit), "tree"=>String(tree))
+    Dict("repository"=>repository, "commit"=>commit, "tree"=>tree)
 end
 
 function _environment_record(value)
-    value isa NamedTuple && (value = Dict(string(k)=>v for (k,v) in pairs(value)))
-    value isa AbstractDict || throw(ArgumentError("environment_ref must be a record"))
-    getv(k) = haskey(value, k) ? value[k] : get(value, Symbol(k), nothing)
-    digest, name = getv("receipt_sha256"), getv("artifact_name")
+    value = _normalized_record(value, "environment_ref", ("receipt_sha256","artifact_name"))
+    digest, name = get(value,"receipt_sha256",nothing), get(value,"artifact_name",nothing)
+    digest = _metadata_string(digest, "receipt_sha256"; nonempty=true)
     digest isa AbstractString && occursin(_SHA256_RE, digest) || throw(ArgumentError("receipt_sha256 must be lower-case SHA-256"))
-    name isa AbstractString && !isempty(name) || throw(ArgumentError("artifact_name is required"))
-    startswith(name, "/") && throw(ArgumentError("artifact_name must be relative"))
-    any(==(".."), split(replace(String(name), '\\'=>"/"), '/')) &&
-        throw(ArgumentError("artifact_name cannot traverse outside its evidence root"))
-    Dict("receipt_sha256"=>String(digest), "artifact_name"=>String(name))
+    name = _safe_artifact_name(name)
+    Dict("receipt_sha256"=>digest, "artifact_name"=>name)
 end
 
 function _root_record(model::CertificationModel, root::RootResult)
@@ -117,12 +207,21 @@ function _root_record(model::CertificationModel, root::RootResult)
         "q_upper"=>_ratstr(root.q_upper))
 end
 
-function _hessian_record(root::RootResult)
+function _hessian_record(root::RootResult, spectrum=nothing)
     n = length(root.original_seed)
     direct = root.hessian_method === :direct_ldl
-    negative = direct ? count(x -> _hi(x) < 0, root.hessian_pivots) : 0
-    positive = direct ? count(x -> _lo(x) > 0, root.hessian_pivots) : 0
-    unresolved = n - negative - positive
+    if root.hessian_method === :spectral_counts
+        spectrum isa SpectrumResult && spectrum.status === :CERTIFIED_BOUNDS ||
+            throw(ArgumentError("spectral Hessian counts require an accompanying certified spectrum"))
+        negative, positive, unresolved = spectrum.negative_count, spectrum.positive_count, spectrum.unresolved_count
+        _count_classification(negative, positive, unresolved, n) === root.hessian_classification ||
+            throw(ArgumentError("spectral Hessian classification differs from spectrum sign counts"))
+        isempty(root.hessian_pivots) || throw(ArgumentError("spectral Hessian evidence has no direct pivots"))
+    else
+        negative = direct ? count(x -> _hi(x) < 0, root.hessian_pivots) : 0
+        positive = direct ? count(x -> _lo(x) > 0, root.hessian_pivots) : 0
+        unresolved = n - negative - positive
+    end
     direct && unresolved != 0 && throw(ArgumentError("direct Hessian pivots must have strict signs"))
     Dict("classification"=>String(root.hessian_classification),
         "method"=>String(root.hessian_method), "negative_count"=>negative,
@@ -217,10 +316,24 @@ function _require_keys(value, expected, label)
     nothing
 end
 
-function _check_tree_limits(value, depth=0)
+const _RATIONAL_VALUE_PATHS = Set((
+    ("Q","data"), ("L","data"), ("K","data"), ("phi","data"),
+    ("interpretation","s"), ("settings","box_radii"), ("settings","relative_width"),
+    ("root","original_seed","data"), ("root","translation","data"),
+    ("root","normalized_seed","data"), ("root","center","data"),
+    ("root","box","data"), ("root","preconditioner","data"),
+    ("root","F_center","data"), ("root","H_box","data"),
+    ("root","W","data"), ("root","q_upper"), ("hessian","pivots","data"),
+    ("spectrum","metric_pivots","data"), ("spectrum","bounds","data"),
+    ("spectrum","diagonal_ratios","data"),
+    ("spectrum","clusters","lower"), ("spectrum","clusters","upper"),
+    ("spectrum","endpoint_counts","trial"), ("spectrum","endpoint_counts","pivots","data")))
+
+function _check_tree_limits(value, depth=0, path=())
     depth <= 12 || throw(ResourceLimitError("RESOURCE_LIMIT: nesting depth limit exceeded"))
     if value isa AbstractString
-        if occursin(_RATIONAL_RE, value)
+        isvalid(value) || throw(ArgumentError("serialized strings must be valid UTF-8"))
+        if path in _RATIONAL_VALUE_PATHS && occursin(_RATIONAL_RE, value)
             parts = split(value, '/'; limit=2)
             numerator_digits = length(parts[1]) - (startswith(parts[1], "-") ? 1 : 0)
             (numerator_digits <= 4096 && length(parts[2]) <= 4096) ||
@@ -230,10 +343,12 @@ function _check_tree_limits(value, depth=0)
         end
     elseif value isa AbstractDict
         for (k,v) in value
-            _check_tree_limits(string(k), depth+1); _check_tree_limits(v, depth+1)
+            key = string(k)
+            _check_tree_limits(key, depth+1, (path..., "<key>"))
+            _check_tree_limits(v, depth+1, (path..., key))
         end
     elseif value isa AbstractVector
-        for x in value; _check_tree_limits(x, depth+1); end
+        for x in value; _check_tree_limits(x, depth+1, path); end
     end
 end
 
@@ -356,6 +471,7 @@ function _verify_spectrum_claim(model, root, spectrum, bits, options)
     route = spectrum["route"]; route in ("diagonal","inertia_counts") || throw(ArgumentError("unknown spectrum route"))
     goal = spectrum["goal"]; goal == String(options.spectral_goal) || throw(ArgumentError("spectrum goal differs from settings"))
     mp = _interval_claims(spectrum["metric_pivots"], [n])
+    all(pair -> pair[1] > 0, vec(mp)) || throw(ArgumentError("metric pivots must be strictly positive"))
     bclaims = _interval_claims(spectrum["bounds"], [n])
     clusters = spectrum["clusters"]
     clusters isa Vector && !isempty(clusters) || throw(ArgumentError("clusters must be a nonempty array"))
@@ -417,17 +533,21 @@ function _verify_spectrum_claim(model, root, spectrum, bits, options)
     length(ec) <= 2n || throw(ArgumentError("too many endpoint witnesses"))
     isempty(vec(dc)) || throw(ArgumentError("inertia route has no diagonal ratios"))
     endpoint_claims = Dict{Rational{BigInt},Tuple{Int,Vector{Tuple{Rational{BigInt},Rational{BigInt}}}}}()
+    submitted_endpoints = Rational{BigInt}[]
     for item in ec
         _require_keys(item, ("trial","negative","pivots"), "endpoint_count")
         t = _parse_rational(item["trial"]); _is_dyadic(t) || throw(ArgumentError("endpoint trial must be dyadic"))
         negative = _strict_int(item["negative"], "endpoint negative", lower=0, upper=n)
         piv = _interval_claims(item["pivots"], [n])
         haskey(endpoint_claims,t) && throw(ArgumentError("duplicate endpoint trial"))
+        all(pair -> pair[1] > 0 || pair[2] < 0, vec(piv)) ||
+            throw(ArgumentError("endpoint pivots must exclude zero"))
+        push!(submitted_endpoints,t)
         endpoint_claims[t] = (negative, vec(piv))
     end
     expected_endpoints = sort(unique(vcat([c.lower for c in parsed_clusters],[c.upper for c in parsed_clusters])))
-    sort(collect(keys(endpoint_claims))) == expected_endpoints ||
-        throw(ArgumentError("endpoint set does not equal final cluster endpoints"))
+    submitted_endpoints == expected_endpoints ||
+        throw(ArgumentError("endpoint trials must equal sorted unique final cluster endpoints in canonical order"))
     length(expected_endpoints) <= 2n || throw(ArgumentError("endpoint set exceeds 2n"))
     issorted([endpoint_claims[t][1] for t in expected_endpoints]) ||
         throw(ArgumentError("endpoint counts are not nondecreasing"))
@@ -481,20 +601,34 @@ function _same_clusters(a::Vector{SpectralCluster}, b::Vector{SpectralCluster})
         for (x,y) in zip(a,b))
 end
 
-function _read_candidate_provenance(value)
-    value isa AbstractDict || throw(ArgumentError("candidate_provenance must be a table"))
-    status = get(value,"status",nothing)
+function _candidate_provenance_record(value)
+    value === nothing && return Dict("status"=>"unknown")
+    record = _normalized_record(value, "candidate_provenance", ("status","method","source_ref"))
+    status = get(record, "status", nothing)
+    shorthand = status === nothing
+    if shorthand
+        Set(keys(record)) == Set(("method","source_ref")) ||
+            throw(ArgumentError("candidate provenance shorthand requires method and source_ref only"))
+        status = "supplied"
+    end
     if status == "unknown"
-        _require_keys(value,("status",),"candidate provenance")
+        Set(keys(record)) == Set(("status",)) ||
+            throw(ArgumentError("unknown candidate provenance cannot include method or source_ref"))
         return Dict("status"=>"unknown")
     elseif status == "supplied"
-        _require_keys(value,("status","method","source_ref"),"candidate provenance")
-        method, source = value["method"], value["source_ref"]
-        method isa AbstractString && !isempty(method) || throw(ArgumentError("candidate method required"))
-        source isa AbstractString && !isempty(source) || throw(ArgumentError("candidate source required"))
-        return Dict("status"=>"supplied","method"=>String(method),"source_ref"=>String(source))
+        expected_keys = shorthand ? Set(("method","source_ref")) : Set(("status","method","source_ref"))
+        Set(keys(record)) == expected_keys ||
+            throw(ArgumentError("supplied candidate provenance requires method and source_ref"))
+        method = _metadata_string(record["method"], "candidate method"; nonempty=true)
+        source = _public_safe_source_ref(record["source_ref"])
+        return Dict("status"=>"supplied","method"=>method,"source_ref"=>source)
     end
     throw(ArgumentError("unknown candidate provenance status"))
+end
+
+function _read_candidate_provenance(value)
+    value isa AbstractDict || throw(ArgumentError("candidate_provenance must be a table"))
+    _candidate_provenance_record(value)
 end
 
 function _read_certificate(record, model, input_digest)
@@ -556,6 +690,10 @@ function _read_certificate(record, model, input_digest)
     neg+pos+unr==n || throw(ArgumentError("Hessian counts do not sum to n"))
     pivdims=method=="direct_ldl" ? [n] : [0]
     pivclaims=vec(_interval_claims(hessian["pivots"],pivdims))
+    if method=="direct_ldl"
+        all(pair -> pair[1] > 0 || pair[2] < 0, pivclaims) ||
+            throw(ArgumentError("direct Hessian pivots must exclude zero"))
+    end
     if method=="none"
         (class=="UNRESOLVED" && neg==0 && pos==0 && unr==n) || throw(ArgumentError("none Hessian evidence must be unresolved"))
     end
@@ -578,6 +716,14 @@ function _proof_interval_claims_fit(claims, actual)
     all(_claim_contains(claims[i],actual[i]) for i in eachindex(claims))
 end
 
+function _count_classification(negative::Int, positive::Int, unresolved::Int, n::Int)
+    negative + positive + unresolved == n || throw(ArgumentError("Hessian sign counts do not sum to n"))
+    negative > 0 && positive > 0 && return :SADDLE
+    unresolved == 0 && positive == n && return :MINIMUM
+    unresolved == 0 && negative == n && return :MAXIMUM
+    :UNRESOLVED
+end
+
 function _verify_root_hessian(parsed, evaluated, spectrum_verified)
     n=length(parsed.original)
     h=parsed.hessian
@@ -590,14 +736,11 @@ function _verify_root_hessian(parsed, evaluated, spectrum_verified)
         _classify(signs,n)==Symbol(parsed.class) || return false
     elseif parsed.method=="spectral_counts"
         spectrum_verified || return false
-        parsed.unr==0 || return false
         spectrum=parsed.spectrum
         parsed.neg==spectrum["negative_count"] &&
             parsed.pos==spectrum["positive_count"] &&
             parsed.unr==spectrum["unresolved_count"] || return false
-        signs=vcat(fill(:negative,parsed.neg),fill(:positive,parsed.pos),
-                   fill(:unresolved,parsed.unr))
-        _classify(signs,n)==Symbol(parsed.class) || return false
+        _count_classification(parsed.neg,parsed.pos,parsed.unr,n)==Symbol(parsed.class) || return false
     elseif parsed.method=="none"
         parsed.class=="UNRESOLVED" && parsed.neg==0 && parsed.pos==0 && parsed.unr==n || return false
     end
@@ -622,13 +765,19 @@ function write_certificate(directory::AbstractString, model::CertificationModel,
     root.status === :CERTIFIED_ROOT || throw(ArgumentError("only a certified root can be written"))
     _backend_supported() || throw(ArgumentError("unsupported interval backend"))
     sr, er = _source_record(source_ref), _environment_record(environment_ref)
+    combined_spectrum = result isa CertificationResult &&
+        result.spectrum.status === :CERTIFIED_BOUNDS ? result.spectrum : nothing
+    root.hessian_method === :spectral_counts && combined_spectrum === nothing &&
+        throw(ArgumentError("spectral Hessian counts require an accompanying certified spectrum"))
     lock(_PROOF_LOCK) do
         setprecision(BigFloat,root.precision) do
             setrounding(BigFloat,RoundNearest) do
-                _revalidate_root(model,root,root.precision) || throw(ArgumentError("root witness did not revalidate"))
+                _revalidate_root(model,root,root.precision;
+                    reuse_hessian=root.hessian_method === :spectral_counts) ||
+                    throw(ArgumentError("root witness did not revalidate"))
                 kind="root"; spectrum_record=Dict("status"=>"not_requested","reason"=>"not_requested")
-                if result isa CertificationResult && result.spectrum.status===:CERTIFIED_BOUNDS
-                    spectrum=result.spectrum
+                if combined_spectrum !== nothing
+                    spectrum=combined_spectrum
                     _verify_spectrum_claim(model,root,_spectrum_record(spectrum),root.precision,
                                            root.options) || throw(ArgumentError("spectrum witness did not revalidate"))
                     kind="root_and_spectrum"; spectrum_record=_spectrum_record(spectrum)
@@ -640,7 +789,7 @@ function write_certificate(directory::AbstractString, model::CertificationModel,
                     "settings"=>_settings_record(root.options),"precision"=>root.precision,
                     "candidate_provenance"=>root.candidate_provenance,
                     "interpretation"=>_interpretation(model),"root"=>_root_record(model,root),
-                    "hessian"=>_hessian_record(root),"spectrum"=>spectrum_record)
+                    "hessian"=>_hessian_record(root,combined_spectrum),"spectrum"=>spectrum_record)
                 cert_bytes=_toml_bytes(certificate)
                 out=abspath(directory)
                 ispath(out) && throw(ArgumentError("certificate destination already exists"))

@@ -686,7 +686,7 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
         negative_4096=-(big(10)^4095)//big(1)
         negative_4096_text=SC._ratstr(negative_4096)
         @test SC._parse_rational(negative_4096_text)==negative_4096
-        @test SC._check_tree_limits(Dict("negative"=>negative_4096_text))===nothing
+        @test SC._check_tree_limits(Dict("Q"=>Dict("dims"=>[1,1],"data"=>[negative_4096_text])))===nothing
         @test_throws SC.ResourceLimitError SC._parse_rational("-"*repeat("9",4097)*"/1")
         long_metadata=repeat("x",4097)
         @test_throws SC.ResourceLimitError SC._check_tree_limits(Dict("metadata"=>long_metadata))
@@ -900,6 +900,219 @@ end
         @test receipt["mathematical_verdict"] == "VERIFIED"
         @test receipt["provenance_status"] == "FAIL"
         @test !(receipt["mathematical_verdict"] == "VERIFIED" && receipt["provenance_status"] == "PASS")
+    end
+end
+
+@testset "R2 source correction regressions" begin
+    repository_root=normpath(joinpath(@__DIR__,".."))
+    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
+    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
+
+    @testset "closed and byte-bounded metadata" begin
+        digest=repeat("a",64)
+        @test SC._public_safe_source_ref("fixtures/candidate-source") == "fixtures/candidate-source"
+        @test SC._public_safe_source_ref("opaque:fixture-reference") == "opaque:fixture-reference"
+        @test SC._public_safe_source_ref("~candidate") == "~candidate"
+        @test SC._public_safe_source_ref("https://github.com/Julia-meets-String-Theory/CYAxiverse.jl") ==
+            "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl"
+        @test_throws ArgumentError SC._source_record(merge(source,(unexpected="discarded",)))
+        @test_throws ArgumentError SC._source_record(Dict("repository"=>source.repository,
+            :repository=>"conflict","commit"=>commit,"tree"=>tree))
+        @test_throws ArgumentError SC._environment_record((receipt_sha256=digest,
+            artifact_name="fixtures/../private.toml"))
+        @test_throws ArgumentError SC._environment_record((receipt_sha256=digest,
+            artifact_name="C:\\private\\receipt.toml"))
+        @test_throws ArgumentError SC._environment_record((receipt_sha256=digest,
+            artifact_name="\\\\server\\share\\receipt.toml"))
+        @test_throws ArgumentError SC._environment_record((receipt_sha256=digest,
+            artifact_name="file:///private/receipt.toml"))
+        @test SC._environment_record((receipt_sha256=digest,
+            artifact_name="fixtures/environment.toml"))["artifact_name"] == "fixtures/environment.toml"
+        @test SC._environment_record((receipt_sha256=digest,
+            artifact_name="~artifact.toml"))["artifact_name"] == "~artifact.toml"
+        @test SC._provenance((method="synthetic",source_ref="fixtures/candidate")) ==
+            Dict("status"=>"supplied","method"=>"synthetic","source_ref"=>"fixtures/candidate")
+        @test_throws ArgumentError SC._provenance((status="unknown",method="synthetic",
+            source_ref="fixtures/candidate"))
+        @test_throws ArgumentError SC._provenance((status="other",method="synthetic",
+            source_ref="fixtures/candidate"))
+        @test_throws ArgumentError SC._provenance(Dict("method"=>"one",:method=>"two",
+            "source_ref"=>"fixtures/candidate"))
+        @test_throws ArgumentError SC._provenance((method="synthetic",source_ref="/tmp/candidate"))
+        @test_throws ArgumentError SC._provenance((method="synthetic",
+            source_ref="https://chatgpt.com/share/fixture"))
+        @test_throws ArgumentError SC._provenance((method="synthetic",
+            source_ref="https://127.0.0.1:8080/fixture"))
+        @test_throws ArgumentError SC._provenance((method="synthetic",
+            source_ref="s3://localhost/private-object"))
+        @test_throws ArgumentError SC._provenance((method="synthetic",
+            source_ref="ftp://user@example.org/candidate"))
+        @test_throws ArgumentError SC._provenance((method="synthetic",
+            source_ref="https://example.org/share/fixture"))
+
+        long_metadata=repeat("é",2049)
+        @test_throws SC.ResourceLimitError SC._metadata_string(long_metadata,"method")
+        @test SC._metadata_string(repeat("é",2048),"method")==repeat("é",2048)
+        @test_throws SC.ResourceLimitError SC._source_record((repository=repeat("x",4097),
+            commit,tree))
+        @test_throws SC.ResourceLimitError SC._provenance((method=repeat("x",4097),
+            source_ref="fixtures/candidate"))
+        long_ratio=repeat("9",2048)*"/"*repeat("3",2048)
+        @test_throws SC.ResourceLimitError SC._toml_bytes(Dict("method"=>long_ratio))
+        raw_metadata=Vector{UInt8}(codeunits("method = \""*long_ratio*"\"\n"))
+        @test_throws SC.ResourceLimitError SC._parse_toml(raw_metadata)
+        encoded=SC._toml_bytes(Dict("Q"=>Dict("dims"=>[1,1],"data"=>[long_ratio])))
+        @test SC._parse_toml(encoded)["Q"]["data"][1]==long_ratio
+    end
+
+    @testset "request fidelity on noncertifying exits" begin
+        model=SC.prepare_model(reshape([1,1],1,2),[1 1;0 0],reshape([1],1,1))
+        options=SC.ProofOptions(precisions=(256,),max_terms=1)
+        provenance=(method="fixture-search",source_ref="fixtures/search-run")
+        seed=[5//4]
+        standalone=SC.certify_stationary_point(model,seed;options,candidate_provenance=provenance)
+        combined=SC.certify(model,seed;options,candidate_provenance=provenance)
+        for root in (standalone,combined.root)
+            @test root.status==:UNSUPPORTED && root.reason=="RESOURCE_LIMIT"
+            @test root.original_seed==[5//4]
+            @test root.translation==[1]
+            @test root.normalized_seed==[1//4]
+            @test root.options==options
+            @test root.candidate_provenance==SC._provenance(provenance)
+            @test root.model_signature==SC._model_signature(model)
+            @test isempty(root.attempts)
+        end
+        @test isempty(combined.attempts)
+
+        flat=SC.prepare_model(reshape([1,0],2,1),reshape([1,0],2,1),Matrix{Int}(I,2,2))
+        no_witness=SC.certify_stationary_point(flat,[5//4,1//3];
+            options=SC.ProofOptions(precisions=(256,),box_radii=(1//big(2)^20,)),
+            candidate_provenance=provenance)
+        no_witness_combined=SC.certify(flat,[5//4,1//3];
+            options=SC.ProofOptions(precisions=(256,),box_radii=(1//big(2)^20,)),
+            candidate_provenance=provenance)
+        @test no_witness.status==:INCONCLUSIVE && no_witness.reason=="no finite root witness"
+        @test no_witness.translation==[1,0] && no_witness.normalized_seed==[1//4,1//3]
+        @test no_witness.options.precisions==(256,)
+        @test no_witness.candidate_provenance==SC._provenance(provenance)
+        @test !isempty(no_witness.attempts)
+        @test no_witness_combined.root.status==:INCONCLUSIVE
+        @test no_witness_combined.root.translation==[1,0]
+        @test no_witness_combined.root.normalized_seed==[1//4,1//3]
+        @test no_witness_combined.root.options.precisions==(256,)
+        @test no_witness_combined.root.candidate_provenance==SC._provenance(provenance)
+        @test no_witness_combined.root.attempts==no_witness_combined.attempts
+    end
+
+    @testset "pivot, endpoint order, and writer revalidation" begin
+        options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals)
+        model1=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+        model2=SC.prepare_model(Matrix{Int}(I,2,2),[1 -1;0 0],[2 1;1 2])
+        result1=SC.certify(model1,[0];options)
+        result2=SC.certify(model2,[0,0];options)
+        @test result1.status==:CERTIFIED && result2.status==:CERTIFIED
+        mktempdir() do parent
+            envbytes=Vector{UInt8}(codeunits("synthetic environment receipt"))
+            envpath=joinpath(parent,"environment.toml")
+            write(envpath,envbytes)
+            environment=(receipt_sha256=bytes2hex(sha256(envbytes)),artifact_name=basename(envpath))
+            one=SC.write_certificate(joinpath(parent,"one"),model1,result1;
+                source_ref=source,environment_ref=environment)
+            two=SC.write_certificate(joinpath(parent,"two"),model2,result2;
+                source_ref=source,environment_ref=environment)
+            one_doc=TOML.parsefile(one.certificate_path)
+            two_doc=TOML.parsefile(two.certificate_path)
+            function replay(name,doc,written)
+                path=joinpath(parent,"$name.toml")
+                write(path,SC._toml_bytes(doc))
+                digest=bytes2hex(sha256(read(path)))
+                SC.verify_certificate(path,written.input_path;
+                    expected_input_sha256=written.input_sha256,
+                    expected_certificate_sha256=digest,
+                    require=:root_and_spectrum,precision_bits=256)
+            end
+            bad_metric=deepcopy(one_doc)
+            bad_metric["spectrum"]["metric_pivots"]["data"][1]=["-1/1","2/1"]
+            @test replay("bad-metric-pivot",bad_metric,one).status==:INVALID
+            bad_hessian=deepcopy(one_doc)
+            bad_hessian["hessian"]["pivots"]["data"][1]=["-1000/1","1000/1"]
+            @test replay("bad-hessian-pivot",bad_hessian,one).status==:INVALID
+            @test two_doc["spectrum"]["route"]=="inertia_counts"
+            bad_endpoint_pivot=deepcopy(two_doc)
+            bad_endpoint_pivot["spectrum"]["endpoint_counts"][1]["pivots"]["data"][1]=["-1000/1","1000/1"]
+            @test replay("bad-endpoint-pivot",bad_endpoint_pivot,two).status==:INVALID
+            reversed=deepcopy(two_doc)
+            reverse!(reversed["spectrum"]["endpoint_counts"])
+            @test replay("reversed-endpoints",reversed,two).status==:INVALID
+            permuted=deepcopy(two_doc)
+            permuted["spectrum"]["endpoint_counts"][1:2]=permuted["spectrum"]["endpoint_counts"][2:-1:1]
+            @test replay("permuted-endpoints",permuted,two).status==:INVALID
+
+            root=result1.root
+            bad_pivots=copy(root.hessian_pivots)
+            bad_pivots[1]=SC._iv(BigInt(-1000)//BigInt(1),BigInt(1000)//BigInt(1),root.precision)
+            bad_root=SC.RootResult(root.status,root.model_signature,root.reason,
+                copy(root.original_seed),copy(root.translation),copy(root.normalized_seed),
+                copy(root.center),copy(root.box),copy(root.preconditioner),copy(root.F_center),
+                copy(root.H_box),copy(root.W),root.q_upper,root.precision,root.options,
+                root.hessian_classification,root.hessian_method,bad_pivots,
+                copy(root.candidate_provenance),copy(root.attempts))
+            @test_throws ArgumentError SC.write_certificate(joinpath(parent,"mutated-root"),
+                model1,bad_root;source_ref=source,environment_ref=environment)
+        end
+    end
+
+    @testset "public spectrum budget stays internal" begin
+        model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+        result=SC.certify_stationary_point(model,[0];options=SC.ProofOptions(precisions=(256,)))
+        @test_throws MethodError SC.certify_generalized_spectrum(model,result;
+            options=SC.ProofOptions(precisions=(256,)),budget=nothing)
+    end
+
+    @testset "partial spectral signs classify a saddle and replay" begin
+        Q=[1 1 0;1 -1 0;0 0 1]
+        L=reshape(Rational{BigInt}[1//1,0//1,-1//1,0//1,1//big(2)^20,0//1],2,3)
+        model=SC.prepare_model(Q,L,Matrix{Int}(I,3,3))
+        options=SC.ProofOptions(precisions=(256,),box_radii=(1//big(2)^20,),
+            max_expansions=1,max_inertia_evaluations=7,spectral_goal=:individuals)
+        result=SC.certify(model,zeros(3);options)
+        @test result.status==:INCONCLUSIVE_SPECTRUM
+        @test result.root.status==:CERTIFIED_ROOT
+        @test result.root.hessian_method==:spectral_counts
+        @test result.root.hessian_classification==:SADDLE
+        @test (result.spectrum.negative_count,result.spectrum.positive_count,
+            result.spectrum.unresolved_count)==(1,1,1)
+        @test count(x->startswith(x,"root H LDL evaluations=1 method=none"),result.attempts)==1
+        @test count(x->startswith(x,"root H LDL evaluations="),result.attempts)==1
+        mktempdir() do parent
+            envbytes=Vector{UInt8}(codeunits("synthetic environment receipt"))
+            envpath=joinpath(parent,"environment.toml")
+            write(envpath,envbytes)
+            environment=(receipt_sha256=bytes2hex(sha256(envbytes)),artifact_name=basename(envpath))
+            @test_throws ArgumentError SC.write_certificate(joinpath(parent,"root-only"),
+                model,result.root;source_ref=source,environment_ref=environment)
+            written=SC.write_certificate(joinpath(parent,"combined"),model,result;
+                source_ref=source,environment_ref=environment)
+            document=TOML.parsefile(written.certificate_path)
+            @test document["hessian"]["method"]=="spectral_counts"
+            @test document["hessian"]["classification"]=="SADDLE"
+            report=SC.verify_certificate(written.certificate_path,written.input_path;
+                expected_input_sha256=written.input_sha256,
+                expected_certificate_sha256=written.certificate_sha256,
+                require=:root_and_spectrum,precision_bits=256)
+            @test report.status==:VERIFIED
+
+            false_minimum=deepcopy(document)
+            false_minimum["hessian"]["classification"]="MINIMUM"
+            path=joinpath(parent,"unresolved-called-minimum.toml")
+            write(path,SC._toml_bytes(false_minimum))
+            invalid=SC.verify_certificate(path,written.input_path;
+                expected_input_sha256=written.input_sha256,
+                expected_certificate_sha256=bytes2hex(sha256(read(path))),
+                require=:root_and_spectrum,precision_bits=256)
+            @test invalid.status==:UNPROVEN
+        end
     end
 end
 

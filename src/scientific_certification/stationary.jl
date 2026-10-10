@@ -114,13 +114,17 @@ struct RootResult
     attempts::Vector{String}
 end
 
-function _empty_root(status::Symbol, reason::String, seed=Rational{BigInt}[], options=ProofOptions())
-    return RootResult(status, "", reason, copy(seed), BigInt[], Rational{BigInt}[],
+function _empty_root(status::Symbol, reason::String, seed=Rational{BigInt}[], options=ProofOptions();
+        model_signature::String="", translation::Vector{BigInt}=BigInt[],
+        normalized_seed::Vector{Rational{BigInt}}=Rational{BigInt}[],
+        candidate_provenance::Dict{String,String}=Dict("status"=>"unknown"),
+        attempts::Vector{String}=String[])
+    return RootResult(status, model_signature, reason, copy(seed), copy(translation), copy(normalized_seed),
         Rational{BigInt}[], IA.Interval{BigFloat}[],
         Matrix{Rational{BigInt}}(undef, 0, 0), IA.Interval{BigFloat}[],
         Matrix{IA.Interval{BigFloat}}(undef, 0, 0), IA.Interval{BigFloat}[],
         BigInt(0)//BigInt(1), 0, options, :UNRESOLVED, :none,
-        IA.Interval{BigFloat}[], Dict("status"=>"unknown"), String[])
+        IA.Interval{BigFloat}[], copy(candidate_provenance), copy(attempts))
 end
 
 function _matrix_product(A::Matrix{IA.Interval{BigFloat}},
@@ -419,11 +423,14 @@ function _revalidate_root(model::CertificationModel, root::RootResult, bits::Int
             _classify(signs,n) === root.hessian_classification || return false
         elseif root.hessian_method === :none
             isempty(root.hessian_pivots) && root.hessian_classification === :UNRESOLVED || return false
+        elseif root.hessian_method === :spectral_counts
+            isempty(root.hessian_pivots) && root.hessian_classification in (:MINIMUM,:MAXIMUM,:SADDLE) || return false
         else
             return false
         end
     elseif root.hessian_method === :direct_ldl
         length(root.hessian_pivots) == n && evaluated.hessian_method === :direct_ldl || return false
+        all(_isvalidproof(p) && (_lo(p) > 0 || _hi(p) < 0) for p in root.hessian_pivots) || return false
         all(_contained_claim(evaluated.hessian_pivots[i], root.hessian_pivots[i]) for i in 1:n) || return false
         evaluated.hessian_classification === root.hessian_classification || return false
     elseif root.hessian_method === :none
@@ -441,14 +448,7 @@ function _normalize_seed(seed::Vector{Rational{BigInt}})
 end
 
 function _provenance(value)
-    value === nothing && return Dict("status"=>"unknown")
-    value isa NamedTuple && (value = Dict(string(k)=>v for (k,v) in pairs(value)))
-    value isa AbstractDict || throw(ArgumentError("candidate_provenance must be a record"))
-    method = get(value, "method", get(value, :method, nothing))
-    source = get(value, "source_ref", get(value, :source_ref, nothing))
-    method isa AbstractString && !isempty(method) || throw(ArgumentError("provenance method is required"))
-    source isa AbstractString && !isempty(source) || throw(ArgumentError("provenance source_ref is required"))
-    Dict("status"=>"supplied", "method"=>String(method), "source_ref"=>String(source))
+    _candidate_provenance_record(value)
 end
 
 function certify_stationary_point(model::CertificationModel, theta0;
@@ -457,9 +457,12 @@ function certify_stationary_point(model::CertificationModel, theta0;
     seed = _exact_seed(theta0, size(model.Q, 1))
     translation, normalized = _normalize_seed(seed)
     provenance = _provenance(candidate_provenance)
+    model_signature = size(model.Q,1) <= 32 && size(model.Q,2) <= 2048 ? _model_signature(model) : ""
+    context = (; model_signature, translation, normalized_seed=normalized,
+        candidate_provenance=provenance)
     (length(seed) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
-        return _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed)
-    _backend_supported() || return _empty_root(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", seed)
+        return _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...)
+    _backend_supported() || return _empty_root(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", seed, options; context...)
     attempts = String[]
     retained = nothing
     for bits in options.precisions
@@ -487,7 +490,8 @@ function certify_stationary_point(model::CertificationModel, theta0;
         witness_for_precision !== nothing && witness_for_precision.status === :CERTIFIED_ROOT &&
             return witness_for_precision
     end
-    retained === nothing ? _empty_root(:INCONCLUSIVE, "no finite root witness", seed) :
+    retained === nothing ? _empty_root(:INCONCLUSIVE, "no finite root witness", seed, options;
+        context..., attempts) :
         RootResult(:INCONCLUSIVE, retained.model_signature, retained.reason, retained.original_seed,
             retained.translation, retained.normalized_seed, retained.center,
             retained.box, retained.preconditioner, retained.F_center, retained.H_box,
