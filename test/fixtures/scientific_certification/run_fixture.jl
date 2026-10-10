@@ -397,7 +397,8 @@ function _check_pairwise(records)
     true
 end
 
-function run_public_suite(evidence_dir::AbstractString; retain=true)
+function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
+                                  precisions::Tuple, profile::String; retain=true)
     out = abspath(evidence_dir)
     ispath(out) && error("public qualification evidence destination already exists: $out")
     mkpath(out)
@@ -408,11 +409,15 @@ function run_public_suite(evidence_dir::AbstractString; retain=true)
     mkpath(joinpath(out,"environment")); mkpath(joinpath(out,"commands"));
     mkpath(joinpath(out,"producer")); mkpath(joinpath(out,"replay")); mkpath(joinpath(out,"logs"))
     environment = _environment_record(candidate,joinpath(out,"environment","producer-environment.toml"))
-    settings, fixtures = _fixture_records()
+    settings, all_fixtures = _fixture_records()
+    fixtures = selected_ids === nothing ? all_fixtures :
+        filter(item -> item["id"] in selected_ids, all_fixtures)
+    selected_ids === nothing || length(fixtures) == length(selected_ids) ||
+        error("fast qualification fixture selection is incomplete")
     producer_rows=Dict{String,Any}[]
     replay_rows=Dict{String,Any}[]
     records=Dict{String,Any}[]
-    for item in fixtures, precision in (256,512)
+    for item in fixtures, precision in precisions
         id=item["id"]
         destination=joinpath(out,"producer","$id-p$precision")
         argv=_julia_argv(environment.project_dir,@__FILE__,"--case",id,"--precision",string(precision),
@@ -436,18 +441,28 @@ function run_public_suite(evidence_dir::AbstractString; retain=true)
         push!(replay_rows,Dict("case"=>id,"precision"=>precision,"verdict"=>"VERIFIED",
             "receipt_ref"=>relpath(replay.receipt,out),"log_ref"=>relpath(replay.log,out)))
     end
-    _check_pairwise(records)
-    suite=Dict("schema"=>"cyax-scientific-public-qualification-v1",
+    profile == "public" && _check_pairwise(records)
+    schema = profile == "public" ? "cyax-scientific-public-qualification-v1" :
+        "cyax-scientific-fast-qualification-v1"
+    suite=Dict("schema"=>schema,
         "candidate_commit"=>candidate.commit,"candidate_tree"=>candidate.tree,
         "environment_sha256"=>environment.sha256,"environment_ref"=>relpath(environment.path,out),
-        "qualification_profile"=>"julia-1.12-ia-0.22.36-serial",
-        "fixture_count"=>length(fixtures),"precision_count"=>2,
+        "qualification_profile"=>"julia-1.12-ia-0.22.36-serial-$profile",
+        "fixture_count"=>length(fixtures),"precision_count"=>length(precisions),
         "producer_count"=>length(producer_rows),"replay_count"=>length(replay_rows),
         "retained_final_evidence"=>retain,"producers"=>producer_rows,"replays"=>replay_rows)
     _set_report(joinpath(out,"qualification.toml"),suite)
-    println("public_qualification=PASS producers=$(length(producer_rows)) replays=$(length(replay_rows)) candidate=$(candidate.commit) tree=$(candidate.tree)")
+    println("$(profile)_qualification=PASS producers=$(length(producer_rows)) replays=$(length(replay_rows)) candidate=$(candidate.commit) tree=$(candidate.tree)")
     0
 end
+
+run_public_suite(evidence_dir::AbstractString; retain=true) =
+    _run_qualification_suite(evidence_dir, nothing, (256,512), "public"; retain)
+
+run_fast_suite(evidence_dir::AbstractString; retain=true) =
+    _run_qualification_suite(evidence_dir,
+        ("T01","T02","T03","T04","T06_hierarchy","T06_fractional_log"),
+        (256,), "fast"; retain)
 
 function _check_result_record(id,item,result)
     result["case"]==id && result["family"]==item["family"] || error("case result identity mismatch")
@@ -462,15 +477,25 @@ function _check_result_record(id,item,result)
 end
 
 function qualify_from_test_profile!()
-    full = get(ENV,"CYAXIVERSE_TEST_FULL","0") == "1"
-    full || return nothing
-    path = get(ENV,"CYAX_SCIENTIFIC_EVIDENCE_DIR","")
-    if isempty(path)
-        mktempdir(prefix="cyax-scientific-full-") do tmp
-            run_public_suite(joinpath(tmp,"public-qualification"); retain=false)
+    full = get(ENV,"CYAXIVERSE_TEST_FULL","1") == "1"
+    if full
+        path = get(ENV,"CYAX_SCIENTIFIC_EVIDENCE_DIR","")
+        if isempty(path)
+            mktempdir(prefix="cyax-scientific-full-") do tmp
+                run_public_suite(joinpath(tmp,"public-qualification"); retain=false)
+            end
+        else
+            run_public_suite(path; retain=true)
         end
     else
-        run_public_suite(path; retain=true)
+        path = get(ENV,"CYAX_SCIENTIFIC_FAST_EVIDENCE_DIR","")
+        if isempty(path)
+            mktempdir(prefix="cyax-scientific-fast-") do tmp
+                run_fast_suite(joinpath(tmp,"fast-qualification"); retain=false)
+            end
+        else
+            run_fast_suite(path; retain=true)
+        end
     end
     nothing
 end
@@ -495,12 +520,14 @@ function _main(args=ARGS)
         return _produce_case(id,precision,evidence,envpath,envsha)
     elseif length(args)==4 && args[1]=="--suite" && args[2]=="public" && args[3]=="--evidence-dir"
         return run_public_suite(args[4]; retain=true)
+    elseif length(args)==4 && args[1]=="--suite" && args[2]=="fast" && args[3]=="--evidence-dir"
+        return run_fast_suite(args[4]; retain=true)
     elseif length(args)>=2 && args[1]=="--held-out-case"
         return _produce_held_out_case(args)
     elseif length(args)>=2 && args[1]=="--held-out"
         return _run_held_out(args)
     end
-    error("usage: --suite public --evidence-dir DIR | --case ID --precision 256|512 --evidence-dir DIR --environment-receipt FILE --environment-sha256 HASH | --held-out INPUT --oracle ORACLE --evidence-dir DIR")
+    error("usage: --suite public|fast --evidence-dir DIR | --case ID --precision 256|512 --evidence-dir DIR --environment-receipt FILE --environment-sha256 HASH | --held-out INPUT --oracle ORACLE --evidence-dir DIR")
 end
 
 function _held_out_data(input_path, oracle_path)
