@@ -741,7 +741,9 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
             oversized_metadata=TOML.parsefile(written.certificate_path)
             oversized_metadata["candidate_provenance"]["source_ref"]=repeat("x",4097)
             metadata_path=joinpath(parent,"oversized-metadata.toml")
-            write(metadata_path,SC._toml_bytes(oversized_metadata))
+            open(metadata_path,"w") do io
+                TOML.print(io,oversized_metadata; sorted=true)
+            end
             metadata_digest=bytes2hex(sha256(read(metadata_path)))
             metadata_report=SC.verify_certificate(metadata_path,written.input_path;
                 expected_input_sha256=written.input_sha256,
