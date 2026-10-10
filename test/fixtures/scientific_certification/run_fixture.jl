@@ -271,8 +271,13 @@ function _produce_case(id, precision, evidence_dir, environment_path, expected_e
     candidate = _source_identity()
     env_record["candidate_commit"] == candidate.commit && env_record["candidate_tree"] == candidate.tree ||
         error("candidate identity changed after environment receipt")
+    warmup_start = time_ns()
     _warmup(precision)
-    item, model, seed, _Q, _L, _K, result, _aux = _run_math(id, precision)
+    warmup_proof_seconds = (time_ns() - warmup_start) / 1e9
+    case_timing = @timed _run_math(id, precision)
+    item, model, seed, _Q, _L, _K, result, _aux = case_timing.value
+    case_compile_seconds = case_timing.compile_time
+    warm_case_seconds = max(0.0, case_timing.time - case_compile_seconds)
     _check_basic(id, item, result)
     _check_oracle(id, result)
     source_ref = (repository=candidate.repository, commit=candidate.commit, tree=candidate.tree)
@@ -280,7 +285,7 @@ function _produce_case(id, precision, evidence_dir, environment_path, expected_e
     written = SC.write_certificate(evidence_dir, model, result; source_ref, environment_ref)
     result_path = joinpath(evidence_dir, "case_result.toml")
     _result_record(result_path,id,precision,item,result,written.input_sha256,written.certificate_sha256)
-    println("case=$id precision=$precision status=CERTIFIED input_sha256=$(written.input_sha256) certificate_sha256=$(written.certificate_sha256)")
+    println("case=$id precision=$precision status=CERTIFIED input_sha256=$(written.input_sha256) certificate_sha256=$(written.certificate_sha256) warmup_proof_seconds=$warmup_proof_seconds case_compile_seconds=$case_compile_seconds warm_case_seconds=$warm_case_seconds")
     return 0
 end
 
@@ -291,10 +296,18 @@ function _set_report(path, data)
     end
 end
 
-function _argv_record(path, argv, cwd, exit_code, timed_out)
-    _set_report(path, Dict("argv"=>argv,"cwd"=>cwd,"exit_code"=>exit_code,
+function _argv_record(path, argv, cwd, exit_code, timed_out; elapsed_seconds=nothing,
+                      measured_child_argv=nothing, peak_rss_bytes=nothing)
+    record=Dict{String,Any}("argv"=>argv,"cwd"=>cwd,"exit_code"=>exit_code,
         "timed_out"=>timed_out,"julia_threads"=>get(ENV,"JULIA_NUM_THREADS","unset"),
-        "openblas_num_threads"=>get(ENV,"OPENBLAS_NUM_THREADS","unset")))
+        "openblas_num_threads"=>get(ENV,"OPENBLAS_NUM_THREADS","unset"))
+    elapsed_seconds === nothing || (record["elapsed_seconds"]=elapsed_seconds)
+    measured_child_argv === nothing || (record["measured_child_argv"]=measured_child_argv)
+    if peak_rss_bytes !== nothing
+        record["peak_rss_bytes"]=peak_rss_bytes
+        record["peak_rss_method"]="getrusage(RUSAGE_CHILDREN) in a single-child Julia wrapper"
+    end
+    _set_report(path,record)
 end
 
 function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::Int; cwd=ROOT)
@@ -303,6 +316,7 @@ function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::I
         cmd = Cmd(Cmd(argv); dir=cwd)
         proc = run(pipeline(addenv(cmd, "JULIA_NUM_THREADS"=>"1",
             "OPENBLAS_NUM_THREADS"=>"1"), stdout=log, stderr=log); wait=false)
+        started = time()
         deadline = time() + timeout_seconds
         while !process_exited(proc) && time() < deadline
             sleep(0.1)
@@ -312,13 +326,53 @@ function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::I
             kill(proc, Base.SIGKILL)
         end
         wait(proc)
-        return (timed_out ? 124 : proc.exitcode, timed_out)
+        return (timed_out ? 124 : proc.exitcode, timed_out, time() - started)
     end
 end
 
 function _julia_argv(project_dir, args...)
     cmd = Base.julia_cmd()
     String[cmd.exec...; "--startup-file=no"; "--threads=1"; "--project=$project_dir"; string.(args)...]
+end
+
+function _children_peak_rss_bytes()
+    Sys.isapple() || error("peak RSS measurement is qualified only on the macOS host")
+    storage=zeros(UInt8,176) # Darwin struct rusage; ru_maxrss follows two timeval fields.
+    status=ccall(:getrusage,Cint,(Cint,Ptr{UInt8}),-1,pointer(storage))
+    status==0 || error("getrusage(RUSAGE_CHILDREN) failed with status $status")
+    peak=unsafe_load(Ptr{Clong}(pointer(storage)+32))
+    peak>0 || error("getrusage(RUSAGE_CHILDREN) returned no positive peak RSS")
+    Int(peak)
+end
+
+function _measure_child(args)
+    !isempty(args) || error("measured child command is empty")
+    child=run(pipeline(Cmd(args);stdout=stdout,stderr=stderr);wait=false)
+    wait(child)
+    peak=_children_peak_rss_bytes()
+    println("measurement_peak_rss_bytes=$peak")
+    println("measurement_child_exit_code=$(child.exitcode)")
+    child.exitcode
+end
+
+function _measurement_wrapper(project_dir, runner_path, argv)
+    _julia_argv(project_dir,runner_path,"--measure-child","--",argv...)
+end
+
+function _producer_timing(log_path)
+    body=read(log_path,String)
+    timing=match(r"warmup_proof_seconds=([0-9.eE+-]+) case_compile_seconds=([0-9.eE+-]+) warm_case_seconds=([0-9.eE+-]+)",body)
+    timing===nothing && error("producer timing markers are missing from $log_path")
+    return (warmup_proof_seconds=parse(Float64,timing.captures[1]),
+        case_compile_seconds=parse(Float64,timing.captures[2]),
+        warm_case_seconds=parse(Float64,timing.captures[3]))
+end
+
+function _measured_peak_rss(log_path)
+    body=read(log_path,String)
+    measured=match(r"measurement_peak_rss_bytes=([0-9]+)",body)
+    measured===nothing && return nothing
+    parse(Int,measured.captures[1])
 end
 
 function _replay_receipt(case_id, precision, result, environment, source, evidence_root, log_rel, replay_rel; require_provenance=true)
@@ -338,8 +392,8 @@ function _replay_receipt(case_id, precision, result, environment, source, eviden
         "--certificate",joinpath(result["path"],"certificate.toml"),
         "--expect-input-sha256",input_sha,"--expect-certificate-sha256",cert_sha,
         "--require","root_and_spectrum","--precision",string(precision))
-    code, timedout = _run_process(argv,log_path,300)
-    _argv_record(command_path,argv,ROOT,code,timedout)
+    code, timedout, elapsed = _run_process(argv,log_path,300)
+    _argv_record(command_path,argv,ROOT,code,timedout;elapsed_seconds=elapsed)
     text = read(log_path,String)
     verdict = occursin("status=VERIFIED",text) ? "VERIFIED" :
         occursin("status=UNPROVEN",text) ? "UNPROVEN" :
@@ -424,16 +478,34 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
             "--evidence-dir",destination,"--environment-receipt",environment.path,
             "--environment-sha256",environment.sha256)
         log=joinpath(out,"logs","producer-$id-p$precision.log")
-        code,timedout=_run_process(argv,log,settings["watchdog_seconds"])
-        _argv_record(joinpath(out,"commands","producer-$id-p$precision.toml"),argv,ROOT,code,timedout)
+        measure_peak = id in ("T03","T05")
+        command_argv = measure_peak ? _measurement_wrapper(environment.project_dir,@__FILE__,argv) : argv
+        code,timedout,elapsed=_run_process(command_argv,log,settings["watchdog_seconds"])
+        peak_rss = measure_peak ? _measured_peak_rss(log) : nothing
+        _argv_record(joinpath(out,"commands","producer-$id-p$precision.toml"),command_argv,ROOT,code,timedout;
+            elapsed_seconds=elapsed,measured_child_argv=measure_peak ? argv : nothing,peak_rss_bytes=peak_rss)
         code==0 || error("$id p=$precision producer failed (exit=$code watchdog=$timedout): $(read(log,String))")
+        measure_peak && peak_rss === nothing && error("peak RSS measurement missing for $id p=$precision")
         result=_read_result(joinpath(destination,"case_result.toml"))
         record_item=_record(id)
         _check_result_record(id,record_item,result)
         push!(records,result)
-        push!(producer_rows,Dict("case"=>id,"precision"=>precision,"status"=>result["status"],
+        timing=_producer_timing(log)
+        row=Dict{String,Any}("case"=>id,"precision"=>precision,"status"=>result["status"],
+            "classification"=>result["classification"],"n"=>length(item["Q"]),
+            "M"=>length(item["Q"][1]),"interval_widths"=>[
+                _ratstr(SC._parse_rational(b[2])-SC._parse_rational(b[1])) for b in result["bounds"]],
+            "warmup_proof_seconds"=>timing.warmup_proof_seconds,
+            "case_compile_seconds"=>timing.case_compile_seconds,
+            "warm_case_seconds"=>timing.warm_case_seconds,
+            "external_process_wall_seconds"=>elapsed,
             "input_sha256"=>result["input_sha256"],"certificate_sha256"=>result["certificate_sha256"],
-            "result_ref"=>relpath(joinpath(destination,"case_result.toml"),out)))
+            "result_ref"=>relpath(joinpath(destination,"case_result.toml"),out))
+        if peak_rss !== nothing
+            row["peak_rss_bytes"]=peak_rss
+            row["peak_rss_method"]="getrusage(RUSAGE_CHILDREN) in a single-child Julia wrapper"
+        end
+        push!(producer_rows,row)
         replay_log_rel=joinpath("logs","replay-$id-p$precision.log")
         replay_rel=joinpath("replay","$id-p$precision.toml")
         replay=_replay_receipt(id,precision,result,environment,candidate,out,replay_log_rel,replay_rel;
@@ -448,6 +520,8 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
         "candidate_commit"=>candidate.commit,"candidate_tree"=>candidate.tree,
         "environment_sha256"=>environment.sha256,"environment_ref"=>relpath(environment.path,out),
         "qualification_profile"=>"julia-1.12-ia-0.22.36-serial-$profile",
+        "warm_timing_method"=>"Base.@timed measures _run_math; case_compile_seconds is Julia compiler time and warm_case_seconds is elapsed time minus compiler time; warmup_proof_seconds measures the bounded T01 warm-up separately",
+        "peak_rss_method"=>"Darwin getrusage(RUSAGE_CHILDREN) in a one-child Julia wrapper for T03/T05",
         "fixture_count"=>length(fixtures),"precision_count"=>length(precisions),
         "producer_count"=>length(producer_rows),"replay_count"=>length(replay_rows),
         "retained_final_evidence"=>retain,"producers"=>producer_rows,"replays"=>replay_rows)
@@ -501,7 +575,9 @@ function qualify_from_test_profile!()
 end
 
 function _main(args=ARGS)
-    if length(args)>=2 && args[1]=="--case"
+    if length(args)>=3 && args[1]=="--measure-child" && args[2]=="--"
+        return _measure_child(args[3:end])
+    elseif length(args)>=2 && args[1]=="--case"
         id=args[2]; precision=256; evidence=""; envpath=""; envsha=""
         i=3
         while i<=length(args)
@@ -639,8 +715,9 @@ function _run_held_out(args)
         argv=_julia_argv(environment.project_dir,@__FILE__,"--held-out-case",values["--held-out"],
             values["--oracle"],string(precision),destination,environment.path,environment.sha256)
         log_rel=joinpath("logs","producer-$id-p$precision.log")
-        code,timedout=_run_process(argv,joinpath(out,log_rel),300)
-        _argv_record(joinpath(out,"commands","producer-$id-p$precision.toml"),argv,ROOT,code,timedout)
+        code,timedout,elapsed=_run_process(argv,joinpath(out,log_rel),300)
+        _argv_record(joinpath(out,"commands","producer-$id-p$precision.toml"),argv,ROOT,code,timedout;
+            elapsed_seconds=elapsed)
         code==0 || error("T15 producer failed (exit=$code watchdog=$timedout); see $log_rel")
         record=_read_result(joinpath(destination,"case_result.toml"))
         record["status"]=="CERTIFIED" && record["classification"]=="MINIMUM" || error("T15 result record failed")
