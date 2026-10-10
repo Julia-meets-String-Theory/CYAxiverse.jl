@@ -40,3 +40,11 @@ closed certificate. `verify_certificate` and
 without network access. A verified certificate proves only its recorded local
 claims. It does not establish global completeness, a vacuum population,
 physical normalization, or correctness of an external candidate generator.
+
+## API reference
+
+```@docs
+CYAxiverse.scientific_certification
+CYAxiverse.scientific_certification.write_certificate
+CYAxiverse.scientific_certification.verify_certificate
+```
