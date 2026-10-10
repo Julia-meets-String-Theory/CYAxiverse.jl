@@ -235,7 +235,7 @@ def _check_appends(base, candidate, spec):
     for path, block in pairs:
         before, after = show(base, path), show(candidate, path)
         separator = b"" if before.endswith(b"\n") else b"\n"
-        if after != before + separator + blocks[block]:
+        if after != before + separator + blocks[block] + b"\n":
             raise CheckFailure("PARENT_MODIFIED", "skill is not baseline bytes plus the exact frozen suffix", path)
     for path, block in zip(PROC, ("5.4", "5.5", "5.6", "5.7", "5.8")):
         if show(candidate, path) != blocks[block]:
@@ -253,7 +253,7 @@ def _check_instruction_budgets(base, candidate, spec):
     for path, key in entries:
         before, after = show(base, path), show(candidate, path)
         suffix = after[len(before) + (0 if before.endswith(b"\n") else 1):]
-        if suffix != blocks[key]:
+        if suffix != blocks[key] + b"\n":
             raise CheckFailure("PARENT_MODIFIED", "installed entry suffix differs from its frozen block", path)
         entry_bytes.append(suffix)
 
