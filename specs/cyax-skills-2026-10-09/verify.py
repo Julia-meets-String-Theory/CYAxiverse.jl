@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
+import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,6 +67,9 @@ SCOPE = set(INSTRUCTION_PATHS) | {
 }
 SKILL_SPEC_SHA = "2e9853ad4de7b79b470dd5dccc997d8cce7c3318dbf38efb21e6b0c3311f462a"
 SCIENCE_SPEC_SHA = "12ab0de319ebbfef895cfaecef6a19850c2d488778394e723dc1583e77800b8b"
+FROZEN_STATUS = (b"> **Status:** Frozen detached pre-edit review candidate. This document is not yet installed in the target repository, independently approved, implementation-ready, merged, or a standalone dispatch grant. The governing task has one exact authorised S2 scope; private control-plane authority and actor configuration are separately bound.")
+INSTALLED_STATUS = (b"> **Status:** Installed public task documentation. This document is not a readiness, acceptance, or integration record. Current acceptance state is tracked through the governing task evidence.")
+EXAMPLE_MARKER = b"\n## Historical serialized examples (development-only)"
 
 
 class CheckFailure(Exception):
@@ -84,6 +88,85 @@ def git(args: list[str], *, cwd: Path = ROOT, check: bool = True) -> bytes:
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _canonical_spec_bytes(path: str, content: bytes) -> bytes:
+    if content.count(INSTALLED_STATUS) != 1:
+        raise CheckFailure("SPEC_STATUS_INVALID", "candidate document must identify installed public task documentation", path)
+    content = content.replace(INSTALLED_STATUS, FROZEN_STATUS, 1)
+    if path == "specs/cyax-scientific-certification/spec.md":
+        if content.count(EXAMPLE_MARKER) != 1:
+            raise CheckFailure("HISTORICAL_EXAMPLES_MISSING", "scientific spec must contain one historical examples appendix", path)
+        content = content[:content.index(EXAMPLE_MARKER)]
+    return content
+
+
+def _example_block(markdown: bytes, heading: bytes, path: str) -> bytes:
+    pattern = re.escape(heading) + rb"\n\n```toml\n(.*?)```"
+    match = re.search(pattern, markdown, re.S)
+    if match is None:
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", f"missing TOML example block {heading.decode()}", path)
+    return match.group(1)
+
+
+def _parse_example(markdown: bytes, heading: bytes, path: str):
+    content = _example_block(markdown, heading, path)
+    try:
+        record = tomllib.loads(content.decode("utf-8"))
+    except (UnicodeError, tomllib.TOMLDecodeError) as exc:
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", f"invalid {heading.decode()} TOML: {exc}", path) from exc
+    return content, record
+
+
+def _check_historical_examples(science: bytes):
+    path = "specs/cyax-scientific-certification/spec.md"
+    if science.count(EXAMPLE_MARKER) != 1:
+        raise CheckFailure("HISTORICAL_EXAMPLES_MISSING", "scientific spec must contain one historical examples appendix", path)
+    inputs, input_record = _parse_example(science, b"### Shared `inputs.toml`", path)
+    root_bytes, root = _parse_example(science, b"### Root-only `certificate.toml`", path)
+    combined_bytes, combined = _parse_example(science, b"### Root-and-spectrum `certificate.toml`", path)
+    env_bytes, env = _parse_example(science, b"### `environment.toml`", path)
+    if input_record.get("schema") != "cyax-scientific-input-v1":
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", "input sample has the wrong schema", path)
+    if (root.get("kind"), combined.get("kind")) != ("root", "root_and_spectrum"):
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", "certificate samples must show both exact kinds", path)
+    input_sha = sha(inputs)
+    if root.get("input_sha256") != input_sha or combined.get("input_sha256") != input_sha:
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", "certificate samples do not bind the shared input bytes", path)
+    source = root.get("source_ref")
+    if not isinstance(source, dict) or source != combined.get("source_ref"):
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", "certificate samples must share their actual producer identity", path)
+    if source.get("commit") != "4ecdb53d0f224f879646279bfa2f9128d7b14dfa" or source.get("tree") != "9608f60a0d4f770d8296f96d1ecf4eb78dbf5d0f":
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", "producer commit/tree differs from the recorded development run", path)
+    environment = root.get("environment_ref")
+    if not isinstance(environment, dict) or environment != combined.get("environment_ref"):
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", "certificate samples must share one environment receipt", path)
+    if environment.get("artifact_name") != "environment.toml" or environment.get("receipt_sha256") != sha(env_bytes):
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", "sample environment receipt hash does not match its exact bytes", path)
+    if env.get("interval_arithmetic_version") != "0.22.36" or env.get("julia_version") != "1.12.6":
+        raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", "sample environment does not identify the qualified development profile", path)
+    metadata = {
+        "shared_input": input_sha,
+        "root_certificate": sha(root_bytes),
+        "root_and_spectrum_certificate": sha(combined_bytes),
+        "environment": sha(env_bytes),
+    }
+    expected_lines = {
+        "- Shared input SHA-256": input_sha,
+        "- Root-only certificate SHA-256": metadata["root_certificate"],
+        "- Root-and-spectrum certificate SHA-256": metadata["root_and_spectrum_certificate"],
+        "- Environment receipt SHA-256": metadata["environment"],
+    }
+    appendix = science[science.index(EXAMPLE_MARKER):]
+    for label, digest in expected_lines.items():
+        if f"{label}: `{digest}`".encode() not in appendix:
+            raise CheckFailure("HISTORICAL_EXAMPLE_INVALID", f"appendix digest does not match its {label} bytes", path)
+    return {
+        "shared_input": {"bytes": len(inputs), "sha256": metadata["shared_input"]},
+        "root_certificate": {"bytes": len(root_bytes), "sha256": metadata["root_certificate"]},
+        "root_and_spectrum_certificate": {"bytes": len(combined_bytes), "sha256": metadata["root_and_spectrum_certificate"]},
+        "environment": {"bytes": len(env_bytes), "sha256": metadata["environment"]},
+    }
 
 
 def commit_tree(commit: str) -> str:
@@ -507,8 +590,11 @@ def main():
         modes = _check_modes_and_mirrors(args.base, args.candidate)
         spec = show(args.candidate, "specs/cyax-skills-2026-10-09/spec.md")
         science = show(args.candidate, "specs/cyax-scientific-certification/spec.md")
-        if sha(spec) != SKILL_SPEC_SHA or sha(science) != SCIENCE_SPEC_SHA:
+        skill_core = _canonical_spec_bytes("specs/cyax-skills-2026-10-09/spec.md", spec)
+        science_core = _canonical_spec_bytes("specs/cyax-scientific-certification/spec.md", science)
+        if sha(skill_core) != SKILL_SPEC_SHA or sha(science_core) != SCIENCE_SPEC_SHA:
             raise CheckFailure("APPROVED_SPEC_MISMATCH", "approved normative spec bytes differ")
+        historical_examples = _check_historical_examples(science)
         _check_appends(args.base, args.candidate, spec)
         instruction_sizes = _check_instruction_budgets(args.base, args.candidate, spec)
         _check_narrow_edits(args.base, args.candidate)
@@ -536,6 +622,7 @@ def main():
                     "case_count": len(cases), "procedure_count": len(PROC),
                     "instruction_sizes": instruction_sizes,
                     "source_provenance_spec_case_sizes": content_sizes,
+                    "historical_example_sizes": historical_examples,
                     "evidence_checked": bool(args.evidence)})
     except CheckFailure as exc:
         errors.append({"code": exc.code, **({"path": exc.path} if exc.path else {}),

@@ -1,6 +1,6 @@
 # Scientific certification — sole umbrella S2 specification
 
-> **Status:** Frozen detached pre-edit review candidate. This document is not yet installed in the target repository, independently approved, implementation-ready, merged, or a standalone dispatch grant. The governing task has one exact authorised S2 scope; private control-plane authority and actor configuration are separately bound.
+> **Status:** Installed public task documentation. This document is not a readiness, acceptance, or integration record. Current acceptance state is tracked through the governing task evidence.
 >
 > **Construction:** Scientific and engineering requirements below are verbatim public-safe extracts of the approved complete R2. The headings and ordering are reorganised into one umbrella feature and a subordinate instruction annex, without changing the scientific methods, options, thresholds, schema meanings, fixtures, required evidence or allowed file set. If any transformation introduces a conflict, the exact governing R2 controls and independent reviewers must block acceptance pending correction.
 
@@ -580,3 +580,287 @@ These are reporting descriptions, not new governance states/grants. Worker DONE 
 Final handback identifies: the literal persistent contract/state paths and contract digest; task/approved spec and authority bindings; base/candidate/tree; changed paths; all eight methods and twelve case outcomes; T01–T18 plus MX coverage; actual commands/exits/environment; artifacts and external digests; independent review/held-out identities and findings; privacy/currentness; scientific/API/schema/version impact; measured context/usage/performance where available; exact unmet conditions and next lawful action. Retain all material findings in referenced detail.
 
 Rollback, if later required, is an ordinary separately authorized revert through existing review/integration policy. It restores the prior instruction/feature behavior as appropriate and preserves evidence/history. This proposal grants no history rewrite, force push, silent rollback or release action.
+
+## Historical serialized examples (development-only)
+
+These literal TOML records demonstrate the closed `root` and `root_and_spectrum` certificate kinds. They are historical development examples, excluded from final acceptance evidence. The producer was commit `4ecdb53d0f224f879646279bfa2f9128d7b14dfa`, tree `9608f60a0d4f770d8296f96d1ecf4eb78dbf5d0f`, on Julia 1.12.6 and IntervalArithmetic 0.22.36. Both certificates bind the same exact `inputs.toml` bytes and the included environment receipt.
+
+- Shared input SHA-256: `dc3e2d75aebe011f738743ad770f2db059f4573d3fb6d52de103e730de79d835` (498 bytes).
+- Root-only certificate SHA-256: `69968145e5e14753c4d88f83c0e8c45eeaf0fd531a73b2505ecfc5ecc761a5d4` (3220 bytes).
+- Root-and-spectrum certificate SHA-256: `36587639ae677e1a2cfb526ac18f65be57964290f35a3718d55e5cb5214ae322` (4594 bytes).
+- Environment receipt SHA-256: `73ae6b9a6ef5e0ec1d12cf06c2fe39b3bf5e598437550f6182764962f58d0efe`.
+
+### Shared `inputs.toml`
+
+```toml
+M = 1
+n = 1
+schema = "cyax-scientific-input-v1"
+
+[K]
+data = ["1/1"]
+dims = [1, 1]
+
+[L]
+data = ["1/1", "0/1"]
+dims = [2, 1]
+
+[Q]
+data = ["1/1"]
+dims = [1, 1]
+
+[interpretation]
+basis = "periodic_string"
+coefficient_convention = "signed_base10_log"
+numeric_semantics = "exact_supplied_values"
+orientation = "axions_by_terms"
+phase_units = "radian"
+physical_normalization = "not_established"
+s = "0/1"
+spectrum_convention = "scaled_hessian_pencil"
+theta_period = "1/1"
+
+[phi]
+data = ["0/1"]
+dims = [1]
+```
+
+### Root-only `certificate.toml`
+
+```toml
+input_sha256 = "dc3e2d75aebe011f738743ad770f2db059f4573d3fb6d52de103e730de79d835"
+kind = "root"
+precision = 256
+schema = "cyax-scientific-certificate-v1"
+
+[candidate_provenance]
+status = "unknown"
+
+[environment_ref]
+artifact_name = "environment.toml"
+receipt_sha256 = "73ae6b9a6ef5e0ec1d12cf06c2fe39b3bf5e598437550f6182764962f58d0efe"
+
+[hessian]
+classification = "MINIMUM"
+method = "direct_ldl"
+negative_count = 0
+positive_count = 1
+unresolved_count = 0
+
+    [hessian.pivots]
+    data = [["71426382095464432983439783751962242451000035999335438327755685272300656750829/1809251394333065553493296640760748560207343510400633813116524750123642650624", "71426382096746729809203684897194746054556608155922782474232187552779234391697/1809251394333065553493296640760748560207343510400633813116524750123642650624"]]
+    dims = [1]
+
+[interpretation]
+basis = "periodic_string"
+coefficient_convention = "signed_base10_log"
+numeric_semantics = "exact_supplied_values"
+orientation = "axions_by_terms"
+phase_units = "radian"
+physical_normalization = "not_established"
+s = "0/1"
+spectrum_convention = "scaled_hessian_pencil"
+theta_period = "1/1"
+
+[root]
+lift = "unwrapped_centered_seed"
+q_upper = "1039390657347018162319171412919616386306234669062552076547269298145/115792089237316195423570985008687907853269984665640564039457584007913129639936"
+status = "certified_root"
+
+    [root.F_center]
+    data = [["0/1", "0/1"]]
+    dims = [1]
+
+    [root.H_box]
+    data = [["71426382095464432983439783751962242451000035999335438327755685272300656750829/1809251394333065553493296640760748560207343510400633813116524750123642650624", "71426382096746729809203684897194746054556608155922782474232187552779234391697/1809251394333065553493296640760748560207343510400633813116524750123642650624"]]
+    dims = [1, 1]
+
+    [root.W]
+    data = [["-1039390657347018162319171412919616386306234669062552076547269298145/121416805764108066932466369176469931665150427440758720078238275608681517825325531136", "1039390657347018162319171412919616386306234669062552076547269298145/121416805764108066932466369176469931665150427440758720078238275608681517825325531136"]]
+    dims = [1]
+
+    [root.box]
+    data = [["-1/1048576", "1/1048576"]]
+    dims = [1]
+
+    [root.center]
+    data = ["0/1"]
+    dims = [1]
+
+    [root.normalized_seed]
+    data = ["0/1"]
+    dims = [1]
+
+    [root.original_seed]
+    data = ["0/1"]
+    dims = [1]
+
+    [root.preconditioner]
+    data = ["93857532304395116068584728727630739165376057677760410161609534486701893694687/3705346855594118253554271520278013051304639509300498049262642688253220148477952"]
+    dims = [1, 1]
+
+    [root.translation]
+    data = ["0/1"]
+    dims = [1]
+
+[settings]
+box_radii = ["1/1048576", "1/1073741824", "1/1099511627776", "1/1152921504606846976"]
+max_backtracks = 8
+max_dimension = 32
+max_expansions = 32
+max_inertia_evaluations = 4096
+max_newton_steps = 20
+max_terms = 2048
+precisions = [256]
+relative_width = "1/1048576"
+spectral_goal = "individuals"
+
+[source_ref]
+commit = "4ecdb53d0f224f879646279bfa2f9128d7b14dfa"
+repository = "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl"
+tree = "9608f60a0d4f770d8296f96d1ecf4eb78dbf5d0f"
+
+[spectrum]
+reason = "not_requested"
+status = "not_requested"
+```
+
+### Root-and-spectrum `certificate.toml`
+
+```toml
+input_sha256 = "dc3e2d75aebe011f738743ad770f2db059f4573d3fb6d52de103e730de79d835"
+kind = "root_and_spectrum"
+precision = 256
+schema = "cyax-scientific-certificate-v1"
+
+[candidate_provenance]
+status = "unknown"
+
+[environment_ref]
+artifact_name = "environment.toml"
+receipt_sha256 = "73ae6b9a6ef5e0ec1d12cf06c2fe39b3bf5e598437550f6182764962f58d0efe"
+
+[hessian]
+classification = "MINIMUM"
+method = "direct_ldl"
+negative_count = 0
+positive_count = 1
+unresolved_count = 0
+
+    [hessian.pivots]
+    data = [["71426382095464432983439783751962242451000035999335438327755685272300656750829/1809251394333065553493296640760748560207343510400633813116524750123642650624", "71426382096746729809203684897194746054556608155922782474232187552779234391697/1809251394333065553493296640760748560207343510400633813116524750123642650624"]]
+    dims = [1]
+
+[interpretation]
+basis = "periodic_string"
+coefficient_convention = "signed_base10_log"
+numeric_semantics = "exact_supplied_values"
+orientation = "axions_by_terms"
+phase_units = "radian"
+physical_normalization = "not_established"
+s = "0/1"
+spectrum_convention = "scaled_hessian_pencil"
+theta_period = "1/1"
+
+[root]
+lift = "unwrapped_centered_seed"
+q_upper = "1039390657347018162319171412919616386306234669062552076547269298145/115792089237316195423570985008687907853269984665640564039457584007913129639936"
+status = "certified_root"
+
+    [root.F_center]
+    data = [["0/1", "0/1"]]
+    dims = [1]
+
+    [root.H_box]
+    data = [["71426382095464432983439783751962242451000035999335438327755685272300656750829/1809251394333065553493296640760748560207343510400633813116524750123642650624", "71426382096746729809203684897194746054556608155922782474232187552779234391697/1809251394333065553493296640760748560207343510400633813116524750123642650624"]]
+    dims = [1, 1]
+
+    [root.W]
+    data = [["-1039390657347018162319171412919616386306234669062552076547269298145/121416805764108066932466369176469931665150427440758720078238275608681517825325531136", "1039390657347018162319171412919616386306234669062552076547269298145/121416805764108066932466369176469931665150427440758720078238275608681517825325531136"]]
+    dims = [1]
+
+    [root.box]
+    data = [["-1/1048576", "1/1048576"]]
+    dims = [1]
+
+    [root.center]
+    data = ["0/1"]
+    dims = [1]
+
+    [root.normalized_seed]
+    data = ["0/1"]
+    dims = [1]
+
+    [root.original_seed]
+    data = ["0/1"]
+    dims = [1]
+
+    [root.preconditioner]
+    data = ["93857532304395116068584728727630739165376057677760410161609534486701893694687/3705346855594118253554271520278013051304639509300498049262642688253220148477952"]
+    dims = [1, 1]
+
+    [root.translation]
+    data = ["0/1"]
+    dims = [1]
+
+[settings]
+box_radii = ["1/1048576"]
+max_backtracks = 8
+max_dimension = 32
+max_expansions = 32
+max_inertia_evaluations = 4096
+max_newton_steps = 20
+max_terms = 2048
+precisions = [256]
+relative_width = "1/1048576"
+spectral_goal = "individuals"
+
+[source_ref]
+commit = "4ecdb53d0f224f879646279bfa2f9128d7b14dfa"
+repository = "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl"
+tree = "9608f60a0d4f770d8296f96d1ecf4eb78dbf5d0f"
+
+[spectrum]
+endpoint_counts = []
+goal = "individuals"
+negative_count = 0
+positive_count = 1
+reason = "goal_met"
+resolution_met = true
+route = "diagonal"
+status = "certified_bounds"
+unresolved_count = 0
+
+    [spectrum.bounds]
+    data = [["71426382095464432983439783751962242451000035999335438327755685272300656750829/1809251394333065553493296640760748560207343510400633813116524750123642650624", "71426382096746729809203684897194746054556608155922782474232187552779234391697/1809251394333065553493296640760748560207343510400633813116524750123642650624"]]
+    dims = [1]
+
+    [[spectrum.clusters]]
+    first = 1
+    last = 1
+    lower = "71426382095464432983439783751962242451000035999335438327755685272300656750829/1809251394333065553493296640760748560207343510400633813116524750123642650624"
+    population = 1
+    relative_width_met = true
+    sign = "positive"
+    upper = "71426382096746729809203684897194746054556608155922782474232187552779234391697/1809251394333065553493296640760748560207343510400633813116524750123642650624"
+
+    [spectrum.diagonal_ratios]
+    data = [["71426382095464432983439783751962242451000035999335438327755685272300656750829/1809251394333065553493296640760748560207343510400633813116524750123642650624", "71426382096746729809203684897194746054556608155922782474232187552779234391697/1809251394333065553493296640760748560207343510400633813116524750123642650624"]]
+    dims = [1]
+
+    [spectrum.metric_pivots]
+    data = [["1/1", "1/1"]]
+    dims = [1]
+```
+
+### `environment.toml`
+
+```toml
+blas_threads = 1
+interval_arithmetic_version = "0.22.36"
+julia_threads = 1
+julia_version = "1.12.6"
+manifest_sha256 = "49e99650530485e3d75bae81858a758aabfab270dd4136c8c8e527884b30ba0b"
+project_sha256 = "cb06c2510d4679c793f7ad1b1ae3a0a7ebbb378aefb231388d7630932b047376"
+schema = "cyax-scientific-example-environment-v1"
+```

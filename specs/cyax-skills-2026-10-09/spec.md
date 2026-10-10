@@ -1,6 +1,6 @@
 # Subordinate engineering-instruction annex — exact methods and acceptance
 
-> **Status:** Frozen detached pre-edit review candidate. This document is not yet installed in the target repository, independently approved, implementation-ready, merged, or a standalone dispatch grant. The governing task has one exact authorised S2 scope; private control-plane authority and actor configuration are separately bound.
+> **Status:** Installed public task documentation. This document is not a readiness, acceptance, or integration record. Current acceptance state is tracked through the governing task evidence.
 >
 > **Construction:** Scientific and engineering requirements below are verbatim public-safe extracts of the approved complete R2. The headings and ordering are reorganised into one umbrella feature and a subordinate instruction annex, without changing the scientific methods, options, thresholds, schema meanings, fixtures, required evidence or allowed file set. If any transformation introduces a conflict, the exact governing R2 controls and independent reviewers must block acceptance pending correction.
 
