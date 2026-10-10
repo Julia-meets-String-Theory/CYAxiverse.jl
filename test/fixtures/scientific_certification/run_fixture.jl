@@ -138,7 +138,7 @@ function _exact_interval_endpoint(interval, bits, side)
     end
 end
 
-function _check_oracle(id, result)
+function _check_oracle(id, result, model)
     bounds = result.spectrum.bounds
     clo, chi = oracle_c_interval()
     c = (clo, chi)
@@ -154,20 +154,29 @@ function _check_oracle(id, result)
         _assert_contains("T04 negative mode", bounds[1], refs[1])
         _assert_contains("T04 positive mode", bounds[2], refs[2])
     elseif id == "T05"
+        polynomial=oracle_t05_pencil_polynomial(model.Q,model.L,model.K)
         for i in 1:5
-            _assert_contains("T05 mode $i", bounds[i], oracle_t05_scaled_reference(i, bounds[i]))
+            _assert_contains("T05 mode $i", bounds[i],
+                oracle_t05_scaled_reference(i, bounds[i], polynomial))
         end
     elseif id == "T06_hierarchy"
         _assert_contains("T06 hierarchy soft mode", bounds[1], oracle_scalar_curvature(-400//1))
+        _assert_contains("T06 hierarchy refined reference", oracle_scalar_curvature(-400//1),
+            oracle_scalar_curvature(-400//1; bits=2048))
         _assert_contains("T06 hierarchy hard mode", bounds[2], c)
         bounds[1][1] > 0 || error("T06 hierarchy lower bound is not strictly positive")
     elseif id == "T06_fractional_log"
         _assert_contains("T06 fractional soft mode", bounds[1], oracle_scalar_curvature(-1//2))
+        _assert_contains("T06 fractional refined reference", oracle_scalar_curvature(-1//2),
+            oracle_scalar_curvature(-1//2; bits=2048))
         _assert_contains("T06 fractional hard mode", bounds[2], c)
     elseif id == "T14"
         refs = oracle_t14_intervals()
+        refined = oracle_t14_intervals(2048)
         _assert_contains("T14 negative generalized mode", bounds[1], refs[1])
         _assert_contains("T14 positive generalized mode", bounds[2], refs[2])
+        _assert_contains("T14 negative refined oracle", refs[1], refined[1])
+        _assert_contains("T14 positive refined oracle", refs[2], refined[2])
     elseif id == "T16_phase_unit"
         root_box = (_exact_interval_endpoint(result.root.box[1], result.root.precision, :lower),
             _exact_interval_endpoint(result.root.box[1], result.root.precision, :upper))
@@ -279,7 +288,7 @@ function _produce_case(id, precision, evidence_dir, environment_path, expected_e
     case_compile_seconds = case_timing.compile_time
     warm_case_seconds = max(0.0, case_timing.time - case_compile_seconds)
     _check_basic(id, item, result)
-    _check_oracle(id, result)
+    _check_oracle(id, result, model)
     source_ref = (repository=candidate.repository, commit=candidate.commit, tree=candidate.tree)
     environment_ref = (receipt_sha256=expected_environment_sha, artifact_name=basename(environment_path))
     written = SC.write_certificate(evidence_dir, model, result; source_ref, environment_ref)
@@ -297,7 +306,9 @@ function _set_report(path, data)
 end
 
 function _argv_record(path, argv, cwd, exit_code, timed_out; elapsed_seconds=nothing,
-                      measured_child_argv=nothing, peak_rss_bytes=nothing)
+                      measured_child_argv=nothing, peak_rss_bytes=nothing,
+                      peak_rss_raw=nothing, peak_rss_raw_unit=nothing,
+                      peak_rss_method=nothing)
     record=Dict{String,Any}("argv"=>argv,"cwd"=>cwd,"exit_code"=>exit_code,
         "timed_out"=>timed_out,"julia_threads"=>get(ENV,"JULIA_NUM_THREADS","unset"),
         "openblas_num_threads"=>get(ENV,"OPENBLAS_NUM_THREADS","unset"))
@@ -305,7 +316,9 @@ function _argv_record(path, argv, cwd, exit_code, timed_out; elapsed_seconds=not
     measured_child_argv === nothing || (record["measured_child_argv"]=measured_child_argv)
     if peak_rss_bytes !== nothing
         record["peak_rss_bytes"]=peak_rss_bytes
-        record["peak_rss_method"]="getrusage(RUSAGE_CHILDREN) in a single-child Julia wrapper"
+        record["peak_rss_raw"]=peak_rss_raw
+        record["peak_rss_raw_unit"]=peak_rss_raw_unit
+        record["peak_rss_method"]=peak_rss_method
     end
     _set_report(path,record)
 end
@@ -335,14 +348,32 @@ function _julia_argv(project_dir, args...)
     String[cmd.exec...; "--startup-file=no"; "--threads=1"; "--project=$project_dir"; string.(args)...]
 end
 
+function _peak_rss_bytes(raw::Integer, raw_unit::String)
+    raw > 0 || error("peak RSS must be positive")
+    raw_unit == "bytes" && return Int(raw)
+    raw_unit == "KiB" && return Base.checked_mul(Int(raw),1024)
+    error("unsupported peak RSS raw unit $raw_unit")
+end
+
 function _children_peak_rss_bytes()
-    Sys.isapple() || error("peak RSS measurement is qualified only on the macOS host")
-    storage=zeros(UInt8,176) # Darwin struct rusage; ru_maxrss follows two timeval fields.
+    if Sys.isapple()
+        storage=zeros(UInt8,176) # Darwin struct rusage; ru_maxrss follows two timeval fields.
+        raw_unit="bytes"
+        method="Darwin getrusage(RUSAGE_CHILDREN).ru_maxrss (bytes)"
+    elseif Sys.islinux()
+        Sys.WORD_SIZE == 64 || error("Linux peak RSS measurement is qualified only for the 64-bit rusage ABI")
+        storage=zeros(UInt8,144) # Linux 64-bit struct rusage; ru_maxrss follows two timeval fields.
+        raw_unit="KiB"
+        method="Linux 64-bit getrusage(RUSAGE_CHILDREN).ru_maxrss (KiB converted to bytes)"
+    else
+        error("peak RSS measurement is qualified only for the Darwin and 64-bit Linux rusage ABIs")
+    end
     status=ccall(:getrusage,Cint,(Cint,Ptr{UInt8}),-1,pointer(storage))
     status==0 || error("getrusage(RUSAGE_CHILDREN) failed with status $status")
-    peak=unsafe_load(Ptr{Clong}(pointer(storage)+32))
-    peak>0 || error("getrusage(RUSAGE_CHILDREN) returned no positive peak RSS")
-    Int(peak)
+    raw=unsafe_load(Ptr{Clong}(pointer(storage)+32))
+    raw>0 || error("getrusage(RUSAGE_CHILDREN) returned no positive peak RSS")
+    bytes=_peak_rss_bytes(raw,raw_unit)
+    (bytes=bytes,raw=Int(raw),raw_unit=raw_unit,method=method)
 end
 
 function _measure_child(args)
@@ -350,7 +381,10 @@ function _measure_child(args)
     child=run(pipeline(Cmd(args);stdout=stdout,stderr=stderr);wait=false)
     wait(child)
     peak=_children_peak_rss_bytes()
-    println("measurement_peak_rss_bytes=$peak")
+    println("measurement_peak_rss_bytes=$(peak.bytes)")
+    println("measurement_peak_rss_raw=$(peak.raw)")
+    println("measurement_peak_rss_raw_unit=$(peak.raw_unit)")
+    println("measurement_method=$(peak.method)")
     println("measurement_child_exit_code=$(child.exitcode)")
     child.exitcode
 end
@@ -370,9 +404,13 @@ end
 
 function _measured_peak_rss(log_path)
     body=read(log_path,String)
-    measured=match(r"measurement_peak_rss_bytes=([0-9]+)",body)
-    measured===nothing && return nothing
-    parse(Int,measured.captures[1])
+    bytes=match(r"measurement_peak_rss_bytes=([0-9]+)",body)
+    raw=match(r"measurement_peak_rss_raw=([0-9]+)",body)
+    unit=match(r"measurement_peak_rss_raw_unit=([^\r\n]+)",body)
+    method=match(r"measurement_method=([^\r\n]+)",body)
+    any(isnothing,(bytes,raw,unit,method)) && return nothing
+    (bytes=parse(Int,bytes.captures[1]),raw=parse(Int,raw.captures[1]),
+        raw_unit=unit.captures[1],method=method.captures[1])
 end
 
 function _replay_receipt(case_id, precision, result, environment, source, evidence_root, log_rel, replay_rel; require_provenance=true)
@@ -483,7 +521,11 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
         code,timedout,elapsed=_run_process(command_argv,log,settings["watchdog_seconds"])
         peak_rss = measure_peak ? _measured_peak_rss(log) : nothing
         _argv_record(joinpath(out,"commands","producer-$id-p$precision.toml"),command_argv,ROOT,code,timedout;
-            elapsed_seconds=elapsed,measured_child_argv=measure_peak ? argv : nothing,peak_rss_bytes=peak_rss)
+            elapsed_seconds=elapsed,measured_child_argv=measure_peak ? argv : nothing,
+            peak_rss_bytes=peak_rss===nothing ? nothing : peak_rss.bytes,
+            peak_rss_raw=peak_rss===nothing ? nothing : peak_rss.raw,
+            peak_rss_raw_unit=peak_rss===nothing ? nothing : peak_rss.raw_unit,
+            peak_rss_method=peak_rss===nothing ? nothing : peak_rss.method)
         code==0 || error("$id p=$precision producer failed (exit=$code watchdog=$timedout): $(read(log,String))")
         measure_peak && peak_rss === nothing && error("peak RSS measurement missing for $id p=$precision")
         result=_read_result(joinpath(destination,"case_result.toml"))
@@ -502,8 +544,10 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
             "input_sha256"=>result["input_sha256"],"certificate_sha256"=>result["certificate_sha256"],
             "result_ref"=>relpath(joinpath(destination,"case_result.toml"),out))
         if peak_rss !== nothing
-            row["peak_rss_bytes"]=peak_rss
-            row["peak_rss_method"]="getrusage(RUSAGE_CHILDREN) in a single-child Julia wrapper"
+            row["peak_rss_bytes"]=peak_rss.bytes
+            row["peak_rss_raw"]=peak_rss.raw
+            row["peak_rss_raw_unit"]=peak_rss.raw_unit
+            row["peak_rss_method"]=peak_rss.method
         end
         push!(producer_rows,row)
         replay_log_rel=joinpath("logs","replay-$id-p$precision.log")
@@ -521,7 +565,7 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
         "environment_sha256"=>environment.sha256,"environment_ref"=>relpath(environment.path,out),
         "qualification_profile"=>"julia-1.12-ia-0.22.36-serial-$profile",
         "warm_timing_method"=>"Base.@timed measures _run_math; case_compile_seconds is Julia compiler time and warm_case_seconds is elapsed time minus compiler time; warmup_proof_seconds measures the bounded T01 warm-up separately",
-        "peak_rss_method"=>"Darwin getrusage(RUSAGE_CHILDREN) in a one-child Julia wrapper for T03/T05",
+        "peak_rss_method"=>"Platform-qualified getrusage(RUSAGE_CHILDREN) in a one-child Julia wrapper for T03/T05; row receipts record OS method, raw unit and bytes",
         "fixture_count"=>length(fixtures),"precision_count"=>length(precisions),
         "producer_count"=>length(producer_rows),"replay_count"=>length(replay_rows),
         "retained_final_evidence"=>retain,"producers"=>producer_rows,"replays"=>replay_rows)

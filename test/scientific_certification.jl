@@ -3,6 +3,22 @@ using TOML
 
 const SC = CYAxiverse.scientific_certification
 
+function _run_scientific_cli(repository_root, input_path, certificate_path,
+        input_sha256, certificate_sha256; precision=256)
+    argv=vcat(String[Base.julia_cmd().exec...],String["--startup-file=no","--project=$repository_root",
+        joinpath(repository_root,"scripts","verify_scientific_certificate.jl"),
+        "--inputs",input_path,"--certificate",certificate_path,
+        "--expect-input-sha256",input_sha256,
+        "--expect-certificate-sha256",certificate_sha256,
+        "--require","root_and_spectrum","--precision",string(precision)])
+    mktemp() do _path, output
+        process=run(pipeline(Cmd(Cmd(argv);dir=repository_root);stdout=output,stderr=output);wait=false)
+        wait(process)
+        flush(output); seekstart(output)
+        (exit_code=process.exitcode,output=read(output,String),argv=argv)
+    end
+end
+
 @testset "Bounded scientific certification" begin
     @testset "exact input and phase conventions" begin
         @test_throws DimensionMismatch SC.prepare_model(reshape([1], 1, 1), [1 0 0], reshape([1], 1, 1))
@@ -269,6 +285,16 @@ end
             @test report.status == expected
             report
         end
+        function replay_cli_mutant(name,source_cert; expected_status,expected_exit,precision=256)
+            path=joinpath(parent,"$name.toml")
+            logpath=joinpath(parent,"$name-cli.log")
+            receipt=_run_scientific_cli(repository_root,source_cert.input_path,path,
+                source_cert.input_sha256,bytes2hex(sha256(read(path)));precision)
+            write(logpath,receipt.output)
+            @test receipt.exit_code==expected_exit
+            @test occursin("status=$expected_status",receipt.output)
+            receipt.exit_code
+        end
 
         bad_integrity=copy(read(one.certificate_path)); bad_integrity[end-1] ⊻= 0x01
         integrity_path=joinpath(parent,"integrity-mismatch.toml"); write(integrity_path,bad_integrity)
@@ -366,6 +392,14 @@ end
         malformed_dims["root"]["W"]["dims"]=[2]
         @test replay_mutant("malformed-array-dimensions",malformed_dims;expected=:INVALID).status == :INVALID
 
+        for (name,record) in (("boolean-center-dimensions", "center"),
+                              ("boolean-interval-dimensions", "W"))
+            boolean_dims=deepcopy(one_doc)
+            boolean_dims["root"][record]["dims"]=[true]
+            @test replay_mutant(name,boolean_dims;expected=:INVALID).status==:INVALID
+            @test replay_cli_mutant(name,one;expected_status="INVALID",expected_exit=2)==2
+        end
+
         unknown_key=deepcopy(one_doc)
         unknown_key["unexpected_claim"]="ignored?"
         @test replay_mutant("unknown-certificate-key",unknown_key;expected=:INVALID).status == :INVALID
@@ -413,6 +447,258 @@ end
 end
 
 include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.jl"))
+
+@testset "P7 correction: scheduling, replay, resources and independent references" begin
+    @testset "one proposal and one shared spectral budget per precision" begin
+        model=SC.prepare_model(Matrix{Int}(I,2,2),[1 1;0 0],[2 1;1 2])
+        radii=(big(1)//big(2)^20,big(1)//big(2)^30,
+            big(1)//big(2)^40,big(1)//big(2)^60)
+        options=SC.ProofOptions(precisions=(256,),max_newton_steps=1,
+            box_radii=radii,max_expansions=0,max_inertia_evaluations=3,
+            spectral_goal=:individuals)
+        combined=SC.certify(model,[0,0];options)
+        @test count(x->startswith(x,"proposal p=256 "),combined.attempts)==1
+        @test combined.root.options.precisions==options.precisions
+        @test combined.root.options.box_radii==options.box_radii
+        @test count(x->occursin("spectrum budget p=256 used=3 limit=3",x),
+            combined.attempts)==length(radii)
+        @test count(x->startswith(x,"metric LDL status=attempted"),
+            combined.spectrum.attempts)==1
+        @test count(x->startswith(x,"trial="),combined.spectrum.attempts)==2
+        @test combined.spectrum.status==:CERTIFIED_BOUNDS
+        @test !combined.spectrum.resolution_met
+    end
+
+    @testset "bounded inertia midpoint and quarter fallback" begin
+        function run_inertia(H,K=Matrix{Rational{BigInt}}(I,2,2),limit=20)
+            SC._with_precision(256) do
+                h=SC._interval_matrix(H .// BigInt(1),256)
+                k=SC._interval_matrix(K,256)
+                options=SC.ProofOptions(precisions=(256,),max_expansions=1,
+                    max_inertia_evaluations=limit,spectral_goal=:individuals)
+                budget=SC._InertiaBudget(options.max_inertia_evaluations,0,String[])
+                spectrum=SC._inertia_spectrum(h,k,256,options,
+                    fill(SC._iv(1,256),2),budget)
+                (spectrum=spectrum,budget=budget)
+            end
+        end
+
+        contracted=run_inertia(BigInt[0 1;1 0])
+        trials=[match(r"trial=([^ ]+)",x).captures[1] for x in contracted.budget.attempts
+            if startswith(x,"trial=")]
+        @test trials[end-2:end]==["0//1","-1//1","1//1"]
+        @test length(contracted.spectrum.clusters)==1
+        @test only(contracted.spectrum.clusters).population==2
+        @test [e.trial for e in contracted.spectrum.endpoint_counts]==[-2//1,2//1]
+
+        quarter=run_inertia(BigInt[-1 0;0 0],Rational{BigInt}[1//1 0//1;0//1 1//2],5)
+        quarter_trials=[match(r"trial=([^ ]+)",x).captures[1] for x in quarter.budget.attempts
+            if startswith(x,"trial=")]
+        queue_start=findfirst(==("0//1"),quarter_trials)
+        @test quarter_trials[queue_start:queue_start+2]==["0//1","-1//1","1//1"]
+        @test [e.trial for e in quarter.spectrum.endpoint_counts]==[-2//1,1//1]
+        @test [e.negative for e in quarter.spectrum.endpoint_counts]==[0,2]
+        @test !(-1//1 in [e.trial for e in quarter.spectrum.endpoint_counts])
+    end
+
+    @testset "diagonal overlap bounds and honest weakening replay" begin
+        close_model=SC.prepare_model(Matrix{Int}(I,2,2),
+            [1 1+1//2^50;0 0],Matrix{Int}(I,2,2))
+        close=SC.certify(close_model,[0,0];
+            options=SC.ProofOptions(precisions=(256,),spectral_goal=:clusters))
+        @test close.status==:CERTIFIED
+        @test length(close.spectrum.clusters)==1
+        @test close.spectrum.bounds[1]!=close.spectrum.bounds[2]
+        @test close.spectrum.bounds[1][1]==close.spectrum.clusters[1].lower
+        @test close.spectrum.bounds[2][2]==close.spectrum.clusters[1].upper
+
+        equal_model=SC.prepare_model(Matrix{Int}(I,2,2),[1 1;0 0],Matrix{Int}(I,2,2))
+        equal=SC.certify(equal_model,[0,0];
+            options=SC.ProofOptions(precisions=(256,),spectral_goal=:clusters))
+        repository_root=normpath(joinpath(@__DIR__,".."))
+        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
+        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
+        mktempdir() do parent
+            project=Base.active_project()
+            manifest=joinpath(dirname(project),"Manifest.toml")
+            envpath=joinpath(parent,"producer-environment.toml")
+            envbytes=Vector{UInt8}(codeunits(join(("schema=cyax-scientific-test-environment-v1",
+                "julia_version=$(VERSION)","interval_arithmetic_version=$(Base.pkgversion(SC.IA))",
+                "project_sha256=$(bytes2hex(sha256(read(project))))",
+                "manifest_sha256=$(bytes2hex(sha256(read(manifest))))"),"\n")*"\n"))
+            write(envpath,envbytes)
+            environment=(receipt_sha256=bytes2hex(sha256(envbytes)),artifact_name=basename(envpath))
+            written=SC.write_certificate(joinpath(parent,"equal"),equal_model,equal;
+                source_ref=source,environment_ref=environment)
+            document=TOML.parsefile(written.certificate_path)
+            document["spectrum"]["bounds"]["data"]=[["1/1","100/1"],["2/1","101/1"]]
+            document["spectrum"]["diagonal_ratios"]["data"]=[["1/1","100/1"],["2/1","101/1"]]
+            document["spectrum"]["clusters"][1]["lower"]="1/1"
+            document["spectrum"]["clusters"][1]["upper"]="101/1"
+            document["spectrum"]["clusters"][1]["relative_width_met"]=false
+            document["spectrum"]["resolution_met"]=false
+            document["spectrum"]["reason"]="refinement_inconclusive"
+            path=joinpath(parent,"honest-diagonal-widening.toml")
+            write(path,SC._toml_bytes(document))
+            digest=bytes2hex(sha256(read(path)))
+            report=SC.verify_certificate(path,written.input_path;
+                expected_input_sha256=written.input_sha256,
+                expected_certificate_sha256=digest,require=:root_and_spectrum,
+                precision_bits=256)
+            @test report.status==:VERIFIED
+            @test !document["spectrum"]["resolution_met"]
+        end
+    end
+
+    @testset "typed resource limits preserve invalid schema outcomes" begin
+        @test_throws SC.ResourceLimitError SC.prepare_model(zeros(Int,33,1),
+            reshape([1,0],2,1),Matrix{Int}(I,33,33))
+        big_q=Matrix{Rational{BigInt}}(I,33,33)
+        big_model=SC.CertificationModel(big_q,reshape(Rational{BigInt}[1//1,0//1],2,1),
+            Matrix{Rational{BigInt}}(I,33,33),zeros(Rational{BigInt},1),BigInt(0)//BigInt(1))
+        result=SC.certify(big_model,zeros(33);options=SC.ProofOptions(precisions=(256,)))
+        @test result.status==:UNSUPPORTED
+        @test result.root.reason=="RESOURCE_LIMIT"
+        @test_throws SC.ResourceLimitError SC._parse_rational(repeat("1",4097)*"/1")
+        long_metadata=repeat("x",4097)
+        @test_throws SC.ResourceLimitError SC._check_tree_limits(Dict("metadata"=>long_metadata))
+        nested=Any[]
+        for _ in 1:13
+            nested=[nested]
+        end
+        @test_throws SC.ResourceLimitError SC._check_tree_limits(nested)
+        @test_throws SC.ResourceLimitError SC._ratstr(BigInt(1)//BigInt(10)^4097)
+        @test_throws SC.ResourceLimitError SC._toml_bytes(
+            Dict("payload"=>repeat("x",16*1024*1024)))
+
+        model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+        cert=SC.certify(model,[0];options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals))
+        repository_root=normpath(joinpath(@__DIR__,".."))
+        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
+        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
+        mktempdir() do parent
+            project=Base.active_project(); manifest=joinpath(dirname(project),"Manifest.toml")
+            envbytes=Vector{UInt8}(codeunits(join(("schema=cyax-scientific-test-environment-v1",
+                "julia_version=$(VERSION)","interval_arithmetic_version=$(Base.pkgversion(SC.IA))",
+                "project_sha256=$(bytes2hex(sha256(read(project))))",
+                "manifest_sha256=$(bytes2hex(sha256(read(manifest))))"),"\n")*"\n"))
+            envpath=joinpath(parent,"producer-environment.toml");write(envpath,envbytes)
+            environment=(receipt_sha256=bytes2hex(sha256(envbytes)),artifact_name=basename(envpath))
+            written=SC.write_certificate(joinpath(parent,"valid"),model,cert;
+                source_ref=source,environment_ref=environment)
+            oversized_metadata=TOML.parsefile(written.certificate_path)
+            oversized_metadata["candidate_provenance"]["source_ref"]=repeat("x",4097)
+            metadata_path=joinpath(parent,"oversized-metadata.toml")
+            write(metadata_path,SC._toml_bytes(oversized_metadata))
+            metadata_digest=bytes2hex(sha256(read(metadata_path)))
+            metadata_report=SC.verify_certificate(metadata_path,written.input_path;
+                expected_input_sha256=written.input_sha256,
+                expected_certificate_sha256=metadata_digest,
+                require=:root_and_spectrum,precision_bits=256)
+            @test metadata_report.status==:UNSUPPORTED
+            @test metadata_report.reason=="RESOURCE_LIMIT"
+            maxbytes=16*1024*1024
+            oversized_input=joinpath(parent,"oversized-input.toml")
+            open(oversized_input,"w") do io; seek(io,maxbytes);write(io,UInt8(0));end
+            oversized_certificate=joinpath(parent,"oversized-certificate.toml")
+            open(oversized_certificate,"w") do io; seek(io,maxbytes);write(io,UInt8(0));end
+            for (input_path,certificate_path,input_sha,certificate_sha,name) in (
+                    (oversized_input,written.certificate_path,written.input_sha256,written.certificate_sha256,"oversized-input"),
+                    (written.input_path,oversized_certificate,written.input_sha256,
+                        bytes2hex(sha256(read(oversized_certificate))),"oversized-certificate"))
+                report=SC.verify_certificate(certificate_path,input_path;
+                    expected_input_sha256=input_sha,expected_certificate_sha256=certificate_sha,
+                    require=:root_and_spectrum,precision_bits=256)
+                @test report.status==:UNSUPPORTED
+                @test report.reason=="RESOURCE_LIMIT"
+                cli=_run_scientific_cli(repository_root,input_path,certificate_path,
+                    input_sha,certificate_sha;precision=256)
+                @test cli.exit_code==3
+                @test occursin("status=UNSUPPORTED reason=RESOURCE_LIMIT",cli.output)
+            end
+        end
+    end
+
+    @testset "independent exact oracles and correction composition" begin
+        fixtures=ScientificCertificationFixtures
+        for exponent in (-400//1,-1//2)
+            @test fixtures.oracle_contains_interval(
+                fixtures.oracle_scalar_curvature(exponent),
+                fixtures.oracle_scalar_curvature(exponent;bits=2048))
+        end
+        reference14=fixtures.oracle_t14_intervals()
+        refined14=fixtures.oracle_t14_intervals(2048)
+        @test fixtures.oracle_contains_interval(reference14[1],refined14[1])
+        @test fixtures.oracle_contains_interval(reference14[2],refined14[2])
+        t05=fixtures._record("T05")
+        model5=first(fixtures._model_seed(t05))
+        polynomial=fixtures.oracle_t05_pencil_polynomial(model5.Q,model5.L,model5.K)
+        @test polynomial==Rational{BigInt}[55//1,-435//1,1161//1,-1341//1,678//1,-120//1]
+
+        model1=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+        high=SC.certify(model1,[0];options=SC.ProofOptions(
+            precisions=(512,),spectral_goal=:individuals))
+        @test high.status==:CERTIFIED
+        repository_root=normpath(joinpath(@__DIR__,".."))
+        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
+        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
+        mktempdir() do parent
+            project=Base.active_project();manifest=joinpath(dirname(project),"Manifest.toml")
+            envbytes=Vector{UInt8}(codeunits(join(("schema=cyax-scientific-test-environment-v1",
+                "julia_version=$(VERSION)","interval_arithmetic_version=$(Base.pkgversion(SC.IA))",
+                "project_sha256=$(bytes2hex(sha256(read(project))))",
+                "manifest_sha256=$(bytes2hex(sha256(read(manifest))))"),"\n")*"\n"))
+            envpath=joinpath(parent,"producer-environment.toml");write(envpath,envbytes)
+            environment=(receipt_sha256=bytes2hex(sha256(envbytes)),artifact_name=basename(envpath))
+            written=SC.write_certificate(joinpath(parent,"high"),model1,high;
+                source_ref=source,environment_ref=environment)
+            document=TOML.parsefile(written.certificate_path)
+            spectrum=document["spectrum"]
+            oldlo,oldhi=(SC._parse_rational(x) for x in spectrum["bounds"]["data"][1])
+            narrowlo=oldlo+BigInt(1)//BigInt(2)^1024
+            spectrum["bounds"]["data"][1][1]=SC._ratstr(narrowlo)
+            spectrum["diagonal_ratios"]["data"][1][1]=SC._ratstr(narrowlo)
+            spectrum["clusters"][1]["lower"]=SC._ratstr(narrowlo)
+            width=SC._relative_met(narrowlo,oldhi,high.root.options.relative_width)
+            spectrum["clusters"][1]["relative_width_met"]=width
+            spectrum["resolution_met"]=width
+            spectrum["reason"]=width ? "goal_met" : "refinement_inconclusive"
+            rounded=SC._iv(narrowlo,oldhi,256)
+            original=SC._iv(oldlo,oldhi,256)
+            @test SC._lo(rounded)==SC._lo(original)
+            path=joinpath(parent,"too-narrow-updated-digest.toml")
+            write(path,SC._toml_bytes(document))
+            digest=bytes2hex(sha256(read(path)))
+            report=SC.verify_certificate(path,written.input_path;
+                expected_input_sha256=written.input_sha256,
+                expected_certificate_sha256=digest,require=:root_and_spectrum,
+                precision_bits=256)
+            @test report.status==:UNPROVEN
+            cli=_run_scientific_cli(repository_root,written.input_path,path,
+                written.input_sha256,digest;precision=256)
+            @test cli.exit_code==1
+            @test occursin("status=UNPROVEN",cli.output)
+        end
+
+        points=CYAxiverse.inflation_points
+        Q=Int[1 0;0 1]
+        L=Float64[1.0 -0.1;0.0 0.0]
+        K=Float64[2.0 0.3;0.3 1.0]
+        context=points.prepare_context(Q,L,K)
+        correction=points.correct_stationary_point(context,[1.5,-0.5];residual_tolerance=1e-12)
+        @test correction.status==:converged
+        model=SC.prepare_model(Q,L,K)
+        result=SC.certify(model,correction.theta;
+            options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals),
+            candidate_provenance=(method="inflation_points.correct_stationary_point",
+                source_ref="T14 exact binary benchmark input"))
+        @test result.status==:CERTIFIED
+        @test result.root.candidate_provenance["status"]=="supplied"
+    end
+end
 
 @testset "MX-04 mathematical replay does not waive provenance" begin
     model = SC.prepare_model(reshape([1], 1, 1), reshape([1, 0], 2, 1), reshape([1], 1, 1))

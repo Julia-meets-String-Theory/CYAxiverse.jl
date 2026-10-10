@@ -12,7 +12,7 @@ const _RATIONAL_RE = r"^(0|-[1-9][0-9]*|[1-9][0-9]*)/([1-9][0-9]*)$"
 
 function _ratstr(x::Rational)
     n, d = numerator(x), denominator(x)
-    max(ndigits(abs(n)), ndigits(d)) <= 4096 || throw(ArgumentError("RESOURCE_LIMIT"))
+    max(ndigits(abs(n)), ndigits(d)) <= 4096 || throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
     string(n, "/", d)
 end
 _ratstr(x::Integer) = _ratstr(BigInt(x)//BigInt(1))
@@ -21,7 +21,7 @@ function _parse_rational(x)
     x isa AbstractString || throw(ArgumentError("rational values must be quoted strings"))
     occursin(_RATIONAL_RE, x) || throw(ArgumentError("noncanonical rational"))
     left, right = split(x, '/'; limit=2)
-    (length(left) <= 4096 && length(right) <= 4096) || throw(ArgumentError("rational digit limit exceeded"))
+    (length(left) <= 4096 && length(right) <= 4096) || throw(ResourceLimitError("RESOURCE_LIMIT: rational digit limit exceeded"))
     n, d = parse(BigInt, left), parse(BigInt, right)
     d > 0 || throw(ArgumentError("rational denominator must be positive"))
     gcd(abs(n), d) == 1 || throw(ArgumentError("rational must be reduced"))
@@ -73,7 +73,7 @@ function _toml_bytes(record::Dict)
     io = IOBuffer()
     TOML.print(io, record; sorted=true)
     bytes = take!(io)
-    length(bytes) <= 16*1024*1024 || throw(ArgumentError("RESOURCE_LIMIT"))
+    length(bytes) <= 16*1024*1024 || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
     (isempty(bytes) || last(bytes) != 0x0a) && push!(bytes, 0x0a)
     return bytes
 end
@@ -172,7 +172,7 @@ end
 
 function _interval_claims(value, dims::Vector{Int})
     _require_keys(value, ("dims","data"), "interval array")
-    value["dims"] == dims || throw(ArgumentError("interval array dimensions do not match"))
+    _validate_claim_dims(value["dims"], dims, "interval array")
     data = value["data"]
     data isa Vector || throw(ArgumentError("interval array data must be an array"))
     length(data) == prod(dims; init=1) || throw(ArgumentError("interval array length mismatch"))
@@ -188,12 +188,26 @@ end
 
 function _exact_claims(value, dims::Vector{Int})
     _require_keys(value, ("dims","data"), "exact array")
-    value["dims"] == dims || throw(ArgumentError("exact array dimensions do not match"))
+    _validate_claim_dims(value["dims"], dims, "exact array")
     data = value["data"]
     data isa Vector || throw(ArgumentError("exact array data must be an array"))
     length(data) == prod(dims; init=1) || throw(ArgumentError("exact array length mismatch"))
     out = Rational{BigInt}[_parse_rational(x) for x in data]
     reshape(out, dims...)
+end
+
+function _validate_claim_dims(observed, expected::Vector{Int}, label::String)
+    observed isa Vector || throw(ArgumentError("$label dimensions must be an array"))
+    length(observed) == length(expected) || throw(ArgumentError("$label dimensions have the wrong rank"))
+    dims = Int[]
+    for dimension in observed
+        dimension isa Integer && !(dimension isa Bool) ||
+            throw(ArgumentError("$label dimensions must contain strict integers"))
+        0 <= dimension <= typemax(Int) || throw(ArgumentError("$label dimensions are outside the supported range"))
+        push!(dims, Int(dimension))
+    end
+    dims == expected || throw(ArgumentError("$label dimensions do not match"))
+    nothing
 end
 
 function _require_keys(value, expected, label)
@@ -203,13 +217,13 @@ function _require_keys(value, expected, label)
 end
 
 function _check_tree_limits(value, depth=0)
-    depth <= 12 || throw(ArgumentError("nesting depth limit exceeded"))
+    depth <= 12 || throw(ResourceLimitError("RESOURCE_LIMIT: nesting depth limit exceeded"))
     if value isa AbstractString
         if occursin(_RATIONAL_RE, value)
             parts = split(value, '/'; limit=2)
-            all(p -> length(p) <= 4096, parts) || throw(ArgumentError("rational component limit exceeded"))
+            all(p -> length(p) <= 4096, parts) || throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
         else
-            ncodeunits(value) <= 4096 || throw(ArgumentError("metadata string limit exceeded"))
+            ncodeunits(value) <= 4096 || throw(ResourceLimitError("RESOURCE_LIMIT: metadata string limit exceeded"))
         end
     elseif value isa AbstractDict
         for (k,v) in value
@@ -223,7 +237,7 @@ end
 function _read_toml(path::AbstractString)
     isfile(path) && !islink(path) || throw(ArgumentError("evidence path must be a regular file"))
     size = filesize(path)
-    size <= 16*1024*1024 || throw(ArgumentError("RESOURCE_LIMIT"))
+    size <= 16*1024*1024 || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
     bytes = read(path)
     text = String(copy(bytes))
     isvalid(text) || throw(ArgumentError("input is not valid UTF-8"))
@@ -240,7 +254,7 @@ function _parse_input(record)
     _require_keys(record, ("schema","n","M","Q","L","K","phi","interpretation"), "input")
     record["schema"] == "cyax-scientific-input-v1" || throw(ArgumentError("unknown input schema"))
     n, M = _strict_int(record["n"], "n"), _strict_int(record["M"], "M")
-    1 <= n <= 32 && 1 <= M <= 2048 || throw(ArgumentError("input dimensions exceed schema"))
+    1 <= n <= 32 && 1 <= M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: input dimensions exceed schema"))
     q = _exact_claims(record["Q"], [n,M]); l = _exact_claims(record["L"], [2,M])
     k = _exact_claims(record["K"], [n,n]); phi = _exact_claims(record["phi"], [M])
     all(denominator(x)==1 for x in q) || throw(ArgumentError("Q entries must be integers"))
@@ -347,7 +361,12 @@ function _verify_spectrum_claim(model, root, spectrum, bits, options)
             throw(ArgumentError("cluster flags do not follow exact endpoints"))
         push!(parsed_clusters,c); next=last+1
         for i in first:last
-            bclaims[i] == (lo,hi) || throw(ArgumentError("mode bound differs from cluster"))
+            if route == "inertia_counts"
+                bclaims[i] == (lo,hi) || throw(ArgumentError("mode bound differs from cluster"))
+            else
+                lo <= bclaims[i][1] <= bclaims[i][2] <= hi ||
+                    throw(ArgumentError("diagonal mode bound lies outside its overlap cluster"))
+            end
         end
     end
     next == n+1 || throw(ArgumentError("clusters do not cover all modes"))
@@ -368,6 +387,7 @@ function _verify_spectrum_claim(model, root, spectrum, bits, options)
     dc = _interval_claims(spectrum["diagonal_ratios"], route == "diagonal" ? [n] : [0])
     if route == "diagonal"
         isempty(ec) || throw(ArgumentError("diagonal route has no endpoint counts"))
+        options.max_inertia_evaluations >= 1 || return false
         ratios = IA.Interval{BigFloat}[_iv(x[1],x[2],bits) for x in vec(dc)]
         H = root.H_box; K = _interval_matrix(model.K,bits)
         (_is_diagonal(H) && _is_diagonal(K)) || return false
@@ -575,6 +595,9 @@ end
 function _unproven(reason::String, precision=nothing)
     VerificationReport(:UNPROVEN,reason,[(name="submitted_claims",outcome=:unproved,reason=reason)],:NOT_CHECKED,precision)
 end
+function _unsupported_resource(precision=nothing)
+    VerificationReport(:UNSUPPORTED,"RESOURCE_LIMIT",NamedTuple[],:NOT_CHECKED,precision)
+end
 
 """Write exact, closed TOML inputs and a revalidated certificate in a fresh directory."""
 function write_certificate(directory::AbstractString, model::CertificationModel, result;
@@ -645,16 +668,18 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
     expected_certificate_sha256===nothing || _valid_ref_hash(expected_certificate_sha256) ||
         return _invalid("expected certificate SHA-256 is malformed")
     input_bytes,input_record = try _read_toml(input_path) catch e
+        e isa ResourceLimitError && return _unsupported_resource()
         return _invalid("input read/parse failed: $(sprint(showerror,e))")
     end
     cert_bytes,cert_record = try _read_toml(certificate_path) catch e
-        occursin("RESOURCE_LIMIT",sprint(showerror,e)) && return VerificationReport(:UNSUPPORTED,"RESOURCE_LIMIT",NamedTuple[],:NOT_CHECKED,nothing)
+        e isa ResourceLimitError && return _unsupported_resource()
         return _invalid("certificate read/parse failed: $(sprint(showerror,e))")
     end
     input_digest=bytes2hex(sha256(input_bytes)); cert_digest=bytes2hex(sha256(cert_bytes))
     input_digest==expected_input_sha256 || return _invalid("input digest mismatch")
     expected_certificate_sha256===nothing || cert_digest==expected_certificate_sha256 || return _invalid("certificate digest mismatch")
     model, input_interpretation = try _parse_input(input_record) catch e
+        e isa ResourceLimitError && return _unsupported_resource()
         return _invalid("input schema invalid: $(sprint(showerror,e))")
     end
     _backend_supported() || return VerificationReport(:UNSUPPORTED,"INTERVAL_BACKEND_VERSION",NamedTuple[],:NOT_CHECKED,nothing)
@@ -663,7 +688,7 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
         return VerificationReport(:UNSUPPORTED,"RESOURCE_LIMIT",NamedTuple[],:NOT_CHECKED,nothing)
     end
     parsed = try _read_certificate(cert_record,model,input_digest) catch e
-        occursin("RESOURCE_LIMIT",sprint(showerror,e)) && return VerificationReport(:UNSUPPORTED,"RESOURCE_LIMIT",NamedTuple[],:NOT_CHECKED,nothing)
+        e isa ResourceLimitError && return _unsupported_resource()
         return _invalid("certificate schema invalid: $(sprint(showerror,e))")
     end
     if requested===:root_and_spectrum && parsed.kind=="root"
@@ -723,6 +748,7 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
         end
         return result
     catch e
+        e isa ResourceLimitError && return _unsupported_resource(replay_bits)
         (e isa DivideError || e isa ProofArithmeticError) && return _unproven("proof arithmetic was inconclusive",replay_bits)
         rethrow()
     end

@@ -39,6 +39,11 @@ struct BackendUnsupported <: Exception
 end
 Base.showerror(io::IO, e::BackendUnsupported) = print(io, e.reason)
 
+struct ResourceLimitError <: Exception
+    message::String
+end
+Base.showerror(io::IO, e::ResourceLimitError) = print(io, e.message)
+
 function _exact_rational(x)
     x isa Bool && throw(ArgumentError("Bool is not an exact numeric input"))
     if x isa Integer
@@ -212,8 +217,8 @@ function prepare_model(Q, L, K; phases=nothing)
     Q isa AbstractMatrix || throw(ArgumentError("Q must be a matrix"))
     Base.require_one_based_indexing(Q)
     n, M = size(Q)
-    1 <= n <= 32 || throw(ArgumentError("n must be in 1:32"))
-    1 <= M <= 2048 || throw(ArgumentError("M must be in 1:2048"))
+    1 <= n <= 32 || throw(ResourceLimitError("RESOURCE_LIMIT: n must be in 1:32"))
+    1 <= M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: M must be in 1:2048"))
     size(L) == (2, M) || throw(DimensionMismatch("L must have size (2,M)"))
     size(K) == (n, n) || throw(DimensionMismatch("K must have size (n,n)"))
     q = _effective_exact_matrix(Q, "Q")

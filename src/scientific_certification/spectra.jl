@@ -167,9 +167,9 @@ function _make_spectrum_cluster(ca::EndpointCount, cb::EndpointCount,
     return cluster, done
 end
 
-function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots; used=1)
+function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
+        budget::_InertiaBudget)
     n = size(H, 1)
-    budget = _InertiaBudget(options.max_inertia_evaluations, used, String[])
     radius = _initial_radius(H, K, bits)
     lower_count = nothing; upper_count = nothing
     radius_exact = Rational{BigInt}(radius)
@@ -272,7 +272,7 @@ function _diagonal_spectrum(H, K, bits, options::ProofOptions, metric_pivots)
 end
 
 function certify_generalized_spectrum(model::CertificationModel, root::RootResult;
-        options=ProofOptions())
+        options=ProofOptions(), budget=nothing)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
     root.precision in options.precisions || throw(ArgumentError("root precision must be in options.precisions"))
     root.status === :CERTIFIED_ROOT || return _empty_spectrum(:INCONCLUSIVE, "root is not certified", options.spectral_goal, root.precision)
@@ -283,10 +283,18 @@ function certify_generalized_spectrum(model::CertificationModel, root::RootResul
     return _with_precision(bits) do
         _revalidate_root(model, root, bits) ||
             return _empty_spectrum(:INVALID_INPUT, "root witness does not match model", options.spectral_goal, bits)
-        options.max_inertia_evaluations == 0 &&
+        shared_budget = budget === nothing ?
+            _InertiaBudget(options.max_inertia_evaluations, 0, String[]) : budget
+        shared_budget isa _InertiaBudget || throw(ArgumentError("budget must be an internal inertia budget"))
+        shared_budget.limit == options.max_inertia_evaluations ||
+            throw(ArgumentError("shared inertia budget limit must match options"))
+        shared_budget.used >= shared_budget.limit &&
             return _empty_spectrum(:INCONCLUSIVE, "budget_exhausted", options.spectral_goal, bits)
+        shared_budget.used += 1
+        push!(shared_budget.attempts, "metric LDL status=attempted")
         H = root.H_box
         metric, K = _metric_ldl(model, bits)
+        push!(shared_budget.attempts, "metric LDL status=$(metric.ok ? "succeeded" : "inconclusive")")
         if !metric.ok
             # An exact nonpositive diagonal itself proves K is not SPD.
             any(model.K[i, i] <= 0 for i in 1:size(model.K, 1)) &&
@@ -298,47 +306,85 @@ function certify_generalized_spectrum(model::CertificationModel, root::RootResul
         length(metric.pivots) == size(H, 1) ||
             return _empty_spectrum(:INCONCLUSIVE, "METRIC_PD_UNPROVED", options.spectral_goal, bits)
         if _is_diagonal(H) && _is_diagonal(K)
-            _diagonal_spectrum(H, K, bits, options, metric.pivots)
+            result = _diagonal_spectrum(H, K, bits, options, metric.pivots)
+            SpectrumResult(result.status, result.reason, result.route, result.goal,
+                result.precision, result.metric_pivots, result.bounds, result.clusters,
+                result.endpoint_counts, result.diagonal_ratios, result.negative_count,
+                result.positive_count, result.unresolved_count, result.resolution_met,
+                copy(shared_budget.attempts))
         else
-            _inertia_spectrum(H, K, bits, options, metric.pivots; used=1)
+            _inertia_spectrum(H, K, bits, options, metric.pivots, shared_budget)
         end
     end
+end
+
+function _with_attempts(root::RootResult, attempts::Vector{String})
+    RootResult(root.status, root.model_signature, root.reason, copy(root.original_seed),
+        copy(root.translation), copy(root.normalized_seed), copy(root.center),
+        copy(root.box), copy(root.preconditioner), copy(root.F_center), copy(root.H_box),
+        copy(root.W), root.q_upper, root.precision, root.options,
+        root.hessian_classification, root.hessian_method, copy(root.hessian_pivots),
+        copy(root.candidate_provenance), copy(attempts))
 end
 
 function certify(model::CertificationModel, theta0; options=ProofOptions(), candidate_provenance=nothing)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
     seed = _exact_seed(theta0, size(model.Q, 1))
+    translation, normalized = _normalize_seed(seed)
+    provenance = _provenance(candidate_provenance)
+    (length(seed) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
+        return CertificationResult(:UNSUPPORTED,
+            _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options),
+            _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", options.spectral_goal), String[])
+    _backend_supported() || return CertificationResult(:UNSUPPORTED,
+        _empty_root(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", seed, options),
+        _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", options.spectral_goal), String[])
     attempts = String[]
-    best_root = _empty_root(:INCONCLUSIVE, "no root attempt")
+    first_diagnostic = nothing
+    best_root = _empty_root(:INCONCLUSIVE, "no root attempt", seed, options)
     best_spectrum = _empty_spectrum(:INCONCLUSIVE, "spectrum not attempted", options.spectral_goal)
     best_level = 0
     for bits in options.precisions
+        budget = _InertiaBudget(options.max_inertia_evaluations, 0, String[])
+        center = _with_precision(bits) do
+            proposed = _proposal(model, normalized, options, bits)
+            Rational{BigInt}[Rational{BigInt}(x) for x in proposed]
+        end
+        push!(attempts, "proposal p=$bits refinements=1")
         for radius in options.box_radii
-            onebox = ProofOptions(; precisions=(bits,), max_newton_steps=options.max_newton_steps,
-                max_backtracks=options.max_backtracks, box_radii=(radius,),
-                max_expansions=options.max_expansions,
-                max_inertia_evaluations=options.max_inertia_evaluations,
-                relative_width=options.relative_width, spectral_goal=options.spectral_goal,
-                max_dimension=options.max_dimension, max_terms=options.max_terms)
-            root = certify_stationary_point(model, seed; options=onebox,
-                                            candidate_provenance)
+            push!(attempts, "root p=$bits radius=$radius")
+            root = try
+                _with_precision(bits) do
+                    _root_witness(model, seed, translation, normalized, center, radius,
+                        bits, options, provenance, attempts)
+                end
+            catch e
+                (e isa SingularException || e isa DivideError ||
+                 e isa ProofArithmeticError || e isa DomainError) || rethrow()
+                nothing
+            end
+            root === nothing && (push!(attempts, "root p=$bits radius=$radius status=no_finite_witness"); continue)
+            first_diagnostic === nothing && (first_diagnostic = root)
             push!(attempts, "root p=$bits radius=$radius status=$(root.status)")
             if root.status === :CERTIFIED_ROOT
-                spectrum = certify_generalized_spectrum(model, root; options=onebox)
+                spectrum = certify_generalized_spectrum(model, root; options, budget)
                 push!(attempts, "spectrum p=$bits radius=$radius status=$(spectrum.status) reason=$(spectrum.reason)")
+                push!(attempts, "spectrum budget p=$bits used=$(budget.used) limit=$(budget.limit)")
                 level = spectrum.status === :CERTIFIED_BOUNDS ? 2 : 1
                 if level > best_level
                     best_level = level; best_root = root; best_spectrum = spectrum
                 end
                 if spectrum.status === :CERTIFIED_BOUNDS && spectrum.resolution_met
-                    return CertificationResult(:CERTIFIED, root, spectrum, attempts)
+                    return CertificationResult(:CERTIFIED, _with_attempts(root, attempts),
+                        spectrum, attempts)
                 end
-            elseif best_level == 0 && best_root.status !== :CERTIFIED_ROOT
-                best_root = root
             end
         end
     end
-    status = best_level == 2 ? :INCONCLUSIVE_SPECTRUM :
-             best_level == 1 ? :CERTIFIED_ROOT : best_root.status
-    CertificationResult(status, best_root, best_spectrum, attempts)
+    if best_level == 0
+        root = first_diagnostic === nothing ? best_root : _with_attempts(first_diagnostic, attempts)
+        return CertificationResult(root.status, root, best_spectrum, attempts)
+    end
+    status = best_level == 2 ? :INCONCLUSIVE_SPECTRUM : :CERTIFIED_ROOT
+    CertificationResult(status, _with_attempts(best_root, attempts), best_spectrum, attempts)
 end

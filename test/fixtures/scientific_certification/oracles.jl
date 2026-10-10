@@ -63,22 +63,36 @@ function oracle_scalar_root(phi::Rational)
     _oracle_exact(lo, 512), _oracle_exact(hi, 512)
 end
 
-function oracle_scalar_curvature(log10_coefficient::Rational)
-    # Independent MPFR enclosure of c*10^x, including fractional x.
-    bits = 512
+function oracle_scalar_curvature(log10_coefficient::Rational; bits=512)
+    # Exact integer powers and an independent directed sqrt(10) enclosure.
     c_lo, c_hi = oracle_c_interval(bits)
     x = _orat(log10_coefficient)
-    ten_lo = _oracle_directed(bits, _ORACLE_D) do
-        exp(BigFloat(x, _ORACLE_D; precision=bits) * log(BigFloat(10)))
-    end
-    ten_hi = _oracle_directed(bits, _ORACLE_U) do
-        exp(BigFloat(x, _ORACLE_U; precision=bits) * log(BigFloat(10)))
-    end
-    lo = _oracle_directed(bits, _ORACLE_D) do
-        BigFloat(c_lo, _ORACLE_D; precision=bits) * ten_lo
-    end
-    hi = _oracle_directed(bits, _ORACLE_U) do
-        BigFloat(c_hi, _ORACLE_U; precision=bits) * ten_hi
+    if denominator(x) == 1
+        exponent = numerator(x)
+        abs(exponent) <= 1000 || throw(ArgumentError("integer reference exponent is outside the bounded oracle"))
+        scale = exponent >= 0 ? BigInt(10)^Int(exponent)//BigInt(1) :
+            BigInt(1)//BigInt(10)^Int(-exponent)
+        lo = _oracle_directed(bits, _ORACLE_D) do
+            BigFloat(c_lo, _ORACLE_D; precision=bits) * BigFloat(scale, _ORACLE_D; precision=bits)
+        end
+        hi = _oracle_directed(bits, _ORACLE_U) do
+            BigFloat(c_hi, _ORACLE_U; precision=bits) * BigFloat(scale, _ORACLE_U; precision=bits)
+        end
+    elseif x == -1//2
+        sqrt_lo = _oracle_directed(bits, _ORACLE_D) do
+            sqrt(BigFloat(10))
+        end
+        sqrt_hi = _oracle_directed(bits, _ORACLE_U) do
+            sqrt(BigFloat(10))
+        end
+        lo = _oracle_directed(bits, _ORACLE_D) do
+            BigFloat(c_lo, _ORACLE_D; precision=bits) / sqrt_hi
+        end
+        hi = _oracle_directed(bits, _ORACLE_U) do
+            BigFloat(c_hi, _ORACLE_U; precision=bits) / sqrt_lo
+        end
+    else
+        throw(ArgumentError("independent curvature oracle supports integer powers and -1/2"))
     end
     _oracle_exact(lo, bits), _oracle_exact(hi, bits)
 end
@@ -146,10 +160,10 @@ function oracle_t14_intervals(bits=512)
     end
     c_lo, c_hi = oracle_c_interval(bits)
     nlo = _oracle_directed(bits, _ORACLE_D) do
-        BigFloat(neg_lo) * BigFloat(c_lo, _ORACLE_D; precision=bits)
+        BigFloat(neg_lo) * BigFloat(c_hi, _ORACLE_U; precision=bits)
     end
     nhi = _oracle_directed(bits, _ORACLE_U) do
-        BigFloat(neg_hi) * BigFloat(c_hi, _ORACLE_U; precision=bits)
+        BigFloat(neg_hi) * BigFloat(c_lo, _ORACLE_D; precision=bits)
     end
     plo = _oracle_directed(bits, _ORACLE_D) do
         BigFloat(pos_lo) * BigFloat(c_lo, _ORACLE_D; precision=bits)
@@ -219,12 +233,10 @@ function _sturm_count(seq, lo::_ORACLE_RAT, hi::_ORACLE_RAT)
     _variations(seq, lo) - _variations(seq, hi)
 end
 
-function oracle_t05_reference(index::Int, claim::Tuple{_ORACLE_RAT,_ORACLE_RAT})
+function oracle_t05_reference(index::Int, claim::Tuple{_ORACLE_RAT,_ORACLE_RAT}, poly::Vector{_ORACLE_RAT})
     starts = (4297459, 9349281, 15337845, 23207141, 42599543)
     1 <= index <= length(starts) || throw(BoundsError(starts, index))
     # det(A-mu*K), independently evaluated with exact rational Sturm arithmetic.
-    coefficients = BigInt[55, -435, 1161, -1341, 678, -120]
-    poly = _ORACLE_RAT[x // BigInt(1) for x in coefficients]
     seq = _sturm_sequence(poly)
     lo = BigInt(starts[index]) // BigInt(2)^24
     hi = BigInt(starts[index]+1) // BigInt(2)^24
@@ -243,11 +255,9 @@ function oracle_t05_reference(index::Int, claim::Tuple{_ORACLE_RAT,_ORACLE_RAT})
     error("T05 exact oracle could not be refined inside the certified claim")
 end
 
-function oracle_t05_scaled_reference(index::Int, claim::Tuple{_ORACLE_RAT,_ORACLE_RAT})
+function oracle_t05_scaled_reference(index::Int, claim::Tuple{_ORACLE_RAT,_ORACLE_RAT}, poly::Vector{_ORACLE_RAT})
     starts = (4297459, 9349281, 15337845, 23207141, 42599543)
     1 <= index <= length(starts) || throw(BoundsError(starts, index))
-    coefficients = BigInt[55, -435, 1161, -1341, 678, -120]
-    poly = _ORACLE_RAT[x // BigInt(1) for x in coefficients]
     seq = _sturm_sequence(poly)
     lo = BigInt(starts[index]) // BigInt(2)^24
     hi = BigInt(starts[index]+1) // BigInt(2)^24
@@ -314,7 +324,7 @@ end
 function oracle_exact_pencil_polynomial(A::Matrix{_ORACLE_RAT},K::Matrix{_ORACLE_RAT})
     n,m=size(A)
     n==m && size(K)==(n,n) || throw(DimensionMismatch())
-    n==3 || throw(ArgumentError("the held-out exact polynomial oracle is bounded to n=3"))
+    1<=n<=5 || throw(ArgumentError("the exact polynomial oracle is bounded to n=5"))
     total=fill(_ORACLE_RAT(0),n+1)
     for permutation in _permutations(collect(1:n))
         term=_ORACLE_RAT[1//1]
@@ -325,6 +335,21 @@ function oracle_exact_pencil_polynomial(A::Matrix{_ORACLE_RAT},K::Matrix{_ORACLE
         _poly_add!(total,_permutation_sign(permutation).*term)
     end
     _poly_trim(total)
+end
+
+function oracle_t05_pencil_polynomial(Q::Matrix{_ORACLE_RAT},L::Matrix{_ORACLE_RAT},
+        K::Matrix{_ORACLE_RAT})
+    size(Q)==(5,9) && size(L)==(2,9) && size(K)==(5,5) ||
+        throw(DimensionMismatch("T05 oracle requires its fixed 5-by-9 model data"))
+    all(denominator(x)==1 for x in Q) && all(denominator(x)==1 for x in L[1,:]) &&
+        all(denominator(x)==1 for x in K) || throw(ArgumentError("T05 oracle requires exact integer model data"))
+    all(==(1//1),L[1,:]) && all(iszero,L[2,:]) ||
+        throw(ArgumentError("T05 oracle coefficients/logs differ from the fixed family"))
+    A=Matrix{_ORACLE_RAT}(Q*Diagonal(L[1,:])*transpose(Q))
+    polynomial=oracle_exact_pencil_polynomial(A,K)
+    expected=_ORACLE_RAT[55//1,-435//1,1161//1,-1341//1,678//1,-120//1]
+    polynomial==expected || error("independent T05 pencil reproduction differs from the fixed exact coefficients")
+    polynomial
 end
 
 function _poly_add!(a::Vector{_ORACLE_RAT}, b::Vector{_ORACLE_RAT})
