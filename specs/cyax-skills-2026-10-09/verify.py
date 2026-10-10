@@ -259,6 +259,13 @@ def validate_case_pack(path: Path):
     data, cases = parse_json(path)
     if not isinstance(cases, list):
         raise CheckFailure("CASE_PACK_INVALID", "case pack must be a JSON array")
+    seen_ids = set()
+    for item in cases:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            cid = item["id"]
+            if cid in seen_ids:
+                raise CheckFailure("CASE_ID_DUPLICATE", f"duplicate case id {cid}")
+            seen_ids.add(cid)
     ids = []
     expected = {"id", "methods", "task_input", "supplied_fixture",
                 "required_observations", "forbidden_observations", "evidence_kind"}

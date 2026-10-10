@@ -6,6 +6,13 @@ const SC = CYAxiverse.scientific_certification
 @testset "Bounded scientific certification" begin
     @testset "exact input and phase conventions" begin
         @test_throws DimensionMismatch SC.prepare_model(reshape([1], 1, 1), [1 0 0], reshape([1], 1, 1))
+        # The public scientific contract uses Q with shape n×M; unlike the
+        # synthetic SK-02/SK-08 (term,axion) reader fixture, it is not M×n.
+        q_transposed = [1 0; 0 1; 1 1]
+        l_for_n2_m3 = [1 1 1; 0 0 0]
+        @test_throws DimensionMismatch SC.prepare_model(q_transposed, l_for_n2_m3, Matrix{Int}(I, 2, 2))
+        @test size(SC.prepare_model(transpose(q_transposed), l_for_n2_m3,
+            Matrix{Int}(I, 2, 2)).Q) == (2, 3)
         @test_throws ArgumentError SC.prepare_model(reshape([1.5], 1, 1), reshape([1, 0], 2, 1), reshape([1], 1, 1))
         @test_throws ArgumentError SC.prepare_model(reshape([1], 1, 1), reshape([1, 0], 2, 1), reshape([NaN], 1, 1))
         @test_throws ArgumentError SC.prepare_model(reshape([1], 1, 1), reshape([1, 0], 2, 1), reshape([1], 1, 1); phases=[NaN])
@@ -406,6 +413,52 @@ end
 end
 
 include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.jl"))
+
+@testset "MX-04 mathematical replay does not waive provenance" begin
+    model = SC.prepare_model(reshape([1], 1, 1), reshape([1, 0], 2, 1), reshape([1], 1, 1))
+    result = SC.certify(model, [0]; options=SC.ProofOptions(precisions=(256,), spectral_goal=:individuals))
+    @test result.status == :CERTIFIED
+
+    repository_root = normpath(joinpath(@__DIR__, ".."))
+    commit = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD"]), String))
+    tree = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD^{tree}"]), String))
+    source = (repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl", commit, tree)
+    mktempdir() do parent
+        project = Base.active_project()
+        project === nothing && error("provenance control requires an active project")
+        manifest = joinpath(dirname(project), "Manifest.toml")
+        envpath = joinpath(parent, "producer-environment.toml")
+        envbytes = Vector{UInt8}(codeunits(join((
+            "schema=cyax-scientific-test-environment-v1",
+            "julia_version=$(VERSION)",
+            "interval_arithmetic_version=$(Base.pkgversion(SC.IA))",
+            "project_sha256=$(bytes2hex(sha256(read(project))))",
+            "manifest_sha256=$(bytes2hex(sha256(read(manifest))))"), "\n") * "\n"))
+        write(envpath, envbytes)
+        environment_ref = (receipt_sha256=bytes2hex(sha256(envbytes)), artifact_name=basename(envpath))
+        certificate = SC.write_certificate(joinpath(parent, "certificate"), model, result;
+            source_ref=source, environment_ref)
+        observed_environment = (sha256=environment_ref.receipt_sha256,
+            artifact_name=environment_ref.artifact_name, project_dir=dirname(project),
+            record=Dict("worktree_clean"=>true))
+        stale_source = (repository=source.repository, commit=repeat("0", 40),
+            tree=repeat("0", 40), clean=true)
+        evidence_root = joinpath(parent, "replay-evidence")
+        mkpath(joinpath(evidence_root, "commands"))
+        @test_throws ErrorException ScientificCertificationFixtures._replay_receipt(
+            "MX04_BAD_PROVENANCE", 256,
+            Dict("path"=>dirname(certificate.certificate_path),
+                "input_sha256"=>certificate.input_sha256,
+                "certificate_sha256"=>certificate.certificate_sha256),
+            observed_environment, stale_source, evidence_root,
+            "logs/mx04-replay.log", "replay/mx04-replay.toml";
+            require_provenance=true)
+        receipt = TOML.parsefile(joinpath(evidence_root, "replay", "mx04-replay.toml"))
+        @test receipt["mathematical_verdict"] == "VERIFIED"
+        @test receipt["provenance_status"] == "FAIL"
+        @test !(receipt["mathematical_verdict"] == "VERIFIED" && receipt["provenance_status"] == "PASS")
+    end
+end
 
 @testset "Full public qualification profile" begin
     @test ScientificCertificationFixtures.qualify_from_test_profile!() === nothing
