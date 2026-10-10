@@ -377,14 +377,13 @@ def _check_instruction_budgets(base, candidate, spec):
     }
 
 
-def _check_links(candidate: str, spec: bytes):
-    text = spec.decode("utf-8")
-    blocks = _expected_blocks(spec)
-    sources = {
-        INSTRUCTION_PATHS[0]: blocks["5.1"].decode(),
-        INSTRUCTION_PATHS[1]: blocks["5.2"].decode(),
-        INSTRUCTION_PATHS[2]: blocks["5.3"].decode(),
-    }
+def _check_links(base: str, candidate: str, spec: bytes):
+    sources = {}
+    for path in INSTRUCTION_PATHS[:3]:
+        before, after = show(base, path), show(candidate, path)
+        separator = 0 if before.endswith(b"\n") else 1
+        suffix = after[len(before) + separator:]
+        sources[path] = suffix.decode("utf-8")
     for path in PROC:
         sources[path] = show(candidate, path).decode("utf-8")
     link_re = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -595,10 +594,10 @@ def main():
         if sha(skill_core) != SKILL_SPEC_SHA or sha(science_core) != SCIENCE_SPEC_SHA:
             raise CheckFailure("APPROVED_SPEC_MISMATCH", "approved normative spec bytes differ")
         historical_examples = _check_historical_examples(science)
+        _check_links(args.base, args.candidate, spec)
         _check_appends(args.base, args.candidate, spec)
         instruction_sizes = _check_instruction_budgets(args.base, args.candidate, spec)
         _check_narrow_edits(args.base, args.candidate)
-        _check_links(args.candidate, spec)
         case_bytes, cases = validate_case_pack(ROOT/"specs/cyax-skills-2026-10-09/cases.json")
         size_paths = {
             "source_provenance": "specs/cyax-skills-2026-10-09/sources.md",
