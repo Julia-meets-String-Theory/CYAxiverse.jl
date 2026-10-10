@@ -190,7 +190,12 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots; use
             Tuple{Rational{BigInt},Rational{BigInt}}[], SpectralCluster[],
             EndpointCount[], IA.Interval{BigFloat}[], budget.attempts)
 
-    queue = [(lower_count, upper_count)]
+    # The successful global-bracket check above proves both endpoints exist.
+    # Keep that invariant in the queue's element type so downstream refinement
+    # does not carry the failed-evaluation `nothing` case into certified pairs.
+    lower_endpoint = lower_count::EndpointCount
+    upper_endpoint = upper_count::EndpointCount
+    queue = Tuple{EndpointCount,EndpointCount}[(lower_endpoint, upper_endpoint)]
     final = Tuple{EndpointCount,EndpointCount}[]
     while !isempty(queue)
         ca, cb = popfirst!(queue)
@@ -216,8 +221,9 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots; use
             push!(final, (ca, cb))
             continue
         end
-        ca.negative < chosen.negative && push!(queue, (ca, chosen))
-        chosen.negative < cb.negative && push!(queue, (chosen, cb))
+        chosen_endpoint = chosen::EndpointCount
+        ca.negative < chosen_endpoint.negative && push!(queue, (ca, chosen_endpoint))
+        chosen_endpoint.negative < cb.negative && push!(queue, (chosen_endpoint, cb))
     end
     # A budget stop leaves every queued certified frontier item intact.
     append!(final, queue)
