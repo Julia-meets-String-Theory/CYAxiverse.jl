@@ -23,3 +23,8 @@ description: Draft, review, plan, task, migrate, or converge CYAxiverse specific
 16. Do not turn every chat into a Project card. Promote conversation-derived work only when it produces an independently durable project outcome such as a research question, decision, blocker, proposed spec, implementation follow-up or evidence-bearing investigation. The checkpoint is a sanitized summary, never a transcript. It may contain title/question, Workstream, normal Project Status/Priority, a public-safe conclusion, next action, related Issue/spec/PR or repository-relative references, and optionally an opaque non-resolving private reference. Never publish a resolving private-chat or local-machine locator. Conversation checkpoints use the existing Project lifecycle and governing-Issue model; a `Research & Chats` view is only another view over the same Project items, not a second ledger or status system.
 
 Finish with the governing spec/status, approval provenance where required, requirements/gates advanced, verification evidence, remaining work, and any owner decision required. Use the relevant domain skill as well when the work changes Julia/scientific/sampling/vacua/release behaviour.
+## Conditional engineering methods
+
+- For a named architecture/design assessment, use [architecture assessment](references/architecture-assessment.md).
+- When authoring agent instructions or resolving domain terminology, use [instruction writing and terminology](references/agent-writing-domain-modeling.md).
+- When a reusable failure or lesson warrants analysis, use [retrospective](references/retrospective.md). The existing convergence question and lessons lifecycle still apply.

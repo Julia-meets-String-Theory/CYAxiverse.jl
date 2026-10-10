@@ -194,6 +194,7 @@ makedocs(
         "Installation" => "installation.md",
         "User guide" => "userguide.md",
         "Pipelines" => "pipelines.md",
+        "Scientific certification" => "scientific_certification.md",
         "Local axion-photon scan" => "axion_photon.md",
         "Examples" => "examples.md",
         "API" => "api.md"
