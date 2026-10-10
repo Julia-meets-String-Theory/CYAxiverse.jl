@@ -44,13 +44,19 @@ function _interval_array_record(A::AbstractArray{<:IA.Interval{BigFloat}})
         _ratstr(_rational_bound(_hi(x)))] for x in vec(A)])
 end
 
+function _identity_interpretation(model::CertificationModel)::_CertificationInterpretation
+    (basis="periodic_string", orientation="axions_by_terms",
+        theta_period="1/1", phase_units="radian",
+        coefficient_convention="signed_base10_log",
+        numeric_semantics="exact_supplied_values",
+        spectrum_convention="scaled_hessian_pencil",
+        physical_normalization="not_established", s=model.s)
+end
+
 function _interpretation(model::CertificationModel)
-    Dict("basis"=>"periodic_string", "orientation"=>"axions_by_terms",
-        "theta_period"=>"1/1", "phase_units"=>"radian",
-        "coefficient_convention"=>"signed_base10_log",
-        "numeric_semantics"=>"exact_supplied_values",
-        "spectrum_convention"=>"scaled_hessian_pencil",
-        "physical_normalization"=>"not_established", "s"=>_ratstr(model.s))
+    values = _identity_interpretation(model)
+    Dict{String,String}(String(key) => (key === :s ? _ratstr(value) : value)
+        for (key, value) in pairs(values))
 end
 
 function _settings_record(o::ProofOptions)
@@ -68,6 +74,19 @@ function _input_record(model::CertificationModel)
         "Q"=>_array_record(model.Q), "L"=>_array_record(model.L),
         "K"=>_array_record(model.K), "phi"=>_array_record(model.phases),
         "interpretation"=>_interpretation(model))
+end
+
+function _result_identity(model::CertificationModel)
+    interpretation = _identity_interpretation(model)
+    try
+        input_bytes = _toml_bytes(_input_record(model))
+        return CertificationIdentity(bytes2hex(sha256(input_bytes)), :AVAILABLE,
+            nothing, interpretation)
+    catch error
+        error isa ResourceLimitError || rethrow()
+        return CertificationIdentity(nothing, :UNAVAILABLE, "RESOURCE_LIMIT",
+            interpretation)
+    end
 end
 
 function _toml_bytes(record::Dict)
@@ -142,7 +161,9 @@ function _public_safe_source_ref(value)
     if occursin("://", text)
         authority = match(r"^[A-Za-z][A-Za-z0-9+.-]*://([^/?#]+)", text)
         authority === nothing && throw(ArgumentError("candidate source_ref URL is malformed"))
-        hostport = authority.captures[1]
+        captured_hostport = authority.captures[1]
+        captured_hostport isa AbstractString || throw(ArgumentError("candidate source_ref URL is malformed"))
+        hostport = String(captured_hostport)
         occursin('@', hostport) && throw(ArgumentError("candidate source_ref URL must not contain credentials"))
         host_match = startswith(hostport, "[") ? match(r"^\[([^\]]+)\]", hostport) : nothing
         host = host_match === nothing ? first(split(hostport, ':'; limit=2)) : host_match.captures[1]
@@ -462,7 +483,7 @@ function _valid_ref_hash(value)
     value isa AbstractString && occursin(_SHA256_RE, value)
 end
 
-function _verify_spectrum_claim(model, root, spectrum, bits, options)
+function _verify_spectrum_claim(model, root, spectrum, bits, options; schema_only::Bool=false)
     n = size(model.Q, 1)
     _require_keys(spectrum, ("status","route","goal","metric_pivots","bounds","clusters",
         "negative_count","positive_count","unresolved_count","resolution_met","reason",
@@ -485,7 +506,9 @@ function _verify_spectrum_claim(model, root, spectrum, bits, options)
         pop == last-first+1 && first == next || throw(ArgumentError("clusters do not form exact ordered coverage"))
         lo, hi = _parse_rational(item["lower"]), _parse_rational(item["upper"])
         lo < hi || throw(ArgumentError("cluster endpoints must increase"))
-        sign = Symbol(item["sign"]); sign in (:negative,:positive,:unresolved) || throw(ArgumentError("unknown cluster sign"))
+        sign_value = item["sign"]
+        sign_value isa AbstractString || throw(ArgumentError("cluster sign must be a string"))
+        sign = Symbol(sign_value); sign in (:negative,:positive,:unresolved) || throw(ArgumentError("unknown cluster sign"))
         item["relative_width_met"] isa Bool || throw(ArgumentError("relative_width_met must be boolean"))
         c = _cluster_from_interval(first,last,lo,hi,options.relative_width)
         c.sign === sign && c.relative_width_met == item["relative_width_met"] ||
@@ -518,6 +541,10 @@ function _verify_spectrum_claim(model, root, spectrum, bits, options)
     dc = _interval_claims(spectrum["diagonal_ratios"], route == "diagonal" ? [n] : [0])
     if route == "diagonal"
         isempty(ec) || throw(ArgumentError("diagonal route has no endpoint counts"))
+        expected_bounds, expected_clusters = _diagonal_clusters_claim(vec(dc), options.relative_width)
+        expected_bounds == vec(bclaims) && _same_clusters(expected_clusters, parsed_clusters) ||
+            throw(ArgumentError("diagonal bounds and clusters do not match submitted ratios"))
+        schema_only && return true
         options.max_inertia_evaluations >= 1 || return false
         ratios = IA.Interval{BigFloat}[_iv(x[1],x[2],bits) for x in vec(dc)]
         H = root.H_box; K = _interval_matrix(model.K,bits)
@@ -551,6 +578,7 @@ function _verify_spectrum_claim(model, root, spectrum, bits, options)
     length(expected_endpoints) <= 2n || throw(ArgumentError("endpoint set exceeds 2n"))
     issorted([endpoint_claims[t][1] for t in expected_endpoints]) ||
         throw(ArgumentError("endpoint counts are not nondecreasing"))
+    schema_only && return true
     options.max_inertia_evaluations >= 1+length(expected_endpoints) || return false
 
     # Complete bounded endpoint structure before any numerical factorization.
@@ -784,6 +812,10 @@ function write_certificate(directory::AbstractString, model::CertificationModel,
                 end
                 input_bytes=_toml_bytes(_input_record(model))
                 input_digest=bytes2hex(sha256(input_bytes))
+                root.identity.input_sha256 == input_digest ||
+                    throw(ArgumentError("result input identity does not match serialized model"))
+                result isa CertificationResult && result.identity.input_sha256 != input_digest &&
+                    throw(ArgumentError("certification input identity does not match serialized model"))
                 certificate=Dict("schema"=>"cyax-scientific-certificate-v1","kind"=>kind,
                     "input_sha256"=>input_digest,"source_ref"=>sr,"environment_ref"=>er,
                     "settings"=>_settings_record(root.options),"precision"=>root.precision,
@@ -863,6 +895,16 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
         e isa ResourceLimitError && return _unsupported_resource()
         return _invalid("certificate schema invalid: $(sprint(showerror,e))")
     end
+    if parsed.kind == "root_and_spectrum"
+        try
+            _verify_spectrum_claim(model, nothing, parsed.spectrum,
+                parsed.precision_bits, parsed.settings; schema_only=true)
+        catch e
+            e isa ResourceLimitError && return _unsupported_resource(parsed.precision_bits)
+            e isa ArgumentError && return _invalid("spectrum schema invalid: $(sprint(showerror,e))", parsed.precision_bits)
+            rethrow()
+        end
+    end
     if requested===:root_and_spectrum && parsed.kind=="root"
         return _unproven("root_and_spectrum was required but certificate is root-only",parsed.precision_bits)
     end
@@ -877,7 +919,8 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
             bounds=vec(parsed.boxclaims)
             root=try
                 _evaluate_root_claims(model,parsed.original,parsed.translation,parsed.normalized,
-                    parsed.center,bounds,parsed.C,replay_bits,parsed.settings,parsed.provenance,String[])
+                    parsed.center,bounds,parsed.C,replay_bits,parsed.settings,parsed.provenance,
+                    String[],_result_identity(model))
             catch e
                 (e isa DivideError || e isa ProofArithmeticError) && return _unproven("root proof arithmetic was inconclusive",replay_bits)
                 rethrow()

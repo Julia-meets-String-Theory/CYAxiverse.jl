@@ -220,6 +220,19 @@ struct CertificationModel
     s::Rational{BigInt}
 end
 
+const _CertificationInterpretation = NamedTuple{
+    (:basis, :orientation, :theta_period, :phase_units, :coefficient_convention,
+     :numeric_semantics, :spectrum_convention, :physical_normalization, :s),
+    Tuple{String, String, String, String, String, String, String, String, Rational{BigInt}}}
+
+"""Exact input identity and interpretation carried by every public result."""
+struct CertificationIdentity
+    input_sha256::Union{Nothing,String}
+    input_identity_status::Symbol
+    input_identity_reason::Union{Nothing,String}
+    interpretation::_CertificationInterpretation
+end
+
 function prepare_model(Q, L, K; phases=nothing)
     Q isa AbstractMatrix || throw(ArgumentError("Q must be a matrix"))
     Base.require_one_based_indexing(Q)

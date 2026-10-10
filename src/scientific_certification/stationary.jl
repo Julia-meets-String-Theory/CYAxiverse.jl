@@ -112,19 +112,20 @@ struct RootResult
     hessian_pivots::Vector{IA.Interval{BigFloat}}
     candidate_provenance::Dict{String,String}
     attempts::Vector{String}
+    identity::CertificationIdentity
 end
 
 function _empty_root(status::Symbol, reason::String, seed=Rational{BigInt}[], options=ProofOptions();
         model_signature::String="", translation::Vector{BigInt}=BigInt[],
         normalized_seed::Vector{Rational{BigInt}}=Rational{BigInt}[],
         candidate_provenance::Dict{String,String}=Dict("status"=>"unknown"),
-        attempts::Vector{String}=String[])
+        attempts::Vector{String}=String[], identity::CertificationIdentity)
     return RootResult(status, model_signature, reason, copy(seed), copy(translation), copy(normalized_seed),
         Rational{BigInt}[], IA.Interval{BigFloat}[],
         Matrix{Rational{BigInt}}(undef, 0, 0), IA.Interval{BigFloat}[],
         Matrix{IA.Interval{BigFloat}}(undef, 0, 0), IA.Interval{BigFloat}[],
         BigInt(0)//BigInt(1), 0, options, :UNRESOLVED, :none,
-        IA.Interval{BigFloat}[], copy(candidate_provenance), copy(attempts))
+        IA.Interval{BigFloat}[], copy(candidate_provenance), copy(attempts), identity)
 end
 
 function _matrix_product(A::Matrix{IA.Interval{BigFloat}},
@@ -294,7 +295,8 @@ end
 function _root_witness(model::CertificationModel, original::Vector{Rational{BigInt}},
                        translation::Vector{BigInt}, normalized::Vector{Rational{BigInt}},
                        center::Vector{Rational{BigInt}}, radius::Rational{BigInt},
-                       bits::Int, options::ProofOptions, provenance::Dict{String,String}, attempts::Vector{String})
+                       bits::Int, options::ProofOptions, provenance::Dict{String,String},
+                       attempts::Vector{String}, identity::CertificationIdentity)
     n = length(center)
     box_bounds = Tuple{Rational{BigInt},Rational{BigInt}}[
         (center[i] - radius, center[i] + radius) for i in 1:n]
@@ -304,7 +306,7 @@ function _root_witness(model::CertificationModel, original::Vector{Rational{BigI
     Cbig = _big_inverse(midH)
     C = Rational{BigInt}[Rational{BigInt}(Cbig[i, j]) for i in 1:n, j in 1:n]
     _evaluate_root_claims(model, original, translation, normalized, center,
-        box_bounds, C, bits, options, provenance, attempts)
+        box_bounds, C, bits, options, provenance, attempts, identity)
 end
 
 function _evaluate_root_claims(model::CertificationModel,
@@ -313,7 +315,8 @@ function _evaluate_root_claims(model::CertificationModel,
         box_bounds::Vector{Tuple{Rational{BigInt},Rational{BigInt}}},
         C::Matrix{Rational{BigInt}}, bits::Int, options::ProofOptions,
         provenance::Dict{String,String},
-        attempts::Vector{String}; classify_hessian::Bool=true)
+        attempts::Vector{String}, identity::CertificationIdentity;
+        classify_hessian::Bool=true)
     n = length(center)
     box = [_iv(lo, hi, bits) for (lo, hi) in box_bounds]
     x0 = _point_intervals(center, bits)
@@ -351,7 +354,7 @@ function _evaluate_root_claims(model::CertificationModel,
     return RootResult(status, _model_signature(model), reason, copy(original),
         copy(translation), copy(normalized), copy(center), box, copy(C), f0, H, W,
         Rational{BigInt}(q), bits, options, class, method,
-        pivots, copy(provenance), copy(attempts))
+        pivots, copy(provenance), copy(attempts), identity)
 end
 
 function _model_signature(model::CertificationModel)
@@ -398,7 +401,7 @@ function _revalidate_root(model::CertificationModel, root::RootResult, bits::Int
     evaluated = try
         _evaluate_root_claims(model, root.original_seed, root.translation,
             root.normalized_seed, root.center, bounds, root.preconditioner,
-            bits, root.options, root.candidate_provenance, root.attempts;
+            bits, root.options, root.candidate_provenance, root.attempts, root.identity;
             classify_hessian=!reuse_hessian)
     catch e
         e isa SingularException || e isa DomainError || e isa OverflowError || rethrow()
@@ -457,9 +460,13 @@ function certify_stationary_point(model::CertificationModel, theta0;
     seed = _exact_seed(theta0, size(model.Q, 1))
     translation, normalized = _normalize_seed(seed)
     provenance = _provenance(candidate_provenance)
-    model_signature = size(model.Q,1) <= 32 && size(model.Q,2) <= 2048 ? _model_signature(model) : ""
+    identity = _result_identity(model)
+    model_signature = identity.input_sha256 !== nothing && size(model.Q,1) <= 32 &&
+        size(model.Q,2) <= 2048 ? _model_signature(model) : ""
     context = (; model_signature, translation, normalized_seed=normalized,
-        candidate_provenance=provenance)
+        candidate_provenance=provenance, identity)
+    identity.input_sha256 === nothing &&
+        return _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...)
     (length(seed) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
         return _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...)
     _backend_supported() || return _empty_root(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", seed, options; context...)
@@ -474,7 +481,7 @@ function certify_stationary_point(model::CertificationModel, theta0;
                 push!(attempts, "precision=$bits radius=$radius")
                 witness = try
                     _root_witness(model, seed, translation, normalized, center,
-                                  radius, bits, options, provenance, attempts)
+                                  radius, bits, options, provenance, attempts, identity)
                 catch e
                     (e isa SingularException || e isa DivideError ||
                      e isa ProofArithmeticError || e isa DomainError) || rethrow()
@@ -497,5 +504,5 @@ function certify_stationary_point(model::CertificationModel, theta0;
             retained.box, retained.preconditioner, retained.F_center, retained.H_box,
             retained.W, retained.q_upper, retained.precision, retained.options,
             retained.hessian_classification, retained.hessian_method,
-            retained.hessian_pivots, provenance, attempts)
+            retained.hessian_pivots, provenance, attempts, identity)
 end

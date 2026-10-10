@@ -1007,6 +1007,69 @@ end
         @test no_witness_combined.root.attempts==no_witness_combined.attempts
     end
 
+    @testset "result input identity and interpretation" begin
+        options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals)
+        model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+        root=SC.certify_stationary_point(model,[0];options)
+        spectrum=SC.certify_generalized_spectrum(model,root;options)
+        combined=SC.certify(model,[0];options)
+        @test root.status==:CERTIFIED_ROOT
+        @test spectrum.status==:CERTIFIED_BOUNDS
+        @test combined.status==:CERTIFIED
+        for identity in (root.identity,spectrum.identity,combined.identity,combined.root.identity,
+                combined.spectrum.identity)
+            @test identity.input_identity_status==:AVAILABLE
+            @test identity.input_identity_reason===nothing
+            @test occursin(r"^[0-9a-f]{64}$",identity.input_sha256)
+            @test identity.interpretation.basis=="periodic_string"
+            @test identity.interpretation.orientation=="axions_by_terms"
+            @test identity.interpretation.theta_period=="1/1"
+            @test identity.interpretation.phase_units=="radian"
+            @test identity.interpretation.coefficient_convention=="signed_base10_log"
+            @test identity.interpretation.numeric_semantics=="exact_supplied_values"
+            @test identity.interpretation.spectrum_convention=="scaled_hessian_pencil"
+            @test identity.interpretation.s==0//1
+            @test identity.interpretation.physical_normalization=="not_established"
+        end
+        @test !hasproperty(root,:physical_mass)
+        @test !hasproperty(spectrum,:physical_mass)
+        @test root.identity.input_sha256==spectrum.identity.input_sha256==combined.identity.input_sha256
+
+        source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",
+            commit=repeat("a",40),tree=repeat("b",40))
+        mktempdir() do parent
+            envpath=joinpath(parent,"environment.toml")
+            write(envpath,"identity fixture environment")
+            environment=(receipt_sha256=bytes2hex(sha256(read(envpath))),artifact_name=basename(envpath))
+            written=SC.write_certificate(joinpath(parent,"certificate"),model,combined;
+                source_ref=source,environment_ref=environment)
+            emitted_digest=bytes2hex(sha256(read(written.input_path)))
+            @test emitted_digest==written.input_sha256
+            @test emitted_digest==root.identity.input_sha256
+            @test emitted_digest==spectrum.identity.input_sha256
+            @test emitted_digest==combined.identity.input_sha256
+            @test SC._toml_bytes(SC._input_record(model))==read(written.input_path)
+        end
+
+        huge=big(10)^4096
+        oversized_model=SC.prepare_model(reshape([1 0],1,2),
+            reshape([huge,0,0,0],2,2),reshape([1],1,1))
+        unsupported=SC.certify_stationary_point(oversized_model,[0];
+            options=SC.ProofOptions(precisions=(256,),max_terms=1))
+        unsupported_combined=SC.certify(oversized_model,[0];
+            options=SC.ProofOptions(precisions=(256,),max_terms=1))
+        @test unsupported.status==:UNSUPPORTED
+        @test unsupported.identity.input_sha256===nothing
+        @test unsupported.identity.input_identity_status==:UNAVAILABLE
+        @test unsupported.identity.input_identity_reason=="RESOURCE_LIMIT"
+        @test unsupported.identity.interpretation.s==0//1
+        @test unsupported.identity.interpretation.physical_normalization=="not_established"
+        @test unsupported_combined.status==:UNSUPPORTED
+        @test unsupported_combined.identity.input_sha256===nothing
+        @test unsupported_combined.root.identity.input_identity_status==:UNAVAILABLE
+        @test unsupported_combined.spectrum.identity.input_identity_status==:UNAVAILABLE
+    end
+
     @testset "pivot, endpoint order, and writer revalidation" begin
         options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals)
         model1=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
@@ -1051,6 +1114,45 @@ end
             permuted["spectrum"]["endpoint_counts"][1:2]=permuted["spectrum"]["endpoint_counts"][2:-1:1]
             @test replay("permuted-endpoints",permuted,two).status==:INVALID
 
+            unproved=deepcopy(two_doc)
+            unproved["root"]["q_upper"]="0/1"
+            @test replay("unproved-q",unproved,two).status==:UNPROVEN
+            unknown_nested=deepcopy(unproved)
+            unknown_nested["spectrum"]["endpoint_counts"][1]["unknown_nested"]=true
+            @test replay("unproved-and-unknown-endpoint-key",unknown_nested,two).status==:INVALID
+            wrong_count_type=deepcopy(unproved)
+            wrong_count_type["spectrum"]["negative_count"]=true
+            @test replay("unproved-and-boolean-spectrum-count",wrong_count_type,two).status==:INVALID
+            wrong_sign_type=deepcopy(unproved)
+            wrong_sign_type["spectrum"]["clusters"][1]["sign"]=1
+            @test replay("unproved-and-integer-cluster-sign",wrong_sign_type,two).status==:INVALID
+            bad_endpoint_order=deepcopy(unproved)
+            reverse!(bad_endpoint_order["spectrum"]["endpoint_counts"])
+            @test replay("unproved-and-reversed-endpoints",bad_endpoint_order,two).status==:INVALID
+
+            q_cli_path=joinpath(parent,"unproved-q-cli.toml")
+            write(q_cli_path,SC._toml_bytes(unproved))
+            q_cli_digest=bytes2hex(sha256(read(q_cli_path)))
+            q_cli=_run_scientific_cli(repository_root,two.input_path,q_cli_path,
+                two.input_sha256,q_cli_digest;precision=256)
+            println("schema-order q-only CLI argv=",repr(q_cli.argv)," exit=",q_cli.exit_code,
+                " output=",repr(q_cli.output))
+            @test q_cli.exit_code==1
+            @test occursin("status=UNPROVEN",q_cli.output)
+
+            malformed_cli=deepcopy(unproved)
+            malformed_cli["spectrum"]["endpoint_counts"][1]["unknown_nested"]=true
+            malformed_cli_path=joinpath(parent,"malformed-spectrum-cli.toml")
+            write(malformed_cli_path,SC._toml_bytes(malformed_cli))
+            malformed_cli_digest=bytes2hex(sha256(read(malformed_cli_path)))
+            malformed_cli_result=_run_scientific_cli(repository_root,two.input_path,
+                malformed_cli_path,two.input_sha256,malformed_cli_digest;precision=256)
+            println("schema-order malformed CLI argv=",repr(malformed_cli_result.argv),
+                " exit=",malformed_cli_result.exit_code,
+                " output=",repr(malformed_cli_result.output))
+            @test malformed_cli_result.exit_code==2
+            @test occursin("status=INVALID reason=spectrum schema invalid",malformed_cli_result.output)
+
             root=result1.root
             bad_pivots=copy(root.hessian_pivots)
             bad_pivots[1]=SC._iv(BigInt(-1000)//BigInt(1),BigInt(1000)//BigInt(1),root.precision)
@@ -1059,7 +1161,7 @@ end
                 copy(root.center),copy(root.box),copy(root.preconditioner),copy(root.F_center),
                 copy(root.H_box),copy(root.W),root.q_upper,root.precision,root.options,
                 root.hessian_classification,root.hessian_method,bad_pivots,
-                copy(root.candidate_provenance),copy(root.attempts))
+                copy(root.candidate_provenance),copy(root.attempts),root.identity)
             @test_throws ArgumentError SC.write_certificate(joinpath(parent,"mutated-root"),
                 model1,bad_root;source_ref=source,environment_ref=environment)
         end

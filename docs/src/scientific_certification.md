@@ -91,6 +91,16 @@ value. The numerical correction does not establish the proof, source history,
 global completeness, or physical normalization. Supply candidate provenance only
 when the method and source reference are known; otherwise leave it `unknown`.
 
+Every root, spectrum, and combined result carries an `identity` value. Its
+`input_sha256` is the digest of the exact canonical `inputs.toml` bytes that
+`write_certificate` will emit. `input_identity_status` is `:AVAILABLE` when
+those bytes fit the bounded representation and `:UNAVAILABLE` with an explicit
+`input_identity_reason` when they do not. The `interpretation` retains the
+exact rational `s` and records the basis, orientation, period, phase units,
+coefficient and numeric conventions, scaled-Hessian pencil, and
+`physical_normalization="not_established"`. These fields describe the supplied
+finite model and make no physical-mass claim.
+
 The API uses IntervalArithmetic 0.22.36 for its qualified certification path.
 Other supported package configurations remain importable, but the certifier
 returns an explicit unsupported-backend outcome. Proof intervals use explicit

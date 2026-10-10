@@ -30,6 +30,7 @@ struct SpectrumResult
     unresolved_count::Int
     resolution_met::Bool
     attempts::Vector{String}
+    identity::Union{Nothing,CertificationIdentity}
 end
 
 struct CertificationResult
@@ -37,12 +38,14 @@ struct CertificationResult
     root::RootResult
     spectrum::SpectrumResult
     attempts::Vector{String}
+    identity::CertificationIdentity
 end
 
-function _empty_spectrum(status::Symbol, reason::String, goal::Symbol=:clusters, bits::Int=0)
+function _empty_spectrum(status::Symbol, reason::String, identity::CertificationIdentity,
+        goal::Symbol=:clusters, bits::Int=0)
     SpectrumResult(status, reason, :none, goal, bits, IA.Interval{BigFloat}[],
         Tuple{Rational{BigInt},Rational{BigInt}}[], SpectralCluster[], EndpointCount[],
-        IA.Interval{BigFloat}[], 0, 0, 0, false, String[])
+        IA.Interval{BigFloat}[], 0, 0, 0, false, String[], identity)
 end
 
 function _relative_met(lo::Rational{BigInt}, hi::Rational{BigInt}, target::Rational{BigInt})
@@ -97,12 +100,13 @@ function _is_diagonal(A::Matrix{IA.Interval{BigFloat}})
 end
 
 function _spectral_result(status, reason, route, goal, bits, pivots, bounds,
-                          clusters, counts, ratios, attempts)
+                          clusters, counts, ratios, attempts,
+                          identity::Union{Nothing,CertificationIdentity})
     negative, positive, unresolved = _classify_bounds(bounds)
     met = !isempty(clusters) && all(c -> c.relative_width_met, clusters) &&
         (goal === :clusters || all(c -> c.population == 1, clusters))
     SpectrumResult(status, reason, route, goal, bits, pivots, bounds, clusters,
-                   counts, ratios, negative, positive, unresolved, met, attempts)
+                   counts, ratios, negative, positive, unresolved, met, attempts, identity)
 end
 
 function _metric_ldl(model::CertificationModel, bits::Int)
@@ -168,7 +172,7 @@ function _make_spectrum_cluster(ca::EndpointCount, cb::EndpointCount,
 end
 
 function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
-        budget::_InertiaBudget)
+        budget::_InertiaBudget, identity::Union{Nothing,CertificationIdentity}=nothing)
     n = size(H, 1)
     radius = _initial_radius(H, K, bits)
     lower_count = nothing; upper_count = nothing
@@ -188,7 +192,7 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
         return _spectral_result(:INCONCLUSIVE, budget.used >= budget.limit ? "budget_exhausted" : "global_bracket_unproved",
             :inertia_counts, options.spectral_goal, bits, metric_pivots,
             Tuple{Rational{BigInt},Rational{BigInt}}[], SpectralCluster[],
-            EndpointCount[], IA.Interval{BigFloat}[], budget.attempts)
+            EndpointCount[], IA.Interval{BigFloat}[], budget.attempts, identity)
 
     # The successful global-bracket check above proves both endpoints exist.
     # Keep that invariant in the queue's element type so downstream refinement
@@ -256,10 +260,11 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
     status = covered ? :CERTIFIED_BOUNDS : :INCONCLUSIVE
     return _spectral_result(status, reason, :inertia_counts, options.spectral_goal,
         bits, metric_pivots, bounds, clusters, endpoint_counts,
-        IA.Interval{BigFloat}[], budget.attempts)
+        IA.Interval{BigFloat}[], budget.attempts, identity)
 end
 
-function _diagonal_spectrum(H, K, bits, options::ProofOptions, metric_pivots)
+function _diagonal_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
+        identity::CertificationIdentity)
     n = size(H, 1)
     ratios = IA.Interval{BigFloat}[_idiv(H[i, i], K[i, i], bits) for i in 1:n]
     bounds, clusters = _diagonal_clusters(ratios, options.relative_width)
@@ -270,30 +275,33 @@ function _diagonal_spectrum(H, K, bits, options::ProofOptions, metric_pivots)
             "individuals_unresolved" : "refinement_inconclusive"
     result = _spectral_result(:CERTIFIED_BOUNDS, reason, :diagonal,
         options.spectral_goal, bits, metric_pivots, bounds, clusters,
-        EndpointCount[], ratios, String[])
+        EndpointCount[], ratios, String[], identity)
     return result
 end
 
 function _certify_generalized_spectrum(model::CertificationModel, root::RootResult,
-        options::ProofOptions, budget; reuse_hessian::Bool=false)
+        options::ProofOptions, budget, identity::CertificationIdentity;
+        reuse_hessian::Bool=false)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
     root.precision in options.precisions || throw(ArgumentError("root precision must be in options.precisions"))
-    root.status === :CERTIFIED_ROOT || return _empty_spectrum(:INCONCLUSIVE, "root is not certified", options.spectral_goal, root.precision)
+    identity.input_sha256 === nothing &&
+        return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal, root.precision)
+    root.status === :CERTIFIED_ROOT || return _empty_spectrum(:INCONCLUSIVE, "root is not certified", identity, options.spectral_goal, root.precision)
     (length(root.center) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
-        return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", options.spectral_goal, root.precision)
-    _backend_supported() || return _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", options.spectral_goal, root.precision)
+        return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal, root.precision)
+    _backend_supported() || return _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", identity, options.spectral_goal, root.precision)
     bits = root.precision
     return _with_precision(bits) do
         reuse_hessian = reuse_hessian || root.hessian_method === :spectral_counts
         _revalidate_root(model, root, bits; reuse_hessian) ||
-            return _empty_spectrum(:INVALID_INPUT, "root witness does not match model", options.spectral_goal, bits)
+            return _empty_spectrum(:INVALID_INPUT, "root witness does not match model", identity, options.spectral_goal, bits)
         shared_budget = budget === nothing ?
             _InertiaBudget(options.max_inertia_evaluations, 0, String[]) : budget
         shared_budget isa _InertiaBudget || throw(ArgumentError("budget must be an internal inertia budget"))
         shared_budget.limit == options.max_inertia_evaluations ||
             throw(ArgumentError("shared inertia budget limit must match options"))
         shared_budget.used >= shared_budget.limit &&
-            return _empty_spectrum(:INCONCLUSIVE, "budget_exhausted", options.spectral_goal, bits)
+            return _empty_spectrum(:INCONCLUSIVE, "budget_exhausted", identity, options.spectral_goal, bits)
         shared_budget.used += 1
         push!(shared_budget.attempts, "metric LDL status=attempted")
         H = root.H_box
@@ -302,22 +310,22 @@ function _certify_generalized_spectrum(model::CertificationModel, root::RootResu
         if !metric.ok
             # An exact nonpositive diagonal itself proves K is not SPD.
             any(model.K[i, i] <= 0 for i in 1:size(model.K, 1)) &&
-                return _empty_spectrum(:INVALID_INPUT, "METRIC_NOT_SPD", options.spectral_goal, bits)
-            return _empty_spectrum(:INCONCLUSIVE, "METRIC_PD_UNPROVED", options.spectral_goal, bits)
+                return _empty_spectrum(:INVALID_INPUT, "METRIC_NOT_SPD", identity, options.spectral_goal, bits)
+            return _empty_spectrum(:INCONCLUSIVE, "METRIC_PD_UNPROVED", identity, options.spectral_goal, bits)
         end
         all(==(:positive), metric.signs) ||
-            return _empty_spectrum(:INVALID_INPUT, "METRIC_NOT_SPD", options.spectral_goal, bits)
+            return _empty_spectrum(:INVALID_INPUT, "METRIC_NOT_SPD", identity, options.spectral_goal, bits)
         length(metric.pivots) == size(H, 1) ||
-            return _empty_spectrum(:INCONCLUSIVE, "METRIC_PD_UNPROVED", options.spectral_goal, bits)
+            return _empty_spectrum(:INCONCLUSIVE, "METRIC_PD_UNPROVED", identity, options.spectral_goal, bits)
         if _is_diagonal(H) && _is_diagonal(K)
-            result = _diagonal_spectrum(H, K, bits, options, metric.pivots)
+            result = _diagonal_spectrum(H, K, bits, options, metric.pivots, identity)
             SpectrumResult(result.status, result.reason, result.route, result.goal,
                 result.precision, result.metric_pivots, result.bounds, result.clusters,
                 result.endpoint_counts, result.diagonal_ratios, result.negative_count,
                 result.positive_count, result.unresolved_count, result.resolution_met,
-                copy(shared_budget.attempts))
+                copy(shared_budget.attempts), identity)
         else
-            _inertia_spectrum(H, K, bits, options, metric.pivots, shared_budget)
+            _inertia_spectrum(H, K, bits, options, metric.pivots, shared_budget, identity)
         end
     end
 end
@@ -325,7 +333,8 @@ end
 function certify_generalized_spectrum(model::CertificationModel, root::RootResult;
         options=ProofOptions())
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
-    return _certify_generalized_spectrum(model, root, options, nothing)
+    identity = _result_identity(model)
+    return _certify_generalized_spectrum(model, root, options, nothing, identity)
 end
 
 function _with_attempts(root::RootResult, attempts::Vector{String})
@@ -334,7 +343,7 @@ function _with_attempts(root::RootResult, attempts::Vector{String})
         copy(root.box), copy(root.preconditioner), copy(root.F_center), copy(root.H_box),
         copy(root.W), root.q_upper, root.precision, root.options,
         root.hessian_classification, root.hessian_method, copy(root.hessian_pivots),
-        copy(root.candidate_provenance), copy(attempts))
+        copy(root.candidate_provenance), copy(attempts), root.identity)
 end
 
 function _with_spectral_hessian(root::RootResult, spectrum::SpectrumResult)
@@ -349,7 +358,8 @@ function _with_spectral_hessian(root::RootResult, spectrum::SpectrumResult)
         copy(root.center), copy(root.box), copy(root.preconditioner),
         copy(root.F_center), copy(root.H_box), copy(root.W), root.q_upper,
         root.precision, root.options, classification, :spectral_counts,
-        IA.Interval{BigFloat}[], copy(root.candidate_provenance), copy(root.attempts))
+        IA.Interval{BigFloat}[], copy(root.candidate_provenance), copy(root.attempts),
+        root.identity)
 end
 
 function certify(model::CertificationModel, theta0; options=ProofOptions(), candidate_provenance=nothing)
@@ -357,20 +367,26 @@ function certify(model::CertificationModel, theta0; options=ProofOptions(), cand
     seed = _exact_seed(theta0, size(model.Q, 1))
     translation, normalized = _normalize_seed(seed)
     provenance = _provenance(candidate_provenance)
-    model_signature = size(model.Q,1) <= 32 && size(model.Q,2) <= 2048 ? _model_signature(model) : ""
+    identity = _result_identity(model)
+    model_signature = identity.input_sha256 !== nothing && size(model.Q,1) <= 32 &&
+        size(model.Q,2) <= 2048 ? _model_signature(model) : ""
     context = (; model_signature, translation, normalized_seed=normalized,
-        candidate_provenance=provenance)
+        candidate_provenance=provenance, identity)
+    identity.input_sha256 === nothing && return CertificationResult(:UNSUPPORTED,
+        _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...),
+        _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal),
+        String[], identity)
     (length(seed) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
         return CertificationResult(:UNSUPPORTED,
             _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...),
-            _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", options.spectral_goal), String[])
+            _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal), String[], identity)
     _backend_supported() || return CertificationResult(:UNSUPPORTED,
         _empty_root(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", seed, options; context...),
-        _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", options.spectral_goal), String[])
+        _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", identity, options.spectral_goal), String[], identity)
     attempts = String[]
     first_diagnostic = nothing
     best_root = _empty_root(:INCONCLUSIVE, "no root attempt", seed, options; context...)
-    best_spectrum = _empty_spectrum(:INCONCLUSIVE, "spectrum not attempted", options.spectral_goal)
+    best_spectrum = _empty_spectrum(:INCONCLUSIVE, "spectrum not attempted", identity, options.spectral_goal)
     best_level = 0
     for bits in options.precisions
         budget = _InertiaBudget(options.max_inertia_evaluations, 0, String[])
@@ -384,7 +400,7 @@ function certify(model::CertificationModel, theta0; options=ProofOptions(), cand
             root = try
                 _with_precision(bits) do
                     _root_witness(model, seed, translation, normalized, center, radius,
-                        bits, options, provenance, attempts)
+                        bits, options, provenance, attempts, identity)
                 end
             catch e
                 (e isa SingularException || e isa DivideError ||
@@ -396,8 +412,8 @@ function certify(model::CertificationModel, theta0; options=ProofOptions(), cand
             first_diagnostic === nothing && (first_diagnostic = root)
             push!(attempts, "root p=$bits radius=$radius status=$(root.status)")
             if root.status === :CERTIFIED_ROOT
-                spectrum = _certify_generalized_spectrum(model, root, options, budget;
-                    reuse_hessian=true)
+                spectrum = _certify_generalized_spectrum(model, root, options, budget,
+                    identity; reuse_hessian=true)
                 push!(attempts, "spectrum p=$bits radius=$radius status=$(spectrum.status) reason=$(spectrum.reason)")
                 push!(attempts, "spectrum budget p=$bits used=$(budget.used) limit=$(budget.limit)")
                 classified_root = _with_spectral_hessian(root, spectrum)
@@ -407,15 +423,15 @@ function certify(model::CertificationModel, theta0; options=ProofOptions(), cand
                 end
                 if spectrum.status === :CERTIFIED_BOUNDS && spectrum.resolution_met
                     return CertificationResult(:CERTIFIED, _with_attempts(classified_root, attempts),
-                        spectrum, attempts)
+                        spectrum, attempts, identity)
                 end
             end
         end
     end
     if best_level == 0
         root = first_diagnostic === nothing ? _with_attempts(best_root, attempts) : _with_attempts(first_diagnostic, attempts)
-        return CertificationResult(root.status, root, best_spectrum, attempts)
+        return CertificationResult(root.status, root, best_spectrum, attempts, identity)
     end
     status = best_level == 2 ? :INCONCLUSIVE_SPECTRUM : :CERTIFIED_ROOT
-    CertificationResult(status, _with_attempts(best_root, attempts), best_spectrum, attempts)
+    CertificationResult(status, _with_attempts(best_root, attempts), best_spectrum, attempts, identity)
 end
