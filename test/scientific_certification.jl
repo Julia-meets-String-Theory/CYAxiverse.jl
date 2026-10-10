@@ -31,6 +31,10 @@ end
             Matrix{Int}(I, 2, 2)).Q) == (2, 3)
         @test_throws ArgumentError SC.prepare_model(reshape([1.5], 1, 1), reshape([1, 0], 2, 1), reshape([1], 1, 1))
         @test_throws ArgumentError SC.prepare_model(reshape([1], 1, 1), reshape([1, 0], 2, 1), reshape([NaN], 1, 1))
+        @test_throws ArgumentError SC.prepare_model(reshape([1], 1, 1),
+            reshape([1, 0], 2, 1), reshape([Inf], 1, 1))
+        @test_throws ArgumentError SC.prepare_model(reshape([1], 1, 1),
+            reshape([1, 0], 2, 1), reshape([-Inf], 1, 1))
         @test_throws ArgumentError SC.prepare_model(reshape([1], 1, 1), reshape([1, 0], 2, 1), reshape([1], 1, 1); phases=[NaN])
         @test_throws ArgumentError SC.prepare_model(reshape([true], 1, 1), reshape([1, 0], 2, 1), reshape([1], 1, 1))
         @test_throws ArgumentError SC.prepare_model(reshape([SC.IA.interval(1)], 1, 1),
@@ -191,6 +195,12 @@ end
 
         deficient = SC.prepare_model(reshape([1,0],2,1), reshape([1,0],2,1), Matrix{Int}(I,2,2))
         @test SC.certify_stationary_point(deficient,[0,0];options).status == :INCONCLUSIVE
+
+        zero_second_coefficient = SC.prepare_model(Matrix{Int}(I,2,2),
+            [1 0; 0 0], Matrix{Int}(I,2,2))
+        zero_second_result = SC.certify_stationary_point(zero_second_coefficient,[0,0];options)
+        @test zero_second_result.status == :INCONCLUSIVE
+        @test zero_second_result.hessian_classification == :UNRESOLVED
 
         badmetric = SC.prepare_model(Matrix{Int}(I,2,2),[1 1;0 0],[1 0;0 -1])
         badroot = SC.certify_stationary_point(badmetric,[0,0];options)
@@ -443,6 +453,38 @@ end
         endpoint_report=replay_mutant("false-inertia-endpoint",false_endpoint;
             expected=:UNPROVEN,source_cert=four)
         @test endpoint_report.reason == "submitted generalized spectrum did not revalidate"
+
+        outer_endpoints=four_doc["spectrum"]["endpoint_counts"]
+        broad_lower=four_doc["spectrum"]["clusters"][1]["lower"]
+        broad_upper=four_doc["spectrum"]["clusters"][end]["upper"]
+        broad_cluster=deepcopy(four_doc)
+        broad_cluster["spectrum"]["bounds"]["data"]=[
+            [broad_lower,broad_upper], [broad_lower,broad_upper]]
+        broad_cluster["spectrum"]["clusters"]=[Dict(
+            "first"=>1,"last"=>2,"population"=>2,
+            "lower"=>broad_lower,"upper"=>broad_upper,
+            "sign"=>"unresolved","relative_width_met"=>false)]
+        broad_cluster["spectrum"]["endpoint_counts"]=[first(outer_endpoints),last(outer_endpoints)]
+        broad_cluster["spectrum"]["negative_count"]=0
+        broad_cluster["spectrum"]["positive_count"]=0
+        broad_cluster["spectrum"]["unresolved_count"]=2
+        broad_cluster["spectrum"]["resolution_met"]=false
+        broad_cluster["spectrum"]["reason"]="sign_unresolved"
+        broad_path=joinpath(parent,"honest-broad-inertia-cluster.toml")
+        write(broad_path,SC._toml_bytes(broad_cluster))
+        broad_digest=bytes2hex(sha256(read(broad_path)))
+        broad_report=SC.verify_certificate(broad_path,four.input_path;
+            expected_input_sha256=four.input_sha256,
+            expected_certificate_sha256=broad_digest,require=:root_and_spectrum,
+            precision_bits=256)
+        @test broad_report.status==:VERIFIED
+
+        unsupported_narrow_mode=deepcopy(broad_cluster)
+        unsupported_narrow_mode["spectrum"]["bounds"]["data"][1]=
+            copy(four_doc["spectrum"]["bounds"]["data"][1])
+        narrow_report=replay_mutant("narrow-mode-inside-broad-inertia-cluster",
+            unsupported_narrow_mode;expected=:INVALID,source_cert=four)
+        @test occursin("mode bound differs from cluster",narrow_report.reason)
     end
 end
 
