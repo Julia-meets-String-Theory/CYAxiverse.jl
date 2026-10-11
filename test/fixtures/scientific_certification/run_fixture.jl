@@ -5,7 +5,10 @@ using SHA
 using TOML
 using LinearAlgebra
 using Dates
-using Pkg
+# Pkg is a Julia stdlib but is not part of this package's declared test target.
+# Load it by stdlib identity for its source-tree hash helper without changing the
+# narrowly authorized Project.toml dependency set.
+const Pkg = Base.require(Base.PkgId(Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Pkg"))
 
 const SC = CYAxiverse.scientific_certification
 const ROOT = normpath(joinpath(@__DIR__, "../../.."))
