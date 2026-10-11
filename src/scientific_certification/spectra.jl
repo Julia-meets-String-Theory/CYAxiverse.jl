@@ -283,9 +283,13 @@ function _certify_generalized_spectrum(model::CertificationModel, root::RootResu
         options::ProofOptions, budget, identity::CertificationIdentity;
         reuse_hessian::Bool=false)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
-    root.precision in options.precisions || throw(ArgumentError("root precision must be in options.precisions"))
+    model.resource_reason === nothing ||
+        return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal, root.precision)
     identity.input_sha256 === nothing &&
         return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal, root.precision)
+    root.status === :UNSUPPORTED && root.reason == "RESOURCE_LIMIT" &&
+        return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal, root.precision)
+    root.precision in options.precisions || throw(ArgumentError("root precision must be in options.precisions"))
     root.status === :CERTIFIED_ROOT || return _empty_spectrum(:INCONCLUSIVE, "root is not certified", identity, options.spectral_goal, root.precision)
     (length(root.center) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
         return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal, root.precision)
@@ -334,7 +338,13 @@ function certify_generalized_spectrum(model::CertificationModel, root::RootResul
         options=ProofOptions())
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
     identity = _result_identity(model)
-    return _certify_generalized_spectrum(model, root, options, nothing, identity)
+    try
+        return _certify_generalized_spectrum(model, root, options, nothing, identity)
+    catch error
+        error isa ResourceLimitError || rethrow()
+        return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity,
+            options.spectral_goal, root.precision)
+    end
 end
 
 function _with_attempts(root::RootResult, attempts::Vector{String})
@@ -362,21 +372,21 @@ function _with_spectral_hessian(root::RootResult, spectrum::SpectrumResult)
         root.identity)
 end
 
-function certify(model::CertificationModel, theta0; options=ProofOptions(), candidate_provenance=nothing)
+function _certify_impl(model::CertificationModel, theta0; options=ProofOptions(), candidate_provenance=nothing)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
-    seed = _exact_seed(theta0, size(model.Q, 1))
+    seed = _exact_seed(theta0, model.n)
     translation, normalized = _normalize_seed(seed)
     provenance = _provenance(candidate_provenance)
     identity = _result_identity(model)
-    model_signature = identity.input_sha256 !== nothing && size(model.Q,1) <= 32 &&
-        size(model.Q,2) <= 2048 ? _model_signature(model) : ""
+    model_signature = identity.input_sha256 !== nothing && model.n <= 32 &&
+        model.M <= 2048 ? _model_signature(model) : ""
     context = (; model_signature, translation, normalized_seed=normalized,
         candidate_provenance=provenance, identity)
-    identity.input_sha256 === nothing && return CertificationResult(:UNSUPPORTED,
+    (model.resource_reason !== nothing || identity.input_sha256 === nothing) && return CertificationResult(:UNSUPPORTED,
         _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...),
         _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal),
         String[], identity)
-    (length(seed) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
+    (length(seed) <= options.max_dimension && model.M <= options.max_terms) ||
         return CertificationResult(:UNSUPPORTED,
             _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...),
             _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal), String[], identity)
@@ -434,4 +444,19 @@ function certify(model::CertificationModel, theta0; options=ProofOptions(), cand
     end
     status = best_level == 2 ? :INCONCLUSIVE_SPECTRUM : :CERTIFIED_ROOT
     CertificationResult(status, _with_attempts(best_root, attempts), best_spectrum, attempts, identity)
+end
+
+function certify(model::CertificationModel, theta0; options=ProofOptions(), candidate_provenance=nothing)
+    options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
+    try
+        return _certify_impl(model, theta0; options, candidate_provenance)
+    catch error
+        error isa ResourceLimitError || rethrow()
+        root = _resource_limited_root(model, theta0, options, candidate_provenance)
+        identity = root.identity
+        spectrum = _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity,
+            options.spectral_goal)
+        return CertificationResult(:UNSUPPORTED, root, spectrum,
+            copy(root.attempts), identity)
+    end
 end

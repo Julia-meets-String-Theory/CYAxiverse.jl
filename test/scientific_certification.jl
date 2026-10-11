@@ -3,6 +3,8 @@ using TOML
 
 const SC = CYAxiverse.scientific_certification
 
+@test SC._IR[] === nothing
+
 function _run_scientific_cli(repository_root, input_path, certificate_path,
         input_sha256, certificate_sha256; precision=256)
     argv=vcat(String[Base.julia_cmd().exec...],String["--startup-file=no","--project=$repository_root",
@@ -109,16 +111,25 @@ end
             @test_throws SC.ResourceLimitError SC._interval_array_record([oversized_interval])
             @test_throws SC.ResourceLimitError SC._diagonal_clusters([oversized_interval],
                 BigInt(1)//BigInt(1))
-            @test_throws SC.ResourceLimitError SC.prepare_model(reshape([1],1,1),
+            oversized_model=SC.prepare_model(reshape([1],1,1),
                 reshape([1,0],2,1),reshape([oversized],1,1))
+            @test oversized_model.resource_reason=="RESOURCE_LIMIT"
+            @test SC.certify(oversized_model,[0]).status==:UNSUPPORTED
         end
         small_model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
         oversized_seed=ldexp(BigFloat(1;precision=256),14_000)
-        @test_throws SC.ResourceLimitError SC.certify_stationary_point(small_model,[oversized_seed];
+        oversized_seed_result=SC.certify_stationary_point(small_model,[oversized_seed];
             options=SC.ProofOptions(precisions=(256,)))
+        @test oversized_seed_result.status==:UNSUPPORTED
+        @test oversized_seed_result.reason=="RESOURCE_LIMIT"
+        @test isempty(oversized_seed_result.original_seed)
+        @test SC.certify_generalized_spectrum(small_model,oversized_seed_result).status==:UNSUPPORTED
+        @test SC.certify(small_model,[oversized_seed]).status==:UNSUPPORTED
         expansion_model=SC.prepare_model(Matrix{Int}(I,2,2),[1 1;0 -10_000],Matrix{Int}(I,2,2))
-        @test_throws SC.ResourceLimitError SC.certify_stationary_point(expansion_model,[0,0];
+        expansion_result=SC.certify_stationary_point(expansion_model,[0,0];
             options=SC.ProofOptions(precisions=(256,)))
+        @test expansion_result.status==:UNSUPPORTED
+        @test expansion_result.reason=="RESOURCE_LIMIT"
         high_precision_sparse=setprecision(BigFloat,100_000) do
             BigFloat(1)+ldexp(BigFloat(1),-500)
         end
@@ -721,10 +732,25 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
     end
 
     @testset "typed resource limits preserve invalid schema outcomes" begin
-        @test_throws SC.ResourceLimitError SC.prepare_model(zeros(Int,33,1),
+        large_n_model=SC.prepare_model(ones(Int,33,1),
             reshape([1,0],2,1),Matrix{Int}(I,33,33))
-        @test_throws SC.ResourceLimitError SC.prepare_model(zeros(Int,1,2049),
+        large_n_result=SC.certify(large_n_model,zeros(33))
+        @test large_n_model.resource_reason=="RESOURCE_LIMIT"
+        @test large_n_result.status==:UNSUPPORTED
+        @test large_n_result.root.reason=="RESOURCE_LIMIT"
+        @test large_n_result.identity.input_identity_status==:UNAVAILABLE
+        large_m_model=SC.prepare_model(ones(Int,1,2049),
             zeros(Int,2,2049),reshape([1],1,1))
+        large_m_result=SC.certify(large_m_model,[0])
+        @test large_m_model.resource_reason=="RESOURCE_LIMIT"
+        @test large_m_result.status==:UNSUPPORTED
+        @test large_m_result.root.reason=="RESOURCE_LIMIT"
+        @test_throws DimensionMismatch SC.prepare_model(ones(Int,33,1),
+            zeros(Int,2,2),Matrix{Int}(I,33,33))
+        asymmetric_large_metric=Matrix{Int}(I,33,33)
+        asymmetric_large_metric[1,2]=1
+        @test_throws ArgumentError SC.prepare_model(ones(Int,33,1),
+            reshape([1,0],2,1),asymmetric_large_metric)
         for (name,shape) in (("zero-n",(0,1)),("zero-M",(1,0)))
             record=SC._input_record(SC.prepare_model(reshape([1],1,1),
                 reshape([1,0],2,1),reshape([1],1,1)))
@@ -759,6 +785,53 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
             nested=[nested]
         end
         @test_throws SC.ResourceLimitError SC._check_tree_limits(nested)
+        serialized_deep="value = "*repeat("[",13)*"0"*repeat("]",13)
+        @test_throws SC.ResourceLimitError SC._preflight_toml_depth(serialized_deep)
+        @test_throws SC.ResourceLimitError SC._parse_toml(Vector{UInt8}(codeunits(serialized_deep)))
+        @test SC._preflight_toml_depth("value = [[0]]\n")===nothing
+        bracket_metadata="quoted = \"[[[[[[[[[[[[\" # [[[[[[[[[[[[\nmultiline = \"\"\"\n{ [[ ]]}\n\"\"\"\ninline = { child = [1] }\n"
+        @test SC._parse_toml(Vector{UInt8}(codeunits(bracket_metadata)))["inline"]["child"]==[1]
+        @test_throws ArgumentError SC._parse_toml(Vector{UInt8}(codeunits("value = [0\n")))
+        deep_table="["*join(fill("level",13),".")*"]\nvalue = 0\n"
+        @test_throws SC.ResourceLimitError SC._preflight_toml_depth(deep_table)
+        array_table_subtable="[[fruit]]\n[fruit.physical]\ncolor = \"red\"\n"
+        @test SC._preflight_toml_depth(array_table_subtable)===nothing
+        array_table_depth_ok="[[root]]\n[root."*join(fill("level",10),".")*"]\n"
+        @test SC._preflight_toml_depth(array_table_depth_ok)===nothing
+        array_table_depth_over="[[root]]\n[root."*join(fill("level",11),".")*"]\n"
+        @test_throws SC.ResourceLimitError SC._preflight_toml_depth(array_table_depth_over)
+        quoted_array_table_depth_over="[[\"root\"]]\n[ \"root\" . "*
+            join(fill("level",11),".")*"]\n"
+        @test_throws SC.ResourceLimitError SC._preflight_toml_depth(quoted_array_table_depth_over)
+        escaped_array_table_depth_over="[[\"r\\u006fot\"]]\n[root."*
+            join(fill("level",11),".")*"]\n"
+        @test_throws SC.ResourceLimitError SC._preflight_toml_depth(escaped_array_table_depth_over)
+        dotted_assignment_depth_ok=join(fill("level",11),".")*" = 0\n"
+        @test SC._preflight_toml_depth(dotted_assignment_depth_ok)===nothing
+        @test SC._parse_toml(Vector{UInt8}(codeunits(dotted_assignment_depth_ok)))["level"] isa AbstractDict
+        deep_dotted_assignment=join(fill("level",12),".")*" = 0\n"
+        @test_throws SC.ResourceLimitError SC._preflight_toml_depth(deep_dotted_assignment)
+        @test_throws SC.ResourceLimitError SC._parse_toml(Vector{UInt8}(codeunits(deep_dotted_assignment)))
+        deep_inline="value = "*repeat("{k = ",11)*"0"*repeat("}",11)*"\n"
+        @test SC._preflight_toml_depth(deep_inline)===nothing
+        @test SC._parse_toml(Vector{UInt8}(codeunits(deep_inline)))["value"] isa AbstractDict
+        mktempdir() do parser_root
+            deep_input=joinpath(parser_root,"deep.toml")
+            shallow_certificate=joinpath(parser_root,"certificate.toml")
+            write(deep_input,serialized_deep*"\n")
+            write(shallow_certificate,"schema = \"cyax-scientific-certificate-v1\"\n")
+            input_digest=bytes2hex(sha256(read(deep_input)))
+            certificate_digest=bytes2hex(sha256(read(shallow_certificate)))
+            report=SC.verify_certificate(shallow_certificate,deep_input;
+                expected_input_sha256=input_digest,
+                expected_certificate_sha256=certificate_digest)
+            @test report.status==:UNSUPPORTED
+            @test report.reason=="RESOURCE_LIMIT"
+            cli=_run_scientific_cli(normpath(joinpath(@__DIR__,"..")),deep_input,
+                shallow_certificate,input_digest,certificate_digest)
+            @test cli.exit_code==3
+            @test occursin("status=UNSUPPORTED reason=RESOURCE_LIMIT",cli.output)
+        end
         @test_throws SC.ResourceLimitError SC._ratstr(BigInt(1)//BigInt(10)^4097)
         @test_throws SC.ResourceLimitError SC._toml_bytes(
             Dict("payload"=>repeat("x",16*1024*1024)))
@@ -1040,8 +1113,28 @@ end
         watchdog=ScientificCertificationFixtures._watchdog_self_test()
         @test watchdog.exit_code==124
         @test watchdog.timed_out
+        @test watchdog.slow_start_passed
+        @test watchdog.missing_ready_rejected
+        @test watchdog.slow_preparation_seconds>=1.5
+        @test watchdog.slow_computation_seconds<1
+        @test watchdog.timeout_phase=="computation"
+        @test watchdog.preparation_seconds>=0
+        @test watchdog.computation_seconds>=2
         @test !watchdog.child_alive_after_timeout
         @test !watchdog.late_marker
+        mktempdir() do readiness_root
+            marker=joinpath(readiness_root,"warmed-ready")
+            previous=get(ENV,"CYAX_SCIENTIFIC_READY_MARKER",nothing)
+            try
+                ENV["CYAX_SCIENTIFIC_READY_MARKER"]=marker
+                ScientificCertificationFixtures._announce_ready()
+                @test isdir(marker)
+                @test_throws ErrorException ScientificCertificationFixtures._announce_ready()
+            finally
+                previous===nothing ? delete!(ENV,"CYAX_SCIENTIFIC_READY_MARKER") :
+                    (ENV["CYAX_SCIENTIFIC_READY_MARKER"]=previous)
+            end
+        end
 
         t14_item=ScientificCertificationFixtures._record("T14")
         _,_,_,_,_,_,t14_diagnostic=ScientificCertificationFixtures._benchmark_model(t14_item)

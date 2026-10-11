@@ -54,6 +54,7 @@ function _identity_interpretation(model::CertificationModel)::_CertificationInte
 end
 
 function _interpretation(model::CertificationModel)
+    model.s === nothing && throw(ResourceLimitError("RESOURCE_LIMIT: exact input interpretation unavailable"))
     values = _identity_interpretation(model)
     Dict{String,String}(String(key) => (key === :s ? _ratstr(value) : value)
         for (key, value) in pairs(values))
@@ -69,7 +70,9 @@ function _settings_record(o::ProofOptions)
 end
 
 function _input_record(model::CertificationModel)
-    n, M = size(model.Q)
+    model.resource_reason === nothing || throw(ResourceLimitError("RESOURCE_LIMIT: input model unavailable"))
+    n, M = model.n, model.M
+    n <= 32 && M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: input dimensions exceed schema"))
     Dict("schema"=>"cyax-scientific-input-v1", "n"=>n, "M"=>M,
         "Q"=>_array_record(model.Q), "L"=>_array_record(model.L),
         "K"=>_array_record(model.K), "phi"=>_array_record(model.phases),
@@ -78,6 +81,8 @@ end
 
 function _result_identity(model::CertificationModel)
     interpretation = _identity_interpretation(model)
+    model.resource_reason === nothing || return CertificationIdentity(nothing, :UNAVAILABLE,
+        model.resource_reason, interpretation)
     try
         input_bytes = _toml_bytes(_input_record(model))
         return CertificationIdentity(bytes2hex(sha256(input_bytes)), :AVAILABLE,
@@ -398,9 +403,300 @@ function _read_toml_bytes(path::AbstractString)
     bytes
 end
 
+function _toml_key_depth(bytes, first::Int, last::Int)
+    dots = 0
+    quote_byte = 0x00
+    escaped = false
+    for index in first:last
+        byte = bytes[index]
+        if quote_byte != 0x00
+            if quote_byte == 0x22 && escaped
+                escaped = false
+            elseif quote_byte == 0x22 && byte == 0x5c
+                escaped = true
+            elseif byte == quote_byte
+                quote_byte = 0x00
+            end
+        elseif byte == 0x22 || byte == 0x27
+            quote_byte = byte
+        elseif byte == 0x2e
+            dots += 1
+        end
+    end
+    dots + 1
+end
+
+function _toml_key_component(bytes, first::Int, last::Int)
+    while first <= last && (bytes[first] == 0x20 || bytes[first] == 0x09)
+        first += 1
+    end
+    while last >= first && (bytes[last] == 0x20 || bytes[last] == 0x09 || bytes[last] == 0x0d)
+        last -= 1
+    end
+    first <= last || return ""
+    if bytes[first] == 0x27 && bytes[last] == 0x27 && last > first
+        return String(copy(bytes[first+1:last-1]))
+    elseif bytes[first] != 0x22 || bytes[last] != 0x22 || last <= first
+        return String(copy(bytes[first:last]))
+    end
+
+    decoded = IOBuffer()
+    index = first + 1
+    stop = last - 1
+    while index <= stop
+        byte = bytes[index]
+        if byte != 0x5c
+            write(decoded, byte)
+            index += 1
+            continue
+        end
+        index += 1
+        index <= stop || return String(copy(bytes[first:last]))
+        escaped = bytes[index]
+        if escaped == 0x62
+            write(decoded, 0x08)
+            index += 1
+        elseif escaped == 0x74
+            write(decoded, 0x09)
+            index += 1
+        elseif escaped == 0x6e
+            write(decoded, 0x0a)
+            index += 1
+        elseif escaped == 0x66
+            write(decoded, 0x0c)
+            index += 1
+        elseif escaped == 0x72
+            write(decoded, 0x0d)
+            index += 1
+        elseif escaped == 0x22 || escaped == 0x5c
+            write(decoded, escaped)
+            index += 1
+        elseif escaped == 0x75 || escaped == 0x55
+            digits = escaped == 0x75 ? 4 : 8
+            index += 1
+            index + digits - 1 <= stop || return String(copy(bytes[first:last]))
+            codepoint = tryparse(UInt32, String(copy(bytes[index:index+digits-1])); base=16)
+            codepoint === nothing && return String(copy(bytes[first:last]))
+            isvalid(Char, codepoint) || return String(copy(bytes[first:last]))
+            print(decoded, Char(codepoint))
+            index += digits
+        else
+            # Invalid escapes are left for TOML.parse to classify as malformed.
+            return String(copy(bytes[first:last]))
+        end
+    end
+    String(take!(decoded))
+end
+
+function _toml_header_info(bytes, first::Int, last::Int)
+    opening = bytes[first] == 0x5b && first < last && bytes[first+1] == 0x5b ? 2 : 1
+    index = first + opening
+    quote_byte = 0x00
+    escaped = false
+    component_start = index
+    path = String[]
+    too_deep = false
+    close_at = 0
+    while index <= last
+        byte = bytes[index]
+        if quote_byte != 0x00
+            if quote_byte == 0x22 && escaped
+                escaped = false
+            elseif quote_byte == 0x22 && byte == 0x5c
+                escaped = true
+            elseif byte == quote_byte
+                quote_byte = 0x00
+            end
+        elseif byte == 0x22 || byte == 0x27
+            quote_byte = byte
+        elseif byte == 0x2e
+            if length(path) < 13
+                push!(path, _toml_key_component(bytes, component_start, index - 1))
+            else
+                too_deep = true
+            end
+            component_start = index + 1
+        elseif byte == 0x23
+            break
+        elseif opening == 1 && byte == 0x5d
+            close_at = index
+            break
+        elseif opening == 2 && index < last && byte == 0x5d && bytes[index+1] == 0x5d
+            close_at = index + 1
+            break
+        end
+        index += 1
+    end
+    close_at == 0 && return nothing
+    for index in close_at+1:last
+        (bytes[index] == 0x20 || bytes[index] == 0x09 || bytes[index] == 0x0d) && continue
+        bytes[index] == 0x23 && break
+        return nothing
+    end
+    if length(path) < 13
+        push!(path, _toml_key_component(bytes, component_start, close_at - opening))
+    else
+        too_deep = true
+    end
+    all(component -> !isempty(component), path) || return nothing
+    (path=path, is_array_table=opening == 2, too_deep=too_deep || length(path) > 12)
+end
+
+"""Reject excessive TOML container depth before calling TOML.parse."""
+function _preflight_toml_depth(text::String)
+    bytes = codeunits(text)
+    isempty(bytes) && return nothing
+    table_depth = 0
+    array_table_paths = Set{Tuple}()
+    value_base = 0
+    stack = UInt8[]
+    inline_key_start = 0
+    in_value = false
+    quote_state = :none
+    escaped = false
+    overflow = false
+    malformed = false
+    line_start = 1
+    index = 1
+    while index <= length(bytes)
+        byte = bytes[index]
+        if quote_state === :multibasic
+            if byte == 0x5c
+                index += 2
+                continue
+            elseif byte == 0x22 && index + 2 <= length(bytes) &&
+                    bytes[index+1] == 0x22 && bytes[index+2] == 0x22
+                run_end = index + 2
+                while run_end < length(bytes) && bytes[run_end+1] == 0x22
+                    run_end += 1
+                end
+                quote_state = :none
+                escaped = false
+                index = run_end + 1
+                continue
+            end
+        elseif quote_state === :multiliteral
+            if byte == 0x27 && index + 2 <= length(bytes) &&
+                    bytes[index+1] == 0x27 && bytes[index+2] == 0x27
+                run_end = index + 2
+                while run_end < length(bytes) && bytes[run_end+1] == 0x27
+                    run_end += 1
+                end
+                quote_state = :none
+                index = run_end + 1
+                continue
+            end
+        elseif quote_state === :basic
+            if escaped
+                escaped = false
+            elseif byte == 0x5c
+                escaped = true
+            elseif byte == 0x22
+                quote_state = :none
+            end
+        elseif quote_state === :literal
+            byte == 0x27 && (quote_state = :none)
+        elseif byte == 0x23
+            while index <= length(bytes) && bytes[index] != 0x0a
+                index += 1
+            end
+            continue
+        elseif byte == 0x22
+            if index + 2 <= length(bytes) && bytes[index+1] == 0x22 && bytes[index+2] == 0x22
+                quote_state = :multibasic
+                index += 3
+                continue
+            end
+            quote_state = :basic
+        elseif byte == 0x27
+            if index + 2 <= length(bytes) && bytes[index+1] == 0x27 && bytes[index+2] == 0x27
+                quote_state = :multiliteral
+                index += 3
+                continue
+            end
+            quote_state = :literal
+        elseif byte == 0x0a
+            isempty(stack) && (in_value = false)
+            line_start = index + 1
+        elseif !in_value && isempty(stack) && (byte == 0x20 || byte == 0x09 || index == line_start)
+            probe = index
+            while probe <= length(bytes) && (bytes[probe] == 0x20 || bytes[probe] == 0x09)
+                probe += 1
+            end
+            if probe == index && byte != 0x5b
+                index += 1
+                continue
+            elseif probe <= length(bytes) && bytes[probe] == 0x5b
+                line_end = probe
+                while line_end <= length(bytes) && bytes[line_end] != 0x0a
+                    line_end += 1
+                end
+                header = _toml_header_info(bytes, probe, line_end - 1)
+                if header === nothing
+                    malformed = true
+                else
+                    path = header.path
+                    ancestors = 0
+                    if !header.too_deep
+                        for prefix_length in 1:(length(path)-1)
+                            ancestors += Tuple(path[1:prefix_length]) in array_table_paths
+                        end
+                    end
+                    depth = header.too_deep ? 13 :
+                        length(path) + ancestors + (header.is_array_table ? 1 : 0)
+                    table_depth = depth
+                    overflow |= header.too_deep || depth > 12
+                    if header.is_array_table && !header.too_deep
+                        push!(array_table_paths, Tuple(path))
+                    end
+                end
+                index = line_end + 1
+                line_start = index
+                continue
+            end
+        end
+
+        if quote_state === :none
+            if !in_value && byte == 0x3d
+                value_base = table_depth + _toml_key_depth(bytes, line_start, index - 1)
+                # Count the assigned value after all dotted-key table levels;
+                # otherwise a 12-component key reaches TOML.parse at the bound.
+                overflow |= value_base >= 12
+                in_value = true
+                inline_key_start = index + 1
+            elseif in_value && (byte == 0x5b || byte == 0x7b)
+                push!(stack, byte)
+                current_depth = value_base + length(stack) - 1
+                overflow |= current_depth > 12
+                byte == 0x7b && (inline_key_start = index + 1)
+            elseif in_value && (byte == 0x5d || byte == 0x7d)
+                expected = byte == 0x5d ? 0x5b : 0x7b
+                if isempty(stack) || last(stack) != expected
+                    malformed = true
+                else
+                    pop!(stack)
+                    inline_key_start = index + 1
+                end
+            elseif in_value && !isempty(stack) && last(stack) == 0x7b && byte == 0x3d
+                key_depth = _toml_key_depth(bytes, inline_key_start, index - 1)
+                current_depth = value_base + length(stack) - 1 + key_depth
+                overflow |= current_depth > 12
+            elseif in_value && !isempty(stack) && last(stack) == 0x7b && byte == 0x2c
+                inline_key_start = index + 1
+            end
+        end
+        index += 1
+    end
+    # Unclosed strings/containers belong to TOML's malformed-input path.
+    balanced = !malformed && quote_state === :none && isempty(stack)
+    balanced && overflow && throw(ResourceLimitError("RESOURCE_LIMIT: nesting depth limit exceeded"))
+    nothing
+end
+
 function _parse_toml(bytes::Vector{UInt8})
     text = String(copy(bytes))
     isvalid(text) || throw(ArgumentError("input is not valid UTF-8"))
+    _preflight_toml_depth(text)
     record = try
         TOML.parse(text)
     catch e

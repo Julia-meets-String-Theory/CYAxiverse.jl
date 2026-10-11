@@ -13,6 +13,12 @@ include(joinpath(@__DIR__, "..", "test", "fixtures", "scientific_certification",
 const FIXTURES = ScientificCertificationFixtures
 isdir(OBSERVATION_DIR) || error("replay observation directory is unavailable")
 before = FIXTURES._actual_environment_observation()
+precision_index = findfirst(==("--precision"), ARGS)
+precision_index !== nothing && precision_index < length(ARGS) ||
+    error("replay precision is unavailable for bounded warm-up")
+precision = parse(Int, ARGS[precision_index + 1])
+FIXTURES._warmup(precision)
+FIXTURES._announce_ready()
 exit_code = SC._verify_cli(ARGS)
 after = FIXTURES._actual_environment_observation()
 environment_path = joinpath(OBSERVATION_DIR, "replay-environment.toml")

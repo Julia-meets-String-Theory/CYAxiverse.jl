@@ -1,6 +1,6 @@
-const _IR = IA.IntervalRounding{:correct}()
 const _RD = RoundDown
 const _RU = RoundUp
+const _IR = Ref{Any}(nothing)
 const _RATIONAL_COMPONENT_DIGITS = 4096
 const _MAX_RATIONAL_COMPONENT_VALUE = big(10)^_RATIONAL_COMPONENT_DIGITS - 1
 const _RATIONAL_COMPONENT_BITS = ndigits(_MAX_RATIONAL_COMPONENT_VALUE; base=2)
@@ -16,14 +16,14 @@ struct ProofArithmeticError <: Exception
 end
 Base.showerror(io::IO, e::ProofArithmeticError) = print(io, e.message)
 
-_add(x::BigFloat, y::BigFloat, r::RoundingMode) = IA._add_round(_IR, x, y, r)
-_sub(x::BigFloat, y::BigFloat, r::RoundingMode) = IA._sub_round(_IR, x, y, r)
-_mul(x::BigFloat, y::BigFloat, r::RoundingMode) = IA._mul_round(_IR, x, y, r)
-_div(x::BigFloat, y::BigFloat, r::RoundingMode) = IA._div_round(_IR, x, y, r)
-_sin(x::BigFloat, r::RoundingMode) = IA._sin_round(_IR, x, r)
-_cos(x::BigFloat, r::RoundingMode) = IA._cos_round(_IR, x, r)
-_exp(x::BigFloat, r::RoundingMode) = IA._exp_round(_IR, x, r)
-_log(x::BigFloat, r::RoundingMode) = IA._log_round(_IR, x, r)
+_add(x::BigFloat, y::BigFloat, r::RoundingMode) = IA._add_round(_interval_rounding(), x, y, r)
+_sub(x::BigFloat, y::BigFloat, r::RoundingMode) = IA._sub_round(_interval_rounding(), x, y, r)
+_mul(x::BigFloat, y::BigFloat, r::RoundingMode) = IA._mul_round(_interval_rounding(), x, y, r)
+_div(x::BigFloat, y::BigFloat, r::RoundingMode) = IA._div_round(_interval_rounding(), x, y, r)
+_sin(x::BigFloat, r::RoundingMode) = IA._sin_round(_interval_rounding(), x, r)
+_cos(x::BigFloat, r::RoundingMode) = IA._cos_round(_interval_rounding(), x, r)
+_exp(x::BigFloat, r::RoundingMode) = IA._exp_round(_interval_rounding(), x, r)
+_log(x::BigFloat, r::RoundingMode) = IA._log_round(_interval_rounding(), x, r)
 
 """Run proof work serially and restore the caller's BigFloat context."""
 function _with_precision(f::Function, bits::Int)
@@ -37,6 +37,16 @@ function _with_precision(f::Function, bits::Int)
 end
 
 _backend_supported() = Base.pkgversion(IA) == _BACKEND_VERSION
+
+function _interval_rounding()
+    rounding = _IR[]
+    if rounding === nothing
+        _require_backend()
+        rounding = IA.IntervalRounding{:correct}()
+        _IR[] = rounding
+    end
+    return rounding
+end
 
 function _require_backend()
     _backend_supported() || throw(BackendUnsupported("INTERVAL_BACKEND_VERSION"))
@@ -264,13 +274,21 @@ struct CertificationModel
     L::Matrix{Rational{BigInt}}
     K::Matrix{Rational{BigInt}}
     phases::Vector{Rational{BigInt}}
-    s::Rational{BigInt}
+    s::Union{Nothing,Rational{BigInt}}
+    resource_reason::Union{Nothing,String}
+    n::Int
+    M::Int
 end
+
+CertificationModel(Q::Matrix{Rational{BigInt}}, L::Matrix{Rational{BigInt}},
+        K::Matrix{Rational{BigInt}}, phases::Vector{Rational{BigInt}},
+        s::Rational{BigInt}) = CertificationModel(Q, L, K, phases, s, nothing,
+            size(Q, 1), size(Q, 2))
 
 const _CertificationInterpretation = NamedTuple{
     (:basis, :orientation, :theta_period, :phase_units, :coefficient_convention,
      :numeric_semantics, :spectrum_convention, :physical_normalization, :s),
-    Tuple{String, String, String, String, String, String, String, String, Rational{BigInt}}}
+    Tuple{String, String, String, String, String, String, String, String, Union{Nothing,Rational{BigInt}}}}
 
 """Exact input identity and interpretation carried by every public result."""
 struct CertificationIdentity
@@ -280,33 +298,81 @@ struct CertificationIdentity
     interpretation::_CertificationInterpretation
 end
 
+function _validate_scalar_input(x, label::String; integer_only::Bool=false)
+    x isa Bool && throw(ArgumentError("Bool is not an exact numeric input"))
+    if integer_only
+        is_integer_value = x isa Integer ||
+            (x isa Rational && denominator(x) == 1) ||
+            (x isa AbstractFloat && isfinite(x) && isinteger(x))
+        is_integer_value || throw(ArgumentError("$label entries must be integers"))
+    elseif !(x isa Union{Integer,Rational,Float16,Float32,Float64,BigFloat})
+        throw(ArgumentError("$label contains an unsupported numeric input"))
+    end
+    x isa AbstractFloat && !isfinite(x) && throw(ArgumentError("$label entries must be finite"))
+    nothing
+end
+
+function _resource_limited_model(n::Int, M::Int)
+    empty_matrix = Matrix{Rational{BigInt}}(undef, 0, 0)
+    CertificationModel(empty_matrix, empty_matrix, empty_matrix,
+        Rational{BigInt}[], nothing, "RESOURCE_LIMIT", n, M)
+end
+
 function prepare_model(Q, L, K; phases=nothing)
     Q isa AbstractMatrix || throw(ArgumentError("Q must be a matrix"))
     Base.require_one_based_indexing(Q)
     n, M = size(Q)
     n >= 1 || throw(DimensionMismatch("Q must have at least one row"))
     M >= 1 || throw(DimensionMismatch("Q must have at least one column"))
-    n <= 32 || throw(ResourceLimitError("RESOURCE_LIMIT: n must be at most 32"))
-    M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: M must be at most 2048"))
+    L isa AbstractMatrix || throw(ArgumentError("L must be a matrix"))
+    K isa AbstractMatrix || throw(ArgumentError("K must be a matrix"))
+    Base.require_one_based_indexing(L)
+    Base.require_one_based_indexing(K)
     size(L) == (2, M) || throw(DimensionMismatch("L must have size (2,M)"))
     size(K) == (n, n) || throw(DimensionMismatch("K must have size (n,n)"))
-    q = _effective_exact_matrix(Q, "Q")
-    all(denominator(x) == 1 for x in q) || throw(ArgumentError("Q entries must be integers"))
-    l = _effective_exact_matrix(L, "L")
-    k = _effective_exact_matrix(K, "K")
-    for j in 1:n, i in 1:j-1
-        k[i, j] == k[j, i] || throw(ArgumentError("K must be exactly symmetric"))
-    end
-    p = if phases === nothing
-        fill(BigInt(0)//BigInt(1), M)
-    else
+    if phases !== nothing
         phases isa AbstractVector || throw(ArgumentError("phases must be a vector"))
         Base.require_one_based_indexing(phases)
         length(phases) == M || throw(DimensionMismatch("phases must have length M"))
-        [_exact_rational(x) for x in phases]
     end
-    s = maximum(view(l, 2, :))
-    return CertificationModel(q, l, k, p, s)
+
+    # Validate shape/type/finiteness/symmetry before applying resource limits,
+    # so malformed inputs retain their ordinary argument errors.
+    for value in Q
+        _validate_scalar_input(value, "Q"; integer_only=true)
+    end
+    for value in L
+        _validate_scalar_input(value, "L")
+    end
+    for value in K
+        _validate_scalar_input(value, "K")
+    end
+    for j in 1:n, i in 1:j-1
+        K[i, j] == K[j, i] || throw(ArgumentError("K must be exactly symmetric"))
+    end
+    if phases !== nothing
+        for value in phases
+            _validate_scalar_input(value, "phases")
+        end
+    end
+
+    # Do not duplicate arrays outside the schema's bounded dimensions. The
+    # typed certification operations return UNSUPPORTED for this model.
+    (n <= 32 && M <= 2048) || return _resource_limited_model(n, M)
+
+    try
+        q = _effective_exact_matrix(Q, "Q")
+        all(denominator(x) == 1 for x in q) || throw(ArgumentError("Q entries must be integers"))
+        l = _effective_exact_matrix(L, "L")
+        k = _effective_exact_matrix(K, "K")
+        p = phases === nothing ? fill(BigInt(0)//BigInt(1), M) :
+            [_exact_rational(x) for x in phases]
+        s = maximum(view(l, 2, :))
+        return CertificationModel(q, l, k, p, s)
+    catch error
+        error isa ResourceLimitError || rethrow()
+        return _resource_limited_model(n, M)
+    end
 end
 
 function _exact_seed(seed, n::Int)

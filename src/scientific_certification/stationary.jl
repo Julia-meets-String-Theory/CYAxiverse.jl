@@ -456,20 +456,41 @@ function _provenance(value)
     _candidate_provenance_record(value)
 end
 
-function certify_stationary_point(model::CertificationModel, theta0;
+function _resource_limited_root(model::CertificationModel, theta0, options::ProofOptions,
+        candidate_provenance)
+    seed = try
+        _exact_seed(theta0, model.n)
+    catch error
+        error isa ResourceLimitError || rethrow()
+        Rational{BigInt}[]
+    end
+    translation, normalized = isempty(seed) ? (BigInt[], Rational{BigInt}[]) : _normalize_seed(seed)
+    provenance = try
+        _provenance(candidate_provenance)
+    catch error
+        error isa ResourceLimitError || rethrow()
+        Dict("status"=>"unknown")
+    end
+    identity = _result_identity(model)
+    _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options;
+        translation, normalized_seed=normalized, candidate_provenance=provenance,
+        attempts=["proof stopped at a representation resource limit"], identity)
+end
+
+function _certify_stationary_point_impl(model::CertificationModel, theta0;
         options=ProofOptions(), candidate_provenance=nothing)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
-    seed = _exact_seed(theta0, size(model.Q, 1))
+    seed = _exact_seed(theta0, model.n)
     translation, normalized = _normalize_seed(seed)
     provenance = _provenance(candidate_provenance)
     identity = _result_identity(model)
-    model_signature = identity.input_sha256 !== nothing && size(model.Q,1) <= 32 &&
-        size(model.Q,2) <= 2048 ? _model_signature(model) : ""
+    model_signature = identity.input_sha256 !== nothing && model.n <= 32 &&
+        model.M <= 2048 ? _model_signature(model) : ""
     context = (; model_signature, translation, normalized_seed=normalized,
         candidate_provenance=provenance, identity)
-    identity.input_sha256 === nothing &&
+    (model.resource_reason !== nothing || identity.input_sha256 === nothing) &&
         return _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...)
-    (length(seed) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||
+    (length(seed) <= options.max_dimension && model.M <= options.max_terms) ||
         return _empty_root(:UNSUPPORTED, "RESOURCE_LIMIT", seed, options; context...)
     _backend_supported() || return _empty_root(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", seed, options; context...)
     attempts = String[]
@@ -507,4 +528,15 @@ function certify_stationary_point(model::CertificationModel, theta0;
             retained.W, retained.q_upper, retained.precision, retained.options,
             retained.hessian_classification, retained.hessian_method,
             retained.hessian_pivots, provenance, attempts, identity)
+end
+
+function certify_stationary_point(model::CertificationModel, theta0;
+        options=ProofOptions(), candidate_provenance=nothing)
+    options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
+    try
+        return _certify_stationary_point_impl(model, theta0; options, candidate_provenance)
+    catch error
+        error isa ResourceLimitError || rethrow()
+        return _resource_limited_root(model, theta0, options, candidate_provenance)
+    end
 end

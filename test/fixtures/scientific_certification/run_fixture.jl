@@ -114,16 +114,38 @@ function _process_alive(pid::Integer)
     ccall(:kill, Cint, (Cint, Cint), Cint(pid), Cint(0)) == 0
 end
 
+_process_successful(result) = result.exit_code == 0 && !result.timed_out && result.readiness_observed
+
 function _watchdog_self_test()
     (Sys.isapple() || Sys.islinux()) || error("process-group watchdog test is qualified only on Darwin and Linux")
     mktempdir() do parent
         pid_path = joinpath(parent, "child.pid")
+        ready_path = joinpath(parent, "computation-ready")
         marker_path = joinpath(parent, "late-marker.txt")
         wrapper_path = joinpath(parent, "watchdog-wrapper.sh")
-        write(wrapper_path, "#!/bin/sh\nsh -c 'sleep 30 & p=\$!; printf \"%s %s\" \"\$\$\" \"\$p\" > \"\$1\"; wait \"\$p\"; printf late > \"\$2\"' child \"\$1\" \"\$2\" &\nwait \$!\n")
+        write(wrapper_path, "#!/bin/sh\nsh -c 'sleep 30 & p=\$!; printf \"%s %s\" \"\$\$\" \"\$p\" > \"\$1\"; : > \"\$2\"; wait \"\$p\"; printf late > \"\$3\"' child \"\$1\" \"\$2\" \"\$3\" &\nwait \$!\n")
         chmod(wrapper_path, 0o700)
-        code, timed_out, elapsed = _run_process(String[wrapper_path, pid_path, marker_path],
-            joinpath(parent, "watchdog.log"), 2; cwd=ROOT)
+        slow_script = joinpath(parent, "slow-preparation.sh")
+        slow_ready = joinpath(parent, "slow-ready")
+        write(slow_script, "#!/bin/sh\nsleep 2\nmkdir \"\$1\"\nprintf complete\n")
+        chmod(slow_script, 0o700)
+        slow = _run_process(String[slow_script, slow_ready], joinpath(parent, "slow.log"), 1;
+            cwd=ROOT, readiness_marker=slow_ready, startup_timeout_seconds=5)
+        slow_start_passed = _process_successful(slow) &&
+            slow.preparation_seconds >= 1.5 && slow.computation_seconds < 1
+        missing_ready_script = joinpath(parent, "missing-ready.sh")
+        missing_ready_marker = joinpath(parent, "missing-ready")
+        write(missing_ready_script, "#!/bin/sh\nexit 0\n")
+        chmod(missing_ready_script, 0o700)
+        missing_ready = _run_process(String[missing_ready_script],
+            joinpath(parent, "missing-ready.log"), 1; cwd=ROOT,
+            readiness_marker=missing_ready_marker, startup_timeout_seconds=5)
+        missing_ready_rejected = missing_ready.exit_code == 0 && !missing_ready.timed_out &&
+            !missing_ready.readiness_observed && !_process_successful(missing_ready)
+        code_result = _run_process(String[wrapper_path, pid_path, ready_path, marker_path],
+            joinpath(parent, "watchdog.log"), 2; cwd=ROOT, readiness_marker=ready_path,
+            startup_timeout_seconds=5)
+        code, timed_out, elapsed = code_result.exit_code, code_result.timed_out, code_result.elapsed_seconds
         isfile(pid_path) || error("watchdog regression child did not start before timeout")
         child_pids = parse.(Int, split(read(pid_path, String)))
         length(child_pids) == 2 || error("watchdog regression did not record its owned process tree")
@@ -138,8 +160,16 @@ function _watchdog_self_test()
         end
         late_marker = isfile(marker_path)
         (exit_code=code, timed_out=timed_out, elapsed_seconds=elapsed,
+            preparation_seconds=code_result.preparation_seconds,
+            computation_seconds=code_result.computation_seconds,
+            timeout_phase=code_result.timeout_phase,
+            slow_start_passed=slow_start_passed,
+            missing_ready_rejected=missing_ready_rejected,
+            slow_preparation_seconds=slow.preparation_seconds,
+            slow_computation_seconds=slow.computation_seconds,
             child_alive_after_timeout=child_alive, late_marker=late_marker,
-            passed=code == 124 && timed_out && !child_alive && !late_marker)
+            passed=slow_start_passed && missing_ready_rejected && code == 124 && timed_out &&
+                code_result.timeout_phase == "computation" && !child_alive && !late_marker)
     end
 end
 
@@ -405,6 +435,15 @@ function _warmup(precision)
     result.root.status == :CERTIFIED_ROOT || error("bounded qualification warm-up failed")
 end
 
+function _announce_ready()
+    marker = get(ENV, "CYAX_SCIENTIFIC_READY_MARKER", "")
+    isempty(marker) && return nothing
+    ispath(marker) && error("computation readiness marker already exists")
+    mkpath(dirname(marker))
+    mkdir(marker)
+    nothing
+end
+
 function _produce_case(id, precision, evidence_dir, environment_path, expected_environment_sha)
     ispath(evidence_dir) && error("producer destination collision: $evidence_dir")
     item = _record(id)
@@ -432,6 +471,7 @@ function _produce_case(id, precision, evidence_dir, environment_path, expected_e
     warmup_start = time_ns()
     _warmup(precision)
     warmup_proof_seconds = (time_ns() - warmup_start) / 1e9
+    _announce_ready()
     case_timing = @timed _run_math(id, precision)
     item, model, seed, _Q, _L, _K, result, _aux = case_timing.value
     case_compile_seconds = case_timing.compile_time
@@ -469,6 +509,9 @@ function _set_report(path, data)
 end
 
 function _argv_record(path, argv, cwd, exit_code, timed_out; elapsed_seconds=nothing,
+                      preparation_seconds=nothing, computation_seconds=nothing,
+                      timeout_phase=nothing, readiness_marker=nothing,
+                      readiness_observed=nothing,
                       measured_child_argv=nothing, peak_rss_bytes=nothing,
                       peak_rss_raw=nothing, peak_rss_raw_unit=nothing,
                       peak_rss_method=nothing)
@@ -476,6 +519,11 @@ function _argv_record(path, argv, cwd, exit_code, timed_out; elapsed_seconds=not
         "timed_out"=>timed_out,"julia_threads"=>get(ENV,"JULIA_NUM_THREADS","unset"),
         "openblas_num_threads"=>get(ENV,"OPENBLAS_NUM_THREADS","unset"))
     elapsed_seconds === nothing || (record["elapsed_seconds"]=elapsed_seconds)
+    preparation_seconds === nothing || (record["preparation_seconds"]=preparation_seconds)
+    computation_seconds === nothing || (record["computation_seconds"]=computation_seconds)
+    timeout_phase === nothing || (record["timeout_phase"]=timeout_phase)
+    readiness_marker === nothing || (record["readiness_marker"]=readiness_marker)
+    readiness_observed === nothing || (record["readiness_observed"]=readiness_observed)
     measured_child_argv === nothing || (record["measured_child_argv"]=measured_child_argv)
     if peak_rss_bytes !== nothing
         record["peak_rss_bytes"]=peak_rss_bytes
@@ -521,19 +569,41 @@ function _terminate_process_group(pgid::Integer)
 end
 
 function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::Int; cwd=ROOT,
-                      extra_env=Pair{String,String}[])
+                      extra_env=Pair{String,String}[], readiness_marker=nothing,
+                      startup_timeout_seconds::Int=300)
     mkpath(dirname(log_path))
+    timeout_seconds > 0 || error("computation watchdog must be positive")
+    startup_timeout_seconds > 0 || error("preparation watchdog must be positive")
+    readiness_marker === nothing || !ispath(readiness_marker) ||
+        error("computation readiness marker collision")
     open(log_path,"w") do log
         cmd = Cmd(Cmd(argv); dir=cwd, detach=_PROCESS_GROUP_SUPERVISION)
-        proc = run(pipeline(addenv(cmd, "JULIA_NUM_THREADS"=>"1",
-            "OPENBLAS_NUM_THREADS"=>"1", extra_env...), stdout=log, stderr=log); wait=false)
+        process_env = Pair{String,String}["JULIA_NUM_THREADS"=>"1",
+            "OPENBLAS_NUM_THREADS"=>"1", extra_env...]
+        readiness_marker === nothing || push!(process_env,
+            "CYAX_SCIENTIFIC_READY_MARKER"=>String(readiness_marker))
+        proc = run(pipeline(addenv(cmd, process_env...), stdout=log, stderr=log); wait=false)
         process_group = _PROCESS_GROUP_SUPERVISION ? getpid(proc) : nothing
         started = time()
-        deadline = time() + timeout_seconds
-        while !process_exited(proc) && time() < deadline
-            sleep(0.1)
+        preparation_deadline = started + (readiness_marker === nothing ? 0 : startup_timeout_seconds)
+        if readiness_marker !== nothing
+            while !ispath(readiness_marker) && !process_exited(proc) && time() < preparation_deadline
+                sleep(0.05)
+            end
         end
-        timed_out = !process_exited(proc)
+        ready = readiness_marker === nothing || ispath(readiness_marker)
+        preparation_timed_out = !ready && !process_exited(proc)
+        computation_started = ready ? time() : nothing
+        timed_out = preparation_timed_out
+        timeout_phase = preparation_timed_out ? "preparation" : "none"
+        if ready && !process_exited(proc)
+            deadline = computation_started + timeout_seconds
+            while !process_exited(proc) && time() < deadline
+                sleep(0.05)
+            end
+            timed_out = !process_exited(proc)
+            timed_out && (timeout_phase = "computation")
+        end
         if timed_out
             if process_group === nothing
                 kill(proc, Base.SIGKILL)
@@ -548,7 +618,12 @@ function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::I
                 error("owned process group remained alive after watchdog cleanup")
             timed_out || error("process exited while owned subprocesses remained")
         end
-        return (timed_out ? 124 : proc.exitcode, timed_out, time() - started)
+        finished = time()
+        preparation_seconds = computation_started === nothing ? finished - started : computation_started - started
+        computation_seconds = computation_started === nothing ? 0.0 : finished - computation_started
+        return (exit_code=timed_out ? 124 : proc.exitcode, timed_out,
+            elapsed_seconds=finished-started, preparation_seconds, computation_seconds,
+            timeout_phase, readiness_observed=ready)
     end
 end
 
@@ -638,9 +713,17 @@ function _replay_receipt(case_id, precision, result, environment, source, eviden
         "--certificate",joinpath(result["path"],"certificate.toml"),
         "--expect-input-sha256",input_sha,"--expect-certificate-sha256",cert_sha,
         "--require","root_and_spectrum","--precision",string(precision))
-    code, timedout, elapsed = _run_process(argv,log_path,300;
-        extra_env=["CYAX_SCIENTIFIC_REPLAY_OBSERVATION_DIR"=>observation_dir])
-    _argv_record(command_path,argv,ROOT,code,timedout;elapsed_seconds=elapsed)
+    readiness_marker = joinpath(evidence_root, "commands", "replay-$case_id-p$precision.ready")
+    execution = _run_process(argv,log_path,300;
+        extra_env=["CYAX_SCIENTIFIC_REPLAY_OBSERVATION_DIR"=>observation_dir],
+        readiness_marker, startup_timeout_seconds=300)
+    code, timedout, elapsed = execution.exit_code, execution.timed_out, execution.elapsed_seconds
+    _argv_record(command_path,argv,ROOT,code,timedout;elapsed_seconds=elapsed,
+        preparation_seconds=execution.preparation_seconds,
+        computation_seconds=execution.computation_seconds,timeout_phase=execution.timeout_phase,
+        readiness_marker=relpath(readiness_marker,evidence_root),
+        readiness_observed=execution.readiness_observed)
+    execution.readiness_observed || error("replay process exited before warmed computation readiness")
     text = read(log_path,String)
     verdict = occursin("status=VERIFIED",text) ? "VERIFIED" :
         occursin("status=UNPROVEN",text) ? "UNPROVEN" :
@@ -808,14 +891,22 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
         log=joinpath(out,"logs","producer-$id-p$precision.log")
         measure_peak = id in ("T03","T05")
         command_argv = measure_peak ? _measurement_wrapper(environment.project_dir,@__FILE__,argv) : argv
-        code,timedout,elapsed=_run_process(command_argv,log,settings["watchdog_seconds"])
+        readiness_marker=joinpath(out,"commands","producer-$id-p$precision.ready")
+        execution=_run_process(command_argv,log,settings["watchdog_seconds"];
+            readiness_marker, startup_timeout_seconds=300)
+        code,timedout,elapsed=execution.exit_code,execution.timed_out,execution.elapsed_seconds
         peak_rss = measure_peak ? _measured_peak_rss(log) : nothing
         _argv_record(joinpath(out,"commands","producer-$id-p$precision.toml"),command_argv,ROOT,code,timedout;
-            elapsed_seconds=elapsed,measured_child_argv=measure_peak ? argv : nothing,
+            elapsed_seconds=elapsed,preparation_seconds=execution.preparation_seconds,
+            computation_seconds=execution.computation_seconds,timeout_phase=execution.timeout_phase,
+            readiness_marker=relpath(readiness_marker,out),
+            readiness_observed=execution.readiness_observed,
+            measured_child_argv=measure_peak ? argv : nothing,
             peak_rss_bytes=peak_rss===nothing ? nothing : peak_rss.bytes,
             peak_rss_raw=peak_rss===nothing ? nothing : peak_rss.raw,
             peak_rss_raw_unit=peak_rss===nothing ? nothing : peak_rss.raw_unit,
             peak_rss_method=peak_rss===nothing ? nothing : peak_rss.method)
+        execution.readiness_observed || error("$id p=$precision producer exited before warmed computation readiness")
         code==0 || error("$id p=$precision producer failed (exit=$code watchdog=$timedout): $(read(log,String))")
         measure_peak && peak_rss === nothing && error("peak RSS measurement missing for $id p=$precision")
         result=_read_result(joinpath(destination,"case_result.toml"))
@@ -929,6 +1020,13 @@ function _main(args=ARGS)
             " exit_code=", result.exit_code, " timed_out=", result.timed_out,
             " child_alive_after_timeout=", result.child_alive_after_timeout,
             " late_marker=", result.late_marker,
+            " slow_start_passed=", result.slow_start_passed,
+            " missing_ready_rejected=", result.missing_ready_rejected,
+            " slow_preparation_seconds=", result.slow_preparation_seconds,
+            " slow_computation_seconds=", result.slow_computation_seconds,
+            " preparation_seconds=", result.preparation_seconds,
+            " computation_seconds=", result.computation_seconds,
+            " timeout_phase=", result.timeout_phase,
             " elapsed_seconds=", result.elapsed_seconds)
         return result.passed ? 0 : 1
     elseif length(args)>=2 && args[1]=="--case"
@@ -1034,6 +1132,7 @@ function _produce_held_out_case(args)
         error("T15 producer process profile/source does not match the trusted execution receipt")
     end
     _warmup(precision)
+    _announce_ready()
     settings,_=_fixture_records()
     options=SC.ProofOptions(precisions=(precision,),max_newton_steps=settings["max_newton_steps"],
         max_backtracks=settings["max_backtracks"],box_radii=[_rat(x) for x in settings["box_radii"]],
@@ -1094,9 +1193,16 @@ function _run_held_out(args)
         argv=_julia_argv(environment.project_dir,@__FILE__,"--held-out-case",values["--held-out"],
             values["--oracle"],string(precision),destination,environment.path,environment.sha256)
         log_rel=joinpath("logs","producer-$id-p$precision.log")
-        code,timedout,elapsed=_run_process(argv,joinpath(out,log_rel),300)
+        readiness_marker=joinpath(out,"commands","producer-T15-p$precision.ready")
+        execution=_run_process(argv,joinpath(out,log_rel),300;readiness_marker,
+            startup_timeout_seconds=300)
+        code,timedout,elapsed=execution.exit_code,execution.timed_out,execution.elapsed_seconds
         _argv_record(joinpath(out,"commands","producer-$id-p$precision.toml"),argv,ROOT,code,timedout;
-            elapsed_seconds=elapsed)
+            elapsed_seconds=elapsed,preparation_seconds=execution.preparation_seconds,
+            computation_seconds=execution.computation_seconds,timeout_phase=execution.timeout_phase,
+            readiness_marker=relpath(readiness_marker,out),
+            readiness_observed=execution.readiness_observed)
+        execution.readiness_observed || error("T15 producer exited before warmed computation readiness")
         code==0 || error("T15 producer failed (exit=$code watchdog=$timedout); see $log_rel")
         record=_read_result(joinpath(destination,"case_result.toml"))
         record["status"]=="CERTIFIED" && record["classification"]=="MINIMUM" || error("T15 result record failed")
