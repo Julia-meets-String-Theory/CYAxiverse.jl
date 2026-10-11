@@ -153,6 +153,8 @@ function _public_safe_source_ref(value)
         startswith(lower, "file:")) && throw(ArgumentError("candidate source_ref must not expose a local path"))
     occursin(r"(?i)(?:password|pass|token|access[_-]?token|secret|client[_-]?secret|api[_-]?key|authorization|auth)\s*=", text) &&
         throw(ArgumentError("candidate source_ref must not contain credentials"))
+    occursin(r"(?i)(?:^|[?&#;\s])(?:session(?:[_-]?id)?|machine(?:[_-]?id)?|hostname|device(?:[_-]?id)?|workspace(?:[_-]?id)?)\s*[=:]", text) &&
+        throw(ArgumentError("candidate source_ref must not contain machine or session identifiers"))
     if !occursin("://", text)
         bare_host = first(split(text, ['/','?','#']; limit=2))
         _private_or_local_host(first(split(bare_host, ':'; limit=2))) &&
@@ -198,6 +200,7 @@ function _source_record(value)
     value = _normalized_record(value, "source_ref", ("repository","commit","tree"))
     repository, commit, tree = get(value,"repository",nothing), get(value,"commit",nothing), get(value,"tree",nothing)
     repository = _metadata_string(repository, "repository"; nonempty=true)
+    repository = _public_safe_source_ref(repository)
     commit = _metadata_string(commit, "commit"; nonempty=true)
     tree = _metadata_string(tree, "tree"; nonempty=true)
     commit isa AbstractString && occursin(_GIT_SHA_RE, commit) || throw(ArgumentError("commit must be lower-case Git SHA-1"))
@@ -886,7 +889,6 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
         e isa ResourceLimitError && return _unsupported_resource()
         return _invalid("input schema invalid: $(sprint(showerror,e))")
     end
-    _backend_supported() || return VerificationReport(:UNSUPPORTED,"INTERVAL_BACKEND_VERSION",NamedTuple[],:NOT_CHECKED,nothing)
     input_size = size(model.Q)
     if input_size[1]>32 || input_size[2]>2048
         return VerificationReport(:UNSUPPORTED,"RESOURCE_LIMIT",NamedTuple[],:NOT_CHECKED,nothing)
@@ -905,6 +907,7 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
             rethrow()
         end
     end
+    _backend_supported() || return VerificationReport(:UNSUPPORTED,"INTERVAL_BACKEND_VERSION",NamedTuple[],:NOT_CHECKED,nothing)
     if requested===:root_and_spectrum && parsed.kind=="root"
         return _unproven("root_and_spectrum was required but certificate is root-only",parsed.precision_bits)
     end

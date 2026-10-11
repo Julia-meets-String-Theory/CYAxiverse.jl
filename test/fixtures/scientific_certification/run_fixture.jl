@@ -81,6 +81,64 @@ function _benchmark_model(item)
     return model, [_rat(x) for x in correction.theta], Q, L, K, correction, diagnostic
 end
 
+function _t14_diagnostic_compatibility(diagnostic; relative_tolerance=BigInt(1)//BigInt(10)^10)
+    values = diagnostic.hessian_eigenvalues
+    length(values) == 2 || error("T14 numerical diagnostic must contain two generalized eigenvalues")
+    issorted(values) || error("T14 numerical diagnostic eigenvalues are not ordered")
+    values[1] < 0 < values[2] || error("T14 numerical diagnostic does not preserve signed mode order")
+    references = oracle_t14_intervals(2048)
+    observed = Rational{BigInt}[_rat(value) for value in values]
+    relative_errors = Rational{BigInt}[]
+    for i in eachindex(observed)
+        lo, hi = references[i]
+        reference = (lo + hi) / 2
+        relative_error = abs(observed[i] - reference) / abs(reference)
+        relative_error <= relative_tolerance ||
+            error("T14 numerical diagnostic exceeds the declared relative tolerance")
+        push!(relative_errors, relative_error)
+    end
+    Dict{String,Any}(
+        "comparison_outcome" => "PASS",
+        "comparison" => "signed ordered generalized Hessian eigenvalues versus exact-binary Float64 quadratic roots scaled by c=(2*pi)^2",
+        "relative_tolerance" => _ratstr(relative_tolerance),
+        "diagnostic_eigenvalues" => repr.(collect(values)),
+        "reference_intervals" => [[_ratstr(lo), _ratstr(hi)] for (lo, hi) in references],
+        "relative_errors" => string.(Float64.(relative_errors)))
+end
+
+function _process_alive(pid::Integer)
+    ccall(:kill, Cint, (Cint, Cint), Cint(pid), Cint(0)) == 0
+end
+
+function _watchdog_self_test()
+    (Sys.isapple() || Sys.islinux()) || error("process-group watchdog test is qualified only on Darwin and Linux")
+    mktempdir() do parent
+        pid_path = joinpath(parent, "child.pid")
+        marker_path = joinpath(parent, "late-marker.txt")
+        wrapper_path = joinpath(parent, "watchdog-wrapper.sh")
+        write(wrapper_path, "#!/bin/sh\nsh -c 'sleep 30 & p=\$!; printf \"%s %s\" \"\$\$\" \"\$p\" > \"\$1\"; wait \"\$p\"; printf late > \"\$2\"' child \"\$1\" \"\$2\" &\nwait \$!\n")
+        chmod(wrapper_path, 0o700)
+        code, timed_out, elapsed = _run_process(String[wrapper_path, pid_path],
+            joinpath(parent, "watchdog.log"), 2; cwd=ROOT)
+        isfile(pid_path) || error("watchdog regression child did not start before timeout")
+        child_pids = parse.(Int, split(read(pid_path, String)))
+        length(child_pids) == 2 || error("watchdog regression did not record its owned process tree")
+        reap_deadline = time() + 2
+        while any(_process_alive, child_pids) && time() < reap_deadline
+            sleep(0.05)
+        end
+        child_alive = any(_process_alive, child_pids)
+        # Clean up a failure so the regression itself never leaks a child.
+        for child_pid in reverse(child_pids)
+            _process_alive(child_pid) && ccall(:kill, Cint, (Cint, Cint), Cint(child_pid), Cint(Base.SIGKILL))
+        end
+        late_marker = isfile(marker_path)
+        (exit_code=code, timed_out=timed_out, elapsed_seconds=elapsed,
+            child_alive_after_timeout=child_alive, late_marker=late_marker,
+            passed=code == 124 && timed_out && !child_alive && !late_marker)
+    end
+end
+
 function _options(item, precision::Int)
     settings, _ = _fixture_records()
     ratfield(k) = _rat(settings[k])
@@ -197,7 +255,8 @@ function _check_oracle(id, result, model)
     true
 end
 
-function _result_record(path, id, precision, item, result, input_sha, certificate_sha)
+function _result_record(path, id, precision, item, result, input_sha, certificate_sha;
+        diagnostic_compatibility=nothing)
     root = result.root
     spectrum = result.spectrum
     record = Dict{String,Any}(
@@ -216,6 +275,8 @@ function _result_record(path, id, precision, item, result, input_sha, certificat
             "lower"=>_ratstr(c.lower),"upper"=>_ratstr(c.upper),"sign"=>String(c.sign),
             "relative_width_met"=>c.relative_width_met) for c in spectrum.clusters],
         "input_sha256" => input_sha, "certificate_sha256" => certificate_sha)
+    diagnostic_compatibility === nothing ||
+        (record["benchmark_diagnostic_compatibility"] = diagnostic_compatibility)
     ispath(path) && error("refusing to overwrite evidence file $path")
     open(path, "w") do io
         TOML.print(io, record; sorted=true)
@@ -293,7 +354,9 @@ function _produce_case(id, precision, evidence_dir, environment_path, expected_e
     environment_ref = (receipt_sha256=expected_environment_sha, artifact_name=basename(environment_path))
     written = SC.write_certificate(evidence_dir, model, result; source_ref, environment_ref)
     result_path = joinpath(evidence_dir, "case_result.toml")
-    _result_record(result_path,id,precision,item,result,written.input_sha256,written.certificate_sha256)
+    diagnostic_compatibility = id == "T14" ? _t14_diagnostic_compatibility(_aux.diagnostic) : nothing
+    _result_record(result_path,id,precision,item,result,written.input_sha256,written.certificate_sha256;
+        diagnostic_compatibility)
     println("case=$id precision=$precision status=CERTIFIED input_sha256=$(written.input_sha256) certificate_sha256=$(written.certificate_sha256) warmup_proof_seconds=$warmup_proof_seconds case_compile_seconds=$case_compile_seconds warm_case_seconds=$warm_case_seconds")
     return 0
 end
@@ -323,12 +386,47 @@ function _argv_record(path, argv, cwd, exit_code, timed_out; elapsed_seconds=not
     _set_report(path,record)
 end
 
+const _PROCESS_GROUP_SUPERVISION = Sys.isapple() || Sys.islinux()
+
+function _process_group_exists(pgid::Integer)
+    status = ccall(:kill, Cint, (Cint, Cint), -Cint(pgid), Cint(0))
+    status == 0 && return true
+    error_code = Base.Libc.errno()
+    error_code == Base.Libc.ESRCH && return false
+    error_code == Base.Libc.EPERM && return true
+    error("could not inspect owned process group (errno=$error_code)")
+end
+
+function _signal_process_group(pgid::Integer, signal::Integer)
+    status = ccall(:kill, Cint, (Cint, Cint), -Cint(pgid), Cint(signal))
+    status == 0 && return nothing
+    error_code = Base.Libc.errno()
+    error_code == Base.Libc.ESRCH && return nothing
+    error("could not signal owned process group (errno=$error_code)")
+end
+
+function _wait_for_process_group_exit(pgid::Integer, timeout_seconds::Real)
+    deadline = time() + timeout_seconds
+    while _process_group_exists(pgid) && time() < deadline
+        sleep(0.05)
+    end
+    !_process_group_exists(pgid)
+end
+
+function _terminate_process_group(pgid::Integer)
+    _signal_process_group(pgid, Base.SIGTERM)
+    _wait_for_process_group_exit(pgid, 0.25) && return nothing
+    _signal_process_group(pgid, Base.SIGKILL)
+    nothing
+end
+
 function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::Int; cwd=ROOT)
     mkpath(dirname(log_path))
     open(log_path,"w") do log
-        cmd = Cmd(Cmd(argv); dir=cwd)
+        cmd = Cmd(Cmd(argv); dir=cwd, detach=_PROCESS_GROUP_SUPERVISION)
         proc = run(pipeline(addenv(cmd, "JULIA_NUM_THREADS"=>"1",
             "OPENBLAS_NUM_THREADS"=>"1"), stdout=log, stderr=log); wait=false)
+        process_group = _PROCESS_GROUP_SUPERVISION ? getpid(proc) : nothing
         started = time()
         deadline = time() + timeout_seconds
         while !process_exited(proc) && time() < deadline
@@ -336,9 +434,19 @@ function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::I
         end
         timed_out = !process_exited(proc)
         if timed_out
-            kill(proc, Base.SIGKILL)
+            if process_group === nothing
+                kill(proc, Base.SIGKILL)
+            else
+                _terminate_process_group(process_group)
+            end
         end
         wait(proc)
+        if process_group !== nothing && !_wait_for_process_group_exit(process_group, 2.0)
+            _signal_process_group(process_group, Base.SIGKILL)
+            _wait_for_process_group_exit(process_group, 2.0) ||
+                error("owned process group remained alive after watchdog cleanup")
+            timed_out || error("process exited while owned subprocesses remained")
+        end
         return (timed_out ? 124 : proc.exitcode, timed_out, time() - started)
     end
 end
@@ -621,6 +729,14 @@ end
 function _main(args=ARGS)
     if length(args)>=3 && args[1]=="--measure-child" && args[2]=="--"
         return _measure_child(args[3:end])
+    elseif length(args)==1 && args[1]=="--watchdog-self-test"
+        result = _watchdog_self_test()
+        println("watchdog_self_test=", result.passed ? "PASS" : "FAIL",
+            " exit_code=", result.exit_code, " timed_out=", result.timed_out,
+            " child_alive_after_timeout=", result.child_alive_after_timeout,
+            " late_marker=", result.late_marker,
+            " elapsed_seconds=", result.elapsed_seconds)
+        return result.passed ? 0 : 1
     elseif length(args)>=2 && args[1]=="--case"
         id=args[2]; precision=256; evidence=""; envpath=""; envsha=""
         i=3

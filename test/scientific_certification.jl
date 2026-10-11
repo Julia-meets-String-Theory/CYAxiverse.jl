@@ -187,6 +187,24 @@ end
                 require=:root_and_spectrum, precision_bits=256)
             @test report.status == :VERIFIED
 
+            unsafe_writer = (repository="file:///fixture-private/source-location",
+                commit=source.commit, tree=source.tree)
+            @test_throws ArgumentError SC.write_certificate(joinpath(parent,"unsafe-writer"),
+                model,result;source_ref=unsafe_writer,environment_ref=environment)
+            @test !ispath(joinpath(parent,"unsafe-writer"))
+
+            unsafe_document=TOML.parsefile(first.certificate_path)
+            unsafe_document["source_ref"]["repository"]="session_id=fixture-only"
+            unsafe_path=joinpath(parent,"unsafe-source-ref-mutant.toml")
+            write(unsafe_path,SC._toml_bytes(unsafe_document))
+            unsafe_digest=bytes2hex(sha256(read(unsafe_path)))
+            unsafe_report=SC.verify_certificate(unsafe_path,first.input_path;
+                expected_input_sha256=first.input_sha256,
+                expected_certificate_sha256=unsafe_digest,
+                require=:root_and_spectrum,precision_bits=256)
+            @test unsafe_report.status==:INVALID
+            @test occursin("certificate schema invalid",unsafe_report.reason)
+
             forged = TOML.parsefile(first.certificate_path)
             forged["root"]["q_upper"] = "0/1"
             forged_path = joinpath(parent, "forged.toml")
@@ -918,6 +936,16 @@ end
         @test SC._public_safe_source_ref("~candidate") == "~candidate"
         @test SC._public_safe_source_ref("https://github.com/Julia-meets-String-Theory/CYAxiverse.jl") ==
             "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl"
+        @test SC._source_record((repository="owner/private-project",commit,tree))["repository"] ==
+            "owner/private-project"
+        @test SC._source_record((repository="opaque:fixture-reference",commit,tree))["repository"] ==
+            "opaque:fixture-reference"
+        for repository in ("/fixture-private/source", "C:\\fixture-private\\source",
+                "\\\\fixture-host\\share\\source", "file:///fixture-private/source",
+                "session_id=fixture-only", "https://user:fixture@example.invalid/source",
+                "https://localhost/source")
+            @test_throws ArgumentError SC._source_record((repository=repository,commit,tree))
+        end
         @test_throws ArgumentError SC._source_record(merge(source,(unexpected="discarded",)))
         @test_throws ArgumentError SC._source_record(Dict("repository"=>source.repository,
             :repository=>"conflict","commit"=>commit,"tree"=>tree))
@@ -933,6 +961,19 @@ end
             artifact_name="fixtures/environment.toml"))["artifact_name"] == "fixtures/environment.toml"
         @test SC._environment_record((receipt_sha256=digest,
             artifact_name="~artifact.toml"))["artifact_name"] == "~artifact.toml"
+
+        watchdog=ScientificCertificationFixtures._watchdog_self_test()
+        @test watchdog.exit_code==124
+        @test watchdog.timed_out
+        @test !watchdog.child_alive_after_timeout
+        @test !watchdog.late_marker
+
+        t14_item=ScientificCertificationFixtures._record("T14")
+        _,_,_,_,_,_,t14_diagnostic=ScientificCertificationFixtures._benchmark_model(t14_item)
+        t14_comparison=ScientificCertificationFixtures._t14_diagnostic_compatibility(t14_diagnostic)
+        @test t14_comparison["comparison_outcome"]=="PASS"
+        @test t14_comparison["relative_tolerance"]=="1/10000000000"
+        @test length(t14_comparison["diagnostic_eigenvalues"])==2
         @test SC._provenance((method="synthetic",source_ref="fixtures/candidate")) ==
             Dict("status"=>"supplied","method"=>"synthetic","source_ref"=>"fixtures/candidate")
         @test_throws ArgumentError SC._provenance((status="unknown",method="synthetic",
