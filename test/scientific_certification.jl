@@ -1009,6 +1009,86 @@ end
         @test SC._parse_toml(encoded)["Q"]["data"][1]==long_ratio
     end
 
+    @testset "execution profile requires a clean matching child" begin
+        F=ScientificCertificationFixtures
+        actual=F._actual_environment_observation()
+        @test actual["interval_arithmetic_registered_tree_sha1"] ==
+            actual["interval_arithmetic_actual_tree_sha1"]
+        @test actual["loaded_package_root"] == realpath(repository_root)
+        expected=copy(actual)
+        expected["worktree_clean"]=true
+        dirty=copy(expected)
+        dirty["worktree_clean"]=false
+        @test !F._approved_profile_matches(expected,dirty)
+        changed_profile=copy(expected)
+        changed_profile["active_manifest_sha256"]=repeat("0",64)
+        @test !F._approved_profile_matches(expected,changed_profile)
+
+        mktempdir() do root
+            run(Cmd(Cmd(["git","init","--quiet"]);dir=root))
+            write(joinpath(root,"source.txt"),"baseline\n")
+            run(Cmd(["git","-C",root,"add","source.txt"]))
+            run(Cmd(["git","-C",root,"-c","user.name=Fixture","-c",
+                "user.email=fixture@example.invalid","commit","--quiet","-m","baseline"]))
+            clean_source=F._source_identity(root)
+            write(joinpath(root,"source.txt"),"baseline plus uncommitted byte\n")
+            dirty_source=F._source_identity(root)
+            @test clean_source.commit==dirty_source.commit
+            @test clean_source.tree==dirty_source.tree
+            @test clean_source.clean
+            @test !dirty_source.clean
+            unchanged_head_expected=copy(expected)
+            unchanged_head_expected["candidate_commit"]=clean_source.commit
+            unchanged_head_expected["candidate_tree"]=clean_source.tree
+            unchanged_head_actual=copy(unchanged_head_expected)
+            unchanged_head_actual["worktree_clean"]=dirty_source.clean
+            @test !F._approved_profile_matches(unchanged_head_expected,unchanged_head_actual)
+        end
+    end
+
+    @testset "attempted but incomplete spectrum stays unavailable" begin
+        model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+        options=SC.ProofOptions(precisions=(256,),max_inertia_evaluations=0,
+            spectral_goal=:individuals)
+        combined=SC.certify(model,[0];options)
+        @test combined.status==:CERTIFIED_ROOT
+        @test combined.root.status==:CERTIFIED_ROOT
+        @test combined.spectrum.status==:INCONCLUSIVE
+        environment_bytes=Vector{UInt8}(codeunits("synthetic environment receipt"))
+        mktempdir() do parent
+            envpath=joinpath(parent,"environment.toml")
+            write(envpath,environment_bytes)
+            environment=(receipt_sha256=bytes2hex(sha256(environment_bytes)),
+                artifact_name=basename(envpath))
+            unavailable=SC.write_certificate(joinpath(parent,"attempted-root"),model,combined;
+                source_ref=source,environment_ref=environment)
+            document=TOML.parsefile(unavailable.certificate_path)
+            @test document["kind"]=="root"
+            @test document["spectrum"]==Dict("status"=>"not_requested",
+                "reason"=>"coverage_unavailable")
+            root_report=SC.verify_certificate(unavailable.certificate_path,unavailable.input_path;
+                expected_input_sha256=unavailable.input_sha256,
+                expected_certificate_sha256=unavailable.certificate_sha256,
+                require=:root,precision_bits=256)
+            @test root_report.status==:VERIFIED
+            spectrum_claim=only(filter(claim->claim.name=="spectrum",root_report.claims))
+            @test spectrum_claim.outcome==:not_requested
+            @test spectrum_claim.reason=="coverage_unavailable"
+            spectrum_gate=SC.verify_certificate(unavailable.certificate_path,unavailable.input_path;
+                expected_input_sha256=unavailable.input_sha256,
+                expected_certificate_sha256=unavailable.certificate_sha256,
+                require=:root_and_spectrum,precision_bits=256)
+            @test spectrum_gate.status==:UNPROVEN
+
+            root_only=SC.certify_stationary_point(model,[0];options)
+            not_requested=SC.write_certificate(joinpath(parent,"unrequested-root"),model,root_only;
+                source_ref=source,environment_ref=environment)
+            not_requested_document=TOML.parsefile(not_requested.certificate_path)
+            @test not_requested_document["spectrum"]==Dict("status"=>"not_requested",
+                "reason"=>"not_requested")
+        end
+    end
+
     @testset "request fidelity on noncertifying exits" begin
         model=SC.prepare_model(reshape([1,1],1,2),[1 1;0 0],reshape([1],1,1))
         options=SC.ProofOptions(precisions=(256,),max_terms=1)

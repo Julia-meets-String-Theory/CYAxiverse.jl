@@ -5,6 +5,7 @@ using SHA
 using TOML
 using LinearAlgebra
 using Dates
+using Pkg
 
 const SC = CYAxiverse.scientific_certification
 const ROOT = normpath(joinpath(@__DIR__, "../../.."))
@@ -118,7 +119,7 @@ function _watchdog_self_test()
         wrapper_path = joinpath(parent, "watchdog-wrapper.sh")
         write(wrapper_path, "#!/bin/sh\nsh -c 'sleep 30 & p=\$!; printf \"%s %s\" \"\$\$\" \"\$p\" > \"\$1\"; wait \"\$p\"; printf late > \"\$2\"' child \"\$1\" \"\$2\" &\nwait \$!\n")
         chmod(wrapper_path, 0o700)
-        code, timed_out, elapsed = _run_process(String[wrapper_path, pid_path],
+        code, timed_out, elapsed = _run_process(String[wrapper_path, pid_path, marker_path],
             joinpath(parent, "watchdog.log"), 2; cwd=ROOT)
         isfile(pid_path) || error("watchdog regression child did not start before timeout")
         child_pids = parse.(Int, split(read(pid_path, String)))
@@ -256,7 +257,8 @@ function _check_oracle(id, result, model)
 end
 
 function _result_record(path, id, precision, item, result, input_sha, certificate_sha;
-        diagnostic_compatibility=nothing)
+        diagnostic_compatibility=nothing, producer_observation_ref=nothing,
+        producer_observation_sha256=nothing)
     root = result.root
     spectrum = result.spectrum
     record = Dict{String,Any}(
@@ -277,6 +279,10 @@ function _result_record(path, id, precision, item, result, input_sha, certificat
         "input_sha256" => input_sha, "certificate_sha256" => certificate_sha)
     diagnostic_compatibility === nothing ||
         (record["benchmark_diagnostic_compatibility"] = diagnostic_compatibility)
+    producer_observation_ref === nothing ||
+        (record["producer_observation_ref"] = producer_observation_ref)
+    producer_observation_sha256 === nothing ||
+        (record["producer_observation_sha256"] = producer_observation_sha256)
     ispath(path) && error("refusing to overwrite evidence file $path")
     open(path, "w") do io
         TOML.print(io, record; sorted=true)
@@ -284,14 +290,14 @@ function _result_record(path, id, precision, item, result, input_sha, certificat
     record
 end
 
-function _git(args...)
-    read(Cmd(Cmd(["git", args...]); dir=ROOT), String) |> strip
+function _git(root::AbstractString, args...)
+    read(Cmd(Cmd(["git", args...]); dir=root), String) |> strip
 end
 
-function _source_identity()
-    commit = _git("rev-parse", "HEAD")
-    tree = _git("rev-parse", "HEAD^{tree}")
-    status = _git("status", "--porcelain=v1", "--untracked-files=all")
+function _source_identity(root::AbstractString=ROOT)
+    commit = _git(root, "rev-parse", "HEAD")
+    tree = _git(root, "rev-parse", "HEAD^{tree}")
+    status = _git(root, "status", "--porcelain=v1", "--untracked-files=all")
     return (repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",
         commit, tree, clean=isempty(status))
 end
@@ -300,30 +306,94 @@ function _hash_file(path)
     bytes2hex(sha256(read(path)))
 end
 
-function _environment_record(candidate, path)
+function _manifest_package_entry(manifest, name, uuid)
+    entries = get(get(manifest, "deps", Dict{String,Any}()), name, nothing)
+    entries === nothing && error("active Manifest.toml does not bind $name")
+    candidates = entries isa AbstractVector ? entries : [entries]
+    matches = filter(entry -> get(entry, "uuid", "") == uuid, candidates)
+    length(matches) == 1 || error("active Manifest.toml does not uniquely bind $name/$uuid")
+    only(matches)
+end
+
+function _actual_environment_observation()
     project = Base.active_project()
-    project === nothing && error("qualification requires an active Julia project")
+    project === nothing && error("execution provenance requires an active Julia project")
     project = abspath(project)
     manifest = joinpath(dirname(project), "Manifest.toml")
-    isfile(manifest) || error("qualification requires the actual active Manifest.toml")
+    isfile(manifest) || error("execution provenance requires the actual active Manifest.toml")
+    source = _source_identity()
+    package_root = realpath(Base.pkgdir(CYAxiverse))
+    package_entry_path = pathof(CYAxiverse)
+    package_entry_path === nothing && error("CYAxiverse module path is unavailable")
+    package_entry = realpath(package_entry_path)
+    ia_root = realpath(Base.pkgdir(SC.IA))
+    ia_uuid = string(Base.PkgId(SC.IA).uuid)
+    manifest_data = TOML.parsefile(manifest)
+    ia_entry = _manifest_package_entry(manifest_data, "IntervalArithmetic", ia_uuid)
+    registered_ia_tree = get(ia_entry, "git-tree-sha1", "")
+    actual_ia_tree = bytes2hex(Pkg.GitTools.tree_hash(ia_root))
+    scientific_entry = something(pathof(SC), "")
+    cert_source = joinpath(package_root, "src", "scientific_certification", "certificates.jl")
     record = Dict("schema"=>"cyax-scientific-environment-v1",
-        "candidate_commit"=>candidate.commit,"candidate_tree"=>candidate.tree,
-        "worktree_clean"=>candidate.clean,"julia_version"=>string(VERSION),
+        "repository"=>source.repository,"candidate_commit"=>source.commit,
+        "candidate_tree"=>source.tree,"worktree_clean"=>source.clean,
+        "julia_version"=>string(VERSION),
         "julia_executable"=>first(Base.julia_cmd().exec),
         "package_version"=>string(Base.pkgversion(CYAxiverse)),
         "interval_arithmetic_version"=>string(Base.pkgversion(SC.IA)),
+        "interval_arithmetic_uuid"=>ia_uuid,
+        "interval_arithmetic_source_root"=>ia_root,
+        "interval_arithmetic_registered_tree_sha1"=>registered_ia_tree,
+        "interval_arithmetic_actual_tree_sha1"=>actual_ia_tree,
+        "loaded_package_root"=>package_root,
+        "loaded_package_entrypoint"=>package_entry,
+        "loaded_package_entrypoint_sha256"=>_hash_file(package_entry),
+        "scientific_module_entrypoint"=>scientific_entry,
+        "certificate_source_sha256"=>isfile(cert_source) ? _hash_file(cert_source) : "missing",
         "active_project_sha256"=>_hash_file(project),
         "active_manifest_sha256"=>_hash_file(manifest),
         "active_project_path"=>project,"active_manifest_path"=>manifest,
         "julia_threads"=>Threads.nthreads(),"blas_threads"=>BLAS.get_num_threads(),
         "openblas_num_threads"=>get(ENV,"OPENBLAS_NUM_THREADS","unset"),
         "julia_num_threads"=>get(ENV,"JULIA_NUM_THREADS","unset"))
+    return record
+end
+
+function _approved_profile_matches(expected, observed)
+    expected == observed || return false
+    get(observed, "schema", "") == "cyax-scientific-environment-v1" || return false
+    get(observed, "worktree_clean", false) === true || return false
+    startswith(get(observed, "julia_version", ""), "1.12.") || return false
+    get(observed, "interval_arithmetic_version", "") == "0.22.36" || return false
+    get(observed, "interval_arithmetic_registered_tree_sha1", "") ==
+        "79342df41c3c24664e5bf29395cfdf2f2a599412" || return false
+    get(observed, "julia_threads", 0) == 1 || return false
+    get(observed, "blas_threads", 0) == 1 || return false
+    get(observed, "julia_num_threads", "") == "1" || return false
+    get(observed, "openblas_num_threads", "") == "1" || return false
+    get(observed, "interval_arithmetic_registered_tree_sha1", "") != "" || return false
+    get(observed, "interval_arithmetic_registered_tree_sha1", "") ==
+        get(observed, "interval_arithmetic_actual_tree_sha1", "") || return false
+    get(observed, "loaded_package_root", "") == realpath(ROOT) || return false
+    get(observed, "loaded_package_entrypoint", "") == realpath(joinpath(ROOT, "src", "CYAxiverse.jl")) || return false
+    get(observed, "certificate_source_sha256", "") != "missing" || return false
+    true
+end
+
+function _environment_record(candidate, path)
+    record = _actual_environment_observation()
+    record["candidate_commit"] == candidate.commit &&
+        record["candidate_tree"] == candidate.tree &&
+        record["worktree_clean"] == candidate.clean ||
+        error("trusted environment snapshot does not match the observed candidate")
+    record["worktree_clean"] === true || error("qualification requires a clean candidate source")
+    _approved_profile_matches(record, record) || error("qualification requires the approved serial scientific profile")
     ispath(path) && error("refusing to overwrite evidence file $path")
     open(path, "w") do io
         TOML.print(io, record; sorted=true)
     end
     return (record=record, path=path, sha256=_hash_file(path),
-        artifact_name=basename(path), project_dir=dirname(project))
+        artifact_name=basename(path), project_dir=dirname(record["active_project_path"]))
 end
 
 function _warmup(precision)
@@ -341,6 +411,21 @@ function _produce_case(id, precision, evidence_dir, environment_path, expected_e
     candidate = _source_identity()
     env_record["candidate_commit"] == candidate.commit && env_record["candidate_tree"] == candidate.tree ||
         error("candidate identity changed after environment receipt")
+    evidence_root = dirname(dirname(abspath(environment_path)))
+    observation_dir = joinpath(dirname(abspath(environment_path)), "observations")
+    mkpath(observation_dir)
+    observation_path = joinpath(observation_dir, "producer-$id-p$precision.toml")
+    before = _actual_environment_observation()
+    before_matches = _approved_profile_matches(env_record, before)
+    if !before_matches
+        _set_report(observation_path, Dict("schema"=>"cyax-scientific-execution-observation-v1",
+            "kind"=>"producer", "case"=>id, "precision"=>precision,
+            "trusted_environment_sha256"=>expected_environment_sha,
+            "provenance_status"=>"FAIL", "before_profile_matches"=>false,
+            "after_profile_matches"=>false, "after_observation_status"=>"NOT_RUN",
+            "before"=>before))
+        error("producer process profile/source does not match the trusted execution receipt")
+    end
     warmup_start = time_ns()
     _warmup(precision)
     warmup_proof_seconds = (time_ns() - warmup_start) / 1e9
@@ -353,10 +438,22 @@ function _produce_case(id, precision, evidence_dir, environment_path, expected_e
     source_ref = (repository=candidate.repository, commit=candidate.commit, tree=candidate.tree)
     environment_ref = (receipt_sha256=expected_environment_sha, artifact_name=basename(environment_path))
     written = SC.write_certificate(evidence_dir, model, result; source_ref, environment_ref)
+    after = _actual_environment_observation()
+    after_matches = _approved_profile_matches(env_record, after)
+    observation = Dict("schema"=>"cyax-scientific-execution-observation-v1",
+        "kind"=>"producer", "case"=>id, "precision"=>precision,
+        "trusted_environment_sha256"=>expected_environment_sha,
+        "provenance_status"=>after_matches ? "PASS" : "FAIL",
+        "before_profile_matches"=>before_matches, "after_profile_matches"=>after_matches,
+        "before"=>before, "after"=>after, "after_observation_status"=>"COMPLETE")
+    _set_report(observation_path, observation)
+    after_matches || error("producer process profile/source changed before certification completed")
     result_path = joinpath(evidence_dir, "case_result.toml")
     diagnostic_compatibility = id == "T14" ? _t14_diagnostic_compatibility(_aux.diagnostic) : nothing
     _result_record(result_path,id,precision,item,result,written.input_sha256,written.certificate_sha256;
-        diagnostic_compatibility)
+        diagnostic_compatibility,
+        producer_observation_ref=replace(relpath(observation_path,evidence_root),'\\'=>'/'),
+        producer_observation_sha256=_hash_file(observation_path))
     println("case=$id precision=$precision status=CERTIFIED input_sha256=$(written.input_sha256) certificate_sha256=$(written.certificate_sha256) warmup_proof_seconds=$warmup_proof_seconds case_compile_seconds=$case_compile_seconds warm_case_seconds=$warm_case_seconds")
     return 0
 end
@@ -420,12 +517,13 @@ function _terminate_process_group(pgid::Integer)
     nothing
 end
 
-function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::Int; cwd=ROOT)
+function _run_process(argv::Vector{String}, log_path::String, timeout_seconds::Int; cwd=ROOT,
+                      extra_env=Pair{String,String}[])
     mkpath(dirname(log_path))
     open(log_path,"w") do log
         cmd = Cmd(Cmd(argv); dir=cwd, detach=_PROCESS_GROUP_SUPERVISION)
         proc = run(pipeline(addenv(cmd, "JULIA_NUM_THREADS"=>"1",
-            "OPENBLAS_NUM_THREADS"=>"1"), stdout=log, stderr=log); wait=false)
+            "OPENBLAS_NUM_THREADS"=>"1", extra_env...), stdout=log, stderr=log); wait=false)
         process_group = _PROCESS_GROUP_SUPERVISION ? getpid(proc) : nothing
         started = time()
         deadline = time() + timeout_seconds
@@ -527,18 +625,18 @@ function _replay_receipt(case_id, precision, result, environment, source, eviden
     cert_sha = result["certificate_sha256"]
     producer_source = cert["source_ref"]
     producer_environment = cert["environment_ref"]
-    observed_source = Dict("repository"=>source.repository,"commit"=>source.commit,"tree"=>source.tree)
-    observed_environment = Dict("receipt_sha256"=>environment.sha256,"artifact_name"=>environment.artifact_name)
-    provenance = producer_source == observed_source && producer_environment == observed_environment && source.clean &&
-        environment.record["worktree_clean"]
     log_path = joinpath(evidence_root, log_rel)
     command_path = joinpath(evidence_root,"commands", "replay-$case_id-p$precision.toml")
+    observation_dir = joinpath(evidence_root, "environment", "observations", "replay-$case_id-p$precision")
+    ispath(observation_dir) && error("replay observation destination collision: $observation_dir")
+    mkpath(observation_dir)
     argv = _julia_argv(environment.project_dir, VERIFIER_PATH,
         "--inputs",joinpath(result["path"],"inputs.toml"),
         "--certificate",joinpath(result["path"],"certificate.toml"),
         "--expect-input-sha256",input_sha,"--expect-certificate-sha256",cert_sha,
         "--require","root_and_spectrum","--precision",string(precision))
-    code, timedout, elapsed = _run_process(argv,log_path,300)
+    code, timedout, elapsed = _run_process(argv,log_path,300;
+        extra_env=["CYAX_SCIENTIFIC_REPLAY_OBSERVATION_DIR"=>observation_dir])
     _argv_record(command_path,argv,ROOT,code,timedout;elapsed_seconds=elapsed)
     text = read(log_path,String)
     verdict = occursin("status=VERIFIED",text) ? "VERIFIED" :
@@ -548,14 +646,95 @@ function _replay_receipt(case_id, precision, result, environment, source, eviden
     expected = Dict("VERIFIED"=>0,"UNPROVEN"=>1,"INVALID"=>2,"UNSUPPORTED"=>3)
     haskey(expected,verdict) || error("replay process did not return a declared result")
     code == expected[verdict] || error("replay exit code does not match mathematical verdict")
-    ref_status = provenance ? "PASS" : "FAIL"
+    replay_environment_path = joinpath(observation_dir, "replay-environment.toml")
+    replay_execution_path = joinpath(observation_dir, "replay-execution.toml")
+    isfile(replay_environment_path) && isfile(replay_execution_path) ||
+        error("replay child did not retain its actual source/environment observations")
+    replay_environment = TOML.parsefile(replay_environment_path)
+    replay_execution = TOML.parsefile(replay_execution_path)
+    replay_environment_sha = _hash_file(replay_environment_path)
+    verifier_index = findfirst(==(VERIFIER_PATH), argv)
+    verifier_index === nothing && error("actual replay argv did not include the standalone verifier")
+    replay_execution["schema"] == "cyax-scientific-replay-observation-v1" ||
+        error("replay child observation schema is invalid")
+    replay_execution["verifier_path"] == realpath(VERIFIER_PATH) ||
+        error("replay child observed a different verifier path")
+    replay_execution["verifier_sha256"] == _hash_file(VERIFIER_PATH) ||
+        error("replay child observed a different verifier source identity")
+    replay_execution["verifier_argv"] == argv[(verifier_index + 1):end] ||
+        error("replay child observed a different verifier argument vector")
+    replay_execution["exit_code"] == code || error("replay child observation exit differs from the process exit")
+    replay_execution["environment_observation_ref"] == basename(replay_environment_path) &&
+        replay_execution["environment_observation_sha256"] == replay_environment_sha ||
+        error("replay child environment observation identity is inconsistent")
+    replay_environment == replay_execution["after"] ||
+        error("replay child environment receipt differs from its post-execution observation")
+    replay_environment_ref = Dict("receipt_sha256"=>replay_environment_sha,
+        "artifact_name"=>basename(replay_environment_path))
+    observed_source = Dict("repository"=>replay_environment["repository"],
+        "commit"=>replay_environment["candidate_commit"],"tree"=>replay_environment["candidate_tree"])
+    replay_before = replay_execution["before"]
+    replay_after = replay_execution["after"]
+    replay_profile_matches = _approved_profile_matches(environment.record, replay_before) &&
+        _approved_profile_matches(environment.record, replay_after) && replay_before == replay_after
+    producer_observation_ref = get(result, "producer_observation_ref", "")
+    producer_observation_path = isempty(producer_observation_ref) ? "" :
+        joinpath(evidence_root, split(producer_observation_ref, '/')...)
+    producer_observation_available = !isempty(producer_observation_path) &&
+        isfile(producer_observation_path) &&
+        get(result, "producer_observation_sha256", "") == _hash_file(producer_observation_path)
+    producer_profile_matches = false
+    producer_observation_sha = ""
+    if producer_observation_available
+        producer_observation = TOML.parsefile(producer_observation_path)
+        producer_observation_sha = _hash_file(producer_observation_path)
+        producer_profile_matches = producer_observation["schema"] == "cyax-scientific-execution-observation-v1" &&
+            producer_observation["kind"] == "producer" && producer_observation["case"] == case_id &&
+            producer_observation["precision"] == precision &&
+            producer_observation["trusted_environment_sha256"] == environment.sha256 &&
+            producer_observation["provenance_status"] == "PASS" &&
+            producer_observation["before_profile_matches"] === true &&
+            producer_observation["after_profile_matches"] === true &&
+            _approved_profile_matches(environment.record, producer_observation["before"]) &&
+            _approved_profile_matches(environment.record, producer_observation["after"])
+    end
+    producer_source_matches = producer_source == observed_source &&
+        replay_environment["worktree_clean"] === true && source.commit == observed_source["commit"] &&
+        source.tree == observed_source["tree"] && source.clean
+    producer_environment_matches = producer_environment ==
+        Dict("receipt_sha256"=>environment.sha256,"artifact_name"=>environment.artifact_name)
+    provenance = producer_profile_matches && replay_profile_matches && producer_source_matches &&
+        producer_environment_matches
+    ref_status = provenance ? "PASS" :
+        (!producer_observation_available && replay_profile_matches && producer_source_matches ? "UNAVAILABLE" : "FAIL")
+    pair_observation_path = joinpath(evidence_root, "environment", "observations",
+        "pair-$case_id-p$precision.toml")
+    producer_observation_relative = producer_observation_available ?
+        replace(relpath(producer_observation_path,evidence_root),'\\'=>'/') : "unavailable"
+    replay_environment_relative = replace(relpath(replay_environment_path,evidence_root),'\\'=>'/')
+    replay_execution_relative = replace(relpath(replay_execution_path,evidence_root),'\\'=>'/')
+    pair_observation = Dict("schema"=>"cyax-scientific-provenance-observation-v1",
+        "case"=>case_id,"precision"=>precision,"trusted_environment_sha256"=>environment.sha256,
+        "producer_observation_available"=>producer_observation_available,
+        "producer_observation_ref"=>producer_observation_relative,
+        "producer_observation_sha256"=>producer_observation_sha,
+        "producer_profile_matches"=>producer_profile_matches,
+        "replay_environment_observation_ref"=>replay_environment_relative,
+        "replay_environment_observation_sha256"=>replay_environment_sha,
+        "replay_execution_observation_ref"=>replay_execution_relative,
+        "replay_execution_observation_sha256"=>_hash_file(replay_execution_path),
+        "replay_profile_matches"=>replay_profile_matches,
+        "producer_source_matches"=>producer_source_matches,
+        "producer_environment_matches"=>producer_environment_matches,
+        "provenance_status"=>ref_status)
+    _set_report(pair_observation_path, pair_observation)
     replay = Dict("schema"=>"cyax-scientific-replay-v1","input_sha256"=>input_sha,
         "certificate_sha256"=>cert_sha,"producer_source"=>producer_source,
         "producer_environment"=>producer_environment,"observed_replay_source"=>observed_source,
-        "observed_replay_environment"=>observed_environment,"replay_precision"=>precision,
+        "observed_replay_environment"=>replay_environment_ref,"replay_precision"=>precision,
         "required_kind"=>"root_and_spectrum","mathematical_verdict"=>verdict,
         "exit_code"=>code,"provenance_status"=>ref_status,
-        "provenance_evidence_ref"=>"environment/producer-environment.toml",
+        "provenance_evidence_ref"=>replace(relpath(pair_observation_path,evidence_root),'\\'=>'/'),
         "claims"=>[Dict("name"=>"root","outcome"=>verdict=="VERIFIED" ? "proved" : "unproved",
             "reason"=>"fresh-process submitted root witness replay"),
             Dict("name"=>"spectrum","outcome"=>verdict=="VERIFIED" ? "proved" : "unproved",
@@ -650,6 +829,8 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
             "warm_case_seconds"=>timing.warm_case_seconds,
             "external_process_wall_seconds"=>elapsed,
             "input_sha256"=>result["input_sha256"],"certificate_sha256"=>result["certificate_sha256"],
+            "producer_observation_ref"=>result["producer_observation_ref"],
+            "producer_observation_sha256"=>result["producer_observation_sha256"],
             "result_ref"=>relpath(joinpath(destination,"case_result.toml"),out))
         if peak_rss !== nothing
             row["peak_rss_bytes"]=peak_rss.bytes
@@ -666,11 +847,21 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
             "receipt_ref"=>relpath(replay.receipt,out),"log_ref"=>relpath(replay.log,out)))
     end
     profile == "public" && _check_pairwise(records)
+    suite_observation_path=joinpath(out,"environment","observations","suite-$profile.toml")
+    suite_after=_actual_environment_observation()
+    suite_profile_matches=_approved_profile_matches(environment.record,suite_after)
+    _set_report(suite_observation_path,Dict("schema"=>"cyax-scientific-suite-observation-v1",
+        "profile"=>profile,"trusted_environment_sha256"=>environment.sha256,
+        "provenance_status"=>suite_profile_matches ? "PASS" : "FAIL",
+        "before"=>environment.record,"after"=>suite_after))
+    suite_profile_matches || error("qualification suite parent profile/source changed during execution")
     schema = profile == "public" ? "cyax-scientific-public-qualification-v1" :
         "cyax-scientific-fast-qualification-v1"
     suite=Dict("schema"=>schema,
         "candidate_commit"=>candidate.commit,"candidate_tree"=>candidate.tree,
         "environment_sha256"=>environment.sha256,"environment_ref"=>relpath(environment.path,out),
+        "execution_observation_ref"=>relpath(suite_observation_path,out),
+        "execution_observation_sha256"=>_hash_file(suite_observation_path),
         "qualification_profile"=>"julia-1.12-ia-0.22.36-serial-$profile",
         "warm_timing_method"=>"Base.@timed measures _run_math; case_compile_seconds is Julia compiler time and warm_case_seconds is elapsed time minus compiler time; warmup_proof_seconds measures the bounded T01 warm-up separately",
         "peak_rss_method"=>"Platform-qualified getrusage(RUSAGE_CHILDREN) in a one-child Julia wrapper for T03/T05; row receipts record OS method, raw unit and bytes",
@@ -825,6 +1016,20 @@ function _produce_held_out_case(args)
     env_record=TOML.parse(String(environment_bytes)); candidate=_source_identity()
     env_record["candidate_commit"]==candidate.commit && env_record["candidate_tree"]==candidate.tree && candidate.clean ||
         error("T15 requires the unchanged clean frozen candidate")
+    evidence_root=dirname(dirname(abspath(environment_path)))
+    observation_dir=joinpath(dirname(abspath(environment_path)),"observations")
+    mkpath(observation_dir)
+    observation_path=joinpath(observation_dir,"producer-T15-p$precision.toml")
+    before=_actual_environment_observation()
+    before_matches=_approved_profile_matches(env_record,before)
+    if !before_matches
+        _set_report(observation_path,Dict("schema"=>"cyax-scientific-execution-observation-v1",
+            "kind"=>"producer","case"=>"T15","precision"=>precision,
+            "trusted_environment_sha256"=>environment_sha,"provenance_status"=>"FAIL",
+            "before_profile_matches"=>false,"after_profile_matches"=>false,
+            "after_observation_status"=>"NOT_RUN","before"=>before))
+        error("T15 producer process profile/source does not match the trusted execution receipt")
+    end
     _warmup(precision)
     settings,_=_fixture_records()
     options=SC.ProofOptions(precisions=(precision,),max_newton_steps=settings["max_newton_steps"],
@@ -843,9 +1048,20 @@ function _produce_held_out_case(args)
     source_ref=(repository=candidate.repository,commit=candidate.commit,tree=candidate.tree)
     environment_ref=(receipt_sha256=environment_sha,artifact_name=basename(environment_path))
     written=SC.write_certificate(evidence_dir,held.model,result;source_ref,environment_ref)
+    after=_actual_environment_observation()
+    after_matches=_approved_profile_matches(env_record,after)
+    _set_report(observation_path,Dict("schema"=>"cyax-scientific-execution-observation-v1",
+        "kind"=>"producer","case"=>"T15","precision"=>precision,
+        "trusted_environment_sha256"=>environment_sha,
+        "provenance_status"=>after_matches ? "PASS" : "FAIL",
+        "before_profile_matches"=>before_matches,"after_profile_matches"=>after_matches,
+        "before"=>before,"after"=>after,"after_observation_status"=>"COMPLETE"))
+    after_matches || error("T15 producer process profile/source changed before certification completed")
     item=Dict("id"=>"T15","family"=>"T15")
     _result_record(joinpath(evidence_dir,"case_result.toml"),"T15",precision,item,result,
-        written.input_sha256,written.certificate_sha256)
+        written.input_sha256,written.certificate_sha256;
+        producer_observation_ref=replace(relpath(observation_path,evidence_root),'\\'=>'/'),
+        producer_observation_sha256=_hash_file(observation_path))
     println("case=T15 precision=$precision status=CERTIFIED input_sha256=$(written.input_sha256) certificate_sha256=$(written.certificate_sha256)")
     0
 end
@@ -883,6 +1099,8 @@ function _run_held_out(args)
         record["status"]=="CERTIFIED" && record["classification"]=="MINIMUM" || error("T15 result record failed")
         push!(producer_rows,Dict("case"=>id,"precision"=>precision,"status"=>record["status"],
             "input_sha256"=>record["input_sha256"],"certificate_sha256"=>record["certificate_sha256"],
+            "producer_observation_ref"=>record["producer_observation_ref"],
+            "producer_observation_sha256"=>record["producer_observation_sha256"],
             "result_ref"=>relpath(joinpath(destination,"case_result.toml"),out)))
         replay_log_rel=joinpath("logs","replay-$id-p$precision.log")
         replay_rel=joinpath("replay","$id-p$precision.toml")
@@ -890,9 +1108,19 @@ function _run_held_out(args)
         push!(replay_rows,Dict("case"=>id,"precision"=>precision,"verdict"=>"VERIFIED",
             "receipt_ref"=>relpath(replay.receipt,out),"log_ref"=>relpath(replay.log,out)))
     end
+    suite_observation_path=joinpath(out,"environment","observations","suite-held-out.toml")
+    suite_after=_actual_environment_observation()
+    suite_profile_matches=_approved_profile_matches(environment.record,suite_after)
+    _set_report(suite_observation_path,Dict("schema"=>"cyax-scientific-suite-observation-v1",
+        "profile"=>"held-out","trusted_environment_sha256"=>environment.sha256,
+        "provenance_status"=>suite_profile_matches ? "PASS" : "FAIL",
+        "before"=>environment.record,"after"=>suite_after))
+    suite_profile_matches || error("T15 qualification parent profile/source changed during execution")
     suite=Dict("schema"=>"cyax-scientific-held-out-qualification-v1",
         "candidate_commit"=>candidate.commit,"candidate_tree"=>candidate.tree,
         "input_sha256"=>held.input_sha256,"oracle_sha256"=>bytes2hex(sha256(held.oracle_bytes)),
+        "execution_observation_ref"=>relpath(suite_observation_path,out),
+        "execution_observation_sha256"=>_hash_file(suite_observation_path),
         "environment_sha256"=>environment.sha256,"producer_count"=>length(producer_rows),
         "replay_count"=>length(replay_rows),"producers"=>producer_rows,"replays"=>replay_rows)
     _set_report(joinpath(out,"qualification.toml"),suite)

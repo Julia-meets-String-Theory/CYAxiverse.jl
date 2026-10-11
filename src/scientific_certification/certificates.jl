@@ -806,7 +806,8 @@ function write_certificate(directory::AbstractString, model::CertificationModel,
                 _revalidate_root(model,root,root.precision;
                     reuse_hessian=root.hessian_method === :spectral_counts) ||
                     throw(ArgumentError("root witness did not revalidate"))
-                kind="root"; spectrum_record=Dict("status"=>"not_requested","reason"=>"not_requested")
+                kind="root"; spectrum_record=Dict("status"=>"not_requested",
+                    "reason"=>result isa CertificationResult ? "coverage_unavailable" : "not_requested")
                 if combined_spectrum !== nothing
                     spectrum=combined_spectrum
                     _verify_spectrum_claim(model,root,_spectrum_record(spectrum),root.precision,
@@ -961,7 +962,7 @@ function verify_certificate(certificate_path::AbstractString, input_path::Abstra
                 [(name="root",outcome=:proved,reason="strict inclusion and contraction"),
                  (name="hessian",outcome=:proved,reason="submitted Hessian claim reproduced"),
                  (name="spectrum",outcome=parsed.kind=="root_and_spectrum" ? :proved : :not_requested,
-                  reason=parsed.kind=="root_and_spectrum" ? "all mode bounds reproduced" : "not requested")],
+                  reason=parsed.kind=="root_and_spectrum" ? "all mode bounds reproduced" : parsed.spectrum["reason"])],
                 :NOT_CHECKED,replay_bits)
         end
         return result
