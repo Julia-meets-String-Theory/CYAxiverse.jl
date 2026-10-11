@@ -1137,6 +1137,19 @@ end
         @test root.status==:CERTIFIED_ROOT
         @test spectrum.status==:CERTIFIED_BOUNDS
         @test combined.status==:CERTIFIED
+
+        root_fields=fieldnames(typeof(root))
+        root_values=Any[getfield(root,name) for name in root_fields]
+        root_values[findfirst(==(:W),root_fields)]=SC._with_precision(256) do
+            [SC._iv(-1//1,1//1,256)]
+        end
+        stored_W_outside=SC.RootResult(root_values...)
+        @test SC._lo(stored_W_outside.W[1])<SC._lo(stored_W_outside.box[1])
+        @test SC._hi(stored_W_outside.W[1])>SC._hi(stored_W_outside.box[1])
+        rejected_spectrum=SC.certify_generalized_spectrum(model,stored_W_outside;options)
+        @test rejected_spectrum.status==:INVALID_INPUT
+        @test rejected_spectrum.reason=="root witness does not match model"
+        @test !rejected_spectrum.resolution_met
         for identity in (root.identity,spectrum.identity,combined.identity,combined.root.identity,
                 combined.spectrum.identity)
             @test identity.input_identity_status==:AVAILABLE

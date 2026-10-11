@@ -412,6 +412,8 @@ function _revalidate_root(model::CertificationModel, root::RootResult, bits::Int
     all(_contained_claim(evaluated.F_center[i], root.F_center[i]) for i in 1:n) || return false
     all(_contained_claim(evaluated.H_box[i,j], root.H_box[i,j]) for j in 1:n for i in 1:n) || return false
     all(_contained_claim(evaluated.W[i], root.W[i]) for i in 1:n) || return false
+    all(_lo(root.W[i]) > _lo(root.box[i]) &&
+        _hi(root.W[i]) < _hi(root.box[i]) for i in 1:n) || return false
     all(_lo(evaluated.W[i]) > _lo(root.box[i]) && _hi(evaluated.W[i]) < _hi(root.box[i]) for i in 1:n) || return false
     if reuse_hessian
         # The combined certifier uses this path only for its freshly created
