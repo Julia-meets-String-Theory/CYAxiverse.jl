@@ -286,6 +286,12 @@ function _contains_embedded_absolute_path(value::AbstractString)
     occursin(r"(?<![A-Za-z0-9.])/(?:[^\s/]+/)*[^\s/]+", without_urls)
 end
 
+function _required_url_capture(match_result::RegexMatch, index::Int, label::String)
+    capture = match_result.captures[index]
+    capture === nothing && throw(ArgumentError("$label contains a malformed URL"))
+    String(capture)
+end
+
 function _public_safe_metadata(value, label::String)
     text = _metadata_string(value, label; nonempty=true)
     lower = lowercase(text)
@@ -305,10 +311,14 @@ function _public_safe_metadata(value, label::String)
         url = String(url_match.match)
         authority = match(r"^[A-Za-z][A-Za-z0-9+.-]*://([^/?#]+)", url)
         authority === nothing && throw(ArgumentError("$label contains a malformed URL"))
-        hostport = String(authority.captures[1])
+        hostport = _required_url_capture(authority, 1, label)
         occursin('@', hostport) && throw(ArgumentError("$label URL must not contain credentials"))
         host_match = startswith(hostport, "[") ? match(r"^\[([^\]]+)\]", hostport) : nothing
-        host = host_match === nothing ? first(split(hostport, ':'; limit=2)) : String(host_match.captures[1])
+        host = if host_match === nothing
+            first(split(hostport, ':'; limit=2))
+        else
+            _required_url_capture(host_match, 1, label)
+        end
         _private_or_local_host(host) && throw(ArgumentError("$label URL must not name a local/private host"))
         normalized_host = lowercase(host)
         any(normalized_host == domain || endswith(normalized_host, "." * domain)

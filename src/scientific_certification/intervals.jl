@@ -385,9 +385,13 @@ end
 function _amplitudes(model::CertificationModel, bits::Int)
     log10 = _ilog(_iv(10, bits), bits)
     out = Vector{IA.Interval{BigFloat}}(undef, size(model.Q, 2))
+    isempty(out) && return out
+    scale = model.s
+    scale === nothing && throw(ResourceLimitError(
+        "RESOURCE_LIMIT: amplitude scale is unavailable"))
     for a in eachindex(out)
         coeff = model.L[1, a]
-        delta = model.L[2, a] - model.s
+        delta = model.L[2, a] - scale
         if iszero(coeff)
             out[a] = _iv(0, bits)
         else

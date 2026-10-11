@@ -736,6 +736,7 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
             reshape([1,0],2,1),Matrix{Int}(I,33,33))
         large_n_result=SC.certify(large_n_model,zeros(33))
         @test large_n_model.resource_reason=="RESOURCE_LIMIT"
+        @test isempty(SC._amplitudes(large_n_model,256))
         @test large_n_result.status==:UNSUPPORTED
         @test large_n_result.root.reason=="RESOURCE_LIMIT"
         @test large_n_result.identity.input_identity_status==:UNAVAILABLE
@@ -1091,7 +1092,7 @@ end
         for repository in ("/fixture-private/source", "C:\\fixture-private\\source",
                 "\\\\fixture-host\\share\\source", "file:///fixture-private/source",
                 "session_id=fixture-only", "https://user:fixture@example.invalid/source",
-                "https://localhost/source")
+                "https://localhost/source", "https://[::1]/source")
             @test_throws ArgumentError SC._source_record((repository=repository,commit,tree))
         end
         @test_throws ArgumentError SC._source_record(merge(source,(unexpected="discarded",)))
