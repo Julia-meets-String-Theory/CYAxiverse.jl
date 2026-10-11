@@ -145,11 +145,23 @@ function _private_or_local_host(host::AbstractString)
     false
 end
 
+function _contains_embedded_absolute_path(value::AbstractString)
+    # Repository URLs are valid source references; inspect prose and opaque
+    # descriptors separately so their slashes are not mistaken for host paths.
+    without_urls = replace(String(value),
+        r"(?i)\b[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"']+" => " ")
+    occursin(r"(?i)(?:^|[^A-Za-z0-9])(?:[A-Z]:[\\/]|\\\\[^\\/\s]+[\\/])",
+        without_urls) && return true
+    occursin(r"(?<![A-Za-z0-9._-])~[\\/]", without_urls) && return true
+    occursin(r"(?<![A-Za-z0-9.])/(?:[^\s/]+/)*[^\s/]+", without_urls)
+end
+
 function _public_safe_source_ref(value)
     text = _metadata_string(value, "candidate source_ref"; nonempty=true)
     lower = lowercase(text)
     (startswith(text, "/") || text == "~" || startswith(text, "~/") || startswith(text, "~\\") ||
         _windows_absolute_path(text) ||
+        _contains_embedded_absolute_path(text) ||
         startswith(lower, "file:")) && throw(ArgumentError("candidate source_ref must not expose a local path"))
     occursin(r"(?i)(?:password|pass|token|access[_-]?token|secret|client[_-]?secret|api[_-]?key|authorization|auth)\s*=", text) &&
         throw(ArgumentError("candidate source_ref must not contain credentials"))
@@ -659,6 +671,14 @@ end
 
 function _read_candidate_provenance(value)
     value isa AbstractDict || throw(ArgumentError("candidate_provenance must be a table"))
+    status = get(value, "status", nothing)
+    if status == "unknown"
+        _require_keys(value, ("status",), "candidate_provenance")
+    elseif status == "supplied"
+        _require_keys(value, ("status","method","source_ref"), "candidate_provenance")
+    else
+        throw(ArgumentError("candidate_provenance requires an explicit valid status"))
+    end
     _candidate_provenance_record(value)
 end
 

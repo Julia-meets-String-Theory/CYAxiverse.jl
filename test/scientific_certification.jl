@@ -1354,6 +1354,115 @@ end
     end
 end
 
+@testset "R2 serialized provenance and embedded private paths" begin
+    repository_root=normpath(joinpath(@__DIR__,".."))
+    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
+    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
+    model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+    options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals)
+    shorthand=(method="synthetic",source_ref="fixtures/candidate-source")
+    @test SC._provenance(shorthand)==Dict("status"=>"supplied",
+        "method"=>"synthetic","source_ref"=>"fixtures/candidate-source")
+    @test SC._read_candidate_provenance(Dict("status"=>"unknown"))==Dict("status"=>"unknown")
+    @test SC._read_candidate_provenance(Dict("status"=>"supplied",
+        "method"=>"synthetic","source_ref"=>"fixtures/candidate-source"))==
+        Dict("status"=>"supplied","method"=>"synthetic","source_ref"=>"fixtures/candidate-source")
+    @test_throws ArgumentError SC._read_candidate_provenance(Dict(
+        "method"=>"synthetic","source_ref"=>"fixtures/candidate-source"))
+    @test_throws ArgumentError SC._read_candidate_provenance(Dict(
+        "status"=>"unknown","method"=>"synthetic","source_ref"=>"fixtures/candidate-source"))
+
+    unsafe_paths=("fixture description /home/example-user/private/snapshot.toml",
+        "fixture description C:\\Users\\example-user\\private\\snapshot.toml",
+        "fixture description \\\\example-host\\private-share\\snapshot.toml")
+    for reference in unsafe_paths
+        @test_throws ArgumentError SC._public_safe_source_ref(reference)
+        @test_throws ArgumentError SC._provenance((method="synthetic",source_ref=reference))
+        @test_throws ArgumentError SC._source_record((repository=reference,commit,tree))
+    end
+    @test SC._public_safe_source_ref("fixtures/candidate-source")=="fixtures/candidate-source"
+    @test SC._public_safe_source_ref("opaque:fixture-reference")=="opaque:fixture-reference"
+    @test SC._public_safe_source_ref(source.repository)==source.repository
+
+    result=SC.certify(model,[0];options,candidate_provenance=shorthand)
+    @test result.status==:CERTIFIED
+    mktempdir() do parent
+        environment_bytes=Vector{UInt8}(codeunits("synthetic public environment receipt"))
+        environment_path=joinpath(parent,"environment.toml")
+        write(environment_path,environment_bytes)
+        environment=(receipt_sha256=bytes2hex(sha256(environment_bytes)),
+            artifact_name=basename(environment_path))
+        written=SC.write_certificate(joinpath(parent,"valid"),model,result;
+            source_ref=source,environment_ref=environment)
+        valid_report=SC.verify_certificate(written.certificate_path,written.input_path;
+            expected_input_sha256=written.input_sha256,
+            expected_certificate_sha256=written.certificate_sha256,
+            require=:root_and_spectrum,precision_bits=256)
+        @test valid_report.status==:VERIFIED
+
+        valid_document=TOML.parsefile(written.certificate_path)
+        function replay_mutation(name,mutate!)
+            document=deepcopy(valid_document)
+            mutate!(document)
+            path=joinpath(parent,name*".toml")
+            write(path,SC._toml_bytes(document))
+            digest=bytes2hex(sha256(read(path)))
+            report=SC.verify_certificate(path,written.input_path;
+                expected_input_sha256=written.input_sha256,
+                expected_certificate_sha256=digest,
+                require=:root_and_spectrum,precision_bits=256)
+            (path,digest,report)
+        end
+
+        missing_status_path,missing_status_digest,missing_status_report=replay_mutation(
+            "missing-provenance-status",doc->delete!(doc["candidate_provenance"],"status"))
+        @test missing_status_report.status==:INVALID
+
+        unsafe_reference=first(unsafe_paths)
+        unsafe_provenance_path,_,unsafe_provenance_report=replay_mutation(
+            "unsafe-candidate-provenance",doc->(doc["candidate_provenance"]=Dict(
+                "status"=>"supplied","method"=>"synthetic","source_ref"=>unsafe_reference)))
+        @test unsafe_provenance_report.status==:INVALID
+        unsafe_source_path,_,unsafe_source_report=replay_mutation(
+            "unsafe-top-level-source",doc->(doc["source_ref"]["repository"]=unsafe_reference))
+        @test unsafe_source_report.status==:INVALID
+
+        @test_throws ArgumentError SC.write_certificate(joinpath(parent,"unsafe-source-writer"),
+            model,result;source_ref=merge(source,(repository=unsafe_reference,)),
+            environment_ref=environment)
+        @test !ispath(joinpath(parent,"unsafe-source-writer"))
+
+        root_fields=fieldnames(typeof(result.root))
+        root_values=Any[getfield(result.root,name) for name in root_fields]
+        provenance_index=findfirst(==(:candidate_provenance),root_fields)
+        root_values[provenance_index]=Dict("status"=>"supplied","method"=>"synthetic",
+            "source_ref"=>unsafe_reference)
+        unsafe_root=SC.RootResult(root_values...)
+        unsafe_provenance_directory=joinpath(parent,"unsafe-provenance-writer")
+        @test_throws ArgumentError SC.write_certificate(unsafe_provenance_directory,
+            model,unsafe_root;source_ref=source,environment_ref=environment)
+        @test !isfile(joinpath(unsafe_provenance_directory,"inputs.toml"))
+        @test !isfile(joinpath(unsafe_provenance_directory,"certificate.toml"))
+
+        cli_argv=vcat(String.(Base.julia_cmd().exec),String["--startup-file=no",
+            "--project=$repository_root",joinpath(repository_root,"scripts",
+            "verify_scientific_certificate.jl"),"--inputs",written.input_path,
+            "--certificate",missing_status_path,"--expect-input-sha256",written.input_sha256,
+            "--expect-certificate-sha256",missing_status_digest,"--require",
+            "root_and_spectrum","--precision","256"])
+        mktemp() do _log_path,output_file
+            process=run(pipeline(Cmd(Cmd(cli_argv);dir=repository_root);
+                stdout=output_file,stderr=output_file);wait=false)
+            wait(process)
+            flush(output_file);seekstart(output_file)
+            output=read(output_file,String)
+            @test process.exitcode==2
+            @test occursin("status=INVALID",output)
+        end
+    end
+end
+
 @testset "Full public qualification profile" begin
     @test ScientificCertificationFixtures.qualify_from_test_profile!() === nothing
 end
