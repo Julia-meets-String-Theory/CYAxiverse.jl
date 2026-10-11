@@ -1741,3 +1741,145 @@ end
 @testset "Full public qualification profile" begin
     @test ScientificCertificationFixtures.qualify_from_test_profile!() === nothing
 end
+
+# R2 focused correction regressions. This terminal block is selected by the
+# detached focused runner; the public package suite remains unchanged here.
+@testset "R2 focused privacy and serialization bounds" begin
+    repository_root=normpath(joinpath(@__DIR__,".."))
+    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
+    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
+    safe_source_ref="fixtures/candidate-source"
+    safe_method="deterministic fixture search"
+    safe_name="fixtures/environment.toml"
+    digest=repeat("a",64)
+
+    @test SC._provenance((method=safe_method,source_ref=safe_source_ref))["method"]==safe_method
+    @test SC._environment_record((receipt_sha256=digest,artifact_name=safe_name))["artifact_name"]==safe_name
+
+    unsafe_methods=("/home/example-user/private/search.jl",
+        "fixture method /private/workspace/search.jl",
+        "machine_id=synthetic-review-host session_id=synthetic-session",
+        "hostname=synthetic-review-host",
+        "elapsed_seconds=1.25",
+        "started_at=2026-10-11T12:34:56Z")
+    for method in unsafe_methods
+        @test_throws ArgumentError SC._provenance((method=method,source_ref=safe_source_ref))
+    end
+    unsafe_names=("hostname=synthetic-review-host_session_id=synthetic-session.toml",
+        "fixtures/session_id=synthetic-session.toml",
+        "fixtures/search /home/example-user/private/search.jl.toml",
+        "fixtures/elapsed_seconds=1.25.toml")
+    for artifact_name in unsafe_names
+        @test_throws ArgumentError SC._environment_record((receipt_sha256=digest,artifact_name=artifact_name))
+    end
+
+    model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+    options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals)
+    provenance=(method=safe_method,source_ref=safe_source_ref)
+    result=SC.certify(model,[0];options,candidate_provenance=provenance)
+    @test result.status==:CERTIFIED
+    @test_throws ArgumentError SC.certify_stationary_point(model,[0];options,
+        candidate_provenance=(method=first(unsafe_methods),source_ref=safe_source_ref))
+    mktempdir() do parent
+        envbytes=Vector{UInt8}(codeunits("synthetic public environment receipt"))
+        environment=(receipt_sha256=bytes2hex(sha256(envbytes)),artifact_name=safe_name)
+        written=SC.write_certificate(joinpath(parent,"valid"),model,result;
+            source_ref=source,environment_ref=environment)
+        report=SC.verify_certificate(written.certificate_path,written.input_path;
+            expected_input_sha256=written.input_sha256,
+            expected_certificate_sha256=written.certificate_sha256,
+            require=:root_and_spectrum,precision_bits=256)
+        @test report.status==:VERIFIED
+
+        unsafe_environment=(receipt_sha256=environment.receipt_sha256,
+            artifact_name=first(unsafe_names))
+        unsafe_environment_path=joinpath(parent,"unsafe-environment")
+        @test_throws ArgumentError SC.write_certificate(unsafe_environment_path,model,result;
+            source_ref=source,environment_ref=unsafe_environment)
+        @test !ispath(unsafe_environment_path)
+
+        unsafe_provenance=deepcopy(result)
+        unsafe_provenance.root.candidate_provenance["method"]=first(unsafe_methods)
+        unsafe_provenance_path=joinpath(parent,"unsafe-provenance")
+        @test_throws ArgumentError SC.write_certificate(unsafe_provenance_path,model,
+            unsafe_provenance;source_ref=source,environment_ref=environment)
+        @test !ispath(unsafe_provenance_path)
+
+        original=TOML.parsefile(written.certificate_path)
+        function verify_mutant(name,mutate!)
+            document=deepcopy(original)
+            mutate!(document)
+            path=joinpath(parent,name*".toml")
+            write(path,SC._toml_bytes(document))
+            certificate_sha=bytes2hex(sha256(read(path)))
+            SC.verify_certificate(path,written.input_path;
+                expected_input_sha256=written.input_sha256,
+                expected_certificate_sha256=certificate_sha,
+                require=:root_and_spectrum,precision_bits=256)
+        end
+        unsafe_method_report=verify_mutant("unsafe-method",document->
+            (document["candidate_provenance"]["method"]=first(unsafe_methods)))
+        @test unsafe_method_report.status==:INVALID
+        @test occursin("candidate method",unsafe_method_report.reason)
+        unsafe_name_report=verify_mutant("unsafe-artifact-name",document->
+            (document["environment_ref"]["artifact_name"]=first(unsafe_names)))
+        @test unsafe_name_report.status==:INVALID
+        @test occursin("machine or session",unsafe_name_report.reason)
+    end
+
+    small_model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+    small_identity=SC._result_identity(small_model)
+    @test small_identity.input_identity_status==:AVAILABLE
+    large_charge=big(10)^256 # 257 decimal digits; bounded and below each-component limit.
+    large_model=SC.prepare_model(fill(large_charge,32,2048),zeros(Int,2,2048),
+        Matrix{Int}(I,32,32))
+    SC._result_identity(small_model) # warm the measured path before allocation accounting.
+    identity_allocation=@allocated begin
+        large_identity=SC._result_identity(large_model)
+    end
+    @test large_identity.input_identity_status==:UNAVAILABLE
+    @test large_identity.input_identity_reason=="RESOURCE_LIMIT"
+    @test identity_allocation < 4*1024*1024
+    println("input_preflight_allocated_bytes=",identity_allocation)
+
+    small_result=SC.certify(small_model,[0];options)
+    mktempdir() do parent
+        bounded_output=joinpath(parent,"resource-limited-certificate")
+        envbytes=Vector{UInt8}(codeunits("synthetic public environment receipt"))
+        environment=(receipt_sha256=bytes2hex(sha256(envbytes)),artifact_name=safe_name)
+        @test_throws SC.ResourceLimitError SC.write_certificate(bounded_output,large_model,
+            small_result;source_ref=source,environment_ref=environment)
+        @test !ispath(bounded_output)
+    end
+
+    large_rational=string(big(10)^4095,"/1")
+    oversized_document=Dict("Q"=>Dict("dims"=>[1,4097],
+        "data"=>fill(large_rational,4097)))
+    @test SC._toml_bytes(Dict("Q"=>Dict("dims"=>[1,1],"data"=>["1/1"]))) isa Vector{UInt8}
+    serialization_error=nothing
+    serialization_allocation=@allocated begin
+        try
+            SC._toml_bytes(oversized_document)
+        catch error
+            serialization_error=error
+        end
+    end
+    @test serialization_error isa SC.ResourceLimitError
+    @test serialization_allocation < 4*1024*1024
+    println("generic_toml_preflight_allocated_bytes=",serialization_allocation)
+
+    certificate_root=small_result.root
+    append!(certificate_root.original_seed,fill(big(10)^4095//1,4097))
+    certificate_error=nothing
+    certificate_allocation=@allocated begin
+        try
+            SC._preflight_certificate_rational_bytes(certificate_root,nothing)
+        catch error
+            certificate_error=error
+        end
+    end
+    @test certificate_error isa SC.ResourceLimitError
+    @test certificate_allocation < 4*1024*1024
+    println("certificate_preflight_allocated_bytes=",certificate_allocation)
+end

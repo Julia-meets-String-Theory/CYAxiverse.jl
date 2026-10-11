@@ -9,6 +9,123 @@ end
 const _SHA256_RE = r"^[0-9a-f]{64}$"
 const _GIT_SHA_RE = r"^[0-9a-f]{40}$"
 const _RATIONAL_RE = r"^(0|-[1-9][0-9]*|[1-9][0-9]*)/([1-9][0-9]*)$"
+const _MAX_TOML_BYTES = 16*1024*1024
+
+function _preflight_add_bytes(total::Int, additional::Int)
+    additional >= 0 && additional <= _MAX_TOML_BYTES - total ||
+        throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded before serialization"))
+    total + additional
+end
+
+function _decimal_digits_lower_bound(value::BigInt)
+    # GMP's base-10 estimate is exact or one too large; subtracting one gives
+    # a nonallocating lower bound suitable for fail-fast cumulative refusal.
+    max(Base.GMP.MPZ.sizeinbase(value, 10) - 1, 1)
+end
+
+function _rational_text_bytes(value::Rational)
+    n, d = numerator(value), denominator(value)
+    numerator_estimate = Base.GMP.MPZ.sizeinbase(n, 10)
+    denominator_estimate = Base.GMP.MPZ.sizeinbase(d, 10)
+    max(numerator_estimate, denominator_estimate) > 4097 &&
+        throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    max(numerator_estimate - 1, 1) + (n < 0 ? 1 : 0) + 1 +
+        max(denominator_estimate - 1, 1)
+end
+
+function _rational_text_bytes(value::Integer)
+    n = BigInt(value)
+    estimate = Base.GMP.MPZ.sizeinbase(n, 10)
+    estimate > 4097 && throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    _decimal_digits_lower_bound(n) + (n < 0 ? 1 : 0) + 2 # canonical integer spelling is n/1
+end
+
+function _preflight_rational_array(total::Int, values::AbstractArray)
+    total = _preflight_add_bytes(total, 2 + max(length(values) - 1, 0)) # brackets and separators
+    for value in values
+        total = _preflight_add_bytes(total, _rational_text_bytes(value) + 2) # quoted value
+    end
+    total
+end
+
+function _preflight_interval_array(total::Int, values::AbstractArray{<:IA.Interval{BigFloat}})
+    count = length(values)
+    total = _preflight_add_bytes(total, 2 + 3count + max(count - 1, 0))
+    for value in values
+        total = _preflight_add_bytes(total, _rational_text_bytes(_rational_bound(_lo(value))) + 2)
+        total = _preflight_add_bytes(total, _rational_text_bytes(_rational_bound(_hi(value))) + 2)
+    end
+    total
+end
+
+function _preflight_input_rational_bytes(model::CertificationModel)
+    total = 0
+    for values in (model.Q, model.L, model.K, model.phases)
+        total = _preflight_rational_array(total, values)
+    end
+    model.s === nothing && throw(ResourceLimitError("RESOURCE_LIMIT: exact input interpretation unavailable"))
+    _preflight_add_bytes(total, _rational_text_bytes(model.s) + 2)
+end
+
+function _preflight_certificate_rational_bytes(root::RootResult, spectrum)
+    total = 0
+    for values in (root.original_seed, root.translation, root.normalized_seed,
+            root.center, root.preconditioner)
+        total = _preflight_rational_array(total, values)
+    end
+    for values in (root.box, root.F_center, root.H_box, root.W)
+        total = _preflight_interval_array(total, values)
+    end
+    total = _preflight_add_bytes(total, _rational_text_bytes(root.q_upper) + 2)
+    for value in root.options.box_radii
+        total = _preflight_add_bytes(total, _rational_text_bytes(value) + 2)
+    end
+    total = _preflight_add_bytes(total, _rational_text_bytes(root.options.relative_width) + 2)
+    if root.hessian_method === :direct_ldl
+        total = _preflight_interval_array(total, root.hessian_pivots)
+    end
+    if spectrum isa SpectrumResult
+        for values in (spectrum.metric_pivots, spectrum.diagonal_ratios)
+            total = _preflight_interval_array(total, values)
+        end
+        for (lower, upper) in spectrum.bounds
+            total = _preflight_add_bytes(total, _rational_text_bytes(lower) + 2)
+            total = _preflight_add_bytes(total, _rational_text_bytes(upper) + 2)
+        end
+        for cluster in spectrum.clusters
+            total = _preflight_add_bytes(total, _rational_text_bytes(cluster.lower) + 2)
+            total = _preflight_add_bytes(total, _rational_text_bytes(cluster.upper) + 2)
+        end
+        for endpoint in spectrum.endpoint_counts
+            total = _preflight_add_bytes(total, _rational_text_bytes(endpoint.trial) + 2)
+            total = _preflight_interval_array(total, endpoint.pivots)
+        end
+    end
+    total
+end
+
+function _preflight_toml_min_bytes(value, total::Int=0)
+    if value isa AbstractString
+        total = _preflight_add_bytes(total, ncodeunits(value) + 2)
+    elseif value isa AbstractDict
+        for (key, item) in value
+            total = _preflight_add_bytes(total, ncodeunits(string(key)) + 1)
+            total = _preflight_toml_min_bytes(item, total)
+        end
+    elseif value isa AbstractVector
+        if all(item -> item isa AbstractDict, value)
+            for item in value
+                total = _preflight_toml_min_bytes(item, total)
+            end
+        else
+            total = _preflight_add_bytes(total, 2 + max(length(value) - 1, 0))
+            for item in value
+                total = _preflight_toml_min_bytes(item, total)
+            end
+        end
+    end
+    total
+end
 
 function _ratstr(x::Rational)
     n, d = numerator(x), denominator(x)
@@ -73,6 +190,7 @@ function _input_record(model::CertificationModel)
     model.resource_reason === nothing || throw(ResourceLimitError("RESOURCE_LIMIT: input model unavailable"))
     n, M = model.n, model.M
     n <= 32 && M <= 2048 || throw(ResourceLimitError("RESOURCE_LIMIT: input dimensions exceed schema"))
+    _preflight_input_rational_bytes(model)
     Dict("schema"=>"cyax-scientific-input-v1", "n"=>n, "M"=>M,
         "Q"=>_array_record(model.Q), "L"=>_array_record(model.L),
         "K"=>_array_record(model.K), "phi"=>_array_record(model.phases),
@@ -95,12 +213,19 @@ function _result_identity(model::CertificationModel)
 end
 
 function _toml_bytes(record::Dict)
+    _preflight_toml_min_bytes(record)
     _check_tree_limits(record)
-    io = IOBuffer()
+    # IOBuffer truncates at maxsize instead of throwing, so retain one byte
+    # beyond the contract cap and reject the resulting size before use.
+    io = IOBuffer(; maxsize=_MAX_TOML_BYTES + 1)
     TOML.print(io, record; sorted=true)
     bytes = take!(io)
-    (isempty(bytes) || last(bytes) != 0x0a) && push!(bytes, 0x0a)
-    length(bytes) <= 16*1024*1024 || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
+    length(bytes) <= _MAX_TOML_BYTES || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
+    if isempty(bytes) || last(bytes) != 0x0a
+        length(bytes) < _MAX_TOML_BYTES || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
+        push!(bytes, 0x0a)
+    end
+    length(bytes) <= _MAX_TOML_BYTES || throw(ResourceLimitError("RESOURCE_LIMIT: TOML byte limit exceeded"))
     return bytes
 end
 
@@ -161,8 +286,50 @@ function _contains_embedded_absolute_path(value::AbstractString)
     occursin(r"(?<![A-Za-z0-9.])/(?:[^\s/]+/)*[^\s/]+", without_urls)
 end
 
+function _public_safe_metadata(value, label::String)
+    text = _metadata_string(value, label; nonempty=true)
+    lower = lowercase(text)
+    (startswith(text, "/") || text == "~" || startswith(text, "~/") || startswith(text, "~\\") ||
+        _windows_absolute_path(text) || _contains_embedded_absolute_path(text) ||
+        startswith(lower, "file:")) && throw(ArgumentError("$label must not expose a local path"))
+    occursin(r"(?i)(?:password|pass|token|access[_-]?token|secret|client[_-]?secret|api[_-]?key|authorization|auth)\s*=", text) &&
+        throw(ArgumentError("$label must not contain credentials"))
+    occursin(r"(?i)(?:^|[^A-Za-z0-9])(?:session(?:[_-]?id)?|machine(?:[_-]?id)?|hostname|device(?:[_-]?id)?|workspace(?:[_-]?id)?)\s*[=:]", text) &&
+        throw(ArgumentError("$label must not contain machine or session identifiers"))
+    occursin(r"(?i)(?:^|[^A-Za-z0-9])(?:timestamp|date[_-]?time|created[_-]?at|started[_-]?at|finished[_-]?at|elapsed(?:[_-]?(?:time|seconds?|ms))?|duration(?:[_-]?(?:seconds?|ms))?)\s*[=:]", text) &&
+        throw(ArgumentError("$label must not contain timestamps or elapsed-time details"))
+    occursin(r"\b\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?\b", text) &&
+        throw(ArgumentError("$label must not contain timestamps"))
+
+    for url_match in eachmatch(r"(?i)\b[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"']+", text)
+        url = String(url_match.match)
+        authority = match(r"^[A-Za-z][A-Za-z0-9+.-]*://([^/?#]+)", url)
+        authority === nothing && throw(ArgumentError("$label contains a malformed URL"))
+        hostport = String(authority.captures[1])
+        occursin('@', hostport) && throw(ArgumentError("$label URL must not contain credentials"))
+        host_match = startswith(hostport, "[") ? match(r"^\[([^\]]+)\]", hostport) : nothing
+        host = host_match === nothing ? first(split(hostport, ':'; limit=2)) : String(host_match.captures[1])
+        _private_or_local_host(host) && throw(ArgumentError("$label URL must not name a local/private host"))
+        normalized_host = lowercase(host)
+        any(normalized_host == domain || endswith(normalized_host, "." * domain)
+            for domain in ("chatgpt.com", "chat.openai.com", "claude.ai")) &&
+            throw(ArgumentError("$label must not contain a chat/share URL"))
+        path_and_query = replace(url, r"^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]+"=>"")
+        occursin(r"(?i)/(?:share|sharing)(?:/|\?|#|$)", path_and_query) &&
+            throw(ArgumentError("$label must not contain a public-share URL"))
+        occursin(r"(?i)[?&](?:share|share_id|conversation_id|thread_id)=", path_and_query) &&
+            throw(ArgumentError("$label must not contain a private share reference"))
+    end
+    if !occursin("://", text)
+        bare_host = first(split(text, ['/','?','#']; limit=2))
+        _private_or_local_host(first(split(bare_host, ':'; limit=2))) &&
+            throw(ArgumentError("$label must not name a local/private host"))
+    end
+    text
+end
+
 function _public_safe_source_ref(value)
-    text = _metadata_string(value, "candidate source_ref"; nonempty=true)
+    text = _public_safe_metadata(value, "candidate source_ref")
     lower = lowercase(text)
     (startswith(text, "/") || text == "~" || startswith(text, "~/") || startswith(text, "~\\") ||
         _windows_absolute_path(text) ||
@@ -210,7 +377,7 @@ function _safe_artifact_name(value)
         throw(ArgumentError("artifact_name must be a relative name"))
     any(==(".."), split(normalized, '/')) &&
         throw(ArgumentError("artifact_name cannot traverse outside its evidence root"))
-    name
+    _public_safe_metadata(name, "artifact_name")
 end
 
 function _source_record(value)
@@ -958,7 +1125,7 @@ function _candidate_provenance_record(value)
         expected_keys = shorthand ? Set(("method","source_ref")) : Set(("status","method","source_ref"))
         Set(keys(record)) == expected_keys ||
             throw(ArgumentError("supplied candidate provenance requires method and source_ref"))
-        method = _metadata_string(record["method"], "candidate method"; nonempty=true)
+        method = _public_safe_metadata(record["method"], "candidate method")
         source = _public_safe_source_ref(record["source_ref"])
         return Dict("status"=>"supplied","method"=>method,"source_ref"=>source)
     end
@@ -1112,6 +1279,8 @@ function write_certificate(directory::AbstractString, model::CertificationModel,
     root.status === :CERTIFIED_ROOT || throw(ArgumentError("only a certified root can be written"))
     _backend_supported() || throw(ArgumentError("unsupported interval backend"))
     sr, er = _source_record(source_ref), _environment_record(environment_ref)
+    provenance = _candidate_provenance_record(root.candidate_provenance)
+    _preflight_input_rational_bytes(model)
     combined_spectrum = result isa CertificationResult &&
         result.spectrum.status === :CERTIFIED_BOUNDS ? result.spectrum : nothing
     root.hessian_method === :spectral_counts && combined_spectrum === nothing &&
@@ -1122,6 +1291,7 @@ function write_certificate(directory::AbstractString, model::CertificationModel,
                 _revalidate_root(model,root,root.precision;
                     reuse_hessian=root.hessian_method === :spectral_counts) ||
                     throw(ArgumentError("root witness did not revalidate"))
+                _preflight_certificate_rational_bytes(root,combined_spectrum)
                 kind="root"; spectrum_record=Dict("status"=>"not_requested",
                     "reason"=>result isa CertificationResult ? "coverage_unavailable" : "not_requested")
                 if combined_spectrum !== nothing
@@ -1139,7 +1309,7 @@ function write_certificate(directory::AbstractString, model::CertificationModel,
                 certificate=Dict("schema"=>"cyax-scientific-certificate-v1","kind"=>kind,
                     "input_sha256"=>input_digest,"source_ref"=>sr,"environment_ref"=>er,
                     "settings"=>_settings_record(root.options),"precision"=>root.precision,
-                    "candidate_provenance"=>root.candidate_provenance,
+                    "candidate_provenance"=>provenance,
                     "interpretation"=>_interpretation(model),"root"=>_root_record(model,root),
                     "hessian"=>_hessian_record(root,combined_spectrum),"spectrum"=>spectrum_record)
                 cert_bytes=_toml_bytes(certificate)
