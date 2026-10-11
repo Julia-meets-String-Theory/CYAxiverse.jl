@@ -1,6 +1,15 @@
 const _IR = IA.IntervalRounding{:correct}()
 const _RD = RoundDown
 const _RU = RoundUp
+const _RATIONAL_COMPONENT_DIGITS = 4096
+const _MAX_RATIONAL_COMPONENT_VALUE = big(10)^_RATIONAL_COMPONENT_DIGITS - 1
+const _RATIONAL_COMPONENT_BITS = ndigits(_MAX_RATIONAL_COMPONENT_VALUE; base=2)
+const _MAX_DYADIC_DENOMINATOR_EXPONENT = let k = _RATIONAL_COMPONENT_BITS
+    while ndigits(big(1) << k; base=10) > _RATIONAL_COMPONENT_DIGITS
+        k -= 1
+    end
+    k
+end
 
 struct ProofArithmeticError <: Exception
     message::String
@@ -59,9 +68,47 @@ function _exact_rational(x)
 end
 
 function _exact_bigfloat_rational(x::BigFloat)
-    return setprecision(BigFloat, precision(x)) do
-        Rational{BigInt}(x)
+    isfinite(x) || throw(ArgumentError("numeric inputs must be finite"))
+    iszero(x) && return BigInt(0) // BigInt(1)
+
+    # MPFR stores a significand and a separate binary exponent. Check both
+    # components before expanding that representation into a BigInt. The
+    # minimum precision removes significand trailing zeros, so large-precision
+    # values such as 1 + 2^-500 remain cheap and exact.
+    binary_exponent = exponent(x)
+    binary_exponent < _RATIONAL_COMPONENT_BITS ||
+        throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    binary_exponent < -_MAX_DYADIC_DENOMINATOR_EXPONENT &&
+        throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    significand_bits = ccall((:mpfr_min_prec, Base.MPFR.libmpfr), Clong,
+        (Ref{BigFloat},), x)
+    significand_bits <= _RATIONAL_COMPONENT_BITS ||
+        throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    binary_shift = binary_exponent - (Int(significand_bits) - 1)
+    binary_shift < 0 && -binary_shift > _MAX_DYADIC_DENOMINATOR_EXPONENT &&
+        throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    binary_shift >= 0 && Int(significand_bits) + binary_shift > _RATIONAL_COMPONENT_BITS &&
+        throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    if binary_shift >= 0
+        cmp = ccall((:mpfr_cmp_z, Base.MPFR.libmpfr), Cint,
+            (Ref{BigFloat}, Ref{BigInt}), abs(x), _MAX_RATIONAL_COMPONENT_VALUE)
+        cmp <= 0 || throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
     end
+
+    significand_float = setprecision(BigFloat, Int(significand_bits)) do
+        ldexp(abs(x), Int(significand_bits) - 1 - binary_exponent)
+    end
+    cmp_significand = ccall((:mpfr_cmp_z, Base.MPFR.libmpfr), Cint,
+        (Ref{BigFloat}, Ref{BigInt}), significand_float, _MAX_RATIONAL_COMPONENT_VALUE)
+    cmp_significand <= 0 ||
+        throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    significand = BigInt(significand_float)
+    numerator_value = binary_shift >= 0 ? significand << binary_shift : significand
+    denominator_value = binary_shift < 0 ? big(1) << -binary_shift : big(1)
+    (ndigits(numerator_value; base=10) <= _RATIONAL_COMPONENT_DIGITS &&
+     ndigits(denominator_value; base=10) <= _RATIONAL_COMPONENT_DIGITS) ||
+        throw(ResourceLimitError("RESOURCE_LIMIT: rational component limit exceeded"))
+    return (signbit(x) ? -numerator_value : numerator_value) // denominator_value
 end
 
 function _rational_interval(x::Rational{BigInt}, bits::Int)

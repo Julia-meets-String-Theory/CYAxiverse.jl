@@ -221,6 +221,31 @@ def _constant(value):
     raise CheckFailure("JSON_NONFINITE", f"nonstandard JSON numeric value {value}")
 
 
+def _check_json_nesting(text: str, path: Path):
+    stack = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "[{":
+            stack.append(char)
+            if len(stack) > 12:
+                raise CheckFailure("JSON_RESOURCE_LIMIT", "JSON nesting depth exceeds 12", str(path))
+        elif char == "]" and stack and stack[-1] == "[":
+            stack.pop()
+        elif char == "}" and stack and stack[-1] == "{":
+            stack.pop()
+
+
 def _walk_limits(value, depth=0):
     if depth > 12:
         raise CheckFailure("JSON_RESOURCE_LIMIT", "JSON nesting depth exceeds 12")
@@ -241,10 +266,14 @@ def parse_json(path: Path):
     if len(data) > 4 * 1024 * 1024:
         raise CheckFailure("JSON_RESOURCE_LIMIT", "JSON file exceeds 4 MiB", str(path))
     try:
-        value = json.loads(data.decode("utf-8"), object_pairs_hook=_objects,
+        text = data.decode("utf-8")
+        _check_json_nesting(text, path)
+        value = json.loads(text, object_pairs_hook=_objects,
                            parse_constant=_constant)
     except CheckFailure:
         raise
+    except RecursionError as exc:
+        raise CheckFailure("JSON_RESOURCE_LIMIT", "JSON nesting exceeds parser limits", str(path)) from exc
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise CheckFailure("JSON_INVALID", str(exc), str(path)) from exc
     _walk_limits(value)
@@ -254,6 +283,16 @@ def parse_json(path: Path):
 def _string(value, name):
     if not isinstance(value, str) or not value.strip():
         raise CheckFailure("CASE_FIELD_INVALID", f"{name} must be a nonempty string")
+
+
+def _validate_simulated_action_status(case_id: str, value):
+    if not isinstance(value, str) or value not in {"not_applicable", "BLOCKED"}:
+        raise CheckFailure("EVIDENCE_INVALID", f"{case_id} simulated_action_status is invalid")
+    if case_id == "SK-12":
+        if value != "BLOCKED":
+            raise CheckFailure("EVIDENCE_INCOMPLETE", "SK-12 must record its simulated BLOCKED action")
+    elif value != "not_applicable":
+        raise CheckFailure("EVIDENCE_INVALID", f"{case_id} simulated_action_status must be not_applicable")
 
 
 def validate_case_pack(path: Path):
@@ -528,11 +567,7 @@ def validate_evidence(path: Path, candidate: str, tree: str, checker_hash: str,
             raise CheckFailure("EVIDENCE_INVALID", f"{cid} status field is invalid")
         if item["evidence_status"] != "observed" or item["criterion_status"] != "met":
             raise CheckFailure("EVIDENCE_INCOMPLETE", f"{cid} is not observed and assessed met")
-        if (not isinstance(item["simulated_action_status"], str)
-                or item["simulated_action_status"] not in {"not_applicable", "BLOCKED"}):
-            raise CheckFailure("EVIDENCE_INVALID", f"{cid} simulated_action_status is invalid")
-        if cid == "SK-12" and item["simulated_action_status"] != "BLOCKED":
-            raise CheckFailure("EVIDENCE_INCOMPLETE", "SK-12 must record its simulated BLOCKED action")
+        _validate_simulated_action_status(cid, item["simulated_action_status"])
         for key in ("actor_ref", "assessment_ref"):
             _string(item[key], f"{cid}.{key}")
         evs = item["evidence"]

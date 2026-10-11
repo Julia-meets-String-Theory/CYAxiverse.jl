@@ -87,6 +87,52 @@ end
         @test SC._exact_rational(exact_bigfloat)==exact_bigfloat_rational
         @test SC._exact_rational(negative_bigfloat)==-exact_bigfloat_rational
         @test SC._exact_rational(BigFloat(0;precision=512))==0//1
+        @test SC._exact_rational(BigFloat(-0.0;precision=512))==0//1
+        component_bits=SC._RATIONAL_COMPONENT_BITS
+        largest_integer=BigInt(10)^4095
+        largest_integer_float=BigFloat(largest_integer;precision=component_bits)
+        @test SC._exact_rational(largest_integer_float)==largest_integer//BigInt(1)
+        over_limit_integer_float=BigFloat(BigInt(10)^4096;precision=component_bits)
+        @test_throws SC.ResourceLimitError SC._exact_rational(over_limit_integer_float)
+        denominator_exponent=SC._MAX_DYADIC_DENOMINATOR_EXPONENT
+        largest_denominator=BigInt(1)<<denominator_exponent
+        @test ndigits(largest_denominator)==4096
+        @test SC._exact_rational(ldexp(BigFloat(1;precision=256),-denominator_exponent))==
+            BigInt(1)//largest_denominator
+        @test_throws SC.ResourceLimitError SC._exact_rational(
+            ldexp(BigFloat(1;precision=256),-(denominator_exponent+1)))
+        for exponent in (14_000,-14_000)
+            oversized=ldexp(BigFloat(1;precision=256),exponent)
+            @test_throws SC.ResourceLimitError SC._exact_rational(oversized)
+            @test_throws SC.ResourceLimitError SC._endpoint_rational(oversized)
+            oversized_interval=SC._iv(oversized,oversized,256)
+            @test_throws SC.ResourceLimitError SC._interval_array_record([oversized_interval])
+            @test_throws SC.ResourceLimitError SC._diagonal_clusters([oversized_interval],
+                BigInt(1)//BigInt(1))
+            @test_throws SC.ResourceLimitError SC.prepare_model(reshape([1],1,1),
+                reshape([1,0],2,1),reshape([oversized],1,1))
+        end
+        small_model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
+        oversized_seed=ldexp(BigFloat(1;precision=256),14_000)
+        @test_throws SC.ResourceLimitError SC.certify_stationary_point(small_model,[oversized_seed];
+            options=SC.ProofOptions(precisions=(256,)))
+        expansion_model=SC.prepare_model(Matrix{Int}(I,2,2),[1 1;0 -10_000],Matrix{Int}(I,2,2))
+        @test_throws SC.ResourceLimitError SC.certify_stationary_point(expansion_model,[0,0];
+            options=SC.ProofOptions(precisions=(256,)))
+        high_precision_sparse=setprecision(BigFloat,100_000) do
+            BigFloat(1)+ldexp(BigFloat(1),-500)
+        end
+        @test precision(high_precision_sparse)==100_000
+        @test SC._exact_rational(high_precision_sparse)==exact_bigfloat_rational
+        setprecision(BigFloat,384) do
+            setrounding(BigFloat,RoundUp) do
+                ambient_precision=precision(BigFloat)
+                ambient_rounding=rounding(BigFloat)
+                @test SC._exact_rational(exact_bigfloat)==exact_bigfloat_rational
+                @test precision(BigFloat)==ambient_precision
+                @test rounding(BigFloat)==ambient_rounding
+            end
+        end
         high_precision_k=reshape([exact_bigfloat],1,1)
         high_precision_phase=[exact_bigfloat]
         high_precision_model=SC.prepare_model(reshape([1],1,1),
@@ -799,6 +845,35 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
 
     @testset "independent exact oracles and correction composition" begin
         fixtures=ScientificCertificationFixtures
+        function rational_atan_bounds(q::Integer,terms::Int)
+            # The alternating series partial and its first omitted term form
+            # an exact rational enclosure for each arctangent in Machin's formula.
+            q_big=BigInt(q)
+            partial=BigInt(0)//BigInt(1)
+            for index in 0:(terms-1)
+                term=BigInt(1)//(BigInt(2index+1)*q_big^(2index+1))
+                partial+=iseven(index) ? term : -term
+            end
+            next=BigInt(1)//(BigInt(2terms+1)*q_big^(2terms+1))
+            iseven(terms) ? (partial,partial+next) : (partial-next,partial)
+        end
+        atan5=rational_atan_bounds(5,150)
+        atan239=rational_atan_bounds(239,55)
+        pi_lower=16*atan5[1]-4*atan239[2]
+        pi_upper=16*atan5[2]-4*atan239[1]
+        @test 3 < pi_lower < pi_upper < 4
+        @test pi_upper-pi_lower < BigInt(1)//(BigInt(2)^600)
+        pi_mpfr=fixtures.oracle_pi_interval(1024)
+        @test pi_lower <= pi_mpfr[1] <= pi_mpfr[2] <= pi_upper
+        for phase in (-5//9,5//9,-1//8,1//8)
+            if phase < 0
+                reference=(-phase/(2*pi_upper),-phase/(2*pi_lower))
+            else
+                reference=(-phase/(2*pi_lower),-phase/(2*pi_upper))
+            end
+            observed=fixtures.oracle_scalar_root(phase)
+            @test observed[1] <= reference[1] <= reference[2] <= observed[2]
+        end
         for exponent in (-400//1,-1//2)
             @test fixtures.oracle_contains_interval(
                 fixtures.oracle_scalar_curvature(exponent),
@@ -1459,6 +1534,113 @@ end
             output=read(output_file,String)
             @test process.exitcode==2
             @test occursin("status=INVALID",output)
+        end
+    end
+end
+
+@testset "R2 bounded skills-checker JSON and action controls" begin
+    repository_root=normpath(joinpath(@__DIR__,".."))
+    python=Sys.which("python3.13")
+    python===nothing && (python=Sys.which("python3"))
+    @test python!==nothing
+    if python!==nothing
+        mktempdir() do parent
+            driver=raw"""
+import copy
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+sys.dont_write_bytecode = True
+module_path, repository, scratch = map(Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location("candidate_verify", module_path)
+checker = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(checker)
+
+def parse_result(path):
+    try:
+        checker.parse_json(path)
+    except checker.CheckFailure as exc:
+        return exc.code
+    except BaseException as exc:
+        return "unhandled:" + type(exc).__name__
+    return "ok"
+
+deep = scratch / "depth-100000.json"
+deep.write_text("[" * 100000 + "0" + "]" * 100000, encoding="utf-8")
+print("depth-100000=" + parse_result(deep))
+depth12 = scratch / "depth-12.json"
+depth12.write_text("[" * 12 + "0" + "]" * 12, encoding="utf-8")
+print("depth-12=" + parse_result(depth12))
+quoted = scratch / "quoted-brackets.json"
+quoted.write_text(json.dumps({"text": "[{[[ ]]} and an escaped quote: \\\""}), encoding="utf-8")
+print("quoted-brackets=" + parse_result(quoted))
+
+candidate = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repository,
+                           check=True, capture_output=True, text=True).stdout.strip()
+tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=repository,
+                      check=True, capture_output=True, text=True).stdout.strip()
+checker_hash = checker.sha(module_path.read_bytes())
+case_hash = checker.sha((repository / "specs/cyax-skills-2026-10-09/cases.json").read_bytes())
+procedure_hashes = {item: checker.sha((repository / item).read_bytes()) for item in checker.PROC}
+artifact = scratch / "synthetic-control.txt"
+artifact_bytes = b"synthetic EVIDENCE_CANDIDATE_MISMATCH control; test fixture only\n"
+artifact.write_bytes(artifact_bytes)
+record = {"artifact_ref": "test-fixture:synthetic-control.txt",
+          "local_path": artifact.name, "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+          "bytes": len(artifact_bytes)}
+cases = []
+for case_id in checker.CASE_IDS:
+    commands = []
+    if case_id == "SK-01":
+        commands = [{"argv": ["synthetic-red"], "exit_code": 1,
+                     "expected_exit": "nonzero", "sequence": 1},
+                    {"argv": ["synthetic-green"], "exit_code": 0,
+                     "expected_exit": "zero", "sequence": 2}]
+    elif case_id == "SK-11":
+        commands = [{"argv": ["synthetic-identity-control"], "exit_code": 1,
+                     "expected_exit": "nonzero", "sequence": 1}]
+    cases.append({"id": case_id, "evidence_status": "observed", "criterion_status": "met",
+                  "simulated_action_status": "BLOCKED" if case_id == "SK-12" else "not_applicable",
+                  "actor_ref": "test-fixture", "assessment_ref": "test-fixture",
+                  "evidence": [record], "commands": commands})
+receipt = {"schema": "cyax-skills-smoke-1", "candidate_commit": candidate,
+           "candidate_tree": tree, "checker_sha256": checker_hash,
+           "case_pack_sha256": case_hash, "procedure_sha256": procedure_hashes,
+           "cases": cases}
+
+def validate(name, document):
+    path = scratch / name
+    path.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
+    try:
+        checker.validate_evidence(path, candidate, tree, checker_hash, case_hash,
+                                  procedure_hashes)
+    except checker.CheckFailure as exc:
+        return exc.code
+    return "ok"
+
+print("synthetic-valid=" + validate("synthetic-valid.json", receipt))
+mutant = copy.deepcopy(receipt)
+mutant["cases"][1]["simulated_action_status"] = "BLOCKED"
+print("sk02-blocked=" + validate("sk02-blocked.json", mutant))
+mutant = copy.deepcopy(receipt)
+mutant["cases"][-1]["simulated_action_status"] = "not_applicable"
+print("sk12-not-applicable=" + validate("sk12-not-applicable.json", mutant))
+"""
+            driver_path=joinpath(parent,"focused_verify_controls.py")
+            write(driver_path,driver)
+            verifier=joinpath(repository_root,"specs","cyax-skills-2026-10-09","verify.py")
+            output=read(Cmd([python,driver_path,verifier,repository_root,parent]),String)
+            @test split(chomp(output),'\n')==[
+                "depth-100000=JSON_RESOURCE_LIMIT",
+                "depth-12=ok",
+                "quoted-brackets=ok",
+                "synthetic-valid=ok",
+                "sk02-blocked=EVIDENCE_INVALID",
+                "sk12-not-applicable=EVIDENCE_INCOMPLETE"]
         end
     end
 end

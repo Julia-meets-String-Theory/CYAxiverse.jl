@@ -304,7 +304,7 @@ function _root_witness(model::CertificationModel, original::Vector{Rational{BigI
     Hmid = _hessian(model, box, bits)
     midH = BigFloat[_interval_mid(Hmid[i, j], bits) for i in 1:n, j in 1:n]
     Cbig = _big_inverse(midH)
-    C = Rational{BigInt}[Rational{BigInt}(Cbig[i, j]) for i in 1:n, j in 1:n]
+    C = Rational{BigInt}[_exact_bigfloat_rational(Cbig[i, j]) for i in 1:n, j in 1:n]
     _evaluate_root_claims(model, original, translation, normalized, center,
         box_bounds, C, bits, options, provenance, attempts, identity)
 end
@@ -353,7 +353,7 @@ function _evaluate_root_claims(model::CertificationModel,
         "root proof was inconclusive"
     return RootResult(status, _model_signature(model), reason, copy(original),
         copy(translation), copy(normalized), copy(center), box, copy(C), f0, H, W,
-        Rational{BigInt}(q), bits, options, class, method,
+        _exact_bigfloat_rational(q), bits, options, class, method,
         pivots, copy(provenance), copy(attempts), identity)
 end
 
@@ -477,7 +477,7 @@ function certify_stationary_point(model::CertificationModel, theta0;
     for bits in options.precisions
         witness_for_precision = _with_precision(bits) do
             x = _proposal(model, normalized, options, bits)
-            center = Rational{BigInt}[Rational{BigInt}(v) for v in x]
+            center = Rational{BigInt}[_exact_bigfloat_rational(v) for v in x]
             best = nothing
             for radius in options.box_radii
                 push!(attempts, "precision=$bits radius=$radius")

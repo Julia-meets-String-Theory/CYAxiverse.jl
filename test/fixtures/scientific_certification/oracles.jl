@@ -54,10 +54,10 @@ function oracle_scalar_root(phi::Rational)
         end
     else
         lo = _oracle_directed(512, _ORACLE_D) do
-            -p_lo / (BigFloat(2) * BigFloat(p_hi_pi, _ORACLE_U; precision=512))
+            -p_hi / (BigFloat(2) * BigFloat(p_hi_pi, _ORACLE_U; precision=512))
         end
         hi = _oracle_directed(512, _ORACLE_U) do
-            -p_hi / (BigFloat(2) * BigFloat(p_lo_pi, _ORACLE_D; precision=512))
+            -p_lo / (BigFloat(2) * BigFloat(p_lo_pi, _ORACLE_D; precision=512))
         end
     end
     _oracle_exact(lo, 512), _oracle_exact(hi, 512)

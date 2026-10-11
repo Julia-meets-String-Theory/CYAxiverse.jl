@@ -72,8 +72,8 @@ end
 function _diagonal_clusters(ratios::Vector{IA.Interval{BigFloat}},
                             target::Rational{BigInt})
     n = length(ratios)
-    lower = sort(Rational{BigInt}[Rational{BigInt}(_lo(x)) for x in ratios])
-    upper = sort(Rational{BigInt}[Rational{BigInt}(_hi(x)) for x in ratios])
+    lower = sort(Rational{BigInt}[_exact_bigfloat_rational(_lo(x)) for x in ratios])
+    upper = sort(Rational{BigInt}[_exact_bigfloat_rational(_hi(x)) for x in ratios])
     bounds = Tuple{Rational{BigInt},Rational{BigInt}}[(lower[i], upper[i]) for i in 1:n]
     clusters = SpectralCluster[]
     first = 1
@@ -157,7 +157,7 @@ function _inertia_at(H::Matrix{IA.Interval{BigFloat}}, K::Matrix{IA.Interval{Big
 end
 
 function _endpoint_rational(x::BigFloat)
-    Rational{BigInt}(x)
+    _exact_bigfloat_rational(x)
 end
 
 function _make_spectrum_cluster(ca::EndpointCount, cb::EndpointCount,
@@ -176,7 +176,7 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
     n = size(H, 1)
     radius = _initial_radius(H, K, bits)
     lower_count = nothing; upper_count = nothing
-    radius_exact = Rational{BigInt}(radius)
+    radius_exact = _exact_bigfloat_rational(radius)
     for expansion in 0:options.max_expansions
         lower_count = _inertia_at(H, K, -radius_exact, bits, budget)
         upper_count = _inertia_at(H, K, radius_exact, bits, budget)
@@ -185,7 +185,7 @@ function _inertia_spectrum(H, K, bits, options::ProofOptions, metric_pivots,
         budget.used >= budget.limit && break
         expansion == options.max_expansions && break
         radius *= 2
-        radius_exact = Rational{BigInt}(radius)
+        radius_exact = _exact_bigfloat_rational(radius)
     end
     (lower_count !== nothing && upper_count !== nothing &&
      lower_count.negative == 0 && upper_count.negative == n) ||
@@ -392,7 +392,7 @@ function certify(model::CertificationModel, theta0; options=ProofOptions(), cand
         budget = _InertiaBudget(options.max_inertia_evaluations, 0, String[])
         center = _with_precision(bits) do
             proposed = _proposal(model, normalized, options, bits)
-            Rational{BigInt}[Rational{BigInt}(x) for x in proposed]
+            Rational{BigInt}[_exact_bigfloat_rational(x) for x in proposed]
         end
         push!(attempts, "proposal p=$bits refinements=1")
         for radius in options.box_radii
