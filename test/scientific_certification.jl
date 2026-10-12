@@ -13,6 +13,28 @@ end
 
 @test SC._IR[] === nothing
 
+# CYAX_R2_PROOFOPTIONS_EXACT_RATIONAL_TESTS_BEGIN
+@testset "ProofOptions require exact rational radius and width inputs" begin
+    int_options=SC.ProofOptions(precisions=(256,),
+        box_radii=(1//2^20,1//2^30),relative_width=1//2^20)
+    @test int_options.box_radii == (BigInt(1)//BigInt(2)^20,BigInt(1)//BigInt(2)^30)
+    @test int_options.relative_width == BigInt(1)//BigInt(2)^20
+
+    big_radii=Rational{BigInt}[BigInt(1)//BigInt(2)^20,BigInt(1)//BigInt(2)^30]
+    big_options=SC.ProofOptions(precisions=[256,512],box_radii=big_radii,
+        relative_width=BigInt(1)//BigInt(2)^20)
+    @test big_options.box_radii == Tuple(big_radii)
+    @test big_options.relative_width == BigInt(1)//BigInt(2)^20
+
+    for float_type in (Float16,Float32,Float64,BigFloat)
+        radius=float_type(0.25)
+        width=float_type(2.0^-20)
+        @test_throws ArgumentError SC.ProofOptions(precisions=(256,),box_radii=(radius,))
+        @test_throws ArgumentError SC.ProofOptions(precisions=(256,),relative_width=width)
+    end
+end
+# CYAX_R2_PROOFOPTIONS_EXACT_RATIONAL_TESTS_END
+
 function _run_scientific_cli(repository_root, input_path, certificate_path,
         input_sha256, certificate_sha256; precision=256)
     argv=vcat(String[Base.julia_cmd().exec...],_coverage_output_args(),String["--startup-file=no","--project=$repository_root",

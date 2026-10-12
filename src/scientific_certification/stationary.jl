@@ -72,10 +72,14 @@ function ProofOptions(; precisions=(256, 512), max_newton_steps=20,
     box_radii isa Tuple || box_radii isa AbstractVector ||
         throw(ArgumentError("box_radii must be a tuple or vector"))
     1 <= length(box_radii) <= 4 || throw(ArgumentError("one to four box radii are supported"))
+    all(x -> x isa Rational, box_radii) ||
+        throw(ArgumentError("box_radii must contain exact rational values"))
     rs = Rational{BigInt}[_exact_rational(x) for x in box_radii]
     all(r -> 0 < r < 1//2, rs) || throw(ArgumentError("box radii must be positive and below 1/2"))
     all(rs[i] > rs[i+1] for i in 1:length(rs)-1) ||
         throw(ArgumentError("box radii must be strictly decreasing"))
+    relative_width isa Rational ||
+        throw(ArgumentError("relative_width must be an exact rational value"))
     rw = _exact_rational(relative_width)
     0 < rw <= big(1)//big(1048576) ||
         throw(ArgumentError("relative_width must be positive and no larger than 2^-20"))
