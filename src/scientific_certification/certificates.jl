@@ -262,7 +262,7 @@ function _normalized_policy_host(host::AbstractString)
     name = lowercase(replace(host, "["=>"", "]"=>""))
     # DNS permits one terminal root dot in an absolute name. Remove terminal
     # dots only for policy comparisons; keep the caller's original text intact.
-    while endswith(name, ".")
+    while !isempty(name) && last(name) == '.'
         name = chop(name; tail=1)
     end
     name
