@@ -620,6 +620,70 @@ end
 
 include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.jl"))
 
+@testset "T15 oracle envelope uses exact frozen types" begin
+    model=SC.prepare_model(BigInt[1 0 0 1 0;0 1 0 1 1;0 0 1 0 1],
+        BigInt[1 1 1 1 1;0 0 0 0 0],BigInt[1 1 0;1 3 0;0 0 3])
+    A=Matrix{Rational{BigInt}}(model.Q*Diagonal(model.L[1,:])*transpose(model.Q))
+    polynomial=ScientificCertificationFixtures.oracle_exact_pencil_polynomial(A,model.K)
+    sequence=ScientificCertificationFixtures._sturm_sequence(polynomial)
+    isolators=Tuple{Rational{BigInt},Rational{BigInt}}[]
+    for k in 0:102400
+        lo=BigInt(k)//BigInt(1024)
+        hi=BigInt(k+1)//BigInt(1024)
+        if ScientificCertificationFixtures._sturm_count(sequence,lo,hi)==1
+            push!(isolators,(lo,hi))
+            length(isolators)==3 && break
+        end
+    end
+    @test length(isolators)==3
+    seed=Rational{BigInt}[1//256,1//512,-1//1024]
+    input_record=Dict("case"=>"T15","model"=>SC._input_record(model),
+        "seed"=>SC._array_record(seed))
+    input_bytes=SC._toml_bytes(input_record)
+    oracle=Dict("case"=>"T15","input_sha256"=>bytes2hex(sha256(input_bytes)),
+        "pencil_coefficients"=>String[SC._ratstr(x) for x in polynomial],
+        "mu_isolators"=>Dict("dims"=>[3],"data"=>Any[Any[SC._ratstr(lo),SC._ratstr(hi)]
+            for (lo,hi) in isolators]),"expected_class"=>"MINIMUM",
+        "spectral_goal"=>"individuals","relative_width"=>"1/1048576",
+        "precisions"=>[256,512])
+
+    mktempdir() do parent
+        input_path=joinpath(parent,"synthetic-input.toml")
+        oracle_path=joinpath(parent,"synthetic-oracle.toml")
+        write(input_path,input_bytes)
+        write(oracle_path,SC._toml_bytes(oracle))
+        valid=ScientificCertificationFixtures._held_out_data(input_path,oracle_path)
+        @test valid.relative_width==big(1)//big(1048576)
+
+        function envelope_rejected(name,mutate!; message=nothing)
+            candidate=deepcopy(oracle)
+            mutate!(candidate)
+            path=joinpath(parent,name*".toml")
+            write(path,SC._toml_bytes(candidate))
+            err=try
+                ScientificCertificationFixtures._held_out_data(input_path,path)
+                nothing
+            catch exception
+                exception
+            end
+            @test err isa Exception
+            message===nothing || @test occursin(message,sprint(showerror,err))
+        end
+        envelope_rejected("float-width",item->(item["relative_width"]=1.0/1048576);
+            message="quoted rational string")
+        envelope_rejected("unreduced-width",item->(item["relative_width"]="2/2097152");
+            message="rational must be reduced")
+        envelope_rejected("float-precisions",item->(item["precisions"]=[256.0,512.0]);
+            message="integer array")
+        envelope_rejected("bool-precision",item->(item["precisions"]=Any[256,true]);
+            message="integer array")
+        envelope_rejected("short-precisions",item->(item["precisions"]=[256]);
+            message="integer array")
+        envelope_rejected("reversed-precisions",item->(item["precisions"]=[512,256]);
+            message="precision schedule")
+    end
+end
+
 @testset "P7 correction: scheduling, replay, resources and independent references" begin
     @testset "one proposal and one shared spectral budget per precision" begin
         model=SC.prepare_model(Matrix{Int}(I,2,2),[1 1;0 0],[2 1;1 2])
@@ -1545,11 +1609,25 @@ end
     unsafe_paths=("fixture description /home/example-user/private/snapshot.toml",
         "fixture description C:\\Users\\example-user\\private\\snapshot.toml",
         "fixture description \\\\example-host\\private-share\\snapshot.toml")
+    dotted_chat="https://chatgpt.com./c/synthetic-review-fixture"
+    dotted_local="https://localhost.localdomain./synthetic-review-fixture"
+    dotted_private="https://192.168.1.5./synthetic-review-fixture"
     for reference in unsafe_paths
         @test_throws ArgumentError SC._public_safe_source_ref(reference)
         @test_throws ArgumentError SC._provenance((method="synthetic",source_ref=reference))
         @test_throws ArgumentError SC._source_record((repository=reference,commit,tree))
     end
+    for reference in (dotted_chat,dotted_local,dotted_private,
+            "https://chat.openai.com./c/synthetic-review-fixture",
+            "https://claude.ai./c/synthetic-review-fixture")
+        @test_throws ArgumentError SC._public_safe_metadata(reference,"synthetic metadata")
+        @test_throws ArgumentError SC._public_safe_source_ref(reference)
+        @test_throws ArgumentError SC._provenance((method="synthetic",source_ref=reference))
+        @test_throws ArgumentError SC._source_record((repository=reference,commit,tree))
+    end
+    dotted_public="https://example.org./public-fixture"
+    @test SC._public_safe_metadata(dotted_public,"synthetic metadata")==dotted_public
+    @test SC._public_safe_source_ref(dotted_public)==dotted_public
     @test SC._public_safe_source_ref("fixtures/candidate-source")=="fixtures/candidate-source"
     @test SC._public_safe_source_ref("opaque:fixture-reference")=="opaque:fixture-reference"
     @test SC._public_safe_source_ref(source.repository)==source.repository
@@ -1597,10 +1675,23 @@ end
             "unsafe-top-level-source",doc->(doc["source_ref"]["repository"]=unsafe_reference))
         @test unsafe_source_report.status==:INVALID
 
+        dotted_provenance_path,_,dotted_provenance_report=replay_mutation(
+            "dotted-chat-provenance",doc->(doc["candidate_provenance"]["source_ref"]=dotted_chat))
+        @test dotted_provenance_report.status==:INVALID
+        @test occursin("chat/share URL",dotted_provenance_report.reason)
+        dotted_source_path,_,dotted_source_report=replay_mutation(
+            "dotted-chat-top-level-source",doc->(doc["source_ref"]["repository"]=dotted_chat))
+        @test dotted_source_report.status==:INVALID
+        @test occursin("chat/share URL",dotted_source_report.reason)
+
         @test_throws ArgumentError SC.write_certificate(joinpath(parent,"unsafe-source-writer"),
             model,result;source_ref=merge(source,(repository=unsafe_reference,)),
             environment_ref=environment)
         @test !ispath(joinpath(parent,"unsafe-source-writer"))
+        @test_throws ArgumentError SC.write_certificate(joinpath(parent,"dotted-chat-source-writer"),
+            model,result;source_ref=merge(source,(repository=dotted_chat,)),
+            environment_ref=environment)
+        @test !ispath(joinpath(parent,"dotted-chat-source-writer"))
 
         root_fields=fieldnames(typeof(result.root))
         root_values=Any[getfield(result.root,name) for name in root_fields]
@@ -1613,6 +1704,15 @@ end
             model,unsafe_root;source_ref=source,environment_ref=environment)
         @test !isfile(joinpath(unsafe_provenance_directory,"inputs.toml"))
         @test !isfile(joinpath(unsafe_provenance_directory,"certificate.toml"))
+
+        dotted_provenance_values=Any[getfield(result.root,name) for name in root_fields]
+        dotted_provenance_values[provenance_index]=Dict("status"=>"supplied","method"=>"synthetic",
+            "source_ref"=>dotted_chat)
+        dotted_provenance_root=SC.RootResult(dotted_provenance_values...)
+        dotted_provenance_directory=joinpath(parent,"dotted-chat-provenance-writer")
+        @test_throws ArgumentError SC.write_certificate(dotted_provenance_directory,
+            model,dotted_provenance_root;source_ref=source,environment_ref=environment)
+        @test !ispath(dotted_provenance_directory)
 
         cli_argv=vcat(String.(Base.julia_cmd().exec),String["--startup-file=no",
             "--project=$repository_root",joinpath(repository_root,"scripts",

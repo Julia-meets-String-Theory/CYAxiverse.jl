@@ -258,8 +258,18 @@ function _windows_absolute_path(value::String)
     startswith(value, "\\\\") || occursin(r"^[A-Za-z]:", value)
 end
 
-function _private_or_local_host(host::AbstractString)
+function _normalized_policy_host(host::AbstractString)
     name = lowercase(replace(host, "["=>"", "]"=>""))
+    # DNS permits one terminal root dot in an absolute name. Remove terminal
+    # dots only for policy comparisons; keep the caller's original text intact.
+    while endswith(name, ".")
+        name = chop(name; tail=1)
+    end
+    name
+end
+
+function _private_or_local_host(host::AbstractString)
+    name = _normalized_policy_host(host)
     name in ("localhost", "localhost.localdomain") && return true
     any(endswith(name, suffix) for suffix in (".local", ".internal", ".private")) && return true
     octets = tryparse.(Int, split(name, '.'))
@@ -320,7 +330,7 @@ function _public_safe_metadata(value, label::String)
             _required_url_capture(host_match, 1, label)
         end
         _private_or_local_host(host) && throw(ArgumentError("$label URL must not name a local/private host"))
-        normalized_host = lowercase(host)
+        normalized_host = _normalized_policy_host(host)
         any(normalized_host == domain || endswith(normalized_host, "." * domain)
             for domain in ("chatgpt.com", "chat.openai.com", "claude.ai")) &&
             throw(ArgumentError("$label must not contain a chat/share URL"))
@@ -364,7 +374,7 @@ function _public_safe_source_ref(value)
         host_match = startswith(hostport, "[") ? match(r"^\[([^\]]+)\]", hostport) : nothing
         host = host_match === nothing ? first(split(hostport, ':'; limit=2)) : host_match.captures[1]
         _private_or_local_host(host) && throw(ArgumentError("candidate source_ref URL must not name a local/private host"))
-        host = lowercase(host)
+        host = _normalized_policy_host(host)
         if any(host == domain || endswith(host, "." * domain)
                 for domain in ("chatgpt.com", "chat.openai.com", "claude.ai"))
             throw(ArgumentError("candidate source_ref must not contain a chat/share URL"))

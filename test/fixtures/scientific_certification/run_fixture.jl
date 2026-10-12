@@ -85,6 +85,20 @@ function _benchmark_model(item)
     return model, [_rat(x) for x in correction.theta], Q, L, K, correction, diagnostic
 end
 
+function _strict_t15_oracle_settings(oracle)
+    raw_width = oracle["relative_width"]
+    raw_width isa AbstractString || error("T15 relative_width must be a quoted rational string")
+    relative_width = SC._parse_rational(raw_width)
+    relative_width == big(1)//big(1048576) || error("T15 resolution differs from contract")
+
+    precisions = oracle["precisions"]
+    precisions isa Vector && length(precisions) == 2 &&
+        all(x -> x isa Integer && !(x isa Bool), precisions) ||
+        error("T15 precisions must be a two-element integer array")
+    precisions == [256, 512] || error("T15 precision schedule differs from contract")
+    relative_width
+end
+
 function _t14_diagnostic_compatibility(diagnostic; relative_tolerance=BigInt(1)//BigInt(10)^10)
     values = diagnostic.hessian_eigenvalues
     length(values) == 2 || error("T14 numerical diagnostic must contain two generalized eigenvalues")
@@ -1066,6 +1080,7 @@ function _held_out_data(input_path, oracle_path)
     Set(keys(oracle))==Set(("case","input_sha256","pencil_coefficients","mu_isolators",
         "expected_class","spectral_goal","relative_width","precisions")) && oracle["case"]=="T15" ||
         error("T15 oracle envelope schema mismatch")
+    relative_width = _strict_t15_oracle_settings(oracle)
     bytes2hex(sha256(input_bytes))==oracle["input_sha256"] || error("T15 oracle input digest mismatch")
     model, _ = SC._parse_input(input["model"])
     seed_record=input["seed"]
@@ -1098,11 +1113,9 @@ function _held_out_data(input_path, oracle_path)
     end
     oracle["expected_class"]=="MINIMUM" || error("T15 expected class differs from contract")
     oracle["spectral_goal"]=="individuals" || error("T15 spectral goal differs from contract")
-    _rat(oracle["relative_width"])==big(1)//big(1048576) || error("T15 resolution differs from contract")
-    oracle["precisions"]==[256,512] || error("T15 precision schedule differs from contract")
     return (input_bytes=input_bytes,oracle_bytes=oracle_bytes,input=input,oracle=oracle,
         model=model,seed=seed,A=A,polynomial=polynomial,isolators=isolators,
-        input_sha256=bytes2hex(sha256(input_bytes)))
+        input_sha256=bytes2hex(sha256(input_bytes)),relative_width=relative_width)
 end
 
 function _produce_held_out_case(args)
@@ -1137,7 +1150,7 @@ function _produce_held_out_case(args)
     options=SC.ProofOptions(precisions=(precision,),max_newton_steps=settings["max_newton_steps"],
         max_backtracks=settings["max_backtracks"],box_radii=[_rat(x) for x in settings["box_radii"]],
         max_expansions=settings["max_expansions"],max_inertia_evaluations=settings["max_inertia_evaluations"],
-        relative_width=_rat(held.oracle["relative_width"]),spectral_goal=:individuals)
+        relative_width=held.relative_width,spectral_goal=:individuals)
     result=SC.certify(held.model,held.seed;options)
     result.status==:CERTIFIED && result.root.hessian_classification==:MINIMUM ||
         error("T15 did not certify the held-out minimum")
