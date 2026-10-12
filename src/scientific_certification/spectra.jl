@@ -289,6 +289,9 @@ function _certify_generalized_spectrum(model::CertificationModel, root::RootResu
         return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal, root.precision)
     root.status === :UNSUPPORTED && root.reason == "RESOURCE_LIMIT" &&
         return _empty_spectrum(:UNSUPPORTED, "RESOURCE_LIMIT", identity, options.spectral_goal, root.precision)
+    root.status === :UNSUPPORTED && root.reason == "INTERVAL_BACKEND_VERSION" &&
+        return _empty_spectrum(:UNSUPPORTED, "INTERVAL_BACKEND_VERSION", identity,
+            options.spectral_goal, root.precision)
     root.precision in options.precisions || throw(ArgumentError("root precision must be in options.precisions"))
     root.status === :CERTIFIED_ROOT || return _empty_spectrum(:INCONCLUSIVE, "root is not certified", identity, options.spectral_goal, root.precision)
     (length(root.center) <= options.max_dimension && size(model.Q, 2) <= options.max_terms) ||

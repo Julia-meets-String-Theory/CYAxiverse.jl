@@ -742,7 +742,6 @@ function _preflight_toml_depth(text::String)
     quote_state = :none
     escaped = false
     overflow = false
-    malformed = false
     line_start = 1
     index = 1
     while index <= length(bytes)
@@ -819,9 +818,7 @@ function _preflight_toml_depth(text::String)
                     line_end += 1
                 end
                 header = _toml_header_info(bytes, probe, line_end - 1)
-                if header === nothing
-                    malformed = true
-                else
+                if header !== nothing
                     path = header.path
                     ancestors = 0
                     if !header.too_deep
@@ -858,9 +855,7 @@ function _preflight_toml_depth(text::String)
                 byte == 0x7b && (inline_key_start = index + 1)
             elseif in_value && (byte == 0x5d || byte == 0x7d)
                 expected = byte == 0x5d ? 0x5b : 0x7b
-                if isempty(stack) || last(stack) != expected
-                    malformed = true
-                else
+                if !isempty(stack) && last(stack) == expected
                     pop!(stack)
                     inline_key_start = index + 1
                 end
@@ -874,9 +869,10 @@ function _preflight_toml_depth(text::String)
         end
         index += 1
     end
-    # Unclosed strings/containers belong to TOML's malformed-input path.
-    balanced = !malformed && quote_state === :none && isempty(stack)
-    balanced && overflow && throw(ResourceLimitError("RESOURCE_LIMIT: nesting depth limit exceeded"))
+    # Enforce the resource boundary before TOML.parse even when the input is
+    # incomplete. Shallow malformed text still reaches the parser and retains
+    # its ordinary INVALID path.
+    overflow && throw(ResourceLimitError("RESOURCE_LIMIT: nesting depth limit exceeded"))
     nothing
 end
 

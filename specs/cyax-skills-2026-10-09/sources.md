@@ -1,8 +1,22 @@
 # Engineering-method sources, source identities and complete MIT notice
 
-> **Status:** Frozen detached pre-edit review candidate. This document is not yet installed in the target repository, independently approved, implementation-ready, merged, or a standalone dispatch grant. The governing task has one exact authorised S2 scope; private control-plane authority and actor configuration are separately bound.
+> **Status:** Public-safe source and adaptation record. This document records the pinned upstream materials and bounded local adaptation; it does not establish independent approval, merge, or integration.
 >
 > **Construction:** Scientific and engineering requirements below are verbatim public-safe extracts of the approved complete R2. The headings and ordering are reorganised into one umbrella feature and a subordinate instruction annex, without changing the scientific methods, options, thresholds, schema meanings, fixtures, required evidence or allowed file set. If any transformation introduces a conflict, the exact governing R2 controls and independent reviewers must block acceptance pending correction.
+
+## Fixed adaptation and omissions
+
+The eight selected upstream methods map to the five bounded local procedures as follows:
+
+| Upstream method(s) | Local procedure | Adaptation boundary |
+|---|---|---|
+| `diagnosing-bugs` and `tdd` | `diagnostic-test-loop` | A bounded local diagnose/edit/test/correct/retest loop. |
+| `code-review` | `implementation-self-review` | An implementer self-check; it is never an independent review. |
+| `codebase-design` and `improve-codebase-architecture` | `architecture-assessment` | A bounded architecture assessment within the assigned change. |
+| `writing-for-agents` and `domain-modeling` | `agent-writing-domain-modeling` | Local instruction writing and domain terminology for the assigned work. |
+| `retro` | `retrospective` | A scoped retrospective after the assigned work. |
+
+The adaptation omits upstream global setup, launcher YAML, shell/HITL templates, automatic reviewer or design-agent spawning, repeated owner grilling, blanket internal-test deletion, external HTML/CDN reports, glossary or ADR writes, raw-session harvesting, and automatic policy promotion. The pinned upstream material supplies attribution and audit context only; it does not authorize live fetching or expansion of local procedures.
 
 The recorded upstream method inventory is attribution and verification material only. The pinned public source commits/blobs and unchanged license text below are not installed at runtime. No automatic upstream fetch, second agent service or upstream global setup is authorised. Private owner and ledger references are intentionally excluded.
 

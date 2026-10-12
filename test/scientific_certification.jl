@@ -201,6 +201,15 @@ end
         @test minimum_result.root.hessian_classification == :MINIMUM
         @test length(minimum_result.spectrum.bounds) == 1
         @test minimum_result.spectrum.bounds[1][1] > 0
+        synthetic_unsupported_root=SC._empty_root(:UNSUPPORTED,
+            "INTERVAL_BACKEND_VERSION",[0//1],options;
+            identity=SC._result_identity(model))
+        unsupported_spectrum=SC.certify_generalized_spectrum(model,
+            synthetic_unsupported_root;options)
+        @test unsupported_spectrum.status==:UNSUPPORTED
+        @test unsupported_spectrum.reason=="INTERVAL_BACKEND_VERSION"
+        @test_throws ArgumentError SC.certify_generalized_spectrum(model,
+            minimum_result.root;options=SC.ProofOptions(precisions=(512,)))
 
         maximum_result = SC.certify(model, [1//2]; options)
         @test maximum_result.status == :CERTIFIED
@@ -853,10 +862,17 @@ end
         serialized_deep="value = "*repeat("[",13)*"0"*repeat("]",13)
         @test_throws SC.ResourceLimitError SC._preflight_toml_depth(serialized_deep)
         @test_throws SC.ResourceLimitError SC._parse_toml(Vector{UInt8}(codeunits(serialized_deep)))
+        incomplete_deep="value = "*repeat("[",13)*"0\n"
+        @test_throws SC.ResourceLimitError SC._preflight_toml_depth(incomplete_deep)
+        @test_throws SC.ResourceLimitError SC._parse_toml(Vector{UInt8}(codeunits(incomplete_deep)))
+        incomplete_inline_deep="value = "*repeat("{k = ",13)*"0\n"
+        @test_throws SC.ResourceLimitError SC._preflight_toml_depth(incomplete_inline_deep)
+        @test_throws SC.ResourceLimitError SC._parse_toml(Vector{UInt8}(codeunits(incomplete_inline_deep)))
         @test SC._preflight_toml_depth("value = [[0]]\n")===nothing
         bracket_metadata="quoted = \"[[[[[[[[[[[[\" # [[[[[[[[[[[[\nmultiline = \"\"\"\n{ [[ ]]}\n\"\"\"\ninline = { child = [1] }\n"
         @test SC._parse_toml(Vector{UInt8}(codeunits(bracket_metadata)))["inline"]["child"]==[1]
-        @test_throws ArgumentError SC._parse_toml(Vector{UInt8}(codeunits("value = [0\n")))
+        shallow_invalid="value = [0\n"
+        @test_throws ArgumentError SC._parse_toml(Vector{UInt8}(codeunits(shallow_invalid)))
         deep_table="["*join(fill("level",13),".")*"]\nvalue = 0\n"
         @test_throws SC.ResourceLimitError SC._preflight_toml_depth(deep_table)
         array_table_subtable="[[fruit]]\n[fruit.physical]\ncolor = \"red\"\n"
@@ -883,19 +899,31 @@ end
         mktempdir() do parser_root
             deep_input=joinpath(parser_root,"deep.toml")
             shallow_certificate=joinpath(parser_root,"certificate.toml")
-            write(deep_input,serialized_deep*"\n")
             write(shallow_certificate,"schema = \"cyax-scientific-certificate-v1\"\n")
-            input_digest=bytes2hex(sha256(read(deep_input)))
             certificate_digest=bytes2hex(sha256(read(shallow_certificate)))
-            report=SC.verify_certificate(shallow_certificate,deep_input;
-                expected_input_sha256=input_digest,
+            for text in (serialized_deep*"\n", incomplete_deep, incomplete_inline_deep)
+                write(deep_input,text)
+                input_digest=bytes2hex(sha256(read(deep_input)))
+                report=SC.verify_certificate(shallow_certificate,deep_input;
+                    expected_input_sha256=input_digest,
+                    expected_certificate_sha256=certificate_digest)
+                @test report.status==:UNSUPPORTED
+                @test report.reason=="RESOURCE_LIMIT"
+                cli=_run_scientific_cli(normpath(joinpath(@__DIR__,"..")),deep_input,
+                    shallow_certificate,input_digest,certificate_digest)
+                @test cli.exit_code==3
+                @test occursin("status=UNSUPPORTED reason=RESOURCE_LIMIT",cli.output)
+            end
+            write(deep_input,shallow_invalid)
+            shallow_digest=bytes2hex(sha256(read(deep_input)))
+            shallow_report=SC.verify_certificate(shallow_certificate,deep_input;
+                expected_input_sha256=shallow_digest,
                 expected_certificate_sha256=certificate_digest)
-            @test report.status==:UNSUPPORTED
-            @test report.reason=="RESOURCE_LIMIT"
-            cli=_run_scientific_cli(normpath(joinpath(@__DIR__,"..")),deep_input,
-                shallow_certificate,input_digest,certificate_digest)
-            @test cli.exit_code==3
-            @test occursin("status=UNSUPPORTED reason=RESOURCE_LIMIT",cli.output)
+            @test shallow_report.status==:INVALID
+            shallow_cli=_run_scientific_cli(normpath(joinpath(@__DIR__,"..")),deep_input,
+                shallow_certificate,shallow_digest,certificate_digest)
+            @test shallow_cli.exit_code==2
+            @test occursin("status=INVALID",shallow_cli.output)
         end
         @test_throws SC.ResourceLimitError SC._ratstr(BigInt(1)//BigInt(10)^4097)
         @test_throws SC.ResourceLimitError SC._toml_bytes(
