@@ -475,6 +475,19 @@ end
         narrow_hessian["hessian"]["pivots"]["data"][1]=[SC._ratstr(pivot_mid),SC._ratstr(pivot_mid)]
         @test replay_mutant("narrow-hessian",narrow_hessian;expected=:UNPROVEN).status == :UNPROVEN
 
+        # Exercise the submitted H(X) enclosure itself, separately from the
+        # derived LDL-pivot claim above. The mutant keeps the schema valid and
+        # the helper binds its updated certificate digest to the original input.
+        narrow_root_hessian=deepcopy(one_doc)
+        root_hessian_box=narrow_root_hessian["root"]["H_box"]["data"][1]
+        root_hessian_lower,root_hessian_upper=SC._parse_rational.(root_hessian_box)
+        root_hessian_mid=(root_hessian_lower+root_hessian_upper)/2
+        narrow_root_hessian["root"]["H_box"]["data"][1]=
+            SC._ratstr.([root_hessian_mid,root_hessian_mid])
+        root_hessian_report=replay_mutant("narrow-root-hessian-box",narrow_root_hessian;
+            expected=:UNPROVEN)
+        @test root_hessian_report.reason == "H(X) exceeds submitted claim"
+
         false_spectrum=deepcopy(one_doc)
         oldlo,oldhi=(SC._parse_rational(x) for x in false_spectrum["spectrum"]["bounds"]["data"][1])
         newpair=[SC._ratstr(oldlo+1),SC._ratstr(oldhi+1)]
