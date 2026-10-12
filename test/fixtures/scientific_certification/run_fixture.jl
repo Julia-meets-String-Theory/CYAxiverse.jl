@@ -643,7 +643,16 @@ end
 
 function _julia_argv(project_dir, args...)
     cmd = Base.julia_cmd()
-    String[cmd.exec...; "--startup-file=no"; "--threads=1"; "--project=$project_dir"; string.(args)...]
+    argv = String[cmd.exec...]
+    options = Base.JLOptions()
+    if options.code_coverage != 0 && options.output_code_coverage == C_NULL
+        # Keep Julia's inherited coverage filter, but send this subprocess's
+        # LCOV output outside the checkout. Julia's default per-source .cov
+        # files make a clean-source qualification observe its own test work.
+        push!(argv, "--code-coverage=$(tempname()).info")
+    end
+    append!(argv, ["--startup-file=no", "--threads=1", "--project=$project_dir", string.(args)...])
+    argv
 end
 
 function _peak_rss_bytes(raw::Integer, raw_unit::String)

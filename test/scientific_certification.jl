@@ -3,11 +3,19 @@ using TOML
 
 const SC = CYAxiverse.scientific_certification
 
+function _coverage_output_args()
+    options=Base.JLOptions()
+    if options.code_coverage!=0 && options.output_code_coverage==C_NULL
+        return ["--code-coverage=$(tempname()).info"]
+    end
+    String[]
+end
+
 @test SC._IR[] === nothing
 
 function _run_scientific_cli(repository_root, input_path, certificate_path,
         input_sha256, certificate_sha256; precision=256)
-    argv=vcat(String[Base.julia_cmd().exec...],String["--startup-file=no","--project=$repository_root",
+    argv=vcat(String[Base.julia_cmd().exec...],_coverage_output_args(),String["--startup-file=no","--project=$repository_root",
         joinpath(repository_root,"scripts","verify_scientific_certificate.jl"),
         "--inputs",input_path,"--certificate",certificate_path,
         "--expect-input-sha256",input_sha256,
@@ -19,6 +27,45 @@ function _run_scientific_cli(repository_root, input_path, certificate_path,
         flush(output); seekstart(output)
         (exit_code=process.exitcode,output=read(output,String),argv=argv)
     end
+end
+
+@testset "coverage-enabled CLI child keeps candidate source clean" begin
+    repository_root=normpath(joinpath(@__DIR__,".."))
+    status_argv=["git","-C",repository_root,"status","--porcelain=v1","--untracked-files=all"]
+    before_status=read(Cmd(status_argv),String)
+    options=Base.JLOptions()
+    detached_coverage=_coverage_output_args()
+    trace_path=nothing
+    if options.code_coverage!=0 && options.output_code_coverage==C_NULL
+        @test length(detached_coverage)==1
+        trace_path=split(only(detached_coverage),'=';limit=2)[2]
+        @test endswith(trace_path,".info")
+        @test startswith(relpath(trace_path,repository_root),"..")
+        @test !ispath(trace_path)
+    else
+        @test isempty(detached_coverage)
+    end
+
+    argv=vcat(String[Base.julia_cmd().exec...],detached_coverage,String["--startup-file=no",
+        "--project=$repository_root",joinpath(repository_root,"scripts",
+        "verify_scientific_certificate.jl")])
+    mktemp() do _path,output_file
+        process=run(pipeline(Cmd(Cmd(argv);dir=repository_root);
+            stdout=output_file,stderr=output_file);wait=false)
+        wait(process)
+        flush(output_file); seekstart(output_file)
+        output=read(output_file,String)
+        @test process.exitcode==2
+        @test occursin("missing required argument",output)
+    end
+    if trace_path!==nothing
+        @test isfile(trace_path)
+        if isfile(trace_path)
+            @test filesize(trace_path)>0
+            rm(trace_path;force=true)
+        end
+    end
+    @test read(Cmd(status_argv),String)==before_status
 end
 
 @testset "Bounded scientific certification" begin
@@ -641,6 +688,25 @@ end
 end
 
 include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.jl"))
+
+@testset "fixture qualification children retain detached coverage output" begin
+    repository_root=normpath(joinpath(@__DIR__,".."))
+    options=Base.JLOptions()
+    argv=ScientificCertificationFixtures._julia_argv(repository_root,
+        ScientificCertificationFixtures.VERIFIER_PATH)
+    coverage_flags=filter(arg->startswith(arg,"--code-coverage"),argv)
+    if options.code_coverage!=0 && options.output_code_coverage==C_NULL
+        @test count(arg->startswith(arg,"--code-coverage=@"),coverage_flags)>=1
+        trace_flag=last(coverage_flags)
+        @test startswith(trace_flag,"--code-coverage=")
+        trace_path=split(trace_flag,'=';limit=2)[2]
+        @test endswith(trace_path,".info")
+        @test startswith(relpath(trace_path,repository_root),"..")
+        @test !ispath(trace_path)
+    else
+        @test isempty(_coverage_output_args())
+    end
+end
 
 @testset "T15 oracle envelope uses exact frozen types" begin
     model=SC.prepare_model(BigInt[1 0 0 1 0;0 1 0 1 1;0 0 1 0 1],
@@ -1755,7 +1821,7 @@ end
             model,dotted_provenance_root;source_ref=source,environment_ref=environment)
         @test !ispath(dotted_provenance_directory)
 
-        cli_argv=vcat(String.(Base.julia_cmd().exec),String["--startup-file=no",
+        cli_argv=vcat(String.(Base.julia_cmd().exec),_coverage_output_args(),String["--startup-file=no",
             "--project=$repository_root",joinpath(repository_root,"scripts",
             "verify_scientific_certificate.jl"),"--inputs",written.input_path,
             "--certificate",missing_status_path,"--expect-input-sha256",written.input_sha256,
