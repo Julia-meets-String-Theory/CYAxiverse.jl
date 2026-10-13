@@ -1972,6 +1972,105 @@ end
     @test ScientificCertificationFixtures.qualify_from_test_profile!() === nothing
 end
 
+# CYAX_R2_SERIAL_QUALIFICATION_PROFILE_TESTS_BEGIN
+@testset "CI qualification profile is scoped and checks the real thread pools" begin
+    F=ScientificCertificationFixtures
+    original_blas=BLAS.get_num_threads()
+    original_julia_env=get(ENV,"JULIA_NUM_THREADS",nothing)
+    original_openblas_env=get(ENV,"OPENBLAS_NUM_THREADS",nothing)
+    original_full_env=get(ENV,"CYAXIVERSE_TEST_FULL",nothing)
+    try
+        Threads.nthreads()==1 || error("profile regression requires the approved one-thread Julia test process")
+        BLAS.set_num_threads(2)
+        ENV["JULIA_NUM_THREADS"]="caller-julia-setting"
+        ENV["OPENBLAS_NUM_THREADS"]="caller-openblas-setting"
+        for (full_setting,expected_full) in ((nothing,true),("0",false),("1",true))
+            full_setting===nothing ? pop!(ENV,"CYAXIVERSE_TEST_FULL",nothing) :
+                (ENV["CYAXIVERSE_TEST_FULL"]=full_setting)
+            @test F._test_profile_is_full()===expected_full
+            observed=F._with_serial_qualification_profile() do
+                @test get(ENV,"CYAXIVERSE_TEST_FULL","1")==
+                    (full_setting===nothing ? "1" : full_setting)
+                @test F._test_profile_is_full()===expected_full
+                profile=F._actual_environment_observation()
+                @test profile["julia_threads"]==1
+                @test profile["blas_threads"]==1
+                @test profile["julia_num_threads"]=="1"
+                @test profile["openblas_num_threads"]=="1"
+                get(ENV,"CYAXIVERSE_TEST_FULL","1")=="1"
+            end
+            @test observed===expected_full
+            @test BLAS.get_num_threads()==2
+            @test ENV["JULIA_NUM_THREADS"]=="caller-julia-setting"
+            @test ENV["OPENBLAS_NUM_THREADS"]=="caller-openblas-setting"
+            @test get(ENV,"CYAXIVERSE_TEST_FULL","1")==
+                (full_setting===nothing ? "1" : full_setting)
+            @test (haskey(ENV,"CYAXIVERSE_TEST_FULL") == (full_setting!==nothing))
+        end
+
+        restored_after_error=try
+            F._with_serial_qualification_profile() do
+                error("serial-profile restoration sentinel")
+            end
+            false
+        catch err
+            err isa ErrorException && occursin("serial-profile restoration sentinel",sprint(showerror,err))
+        end
+        @test restored_after_error
+        @test BLAS.get_num_threads()==2
+        @test ENV["JULIA_NUM_THREADS"]=="caller-julia-setting"
+        @test ENV["OPENBLAS_NUM_THREADS"]=="caller-openblas-setting"
+
+        child_code="""
+            using LinearAlgebra, CYAxiverse
+            include(ARGS[1])
+            F=ScientificCertificationFixtures
+            before_blas=BLAS.get_num_threads()
+            ENV[\"JULIA_NUM_THREADS\"]=\"child-julia-setting\"
+            ENV[\"OPENBLAS_NUM_THREADS\"]=\"child-openblas-setting\"
+            rejected=try
+                F._with_serial_qualification_profile() do
+                    error(\"nonserial child entered the qualification callback\")
+                end
+                false
+            catch err
+                occursin(\"started with one thread\",sprint(showerror,err))
+            end
+            @assert rejected
+            @assert Threads.nthreads()==2
+            @assert BLAS.get_num_threads()==before_blas
+            @assert ENV[\"JULIA_NUM_THREADS\"]==\"child-julia-setting\"
+            @assert ENV[\"OPENBLAS_NUM_THREADS\"]==\"child-openblas-setting\"
+            println(\"nonserial_parent_rejected=true julia_threads=\",Threads.nthreads(),\" blas_threads=\",BLAS.get_num_threads())
+        """
+        repository_root=normpath(joinpath(@__DIR__,".."))
+        child_argv=String[first(Base.julia_cmd().exec),"--startup-file=no","--threads=2",
+            "--project=$repository_root","-e",child_code,
+            joinpath(@__DIR__,"fixtures","scientific_certification","run_fixture.jl")]
+        child_env=addenv(Cmd(child_argv),"JULIA_NUM_THREADS"=>"2","OPENBLAS_NUM_THREADS"=>"2")
+        child_stdout=""
+        child_exit=mktemp() do _path,log
+            process=run(pipeline(child_env,stdout=log,stderr=log);wait=false)
+            wait(process)
+            flush(log);seekstart(log)
+            output=read(log,String)
+            child_stdout=output
+            process.exitcode
+        end
+        @test child_exit==0
+        @test occursin("nonserial_parent_rejected=true julia_threads=2 blas_threads=2",child_stdout)
+    finally
+        original_julia_env===nothing ? pop!(ENV,"JULIA_NUM_THREADS",nothing) :
+            (ENV["JULIA_NUM_THREADS"]=original_julia_env)
+        original_openblas_env===nothing ? pop!(ENV,"OPENBLAS_NUM_THREADS",nothing) :
+            (ENV["OPENBLAS_NUM_THREADS"]=original_openblas_env)
+        original_full_env===nothing ? pop!(ENV,"CYAXIVERSE_TEST_FULL",nothing) :
+            (ENV["CYAXIVERSE_TEST_FULL"]=original_full_env)
+        BLAS.set_num_threads(original_blas)
+    end
+end
+# CYAX_R2_SERIAL_QUALIFICATION_PROFILE_TESTS_END
+
 # R2 focused correction regressions. This terminal block is selected by the
 # detached focused runner; the public package suite remains unchanged here.
 @testset "R2 focused privacy and serialization bounds" begin

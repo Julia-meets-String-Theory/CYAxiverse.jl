@@ -1010,25 +1010,62 @@ function _check_result_record(id,item,result)
     true
 end
 
-function qualify_from_test_profile!()
-    full = get(ENV,"CYAXIVERSE_TEST_FULL","1") == "1"
-    if full
-        path = get(ENV,"CYAX_SCIENTIFIC_EVIDENCE_DIR","")
-        if isempty(path)
-            mktempdir(prefix="cyax-scientific-full-") do tmp
-                run_public_suite(joinpath(tmp,"public-qualification"); retain=false)
-            end
-        else
-            run_public_suite(path; retain=true)
+function _with_serial_qualification_profile(f::Function)
+    # Julia's thread pool is fixed at process start, so reject a genuinely
+    # multithreaded parent instead of labeling it serial after the fact.
+    Threads.nthreads() == 1 ||
+        error("qualification requires a Julia process started with one thread")
+
+    caller_blas_threads = BLAS.get_num_threads()
+    caller_julia_threads_env = get(ENV, "JULIA_NUM_THREADS", nothing)
+    caller_openblas_threads_env = get(ENV, "OPENBLAS_NUM_THREADS", nothing)
+    try
+        # julia-runtest starts Julia itself and does not inherit the fixture
+        # child's environment. Establish the actual BLAS setting and scoped
+        # serial labels for qualification and its child processes; the Julia
+        # pool above has already been checked and cannot be changed here.
+        caller_blas_threads == 1 || BLAS.set_num_threads(1)
+        ENV["JULIA_NUM_THREADS"] = "1"
+        ENV["OPENBLAS_NUM_THREADS"] = "1"
+        Threads.nthreads() == 1 && BLAS.get_num_threads() == 1 ||
+            error("could not establish the approved serial scientific profile")
+        return f()
+    finally
+        try
+            BLAS.get_num_threads() == caller_blas_threads ||
+                BLAS.set_num_threads(caller_blas_threads)
+        finally
+            caller_julia_threads_env === nothing ? pop!(ENV, "JULIA_NUM_THREADS", nothing) :
+                (ENV["JULIA_NUM_THREADS"] = caller_julia_threads_env)
+            caller_openblas_threads_env === nothing ? pop!(ENV, "OPENBLAS_NUM_THREADS", nothing) :
+                (ENV["OPENBLAS_NUM_THREADS"] = caller_openblas_threads_env)
         end
-    else
-        path = get(ENV,"CYAX_SCIENTIFIC_FAST_EVIDENCE_DIR","")
-        if isempty(path)
-            mktempdir(prefix="cyax-scientific-fast-") do tmp
-                run_fast_suite(joinpath(tmp,"fast-qualification"); retain=false)
+    end
+end
+
+_test_profile_is_full() = get(ENV,"CYAXIVERSE_TEST_FULL","1") == "1"
+
+function qualify_from_test_profile!()
+    _with_serial_qualification_profile() do
+        full = _test_profile_is_full()
+        if full
+            path = get(ENV,"CYAX_SCIENTIFIC_EVIDENCE_DIR","")
+            if isempty(path)
+                mktempdir(prefix="cyax-scientific-full-") do tmp
+                    run_public_suite(joinpath(tmp,"public-qualification"); retain=false)
+                end
+            else
+                run_public_suite(path; retain=true)
             end
         else
-            run_fast_suite(path; retain=true)
+            path = get(ENV,"CYAX_SCIENTIFIC_FAST_EVIDENCE_DIR","")
+            if isempty(path)
+                mktempdir(prefix="cyax-scientific-fast-") do tmp
+                    run_fast_suite(joinpath(tmp,"fast-qualification"); retain=false)
+                end
+            else
+                run_fast_suite(path; retain=true)
+            end
         end
     end
     nothing
