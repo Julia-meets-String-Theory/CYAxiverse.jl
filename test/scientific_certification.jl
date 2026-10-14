@@ -994,8 +994,13 @@ end
             @test_throws ArgumentError SC._parse_input(record)
         end
         big_q=Matrix{Rational{BigInt}}(I,33,33)
-        big_model=SC.CertificationModel(big_q,reshape(Rational{BigInt}[1//1,0//1],2,1),
+        malformed_big_model=SC.CertificationModel(big_q,reshape(Rational{BigInt}[1//1,0//1],2,1),
             Matrix{Rational{BigInt}}(I,33,33),zeros(Rational{BigInt},1),BigInt(0)//BigInt(1))
+        @test_throws DimensionMismatch SC.certify(malformed_big_model,zeros(33);
+            options=SC.ProofOptions(precisions=(256,)))
+        big_model=SC.CertificationModel(big_q,
+            repeat(reshape(Rational{BigInt}[1//1,0//1],2,1),1,33),
+            Matrix{Rational{BigInt}}(I,33,33),zeros(Rational{BigInt},33),BigInt(0)//BigInt(1))
         result=SC.certify(big_model,zeros(33);options=SC.ProofOptions(precisions=(256,)))
         @test result.status==:UNSUPPORTED
         @test result.root.reason=="RESOURCE_LIMIT"
