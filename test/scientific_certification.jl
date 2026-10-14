@@ -35,6 +35,58 @@ end
 end
 # CYAX_R2_PROOFOPTIONS_EXACT_RATIONAL_TESTS_END
 
+# PR199_MODEL_INVARIANT_REGRESSIONS_BEGIN
+@testset "Public proofs reject inconsistent mutable and directly constructed models" begin
+    R=Rational{BigInt}
+    options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals)
+    valid=SC.prepare_model(R[1 0;0 1],R[1 1;0 0],R[2 1;1 2])
+    result=SC.certify(valid,R[0,0];options)
+    @test result.root.status === :CERTIFIED_ROOT
+    @test result.spectrum.status === :CERTIFIED_BOUNDS
+
+    asymmetric=deepcopy(valid)
+    asymmetric.K[1,2]=100//1
+    stale_scale=deepcopy(valid)
+    stale_scale.L[2,1]=1//1
+    fractional_charge=deepcopy(valid)
+    fractional_charge.Q[1,1]=1//2
+    short_phases=deepcopy(valid)
+    pop!(short_phases.phases)
+    nonfinite=deepcopy(valid)
+    nonfinite.phases[1]=big(1)//big(0)
+    direct_asymmetric=SC.CertificationModel(copy(valid.Q),copy(valid.L),
+        R[2 100;1 2],copy(valid.phases),valid.s)
+    direct_stale_scale=SC.CertificationModel(copy(valid.Q),copy(valid.L),
+        copy(valid.K),copy(valid.phases),1//big(1))
+    direct_dimensions=SC.CertificationModel(copy(valid.Q),copy(valid.L),
+        copy(valid.K),copy(valid.phases),valid.s,nothing,3,2)
+    direct_missing_scale=SC.CertificationModel(copy(valid.Q),copy(valid.L),
+        copy(valid.K),copy(valid.phases),nothing,nothing,2,2)
+    for (model,error_type) in ((asymmetric,ArgumentError),
+            (stale_scale,ArgumentError),(fractional_charge,ArgumentError),
+            (short_phases,DimensionMismatch),(direct_asymmetric,ArgumentError),
+            (direct_stale_scale,ArgumentError),(direct_dimensions,DimensionMismatch),
+            (direct_missing_scale,ArgumentError),(nonfinite,ArgumentError))
+        @test_throws error_type SC.certify(model,R[0,0];options)
+        @test_throws error_type SC.certify_stationary_point(model,R[0,0];options)
+        @test_throws error_type SC.certify_generalized_spectrum(model,result.root;options)
+    end
+    mktempdir() do directory
+        @test_throws "K must be exactly symmetric" SC.write_certificate(
+            directory,asymmetric,result;source_ref=nothing,environment_ref=nothing)
+        @test_throws "model amplitude scale" SC.write_certificate(
+            directory,stale_scale,result;source_ref=nothing,environment_ref=nothing)
+        @test isempty(readdir(directory))
+    end
+
+    # Valid edits are still usable when their cached interpretation agrees.
+    updated=deepcopy(valid)
+    updated.L[2,1]=1//1
+    updated=SC.CertificationModel(updated.Q,updated.L,updated.K,updated.phases,1//big(1))
+    @test SC.certify(updated,R[0,0];options).spectrum.status === :CERTIFIED_BOUNDS
+end
+# PR199_MODEL_INVARIANT_REGRESSIONS_END
+
 function _run_scientific_cli(repository_root, input_path, certificate_path,
         input_sha256, certificate_sha256; precision=256)
     argv=vcat(String[Base.julia_cmd().exec...],_coverage_output_args(),String["--startup-file=no","--project=$repository_root",
@@ -942,8 +994,13 @@ end
             @test_throws ArgumentError SC._parse_input(record)
         end
         big_q=Matrix{Rational{BigInt}}(I,33,33)
-        big_model=SC.CertificationModel(big_q,reshape(Rational{BigInt}[1//1,0//1],2,1),
+        malformed_big_model=SC.CertificationModel(big_q,reshape(Rational{BigInt}[1//1,0//1],2,1),
             Matrix{Rational{BigInt}}(I,33,33),zeros(Rational{BigInt},1),BigInt(0)//BigInt(1))
+        @test_throws DimensionMismatch SC.certify(malformed_big_model,zeros(33);
+            options=SC.ProofOptions(precisions=(256,)))
+        big_model=SC.CertificationModel(big_q,
+            repeat(reshape(Rational{BigInt}[1//1,0//1],2,1),1,33),
+            Matrix{Rational{BigInt}}(I,33,33),zeros(Rational{BigInt},33),BigInt(0)//BigInt(1))
         result=SC.certify(big_model,zeros(33);options=SC.ProofOptions(precisions=(256,)))
         @test result.status==:UNSUPPORTED
         @test result.root.reason=="RESOURCE_LIMIT"
@@ -1980,7 +2037,8 @@ end
     original_openblas_env=get(ENV,"OPENBLAS_NUM_THREADS",nothing)
     original_full_env=get(ENV,"CYAXIVERSE_TEST_FULL",nothing)
     try
-        Threads.nthreads()==1 || error("profile regression requires the approved one-thread Julia test process")
+        Threads.nthreads(:default)==1 && Threads.nthreads(:interactive)==0 ||
+            error("profile regression requires the approved one-thread Julia test process")
         BLAS.set_num_threads(2)
         ENV["JULIA_NUM_THREADS"]="caller-julia-setting"
         ENV["OPENBLAS_NUM_THREADS"]="caller-openblas-setting"
@@ -1994,9 +2052,21 @@ end
                 @test F._test_profile_is_full()===expected_full
                 profile=F._actual_environment_observation()
                 @test profile["julia_threads"]==1
+                @test profile["julia_default_threads"]==1
+                @test profile["julia_interactive_threads"]==0
                 @test profile["blas_threads"]==1
                 @test profile["julia_num_threads"]=="1"
                 @test profile["openblas_num_threads"]=="1"
+                profile["worktree_clean"]=true # Exercise profile matching independently of an edited checkout.
+                @test F._approved_profile_matches(profile,profile)
+                for (key,value) in (("julia_default_threads",2),("julia_interactive_threads",1))
+                    invalid_profile=copy(profile)
+                    invalid_profile[key]=value
+                    @test !F._approved_profile_matches(invalid_profile,invalid_profile)
+                end
+                missing_pool=copy(profile)
+                delete!(missing_pool,"julia_interactive_threads")
+                @test !F._approved_profile_matches(missing_pool,missing_pool)
                 get(ENV,"CYAXIVERSE_TEST_FULL","1")=="1"
             end
             @test observed===expected_full
@@ -2037,28 +2107,34 @@ end
                 occursin(\"started with one thread\",sprint(showerror,err))
             end
             @assert rejected
-            @assert Threads.nthreads()==2
+            pools=parse.(Int,split(ARGS[2],','))
+            @assert Threads.nthreads(:default)==pools[1]
+            @assert Threads.nthreads(:interactive)==(length(pools)==2 ? pools[2] : 0)
             @assert BLAS.get_num_threads()==before_blas
             @assert ENV[\"JULIA_NUM_THREADS\"]==\"child-julia-setting\"
             @assert ENV[\"OPENBLAS_NUM_THREADS\"]==\"child-openblas-setting\"
-            println(\"nonserial_parent_rejected=true julia_threads=\",Threads.nthreads(),\" blas_threads=\",BLAS.get_num_threads())
+            println(\"nonserial_parent_rejected=true default=\",Threads.nthreads(:default),
+                \" interactive=\",Threads.nthreads(:interactive),\" blas_threads=\",BLAS.get_num_threads())
         """
         repository_root=normpath(joinpath(@__DIR__,".."))
-        child_argv=String[first(Base.julia_cmd().exec),"--startup-file=no","--threads=2",
-            "--project=$repository_root","-e",child_code,
-            joinpath(@__DIR__,"fixtures","scientific_certification","run_fixture.jl")]
-        child_env=addenv(Cmd(child_argv),"JULIA_NUM_THREADS"=>"2","OPENBLAS_NUM_THREADS"=>"2")
-        child_stdout=""
-        child_exit=mktemp() do _path,log
-            process=run(pipeline(child_env,stdout=log,stderr=log);wait=false)
-            wait(process)
-            flush(log);seekstart(log)
-            output=read(log,String)
-            child_stdout=output
-            process.exitcode
+        for (thread_setting,expected_counts) in (("2,0","default=2 interactive=0"),
+                ("1,1","default=1 interactive=1"))
+            child_argv=String[first(Base.julia_cmd().exec),"--startup-file=no","--threads=$thread_setting",
+                "--project=$repository_root","-e",child_code,
+                joinpath(@__DIR__,"fixtures","scientific_certification","run_fixture.jl"),thread_setting]
+            child_env=addenv(Cmd(child_argv),"JULIA_NUM_THREADS"=>thread_setting,"OPENBLAS_NUM_THREADS"=>"2")
+            child_stdout=""
+            child_exit=mktemp() do _path,log
+                process=run(pipeline(child_env,stdout=log,stderr=log);wait=false)
+                wait(process)
+                flush(log);seekstart(log)
+                output=read(log,String)
+                child_stdout=output
+                process.exitcode
+            end
+            @test child_exit==0
+            @test occursin("nonserial_parent_rejected=true $expected_counts blas_threads=2",child_stdout)
         end
-        @test child_exit==0
-        @test occursin("nonserial_parent_rejected=true julia_threads=2 blas_threads=2",child_stdout)
     finally
         original_julia_env===nothing ? pop!(ENV,"JULIA_NUM_THREADS",nothing) :
             (ENV["JULIA_NUM_THREADS"]=original_julia_env)

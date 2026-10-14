@@ -537,6 +537,7 @@ end
 function certify_stationary_point(model::CertificationModel, theta0;
         options=ProofOptions(), candidate_provenance=nothing)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
+    _validate_model(model)
     try
         return _certify_stationary_point_impl(model, theta0; options, candidate_provenance)
     catch error

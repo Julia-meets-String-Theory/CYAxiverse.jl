@@ -54,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CYAXIVERSE_TEST_FULL: '0'
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,6 +74,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CYAXIVERSE_TEST_FULL: '1'
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
         with:

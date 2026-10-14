@@ -1290,6 +1290,7 @@ end
 """Write exact, closed TOML inputs and a revalidated certificate in a fresh directory."""
 function write_certificate(directory::AbstractString, model::CertificationModel, result;
                            source_ref, environment_ref)
+    _validate_model(model)
     root = result isa RootResult ? result : result isa CertificationResult ? result.root :
         throw(ArgumentError("result must be RootResult or CertificationResult"))
     root.status === :CERTIFIED_ROOT || throw(ArgumentError("only a certified root can be written"))

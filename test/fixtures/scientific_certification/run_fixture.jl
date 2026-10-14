@@ -400,7 +400,10 @@ function _actual_environment_observation()
         "active_project_sha256"=>_hash_file(project),
         "active_manifest_sha256"=>_hash_file(manifest),
         "active_project_path"=>project,"active_manifest_path"=>manifest,
-        "julia_threads"=>Threads.nthreads(),"blas_threads"=>BLAS.get_num_threads(),
+        "julia_threads"=>Threads.nthreads(:default),
+        "julia_default_threads"=>Threads.nthreads(:default),
+        "julia_interactive_threads"=>Threads.nthreads(:interactive),
+        "blas_threads"=>BLAS.get_num_threads(),
         "openblas_num_threads"=>get(ENV,"OPENBLAS_NUM_THREADS","unset"),
         "julia_num_threads"=>get(ENV,"JULIA_NUM_THREADS","unset"))
     return record
@@ -415,6 +418,8 @@ function _approved_profile_matches(expected, observed)
     get(observed, "interval_arithmetic_registered_tree_sha1", "") ==
         "79342df41c3c24664e5bf29395cfdf2f2a599412" || return false
     get(observed, "julia_threads", 0) == 1 || return false
+    get(observed, "julia_default_threads", 0) == 1 || return false
+    get(observed, "julia_interactive_threads", -1) == 0 || return false
     get(observed, "blas_threads", 0) == 1 || return false
     get(observed, "julia_num_threads", "") == "1" || return false
     get(observed, "openblas_num_threads", "") == "1" || return false
@@ -1013,8 +1018,8 @@ end
 function _with_serial_qualification_profile(f::Function)
     # Julia's thread pool is fixed at process start, so reject a genuinely
     # multithreaded parent instead of labeling it serial after the fact.
-    Threads.nthreads() == 1 ||
-        error("qualification requires a Julia process started with one thread")
+    Threads.nthreads(:default) == 1 && Threads.nthreads(:interactive) == 0 ||
+        error("qualification requires a Julia process started with one thread in the default pool and no interactive threads")
 
     caller_blas_threads = BLAS.get_num_threads()
     caller_julia_threads_env = get(ENV, "JULIA_NUM_THREADS", nothing)
@@ -1027,7 +1032,8 @@ function _with_serial_qualification_profile(f::Function)
         caller_blas_threads == 1 || BLAS.set_num_threads(1)
         ENV["JULIA_NUM_THREADS"] = "1"
         ENV["OPENBLAS_NUM_THREADS"] = "1"
-        Threads.nthreads() == 1 && BLAS.get_num_threads() == 1 ||
+        Threads.nthreads(:default) == 1 && Threads.nthreads(:interactive) == 0 &&
+            BLAS.get_num_threads() == 1 ||
             error("could not establish the approved serial scientific profile")
         return f()
     finally

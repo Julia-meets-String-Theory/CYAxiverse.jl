@@ -57,6 +57,13 @@ centered periodic lift, with its integer translation retained in the result.
 Integer, rational, and finite binary floating-point values are captured as
 exact rationals before proof arithmetic begins.
 
+`prepare_model` copies the supplied arrays. The model's stored arrays remain
+mutable, so every public proof operation and certificate writer rechecks their
+dimensions, integer charges, finite entries, metric symmetry and amplitude
+scale. An inconsistent model raises an argument or dimension error before
+proof work. After changing logarithmic amplitudes, call `prepare_model` again
+to recompute the scale. Do not mutate a model during a proof operation.
+
 When an existing numerical correction or geometry reader supplies a candidate,
 keep that operation as proposal work and certify its returned point against the
 same oriented model. This example shows the repository reader and correction
