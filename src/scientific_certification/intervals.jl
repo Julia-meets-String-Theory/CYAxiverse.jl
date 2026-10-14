@@ -285,6 +285,33 @@ CertificationModel(Q::Matrix{Rational{BigInt}}, L::Matrix{Rational{BigInt}},
         s::Rational{BigInt}) = CertificationModel(Q, L, K, phases, s, nothing,
             size(Q, 1), size(Q, 2))
 
+function _validate_model(model::CertificationModel)
+    n, M = model.n, model.M
+    n >= 1 && M >= 1 || throw(DimensionMismatch("model dimensions must be positive"))
+    if model.resource_reason !== nothing
+        # Only the deliberately empty resource-limited representation may
+        # bypass the full model checks; it cannot produce a proof.
+        model.resource_reason == "RESOURCE_LIMIT" && model.s === nothing &&
+            size(model.Q) == size(model.L) == size(model.K) == (0, 0) &&
+            isempty(model.phases) || throw(ArgumentError("invalid resource-limited model"))
+        return nothing
+    end
+    size(model.Q) == (n, M) || throw(DimensionMismatch("Q must have size (n,M)"))
+    size(model.L) == (2, M) || throw(DimensionMismatch("L must have size (2,M)"))
+    size(model.K) == (n, n) || throw(DimensionMismatch("K must have size (n,n)"))
+    length(model.phases) == M || throw(DimensionMismatch("phases must have length M"))
+    all(denominator(x) == 1 for x in model.Q) ||
+        throw(ArgumentError("Q entries must be integers"))
+    all(isfinite, model.L) && all(isfinite, model.K) && all(isfinite, model.phases) ||
+        throw(ArgumentError("model entries must be finite"))
+    for j in 1:n, i in 1:j-1
+        model.K[i, j] == model.K[j, i] || throw(ArgumentError("K must be exactly symmetric"))
+    end
+    model.s == maximum(view(model.L, 2, :)) ||
+        throw(ArgumentError("model amplitude scale must equal maximum(L[2,:])"))
+    return nothing
+end
+
 const _CertificationInterpretation = NamedTuple{
     (:basis, :orientation, :theta_period, :phase_units, :coefficient_convention,
      :numeric_semantics, :spectrum_convention, :physical_normalization, :s),

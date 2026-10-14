@@ -340,6 +340,7 @@ end
 function certify_generalized_spectrum(model::CertificationModel, root::RootResult;
         options=ProofOptions())
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
+    _validate_model(model)
     identity = _result_identity(model)
     try
         return _certify_generalized_spectrum(model, root, options, nothing, identity)
@@ -451,6 +452,7 @@ end
 
 function certify(model::CertificationModel, theta0; options=ProofOptions(), candidate_provenance=nothing)
     options isa ProofOptions || throw(ArgumentError("options must be ProofOptions"))
+    _validate_model(model)
     try
         return _certify_impl(model, theta0; options, candidate_provenance)
     catch error
