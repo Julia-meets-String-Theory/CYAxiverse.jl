@@ -1,0 +1,165 @@
+schema = "cyax-scientific-public-fixtures-v1"
+
+[settings]
+max_newton_steps = 20
+max_backtracks = 8
+box_radii = ["1/1048576", "1/1073741824", "1/1099511627776", "1/1152921504606846976"]
+max_expansions = 32
+max_inertia_evaluations = 4096
+relative_width = "1/1048576"
+watchdog_seconds = 300
+
+[[fixtures]]
+id = "T01"
+family = "T01"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1]]
+L = [[1], [0]]
+K = [[1]]
+phi = ["0/1"]
+seed = ["0/1"]
+
+[[fixtures]]
+id = "T02"
+family = "T02"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1]]
+L = [[1], [0]]
+K = [[1]]
+phi = ["0/1"]
+seed = ["1/2"]
+
+[[fixtures]]
+id = "T03"
+family = "T03"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1, 0], [0, 1]]
+L = [[1, 1], [0, 0]]
+K = [[1, 0], [0, 4]]
+phi = ["0/1", "0/1"]
+seed = ["0/1", "0/1"]
+
+[[fixtures]]
+id = "T04"
+family = "T04"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1, 0], [0, 1]]
+L = [[1, -1], [0, 0]]
+K = [[2, 1], [1, 2]]
+phi = ["0/1", "0/1"]
+seed = ["0/1", "0/1"]
+
+[[fixtures]]
+id = "T05"
+family = "T05"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1, 0, 0, 0, 0, 1, 0, 0, 0], [0, 1, 0, 0, 0, 1, 1, 0, 0], [0, 0, 1, 0, 0, 0, 1, 1, 0], [0, 0, 0, 1, 0, 0, 0, 1, 1], [0, 0, 0, 0, 1, 0, 0, 0, 1]]
+L = [[1, 1, 1, 1, 1, 1, 1, 1, 1], [0, 0, 0, 0, 0, 0, 0, 0, 0]]
+K = [[1, 0, 0, 0, 0], [0, 2, 0, 0, 0], [0, 0, 3, 0, 0], [0, 0, 0, 4, 0], [0, 0, 0, 0, 5]]
+phi = ["0/1", "0/1", "0/1", "0/1", "0/1", "0/1", "0/1", "0/1", "0/1"]
+seed = ["0/1", "0/1", "0/1", "0/1", "0/1"]
+
+[[fixtures]]
+id = "T06_hierarchy"
+family = "T06"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1, 0], [0, 1]]
+L = [[1, 1], [0, -400]]
+K = [[1, 0], [0, 1]]
+phi = ["0/1", "0/1"]
+seed = ["0/1", "0/1"]
+
+[[fixtures]]
+id = "T06_fractional_log"
+family = "T06"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1, 0], [0, 1]]
+L = [[1, 1], [0, "-1/2"]]
+K = [[1, 0], [0, 1]]
+phi = ["0/1", "0/1"]
+seed = ["0/1", "0/1"]
+
+[[fixtures]]
+id = "T09_seed0"
+family = "T09"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1]]
+L = [[1], [0]]
+K = [[1]]
+phi = ["0/1"]
+seed = ["0/1"]
+
+[[fixtures]]
+id = "T09_seed1"
+family = "T09"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1]]
+L = [[1], [0]]
+K = [[1]]
+phi = ["0/1"]
+seed = ["1/1"]
+
+[[fixtures]]
+id = "T14"
+family = "T14"
+precision = 256
+spectral_goal = "individuals"
+benchmark = true
+Q = [[1, 0], [0, 1]]
+L = [[1.0, -0.1], [0.0, 0.0]]
+K = [[2.0, 0.3], [0.3, 1.0]]
+phi = ["0/1", "0/1"]
+seed = ["3/2", "-1/2"]
+
+[[fixtures]]
+id = "T16_phase_unit"
+family = "T16"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1]]
+L = [[1], [0]]
+K = [[1]]
+phi = ["1/8"]
+seed = ["0/1"]
+
+[[fixtures]]
+id = "T16_common_shift"
+family = "T16"
+precision = 256
+spectral_goal = "individuals"
+Q = [[1, 0], [0, 1]]
+L = [[1, 1], [1000, 1000]]
+K = [[1, 0], [0, 4]]
+phi = ["0/1", "0/1"]
+seed = ["0/1", "0/1"]
+
+[[fixtures]]
+id = "T16_signed_charge"
+family = "T16"
+precision = 256
+spectral_goal = "individuals"
+Q = [[-2]]
+L = [[1], [0]]
+K = [[1]]
+phi = ["1/8"]
+seed = ["0/1"]
+
+[[fixtures]]
+id = "T17"
+family = "T17"
+precision = 256
+spectral_goal = "clusters"
+Q = [[1, 0], [0, 1]]
+L = [[1, 1], [0, 0]]
+K = [[1, 0], [0, 1]]
+phi = ["0/1", "0/1"]
+seed = ["0/1", "0/1"]

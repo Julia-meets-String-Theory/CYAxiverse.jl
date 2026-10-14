@@ -32,3 +32,7 @@ could alter a benchmark, scientific interpretation, or population claim.
 When delegated, own routine diagnose/debug/correct/retest loops. Return a
 concise result summary with exact command outcomes and references to raw logs
 or detailed artifacts where those are useful.
+## Conditional engineering methods
+
+- When diagnosing a defect or implementing a behavior with a justified test oracle, use [the diagnostic and test loop](references/diagnostic-test-loop.md).
+- Before implementation handback, use [the implementation self-check](references/implementation-self-review.md). Its findings are implementation evidence; independent review follows the governing task.
