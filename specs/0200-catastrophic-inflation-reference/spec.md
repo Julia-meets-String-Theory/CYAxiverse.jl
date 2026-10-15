@@ -3,13 +3,13 @@ spec_id: CYAX-INF-01A
 title: Catastrophic inflation N=5/N=8 scientific reference readiness
 issue: 200
 class: S2
-status: draft
+status: approved
 workstream: Inflation
 parent: catastrophic-inflation-M0-M6
 depends_on: [119, 130, 131, 148]
 created: 2026-10-14
 review_required: scientific-owner-after-independent-scientific-review
-approval_ref: null
+approval_ref: https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/pull/202#issuecomment-6204315512
 version_impact: no package version change for reference-only output
 ---
 
