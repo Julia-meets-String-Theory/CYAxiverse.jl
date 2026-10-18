@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/research/temporal_provenance/record.schema.json",
+  "title": "CYAxiverse temporal-provenance prototype record",
+  "oneOf": [
+    {"$ref": "#/$defs/meta"},
+    {"$ref": "#/$defs/resource"},
+    {"$ref": "#/$defs/assertion"}
+  ],
+  "$defs": {
+    "id": {"type": "string", "minLength": 1},
+    "timestamp": {"type": ["string", "null"], "format": "date-time"},
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "scope"],
+      "properties": {
+        "class": {
+          "enum": [
+            "agent_extraction",
+            "approved_spec",
+            "external_source",
+            "implementation_evidence",
+            "owner_decision",
+            "verification_evidence",
+            "workflow_state"
+          ]
+        },
+        "scope": {"type": "string", "minLength": 1}
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "id",
+        "schema_version",
+        "title",
+        "pilot",
+        "root",
+        "reconstruction_task"
+      ],
+      "properties": {
+        "record_type": {"const": "meta"},
+        "id": {"$ref": "#/$defs/id"},
+        "schema_version": {"const": "cyax-temporal-provenance-0.1"},
+        "title": {"type": "string", "minLength": 1},
+        "pilot": {"type": "string", "minLength": 1},
+        "root": {"$ref": "#/$defs/id"},
+        "reconstruction_task": {"type": "string", "minLength": 1}
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "id",
+        "kind",
+        "label",
+        "canonical",
+        "observed_at",
+        "authority"
+      ],
+      "properties": {
+        "record_type": {"const": "resource"},
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {
+          "enum": [
+            "Action",
+            "Artifact",
+            "Claim",
+            "Computation",
+            "Decision",
+            "Episode",
+            "ExternalSource",
+            "Implementation",
+            "Requirement",
+            "Verification",
+            "WorkItem"
+          ]
+        },
+        "label": {"type": "string", "minLength": 1},
+        "canonical": {"type": "boolean"},
+        "locator": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "authority": {"$ref": "#/$defs/authority"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"canonical": {"const": true}}},
+          "then": {"required": ["locator"]}
+        }
+      ]
+    },
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "anchor"],
+      "properties": {
+        "source": {"$ref": "#/$defs/id"},
+        "anchor": {"type": "string", "minLength": 1}
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "id",
+        "subject",
+        "predicate",
+        "object",
+        "epistemic_status",
+        "valid_time",
+        "recorded_at",
+        "provenance",
+        "curation"
+      ],
+      "properties": {
+        "record_type": {"const": "assertion"},
+        "id": {"$ref": "#/$defs/id"},
+        "subject": {"$ref": "#/$defs/id"},
+        "predicate": {
+          "enum": [
+            "blocks",
+            "concerns",
+            "contradicts",
+            "depends_on",
+            "documented_in",
+            "governs",
+            "has_outcome",
+            "has_status",
+            "implements",
+            "next_valid_action",
+            "produced_by",
+            "resolves",
+            "supports",
+            "supersedes",
+            "uses",
+            "verifies"
+          ]
+        },
+        "object": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref"],
+          "properties": {"ref": {"$ref": "#/$defs/id"}}
+        },
+        "epistemic_status": {
+          "enum": [
+            "accepted",
+            "extracted",
+            "observed",
+            "rejected",
+            "reported",
+            "unresolved",
+            "verified"
+          ]
+        },
+        "valid_time": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to"],
+          "properties": {
+            "from": {"$ref": "#/$defs/timestamp"},
+            "to": {"$ref": "#/$defs/timestamp"}
+          }
+        },
+        "recorded_at": {"type": "string", "format": "date-time"},
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/citation"}
+        },
+        "curation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "review_status"],
+          "properties": {
+            "method": {"type": "string", "minLength": 1},
+            "review_status": {
+              "enum": ["unreviewed", "curator_checked", "independently_reviewed"]
+            }
+          }
+        },
+        "qualifiers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "effect": {"enum": ["disputes", "refutes"]},
+            "strength": {"enum": ["context", "required", "supporting"]}
+          }
+        }
+      }
+    }
+  }
+}

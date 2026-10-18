@@ -1,0 +1,18 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F3-nonunit-coefficient-factor"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:133-146", "src/generate.jl:374-384"]
+precision = "Float64"
+environment = "Julia 1.12.6; one Julia thread; scalar Float64 arithmetic"
+construction = "Identity charges with coefficient factors 2.5 and -0.25; factors are intentionally not signs."
+purpose = "Freeze that L[1,a] is multiplied as a signed coefficient factor and is not normalized to +/-1."
+q = [[1, 0], [0, 1]]
+l = [[2.5, -0.25], [0.0, -3.0]]
+theta = [0.2, 0.3]
+phases = [0.0, 0.0]
+
+[expected]
+historical_result = "effective amplitudes are [2.5,-0.00025] before any route-specific row scaling; no coefficient canonicalization occurs."
+effective_amplitudes = [2.5, -0.00025]
+global_amplitudes = [2.5, -0.00025]
+status = "applicable"

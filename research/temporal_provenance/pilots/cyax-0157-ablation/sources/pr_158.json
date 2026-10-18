@@ -1,0 +1,26 @@
+{
+  "number": 158,
+  "title": "Sanitize machine-local path configuration",
+  "state": "OPEN",
+  "isDraft": false,
+  "mergeable": "MERGEABLE",
+  "mergedAt": null,
+  "headRefOid": "8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45",
+  "baseRefOid": "856012f015a866bf7ff352bc50e8d10c250855e6",
+  "headRefName": "fix/privacy-path-remediation-20260910",
+  "baseRefName": "vmm",
+  "labels": [],
+  "milestone": null,
+  "projectItems": [
+    {
+      "status": {
+        "optionId": "0615a79e",
+        "name": "Verification"
+      },
+      "title": "CYAxiverse Research & Development"
+    }
+  ],
+  "body": "## Summary\n\nRemoves confirmed machine-local filesystem disclosures from the current `vmm` code and documentation surface.\n\n- moves personal data and Slurm locations to explicit environment configuration;\n- replaces local checkout and interpreter paths with repository-relative or configurable resolution;\n- sanitizes path-bearing documentation, notebooks, validation notes, and reproducibility helpers;\n- preserves scientific algorithms, source identities, hashes, schemas, and numerical behavior;\n- retires the unavailable 2026-08-25 bound evidence set with path-free identity ledgers;\n- fail-closes all eight historical 2026-08-25 Julia and Python entry points before dependency loading, input resolution, or output creation;\n- treats `CYAXIVERSE_PYTHON` as a checked desired interpreter, rejects a mismatch with explicit PyCall rebuild/restart guidance, and never rebuilds PyCall automatically;\n- adds focused data-directory, Slurm-log, optional-interpreter, retired-workflow, static notebook-configuration, and executable notebook-initialization coverage.\n\nIssue #157 remains open. PR #158 does not complete R-005 because every surviving public branch still requires a read-only scan and preservation/reachability classification.\n\n## Notebook runtime failure and repair\n\nThe notebooks use their own committed `notebooks/Project.toml` and `notebooks/Manifest.toml`. CI previously instantiated only the package/test environment, so clean runners could not resolve notebook-only dependencies. Developer machines with an already-populated depot masked that setup gap.\n\nFast and Full CI now instantiate the notebook project before package tests and verify that instantiation does not change either committed environment file. Notebook changes also trigger CI.\n\nThe CYTools startup smoke uses a synthetic import-only Python fixture because it tests initialization rather than scientific execution. Clean CI showed that extension initialization imports both SciPy and NumPy even when no solver runs. The fixture now supplies those import surfaces; its numerical functions deliberately throw if called, so the smoke fails loudly if initialization begins scientific work. The runtime assertions were not weakened or skipped.\n\n## Verification at exact head\n\n- head: `8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45`\n- current `vmm` base incorporated: `856012f015a866bf7ff352bc50e8d10c250855e6`\n- `python3 scripts/agent_verify.py diff-check` — passed\n- tracked privacy/path scan — clean for the confirmed machine-local fragments; generic container paths remain intentionally allowed by the specification\n- clean notebook-project instantiation — passed with no `Project.toml` or `Manifest.toml` drift\n- focused remediation tests — passed:\n  - optional Python interpreter contract: 9/9\n  - notebook static checks: 20/20\n  - notebook runtime initialization smoke: 10/10\n  - retired 2026-08-25 entry-point guards: 54/54\n- Slurm-log resolution: 6/6\n- data-directory resolution: 10/10\n- bounded Phase-3 CLI data-directory contract: 4/4, without launching the production pipeline\n- changed Python files parsed/compiled: 8/8\n- documentation build — passed\n- Fast package verification — every new #157/#158 test passed, then the suite stopped at the unchanged pre-existing Hessian expectation mismatch at `test/runtests.jl:1317`: diagonal `19.739208802178716` observed versus `39.47841760435743` expected\n- independent re-review — APPROVE, no findings, against the exact head above\n\nNo production CYTools geometry generation, large database scan, retired physical-scaling workflow, or external evidence generation was run. No scientific or numerical implementation changed in this repair.\n\n## R-005 / deferred work\n\nNo public branch was deleted, force-pushed, or rewritten. The surviving-public-branch scan, reachability/preservation classification, and any later history decision remain the explicit completion gate for Issue #157. This PR must not close Issue #157.\n\nIndependent re-review is requested against exact head `8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45`.\n",
+  "createdAt": "2026-09-11T02:06:37Z",
+  "updatedAt": "2026-09-11T20:50:22Z"
+}

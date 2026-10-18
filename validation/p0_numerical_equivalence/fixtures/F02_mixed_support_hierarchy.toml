@@ -1,0 +1,18 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F2-mixed-support-hierarchy"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:137-161", "src/minimizer.jl:167-185"]
+precision = "Float64"
+environment = "Julia 1.12.6; one Julia thread; scalar Float64 arithmetic"
+construction = "Three terms: one dominant term on coordinate 1, one -400 term shared by both coordinates, and one -10 term on coordinate 2."
+purpose = "Check that overlapping support selects row maxima independently and drops only underflowed pair scaling."
+q = [[1, 1, 0], [0, 1, 1]]
+l = [[1.0, 1.0, -1.0], [0.0, -400.0, -10.0]]
+theta = [0.125, 0.125]
+phases = [0.0, 0.0, 0.0]
+
+[expected]
+historical_result = "row_logscale=[0,-10]; the shared -400 term is below the Float64 delta floor for row 1 and the row-1/row-2 pair, so it contributes zero there; row 2 is normalized by the -10 term."
+row_logscale = [0.0, -10.0]
+scaled_amplitudes = [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0]]
+status = "applicable"

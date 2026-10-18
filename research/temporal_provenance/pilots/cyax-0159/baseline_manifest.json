@@ -1,0 +1,26 @@
+{
+  "condition": "unstructured-canonical-artifacts",
+  "pilot": "CYAX-0159",
+  "anchor": "vmm@856012f015a866bf7ff352bc50e8d10c250855e6",
+  "instructions": "Use these raw durable artifacts directly. Do not read ledger.jsonl or context.md.",
+  "github": [
+    "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/159",
+    "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/pull/160",
+    "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/pull/161",
+    "https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/compare/856012f015a866bf7ff352bc50e8d10c250855e6...main"
+  ],
+  "repository_at_anchor": [
+    "specs/0159-lessons-corrections/spec.md",
+    ".agents/LESSONS.md",
+    ".agents/skills/cyaxiverse-sdd/SKILL.md",
+    ".github/pull_request_template.md",
+    "specs/0151-sdd-v1/clarification-a.md",
+    "specs/0155-private-safe-chat-checkpoints/spec.md"
+  ],
+  "history": [
+    "2b9b056efb8bd35229c37b394e8fc75ede2eac95",
+    "f965dc65db44559dc766552242ef4a7e3f4e3279",
+    "bd3e866537b0115a4cb76cbae31b3768da3de724",
+    "856012f015a866bf7ff352bc50e8d10c250855e6"
+  ]
+}

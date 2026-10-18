@@ -1,0 +1,16 @@
+# Diagnostic and test loop
+
+Trigger: A reproducible defect, or an authorized feature whose behavior has a justified test oracle. Inputs: governing requirement, authorized code boundary, environment, and relevant existing tests. Apply AGENTS.md and cyaxiverse-julia-quality; consult scientific-reproduction where its existing trigger applies.
+
+1. Name the observable behavior and independently justify the expectation. Suitable foundations include a proved identity, hand-derived analytic value, source-verified fixture, or independently certified benchmark. Record what the oracle does and does not establish. Copying the implementation into the expected-value calculation is insufficient.
+2. Establish a red-capable case early. For a defect, run it against the faulty authorized baseline before correction. For a feature, add and run the smallest test expressing the next approved behavior before implementing that behavior. A failure caused by import, environment, or fixture setup is not the intended red result.
+3. Minimize the reproducer and investigate falsifiable hypotheses. Use bounded local instrumentation where authorized. Preserve valid existing tests and unrelated work. For an already-fixed historical defect, an explicitly authorized disposable mutant may demonstrate detection; label it as a mutant, not historical execution evidence.
+4. Make the smallest justified correction or behavioral slice. Run its test, investigate failures, and continue within scope. Refactor only where authorized, retaining applicable tests and rechecking the behavior. Do not introduce an abstraction solely to satisfy a preferred testing style.
+5. Run required broader validation after the focused loop. Fast reproductions do not replace required package, scientific, privacy, or other gates.
+6. Return baseline/candidate identity, oracle basis, exact commands and observed red/green outcomes, broader verification, and unresolved limitations. Record missing evidence as missing. Do not claim completion if an applicable required check is unavailable.
+
+Preserve precision, exactness, sparse behavior, optional Python boundaries, and existing shape/orientation/identity/unit/schema contracts. Apply physical-domain restrictions to the appropriate objects; a diagnostic saddle is not rejected merely because its Hessian is indefinite. Scientific interpretation remains with the existing authority.
+
+If the oracle or intended convention is unresolved, isolate the uncertainty and return it through the governing escalation route. Ordinary test failures and corrections remain with the implementation worker. Existing task authorization suffices for settled design choices.
+
+For a task expressly scoped to scientific certification, follow [the bound certification contract](../../../../specs/cyax-scientific-certification/spec.md). Keep candidate generation, root proof, Hessian classification, spectral coverage and resolution, exact replay, and execution provenance as distinct obligations. Use independently justified scientific fixtures, exercise false claims beyond checksum rejection, and bind observations to the actual candidate and environment. The skills smoke cases assess instruction behavior; they do not satisfy scientific proof gates. Other tasks do not acquire a requirement to run or add this certifier.

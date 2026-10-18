@@ -23,6 +23,7 @@ end
 
 include(joinpath(@__DIR__, "optional_plotting.jl"))
 include(joinpath(@__DIR__, "path_remediation.jl"))
+include(joinpath(@__DIR__, "scientific_certification.jl"))
 
 # The bounded synthetic geometry-flow test below exercises this helper in both
 # fast and full modes. Keep the implementation boundary available without
@@ -400,8 +401,23 @@ if _FULL; @testset "Scale-continuation pilot diagnostics" begin
 
     benchmark = pilot_benchmark_regression()
     @test benchmark.passed
-    @test benchmark.n5_critical_scale ≈ 0.674506370003365 atol=1e-12
+    @test isapprox(benchmark.n5_critical_scale, benchmark.n5_closed_form_kc;
+        rtol=0.0, atol=1e-12)
+    @test benchmark.n5_kc_residual < 1e-12
     @test benchmark.n5_ratio ≈ 0.25 atol=1e-12
+    @test length(benchmark.n5_continuation) == 4
+    @test all(step.branch == :pi for step in benchmark.n5_continuation)
+    @test all(step.converged for step in benchmark.n5_continuation)
+    @test benchmark.n5_catastrophe_index !== nothing
+    @test isapprox(benchmark.n5_continuation[benchmark.n5_catastrophe_index].theta,
+        π; atol=2e-7)
+    @test all(isapprox(benchmark.n5_continuation[index].theta,
+        benchmark.n5_continuation[benchmark.n5_catastrophe_index].theta;
+        atol=2e-7) for index in eachindex(benchmark.n5_continuation))
+    @test any(step -> step.catastrophe_detected, benchmark.n5_continuation)
+    @test all(step.gradient <= 1e-10 for step in benchmark.n5_continuation)
+    @test benchmark.n5_continuation[1].hessian > 0
+    @test benchmark.n5_continuation[end].hessian < 0
     @test benchmark.n8_zero_mode
     @test benchmark.n8_positive_heavy_modes
     @test benchmark.n8_detuned_negative_modes == 1
@@ -1161,29 +1177,50 @@ end
 function _load_geometries_generate_fixture()
     source_path = joinpath(@__DIR__, "..", "add_functions", "cytools_wrapper.jl")
     source = read(source_path, String)
-    function find_definition(expression)
+    function find_definition(expression, name)
         expression isa Expr || return nothing
         if expression.head === :function
             signature = expression.args[1]
             if signature isa Expr && signature.head === :call &&
-                    signature.args[1] === :geometries_generate
+                    signature.args[1] === name
                 return expression
             end
         end
         for argument in expression.args
-            definition = find_definition(argument)
+            definition = find_definition(argument, name)
             definition === nothing || return definition
         end
         nothing
     end
 
-    expression = find_definition(Meta.parseall(source))
-    expression === nothing && error("geometries_generate definition not found in $source_path")
+    parsed_source = Meta.parseall(source)
+    generate_expression = find_definition(parsed_source, :geometries_generate)
+    generate_expression === nothing &&
+        error("geometries_generate definition not found in $source_path")
+    hilbert_expression = find_definition(parsed_source, :geometries_generate_hilbert)
+    hilbert_expression === nothing &&
+        error("geometries_generate_hilbert definition not found in $source_path")
     fixture_module = Module(:GeometriesGenerateFixture)
     Core.eval(fixture_module, :(using LinearAlgebra))
     Core.eval(fixture_module, :(cytools_version() = "0.8.0"))
-    Core.eval(fixture_module, expression)
-    return Base.invokelatest(getproperty, fixture_module, :geometries_generate)
+    Core.eval(fixture_module, quote
+        struct GeometryIndex
+            h11::Int
+            cy::Any
+            geometry_data::Any
+        end
+        cy_from_poly(geom_idx::GeometryIndex) = (; cy=geom_idx.cy)
+        geometry(geom_idx::GeometryIndex) = geom_idx.geometry_data
+    end)
+    Core.eval(fixture_module, generate_expression)
+    Core.eval(fixture_module, hilbert_expression)
+    return (;
+        geometries_generate=Base.invokelatest(getproperty, fixture_module,
+            :geometries_generate),
+        geometries_generate_hilbert=Base.invokelatest(getproperty, fixture_module,
+            :geometries_generate_hilbert),
+        fixture_module,
+    )
 end
 
 struct _SyntheticKahlerCone
@@ -1207,6 +1244,8 @@ end
 struct _SyntheticCY
     tau_coefficient::Float64
     metric_coefficient::Float64
+    metric_shape::Matrix{Float64}
+    charges::Matrix{Float64}
     divisor_points::Vector{Vector{Float64}}
     metric_points::Vector{Vector{Float64}}
     volume_points::Vector{Vector{Float64}}
@@ -1214,66 +1253,137 @@ end
 
 function Base.getproperty(cy::_SyntheticCY, name::Symbol)
     name === :h21 && return () -> 0
-    name === :glsm_charge_matrix && return (; include_origin=false) -> reshape([1], 1, 1)
-    name === :divisor_basis && return () -> [1]
-    name === :toric_kahler_cone && return () -> _SyntheticKahlerCone([1.0])
+    n = size(getfield(cy, :metric_shape), 1)
+    name === :glsm_charge_matrix &&
+        return (; include_origin=false) -> Matrix{Int}(I, n, n)
+    name === :divisor_basis && return () -> collect(1:n)
+    name === :toric_kahler_cone && return () -> _SyntheticKahlerCone(ones(n))
     name === :toric_effective_cone &&
-        return () -> _SyntheticEffectiveCone(reshape([-1.0, 2.0], 2, 1))
+        return () -> _SyntheticEffectiveCone(copy(getfield(cy, :charges)))
     if name === :compute_divisor_volumes
         return point -> begin
             push!(getfield(cy, :divisor_points), copy(point))
-            [getfield(cy, :tau_coefficient) * point[1]^2]
+            getfield(cy, :tau_coefficient) .* point.^2
         end
     end
     if name === :compute_inverse_kahler_metric || name === :compute_Kinv
         return point -> begin
             push!(getfield(cy, :metric_points), copy(point))
-            reshape([getfield(cy, :metric_coefficient) * point[1]^4], 1, 1)
+            getfield(cy, :metric_coefficient) * point[1]^4 .* getfield(cy, :metric_shape)
         end
     end
     if name === :compute_cy_volume
         return point -> begin
             push!(getfield(cy, :volume_points), copy(point))
-            point[1]^3
+            (sum(point) / length(point))^3
         end
     end
     getfield(cy, name)
 end
 
-@testset "CYTools geometry fields share the final evaluation point" begin
+function _synthetic_eq21_margins(qprime, tau, Kinv)
+    margins = Float64[]
+    for i in 1:size(qprime, 1), j in 1:i-1
+        qi = @view qprime[i, :]
+        qj = @view qprime[j, :]
+        pair_log = log(abs(π * dot(qi, Kinv * qj))) -
+            2π * dot(tau, qi .+ qj)
+        single_log = log(abs(dot(tau, qi))) - 2π * dot(tau, qi)
+        push!(margins, abs(pair_log) - abs(single_log))
+    end
+    margins
+end
+
+@testset "CYTools Eq21 scaling and final geometry fields" begin
     geometries_generate_fixture = _load_geometries_generate_fixture()
     cases = (
-        (name="unscaled", tau=2.0, metric=1.0, expect_m=false, expect_n=false),
-        (name="m scaling", tau=2.0, metric=1e-8, expect_m=true, expect_n=false),
-        (name="m then n scaling", tau=0.1, metric=1e-2, expect_m=true, expect_n=true),
+        (name="Eq21 accepts at the base point", tau=2.0, metric=1e-8,
+            expect_m=false, expect_n=false),
+        (name="Eq21 rejection triggers radial m scaling", tau=2.0,
+            metric=exp(12π - abs(log(4.0) - 8π) + 0.01) / (2π),
+            expect_m=true, expect_n=false),
+        (name="radial m scaling followed by n scaling", tau=0.5,
+            metric=exp(π + 0.01) / (2π), expect_m=true, expect_n=true),
     )
+    charges = reshape([1.0, 2.0], 2, 1)
     for case in cases
         divisor_points = Vector{Float64}[]
         metric_points = Vector{Float64}[]
         volume_points = Vector{Float64}[]
-        cy = _SyntheticCY(case.tau, case.metric, divisor_points,
-            metric_points, volume_points)
-        result = geometries_generate_fixture(1, cy)
+        cy = _SyntheticCY(case.tau, case.metric, ones(1, 1), charges,
+            divisor_points, metric_points, volume_points)
+        result = geometries_generate_fixture.geometries_generate(1, cy)
+        hilbert_divisor_points = Vector{Float64}[]
+        hilbert_metric_points = Vector{Float64}[]
+        hilbert_volume_points = Vector{Float64}[]
+        hilbert_cy = _SyntheticCY(case.tau, case.metric, ones(1, 1), charges,
+            hilbert_divisor_points, hilbert_metric_points, hilbert_volume_points)
+        geometry_data = (; basis=[1], tip=[1.0],
+            kinv=reshape([case.metric], 1, 1), τ_volumes=[case.tau],
+            hilbert_basis=charges)
+        index_type = getproperty(geometries_generate_fixture.fixture_module,
+            :GeometryIndex)
+        geom_idx = Base.invokelatest(index_type, 1, hilbert_cy, geometry_data)
+        hilbert_result = geometries_generate_fixture.geometries_generate_hilbert(geom_idx)
         radial_scale = prod(result["tip_prefactor"])
         final_tip = result["tip"]
         tau = result["PTD_volumes"]
         Kinv = result["Kinv"]
         volume = result["CY_volume"]
+        next_m = 1.01
+        base_margins = _synthetic_eq21_margins(charges, [case.tau],
+            reshape([case.metric], 1, 1))
+        next_margins = _synthetic_eq21_margins(charges,
+            [case.tau * next_m^2], reshape([case.metric * next_m^4], 1, 1))
+        final_margins = _synthetic_eq21_margins(charges, tau, Kinv)
+        hilbert_base_margins = _synthetic_eq21_margins(charges,
+            geometry_data.τ_volumes, geometry_data.kinv)
+        hilbert_next_margins = _synthetic_eq21_margins(charges,
+            geometry_data.τ_volumes .* next_m^2,
+            geometry_data.kinv .* next_m^4)
+        hilbert_final_margins = _synthetic_eq21_margins(charges,
+            hilbert_result.τ_volumes, hilbert_result.Kinv)
+
+        q_i, q_j = charges[2, 1], charges[1, 1]
+        lhs0 = abs(log(abs(π * q_i * case.metric * q_j)) -
+            2π * case.tau * (q_i + q_j))
+        rhs0 = abs(log(abs(case.tau * q_i)) - 2π * case.tau * q_i)
 
         @testset "$(case.name)" begin
+            @test (lhs0 <= rhs0) == case.expect_m
             @test (result["tip_prefactor"][2] > 1.0) == case.expect_m
             @test (result["tip_prefactor"][1] > 1.0) == case.expect_n
-            @test final_tip ≈ [radial_scale]
+            @test all(>(0), base_margins) == !case.expect_m
+            @test hilbert_base_margins ≈ base_margins
+            if case.expect_m
+                @test minimum(next_margins) > minimum(base_margins)
+                @test all(>(0), next_margins)
+                @test minimum(hilbert_next_margins) >
+                    minimum(hilbert_base_margins)
+                @test all(>(0), hilbert_next_margins)
+            end
+            @test all(>(0), final_margins)
+            @test final_tip ≈ fill(radial_scale, 1)
             @test divisor_points[end] ≈ final_tip
             @test metric_points[end] ≈ final_tip
             @test volume_points[end] ≈ final_tip
             @test tau ≈ [case.tau * radial_scale^2]
-            @test Kinv ≈ reshape([1.5 * case.metric * radial_scale^4], 1, 1)
+            @test Kinv ≈ reshape([case.metric * radial_scale^4], 1, 1)
             @test volume ≈ radial_scale^3
+
+            @test hilbert_result.tip ≈ final_tip
+            @test hilbert_result.tip_prefactor ≈ result["tip_prefactor"]
+            @test hilbert_result.τ_volumes ≈ tau
+            @test hilbert_result.Kinv ≈ Kinv
+            @test hilbert_result.CY_volume ≈ volume
+            @test hilbert_divisor_points[end] ≈ hilbert_result.tip
+            @test hilbert_metric_points[end] ≈ hilbert_result.tip
+            @test hilbert_volume_points[end] ≈ hilbert_result.tip
+            @test all(>(0), hilbert_final_margins)
 
             # Use simple algebraic charges to exercise the potential formula;
             # these are not an effective-cone scientific fixture.
-            qprime = reshape([-1.0, 2.0], 2, 1)
+            qprime = charges
             expected_coefficients = [
                 (8pi / volume^2) * dot(qprime[1, :], tau),
                 (8pi / volume^2) * dot(qprime[2, :], tau),
@@ -1291,6 +1401,48 @@ end
             @test result["L"] ≈ expected_L
         end
     end
+
+    # Antisymmetric numerical noise in Kinv must not affect the Eq21 decision,
+    # radial scale, potential, or returned symmetric inverse metric.
+    symmetric_metric = [2.0 0.3; 0.3 1.0]
+    skew_metric = [0.0 0.4; -0.4 0.0]
+    charges_2d = [1.0 0.0; 0.0 1.0; 1.0 1.0]
+    outputs = map((symmetric_metric + skew_metric,
+            symmetric_metric - skew_metric)) do metric_shape
+        cy = _SyntheticCY(2.0, 1.0, metric_shape, charges_2d,
+            Vector{Float64}[], Vector{Float64}[], Vector{Float64}[])
+        geometries_generate_fixture.geometries_generate(2, cy)
+    end
+    @test outputs[1]["tip"] ≈ outputs[2]["tip"]
+    @test outputs[1]["tip_prefactor"] ≈ outputs[2]["tip_prefactor"]
+    @test outputs[1]["PTD_volumes"] ≈ outputs[2]["PTD_volumes"]
+    @test outputs[1]["Kinv"] ≈ outputs[2]["Kinv"]
+    @test outputs[1]["Kinv"] ≈ symmetric_metric
+    @test issymmetric(outputs[1]["Kinv"])
+    @test outputs[1]["L"] ≈ outputs[2]["L"]
+    @test all(>(0), _synthetic_eq21_margins(charges_2d,
+        outputs[1]["PTD_volumes"], outputs[1]["Kinv"]))
+
+    # The Hilbert-basis path starts from persisted Kinv and evaluates the
+    # final metric with CYTools. It must apply the same symmetric projection.
+    hilbert_outputs = map((symmetric_metric + skew_metric,
+            symmetric_metric - skew_metric)) do metric_shape
+        cy = _SyntheticCY(2.0, 1.0, metric_shape, charges_2d,
+            Vector{Float64}[], Vector{Float64}[], Vector{Float64}[])
+        geometry_data = (; basis=[1, 2], tip=ones(2), kinv=metric_shape,
+            τ_volumes=fill(2.0, 2), hilbert_basis=charges_2d)
+        index_type = getproperty(geometries_generate_fixture.fixture_module,
+            :GeometryIndex)
+        geom_idx = Base.invokelatest(index_type, 2, cy, geometry_data)
+        geometries_generate_fixture.geometries_generate_hilbert(geom_idx)
+    end
+    @test hilbert_outputs[1].Kinv ≈ hilbert_outputs[2].Kinv
+    @test hilbert_outputs[1].Kinv ≈ symmetric_metric
+    @test issymmetric(hilbert_outputs[1].Kinv)
+    @test hilbert_outputs[1].tip ≈ ones(2)
+    @test hilbert_outputs[1].τ_volumes ≈ fill(2.0, 2)
+    @test all(>(0), _synthetic_eq21_margins(charges_2d,
+        hilbert_outputs[1].τ_volumes, hilbert_outputs[1].Kinv))
 end
 
 @testset "CYAxiverse.jl" begin
@@ -1314,21 +1466,130 @@ end
         @test length(phases) == 9
         @test phases[1] == [0.0, 0.0]
         @test S.potential([0.0, 0.0], Q, L, phases[1]) ≈ 0
-        @test S.hessian([0.0, 0.0], Q, L, phases[1]) ≈
-            4π^2 * Matrix{Float64}(I, 2, 2)
+        expected_identity_hessian = (2π)^2 .* Matrix{Float64}(I, 2, 2)
+        @test S.hessian([0.0, 0.0], Q, L, phases[1]) ≈ expected_identity_hessian
+
+        Q_general = [1.0 2.0; -1.0 1.0; 2.0 0.0]
+        L_general = [1.5 -0.3; 0.7 0.4; 2.3 -0.1]
+        theta_general = [0.17, -0.23]
+        phase_general = [0.11, -0.07, 0.19]
+        k_general = 0.8
+        amplitudes_general = L_general[:, 1] .* 10.0 .^ (k_general .* L_general[:, 2])
+        angles_general = 2π .* (Q_general * theta_general .+ phase_general)
+        expected_general_hessian = (2π)^2 .* (
+            transpose(Q_general) *
+            Diagonal(amplitudes_general .* cos.(angles_general)) * Q_general)
+        @test S.hessian(theta_general, Q_general, L_general, phase_general;
+            k=k_general) ≈ expected_general_hessian
+
+        historical_hessian = function(theta, Q, L, phase, k)
+            T = eltype(theta)
+            amplitudes = T.(L[:, 1]) .* T(10) .^ (T(k) .* T.(L[:, 2]))
+            angles = T(2) * T(π) .* (Q * theta .+ T.(phase))
+            weighted = amplitudes .* cos.(angles)
+            T(2) * T(π)^2 .* (transpose(Q) * (weighted .* Q))
+        end
+        zero_mode = hessian -> begin
+            values = eigvals(Symmetric(hessian))
+            values[argmin(abs.(values))]
+        end
         @test_throws ArgumentError S.scan([0.0, 0.0], Q, L; k_grid=[1.0, 0.5])
 
         # A two-instanton phase detuning has a reproducible zero of the
         # one-dimensional Hessian as the relative hierarchy is varied.
         q1 = reshape([1.0, 1.0], 2, 1)
         l1 = [2.0 -1.0; 1.0 1.0]
+        theta1 = [0.0]
+        phase1 = [0.4, 0.0]
+        k_grid1 = range(0.05, 0.20; length=4)
         result = S.scan([0.0], q1, l1;
-            k_grid=range(0.05, 0.2; length=4),
-            phases=[[0.4, 0.0]], tolerance=big"1e-20")
+            k_grid=k_grid1, phases=[phase1], precision_bits=256,
+            tolerance=big"1e-20")
         @test length(result) == 1
         @test all(candidate.scale_status == :homotopy_only for candidate in result)
         @test result[1].k_low < result[1].k_c < result[1].k_high
         @test result[1].n_e === missing
+
+        setprecision(BigFloat, 256) do
+            p64 = BigFloat(phase1[1])
+            p64_rational = BigFloat(big"3602879701896397") /
+                BigFloat(big"9007199254740992")
+            @test p64 == p64_rational
+            k64 = BigFloat("0.5") * log10(-BigFloat(2) *
+                cos(BigFloat(2) * BigFloat(π) * p64))
+            phi = (BigFloat(1) + sqrt(BigFloat(5))) / BigFloat(2)
+            k_phi = log10(phi) / BigFloat(2)
+            @test abs(result[1].k_c - k64) <= BigFloat("1e-20")
+            @test abs(result[1].k_c - k_phi) <= BigFloat("1e-12")
+            @test (result[1].k_low, result[1].k_high) ==
+                (BigFloat(0.10), BigFloat(0.15))
+
+            exact_Q = reshape([1, 1], 2, 1)
+            exact_L = [2 -1; 1 1]
+            exact_theta = BigFloat[BigFloat("0")]
+            exact_phase = BigFloat[BigFloat("0.4"), BigFloat("0")]
+            exact_low = BigFloat("0.10")
+            exact_high = BigFloat("0.15")
+            exact_hessian = S.hessian(exact_theta, exact_Q, exact_L, exact_phase;
+                k=BigFloat("0.12"), precision_bits=256)
+            @test eltype(exact_hessian) == BigFloat
+            k_B = S.refine_catastrophe(exact_theta, exact_Q, exact_L, exact_phase,
+                exact_low, exact_high; precision_bits=256,
+                tolerance=BigFloat("1e-20"))
+            @test abs(k_B - k_phi) <= BigFloat("1e-20")
+
+            theta1_big = BigFloat.(theta1)
+            phase1_big = BigFloat.(phase1)
+            ks = collect(k_grid1)
+            historical_values = [zero_mode(historical_hessian(theta1_big, q1, l1,
+                phase1_big, BigFloat(k))) for k in ks]
+            historical_bracket_index = findfirst(i ->
+                signbit(historical_values[i]) != signbit(historical_values[i + 1]),
+                1:(length(ks) - 1))
+            @test historical_bracket_index == 2
+            @test (ks[historical_bracket_index], ks[historical_bracket_index + 1]) ==
+                (0.10, 0.15)
+            @test signbit(historical_values[historical_bracket_index]) ==
+                signbit(result[1].eigenvalue_low)
+            @test signbit(historical_values[historical_bracket_index + 1]) ==
+                signbit(result[1].eigenvalue_high)
+            @test (historical_values[historical_bracket_index] < 0 ? :fold : :reverse_fold) ==
+                result[1].catastrophe_type == :fold
+
+            historical_root = begin
+                lo = BigFloat(ks[historical_bracket_index])
+                hi = BigFloat(ks[historical_bracket_index + 1])
+                flo = historical_values[historical_bracket_index]
+                refined = (lo + hi) / BigFloat(2)
+                for _ in 1:160
+                    refined = (lo + hi) / BigFloat(2)
+                    fmid = zero_mode(historical_hessian(theta1_big, q1, l1,
+                        phase1_big, refined))
+                    if abs(hi - lo) <= BigFloat("1e-20")
+                        break
+                    elseif signbit(flo) == signbit(fmid)
+                        lo, flo = refined, fmid
+                    else
+                        hi = refined
+                    end
+                end
+                refined
+            end
+            @test abs(result[1].k_c - historical_root) <= BigFloat("1e-20")
+
+            for k in (BigFloat(ks[historical_bracket_index]),
+                    BigFloat(ks[historical_bracket_index + 1]))
+                corrected_hessian = S.hessian(theta1_big, q1, l1, phase1_big;
+                    k, precision_bits=256)
+                historical_matrix = historical_hessian(theta1_big, q1, l1,
+                    phase1_big, k)
+                @test corrected_hessian ≈ BigFloat(2) .* historical_matrix
+                corrected_eigenvalues = eigvals(Symmetric(corrected_hessian))
+                historical_eigenvalues = eigvals(Symmetric(historical_matrix))
+                @test signbit.(corrected_eigenvalues) == signbit.(historical_eigenvalues)
+                @test corrected_eigenvalues ≈ BigFloat(2) .* historical_eigenvalues
+            end
+        end
     end
 end
 
@@ -1735,6 +1996,7 @@ end
     @test n5_selected.Qtilde == n5.Q[:, 1:5]
 
     kc = CYAxiverse.paper_benchmarks.n5_critical_scale()
+    @test isapprox(kc, 4 / π * log(1024 / 255); atol=1e-12)
     @test isapprox(CYAxiverse.paper_benchmarks.n5_reduced_ratio(kc), 1 / 4; atol=1e-14)
     @test CYAxiverse.paper_benchmarks.n5_reduced_critical_points(kc - 1e-4).minima == 2
     @test CYAxiverse.paper_benchmarks.n5_reduced_critical_points(kc + 1e-4).minima == 1
@@ -1965,6 +2227,12 @@ end
     fixed_volume = CYAxiverse.paper_benchmarks.n8_full_potential(
         k=2.0, volume_normalization=:fixed)
     full_volume = CYAxiverse.paper_benchmarks.n8_full_potential(k=2.0)
+    cross_phase_probe = collect(1.0:12.0)
+    phased_full = CYAxiverse.paper_benchmarks.n8_full_potential(phases=cross_phase_probe)
+    expected_cross_phases = [
+        cross_phase_probe[j] - cross_phase_probe[i]
+        for i in 1:11 for j in (i + 1):12
+    ]
     @test length(truncated.amplitudes) == 12
     @test length(full.amplitudes) == 78
     @test norm(truncated.gradient, Inf) / maximum(abs, truncated.amplitudes) < 1e-10
@@ -1973,6 +2241,8 @@ end
     @test isapprox(fixed_volume.volume, 126.0; atol=0)
     @test isapprox(full_volume.volume, 126.0 * 2.0^(3 / 2); rtol=1e-14)
     @test full_volume.Q == fixed_volume.Q
+    @test phased_full.phases[13:end] == expected_cross_phases
+    @test length(phased_full.phases) == 78
     @test full_volume.L[1, :] == fixed_volume.L[1, :]
     @test all(isapprox.(full_volume.L[2, :] .- fixed_volume.L[2, :],
         fill(-3log10(2.0), 78); atol=1e-12))
@@ -3376,6 +3646,82 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         @test size(appendix.Q) == (8, 12)
         @test appendix.qdotτ[end-1:end] == [25.0, 45.0]
 
+        author_phase_probe = collect(1.0:12.0)
+        author_full = benchmark.author_inflation.n8_full_potential(
+            phases=author_phase_probe)
+        expected_author_cross_phases = [
+            author_phase_probe[j] - author_phase_probe[i]
+            for i in 1:11 for j in (i + 1):12
+        ]
+        @test size(author_full.Q) == (8, 78)
+        @test author_full.diagonal_count == 12
+        @test author_full.cross_count == 66
+        @test author_full.phases[1:12] == author_phase_probe
+        @test author_full.phases[13:end] == expected_author_cross_phases
+
+        author = benchmark.author_inflation
+        @test author.N8_DIVISOR_VOLUMES ==
+            [45.0, 17.0, 17.0, 14.5, 14.5, 15.5, 15.5, 25.0]
+        @test author.N8_TAU ==
+            [14.0, 14.5, 14.5, 15.5, 15.5, 15.5, 15.5, 16.0, 17.0, 17.0, 25.0, 45.0]
+        @test [dot(q, author.N8_DIVISOR_VOLUMES)
+            for q in eachrow(author.N8_Q)] == author.N8_TAU
+
+        function eq19_coefficients(qrows, kinv, tau, volume)
+            coefficients = Float64[]
+            qdotτ = Float64[]
+            for q in eachrow(qrows)
+                action = dot(q, tau)
+                push!(qdotτ, action)
+                push!(coefficients, (8π / volume^2) * action)
+            end
+            for i in 1:(size(qrows, 1) - 1), j in (i + 1):size(qrows, 1)
+                qi, qj = qrows[i, :], qrows[j, :]
+                action = dot(qi + qj, tau)
+                push!(qdotτ, action)
+                push!(coefficients,
+                    (8π / volume^2) * (π * dot(qi, kinv * qj) + action))
+            end
+            coefficients, qdotτ
+        end
+
+        for k in (author.N8_KC, 1.0)
+            tau = k .* author.N8_DIVISOR_VOLUMES
+            @test isapprox([dot(q, tau) for q in eachrow(author.N8_Q)],
+                k .* author.N8_TAU; rtol=1e-14, atol=1e-14)
+            volume = author.N8_VOLUME * k^(3 / 2)
+            author_kinv = k^2 .* inv(author.N8_K_RAW)
+            source_coefficients, source_actions = eq19_coefficients(
+                author.N8_Q, author_kinv, tau, volume)
+            author_full = author.n8_full_potential(k=k)
+            decoded_coefficients = vec(author_full.L[1, :]) .*
+                10.0 .^ (vec(author_full.L[2, :]) .+
+                    2π .* source_actions .* log10(exp(1)))
+            @test all(isfinite, source_coefficients)
+            @test all(!iszero, source_coefficients)
+            @test sign.(decoded_coefficients) == sign.(source_coefficients)
+            @test all(isapprox.(decoded_coefficients, source_coefficients;
+                rtol=1e-12, atol=1e-14))
+
+            reduced_geometry = benchmark.n8_geometry()
+            reduced_kinv = k^2 .* inv(Matrix(reduced_geometry.kinetic))
+            reduced_coefficients, reduced_actions = eq19_coefficients(
+                author.N8_Q, reduced_kinv, tau, volume)
+            reduced_full = benchmark.n8_full_potential(k=k)
+            reduced_decoded = vec(reduced_full.L[1, :]) .*
+                10.0 .^ (vec(reduced_full.L[2, :]) .+
+                    2π .* reduced_actions .* log10(exp(1)))
+            @test all(isapprox.(reduced_decoded, reduced_coefficients;
+                rtol=1e-12, atol=1e-14))
+            relative_differences = abs.(decoded_coefficients .-
+                reduced_coefficients) ./ abs.(reduced_coefficients)
+            log10_differences = abs.(log10.(abs.(decoded_coefficients)) .-
+                log10.(abs.(reduced_coefficients)))
+            @test sign.(decoded_coefficients) == sign.(reduced_coefficients)
+            @test maximum(relative_differences) <= 0.02
+            @test maximum(log10_differences) <= 0.01
+        end
+
         geometry = benchmark.n8_geometry()
         @test length(geometry.divisor_volumes) == 8
         @test length(geometry.instanton_actions) == 12
@@ -3438,8 +3784,88 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         n8_sixty = poly102.n8_hilltop_normal_form_efolds(1.5320548620798324e-3).efolds
         @test isapprox(n8_sixty, 60.0; rtol=0.08)
 
-        @test isapprox(poly102.n5_critical_scale(), 0.674506370003365; atol=1e-15)
-        @test isapprox(poly102.n5_reduced_ratio(poly102.n5_critical_scale()), 0.25; atol=1e-15)
+        n5_kc = poly102.n5_critical_scale()
+        n5_ratio_formula(k::Real) =
+            (32 / (255 / 8)) * exp(-2π * k * (32 - 255 / 8))
+        n5_below = poly102.n5_reduced_critical_points(n5_kc - 1e-3)
+        n5_above = poly102.n5_reduced_critical_points(n5_kc + 1e-3)
+        n5_kc_path = poly102.n5_reduced_zero_phase_continuation([
+            n5_kc - 1e-3,
+            n5_kc - 2e-4,
+            n5_kc + 2e-4,
+            n5_kc + 1e-3]; seed_theta=π + 1.0e-3,
+            max_iterations=64, gradient_tolerance=1e-10,
+            hessian_tolerance=1e-10)
+        @test isapprox(poly102.n5_reduced_ratio(n5_kc), 0.25; atol=1e-15)
+        @test all(
+            isapprox(step.ratio, n5_ratio_formula(step.k); rtol=1e-15, atol=1e-18)
+            for step in n5_kc_path)
+        @test all(step.branch == :pi for step in n5_kc_path)
+        @test all(step.converged for step in n5_kc_path)
+        @test all(step.gradient <= 1e-9 for step in n5_kc_path)
+        catastrophe_index = findfirst(step -> step.catastrophe_detected, n5_kc_path)
+        @test catastrophe_index !== nothing
+        @test isapprox(n5_kc_path[catastrophe_index].catastrophe_k, n5_kc; atol=5e-7)
+        @test abs(n5_kc_path[catastrophe_index].catastrophe_hessian) <= 1e-10
+        @test n5_kc_path[catastrophe_index].catastrophe_residual <= 1e-10
+        @test isapprox(n5_kc_path[catastrophe_index].catastrophe_theta, π; atol=1e-10)
+        @test catastrophe_index < length(n5_kc_path)
+        @test isfinite(n5_kc_path[catastrophe_index + 1].catastrophe_k)
+        @test n5_kc_path[catastrophe_index + 1].catastrophe_detected
+        n5_below_pi_idx = argmin(abs.(n5_below.theta .- π))
+        n5_above_pi_idx = argmin(abs.(n5_above.theta .- π))
+        @test n5_below.minima == 2
+        @test n5_above.minima == 1
+        @test n5_below.hessian_sign[n5_below_pi_idx] == 1
+        @test n5_above.hessian_sign[n5_above_pi_idx] == -1
+        n5_tight_event_path = poly102.n5_reduced_zero_phase_continuation(
+            [n5_kc - 1e-3, n5_kc - 2e-4, n5_kc + 2e-4, n5_kc + 1e-3];
+            seed_theta=π + 1e-3, max_iterations=1,
+            gradient_tolerance=1e-12, hessian_tolerance=1e-10,
+            event_scale_tolerance=1e-14)
+        @test all(!step.catastrophe_detected for step in n5_tight_event_path)
+        n5_nonconverged_path = poly102.n5_reduced_zero_phase_continuation(
+            [0.1, 1.0]; seed_theta=π + 1e-3,
+            max_iterations=1, gradient_tolerance=1e-16, hessian_tolerance=1e-10,
+            event_scale_tolerance=1e-14)
+        @test !n5_nonconverged_path[1].converged
+        @test n5_nonconverged_path[1].iterations == 1
+        @test !n5_nonconverged_path[1].catastrophe_detected
+        @test isapprox(poly102._n5_reduced_zero_phase_ratio_prefactor(Float64),
+            1.00392156862745096646; rtol=1e-15)
+        n5_zero_seed_path = poly102.n5_reduced_zero_phase_continuation(
+            [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=1e-3)
+        @test all(step.branch == :zero for step in n5_zero_seed_path)
+        @test all(!step.catastrophe_detected for step in n5_zero_seed_path)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=3.101964568393247)
+        n5_kc_path_final = poly102.n5_reduced_zero_phase_continuation(
+            [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=π + 1e-3,
+            max_iterations=1, gradient_tolerance=1e-8)
+        @test n5_kc_path_final[1].converged
+        @test n5_kc_path_final[1].iterations == 1
+        @test all(isfinite.([point.k for point in n5_kc_path_final]))
+        n5_big_kc_path = poly102.n5_reduced_zero_phase_continuation(
+            BigFloat.([n5_kc - 1e-3, n5_kc + 1e-3]);
+            seed_theta=big(π) + 1e-3)
+        @test typeof(first(n5_big_kc_path).k) == BigFloat
+        @test poly102.n5_reduced_zero_phase_continuation(
+            BigFloat.([n5_kc - 1e-3, n5_kc + 1e-3]);
+            seed_theta=big(π) + 1e-3,
+            gradient_tolerance=big(1e-8), hessian_tolerance=big(1e-10))[1].converged
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [n5_kc - 1e-3, n5_kc + 1e-3]; seed_theta=1.0)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [1.0, 2.0]; max_iterations=0)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [1.0, 2.0]; gradient_tolerance=-1.0)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [1.0, 2.0]; hessian_tolerance=0.0)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [1.0, 2.0]; event_scale_tolerance=0.0)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(
+            [1.0, 2.0]; event_scale_tolerance=1/0)
+        @test_throws ArgumentError poly102.n5_reduced_zero_phase_continuation(Float64[])
         n5_geometry = poly102.n5_geometry()
         @test n5_geometry.h11 == 5
         @test n5_geometry.h21 == 75

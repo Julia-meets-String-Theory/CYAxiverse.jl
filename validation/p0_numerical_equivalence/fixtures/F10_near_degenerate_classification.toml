@@ -1,0 +1,21 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F10-near-degenerate-classification"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:193-203", "src/minimizer.jl:226-235"]
+precision = "Float64"
+environment = "Julia 1.12.6; one Julia thread; symmetric Float64 eigenvalue path"
+construction = "At theta=0, two equal and opposite dominant terms cancel in one direction, a positive dominant term remains in the other, and a negative log-scale -8 term places the first mode at the historical zero band boundary."
+purpose = "Freeze the final inertia threshold and preserve its distinction from the seed displacement threshold."
+q = [[1, 1, 1, 0], [0, 0, 0, 1]]
+l = [[1.0, -1.0, -1.0, 1.0], [0.0, 0.0, -8.0, 0.0]]
+theta = [0.0, 0.0]
+phases = [0.0, 0.0, 0.0, 0.0]
+
+[expected]
+historical_result = "physical classification eigenvalues are approximately [-(2pi)^2*1e-8,(2pi)^2]; scale=max(abs(eigenvalues),1)=39.47841760435743 and final zero_tolerance=100*1e-10*scale=3.947841760435743e-7. The negative mode is zeroish at equality after dominant-term cancellation."
+final_zero_tolerance = 3.947841760435743e-7
+scaled_amplitudes = [[1.0, -1.0, -1.0e-8, 0.0], [0.0, 0.0, 0.0, 1.0]]
+final_inertia = [0, 1, 1]
+seed_negative_mode_threshold = -2.220446049250313e-14
+seed_threshold_formula = "-100*eps(Float64)"
+status = "applicable"

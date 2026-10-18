@@ -1,0 +1,75 @@
+{
+  "items": {
+    "S1": {
+      "byte_identical": true,
+      "opaque_artifact": "scoring/blind_responses/S1.response",
+      "opaque_bytes": 4482,
+      "opaque_sha256": "8adf61d6cc26c76eec28bb049609ba6c383320940cbd75b41fa402080549fef0",
+      "source_artifact": "runs/responses/A1.response",
+      "source_bytes": 4482,
+      "source_run": "A1",
+      "source_sha256": "8adf61d6cc26c76eec28bb049609ba6c383320940cbd75b41fa402080549fef0"
+    },
+    "S2": {
+      "byte_identical": true,
+      "opaque_artifact": "scoring/blind_responses/S2.response",
+      "opaque_bytes": 4115,
+      "opaque_sha256": "1f518c93e978176e1a22fd6a700756c09f19833eb178a558e1eb375acc8488ab",
+      "source_artifact": "runs/responses/B1.response",
+      "source_bytes": 4115,
+      "source_run": "B1",
+      "source_sha256": "1f518c93e978176e1a22fd6a700756c09f19833eb178a558e1eb375acc8488ab"
+    },
+    "S3": {
+      "byte_identical": true,
+      "opaque_artifact": "scoring/blind_responses/S3.response",
+      "opaque_bytes": 4071,
+      "opaque_sha256": "178aada6be7c756f88d01914ff0a45d17c538a92e3670d219abede697036260c",
+      "source_artifact": "runs/responses/B2.response",
+      "source_bytes": 4071,
+      "source_run": "B2",
+      "source_sha256": "178aada6be7c756f88d01914ff0a45d17c538a92e3670d219abede697036260c"
+    },
+    "S4": {
+      "byte_identical": true,
+      "opaque_artifact": "scoring/blind_responses/S4.response",
+      "opaque_bytes": 3764,
+      "opaque_sha256": "456ba1fe60a14465c5794f910ba9a74a04529592ac6a3a891cbb928e4e33bbe2",
+      "source_artifact": "runs/responses/A2.response",
+      "source_bytes": 3764,
+      "source_run": "A2",
+      "source_sha256": "456ba1fe60a14465c5794f910ba9a74a04529592ac6a3a891cbb928e4e33bbe2"
+    },
+    "S5": {
+      "byte_identical": true,
+      "opaque_artifact": "scoring/blind_responses/S5.response",
+      "opaque_bytes": 4247,
+      "opaque_sha256": "e9272dcf24d6b208b001098c62bf641a20f766dfeb1580d3ca54429aa2330c3d",
+      "source_artifact": "runs/responses/A3.response",
+      "source_bytes": 4247,
+      "source_run": "A3",
+      "source_sha256": "e9272dcf24d6b208b001098c62bf641a20f766dfeb1580d3ca54429aa2330c3d"
+    },
+    "S6": {
+      "byte_identical": true,
+      "opaque_artifact": "scoring/blind_responses/S6.response",
+      "opaque_bytes": 4760,
+      "opaque_sha256": "fd24565fb69cd51cb6410c8637ffc04e205f6ccf2d23ac7d088cb2910cb055cf",
+      "source_artifact": "runs/responses/B3.response",
+      "source_bytes": 4760,
+      "source_run": "B3",
+      "source_sha256": "fd24565fb69cd51cb6410c8637ffc04e205f6ccf2d23ac7d088cb2910cb055cf"
+    }
+  },
+  "mapping_schema": "cyax-0163-clean-rerun-blind-mapping-v1",
+  "note": "Private audit manifest. Do not provide this mapping-bearing file to the scorer.",
+  "opaque_ids": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6"
+  ],
+  "schema": "cyax-0163-blind-materialization-v1"
+}

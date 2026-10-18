@@ -110,7 +110,7 @@ function _hessian(theta, Q, L, phase, k)
     amplitudes = _amplitudes(L, k, T)
     angles = T(2) * T(π) .* (Q * theta .+ phase)
     weighted = amplitudes .* cos.(angles)
-    T(2) * T(π)^2 .* (transpose(Q) * (weighted .* Q))
+    T(4) * T(π)^2 .* (transpose(Q) * (weighted .* Q))
 end
 
 function _zero_mode(h)

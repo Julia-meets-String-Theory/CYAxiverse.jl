@@ -1,0 +1,110 @@
+{
+  "finished_at": "2026-09-13T13:48:15.736009Z",
+  "identity_sanitization": {
+    "event_stream": {
+      "original": {
+        "bytes": 3263,
+        "sha256": "89b6e80e0c71b44d0fb9c5c77668513382a6af103b24e580178e0c7cb066de5d"
+      },
+      "sanitized": {
+        "bytes": 3298,
+        "sha256": "de830b588d0d7940b57c4d9bf76a3d2310b71b07972754aab9a705a3f31219ad"
+      }
+    },
+    "identity_fields": [
+      "thread_id",
+      "session_id",
+      "conversation_id",
+      "turn_id"
+    ],
+    "note": "Original event bytes are not retained; original byte/hash provenance is recorded.",
+    "schema": "cyax-0163-identity-sanitization-v1",
+    "status": "SANITIZED",
+    "value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix"
+  },
+  "invocation": {
+    "argv": [
+      "codex",
+      "exec",
+      "--model",
+      "gpt-5.6-sol",
+      "-c",
+      "model_reasoning_effort=high",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--ignore-rules",
+      "--skip-git-repo-check",
+      "--json",
+      "--output-last-message",
+      "scorer.response",
+      "-"
+    ],
+    "cwd": "fresh empty temporary directory",
+    "ephemeral": true,
+    "ignore_rules": true,
+    "ignore_user_config": true,
+    "input_sha256": "ad3c1e0e777f45d3932edfcba6089f722711cdeaca959003bd4fbdcbbef3b82c",
+    "model": "gpt-5.6-sol",
+    "reasoning": "high",
+    "sandbox": "read-only",
+    "shell": false,
+    "skip_git_repo_check": true,
+    "stdin": "exact scorer_input.input bytes"
+  },
+  "invocation_sha256": "575ee8ee216326c441af3ec545e89978367ea862f3c8ffe5e434bad3082fa9b2",
+  "result": {
+    "completion_status": "COMPLETE",
+    "event": {
+      "bytes": 3298,
+      "sha256": "de830b588d0d7940b57c4d9bf76a3d2310b71b07972754aab9a705a3f31219ad"
+    },
+    "event_audit": {
+      "errors": [],
+      "event_count": 4,
+      "forbidden_events": [],
+      "session_id": null,
+      "source_reopenings": 0,
+      "thread_id": "sha256:217746055e88b2f86eff6fef08f83901dc28babefb29a881e69ec3cc6cc0aac0",
+      "tools_used": false,
+      "valid_jsonl": true
+    },
+    "event_original": {
+      "bytes": 3263,
+      "sha256": "89b6e80e0c71b44d0fb9c5c77668513382a6af103b24e580178e0c7cb066de5d"
+    },
+    "identity_sanitization": {
+      "hashed_identities": [
+        "sha256:217746055e88b2f86eff6fef08f83901dc28babefb29a881e69ec3cc6cc0aac0"
+      ],
+      "hashed_identity_count": 1,
+      "identity_fields": [
+        "thread_id",
+        "session_id",
+        "conversation_id",
+        "turn_id"
+      ],
+      "identity_value_encoding": "sha256:<64 lowercase hex> with a fixed domain prefix",
+      "original_bytes": 3263,
+      "original_sha256": "89b6e80e0c71b44d0fb9c5c77668513382a6af103b24e580178e0c7cb066de5d",
+      "sanitized_bytes": 3298,
+      "sanitized_sha256": "de830b588d0d7940b57c4d9bf76a3d2310b71b07972754aab9a705a3f31219ad",
+      "schema": "cyax-0163-identity-sanitization-v1"
+    },
+    "response": {
+      "bytes": 2573,
+      "sha256": "24c7e38d9d75c78705953f7b9b32e531a026e50a1526dafb85e14f989fe47389"
+    },
+    "returncode": 0,
+    "session_id": null,
+    "stderr": {
+      "bytes": 2920,
+      "sha256": "f9eb960524da771af5520973ef336f8b6acc0b863fe39be31fea7930f5866e76"
+    },
+    "thread_id": "sha256:217746055e88b2f86eff6fef08f83901dc28babefb29a881e69ec3cc6cc0aac0"
+  },
+  "schema": "cyax-0163-blind-scorer-run-v1",
+  "started_at": "2026-09-13T13:46:57.155640Z",
+  "status": "CAPTURED"
+}

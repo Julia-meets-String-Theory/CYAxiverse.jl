@@ -1,0 +1,17 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F5-argument-phase-offsets"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:151-180", "src/generate.jl:559-587"]
+precision = "Float64"
+environment = "Julia 1.12.6; one Julia thread; scalar Float64 arithmetic"
+construction = "Identity charges, unequal scales, and nonzero per-instanton phase offsets represented in radians."
+purpose = "Freeze additive argument offsets and their evaluation order after 2pi*q'*theta."
+q = [[1, 0], [0, 1]]
+l = [[1.0, 1.0], [0.0, -2.0]]
+theta = [0.13, 0.27]
+phases = [1.0471975511965976, -0.6283185307179586]
+
+[expected]
+historical_result = "arguments = (2pi .* (q' * theta)) .+ phase; phase is indexed by instanton, not coordinate. The phase vector is not folded into theta or absorbed into L."
+argument_route = "two_pi .* (q' * theta) .+ phase"
+status = "applicable"

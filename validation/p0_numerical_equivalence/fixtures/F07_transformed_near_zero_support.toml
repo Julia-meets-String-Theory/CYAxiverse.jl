@@ -1,0 +1,19 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F7-transformed-near-zero-support"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:128-146"]
+precision = "Float64 after coordinate-basis solve"
+environment = "Julia 1.12.6; one Julia thread; coordinate basis and q use Float64"
+construction = "Integer source charges are transformed by A\\Q, with A=[[1,1],[1,2+1e-15]]."
+purpose = "Freeze support detection after transformation/materialization, including a nonzero 8.881784197001252e-16 entry."
+q = [[1, 1], [1, 2]]
+coordinate_basis = [[1.0, 1.0], [1.0, 2.000000000000001]]
+l = [[1.0, 1.0], [0.0, -5.0]]
+theta = [0.1, 0.2]
+phases = [0.0, 0.0]
+
+[expected]
+historical_result = "Float64 q=A\\Q=[[1,8.881784197001252e-16],[0,0.9999999999999991]]; support uses !iszero(q[i,j]), so row 1 supports both columns while row 2 supports only column 2."
+transformed_q = [[1.0, 8.881784197001252e-16], [0.0, 0.9999999999999991]]
+support = [[true, true], [false, true]]
+status = "applicable"

@@ -1,0 +1,144 @@
+# Condition B — structured evidence summary
+
+Frozen snapshot: `cyax-0155-adversarial-20260913T043555Z`
+Observation time: `2026-09-13T04:35:55Z`
+
+This is a derived context, not an authority source. Source scope and authority are stated below. Use only this document during reconstruction.
+
+## Source index
+
+| Source identity | Captured material | Authority scope |
+| --- | --- | --- |
+| `issue-155-current` | GitHub Issue observation | current work-state observation |
+| `issue-155-checkpoint` | Issue comment at 2026-09-11T00:01:47Z | durable historical workflow statement |
+| `issue-155-closure-event` | Issue timeline event at 2026-09-11T01:09:18Z | later work-state event |
+| `pr-156` | GitHub pull-request observation | implementation/integration evidence |
+| `pr-156-merge-commit` | Git commit f0013552cd69a93221464e9c8ccfd56339f39052 | repository implementation evidence |
+| `spec-0155` | Approved CYAX-0155 S1 specification | feature intent and acceptance contract |
+| `agents-contract-at-merge` | AGENTS.md at merge revision | repository policy authority |
+| `sdd-contract-at-merge` | cyaxiverse-sdd at merge revision | workflow/authority semantics |
+| `checkpoint-guide-at-merge` | Human guide at merge revision | implementation artifact |
+| `closure-search` | Finite public-artifact search through 2026-09-13T04:35:55Z | mechanical absence record |
+
+## Evidence cards
+
+### Governing work item
+
+The governing Issue is #155, titled ‘Add private-safe conversation checkpoints to the CYAxiverse Project.’ Its objective is to surface durable, sanitized outcomes from exploratory AI/chat work in the existing Project without turning GitHub into an archive of private conversations.
+
+Source: `issue-155-current`.
+
+### Current Issue observation
+
+At the snapshot observation, GitHub reports Issue #155 as CLOSED with state reason COMPLETED. Its item in ‘CYAxiverse Research & Development’ has Project Status Done.
+
+Source: `issue-155-current`.
+
+### PR-to-Issue scope
+
+PR #156 names Issue #155 as the governing Issue and the CYAX-0155 spec as canonical. It presents itself as implementing R-001 through R-005.
+
+Source: `pr-156`.
+
+### Current PR observation
+
+GitHub reports PR #156 MERGED to vmm at 2026-09-11T00:01:20Z with merge commit f0013552cd69a93221464e9c8ccfd56339f39052.
+
+Source: `pr-156`.
+
+### Repository diff
+
+The single-parent squash commit changes four files with 177 insertions and zero deletions: AGENTS.md, cyaxiverse-sdd, the human checkpoint guide, and the approved CYAX-0155 specification.
+
+Source: `pr-156-merge-commit`.
+
+### Approved requirements
+
+The spec is ‘Approved for S1 implementation.’ R-001 requires publication sanitization; R-002 defines checkpoints as summaries rather than transcripts; R-003 preserves the existing Kanban lifecycle; R-004 defines Research & Chats as a saved view rather than an authority layer; R-005 requires failing closed when publication safety is uncertain.
+
+Source: `spec-0155`.
+
+### Spec acceptance text
+
+The acceptance text says R-001–R-005 are represented in the repository control plane, privacy-sensitive data is not introduced, Project Status semantics are unchanged, and ‘a saved Research & Chats view can be configured without introducing a second ledger.’
+
+Source: `spec-0155`.
+
+### Repository contract
+
+The repository contract says ordinary durable state belongs in Git and assigns the main agent responsibility for scope, interpretation, integration, final diff review, PR state, and handoff. It also contains the privacy/publication rule added by PR #156.
+
+Source: `agents-contract-at-merge`.
+
+### SDD semantics
+
+The SDD contract says the governing Issue is the primary Project work item and linked PRs normally provide implementation, integration, or evidence. It says GitHub Issues and Projects track live work state, while an approved spec records feature intent.
+
+Source: `sdd-contract-at-merge`.
+
+### Human guide
+
+The human guide defines Research & Chats as another saved view over the same Project items using the normal Status field and sanitized metadata. It does not report a concrete saved view or filter instance.
+
+Source: `checkpoint-guide-at-merge`.
+
+### Implementation checkpoint
+
+The checkpoint reports that PR #156 merged and that the repository-side privacy boundary is active on vmm.
+
+Source: `issue-155-checkpoint`.
+
+### Remaining Project action
+
+Under ‘Remaining Project action,’ the checkpoint says: ‘Keep #155 open until the Research & Chats saved Project view/filter is configured.’
+
+Source: `issue-155-checkpoint`.
+
+### Checkpoint tooling limit
+
+The same checkpoint says the available connector exposed neither Projects-v2 view/field mutations nor direct verification, found no alternative Projects-specific connector, and did not claim that UI configuration was complete.
+
+Source: `issue-155-checkpoint`.
+
+### PR Project boundary
+
+The PR body likewise describes creation/configuration of the saved view as separate from the repository diff, requiring Projects-v2 write capability, and says no Project mutation is claimed.
+
+Source: `pr-156`.
+
+### Later closure event
+
+Sixty-seven minutes after the checkpoint, the timeline records that vmmhep closed #155 at 2026-09-11T01:09:18Z. The event has no commit identifier and was not performed through a GitHub App.
+
+Source: `issue-155-closure-event`.
+
+### Closure-event contents
+
+The captured closure event contains the event type, actor, and time but no reason or explanatory text.
+
+Source: `issue-155-closure-event`.
+
+### Merge-message check
+
+The PR #156 squash-merge message contains no Closes, Fixes, or Resolves keyword for #155.
+
+Source: `pr-156-merge-commit`.
+
+### Later-artifact search
+
+The frozen search found no later public Issue comment, PR material, repository artifact, or search result that documents saved-view configuration or explicitly supersedes the checkpoint’s keep-open condition. This finding is limited to the captured search scope and observation time.
+
+Source: `closure-search`.
+
+## Chronology
+
+| Time | Captured event |
+| --- | --- |
+| 2026-09-11T00:01:20Z | GitHub records PR #156 as merged. |
+| 2026-09-11T00:01:47Z | The durable checkpoint records repository completion and a remaining Project action. |
+| 2026-09-11T01:09:18Z | The timeline records closure of #155 by vmmhep without an attached reason. |
+| 2026-09-13T04:35:55Z | The snapshot observes #155 closed/completed and Project status Done; the finite resolving-evidence search ends. |
+
+## Reading boundary
+
+The source index distinguishes live work-state observations, feature intent, repository implementation evidence, historical workflow text, and a bounded search result. The summary does not add a conclusion that any source does not state.

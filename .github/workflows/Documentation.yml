@@ -1,13 +1,19 @@
 name: Documentation
 
 on:
+  workflow_dispatch:
+    inputs:
+      publication_ref:
+        description: Exact immutable lifecycle publication ref
+        required: true
+        type: string
   push:
-    branches:
-      - vmm
-    tags: '*'
+    branches: [vmm]
     paths:
       - 'docs/src/**'
       - 'docs/make.jl'
+      - 'docs/verify_release_context.py'
+      - 'docs/prepare_release_authority.py'
       - 'docs/Project.toml'
       - 'src/**'
       - 'ext/**'
@@ -17,6 +23,8 @@ on:
     paths:
       - 'docs/src/**'
       - 'docs/make.jl'
+      - 'docs/verify_release_context.py'
+      - 'docs/prepare_release_authority.py'
       - 'docs/Project.toml'
       - 'src/**'
       - 'ext/**'
@@ -34,16 +42,419 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'vmm' || github.sha }}
+          fetch-depth: 0
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.12'
       - uses: julia-actions/cache@v2
+      - name: Fetch immutable lifecycle authority
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CYAX_PUBLICATION_REF: ${{ inputs.publication_ref }}
+        run: |
+          python3 - "$CYAX_PUBLICATION_REF" <<'PY'
+          import re
+          import sys
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.versions import parse_public_tag
+          prefix = "refs/heads/lifecycle/v1/publications/"
+          value = sys.argv[1]
+          if not value.startswith(prefix):
+              raise SystemExit("publication_ref is outside the immutable lifecycle namespace")
+          parts = value[len(prefix):].split("/")
+          if len(parts) != 2 or re.fullmatch(r"pub-[0-9a-f]{64}", parts[1]) is None:
+              raise SystemExit("publication_ref is not an exact publication ref")
+          try:
+              parse_public_tag(parts[0])
+          except (TypeError, ValueError) as error:
+              raise SystemExit("publication_ref has a noncanonical public tag") from error
+          PY
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          git fetch --no-tags origin 'refs/heads/lifecycle/v1/*:refs/remotes/origin/lifecycle/v1/*'
+          PUBLICATION_REF="refs/remotes/origin/${CYAX_PUBLICATION_REF#refs/heads/}"
+          if ! git show "$PUBLICATION_REF:manifest.json" > "$RUNNER_TEMP/publication-manifest.json"; then
+            echo "triggering immutable publication manifest is unavailable" >&2
+            exit 2
+          fi
+          python3 - "$RUNNER_TEMP/publication-manifest.json" "$RUNNER_TEMP/release-context" <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.manifests import (
+              canonical_manifest_bytes,
+              publication_ref,
+              validate_manifest,
+          )
+          raw = pathlib.Path(sys.argv[1]).read_bytes()
+          publication = validate_manifest(json.loads(raw))
+          if (
+              publication["manifest_type"] != "publication"
+              or canonical_manifest_bytes(publication) != raw
+          ):
+              raise SystemExit("publication manifest is not exact canonical bytes")
+          expected_ref = publication_ref(
+              publication["public_tag"], publication["released_manifest_id"]
+          )
+          if expected_ref != os.environ["CYAX_PUBLICATION_REF"]:
+              raise SystemExit("publication trigger ref does not match manifest identity")
+          pathlib.Path(sys.argv[2]).write_text(
+              "\n".join((
+                  publication["released_manifest_ref"],
+                  publication["public_tag"],
+              )),
+              encoding="ascii",
+          )
+          PY
+          RELEASE_CANONICAL_REF="$(sed -n '1p' "$RUNNER_TEMP/release-context")"
+          RELEASE_TAG="$(sed -n '2p' "$RUNNER_TEMP/release-context")"
+          RELEASE_REF="refs/remotes/origin/${RELEASE_CANONICAL_REF#refs/heads/}"
+          if ! git show "$RELEASE_REF:manifest.json" > "$RUNNER_TEMP/released-manifest.json"; then
+            echo "matching immutable released manifest is unavailable" >&2
+            exit 2
+          fi
+          echo "CYAX_DOCS_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "CYAX_DOCS_TAG_REF=refs/tags/$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "CYAX_DOCS_REF=refs/tags/$RELEASE_TAG" >> "$GITHUB_ENV"
+          python3 - "$RUNNER_TEMP/lifecycle-index.json" <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          import sys
+          from hashlib import sha256
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.manifests import canonical_manifest_bytes
+          prefix = "refs/remotes/origin/lifecycle/v1/"
+          refs = subprocess.check_output(
+              ["git", "for-each-ref", "--format=%(refname)", prefix], text=True
+          ).splitlines()
+          records = []
+          for ref in refs:
+              canonical_ref = ref.replace(prefix, "refs/heads/lifecycle/v1/", 1)
+              raw = subprocess.check_output(["git", "show", f"{ref}:manifest.json"])
+              manifest = json.loads(raw)
+              if canonical_manifest_bytes(manifest) != raw:
+                  raise SystemExit("lifecycle manifest bytes are not canonical")
+              commit = subprocess.check_output(
+                  ["git", "rev-parse", f"{ref}^{{commit}}"], text=True
+              ).strip()
+              tree = subprocess.check_output(
+                  ["git", "rev-parse", f"{ref}^{{tree}}"], text=True
+              ).strip()
+              records.append({
+                  "ref": canonical_ref,
+                  "manifest": manifest,
+                  "commit": commit,
+                  "tree": tree,
+                  "manifest_id": manifest["manifest_id"],
+                  "manifest_digest": sha256(raw).hexdigest(),
+              })
+          pathlib.Path(sys.argv[1]).write_text(
+              json.dumps(records, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+          git fetch --no-tags origin 'refs/tags/v*:refs/tags/v*'
+          python3 - "$RUNNER_TEMP/canonical-tags.json" <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          import sys
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.release import is_canonical_public_tag
+          refs = subprocess.check_output(
+              ["git", "for-each-ref", "--format=%(refname)", "refs/tags/"],
+              text=True,
+          ).splitlines()
+          observations = []
+          for ref in refs:
+              tag = ref.removeprefix("refs/tags/")
+              if not is_canonical_public_tag(tag):
+                  continue
+              observations.append({
+                  "ref": ref,
+                  "tag": tag,
+                  "commit": subprocess.check_output(
+                      ["git", "rev-parse", f"{ref}^{{commit}}"], text=True
+                  ).strip(),
+                  "tree": subprocess.check_output(
+                      ["git", "rev-parse", f"{ref}^{{tree}}"], text=True
+                  ).strip(),
+              })
+          pathlib.Path(sys.argv[1]).write_text(
+              json.dumps(observations, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.id, .tag_name, .html_url] | @tsv' > "$RUNNER_TEMP/github-releases.tsv"
+          python3 - "$RUNNER_TEMP/github-releases.tsv" "$RUNNER_TEMP/github-releases.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+          rows = []
+          for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+              release_id, tag, url = line.split("\t", 2)
+              rows.append({"id": int(release_id), "tag": tag, "url": url})
+          pathlib.Path(sys.argv[2]).write_text(
+              json.dumps(rows, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+          python3 - "$RUNNER_TEMP/released-manifest.json" "$RUNNER_TEMP/publication-manifest.json" "$RUNNER_TEMP/direct-refs" <<'PY'
+          import json
+          import pathlib
+          import sys
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.manifests import (
+              canonical_manifest_bytes,
+              validate_manifest,
+          )
+          released_raw = pathlib.Path(sys.argv[1]).read_bytes()
+          publication_raw = pathlib.Path(sys.argv[2]).read_bytes()
+          released = validate_manifest(json.loads(released_raw))
+          publication = validate_manifest(json.loads(publication_raw))
+          if (
+              released["manifest_type"] != "released"
+              or publication["manifest_type"] != "publication"
+              or canonical_manifest_bytes(released) != released_raw
+              or canonical_manifest_bytes(publication) != publication_raw
+          ):
+              raise SystemExit("release manifests are not exact canonical bytes")
+          evidence_ref = publication["publication_evidence_ref"]
+          parts = pathlib.PurePosixPath(evidence_ref).parts
+          if (
+              not isinstance(evidence_ref, str)
+              or not parts
+              or evidence_ref.startswith("/")
+              or any(part in {"", ".", ".."} for part in parts)
+              or "\\" in evidence_ref
+              or ":" in evidence_ref
+          ):
+              raise SystemExit("unsafe publication evidence ref")
+          pathlib.Path(sys.argv[3]).write_text(
+              "\n".join((released["anchor_ref"], released["candidate_ref"], evidence_ref))
+          )
+          PY
+          ANCHOR_REF="$(sed -n '1p' "$RUNNER_TEMP/direct-refs")"
+          CANDIDATE_REF="$(sed -n '2p' "$RUNNER_TEMP/direct-refs")"
+          PUBLICATION_EVIDENCE_REF="$(sed -n '3p' "$RUNNER_TEMP/direct-refs")"
+          git fetch --no-tags -- origin "$ANCHOR_REF:$ANCHOR_REF"
+          git fetch --no-tags -- origin "$CANDIDATE_REF:refs/remotes/origin/cyax-candidate"
+          python3 - "$ANCHOR_REF" "$RUNNER_TEMP/anchor-closure-timestamp" <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.static import _annotated_anchor_payload
+          ref = sys.argv[1]
+          object_id = subprocess.check_output(
+              ["git", "rev-parse", ref], text=True
+          ).strip()
+          commit = subprocess.check_output(
+              ["git", "rev-parse", f"{ref}^{{commit}}"], text=True
+          ).strip()
+          closure_timestamp = _annotated_anchor_payload(
+              pathlib.Path("."), object_id, ref.removeprefix("refs/tags/"), commit
+          )
+          pathlib.Path(sys.argv[2]).write_text(closure_timestamp, encoding="ascii")
+          PY
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > "$RUNNER_TEMP/github-release.json"
+          ASSET_ID="$(python3 - "$RUNNER_TEMP/github-release.json" "$PUBLICATION_EVIDENCE_REF" <<'PY'
+          import json
+          import pathlib
+          import sys
+          release = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          matches = [asset["id"] for asset in release.get("assets", []) if asset.get("name") == sys.argv[2]]
+          if len(matches) != 1:
+              raise SystemExit("publication evidence asset is missing or ambiguous")
+          print(matches[0])
+          PY
+          )"
+          if ! gh api -H 'Accept: application/octet-stream' "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" > "$RUNNER_TEMP/publication-evidence"; then
+            echo "immutable publication evidence asset is unavailable" >&2
+            exit 2
+          fi
+      - name: Prepare independent stable-selector authority
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 docs/prepare_release_authority.py \
+            --repository "$GITHUB_WORKSPACE" \
+            --github-repository "$GITHUB_REPOSITORY" \
+            --lifecycle-index "$RUNNER_TEMP/lifecycle-index.json" \
+            --canonical-tags "$RUNNER_TEMP/canonical-tags.json" \
+            --github-releases "$RUNNER_TEMP/github-releases.json" \
+            --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --anchor-observations "$RUNNER_TEMP/anchor-observations.json" \
+            --stable-evidence "$RUNNER_TEMP/stable-publication-evidence"
+      - name: Verify immutable release context for tag documentation
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 docs/verify_release_context.py \
+            --manifest "$RUNNER_TEMP/released-manifest.json" \
+            --publication-manifest "$RUNNER_TEMP/publication-manifest.json" \
+            --publication-evidence "$RUNNER_TEMP/publication-evidence" \
+            --lifecycle-index "$RUNNER_TEMP/lifecycle-index.json" \
+            --canonical-tags "$RUNNER_TEMP/canonical-tags.json" \
+            --github-releases "$RUNNER_TEMP/github-releases.json" \
+            --anchor-observations "$RUNNER_TEMP/anchor-observations.json" \
+            --stable-publication-evidence "$RUNNER_TEMP/stable-publication-evidence" \
+            --require-complete-lifecycle \
+            --tag-ref "$CYAX_DOCS_TAG_REF" \
+            --tag "$CYAX_DOCS_TAG" \
+            --tag-sha "$(git rev-parse "${CYAX_DOCS_TAG_REF}^{commit}")" \
+            --tag-tree "$(git rev-parse "${CYAX_DOCS_TAG_REF}^{tree}")" \
+            --tag-version "$(git show "${CYAX_DOCS_TAG_REF}:Project.toml" | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --anchor-tag-object "$(git rev-parse "$(sed -n '1p' "$RUNNER_TEMP/direct-refs")")" \
+            --anchor-tree "$(git rev-parse "$(sed -n '1p' "$RUNNER_TEMP/direct-refs")^{tree}")" \
+            --anchor-closure-timestamp-utc "$(cat "$RUNNER_TEMP/anchor-closure-timestamp")" \
+            --candidate-ref "$(sed -n '2p' "$RUNNER_TEMP/direct-refs")" \
+            --candidate-commit "$(git rev-parse refs/remotes/origin/cyax-candidate^{commit})" \
+            --candidate-tree "$(git rev-parse refs/remotes/origin/cyax-candidate^{tree})" \
+            --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --github-release-id "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${CYAX_DOCS_TAG}" --jq .id)" \
+            --github-env "$GITHUB_ENV"
+      - name: Check out immutable release source
+        if: github.event_name == 'workflow_dispatch'
+        run: git checkout --detach "$CYAX_DOCS_RELEASE_SHA"
+      - name: Verify development documentation context
+        if: github.event_name == 'push' && github.ref == 'refs/heads/vmm'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          import sys
+          from hashlib import sha256
+          sys.path.insert(0, "scripts")
+          from version_lifecycle.manifests import canonical_manifest_bytes
+          from version_lifecycle.release import is_canonical_public_tag
+
+          output = pathlib.Path(sys.argv[1])
+          if subprocess.check_output(
+              ["git", "ls-remote", "--refs", "origin", "refs/heads/lifecycle/v1/*"],
+              text=True,
+          ).strip():
+              subprocess.run([
+                  "git", "fetch", "--no-tags", "origin",
+                  "refs/heads/lifecycle/v1/*:refs/remotes/origin/lifecycle/v1/*",
+              ], check=True)
+          if subprocess.check_output(
+              ["git", "ls-remote", "--refs", "origin", "refs/tags/v*"],
+              text=True,
+          ).strip():
+              subprocess.run([
+                  "git", "fetch", "--no-tags", "origin",
+                  "refs/tags/v*:refs/tags/v*",
+              ], check=True)
+          prefix = "refs/remotes/origin/lifecycle/v1/"
+          refs = subprocess.check_output(
+              ["git", "for-each-ref", "--format=%(refname)", prefix], text=True
+          ).splitlines()
+          records = []
+          for ref in refs:
+              canonical_ref = ref.replace(prefix, "refs/heads/lifecycle/v1/", 1)
+              raw = subprocess.check_output(["git", "show", f"{ref}:manifest.json"])
+              manifest = json.loads(raw.decode("utf-8"))
+              if canonical_manifest_bytes(manifest) != raw:
+                  raise SystemExit("lifecycle manifest bytes are not canonical")
+              records.append({
+                  "ref": canonical_ref,
+                  "manifest": manifest,
+                  "commit": subprocess.check_output(
+                      ["git", "rev-parse", f"{ref}^{{commit}}"], text=True
+                  ).strip(),
+                  "tree": subprocess.check_output(
+                      ["git", "rev-parse", f"{ref}^{{tree}}"], text=True
+                  ).strip(),
+                  "manifest_id": manifest["manifest_id"],
+                  "manifest_digest": sha256(raw).hexdigest(),
+              })
+          (output / "stable-lifecycle-index.json").write_text(
+              json.dumps(records, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+
+          tag_refs = subprocess.check_output(
+              ["git", "for-each-ref", "--format=%(refname)", "refs/tags/"],
+              text=True,
+          ).splitlines()
+          tags = []
+          for ref in tag_refs:
+              tag = ref.removeprefix("refs/tags/")
+              if not is_canonical_public_tag(tag):
+                  continue
+              tags.append({
+                  "ref": ref,
+                  "tag": tag,
+                  "commit": subprocess.check_output(
+                      ["git", "rev-parse", f"{ref}^{{commit}}"], text=True
+                  ).strip(),
+                  "tree": subprocess.check_output(
+                      ["git", "rev-parse", f"{ref}^{{tree}}"], text=True
+                  ).strip(),
+              })
+          (output / "stable-canonical-tags.json").write_text(
+              json.dumps(tags, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.id, .tag_name, .html_url] | @tsv' > "$RUNNER_TEMP/stable-github-releases.tsv"
+          python3 - "$RUNNER_TEMP/stable-github-releases.tsv" "$RUNNER_TEMP/stable-github-releases.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+          rows = []
+          for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+              release_id, tag, url = line.split("\t", 2)
+              rows.append({"id": int(release_id), "tag": tag, "url": url})
+          pathlib.Path(sys.argv[2]).write_text(
+              json.dumps(rows, sort_keys=True, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+          python3 docs/prepare_release_authority.py \
+            --repository "$GITHUB_WORKSPACE" \
+            --github-repository "$GITHUB_REPOSITORY" \
+            --lifecycle-index "$RUNNER_TEMP/stable-lifecycle-index.json" \
+            --canonical-tags "$RUNNER_TEMP/stable-canonical-tags.json" \
+            --github-releases "$RUNNER_TEMP/stable-github-releases.json" \
+            --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --anchor-observations "$RUNNER_TEMP/stable-anchor-observations.json" \
+            --stable-evidence "$RUNNER_TEMP/stable-publication-evidence"
+          python3 docs/verify_release_context.py \
+            --stable-only \
+            --main-sha "$(git rev-parse refs/remotes/origin/main^{commit})" \
+            --main-version "$(git show refs/remotes/origin/main:Project.toml | sed -n 's/^version = \"\(.*\)\"/\1/p')" \
+            --lifecycle-index "$RUNNER_TEMP/stable-lifecycle-index.json" \
+            --canonical-tags "$RUNNER_TEMP/stable-canonical-tags.json" \
+            --github-releases "$RUNNER_TEMP/stable-github-releases.json" \
+            --anchor-observations "$RUNNER_TEMP/stable-anchor-observations.json" \
+            --stable-publication-evidence "$RUNNER_TEMP/stable-publication-evidence" \
+            --github-env "$GITHUB_ENV"
       - name: Install dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
       - name: Build documentation
         if: github.event_name == 'pull_request'
         env:
           DOCS_DEPLOY: 'false'
+          CYAX_DOCS_REF: ${{ github.ref }}
+          CYAX_DOCS_MANIFEST_STATUS: 'preview'
         run: julia --project=docs/ docs/make.jl
       - name: Build and deploy documentation
         if: github.event_name != 'pull_request'
@@ -51,4 +462,6 @@ jobs:
           DOCS_DEPLOY: 'true'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
-        run: julia --project=docs/ docs/make.jl
+        run: |
+          export CYAX_DOCS_REF="${CYAX_DOCS_REF:-$GITHUB_REF}"
+          julia --project=docs/ docs/make.jl
