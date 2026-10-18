@@ -22,6 +22,7 @@ const _FULL = get(ENV, "CYAXIVERSE_TEST_FULL", "1") == "1"
 end
 
 include(joinpath(@__DIR__, "optional_plotting.jl"))
+include(joinpath(@__DIR__, "scientific_certification.jl"))
 
 # The bounded synthetic geometry-flow test below exercises this helper in both
 # fast and full modes. Keep the implementation boundary available without
