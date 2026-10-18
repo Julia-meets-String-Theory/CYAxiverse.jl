@@ -74,6 +74,8 @@ jobs:
           julia --startup-file=no --project=notebooks -e 'using Pkg; Pkg.instantiate()'
           git diff --exit-code -- notebooks/Project.toml notebooks/Manifest.toml
       - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
 
   full:
     name: Full test suite
