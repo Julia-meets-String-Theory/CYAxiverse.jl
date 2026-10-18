@@ -421,7 +421,6 @@ cited public incident proof.
 Superseded by: N/A
 Promotion status: not promoted
 
-
 ## L-0010 — Do not delegate directly executable owner-authorized repository actions
 
 ID: L-0010
@@ -441,6 +440,50 @@ Preventive rule / check: Before creating or proposing a handoff, ask whether the
 Applicability / exceptions: This lesson does not bypass specifications, required review, merge gates, scientific gates, privacy constraints, or owner-controlled authorization. If the action requires code changes, local testing, unavailable permissions, a distinct evidential role, or another execution context required by the governing contract, use the applicable handoff path instead.
 
 Evidence / durable reference: Sanitized owner-redirection-derived pattern. The repository's delegation and lesson-lifecycle rules provide adjacent mechanism support; no private transcript, private URL, or resolving conversation reference is retained here.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0011 — Keep Handoff Review separate from specialist review roles
+
+ID: L-0011
+Status: candidate
+Date: 2026-09-30
+Type: workflow
+Scope / tags: review topology, Handoff Review, SPEC, STANDARDS, SCIENTIFIC, Manager delegation, evidence reuse
+
+Observed failure: A specialist review axis was routed directly through the Handoff
+Review surface, conflating the workflow component that reviews a governed handoff
+with the downstream specialist reviewer role that should be delegated by a Manager.
+
+Correction: Keep the review topology explicit. Review Desk performs comprehensive
+Handoff Review of governed Manager packets. After a current passing Handoff Review
+and owner-manual Manager dispatch, the Manager delegates the applicable independent
+SPEC, STANDARDS, and SCIENTIFIC reviewers. A specialist review accidentally produced
+on the wrong surface may be retained as secondary corroborating evidence or a
+double-check, but it does not satisfy the specialist-review gate and its verdict
+must not be transferred into the correctly routed review.
+
+Root cause: The review surface and the reviewer role were treated as interchangeable
+because both can inspect the same candidate and rubric.
+
+Preventive rule / check: Before activating any review, classify it explicitly as
+either Handoff Review or a specialist review axis. If it is Handoff Review, route it
+through Review Desk. If it is SPEC, STANDARDS, or SCIENTIFIC, require a Manager to
+receive the governed packet first and delegate the specialist reviewer under the
+bound capability policy. Preserve useful wrong-surface review evidence for
+corroboration, but require a fresh correctly routed specialist review and never use
+the earlier verdict to suppress findings, skip an axis, or establish acceptance.
+
+Applicability / exceptions: Applies to governed delegated workflows that distinguish
+Handoff Review from Manager-delegated specialist review axes. Ordinary informal peer
+review outside that topology may use a lighter process, but must not be represented
+as satisfying a governed specialist or Handoff Review gate.
+
+Evidence / durable reference: Sanitized owner-redirection-derived pattern checked
+against the repository's delegated-review topology and CYAX-0159 lessons lifecycle.
+No private exchange path, transcript, or resolving private reference is retained in
+this candidate.
 
 Superseded by: N/A
 Promotion status: not promoted
