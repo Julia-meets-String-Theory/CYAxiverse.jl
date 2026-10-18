@@ -21,6 +21,7 @@ const _FULL = get(ENV, "CYAXIVERSE_TEST_FULL", "1") == "1"
     @test_throws ArgumentError CYAxiverse.plotting.reference_line(1; orientation = :diagonal)
 end
 
+include(joinpath(@__DIR__, "coverage_support.jl"))
 include(joinpath(@__DIR__, "optional_plotting.jl"))
 include(joinpath(@__DIR__, "path_remediation.jl"))
 include(joinpath(@__DIR__, "scientific_certification.jl"))
