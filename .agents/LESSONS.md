@@ -421,9 +421,9 @@ cited public incident proof.
 Superseded by: N/A
 Promotion status: not promoted
 
-## L-0010 — Keep Handoff Review separate from specialist review roles
+## L-0011 — Keep Handoff Review separate from specialist review roles
 
-ID: L-0010
+ID: L-0011
 Status: candidate
 Date: 2026-09-30
 Type: workflow
