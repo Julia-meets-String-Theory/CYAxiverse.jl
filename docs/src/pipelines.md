@@ -21,8 +21,9 @@ inherited-orientifold trilayer sector, `h11₋ = 0` and `h21₊ = 0`.
 
 ## 1. Prerequisites and setup
 
-- Julia 1.12 (matches `Project.toml` and CI). Run every command locally, never
-  in a sandbox or container:
+- Install the core package and choose optional CYTools/PyCall or plotting
+  dependencies as described on the [Installation](@ref Installation) page.
+  Julia 1.12 matches `Project.toml` and CI. Run every command locally:
 
   ```sh
   julia --project=. -e 'using Pkg; Pkg.instantiate()'
@@ -41,8 +42,10 @@ inherited-orientifold trilayer sector, `h11₋ = 0` and `h21₊ = 0`.
   `CYAXIVERSE_PYTHON` is a checked setup request; setting it in an already
   running notebook does not rebind PyCall. `enable_cytools!()` fails with
   rebuild/restart instructions when the requested and effective interpreters
-  differ. CYAxiverse never rebuilds PyCall automatically. Do not commit a
-  machine-specific interpreter path.
+  differ. On a typical install the CYTools interpreter is a dedicated conda
+  environment; determine its path with
+  `python -c 'import sys; print(sys.executable)'`. CYAxiverse never rebuilds
+  PyCall automatically. Do not commit a machine-specific interpreter path.
 
 - Select the geometry database with `CYAXIVERSE_DATA_DIR` (or the `--data-dir`
   option that the batch scripts accept). See the

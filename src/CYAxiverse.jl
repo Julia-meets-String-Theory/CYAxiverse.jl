@@ -24,6 +24,7 @@ include("jlm_reduced.jl")
 include("paper_benchmarks.jl")
 include("inflation_points.jl")
 include("axion_photon.jl")
+include("scientific_certification.jl")
 
 # Keep the historical module binding as a narrow compatibility alias. New
 # code should use `CYAxiverse.axion_photon`, whose name describes the physics.

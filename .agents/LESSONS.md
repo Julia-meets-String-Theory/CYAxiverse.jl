@@ -307,3 +307,183 @@ Issue #157 / PR #158 public-path remediation history.
 
 Superseded by: N/A
 Promotion status: not promoted
+
+## L-0007 — Handoff draft is not launch authorization
+
+ID: L-0007
+Status: candidate
+Date: 2026-09-11
+Type: owner-redirection
+Scope / tags: delegation launch, authorization semantics, state/provenance
+
+Observed failure: Discussion or refinement of a proposed delegation packet was
+treated as launch authorization, and work/state advanced before explicit owner
+authorization.
+
+Correction: Treat discussion and refinement of a proposed packet as advisory, not
+authorization. Present the final packet and obtain explicit owner authorization
+before launch. After approval, ordinary already-authorized worker
+diagnose/edit/check/correct/recheck work remains covered by that authorization.
+Only a material post-approval change to authorized scope or terms requires
+renewed approval.
+
+Root cause: Plan updates were conflated with owner-governed launch authorization.
+
+Preventive rule / check: Require a distinct pre-launch authorization checkpoint.
+Treat packet edits as planning detail unless they materially change authorized
+scope or terms; require renewed approval before applying such a change.
+
+Applicability / exceptions: Applies to owner-redirection and delegated workflows
+with explicit owner-governed execution. It does not replace scientific or merge
+gates already governed by higher sources.
+
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration section 2
+provide adjacent delegation mechanisms only. This sanitized candidate has no
+cited public incident proof.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0008 — Delegation contract must name capability and budget
+
+ID: L-0008
+Status: candidate
+Date: 2026-09-11
+Type: workflow
+Scope / tags: delegation packet, capacity planning, escalation policy
+
+Observed failure: A delegated task was launched with implicit role, capability,
+and effort assumptions, which reduced contract clarity and made fallback behavior
+ambiguous.
+
+Correction: Before delegation, state the role, model/capability target, reasoning
+target, topology, ordered product-neutral fallback policy, effort budget/lease,
+escalation conditions, and worker-reuse expectations. Do not encode a
+concrete/current fallback sequence or model list.
+
+Root cause: The packet lacked explicit operational bounds and fallback triggers.
+
+Preventive rule / check: Reject a packet that omits any required contract field.
+Verify that its fallback policy is ordered and product-neutral without encoding a
+concrete/current sequence. Renew owner authorization only for a material change
+to any authorized scope or term. Ordinary diagnose/edit/check/correct/recheck
+loops and use of an already approved fallback or worker-reuse policy remain
+authorized.
+
+Applicability / exceptions: Applies to multi-agent and handoff-based work where
+worker-level reuse is expected. Single-agent work without handoff may use a lighter
+form.
+
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration sections
+2, 5, 7, and 8 provide only partial, adjacent mechanism support for packet
+fields and worker reuse. This sanitized candidate has no cited public incident
+proof.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0009 — Handoff state follows observed execution outcome
+
+ID: L-0009
+Status: candidate
+Date: 2026-09-11
+Type: state/provenance
+Scope / tags: handoff state, status integrity, orchestration
+
+Observed failure: Handoff bookkeeping conflated the immediate operation result
+with the later worker terminal return, so launch state could be inferred from the
+wrong phase.
+
+Correction: Use the immediate handoff operation result as the phase-1 launch
+decision. Only success creates or attaches new execution task/worker state.
+Decline, cancellation, or failure creates no new task/worker state, leaves prior
+state unchanged, and is not silently retried. After successful launch, later worker
+terminal states (`DONE`, `BLOCKED`, `FAILED`) are a separate phase-2 downstream
+contract.
+
+Root cause: State bookkeeping mixed handoff operation status with downstream return
+state.
+
+Preventive rule / check: Record phase 1 from the operation result and phase 2 from
+the later worker terminal return. Do not make phase-2 evidence a prerequisite for
+the phase-1 success transition; apply phase-2 checks only after successful launch.
+
+Applicability / exceptions: Applies to workflows using explicit worker return
+contracts and observed execution results. Internal planning notes may be prepared
+before execution and do not by themselves move execution state.
+
+Evidence / durable reference: `AGENTS.md` section 6 and orchestration section 3
+provide adjacent support only for the later phase-2 `DONE`, `BLOCKED`, `FAILED`
+worker-return contract. These sources do not prove the phase-1 incident or
+define handoff-operation result semantics. This sanitized candidate has no
+cited public incident proof.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0010 — Do not delegate directly executable owner-authorized repository actions
+
+ID: L-0010
+Status: candidate
+Date: 2026-09-24
+Type: workflow
+Scope / tags: Control Desk, owner authorization, GitHub actions, delegation boundary, handoff minimization
+
+Observed failure: A bounded repository action that had already reached its owner-decision boundary and was directly executable through the available authenticated GitHub surface was redirected to a separate execution context. This introduced an unnecessary handoff and extra owner coordination even though no downstream implementation worker was required.
+
+Correction: Distinguish downstream delegated implementation from direct owner-authorized repository administration. When the owner explicitly authorizes a bounded action, all governing gates are already satisfied, and the current surface can execute the action directly, verify the exact current state and perform the action on that surface. Use a Manager, Work, or other downstream execution context only when the task actually requires delegated implementation, local execution, unavailable capability, or another governed execution role.
+
+Root cause: The no-automatic-downstream-launch boundary was overgeneralized into a rule that repository mutations should be redirected to another execution surface. Orchestration role boundaries were conflated with direct connector capability and explicit owner authorization.
+
+Preventive rule / check: Before creating or proposing a handoff, ask whether the requested action requires a downstream implementation worker or is an already-authorized direct action available on the current surface. If it is direct, bounded, gated, and executable here, perform it after exact-state verification rather than inventing a new execution boundary. Never use a handoff merely because the action mutates GitHub.
+
+Applicability / exceptions: This lesson does not bypass specifications, required review, merge gates, scientific gates, privacy constraints, or owner-controlled authorization. If the action requires code changes, local testing, unavailable permissions, a distinct evidential role, or another execution context required by the governing contract, use the applicable handoff path instead.
+
+Evidence / durable reference: Sanitized owner-redirection-derived pattern. The repository's delegation and lesson-lifecycle rules provide adjacent mechanism support; no private transcript, private URL, or resolving conversation reference is retained here.
+
+Superseded by: N/A
+Promotion status: not promoted
+
+## L-0011 — Keep Handoff Review separate from specialist review roles
+
+ID: L-0011
+Status: candidate
+Date: 2026-09-30
+Type: workflow
+Scope / tags: review topology, Handoff Review, SPEC, STANDARDS, SCIENTIFIC, Manager delegation, evidence reuse
+
+Observed failure: A specialist review axis was routed directly through the Handoff
+Review surface, conflating the workflow component that reviews a governed handoff
+with the downstream specialist reviewer role that should be delegated by a Manager.
+
+Correction: Keep the review topology explicit. Review Desk performs comprehensive
+Handoff Review of governed Manager packets. After a current passing Handoff Review
+and owner-manual Manager dispatch, the Manager delegates the applicable independent
+SPEC, STANDARDS, and SCIENTIFIC reviewers. A specialist review accidentally produced
+on the wrong surface may be retained as secondary corroborating evidence or a
+double-check, but it does not satisfy the specialist-review gate and its verdict
+must not be transferred into the correctly routed review.
+
+Root cause: The review surface and the reviewer role were treated as interchangeable
+because both can inspect the same candidate and rubric.
+
+Preventive rule / check: Before activating any review, classify it explicitly as
+either Handoff Review or a specialist review axis. If it is Handoff Review, route it
+through Review Desk. If it is SPEC, STANDARDS, or SCIENTIFIC, require a Manager to
+receive the governed packet first and delegate the specialist reviewer under the
+bound capability policy. Preserve useful wrong-surface review evidence for
+corroboration, but require a fresh correctly routed specialist review and never use
+the earlier verdict to suppress findings, skip an axis, or establish acceptance.
+
+Applicability / exceptions: Applies to governed delegated workflows that distinguish
+Handoff Review from Manager-delegated specialist review axes. Ordinary informal peer
+review outside that topology may use a lighter process, but must not be represented
+as satisfying a governed specialist or Handoff Review gate.
+
+Evidence / durable reference: Sanitized owner-redirection-derived pattern checked
+against the repository's delegated-review topology and CYAX-0159 lessons lifecycle.
+No private exchange path, transcript, or resolving private reference is retained in
+this candidate.
+
+Superseded by: N/A
+Promotion status: not promoted

@@ -1,0 +1,29 @@
+{
+  "snapshot_id": "cyax-0155-adversarial-20260913T043555Z",
+  "preregistration_commit": "44937a83cc039805d072bd0263517d8dfef03a10",
+  "generator": "context_builder.py",
+  "answer_bearing_facts_each": 12,
+  "evidence_items_each": 18,
+  "source_identities_each": 10,
+  "condition_a": {
+    "words": 852,
+    "bytes": 6429,
+    "sha256": "aedd1350bef5389be90d2608318f7b9675f94aad0a50a8d5d59499fb017bc780"
+  },
+  "condition_b": {
+    "words": 895,
+    "bytes": 6702,
+    "sha256": "33c61ad16a5228a557ae59f0ac80834674e40aae5b77a0a9e0044e82c1b2237c"
+  },
+  "common_prompt": {
+    "words": 122,
+    "bytes": 899,
+    "sha256": "cf9b6aec4c7e232a9c2462e2f100dcefb6e49ea67422ce7670c4f85e66f3c52a"
+  },
+  "word_difference": 43,
+  "word_difference_percent_of_larger": 4.804,
+  "input_words": {
+    "condition_a_plus_prompt": 974,
+    "condition_b_plus_prompt": 1017
+  }
+}

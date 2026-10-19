@@ -1,0 +1,969 @@
+{
+  "answer_key_completeness": {
+    "keys": [
+      "K1",
+      "K2",
+      "K3",
+      "K4",
+      "K5",
+      "K6",
+      "K7",
+      "K8",
+      "K9",
+      "K10",
+      "K11",
+      "K12"
+    ],
+    "path": "answer_key.md"
+  },
+  "common_subject_prompt": {
+    "byte_count": 1983,
+    "path": "common_subject_prompt.md",
+    "sha256": "603a071930e2a1e744c4ece3d705f920960b70a78c6c89f93ac708956ec5dc1f",
+    "word_count": 314
+  },
+  "contexts": {
+    "condition_a": {
+      "byte_count": 22150,
+      "evidence_items": 35,
+      "fact_coverage": [
+        "K1",
+        "K2",
+        "K3",
+        "K4",
+        "K5",
+        "K6",
+        "K7",
+        "K8",
+        "K9",
+        "K10",
+        "K11",
+        "K12"
+      ],
+      "line_count": 160,
+      "path": "condition_a_context.md",
+      "sha256": "751159a373048d8d7159c07b8e4d3d55297298a025922403c14561b920132123",
+      "source_references": [
+        "AGENTS.md",
+        "commit:1ed97e181e3203524d5435c43f58c1a3ff03d813",
+        "commit:856012f015a866bf7ff352bc50e8d10c250855e6",
+        "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45",
+        "github:Julia-meets-String-Theory/CYAxiverse.jl#157",
+        "github:Julia-meets-String-Theory/CYAxiverse.jl#158",
+        "specs/0155-private-safe-chat-checkpoints/spec.md",
+        "specs/0157-public-path-remediation/spec.md",
+        "tree:fc980d28f3faa51f66031fe2e1fb5281b2ad5a48"
+      ],
+      "word_count": 2406
+    },
+    "condition_b": {
+      "byte_count": 19483,
+      "evidence_items": 35,
+      "fact_coverage": [
+        "K1",
+        "K2",
+        "K3",
+        "K4",
+        "K5",
+        "K6",
+        "K7",
+        "K8",
+        "K9",
+        "K10",
+        "K11",
+        "K12"
+      ],
+      "line_count": 143,
+      "path": "condition_b_context.md",
+      "sha256": "d9ebe46375f4e25b58087ac90f8860baa253b2f4fce1a810a17ebbf956f4a5b3",
+      "source_references": [
+        "AGENTS.md",
+        "commit:1ed97e181e3203524d5435c43f58c1a3ff03d813",
+        "commit:856012f015a866bf7ff352bc50e8d10c250855e6",
+        "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45",
+        "github:Julia-meets-String-Theory/CYAxiverse.jl#157",
+        "github:Julia-meets-String-Theory/CYAxiverse.jl#158",
+        "specs/0155-private-safe-chat-checkpoints/spec.md",
+        "specs/0157-public-path-remediation/spec.md",
+        "tree:fc980d28f3faa51f66031fe2e1fb5281b2ad5a48"
+      ],
+      "word_count": 2350
+    }
+  },
+  "deterministic": true,
+  "frozen_inputs": {
+    "fixtures_directory": "sources",
+    "snapshot": "source_snapshot.json"
+  },
+  "generator_version": "phase2-canonical-parity-2",
+  "manifest_version": "phase2-1",
+  "phase": 2,
+  "pilot": "CYAX-0157 held-out ablation",
+  "semantic_inventory": {
+    "condition_parity": {
+      "condition_a": {
+        "evidence_item_ids": [
+          "K1:1",
+          "K1:2",
+          "K2:1",
+          "K2:2",
+          "K3:1",
+          "K4:1",
+          "K4:2",
+          "K4:3",
+          "K4:4",
+          "K5:1",
+          "K5:2",
+          "K5:3",
+          "K5:4",
+          "K5:5",
+          "K5:6",
+          "K6:1",
+          "K6:2",
+          "K7:1",
+          "K7:2",
+          "K8:1",
+          "K8:2",
+          "K8:3",
+          "K9:1",
+          "K9:2",
+          "K9:3",
+          "K10:1",
+          "K10:2",
+          "K10:3",
+          "K11:1",
+          "K11:2",
+          "K11:3",
+          "K11:4",
+          "K12:1",
+          "K12:2",
+          "K12:3"
+        ],
+        "fact_fields": {
+          "K1": {
+            "answer": "Issue #157, titled Remove current machine-local path disclosures, asks for confirmed personal and machine-local filesystem details to be removed from current public CYAxiverse surfaces. Its scope keeps useful source filenames, hashes, commits, branch names, scientific algorithms, numerical values, units, identities, persisted schemas, and reproducibility. It also covers sanitizing Issue, PR, and comment prose, replacing tracked personal defaults with explicit configuration or repository-relative resolution, focused path-resolution coverage, and a separate inventory of stale public branches.",
+            "evidence": [
+              {
+                "anchor": "title, Problem, Scope, and Acceptance criteria sections",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              },
+              {
+                "anchor": "repository governance boundary",
+                "source": "AGENTS.md"
+              }
+            ],
+            "heading": "Issue identity and public-surface scope",
+            "next_action": "Preserve the stated scientific identity and behavior while handling the separate branch-safety work through its own evidence gate.",
+            "temporal": "Current at the frozen observation time 2026-09-13T01:22:00Z; the scope is limited to the stated public-surface remediation.",
+            "uncertainty": "The snapshot does not establish a wider redesign, a scientific algorithm change, or a completed branch inventory."
+          },
+          "K10": {
+            "answer": "The prior head 1ed97e181e3203524d5435c43f58c1a3ff03d813 is stale relative to the current PR head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. The first captured PR comment requests review against the prior head; the later comment requests review against 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 and records incorporation of the current vmm base 856012f015a866bf7ff352bc50e8d10c250855e6. The prior reference is historical context and must not be used as the current PR state.",
+            "evidence": [
+              {
+                "anchor": "current headRefOid",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "current baseRefOid and baseRefName",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "prior head object identity",
+                "source": "commit:1ed97e181e3203524d5435c43f58c1a3ff03d813"
+              }
+            ],
+            "heading": "Head lineage and supersession",
+            "next_action": "Bind every new review or owner decision to 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, not to the stale prior reference.",
+            "temporal": "Current is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45; stale is 1ed97e181e3203524d5435c43f58c1a3ff03d813; both are scoped to the observation 2026-09-13T01:22:00Z.",
+            "uncertainty": "Earlier comment context does not establish current state after the head changed."
+          },
+          "K11": {
+            "answer": "The verification surface has no independent CI rerun, is scoped to the snapshot time 2026-09-13T01:22:00Z, and includes a PR-body self-report for focused tests and review approval. The formal review array is empty. No production CYTools geometry generation, large database scan, retired physical-scaling workflow, or external evidence generation was independently verified, and the surviving-public-branch scan required by R-005 was not performed. Abstain from claims requiring state after 2026-09-13T01:22:00Z or evidence beyond these captured records.",
+            "evidence": [
+              {
+                "anchor": "verification and no-production-execution statements",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "captured checks and review surface",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "timestamp-scoped verification note",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              },
+              {
+                "anchor": "evidence and execution boundary",
+                "source": "AGENTS.md"
+              }
+            ],
+            "heading": "Evidence limits and abstentions",
+            "next_action": "State the missing evidence and abstain rather than infer a later CI, review, production, or branch result.",
+            "temporal": "All limitations are active at the frozen boundary 2026-09-13T01:22:00Z; future state is unknown.",
+            "uncertainty": "Missing reruns, formal review evidence, production execution, and branch classification are explicit abstention triggers."
+          },
+          "K12": {
+            "answer": "The next valid action is to obtain and record an exact-head review and owner merge decision for PR #158 against 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. If an owner later approves a merge into vmm, Issue #157 must remain open because that merge does not complete R-005. Separately, perform the R-005 surviving-public-branch read-only scan, produce the preservation/reachability classification, and act on those results before any branch deletion or history rewriting. Only the owner can complete the decision; this frozen artifact cannot do it.",
+            "evidence": [
+              {
+                "anchor": "R-005 gate and implementation status",
+                "source": "specs/0157-public-path-remediation/spec.md"
+              },
+              {
+                "anchor": "exact-head review request and deferred-work section",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "R-005 and Issue-closure boundary",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              }
+            ],
+            "heading": "Next authorized action",
+            "next_action": "Obtain the exact-head review/owner decision, keep the Issue open after any merge, then complete R-005 independently.",
+            "temporal": "This is the next action at observation 2026-09-13T01:22:00Z, directed at exact head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45.",
+            "uncertainty": "The artifact records a required action, not an owner decision or completed scan."
+          },
+          "K2": {
+            "answer": "PR #158, titled Sanitize machine-local path configuration, implements the Issue #157 remediation. Its recorded changes move personal data and Slurm locations to explicit environment configuration, use repository-relative or configurable resolution, sanitize path-bearing documentation and notebooks, preserve scientific algorithms, hashes, schemas, and numerical behavior, and add focused coverage. The PR body explicitly says Issue #157 remains open and that PR #158 does not complete R-005.",
+            "evidence": [
+              {
+                "anchor": "Summary and explicit Issue #157/R-005 statements",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "Acceptance criteria",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              }
+            ],
+            "heading": "Supporting change and completion boundary",
+            "next_action": "Treat the PR as the current-surface remediation record and keep the Issue and branch gate separate.",
+            "temporal": "Current PR identity at 2026-09-13T01:22:00Z; its completion boundary remains the one stated in the captured PR body.",
+            "uncertainty": "The fixture records the PR body claim; it does not turn that claim into an Issue closure or an R-005 completion decision."
+          },
+          "K3": {
+            "answer": "Issue #157 is OPEN at the frozen observation. Its project item in the CYAxiverse Research & Development project has status Verification. This is the current state recorded for the governing work item, not a prediction about a later project transition.",
+            "evidence": [
+              {
+                "anchor": "API state and projectItems status fields",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              }
+            ],
+            "heading": "Issue state at observation",
+            "next_action": "Use the recorded Verification status as evidence, then obtain a new owner-authorized decision if the work advances.",
+            "temporal": "Current through 2026-09-13T01:22:00Z; later GitHub state is outside the captured surface.",
+            "uncertainty": "Project status is timestamp-scoped and can change after the frozen observation."
+          },
+          "K4": {
+            "answer": "PR #158 is OPEN, non-draft, unmerged, and mergeable. Its head commit is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 with head tree fc980d28f3faa51f66031fe2e1fb5281b2ad5a48; its base branch is vmm at 856012f015a866bf7ff352bc50e8d10c250855e6. PR #158 Project status: Verification. The snapshot records no merge decision and no Issue completion claim, so these are properties of the frozen PR surface rather than an instruction to merge.",
+            "evidence": [
+              {
+                "anchor": "state, isDraft, mergedAt, mergeable, headRefOid, baseRefName, baseRefOid, and projectItems",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "current PR head commit object",
+                "source": "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45"
+              },
+              {
+                "anchor": "current PR head tree object",
+                "source": "tree:fc980d28f3faa51f66031fe2e1fb5281b2ad5a48"
+              },
+              {
+                "anchor": "current vmm base commit object",
+                "source": "commit:856012f015a866bf7ff352bc50e8d10c250855e6"
+              }
+            ],
+            "heading": "Pull request state and project placement",
+            "next_action": "Review and record an owner decision against this exact head before any merge action.",
+            "temporal": "Current head is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 at 2026-09-13T01:22:00Z; the PR is unmerged in this snapshot.",
+            "uncertainty": "The frozen surface does not include a later owner merge decision or a later project transition."
+          },
+          "K5": {
+            "answer": "The CYAX-0157 spec is Approved for S1 implementation. Its requirements are R-001 Sanitize current GitHub prose; R-002 Configure executable paths at runtime; R-003 Preserve scientific behavior and evidence identity; R-004 Preserve operational compatibility deliberately; and R-005 Close every live-reference route before history review. The frozen Issue and PR evidence describes current-surface remediation implemented at exact current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, while the spec, PR, and governance material make no merge or Issue completion claim. The related CYAX-0155 specification is retained as an allowed governance reference, not as evidence of a changed requirement.",
+            "evidence": [
+              {
+                "anchor": "approval header, implementation status, and R-001 through R-005",
+                "source": "specs/0157-public-path-remediation/spec.md"
+              },
+              {
+                "anchor": "Verification at exact head and deferred-work sections",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "Verification note and R-005 statement",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              },
+              {
+                "anchor": "repository change and evidence boundary",
+                "source": "AGENTS.md"
+              },
+              {
+                "anchor": "allowed related specification identity",
+                "source": "specs/0155-private-safe-chat-checkpoints/spec.md"
+              },
+              {
+                "anchor": "exact current head object",
+                "source": "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45"
+              }
+            ],
+            "heading": "Approved specification and current-surface implementation",
+            "next_action": "Keep R-001 through R-004 tied to the current-surface evidence and perform R-005 separately before history review.",
+            "temporal": "The approval and implementation statements are scoped to exact head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 at 2026-09-13T01:22:00Z; R-005 remains current and open.",
+            "uncertainty": "The artifact set records implementation evidence and approval wording but does not independently execute the spec or infer completion of its final gate."
+          },
+          "K6": {
+            "answer": "At current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, the captured checks show Fast tests: FAILURE, Documentation build: SUCCESS, and Full test suite: SKIPPED. The Fast failure is the unchanged pre-existing Hessian expectation mismatch at test/runtests.jl:1317, with observed diagonal 19.739208802178716 versus expected 39.47841760435743. The PR body reports focused remediation results: optional Python interpreter contract 9/9, notebook static checks 20/20, notebook runtime initialization smoke 10/10, retired 2026-08-25 entry-point guards 54/54, Slurm-log resolution 6/6, and data-directory resolution 10/10.",
+            "evidence": [
+              {
+                "anchor": "Verification at exact head and focused test counts",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "captured status checks: Fast tests, build, and Full test suite",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              }
+            ],
+            "heading": "Checks and focused verification",
+            "next_action": "Report the unchanged Fast-suite mismatch accurately and do not convert the focused counts into a claim of a clean full suite.",
+            "temporal": "Check timestamps and focused counts are scoped to the captured head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 and observation 2026-09-13T01:22:00Z.",
+            "uncertainty": "Focused counts are self-reported in the PR body; no independent rerun or production-scale execution is included here."
+          },
+          "K7": {
+            "answer": "The PR body self-reports independent re-review APPROVE with no findings against exact current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. The captured GitHub reviews surface is an empty array, so it exposes no formal APPROVED, CHANGES_REQUESTED, or COMMENTED decision. The approval is therefore a self-reported PR-body statement bound to the exact head, not an independently confirmed GitHub review record.",
+            "evidence": [
+              {
+                "anchor": "independent re-review statement against exact current head",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "captured reviews surface: empty array",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              }
+            ],
+            "heading": "Review record and evidence limit",
+            "next_action": "Obtain and record a formal exact-head review or an explicitly recorded owner decision.",
+            "temporal": "The claimed approval targets 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45; the empty formal review surface is current only at 2026-09-13T01:22:00Z.",
+            "uncertainty": "The absence of a formal review record limits what can be claimed about independent approval."
+          },
+          "K8": {
+            "answer": "R-005, Close every live-reference route before history review, remains open. It requires a read-only privacy scan of surviving public branches and a preservation/reachability classification before any branch deletion or history rewriting. The frozen Issue and PR bodies say that no public branch has been deleted, force-pushed, or rewritten and that this scan and classification are deferred. R-005 is the explicit completion gate for Issue #157.",
+            "evidence": [
+              {
+                "anchor": "R-005 requirement",
+                "source": "specs/0157-public-path-remediation/spec.md"
+              },
+              {
+                "anchor": "R-005 remains open and deferred",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              },
+              {
+                "anchor": "R-005 remains open and deferred",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              }
+            ],
+            "heading": "Open R-005 branch-safety requirement",
+            "next_action": "Perform the read-only branch scan and record preservation/reachability classification before deletion or rewrite discussion.",
+            "temporal": "Open at 2026-09-13T01:22:00Z; no later branch scan is represented.",
+            "uncertainty": "The remaining public-branch exposure is undetermined because the required scan has not been performed."
+          },
+          "K9": {
+            "answer": "Merging PR #158 must not close Issue #157. A merge would incorporate the current-surface remediation into vmm, but PR completion and Issue completion remain distinct because R-005 is still open. The specification and both captured public bodies explicitly preserve that separation; no merge has occurred in the frozen state and no evidence authorizes Issue closure.",
+            "evidence": [
+              {
+                "anchor": "implementation status and no-auto-close rule",
+                "source": "specs/0157-public-path-remediation/spec.md"
+              },
+              {
+                "anchor": "Issue remains open and PR does not complete R-005",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "PR does not close this issue",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              }
+            ],
+            "heading": "Separate completion decisions",
+            "next_action": "If a merge is later approved, keep Issue #157 open until R-005 has its own evidence-backed completion decision.",
+            "temporal": "This is a workflow rule applied to the frozen unmerged state at 2026-09-13T01:22:00Z.",
+            "uncertainty": "The artifact does not establish a future merge, closure, or owner decision."
+          }
+        }
+      },
+      "condition_b": {
+        "evidence_item_ids": [
+          "K1:1",
+          "K1:2",
+          "K2:1",
+          "K2:2",
+          "K3:1",
+          "K4:1",
+          "K4:2",
+          "K4:3",
+          "K4:4",
+          "K5:1",
+          "K5:2",
+          "K5:3",
+          "K5:4",
+          "K5:5",
+          "K5:6",
+          "K6:1",
+          "K6:2",
+          "K7:1",
+          "K7:2",
+          "K8:1",
+          "K8:2",
+          "K8:3",
+          "K9:1",
+          "K9:2",
+          "K9:3",
+          "K10:1",
+          "K10:2",
+          "K10:3",
+          "K11:1",
+          "K11:2",
+          "K11:3",
+          "K11:4",
+          "K12:1",
+          "K12:2",
+          "K12:3"
+        ],
+        "fact_fields": {
+          "K1": {
+            "answer": "Issue #157, titled Remove current machine-local path disclosures, asks for confirmed personal and machine-local filesystem details to be removed from current public CYAxiverse surfaces. Its scope keeps useful source filenames, hashes, commits, branch names, scientific algorithms, numerical values, units, identities, persisted schemas, and reproducibility. It also covers sanitizing Issue, PR, and comment prose, replacing tracked personal defaults with explicit configuration or repository-relative resolution, focused path-resolution coverage, and a separate inventory of stale public branches.",
+            "evidence": [
+              {
+                "anchor": "title, Problem, Scope, and Acceptance criteria sections",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              },
+              {
+                "anchor": "repository governance boundary",
+                "source": "AGENTS.md"
+              }
+            ],
+            "heading": "Issue identity and public-surface scope",
+            "next_action": "Preserve the stated scientific identity and behavior while handling the separate branch-safety work through its own evidence gate.",
+            "temporal": "Current at the frozen observation time 2026-09-13T01:22:00Z; the scope is limited to the stated public-surface remediation.",
+            "uncertainty": "The snapshot does not establish a wider redesign, a scientific algorithm change, or a completed branch inventory."
+          },
+          "K10": {
+            "answer": "The prior head 1ed97e181e3203524d5435c43f58c1a3ff03d813 is stale relative to the current PR head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. The first captured PR comment requests review against the prior head; the later comment requests review against 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 and records incorporation of the current vmm base 856012f015a866bf7ff352bc50e8d10c250855e6. The prior reference is historical context and must not be used as the current PR state.",
+            "evidence": [
+              {
+                "anchor": "current headRefOid",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "current baseRefOid and baseRefName",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "prior head object identity",
+                "source": "commit:1ed97e181e3203524d5435c43f58c1a3ff03d813"
+              }
+            ],
+            "heading": "Head lineage and supersession",
+            "next_action": "Bind every new review or owner decision to 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, not to the stale prior reference.",
+            "temporal": "Current is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45; stale is 1ed97e181e3203524d5435c43f58c1a3ff03d813; both are scoped to the observation 2026-09-13T01:22:00Z.",
+            "uncertainty": "Earlier comment context does not establish current state after the head changed."
+          },
+          "K11": {
+            "answer": "The verification surface has no independent CI rerun, is scoped to the snapshot time 2026-09-13T01:22:00Z, and includes a PR-body self-report for focused tests and review approval. The formal review array is empty. No production CYTools geometry generation, large database scan, retired physical-scaling workflow, or external evidence generation was independently verified, and the surviving-public-branch scan required by R-005 was not performed. Abstain from claims requiring state after 2026-09-13T01:22:00Z or evidence beyond these captured records.",
+            "evidence": [
+              {
+                "anchor": "verification and no-production-execution statements",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "captured checks and review surface",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "timestamp-scoped verification note",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              },
+              {
+                "anchor": "evidence and execution boundary",
+                "source": "AGENTS.md"
+              }
+            ],
+            "heading": "Evidence limits and abstentions",
+            "next_action": "State the missing evidence and abstain rather than infer a later CI, review, production, or branch result.",
+            "temporal": "All limitations are active at the frozen boundary 2026-09-13T01:22:00Z; future state is unknown.",
+            "uncertainty": "Missing reruns, formal review evidence, production execution, and branch classification are explicit abstention triggers."
+          },
+          "K12": {
+            "answer": "The next valid action is to obtain and record an exact-head review and owner merge decision for PR #158 against 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. If an owner later approves a merge into vmm, Issue #157 must remain open because that merge does not complete R-005. Separately, perform the R-005 surviving-public-branch read-only scan, produce the preservation/reachability classification, and act on those results before any branch deletion or history rewriting. Only the owner can complete the decision; this frozen artifact cannot do it.",
+            "evidence": [
+              {
+                "anchor": "R-005 gate and implementation status",
+                "source": "specs/0157-public-path-remediation/spec.md"
+              },
+              {
+                "anchor": "exact-head review request and deferred-work section",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "R-005 and Issue-closure boundary",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              }
+            ],
+            "heading": "Next authorized action",
+            "next_action": "Obtain the exact-head review/owner decision, keep the Issue open after any merge, then complete R-005 independently.",
+            "temporal": "This is the next action at observation 2026-09-13T01:22:00Z, directed at exact head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45.",
+            "uncertainty": "The artifact records a required action, not an owner decision or completed scan."
+          },
+          "K2": {
+            "answer": "PR #158, titled Sanitize machine-local path configuration, implements the Issue #157 remediation. Its recorded changes move personal data and Slurm locations to explicit environment configuration, use repository-relative or configurable resolution, sanitize path-bearing documentation and notebooks, preserve scientific algorithms, hashes, schemas, and numerical behavior, and add focused coverage. The PR body explicitly says Issue #157 remains open and that PR #158 does not complete R-005.",
+            "evidence": [
+              {
+                "anchor": "Summary and explicit Issue #157/R-005 statements",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "Acceptance criteria",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              }
+            ],
+            "heading": "Supporting change and completion boundary",
+            "next_action": "Treat the PR as the current-surface remediation record and keep the Issue and branch gate separate.",
+            "temporal": "Current PR identity at 2026-09-13T01:22:00Z; its completion boundary remains the one stated in the captured PR body.",
+            "uncertainty": "The fixture records the PR body claim; it does not turn that claim into an Issue closure or an R-005 completion decision."
+          },
+          "K3": {
+            "answer": "Issue #157 is OPEN at the frozen observation. Its project item in the CYAxiverse Research & Development project has status Verification. This is the current state recorded for the governing work item, not a prediction about a later project transition.",
+            "evidence": [
+              {
+                "anchor": "API state and projectItems status fields",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              }
+            ],
+            "heading": "Issue state at observation",
+            "next_action": "Use the recorded Verification status as evidence, then obtain a new owner-authorized decision if the work advances.",
+            "temporal": "Current through 2026-09-13T01:22:00Z; later GitHub state is outside the captured surface.",
+            "uncertainty": "Project status is timestamp-scoped and can change after the frozen observation."
+          },
+          "K4": {
+            "answer": "PR #158 is OPEN, non-draft, unmerged, and mergeable. Its head commit is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 with head tree fc980d28f3faa51f66031fe2e1fb5281b2ad5a48; its base branch is vmm at 856012f015a866bf7ff352bc50e8d10c250855e6. PR #158 Project status: Verification. The snapshot records no merge decision and no Issue completion claim, so these are properties of the frozen PR surface rather than an instruction to merge.",
+            "evidence": [
+              {
+                "anchor": "state, isDraft, mergedAt, mergeable, headRefOid, baseRefName, baseRefOid, and projectItems",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "current PR head commit object",
+                "source": "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45"
+              },
+              {
+                "anchor": "current PR head tree object",
+                "source": "tree:fc980d28f3faa51f66031fe2e1fb5281b2ad5a48"
+              },
+              {
+                "anchor": "current vmm base commit object",
+                "source": "commit:856012f015a866bf7ff352bc50e8d10c250855e6"
+              }
+            ],
+            "heading": "Pull request state and project placement",
+            "next_action": "Review and record an owner decision against this exact head before any merge action.",
+            "temporal": "Current head is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 at 2026-09-13T01:22:00Z; the PR is unmerged in this snapshot.",
+            "uncertainty": "The frozen surface does not include a later owner merge decision or a later project transition."
+          },
+          "K5": {
+            "answer": "The CYAX-0157 spec is Approved for S1 implementation. Its requirements are R-001 Sanitize current GitHub prose; R-002 Configure executable paths at runtime; R-003 Preserve scientific behavior and evidence identity; R-004 Preserve operational compatibility deliberately; and R-005 Close every live-reference route before history review. The frozen Issue and PR evidence describes current-surface remediation implemented at exact current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, while the spec, PR, and governance material make no merge or Issue completion claim. The related CYAX-0155 specification is retained as an allowed governance reference, not as evidence of a changed requirement.",
+            "evidence": [
+              {
+                "anchor": "approval header, implementation status, and R-001 through R-005",
+                "source": "specs/0157-public-path-remediation/spec.md"
+              },
+              {
+                "anchor": "Verification at exact head and deferred-work sections",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "Verification note and R-005 statement",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              },
+              {
+                "anchor": "repository change and evidence boundary",
+                "source": "AGENTS.md"
+              },
+              {
+                "anchor": "allowed related specification identity",
+                "source": "specs/0155-private-safe-chat-checkpoints/spec.md"
+              },
+              {
+                "anchor": "exact current head object",
+                "source": "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45"
+              }
+            ],
+            "heading": "Approved specification and current-surface implementation",
+            "next_action": "Keep R-001 through R-004 tied to the current-surface evidence and perform R-005 separately before history review.",
+            "temporal": "The approval and implementation statements are scoped to exact head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 at 2026-09-13T01:22:00Z; R-005 remains current and open.",
+            "uncertainty": "The artifact set records implementation evidence and approval wording but does not independently execute the spec or infer completion of its final gate."
+          },
+          "K6": {
+            "answer": "At current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, the captured checks show Fast tests: FAILURE, Documentation build: SUCCESS, and Full test suite: SKIPPED. The Fast failure is the unchanged pre-existing Hessian expectation mismatch at test/runtests.jl:1317, with observed diagonal 19.739208802178716 versus expected 39.47841760435743. The PR body reports focused remediation results: optional Python interpreter contract 9/9, notebook static checks 20/20, notebook runtime initialization smoke 10/10, retired 2026-08-25 entry-point guards 54/54, Slurm-log resolution 6/6, and data-directory resolution 10/10.",
+            "evidence": [
+              {
+                "anchor": "Verification at exact head and focused test counts",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "captured status checks: Fast tests, build, and Full test suite",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              }
+            ],
+            "heading": "Checks and focused verification",
+            "next_action": "Report the unchanged Fast-suite mismatch accurately and do not convert the focused counts into a claim of a clean full suite.",
+            "temporal": "Check timestamps and focused counts are scoped to the captured head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 and observation 2026-09-13T01:22:00Z.",
+            "uncertainty": "Focused counts are self-reported in the PR body; no independent rerun or production-scale execution is included here."
+          },
+          "K7": {
+            "answer": "The PR body self-reports independent re-review APPROVE with no findings against exact current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. The captured GitHub reviews surface is an empty array, so it exposes no formal APPROVED, CHANGES_REQUESTED, or COMMENTED decision. The approval is therefore a self-reported PR-body statement bound to the exact head, not an independently confirmed GitHub review record.",
+            "evidence": [
+              {
+                "anchor": "independent re-review statement against exact current head",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "captured reviews surface: empty array",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              }
+            ],
+            "heading": "Review record and evidence limit",
+            "next_action": "Obtain and record a formal exact-head review or an explicitly recorded owner decision.",
+            "temporal": "The claimed approval targets 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45; the empty formal review surface is current only at 2026-09-13T01:22:00Z.",
+            "uncertainty": "The absence of a formal review record limits what can be claimed about independent approval."
+          },
+          "K8": {
+            "answer": "R-005, Close every live-reference route before history review, remains open. It requires a read-only privacy scan of surviving public branches and a preservation/reachability classification before any branch deletion or history rewriting. The frozen Issue and PR bodies say that no public branch has been deleted, force-pushed, or rewritten and that this scan and classification are deferred. R-005 is the explicit completion gate for Issue #157.",
+            "evidence": [
+              {
+                "anchor": "R-005 requirement",
+                "source": "specs/0157-public-path-remediation/spec.md"
+              },
+              {
+                "anchor": "R-005 remains open and deferred",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              },
+              {
+                "anchor": "R-005 remains open and deferred",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              }
+            ],
+            "heading": "Open R-005 branch-safety requirement",
+            "next_action": "Perform the read-only branch scan and record preservation/reachability classification before deletion or rewrite discussion.",
+            "temporal": "Open at 2026-09-13T01:22:00Z; no later branch scan is represented.",
+            "uncertainty": "The remaining public-branch exposure is undetermined because the required scan has not been performed."
+          },
+          "K9": {
+            "answer": "Merging PR #158 must not close Issue #157. A merge would incorporate the current-surface remediation into vmm, but PR completion and Issue completion remain distinct because R-005 is still open. The specification and both captured public bodies explicitly preserve that separation; no merge has occurred in the frozen state and no evidence authorizes Issue closure.",
+            "evidence": [
+              {
+                "anchor": "implementation status and no-auto-close rule",
+                "source": "specs/0157-public-path-remediation/spec.md"
+              },
+              {
+                "anchor": "Issue remains open and PR does not complete R-005",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+              },
+              {
+                "anchor": "PR does not close this issue",
+                "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+              }
+            ],
+            "heading": "Separate completion decisions",
+            "next_action": "If a merge is later approved, keep Issue #157 open until R-005 has its own evidence-backed completion decision.",
+            "temporal": "This is a workflow rule applied to the frozen unmerged state at 2026-09-13T01:22:00Z.",
+            "uncertainty": "The artifact does not establish a future merge, closure, or owner decision."
+          }
+        }
+      }
+    },
+    "fact_order": [
+      "K1",
+      "K2",
+      "K3",
+      "K4",
+      "K5",
+      "K6",
+      "K7",
+      "K8",
+      "K9",
+      "K10",
+      "K11",
+      "K12"
+    ],
+    "facts": {
+      "K1": {
+        "answer": "Issue #157, titled Remove current machine-local path disclosures, asks for confirmed personal and machine-local filesystem details to be removed from current public CYAxiverse surfaces. Its scope keeps useful source filenames, hashes, commits, branch names, scientific algorithms, numerical values, units, identities, persisted schemas, and reproducibility. It also covers sanitizing Issue, PR, and comment prose, replacing tracked personal defaults with explicit configuration or repository-relative resolution, focused path-resolution coverage, and a separate inventory of stale public branches.",
+        "evidence": [
+          {
+            "anchor": "title, Problem, Scope, and Acceptance criteria sections",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+          },
+          {
+            "anchor": "repository governance boundary",
+            "source": "AGENTS.md"
+          }
+        ],
+        "heading": "Issue identity and public-surface scope",
+        "next_action": "Preserve the stated scientific identity and behavior while handling the separate branch-safety work through its own evidence gate.",
+        "temporal": "Current at the frozen observation time 2026-09-13T01:22:00Z; the scope is limited to the stated public-surface remediation.",
+        "uncertainty": "The snapshot does not establish a wider redesign, a scientific algorithm change, or a completed branch inventory."
+      },
+      "K10": {
+        "answer": "The prior head 1ed97e181e3203524d5435c43f58c1a3ff03d813 is stale relative to the current PR head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. The first captured PR comment requests review against the prior head; the later comment requests review against 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 and records incorporation of the current vmm base 856012f015a866bf7ff352bc50e8d10c250855e6. The prior reference is historical context and must not be used as the current PR state.",
+        "evidence": [
+          {
+            "anchor": "current headRefOid",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "current baseRefOid and baseRefName",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "prior head object identity",
+            "source": "commit:1ed97e181e3203524d5435c43f58c1a3ff03d813"
+          }
+        ],
+        "heading": "Head lineage and supersession",
+        "next_action": "Bind every new review or owner decision to 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, not to the stale prior reference.",
+        "temporal": "Current is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45; stale is 1ed97e181e3203524d5435c43f58c1a3ff03d813; both are scoped to the observation 2026-09-13T01:22:00Z.",
+        "uncertainty": "Earlier comment context does not establish current state after the head changed."
+      },
+      "K11": {
+        "answer": "The verification surface has no independent CI rerun, is scoped to the snapshot time 2026-09-13T01:22:00Z, and includes a PR-body self-report for focused tests and review approval. The formal review array is empty. No production CYTools geometry generation, large database scan, retired physical-scaling workflow, or external evidence generation was independently verified, and the surviving-public-branch scan required by R-005 was not performed. Abstain from claims requiring state after 2026-09-13T01:22:00Z or evidence beyond these captured records.",
+        "evidence": [
+          {
+            "anchor": "verification and no-production-execution statements",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "captured checks and review surface",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "timestamp-scoped verification note",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+          },
+          {
+            "anchor": "evidence and execution boundary",
+            "source": "AGENTS.md"
+          }
+        ],
+        "heading": "Evidence limits and abstentions",
+        "next_action": "State the missing evidence and abstain rather than infer a later CI, review, production, or branch result.",
+        "temporal": "All limitations are active at the frozen boundary 2026-09-13T01:22:00Z; future state is unknown.",
+        "uncertainty": "Missing reruns, formal review evidence, production execution, and branch classification are explicit abstention triggers."
+      },
+      "K12": {
+        "answer": "The next valid action is to obtain and record an exact-head review and owner merge decision for PR #158 against 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. If an owner later approves a merge into vmm, Issue #157 must remain open because that merge does not complete R-005. Separately, perform the R-005 surviving-public-branch read-only scan, produce the preservation/reachability classification, and act on those results before any branch deletion or history rewriting. Only the owner can complete the decision; this frozen artifact cannot do it.",
+        "evidence": [
+          {
+            "anchor": "R-005 gate and implementation status",
+            "source": "specs/0157-public-path-remediation/spec.md"
+          },
+          {
+            "anchor": "exact-head review request and deferred-work section",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "R-005 and Issue-closure boundary",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+          }
+        ],
+        "heading": "Next authorized action",
+        "next_action": "Obtain the exact-head review/owner decision, keep the Issue open after any merge, then complete R-005 independently.",
+        "temporal": "This is the next action at observation 2026-09-13T01:22:00Z, directed at exact head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45.",
+        "uncertainty": "The artifact records a required action, not an owner decision or completed scan."
+      },
+      "K2": {
+        "answer": "PR #158, titled Sanitize machine-local path configuration, implements the Issue #157 remediation. Its recorded changes move personal data and Slurm locations to explicit environment configuration, use repository-relative or configurable resolution, sanitize path-bearing documentation and notebooks, preserve scientific algorithms, hashes, schemas, and numerical behavior, and add focused coverage. The PR body explicitly says Issue #157 remains open and that PR #158 does not complete R-005.",
+        "evidence": [
+          {
+            "anchor": "Summary and explicit Issue #157/R-005 statements",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "Acceptance criteria",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+          }
+        ],
+        "heading": "Supporting change and completion boundary",
+        "next_action": "Treat the PR as the current-surface remediation record and keep the Issue and branch gate separate.",
+        "temporal": "Current PR identity at 2026-09-13T01:22:00Z; its completion boundary remains the one stated in the captured PR body.",
+        "uncertainty": "The fixture records the PR body claim; it does not turn that claim into an Issue closure or an R-005 completion decision."
+      },
+      "K3": {
+        "answer": "Issue #157 is OPEN at the frozen observation. Its project item in the CYAxiverse Research & Development project has status Verification. This is the current state recorded for the governing work item, not a prediction about a later project transition.",
+        "evidence": [
+          {
+            "anchor": "API state and projectItems status fields",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+          }
+        ],
+        "heading": "Issue state at observation",
+        "next_action": "Use the recorded Verification status as evidence, then obtain a new owner-authorized decision if the work advances.",
+        "temporal": "Current through 2026-09-13T01:22:00Z; later GitHub state is outside the captured surface.",
+        "uncertainty": "Project status is timestamp-scoped and can change after the frozen observation."
+      },
+      "K4": {
+        "answer": "PR #158 is OPEN, non-draft, unmerged, and mergeable. Its head commit is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 with head tree fc980d28f3faa51f66031fe2e1fb5281b2ad5a48; its base branch is vmm at 856012f015a866bf7ff352bc50e8d10c250855e6. PR #158 Project status: Verification. The snapshot records no merge decision and no Issue completion claim, so these are properties of the frozen PR surface rather than an instruction to merge.",
+        "evidence": [
+          {
+            "anchor": "state, isDraft, mergedAt, mergeable, headRefOid, baseRefName, baseRefOid, and projectItems",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "current PR head commit object",
+            "source": "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45"
+          },
+          {
+            "anchor": "current PR head tree object",
+            "source": "tree:fc980d28f3faa51f66031fe2e1fb5281b2ad5a48"
+          },
+          {
+            "anchor": "current vmm base commit object",
+            "source": "commit:856012f015a866bf7ff352bc50e8d10c250855e6"
+          }
+        ],
+        "heading": "Pull request state and project placement",
+        "next_action": "Review and record an owner decision against this exact head before any merge action.",
+        "temporal": "Current head is 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 at 2026-09-13T01:22:00Z; the PR is unmerged in this snapshot.",
+        "uncertainty": "The frozen surface does not include a later owner merge decision or a later project transition."
+      },
+      "K5": {
+        "answer": "The CYAX-0157 spec is Approved for S1 implementation. Its requirements are R-001 Sanitize current GitHub prose; R-002 Configure executable paths at runtime; R-003 Preserve scientific behavior and evidence identity; R-004 Preserve operational compatibility deliberately; and R-005 Close every live-reference route before history review. The frozen Issue and PR evidence describes current-surface remediation implemented at exact current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, while the spec, PR, and governance material make no merge or Issue completion claim. The related CYAX-0155 specification is retained as an allowed governance reference, not as evidence of a changed requirement.",
+        "evidence": [
+          {
+            "anchor": "approval header, implementation status, and R-001 through R-005",
+            "source": "specs/0157-public-path-remediation/spec.md"
+          },
+          {
+            "anchor": "Verification at exact head and deferred-work sections",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "Verification note and R-005 statement",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+          },
+          {
+            "anchor": "repository change and evidence boundary",
+            "source": "AGENTS.md"
+          },
+          {
+            "anchor": "allowed related specification identity",
+            "source": "specs/0155-private-safe-chat-checkpoints/spec.md"
+          },
+          {
+            "anchor": "exact current head object",
+            "source": "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45"
+          }
+        ],
+        "heading": "Approved specification and current-surface implementation",
+        "next_action": "Keep R-001 through R-004 tied to the current-surface evidence and perform R-005 separately before history review.",
+        "temporal": "The approval and implementation statements are scoped to exact head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 at 2026-09-13T01:22:00Z; R-005 remains current and open.",
+        "uncertainty": "The artifact set records implementation evidence and approval wording but does not independently execute the spec or infer completion of its final gate."
+      },
+      "K6": {
+        "answer": "At current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45, the captured checks show Fast tests: FAILURE, Documentation build: SUCCESS, and Full test suite: SKIPPED. The Fast failure is the unchanged pre-existing Hessian expectation mismatch at test/runtests.jl:1317, with observed diagonal 19.739208802178716 versus expected 39.47841760435743. The PR body reports focused remediation results: optional Python interpreter contract 9/9, notebook static checks 20/20, notebook runtime initialization smoke 10/10, retired 2026-08-25 entry-point guards 54/54, Slurm-log resolution 6/6, and data-directory resolution 10/10.",
+        "evidence": [
+          {
+            "anchor": "Verification at exact head and focused test counts",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "captured status checks: Fast tests, build, and Full test suite",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          }
+        ],
+        "heading": "Checks and focused verification",
+        "next_action": "Report the unchanged Fast-suite mismatch accurately and do not convert the focused counts into a claim of a clean full suite.",
+        "temporal": "Check timestamps and focused counts are scoped to the captured head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45 and observation 2026-09-13T01:22:00Z.",
+        "uncertainty": "Focused counts are self-reported in the PR body; no independent rerun or production-scale execution is included here."
+      },
+      "K7": {
+        "answer": "The PR body self-reports independent re-review APPROVE with no findings against exact current head 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45. The captured GitHub reviews surface is an empty array, so it exposes no formal APPROVED, CHANGES_REQUESTED, or COMMENTED decision. The approval is therefore a self-reported PR-body statement bound to the exact head, not an independently confirmed GitHub review record.",
+        "evidence": [
+          {
+            "anchor": "independent re-review statement against exact current head",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "captured reviews surface: empty array",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          }
+        ],
+        "heading": "Review record and evidence limit",
+        "next_action": "Obtain and record a formal exact-head review or an explicitly recorded owner decision.",
+        "temporal": "The claimed approval targets 8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45; the empty formal review surface is current only at 2026-09-13T01:22:00Z.",
+        "uncertainty": "The absence of a formal review record limits what can be claimed about independent approval."
+      },
+      "K8": {
+        "answer": "R-005, Close every live-reference route before history review, remains open. It requires a read-only privacy scan of surviving public branches and a preservation/reachability classification before any branch deletion or history rewriting. The frozen Issue and PR bodies say that no public branch has been deleted, force-pushed, or rewritten and that this scan and classification are deferred. R-005 is the explicit completion gate for Issue #157.",
+        "evidence": [
+          {
+            "anchor": "R-005 requirement",
+            "source": "specs/0157-public-path-remediation/spec.md"
+          },
+          {
+            "anchor": "R-005 remains open and deferred",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+          },
+          {
+            "anchor": "R-005 remains open and deferred",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          }
+        ],
+        "heading": "Open R-005 branch-safety requirement",
+        "next_action": "Perform the read-only branch scan and record preservation/reachability classification before deletion or rewrite discussion.",
+        "temporal": "Open at 2026-09-13T01:22:00Z; no later branch scan is represented.",
+        "uncertainty": "The remaining public-branch exposure is undetermined because the required scan has not been performed."
+      },
+      "K9": {
+        "answer": "Merging PR #158 must not close Issue #157. A merge would incorporate the current-surface remediation into vmm, but PR completion and Issue completion remain distinct because R-005 is still open. The specification and both captured public bodies explicitly preserve that separation; no merge has occurred in the frozen state and no evidence authorizes Issue closure.",
+        "evidence": [
+          {
+            "anchor": "implementation status and no-auto-close rule",
+            "source": "specs/0157-public-path-remediation/spec.md"
+          },
+          {
+            "anchor": "Issue remains open and PR does not complete R-005",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#158"
+          },
+          {
+            "anchor": "PR does not close this issue",
+            "source": "github:Julia-meets-String-Theory/CYAxiverse.jl#157"
+          }
+        ],
+        "heading": "Separate completion decisions",
+        "next_action": "If a merge is later approved, keep Issue #157 open until R-005 has its own evidence-backed completion decision.",
+        "temporal": "This is a workflow rule applied to the frozen unmerged state at 2026-09-13T01:22:00Z.",
+        "uncertainty": "The artifact does not establish a future merge, closure, or owner decision."
+      }
+    },
+    "field_names": [
+      "answer",
+      "evidence",
+      "temporal",
+      "uncertainty",
+      "next_action"
+    ]
+  },
+  "source_references": [
+    "github:Julia-meets-String-Theory/CYAxiverse.jl#157",
+    "github:Julia-meets-String-Theory/CYAxiverse.jl#158",
+    "specs/0157-public-path-remediation/spec.md",
+    "AGENTS.md",
+    "specs/0155-private-safe-chat-checkpoints/spec.md",
+    "commit:8f6a9c28ac4b778b07f244dbbbc0076c86dc1a45",
+    "commit:856012f015a866bf7ff352bc50e8d10c250855e6",
+    "commit:1ed97e181e3203524d5435c43f58c1a3ff03d813",
+    "tree:fc980d28f3faa51f66031fe2e1fb5281b2ad5a48"
+  ],
+  "source_references_are_identical": true,
+  "source_reopening_count": 0,
+  "subject_artifacts": []
+}

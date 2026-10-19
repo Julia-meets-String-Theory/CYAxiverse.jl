@@ -11,6 +11,11 @@ description: >
 Use this skill only when coordinating delegated work. It is an on-demand
 manager workflow, not an additional repository-wide policy source.
 
+Execution-surface selection, dispatch authority, role/surface separation,
+permission boundaries, and fresh-context independent-review requirements are
+governed by `.agents/POLICIES/SURFACE_ALLOCATION.md`. This skill describes
+Manager procedure and does not override that policy.
+
 ## 1. Manager role
 
 The manager owns:
@@ -204,3 +209,6 @@ Classify delegated work as one of:
 The class may guide model/effort choice, expected lease, escalation rules, and
 reviewer requirements. Do not hard-code a particular model into repository-wide
 policy; model availability changes over time.
+## Implementation handback evidence
+
+For implementation delegation, include the conditional [implementation self-check](../cyaxiverse-julia-quality/references/implementation-self-review.md) in the worker's handback instructions. Keep its specification and engineering findings distinct from the required independent reviewer evidence. This reference does not authorize additional actors.

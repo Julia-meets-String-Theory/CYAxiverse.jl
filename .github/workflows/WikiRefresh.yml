@@ -1,0 +1,50 @@
+name: Wiki refresh checks
+
+on:
+  pull_request:
+    branches: [vmm]
+    paths:
+      - "wiki/**"
+      - "scripts/wiki_refresh.jl"
+      - ".github/workflows/WikiRefresh.yml"
+      - "specs/0183-wiki-refresh-v1/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.12"
+
+      - name: Instantiate and test wiki tooling
+        run: |
+          julia --project=wiki -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+
+      - name: Verify tracked public sources and state
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          julia --project=wiki scripts/wiki_refresh.jl verify
+
+      - name: Exercise read-only drift checker
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          julia --project=wiki scripts/wiki_refresh.jl check
+          code=$?
+          set -e
+          if [[ "$code" -ne 0 && "$code" -ne 10 ]]; then
+            echo "Unexpected wiki-refresh exit code: $code"
+            exit "$code"
+          fi

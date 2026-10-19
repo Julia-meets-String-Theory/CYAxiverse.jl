@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Fast tests",
+    "workflowName": "CI",
+    "status": "COMPLETED",
+    "conclusion": "FAILURE",
+    "startedAt": "2026-09-11T18:34:43Z",
+    "completedAt": "2026-09-11T19:27:09Z"
+  },
+  {
+    "name": "build",
+    "workflowName": "Documentation",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "startedAt": "2026-09-11T18:34:43Z",
+    "completedAt": "2026-09-11T18:36:05Z"
+  },
+  {
+    "name": "Full test suite",
+    "workflowName": "CI",
+    "status": "COMPLETED",
+    "conclusion": "SKIPPED",
+    "startedAt": "2026-09-11T18:34:41Z",
+    "completedAt": "2026-09-11T18:34:40Z"
+  }
+]

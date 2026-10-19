@@ -1,0 +1,126 @@
+{
+  "items": {
+    "S1": {
+      "action": "flag_only; response bytes were not changed",
+      "bytes": 4482,
+      "counts": {
+        "condition_label": 0,
+        "condition_phrase": 0,
+        "graph": 0,
+        "relational": 0
+      },
+      "flagged": false,
+      "opaque_id": "S1",
+      "sha256": "8adf61d6cc26c76eec28bb049609ba6c383320940cbd75b41fa402080549fef0",
+      "terms": {
+        "condition_label": [],
+        "condition_phrase": [],
+        "graph": [],
+        "relational": []
+      }
+    },
+    "S2": {
+      "action": "flag_only; response bytes were not changed",
+      "bytes": 4115,
+      "counts": {
+        "condition_label": 0,
+        "condition_phrase": 0,
+        "graph": 0,
+        "relational": 0
+      },
+      "flagged": false,
+      "opaque_id": "S2",
+      "sha256": "1f518c93e978176e1a22fd6a700756c09f19833eb178a558e1eb375acc8488ab",
+      "terms": {
+        "condition_label": [],
+        "condition_phrase": [],
+        "graph": [],
+        "relational": []
+      }
+    },
+    "S3": {
+      "action": "flag_only; response bytes were not changed",
+      "bytes": 4071,
+      "counts": {
+        "condition_label": 0,
+        "condition_phrase": 0,
+        "graph": 0,
+        "relational": 0
+      },
+      "flagged": false,
+      "opaque_id": "S3",
+      "sha256": "178aada6be7c756f88d01914ff0a45d17c538a92e3670d219abede697036260c",
+      "terms": {
+        "condition_label": [],
+        "condition_phrase": [],
+        "graph": [],
+        "relational": []
+      }
+    },
+    "S4": {
+      "action": "flag_only; response bytes were not changed",
+      "bytes": 3764,
+      "counts": {
+        "condition_label": 0,
+        "condition_phrase": 0,
+        "graph": 0,
+        "relational": 0
+      },
+      "flagged": false,
+      "opaque_id": "S4",
+      "sha256": "456ba1fe60a14465c5794f910ba9a74a04529592ac6a3a891cbb928e4e33bbe2",
+      "terms": {
+        "condition_label": [],
+        "condition_phrase": [],
+        "graph": [],
+        "relational": []
+      }
+    },
+    "S5": {
+      "action": "flag_only; response bytes were not changed",
+      "bytes": 4247,
+      "counts": {
+        "condition_label": 0,
+        "condition_phrase": 0,
+        "graph": 0,
+        "relational": 0
+      },
+      "flagged": false,
+      "opaque_id": "S5",
+      "sha256": "e9272dcf24d6b208b001098c62bf641a20f766dfeb1580d3ca54429aa2330c3d",
+      "terms": {
+        "condition_label": [],
+        "condition_phrase": [],
+        "graph": [],
+        "relational": []
+      }
+    },
+    "S6": {
+      "action": "flag_only; response bytes were not changed",
+      "bytes": 4760,
+      "counts": {
+        "condition_label": 0,
+        "condition_phrase": 0,
+        "graph": 0,
+        "relational": 0
+      },
+      "flagged": false,
+      "opaque_id": "S6",
+      "sha256": "fd24565fb69cd51cb6410c8637ffc04e205f6ccf2d23ac7d088cb2910cb055cf",
+      "terms": {
+        "condition_label": [],
+        "condition_phrase": [],
+        "graph": [],
+        "relational": []
+      }
+    }
+  },
+  "patterns": [
+    "graph",
+    "relational",
+    "condition_label",
+    "condition_phrase"
+  ],
+  "schema": "cyax-0163-blind-content-leakage-v1",
+  "scope": "opaque response bytes; substantive terms are flagged, never removed"
+}

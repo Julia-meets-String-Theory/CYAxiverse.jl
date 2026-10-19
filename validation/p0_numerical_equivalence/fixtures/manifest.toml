@@ -1,0 +1,84 @@
+schema = "cyaxiverse-p0-fixture-manifest-v1"
+numerical_contract_revision = "cyaxiverse-p0-numerical-equivalence-v1"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+hash_algorithm = "SHA-256"
+hash_scope = "raw UTF-8 bytes of each fixture TOML file; manifest is not included in its own hash"
+construction_environment = "Julia 1.12.6 (arm64 Apple M4 Pro host); fixture replay helper uses Python 3 tomllib/math/hashlib"
+
+[[fixture]]
+id = "F1-disjoint-support-hierarchy"
+path = "fixtures/F01_disjoint_support_hierarchy.toml"
+sha256 = "7c9bebc0f270af4a14ffa4b83b4a5db0a86a3aad196d3726801102b1a9ea159e"
+status = "applicable"
+
+[[fixture]]
+id = "F2-mixed-support-hierarchy"
+path = "fixtures/F02_mixed_support_hierarchy.toml"
+sha256 = "2d440cee51440ab7bb6b6d911b13a580583d5b3c2623ec0fb332a537bddb9b14"
+status = "applicable"
+
+[[fixture]]
+id = "F3-nonunit-coefficient-factor"
+path = "fixtures/F03_nonunit_coefficient_factor.toml"
+sha256 = "58f2ce65cba8ba1bdc543c48d2fc2f11b1848c557c85f307393db2fab83930d6"
+status = "applicable"
+
+[[fixture]]
+id = "F4-exact-zero-and-minus-inf"
+path = "fixtures/F04_exact_zero_and_minus_inf.toml"
+sha256 = "aae916f4182f9b7c60a42193bc11f8b064d97e9c269b3aa71f712ab9c30d47e7"
+status = "applicable-with-cross-route-rejection"
+
+[[fixture]]
+id = "F5-argument-phase-offsets"
+path = "fixtures/F05_argument_phase_offsets.toml"
+sha256 = "b68205f4b80a5fa9bdf8df528c7f2445f9715b81c834438bcfcf3663c5eecae5"
+status = "applicable"
+
+[[fixture]]
+id = "F6-coordinate-displacement"
+path = "fixtures/F06_coordinate_displacement.toml"
+sha256 = "dfbde4052e415d706de3ef7f61d9b9936dbe72ac079a91a7f76830c13576b58e"
+status = "applicable"
+
+[[fixture]]
+id = "F7-transformed-near-zero-support"
+path = "fixtures/F07_transformed_near_zero_support.toml"
+sha256 = "fb0697d7c83ad3ec16eab558cc8e81747cdb50d5b0e95c448adbbadd7f0a6562"
+status = "applicable"
+
+[[fixture]]
+id = "F8-transformed-noninteger-charge-map"
+path = "fixtures/F08_transformed_noninteger_charges.toml"
+sha256 = "25fafb6ad6633e93c6332dd09a6acb458c1e9d024f78b6f2a6a174b5074d5dbb"
+status = "applicable"
+
+[[fixture]]
+id = "F9-signed-cancellation"
+path = "fixtures/F09_signed_cancellation.toml"
+sha256 = "6c7c01df58bc8b36ca98af91bdd48e96e15fb586d23fb3a2bb26c4033221b0d3"
+status = "applicable"
+
+[[fixture]]
+id = "F10-near-degenerate-classification"
+path = "fixtures/F10_near_degenerate_classification.toml"
+sha256 = "dac071969e418de407d9d3627da5b463226d9c56a1c4060f975f78c94240c6de"
+status = "applicable"
+
+[[fixture]]
+id = "F11-governed-n5-source-fixture"
+path = "fixtures/F11_governed_n5_source_fixture.toml"
+sha256 = "29011c2da683cb541828350a1190944f29a26735aa89fe9351d19c2b7b9cc3b5"
+status = "applicable"
+
+[[fixture]]
+id = "F12-empty-support-row"
+path = "fixtures/F12_empty_support_row.toml"
+sha256 = "247da93702522d92dc8b5e16d95b6836998596aba97d5c803925ecd0e3864c9d"
+status = "applicable"
+
+[[fixture]]
+id = "F13-zero-only-support-all-minus-inf"
+path = "fixtures/F13_zero_only_all_minus_inf.toml"
+sha256 = "5528f9f1543b95fbfa1fa6b0e91f2b5598fa6dc119c1261d21a6abdc84463fc6"
+status = "applicable-hostile-defect-recorded"

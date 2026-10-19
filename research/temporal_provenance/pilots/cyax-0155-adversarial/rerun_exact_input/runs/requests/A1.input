@@ -1,0 +1,83 @@
+# Reconstruction task
+
+Use only the attached frozen context. Do not access GitHub, the web, chats, Control Desk memory, repository files, tools, or any other source. Do not infer facts from the order, repetition, or presentation of evidence.
+
+Answer this question:
+
+> What is the authoritative current state of CYAX-0155, what evidence supports that state, what requirement or workflow condition was previously unresolved, whether durable evidence proves that condition was later satisfied or superseded, and what—if anything—remains uncertain?
+
+Also state the next valid verification or action. Cite the source identities supplied in the context. Separate current observations, historical instructions, implementation evidence, authority, inference, and unknowns. Abstain explicitly whenever the frozen evidence is insufficient. Do not treat the context representation itself as authoritative.
+
+--- BEGIN FROZEN CONTEXT ---
+# Condition A — relational/provenance evidence
+
+Frozen snapshot: `cyax-0155-adversarial-20260913T043555Z`
+Observation time: `2026-09-13T04:35:55Z`
+
+This is a derived context, not an authority source. Source scope and authority are stated below. Use only this document during reconstruction.
+
+## Source records
+
+| Record | Identity | Authority class |
+| --- | --- | --- |
+| `issue-155-current` | GitHub Issue observation | current work-state observation |
+| `issue-155-checkpoint` | Issue comment at 2026-09-11T00:01:47Z | durable historical workflow statement |
+| `issue-155-closure-event` | Issue timeline event at 2026-09-11T01:09:18Z | later work-state event |
+| `pr-156` | GitHub pull-request observation | implementation/integration evidence |
+| `pr-156-merge-commit` | Git commit f0013552cd69a93221464e9c8ccfd56339f39052 | repository implementation evidence |
+| `spec-0155` | Approved CYAX-0155 S1 specification | feature intent and acceptance contract |
+| `agents-contract-at-merge` | AGENTS.md at merge revision | repository policy authority |
+| `sdd-contract-at-merge` | cyaxiverse-sdd at merge revision | workflow/authority semantics |
+| `checkpoint-guide-at-merge` | Human guide at merge revision | implementation artifact |
+| `closure-search` | Finite public-artifact search through 2026-09-13T04:35:55Z | mechanical absence record |
+
+## Provenance-bearing assertions
+
+- `A01` — The governing Issue is #155, titled ‘Add private-safe conversation checkpoints to the CYAxiverse Project.’ Its objective is to surface durable, sanitized outcomes from exploratory AI/chat work in the existing Project without turning GitHub into an archive of private conversations.
+  Provenance: `issue-155-current`.
+- `A02` — At the snapshot observation, GitHub reports Issue #155 as CLOSED with state reason COMPLETED. Its item in ‘CYAxiverse Research & Development’ has Project Status Done.
+  Provenance: `issue-155-current`.
+- `A03` — PR #156 names Issue #155 as the governing Issue and the CYAX-0155 spec as canonical. It presents itself as implementing R-001 through R-005.
+  Provenance: `pr-156`.
+- `A04` — GitHub reports PR #156 MERGED to vmm at 2026-09-11T00:01:20Z with merge commit f0013552cd69a93221464e9c8ccfd56339f39052.
+  Provenance: `pr-156`.
+- `A05` — The single-parent squash commit changes four files with 177 insertions and zero deletions: AGENTS.md, cyaxiverse-sdd, the human checkpoint guide, and the approved CYAX-0155 specification.
+  Provenance: `pr-156-merge-commit`.
+- `A06` — The spec is ‘Approved for S1 implementation.’ R-001 requires publication sanitization; R-002 defines checkpoints as summaries rather than transcripts; R-003 preserves the existing Kanban lifecycle; R-004 defines Research & Chats as a saved view rather than an authority layer; R-005 requires failing closed when publication safety is uncertain.
+  Provenance: `spec-0155`.
+- `A07` — The acceptance text says R-001–R-005 are represented in the repository control plane, privacy-sensitive data is not introduced, Project Status semantics are unchanged, and ‘a saved Research & Chats view can be configured without introducing a second ledger.’
+  Provenance: `spec-0155`.
+- `A08` — The repository contract says ordinary durable state belongs in Git and assigns the main agent responsibility for scope, interpretation, integration, final diff review, PR state, and handoff. It also contains the privacy/publication rule added by PR #156.
+  Provenance: `agents-contract-at-merge`.
+- `A09` — The SDD contract says the governing Issue is the primary Project work item and linked PRs normally provide implementation, integration, or evidence. It says GitHub Issues and Projects track live work state, while an approved spec records feature intent.
+  Provenance: `sdd-contract-at-merge`.
+- `A10` — The human guide defines Research & Chats as another saved view over the same Project items using the normal Status field and sanitized metadata. It does not report a concrete saved view or filter instance.
+  Provenance: `checkpoint-guide-at-merge`.
+- `A11` — The checkpoint reports that PR #156 merged and that the repository-side privacy boundary is active on vmm.
+  Provenance: `issue-155-checkpoint`.
+- `A12` — Under ‘Remaining Project action,’ the checkpoint says: ‘Keep #155 open until the Research & Chats saved Project view/filter is configured.’
+  Provenance: `issue-155-checkpoint`.
+- `A13` — The same checkpoint says the available connector exposed neither Projects-v2 view/field mutations nor direct verification, found no alternative Projects-specific connector, and did not claim that UI configuration was complete.
+  Provenance: `issue-155-checkpoint`.
+- `A14` — The PR body likewise describes creation/configuration of the saved view as separate from the repository diff, requiring Projects-v2 write capability, and says no Project mutation is claimed.
+  Provenance: `pr-156`.
+- `A15` — Sixty-seven minutes after the checkpoint, the timeline records that vmmhep closed #155 at 2026-09-11T01:09:18Z. The event has no commit identifier and was not performed through a GitHub App.
+  Provenance: `issue-155-closure-event`.
+- `A16` — The captured closure event contains the event type, actor, and time but no reason or explanatory text.
+  Provenance: `issue-155-closure-event`.
+- `A17` — The PR #156 squash-merge message contains no Closes, Fixes, or Resolves keyword for #155.
+  Provenance: `pr-156-merge-commit`.
+- `A18` — The frozen search found no later public Issue comment, PR material, repository artifact, or search result that documents saved-view configuration or explicitly supersedes the checkpoint’s keep-open condition. This finding is limited to the captured search scope and observation time.
+  Provenance: `closure-search`.
+## Explicit relationship assertions
+
+- `issue-155-current` governs the work represented by `pr-156`.
+- `pr-156-merge-commit` supplies implementation evidence for `spec-0155`.
+- `issue-155-checkpoint` follows the merge and precedes `issue-155-closure-event`.
+- `closure-search` describes only the captured record set.
+- No captured assertion links saved-view configuration to a confirming artifact.
+- No captured assertion links closure to an explanation or explicit supersession statement.
+
+## Reconstruction boundary
+
+Determine the combined meaning and evidence scope without assigning authority to this derived representation.

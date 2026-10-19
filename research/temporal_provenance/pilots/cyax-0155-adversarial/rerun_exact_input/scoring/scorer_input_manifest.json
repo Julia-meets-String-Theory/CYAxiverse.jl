@@ -1,0 +1,61 @@
+{
+  "answer_key": {
+    "bytes": 3005,
+    "sha256": "055fdba634ebb73ec5a8cd00a18f7c91010b34a011e94638aedbe9be23e9d7cf"
+  },
+  "artifact": "scoring/scorer_input.input",
+  "exclusions": [
+    "condition_mapping.json",
+    "runs/manifest.json",
+    "dispatch_manifest.json",
+    "source_snapshot.json",
+    "run IDs, condition labels, invocation records, and response/run hashes"
+  ],
+  "input": {
+    "bytes": 31997,
+    "sha256": "ad3c1e0e777f45d3932edfcba6089f722711cdeaca959003bd4fbdcbbef3b82c"
+  },
+  "opaque_ids": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6"
+  ],
+  "opaque_responses": {
+    "S1": {
+      "bytes": 4482,
+      "sha256": "8adf61d6cc26c76eec28bb049609ba6c383320940cbd75b41fa402080549fef0"
+    },
+    "S2": {
+      "bytes": 4115,
+      "sha256": "1f518c93e978176e1a22fd6a700756c09f19833eb178a558e1eb375acc8488ab"
+    },
+    "S3": {
+      "bytes": 4071,
+      "sha256": "178aada6be7c756f88d01914ff0a45d17c538a92e3670d219abede697036260c"
+    },
+    "S4": {
+      "bytes": 3764,
+      "sha256": "456ba1fe60a14465c5794f910ba9a74a04529592ac6a3a891cbb928e4e33bbe2"
+    },
+    "S5": {
+      "bytes": 4247,
+      "sha256": "e9272dcf24d6b208b001098c62bf641a20f766dfeb1580d3ca54429aa2330c3d"
+    },
+    "S6": {
+      "bytes": 4760,
+      "sha256": "fd24565fb69cd51cb6410c8637ffc04e205f6ccf2d23ac7d088cb2910cb055cf"
+    }
+  },
+  "prompt": {
+    "bytes": 845,
+    "sha256": "7da93a78a4e72c849c60d6f258ccf7c13a5d16efc8ffd6e6d5023aa3859fbe37"
+  },
+  "schema": "cyax-0163-blind-scorer-input-v1",
+  "scorecard_schema": {
+    "bytes": 2438,
+    "sha256": "acdd653f75e2973033e1e0cf3153396bb9d13332e63fa6dca11e3c574ebafb1c"
+  }
+}

@@ -1,0 +1,19 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F9-signed-cancellation"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/minimizer.jl:133-185", "src/generate.jl:410-428"]
+precision = "Float64"
+environment = "Julia 1.12.6; one Julia thread; left-to-right term accumulation"
+construction = "Terms 1 and 2 have identical charges and opposite coefficients; term 3 is a distinct signed term."
+purpose = "Freeze signed cancellation without term pruning or coefficient aggregation."
+q = [[1, 1, 1], [1, 1, -1]]
+l = [[1.0, -1.0, 1.0], [0.0, 0.0, 0.0]]
+theta = [0.125, 0.125]
+phases = [0.0, 0.0, 0.0]
+
+[expected]
+historical_result = "At theta=[1/8,1/8], terms 1 and 2 cancel in value, gradient, and Hessian contributions because their arguments and charges match while signs oppose; term 3 has zero argument. The encoded three-term order remains observable to floating-point accumulation."
+term_count = 3
+global_amplitudes = [1.0, -1.0, 1.0]
+pruning_policy = "retain-all-encoded-terms"
+status = "applicable"

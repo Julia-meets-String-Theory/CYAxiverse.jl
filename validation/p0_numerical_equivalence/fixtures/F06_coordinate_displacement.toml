@@ -1,0 +1,21 @@
+schema = "cyaxiverse-p0-fixture-v1"
+id = "F6-coordinate-displacement"
+source_revision = "7a40285bb5c313f7e8746b90644d5f45bb67be44"
+source_paths = ["src/inflation_points.jl:315-341", "src/inflation_points.jl:400-414"]
+precision = "Float64"
+environment = "Julia 1.12.6; one Julia thread; canonical chart uses Cholesky factor"
+construction = "Two-axion identity potential with K=I; a hilltop is displaced along an explicitly supplied raw-coordinate mass direction."
+purpose = "Keep coordinate displacement distinct from a per-instanton argument phase."
+q = [[1, 0], [0, 1]]
+l = [[1.0, 1.0], [0.0, 0.0]]
+k = [[1.0, 0.0], [0.0, 1.0]]
+hilltop = [0.25, 0.5]
+mass_direction = [1.0, 0.0]
+displacement = 0.0625
+displacement_sign = -1.0
+
+[expected]
+historical_result = "theta_initial=periodic(hilltop + displacement_sign*displacement*mass_direction)=[0.1875,0.5]; subsequent flow converts theta_initial to chi=L' * theta_initial. This is not equivalent to adding a per-instanton phase vector."
+theta_initial = [0.1875, 0.5]
+coordinate_chart = "canonical_cholesky"
+status = "applicable"

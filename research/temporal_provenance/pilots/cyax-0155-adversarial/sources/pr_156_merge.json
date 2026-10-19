@@ -1,0 +1,26 @@
+{
+  "number": 156,
+  "title": "Add private-safe conversation checkpoints",
+  "state": "MERGED",
+  "merge_commit": "f0013552cd69a93221464e9c8ccfd56339f39052",
+  "merge_type": "squash",
+  "merged_at_author": "2026-09-10T20:01:19-04:00",
+  "merged_at_utc": "2026-09-11T00:01:20Z",
+  "merge_parent": "6434e133af4b91db81babfafa024fc3cbada901a",
+  "merge_tree": "4a6178f344f82edb89d5964ec1a9bb6fb1b66afd",
+  "merge_committer": "GitHub <noreply@github.com>",
+  "merge_author": "Viraf M. Mehta <102535039+vmmhep@users.noreply.github.com>",
+  "gpg_signed": true,
+  "commit_message_subject": "Add private-safe conversation checkpoints (#156)",
+  "commit_message_body": "Adds a fail-closed publication privacy boundary, SDD checkpoint procedure, and human guidance for surfacing durable conversation outcomes without publishing private chat or machine-local context.",
+  "auto_close_keywords_for_155": false,
+  "files_changed": [
+    ".agents/skills/cyaxiverse-sdd/SKILL.md",
+    "AGENTS.md",
+    "docs/PRIVACY_AND_CONVERSATION_CHECKPOINTS.md",
+    "specs/0155-private-safe-chat-checkpoints/spec.md"
+  ],
+  "stat_summary": "4 files changed, 177 insertions(+), 0 deletions(-)",
+  "evidence_source": "git_cat_file_and_diff",
+  "evidence_note": "Commit fields derive from git cat-file/show/diff; merged_at_utc is the frozen GitHub PR observation."
+}

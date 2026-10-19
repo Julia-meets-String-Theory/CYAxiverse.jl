@@ -175,7 +175,7 @@ function _run_notebook_initialization_smoke(path::AbstractString, source::Abstra
     println("notebook initialization runtime smoke passed: ", basename(notebook))
     """
     command = addenv(
-        `$(Base.julia_cmd()) --startup-file=no --project=$notebook_dir -e $command_source`,
+        `$(Base.julia_cmd()) $(child_coverage_args()) --startup-file=no --project=$notebook_dir -e $command_source`,
         "JULIA_LOAD_PATH" => "@:@stdlib",
     )
     output = IOBuffer()
@@ -370,7 +370,7 @@ end
             script = joinpath(synthetic_script_dir, name)
             command = if kind === :julia
                 addenv(
-                    `$(Base.julia_cmd()) --startup-file=no $script --output-root $output_root`,
+                    `$(Base.julia_cmd()) $(child_coverage_args()) --startup-file=no $script --output-root $output_root`,
                     "JULIA_LOAD_PATH" => "@stdlib",
                     "CYAXIVERSE_AUDIT_OUTPUT_DIR" => output_root,
                     "CYAXIVERSE_AUDIT_REPOSITORY" => synthetic_repo,

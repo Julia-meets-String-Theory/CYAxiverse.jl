@@ -1,0 +1,101 @@
+{
+  "automatic_failure_checks_applied_first": true,
+  "blind_scoring_complete_before_mapping_reveal": true,
+  "opaque_responses": {
+    "R1": {
+      "automatic_failures": [],
+      "authority_mistakes": [],
+      "correct_abstentions": [
+        "later GitHub state",
+        "formal independent approval",
+        "clean full suite",
+        "production-scale behavior",
+        "remaining branch exposure",
+        "merge or closure",
+        "destructive history action",
+        "completed scan or owner decision"
+      ],
+      "incorrect_abstentions": [],
+      "k_scores": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+      "material_provenance_errors": [],
+      "next_action_mistakes": [],
+      "opaque_word_count": 956,
+      "score": 12,
+      "supersession_mistakes": [],
+      "unsupported_assertions": []
+    },
+    "R2": {
+      "automatic_failures": [],
+      "authority_mistakes": [],
+      "correct_abstentions": [
+        "later state",
+        "clean suite",
+        "formal approval",
+        "production behavior",
+        "branch safety",
+        "merge or Issue completion",
+        "existing owner decision"
+      ],
+      "incorrect_abstentions": [],
+      "k_scores": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+      "material_provenance_errors": [],
+      "next_action_mistakes": [],
+      "notes": [
+        "Owner-only completion wording is a minor scope ambiguity, not a scoring error."
+      ],
+      "opaque_word_count": 920,
+      "score": 12,
+      "supersession_mistakes": [],
+      "unsupported_assertions": []
+    },
+    "R3": {
+      "automatic_failures": [],
+      "authority_mistakes": [],
+      "correct_abstentions": [
+        "later Issue or project transition",
+        "formal approval",
+        "clean full suite",
+        "production execution",
+        "branch safety",
+        "owner decision",
+        "completed R-005 scan"
+      ],
+      "incorrect_abstentions": [],
+      "k_scores": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+      "material_provenance_errors": [],
+      "next_action_mistakes": [],
+      "opaque_word_count": 852,
+      "score": 12,
+      "supersession_mistakes": [],
+      "unsupported_assertions": []
+    },
+    "R4": {
+      "automatic_failures": [],
+      "authority_mistakes": [],
+      "correct_abstentions": [
+        "later state",
+        "formal approval",
+        "clean suite",
+        "production behavior",
+        "branch safety or completion",
+        "detailed commit ancestry",
+        "merge or completion decision"
+      ],
+      "incorrect_abstentions": [],
+      "k_scores": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+      "material_provenance_errors": [],
+      "next_action_mistakes": [],
+      "notes": [
+        "Owner-only completion wording is a minor scope ambiguity, not a scoring error.",
+        "Routing citations through the neutral assigned-context label is less direct, but durable primary sources are also named."
+      ],
+      "opaque_word_count": 997,
+      "score": 12,
+      "supersession_mistakes": [],
+      "unsupported_assertions": []
+    }
+  },
+  "rubric_items": ["K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9", "K10", "K11", "K12"],
+  "scorer_model": "gpt-5.6-sol",
+  "scorer_reasoning_effort": "xhigh"
+}

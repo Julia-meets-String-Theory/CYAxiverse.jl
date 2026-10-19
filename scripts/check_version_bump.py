@@ -4,14 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
+from version_lifecycle.versions import Version, parse_package_version
 
-VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 PACKAGE_PATH_PREFIXES = ("src/", "ext/", "add_functions/")
 
 
@@ -28,15 +27,15 @@ def git_output(*arguments: str) -> bytes:
     return result.stdout
 
 
-def parse_version(value: str, source: str) -> tuple[int, int, int]:
-    """Parse a three-part package version."""
-    match = VERSION_PATTERN.fullmatch(value)
-    if match is None:
-        raise SystemExit(f"ERROR: {source} has non-SemVer package version {value!r}")
-    return tuple(int(part) for part in match.groups())
+def parse_version(value: str, source: str) -> Version:
+    """Parse the approved canonical final or DEV package identity."""
+    try:
+        return parse_package_version(value)
+    except (TypeError, ValueError) as error:
+        raise SystemExit(f"ERROR: {source} has invalid package version {value!r}: {error}") from error
 
 
-def project_version(ref: str) -> tuple[int, int, int]:
+def project_version(ref: str) -> Version:
     """Read the package version from Project.toml at a Git reference."""
     project = (
         Path("Project.toml").read_bytes()
@@ -95,17 +94,24 @@ def main() -> int:
 
     base_version = project_version(arguments.base)
     head_version = project_version(arguments.head)
-    if head_version <= base_version:
+    if base_version.is_dev or head_version.is_dev:
+        print(
+            "FAIL: a main release boundary requires final package versions "
+            f"({base_version} -> {head_version})",
+            file=sys.stderr,
+        )
+        return 1
+    if head_version.tuple <= base_version.tuple:
         print(
             "FAIL: package implementation changed without increasing the package version "
-            f"({'.'.join(map(str, base_version))} -> {'.'.join(map(str, head_version))})",
+            f"({base_version} -> {head_version})",
             file=sys.stderr,
         )
         return 1
 
     print(
         "PASS: package implementation changed with a version bump "
-        f"({'.'.join(map(str, base_version))} -> {'.'.join(map(str, head_version))})"
+        f"({base_version} -> {head_version})"
     )
     return 0
 
