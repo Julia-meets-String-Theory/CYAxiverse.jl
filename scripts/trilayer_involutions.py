@@ -50,7 +50,7 @@ SOURCE_ARCHIVE_SHA256 = {
     "moritz_arXiv_2305_06363v1": "9e36c8a0a9fa9c5e876329fc6f1d56b46896125842da5f5a44652ea16e48a992",
 }
 SOURCE_ARCHIVE_PATHS = {
-    "sheridan_arXiv_2412_12012v1": "/Users/vmehta/Downloads/fuzzy-2412.12012v1.tar.gz",
+    "sheridan_arXiv_2412_12012v1": "arXiv-2412.12012v1.tar.gz",
     "moritz_arXiv_2305_06363v1": "validation/fuzzy_axions_supp/paper_source_2305_06363/KS_orientifolds.tex",
 }
 

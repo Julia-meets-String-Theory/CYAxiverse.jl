@@ -17,7 +17,7 @@ end
 # ╔═╡ 3788df6d-c756-4b6a-8d75-8cd018ab2991
 begin
 	import Pkg	
-	Pkg.activate(joinpath(@__DIR__, "..", "notebooks"))
+	Pkg.activate(@__DIR__)
 end
 
 # ╔═╡ d1f78454-3ba0-4569-a491-f52e737c7dc3
@@ -704,7 +704,8 @@ test_mass["m"][(test_spec["m"] .- test_mass["m"]) .== maximum(test_spec["m"] .- 
 #=╠═╡
 for t=4:100
 	n = lpad(t,3,"0")
-	h5open("/scratch/users/mehta2/vacua_0822/h11_$n/np_0000001/cy_0000001/cyax.h5","r") do file
+	h5open(joinpath(CYAxiverse.filestructure.resolve_data_dir(),
+		"h11_$n", "np_0000001", "cy_0000001", "cyax.h5"), "r") do file
 		if haskey(file, "cytools/geometric/h21")
 			println("Gone too far")
 		else

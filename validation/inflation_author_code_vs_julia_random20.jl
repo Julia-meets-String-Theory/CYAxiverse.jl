@@ -16,14 +16,16 @@ using Random
 
 include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
 
+function required_environment_path(variable::AbstractString)
+    value = strip(get(ENV, variable, ""))
+    isempty(value) && throw(ArgumentError("$variable must name the archived author source"))
+    normpath(abspath(expanduser(value)))
+end
+
 const DATA_ROOT = get(ENV, "CYAXIVERSE_DATA_DIR",
     normpath(joinpath(@__DIR__, "..", "..", "data")))
-const AUTHOR_SOURCE = get(ENV, "CYAXIVERSE_AUTHOR_SOURCE",
-    "/Users/vmehta/Documents/CYAxiverse/cyaxiverse/"
-    * "CN_Axiverse_code/ks_axiverse_python_collaborator/"
-    * "validation/cyaxiverse_fixed")
-const AUTHOR_PYTHON = get(ENV, "CYAXIVERSE_AUTHOR_PYTHON",
-    "/Users/vmehta/.julia/conda/3/x86_64/bin/python")
+const AUTHOR_SOURCE = required_environment_path("CYAXIVERSE_AUTHOR_SOURCE")
+const AUTHOR_PYTHON = get(ENV, "CYAXIVERSE_AUTHOR_PYTHON", "python")
 const DEFAULT_OUTPUT = "/private/tmp/cyaxiverse-author-bridge-random20-h11-004-050"
 const SAMPLE_SEED = 20260820
 const SAMPLE_COUNT = 20

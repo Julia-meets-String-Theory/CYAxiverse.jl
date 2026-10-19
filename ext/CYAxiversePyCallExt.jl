@@ -56,13 +56,15 @@ end
     enable_cytools!()
 
 Explicitly initialise the CYTools integration:
-1. Reports the Python executable PyCall is using.
-2. Imports `cytools` and configures MOSEK.
-3. Caches success so repeated calls are free.
+1. Checks `CYAXIVERSE_PYTHON`, when set, against the interpreter used by PyCall.
+2. Reports the Python executable PyCall is using.
+3. Imports `cytools` and configures MOSEK.
+4. Caches success so repeated calls are free.
 
 Never calls `Pkg.build` automatically.
 """
 function enable_cytools!()
+    CYAxiverse.python_interpreter.check_configured_python(PyCall.python)
     _cytools_initialised[] && return
 
     println("PyCall is using Python: ", PyCall.python)

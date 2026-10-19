@@ -9,7 +9,7 @@ Program: KS axiverse inflation only
 ## Authoritative source identity
 
 The current primary paper is
-`/Users/vmehta/Documents/CYAxiverse/cyaxiverse/catastrophicKS.pdf`,
+`catastrophicKS.pdf`,
 SHA-256
 `b0f5539bf0fb40e401d93b8cfcbe3e725ba8849efdde2519646103d5f004d2e6`.
 The PDF metadata identifies *Catastrophic Inflation in the Axiverse* by Naomi
@@ -21,7 +21,7 @@ The generic Julia continuation inspected for this decision is
 `scripts/inflation_scale_continuation.jl`, whose pre-edit SHA-256 was
 `b144b377d7f2246e25bb516a908c5d81ddb3ef0d6e491ae62e0d463a3774fc97`.
 The author implementation inspected for the coefficient map is
-`/Users/vmehta/Documents/CYAxiverse/cyaxiverse/CN_Axiverse_code/ks_axiverse_python_collaborator/src/cytools_catastrophe_scan.py`,
+`cytools_catastrophe_scan.py` from the archived collaborator source,
 SHA-256
 `d820dd3e19d2833bac0691d74c2f99d2461c8eb0ef1620062f70d3daffd3bcf4`.
 The other archived author paths named by the earlier ledger were not present
@@ -149,7 +149,7 @@ This comparison does not remove the separate changes from the `tau` and
 ## Numeric representation audit
 
 The bounded existing-data sample
-/Users/vmehta/Documents/CYAxiverse/cyaxiverse/data/h11_015/np_0000001/cy_0000001/cyax.h5
+$CYAXIVERSE_DATA_DIR/h11_015/np_0000001/cy_0000001/cyax.h5
 has SHA-256
 fa29501f512a1d9c00437b26d6d4f5acd42c8e9b638edb5f6c48be0d35d9fc9e.
 Read-only HDF5 inspection reports float64 for

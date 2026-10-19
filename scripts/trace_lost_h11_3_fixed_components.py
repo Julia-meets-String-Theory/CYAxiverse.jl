@@ -411,15 +411,12 @@ def main(argv=None):
         },
         "reproducibility": {
             "trace_command": (
-                "cd /Users/vmehta/Documents/CYAxiverse/cyaxiverse/"
-                "CYAxiverse-orientifold-overcount && PYTHONPATH=scripts conda run "
+                "PYTHONPATH=scripts conda run "
                 "--no-capture-output -n cytools python scripts/"
                 "trace_lost_h11_3_fixed_components.py "
                 "--pre-json /private/tmp/cyax-orientifold-rerun-h11-3-20260820.json "
                 "--post-jsonl /private/tmp/cyax-orientifold-ledger-h11-3-20260820.jsonl "
-                "--output /Users/vmehta/Documents/CYAxiverse/cyaxiverse/"
-                "handoffs_checkpoints/fuzzy_axions_orientifold_track_2_lost_h11_3_"
-                "trace_20260820.json"
+                "--output ./fuzzy_axions_orientifold_track_2_lost_h11_3_trace_20260820.json"
             ),
             "focused_test_command": (
                 "KMP_DUPLICATE_LIB_OK=TRUE NUMBA_CACHE_DIR=/private/tmp/"

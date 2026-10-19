@@ -36,7 +36,7 @@ missing, singular, or orbifold component evidence remains terminal
    TeX anchors below refer to `KS_orientifolds.tex` in that archive.
 2. Elijah Sheridan et al., *Fuzzy Axions and Associated Relics*,
    arXiv:2412.12012v1 (2024), §4.1, Table 1, and §4.2.1. The locally supplied
-   archive `/Users/vmehta/Downloads/fuzzy-2412.12012v1.tar.gz` has SHA-256
+   archive `arXiv-2412.12012v1.tar.gz` has SHA-256
    `905db55f2ab72e2b94ba9175148cd5a4976756e95ce37e64622bffdbc4d7bcea`.
    TeX anchors refer to `main.tex` in that archive.
 3. V. I. Danilov and A. G. Khovanskii, *Newton Polyhedra and an Algorithm

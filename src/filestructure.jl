@@ -26,18 +26,33 @@ function localARGS()
     end
 end
 
-const _LEGACY_DATA_DIRS = Dict{String,String}(
-    "KU_Fair" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_KU_Fair_Large/",
-    "inKC" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse_Scaled/",
-    "home_Large" => "/home/uni09/cosmo/mehta2/KSAxiverse_Jun20_InKC/KSAxiverse/",
-    "vacua_test" => "/scratch/users/mehta2/vacua_testing/",
-    "vacua_stretchtest" => "/scratch/users/mehta2/vacua_stretchtesting/",
-    "vacua_new" => "/scratch/users/mehta2/vacua_db/",
-    "vacua_0323" => "/scratch/users/mehta2/vacua_0323/",
-    "vacua_0822" => "/scratch/users/mehta2/vacua_0822/",
-    "vacua_stretch" => "/scratch/users/mehta2/vacua_stretch/",
+const _LEGACY_DATA_ENV = Dict{String,String}(
+    "KU_Fair" => "CYAXIVERSE_DATA_DIR_KU_FAIR",
+    "inKC" => "CYAXIVERSE_DATA_DIR_INKC",
+    "home_Large" => "CYAXIVERSE_DATA_DIR_HOME_LARGE",
+    "vacua_test" => "CYAXIVERSE_DATA_DIR_VACUA_TEST",
+    "vacua_stretchtest" => "CYAXIVERSE_DATA_DIR_VACUA_STRETCHTEST",
+    "vacua_new" => "CYAXIVERSE_DATA_DIR_VACUA_NEW",
+    "vacua_0323" => "CYAXIVERSE_DATA_DIR_VACUA_0323",
+    "vacua_0822" => "CYAXIVERSE_DATA_DIR_VACUA_0822",
+    "vacua_stretch" => "CYAXIVERSE_DATA_DIR_VACUA_STRETCH",
+)
+
+const _PUBLIC_DATA_DIRS = Dict{String,String}(
     "docker" => "/scratch/database/",
 )
+
+function _legacy_data_dir(key::AbstractString)
+    haskey(_PUBLIC_DATA_DIRS, key) && return _PUBLIC_DATA_DIRS[key]
+    haskey(_LEGACY_DATA_ENV, key) || throw(ArgumentError(
+        "unknown CYAxiverse deployment alias '$key'"))
+    variable = _LEGACY_DATA_ENV[key]
+    value = strip(get(ENV, variable, ""))
+    isempty(value) && throw(ArgumentError(
+        "CYAxiverse deployment alias '$key' is not configured; set $variable, " *
+        "set CYAXIVERSE_DATA_DIR, or pass an explicit data directory"))
+    value
+end
 
 """
     ol_DB(args)
@@ -47,9 +62,7 @@ Define dict of directories for data read/write
 function ol_DB(args)
     key = string(args)
     key == "pwd" && return string(pwd(), "/")
-    haskey(_LEGACY_DATA_DIRS, key) || throw(ArgumentError(
-        "unknown CYAxiverse deployment alias '$key'"))
-    _LEGACY_DATA_DIRS[key]
+    _legacy_data_dir(key)
 end
 
 const _PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
@@ -94,10 +107,7 @@ function resolve_data_dir(data_dir::Union{Nothing,AbstractString}=nothing)
         if key == "pwd"
             pwd()
         else
-            haskey(_LEGACY_DATA_DIRS, key) || throw(ArgumentError(
-                "unknown CYAxiverse deployment alias '$key'; set " *
-                "CYAXIVERSE_DATA_DIR or pass an explicit data directory"))
-            _LEGACY_DATA_DIRS[key]
+            _legacy_data_dir(key)
         end
     else
         default = default_data_dir()
