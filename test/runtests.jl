@@ -56,18 +56,19 @@ end
         delete!(ENV, "CYAXIVERSE_SLURM_LOG_DIR")
         wrapper = Module(:SlurmPathResolutionTest)
         Base.include(wrapper, joinpath(@__DIR__, "..", "src", "slurm.jl"))
-        slurm_module = getfield(wrapper, :slurm)
-        @test_throws ArgumentError Base.invokelatest(slurm_module.slurm_log_dir)
+        slurm_module = Base.invokelatest(getfield, wrapper, :slurm)
+        slurm_function(name::Symbol) = Base.invokelatest(getproperty, slurm_module, name)
+        @test_throws ArgumentError Base.invokelatest(slurm_function(:slurm_log_dir))
         mktempdir() do root
             ENV["SLURM_SUBMIT_DIR"] = root
-            @test Base.invokelatest(slurm_module.slurm_log_dir) == root
-            first_path = Base.invokelatest(slurm_module.writeslurm, 7, "first\n")
+            @test Base.invokelatest(slurm_function(:slurm_log_dir)) == root
+            first_path = Base.invokelatest(slurm_function(:writeslurm), 7, "first\n")
             @test first_path == joinpath(root, "slurm-7.out")
             @test read(first_path, String) == "first\n"
 
             configured = joinpath(root, "configured")
             ENV["CYAXIVERSE_SLURM_LOG_DIR"] = configured
-            second_path = Base.invokelatest(slurm_module.writeslurm, "7_2", "second\n")
+            second_path = Base.invokelatest(slurm_function(:writeslurm), "7_2", "second\n")
             @test second_path == joinpath(configured, "slurm-7_2.out")
             @test read(second_path, String) == "second\n"
         end
