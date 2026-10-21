@@ -45,6 +45,23 @@ function _exception_kind(error)
     return string(nameof(typeof(cause)))
 end
 
+const _DEBUG_ENVIRONMENT_VARIABLE = "CYAXIVERSE_CYTOOLS_DEBUG"
+
+const _restart_required_notice = "MOSEK state is RESTART_REQUIRED for this Julia process, so no recheck was attempted. Restart Julia, correct the license configuration, then call enable_cytools!() again."
+
+_debug_enabled() = lowercase(strip(get(ENV, _DEBUG_ENVIRONMENT_VARIABLE, ""))) in ("1", "true", "yes")
+
+"""Log the original exception locally when the opt-in debug variable is set.
+
+The thrown exception and `mosek_diagnostic()` stay path-free either way; only
+this local log can contain interpreter, license, or file-system paths.
+"""
+function _report_debug_exception(context::AbstractString, error, backtrace)
+    _debug_enabled() || return nothing
+    @error "CYTools original exception ($context). $_DEBUG_ENVIRONMENT_VARIABLE is set, so this output may contain local paths; do not share it." exception=(error, backtrace)
+    return nothing
+end
+
 function _phase_label(phase::Symbol)
     phase === :interpreter_validation && return "interpreter validation"
     phase === :python_import && return "Python import and wrapper setup"
@@ -69,7 +86,10 @@ end
 function _run_cytools_operation(f::Function, operation::Symbol; requires_mosek=false)
     ensure_cytools!()
     if requires_mosek && _mosek_state[] !== :ENABLED_ACTIVE
-        diagnostic = "CYTools downstream wrapped operation `$operation` requires active MOSEK (state: $(_mosek_state[])). Correct the license configuration and establish a fresh activation state, or restart Julia and call enable_cytools!() again. No downstream operation was started."
+        recovery = _mosek_state[] === :RESTART_REQUIRED ?
+            "Restart Julia, correct the license configuration, then call enable_cytools!() again." :
+            "Correct the license configuration and call refresh_mosek_state!(), or restart Julia and call enable_cytools!() again."
+        diagnostic = "CYTools downstream wrapped operation `$operation` requires active MOSEK (state: $(_mosek_state[])). $recovery No downstream operation was started."
         _mosek_diagnostic[] = diagnostic
         throw(ErrorException(diagnostic))
     end
@@ -89,6 +109,7 @@ function _run_cytools_operation(f::Function, operation::Symbol; requires_mosek=f
         return f()
     catch error
         error isa InterruptException && rethrow()
+        _report_debug_exception("wrapped operation `$operation`", error, catch_backtrace())
         policy = get(_operation_backend_policies, operation,
             "Backend requirements depend on the CYTools operation; consult its supported upstream backends.")
         diagnostic = "CYTools downstream wrapped operation `$operation` failed (cause type: $(_exception_kind(error))). Backend selection policy: $policy CYTools was explicitly enabled and imported before this call. MOSEK activation/configuration state: $(_mosek_state[]). Check license configuration only if the selected backend requires it, and use a supported fallback when available. Exception text and local paths are omitted."
@@ -113,6 +134,7 @@ function _load_extension_submodule!(path::AbstractString, name::Symbol)
     try
         return Base.include(@__MODULE__, path)
     catch error
+        _report_debug_exception("submodule load `$name`", error, catch_backtrace())
         diagnostic = "CYAxiversePyCallExt extension/submodule load failed during `$name` (cause type: $(_exception_kind(error))). Check the optional Julia/PyCall and Python import environment, restart Julia, then use enable_cytools!() after the extension loads. MOSEK activation/configuration is checked separately during enable or refresh. No downstream wrapped operation/backend selection was reached. Exception text and local paths are omitted."
         _mosek_diagnostic[] = diagnostic
         throw(ErrorException(diagnostic))
@@ -139,7 +161,7 @@ end
 
 Return the most recently observed MOSEK activation state. The result is one of
 `:CYTOOLS_DISABLED`, `:ENABLED_ACTIVE`, `:ENABLED_INACTIVE_LICENSE_FAILED`, or
-`:RESTART_REQUIRED`.
+`:RESTART_REQUIRED`. `:RESTART_REQUIRED` is final until Julia is restarted.
 """
 mosek_state() = _mosek_state[]
 
@@ -157,15 +179,19 @@ function _define_mosek_helpers!()
     import contextlib
     import io
 
-    _cyaxiverse_original_mosek_is_activated = config.mosek_is_activated
-    _cyaxiverse_restart_required = False
+    # Install the guard once per Python process. A repeated definition would
+    # wrap the guard in itself and recurse, and would reset the restart gate.
+    if not getattr(config.mosek_is_activated, "_cyaxiverse_guard", False):
+        _cyaxiverse_original_mosek_is_activated = config.mosek_is_activated
+        _cyaxiverse_restart_required = False
 
-    def _cyaxiverse_guarded_mosek_is_activated():
-        if _cyaxiverse_restart_required:
-            return False
-        return bool(_cyaxiverse_original_mosek_is_activated())
+        def _cyaxiverse_guarded_mosek_is_activated():
+            if _cyaxiverse_restart_required:
+                return False
+            return bool(_cyaxiverse_original_mosek_is_activated())
 
-    config.mosek_is_activated = _cyaxiverse_guarded_mosek_is_activated
+        _cyaxiverse_guarded_mosek_is_activated._cyaxiverse_guard = True
+        config.mosek_is_activated = _cyaxiverse_guarded_mosek_is_activated
 
     def _cyaxiverse_set_restart_required(restart_required):
         global _cyaxiverse_restart_required
@@ -194,6 +220,9 @@ function _license_file_path(path)
 end
 
 function _record_mosek_state!(; license_path=nothing, restart_on_failure=false, phase=:license_check)
+    # RESTART_REQUIRED is final for this Julia process: the activation state
+    # cannot be trusted, so no later check may replace it.
+    _mosek_state[] === :RESTART_REQUIRED && return :RESTART_REQUIRED
     activated = try
         if license_path === nothing
             pycall(py"_cyaxiverse_check_mosek", Bool)
@@ -201,6 +230,8 @@ function _record_mosek_state!(; license_path=nothing, restart_on_failure=false, 
             pycall(py"_cyaxiverse_set_mosek_path", Bool, license_path)
         end
     catch error
+        error isa InterruptException && rethrow()
+        _report_debug_exception("MOSEK $(_phase_label(phase))", error, catch_backtrace())
         _mosek_state[] = restart_on_failure ? :RESTART_REQUIRED : :ENABLED_INACTIVE_LICENSE_FAILED
         _mosek_diagnostic[] = _failed_mosek_diagnostic(phase, error, _mosek_state[])
         if !_set_upstream_restart_gate!(true)
@@ -234,6 +265,8 @@ function enable_cytools!(; mosek_license_path=nothing)
     try
         CYAxiverse.python_interpreter.check_configured_python(PyCall.python)
     catch error
+        error isa InterruptException && rethrow()
+        _report_debug_exception("interpreter validation", error, catch_backtrace())
         _mosek_diagnostic[] = "CYTools enable failed during interpreter validation (cause type: $(_exception_kind(error))). CYAXIVERSE_PYTHON does not rebind an already-built PyCall interpreter. Configure it to match PyCall, run Pkg.build(\"PyCall\") only as an explicit user action if needed, restart Julia, then call enable_cytools!() again. Interpreter paths are omitted."
         throw(ArgumentError(_mosek_diagnostic[]))
     end
@@ -243,6 +276,11 @@ function enable_cytools!(; mosek_license_path=nothing)
     if _cytools_ready[]
         license_path === nothing && return nothing
         license_path == _mosek_license_path[] && return nothing
+        if _mosek_state[] === :RESTART_REQUIRED
+            _mosek_diagnostic[] = _restart_required_notice
+            @warn _restart_required_notice
+            return nothing
+        end
         _mosek_license_path[] = license_path
         _record_mosek_state!(; license_path, restart_on_failure=true, phase=:license_path_override)
         _mosek_state[] === :RESTART_REQUIRED && @warn _mosek_diagnostic[]
@@ -253,6 +291,8 @@ function enable_cytools!(; mosek_license_path=nothing)
         cytools_wrapper._initialize_python_api!()
         _define_mosek_helpers!()
     catch error
+        error isa InterruptException && rethrow()
+        _report_debug_exception("Python import and wrapper setup", error, catch_backtrace())
         _mosek_diagnostic[] = "CYTools enable failed during Python import and wrapper setup (cause type: $(_exception_kind(error))). Confirm that PyCall's configured interpreter has CYTools, NumPy, and SciPy. Correct the environment, restart Julia, then call enable_cytools!() again. Exception details and local paths are omitted."
         throw(ErrorException(_mosek_diagnostic[]))
     end
@@ -274,9 +314,16 @@ end
 
 Ask CYTools to recheck its configured MOSEK license. Returns the observed state,
 or `:RESTART_REQUIRED` if CYTools cannot establish a fresh state in-process.
+`:RESTART_REQUIRED` is final for the Julia process: once reached, this function
+performs no recheck and returns it again until Julia is restarted.
 """
 function refresh_mosek_state!()
     ensure_cytools!()
+    if _mosek_state[] === :RESTART_REQUIRED
+        _mosek_diagnostic[] = _restart_required_notice
+        @warn _restart_required_notice
+        return :RESTART_REQUIRED
+    end
     state = _record_mosek_state!(; restart_on_failure=true, phase=:license_refresh)
     state === :RESTART_REQUIRED && @warn _mosek_diagnostic[]
     return state

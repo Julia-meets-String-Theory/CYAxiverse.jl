@@ -151,11 +151,35 @@ CYTools.enable_cytools!()
 CYTools.cytools_wrapper.cytools_version()
 ```
 
-The current optional initialization path may perform a CYTools configuration
-and optimizer/licence check. Its eager/check behavior is tracked separately in
-[Issue #176](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/176)
-and is not part of the core loading contract. MOSEK activation is not required
-to load `CYAxiverse`.
+`enable_cytools!()` is the only place CYTools is imported and its MOSEK license
+state is checked. Loading `CYAxiverse` or `PyCall` does neither, and MOSEK
+activation is not required to load `CYAxiverse` or to use CYTools. It checks
+`CYAXIVERSE_PYTHON` (when set) against the interpreter PyCall already uses,
+records the MOSEK state once, and never rebuilds PyCall. Inspect the result with
+`CYTools.mosek_state()` and `CYTools.mosek_diagnostic()`, and recheck after
+correcting a license with `CYTools.refresh_mosek_state!()`. To use a specific
+license file for the current Julia process, call
+`CYTools.enable_cytools!(; mosek_license_path="/path/to/mosek.lic")`.
+
+!!! note "Compatibility changes"
+    - Loading the extension no longer imports CYTools or runs the MOSEK license
+      check. CYTools-backed wrapper functions throw an `ArgumentError` until
+      `enable_cytools!()` has been called. `ensure_cytools!` now throws
+      `ArgumentError` instead of `ErrorException`.
+    - The unconditional `set_mosek_path` call using the home directory is gone;
+      CYTools and MOSEK license discovery applies unless `mosek_license_path` is
+      given.
+    - The module-level Python names `test_config`, `f_polytopes`, `poly`, `cone`
+      and `version` are no longer defined.
+    - A failed wrapped operation reports its exception type and a path-free
+      diagnostic, not the original message. Set `CYAXIVERSE_CYTOOLS_DEBUG=1` to
+      also log the original exception and backtrace to the local console. That
+      log can contain interpreter, license and file-system paths, so do not paste
+      it into issues or shared logs.
+    - `:RESTART_REQUIRED` is final for a Julia process. Once `mosek_state()`
+      returns it, `refresh_mosek_state!()` and further license-path overrides do
+      not recheck; restart Julia, correct the license configuration, and call
+      `enable_cytools!()` again.
 
 ## Optional plotting
 

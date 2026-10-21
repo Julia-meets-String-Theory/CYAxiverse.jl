@@ -259,6 +259,33 @@ function _run_cytools_initialization_smoke()
             active_solver_calls = read_solver_calls()
             @assert last(active_solver_calls) == "selected_backend:mosek"
 
+            write(activation_path, "0")
+            before_override = read_calls()
+            extension.enable_cytools!(; mosek_license_path=license_path)
+            @assert extension.mosek_state() == :ENABLED_INACTIVE_LICENSE_FAILED
+            override_log = read_calls()
+            @assert override_log[length(before_override)+1:end] == [
+                "set_mosek_path:file", "check_mosek_license", "mosek_is_activated",
+            ]
+            extension.enable_cytools!(; mosek_license_path=license_path)
+            @assert read_calls() == override_log
+
+            write(activation_path, "1")
+            @assert extension.refresh_mosek_state!() == :ENABLED_ACTIVE
+            @assert extension._run_cytools_operation(select_test_optimizer, :fair_triangulation) == "mosek"
+            invalid_path_error = try
+                extension.enable_cytools!(; mosek_license_path=joinpath(data_root, "missing.lic"))
+                nothing
+            catch error
+                error
+            end
+            @assert invalid_path_error isa ArgumentError
+            @assert !occursin(license_path, sprint(showerror, invalid_path_error))
+            @assert extension.mosek_state() == :ENABLED_ACTIVE
+
+            active_solver_calls = read_solver_calls()
+            @assert last(active_solver_calls) == "selected_backend:mosek"
+
             write(refresh_fail_path, "1")
             @assert extension.refresh_mosek_state!() == :RESTART_REQUIRED
             refresh_diagnostic = extension.mosek_diagnostic()
@@ -289,43 +316,36 @@ function _run_cytools_initialization_smoke()
             @assert extension.mosek_state() == :RESTART_REQUIRED
             rm(refresh_fail_path)
 
-            write(activation_path, "0")
-            before_override = read_calls()
-            extension.enable_cytools!(; mosek_license_path=license_path)
-            @assert extension.mosek_state() == :ENABLED_INACTIVE_LICENSE_FAILED
-            override_log = read_calls()
-            @assert override_log[length(before_override)+1:end] == [
-                "set_mosek_path:file", "check_mosek_license", "mosek_is_activated",
-            ]
-            extension.enable_cytools!(; mosek_license_path=license_path)
-            @assert read_calls() == override_log
-
+            # RESTART_REQUIRED is final for the process: a refresh or a license-path
+            # override must neither recheck nor replace it.
             write(activation_path, "1")
-            @assert extension.refresh_mosek_state!() == :ENABLED_ACTIVE
-            @assert extension._run_cytools_operation(select_test_optimizer, :fair_triangulation) == "mosek"
-            invalid_path_error = try
-                extension.enable_cytools!(; mosek_license_path=joinpath(data_root, "missing.lic"))
+            alternate_license_path = joinpath(data_root, "alternate-mosek.lic")
+            write(alternate_license_path, "synthetic alternate license fixture")
+            calls_at_terminal = read_calls()
+            @assert extension.refresh_mosek_state!() == :RESTART_REQUIRED
+            extension.enable_cytools!(; mosek_license_path=alternate_license_path)
+            @assert read_calls() == calls_at_terminal
+            @assert extension.mosek_state() == :RESTART_REQUIRED
+            terminal_diagnostic = extension.mosek_diagnostic()
+            @assert occursin("RESTART_REQUIRED", terminal_diagnostic)
+            @assert occursin("Restart Julia", terminal_diagnostic)
+            @assert !occursin(license_path, terminal_diagnostic)
+            @assert !occursin(alternate_license_path, terminal_diagnostic)
+            terminal_mandatory_error = try
+                extension._run_cytools_operation(select_test_optimizer, :fixture_mandatory_mosek;
+                    requires_mosek=true)
                 nothing
             catch error
                 error
             end
-            @assert invalid_path_error isa ArgumentError
-            @assert !occursin(license_path, sprint(showerror, invalid_path_error))
-            @assert extension.mosek_state() == :ENABLED_ACTIVE
-
-            alternate_license_path = joinpath(data_root, "alternate-mosek.lic")
-            write(alternate_license_path, "synthetic alternate license fixture")
-            write(refresh_fail_path, "1")
-            extension.enable_cytools!(; mosek_license_path=alternate_license_path)
+            terminal_mandatory_message = sprint(showerror, terminal_mandatory_error)
+            @assert occursin("Restart Julia, correct the license configuration", terminal_mandatory_message)
+            @assert !occursin("refresh_mosek_state!()", terminal_mandatory_message)
+            # Defining the Python helpers again must neither recurse nor clear the gate.
+            extension._define_mosek_helpers!()
+            @assert extension._run_cytools_operation(select_test_optimizer, :fair_triangulation) == "highs"
             @assert extension.mosek_state() == :RESTART_REQUIRED
-            override_diagnostic = extension.mosek_diagnostic()
-            @assert occursin("license path override", override_diagnostic)
-            @assert occursin("PyError", override_diagnostic)
-            @assert occursin("restart Julia", override_diagnostic)
-            @assert occursin("enable_cytools!()", override_diagnostic)
-            @assert !occursin(license_path, override_diagnostic)
-            @assert !occursin(alternate_license_path, override_diagnostic)
-            rm(refresh_fail_path)
+
 
             println("CYTools initialization smoke passed")
         """
@@ -372,7 +392,7 @@ function _julia_function_block(source::AbstractString, signature::AbstractString
     return join(lines[start:last], "\n")
 end
 
-function _run_cytools_import_failure_smoke()
+function _run_cytools_import_failure_smoke(; debug::Bool=false)
     Base.find_package("PyCall") === nothing && return false, "PyCall is unavailable"
     mktempdir() do root
         python_root = _cytools_python_stub(joinpath(root, "python"))
@@ -411,6 +431,7 @@ function _run_cytools_import_failure_smoke()
                 Sys.iswindows() ? ";" : ":",
                 get(ENV, "PYTHONPATH", ""),
             ),
+            "CYAXIVERSE_CYTOOLS_DEBUG" => debug ? "1" : "",
         )
         output = IOBuffer()
         process = run(pipeline(ignorestatus(command), stdout=output, stderr=output))
@@ -457,6 +478,73 @@ function _run_cytools_submodule_load_failure_smoke()
         process = run(pipeline(ignorestatus(command), stdout=output, stderr=output))
         result = _sanitize_cytools_output(String(take!(output)); fixture_root=root)
         return success(process), result
+    end
+end
+
+function _run_cytools_terminal_override_smoke()
+    Base.find_package("PyCall") === nothing && return false, "PyCall is unavailable"
+    mktempdir() do root
+        python_root = _cytools_python_stub(joinpath(root, "python"))
+        log_path = joinpath(root, "mosek-calls.log")
+        solver_log_path = joinpath(root, "solver-calls.log")
+        license_path = joinpath(root, "mosek.lic")
+        alternate_license_path = joinpath(root, "alternate-mosek.lic")
+        activation_path = joinpath(root, "mosek-active")
+        refresh_fail_path = joinpath(root, "mosek-refresh-fail")
+        operation_fail_path = joinpath(root, "operation-fail")
+        write(license_path, "synthetic license fixture")
+        write(alternate_license_path, "synthetic alternate license fixture")
+        write(activation_path, "0")
+        active_project = something(Base.active_project(), normpath(joinpath(@__DIR__, "..")))
+        child_source = """
+            using CYAxiverse
+            using PyCall
+            extension = Base.get_extension(CYAxiverse, :CYAxiversePyCallExt)
+            activation_path = $(_repr_for_julia(activation_path))
+            refresh_fail_path = $(_repr_for_julia(refresh_fail_path))
+            license_path = $(_repr_for_julia(license_path))
+            alternate_license_path = $(_repr_for_julia(alternate_license_path))
+            ENV["CYAXIVERSE_PYTHON"] = PyCall.python
+
+            extension.enable_cytools!()
+            write(activation_path, "1")
+            @assert extension.refresh_mosek_state!() == :ENABLED_ACTIVE
+
+            # A failing license-path override cannot establish a fresh state.
+            write(refresh_fail_path, "1")
+            extension.enable_cytools!(; mosek_license_path=alternate_license_path)
+            @assert extension.mosek_state() == :RESTART_REQUIRED
+            override_diagnostic = extension.mosek_diagnostic()
+            @assert occursin("license path override", override_diagnostic)
+            @assert occursin("PyError", override_diagnostic)
+            @assert occursin("restart Julia", override_diagnostic)
+            @assert occursin("enable_cytools!()", override_diagnostic)
+            @assert !occursin(license_path, override_diagnostic)
+            @assert !occursin(alternate_license_path, override_diagnostic)
+
+            # The state is final: a later refresh succeeds upstream but is not attempted.
+            rm(refresh_fail_path)
+            @assert extension.refresh_mosek_state!() == :RESTART_REQUIRED
+            @assert extension.mosek_state() == :RESTART_REQUIRED
+            println("CYTools terminal override smoke passed")
+        """
+        command = addenv(
+            `$(Base.julia_cmd()) --startup-file=no --project=$active_project -e $child_source`,
+            "PYTHONPATH" => string(
+                python_root,
+                Sys.iswindows() ? ";" : ":",
+                get(ENV, "PYTHONPATH", ""),
+            ),
+            "CYTOOLS_STUB_LOG" => log_path,
+            "CYTOOLS_STUB_SOLVER_LOG" => solver_log_path,
+            "CYTOOLS_STUB_FAILURE_DETAIL" => license_path,
+            "CYTOOLS_STUB_ACTIVATION_FILE" => activation_path,
+            "CYTOOLS_STUB_REFRESH_FAIL_FILE" => refresh_fail_path,
+            "CYTOOLS_STUB_OPERATION_FAIL_FILE" => operation_fail_path,
+        )
+        output = IOBuffer()
+        process = run(pipeline(ignorestatus(command), stdout=output, stderr=output))
+        return success(process), _sanitize_cytools_output(String(take!(output)); fixture_root=root)
     end
 end
 
@@ -661,6 +749,17 @@ end
         import_failure_passed, import_failure_output = _run_cytools_import_failure_smoke()
         @test import_failure_passed
         @test occursin("CYTools import failure diagnostic smoke passed", import_failure_output)
+        # The original exception text stays out of the output unless the opt-in
+        # debug variable is set; the thrown error and diagnostic stay path-free.
+        @test !occursin("private-license.lic", import_failure_output)
+        debug_passed, debug_output = _run_cytools_import_failure_smoke(debug=true)
+        @test debug_passed
+        @test occursin("CYTools import failure diagnostic smoke passed", debug_output)
+        @test occursin("CYAXIVERSE_CYTOOLS_DEBUG is set", debug_output)
+        @test occursin("private-license.lic", debug_output)
+        terminal_passed, terminal_output = _run_cytools_terminal_override_smoke()
+        @test terminal_passed
+        @test occursin("CYTools terminal override smoke passed", terminal_output)
         submodule_failure_passed, submodule_failure_output = _run_cytools_submodule_load_failure_smoke()
         @test submodule_failure_passed
         @test occursin("CYTools submodule-load diagnostic smoke passed", submodule_failure_output)
