@@ -154,8 +154,9 @@ CYTools.cytools_wrapper.cytools_version()
 `enable_cytools!()` is the only place CYTools is imported and its MOSEK license
 state is checked. Loading `CYAxiverse` or `PyCall` does neither, and MOSEK
 activation is not required to load `CYAxiverse` or to use CYTools. It checks
-`CYAXIVERSE_PYTHON` (when set) against the interpreter PyCall already uses,
-records the MOSEK state once, and never rebuilds PyCall. Inspect the result with
+`CYAXIVERSE_PYTHON` (when set; the [Pipelines](@ref) guide shows how to set it)
+against the interpreter PyCall already uses, records the MOSEK state once, and
+never rebuilds PyCall. Inspect the result with
 `CYTools.mosek_state()` and `CYTools.mosek_diagnostic()`, and recheck after
 correcting a license with `CYTools.refresh_mosek_state!()`. To use a specific
 license file for the current Julia process, call
