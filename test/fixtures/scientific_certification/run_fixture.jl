@@ -15,6 +15,8 @@ const ROOT = normpath(joinpath(@__DIR__, "../../.."))
 const FIXTURE_PATH = joinpath(@__DIR__, "public.toml")
 const VERIFIER_PATH = joinpath(ROOT, "scripts", "verify_scientific_certificate.jl")
 include("oracles.jl")
+# This fixture also runs standalone, outside runtests.jl's include order.
+include(joinpath(@__DIR__, "..", "..", "coverage_support.jl"))
 
 _rat(x::Integer) = BigInt(x) // BigInt(1)
 _rat(x::Rational) = BigInt(numerator(x)) // BigInt(denominator(x))
@@ -649,13 +651,7 @@ end
 function _julia_argv(project_dir, args...)
     cmd = Base.julia_cmd()
     argv = String[cmd.exec...]
-    options = Base.JLOptions()
-    if options.code_coverage != 0 && options.output_code_coverage == C_NULL
-        # Keep Julia's inherited coverage filter, but send this subprocess's
-        # LCOV output outside the checkout. Julia's default per-source .cov
-        # files make a clean-source qualification observe its own test work.
-        push!(argv, "--code-coverage=$(tempname()).info")
-    end
+    append!(argv, child_coverage_args())
     append!(argv, ["--startup-file=no", "--threads=1", "--project=$project_dir", string.(args)...])
     argv
 end
