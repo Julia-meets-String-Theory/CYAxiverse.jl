@@ -273,8 +273,8 @@ function _vacua_worker_job(job)
     end
 end
 
-"""Start geometry workers and configure their BLAS thread counts."""
-function _vacua_start_workers(options)
+"""Start geometry workers with optional Julia flags and configure BLAS threads."""
+function _vacua_start_workers(options; exeflags::Cmd=``)
     workers = options[:workers]
     if workers == 1
         options[:blas_threads] === nothing ||
@@ -283,7 +283,7 @@ function _vacua_start_workers(options)
     end
     project = Base.active_project()
     project === nothing && throw(ArgumentError("parallel execution requires an active Julia project"))
-    worker_ids = addprocs(workers; exeflags="--project=$(project)")
+    worker_ids = addprocs(workers; exeflags=`--project=$project $exeflags`)
     script = joinpath(@__DIR__, "vacua_pipeline.jl")
     blas_threads = options[:blas_threads]
     worker_setup = quote
@@ -327,8 +327,13 @@ function _vacua_start_workers(options)
     worker_ids
 end
 
-"""Run the bounded, resumable vacua batch and stream results to CSV."""
-function run_vacua_batch(options)
+"""
+Run the bounded, resumable vacua batch and stream results to CSV.
+
+`worker_exeflags` supplies additional Julia flags to Distributed workers, for
+example to redirect coverage output when this runner is exercised by tests.
+"""
+function run_vacua_batch(options; worker_exeflags::Cmd=``)
     options = _vacua_validate_options(options)
     ENV["CYAXIVERSE_DATA_DIR"] = options[:data_dir]
     geoms = _vacua_selected_geometries(options)
@@ -421,7 +426,8 @@ function run_vacua_batch(options)
                 options=job_options)))
         end
 
-        worker_ids = isempty(active_jobs) ? Int[] : _vacua_start_workers(options)
+        worker_ids = isempty(active_jobs) ? Int[] :
+            _vacua_start_workers(options; exeflags=worker_exeflags)
         record_result = function (result)
             index = findfirst(==(result.geom_idx), geoms)
             @printf("[%d/%d] h11=%d polytope=%d frst=%d ", index, length(geoms),
