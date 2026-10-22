@@ -7,6 +7,7 @@ import sys
 import unittest
 from hashlib import sha256
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -25,6 +26,7 @@ from version_lifecycle.manifests import (  # noqa: E402
 from version_lifecycle.publication_evidence import (  # noqa: E402
     publication_evidence_for_tag,
 )
+from version_lifecycle.github_protection import GitHubProtectionAdapter  # noqa: E402
 from version_lifecycle.transactions import (  # noqa: E402
     AllocationView,
     BootstrapIntent,
@@ -35,6 +37,11 @@ from version_lifecycle.transactions import (  # noqa: E402
     run_rare_recovery,
     run_release,
 )
+from test_version_lifecycle_github_protection import (  # noqa: E402
+    FakeGitHub,
+    rule,
+    ruleset,
+)
 
 
 SHA_A = "a" * 40
@@ -43,7 +50,7 @@ TREE = "c" * 40
 SNAPSHOT = "0" * 64
 LIFECYCLE_SNAPSHOT = "1" * 64
 OWNER = "owner-principal"
-REPOSITORY = "fixture-repository"
+REPOSITORY = "fixture-owner/fixture-repository"
 RESERVATION_REF = (
     "refs/heads/lifecycle/v1/reservations/principal/v0.3.0-DEV/"
     + "LIF-SHA256-" + "e" * 64
@@ -55,6 +62,31 @@ CONSUMED_RESERVATION_REF = (
 CLAIM_REF = "refs/heads/lifecycle/v1/claims/v0.3.0"
 ANCHOR_REF = "refs/tags/iterations/0.3.0"
 RELEASE_TARGET = "refs/heads/lifecycle/v1/releases/v0.3.0"
+
+
+def transaction_github() -> FakeGitHub:
+    fake = FakeGitHub()
+    fake.branch_shas = {"vmm": SHA_B, "main": SHA_B}
+    fake.rows.extend([
+        ruleset(
+            23948086,
+            "CYAx canonical release tags immutable",
+            target="tag",
+            include=["refs/tags/v*.*.*"],
+            exclude=["refs/tags/v-0.1"],
+            rules=[rule("update"), rule("deletion"), rule("non_fast_forward")],
+        ),
+        ruleset(
+            23948090,
+            "CYAx canonical release tag creation",
+            target="tag",
+            include=["refs/tags/v*.*.*"],
+            exclude=["refs/tags/v-0.1"],
+            rules=[rule("creation")],
+            actors=[{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+        ),
+    ])
+    return fake
 
 
 def make_authorization(
@@ -140,18 +172,27 @@ class PrincipalClosureFixture:
         self.now_utc = "2026-09-20T12:34:56Z"
         self.authorization = IssuingAuthority("tx-closure")
         self.owner_authorization_authority = self.authorization
+        self.github_api = transaction_github()
+        self.github_protection_adapter = GitHubProtectionAdapter(
+            REPOSITORY,
+            token="fixture-token",
+            transport=self.github_api,
+            clock=lambda: datetime(2026, 9, 24, 15, 0, tzinfo=timezone.utc),
+            authorization_gate=self._freeze_gate,
+        )
+
+    def _freeze_gate(self, intent, action, ref):
+        if action == "activate":
+            self.calls.append("freeze")
+            return self.fail != "freeze"
+        self.calls.append("unfreeze")
+        return True
 
     def owner_authorization_ref_for(self, action, target_ref, final_version):
         return self.authorization.issue(action, target_ref, final_version)
 
     def authorization_now_utc(self):
         return self.now_utc
-
-    def freeze_line(self, intent):
-        self.calls.append("freeze")
-        if self.fail == "freeze":
-            return None
-        return "line-freeze"
 
     def acquire_static_mutation(self, intent):
         self.calls.append("serialize")
@@ -218,10 +259,6 @@ class PrincipalClosureFixture:
             raise RuntimeError("correspondence unavailable")
         return {"verified": True}
 
-    def unfreeze_line(self, token):
-        self.calls.append("unfreeze")
-
-
 class NoExclusionClosureFixture(PrincipalClosureFixture):
     def __getattribute__(self, name):
         if name in {"acquire_static_mutation", "acquire_allocation_exclusion"}:
@@ -250,6 +287,25 @@ class PrincipalReleaseFixture:
         self.persisted_publication_evidence_payload = None
         self.authorization = IssuingAuthority("tx-release")
         self.owner_authorization_authority = self.authorization
+        self.github_api = transaction_github()
+        if fail == "candidate-protection":
+            self.github_api.rows[:] = [
+                row for row in self.github_api.rows if row["id"] != 23967991
+            ]
+        self.github_protection_adapter = GitHubProtectionAdapter(
+            REPOSITORY,
+            token="fixture-token",
+            transport=self.github_api,
+            clock=lambda: datetime(2026, 9, 24, 15, 0, tzinfo=timezone.utc),
+            authorization_gate=self._freeze_gate,
+        )
+
+    def _freeze_gate(self, intent, action, ref):
+        if action == "activate":
+            self.calls.append("freeze-main")
+            return self.fail != "freeze"
+        self.calls.append("unfreeze-main")
+        return True
 
     def owner_authorization_ref_for(self, action, target_ref, final_version):
         return self.authorization.issue(action, target_ref, final_version)
@@ -288,6 +344,14 @@ class PrincipalReleaseFixture:
                 "durable": True, "main_at_candidate_sha": SHA_B,
                 "main_at_candidate_version": "0.2.0"}
 
+    def make_durable_candidate_protected(self, intent, protection):
+        self.calls.append("candidate-protection")
+        if not self.github_protection_adapter.is_live_protection_evidence(
+            protection, ref=intent.candidate_ref, repository=intent.repository
+        ):
+            return None
+        return self.create_candidate(intent)
+
     def create_manifest(self, manifest_type, payload):
         self.calls.append(f"manifest:{manifest_type}")
         self.manifest_types.append(manifest_type)
@@ -305,10 +369,6 @@ class PrincipalReleaseFixture:
                 "subject_tree": candidate["tree"], "policy_revision": "policy",
                 "harness_revision": "harness", "environment": "fixture",
                 "evidence_refs": ["evidence/candidate.json"]}
-
-    def freeze_main(self, intent):
-        self.calls.append("freeze-main")
-        return {"token": "main-freeze", "sha": SHA_B, "version": "0.2.0"}
 
     def verify_principal_interval(self, intent, candidate, freeze):
         self.calls.append("interval")
@@ -334,14 +394,6 @@ class PrincipalReleaseFixture:
                 "subject_tree": final["tree"], "policy_revision": "policy-final",
                 "harness_revision": "harness-final", "environment": "fixture-final",
                 "evidence_refs": ["evidence/final.json"]}
-
-    class Protection:
-        def require_public_tag(self, ref):
-            return None
-
-    def verify_public_tag_ruleset(self, intent, ref):
-        self.calls.append("tag-ruleset")
-        return self.Protection()
 
     def create_tag(self, intent, prepared, final):
         self.calls.append("tag")
@@ -409,15 +461,12 @@ class PrincipalReleaseFixture:
             return {"status": "requested", "publication_ref": "refs/heads/wrong"}
         return {"status": "requested", "publication_ref": publication_ref}
 
-    def unfreeze_main(self, token):
-        self.calls.append("unfreeze-main")
-
-
 class NoTagProtectionReleaseFixture(PrincipalReleaseFixture):
-    def __getattribute__(self, name):
-        if name == "verify_public_tag_ruleset":
-            raise AttributeError(name)
-        return super().__getattribute__(name)
+    def __init__(self):
+        super().__init__()
+        self.github_api.rows[:] = [
+            row for row in self.github_api.rows if row["id"] not in {23948086, 23948090}
+        ]
 
 
 class MissingClosureProofFixture(PrincipalClosureFixture):
@@ -622,6 +671,18 @@ class TransactionTests(unittest.TestCase):
                          ("BLOCKED", "OWNER_AUTHORIZATION_UNVERIFIED"))
         self.assertNotIn("anchor", port.calls)
 
+    def test_production_closure_rejects_fixture_freeze_token(self):
+        class PlaceholderAdapter:
+            def is_live_freeze_lease(self, token, *, ref):
+                return False
+
+        port = PrincipalClosureFixture()
+        port.github_protection_adapter = PlaceholderAdapter()
+        port.freeze_line = lambda intent: "fixture-token"
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual((result.status, result.reason_code), ("BLOCKED", "LINE_FREEZE_UNAVAILABLE"))
+        self.assertEqual(port.calls, [])
+
     def test_authority_must_come_from_trusted_port_configuration(self):
         port = PrincipalClosureFixture()
         port.owner_authorization_authority = None
@@ -736,11 +797,7 @@ class TransactionTests(unittest.TestCase):
 
     def test_principal_release_rejects_version_regression_before_tag(self):
         port = PrincipalReleaseFixture()
-        port.freeze_main = lambda intent: {
-            "token": "main-freeze",
-            "sha": SHA_B,
-            "version": "0.4.0",
-        }
+        port.github_api.project_version = "0.4.0"
         result = run_release(port, self.release_intent)
         self.assertEqual(
             (result.status, result.reason_code, result.frozen),
@@ -829,8 +886,36 @@ class TransactionTests(unittest.TestCase):
         port = NoTagProtectionReleaseFixture()
         result = run_release(port, self.release_intent)
         self.assertEqual((result.status, result.reason_code, result.frozen),
-                         ("BLOCKED", "PUBLIC_TAG_RULESET_UNAVAILABLE", True))
+                         ("BLOCKED", "PUBLIC_TAG_PROTECTION_INVALID", True))
         self.assertNotIn("tag", port.calls)
+
+    def test_candidate_creation_requires_verified_protection_first(self):
+        port = PrincipalReleaseFixture(fail="candidate-protection")
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code), ("BLOCKED", "CANDIDATE_PROTECTION_INCOMPLETE"))
+        self.assertNotIn("candidate", port.calls)
+
+        port = PrincipalReleaseFixture()
+        port.github_protection_adapter = None
+        port.verify_candidate_ref = lambda intent, ref: "fixture-token"
+        port._allow_fixture_protection_evidence = True
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code), ("BLOCKED", "CANDIDATE_PROTECTION_UNAVAILABLE"))
+        self.assertNotIn("candidate", port.calls)
+
+    def test_production_candidate_path_rejects_fixture_only_evidence(self):
+        class PlaceholderAdapter:
+            def verify_candidate_ref(self, ref):
+                return "fixture-token"
+
+            def is_live_protection_evidence(self, evidence, *, ref, repository):
+                return False
+
+        port = PrincipalReleaseFixture()
+        port.github_protection_adapter = PlaceholderAdapter()
+        result = run_release(port, self.release_intent)
+        self.assertEqual((result.status, result.reason_code), ("BLOCKED", "CANDIDATE_PROTECTION_UNAVAILABLE"))
+        self.assertNotIn("candidate", port.calls)
         self.assertNotIn("manifest:release-intent-prepared", port.calls)
 
     def test_tree_bound_transfer_requires_equal_trees(self):
