@@ -1679,7 +1679,12 @@ if _FULL; @testset "Vacua pipeline persistence and validation" begin
             default_blas_options = _vacua_parse_args(["--data-dir", root,
                 "--geometry", "2,1,1"])
             @test default_blas_options[:blas_threads] == 1
-            @test !run_vacua_batch(parallel_options)
+            repository_root = normpath(joinpath(@__DIR__, ".."))
+            coverage_files_cmd = `git -C $repository_root ls-files --others --exclude-standard -- '*.cov'`
+            coverage_files_before = Set(readlines(coverage_files_cmd))
+            @test !run_vacua_batch(parallel_options;
+                worker_exeflags=Cmd(child_coverage_args()))
+            @test Set(readlines(coverage_files_cmd)) == coverage_files_before
             @test occursin("failed", read(parallel_summary, String))
 
             mismatched_options = _vacua_parse_args(["--data-dir", root,

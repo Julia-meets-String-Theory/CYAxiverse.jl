@@ -6,6 +6,7 @@ on:
       - main
     tags: '*'
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'src/**'
       - 'ext/**'
@@ -79,7 +80,7 @@ jobs:
 
   full:
     name: Full test suite
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    if: github.event_name != 'pull_request' || github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-tests')
     runs-on: ubuntu-latest
     env:
       CYAXIVERSE_TEST_FULL: '1'
