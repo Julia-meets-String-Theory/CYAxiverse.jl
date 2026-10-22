@@ -19,13 +19,13 @@ approval_ref: N/A
 
 Establish and evaluate a governed workflow using Claude Code CLI and OpenAI Codex CLI, combining independent role-policy assurance with bounded coordination and harness experiments. Determine whether it improves verified engineering outcomes, execution reliability, and total effort under an approved budget while preserving scientific semantics and authority boundaries.
 
-This is an S3 programme composed of separately classified S1/S2 slices. Durable role, authority, execution, provenance, and surface-policy contracts are S2. Bounded adapter implementation can be S1 only where it implements an already approved stable contract without altering its meaning.
+**Working classification: provisional S3 programme**, composed of independently reviewable S1/S2 slices. Durable role, authority, execution, provenance, and surface-policy contracts, including the trusted launcher, require S2 treatment. Thin adapters can be S1 only when they implement an approved stable contract without changing its meaning. If review finds an S3 umbrella unnecessary, reclassify or divide it into linked S2 specifications; preserve requirement/evidence identities and every applicable security review and authorization gate.
 
-**Current state:** the Owner has accepted the architecture direction and authorized Issue/draft-specification preparation. This file is a draft proposal, not an approved normative specification or an execution grant. `last_reviewed` records preparation review only. Consequential implementation, native pilot execution, integration, policy adoption, and activation retain separate authorization requirements.
+**Current state:** the Owner accepted the architecture direction and authorized Issue/draft-specification preparation. `status: draft` and `approval_ref: N/A` remain accurate; `last_reviewed` records preparation review only. The acceptance-gate table consolidates the separate decision boundaries.
 
 ## Motivation
 
-Cross-provider policy support and reliable CLI execution address related but independently verifiable problems. The existing PR #74 audit tests the role-policy foundation. A subsequent CLI pilot must establish its own permission enforcement, evidence integrity, recovery, and context independence. Controlled evaluation must then determine whether operational success translates into useful engineering improvement.
+Cross-provider policy support and reliable CLI execution address related but independently verifiable problems. The existing PR #74 audit tests the role-policy foundation. A subsequent CLI pilot MUST establish its own permission enforcement, evidence integrity, recovery, and context independence. Controlled evaluation MUST then determine whether operational success translates into useful engineering improvement.
 
 One programme coordinates these dependencies without transferring an acceptance result from one subject to another. Conversational Control Desk, scientific discussion, specifications, and applicable independent reviews retain their existing roles.
 
@@ -33,7 +33,8 @@ One programme coordinates these dependencies without transferring an acceptance 
 
 ### Source and implementation facts
 
-- Repository baseline inspected for preparation: `Julia-meets-String-Theory/CYAxiverse.jl`, `vmm`, commit `fb8139ca18cc5a91c59c6b7d693e5174abb3bc27`, tree `0126b886db7dbdd1654e8122b767290c958343ef`.
+- **Governance baseline:** project-policy claims bind to `Julia-meets-String-Theory/CYAxiverse.jl`, `vmm`, commit `fb8139ca18cc5a91c59c6b7d693e5174abb3bc27`, tree `0126b886db7dbdd1654e8122b767290c958343ef`.
+- **Proposal candidate:** the initial draft commit `1c174adc1f906fe17151bafe16f8b801ca1a3ddf` is a direct child of that baseline and added only this specification. It changed no governing policy files. PR #210 records each subsequent draft candidate separately; a later proposal commit does not silently change the governance snapshot. Formal review/execution MUST revalidate applicable sources and record supersession.
 - `AGENTS.md` governs repository work; approved specifications govern feature intent below higher-order project policy. Issues/Projects coordinate work and do not supersede the feature contract.
 - `.agents/POLICIES/SURFACE_ALLOCATION.md` governs dispatch, surface overrides, permissions, and independent context. A task-specific override does not amend unrelated authority or scientific requirements.
 - `.agents/skills/cyaxiverse-agent-orchestration/SKILL.md` preserves worker continuity and explicitly avoids hard-coding a particular model into repository-wide policy.
@@ -51,7 +52,7 @@ The [governing Issue #209](https://github.com/Julia-meets-String-Theory/CYAxiver
 4. Exact configuration identity is recorded for each actual attempt; it is not a programme-wide selection lock.
 5. The Owner accepted architecture-direction and preparation work only. Operational policy adoption and execution remain separate decisions.
 
-OC-001 is recorded here as intended-behavior clarification. It does not rewrite an older policy document, claim that new requirement IDs governed historical episodes, or independently update the private runtime-policy authority. Workstream A must record the requirements identity and effective scope used for every assessment.
+OC-001 is recorded here as intended-behavior clarification. It does not rewrite an older policy document, claim that new requirement IDs governed historical episodes, or independently update the private runtime-policy authority. Workstream A MUST record the requirements identity and effective scope used for every assessment.
 
 ### Existing evidence and hypotheses
 
@@ -66,9 +67,7 @@ Official CLI documentation describes structured programmatic execution; that doe
 
 ## Non-scope
 
-Preparation does not implement adapters, run native agents or a pilot, amend policy, merge or integrate changes, activate capabilities, release/publish scientific results, or change package versions. The programme does not replace SDD, scientific-owner approval, or independent review; change accepted scientific baselines/tolerances; require Harness² as a runtime; automatically launch browser Chat agents; or authorize unrestricted production credentials.
-
-It does not reopen exchange Issue #16, change PR #74's frozen source candidate, or inherit its historical acceptance evidence without proving applicability.
+The programme preserves SDD, scientific-owner approval, independent review, accepted scientific baselines/tolerances, Chat roles, and existing durable authorities. It excludes a mandatory Harness² runtime, automatic browser-agent launch, unrestricted production credentials, package-version changes, and reopening exchange Issue #16. R-012/R-013 preserve the independent PR #74 subject and charter.
 
 ## Scientific claim boundary
 
@@ -78,7 +77,7 @@ It does not reopen exchange Issue #16, change PR #74's frozen source candidate, 
 - Measured workflow behavior on named, reproducible engineering/numerical cases under recorded conditions.
 - Bounded evidence of benefits, regressions, uncertainty, cost, and lesson transfer.
 
-### This specification must not establish
+### This specification MUST NOT establish
 
 - Scientific correctness from model agreement, benchmark scores, or passing visible tests alone.
 - A change in physical normalization, interpretation, accepted tolerance, population definition, schema, or scientific approval authority.
@@ -95,87 +94,121 @@ It does not reopen exchange Issue #16, change PR #74's frozen source candidate, 
 
 ## Requirements
 
-These IDs describe this draft's prospective requirements. Once referenced by implementation they are immutable identifiers. They do not retroactively govern historical work.
+Uppercase MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY use the [RFC 2119/8174 convention](https://www.rfc-editor.org/info/rfc8174/). They identify prospective requirements; only the applicable specification approval makes them governing. Descriptive facts and proposed decision values confer no authority. R-001–R-017 remain the canonical IDs; dotted child IDs refine coverage without creating a second requirement system. They do not retroactively govern historical work.
 
 ### R-001 — Preparation authority and separate decisions
 
-The programme shall record preparation, specification approval, exact-candidate review, native capability, pilot execution, integration, policy adoption, and activation as distinct decisions. Evidence in one category shall not manufacture another. A draft or a completed task checklist shall not be treated as operational authority.
+The programme MUST record preparation, specification approval, exact-candidate review, native capability, pilot execution, integration, policy adoption, and activation as distinct decisions. Evidence in one category MUST NOT manufacture another. A draft or a completed task checklist MUST NOT be treated as operational authority.
 
 ### R-002 — Equivalent role options without provider lock
 
-The architecture shall represent authorized **role/capability option sets**, with primary eligibility and fallback eligibility explicit. The Manager may select any eligible primary within the approved task envelope, including either declared equivalent even when both are available. Selecting an already authorized option shall not require a new Owner approval merely because its provider differs from a previous task.
+The architecture MUST represent versioned, authorized role/capability option sets with primary and fallback eligibility. The Manager MAY choose either eligible primary even when both are available; its provider MUST NOT determine the provider of Implementers or reviewers. Choosing an already authorized option within the task envelope requires no fresh Owner approval. Both CLI providers MUST be assessed for Manager eligibility under the same criteria.
 
-Initial declared alternatives are:
+OC-001 establishes **selection eligibility**, not empirical performance equality, universal suitability, or interchangeable native effort parameters. The catalogue MUST record role/task scope, permitted surface/permissions, qualification evidence, validity, and review triggers. Model identifiers in R-003 are initial catalogue entries, not a permanent architecture lock.
 
-| Role/capability step | Declared alternatives | Selection meaning |
-| --- | --- | --- |
-| Corresponding `gpt-6.1-sol` step | `gpt-6.1-sol` or `claude-opus-5-5` | Either eligible option may be selected for the applicable role. |
-| Corresponding `gpt-6-luna` step | `gpt-6-luna` or `claude-haiku-5-5` | Either eligible option may be selected for the applicable step. |
-| Additional Implementer fallback | `claude-sonnet-5-5` | Available in its governed fallback position; primary eligibility requires an applicable rule. |
+**R-002.1 — Evidence can change eligibility.** Before evaluation, the protocol MUST predeclare role/task quality floors and review triggers. A mandatory integrity failure or a predeclared quality-floor failure MUST generate a scoped suitability finding and restriction/requalification proposal. The launcher MUST apply preapproved pilot stop/quarantine rules. Temporary quarantine, permanent revocation, and statistical uncertainty MUST remain distinct. Durable restriction, reinstatement, and in-flight handling require the applicable policy decision; evaluators MUST NOT rewrite the operational catalogue or historical baseline. An inconclusive comparison proves neither equality nor inferiority.
 
-This table is a declaration of selection options, not native availability proof, a one-to-one replacement instruction, or a permanent model-name lock. The architecture shall consume a governed, versioned option catalogue rather than embed these identifiers into provider-specific branching throughout orchestration. Catalogue changes follow the applicable policy mechanism; the Manager cannot declare an unapproved model equivalent on its own.
+### R-003 — Explicit options, native effort, and attempt identity
 
-Per-role selections shall be independent where authorized. A Manager's provider shall not force all Implementers or reviewers into a homogeneous provider profile. Both CLI providers shall be assessed for Manager eligibility under the same governing criteria; actual use depends on the approved role, capability, surface, and permission combination.
+The following is the **draft catalogue for qualification**, based on primary documentation inspected on 2026-10-22. Each row has its own native values; identical labels do not imply equal computational effort or performance.
 
-### R-003 — Exact attempt provenance and supported configuration
+| Option | Provider / interface | Role/capability membership | Documented effort values | Proposed pilot effort values |
+| --- | --- | --- | --- | --- |
+| `gpt-6.1-sol` | OpenAI / model API; Codex use requires client qualification | Sol/Opus option step; applicable roles require catalogue authorization | `low`, `medium`, `high`, `xhigh`, `max` | `low`, `medium`, `high`, `xhigh`, `max` |
+| `claude-opus-5-5` | Anthropic / Claude Code | Sol/Opus option step; applicable roles require catalogue authorization | `low`, `medium`, `high`, `xhigh`, `max` | `low`, `medium`, `high`, `xhigh`, `max` |
+| `gpt-6-luna` | OpenAI / model API; Codex use requires client qualification | Luna/Haiku option step; applicable roles require catalogue authorization | `none`, `low`, `medium`, `high`, `xhigh`, `max` | `low`, `medium`, `high`, `xhigh`, `max` |
+| `claude-haiku-5-5` | Anthropic / Claude Code | Luna/Haiku option step; applicable roles require catalogue authorization | `low`, `medium`, `high`, `xhigh`, `max` | `low`, `medium`, `high`, `xhigh`, `max` |
+| `claude-sonnet-5-5` | Anthropic / Claude Code | Additional Implementer fallback; no automatic primary/other-role eligibility | `low`, `medium`, `high`, `xhigh`, `max` | `low`, `medium`, `high`, `xhigh`, `max` |
 
-Each attempt shall record the selected and observed provider, exact model, execution mode, native reasoning configuration, CLI/adapter versions, surface, permission profile, and governing option/authority identity. Receipts for one equivalent shall not count as receipts for another. A selected option must satisfy the required capability using supported native configuration; labels such as `low`, `high`, `xhigh`, and `max` shall not be silently translated across providers.
+Sources: [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna), [Claude Code model/effort configuration](https://code.claude.com/docs/en/model-config), and [Codex model selection](https://developers.openai.com/codex/models).
 
-Pre-launch validation shall reject an unavailable, unsupported, unauthorized, or unverifiable invocation. Within its envelope, the Manager may select another eligible primary before any attempt starts, recording the choice. Once an attempt starts, subsequent changes follow R-004. Unavailability of one option shall not be reported as unavailability of all eligible options. Missing native evidence blocks the affected claim; it shall not be reported as PASS.
+The exact supplied identifier `gpt-6-luna` is retained; no `6.1` rename is inferred. `medium` is explicitly included; its omission from earlier example lists was not a justified exclusion. API documentation, client availability, account entitlement, and governed role permission MUST remain separate evidence. Every row is pending qualification of its pinned CLI/client, transport, effective effort/mode, and role-specific allowed subset. An approved task MAY use a narrower qualified subset; it MUST NOT silently substitute labels.
 
-### R-004 — Primary, fallback, continuity, and concurrency
+**R-003.1 — Effective configuration.** Each attempt MUST distinguish requested configuration, client-resolved/transmitted configuration, and provider-reported effective metadata where available, including provider/model and native effort/mode. The recorder MUST identify each observation's trusted source and limitations, CLI/adapter versions, permission/surface profile, and governing catalogue/authority identities. The qualification plan MUST define sufficient evidence for each claim. Missing provider metadata MUST remain missing; copying a requested value into an observed field is not proof of effective behavior or computation spent. Preflight MUST reject unsupported, unavailable, unauthorized, or unverifiable invocations. Any native effort downgrade or model rerouting MUST be rejected or handled as an explicit authorized transition under R-004, never accepted under the requested identity. The catalogue MUST separately govern orchestration modes that create subagents; scalar effort authorization alone does not authorize delegation. Initial serial trials disable such native delegation.
 
-For each task, the Manager shall select one eligible primary and declare the applicable ordered fallback sequence and transition conditions. Transitions shall be sequential, preserve task state/evidence, and record why the previous attempt stopped. A retry shall not be relabeled as a new task or primary to bypass the ladder. Replanning requires authority within the existing envelope or escalation under that envelope.
+Before launch, the Manager MAY reselect another qualified eligible primary without enlarging authority. After launch, R-004 governs transitions. Receipts for one equivalent MUST NOT count as receipts for another. Missing capability evidence blocks the affected claim, not every alternative.
 
-The assigned worker normally owns diagnosis, edits, testing, correction, and retesting. Ordinary failures do not justify replacement. Preserve existing bounded checkpoint/stall recovery rules.
+### R-004 — Explicit sequential fallback and continuity
 
-Concurrent primary workers are permitted only for distinct authorized tasks with allocated scopes/dependencies. Concurrent substitutes for one task are not sequential fallback. Combining changes produces a new integrated candidate requiring its own applicable verification and review. Worktrees alone do not satisfy all configuration, credential, service, and tool-channel isolation requirements.
+For each task, the Manager MUST select one eligible primary and bind an ordered finite fallback list, transition conditions, capability floor, attempt limit, and remaining budget to the packet. Logical task identity persists across attempts. Relabeling a retry as a new primary MUST NOT bypass the ladder.
 
-### R-005 — Manager and trusted execution boundary
+**R-004.1 — Proposed availability ladder (approval input DEC-02).** This order is a concrete proposal, not an assertion of an already adopted ranking:
 
-One designated Manager shall own each deliverable's decomposition, scope, integration, candidate freeze, evidence collection, and handback. A trusted host-side execution boundary shall enforce authority, allowed operations, paths, permissions, delegation depth, concurrency, resource budgets, and process lifecycle. Model-generated requests shall not widen that envelope.
+| Starting role / step | Proposed sequence after the selected primary |
+| --- | --- |
+| Implementer at Sol/Opus step | Untried eligible Sol/Opus counterpart → Sonnet → selected eligible Luna/Haiku option → untried eligible Luna/Haiku counterpart → STOP |
+| Implementer at Luna/Haiku step | Untried eligible Luna/Haiku counterpart → STOP |
+| Manager or independent reviewer | Untried eligible counterpart at the authorized step → STOP; no inherited Implementer downgrade ladder |
 
-Provider adapters shall remain thin translations and observers. Preserve `cyaxctl`'s existing Issue #16 no-launch scope. Any launcher must have separately approved ownership and contract. Reuse existing helpers where appropriate; the first pilot does not require a new general scheduler or memory service.
+The Manager chooses either provider first within a pair. In this proposed order, an eligible same-step counterpart is tried before a lower stage; changing that rule is a DEC-02 decision, not a runtime shortcut. Sonnet precedes the Luna/Haiku stage in the proposed Sol/Opus ladder; moving from a Luna/Haiku primary to Sonnet is replanning, not a late upward fallback. Each entry MUST independently satisfy the task's approved capability floor and role restrictions; ineligible entries are skipped without lowering the floor. Cross-step use requires explicit catalogue qualification. The first serial pilot SHOULD qualify same-step failover first; later stages remain inactive until approved and qualified.
+
+**R-004.2 — Transition conditions.**
+
+| Observed condition | Required action |
+| --- | --- |
+| Provider unavailable, rate limit beyond the packet's wait allowance, or unrecoverable transport/process failure | Reconcile the old attempt; advance to the next eligible entry if budget/attempt limits permit. |
+| Concrete stall after the existing bounded checkpoint/recovery procedure | Reconcile and replace within the approved floor; silence alone is insufficient. |
+| Ordinary failed test or repairable implementation error | Same worker diagnoses, corrects, and retests; no automatic fallback. |
+| Evidence that the task exceeds the chosen capability or has ambiguous scientific intent | Block and replan/escalate within existing authority; do not downgrade as a response to difficulty. |
+| Budget exhausted, authority invalid, safety boundary failed, or effects uncertain | Stop; resume only after the applicable reconciliation/authorization. A cheaper model does not reset the budget or cure an authority failure. |
+
+Distinct authorized tasks MAY later have concurrent primaries under R-014. Parallel alternatives for one task MUST NOT be presented as sequential fallback. Any aggregate candidate requires its own identity and applicable checks.
+
+### R-005 — S2 launcher trust model
+
+One designated Manager owns decomposition, scope, integration requests, candidate freeze, evidence collection, and handback. **The launcher, authority verifier, credential broker, reviewer-packet assembler, and any publication finalizer form a separately reviewed S2 trust boundary.** Thin provider adapters translate requests and observe events; they do not own authority.
+
+**R-005.1 — Custody and bypass prevention.** Worker-provider credentials MUST be held only in the trusted launcher/transport domain and MUST NOT be reachable by the Manager's model-accessible environment or tools. The Manager's own legitimate inference transport MAY authenticate through a protected runtime/broker, but tools and descendants MUST NOT obtain reusable credentials or unrestricted provider-call capability from environment variables, files, keychains, helpers, process inspection, descriptors, sockets, or equivalent channels. A shared credential-bearing environment with general model-controlled shell access fails this requirement. These custody, transport-isolation, and bypass-prevention rules apply to every model-accessible Manager, Implementer, and reviewer context and all tools/descendants, regardless of process ancestry.
+
+Only the trusted boundary MAY create an execution attempt. It MUST validate current authority, role/option, scope, permissions, resource budgets, delegation depth, and concurrency. Manager tools MUST be unable to invoke provider CLIs directly or bypass the launcher using renamed binaries, interpreters/SDKs, direct APIs, native subagents, MCP, hooks, plugins, browser integrations, or local services. Candidate-controlled configuration MUST NOT expand these channels. The supported-channel inventory, effective controls, trusted components, and residual assumptions MUST be reviewable. An executable deny-list or prompt instruction alone is insufficient.
+
+**R-005.2 — Independent qualification.** Before native orchestration, the S2 launcher review MUST establish an enforceable separation between protected transport and untrusted tools for the selected CLI/host configurations. Denial/reconciliation scenarios in the verification table MUST be exercised under a bounded G2 qualification-test grant. Passing those checks is a prerequisite for a later autonomous-orchestration grant, not for obtaining the narrow qualification-test grant. Current provider docs describe narrower shell/proxy boundaries, so native flags MUST NOT be assumed to cover every channel. If the separation is infeasible, the configuration is ineligible for autonomous coordination; a separately scoped planning-only/operator-mediated path MAY be evaluated and labeled accordingly.
+
+**R-005.3 — Local-only pilot effects.** Model-accessible Managers, workers, and reviewers MUST have no remote repository publication credentials or write-capable Git/API/MCP/browser channel. Workers return patches or local commits; reviewers write only designated reports/build outputs. A separately trusted finalizer MAY publish or integrate only an exact artifact/destination under the applicable grant. Its existence does not grant that authority.
+
+**Placement proposal (DEC-01):** a separate `tools/CYAXLauncher/` component in `vmmhep/CYAxiverse-agent-exchange`, with its own S2 issue/specification and named maintainer. This path is proposed, not created or approved. Preserve `CYAXControl`/`cyaxctl`'s Issue #16 no-launch contract; orchestration MUST NOT become a Julia package runtime dependency. The first pilot needs this reviewed boundary, not a general scheduler or memory service.
 
 ### R-006 — Versioned task contract
 
-Each task packet shall bind: programme/deliverable/task/episode/attempt identities; contract version and canonical packet identity; governing specification and authority references/validity; role and objective; acceptance criteria; exact baseline and dependencies; allowed scope/worktree/operations/prohibitions; applicable option set, selected primary and fallback rule; effective execution/environment/budget profile; invariants; required checks and review axes; checkpoint/escalation conditions; and approved evidence destinations.
+Each task packet MUST bind: programme/deliverable/task/episode/attempt identities; contract version and canonical packet identity; governing specification and authority references/validity; role and objective; acceptance criteria; exact baseline and dependencies; allowed scope/worktree/operations/prohibitions; applicable option set, selected primary and fallback rule; effective execution/environment/budget profile; invariants; required checks and review axes; checkpoint/escalation conditions; and approved evidence destinations.
 
-Each required field shall have a producer, verifier, and acceptance rule. A CLI envelope must be separately reviewed; ordinary-Chat V0 transport shall not be assumed to authorize execution.
+Each required field MUST have a producer, verifier, and acceptance rule. A CLI envelope MUST be separately reviewed; ordinary-Chat V0 transport MUST NOT be assumed to authorize execution.
 
 ### R-007 — Checked result and evidence contract
 
-Results shall distinguish worker-reported outcome, observed process state, independently checked verification, and approval state. `DONE`, `BLOCKED`, and `FAILED` remain worker terminal outcomes; one predeclared `CHECKPOINT` is nonterminal. Exit zero, schema-valid output, or model-authored completion text alone shall not establish acceptance.
+Results MUST distinguish worker-reported outcome, observed process state, independently checked verification, and approval state. `DONE`, `BLOCKED`, and `FAILED` remain worker terminal outcomes; one predeclared `CHECKPOINT` is nonterminal. Exit zero, schema-valid output, or model-authored completion text alone MUST NOT establish acceptance.
 
-Record commands/checks actually run, exit statuses, observed results, missing checks, changed paths, candidate/artifact identities, assumptions, uncertainty, findings, blockers, usage/cost, and sanitized evidence. Bind provider events to the actual invocation and attempt. Reject missing, contradictory, tampered, or unsupported authority-bearing or terminal-result data. Streaming fragments remain incomplete until terminal requirements are satisfied. Informational extensions may be ignored only under an explicit safe version-compatibility rule.
+The result recorder MUST record commands/checks actually run, exit statuses, observed results, missing checks, changed paths, candidate/artifact identities, assumptions, uncertainty, findings, blockers, usage/cost, and sanitized evidence. The adapter MUST bind provider events to the actual invocation and attempt. The verifier MUST reject missing, contradictory, tampered, or unsupported authority-bearing or terminal-result data. Streaming fragments MUST remain incomplete until terminal requirements are satisfied. Informational extensions MAY be ignored only under an explicit safe version-compatibility rule.
 
 ### R-008 — Failure, interruption, and recovery
 
-Define timeout, cancellation, crash, partial-write, checkpoint, retry, and Manager-loss behavior. Before retrying uncertain execution, reconcile descendants, partial artifacts, and completed effects. Stable task identity, unique attempts, and duplicate-action protection shall prevent accidental repeated actions. Uncertain effects remain blocked pending reconciliation.
+The execution contract MUST define timeout, cancellation, crash, partial-write, checkpoint, retry, and Manager-loss behavior. Before retrying uncertain execution, the host MUST reconcile descendants, partial artifacts, and completed effects. Stable task identity, unique attempts, and duplicate-action protection MUST prevent accidental repeated actions. Uncertain effects MUST remain blocked pending reconciliation.
 
-Budgets cover all Managers, workers, reviewers, probes, and retries. A bounded local recovery journal may record execution facts but cannot create approval, policy, or durable project-status authority.
+Budgets MUST cover all Managers, workers, reviewers, probes, and retries. A bounded local recovery journal may record execution facts but cannot create approval, policy, or durable project-status authority.
 
-### R-009 — Independent review
+### R-009 — Host-authored independent review
 
-Independent reviewers shall receive the exact immutable candidate, approved requirements/rubric, and a fresh isolated context with an auditable invocation/configuration record. Source and approved specifications are permitted common inputs; implementation conversations and unauthorized private memory are not. A new process or different provider alone does not establish independence.
+Independent reviewers MUST receive an exact frozen candidate, independently established requirements/rubric, and a fresh context with an auditable invocation/configuration. Different providers or fresh processes alone do not establish independence. Implementers and material integrators MUST NOT certify their own candidate as independent. SPEC, STANDARDS, and SCIENTIFIC axes retain their governing sign-off rules.
 
-Implementers and material integrators shall not certify their own candidate as independent. Preserve distinct applicable SPEC, STANDARDS, and SCIENTIFIC axes. One report may satisfy multiple formal sign-offs only if the governing protocol permits it. Candidate or requirements changes require explicit applicability analysis before reusing evidence or conclusions.
+**R-009.1 — Packet authorship.** The trusted launcher MUST deterministically assemble the complete review packet from a versioned host-controlled template, verified candidate/base identities and file manifest, authoritative requirements, approved rubric/required axes, reviewer assignment, and required host-recorded evidence including failures. The host MUST record template, input, and materialized packet identities. The Manager MAY request review of a candidate; it MUST NOT author normative reviewer instructions, choose a weaker rubric, omit required inputs, or substitute its narrative for evidence.
+
+Manager-authored claims MAY appear only where the protocol permits them, segregated as untrusted advisory material. Candidate source/logs are review data, not authority to change instructions. The host MUST control resumed sessions, discovered memory, hooks, plugins, and tool settings; supply read-only candidate access and separate writable report/build locations; and independently verify the freeze at startup. A changed candidate, packet, or requirements identity requires a new bound attempt and evidence-applicability analysis. Deterministic packet assembly is a control against Manager contamination, not proof that all prompt-injection risk is eliminated.
 
 ### R-010 — Privacy and authority evidence
 
-Define protected data classes, approved processing, evidence destinations, and tool-channel boundaries before collection. Reject disallowed material before transport, hashing, logging, or publication where the governing contract prohibits those operations. Test with synthetic sentinels rather than private material.
+The privacy contract MUST define protected data classes, approved processing, evidence destinations, and tool-channel boundaries before collection. The boundary MUST reject disallowed material before transport, hashing, logging, or publication where the governing contract prohibits those operations. Privacy tests MUST use synthetic sentinels rather than private material.
 
-Keep private-ledger contents, private locators, credentials, and conversation data out of repository artifacts. Use sanitized engineering evidence and a restricted annex only at an independently approved destination. A digest establishes content identity, not authorship or authorization. Inventory inherited hooks, plugins, instructions, memory, MCP settings, and credentials; validate effective controls across all enabled channels, not only the shell.
+Repository artifacts MUST exclude private-ledger contents, private locators, credentials, and conversation data. Reports MUST use sanitized engineering evidence; any restricted annex MUST use an independently approved destination. A digest establishes content identity, not authorship or authorization. The launcher MUST inventory inherited hooks, plugins, instructions, memory, MCP settings, and credentials, and MUST validate effective controls across all enabled channels.
 
 ### R-011 — Scientific and test integrity
 
-Keep scientific acceptance, evaluator-only checks, accepted tolerances, authority, and permission controls outside the experiment's editable scope. Use independent mathematical checks and appropriate authoritative references. Visible tests may be extended within the task contract, but weakening acceptance criteria shall not improve evaluation results.
+The evaluation MUST keep scientific acceptance, evaluator-only checks, accepted tolerances, authority, and permission controls outside its editable scope. It MUST use independent mathematical checks and appropriate authoritative references. Visible tests MAY be extended within the task contract; acceptance criteria MUST NOT be weakened to improve evaluation results.
 
-Preserve the established Julia/environment verification route. Isolated adapter tests shall not be presented as equivalent package/scientific evidence when their environment changes relevant semantics. Report unavailable checks explicitly.
+Verification MUST preserve the established Julia/environment verification route. Isolated adapter tests MUST NOT be presented as equivalent package/scientific evidence when their environment changes relevant semantics. Operators MUST report unavailable checks explicitly.
 
 ### R-012 — Exact PR #74 subject and versioned requirements
 
-Workstream A shall preserve:
+Workstream A MUST preserve:
 
 - Repository: `vmmhep/CYAxiverse-agent-exchange`.
 - PR: [#74](https://github.com/vmmhep/CYAxiverse-agent-exchange/pull/74).
@@ -184,150 +217,145 @@ Workstream A shall preserve:
 - Original base: `45ee9f4d94f01ff7507d42ff8c6724a218e2f8b3`.
 - Declared changed files: `tools/CYAXControl/src/RolePolicy.jl`, `tools/CYAXControl/src/PrivacyBoundary.jl`, and `tools/CYAXControl/test/runtests.jl`.
 
-Independently verify remote identity, ancestry, tree, complete diff, and actual changed paths. Distinguish any later head. The original source candidate remains unchanged by OC-001.
+The reviewer MUST independently verify remote identity, ancestry, tree, complete diff, and actual changed paths, and MUST distinguish any later head. The original source candidate remains unchanged by OC-001.
 
-Before a formal verdict, freeze the review handoff, references, and requirements identity. Record OC-001 as a versioned clarification of intended selection behavior, including its relationship to the original owner-directed policy contract. Assess historical-contract compliance and clarified intended behavior separately where they differ. Do not retroactively edit the historical contract or inherit a verdict across changed requirements. The new programme's requirement IDs shall not be projected onto historical execution.
+**Formal verdict target:** the frozen candidate against the independently established original requirements applicable to that candidate. The reviewer MUST freeze that baseline, handoff bytes, and references before a verdict. **OC-001 compatibility:** report prospective option-set gaps separately to inform a successor candidate. Every finding/test MUST be tagged original-baseline, OC-001, or both, with an applicability reason. A newly clarified gap MUST NOT become a fabricated historical violation.
+
+Before commissioning expensive native checks, Workstream A's governing authority SHOULD record whether to retain the complete original audit or approve a successor charter focused on retained V1/validator/privacy/provenance infrastructure. Until explicitly revised, the complete existing obligations remain. This programme MUST NOT silently narrow, cancel, or supersede the independent review.
 
 ### R-013 — Preserve the adversarial review obligations
 
-The read-only review shall establish its authoritative baseline independently, including Issue #16, the repository-relative owner-directed policy contract, applicable runtime/handoff/scoped-policy decisions, expiry/supersession, and `EFFICIENCY_MEASURES.md` Version 2. Retrieve canonical private policy through the authorized Google Drive connector or an independently approved successor route. Do not reconstruct unavailable authority from assertions.
+The read-only review MUST establish its authoritative baseline independently, including Issue #16, the repository-relative owner-directed policy contract, applicable runtime/handoff/scoped-policy decisions, expiry/supersession, and `EFFICIENCY_MEASURES.md` Version 2. The reviewer MUST retrieve canonical private policy through the authorized Google Drive connector or an independently approved successor route and MUST NOT reconstruct unavailable authority from assertions.
 
-Mandatory axes are:
+The reviewer MUST cover all of the following axes and actions under the requirement applicability labels from R-012:
 
 1. **Policy:** all required roles; equivalent role options and authorized mixed-provider selection; correct primary/fallback semantics; adoption/digest/scope/time boundaries; preservation of OpenAI defaults and V1 historical bindings; protection against retroactive reinterpretation and V2-to-V1 downgrade acceptance.
 2. **Validators and callers:** inspect `validate_policy_document`, `match_packet_roles`, `selected_roles`, `adopted_policy_from_source`, `require_resolved_policy!`, direct `policy["roles"]` consumers, and handoff/preflight/readiness/dispatch/P0/handback/reviewer-capability paths, including callers outside the diff. Attack malformed, duplicate, unknown, missing, mismatched, and stale inputs.
 3. **Privacy/provenance:** strict scoped token grammar; aliases and provider/model mismatch; mode/effort confusion; caller-authored native proof; wrong thread/turn/context; replay/cross-episode reuse; prohibited propagation before privacy rejection.
 4. **Independence:** self-review, inherited implementation context, omitted axes, wrong candidate/rubric/capability, historical PASS reuse, and Handoff Review PASS misused as dispatch/scientific acceptance.
-5. **Tests:** focused RolePolicy/PrivacyBoundary coverage, applicable CYAXControl regression coverage, and required authorized native checks. Synthetic fixtures do not establish native capability. Record actual commands, versions, exits/results, and missing tests with minimal reproduction specifications. The reviewer makes no implementation changes.
+5. **Tests:** focused RolePolicy/PrivacyBoundary coverage, applicable CYAXControl regression coverage, and required authorized native checks. Synthetic fixtures do not establish native capability. The reviewer MUST record actual commands, versions, exits/results, and missing tests with minimal reproduction specifications, and MUST NOT make implementation changes.
 
-The report shall provide subject identity, requirement coverage, P0-P3 findings with precise code or evidence locations, mechanisms/consequences, smallest corrections, closure verification, actual tests/gaps, and bounded next work. Use `PASS`, `PASS_WITH_NONBLOCKING_FINDINGS`, `REQUEST_CHANGES`, or `BLOCKED_INSUFFICIENT_EVIDENCE` for the declared acceptance target. A demonstrated mandatory defect takes `REQUEST_CHANGES` precedence; missing evidence remains explicit. Without a demonstrated blocker, missing mandatory acceptance evidence yields `BLOCKED_INSUFFICIENT_EVIDENCE`.
+The report MUST provide subject identity, requirement coverage, P0-P3 findings with precise code or evidence locations, mechanisms/consequences, smallest corrections, closure verification, actual tests/gaps, and bounded next work. The reviewer MUST use `PASS`, `PASS_WITH_NONBLOCKING_FINDINGS`, `REQUEST_CHANGES`, or `BLOCKED_INSUFFICIENT_EVIDENCE` for the **original-baseline verdict target in R-012**. The reviewer MUST report OC-001 compatibility gaps separately. A demonstrated mandatory defect MUST take `REQUEST_CHANGES` precedence; missing evidence MUST remain explicit. Without a demonstrated blocker, missing mandatory acceptance evidence yields `BLOCKED_INSUFFICIENT_EVIDENCE`.
 
-Report code acceptance, native test completeness, provider-native capability, private-policy adoption readiness, and dispatch/activation readiness separately. The formal charter determines required roles and native evidence; this programme does not dispatch that review or grant its verdict. Preserve the original review priority/capability only where still applicable under its independently verified authority.
+The report MUST distinguish code acceptance, native test completeness, provider-native capability, private-policy adoption readiness, and dispatch/activation readiness. The formal charter determines required roles and native evidence; this programme does not dispatch that review or grant its verdict. The reviewer MUST preserve the original review priority/capability only where still applicable under its independently verified authority.
 
-### R-014 — Bounded pilot conformance
+### R-014 — Serial pilot, then optional concurrency
 
-After specification approval and separate execution authorization, demonstrate both Claude-Manager/Codex-worker and Codex-Manager/Claude-worker arrangements; independent per-role choices; a fresh read-only reviewer of a frozen candidate; and reconstruction of its evidence. Exercise separately scoped concurrency and aggregate-candidate verification.
+The initial native pilot MUST run serially: one designated Manager and at most one active worker or reviewer, with native child delegation disabled or mediated. Test Claude-Manager/Codex-worker and Codex-Manager/Claude-worker directions in separate trials, then freeze each candidate and request host-authored read-only review. The host MUST confirm termination/reconciliation of the previous attempt and descendants before replacement.
 
-Also exercise invalid authority/capability, forbidden writes, scope escape, contaminated review context, malformed/partial output, false completion, interruption, retry after uncertain completion, and Manager loss. Use synthetic or replayable tasks with no production-side effects and explicit resource/credential limits. Native option availability and adapter support shall be reported per tested configuration rather than generalized to every option.
+Conformance includes option/effort identity, independent provider choice, packet/result validity, prohibited-operation rejection, false completion, partial output, interruption, recovery, and Manager loss. The pilot MUST use synthetic/replayable tasks, local artifacts, and bounded resources and MUST report support per tested configuration.
 
-### R-015 — Controlled evaluation
+Concurrent work is a later optional milestone requiring separate authorization and evidence that shared Git metadata, hooks/configuration, Julia depots/precompile caches, ports, credentials, and services cannot violate task scope or corrupt results. Worktrees alone are insufficient. The verification route MUST preserve regular-host Julia/environment semantics and the repository CI gate under R-011; an operator-mediated route MAY be used where approved. Serial success does not claim concurrency or aggregate-integration success.
 
-Predeclare task snapshots, environment, role-to-model assignments, budgets, outcomes, repeat/run-order policy, stopping rules, uncertainty reporting, and minimum benefit required for adoption. Separate development cases from held-out evaluation cases, preferably by related defect family. Hide reference fixes, evaluator-only checks, answer-bearing later discussion, and held-out lessons. Include clean cases and plausible incorrect repairs.
+### R-015 — Revised Phase C evaluation plan
 
-Where budget permits compare:
+**R-015.1 — Primary comparisons.** The initial evaluation MUST use three arms and exactly two primary paired contrasts: D-single versus A-single, and D-coordinated versus D-single.
 
-| Condition | Instructions | Verification |
-| --- | --- | --- |
-| A | Current approved baseline | Current approved baseline |
-| B | Mechanism-first variant | Current approved baseline |
-| C | Current approved baseline | Enhanced verification |
-| D | Mechanism-first variant | Enhanced verification |
+| Arm | Instructions | Verification | Topology |
+| --- | --- | --- | --- |
+| A-single | Current approved baseline | Current approved baseline | Single worker |
+| D-single | Mechanism-first | Enhanced | Single worker |
+| D-coordinated | Mechanism-first | Enhanced | Manager plus bounded worker |
 
-Keep model/configuration fixed within a matched comparison to isolate the intervention. **Experimental control is not an operational provider lock.** Evaluate coordination separately against an approved single-worker baseline; record all role/model assignments. An A-versus-D-only budget supports a conclusion about the combined intervention, not attribution to individual components.
+Every arm MUST retain the same applicable mandatory authority, privacy, scientific, test-integrity, and independent-review gates. Enhanced verification is the experimental addition; baseline A is not exempt from mandatory safeguards.
 
-Measure verified correction, introduced regressions, detection, false-positive blocking, false acceptance, test integrity, provenance, recovery, latency, human intervention, and full cost including failed probes and all actor calls. Small-sample conclusions remain exploratory. Mandatory authority/scientific gates cannot be traded away for an aggregate score.
+B (mechanism-first only), C (verification only), provider rankings, extra role/model combinations, and concurrency MAY be secondary, budgeted experiments. They are not required factorial dimensions. Two-way provider conformance is an operational requirement, not a demand for every performance cross-product.
+
+Matched cases MUST hold repository/environment, worker configuration, independent acceptance oracle, and declared total resource caps fixed and MUST record all role assignments and intervention differences. The topology contrast MUST include every additional Manager/reviewer cost. The shared D-single comparator MUST be identified in analysis. A-versus-D estimates the combined intervention; component attribution requires separate evidence. Experimental control creates no operational provider lock.
+
+**R-015.2 — Exposure and holdouts.** The case register MUST record defect/fix provenance and first known public exposure, exact model/version, any reliable cutoff source, and exposure risk. The design SHOULD prefer post-cutoff cases where evidence supports that label, but MUST NOT infer absence from model weights merely from dates or withheld prompts. Unknown training exposure remains unknown.
+
+The set MUST include historical defects and independently authored mutation-injected/synthetic cases with independently checked, realistic ground truth. Reports MUST separate public/high-risk, unknown-risk, and newly authored/lower-known-risk cases, preserving any uncertainty. No case is training-data-clean merely because the worker cannot see its reference fix.
+
+The protocol MUST split development and holdouts by defect family before tuning and MUST protect hidden tests, reference repairs, later answer-bearing Git history/discussion, and held-out lessons from all worker tool channels. The oracle MUST accept valid alternative repairs rather than demand reference-patch matching. The set MUST include no-defect cases and plausible incorrect repairs.
+
+**R-015.3 — Sample size and inference.** The protocol MUST freeze case/family counts, outcomes, run order, repeats, matching, analysis, stopping rules, and dispositions of failures/blocked/over-budget attempts before execution. Repeats and related mutations MUST NOT count as independent defects. Reports MUST show paired per-case results, denominators, effects, uncertainty, integrity failures, and missing evidence. Confirmatory claims MUST first establish that independent cases can resolve the minimum meaningful effect. Insufficient precision is exploratory. The intervention MUST NOT be tuned, and sampling MUST NOT be extended in response to observed results, merely to obtain a desired conclusion.
+
+**R-015.4 — Total effort and governance cost.**
+
+| Dimension | Required accounting |
+| --- | --- |
+| Human active person-time | Owner approvals/review, handoff/packet preparation, review dispatch, intervention, recovery, evidence reconciliation, and in-scope integration/adoption preparation. |
+| Agent/infrastructure expenditure | All Manager, worker, reviewer, verifier, optimizer/probe, failed and retried calls; provider charges and execution resources. |
+| Elapsed time | End-to-end completion and critical-path gate waiting, separating queueing/external delays. |
+| Setup/support | One-time harness/governance setup and recurring maintenance, separate from per-task costs. |
+
+Reports MUST include this cost vector unless an approved aggregation exists. Active minutes and waiting time MUST NOT be conflated; parallel durations MUST NOT be double-counted as elapsed time. Any money/time conversion or setup amortization MUST state valuation and task-volume assumptions. Lower tokens or worker latency alone cannot establish lower total effort.
+
+**R-015.5 — Decision thresholds and exploratory scope.** Before Phase C specification approval, DEC-04 MUST fix numerical minimum benefit, primary quality endpoint/margin, human-effort and monetary/resource ceilings, elapsed-time bound, uncertainty rule, maximum rounds, and finite total budget/stop condition. These remain unresolved approval inputs; this draft does not invent numbers or claim confirmatory readiness.
+
+Authority, privacy, scientific, and test-integrity requirements are hard gates. Exploratory results MAY support a separately reviewed bounded safety/verification improvement with its own mechanism, conformance, and regression evidence. Exploratory results alone MUST NOT justify a CLI-first default, general coordination superiority, or empirical equality of model options.
 
 ### R-016 — Lessons and research inputs
 
-The first evaluation shall use frozen predeclared instruction variants. Any recursive or online self-evolution experiment requires separately approved scope and controls. Extract lessons from development cases, freeze the lesson bundle before transfer evaluation, and follow the existing candidate/validated/promotion lifecycle. No automatic normative promotion is permitted.
+The first evaluation MUST use frozen predeclared instruction variants. Any recursive or online self-evolution experiment requires separately approved scope and controls. The programme MUST extract lessons from development cases, freeze the lesson bundle before transfer evaluation, and follow the existing candidate/validated/promotion lifecycle. No automatic normative promotion is permitted.
 
-Use Harness² as methodological input only. Its implementation's documented unrestricted networking/disabled sandbox defaults are not adopted. Identify the exact title/version/source and intended contribution of the separately mentioned AI-agent engineering benchmark before claiming benchmark alignment.
+The programme MUST treat Harness² as methodological input only; its execution defaults are not adopted. The unnamed AI-agent engineering benchmark is explicitly excluded from the first slice and its claimed evidence. Adding it later requires its exact title, version, primary source, intended contribution, and scope review; do not substitute another benchmark.
 
 ### R-017 — Evidence-led adoption and historical continuity
 
-Adoption proposals shall be limited to supported surface-default changes, orchestration procedures, evidence helpers, instructions, and validated lessons. Document regressions, negative results, uncertainty, support cost, ownership, and rollback/revocation conditions. Normative adoption requires the applicable reviews, exact identity, authority, and effective interval.
+Adoption proposals MUST be limited to supported surface-default changes, orchestration procedures, evidence helpers, instructions, and validated lessons. Proposals MUST document regressions, negative results, uncertainty, support cost, ownership, and rollback/revocation conditions. Normative adoption requires the applicable reviews, exact identity, authority, and effective interval.
 
-Preserve historical episode interpretation and explicit expiry, supersession, and revocation handling for future actions, including in-flight episodes at a boundary. Pilot acceptance alone shall not enact policy, merge code, or activate actors.
+Adoption MUST preserve historical episode interpretation and explicit expiry, supersession, and revocation handling for future actions, including in-flight episodes at a boundary.
+
+**R-017.1 — Programme exit.** At the predeclared stopping/budget boundary, the programme MUST record adopt, narrow, revise-with-new-authorization, or do-not-adopt. If coordination fails to meet the approved quality, benefit, and cost criteria against D-single, the programme MUST close its adoption branch with a do-not-adopt recommendation. An inconclusive result justifies declining a default change without proving ineffectiveness. Further experiments require a new bounded question and authorization. Independently useful safety/verification improvements MAY continue as separately scoped proposals; the independently governed PR #74 audit retains its own disposition.
 
 ## Acceptance gates
 
-### CYAX-0209 G0 — Definition prepared
+R-001 requires these decisions and their evidence to remain distinct. Only G0 preparation is authorized/completed by the present deliverable. All later grants apply to their exact scope and candidate, not automatically to the whole programme.
 
-**Objective:** produce the governing Issue and draft specification incorporating OC-001.
+| Gate | Acceptance / decision | Stop or boundary |
+| --- | --- | --- |
+| CYAX-0209 G0 — Definition prepared | Governing Issue, reviewable draft PR, canonical IDs, source/candidate identities, unresolved inputs, and sanitized preparation checks | No operational authority follows from preparation. |
+| CYAX-0209 G1A — Independent policy audit | R-012 original-baseline verdict, separate OC-001 gaps, R-013 coverage/tests, five readiness judgments | Missing mandatory authority/evidence blocks the affected conclusion; retain feasible static findings. Charter revision belongs to Workstream A. |
+| CYAX-0209 G1B — Architecture/spec approval | Exact revision, required SPEC/STANDARDS and applicable reviews, durable approval reference; resolve DEC-01–DEC-03 for the first launcher slice | Unresolved normative intent blocks that slice. Phase C is unapproved until DEC-04 is resolved; a narrower approval MUST state exclusions. |
+| CYAX-0209 G2 — Implementation and native pilot grants | Record consequential implementation and native execution as separate grants: actor/surface/permission envelope, finite budget, environment, evidence destination, test plan, current policy dependencies | A narrow native qualification-test grant can precede a separate orchestration grant; R-005 qualification is prerequisite for the latter. Implementation authority grants neither. Authorized alternatives may be chosen without widening scope. |
+| CYAX-0209 G3 — Serial operational conformance | Pilot-applicable R-002–R-011 and R-014: both directions, option provenance, host-authored review, rejection and recovery | Authority/permission escape, unreconciled effects, or missing required evidence stop the affected trial. No concurrency claim. |
+| CYAX-0209 G3C — Optional later concurrency | Separate authorized scope, shared-resource isolation, aggregate candidate checks and applicable review | Serial conformance is prerequisite; concurrency is not required to conclude the initial evaluation. |
+| CYAX-0209 G4 — Evaluation concluded | R-015/R-016 paired outcomes, exposure strata, full cost, uncertainty, negative results, recommendation against frozen thresholds | Leakage, invalid oracle, changed criteria, or uncontrolled differences invalidate the affected inference. Negative/inconclusive evidence can complete the bounded study. |
+| CYAX-0209 G5 — Adoption/disposition | Explicit adopt/narrow/revise/do-not-adopt decision; integration, policy adoption, and activation each have separate current authorization and evidence | Missing grants or failed criteria prevent the affected action. R-017.1 permits closure without adoption. |
 
-**Acceptance:** canonical draft location and reviewable preparation PR; requirements, audit identity, authority boundaries, pilot/evaluation plan, related work, and unresolved decisions stated; no claim of normative approval.
-
-**Stop condition:** unresolved publication safety or scope that would require execution/implementation. Continue unaffected drafting where possible.
-
-### CYAX-0209 G1A — Independent policy audit
-
-**Objective:** obtain the separately governed exact-candidate review.
-
-**Acceptance:** frozen source/requirements/handoff identities, mandatory coverage, actual evidence and scoped verdict, and the five separate readiness judgments from R-013.
-
-**Stop condition:** mandatory authority/identity evidence unavailable, review-independence violation, or defect requiring correction. Missing evidence must not erase feasible static findings. This gate does not grant CLI execution authority.
-
-### CYAX-0209 G1B — Architecture/specification approval
-
-**Objective:** approve the contract and resolve normative decisions for the intended first slice.
-
-**Acceptance:** required review roles and durable approval reference bound to the exact reviewed revision; approved ownership, option-selection/fallback rules, enforcement boundary, privacy/review criteria, and evaluation design.
-
-**Stop condition:** unresolved normative intent or missing required review. Drafting may proceed alongside G1A; dependencies are determined by behavior actually invoked.
-
-### CYAX-0209 G2 — Implementation and pilot authorization
-
-**Objective:** authorize a bounded slice with explicit actions and budget.
-
-**Acceptance:** separate implementation and native-execution grants as applicable; current operational policy dependencies; approved actor/options/surface/permission envelope; failure limits, environment route, evidence destinations, and test plan. Authorization may name an option set without permanently fixing one provider.
-
-**Stop condition:** missing scope/authority, unsupported configuration, or inability to enforce the envelope. An authorized alternative may be selected under R-002/R-004; this is not permission to enlarge the option set.
-
-### CYAX-0209 G3 — Operational conformance
-
-**Objective:** demonstrate pilot-applicable R-002 through R-011 and R-014 for the approved configuration. R-012/R-013 remain in G1A; G2 checks any policy-audit dependencies of the behavior actually invoked.
-
-**Acceptance:** both coordination directions, selected-option provenance, independent review, bounded concurrency/integration, prohibited-operation rejection, and recovery evidence pass their predeclared criteria.
-
-**Stop condition:** authority/permission escape, unreconciled side effects, invalid acceptance evidence, or required verification missing. Partial success remains scoped.
-
-### CYAX-0209 G4 — Evaluation concluded
-
-**Objective:** determine verified benefit and cost under R-015/R-016.
-
-**Acceptance:** matched comparisons and holdouts, per-case results, full cost, integrity checks, negative results, uncertainty, and a supported recommendation against predeclared thresholds.
-
-**Stop condition:** evaluator leakage, changed acceptance criteria, invalid scientific oracle, or uncontrolled intervention differences that prevent the proposed inference. A sound negative result may satisfy this gate.
-
-### CYAX-0209 G5 — Adoption decision and authorized activation
-
-**Objective:** make and execute only the separately approved adoption decision.
-
-**Acceptance:** explicit adopt/narrow/revise/do-not-adopt decision; any integration, policy update, and activation individually authorized and evidenced; rollback/revocation responsibilities and historical continuity recorded.
-
-**Stop condition:** missing required decision, failed adoption criteria, or activation conditions unsatisfied. A documented decision not to adopt can close the programme without claiming implementation/activation success.
+Each gate MUST report satisfied, failed, blocked, or not applicable, with evidence and reason. Candidate/requirements changes require a new identity and explicit evidence-applicability analysis.
 
 ## Verification requirements
 
-Verification must be proportional to each slice and must report checks actually run. Preparation uses content/structure, reference, privacy, and exact-file scope checks; it does not claim Julia/native tests or a formal independent architecture verdict.
+Verification MUST be proportional to each slice and MUST report checks actually run. Preparation uses content/structure, reference, privacy, and exact-file scope checks; it does not claim Julia/native tests or a formal independent architecture verdict.
 
 Minimum subsequent scenarios include:
 
-| Scenario | Expected evidence |
-| --- | --- |
-| Either declared equivalent selected while both are eligible/available | Both choices accepted without a provider priority or new Owner approval inside the same envelope. |
-| OpenAI Manager with Anthropic Implementer and independently eligible reviewer; reverse direction | Role-level authorization without a provider-wide profile lock. |
-| Different tasks choose different eligible primaries | No inherited global configuration constraint. |
-| Primary unavailable before start | That invocation blocked; permitted reselection recorded without claiming every alternative unavailable. |
-| Failure after start | Declared sequential transition, continuity, reconciled effects, and new attempt identity. |
-| Retry disguised as new primary, or concurrent fallback for same task | Rejection unless separately authorized replanning actually permits it. |
-| Receipt names an equivalent different from actual/selected execution | Discrepancy rejected or reconciled; no identity substitution. |
-| Manager invents an equivalent, native effort mapping, or permission | Rejection outside the governed option/configuration envelope. |
-| Sonnet appears only as fallback but is used as primary | Rejection unless applicable primary eligibility exists. |
-| Requirements change while PR #74 bytes stay fixed | New requirements identity; explicit historical/current-intent distinction and evidence reuse analysis. |
-| V1 history, malformed V2, expired/tampered scope, replayed native proof | Correct preserved historical binding or rejection, as applicable. |
-| Scientific defect and plausible wrong repair | Independent oracle, immutable tolerances, regression/test-integrity evidence. |
-| Crash, cancellation, Manager loss, uncertain completion | No unaccounted descendant or duplicate action; truthful blocked/failed/partial reporting. |
+| Requirement | Scenario | Expected evidence |
+| --- | --- | --- |
+| R-002 | Either declared equivalent selected while both are eligible/available | Both choices accepted without a provider priority or new Owner approval inside the same envelope. |
+| R-002, R-014 | OpenAI Manager with Anthropic Implementer and independently eligible reviewer; reverse direction | Role-level authorization without a provider-wide profile lock. |
+| R-002 | Different tasks choose different eligible primaries | No inherited global configuration constraint. |
+| R-003–R-004 | Primary unavailable before start | That invocation blocked; permitted reselection recorded without claiming every alternative unavailable. |
+| R-004, R-008 | Failure after start | Declared sequential transition, continuity, reconciled effects, and new attempt identity. |
+| R-004 | Retry disguised as new primary, or concurrent fallback for same task | Rejection unless separately authorized replanning actually permits it. |
+| R-003, R-007 | Receipt names an equivalent different from actual/selected execution | Discrepancy rejected or reconciled; no identity substitution. |
+| R-002–R-005 | Manager invents an equivalent, native effort mapping, or permission | Rejection outside the governed option/configuration envelope. |
+| R-004 | Sonnet appears only as fallback but is used as primary | Rejection unless applicable primary eligibility exists. |
+| R-012–R-013 | Requirements change while PR #74 bytes stay fixed | New requirements identity; explicit historical/current-intent distinction and evidence reuse analysis. |
+| R-013 | V1 history, malformed V2, expired/tampered scope, replayed native proof | Correct preserved historical binding or rejection, as applicable. |
+| R-011, R-015 | Scientific defect and plausible wrong repair | Independent oracle, immutable tolerances, regression/test-integrity evidence. |
+| R-008 | Crash, cancellation, Manager loss, uncertain completion | No unaccounted descendant or duplicate action; truthful blocked/failed/partial reporting. |
+| R-005.1 | Manager tools attempt provider CLI/API/SDK/MCP/native delegation or credential extraction | Legitimate inference transport works; unauthorized launch/credential reuse is prevented across enabled channels. |
+| R-005.3 | Worker/Manager attempts Git push or repository API/browser/MCP write | Remote publication denied; local artifact identity retained. |
+| R-009.1 | Manager omits an axis, edits reviewer prompt, or candidate injects configuration | Host packet retains required inputs/axes; candidate cannot alter execution permissions or review authority. |
+| R-009.1 | Candidate changes after freeze | Identity mismatch blocks review startup. |
+| R-014 | Second active worker or surviving descendant in initial pilot | Launch denied until serial lifecycle reconciliation; later concurrency needs its own evidence. |
+| R-002.1 | Role-specific quality-floor/integrity trigger fires | Scoped stop/quarantine and eligibility review; no automatic permanent catalogue rewrite. |
+| R-015.2–R-015.5 | Public fix exposure, repeated mutations, approval delay, or small sample | Risk-stratified results, independent units, governance costs, and exploratory limits reported. |
+| R-017.1 | No qualifying coordination benefit by budget boundary | Explicit close/do-not-adopt recommendation; no automatic extension. |
 
-Required native checks need an authorized route/operator. A read-only review can inspect existing verifiable receipts without being granted launch authority. Candidate freeze/review evidence must identify code and governing requirements separately.
+Required native checks need an authorized route/operator. A read-only review can inspect existing verifiable receipts without being granted launch authority. Candidate freeze/review evidence MUST identify code and governing requirements separately.
 
 ## Interfaces and compatibility
 
 - Draft a versioned provider-neutral task/result/evidence envelope and thin adapters. The final wire schema, compatibility rules, subprocess implementation, and native configuration mapping belong to the approved slice's subordinate plan.
 - Preserve existing V1 bindings and strict parsing. Do not silently reinterpret a malformed V2 record through V1 or widen accepted token grammar outside its scope.
 - Keep ordinary-Chat V0, private policy authority, deterministic control-plane functions, and new execution transport distinct.
-- Preparation changes no public Julia API, scientific behavior, persisted scientific schema, supported package environment, or package version. Package-infrastructure SemVer impact: none for preparation. Implementation slices must declare their actual impact separately.
-- Agent tooling must not become a runtime dependency of `using CYAxiverse`.
+- Preparation changes no public Julia API, scientific behavior, persisted scientific schema, supported package environment, or package version. Package-infrastructure SemVer impact: none for preparation. Implementation slices MUST declare their actual impact separately.
+- Agent tooling MUST NOT become a runtime dependency of `using CYAxiverse`.
 
 ## Dependencies and blockers
 
@@ -345,7 +373,7 @@ For Workstream A also verify `handoff-reviews/control-desk-cross-provider-eligib
 - [#182](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/182): ordinary-Chat V0 Handoff Review runtime.
 - [#198](https://github.com/Julia-meets-String-Theory/CYAxiverse.jl/issues/198): engineering skills/scientific certification; coordinate reuse and preserve separate acceptance.
 
-Related work is not automatically a blocking dependency or adopted implementation. Add native dependency relationships only for a concrete blocked outcome. Architecture preparation does not require every policy audit conclusion; execution must satisfy the dependencies of invoked behavior.
+Related work is not automatically a blocking dependency or adopted implementation. Add native dependency relationships only for a concrete blocked outcome. Architecture preparation does not require every policy audit conclusion; execution MUST satisfy the dependencies of invoked behavior.
 
 ### Primary research/interface references
 
@@ -353,27 +381,28 @@ Related work is not automatically a blocking dependency or adopted implementatio
 - [Codex approvals/security](https://developers.openai.com/codex/agent-approvals-security).
 - [Claude Code programmatic execution](https://code.claude.com/docs/en/headless).
 - [Claude Code shell sandbox scope](https://code.claude.com/docs/en/sandboxing).
+- [GPT-6.1 Sol native API effort](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [GPT-6 Luna native API effort](https://developers.openai.com/api/docs/models/gpt-6-luna), [Codex models](https://developers.openai.com/codex/models), and [Claude Code model/effort configuration](https://code.claude.com/docs/en/model-config).
 - [Harness² paper v1](https://arxiv.org/html/2610.14224v1) and [reference implementation](https://github.com/google-research/harness2).
 
 Pin actual execution versions for evidence; those versions are observations/experimental controls, not permanent architecture selections.
 
-## Open owner decisions
+## Open approval inputs
 
-The equivalent-option principle and preparation authorization are settled by OC-001. Do not ask the Owner to approve them again.
+OC-001's equivalent-option principle and preparation authorization are settled. The following are concrete remaining decisions, not requests to repeat those approvals.
 
-Before the relevant later gate, resolve:
+| ID | Proposed disposition / missing value | Required boundary |
+| --- | --- | --- |
+| DEC-01 | Separate S2 launcher at `vmmhep/CYAxiverse-agent-exchange/tools/CYAXLauncher/`; approve owning specification, maintainer, trust model, and feasibility evidence plan. Path is proposed, not approved. | G1B launcher slice; qualification evidence before G2 native orchestration. |
+| DEC-02 | Approve or amend R-004.1's ordered ladder; complete per-role/task capability floors, primary/fallback membership, pinned-client native effort/mode subsets, and trusted qualification sources. | G1B first execution contract; availability/permission receipts before each native attempt. |
+| DEC-03 | Freeze serial pilot scope, permitted tool channels, credentials/transport isolation, task-specific surface override, regular-host verification route, resource limits, stop/quarantine and recovery rules, reviewer packet template/rubric, evidence destinations. | Relevant G1B contract and separate G2 grants. |
+| DEC-04 | Numerical minimum benefit and endpoint, quality margin, human/money/resource/time ceilings, independent case/family register, analysis precision, maximum rounds, total budget, finite stop rule. | Phase C specification approval and native evaluation authorization. Unresolved: no confirmatory/adoption readiness claim. |
+| DEC-05 | Unnamed benchmark excluded from first slice; exact source/version/contribution required only if a later amendment includes it. | Any later claim of benchmark alignment. |
+| DEC-06 | Workstream A authority decides whether full original-candidate audit remains useful before expensive native checks; existing complete charter remains until explicitly revised. | Independent G1A commissioning; no programme-imposed narrowing. |
 
-1. Launcher/adapter repository ownership and first independently reviewable S1/S2 slice.
-2. Authoritative option catalogue, per-role primary/fallback eligibility, native effort mappings, and trusted capability evidence source. Primary provider choice within an approved set remains delegated to the Manager.
-3. Any operational policy adoption dependencies, scope validity, and revocation/in-flight handling not already settled by governing sources.
-4. Pilot envelope: actor/delegation limits, allowed operations, runtime/verification route, credentials, budgets, and recovery policy.
-5. Frozen evaluation set, exact engineering benchmark reference, independent scientific oracles, repeats/budgets, and adoption thresholds.
-6. Applicable formal review roles, review-context controls, evidence/report destinations, and exact review candidates.
-
-No unresolved decision here blocks the authorized preparation deliverable. None may be guessed to authorize later consequential work.
+Confirm provisional S3 classification during G1B; any reclassification preserves S2 trust-boundary review and all grants. Architecture drafting and scoped review can proceed while later evaluation inputs remain unresolved.
 
 ## Completion criterion
 
 Preparation is complete when CYAX-0209 G0 is evidenced by this governing draft and its linked preparation PR. The specification remains draft and the programme remains open.
 
-The programme is complete only when the relevant audit, contract approval, authorized pilot, and controlled evaluation have produced their scoped evidence and the Owner has recorded an explicit adoption decision. If adoption is approved, the necessary integration/policy/activation actions require their separate authorization and evidence. A defensible negative result and an explicit do-not-adopt decision can complete the research objective. A successful demonstration, merged draft, or collection of agent PASS messages cannot by itself satisfy completion.
+The bounded coordination programme concludes with its scoped evidence, unresolved limitations, and explicit adopt/narrow/revise/do-not-adopt decision under R-017.1. A negative or inconclusive result can end it without changing defaults. Closure MUST identify any independently governed work, including PR #74 review, that continues under its own authority. Adoption-dependent actions use the separate G5 grants. A merged draft or agent agreement is not programme completion.
