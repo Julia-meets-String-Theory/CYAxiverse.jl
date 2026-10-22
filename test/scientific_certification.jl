@@ -3,14 +3,6 @@ using TOML
 
 const SC = CYAxiverse.scientific_certification
 
-function _coverage_output_args()
-    options=Base.JLOptions()
-    if options.code_coverage!=0 && options.output_code_coverage==C_NULL
-        return ["--code-coverage=$(tempname()).info"]
-    end
-    String[]
-end
-
 @test SC._IR[] === nothing
 
 # CYAX_R2_PROOFOPTIONS_EXACT_RATIONAL_TESTS_BEGIN
@@ -89,7 +81,7 @@ end
 
 function _run_scientific_cli(repository_root, input_path, certificate_path,
         input_sha256, certificate_sha256; precision=256)
-    argv=vcat(String[Base.julia_cmd().exec...],_coverage_output_args(),String["--startup-file=no","--project=$repository_root",
+    argv=vcat(String[Base.julia_cmd().exec...],child_coverage_args(),String["--startup-file=no","--project=$repository_root",
         joinpath(repository_root,"scripts","verify_scientific_certificate.jl"),
         "--inputs",input_path,"--certificate",certificate_path,
         "--expect-input-sha256",input_sha256,
@@ -108,7 +100,7 @@ end
     status_argv=["git","-C",repository_root,"status","--porcelain=v1","--untracked-files=all"]
     before_status=read(Cmd(status_argv),String)
     options=Base.JLOptions()
-    detached_coverage=_coverage_output_args()
+    detached_coverage=child_coverage_args()
     trace_path=nothing
     if options.code_coverage!=0 && options.output_code_coverage==C_NULL
         @test length(detached_coverage)==1
@@ -778,7 +770,7 @@ include(joinpath(@__DIR__, "fixtures", "scientific_certification", "run_fixture.
         @test startswith(relpath(trace_path,repository_root),"..")
         @test !ispath(trace_path)
     else
-        @test isempty(_coverage_output_args())
+        @test isempty(child_coverage_args())
     end
 end
 
@@ -1900,7 +1892,7 @@ end
             model,dotted_provenance_root;source_ref=source,environment_ref=environment)
         @test !ispath(dotted_provenance_directory)
 
-        cli_argv=vcat(String.(Base.julia_cmd().exec),_coverage_output_args(),String["--startup-file=no",
+        cli_argv=vcat(String.(Base.julia_cmd().exec),child_coverage_args(),String["--startup-file=no",
             "--project=$repository_root",joinpath(repository_root,"scripts",
             "verify_scientific_certificate.jl"),"--inputs",written.input_path,
             "--certificate",missing_status_path,"--expect-input-sha256",written.input_sha256,
