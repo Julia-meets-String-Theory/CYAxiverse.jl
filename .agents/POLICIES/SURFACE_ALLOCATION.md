@@ -838,6 +838,40 @@ when the referenced information is required to perform the task correctly.
 
 Necessary information must exist in the packet or in explicitly identified authoritative sources.
 
+### 12.4 Role-specific output and coordination
+
+Across Chat, Work, Codex app and IDE surfaces, use the smallest complete
+decision packet: task/revision, status, material change, exact retrievable
+evidence reference, next owner/action and material limitation. Omit empty
+prose fields; preserve every mandatory schema field and evidence binding.
+Discovery-only channels carry only permitted discovery metadata, with
+substantive findings retained in the authorized evidence artifact.
+
+The Facilitator reports programme implications and the critical dependency;
+the Manager reports delivery disposition and acceptance obligations;
+Implementers report changed behavior and observed verification; independent
+reviewers report a revision-bound verdict, evidence-backed findings and limits.
+General chat should answer the question directly. Role-specific soft prose
+targets are maintained in the applicable EFFICIENCY_MEASURES version 2 output
+contract; necessary scientific reasoning, proofs and uncertainty take precedence.
+
+Use one authorized monitoring owner/route per dependency, retained cursors and
+completion-aware waits. Preserve required health checks, authorized cadence and
+notification intent. Do not repeatedly prompt active workers or reload unchanged
+history. An idle Manager with an outstanding delivery should inspect the exact
+dependency and consume new results once.
+
+Adopt communication changes at the next natural safe boundary without
+interrupting, restarting, replacing or duplicating active work. Propagate the
+applicable delta through the existing authorized hierarchy at a normal
+assignment or handback; note observed adoption in existing state rather than
+creating a reporting process. Keep paused work and holds intact.
+
+These rules change no role/surface allocation, dispatch authority, model or
+reasoning requirement, scientific scope, acceptance gate, privacy constraint or
+fresh-context review requirement. Reuse verified immutable evidence within its
+scope; refresh mutable authority and currentness at consequential transitions.
+
 ## 13. Surface-selection decision procedure
 
 When selecting a surface, determine in order:
