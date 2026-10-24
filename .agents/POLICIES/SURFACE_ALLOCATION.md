@@ -1,6 +1,10 @@
 # CYAxiverse Agent Surface Allocation Policy
 
 **Status:** Adopted  
+**Version:** 1.1
+
+**Policy revision date:** 2026-10-24
+
 **Scope:** CYAxiverse development, research, review, documentation, and agent orchestration  
 **Purpose:** Define how execution surfaces are selected for CYAxiverse work without conflating interface choice with role, authority, model configuration, permissions, or agent topology.  
 **Product capability assumptions last reviewed:** 2026-09-23
@@ -852,7 +856,7 @@ the Manager reports delivery disposition and acceptance obligations;
 Implementers report changed behavior and observed verification; independent
 reviewers report a revision-bound verdict, evidence-backed findings and limits.
 General chat should answer the question directly. Role-specific soft prose
-targets are maintained in the applicable EFFICIENCY_MEASURES version 2 output
+targets are maintained in the applicable EFFICIENCY_MEASURES version 2.1 output
 contract; necessary scientific reasoning, proofs and uncertainty take precedence.
 
 Use one authorized monitoring owner/route per dependency, retained cursors and
@@ -1196,3 +1200,11 @@ A proposed change SHOULD identify:
 Surface preferences SHOULD evolve when evidence supports doing so.
 
 Role boundaries, authority boundaries, and independent-review requirements MUST NOT be weakened merely to accommodate a preferred interface.
+
+### 21.1 Revision history
+
+- **1.1 (2026-10-24):** First explicit version label after the previously
+  unversioned adopted policy. Adds section 12.4 for bounded role outputs,
+  evidence references and safe-boundary coordination; references the version
+  2.1 efficiency contract. Surface allocations, permissions, scientific gates
+  and fresh-context independent-review requirements are unchanged.
