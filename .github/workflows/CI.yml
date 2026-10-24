@@ -78,6 +78,40 @@ jobs:
         with:
           coverage: false
 
+  cytools-bridge:
+    name: CYTools bridge tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+          arch: x64
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      # PyCall is only a weak dependency of the package, so the Fast job cannot
+      # see it and skips the CYTools initialization smokes. Install it in the
+      # default environment against the runner's Python; the smokes use a stub
+      # CYTools package and never need a real CYTools or MOSEK installation.
+      - name: Install PyCall against the runner's Python
+        run: |
+          export PYTHON="$(command -v python)"
+          julia --startup-file=no -e 'using Pkg; Pkg.add("PyCall"); Pkg.build("PyCall")'
+      - name: Run CYTools initialization tests with PyCall visible
+        run: |
+          julia --startup-file=no --project=. -e '
+            using Test, CYAxiverse
+            Base.find_package("PyCall") === nothing &&
+                error("PyCall is not visible, so the CYTools smokes would be skipped")
+            include("test/cytools_initialization.jl")'
+
   full:
     name: Full test suite
     if: github.event_name != 'pull_request' || github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-tests')

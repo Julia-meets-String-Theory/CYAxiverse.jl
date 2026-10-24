@@ -23,6 +23,7 @@ end
 
 include(joinpath(@__DIR__, "coverage_support.jl"))
 include(joinpath(@__DIR__, "optional_plotting.jl"))
+include(joinpath(@__DIR__, "cytools_initialization.jl"))
 include(joinpath(@__DIR__, "path_remediation.jl"))
 include(joinpath(@__DIR__, "scientific_certification.jl"))
 
@@ -1203,6 +1204,8 @@ function _load_geometries_generate_fixture()
         error("geometries_generate_hilbert definition not found in $source_path")
     fixture_module = Module(:GeometriesGenerateFixture)
     Core.eval(fixture_module, :(using LinearAlgebra))
+    Core.eval(fixture_module, :(_ensure_cytools_ready() = nothing))
+    Core.eval(fixture_module, :(_run_cytools_operation(f::Function, operation::Symbol) = f()))
     Core.eval(fixture_module, :(cytools_version() = "0.8.0"))
     Core.eval(fixture_module, quote
         struct GeometryIndex
