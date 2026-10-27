@@ -278,7 +278,11 @@ def main(argv: list[str] | None = None) -> int:
             args.command = "readiness"
             args.principal_closed = args.maintenance_line = args.maintenance_closed = None
         with tempfile.TemporaryDirectory(prefix="cyax-gate-a-readonly-") as temporary:
-            _isolated_authority_repository(args, Path(temporary) / "authority.git")
+            if Path(args.repo).expanduser().is_dir():
+                _isolated_authority_repository(args, Path(temporary) / "authority.git")
+            else:
+                args.authority_repo = args.repo
+                args.authority_remote = args.remote
             result, exit_code = _run(args)
     except SystemExit:
         raise
