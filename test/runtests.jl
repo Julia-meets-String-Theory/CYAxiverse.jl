@@ -2277,10 +2277,10 @@ end
     @test !initial.follow_hilltop
     @test isapprox(initial.theta_critical, theta_glsm; atol=1e-12)
 
-    local_form = CYAxiverse.paper_benchmarks.n8_local_hilltop_coefficients()
+    analytic_efolds = CYAxiverse.paper_benchmarks.n8_hilltop_efolds(1e-7)
+    local_form = analytic_efolds.coefficients
     @test isapprox(local_form.beta1, 3.71e3; rtol=2e-3)
     @test isapprox(local_form.c4, 2.3724e10; rtol=2e-4)
-    analytic_efolds = CYAxiverse.paper_benchmarks.n8_hilltop_efolds(1e-7)
     @test isapprox(analytic_efolds.efolds, 6.819e3; rtol=2e-3)
 
     geometry = CYAxiverse.paper_benchmarks.n8_geometry()
