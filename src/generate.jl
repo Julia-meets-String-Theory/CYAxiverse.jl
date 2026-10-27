@@ -10,7 +10,7 @@ using LinearAlgebra
 using ArbNumerics, Tullio, LoopVectorization, Nemo, SparseArrays, NormalForms, IntervalArithmetic, StaticArrays
 using GenericLinearAlgebra
 using Distributions
-using Random: rand!
+using Random
 using TimerOutputs
 
 using ..filestructure: cyax_file, minfile, present_dir, geom_dir_read, paths_cy
@@ -79,9 +79,11 @@ julia> CYAxiverse.generate.pseudo_Q(4,10,1)
   0  -6   1   7
   9   3   6   1
 ```
+Pass `rng` to reproduce the generated values.
 """
-function pseudo_Q(h11::Int, tri::Int, cy::Int=1)
-    Q = vcat(Matrix{Int}(I(h11)), rand(-5:5, 4, h11))
+function pseudo_Q(h11::Int, tri::Int, cy::Int=1;
+        rng::AbstractRNG=Random.default_rng())
+    Q = vcat(Matrix{Int}(I(h11)), rand(rng, -5:5, 4, h11))
     nrows = size(Q, 1)
     # Pre-allocate cross-terms to avoid intermediate vcat/hcat allocations
     ncross = binomial(nrows, 2)
@@ -467,6 +469,7 @@ end
     pseudo_L(h11,tri,cy=1;log=true)
 
 Randomly generates a h11+4+C(h11+4,2)-length hierarchical list of instanton scales, similar to those found in the KS Axiverse.  Option for (sign,log10) or full precision.\n
+Pass `rng` to reproduce the generated values.
 #Examples
 ```julia-repl
 julia> CYAxiverse.generate.pseudo_L(4,10)
@@ -502,10 +505,11 @@ julia> CYAxiverse.generate.pseudo_L(4,10,log=false)
  -3.173000613781491329619833894919e-138
 ```
 """
-function pseudo_L(h11::Int,tri::Int,cy::Int=1;log::Bool=true)
+function pseudo_L(h11::Int,tri::Int,cy::Int=1;log::Bool=true,
+        rng::AbstractRNG=Random.default_rng())
     L1::Matrix{Float64} = [1. 0.]
     L2::Matrix{Float64} = vcat([[1. -(4. *(j-1.))] for j=2.:h11+4.]...)
-    L3::Matrix{Float64} = vcat([[sign(rand(Uniform(-100. *h11,100. *h11))) -(4*(j-1))+log10(abs(rand(Uniform(-100. *h11,100. *h11))))]
+    L3::Matrix{Float64} = vcat([[sign(rand(rng, Uniform(-100. *h11,100. *h11))) -(4*(j-1))+log10(abs(rand(rng, Uniform(-100. *h11,100. *h11))))]
      for j=h11+5:h11+4+binomial(h11+4,2)]...)
     L4::Matrix{Float64} = @.(log10(abs(L3)))
     L::Matrix{Float64} = vcat(L1,L2,L3)
@@ -1684,6 +1688,8 @@ function spectrum_mode_counts(eigenvalues::AbstractVector{<:Real};
         return (; negative = 0, zeroish = 0, positive = 0,
                 tolerance = 0.0, scale = 1.0)
     end
+    all(isfinite, eigenvalues) || throw(ArgumentError(
+        "eigenvalues must all be finite"))
     scale = max(Float64(maximum(abs, eigenvalues)), 1.0)
     tolerance = Float64(relative_tolerance) * scale
     negative = 0

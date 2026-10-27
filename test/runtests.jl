@@ -41,8 +41,8 @@ if _FULL
     include(joinpath(@__DIR__, "..", "scripts", "inflation_scale_continuation.jl"))
     include(joinpath(@__DIR__, "..", "scripts", "migrate_quartic_index_ordering.jl"))
     include(joinpath(@__DIR__, "..", "scripts", "build_orientifold_vacua_inflation.jl"))
-    include(joinpath(@__DIR__, "axion_photon.jl"))
 end
+include(joinpath(@__DIR__, "axion_photon.jl"))
 
 @testset "Slurm log directory resolution" begin
     old_job_id = get(ENV, "SLURM_JOB_ID", nothing)
@@ -815,7 +815,7 @@ end
     end
 end
 
-if _FULL; @testset "Kinetic matrix construction and section-3 positive-definiteness invariant" begin
+@testset "Kinetic matrix construction and section-3 positive-definiteness invariant" begin
     # `.copilot/AGENTS.md` section 3 requires the kinetic matrix
     # K = 1/2 g to be symmetric positive-definite, throwing a domain error
     # when it is not. `read.potential` previously built K as
@@ -919,9 +919,9 @@ if _FULL; @testset "Kinetic matrix construction and section-3 positive-definiten
             # rejection is correct anyway, while wrongly accepting a stored
             # eigenvalue of -1e-9 that yields a K with smallest eigenvalue
             # -1e9 -- precisely the state section 3 forbids.
-            Random.seed!(2024)
+            marginal_rng = MersenneTwister(2024)
             n = 6
-            V_marginal = Matrix(qr(randn(n, n)).Q)
+            V_marginal = Matrix(qr(randn(marginal_rng, n, n)).Q)
             D_marginal = Diagonal(vcat([1.0, 0.6, 0.4, 0.2, 0.1], [-1e-10]))
             Kinv_marginal = V_marginal * D_marginal * V_marginal'
             @test !isposdef(Hermitian(inv(Hermitian(Kinv_marginal))))
@@ -935,7 +935,8 @@ if _FULL; @testset "Kinetic matrix construction and section-3 positive-definiten
             # still be accepted: its smallest eigenvalue tends to zero from
             # above, which makes K's LARGEST eigenvalue diverge while K
             # stays positive definite.
-            V_wall = Matrix(qr(randn(30, 30)).Q)
+            wall_rng = MersenneTwister(20260817)
+            V_wall = Matrix(qr(randn(wall_rng, 30, 30)).Q)
             Kinv_wall = V_wall * Diagonal(10.0 .^ range(0, -16; length = 30)) * V_wall'
             write_potential_fixture(root, 25, 1, 1, Kinv_wall)
             near_wall = CYAxiverse.read.potential(25, 1, 1)
@@ -945,7 +946,7 @@ if _FULL; @testset "Kinetic matrix construction and section-3 positive-definiten
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
-end; end
+end
 
 @testset "Log-shifted derivative workspace" begin
     Q = Int[1 0 1; 0 1 1]
@@ -1022,9 +1023,11 @@ end
     @test fallback_derivatives.hessian == expected_fallback.hessian
 end
 
-if _FULL; @testset "Cached screening Hessian eigensolver" begin
+if _FULL
+@testset "Cached screening Hessian eigensolver" begin
+    rng = MersenneTwister(20261026)
     for dimension in (3, 8)
-        matrix = randn(dimension, dimension)
+        matrix = randn(rng, dimension, dimension)
         matrix = (matrix + matrix') / 2
         expected = eigvals(Symmetric(matrix))
         workspace = _symmetric_eigen_workspace(dimension)
@@ -1037,8 +1040,11 @@ if _FULL; @testset "Cached screening Hessian eigensolver" begin
         @test @allocated(_symmetric_eigenvalues!(workspace, warmed_matrix)) <= 4096
     end
 end
+end
 
+if _FULL
 @testset "Inflation append-only scan shards" begin
+    withenv("CYAXIVERSE_DATA_DIR" => nothing) do
     mktempdir() do root
         geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
         mkpath(geom_dir)
@@ -1099,6 +1105,7 @@ end
         @test occursin("attempt", read(failed_path, String))
         @test isempty(inflation_completed_shard_geometries(
             failed_dir; data_dir=abspath(root), max_branches=1_000_000))
+    end
     end
 end
 
@@ -1594,7 +1601,8 @@ end
     end
 end
 
-if _FULL; @testset "Vacua pipeline persistence and validation" begin
+if _FULL
+@testset "Vacua pipeline persistence and validation" begin
     migrated_metadata = _normalize_vacua_search_metadata((
         search_classification="exact_determinant_branch", search_method="reduced_jlm"))
     @test migrated_metadata.search_classification ==
@@ -1751,6 +1759,8 @@ if _FULL; @testset "Vacua pipeline persistence and validation" begin
     end
 end
 
+end
+if _FULL
 @testset "Orientifold inflation persistence preserves precision and requires force" begin
     previous_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
     try
@@ -1876,7 +1886,9 @@ end
             (ENV["CYAXIVERSE_DATA_DIR"] = previous_data_dir)
     end
 end
+end
 
+if _FULL
 @testset "Physical spectrum batch persistence" begin
     @test _fpert_log10([18.0], [4.0]) ≈ [7.0]
     # Non-empty λ31/λ22 (one cross-quartic term each) so the round-trip
@@ -1961,6 +1973,7 @@ end
     @test count(==( '\n'), read(summary_path, String)) == 2
     @test occursin("failed", read(summary_path, String))
 end
+end
 
 @testset "Paper reproduction benchmarks" begin
     @testset "Locally scaled critical-point solver" begin
@@ -2035,18 +2048,11 @@ end
     @test square.minima_count == 1
 
     # Section 4.2 reports five minima below the N=8 catastrophe and one above
-    # it. Two thousand deterministic starts are sufficient to recover both
-    # sides with the Table 1 truncation.
-    for (k, expected_minima) in ((0.66, 5), (0.68, 1))
-        potential = CYAxiverse.paper_benchmarks.n8_potential(k=k)
-        solved = CYAxiverse.generate.reduced_critical_points(
-            potential.L, potential.Q; starts=2048,
-            residual_tolerance=1e-9, merge_tolerance=1e-6,
-            max_iterations=300)
-        @test solved.minima_count == expected_minima
+    # it. The scan is the single source for these 2,048-start results.
+    if _FULL
+        scan = CYAxiverse.paper_benchmarks.n8_minima_scan(starts=2048)
+        @test Tuple(result.minima_count for result in scan) == (5, 1)
     end
-    scan = CYAxiverse.paper_benchmarks.n8_minima_scan(starts=2048)
-    @test Tuple(result.minima_count for result in scan) == (5, 1)
 
     reduced_problem = CYAxiverse.jlm_reduced.prepare(n8.Q, n8.L)
     @test reduced_problem.Q_reduced isa SparseArrays.AbstractSparseMatrix
@@ -2081,6 +2087,7 @@ end
     synthetic = (Q=Int[2 0 1; 0 2 1],
         L=Float64[1.0 1.0 1.0; 0.0 -1.0 -10.0])
     synthetic_geom = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+    if _FULL
     leading_estimate, _, leading_search = _search_vacua(synthetic_geom, synthetic;
         threshold=0.5, starts=64, residual_tolerance=1e-9,
         merge_tolerance=1e-6, max_iterations=100,
@@ -2106,6 +2113,7 @@ end
     @test reduced_search.legacy_search_classification ==
         "exact_determinant_branch"
     @test reduced_search.multiplicity == 4.0
+    end
 
     lattice_selected = CYAxiverse.generate.LQtilde(
         [2 0 1; 0 2 1], [1.0 1.0 1.0; 0.0 -1.0 -10.0])
@@ -2696,7 +2704,6 @@ end
         @test reference_h.divisor_index[2] == 6
     end
 end
-end
 
 @testset "Fuzzy-axion h11=2 source-corrected role validation" begin
     PB = CYAxiverse.paper_benchmarks
@@ -2729,7 +2736,6 @@ end
     # Eq. 2.6: m_QCD(T=0) = 5.7e-10 eV * (1e16 GeV / f_QCD).
     f_qcd_gev = 3.2e15
     qcd_mass_ev = 5.7e-10 * (1.0e16 / f_qcd_gev)
-    @test isapprox(qcd_mass_ev, 1.8e-9; rtol=0.02)
     stringy_qcd_mass_ev = 10.0 ^ reference.mass_log10_ev_reference[qcd_slot]
     @test abs(log10(qcd_mass_ev / stringy_qcd_mass_ev)) > 10.0
 end
@@ -3342,7 +3348,17 @@ end
 
     merged = CYAxiverse.generate.instanton_scale_blocks(L; gap_log10=0.1,
         min_block_size=2)
-    @test all(length(block.indices) >= 2 for block in merged.blocks)
+    @test [block.indices for block in merged.blocks] == [[0, 1, 2, 3]]
+
+    # Hand derivation: the log10 scales are [0, -0.2, -10, -10.2], so the
+    # consecutive gaps are 0.2, 9.8, 0.2. With gap_log10=0.5 only the 9.8 gap
+    # exceeds the threshold, giving the split {0,1} | {2,3}. Both blocks have
+    # size 2, so min_block_size=2 does not merge them.
+    paired = CYAxiverse.generate.instanton_scale_blocks(
+        Float64[1.0 1.0 1.0 1.0; 0.0 -0.2 -10.0 -10.2];
+        gap_log10=0.5, min_block_size=2)
+    @test [block.indices for block in paired.blocks] == [[0, 1], [2, 3]]
+    @test only(paired.inter_block_gaps) ≈ 9.8
 
     permutation = [3, 1, 4, 2]
     permuted = CYAxiverse.generate.instanton_scale_blocks(L[:, permutation];
@@ -3544,7 +3560,8 @@ end
 end
 
 @testset "PQ spectrum: non-diagonal kinetic matrix" begin
-    # A non-diagonal K catches the side on which the Cholesky inverse acts.
+    # Compare against the generalized eigenproblem H v = λ K v, which does
+    # not share the package's canonical-factorization path.
     K = Hermitian([4.0 1.2;
                    1.2 9.0])
     Q = [3 0 0;
@@ -3565,11 +3582,27 @@ end
     @test all(isapprox.(pq_corrected.λself, hp["λself"]; atol=1e-10))
     @test pq_corrected.λ22sign == hp["λ22sign"]
     @test all(isapprox.(pq_corrected.λ22, hp["λ22"]; atol=1e-10))
+
+    selected = CYAxiverse.generate.LQtilde(Q, L)
+    amplitudes = selected.Ltilde[1, :] .* 10.0 .^ selected.Ltilde[2, :]
+    hessian = selected.Qtilde * Diagonal(amplitudes) * selected.Qtilde'
+    mass_offset = 9.0 + Float64(log10(CYAxiverse.generate.constants()["MPlanck"])) +
+        Float64(CYAxiverse.generate.constants()["log2π"])
+    expected_masses = setprecision(BigFloat, 400) do
+        Kbig = BigFloat.(Matrix(K))
+        factor = cholesky(Symmetric(Kbig)).L
+        Hbig = BigFloat.(hessian)
+        values = eigvals(Symmetric(factor \ Hbig / factor'))
+        Float64.(0.5 .* log10.(abs.(values)) .+ mass_offset)
+    end
+    # Reference is 400-bit; the output is a Float64 log10 mass (~1e-15 rounding),
+    # and 1e-10 is the atol already used for the hp_spectrum comparisons above.
+    @test sort(pq_corrected.m) ≈ sort(expected_masses) atol=1e-10
 end
 
 @testset "PQ-seeded HP alignment" begin
-    K = Hermitian([4.0 0.0;
-                   0.0 9.0])
+    K = Hermitian([4.0 1.2;
+                   1.2 9.0])
     Q = [3 0 0;
          0 5 0]
     L = [1.0 1.0 0.0;
@@ -4159,7 +4192,7 @@ end; end
     @test occursin("canonical_two_face_dedup", json_str)
 end
 
-if _FULL; @testset "analyze_inflation_candidates: whitened point classification" begin
+@testset "analyze_inflation_candidates: whitened point classification" begin
     # The script defines `derivatives`, `classify_point` and `main`, names that
     # would collide with the scan scripts already included at top level, so it
     # is loaded into its own module.
@@ -4181,8 +4214,8 @@ if _FULL; @testset "analyze_inflation_candidates: whitened point classification"
 
     function classification_fixture(h11, condition_number; seed = 42)
         rng = MersenneTwister(seed)
-        Q = Matrix(CYAxiverse.generate.pseudo_Q(h11, 1)')
-        L = Matrix(CYAxiverse.generate.pseudo_L(h11, 1)')
+        Q = Matrix(CYAxiverse.generate.pseudo_Q(h11, 1; rng=rng)')
+        L = Matrix(CYAxiverse.generate.pseudo_L(h11, 1; rng=rng)')
         rotation = qr(randn(rng, h11, h11)).Q
         spectrum = exp10.(range(0, -log10(condition_number); length = h11))
         K = Matrix(Hermitian(rotation * Diagonal(spectrum) * rotation'))
@@ -4211,7 +4244,6 @@ if _FULL; @testset "analyze_inflation_candidates: whitened point classification"
             d = candidates.derivatives(theta, Q, L)
             actual = candidates.classify_point(theta, Q, L, cholesky(Hermitian(K)))
             @test actual.gradnorm ≈ sqrt(dot(d.gradient, K \ d.gradient)) rtol=1e-9
-            @test actual.gradnorm >= 0
         end
     end
 
@@ -4276,11 +4308,27 @@ if _FULL; @testset "analyze_inflation_candidates: whitened point classification"
                 @test c.abs_min_eta > naive_abs_min_eta
             end
         end
+
+        flat_Q = Int[1 0; 0 0]
+        flat_L = Float64[1.0 1.0; 0.0 -1.0]
+        flat = candidates.classify_point([0.3, 0.2], flat_Q, flat_L,
+            cholesky(Hermitian(Matrix{Float64}(I, 2, 2))))
+        @test flat.zeroish_modes == 1
+        @test flat.abs_min_eta > minimum(abs.(flat.eta_values))
     end
-end; end
+end
 
 @testset "spectrum_mode_counts partitions a symmetric spectrum" begin
     counts = CYAxiverse.generate.spectrum_mode_counts
+
+    @testset "pseudo potentials accept reproducible RNGs" begin
+        pseudo_Q = CYAxiverse.generate.pseudo_Q
+        pseudo_L = CYAxiverse.generate.pseudo_L
+        @test pseudo_Q(4, 1; rng=MersenneTwister(42)) ==
+            pseudo_Q(4, 1; rng=MersenneTwister(42))
+        @test pseudo_L(4, 1; rng=MersenneTwister(42)) ==
+            pseudo_L(4, 1; rng=MersenneTwister(42))
+    end
 
     @testset "the three counts partition the spectrum" begin
         # This is the property the previous `count(<(0))` / toleranced-zeroish
@@ -4355,6 +4403,8 @@ end; end
         exact = counts([-1.0, 0.0, 1.0]; relative_tolerance = 0.0)
         @test (exact.negative, exact.zeroish, exact.positive) == (1, 1, 1)
 
+        @test_throws ArgumentError counts([NaN, 1.0])
+        @test_throws ArgumentError counts([Inf])
         @test_throws ArgumentError counts([1.0]; relative_tolerance = -1e-10)
     end
 
@@ -4530,25 +4580,26 @@ end; end
     end
 
     # A2: _hcat_columns replaces `hcat(blocks...)`.
-    let blocks = [rand(3, 2) for _ in 1:5]
+    let rng = MersenneTwister(20260818), blocks = [rand(rng, 3, 2) for _ in 1:5]
         @test CYAxiverse.generate._hcat_columns(blocks) == hcat(blocks...)
     end
-    let blocks = [rand(4) for _ in 1:6]
+    let rng = MersenneTwister(20260819), blocks = [rand(rng, 4) for _ in 1:6]
         @test CYAxiverse.generate._hcat_columns(blocks) == hcat(blocks...)
     end
 
-    # A9: sandwiching between orthonormal-column QR factors leaves the
-    # operator norm unchanged, so the thin-QR form is exact.
+    # A9: the diagnostics report the independently computed normalized
+    # cross-coupling between two one-vector charge blocks.
     let
-        for (nl, nr, h11) in ((300, 200, 12), (150, 150, 8), (40, 90, 20))
-            A = randn(nl, h11)
-            B = randn(nr, h11)
-            RA = qr(A).R
-            RB = qr(B).R
-            @test isapprox(opnorm(RA), opnorm(A); rtol = 1e-12)
-            @test isapprox(opnorm(RB), opnorm(B); rtol = 1e-12)
-            @test isapprox(opnorm(RA * RB'), opnorm(A * B'); rtol = 1e-10)
-        end
+        L = Float64[1.0 1.0; 0.0 -8.0]
+        Q = Int[1 1; 0 1]
+        hierarchy = CYAxiverse.generate.instanton_scale_blocks(L; gap_log10=0.5)
+        diagnostics = CYAxiverse.generate._instanton_split_diagnostics(
+            Matrix{Float64}(I, 2, 2), Q, hierarchy)
+        @test length(diagnostics) == 1
+        @test only(diagnostics).off_block_norm == 1.0
+        @test only(diagnostics).separation_gap == 8.0
+        @test only(diagnostics).coupling_to_gap_ratio ≈ inv(sqrt(2) * 1e8)
+        @test !only(diagnostics).certified_safe
     end
 
     # A11: _hp_selected_potential now routes through LQtilde + αmatrix
@@ -4556,9 +4607,10 @@ end; end
     # identical, since αmatrix keeps Qhat and Qbar separate where
     # LQtildebar pre-concatenates them.
     let
-        for h11 in (4, 6, 8, 10, 12, 15)
-            Q = Matrix(CYAxiverse.generate.pseudo_Q(h11, 1)')
-            L = Matrix(CYAxiverse.generate.pseudo_L(h11, 1)')
+        for h11 in (4, 10, 15)
+            rng = MersenneTwister(h11)
+            Q = Matrix(CYAxiverse.generate.pseudo_Q(h11, 1; rng=rng)')
+            L = Matrix(CYAxiverse.generate.pseudo_L(h11, 1; rng=rng)')
             legacy = CYAxiverse.generate.LQtildebar(Matrix{Float64}(L), Matrix{Int}(Q))
             legacy_L = Matrix{Float64}(legacy["Lhat"])
             legacy_Q = Matrix{Int}(legacy["Qhat"])

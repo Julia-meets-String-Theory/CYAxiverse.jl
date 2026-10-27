@@ -49,6 +49,12 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'
           python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'
           python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'
+          PYTHONPATH=scripts python3 -m unittest \
+            test_agent_verify \
+            test_analyze_fuzzy_axions_orientifold_gap \
+            test_merge_orientifold_shards \
+            test_orientifold_population_preflight \
+            test_orientifold_terminal_ledger
 
   fast:
     name: Fast tests

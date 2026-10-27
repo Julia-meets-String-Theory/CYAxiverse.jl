@@ -79,19 +79,20 @@ end
 end
 # PR199_MODEL_INVARIANT_REGRESSIONS_END
 
-function _run_scientific_cli(repository_root, input_path, certificate_path,
+function _run_scientific_cli(_repository_root, input_path, certificate_path,
         input_sha256, certificate_sha256; precision=256)
-    argv=vcat(String[Base.julia_cmd().exec...],child_coverage_args(),String["--startup-file=no","--project=$repository_root",
-        joinpath(repository_root,"scripts","verify_scientific_certificate.jl"),
-        "--inputs",input_path,"--certificate",certificate_path,
-        "--expect-input-sha256",input_sha256,
-        "--expect-certificate-sha256",certificate_sha256,
-        "--require","root_and_spectrum","--precision",string(precision)])
+    cli_args = ["--inputs", input_path, "--certificate", certificate_path,
+        "--expect-input-sha256", input_sha256,
+        "--expect-certificate-sha256", certificate_sha256,
+        "--require", "root_and_spectrum", "--precision", string(precision)]
     mktemp() do _path, output
-        process=run(pipeline(Cmd(Cmd(argv);dir=repository_root);stdout=output,stderr=output);wait=false)
-        wait(process)
+        exit_code = redirect_stdout(output) do
+            redirect_stderr(output) do
+                SC._verify_cli(cli_args)
+            end
+        end
         flush(output); seekstart(output)
-        (exit_code=process.exitcode,output=read(output,String),argv=argv)
+        (exit_code=exit_code, output=read(output,String), argv=cli_args)
     end
 end
 
@@ -535,6 +536,10 @@ end
             source_ref=source,environment_ref=environment)
         four=SC.write_certificate(joinpath(parent,"four"),model4,result4;
             source_ref=source,environment_ref=environment)
+        verified_cli=_run_scientific_cli(repository_root,one.input_path,
+            one.certificate_path,one.input_sha256,one.certificate_sha256)
+        @test verified_cli.exit_code==0
+        @test occursin("status=VERIFIED",verified_cli.output)
         one_doc=TOML.parsefile(one.certificate_path)
         four_doc=TOML.parsefile(four.certificate_path)
         function replay_mutant(name,doc; expected, source_cert=one, precision=256)
