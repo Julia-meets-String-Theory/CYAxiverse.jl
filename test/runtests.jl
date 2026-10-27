@@ -22,6 +22,7 @@ const _FULL = get(ENV, "CYAXIVERSE_TEST_FULL", "1") == "1"
 end
 
 include(joinpath(@__DIR__, "coverage_support.jl"))
+include(joinpath(@__DIR__, "environment_support.jl"))
 include(joinpath(@__DIR__, "optional_plotting.jl"))
 include(joinpath(@__DIR__, "path_remediation.jl"))
 include(joinpath(@__DIR__, "scientific_certification.jl"))
@@ -1688,11 +1689,15 @@ if _FULL
                 "--geometry", "2,1,1"])
             @test default_blas_options[:blas_threads] == 1
             repository_root = normpath(joinpath(@__DIR__, ".."))
-            coverage_files_cmd = `git -C $repository_root ls-files --others --exclude-standard -- '*.cov'`
-            coverage_files_before = Set(readlines(coverage_files_cmd))
+            if in_git_checkout(repository_root)
+                coverage_files_cmd = `git -C $repository_root ls-files --others --exclude-standard -- '*.cov'`
+                coverage_files_before = Set(readlines(coverage_files_cmd))
+            end
             @test !run_vacua_batch(parallel_options;
                 worker_exeflags=Cmd(child_coverage_args()))
-            @test Set(readlines(coverage_files_cmd)) == coverage_files_before
+            if in_git_checkout(repository_root)
+                @test Set(readlines(coverage_files_cmd)) == coverage_files_before
+            end
             @test occursin("failed", read(parallel_summary, String))
 
             mismatched_options = _vacua_parse_args(["--data-dir", root,

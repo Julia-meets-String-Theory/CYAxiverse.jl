@@ -85,18 +85,26 @@ function _run_scientific_cli(_repository_root, input_path, certificate_path,
         "--expect-input-sha256", input_sha256,
         "--expect-certificate-sha256", certificate_sha256,
         "--require", "root_and_spectrum", "--precision", string(precision)]
+    # Same limit as the qualification fixture's watchdog (fixtures TOML settings).
+    # The verifier runs in-process, so the limit is enforced only at task yield
+    # points; a non-yielding hang still needs the process-isolated CI step.
+    timeout_seconds = TOML.parsefile(joinpath(@__DIR__, "fixtures",
+        "scientific_certification", "public.toml"))["settings"]["watchdog_seconds"]
     mktemp() do _path, output
-        exit_code = redirect_stdout(output) do
+        task = @async redirect_stdout(output) do
             redirect_stderr(output) do
                 SC._verify_cli(cli_args)
             end
         end
+        timedwait(() -> istaskdone(task), Float64(timeout_seconds)) === :ok ||
+            error("scientific verifier CLI exceeded the $(timeout_seconds) s watchdog")
+        exit_code = fetch(task)
         flush(output); seekstart(output)
         (exit_code=exit_code, output=read(output,String), argv=cli_args)
     end
 end
 
-@testset "coverage-enabled CLI child keeps candidate source clean" begin
+@requires_git @testset "coverage-enabled CLI child keeps candidate source clean" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
     status_argv=["git","-C",repository_root,"status","--porcelain=v1","--untracked-files=all"]
     before_status=read(Cmd(status_argv),String)
@@ -337,8 +345,7 @@ end
         result = SC.certify(model, [0]; options=SC.ProofOptions(precisions=(256,), spectral_goal=:individuals))
         @test result.status == :CERTIFIED
         repository_root = normpath(joinpath(@__DIR__, ".."))
-        commit = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD"]), String))
-        tree = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD^{tree}"]), String))
+        (; commit, tree) = head_identity(repository_root)
         source = (repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",
             commit, tree)
         mktempdir() do parent
@@ -517,8 +524,7 @@ end
     @test result4.status == :CERTIFIED
 
     repository_root = normpath(joinpath(@__DIR__, ".."))
-    commit = strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-    tree = strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    (; commit, tree) = head_identity(repository_root)
     source = (repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
     mktempdir() do parent
         project=Base.active_project()
@@ -919,8 +925,7 @@ end
         equal=SC.certify(equal_model,[0,0];
             options=SC.ProofOptions(precisions=(256,),spectral_goal=:clusters))
         repository_root=normpath(joinpath(@__DIR__,".."))
-        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        (; commit, tree) = head_identity(repository_root)
         source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
         mktempdir() do parent
             project=Base.active_project()
@@ -1087,8 +1092,7 @@ end
         model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
         cert=SC.certify(model,[0];options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals))
         repository_root=normpath(joinpath(@__DIR__,".."))
-        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        (; commit, tree) = head_identity(repository_root)
         source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
         mktempdir() do parent
             project=Base.active_project(); manifest=joinpath(dirname(project),"Manifest.toml")
@@ -1214,8 +1218,7 @@ end
             precisions=(512,),spectral_goal=:individuals))
         @test high.status==:CERTIFIED
         repository_root=normpath(joinpath(@__DIR__,".."))
-        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        (; commit, tree) = head_identity(repository_root)
         source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
         mktempdir() do parent
             project=Base.active_project();manifest=joinpath(dirname(project),"Manifest.toml")
@@ -1278,8 +1281,7 @@ end
     @test result.status == :CERTIFIED
 
     repository_root = normpath(joinpath(@__DIR__, ".."))
-    commit = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD"]), String))
-    tree = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD^{tree}"]), String))
+    (; commit, tree) = head_identity(repository_root)
     source = (repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl", commit, tree)
     mktempdir() do parent
         project = Base.active_project()
@@ -1321,8 +1323,7 @@ end
 
 @testset "R2 source correction regressions" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
-    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    (; commit, tree) = head_identity(repository_root)
     source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
 
     @testset "closed and byte-bounded metadata" begin
@@ -1358,18 +1359,24 @@ end
         @test SC._environment_record((receipt_sha256=digest,
             artifact_name="~artifact.toml"))["artifact_name"] == "~artifact.toml"
 
-        watchdog=ScientificCertificationFixtures._watchdog_self_test()
-        @test watchdog.exit_code==124
-        @test watchdog.timed_out
-        @test watchdog.slow_start_passed
-        @test watchdog.missing_ready_rejected
-        @test watchdog.slow_preparation_seconds>=1.5
-        @test watchdog.slow_computation_seconds<1
-        @test watchdog.timeout_phase=="computation"
-        @test watchdog.preparation_seconds>=0
-        @test watchdog.computation_seconds>=2
-        @test !watchdog.child_alive_after_timeout
-        @test !watchdog.late_marker
+        # The watchdog uses POSIX process groups and /bin/sh; the fixture itself
+        # is qualified only on Darwin and 64-bit Linux.
+        if Sys.isapple() || Sys.islinux()
+            watchdog=ScientificCertificationFixtures._watchdog_self_test()
+            @test watchdog.exit_code==124
+            @test watchdog.timed_out
+            @test watchdog.slow_start_passed
+            @test watchdog.missing_ready_rejected
+            @test watchdog.slow_preparation_seconds>=1.5
+            @test watchdog.slow_computation_seconds<1
+            @test watchdog.timeout_phase=="computation"
+            @test watchdog.preparation_seconds>=0
+            @test watchdog.computation_seconds>=2
+            @test !watchdog.child_alive_after_timeout
+            @test !watchdog.late_marker
+        else
+            @info "skipping watchdog self-test: unsupported platform"
+        end
         mktempdir() do readiness_root
             marker=joinpath(readiness_root,"warmed-ready")
             previous=get(ENV,"CYAX_SCIENTIFIC_READY_MARKER",nothing)
@@ -1425,7 +1432,7 @@ end
         @test SC._parse_toml(encoded)["Q"]["data"][1]==long_ratio
     end
 
-    @testset "execution profile requires a clean matching child" begin
+    @requires_git @testset "execution profile requires a clean matching child" begin
         F=ScientificCertificationFixtures
         actual=F._actual_environment_observation()
         @test actual["interval_arithmetic_registered_tree_sha1"] ==
@@ -1772,8 +1779,7 @@ end
 
 @testset "R2 serialized provenance and embedded private paths" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
-    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    (; commit, tree) = head_identity(repository_root)
     source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
     model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
     options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals)
@@ -1915,7 +1921,10 @@ end
     end
 end
 
-@testset "R2 bounded skills-checker JSON and action controls" begin
+if !python_at_least_3_11()
+    @info "skipping skills-checker controls: python3 older than 3.11 (no tomllib)"
+else
+@requires_git @testset "R2 bounded skills-checker JSON and action controls" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
     python=Sys.which("python3.13")
     python===nothing && (python=Sys.which("python3"))
@@ -2021,13 +2030,27 @@ print("sk12-not-applicable=" + validate("sk12-not-applicable.json", mutant))
         end
     end
 end
+end
 
 @testset "Full public qualification profile" begin
     @test ScientificCertificationFixtures.qualify_from_test_profile!() === nothing
 end
 
+@testset "release pins are a pure predicate on the observed record" begin
+    F=ScientificCertificationFixtures
+    pinned=Dict("julia_version"=>"1.12.0","interval_arithmetic_version"=>"0.22.36",
+        "interval_arithmetic_registered_tree_sha1"=>"79342df41c3c24664e5bf29395cfdf2f2a599412")
+    @test F._release_pins_match(pinned)
+    for (key,value) in (("julia_version","1.11.4"),("interval_arithmetic_version","0.22.37"),
+            ("interval_arithmetic_registered_tree_sha1",repeat("0",40)))
+        changed=copy(pinned)
+        changed[key]=value
+        @test !F._release_pins_match(changed)
+    end
+end
+
 # CYAX_R2_SERIAL_QUALIFICATION_PROFILE_TESTS_BEGIN
-@testset "CI qualification profile is scoped and checks the real thread pools" begin
+@requires_git @testset "CI qualification profile is scoped and checks the real thread pools" begin
     F=ScientificCertificationFixtures
     original_blas=BLAS.get_num_threads()
     original_julia_env=get(ENV,"JULIA_NUM_THREADS",nothing)
@@ -2055,15 +2078,16 @@ end
                 @test profile["julia_num_threads"]=="1"
                 @test profile["openblas_num_threads"]=="1"
                 profile["worktree_clean"]=true # Exercise profile matching independently of an edited checkout.
-                @test F._approved_profile_matches(profile,profile)
+                # Release pins (Julia, IntervalArithmetic) are checked by the dedicated CI step.
+                @test F._approved_profile_matches(profile,profile;pinned=false)
                 for (key,value) in (("julia_default_threads",2),("julia_interactive_threads",1))
                     invalid_profile=copy(profile)
                     invalid_profile[key]=value
-                    @test !F._approved_profile_matches(invalid_profile,invalid_profile)
+                    @test !F._approved_profile_matches(invalid_profile,invalid_profile;pinned=false)
                 end
                 missing_pool=copy(profile)
                 delete!(missing_pool,"julia_interactive_threads")
-                @test !F._approved_profile_matches(missing_pool,missing_pool)
+                @test !F._approved_profile_matches(missing_pool,missing_pool;pinned=false)
                 get(ENV,"CYAXIVERSE_TEST_FULL","1")=="1"
             end
             @test observed===expected_full
@@ -2148,8 +2172,7 @@ end
 # detached focused runner; the public package suite remains unchanged here.
 @testset "R2 focused privacy and serialization bounds" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
-    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    (; commit, tree) = head_identity(repository_root)
     source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
     safe_source_ref="fixtures/candidate-source"
     safe_method="deterministic fixture search"

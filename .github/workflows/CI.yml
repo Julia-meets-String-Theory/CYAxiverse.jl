@@ -84,6 +84,29 @@ jobs:
         with:
           coverage: false
 
+  qualification:
+    name: Process-isolated scientific qualification
+    if: github.event_name != 'pull_request' || github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-tests')
+    runs-on: ubuntu-latest
+    env:
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+          arch: x64
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - name: Watchdog self-test, then fast and public qualification (clean tree, pinned profile)
+        run: |
+          julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --watchdog-self-test
+          julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --suite fast --evidence-dir "$RUNNER_TEMP/qualification-fast"
+          julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --suite public --evidence-dir "$RUNNER_TEMP/qualification-public"
+
   full:
     name: Full test suite
     if: github.event_name != 'pull_request' || github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-tests')
