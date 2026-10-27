@@ -2064,6 +2064,33 @@ end
     end
 end
 
+@testset "thread-pool predicate rejects nonserial profiles (pure, no children)" begin
+    F=ScientificCertificationFixtures
+    profile=F._actual_environment_observation()
+    if Threads.nthreads(:default)==1 && Threads.nthreads(:interactive)==0
+        profile["worktree_clean"]=true
+        @test F._approved_profile_matches(profile,profile;pinned=false)
+    end
+    # Each field is set to a value the approved one-thread profile forbids, on an
+    # otherwise approved record; only that field may cause the rejection.
+    approved=copy(profile)
+    approved["julia_threads"]=1;approved["julia_default_threads"]=1
+    approved["julia_interactive_threads"]=0;approved["blas_threads"]=1
+    approved["julia_num_threads"]="1";approved["openblas_num_threads"]="1"
+    approved["loaded_package_root"]=realpath(F.ROOT)
+    approved["loaded_package_entrypoint"]=realpath(joinpath(F.ROOT,"src","CYAxiverse.jl"))
+    approved["certificate_source_sha256"]="present"
+    approved["interval_arithmetic_registered_tree_sha1"]="x"
+    approved["interval_arithmetic_actual_tree_sha1"]="x"
+    @test F._approved_profile_matches(approved,approved;pinned=false)
+    for (key,bad) in (("julia_threads",2),("julia_default_threads",2),
+            ("julia_interactive_threads",1),("blas_threads",2),
+            ("julia_num_threads","2"),("openblas_num_threads","2"))
+        rejected=copy(approved);rejected[key]=bad
+        @test !F._approved_profile_matches(rejected,rejected;pinned=false)
+    end
+end
+
 # CYAX_R2_SERIAL_QUALIFICATION_PROFILE_TESTS_BEGIN
 @requires_git @testset "CI qualification profile is scoped and checks the real thread pools" begin
     F=ScientificCertificationFixtures

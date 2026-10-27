@@ -1654,6 +1654,21 @@ if _FULL
             end
             @test occursin("failed", read(parallel_summary, String))
 
+            # Geometry 2,1,1 above has no potential, so failure is expected there. The
+            # valid geometry 2,2,1 built earlier must succeed through the same workers.
+            # method=auto: the legacy vacua_id_basis raises BoundsError on this
+            # potential (src/generate.jl:3878, reported separately).
+            valid_summary = joinpath(root, "parallel-valid.csv")
+            valid_options = _vacua_parse_args(["--data-dir", root,
+                "--geometry", "2,2,1", "--workers", "2", "--blas-threads", "1",
+                "--method", "auto", "--summary", valid_summary, "--force"])
+            @test run_vacua_batch(valid_options; worker_exeflags=Cmd(child_coverage_args()))
+            @test !occursin("failed", read(valid_summary, String))
+            # One minimum: asserted above for this same potential via compute_vacua_data
+            # (Q has an identity leading block, so the determinant count is 1).
+            @test CYAxiverse.read.pipeline_vacua(
+                CYAxiverse.structs.GeometryIndex(2, 2, 1)).estimate == 1
+
             mismatched_options = _vacua_parse_args(["--data-dir", root,
                 "--geometry", "2,1,1", "--threshold", "0.6", "--dry-run"])
             @test _vacua_result_state(path, _vacua_config(mismatched_options)) != :matching
