@@ -51,5 +51,11 @@ using ColorSchemes
         output = joinpath(directory, "exclusion.png")
         @test plotting.save_plot(output, exclusion) == output
         @test isfile(output)
+        bytes = read(output)
+        # PNG signature (RFC 2083 / PNG spec section 5.2).
+        @test bytes[1:8] == UInt8[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+        # Signature (8) + IHDR chunk (25) + IEND chunk (12) is the smallest valid PNG;
+        # a plot with axes and data must contain at least an IDAT chunk beyond that.
+        @test length(bytes) > 8 + 25 + 12
     end
 end

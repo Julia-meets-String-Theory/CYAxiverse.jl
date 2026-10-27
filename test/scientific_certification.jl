@@ -1321,6 +1321,26 @@ end
     end
 end
 
+@testset "MX-04 provenance decision isolates each identity" begin
+    decide = ScientificCertificationFixtures._provenance_decision
+    all_match = (producer_observation_available=true, producer_profile_matches=true,
+        replay_profile_matches=true, producer_source_matches=true,
+        producer_environment_matches=true)
+    @test decide(; all_match...) == (true, "PASS")
+    # Exactly one identity differs per case; each alone must prevent PASS.
+    for field in keys(all_match)
+        field === :producer_observation_available && continue
+        flipped = merge(all_match, NamedTuple{(field,)}((false,)))
+        @test decide(; flipped...) == (false, "FAIL")
+    end
+    # Stale source alone fails even without a producer observation.
+    @test decide(; merge(all_match, (producer_observation_available=false,
+        producer_source_matches=false))...) == (false, "FAIL")
+    # Unavailable producer observation with matching replay and source is not PASS.
+    @test decide(; merge(all_match, (producer_observation_available=false,
+        producer_profile_matches=false))...) == (false, "UNAVAILABLE")
+end
+
 @testset "R2 source correction regressions" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
     (; commit, tree) = head_identity(repository_root)

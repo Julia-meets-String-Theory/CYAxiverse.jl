@@ -578,7 +578,11 @@ end
         original = axion_photon._run_local_scan(path)
         unsupported = axion_photon._run_local_scan(path; T=BigFloat)
 
-        @test_throws Exception axion_photon.write_axion_photon_result(
+        # BigFloat has no HDF5 type: HDF5.jl raises ErrorException while staging
+        # ("Type GenericMemory does not have a definite size", observed by a direct
+        # h5open write of a BigFloat vector). ArgumentError would instead mean one of
+        # this package's own guards fired, which is a different failure path.
+        @test_throws ErrorException axion_photon.write_axion_photon_result(
             path, unsupported)
         @test !axion_photon._has_axion_photon(path)
         @test h5open(path, "r") do file
@@ -590,7 +594,7 @@ end
         axion_photon.write_axion_photon_result(path, original)
         before_failed_force = axion_photon.read_axion_photon_result(path)
         bytes_before_failed_force = read(path)
-        @test_throws Exception axion_photon.write_axion_photon_result(
+        @test_throws ErrorException axion_photon.write_axion_photon_result(
             path, unsupported; force=true)
         after_failed_force = axion_photon.read_axion_photon_result(path)
         @test after_failed_force.hierarchy.selected_indices ==

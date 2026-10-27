@@ -727,6 +727,20 @@ function _measured_peak_rss(log_path)
         raw_unit=unit.captures[1],method=method.captures[1])
 end
 
+# Pure decision: provenance binds only when every identity matches; a missing
+# producer observation with otherwise matching replay and source is UNAVAILABLE,
+# never PASS.
+function _provenance_decision(; producer_observation_available::Bool,
+        producer_profile_matches::Bool, replay_profile_matches::Bool,
+        producer_source_matches::Bool, producer_environment_matches::Bool)
+    provenance = producer_profile_matches && replay_profile_matches &&
+        producer_source_matches && producer_environment_matches
+    status = provenance ? "PASS" :
+        (!producer_observation_available && replay_profile_matches && producer_source_matches ?
+            "UNAVAILABLE" : "FAIL")
+    (provenance, status)
+end
+
 function _replay_receipt(case_id, precision, result, environment, source, evidence_root, log_rel, replay_rel; require_provenance=true)
     cert = TOML.parsefile(joinpath(result["path"],"certificate.toml"))
     input_sha = result["input_sha256"]
@@ -819,10 +833,9 @@ function _replay_receipt(case_id, precision, result, environment, source, eviden
         source.tree == observed_source["tree"] && source.clean
     producer_environment_matches = producer_environment ==
         Dict("receipt_sha256"=>environment.sha256,"artifact_name"=>environment.artifact_name)
-    provenance = producer_profile_matches && replay_profile_matches && producer_source_matches &&
-        producer_environment_matches
-    ref_status = provenance ? "PASS" :
-        (!producer_observation_available && replay_profile_matches && producer_source_matches ? "UNAVAILABLE" : "FAIL")
+    provenance, ref_status = _provenance_decision(; producer_observation_available,
+        producer_profile_matches, replay_profile_matches, producer_source_matches,
+        producer_environment_matches)
     pair_observation_path = joinpath(evidence_root, "environment", "observations",
         "pair-$case_id-p$precision.toml")
     producer_observation_relative = producer_observation_available ?

@@ -4691,10 +4691,29 @@ end
         old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
         ENV["CYAXIVERSE_DATA_DIR"] = root
         try
-            @test_throws DimensionMismatch CYAxiverse.read.oriented_potential(geom_idx)
+            @test_throws "Q and L must have the same instanton count" CYAxiverse.read.oriented_potential(geom_idx)
         finally
             old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
                 (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
+        end
+    end
+
+    # A square, valid 3x3 Kinv with a 2xN Q reaches the axion-count guard in
+    # oriented_potential (a 2x3 Kinv would fail earlier, inside Hermitian()).
+    mktempdir() do root
+        geom_dir = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
+        mkpath(geom_dir)
+        h5open(joinpath(geom_dir, "cyax.h5"), "cw") do file
+            cytools = create_group(file, "cytools")
+            potential = create_group(cytools, "potential")
+            geometric = create_group(cytools, "geometric")
+            potential["Q"] = Int[1 0; 0 1]
+            potential["L"] = Float64[1.0 1.0; -5.0 -10.0]
+            geometric["Kinv"] = Matrix{Float64}(I, 3, 3)
+        end
+        geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
+            @test_throws "Q and K must have the same axion count" CYAxiverse.read.oriented_potential(geom_idx)
         end
     end
 
