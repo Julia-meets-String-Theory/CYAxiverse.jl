@@ -3097,6 +3097,35 @@ end
     @test hp_effective["msign"] == hp_provided["msign"]
     @test_throws ArgumentError CYAxiverse.generate.hp_spectrum(
         K, L, Q; quartics=false, selection=:unknown)
+
+    # Here the dropped instanton is 1e-100 relative, invisible in Float64, so the
+    # fixture above cannot distinguish the selections. In this fixture the third
+    # charge repeats the first and sits 1.5 dex below the smallest kept scale
+    # (-21), which is below the default merge threshold log10(0.5) = -0.301, so
+    # LQtildebar drops it. Raw keeps it: H = diag(L1+L3, L2) versus diag(L1, L2),
+    # so mode 1 shifts by 0.5*log10(1 + 10^-1.5) in log10 mass (hand derivation).
+    K2 = Hermitian([4.0 0.0; 0.0 9.0])
+    Q2 = [1 0 1;
+          0 1 0]
+    L2 = [1.0 1.0 1.0;
+          -20.0 -21.0 -21.5]
+    selected2 = CYAxiverse.generate.LQtildebar(L2, Q2)
+    @test size(selected2["Qhat"], 2) == 2
+    raw2 = CYAxiverse.generate.hp_spectrum(K2, L2, Q2;
+        prec=200, quartics=false, selection=:raw)
+    effective2 = CYAxiverse.generate.hp_spectrum(K2, L2, Q2;
+        prec=200, quartics=false, selection=:hp_effective)
+    provided2 = CYAxiverse.generate.hp_spectrum(K2,
+        selected2["Lhat"], selected2["Qhat"]; prec=200,
+        quartics=false, selection=:raw)
+    @test effective2["m"] == provided2["m"]
+    shift = 0.5 * log10(1 + 10.0^-1.5)
+    differences = sort(abs.(sort(raw2["m"]) .- sort(effective2["m"])))
+    @test raw2["m"] != effective2["m"]
+    # Float64 output of a 200-bit computation: agreement is limited by rounding of
+    # O(1) log10 values, far below 1e-9.
+    @test differences[end] ≈ shift atol=1e-9
+    @test differences[1:end-1] ≈ zeros(length(differences) - 1) atol=1e-9
 end
 
 @testset "PQ and HP spectrum: diagonal two-axion comparison" begin
@@ -3303,11 +3332,17 @@ end
         confirm=true, quartics=false)
     @test window.diagnostics.counts_by_precision == [(120, 2, 0)]
 
-    fallback_count = G._pq_physical_mode_count_factored(C, L, Q;
-        threshold_log10=ambiguous_threshold, prec=80, confirm=false)
-    reference_count = G.physical_mode_inertia_count(C, Ltilde, Qtilde,
-        ambiguous_threshold, 80)
-    @test fallback_count == reference_count
+    # W = diag(1e-20, 1e-30) exactly, so the 1e-30 mode has log10 mass
+    # `ambiguous_threshold`. Thresholds 1e-6 above/below that mass are inside the
+    # Float64 certificate radius (gamma*norm_W/1e-30 ~ 1e-4 relative, i.e. ~2e-5 in
+    # log10 mass) but resolvable at 80 bits. By hand: above -> only the 1e-20 mode
+    # exceeds it (count 1); below -> both do (count 2). The exact tie is not tested.
+    for (offset, expected_count) in ((1e-6, 1), (-1e-6, 2))
+        threshold_off_tie = ambiguous_threshold + offset
+        @test G._certified_float64_inertia_count(certificate, threshold_off_tie) === nothing
+        @test G._pq_physical_mode_count_factored(C, L, Q;
+            threshold_log10=threshold_off_tie, prec=80, confirm=false) == expected_count
+    end
 end
 
 @testset "Hybrid spectrum: full fallback after nonconvergence" begin
