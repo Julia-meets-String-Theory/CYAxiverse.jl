@@ -1399,15 +1399,10 @@ end
         end
         mktempdir() do readiness_root
             marker=joinpath(readiness_root,"warmed-ready")
-            previous=get(ENV,"CYAX_SCIENTIFIC_READY_MARKER",nothing)
-            try
-                ENV["CYAX_SCIENTIFIC_READY_MARKER"]=marker
+            withenv("CYAX_SCIENTIFIC_READY_MARKER"=>marker) do
                 ScientificCertificationFixtures._announce_ready()
                 @test isdir(marker)
                 @test_throws ErrorException ScientificCertificationFixtures._announce_ready()
-            finally
-                previous===nothing ? delete!(ENV,"CYAX_SCIENTIFIC_READY_MARKER") :
-                    (ENV["CYAX_SCIENTIFIC_READY_MARKER"]=previous)
             end
         end
 
@@ -2073,18 +2068,14 @@ end
 @requires_git @testset "CI qualification profile is scoped and checks the real thread pools" begin
     F=ScientificCertificationFixtures
     original_blas=BLAS.get_num_threads()
-    original_julia_env=get(ENV,"JULIA_NUM_THREADS",nothing)
-    original_openblas_env=get(ENV,"OPENBLAS_NUM_THREADS",nothing)
-    original_full_env=get(ENV,"CYAXIVERSE_TEST_FULL",nothing)
     try
+      withenv("JULIA_NUM_THREADS"=>"caller-julia-setting","OPENBLAS_NUM_THREADS"=>"caller-openblas-setting",
+              "CYAXIVERSE_TEST_FULL"=>nothing) do
         Threads.nthreads(:default)==1 && Threads.nthreads(:interactive)==0 ||
             error("profile regression requires the approved one-thread Julia test process")
         BLAS.set_num_threads(2)
-        ENV["JULIA_NUM_THREADS"]="caller-julia-setting"
-        ENV["OPENBLAS_NUM_THREADS"]="caller-openblas-setting"
         for (full_setting,expected_full) in ((nothing,true),("0",false),("1",true))
-            full_setting===nothing ? pop!(ENV,"CYAXIVERSE_TEST_FULL",nothing) :
-                (ENV["CYAXIVERSE_TEST_FULL"]=full_setting)
+          withenv("CYAXIVERSE_TEST_FULL"=>full_setting) do
             @test F._test_profile_is_full()===expected_full
             observed=F._with_serial_qualification_profile() do
                 @test get(ENV,"CYAXIVERSE_TEST_FULL","1")==
@@ -2117,6 +2108,7 @@ end
             @test get(ENV,"CYAXIVERSE_TEST_FULL","1")==
                 (full_setting===nothing ? "1" : full_setting)
             @test (haskey(ENV,"CYAXIVERSE_TEST_FULL") == (full_setting!==nothing))
+          end
         end
 
         restored_after_error=try
@@ -2176,13 +2168,8 @@ end
             @test child_exit==0
             @test occursin("nonserial_parent_rejected=true $expected_counts blas_threads=2",child_stdout)
         end
+      end
     finally
-        original_julia_env===nothing ? pop!(ENV,"JULIA_NUM_THREADS",nothing) :
-            (ENV["JULIA_NUM_THREADS"]=original_julia_env)
-        original_openblas_env===nothing ? pop!(ENV,"OPENBLAS_NUM_THREADS",nothing) :
-            (ENV["OPENBLAS_NUM_THREADS"]=original_openblas_env)
-        original_full_env===nothing ? pop!(ENV,"CYAXIVERSE_TEST_FULL",nothing) :
-            (ENV["CYAXIVERSE_TEST_FULL"]=original_full_env)
         BLAS.set_num_threads(original_blas)
     end
 end

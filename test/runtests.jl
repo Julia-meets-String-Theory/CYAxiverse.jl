@@ -46,96 +46,70 @@ end
 include(joinpath(@__DIR__, "axion_photon.jl"))
 
 @testset "Slurm log directory resolution" begin
-    old_job_id = get(ENV, "SLURM_JOB_ID", nothing)
-    old_array_id = get(ENV, "SLURM_ARRAY_TASK_ID", nothing)
-    old_submit_dir = get(ENV, "SLURM_SUBMIT_DIR", nothing)
-    old_log_dir = get(ENV, "CYAXIVERSE_SLURM_LOG_DIR", nothing)
-    try
-        ENV["SLURM_JOB_ID"] = "42"
-        delete!(ENV, "SLURM_ARRAY_TASK_ID")
-        delete!(ENV, "SLURM_SUBMIT_DIR")
-        delete!(ENV, "CYAXIVERSE_SLURM_LOG_DIR")
+    withenv("SLURM_JOB_ID" => "42", "SLURM_ARRAY_TASK_ID" => nothing,
+            "SLURM_SUBMIT_DIR" => nothing, "CYAXIVERSE_SLURM_LOG_DIR" => nothing) do
         wrapper = Module(:SlurmPathResolutionTest)
         Base.include(wrapper, joinpath(@__DIR__, "..", "src", "slurm.jl"))
         slurm_module = getfield(wrapper, :slurm)
         @test_throws ArgumentError Base.invokelatest(slurm_module.slurm_log_dir)
         mktempdir() do root
-            ENV["SLURM_SUBMIT_DIR"] = root
-            @test Base.invokelatest(slurm_module.slurm_log_dir) == root
-            first_path = Base.invokelatest(slurm_module.writeslurm, 7, "first\n")
-            @test first_path == joinpath(root, "slurm-7.out")
-            @test read(first_path, String) == "first\n"
+            withenv("SLURM_SUBMIT_DIR" => root) do
+                @test Base.invokelatest(slurm_module.slurm_log_dir) == root
+                first_path = Base.invokelatest(slurm_module.writeslurm, 7, "first\n")
+                @test first_path == joinpath(root, "slurm-7.out")
+                @test read(first_path, String) == "first\n"
 
-            configured = joinpath(root, "configured")
-            ENV["CYAXIVERSE_SLURM_LOG_DIR"] = configured
-            second_path = Base.invokelatest(slurm_module.writeslurm, "7_2", "second\n")
-            @test second_path == joinpath(configured, "slurm-7_2.out")
-            @test read(second_path, String) == "second\n"
+                configured = joinpath(root, "configured")
+                withenv("CYAXIVERSE_SLURM_LOG_DIR" => configured) do
+                    second_path = Base.invokelatest(slurm_module.writeslurm, "7_2", "second\n")
+                    @test second_path == joinpath(configured, "slurm-7_2.out")
+                    @test read(second_path, String) == "second\n"
+                end
+            end
         end
-    finally
-        old_job_id === nothing ? delete!(ENV, "SLURM_JOB_ID") :
-            (ENV["SLURM_JOB_ID"] = old_job_id)
-        old_array_id === nothing ? delete!(ENV, "SLURM_ARRAY_TASK_ID") :
-            (ENV["SLURM_ARRAY_TASK_ID"] = old_array_id)
-        old_submit_dir === nothing ? delete!(ENV, "SLURM_SUBMIT_DIR") :
-            (ENV["SLURM_SUBMIT_DIR"] = old_submit_dir)
-        old_log_dir === nothing ? delete!(ENV, "CYAXIVERSE_SLURM_LOG_DIR") :
-            (ENV["CYAXIVERSE_SLURM_LOG_DIR"] = old_log_dir)
     end
 end
 
 if _FULL; @testset "Phase-3 driver data-directory configuration" begin
-    old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-    try
-        delete!(ENV, "CYAXIVERSE_DATA_DIR")
+    withenv("CYAXIVERSE_DATA_DIR" => nothing) do
         @test_throws ArgumentError _phase3_cli_data_dir(String[])
         @test_throws ArgumentError _phase3_cli_data_dir(["one", "two"])
         mktempdir() do root
             @test _phase3_cli_data_dir([root]) == root
-            ENV["CYAXIVERSE_DATA_DIR"] = root
-            @test _phase3_cli_data_dir(String[]) == root
+            withenv("CYAXIVERSE_DATA_DIR" => root) do
+                @test _phase3_cli_data_dir(String[]) == root
+            end
         end
-    finally
-        old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-            (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
     end
 end; end
 
 @testset "Data directory resolution" begin
     filestructure = CYAxiverse.filestructure
     expected_default = normpath(joinpath(@__DIR__, "..", "..", "data"))
-    old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-    old_newargs = get(ENV, "newARGS", nothing)
-    old_vacua_test = get(ENV, "CYAXIVERSE_DATA_DIR_VACUA_TEST", nothing)
-    try
-        delete!(ENV, "CYAXIVERSE_DATA_DIR")
-        delete!(ENV, "newARGS")
-        delete!(ENV, "CYAXIVERSE_DATA_DIR_VACUA_TEST")
+    withenv("CYAXIVERSE_DATA_DIR" => nothing, "newARGS" => nothing,
+            "CYAXIVERSE_DATA_DIR_VACUA_TEST" => nothing) do
         @test filestructure.default_data_dir() == expected_default
         @test filestructure.resolve_data_dir() == expected_default
 
-        ENV["CYAXIVERSE_DATA_DIR"] = "/tmp/from-environment"
-        @test filestructure.resolve_data_dir() == "/tmp/from-environment"
-        @test filestructure.resolve_data_dir("/tmp/explicit") == "/tmp/explicit"
-        @test filestructure.present_dir() == "/tmp/from-environment/"
-        @test filestructure.present_dir("/tmp/explicit") == "/tmp/explicit/"
+        withenv("CYAXIVERSE_DATA_DIR" => "/tmp/from-environment") do
+            @test filestructure.resolve_data_dir() == "/tmp/from-environment"
+            @test filestructure.resolve_data_dir("/tmp/explicit") == "/tmp/explicit"
+            @test filestructure.present_dir() == "/tmp/from-environment/"
+            @test filestructure.present_dir("/tmp/explicit") == "/tmp/explicit/"
+        end
 
-        delete!(ENV, "CYAXIVERSE_DATA_DIR")
-        ENV["newARGS"] = "unknown-alias"
-        @test_throws ArgumentError filestructure.resolve_data_dir()
-        ENV["newARGS"] = "docker"
-        @test filestructure.resolve_data_dir() == "/scratch/database"
-        ENV["newARGS"] = "vacua_test"
-        @test_throws ArgumentError filestructure.resolve_data_dir()
-        ENV["CYAXIVERSE_DATA_DIR_VACUA_TEST"] = "/tmp/vacua-testing"
-        @test filestructure.resolve_data_dir() == "/tmp/vacua-testing"
-    finally
-        old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-            (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
-        old_newargs === nothing ? delete!(ENV, "newARGS") :
-            (ENV["newARGS"] = old_newargs)
-        old_vacua_test === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR_VACUA_TEST") :
-            (ENV["CYAXIVERSE_DATA_DIR_VACUA_TEST"] = old_vacua_test)
+        withenv("newARGS" => "unknown-alias") do
+            @test_throws ArgumentError filestructure.resolve_data_dir()
+        end
+        withenv("newARGS" => "docker") do
+            @test filestructure.resolve_data_dir() == "/scratch/database"
+        end
+        withenv("newARGS" => "vacua_test") do
+            @test_throws ArgumentError filestructure.resolve_data_dir()
+            withenv("CYAXIVERSE_DATA_DIR_VACUA_TEST" => "/tmp/vacua-testing") do
+                @test filestructure.resolve_data_dir() == "/tmp/vacua-testing"
+            end
+        end
     end
 end
 
@@ -696,9 +670,7 @@ end
             potential["L"] = scan_L
             geometric["Kinv"] = K
         end
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             geom_idx = CYAxiverse.structs.GeometryIndex(1, 1, 1)
             prepared = points.prepare_geometry_context(geom_idx)
             @test prepared.geometry == geom_idx
@@ -726,12 +698,6 @@ end
             flow_report = joinpath(root, "flows.csv")
             _write_csv(flow_report, scan.flow.rows, FLOW_FIELDS)
             @test length(readlines(flow_report)) == length(scan.flow.rows) + 1
-        finally
-            if old_data_dir === nothing
-                delete!(ENV, "CYAXIVERSE_DATA_DIR")
-            else
-                ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir
-            end
         end
     end
 end
@@ -750,9 +716,7 @@ end
             potential["L"] = L
             geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
         end
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
             from_geometry = CYAxiverse.generate.LQtilde(geom_idx)
             from_matrices = CYAxiverse.generate.LQtilde(
@@ -809,9 +773,6 @@ end
                 CYAxiverse.structs.GeometryIndex(2, 3, 1);
                 canonicalize_charge_rows=false)
             @test size(raw_duplicate.Q) == (2, 6)
-        finally
-            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 end
@@ -849,9 +810,7 @@ end
     end
 
     mktempdir() do root
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             rng = MersenneTwister(20260816)
 
             # A well-conditioned Kinv reads fine and yields a
@@ -942,9 +901,6 @@ end
             write_potential_fixture(root, 25, 1, 1, Kinv_wall)
             near_wall = CYAxiverse.read.potential(25, 1, 1)
             @test isposdef(near_wall.K)
-        finally
-            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 end
@@ -1622,9 +1578,7 @@ if _FULL
             spectrum["sentinel"] = Int[17, 23]
         end
 
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             vacuum_geom_dir = joinpath(root, "h11_002", "np_0000002", "cy_0000001")
             mkpath(vacuum_geom_dir)
             h5open(joinpath(vacuum_geom_dir, "cyax.h5"), "cw") do file
@@ -1757,9 +1711,6 @@ if _FULL
             bad_potential = (Q=zeros(Int, 3, 4), L=zeros(2, 4),
                 K=Hermitian(Matrix{Float64}(I, 2, 2)))
             @test_throws DimensionMismatch _validate_potential(geom_idx, bad_potential)
-        finally
-            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 end
@@ -1767,10 +1718,8 @@ end
 end
 if _FULL
 @testset "Orientifold inflation persistence preserves precision and requires force" begin
-    previous_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-    try
-        mktempdir() do data_dir
-            ENV["CYAXIVERSE_DATA_DIR"] = data_dir
+    mktempdir() do data_dir
+        withenv("CYAXIVERSE_DATA_DIR" => data_dir) do
             geom_idx = CYAxiverse.structs.GeometryIndex(2, 7, 1)
             geom_dir = joinpath(data_dir, "h11_002", "np_0000007", "cy_0000001")
             mkpath(geom_dir)
@@ -1886,9 +1835,6 @@ if _FULL
                 pipeline_config_digest="fixture-digest", force=true)
             @test _has_inflation_group(path; config_digest="fixture-digest")
         end
-    finally
-        previous_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-            (ENV["CYAXIVERSE_DATA_DIR"] = previous_data_dir)
     end
 end
 end
@@ -1935,9 +1881,7 @@ if _FULL
         @test read(file["spectrum/physical/lambda_22_log10"]) == [0.7]
         @test read(file["spectrum/physical/lambda_22_indices"]) == reshape([1, 1, 2, 2], 4, 1)
     end
-    old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-    ENV["CYAXIVERSE_DATA_DIR"] = output_dir
-    try
+    withenv("CYAXIVERSE_DATA_DIR" => output_dir) do
         loaded = CYAxiverse.read.physical_spectrum(geom_idx)
         @test loaded.m == spectrum.m
         @test loaded.fpert ≈ [-9.5, -9.0]
@@ -1945,9 +1889,6 @@ if _FULL
         @test loaded.fpert_log10_unit == "GeV"
         @test loaded.fpert_convention == "lambda_self_abs_log10"
         @test loaded.mass_signs_or_inertia == Int[]
-    finally
-        old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-            (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
     end
 
     _write_result(output_path, geom_idx, spectrum; prec=200, threshold_log10=-30.0,
@@ -2870,9 +2811,7 @@ end
             potential = create_group(create_group(file, "cytools"), "potential")
             potential["L"] = L
         end
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             setprecision(ArbFloat; digits = 60)
             scales = CYAxiverse.read.L_arb(2, 1, 1)
             @test length(scales) == size(L, 2)
@@ -2880,9 +2819,6 @@ end
                 @test isapprox(Float64(log10(abs(scales[a]))), L[2, a]; atol = 1e-12)
                 @test Int(sign(scales[a])) == Int(sign(L[1, a]))
             end
-        finally
-            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 end
@@ -2914,18 +2850,13 @@ end
                 potential["L"] = stored_L
             end
 
-            old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-            ENV["CYAXIVERSE_DATA_DIR"] = root
-            try
+            withenv("CYAXIVERSE_DATA_DIR" => root) do
                 loaded = CYAxiverse.read.L_arb(2, 1, 1)
                 expected = ArbFloat.(stored_L[1, :]) .*
                     ArbFloat(10) .^ ArbFloat.(stored_L[2, :])
                 @test isconcretetype(eltype(loaded))
                 @test eltype(loaded) == typeof(ArbFloat(0))
                 @test loaded == expected
-            finally
-                old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                    (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
             end
         end
     finally
@@ -3047,9 +2978,7 @@ end
             geometric["Kinv"] = Kinv
         end
 
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
             factored = CYAxiverse.read.potential_factored(geom_idx)
             @test factored.Kinv ≈ Kinv
@@ -3067,12 +2996,6 @@ end
                     log10(BigFloat("2.435e18")) .+ log10(2BigFloat(π)))
             end
             @test hp["m"] ≈ reference atol=5e-6
-        finally
-            if old_data_dir === nothing
-                delete!(ENV, "CYAXIVERSE_DATA_DIR")
-            else
-                ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir
-            end
         end
     end
 end
@@ -3670,10 +3593,8 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
         "θ̃∥" => Rational{Int}[1//1 0//1; 0//1 1//1],
     )
 
-    previous_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-    try
-        mktempdir() do data_dir
-            ENV["CYAXIVERSE_DATA_DIR"] = data_dir
+    mktempdir() do data_dir
+        withenv("CYAXIVERSE_DATA_DIR" => data_dir) do
             mkpath(joinpath(data_dir, "h11_002", "np_0000001", "cy_0000001"))
             path = CYAxiverse.filestructure.cyax_file(geom_idx)
             h5open(path, "w") do file
@@ -3705,12 +3626,6 @@ if _FULL; @testset "PQ vacua-pipeline spectrum persistence" begin
             @test saved_vacua.estimate == 3.0
             @test saved_vacua.verified == 3
             @test saved_vacua.theta_parallel == vac_id["θ̃∥"]
-        end
-    finally
-        if previous_data_dir === nothing
-            pop!(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        else
-            ENV["CYAXIVERSE_DATA_DIR"] = previous_data_dir
         end
     end
 
@@ -4536,8 +4451,7 @@ if _FULL; @testset "Quartic index migration: relabel old two-dimensional order" 
             quart31["index", deflate=9] = garbage_index31
         end
 
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        try
+        begin
             # Default is report-only: the on-disk old order must survive a
             # run without --apply.
             dry_options = _quartic_parse_args(["--data-dir", root, "--h11", "4"])
@@ -4597,9 +4511,6 @@ if _FULL; @testset "Quartic index migration: relabel old two-dimensional order" 
             h5open(garbage_path, "r") do file
                 @test read(file, "spectrum/quart31/index") == garbage_index31
             end
-        finally
-            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 end; end
@@ -4688,13 +4599,8 @@ end
             geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
         end
         geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             @test_throws "Q and L must have the same instanton count" CYAxiverse.read.oriented_potential(geom_idx)
-        finally
-            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 
@@ -4731,13 +4637,8 @@ end
             geometric["Kinv"] = Float64[1.0 0.0 0.0; 0.0 1.0 0.0]
         end
         geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             @test_throws DimensionMismatch CYAxiverse.read.oriented_potential(geom_idx)
-        finally
-            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 
@@ -4762,9 +4663,7 @@ end
             cy_index = parse(Int, cy_dirs[1][4:end])
             geom_idx = CYAxiverse.structs.GeometryIndex(2, np_index, cy_index)
 
-            old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-            ENV["CYAXIVERSE_DATA_DIR"] = db_root
-            try
+            withenv("CYAXIVERSE_DATA_DIR" => db_root) do
                 # cytools/geometric round-trip.
                 geometry = CYAxiverse.read.geometry(geom_idx)
                 @test geometry.h21 > 0
@@ -4821,9 +4720,6 @@ end
                     end
                     @test Bool(HDF5.read(HDF5.attributes(file)["orientifold_provenance_complete"]))
                 end
-            finally
-                old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                    (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
             end
         end
     else
@@ -4855,9 +4751,7 @@ if _FULL; @testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary"
             geometric["Kinv"] = Matrix{Float64}(I, 2, 2)
         end
         geom_idx = CYAxiverse.structs.GeometryIndex(2, 1, 1)
-        old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-        ENV["CYAXIVERSE_DATA_DIR"] = root
-        try
+        withenv("CYAXIVERSE_DATA_DIR" => root) do
             # 1. The established vacua_pipeline engine, called with
             # method=:auto (this test's own guard against ever silently
             # reverting to the :legacy default this driver was built to
@@ -4983,9 +4877,6 @@ if _FULL; @testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary"
                     float_tolerance=1e-10, high_tolerance=1e-25,
                     max_points=100, min_efolds=0.01, max_efolds=0.05,
                     flow_step=1e-3, flow_displacement=1e-3))
-        finally
-            old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
         end
     end
 
@@ -5003,9 +4894,7 @@ if _FULL; @testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary"
             if !isempty(cy_dirs)
                 cy_index = parse(Int, cy_dirs[1][4:end])
                 geom_idx = CYAxiverse.structs.GeometryIndex(2, np_index, cy_index)
-                old_data_dir = get(ENV, "CYAXIVERSE_DATA_DIR", nothing)
-                ENV["CYAXIVERSE_DATA_DIR"] = db_root
-                try
+                withenv("CYAXIVERSE_DATA_DIR" => db_root) do
                     pv = CYAxiverse.read.pipeline_vacua(geom_idx)
                     @test pv.metadata.status == "completed"
                     @test pv.metadata.method == "auto"
@@ -5017,9 +4906,6 @@ if _FULL; @testset "Orientifold Pipeline 2 (vacua + inflation) writing boundary"
                         @test String(HDF5.read(file["inflation/catastrophes/status"])) ==
                             "completed"
                     end
-                finally
-                    old_data_dir === nothing ? delete!(ENV, "CYAXIVERSE_DATA_DIR") :
-                        (ENV["CYAXIVERSE_DATA_DIR"] = old_data_dir)
                 end
             end
         end
