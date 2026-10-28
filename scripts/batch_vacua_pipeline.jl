@@ -33,7 +33,7 @@ function _vacua_usage()
       --merge-tolerance X          Recorded merge tolerance. Default: 1e-7.
       --max-iterations N           Recorded iteration bound. Default: 200.
         --method NAME                Search method: auto, legacy, leading_branches, or reduced_jlm.
-                            Default: legacy.
+                            Default: auto (was legacy before the minimizer fix).
                             Note: legacy results changed when the minimizer objective/Hessian
                             shape bug was fixed; recompute rather than compare old counts.
         --max-branches N             Bound leading-branch enumeration. Default: 1000000.
@@ -52,7 +52,7 @@ function _vacua_parse_args(args)
     options = (data_dir="", h11=nothing, limit=nothing, offset=0,
         geometries=GeometryIndex[], threshold=0.5, starts=10_000,
         residual_tolerance=1e-10, merge_tolerance=1e-7, max_iterations=200,
-        method=:legacy, max_branches=1_000_000, summary="",
+        method=:auto, max_branches=1_000_000, summary="",
         append_summary=false, workers=1, blas_threads=DEFAULT_BLAS_THREADS, batch_size=16,
         force=false, dry_run=false)
 

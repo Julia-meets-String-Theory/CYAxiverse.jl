@@ -225,7 +225,8 @@ end
             matching_options = _vacua_parse_args(["--data-dir", root,
                 "--geometry", "2,1,1", "--summary", matching_summary, "--threshold", "0.5",
                 "--starts", "17", "--residual-tolerance", "1e-9",
-                "--merge-tolerance", "1e-6", "--max-iterations", "12", "--dry-run"])
+                "--merge-tolerance", "1e-6", "--max-iterations", "12", "--method", "legacy",
+                "--dry-run"])
             @test run_vacua_batch(matching_options)
             @test occursin("skipped", read(matching_summary, String))
 
@@ -238,6 +239,7 @@ end
             @test parallel_options[:blas_threads] == 1
             default_blas_options = _vacua_parse_args(["--data-dir", root,
                 "--geometry", "2,1,1"])
+            @test default_blas_options[:method] == :auto
             @test default_blas_options[:blas_threads] == 1
             repository_root = normpath(joinpath(@__DIR__, ".."))
             if in_git_checkout(repository_root)
