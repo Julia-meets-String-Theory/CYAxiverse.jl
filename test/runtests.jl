@@ -2302,6 +2302,20 @@ end
     @test basis2["vac"] == 2
     @test basis2["θ̃∥"] == [1//2 0; 0 1]
     @test generate.vacua_id(L, Q2; threshold=0.5, runs=4)["vac"] == 2
+
+    # Known issue, not fixed here: the two vacua above are θ/2π = (0, 0) and
+    # (1/2, 0), but the trivial branch of vacua_id lists only (0, 0).
+    @test_broken size(generate.vacua_id(L, Q2; threshold=0.5, runs=4)["θ̃∥"], 2) == 2
+
+    # Known issue, not fixed here: with the [1, 1] instanton inside the threshold
+    # (log10 Λ = -1.1 >= -1 + log10(0.5)), α = Qtilde⁻¹ [1, 1] = [1/2, 1]. Its first
+    # entry is cut because Λ₃/Λ₁ = 10^-1.1 < 0.5, and the second is kept because
+    # Λ₃/Λ₂ = 10^-0.1 >= 0.5, so αeff = [0; 1] and Qeff = [I | αeff] = [1 0 0; 0 1 1].
+    # The nonzero-α branch strips a placeholder column that LQtildebar already
+    # removed, so a single dependent column raises BoundsError.
+    L_dependent = Float64[1 1 1; 0 -1 -1.1]
+    @test_broken generate.vacua_id_basis(L_dependent, Q2; threshold=0.5)["Qeff"] ==
+        [1 0 0; 0 1 1]
 end
 
 @testset "subspace_minimize keeps only converged minima with Hsign == 1" begin
