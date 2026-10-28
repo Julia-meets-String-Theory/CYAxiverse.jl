@@ -2267,10 +2267,11 @@ end
 
 @testset "vacua_id_basis handles charges with no dependent columns (2,2,1 geometry)" begin
     generate = CYAxiverse.generate
-    # Q = [I | q] has a leading identity block, so every instanton column is either
-    # independent or already in the basis and alpha has zero columns. The expected
-    # number of vacua is |det(Qtilde)| = |det(I)| = 1 (the identity block generates
-    # the lattice). This used to raise BoundsError from an empty column mask.
+    # Q = [I | q]: the leading pair forms Qtilde = I and the dependent [1, 1]
+    # instanton is 10 decades down, below threshold 0.5 (LQtildebar keeps
+    # log10 Λ >= -1 + log10(0.5)), so alpha has zero columns. The expected number
+    # of vacua is |det(Qtilde)| = |det(I)| = 1 (the identity block generates the
+    # lattice). This used to raise BoundsError from an empty column mask.
     L = Float64[1 1 1; 0 -1 -10]
     Q = [1 0 1; 0 1 1]
     basis = generate.vacua_id_basis(L, Q; threshold=0.5)
@@ -2280,6 +2281,18 @@ end
     located = generate.vacua_id(L, Q; threshold=0.5, runs=4)
     @test located["vac"] == 1
     @test all(iszero, located["θ̃∥"])
+
+    # Same cut, but Qtilde = [2 0; 0 1] is not unimodular. Q generates Z², since
+    # [1, 1] - [0, 1] = [1, 0], so θ is 2π-periodic in each component. The leading
+    # potential (1 - cos 2θ₁) + 0.1 (1 - cos θ₂) has minima θ₁ ∈ {0, π}, θ₂ = 0;
+    # the 1e-10 [1, 1] term shifts V(π, 0) by 2e-10 but leaves its Hessian
+    # diag(4, 0.1) - 1e-10 [1 1; 1 1] positive definite. So there are
+    # |det(Qtilde)| = 2 vacua, not 1, and θ̃∥ = Qtilde⁻¹ = [1/2 0; 0 1].
+    Q2 = [2 0 1; 0 1 1]
+    basis2 = generate.vacua_id_basis(L, Q2; threshold=0.5)
+    @test basis2["vac"] == 2
+    @test basis2["θ̃∥"] == [1//2 0; 0 1]
+    @test generate.vacua_id(L, Q2; threshold=0.5, runs=4)["vac"] == 2
 end
 
 @testset "subspace_minimize keeps only converged minima with Hsign == 1" begin
