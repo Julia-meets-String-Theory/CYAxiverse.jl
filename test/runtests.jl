@@ -2249,17 +2249,26 @@ end
     # send Newton's method to a different stationary point.
     Qmin = Float64[1 0 1; 0 1 1]
     result = minimizer.minimize(ones(3), Qmin, [0.3, -0.2])
+    @test result["converged"]
     @test result["Hsign"] == 1
     # xmin is stored as a fraction of 2π, so w is the wrapped displacement from 0 in radians.
     wrapped = [min(abs(v), abs(1 - v)) * 2π for v in result["xmin"]]
-    @test all(<(1e-3), wrapped)
-    @test all(<(-3), result["gradlog"])
+    # Limit sqrt(eps()), from minimize's stopping rules: an x_abstol = sqrt(eps())
+    # stop leaves a Newton error of order the final step squared; a g_abstol =
+    # eps()/1e-2 stop gives |w| <= |∇V| / λmin(H) = 2.2e-14 (λmin = 1, below); and an
+    # exact f-repeat stop needs every 1 - cos(Q_a⋅w) to round to 0, i.e. |Q_a⋅w| <
+    # sqrt(eps()/2). Each other critical point ((0, π), (π, 0), ±(2π/3, 2π/3),
+    # (π, π)) has a component at least 2π/3 from 0.
+    w_limit = sqrt(eps())
+    @test all(<=(w_limit), wrapped)
+    # |sin u| <= |u| gives |∇V|∞ <= (|Q||Q|ᵀ row sum = 3) |w|∞ <= 3 w_limit.
+    @test all(<=(log10(3w_limit)), result["gradlog"])
     # Since 1 - cos(u) <= u^2/2, V(w) <= ½ wᵀHw with H = Q diag(L) Qᵀ = [2 1; 1 2],
     # whose eigenvalues are 1 and 3 (trace 4, determinant 3), so V <= 1.5 |w|².
     # V is evaluated independently here from the definition; 4eps absorbs roundoff.
     V_at_min = sum(1 .- cos.(Qmin' * (2π .* result["xmin"])))
     @test -4eps() <= V_at_min <= 1.5 * sum(abs2, wrapped) + 4eps()
-    @test V_at_min < 1.5e-6  # 1.5 × (1e-3)², the bound at the wrapped-distance limit above
+    @test V_at_min <= 1.5 * 2w_limit^2 + 4eps()  # the bound at |w|² = 2 w_limit²
 
     Qempty = zeros(Float64, 2, 0)
     @test size(generate.hessian_norm([0.2, -0.1], Qempty)) == (2, 2, 0)
