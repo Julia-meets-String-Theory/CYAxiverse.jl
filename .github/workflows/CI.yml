@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   lifecycle:
-    name: Version lifecycle checks
+    name: Python tests (lifecycle, routing, scripts)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,17 +44,14 @@ jobs:
       - uses: julia-actions/cache@v2
       - name: Install documentation routing test dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-      - name: Check lifecycle, version, and documentation routing fixtures
-        run: |
-          python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'
-          python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'
-          python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'
-          PYTHONPATH=scripts python3 -m unittest \
-            test_agent_verify \
-            test_analyze_fuzzy_axions_orientifold_gap \
-            test_merge_orientifold_shards \
-            test_orientifold_population_preflight \
-            test_orientifold_terminal_ledger
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python test requirements
+        run: python3 -m pip install -r requirements-test.txt
+      - name: Run all portable Python tests
+        # CYTools-dependent tests skip themselves (scripts/local_only.py).
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   fast:
     name: Fast tests

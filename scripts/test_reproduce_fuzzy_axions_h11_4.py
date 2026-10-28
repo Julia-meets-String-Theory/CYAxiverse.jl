@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Focused tests for audit-driver argument and population contracts."""
+from local_only import require_cytools
+
+require_cytools()
+
 
 from argparse import Namespace
 from contextlib import redirect_stderr

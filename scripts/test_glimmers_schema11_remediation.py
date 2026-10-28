@@ -1036,9 +1036,10 @@ class ProvenanceContractTests(unittest.TestCase):
 
 class ScopeContractTests(unittest.TestCase):
     def test_handoff_matrix_reserves_monolithic_generator_for_integration(self):
-        task16 = json.loads(
-            (TASK_DIR / "16_schema11_regression_validation.json").read_text()
-        )
+        task16_path = TASK_DIR / "16_schema11_regression_validation.json"
+        if not task16_path.is_file():
+            self.skipTest("local pilot task files are not in this checkout")
+        task16 = json.loads(task16_path.read_text())
         task17 = json.loads(
             (TASK_DIR / "17_schema11_integration_orchestration.json").read_text()
         )
