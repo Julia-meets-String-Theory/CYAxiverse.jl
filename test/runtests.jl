@@ -2318,6 +2318,34 @@ end
         initial_points=[[0.0, 0.0]]))
     # L = 1: the origin is the minimum and is kept (once, after unique).
     @test minimizer.subspace_minimize([1.0], one_by_one(1); initial_points=[[0.3]]) == [[0.0]]
+
+    # Mixed-sign L where the origin is a saddle although both diagonal Hessian
+    # entries are positive. Q = [1 0 1; 0 1 1], L = (1, 1, -0.9):
+    # V = (1 - cos x1) + (1 - cos x2) - 0.9 (1 - cos(x1 + x2)). At the origin
+    # H = I - 0.9 [1 1; 1 1] = [0.1 -0.9; -0.9 0.1], eigenvalues 0.1 ± 0.9 = 1, -0.8.
+    # On x1 = x2 = t, V' = 2 sin t (1 - 1.8 cos t) = 0 gives cos t = 5/9, where
+    # H = (5/9) I + 0.9 (31/81) [1 1; 1 1] has eigenvalues 5/9 and 5/9 + 62/90 > 0,
+    # so (t, t) and (-t, -t) are minima. The start at the origin converges at once
+    # to the saddle and is rejected; the origin rule must not add it back.
+    Qmixed = Float64[1 0 1; 0 1 1]
+    Lmixed = [1.0, 1.0, -0.9]
+    origin_run = minimizer.minimize(Lmixed, Qmixed, [0.0, 0.0])
+    @test origin_run["converged"] && origin_run["Hsign"] == -1
+    kept_mixed = minimizer.subspace_minimize(Lmixed, Qmixed;
+        initial_points=[[0.0, 0.0], [1.0, 0.95], [5.3, 5.25]])
+    a = acos(5 / 9) / 2π  # xmin is stored as a fraction of 2π
+    @test length(kept_mixed) == 2
+    @test !any(iszero, kept_mixed)
+    # sqrt(eps()) is minimize's x_abstol stopping step (radians); Newton's quadratic
+    # convergence leaves the final error far below it, and here it is applied to
+    # the fraction of 2π, which is 2π times looser still.
+    @test sort(kept_mixed) ≈ [[a, a], [1 - a, 1 - a]] atol=sqrt(eps())
+
+    # Caveat (a): L = (1, -1) on the same charge, Q = [1 1], makes V identically 0.
+    # The origin Hessian is exactly 0, so the origin rule keeps it, while every
+    # Newton endpoint has Hsign = sign(0) = 0 and is rejected.
+    flat = minimizer.subspace_minimize([1.0, -1.0], Float64[1 1]; initial_points=[[0.4]])
+    @test flat == [[0.0]]
 end
 
 @testset "Factored Kinv whitening remains stable when Kinv is ill-conditioned" begin

@@ -697,6 +697,17 @@ did not converge are discarded. The origin is always a critical point; it is add
 unless its Hessian `Q * Diagonal(L) * Q'` has a negative eigenvalue, in which case
 it is a saddle or maximum and is not a minimum.
 
+!!! note "Caveats of the origin rule"
+    - The origin test accepts eigenvalues down to a roundoff bound below zero, so an
+      origin with an exactly zero Hessian eigenvalue (a flat direction) is kept.
+      Newton endpoints are filtered on `Hsign == 1`, which rejects zero modes, so
+      the two rules differ for flat directions.
+    - The eigenvalues are computed in `Float64`. For strongly hierarchical `L`
+      (scales spanning more than about 16 decades) the small eigenvalues fall below
+      the roundoff bound and their sign is not resolved, so a saddle along a
+      suppressed direction can be kept. `Hsign` from [`minimize`](@ref) has the
+      same limitation.
+
 !!! warning "Behaviour change"
     Earlier versions kept every Newton endpoint and always added the origin.
     Together with the corrected objective and Hessian in [`minimize`](@ref), this
