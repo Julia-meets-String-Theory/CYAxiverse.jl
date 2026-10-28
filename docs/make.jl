@@ -197,7 +197,7 @@ makedocs(
         "Scientific certification" => "scientific_certification.md",
         "Local axion-photon scan" => "axion_photon.md",
         "Examples" => "examples.md",
-        "API" => "api.md"
+        "API" => ["api.md", "api_minimizer.md"]
     ]
 )
 
