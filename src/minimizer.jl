@@ -545,10 +545,15 @@ function minimize(LV::Vector, QV, x0::Vector)
         sum(grad_temp, dims = 2)
     end
     gradσ = grad_std(LV,QV)
-    x_tol = minimum(abs.(LV))
+    # Step tolerance in radians. It was minimum(abs.(LV)), which ties a position
+    # tolerance to instanton scales (about 1 rad for O(1) scales, 1e-20 for small
+    # ones). sqrt(eps()) is the finest step resolvable through the objective, whose
+    # change is O(eps) once |dx| ~ sqrt(eps), and Newton's quadratic convergence
+    # leaves the error after such a step near eps.
+    x_abstol = sqrt(eps())
     g_tol = eps() / threshold
 	algo_LBFGS = LBFGS(linesearch = LineSearches.BackTracking());
-    res = Optim.optimize(fitness, grad!, hess!, x0, Optim.Options(x_tol = x_tol, g_tol = g_tol))
+    res = Optim.optimize(fitness, grad!, hess!, x0, Optim.Options(x_abstol = x_abstol, g_tol = g_tol))
     Vmin = Optim.minimum(res)
     xmin = Optim.minimizer(res)
     # GC.gc()
