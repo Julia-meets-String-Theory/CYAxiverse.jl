@@ -2265,6 +2265,31 @@ end
     @test size(generate.hessian_norm([0.2, -0.1], Qempty)) == (2, 2, 0)
 end
 
+@testset "subspace_minimize keeps only converged minima with Hsign == 1" begin
+    minimizer = CYAxiverse.minimizer
+    one_by_one(x) = reshape([float(x)], 1, 1)
+    # V = -(1 - cos x): the origin is a maximum (V'' = -1) and x = π a minimum
+    # (V'' = +1), stored by minimizer as the fraction 0.5 of 2π. Optim's Newton
+    # escapes a maximum from any start with nonzero gradient, so starting exactly
+    # at the critical point x = 0 (zero gradient, converged at once) is how a
+    # non-minimum endpoint is produced.
+    maximum_run = minimizer.minimize([-1.0], one_by_one(1), [0.0])
+    @test maximum_run["converged"] && maximum_run["Hsign"] == -1
+    kept = minimizer.subspace_minimize([-1.0], one_by_one(1); initial_points=[[0.0], [3.0]])
+    @test length(kept) == 1
+    @test only(kept) ≈ [0.5] atol=1e-6
+    # The origin is not added when its Hessian Q diag(L) Q' = -1 is not positive.
+    @test isempty(minimizer.subspace_minimize([-1.0], one_by_one(1); initial_points=Vector{Float64}[]))
+    # Q = I, L = (1, -1): V = (1 - cos x1) - (1 - cos x2) has Hessian diag(1, -1)
+    # at the origin, a saddle, so nothing is kept from a start there.
+    saddle_run = minimizer.minimize([1.0, -1.0], Matrix(1.0I, 2, 2), [0.0, 0.0])
+    @test saddle_run["converged"] && saddle_run["Hsign"] == -1
+    @test isempty(minimizer.subspace_minimize([1.0, -1.0], Matrix(1.0I, 2, 2);
+        initial_points=[[0.0, 0.0]]))
+    # L = 1: the origin is the minimum and is kept (once, after unique).
+    @test minimizer.subspace_minimize([1.0], one_by_one(1); initial_points=[[0.3]]) == [[0.0]]
+end
+
 @testset "Factored Kinv whitening remains stable when Kinv is ill-conditioned" begin
     # This Kinv has condition number about 4 × 10^10.  Forming K = inv(Kinv)
     # before whitening loses the small kinetic direction on older paths.

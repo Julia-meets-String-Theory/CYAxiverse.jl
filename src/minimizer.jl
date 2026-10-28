@@ -565,8 +565,8 @@ function minimize(LV::Vector, QV, x0::Vector)
     Vmin_log = Float64(log10(abs(Vmin)))
     xmin = @.ifelse(abs(xmin) < eps() / threshold, zero(xmin), xmin)
     xmin = @.ifelse(one(xmin) - mod(xmin / 2π, 1) < eps() / threshold || mod(xmin / 2π, 1) < eps() / threshold, zero(xmin), mod(xmin / 2π, 1))
-    keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradlog"]
-    vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, grad_log]
+    keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradlog", "converged"]
+    vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, grad_log, Optim.converged(res)]
     return Dict(zip(keys,vals))
         # GC.gc()
     # end
@@ -677,23 +677,57 @@ function id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000)
 
 end
 """
-    subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)))
-Minimizes the subspace with `runs` iterations
+    _is_converged_minimum(result)
+
+Whether a [`minimize`](@ref) result is a converged Newton run ending at a point
+with a positive-definite-signed Hessian (`Hsign == 1`). Saddles and maxima, and
+runs that hit the iteration limit, are rejected.
 """
-function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1))
+_is_converged_minimum(result) = result["converged"] && result["Hsign"] == 1
+
+"""
+    subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)),
+                      initial_points=nothing)
+
+Minimize the subspace with `runs` random initialisations per phase column, or
+from the explicit `initial_points` (a vector of start vectors) when given.
+
+Only converged points with `Hsign == 1` are kept: saddles, maxima and runs that
+did not converge are discarded. The origin is always a critical point; it is added
+unless its Hessian `Q * Diagonal(L) * Q'` has a negative eigenvalue, in which case
+it is a saddle or maximum and is not a minimum.
+
+!!! warning "Behaviour change"
+    Earlier versions kept every Newton endpoint and always added the origin.
+    Together with the corrected objective and Hessian in [`minimize`](@ref), this
+    changes `:legacy` vacua results.
+"""
+function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1),
+        initial_points=nothing)
     xmin = []
-    Random.seed!(9876543210)
-	for _ in 1:runs, col in eachcol(phase)
-		x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
-        x0 = x0 + col
-		test_min = minimize(L, Q, x0)
-		if test_min === nothing
-		else
-			push!(xmin, test_min["xmin"])
-		end
-	end
-    push!(xmin, zeros(size(Q,1)))
-	unique(xmin)
+    function try_start!(x0)
+        test_min = minimize(L, Q, x0)
+        if test_min !== nothing && _is_converged_minimum(test_min)
+            push!(xmin, test_min["xmin"])
+        end
+    end
+    if initial_points === nothing
+        Random.seed!(9876543210)
+        for _ in 1:runs, col in eachcol(phase)
+            x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
+            try_start!(x0 + col)
+        end
+    else
+        foreach(x0 -> try_start!(collect(float.(x0))), initial_points)
+    end
+    origin_hessian = Symmetric(Matrix{Float64}(Q * Diagonal(L) * Q'))
+    origin_eigenvalues = eigvals(origin_hessian)
+    # Rank-style roundoff bound: n * eps * largest |eigenvalue|, so a positive
+    # semidefinite Hessian is not mistaken for an indefinite one.
+    if minimum(origin_eigenvalues) >= -size(Q,1) * eps() * maximum(abs, origin_eigenvalues)
+        push!(xmin, zeros(size(Q,1)))
+    end
+    unique(xmin)
 end
 
 # function subspace_minimize(L, Q; runs=10_000, phase::Number=0)
