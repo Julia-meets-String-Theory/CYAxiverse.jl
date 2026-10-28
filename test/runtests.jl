@@ -2265,6 +2265,23 @@ end
     @test size(generate.hessian_norm([0.2, -0.1], Qempty)) == (2, 2, 0)
 end
 
+@testset "vacua_id_basis handles charges with no dependent columns (2,2,1 geometry)" begin
+    generate = CYAxiverse.generate
+    # Q = [I | q] has a leading identity block, so every instanton column is either
+    # independent or already in the basis and alpha has zero columns. The expected
+    # number of vacua is |det(Qtilde)| = |det(I)| = 1 (the identity block generates
+    # the lattice). This used to raise BoundsError from an empty column mask.
+    L = Float64[1 1 1; 0 -1 -10]
+    Q = [1 0 1; 0 1 1]
+    basis = generate.vacua_id_basis(L, Q; threshold=0.5)
+    @test basis["vac"] == 1
+    @test Matrix{Float64}(basis["θ̃∥"]) == Matrix{Float64}(I, 2, 2)
+    # A single vacuum at the origin: one location, all fields at 0.
+    located = generate.vacua_id(L, Q; threshold=0.5, runs=4)
+    @test located["vac"] == 1
+    @test all(iszero, located["θ̃∥"])
+end
+
 @testset "subspace_minimize keeps only converged minima with Hsign == 1" begin
     minimizer = CYAxiverse.minimizer
     one_by_one(x) = reshape([float(x)], 1, 1)

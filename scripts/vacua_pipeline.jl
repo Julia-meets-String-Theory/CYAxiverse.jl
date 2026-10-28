@@ -179,6 +179,9 @@ end
 function _legacy_vacua_search(geom_idx, Q, L; threshold, starts)
     estimate = CYAxiverse.generate.vacua_estimate(geom_idx; threshold=threshold)
     locations = CYAxiverse.generate.vacua_id(L, Q; threshold=threshold, runs=starts)
+    # vacua_id returns the count as Rational/Float64 on some branches; HDF5 and the
+    # metadata need an Int. Int() throws on a non-integral count rather than rounding.
+    locations["vac"] = Int(locations["vac"])
     search = (; search_method="legacy",
         search_classification="finite_multistart_minimum_lower_bound",
         legacy_search_classification="finite_search_lower_bound",

@@ -3867,7 +3867,9 @@ function vacua_id_basis(L::Matrix{Float64},Q::Matrix{Int}; threshold::Float64=0.
     Qinv = Matrix{Rational}(inv(Qtilde))
     Qinv = @.(ifelse(abs(Qinv) < 1e-5, zero(Rational), Rational(Qinv)))
     αeff = data["α"]
-    if αeff == zeros(Float64,size(Q,1),1)
+    # No dependent charge columns (zero-column alpha) is the same trivial case as
+    # an all-zero placeholder column; falling through indexed an empty column mask.
+    if size(αeff,2) == 0 || αeff == zeros(Float64,size(Q,1),1)
         keys = ["θ̃∥", "vac"]
         vals = [unique(Qinv, dims=2), abs(det(Qtilde))]
         return Dict(zip(keys,vals))
