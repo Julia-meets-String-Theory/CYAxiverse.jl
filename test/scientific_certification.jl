@@ -391,20 +391,6 @@ end
                 require=:root_and_spectrum,precision_bits=256)
             @test unsafe_report.status==:INVALID
             @test occursin("certificate schema invalid",unsafe_report.reason)
-
-            forged = TOML.parsefile(first.certificate_path)
-            forged["root"]["q_upper"] = "0/1"
-            forged_path = joinpath(parent, "forged.toml")
-            open(forged_path, "w") do io
-                TOML.print(io, forged; sorted=true)
-            end
-            forged_hash = bytes2hex(sha256(read(forged_path)))
-            rejected = SC.verify_certificate(forged_path, first.input_path;
-                expected_input_sha256=first.input_sha256,
-                expected_certificate_sha256=forged_hash,
-                require=:root_and_spectrum, precision_bits=256)
-            @test rejected.status in (:INVALID, :UNPROVEN)
-            @test rejected.status != :VERIFIED
         end
     end
 

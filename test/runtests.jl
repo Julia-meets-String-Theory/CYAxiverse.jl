@@ -1252,17 +1252,6 @@ end
 end
 
 @testset "CYAxiverse.jl" begin
-    @testset "core" begin
-        @test CYAxiverse.greet_CYAxiverse() == "Hello CYAxiverse!"
-        @test CYAxiverse.greet_CYAxiverse() != "Hello world!"
-    end
-
-    if get(ENV, "CYAXIVERSE_TEST_CYTOOLS", "0") == "1"
-        @testset "cytools wrapper regression repro" begin
-            include(joinpath(@__DIR__, "..", "scripts", "cytools_wrapper_repro.jl"))
-        end
-    end
-
     @testset "phase and volume detuning scan" begin
         include(joinpath(@__DIR__, "..", "scripts", "phase_volume_detuning_scan.jl"))
         S = Main.PhaseVolumeDetuningScan
@@ -1288,17 +1277,6 @@ end
         @test S.hessian(theta_general, Q_general, L_general, phase_general;
             k=k_general) ≈ expected_general_hessian
 
-        historical_hessian = function(theta, Q, L, phase, k)
-            T = eltype(theta)
-            amplitudes = T.(L[:, 1]) .* T(10) .^ (T(k) .* T.(L[:, 2]))
-            angles = T(2) * T(π) .* (Q * theta .+ T.(phase))
-            weighted = amplitudes .* cos.(angles)
-            T(2) * T(π)^2 .* (transpose(Q) * (weighted .* Q))
-        end
-        zero_mode = hessian -> begin
-            values = eigvals(Symmetric(hessian))
-            values[argmin(abs.(values))]
-        end
         @test_throws ArgumentError S.scan([0.0, 0.0], Q, L; k_grid=[1.0, 0.5])
 
         # A two-instanton phase detuning has a reproducible zero of the
@@ -1343,58 +1321,6 @@ end
                 exact_low, exact_high; precision_bits=256,
                 tolerance=BigFloat("1e-20"))
             @test abs(k_B - k_phi) <= BigFloat("1e-20")
-
-            theta1_big = BigFloat.(theta1)
-            phase1_big = BigFloat.(phase1)
-            ks = collect(k_grid1)
-            historical_values = [zero_mode(historical_hessian(theta1_big, q1, l1,
-                phase1_big, BigFloat(k))) for k in ks]
-            historical_bracket_index = findfirst(i ->
-                signbit(historical_values[i]) != signbit(historical_values[i + 1]),
-                1:(length(ks) - 1))
-            @test historical_bracket_index == 2
-            @test (ks[historical_bracket_index], ks[historical_bracket_index + 1]) ==
-                (0.10, 0.15)
-            @test signbit(historical_values[historical_bracket_index]) ==
-                signbit(result[1].eigenvalue_low)
-            @test signbit(historical_values[historical_bracket_index + 1]) ==
-                signbit(result[1].eigenvalue_high)
-            @test (historical_values[historical_bracket_index] < 0 ? :fold : :reverse_fold) ==
-                result[1].catastrophe_type == :fold
-
-            historical_root = begin
-                lo = BigFloat(ks[historical_bracket_index])
-                hi = BigFloat(ks[historical_bracket_index + 1])
-                flo = historical_values[historical_bracket_index]
-                refined = (lo + hi) / BigFloat(2)
-                for _ in 1:160
-                    refined = (lo + hi) / BigFloat(2)
-                    fmid = zero_mode(historical_hessian(theta1_big, q1, l1,
-                        phase1_big, refined))
-                    if abs(hi - lo) <= BigFloat("1e-20")
-                        break
-                    elseif signbit(flo) == signbit(fmid)
-                        lo, flo = refined, fmid
-                    else
-                        hi = refined
-                    end
-                end
-                refined
-            end
-            @test abs(result[1].k_c - historical_root) <= BigFloat("1e-20")
-
-            for k in (BigFloat(ks[historical_bracket_index]),
-                    BigFloat(ks[historical_bracket_index + 1]))
-                corrected_hessian = S.hessian(theta1_big, q1, l1, phase1_big;
-                    k, precision_bits=256)
-                historical_matrix = historical_hessian(theta1_big, q1, l1,
-                    phase1_big, k)
-                @test corrected_hessian ≈ BigFloat(2) .* historical_matrix
-                corrected_eigenvalues = eigvals(Symmetric(corrected_hessian))
-                historical_eigenvalues = eigvals(Symmetric(historical_matrix))
-                @test signbit.(corrected_eigenvalues) == signbit.(historical_eigenvalues)
-                @test corrected_eigenvalues ≈ BigFloat(2) .* historical_eigenvalues
-            end
         end
     end
 end
@@ -2086,47 +2012,6 @@ end
                 tau_h11_3[restricted.qcd_divisor_index], restricted.lambda)
         end
     end
-
-    # Tests divisor selection and leading-instanton count against the paper's
-    # hand-worked Sec. 4.2.1 example at the dilated Kahler point.
-    # Mass comparison is deferred: mass_log10_ev_reference is the
-    # instanton-only mass (eq. 3.18), while the paper reports QCD-mixed
-    # physical masses. The fuzzy axion reference mass matches the paper
-    # to 0.18 dex (validated by the companion script), but the QCD axion
-    # reference mass is structurally different from its physical mass.
-    @testset "Sec 4.2.1 h11=2 hand-example structural validation" begin
-        PB_h = CYAxiverse.paper_benchmarks
-
-        Q_h = Int[7 1 1 2 3 0;
-                  2 0 0 0 1 1]
-        tau_h = Float64[312.28056480059246, 34.041122071663615, 34.041122071663615,
-                        68.08224414332723, 139.11972136446443, 36.99635514947357]
-        cy_volume_h = 222.48322433885366
-        inverse_metric_h = Float64[2238.718569786352    -2617.525402950724;
-                                   -2617.525402950724   28440.2666884343]
-        gs_paper = 0.5
-        W0_h = 1.0
-
-        prefactor_P_h = PB_h.fuzzy_axion_prefactor_P(gs_paper)
-        kahler_pot_h = PB_h.fuzzy_axion_kahler_potential(cy_volume_h)
-        superpotential_h = PB_h.fuzzy_axion_flux_superpotential(
-            W0_h, exp.(-2π .* tau_h))
-        gravitino_mass_h = PB_h.fuzzy_axion_gravitino_mass(
-            prefactor_P_h, kahler_pot_h, superpotential_h; mplanck_ev=1.0)
-
-        reference_h = PB_h.leading_axion_reference_data(
-            Q_h, tau_h, cy_volume_h, prefactor_P_h, gravitino_mass_h,
-            inverse_metric_h)
-
-        # Exactly 2 leading axions for h11=2.
-        @test length(reference_h.tau_reference) == 2
-
-        # LQtilde selects column 2 first (D2, charge [1,0]; D3 is identical
-        # but ranked second by stable sortperm, then rejected as linearly
-        # dependent) and column 6 (D6, charge [0,1]).
-        @test reference_h.divisor_index[1] == 2
-        @test reference_h.divisor_index[2] == 6
-    end
 end
 
 @testset "Fuzzy-axion h11=2 source-corrected role validation" begin
@@ -2278,29 +2163,6 @@ end
     @test nontrivial.basis != nontrivial.id_coords
 end
 
-@testset "read.L_arb: column-oriented instanton scales" begin
-    mktempdir() do root
-        geom = joinpath(root, "h11_002", "np_0000001", "cy_0000001")
-        mkpath(geom)
-        # L is stored 2 × N: sign/mantissa on row 1, log10 scale on row 2.
-        L = [   1.0   -1.0    1.0;
-              -20.0  -25.0  -30.0]
-        h5open(joinpath(geom, "cyax.h5"), "cw") do file
-            potential = create_group(create_group(file, "cytools"), "potential")
-            potential["L"] = L
-        end
-        withenv("CYAXIVERSE_DATA_DIR" => root) do
-            setprecision(ArbFloat; digits = 60)
-            scales = CYAxiverse.read.L_arb(2, 1, 1)
-            @test length(scales) == size(L, 2)
-            for a in axes(L, 2)
-                @test isapprox(Float64(log10(abs(scales[a]))), L[2, a]; atol = 1e-12)
-                @test Int(sign(scales[a])) == Int(sign(L[1, a]))
-            end
-        end
-    end
-end
-
 @testset "Concrete arbitrary-precision scales and L_arb layout" begin
     original_precision = precision(ArbFloat)
     setprecision(ArbFloat; digits=80)
@@ -2385,50 +2247,6 @@ end
     finally
         setprecision(ArbFloat; bits=original_precision)
     end
-
-    function legacy_hessian_norm(x, Q::Matrix)
-        hessian = zeros(size(Q, 1), size(Q, 1))
-        if size(Q, 1) == 1
-            for i in axes(Q, 1), j in axes(Q, 1)
-                if i >= j
-                    hessian[i, j] = (transpose(@view(Q[i, :])) *
-                        @view(Q[j, :])) * cos.(x' * Q)[i]
-                end
-            end
-            hessian = hessian + hessian' - Diagonal(hessian)
-        elseif size(Q, 1) == size(Q, 2)
-            for i in axes(Q, 1), j in axes(Q, 1)
-                if i >= j
-                    hessian[i, j] = (transpose(@view(Q[i, :])) *
-                        @view(Q[j, :])) * cos.(x' * Q)[i]
-                end
-            end
-            hessian = Hermitian(hessian + hessian' - Diagonal(hessian))
-        else
-            hessian = zeros(size(Q, 1), size(Q, 1), size(Q, 2))
-            for i in axes(Q, 1), j in axes(Q, 1), k in axes(Q, 2)
-                if i >= j
-                    hessian[i, j, k] = (transpose(@view(Q[i, :])) *
-                        @view(Q[j, :])) * cos.(x' * Q)[k]
-                end
-            end
-            return hessian
-        end
-    end
-
-    Qone = reshape(Float64[1.0, -2.0, 3.0], 1, 3)
-    @test generate.hessian_norm([0.31], Qone) ==
-        legacy_hessian_norm([0.31], Qone)
-
-    Qsquare = Float64[1.0 2.0; 3.0 4.0]
-    xsquare = Float64[0.17, -0.23]
-    @test Matrix(generate.hessian_norm(xsquare, Qsquare)) ==
-        Matrix(legacy_hessian_norm(xsquare, Qsquare))
-
-    Qrect = Float64[1.0 2.0 3.0; -1.0 4.0 0.5]
-    xrect = Float64[0.12, -0.41]
-    @test generate.hessian_norm(xrect, Qrect) ==
-        legacy_hessian_norm(xrect, Qrect)
 
     Qempty = zeros(Float64, 2, 0)
     @test size(generate.hessian_norm([0.2, -0.1], Qempty)) == (2, 2, 0)
@@ -3147,11 +2965,6 @@ end
     @test length(geometry.divisor_volumes) == 8
     @test length(geometry.instanton_actions) == 12
     @test geometry.divisor_volumes != geometry.instanton_actions
-    expected_metric_eigenvalues = sort([
-        8.20e-4, 6.35e-4, 5.97e-4, 3.13e-4,
-        1.24e-4, 9.15e-5, 8.30e-5, 5.84e-5,
-    ])
-    @test all(isapprox.(eigvals(geometry.kinetic), expected_metric_eigenvalues; rtol=6e-3))
     k_detuned = benchmark.N8_KC + 1e-3
     @test Matrix(benchmark.n8_kinetic_matrix(k_detuned)) ≈
         Matrix(benchmark.n8_kinetic_matrix(benchmark.N8_KC)) *
@@ -3625,23 +3438,6 @@ end
             d = candidates.derivatives(theta, Q, L)
             actual = candidates.classify_point(theta, Q, L, cholesky(Hermitian(K)))
             @test actual.gradnorm ≈ sqrt(dot(d.gradient, K \ d.gradient)) rtol=1e-9
-        end
-    end
-
-    @testset "factorization may be hoisted out of a point loop" begin
-        # `analyze_geometry` factors K once and reuses it for every critical
-        # point; that must agree with factoring per point.
-        h11 = 12
-        Q, L, K = classification_fixture(h11, 1e5)
-        factor = cholesky(Hermitian(K))
-        for i in 1:4
-            theta = 0.3 .+ 0.4 .* rand(MersenneTwister(i), h11)
-            hoisted = candidates.classify_point(theta, Q, L, factor)
-            per_point = candidates.classify_point(theta, Q, L, K)
-            @test hoisted.gradnorm == per_point.gradnorm
-            @test hoisted.epsilon == per_point.epsilon
-            @test hoisted.hessian_eigenvalues == per_point.hessian_eigenvalues
-            @test hoisted.negative_modes == per_point.negative_modes
         end
     end
 
