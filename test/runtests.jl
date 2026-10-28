@@ -2208,45 +2208,53 @@ end
     minimizer = CYAxiverse.minimizer
     generate = CYAxiverse.generate
 
-    function legacy_phase_hessian(LV, QV, x)
-        T = promote_type(eltype(LV), eltype(QV), eltype(x))
-        hessian = zeros(T, size(QV, 1), size(QV, 1))
-        for i in axes(QV, 1), j in axes(QV, 1)
-            if i >= j
-                hessian[i, j] = sum(LV' *
-                    (@view(QV[i, :]) .* @view(QV[j, :]) .* cos.(x' * QV)))
-            end
-        end
-        hessian
-    end
+    # Closed form H = QV * Diagonal(LV .* cos.(QV' x)) * QV', written as a matrix
+    # product and independent of the elementwise triple sum in the source.
+    closed_form(LV, QV, x) = QV * Diagonal(LV .* vec(cos.(QV' * x))) * QV'
+    symmetrize(h) = h + h' - Diagonal(h)
 
     LV = Float64[1.25, -0.75, 0.5]
     QV = Float64[1.0 2.0 -1.0;
                  0.5 -3.0 4.0]
     x = Float64[0.37, -0.22]
-    expected = legacy_phase_hessian(LV, QV, x)
+    expected = closed_form(LV, QV, x)
     actual = zeros(Float64, 2, 2)
+    # The minimizer passes the 1×N row cos.(x' * QV); that shape must work.
     minimizer._phase_hessian!(actual, LV, QV, cos.(x' * QV))
-    @test actual == expected
-    @test actual + actual' - Diagonal(actual) ==
-        expected + expected' - Diagonal(expected)
+    # Sums of 3 terms with O(1) summands round at a few eps (~1e-16); 1e-13 is a
+    # precision bound, not a fitted value.
+    @test symmetrize(actual) ≈ expected rtol=1e-13 atol=1e-13
+    # The flat-vector form must give the same matrix.
+    flat = zeros(Float64, 2, 2)
+    minimizer._phase_hessian!(flat, LV, QV, vec(cos.(x' * QV)))
+    @test flat == actual
 
     original_precision = precision(ArbFloat)
     setprecision(ArbFloat; digits=80)
     try
         T = typeof(ArbFloat(0))
-        LV_arb = T.(LV)
-        QV_arb = T.(QV)
-        x_arb = T.(x)
-        expected_arb = legacy_phase_hessian(LV_arb, QV_arb, x_arb)
+        LV_arb, QV_arb, x_arb = T.(LV), T.(QV), T.(x)
         actual_arb = zeros(T, 2, 2)
-        minimizer._phase_hessian!(actual_arb, LV_arb, QV_arb,
-            cos.(x_arb' * QV_arb))
-        @test actual_arb == expected_arb
+        minimizer._phase_hessian!(actual_arb, LV_arb, QV_arb, cos.(x_arb' * QV_arb))
+        # 80 decimal digits of working precision; 1e-70 leaves 10 digits of slack.
+        @test maximum(abs, Matrix{Float64}(abs.(symmetrize(actual_arb) .-
+            closed_form(LV_arb, QV_arb, x_arb)))) < 1e-70
         @test eltype(actual_arb) == T
     finally
         setprecision(ArbFloat; bits=original_precision)
     end
+
+    # End to end: V = sum(L (1 - cos(Q'x))) >= 0 with Q of rank 2 has its unique
+    # minimum V = 0 at x = 0 (mod 2π). The mis-shaped objective/Hessian used to
+    # send Newton's method to a different stationary point.
+    Qmin = Float64[1 0 1; 0 1 1]
+    result = minimizer.minimize(ones(3), Qmin, [0.3, -0.2])
+    @test result["±V"] == 1
+    # Measured from this start: wrapped distance to 0 is ~8e-5 rad and
+    # |grad| ~ 1e-4, set by Optim's tolerances; 1e-3 is a 10x margin on both.
+    wrapped = [min(abs(v), abs(1 - v)) * 2π for v in result["xmin"]]
+    @test all(<(1e-3), wrapped)
+    @test all(<(-3), result["gradlog"])
 
     Qempty = zeros(Float64, 2, 0)
     @test size(generate.hessian_norm([0.2, -0.1], Qempty)) == (2, 2, 0)

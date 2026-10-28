@@ -84,10 +84,12 @@ end
 
 function _phase_hessian!(hessian::AbstractMatrix, LV::AbstractVector,
         QV::AbstractMatrix, cosine_phases)
+    # Callers pass the 1×N row `cos.(x' * QV)`; flatten it so the product with
+    # `LV` is elementwise over the N instantons rather than an N×N broadcast.
+    cosines = vec(cosine_phases)
     for i in axes(QV, 1), j in axes(QV, 1)
         if i >= j
-            hessian[i, j] = sum(LV' *
-                (@view(QV[i, :]) .* @view(QV[j, :]) .* cosine_phases))
+            hessian[i, j] = sum(LV .* @view(QV[i, :]) .* @view(QV[j, :]) .* cosines)
         end
     end
     hessian
@@ -499,6 +501,15 @@ Minimize the axion potential
 ``V(x) = \\sum_a \\Lambda_a (1 - \\cos(Q_a \\cdot x))`` from the initial point
 `x0`, where `LV` holds the linear instanton scales ``\\Lambda_a`` and `QV` is the
 charge matrix. Return the located stationary point in field coordinates.
+
+!!! warning "Behaviour change"
+    Before this fix the objective and Hessian passed to Newton's method were
+    mis-shaped (the 1×N row `cos.(x' * QV)` broadcast against `LV` as N×N), so
+    they were not the derivatives of ``V`` and the iteration could stop at
+    spurious points. This affects every caller, including `subspace_minimize`
+    and the `:legacy` vacua search (`vacua_id`). Vacuum counts produced by
+    `--method legacy` before this change may not match results now; recompute
+    them rather than comparing. The gradient was already correct.
 """
 function minimize(LV::Vector, QV, x0::Vector)
 	if @isdefined h11
@@ -508,7 +519,8 @@ function minimize(LV::Vector, QV, x0::Vector)
     @assert size(QV, 2) == size(LV, 1)
     threshold = 1e-2
     function fitness(x::Vector)
-        sum(LV .* (1. .- cos.(x' * QV)))
+        # vec: `x' * QV` is a 1×N row, which would broadcast against `LV` to N×N.
+        dot(LV, 1. .- vec(cos.(x' * QV)))
     end
     function grad!(gradient::Vector, x::Vector)
         grad_temp = LV' .* (QV .* sin.(x' * QV))
@@ -516,6 +528,9 @@ function minimize(LV::Vector, QV, x0::Vector)
     end
     function hess!(hessian::Matrix, x::Vector)
         cosine_phases = cos.(x' * QV)
+        # Optim reuses this buffer; only the lower triangle is written below, so
+        # stale upper-triangle entries would be mirrored into the Hessian.
+        fill!(hessian, 0)
         _phase_hessian!(hessian, LV, QV, cosine_phases)
         hessian .= hessian + hessian' - Diagonal(hessian)
     end
