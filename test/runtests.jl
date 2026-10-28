@@ -2249,12 +2249,17 @@ end
     # send Newton's method to a different stationary point.
     Qmin = Float64[1 0 1; 0 1 1]
     result = minimizer.minimize(ones(3), Qmin, [0.3, -0.2])
-    @test result["±V"] == 1
-    # Measured from this start: wrapped distance to 0 is ~8e-5 rad and
-    # |grad| ~ 1e-4, set by Optim's tolerances; 1e-3 is a 10x margin on both.
+    @test result["Hsign"] == 1
+    # xmin is stored as a fraction of 2π, so w is the wrapped displacement from 0 in radians.
     wrapped = [min(abs(v), abs(1 - v)) * 2π for v in result["xmin"]]
     @test all(<(1e-3), wrapped)
     @test all(<(-3), result["gradlog"])
+    # Since 1 - cos(u) <= u^2/2, V(w) <= ½ wᵀHw with H = Q diag(L) Qᵀ = [2 1; 1 2],
+    # whose eigenvalues are 1 and 3 (trace 4, determinant 3), so V <= 1.5 |w|².
+    # V is evaluated independently here from the definition; 4eps absorbs roundoff.
+    V_at_min = sum(1 .- cos.(Qmin' * (2π .* result["xmin"])))
+    @test -4eps() <= V_at_min <= 1.5 * sum(abs2, wrapped) + 4eps()
+    @test V_at_min < 1.5e-6  # 1.5 × (1e-3)², the bound at the wrapped-distance limit above
 
     Qempty = zeros(Float64, 2, 0)
     @test size(generate.hessian_norm([0.2, -0.1], Qempty)) == (2, 2, 0)
