@@ -229,6 +229,14 @@ end
                 "--dry-run"])
             @test run_vacua_batch(matching_options)
             @test occursin("skipped", read(matching_summary, String))
+            # The default method is part of the configuration digest, so the same
+            # options without --method (now auto) no longer match a legacy result.
+            default_method_options = _vacua_parse_args(["--data-dir", root,
+                "--geometry", "2,1,1", "--threshold", "0.5", "--starts", "17",
+                "--residual-tolerance", "1e-9", "--merge-tolerance", "1e-6",
+                "--max-iterations", "12", "--dry-run"])
+            @test _vacua_result_state(path, _vacua_config(default_method_options)) ==
+                :config_mismatch
 
             parallel_summary = joinpath(root, "parallel.csv")
             parallel_options = _vacua_parse_args(["--data-dir", root,
@@ -240,6 +248,14 @@ end
             default_blas_options = _vacua_parse_args(["--data-dir", root,
                 "--geometry", "2,1,1"])
             @test default_blas_options[:method] == :auto
+            usage = mktemp() do usage_path, usage_io
+                redirect_stdout(_vacua_usage, usage_io)
+                close(usage_io)
+                read(usage_path, String)
+            end
+            # The help text must tell users that existing default-run results now
+            # need --method legacy to match, or --force to recompute.
+            @test occursin("--method legacy", usage) && occursin("configuration digest", usage)
             @test default_blas_options[:blas_threads] == 1
             repository_root = normpath(joinpath(@__DIR__, ".."))
             if in_git_checkout(repository_root)

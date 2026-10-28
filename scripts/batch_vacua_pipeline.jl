@@ -34,6 +34,9 @@ function _vacua_usage()
       --max-iterations N           Recorded iteration bound. Default: 200.
         --method NAME                Search method: auto, legacy, leading_branches, or reduced_jlm.
                             Default: auto (was legacy before the minimizer fix).
+                            The method is part of the configuration digest, so results
+                            written by an earlier default run (legacy) no longer match:
+                            pass --method legacy to match them, or --force to recompute.
                             Note: legacy results changed when the minimizer objective/Hessian
                             shape bug was fixed; recompute rather than compare old counts.
         --max-branches N             Bound leading-branch enumeration. Default: 1000000.
