@@ -2052,13 +2052,21 @@ end
             @assert ENV[\"OPENBLAS_NUM_THREADS\"]==\"child-openblas-setting\"
             println(\"nonserial_parent_rejected=true default=\",Threads.nthreads(:default),
                 \" interactive=\",Threads.nthreads(:interactive),\" blas_threads=\",BLAS.get_num_threads())
+            println(\"cache_flags=\",Base.CacheFlags())
         """
+        # Package images are keyed on these flags; a child that differs from this
+        # process (e.g. without Pkg.test's --check-bounds=yes) recompiles every
+        # dependency of CYAxiverse instead of reusing this process's images.
+        parent_cache_flags="cache_flags=$(Base.CacheFlags())"
         repository_root=normpath(joinpath(@__DIR__,".."))
         for (thread_setting,expected_counts) in (("2,0","default=2 interactive=0"),
                 ("1,1","default=1 interactive=1"))
-            child_argv=String[first(Base.julia_cmd().exec),"--startup-file=no","--threads=$thread_setting",
-                "--project=$repository_root","-e",child_code,
-                joinpath(@__DIR__,"fixtures","scientific_certification","run_fixture.jl"),thread_setting]
+            # Base.julia_cmd() carries this process's cache flags; the later --threads
+            # wins over any inherited one, and child_coverage_args() keeps coverage
+            # output out of the checkout.
+            child_argv=vcat(String.(Base.julia_cmd().exec),child_coverage_args(),String["--startup-file=no",
+                "--threads=$thread_setting","--project=$repository_root","-e",child_code,
+                joinpath(@__DIR__,"fixtures","scientific_certification","run_fixture.jl"),thread_setting])
             child_env=addenv(Cmd(child_argv),"JULIA_NUM_THREADS"=>thread_setting,"OPENBLAS_NUM_THREADS"=>"2")
             child_stdout=""
             child_exit=mktemp() do _path,log
@@ -2071,6 +2079,7 @@ end
             end
             @test child_exit==0
             @test occursin("nonserial_parent_rejected=true $expected_counts blas_threads=2",child_stdout)
+            @test occursin(parent_cache_flags,child_stdout)
         end
       end
     finally
