@@ -696,6 +696,15 @@ records, review results, and dispositions remain preserved in predecessor
 history. This appendix does not transfer any prior review result to the new
 successor.
 
+The earlier statement that all eight findings remained open records the state
+before the independent review of candidate `3dc42926`. Its exact predecessor
+dispositions are: SPEC `F01` closed for the exact successor source; SPEC `F02`
+closed for the original repeated-write failure mode only; STANDARDS `F01`–`F03`
+resolved in the exact successor; and SECURITY `SEC-05-01`, `SEC-06-01`, and
+`SEC-06-02` closed by static source and adversarial test review. These results
+remain bound to `3dc42926`. The broader live-proof gap is the separate blocking
+P1 below, and the SPEC REQUEST_CHANGES disposition remains operative.
+
 | Finding | Severity | Correction |
 | --- | --- | --- |
 | `CYAX125-SPEC-3dc42926-F03` | Blocking P1 | Track a per-ref freeze-write generation. Live lease proof now fails while a write is pending or unresolved, captures the generation before its provider observation, and rechecks the generation and fences before returning true. A terminal write that starts and completes during the observation also invalidates the proof. The lease and write evidence remain available for reconciliation. |
