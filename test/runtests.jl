@@ -2255,7 +2255,8 @@ end
     wrapped = [min(abs(v), abs(1 - v)) * 2π for v in result["xmin"]]
     # Limit sqrt(eps()), from minimize's stopping rules: an x_abstol = sqrt(eps())
     # stop leaves a Newton error of order the final step squared; a g_abstol =
-    # eps()/1e-2 stop gives |w| <= |∇V| / λmin(H) = 2.2e-14 (λmin = 1, below); and an
+    # (eps()/1e-2) max sᵢ stop, with sᵢ = Σₐ |Λₐ Qᵢₐ| = 2 here, gives
+    # |w| <= |∇V| / λmin(H) = 4.4e-14 (λmin = 1, below); and an
     # exact f-repeat stop needs every 1 - cos(Q_a⋅w) to round to 0, i.e. |Q_a⋅w| <
     # sqrt(eps()/2). Each other critical point ((0, π), (π, 0), ±(2π/3, 2π/3),
     # (π, π)) has a component at least 2π/3 from 0.
@@ -2369,6 +2370,36 @@ end
     # Newton endpoint has Hsign = sign(0) = 0 and is rejected.
     flat = minimizer.subspace_minimize([1.0, -1.0], Float64[1 1]; initial_points=[[0.4]])
     @test flat == [[0.0]]
+end
+
+@testset "minimize resolves stationarity relative to the instanton scales" begin
+    minimizer = CYAxiverse.minimizer
+    one_by_one(x) = reshape([float(x)], 1, 1)
+    # V = 1e-20 (1 - cos x) has its only minimum mod 2π at x = 0. At the start 0.3,
+    # |V'| = 1e-20 sin(0.3) ≈ 3e-21 is already below an absolute tolerance of
+    # eps()/1e-2, which used to report convergence without moving. Newton's step
+    # tan(x) does not depend on the overall scale, so the run must reach 0. Every
+    # stopping rule then leaves |x| below minimize's zeroing cut eps()/1e-2 (the
+    # iteration x -> x - tan x ≈ -x³/3 jumps past it), so 0 is stored exactly.
+    tiny = minimizer.minimize([1e-20], one_by_one(1), [0.3])
+    @test tiny["converged"] && tiny["stationary"] && tiny["Hsign"] == 1
+    @test tiny["xmin"] == [0.0]
+    @test minimizer.subspace_minimize([1e-20], one_by_one(1); initial_points=[[0.3]]) == [[0.0]]
+
+    # Hierarchical L = (1, 1e-20) with Q = I: V = (1 - cos x1) + 1e-20 (1 - cos x2)
+    # has its only minimum at the origin. |∂V/∂x2| <= 1e-20 everywhere, so an
+    # endpoint at the unresolved start x2 = 0.5 is not a stationary point of V and
+    # must be rejected; any endpoint kept must be the origin.
+    hierarchical = minimizer.minimize([1.0, 1e-20], Matrix(1.0I, 2, 2), [0.2, 0.5])
+    @test !minimizer._is_converged_minimum(hierarchical) || all(iszero, hierarchical["xmin"])
+    @test minimizer.subspace_minimize([1.0, 1e-20], Matrix(1.0I, 2, 2);
+        initial_points=[[0.2, 0.5]]) == [[0.0, 0.0]]
+
+    # gscale == 0: with L = 0 every Λₐ Qᵢₐ vanishes and V is constant, so no point
+    # is an isolated critical point and the endpoint is not reported stationary.
+    constant = minimizer.minimize([0.0], one_by_one(1), [0.4])
+    @test !constant["stationary"]
+    @test !minimizer._is_converged_minimum(constant)
 end
 
 @testset "Factored Kinv whitening remains stable when Kinv is ill-conditioned" begin

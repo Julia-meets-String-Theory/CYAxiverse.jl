@@ -502,6 +502,12 @@ Minimize the axion potential
 `x0`, where `LV` holds the linear instanton scales ``\\Lambda_a`` and `QV` is the
 charge matrix. Return the located stationary point in field coordinates.
 
+The gradient tolerance is relative to the largest gradient bound
+``s_i = \\sum_a |\\Lambda_a| |Q_{ia}|``, so the result does not change when every
+``\\Lambda_a`` is rescaled. `"converged"` is Optim's convergence flag;
+`"stationary"` additionally requires ``|\\partial_i V| \\le (\\epsilon / 10^{-2})\\, s_i``
+for each component, and is `false` for a constant potential (all ``s_i = 0``).
+
 !!! warning "Behaviour change"
     Before this fix the objective and Hessian passed to Newton's method were
     mis-shaped (the 1×N row `cos.(x' * QV)` broadcast against `LV` as N×N), so
@@ -551,22 +557,36 @@ function minimize(LV::Vector, QV, x0::Vector)
     # change is O(eps) once |dx| ~ sqrt(eps), and Newton's quadratic convergence
     # leaves the error after such a step near eps.
     x_abstol = sqrt(eps())
-    g_tol = eps() / threshold
+    # |∂ᵢV| <= sᵢ = Σₐ |Λₐ| |Qᵢₐ| at every x, since |sin| <= 1. The gradient
+    # tolerance is relative to max sᵢ, so the run does not change under an overall
+    # rescaling of L (Newton's step is invariant under it); an absolute eps()/threshold
+    # reported convergence at any start once max sᵢ was below it. gscale == 0 means
+    # every Λₐ Qᵢₐ vanishes and V is constant, with no isolated critical point.
+    grad_scale = vec(sum(abs.(QV) .* abs.(LV'), dims = 2))
+    gscale = maximum(grad_scale; init = 0.0)
+    g_tol = gscale > 0 ? eps() / threshold * gscale : 0.0
 	algo_LBFGS = LBFGS(linesearch = LineSearches.BackTracking());
     res = Optim.optimize(fitness, grad!, hess!, x0, Optim.Options(x_abstol = x_abstol, g_tol = g_tol))
     Vmin = Optim.minimum(res)
     xmin = Optim.minimizer(res)
     # GC.gc()
     # if abs(minimum(eigen(hess(xmin)).values)) < eps() && maximum(abs.(grad(xmin))) < eps() / threshold
-    hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) 
+    hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values))))
     hess_sign = sign((minimum(eigen(hess(xmin)).values)))
+    gradient_at_min = vec(grad(xmin))
     grad_log = log10.(abs.(grad(xmin)))
+    # Stationary when each component is resolved against its own scale sᵢ: one
+    # tolerance for all components accepts any point along a direction whose sᵢ is
+    # below it (strongly suppressed Λ). The computed ∂ᵢV is a sum of terms bounded by
+    # |Λₐ Qᵢₐ|, so its roundoff is about eps() sᵢ, 1/threshold = 100 times below this.
+    stationary = gscale > 0 && all(abs.(gradient_at_min) .<= eps() / threshold .* grad_scale)
     Vmin_sign = Int(sign(Vmin))
     Vmin_log = Float64(log10(abs(Vmin)))
     xmin = @.ifelse(abs(xmin) < eps() / threshold, zero(xmin), xmin)
     xmin = @.ifelse(one(xmin) - mod(xmin / 2π, 1) < eps() / threshold || mod(xmin / 2π, 1) < eps() / threshold, zero(xmin), mod(xmin / 2π, 1))
-    keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradlog", "converged"]
-    vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, grad_log, Optim.converged(res)]
+    keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradlog", "converged", "stationary"]
+    vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, grad_log, Optim.converged(res),
+        stationary]
     return Dict(zip(keys,vals))
         # GC.gc()
     # end
@@ -679,11 +699,14 @@ end
 """
     _is_converged_minimum(result)
 
-Whether a [`minimize`](@ref) result is a converged Newton run ending at a point
-with a positive-definite-signed Hessian (`Hsign == 1`). Saddles and maxima, and
-runs that hit the iteration limit, are rejected.
+Whether a [`minimize`](@ref) result is a converged Newton run ending at a
+stationary point (each gradient component resolved against its own scale, see
+`"stationary"`) with a positive-definite-signed Hessian (`Hsign == 1`). Saddles and
+maxima, runs that hit the iteration limit, and endpoints whose gradient is below the
+Optim tolerance only because the instanton scales are small are rejected.
 """
-_is_converged_minimum(result) = result["converged"] && result["Hsign"] == 1
+_is_converged_minimum(result) =
+    result["converged"] && result["stationary"] && result["Hsign"] == 1
 
 """
     subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)),
@@ -692,8 +715,9 @@ _is_converged_minimum(result) = result["converged"] && result["Hsign"] == 1
 Minimize the subspace with `runs` random initialisations per phase column, or
 from the explicit `initial_points` (a vector of start vectors) when given.
 
-Only converged points with `Hsign == 1` are kept: saddles, maxima and runs that
-did not converge are discarded. The origin is always a critical point; it is added
+Only converged, stationary points with `Hsign == 1` are kept (see
+`_is_converged_minimum`): saddles, maxima, unresolved endpoints and runs that did
+not converge are discarded. The origin is always a critical point; it is added
 unless its Hessian `Q * Diagonal(L) * Q'` has a negative eigenvalue, in which case
 it is a saddle or maximum and is not a minimum.
 
