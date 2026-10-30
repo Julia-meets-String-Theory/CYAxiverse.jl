@@ -81,9 +81,32 @@ jobs:
         with:
           coverage: false
 
+  changes:
+    name: Scientific qualification gate
+    if: github.event_name == 'pull_request' && github.base_ref == 'vmm'
+    runs-on: ubuntu-latest
+    outputs:
+      qualification: ${{ steps.gate.outputs.qualification }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: gate
+        name: Require qualification for src/ or certification-fixture changes
+        run: python3 scripts/ci_requires_qualification.py --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}"
+
   qualification:
     name: Process-isolated scientific qualification
-    if: github.event_name != 'pull_request' || github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-tests')
+    needs: changes
+    # !cancelled() lets this run when the gate job is skipped (pushes, PRs to other
+    # bases); a failed gate runs qualification rather than silently skipping it.
+    if: >-
+      ${{ !cancelled() && (
+        github.event_name != 'pull_request' ||
+        github.base_ref == 'main' ||
+        contains(github.event.pull_request.labels.*.name, 'full-tests') ||
+        needs.changes.outputs.qualification == 'true' ||
+        needs.changes.result == 'failure') }}
     runs-on: ubuntu-latest
     env:
       JULIA_NUM_THREADS: '1'
