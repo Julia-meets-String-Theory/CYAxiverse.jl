@@ -256,10 +256,47 @@ def _freeze(port: Any, names: tuple[str, ...], intent: Any) -> Any:
             token, ref="refs/heads/vmm", expected_branch_sha=token.branch_sha
         )
     except Exception as error:
-        raise TransactionError("LINE_FREEZE_UNAVAILABLE") from error
+        details = {
+            "freeze_state": "active",
+            "observed_enforcement": "active",
+            "lease_id": getattr(token, "lease_id", None),
+            "target_ref": "refs/heads/vmm",
+            "branch_sha": getattr(token, "branch_sha", None),
+        }
+        details.update(getattr(error, "evidence", {}) or {})
+        raise TransactionError("LINE_FREEZE_UNAVAILABLE", evidence=details) from error
     if verified is not True:
-        raise TransactionError("LINE_FREEZE_UNAVAILABLE")
+        raise TransactionError(
+            "LINE_FREEZE_UNAVAILABLE",
+            evidence={
+                "freeze_state": "active",
+                "observed_enforcement": "active",
+                "lease_id": getattr(token, "lease_id", None),
+                "target_ref": "refs/heads/vmm",
+                "branch_sha": getattr(token, "branch_sha", None),
+            },
+        )
     return token
+
+
+def _carry_freeze_failure(
+    error: TransactionError, evidence: dict[str, Any]
+) -> str | None:
+    details = error.evidence
+    if not isinstance(details, Mapping) or not details:
+        return None
+    if error.reason_code.startswith("FREEZE_WRITE_"):
+        evidence["freeze_write_reconciliation"] = dict(details)
+    else:
+        evidence["freeze_activation_reconciliation"] = dict(details)
+    if error.reason_code == "FREEZE_WRITE_UNKNOWN":
+        return "unknown"
+    state = details.get("freeze_state")
+    if state in {"active", "unknown"}:
+        return state
+    if details.get("observed_enforcement") == "active":
+        return "active"
+    return None
 
 
 def _unfreeze(
@@ -876,10 +913,9 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
             freeze_state=freeze_state,
         )
     except TransactionError as error:
-        if error.reason_code.startswith("FREEZE_WRITE_"):
-            evidence["freeze_write_reconciliation"] = dict(error.evidence)
-            if error.reason_code == "FREEZE_WRITE_UNKNOWN":
-                freeze_state = "unknown"
+        carried_state = _carry_freeze_failure(error, evidence)
+        if carried_state is not None:
+            freeze_state = carried_state
         if lease is not None and freeze_state == "disabled":
             try:
                 _release_exclusion(port, lease)
@@ -890,17 +926,18 @@ def run_closure(port: Any, intent: ClosureIntent) -> TransactionResult:
                    "REOPEN_IDENTITY_MISMATCH"}
         return TransactionResult("INVALID" if error.reason_code in invalid else "BLOCKED",
                                  error.reason_code, error.detail, evidence,
-                                 frozen=token is not None, phase=phase,
+                                 frozen=token is not None or freeze_state == "active", phase=phase,
                                  freeze_state=freeze_state)
     except Exception as error:
-        if lease is not None and freeze_state != "unknown":
+        if lease is not None and freeze_state == "disabled":
             try:
                 _release_exclusion(port, lease)
             except Exception:
                 pass
         evidence["error_type"] = type(error).__name__
         return TransactionResult("BLOCKED", "TRANSACTION_OUTCOME_UNCERTAIN",
-                                 str(error), evidence, frozen=token is not None,
+                                 str(error), evidence,
+                                 frozen=token is not None or freeze_state == "active",
                                  phase=phase, freeze_state=freeze_state)
 
 
@@ -1069,6 +1106,7 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
         if not token or not _sha(freeze.get("sha")):
             raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
         freeze_state = "active"
+        evidence["main_freeze"] = freeze
         try:
             verified = adapter.verify_live_freeze_lease(
                 token,
@@ -1076,10 +1114,28 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
                 expected_branch_sha=token.branch_sha,
             )
         except Exception as error:
-            raise TransactionError("MAIN_FREEZE_UNAVAILABLE") from error
+            details = {
+                "freeze_state": "active",
+                "observed_enforcement": "active",
+                "lease_id": getattr(token, "lease_id", None),
+                "target_ref": "refs/heads/main",
+                "branch_sha": getattr(token, "branch_sha", None),
+            }
+            details.update(getattr(error, "evidence", {}) or {})
+            raise TransactionError(
+                "MAIN_FREEZE_UNAVAILABLE", evidence=details
+            ) from error
         if verified is not True or freeze.get("sha") != token.branch_sha:
-            raise TransactionError("MAIN_FREEZE_UNAVAILABLE")
-        evidence["main_freeze"] = freeze
+            raise TransactionError(
+                "MAIN_FREEZE_UNAVAILABLE",
+                evidence={
+                    "freeze_state": "active",
+                    "observed_enforcement": "active",
+                    "lease_id": getattr(token, "lease_id", None),
+                    "target_ref": "refs/heads/main",
+                    "branch_sha": getattr(token, "branch_sha", None),
+                },
+            )
         phase = "main_frozen"
         if not hasattr(port, "verify_principal_interval"):
             raise TransactionError("PRINCIPAL_ANCESTRY_UNPROVEN")
@@ -1473,10 +1529,9 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             freeze_state=freeze_state,
         )
     except TransactionError as error:
-        if error.reason_code.startswith("FREEZE_WRITE_"):
-            evidence["freeze_write_reconciliation"] = dict(error.evidence)
-            if error.reason_code == "FREEZE_WRITE_UNKNOWN":
-                freeze_state = "unknown"
+        carried_state = _carry_freeze_failure(error, evidence)
+        if carried_state is not None:
+            freeze_state = carried_state
         if lease is not None and freeze_state == "disabled" and not (
             (documentation_dispatch_attempted and not documentation_dispatch_proven)
             or (
@@ -1511,7 +1566,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
             status = "BLOCKED"
         return TransactionResult(
             status, error.reason_code, error.detail, evidence,
-            frozen=token is not None, phase=phase, freeze_state=freeze_state,
+            frozen=token is not None or freeze_state == "active",
+            phase=phase, freeze_state=freeze_state,
         )
     except Exception as error:
         if lease is not None and freeze_state == "disabled" and not (
@@ -1540,7 +1596,8 @@ def run_release(port: Any, intent: ReleaseIntent) -> TransactionResult:
                       "tag_reconciliation_pending" if tag_created else "BLOCKED")
         return TransactionResult(
             status, "RELEASE_OUTCOME_UNCERTAIN", str(error), evidence,
-            frozen=token is not None, phase=phase, freeze_state=freeze_state,
+            frozen=token is not None or freeze_state == "active",
+            phase=phase, freeze_state=freeze_state,
         )
 
 

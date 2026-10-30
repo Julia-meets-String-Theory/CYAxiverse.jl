@@ -195,10 +195,9 @@ jobs:
                       and item.get("request_id") == request.request_id
                       and rules.get("repository") == os.environ["GITHUB_REPOSITORY"]
                       and rules.get("ref") == ref
-                      and len(rules.get("ruleset_snapshot_sha256", "")) == 64
-                      and len(rules.get("response_sha256", "")) == 64
-                      and {"creation", "deletion", "non_fast_forward", "update"}.issubset(
-                          set(rules.get("rule_types", []))
+                      and rules.get("policy") == "cyax-r15-rehearsal-request-fence-v1"
+                      and adapter.is_live_rehearsal_rules_evidence(
+                          rules, ref=ref, policy="request-fence"
                       )
                   ),
               )

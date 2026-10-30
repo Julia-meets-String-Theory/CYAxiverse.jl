@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import traceback
 import unittest
 from unittest import mock
@@ -33,6 +34,8 @@ OBSERVATION_REF = "refs/heads/candidates/cyax-0125/gate-a-observation"
 SHA_A = "a" * 40
 SHA_B = "b" * 40
 TIMESTAMP = "2026-09-24T15:00:00Z"
+APP_BYPASS = {"actor_id": 5371554, "actor_type": "Integration", "bypass_mode": "always"}
+ADMIN_BYPASS = {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
 
 
 def rule(kind: str) -> dict[str, object]:
@@ -127,9 +130,47 @@ def public_tag_rulesets() -> list[dict[str, object]]:
     ]
 
 
+def rehearsal_rulesets() -> list[dict[str, object]]:
+    lifecycle = "refs/heads/rehearsal/lifecycle/**"
+    principal = "refs/heads/rehearsal/principal/*"
+    return [
+        ruleset(
+            51001, "CYAx rehearsal lifecycle creation", include=[lifecycle],
+            rules=[rule("creation")], actors=[ADMIN_BYPASS, APP_BYPASS],
+        ),
+        ruleset(
+            51002, "CYAx rehearsal lifecycle immutable", include=[lifecycle],
+            rules=[rule("deletion"), rule("non_fast_forward"), rule("update")],
+        ),
+        ruleset(
+            52001, "CYAx rehearsal principal integrity", include=[principal],
+            rules=[rule("deletion"), rule("non_fast_forward")],
+        ),
+        ruleset(
+            52002, "CYAx rehearsal principal review", include=[principal],
+            rules=[{
+                "type": "pull_request",
+                "parameters": {
+                    "required_approving_review_count": 0,
+                    "dismiss_stale_reviews_on_push": False,
+                    "require_code_owner_review": False,
+                    "require_last_push_approval": False,
+                },
+            }],
+            actors=[ADMIN_BYPASS, APP_BYPASS],
+        ),
+        ruleset(
+            52003, "CYAx rehearsal principal freeze", include=[principal],
+            rules=[rule("update")], actors=[ADMIN_BYPASS, APP_BYPASS],
+        ),
+    ]
+
+
 class FakeGitHub:
     def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
-        self.rows = rows if rows is not None else candidate_rulesets() + freeze_rulesets()
+        self.rows = rows if rows is not None else (
+            candidate_rulesets() + freeze_rulesets() + rehearsal_rulesets()
+        )
         self.calls: list[tuple[str, str, object]] = []
         self.fail_next = False
         self.stale_detail = False
@@ -139,11 +180,16 @@ class FakeGitHub:
         self.late_freeze_apply: tuple[int, str] | None = None
         self.branch_reads = {"vmm": 0, "main": 0}
         self.branch_shas = {"vmm": "a" * 40, "main": "a" * 40}
+        self.change_vmm_after_write = False
+        self.fail_branch_read_at: dict[str, set[int]] = {}
+        self.fail_project_version = False
         self.vmm_tree = "c" * 40
         self.request_files: set[str] = set()
         self.git_ref_objects: dict[str, str] = {}
         self.git_commit_objects: dict[str, dict[str, object]] = {}
         self.ref_create_mode: str | None = None
+        self.ref_create_calls = 0
+        self.fail_fence_readback = False
         self.object_write_mode: str | None = None
         self.object_write_calls = 0
         self.project_version = "0.2.0"
@@ -152,6 +198,18 @@ class FakeGitHub:
             {"ruleset_id": 23967983, "type": "update"},
             {"ruleset_id": 23967983, "type": "deletion"},
             {"ruleset_id": 23967983, "type": "non_fast_forward"},
+        ]
+        self.lifecycle_evaluated_rules = [
+            {"ruleset_id": 51001, "type": "creation"},
+            {"ruleset_id": 51002, "type": "deletion"},
+            {"ruleset_id": 51002, "type": "non_fast_forward"},
+            {"ruleset_id": 51002, "type": "update"},
+        ]
+        self.principal_evaluated_rules = [
+            {"ruleset_id": 52001, "type": "deletion"},
+            {"ruleset_id": 52001, "type": "non_fast_forward"},
+            {"ruleset_id": 52002, "type": "pull_request"},
+            {"ruleset_id": 52003, "type": "update"},
         ]
 
     def __call__(self, method: str, path: str, payload=None) -> ApiResponse:
@@ -213,12 +271,21 @@ class FakeGitHub:
                 raise RuntimeError("Bearer private-token must not escape")
             return self._response(row)
         if "/rules/branches/" in path and method == "GET":
-            return self._response(self.evaluated_rules, {
+            branch = unquote(path.split("/rules/branches/", 1)[1])
+            if branch.startswith("rehearsal/lifecycle/"):
+                evaluated = self.lifecycle_evaluated_rules
+            elif branch.startswith("rehearsal/principal/"):
+                evaluated = self.principal_evaluated_rules
+            else:
+                evaluated = self.evaluated_rules
+            return self._response(evaluated, {
                 "ETag": '"effective-rules"',
                 "X-GitHub-Request-Id": "REQ-0125",
             })
         if "/git/ref/heads/rehearsal/lifecycle/requests/" in path and method == "GET":
             branch = path.split("/git/ref/heads/", 1)[1]
+            if self.fail_fence_readback and self.ref_create_calls:
+                raise RuntimeError("readback unavailable")
             if branch not in self.git_ref_objects:
                 return ApiResponse(404, b"{}")
             return self._response({
@@ -233,10 +300,16 @@ class FakeGitHub:
             file_path = path.split("/contents/", 1)[1].split("?", 1)[0]
             return self._response({"path": file_path}) if file_path in self.request_files else ApiResponse(404, b"{}")
         if "/branches/vmm" in path and method == "GET":
+            self.branch_reads["vmm"] = self.branch_reads.get("vmm", 0) + 1
+            if self.branch_reads["vmm"] in self.fail_branch_read_at.get("vmm", set()):
+                raise RuntimeError("branch read unavailable")
+            sha = self.branch_shas["vmm"]
+            if self.change_vmm_after_write and self.branch_reads["vmm"] > 1:
+                sha = SHA_B
             return self._response({
                 "name": "vmm",
                 "commit": {
-                    "sha": self.branch_shas["vmm"],
+                    "sha": sha,
                     "commit": {"tree": {"sha": self.vmm_tree}},
                 },
             })
@@ -264,6 +337,7 @@ class FakeGitHub:
             }
             return self._response({"sha": sha})
         if path.endswith("/git/refs") and method == "POST":
+            self.ref_create_calls += 1
             ref = payload["ref"]
             branch = ref.removeprefix("refs/heads/")
             mode = self.ref_create_mode
@@ -272,6 +346,11 @@ class FakeGitHub:
                 return ApiResponse(422, b"{}")
             if mode == "reject-race":
                 self.git_ref_objects[branch] = SHA_B
+                return ApiResponse(422, b"{}")
+            if mode == "terminal-reject":
+                return ApiResponse(422, b"{}")
+            if mode == "terminal-reject-readback-fails":
+                self.fail_fence_readback = True
                 return ApiResponse(422, b"{}")
             if mode == "response-lost-after":
                 self.git_ref_objects[branch] = payload["sha"]
@@ -284,11 +363,17 @@ class FakeGitHub:
         if "/branches/" in path and method == "GET":
             branch = unquote(path.rsplit("/", 1)[1])
             self.branch_reads[branch] = self.branch_reads.get(branch, 0) + 1
+            if self.branch_reads[branch] in self.fail_branch_read_at.get(branch, set()):
+                raise RuntimeError("branch read unavailable")
             sha = self.branch_shas.get(branch, SHA_A)
             if branch == "main" and self.change_main_after_write and self.branch_reads[branch] > 1:
                 sha = SHA_B
+            if branch == "vmm" and self.change_vmm_after_write and self.branch_reads[branch] > 1:
+                sha = SHA_B
             return self._response({"name": branch, "commit": {"sha": sha}})
         if "/contents/Project.toml?" in path and method == "GET":
+            if self.fail_project_version:
+                raise RuntimeError("version read unavailable")
             content = base64.b64encode(
                 f'version = "{self.project_version}"\n'.encode("ascii")
             ).decode("ascii")
@@ -475,6 +560,61 @@ class GitHubProtectionTests(unittest.TestCase):
                     commit_sha=commit, actor="owner", event=replayed,
                 )
 
+    def test_local_git_validation_never_inherits_tokens_or_git_injection_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            _, commit, event = self._trigger_repo(root)
+            captured: list[dict[str, str]] = []
+            original_run = subprocess.run
+
+            def capture_git_environment(command, **kwargs):
+                if command[0] == "git":
+                    captured.append(dict(kwargs.get("env", {})))
+                return original_run(command, **kwargs)
+
+            sentinels = {
+                "GH_TOKEN": "gh-secret-sentinel",
+                "GITHUB_TOKEN": "github-secret-sentinel",
+                "GH_ENTERPRISE_TOKEN": "enterprise-secret-sentinel",
+                "GIT_DIR": "/tmp/injected-git-dir",
+                "GIT_WORK_TREE": "/tmp/injected-work-tree",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "credential.helper",
+                "GIT_CONFIG_VALUE_0": "!printf injected",
+            }
+            with mock.patch.dict(os.environ, sentinels, clear=False), mock.patch(
+                "version_lifecycle.github_protection.subprocess.run",
+                side_effect=capture_git_environment,
+            ):
+                request = validate_rehearsal_trigger(
+                    root,
+                    repository=REPOSITORY,
+                    ref=event["ref"],
+                    commit_sha=commit,
+                    actor="owner",
+                    event=event,
+                )
+            self.assertEqual(request.request_id, "request-0125-1")
+            self.assertGreater(len(captured), 0)
+            for environment in captured:
+                for key in set(sentinels) - {
+                    "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"
+                }:
+                    self.assertNotIn(key, environment)
+                for value in set(sentinels.values()) - {"1", "credential.helper", "!printf injected"}:
+                    self.assertNotIn(value, environment.values())
+                self.assertEqual(environment["GIT_CONFIG_NOSYSTEM"], "1")
+                self.assertEqual(environment["GIT_CONFIG_GLOBAL"], os.devnull)
+                self.assertEqual(environment["GIT_TERMINAL_PROMPT"], "0")
+                self.assertEqual(environment["GCM_INTERACTIVE"], "never")
+                self.assertEqual(environment["GIT_CONFIG_COUNT"], "2")
+                self.assertEqual(environment["GIT_CONFIG_KEY_0"], "credential.helper")
+                self.assertEqual(environment["GIT_CONFIG_VALUE_0"], "")
+                self.assertEqual(environment["GIT_CONFIG_KEY_1"], "core.hooksPath")
+                self.assertEqual(
+                    environment["GIT_CONFIG_VALUE_1"], os.devnull
+                )
+
     def test_trigger_validation_rejects_extra_or_modified_workflow_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -621,8 +761,8 @@ class GitHubProtectionTests(unittest.TestCase):
                     return subprocess.CompletedProcess(command, 0, b"", b"")
                 return original_run(command, **kwargs)
 
-            expected_rules = fake.evaluated_rules
-            fake.evaluated_rules = []
+            expected_rules = fake.principal_evaluated_rules
+            fake.principal_evaluated_rules = []
             with mock.patch(
                 "version_lifecycle.github_protection.subprocess.run",
                 side_effect=successful_push,
@@ -639,7 +779,7 @@ class GitHubProtectionTests(unittest.TestCase):
                         intent={"repository": REPOSITORY, "transaction_id": "tx-rules"},
                     )
             self.assertEqual(push_calls, [])
-            fake.evaluated_rules = expected_rules
+            fake.principal_evaluated_rules = expected_rules
             gate_calls.clear()
 
             intent = {
@@ -809,8 +949,9 @@ class GitHubProtectionTests(unittest.TestCase):
                 and intent.get("owner_environment_approved") is True
                 and rules.get("repository") == REPOSITORY
                 and rules.get("ref") == ref
-                and {"creation", "deletion", "non_fast_forward", "update"}.issubset(
-                    set(rules.get("rule_types", []))
+                and rules.get("policy") == "cyax-r15-rehearsal-request-fence-v1"
+                and adapter.is_live_rehearsal_rules_evidence(
+                    rules, ref=ref, policy="request-fence"
                 )
             )
 
@@ -857,7 +998,7 @@ class GitHubProtectionTests(unittest.TestCase):
             ]),
             1,
         )
-        self.assertEqual(len(gate_calls), 1)
+        self.assertEqual(len(gate_calls), 2)
         self.assertEqual(gate_calls[0][0], "create-request-fence")
         self.assertEqual(
             gate_calls[0][1],
@@ -870,7 +1011,7 @@ class GitHubProtectionTests(unittest.TestCase):
         )
 
         unprotected = FakeGitHub()
-        unprotected.evaluated_rules = []
+        unprotected.lifecycle_evaluated_rules = []
         unprotected_adapter = GitHubProtectionAdapter(
             REPOSITORY,
             token="private-token",
@@ -889,9 +1030,183 @@ class GitHubProtectionTests(unittest.TestCase):
             )
         self.assertFalse(any(call[0] == "POST" for call in unprotected.calls))
 
+    def test_request_fence_rejects_noncanonical_effective_rules_before_writes(self) -> None:
+        cases = (
+            "wrong_coverage",
+            "excluded_coverage",
+            "disabled_immutable",
+            "app_bypasses_immutable",
+            "missing_creation_app_bypass",
+            "inconsistent_effective_id",
+            "unexpected_effective_rule",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                _, _, event = self._trigger_repo(root)
+                request = validate_rehearsal_trigger(
+                    root, repository=REPOSITORY, ref=event["ref"],
+                    commit_sha=event["after"], actor="owner", event=event,
+                )
+                fake = FakeGitHub()
+                immutable = next(row for row in fake.rows if row["id"] == 51002)
+                creation = next(row for row in fake.rows if row["id"] == 51001)
+                if case == "wrong_coverage":
+                    immutable["conditions"]["ref_name"]["include"] = [
+                        "refs/heads/rehearsal/lifecycle/requests/*"
+                    ]
+                elif case == "excluded_coverage":
+                    immutable["conditions"]["ref_name"]["exclude"] = [
+                        "refs/heads/rehearsal/lifecycle/requests/blocked-*"
+                    ]
+                elif case == "disabled_immutable":
+                    immutable["enforcement"] = "disabled"
+                elif case == "app_bypasses_immutable":
+                    immutable["bypass_actors"] = [APP_BYPASS]
+                elif case == "missing_creation_app_bypass":
+                    creation["bypass_actors"] = [ADMIN_BYPASS]
+                elif case == "inconsistent_effective_id":
+                    fake.lifecycle_evaluated_rules[0]["ruleset_id"] = 51999
+                else:
+                    fake.rows.append(ruleset(
+                        51003,
+                        "unexpected rehearsal request rule",
+                        include=["refs/heads/rehearsal/lifecycle/**"],
+                        rules=[rule("pull_request")],
+                    ))
+                    fake.lifecycle_evaluated_rules.append(
+                        {"ruleset_id": 51003, "type": "pull_request"}
+                    )
+                adapter = GitHubProtectionAdapter(
+                    REPOSITORY, token="private-token", transport=fake,
+                    rehearsal_gate=lambda *_: True,
+                )
+                with self.assertRaisesRegex(
+                    GitHubProtectionError, "REHEARSAL_RULESET_UNVERIFIED"
+                ):
+                    adapter.create_rehearsal_request_fence(
+                        request,
+                        intent={"repository": REPOSITORY, "request_id": request.request_id},
+                    )
+                self.assertEqual(fake.object_write_calls, 0)
+                self.assertEqual(fake.ref_create_calls, 0)
+                self.assertFalse(any(
+                    call[0] in {"POST", "PUT", "PATCH"} for call in fake.calls
+                ))
+
+    def test_principal_move_requires_active_freeze_and_exact_effective_binding(self) -> None:
+        cases = ("missing_freeze", "disabled_freeze", "excluded_freeze", "inconsistent_id")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.name", "Fixture")
+            self._git(root, "config", "user.email", "fixture@example.invalid")
+            (root / "README.md").write_text("base\n", encoding="utf-8")
+            self._git(root, "add", "README.md")
+            self._git(root, "commit", "-q", "-m", "base")
+            old = self._git(root, "rev-parse", "HEAD")
+            (root / "README.md").write_text("next\n", encoding="utf-8")
+            self._git(root, "add", "README.md")
+            self._git(root, "commit", "-q", "-m", "next")
+            new = self._git(root, "rev-parse", "HEAD")
+            tree = self._git(root, "rev-parse", f"{new}^{{tree}}")
+            for case in cases:
+                with self.subTest(case=case):
+                    fake = FakeGitHub()
+                    freeze = next(row for row in fake.rows if row["id"] == 52003)
+                    if case == "missing_freeze":
+                        fake.rows.remove(freeze)
+                        fake.principal_evaluated_rules = [
+                            item for item in fake.principal_evaluated_rules
+                            if item["ruleset_id"] != 52003
+                        ]
+                    elif case == "disabled_freeze":
+                        freeze["enforcement"] = "disabled"
+                    elif case == "excluded_freeze":
+                        freeze["conditions"]["ref_name"]["exclude"] = [
+                            "refs/heads/rehearsal/principal/line"
+                        ]
+                    else:
+                        fake.principal_evaluated_rules[-1]["ruleset_id"] = 52999
+                    fake.branch_shas["rehearsal/principal/line"] = old
+                    adapter = GitHubProtectionAdapter(
+                        REPOSITORY, token="private-token", transport=fake,
+                        authorization_gate=lambda *_: True,
+                        rehearsal_gate=lambda *_: True,
+                    )
+                    original_run = subprocess.run
+                    pushes = []
+
+                    def record_push(command, **kwargs):
+                        if command[0] == "git" and "push" in command:
+                            pushes.append(command)
+                        return original_run(command, **kwargs)
+
+                    with mock.patch(
+                        "version_lifecycle.github_protection.subprocess.run",
+                        side_effect=record_push,
+                    ):
+                        with self.assertRaisesRegex(
+                            GitHubProtectionError, "REHEARSAL_RULESET_UNVERIFIED"
+                        ):
+                            adapter.compare_and_swap_rehearsal_principal(
+                                root,
+                                ref="refs/heads/rehearsal/principal/line",
+                                expected_old_sha=old,
+                                intended_new_sha=new,
+                                intended_new_tree=tree,
+                                intent={"repository": REPOSITORY, "transaction_id": "tx"},
+                            )
+                    self.assertEqual(pushes, [])
+                    self.assertFalse(any(
+                        call[0] in {"POST", "PUT", "PATCH"} for call in fake.calls
+                    ))
+
+    def test_request_fence_rechecks_rules_before_ref_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            _, _, event = self._trigger_repo(root)
+            request = validate_rehearsal_trigger(
+                root, repository=REPOSITORY, ref=event["ref"],
+                commit_sha=event["after"], actor="owner", event=event,
+            )
+        fake = FakeGitHub()
+        immutable = next(row for row in fake.rows if row["id"] == 51002)
+        gate_calls = []
+        adapter = None
+
+        def approve_then_weaken(intent, action, ref, rules):
+            approved = adapter.is_live_rehearsal_rules_evidence(
+                rules, ref=ref, policy="request-fence"
+            )
+            gate_calls.append(action)
+            if len(gate_calls) == 1:
+                immutable["bypass_actors"] = [APP_BYPASS]
+            return approved
+
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY, token="private-token", transport=fake,
+            rehearsal_gate=approve_then_weaken,
+        )
+        with self.assertRaisesRegex(
+            GitHubProtectionError, "REHEARSAL_RULESET_UNVERIFIED"
+        ):
+            adapter.create_rehearsal_request_fence(
+                request,
+                intent={"repository": REPOSITORY, "request_id": request.request_id},
+            )
+        self.assertEqual(gate_calls, ["create-request-fence"])
+        self.assertEqual(fake.ref_create_calls, 0)
+        self.assertFalse(any(
+            call[0] == "POST" and call[1].endswith("/git/refs")
+            for call in fake.calls
+        ))
+
     def test_request_fence_race_and_lost_response_stop_without_retry(self) -> None:
         for mode, expected in (
             ("reject-race", "REQUEST_ID_ALREADY_USED"),
+            ("terminal-reject", "REQUEST_FENCE_CREATE_REJECTED"),
+            ("terminal-reject-readback-fails", "REQUEST_FENCE_WRITE_UNKNOWN"),
             ("response-lost-after", "REQUEST_FENCE_WRITE_UNKNOWN"),
         ):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp:
@@ -909,7 +1224,7 @@ class GitHubProtectionTests(unittest.TestCase):
                     transport=fake,
                     rehearsal_gate=lambda *_: True,
                 )
-                with self.assertRaisesRegex(GitHubProtectionError, expected):
+                with self.assertRaisesRegex(GitHubProtectionError, expected) as raised:
                     adapter.create_rehearsal_request_fence(
                         request,
                         intent={
@@ -922,7 +1237,15 @@ class GitHubProtectionTests(unittest.TestCase):
                     if call[0] == "POST" and call[1].endswith("/git/refs")
                 ]
                 self.assertEqual(len(ref_posts), 1)
-                if mode == "response-lost-after":
+                if mode == "terminal-reject-readback-fails":
+                    self.assertEqual(
+                        raised.exception.evidence["readback_error"],
+                        "REQUEST_FENCE_READBACK_UNAVAILABLE",
+                    )
+                    self.assertEqual(
+                        raised.exception.evidence["write_outcome"], "unknown"
+                    )
+                if expected == "REQUEST_FENCE_WRITE_UNKNOWN":
                     with self.assertRaisesRegex(
                         GitHubProtectionError, "REQUEST_FENCE_WRITE_UNRECONCILED"
                     ):
@@ -1230,6 +1553,93 @@ class GitHubProtectionTests(unittest.TestCase):
                     put_count,
                 )
 
+    def test_freeze_inflight_fence_serializes_activation_and_release_writes(self) -> None:
+        class DelayedTransport:
+            def __init__(self, fake, enforcement):
+                self.fake = fake
+                self.enforcement = enforcement
+                self.started = threading.Event()
+                self.resume = threading.Event()
+                self.blocked = False
+
+            def __call__(self, method, path, payload=None):
+                if (
+                    method == "PUT" and "/rulesets/" in path
+                    and payload.get("enforcement") == self.enforcement
+                    and not self.blocked
+                ):
+                    self.blocked = True
+                    self.started.set()
+                    if not self.resume.wait(5):
+                        raise RuntimeError("timed out waiting to release fake write")
+                return self.fake(method, path, payload)
+
+        fake = FakeGitHub()
+        transport = DelayedTransport(fake, "active")
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY, token="private-token", transport=transport,
+            authorization_gate=lambda *_: True,
+        )
+        activation_results = []
+
+        def activate():
+            try:
+                activation_results.append(
+                    adapter.freeze_main({"repository": REPOSITORY})
+                )
+            except Exception as error:
+                activation_results.append(error)
+
+        first_activation = threading.Thread(target=activate)
+        first_activation.start()
+        self.assertTrue(transport.started.wait(5))
+        with self.assertRaisesRegex(
+            GitHubProtectionError, "FREEZE_WRITE_UNRECONCILED"
+        ):
+            adapter.freeze_main({"repository": REPOSITORY})
+        stale_disabled = adapter._freeze_ruleset(
+            "refs/heads/main", adapter.read_snapshot()
+        )
+        with self.assertRaisesRegex(
+            GitHubProtectionError, "FREEZE_WRITE_UNRECONCILED"
+        ):
+            adapter._set_enforcement("refs/heads/main", stale_disabled, "disabled")
+        transport.resume.set()
+        first_activation.join(5)
+        self.assertFalse(first_activation.is_alive())
+        self.assertEqual(len(activation_results), 1)
+        self.assertNotIsInstance(activation_results[0], Exception)
+        self.assertEqual(len([call for call in fake.calls if call[0] == "PUT"]), 1)
+
+        lease = activation_results[0]["token"]
+        fake.freeze_write_mode = "response-lost-after"
+        delayed_release = DelayedTransport(fake, "disabled")
+        adapter._transport = delayed_release
+        release_results = []
+
+        def release():
+            try:
+                adapter.unfreeze_main(lease)
+                release_results.append(None)
+            except Exception as error:
+                release_results.append(error)
+
+        first_release = threading.Thread(target=release)
+        first_release.start()
+        self.assertTrue(delayed_release.started.wait(5))
+        with self.assertRaisesRegex(
+            GitHubProtectionError, "FREEZE_WRITE_UNRECONCILED"
+        ):
+            adapter.unfreeze_main(lease)
+        delayed_release.resume.set()
+        first_release.join(5)
+        self.assertFalse(first_release.is_alive())
+        self.assertEqual(len(release_results), 1)
+        self.assertIsInstance(release_results[0], GitHubProtectionError)
+        self.assertEqual(release_results[0].reason_code, "FREEZE_WRITE_UNKNOWN")
+        self.assertTrue(adapter.is_live_freeze_lease(lease, ref="refs/heads/main"))
+        self.assertEqual(len([call for call in fake.calls if call[0] == "PUT"]), 2)
+
     def test_terminal_freeze_rejection_is_distinct_from_an_uncertain_write(self) -> None:
         fake = FakeGitHub()
         fake.freeze_write_mode = "terminal-rejection"
@@ -1252,7 +1662,8 @@ class GitHubProtectionTests(unittest.TestCase):
 
     def test_freeze_rejects_wrong_rule_or_stale_lease_without_releasing(self) -> None:
         wrong = FakeGitHub()
-        wrong.rows[-1]["bypass_actors"] = [
+        wrong_freeze = next(row for row in wrong.rows if row["id"] == 23948127)
+        wrong_freeze["bypass_actors"] = [
             {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
         ]
         adapter = adapter_for(wrong, gate=lambda *_: True)

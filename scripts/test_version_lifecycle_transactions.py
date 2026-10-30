@@ -586,6 +586,89 @@ class TransactionTests(unittest.TestCase):
         self.assertNotIn("promote", release.calls)
         self.assertNotIn("release-exclusion", release.calls)
 
+    def test_post_activation_identity_failures_keep_active_state_for_closure_and_release(self):
+        scenarios = ("moved_head", "branch_read_failure", "version_read_failure")
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                closure = PrincipalClosureFixture()
+                if scenario == "moved_head":
+                    closure.github_api.branch_shas["vmm"] = SHA_A
+                    closure.github_api.change_vmm_after_write = True
+                    expected_reason = "FREEZE_TARGET_MOVED"
+                    expected_stage = "branch_identity"
+                elif scenario == "branch_read_failure":
+                    closure.github_api.fail_branch_read_at = {"vmm": {2}}
+                    expected_reason = "GITHUB_API_REQUEST_FAILED"
+                    expected_stage = "branch_read"
+                else:
+                    closure.github_api.fail_project_version = True
+                    expected_reason = "GITHUB_API_REQUEST_FAILED"
+                    expected_stage = "version_read"
+                closure_result = run_closure(closure, self.closure_intent)
+                self.assertEqual(
+                    (closure_result.status, closure_result.reason_code,
+                     closure_result.frozen, closure_result.freeze_state),
+                    ("BLOCKED", expected_reason, True, "active"),
+                )
+                closure_evidence = closure_result.evidence[
+                    "freeze_activation_reconciliation"
+                ]
+                self.assertEqual(closure_evidence["freeze_state"], "active")
+                self.assertEqual(closure_evidence["observed_enforcement"], "active")
+                self.assertEqual(
+                    closure_evidence["post_activation_failure_stage"], expected_stage
+                )
+                self.assertNotIn("serialize", closure.calls)
+                self.assertNotIn("create-anchor", closure.calls)
+                self.assertNotIn("unfreeze", closure.calls)
+
+                release = PrincipalReleaseFixture()
+                if scenario == "moved_head":
+                    release.github_api.branch_shas["main"] = SHA_A
+                    release.github_api.change_main_after_write = True
+                elif scenario == "branch_read_failure":
+                    release.github_api.fail_branch_read_at = {"main": {2}}
+                else:
+                    release.github_api.fail_project_version = True
+                release_result = run_release(release, self.release_intent)
+                self.assertEqual(
+                    (release_result.status, release_result.reason_code,
+                     release_result.frozen, release_result.freeze_state),
+                    ("BLOCKED", expected_reason, True, "active"),
+                )
+                release_evidence = release_result.evidence[
+                    "freeze_activation_reconciliation"
+                ]
+                self.assertEqual(release_evidence["freeze_state"], "active")
+                self.assertEqual(release_evidence["observed_enforcement"], "active")
+                self.assertEqual(
+                    release_evidence["post_activation_failure_stage"], expected_stage
+                )
+                self.assertNotIn("promote", release.calls)
+                self.assertNotIn("unfreeze-main", release.calls)
+                self.assertNotIn("release-exclusion", release.calls)
+
+    def test_unexpected_closure_snapshot_failure_retains_active_exclusion(self):
+        port = PrincipalClosureFixture()
+        original_view = port.allocation_view
+
+        def fail_after_anchor():
+            if "create-anchor" in port.calls:
+                port.calls.append("view-exception")
+                raise RuntimeError("simulated allocation snapshot failure")
+            return original_view()
+
+        port.allocation_view = fail_after_anchor
+        result = run_closure(port, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "TRANSACTION_OUTCOME_UNCERTAIN", True, "active"),
+        )
+        self.assertIn("create-anchor", port.calls)
+        self.assertIn("view-exception", port.calls)
+        self.assertNotIn("release-exclusion", port.calls)
+        self.assertNotIn("unfreeze", port.calls)
+
     def test_uncertain_freeze_release_keeps_exclusion_and_reports_unknown(self):
         closure = PrincipalClosureFixture()
         closure.freeze_write_on_deactivate = True

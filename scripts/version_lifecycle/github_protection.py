@@ -15,6 +15,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import tomllib
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -50,6 +51,17 @@ _FULL_REF_SHA = re.compile(r"[0-9a-f]{40}\Z")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?\Z")
 _APP_LOGIN = "cyaxiverse-lifecycle[bot]"
 _APP_INSTALLATION_ID = 172789630
+_APP_ID = 5371554
+_REHEARSAL_LIFECYCLE_PATTERN = "refs/heads/rehearsal/lifecycle/**"
+_REHEARSAL_PRINCIPAL_PATTERN = "refs/heads/rehearsal/principal/*"
+_REHEARSAL_ADMIN_BYPASS = (5, "RepositoryRole", "always")
+_REHEARSAL_APP_BYPASS = (_APP_ID, "Integration", "always")
+_REHEARSAL_PR_REVIEW_PARAMETERS = {
+    "required_approving_review_count": 0,
+    "dismiss_stale_reviews_on_push": False,
+    "require_code_owner_review": False,
+    "require_last_push_approval": False,
+}
 
 
 class GitHubProtectionError(RuntimeError):
@@ -193,6 +205,7 @@ class RuleEvaluationObservation:
     provider_request_id: str | None
     ruleset_ids: tuple[int, ...]
     rule_types: tuple[str, ...]
+    effective_rules: tuple[tuple[int, str], ...]
     canonical_response: bytes
 
     def to_dict(self) -> dict[str, Any]:
@@ -206,6 +219,10 @@ class RuleEvaluationObservation:
             "provider_request_id": self.provider_request_id,
             "ruleset_ids": list(self.ruleset_ids),
             "rule_types": list(self.rule_types),
+            "effective_rules": [
+                {"ruleset_id": identifier, "type": rule_type}
+                for identifier, rule_type in self.effective_rules
+            ],
         }
 
 
@@ -259,14 +276,40 @@ class RehearsalTriggerRequest:
 
 
 def _git_read(repository: str | Path, *args: str) -> bytes:
-    result = subprocess.run(
-        ["git", "-C", str(repository), *args],
-        capture_output=True,
-        check=False,
-    )
+    result = _git_run(repository, *args)
     if result.returncode:
         raise GitHubProtectionError("GIT_EVIDENCE_UNAVAILABLE")
     return result.stdout
+
+
+def _git_environment() -> dict[str, str]:
+    """Build a noninteractive, credential-free environment for local Git reads."""
+
+    allowed = {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT"}
+    environment = {
+        key: value for key, value in os.environ.items() if key in allowed
+    }
+    environment.update({
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "credential.helper",
+        "GIT_CONFIG_VALUE_0": "",
+        "GIT_CONFIG_KEY_1": "core.hooksPath",
+        "GIT_CONFIG_VALUE_1": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "never",
+    })
+    return environment
+
+
+def _git_run(repository: str | Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", "-C", str(repository), *args],
+        capture_output=True,
+        check=False,
+        env=_git_environment(),
+    )
 
 
 def _request_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -302,13 +345,9 @@ def classify_principal_branch_move(
     if expected_old_sha == intended_new_sha:
         return OwnerRouteDecision("REJECTED_BY_RULESET", "REF_MOVE_IS_EMPTY")
     try:
-        ancestor = subprocess.run(
-            [
-                "git", "-C", str(repository), "merge-base", "--is-ancestor",
-                expected_old_sha, intended_new_sha,
-            ],
-            capture_output=True,
-            check=False,
+        ancestor = _git_run(
+            repository, "merge-base", "--is-ancestor",
+            expected_old_sha, intended_new_sha,
         )
         if ancestor.returncode == 1:
             return OwnerRouteDecision("REJECTED_BY_RULESET", "NON_FAST_FORWARD")
@@ -339,7 +378,8 @@ def classify_principal_branch_move(
                     command.extend((before, after))
                 command.extend(("--", ".github/workflows"))
                 result = subprocess.run(
-                    command, capture_output=True, check=False
+                    command, capture_output=True, check=False,
+                    env=_git_environment(),
                 )
                 if result.returncode:
                     return OwnerRouteDecision(
@@ -609,6 +649,9 @@ class GitHubProtectionAdapter:
         self._nonce = object()
         self._leases: dict[str, FreezeLease] = {}
         self._unreconciled_freeze_writes: dict[str, dict[str, Any]] = {}
+        self._freeze_write_lock = threading.Lock()
+        self._freeze_write_inflight: dict[str, dict[str, Any]] = {}
+        self._freeze_write_evidence: dict[str, dict[str, Any]] = {}
         self._unreconciled_branch_moves: dict[str, dict[str, Any]] = {}
         self._unreconciled_request_fences: dict[str, dict[str, Any]] = {}
 
@@ -873,10 +916,14 @@ class GitHubProtectionAdapter:
         if self._read_rehearsal_fence(fence_branch) is not None:
             raise GitHubProtectionError("REQUEST_ID_ALREADY_USED")
         rules_evidence = self._require_rehearsal_rules(
-            fence_ref, {"creation", "deletion", "non_fast_forward", "update"}
+            fence_ref, policy="request-fence"
         )
         if self._rehearsal_gate is None:
             raise GitHubProtectionError("REQUEST_FENCE_AUTHORIZATION_UNVERIFIED")
+        if not self.is_live_rehearsal_rules_evidence(
+            rules_evidence, ref=fence_ref, policy="request-fence"
+        ):
+            raise GitHubProtectionError("REHEARSAL_RULESET_UNVERIFIED")
         try:
             authorized = self._rehearsal_gate(
                 intent, "create-request-fence", fence_ref, rules_evidence
@@ -981,6 +1028,22 @@ class GitHubProtectionAdapter:
         if self._read_rehearsal_fence(fence_branch) is not None:
             raise GitHubProtectionError("REQUEST_ID_ALREADY_USED")
 
+        final_rules_evidence = self._require_rehearsal_rules(
+            fence_ref, policy="request-fence"
+        )
+        if not self.is_live_rehearsal_rules_evidence(
+            final_rules_evidence, ref=fence_ref, policy="request-fence"
+        ):
+            raise GitHubProtectionError("REHEARSAL_RULESET_UNVERIFIED")
+        try:
+            final_authorized = self._rehearsal_gate(
+                intent, "create-request-fence", fence_ref, final_rules_evidence
+            )
+        except Exception:
+            final_authorized = False
+        if final_authorized is not True:
+            raise GitHubProtectionError("REQUEST_FENCE_AUTHORIZATION_UNVERIFIED")
+
         attempt = {
             "write_id": uuid.uuid4().hex,
             "request_id": request.request_id,
@@ -1015,8 +1078,17 @@ class GitHubProtectionAdapter:
                 "observed_commit_sha": observed_sha,
                 "readback_error": readback_error,
             }
+            if readback_error is not None:
+                evidence["write_outcome"] = "unknown"
+                self._unreconciled_request_fences[request.request_id] = evidence
+                raise GitHubProtectionError(
+                    "REQUEST_FENCE_WRITE_UNKNOWN",
+                    provider_status=error.provider_status,
+                    provider_request_id=error.provider_request_id,
+                    evidence=evidence,
+                ) from None
             if error.provider_rejection_is_terminal:
-                if observed_sha is None and readback_error is None:
+                if observed_sha is None:
                     raise GitHubProtectionError(
                         "REQUEST_FENCE_CREATE_REJECTED",
                         provider_status=error.provider_status,
@@ -1127,6 +1199,8 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError("REHEARSAL_REPOSITORY_MISMATCH")
         if self._authorization_gate is None:
             raise GitHubProtectionError("REHEARSAL_AUTHORIZATION_UNVERIFIED")
+        if self._rehearsal_branch_head(ref) != expected_old_sha:
+            raise GitHubProtectionError("CAS_STALE_EXPECTED_OLD")
         try:
             authorized = self._authorization_gate(
                 intent, "move-rehearsal-principal", ref
@@ -1138,8 +1212,12 @@ class GitHubProtectionAdapter:
         if self._rehearsal_gate is None:
             raise GitHubProtectionError("REHEARSAL_RULESET_UNVERIFIED")
         rules_evidence = self._require_rehearsal_rules(
-            ref, {"deletion", "non_fast_forward", "update"}
+            ref, policy="principal-move"
         )
+        if not self.is_live_rehearsal_rules_evidence(
+            rules_evidence, ref=ref, policy="principal-move"
+        ):
+            raise GitHubProtectionError("REHEARSAL_RULESET_UNVERIFIED")
         try:
             rules_verified = self._rehearsal_gate(
                 intent, "move-rehearsal-principal", ref, rules_evidence
@@ -1148,8 +1226,6 @@ class GitHubProtectionAdapter:
             rules_verified = False
         if rules_verified is not True:
             raise GitHubProtectionError("REHEARSAL_RULESET_UNVERIFIED")
-        if self._rehearsal_branch_head(ref) != expected_old_sha:
-            raise GitHubProtectionError("CAS_STALE_EXPECTED_OLD")
         attempt = {
             "write_id": uuid.uuid4().hex,
             "target_ref": ref,
@@ -1167,12 +1243,7 @@ class GitHubProtectionAdapter:
         credential = base64.b64encode(
             f"x-access-token:{self._token}".encode("utf-8")
         ).decode("ascii")
-        environment = {
-            key: value
-            for key, value in os.environ.items()
-            if key not in {"GH_TOKEN", "GITHUB_TOKEN", "GIT_DIR", "GIT_WORK_TREE"}
-            and not key.startswith("GIT_CONFIG_")
-        }
+        environment = _git_environment()
         environment.update({
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
@@ -1231,8 +1302,12 @@ class GitHubProtectionAdapter:
             )
         try:
             postwrite_rules_evidence = self._require_rehearsal_rules(
-                ref, {"deletion", "non_fast_forward", "update"}
+                ref, policy="principal-move"
             )
+            if not self.is_live_rehearsal_rules_evidence(
+                postwrite_rules_evidence, ref=ref, policy="principal-move"
+            ):
+                raise GitHubProtectionError("REHEARSAL_RULESET_UNVERIFIED")
             postwrite_rules_verified = self._rehearsal_gate(
                 intent, "verify-principal-move-postwrite", ref,
                 postwrite_rules_evidence,
@@ -1424,6 +1499,24 @@ class GitHubProtectionAdapter:
         )
 
     @staticmethod
+    def _exact_rehearsal_actors(
+        ruleset: CanonicalRuleset,
+        expected: tuple[tuple[int, str, str], ...],
+    ) -> bool:
+        actual_rows = tuple(sorted(
+            canonical_json(dict(actor)) for actor in ruleset.bypass_actors
+        ))
+        expected_rows = tuple(sorted(
+            canonical_json({
+                "actor_id": actor_id,
+                "actor_type": actor_type,
+                "bypass_mode": bypass_mode,
+            })
+            for actor_id, actor_type, bypass_mode in expected
+        ))
+        return actual_rows == expected_rows
+
+    @staticmethod
     def _overlaps_candidate_namespace(pattern: str) -> bool:
         prefix = re.split(r"[*?\[]", pattern, maxsplit=1)[0]
         namespace = "refs/heads/candidates/"
@@ -1560,7 +1653,9 @@ class GitHubProtectionAdapter:
             return False
         return current.snapshot_sha256 == evidence.snapshot_sha256
 
-    def observe_rules_for_ref(self, ref: str) -> RuleEvaluationObservation:
+    def observe_rules_for_ref(
+        self, ref: str, *, _snapshot: RulesetSnapshot | None = None
+    ) -> RuleEvaluationObservation:
         """Read the non-mutating GitHub effective-rules evaluation for a ref."""
 
         if not isinstance(ref, str) or not ref.startswith("refs/heads/"):
@@ -1568,7 +1663,7 @@ class GitHubProtectionAdapter:
         branch = ref.removeprefix("refs/heads/")
         if not branch or any(part in {"", ".", ".."} for part in branch.split("/")):
             raise GitHubProtectionError("EVALUATION_REF_INVALID")
-        snapshot = self.read_snapshot()
+        snapshot = _snapshot or self.read_snapshot()
         encoded_branch = "/".join(quote(part, safe="") for part in branch.split("/"))
         response = self._api_request(
             "GET", self._repo_path(f"/rules/branches/{encoded_branch}")
@@ -1578,6 +1673,7 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError("RULE_EVALUATION_INVALID")
         ids: set[int] = set()
         rule_types: list[str] = []
+        effective_rules: list[tuple[int, str]] = []
         for item in payload:
             identifier = item.get("ruleset_id")
             rule_type = item.get("type")
@@ -1585,6 +1681,9 @@ class GitHubProtectionAdapter:
                 raise GitHubProtectionError("RULE_EVALUATION_IDENTITY_UNAVAILABLE")
             ids.add(identifier)
             rule_types.append(rule_type)
+            effective_rules.append((identifier, rule_type))
+        if len(effective_rules) != len(set(effective_rules)):
+            raise GitHubProtectionError("RULE_EVALUATION_DUPLICATE_RULE")
         if ref.startswith("refs/heads/candidates/"):
             immutable, creation = self._candidate_pair(snapshot)
             expected_ids = {immutable.id, creation.id}
@@ -1603,11 +1702,12 @@ class GitHubProtectionAdapter:
             headers.get("x-github-request-id"),
             tuple(sorted(ids)),
             tuple(sorted(set(rule_types))),
+            tuple(sorted(effective_rules)),
             normalized_response,
         )
 
     def _require_rehearsal_rules(
-        self, ref: str, required_types: set[str]
+        self, ref: str, *, policy: str
     ) -> dict[str, Any]:
         try:
             require_full_ref(ref)
@@ -1615,24 +1715,146 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError("REHEARSAL_REF_INVALID") from None
         if not ref.startswith("refs/heads/rehearsal/"):
             raise GitHubProtectionError("REHEARSAL_REF_INVALID")
-        observation = self.observe_rules_for_ref(ref)
-        observed_types = set(observation.rule_types)
+        if policy == "request-fence":
+            if re.fullmatch(
+                r"refs/heads/rehearsal/lifecycle/requests/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?",
+                ref,
+            ) is None:
+                raise GitHubProtectionError("REHEARSAL_REF_INVALID")
+            include = (_REHEARSAL_LIFECYCLE_PATTERN,)
+            expected_roles = (
+                (
+                    "creation",
+                    ({"type": "creation"},),
+                    tuple(sorted((_REHEARSAL_ADMIN_BYPASS, _REHEARSAL_APP_BYPASS))),
+                ),
+                (
+                    "immutable",
+                    tuple({"type": name} for name in (
+                        "deletion", "non_fast_forward", "update"
+                    )),
+                    (),
+                ),
+            )
+            policy_id = "cyax-r15-rehearsal-request-fence-v1"
+        elif policy == "principal-move":
+            if (
+                not ref.startswith("refs/heads/rehearsal/principal/")
+                or not ref.removeprefix("refs/heads/rehearsal/principal/")
+                or any(part in {"", ".", ".."} for part in ref.split("/")[4:])
+            ):
+                raise GitHubProtectionError("REHEARSAL_REF_INVALID")
+            include = (_REHEARSAL_PRINCIPAL_PATTERN,)
+            allowed_bypass = tuple(sorted((
+                _REHEARSAL_ADMIN_BYPASS, _REHEARSAL_APP_BYPASS
+            )))
+            expected_roles = (
+                (
+                    "integrity",
+                    ({"type": "deletion"}, {"type": "non_fast_forward"}),
+                    (),
+                ),
+                (
+                    "review",
+                    ({
+                        "type": "pull_request",
+                        "parameters": dict(_REHEARSAL_PR_REVIEW_PARAMETERS),
+                    },),
+                    allowed_bypass,
+                ),
+                (
+                    "freeze",
+                    ({"type": "update"},),
+                    allowed_bypass,
+                ),
+            )
+            policy_id = "cyax-r15-rehearsal-principal-v1"
+        else:
+            raise GitHubProtectionError("REHEARSAL_POLICY_INVALID")
+
+        snapshot = self.read_snapshot()
+        observation = self.observe_rules_for_ref(ref, _snapshot=snapshot)
+        by_id = {ruleset.id: ruleset for ruleset in snapshot.rulesets}
+        role_rulesets: dict[str, CanonicalRuleset] = {}
+        for role, expected_rules, expected_actors in expected_roles:
+            canonical_expected_rules = tuple(sorted(
+                (json.loads(canonical_json(rule)) for rule in expected_rules),
+                key=canonical_json,
+            ))
+            matches = [
+                ruleset for ruleset in snapshot.rulesets
+                if ruleset.target == "branch"
+                and ruleset.enforcement == "active"
+                and ruleset.include == include
+                and not ruleset.exclude
+                and not ruleset.conditions_extra
+                and ruleset.rules == canonical_expected_rules
+                and self._exact_actors(ruleset) == expected_actors
+                and self._exact_rehearsal_actors(ruleset, expected_actors)
+            ]
+            if len(matches) != 1:
+                break
+            role_rulesets[role] = matches[0]
+        expected_effective = tuple(sorted(
+            (ruleset.id, str(rule["type"]))
+            for role, ruleset in role_rulesets.items()
+            for rule in ruleset.rules
+        ))
+        expected_ids = tuple(sorted(ruleset.id for ruleset in role_rulesets.values()))
         if (
-            observation.repository != self.repository
+            len(role_rulesets) != len(expected_roles)
+            or len(expected_ids) != len(expected_roles)
+            or observation.repository != self.repository
             or observation.ref != ref
-            or not required_types.issubset(observed_types)
-            or not observation.ruleset_ids
+            or observation.ruleset_ids != expected_ids
+            or observation.effective_rules != expected_effective
+            or any(identifier not in by_id for identifier in observation.ruleset_ids)
         ):
             raise GitHubProtectionError(
                 "REHEARSAL_RULESET_UNVERIFIED",
                 evidence={
                     "ref": ref,
-                    "required_rule_types": sorted(required_types),
-                    "observed_rule_types": sorted(observed_types),
-                    "ruleset_snapshot_sha256": observation.ruleset_snapshot_sha256,
+                    "policy": policy_id,
+                    "observed_rule_types": list(observation.rule_types),
+                    "observed_ruleset_ids": list(observation.ruleset_ids),
+                    "ruleset_snapshot_sha256": snapshot.snapshot_sha256,
                 },
             )
-        return observation.to_dict()
+        return {
+            **observation.to_dict(),
+            "policy": policy_id,
+            "ruleset_roles": {
+                role: role_rulesets[role].id for role, _, _ in expected_roles
+            },
+            "rulesets": [
+                by_id[identifier].to_dict() for identifier in expected_ids
+            ],
+        }
+
+    def is_live_rehearsal_rules_evidence(
+        self,
+        evidence: Any,
+        *,
+        ref: str,
+        policy: str,
+    ) -> bool:
+        """Re-read and compare the full effective policy before authorizing a write."""
+
+        if not isinstance(evidence, Mapping):
+            return False
+        try:
+            current = self._require_rehearsal_rules(ref, policy=policy)
+        except GitHubProtectionError:
+            return False
+        stable_fields = (
+            "repository", "ref", "ruleset_snapshot_sha256", "response_sha256",
+            "ruleset_ids", "rule_types", "effective_rules", "policy",
+            "ruleset_roles", "rulesets",
+        )
+        return all(
+            canonical_json(evidence.get(key)) == canonical_json(current.get(key))
+            for key in stable_fields
+        )
 
     def _authorize_freeze(self, intent: Any, action: str, ref: str) -> None:
         intent_repository = (
@@ -1682,11 +1904,44 @@ class GitHubProtectionAdapter:
         return left == right
 
     def _require_reconciled_freeze(self, ref: str) -> None:
-        if ref in self._unreconciled_freeze_writes:
-            raise GitHubProtectionError(
-                "FREEZE_WRITE_UNRECONCILED",
-                evidence=self._unreconciled_freeze_writes[ref],
-            )
+        with self._freeze_write_lock:
+            pending = self._freeze_write_inflight.get(ref)
+            if pending is not None:
+                raise GitHubProtectionError(
+                    "FREEZE_WRITE_UNRECONCILED",
+                    evidence={**pending, "write_state": "in_flight"},
+                )
+            unresolved = self._unreconciled_freeze_writes.get(ref)
+            if unresolved is not None:
+                raise GitHubProtectionError(
+                    "FREEZE_WRITE_UNRECONCILED", evidence=unresolved
+                )
+
+    def _finish_freeze_write(
+        self,
+        ref: str,
+        attempt: Mapping[str, Any],
+        evidence: Mapping[str, Any],
+        *,
+        unresolved: bool = False,
+    ) -> None:
+        with self._freeze_write_lock:
+            current = self._freeze_write_inflight.get(ref)
+            if current is None or current.get("write_id") != attempt.get("write_id"):
+                raise GitHubProtectionError("FREEZE_WRITE_STATE_LOST")
+            del self._freeze_write_inflight[ref]
+            retained = dict(evidence)
+            self._freeze_write_evidence[ref] = retained
+            if unresolved:
+                self._unreconciled_freeze_writes[ref] = retained
+
+    def _abandon_freeze_write_before_provider(
+        self, ref: str, attempt: Mapping[str, Any]
+    ) -> None:
+        with self._freeze_write_lock:
+            current = self._freeze_write_inflight.get(ref)
+            if current is not None and current.get("write_id") == attempt.get("write_id"):
+                del self._freeze_write_inflight[ref]
 
     def _freeze_write_readback(
         self,
@@ -1748,6 +2003,34 @@ class GitHubProtectionAdapter:
             "prior_enforcement": ruleset.enforcement,
             "started_at_utc": self._timestamp(),
         }
+        with self._freeze_write_lock:
+            if ref in self._freeze_write_inflight:
+                pending = self._freeze_write_inflight[ref]
+                raise GitHubProtectionError(
+                    "FREEZE_WRITE_UNRECONCILED",
+                    evidence={**pending, "write_state": "in_flight"},
+                )
+            if ref in self._unreconciled_freeze_writes:
+                raise GitHubProtectionError(
+                    "FREEZE_WRITE_UNRECONCILED",
+                    evidence=self._unreconciled_freeze_writes[ref],
+                )
+            self._freeze_write_inflight[ref] = dict(attempt)
+
+        try:
+            current_snapshot = self.read_snapshot()
+            current_ruleset = self._freeze_ruleset(ref, current_snapshot)
+        except Exception:
+            self._abandon_freeze_write_before_provider(ref, attempt)
+            raise
+        if (
+            current_ruleset.enforcement != ruleset.enforcement
+            or current_ruleset.updated_at != ruleset.updated_at
+            or not self._same_freeze_definition(ruleset, current_ruleset)
+        ):
+            self._abandon_freeze_write_before_provider(ref, attempt)
+            raise GitHubProtectionError("FREEZE_RULESET_STALE")
+
         payload = {
             "name": ruleset.name,
             "target": ruleset.target,
@@ -1785,13 +2068,17 @@ class GitHubProtectionAdapter:
                 and observed.updated_at == ruleset.updated_at
                 and evidence.get("definition_matches") is True
             ):
+                self._finish_freeze_write(ref, attempt, evidence)
                 raise GitHubProtectionError(
                     "FREEZE_WRITE_REJECTED",
                     provider_status=error.provider_status,
                     provider_request_id=error.provider_request_id,
                     evidence=evidence,
                 ) from None
-            self._unreconciled_freeze_writes[ref] = evidence
+            evidence["write_outcome"] = "unknown"
+            self._finish_freeze_write(
+                ref, attempt, evidence, unresolved=True
+            )
             raise GitHubProtectionError(
                 "FREEZE_WRITE_UNKNOWN",
                 provider_status=error.provider_status,
@@ -1816,13 +2103,17 @@ class GitHubProtectionAdapter:
             or evidence.get("definition_matches") is not True
         ):
             evidence["write_outcome"] = "unknown"
-            self._unreconciled_freeze_writes[ref] = evidence
+            self._finish_freeze_write(
+                ref, attempt, evidence, unresolved=True
+            )
             raise GitHubProtectionError(
                 "FREEZE_WRITE_UNKNOWN",
                 provider_status=response.status,
                 provider_request_id=response_request_id,
                 evidence=evidence,
             )
+        evidence["write_outcome"] = "provider_accepted_and_read_back"
+        self._finish_freeze_write(ref, attempt, evidence)
         return snapshot, observed
 
     def _branch(self, ref: str) -> tuple[str, str]:
@@ -1870,11 +2161,51 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError("FREEZE_RULESET_STATE_AMBIGUOUS")
         branch_name, branch_sha = self._branch(ref)
         after, active = self._set_enforcement(ref, ruleset, "active")
-        after_name, after_sha = self._branch(ref)
+        activation_evidence = {
+            **self._freeze_write_evidence.get(ref, {}),
+            "freeze_state": "active",
+            "observed_enforcement": "active",
+            "branch_sha_before_activation": branch_sha,
+        }
+        try:
+            after_name, after_sha = self._branch(ref)
+        except Exception as error:
+            reason = getattr(error, "reason_code", None)
+            activation_evidence.update({
+                "post_activation_failure_stage": "branch_read",
+                "post_activation_failure": (
+                    reason if isinstance(reason, str) else "FREEZE_BRANCH_READ_UNAVAILABLE"
+                ),
+            })
+            raise GitHubProtectionError(
+                reason if isinstance(reason, str) else "FREEZE_BRANCH_READ_UNAVAILABLE",
+                evidence=activation_evidence,
+            ) from None
         if after_name != branch_name or after_sha != branch_sha:
-            # The control remains active. The caller must reconcile the moved ref.
-            raise GitHubProtectionError("FREEZE_TARGET_MOVED")
-        version = self._version_at(after_sha)
+            activation_evidence.update({
+                "post_activation_failure_stage": "branch_identity",
+                "post_activation_failure": "FREEZE_TARGET_MOVED",
+                "observed_branch_name": after_name,
+                "observed_branch_sha": after_sha,
+            })
+            raise GitHubProtectionError(
+                "FREEZE_TARGET_MOVED", evidence=activation_evidence
+            )
+        try:
+            version = self._version_at(after_sha)
+        except Exception as error:
+            reason = getattr(error, "reason_code", None)
+            activation_evidence.update({
+                "post_activation_failure_stage": "version_read",
+                "post_activation_failure": (
+                    reason if isinstance(reason, str) else "FREEZE_VERSION_READ_UNAVAILABLE"
+                ),
+                "observed_branch_sha": after_sha,
+            })
+            raise GitHubProtectionError(
+                reason if isinstance(reason, str) else "FREEZE_VERSION_READ_UNAVAILABLE",
+                evidence=activation_evidence,
+            ) from None
         lease = FreezeLease(
             uuid.uuid4().hex,
             ref,

@@ -646,3 +646,42 @@ were changed or proved by this source work. Owner setup and live evidence
 4a–4g/P1–P6, independent workflow security review, source SPEC/STANDARDS
 reviews, and final exact-state review remain pending. This candidate does not
 claim Gate A completion, Gate B, version adoption, or merge authorization.
+
+## r15 same-primary corrective successor (local-only; 2026-10-30)
+
+The following bounded corrections preserve the six-path scope and the earlier
+candidate and review history. The eight original findings remain open until
+fresh independent successor review and Manager reconciliation:
+
+| Correction | Original finding IDs | Source correction |
+| --- | --- | --- |
+| C01 | `CYAX125-SPEC-1e8ef2b8-F01`, `CYAX125-STD-1e8ef2b8-F02`, `SEC-06-01` | Validate the complete canonical effective rehearsal rules against the exact full ruleset definitions and ID/type linkage. Require active intended coverage with no exclusions, creation-only Admin/App bypass, separate bypass-free immutability, and the active principal freeze policy before a rehearsal principal move. Re-read and compare that evidence at the request-ref and CAS authorization boundaries. |
+| C02 | `SEC-05-01` | Give every local Git validation subprocess an allowlisted environment with no tokens or inherited Git configuration, disabled system/global config, empty credential helper, disabled hooks, and noninteractive prompt controls. Keep the remote CAS token only in its explicit isolated push configuration. |
+| C03 | `SEC-06-02` | Treat any unavailable request-ref readback as unknown, retain the unresolved request fence, and block retries. Return rejection only after positive absent-ref readback; return used-ID only after positive occupied-ref readback. |
+| C04 | `CYAX125-SPEC-1e8ef2b8-F02` | Atomically mark each freeze ref write in flight before provider access, reject overlapping or stale repeated/opposite writes, re-read the exact current ruleset before the mutation, and retain the lease/fence on unknown outcomes. |
+| C05 | `CYAX125-STD-1e8ef2b8-F01` | Keep the allocation exclusion on active, unknown, or unreconciled closure failures, including unexpected exceptions after anchor creation. Release it only after verified freeze disablement. |
+| C06 | `CYAX125-STD-1e8ef2b8-F03` | Carry accepted activation/readback evidence through moved-head, branch-read, and version-read failures before lease return. Closure and release results report the observed active state independently of a lease token and do not progress or compensate. |
+
+The exact local source checkout began at reviewed commit
+`1e8ef2b874f6f44a519eaf7dc7539b92a9381f4a` with a clean worktree. Only the
+six commissioned paths changed. The full test and source identity records,
+raw command outputs, correction-to-finding map, full workflow and 15-module
+closure, six-path diff, and protected-source equality record are retained in
+`/Users/vmehta/Documents/CYAxiverse/cyax-ledger/coordination-facilitator-20261022/125-source-correction-custody-1e8ef2b8-successor-20261030/`.
+
+Final offline verification on the corrected executable and test blobs:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_version_lifecycle_github_protection scripts.test_version_lifecycle_transactions` | Passed, 73 tests, exit 0. Raw output and tested path identities are in `focused-regressions.final.raw.log` and `focused-regressions.final.json` in the custody directory. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed, 178 tests, exit 0. Raw output and exact workflow, test, and all 15 module identities are in `full-lifecycle-discovery.raw.log` and `full-lifecycle-discovery.json` in the custody directory. |
+| `git diff --check 653528ee25ffb2bf0b98c788570e9420484e954c`; Ruby/Psych workflow structure; `bash -n` fetch script; `ruby -c` inline script; and Python compile checks | Passed, exit 0. Per-command output is retained in `static-checks.raw.log` and `static-checks.json`. |
+
+The correction tests use local Git fixtures and fake GitHub transports. No
+provider request, credential access, settings change, trigger, protected ref
+write, dependency installation, push, or publication was performed. The
+previous Python-free Julia import limitation remains unchanged: the local
+depot lacked `AbstractTrees`; no install or retry was made. These corrections
+do not transfer the original REQUEST_CHANGES verdicts to PASS and do not
+claim source acceptance, Gate A completion, Owner live-proof completion, or
+permission for rehearsal or lifecycle operations.
