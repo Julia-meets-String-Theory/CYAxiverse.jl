@@ -186,6 +186,11 @@ class PrincipalClosureFixture:
             self.calls.append("freeze")
             return self.fail != "freeze"
         self.calls.append("unfreeze")
+        mode = getattr(self, "freeze_write_on_deactivate", None)
+        if mode:
+            self.github_api.freeze_write_mode = (
+                mode if isinstance(mode, str) else "response-lost-after"
+            )
         return True
 
     def owner_authorization_ref_for(self, action, target_ref, final_version):
@@ -305,6 +310,11 @@ class PrincipalReleaseFixture:
             self.calls.append("freeze-main")
             return self.fail != "freeze"
         self.calls.append("unfreeze-main")
+        mode = getattr(self, "freeze_write_on_deactivate", None)
+        if mode:
+            self.github_api.freeze_write_mode = (
+                mode if isinstance(mode, str) else "response-lost-after"
+            )
         return True
 
     def owner_authorization_ref_for(self, action, target_ref, final_version):
@@ -459,6 +469,8 @@ class PrincipalReleaseFixture:
             raise RuntimeError("documentation dispatch unavailable")
         if self.fail == "documentation-dispatch-mismatch":
             return {"status": "requested", "publication_ref": "refs/heads/wrong"}
+        if getattr(self, "freeze_write_after_documentation", False):
+            self.github_api.freeze_write_mode = "response-lost-after"
         return {"status": "requested", "publication_ref": publication_ref}
 
 class NoTagProtectionReleaseFixture(PrincipalReleaseFixture):
@@ -533,7 +545,7 @@ class TransactionTests(unittest.TestCase):
                          ["reservation-consumed", "reservation-prepared", "reservation-opened", "version-claimed"])
         self.assertLess(port.calls.index("manifest:reservation-consumed"), port.calls.index("manifest:reservation-prepared"))
         self.assertLess(port.calls.index("manifest:reservation-prepared"), port.calls.index("reopen"))
-        self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze"])
+        self.assertEqual(port.calls[-2:], ["unfreeze", "release-exclusion"])
         snapshots = [
             (
                 manifest["static_iteration_snapshot"],
@@ -550,6 +562,85 @@ class TransactionTests(unittest.TestCase):
                 ("3" * 64, "4" * 64),
             ],
         )
+
+    def test_uncertain_freeze_activation_blocks_before_ref_mutation(self):
+        closure = PrincipalClosureFixture()
+        closure.github_api.freeze_write_mode = "response-lost-after"
+        result = run_closure(closure, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_UNKNOWN", False, "unknown"),
+        )
+        self.assertEqual(result.evidence["freeze_write_reconciliation"]["observed_enforcement"], "active")
+        self.assertNotIn("serialize", closure.calls)
+        self.assertEqual(closure.manifest_types, [])
+
+        release = PrincipalReleaseFixture()
+        release.github_api.freeze_write_mode = "response-lost-after"
+        result = run_release(release, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_UNKNOWN", "unknown"),
+        )
+        self.assertEqual(result.evidence["freeze_write_reconciliation"]["observed_enforcement"], "active")
+        self.assertNotIn("promote", release.calls)
+        self.assertNotIn("release-exclusion", release.calls)
+
+    def test_uncertain_freeze_release_keeps_exclusion_and_reports_unknown(self):
+        closure = PrincipalClosureFixture()
+        closure.freeze_write_on_deactivate = True
+        result = run_closure(closure, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_UNKNOWN", True, "unknown"),
+        )
+        self.assertIn("unfreeze", closure.calls)
+        self.assertNotIn("release-exclusion", closure.calls)
+
+        release = PrincipalReleaseFixture()
+        release.freeze_write_after_documentation = True
+        result = run_release(release, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_UNKNOWN", True, "unknown"),
+        )
+        self.assertIn("unfreeze-main", release.calls)
+        self.assertNotIn("release-exclusion", release.calls)
+
+    def test_rejected_freeze_release_keeps_exclusion_until_owner_reconciliation(self):
+        closure = PrincipalClosureFixture()
+        closure.freeze_write_on_deactivate = "terminal-rejection"
+        result = run_closure(closure, self.closure_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_REJECTED", True, "active"),
+        )
+        self.assertEqual(
+            result.evidence["freeze_write_reconciliation"]["observed_enforcement"],
+            "active",
+        )
+        self.assertNotIn("release-exclusion", closure.calls)
+
+        release = PrincipalReleaseFixture()
+        release.freeze_write_after_documentation = True
+        original_dispatch = release.dispatch_documentation
+
+        def reject_freeze_release(publication_ref):
+            value = original_dispatch(publication_ref)
+            release.github_api.freeze_write_mode = "terminal-rejection"
+            return value
+
+        release.dispatch_documentation = reject_freeze_release
+        result = run_release(release, self.release_intent)
+        self.assertEqual(
+            (result.status, result.reason_code, result.frozen, result.freeze_state),
+            ("BLOCKED", "FREEZE_WRITE_REJECTED", True, "active"),
+        )
+        self.assertEqual(
+            result.evidence["freeze_write_reconciliation"]["observed_enforcement"],
+            "active",
+        )
+        self.assertNotIn("release-exclusion", release.calls)
 
     def test_closure_rejects_cached_authority_after_anchor_mutation(self):
         port = CachedClosureFixture()
@@ -770,8 +861,8 @@ class TransactionTests(unittest.TestCase):
         self.assertLess(port.calls.index("publication-evidence"), port.calls.index("publication-evidence-readback"))
         self.assertLess(port.calls.index("publication-evidence-readback"), port.calls.index("manifest:publication"))
         self.assertLess(port.calls.index("terminal"), port.calls.index("documentation-dispatch"))
-        self.assertLess(port.calls.index("documentation-dispatch"), port.calls.index("release-exclusion"))
-        self.assertEqual(port.calls[-2:], ["release-exclusion", "unfreeze-main"])
+        self.assertLess(port.calls.index("documentation-dispatch"), port.calls.index("unfreeze-main"))
+        self.assertEqual(port.calls[-2:], ["unfreeze-main", "release-exclusion"])
         self.assertEqual(
             port.manifests[-1]["publication_evidence_digest"],
             sha256(port.persisted_publication_evidence_payload).hexdigest(),

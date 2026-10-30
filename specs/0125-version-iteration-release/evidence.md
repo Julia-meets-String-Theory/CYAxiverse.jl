@@ -575,3 +575,74 @@ The exact combined source/settings/evidence review identity and remote CI
 result are recorded in the Manager handback when available. This attempt
 does not authorize merge, Gate A completion, Gate B, a version change, or
 any production lifecycle transaction.
+
+## r15 bounded source candidate (2026-10-30; local and pending independent review)
+
+This exact candidate starts from commit
+`653528ee25ffb2bf0b98c788570e9420484e954c` (tree
+`956a480feeb50f578c7bbbbfbbaf4b60389733f8`). It changes only these six
+paths: `scripts/version_lifecycle/github_protection.py`,
+`scripts/version_lifecycle/transactions.py`,
+`scripts/test_version_lifecycle_github_protection.py`,
+`scripts/test_version_lifecycle_transactions.py`, this evidence file, and the
+new `.github/workflows/cyax-lifecycle-dispatch.yml`.
+
+The workflow handles only a push to `rehearsal/trigger/*` that changes
+`lifecycle-requests/**`. It has one `lifecycle` job, a job-level user/App
+sender guard, a first-attempt-only guard, and the `lifecycle` environment from
+job start. Workflow permissions are empty; the job token has `contents: read`
+for the exact event-commit fetch. There are no external actions or called
+workflows. After environment approval, inline standard-library Ruby creates a
+short-lived installation token and checks its repository, permissions, and
+expiry before passing it only to the Python adapter. The request must be one
+canonical JSON file added by a one-parent commit on a new trigger branch whose
+name matches the request ID. The request binds its parent implementation,
+workflow blob, expected `vmm` SHA, and every Python source blob under
+`scripts/version_lifecycle`.
+
+The request-fence path checks the exact current `vmm` head, absence of the
+request file and request ref, and a full ruleset/effective-rules observation
+before writing. It creates a request ref whose commit has the observed `vmm`
+commit as its sole parent and adds only the validated request file; it never
+moves or creates `vmm`. A successful ref write is read back. Unknown object or
+ref writes are recorded as unreconciled in the adapter and cannot be retried
+through that instance. The workflow also rejects job reruns and trigger-branch
+updates, so each request ID uses one owner-created trigger branch.
+
+The principal-ref CAS is limited to `rehearsal/principal/*`. It scans every
+commit and every merge parent in the proposed range with rename detection off;
+any workflow path change routes to Owner review. Before a push, it checks the
+exact old head, effective rules, the target tree, and the authorization gates.
+The push uses an exact-old lease and a token isolated to its Git child process.
+It reads the result back and verifies effective rules again. An unknown push
+outcome fences later attempts in the adapter. No source path writes `main` or
+`vmm` through this CAS path.
+
+Freeze writes are attempted once and followed by one full-snapshot readback.
+Uncertain writes remain `UNKNOWN`/unreconciled, retain safe provider evidence,
+and block further freeze writes. Closure and release now disable the freeze
+before releasing the allocation exclusion. An uncertain activation blocks
+before lifecycle writes; any failed unfreeze keeps the existing exclusion
+held for Owner reconciliation.
+
+Verification commands and results:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_version_lifecycle_github_protection scripts.test_version_lifecycle_transactions` | Passed, 66 tests, exit 0. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed, 171 tests, exit 0. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 scripts/agent_verify.py diff-check` | Passed, no whitespace errors, exit 0. |
+| `git diff --check 653528ee25ffb2bf0b98c788570e9420484e954c HEAD` | Passed, exit 0. |
+| `python3 scripts/check_version_bump.py --base 653528ee25ffb2bf0b98c788570e9420484e954c --head HEAD` | Passed; no package version bump is required, exit 0. |
+| Ruby/Psych workflow parse and one-job/three-step/no-action structure check; `bash -n` on the fetch step; `ruby -c` on the inline script; Python `compile()` on the four changed Python source/test files | Passed. |
+| `JULIA_PKG_OFFLINE=true PYTHON=/nonexistent PYTHONHOME=/nonexistent julia --compiled-modules=no --project=. -e 'using CYAxiverse; println("Python-free CYAxiverse import passed")'` | Not verified; exit 1 because the local Julia depot does not contain `AbstractTrees`. No package install or network fetch was performed. |
+
+The Julia import limitation is unrelated to the changed lifecycle Python and
+workflow paths.
+
+All tests use local fixtures or mocks. No provider settings, credentials,
+trigger pushes, rulesets, refs, releases, merges, or production transactions
+were changed or proved by this source work. Owner setup and live evidence
+4a–4g/P1–P6, independent workflow security review, source SPEC/STANDARDS
+reviews, and final exact-state review remain pending. This candidate does not
+claim Gate A completion, Gate B, version adoption, or merge authorization.

@@ -1,0 +1,235 @@
+name: CYAx lifecycle dispatch
+
+on:
+  push:
+    branches:
+      - rehearsal/trigger/*
+    paths:
+      - lifecycle-requests/**
+
+permissions: {}
+
+jobs:
+  lifecycle:
+    if: ${{ github.event_name == 'push' && github.run_attempt == 1 && github.ref_type == 'branch' && startsWith(github.ref, 'refs/heads/rehearsal/trigger/') && github.event.sender.type == 'User' && github.event.sender.login == github.actor && github.actor != 'cyaxiverse-lifecycle[bot]' && github.event.installation.id != 172789630 }}
+    name: Validate and fence an Owner rehearsal request
+    environment:
+      name: lifecycle
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch the exact trigger commit with read-only access
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          set +x
+          git init --quiet "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          auth="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 --wrap=0)"
+          GIT_CONFIG_NOSYSTEM=1 \
+          GIT_CONFIG_GLOBAL=/dev/null \
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=2 origin "$GITHUB_REF"
+          unset auth GITHUB_TOKEN
+          git -C "$GITHUB_WORKSPACE" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Validate the exact Owner trigger
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from version_lifecycle.github_protection import validate_rehearsal_trigger
+
+          with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
+              event = json.load(stream)
+          request = validate_rehearsal_trigger(
+              Path.cwd(),
+              repository=os.environ["GITHUB_REPOSITORY"],
+              ref=os.environ["GITHUB_REF"],
+              commit_sha=os.environ["GITHUB_SHA"],
+              actor=os.environ["GITHUB_ACTOR"],
+              event=event,
+          )
+          print(json.dumps(request.to_dict(), sort_keys=True))
+          PY
+
+      - name: Mint a scoped token and create the request fence
+        env:
+          LIFECYCLE_APP_ID: ${{ vars.LIFECYCLE_APP_ID }}
+          LIFECYCLE_APP_PRIVATE_KEY: ${{ secrets.LIFECYCLE_APP_PRIVATE_KEY }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          set -euo pipefail
+          set +x
+          ruby <<'RUBY'
+          require "base64"
+          require "json"
+          require "net/http"
+          require "open3"
+          require "openssl"
+          require "time"
+          require "uri"
+
+          API_ORIGIN = "https://api.github.com"
+          API_VERSION = "2026-03-10"
+          INSTALLATION_ID = 172789630
+          REPOSITORY = "Julia-meets-String-Theory/CYAxiverse.jl"
+
+          def api_json(method, path, bearer, body = nil)
+            uri = URI("#{API_ORIGIN}#{path}")
+            request = case method
+                      when :post then Net::HTTP::Post.new(uri)
+                      when :get then Net::HTTP::Get.new(uri)
+                      else raise "API_METHOD_INVALID"
+                      end
+            request["Accept"] = "application/vnd.github+json"
+            request["Authorization"] = "Bearer #{bearer}"
+            request["X-GitHub-Api-Version"] = API_VERSION
+            request["Content-Type"] = "application/json"
+            request.body = JSON.generate(body) if body
+            response = Net::HTTP.start(
+              uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 20
+            ) { |http| http.request(request) }
+            raise "GITHUB_API_REJECTED" unless response.code.to_i.between?(200, 299)
+            response.body.empty? ? {} : JSON.parse(response.body)
+          rescue OpenSSL::SSL::SSLError, IOError, JSON::ParserError, Net::OpenTimeout,
+                 Net::ReadTimeout, SocketError, SystemCallError
+            raise "GITHUB_API_UNAVAILABLE"
+          end
+
+          def base64url(value)
+            Base64.urlsafe_encode64(value, padding: false)
+          end
+
+          begin
+            app_id = ENV.fetch("LIFECYCLE_APP_ID")
+            raise "APP_ID_INVALID" unless app_id.match?(/\A[0-9]+\z/)
+            raise "APP_ID_MISMATCH" unless app_id == "5371554"
+            private_key = OpenSSL::PKey::RSA.new(
+              ENV.fetch("LIFECYCLE_APP_PRIVATE_KEY")
+            )
+            now = Time.now.to_i
+            signing_input = [
+              base64url(JSON.generate({ "alg" => "RS256", "typ" => "JWT" })),
+              base64url(JSON.generate({
+                "iat" => now - 60, "exp" => now + 540, "iss" => app_id
+              })),
+            ].join(".")
+            jwt = "#{signing_input}.#{base64url(private_key.sign(OpenSSL::Digest::SHA256.new, signing_input))}"
+            token_record = api_json(
+              :post,
+              "/app/installations/#{INSTALLATION_ID}/access_tokens",
+              jwt,
+              {
+                "repositories" => ["CYAxiverse.jl"],
+                "permissions" => { "contents" => "write" },
+              },
+            )
+            token = token_record["token"]
+            expires_at = Time.parse(token_record.fetch("expires_at"))
+            raise "APP_TOKEN_SCOPE_INVALID" unless
+              token.is_a?(String) &&
+              token_record["permissions"] == {
+                "contents" => "write", "metadata" => "read"
+              } &&
+              expires_at > Time.now && expires_at <= Time.now + 3600
+            installed = api_json(
+              :get, "/installation/repositories?per_page=100", token
+            )
+            repositories = installed.fetch("repositories").map {
+              |row| row.fetch("full_name")
+            }
+            raise "APP_TOKEN_REPOSITORY_SCOPE_INVALID" unless
+              installed["total_count"] == 1 && repositories == [REPOSITORY]
+
+            python = <<~PY
+              import json
+              import os
+              from pathlib import Path
+              from version_lifecycle.github_protection import (
+                  GitHubProtectionAdapter,
+                  validate_rehearsal_trigger,
+              )
+
+              with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
+                  event = json.load(stream)
+              request = validate_rehearsal_trigger(
+                  Path.cwd(),
+                  repository=os.environ["GITHUB_REPOSITORY"],
+                  ref=os.environ["GITHUB_REF"],
+                  commit_sha=os.environ["GITHUB_SHA"],
+                  actor=os.environ["GITHUB_ACTOR"],
+                  event=event,
+              )
+              intent = {
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "request_id": request.request_id,
+                  "owner_environment_approved": True,
+              }
+              adapter = GitHubProtectionAdapter(
+                  os.environ["GITHUB_REPOSITORY"],
+                  token=os.environ["GH_TOKEN"],
+                  rehearsal_gate=lambda item, action, ref, rules: (
+                      action == "create-request-fence"
+                      and item.get("owner_environment_approved") is True
+                      and item.get("request_id") == request.request_id
+                      and rules.get("repository") == os.environ["GITHUB_REPOSITORY"]
+                      and rules.get("ref") == ref
+                      and len(rules.get("ruleset_snapshot_sha256", "")) == 64
+                      and len(rules.get("response_sha256", "")) == 64
+                      and {"creation", "deletion", "non_fast_forward", "update"}.issubset(
+                          set(rules.get("rule_types", []))
+                      )
+                  ),
+              )
+              result = adapter.create_rehearsal_request_fence(request, intent=intent)
+              print(json.dumps(result, sort_keys=True))
+            PY
+            child_environment = {
+              "GH_TOKEN" => token,
+              "GITHUB_ACTOR" => ENV.fetch("GITHUB_ACTOR"),
+              "GITHUB_REF" => ENV.fetch("GITHUB_REF"),
+              "GITHUB_SHA" => ENV.fetch("GITHUB_SHA"),
+              "GITHUB_REPOSITORY" => ENV.fetch("GITHUB_REPOSITORY"),
+              "GITHUB_EVENT_PATH" => ENV.fetch("GITHUB_EVENT_PATH"),
+              "PYTHONPATH" => "scripts",
+              "PYTHONDONTWRITEBYTECODE" => "1",
+            }
+            stdout, _stderr, status = Open3.capture3(
+              child_environment, "python3", "-c", python, unsetenv_others: true
+            )
+            raise "REQUEST_FENCE_FAILED" unless status.success?
+            puts stdout
+          rescue OpenSSL::PKey::RSAError
+            abort "APP_PRIVATE_KEY_INVALID"
+          rescue KeyError
+            abort "TOKEN_RESPONSE_INVALID"
+          rescue StandardError => error
+            allowed = %w[
+              API_METHOD_INVALID APP_ID_INVALID APP_ID_MISMATCH
+              APP_TOKEN_SCOPE_INVALID APP_TOKEN_REPOSITORY_SCOPE_INVALID
+              GITHUB_API_REJECTED GITHUB_API_UNAVAILABLE REQUEST_FENCE_FAILED
+            ]
+            abort(allowed.include?(error.message) ? error.message : "TOKEN_OR_FENCE_FAILED")
+          end
+          RUBY
