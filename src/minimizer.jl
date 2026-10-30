@@ -718,19 +718,22 @@ from the explicit `initial_points` (a vector of start vectors) when given.
 Only converged, stationary points with `Hsign == 1` are kept (see
 `_is_converged_minimum`): saddles, maxima, unresolved endpoints and runs that did
 not converge are discarded. The origin is always a critical point; it is added
-unless its Hessian `Q * Diagonal(L) * Q'` has a negative eigenvalue, in which case
-it is a saddle or maximum and is not a minimum.
+only when the smallest eigenvalue of its Hessian `Q * Diagonal(L) * Q'` is
+positive, the same test as `Hsign == 1` for Newton endpoints.
 
 !!! note "Caveats of the origin rule"
-    - The origin test accepts eigenvalues down to a roundoff bound below zero, so an
-      origin with an exactly zero Hessian eigenvalue (a flat direction) is kept.
-      Newton endpoints are filtered on `Hsign == 1`, which rejects zero modes, so
-      the two rules differ for flat directions.
+    - A degenerate origin (a zero Hessian eigenvalue) is unclassified and is not
+      returned: the second-order test cannot tell a minimum from a maximum or saddle
+      there (`L = (-1, 1/4)`, `Q = [1 2]` gives `V = -2 sin⁴(x/2)`, a strict maximum
+      with zero Hessian). This excludes fine-tuned cancellations such as
+      ``\\sum_a L_a q_a^2 = 0`` and also rank-deficient flat directions, where some
+      field combination does not appear in `V` (fewer independent charges than
+      fields), even when the origin is a non-strict minimum.
     - The eigenvalues are computed in `Float64`. For strongly hierarchical `L`
-      (scales spanning more than about 16 decades) the small eigenvalues fall below
-      the roundoff bound and their sign is not resolved, so a saddle along a
-      suppressed direction can be kept. `Hsign` from [`minimize`](@ref) has the
-      same limitation.
+      (scales spanning more than about 16 decades) in a basis that mixes them, the
+      small eigenvalues are below roundoff and their sign is not resolved, so a
+      saddle along a suppressed direction can be kept or a minimum dropped. `Hsign`
+      from [`minimize`](@ref) has the same limitation.
 
 !!! warning "Behaviour change"
     Earlier versions kept every Newton endpoint and always added the origin.
@@ -756,10 +759,9 @@ function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(si
         foreach(x0 -> try_start!(collect(float.(x0))), initial_points)
     end
     origin_hessian = Symmetric(Matrix{Float64}(Q * Diagonal(L) * Q'))
-    origin_eigenvalues = eigvals(origin_hessian)
-    # Rank-style roundoff bound: n * eps * largest |eigenvalue|, so a positive
-    # semidefinite Hessian is not mistaken for an indefinite one.
-    if minimum(origin_eigenvalues) >= -size(Q,1) * eps() * maximum(abs, origin_eigenvalues)
+    # Strictly positive, as Hsign == 1 requires of endpoints: a zero eigenvalue
+    # leaves the origin unclassified at second order (see the docstring).
+    if minimum(eigvals(origin_hessian)) > 0
         push!(xmin, zeros(size(Q,1)))
     end
     unique(xmin)

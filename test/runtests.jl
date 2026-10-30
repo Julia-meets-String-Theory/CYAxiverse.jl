@@ -2365,11 +2365,22 @@ end
     # the fraction of 2π, which is 2π times looser still.
     @test sort(kept_mixed) ≈ [[a, a], [1 - a, 1 - a]] atol=sqrt(eps())
 
-    # Caveat (a): L = (1, -1) on the same charge, Q = [1 1], makes V identically 0.
-    # The origin Hessian is exactly 0, so the origin rule keeps it, while every
-    # Newton endpoint has Hsign = sign(0) = 0 and is rejected.
-    flat = minimizer.subspace_minimize([1.0, -1.0], Float64[1 1]; initial_points=[[0.4]])
-    @test flat == [[0.0]]
+    # Degenerate origins are unclassified and excluded, as zero modes are at
+    # endpoints (Hsign = sign(0) = 0). L = (-1, 1/4) with Q = [1 2]:
+    # V = -(1 - cos x) + (1 - cos 2x)/4 = -2 sin²(x/2) + sin²(x/2) cos²(x/2) · 2
+    #   = -2 sin⁴(x/2), using 1 - cos 2x = 2 sin² x = 8 sin²(x/2) cos²(x/2).
+    # The origin Hessian -1 + 4/4 is exactly 0, yet V < 0 = V(0) for 0 < |x| < 2π,
+    # so the origin is a strict local maximum and must not be returned.
+    @test isempty(minimizer.subspace_minimize([-1.0, 0.25], Float64[1 2];
+        initial_points=Vector{Float64}[]))
+    # Fine-tuned cancellation: L = (1, -1) on the same charge, Q = [1 1], makes V
+    # identically 0; the origin Hessian is exactly 0 and nothing is a strict minimum.
+    @test isempty(minimizer.subspace_minimize([1.0, -1.0], Float64[1 1]; initial_points=[[0.4]]))
+    # Rank-deficient flat direction: Q = [1; 0] leaves x2 out of V = 1 - cos x1, so
+    # the origin Hessian diag(1, 0) has a zero eigenvalue and the origin, a minimum
+    # but not a strict one, is excluded too.
+    @test isempty(minimizer.subspace_minimize([1.0], reshape([1.0, 0.0], 2, 1);
+        initial_points=Vector{Float64}[]))
 end
 
 @testset "minimize resolves stationarity relative to the instanton scales" begin
