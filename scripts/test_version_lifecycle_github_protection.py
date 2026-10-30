@@ -1665,6 +1665,18 @@ class GitHubProtectionTests(unittest.TestCase):
             "active",
         )
         self.assertIn("refs/heads/main", adapter._unreconciled_freeze_writes)
+        self.assertEqual(
+            adapter._unreconciled_freeze_writes["refs/heads/main"][
+                "observed_enforcement"
+            ],
+            "active",
+        )
+        self.assertEqual(
+            adapter._freeze_write_evidence["refs/heads/main"][
+                "observed_enforcement"
+            ],
+            "active",
+        )
         self.assertTrue(adapter.is_live_freeze_lease(lease, ref="refs/heads/main"))
         self.assertFalse(
             adapter.verify_live_freeze_lease(lease, ref="refs/heads/main")
