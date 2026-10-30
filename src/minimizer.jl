@@ -506,7 +506,10 @@ The gradient tolerance is relative to the largest gradient bound
 ``s_i = \\sum_a |\\Lambda_a| |Q_{ia}|``, so the result does not change when every
 ``\\Lambda_a`` is rescaled. `"converged"` is Optim's convergence flag;
 `"stationary"` additionally requires ``|\\partial_i V| \\le (\\epsilon / 10^{-2})\\, s_i``
-for each component, and is `false` for a constant potential (all ``s_i = 0``).
+for each component and a Newton step ``\\|H^{-1} \\nabla V\\|_\\infty \\le \\sqrt{\\epsilon}``
+(the step tolerance of the run), so that a point displaced along a weak direction that
+mixes the fields is not stationary. It is `false` for a constant potential (all
+``s_i = 0``) and where the Hessian is singular.
 
 !!! warning "Behaviour change"
     Before this fix the objective and Hessian passed to Newton's method were
@@ -571,15 +574,27 @@ function minimize(LV::Vector, QV, x0::Vector)
     xmin = Optim.minimizer(res)
     # GC.gc()
     # if abs(minimum(eigen(hess(xmin)).values)) < eps() && maximum(abs.(grad(xmin))) < eps() / threshold
-    hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values))))
-    hess_sign = sign((minimum(eigen(hess(xmin)).values)))
+    hessian_at_min = eigen(Symmetric(hess(xmin)))
+    hess_eigs = Float64(log10(abs(minimum(hessian_at_min.values))))
+    hess_sign = sign(minimum(hessian_at_min.values))
     gradient_at_min = vec(grad(xmin))
     grad_log = log10.(abs.(grad(xmin)))
     # Stationary when each component is resolved against its own scale sᵢ: one
     # tolerance for all components accepts any point along a direction whose sᵢ is
     # below it (strongly suppressed Λ). The computed ∂ᵢV is a sum of terms bounded by
     # |Λₐ Qᵢₐ|, so its roundoff is about eps() sᵢ, 1/threshold = 100 times below this.
-    stationary = gscale > 0 && all(abs.(gradient_at_min) .<= eps() / threshold .* grad_scale)
+    # Componentwise bounds are not basis invariant: a weak direction that mixes the
+    # fields has a small gradient in every component away from its minimum. The
+    # Newton step H⁻¹∇V, taken in the Hessian eigenbasis, measures the remaining
+    # displacement in every direction and must be within the step tolerance that
+    # ends the run. Optim can stop before that (its gradient check runs before the
+    # first step, and its f test fires once 1 - cos underflows near a minimum).
+    newton_step = all(!iszero, hessian_at_min.values) ?
+        norm(hessian_at_min.vectors * ((hessian_at_min.vectors' * gradient_at_min) ./
+            hessian_at_min.values), Inf) : Inf
+    stationary = gscale > 0 &&
+        all(abs.(gradient_at_min) .<= eps() / threshold .* grad_scale) &&
+        newton_step <= x_abstol
     Vmin_sign = Int(sign(Vmin))
     Vmin_log = Float64(log10(abs(Vmin)))
     xmin = @.ifelse(abs(xmin) < eps() / threshold, zero(xmin), xmin)
@@ -700,10 +715,11 @@ end
     _is_converged_minimum(result)
 
 Whether a [`minimize`](@ref) result is a converged Newton run ending at a
-stationary point (each gradient component resolved against its own scale, see
-`"stationary"`) with a positive-definite-signed Hessian (`Hsign == 1`). Saddles and
-maxima, runs that hit the iteration limit, and endpoints whose gradient is below the
-Optim tolerance only because the instanton scales are small are rejected.
+stationary point (each gradient component resolved against its own scale and a
+Newton step within the step tolerance, see `"stationary"`) with a
+positive-definite-signed Hessian (`Hsign == 1`). Saddles and maxima, runs that hit
+the iteration limit, and endpoints whose gradient is below the Optim tolerance only
+because the instanton scales are small, in any field basis, are rejected.
 """
 _is_converged_minimum(result) =
     result["converged"] && result["stationary"] && result["Hsign"] == 1

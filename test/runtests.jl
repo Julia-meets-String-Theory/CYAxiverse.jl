@@ -2406,6 +2406,28 @@ end
     @test minimizer.subspace_minimize([1.0, 1e-20], Matrix(1.0I, 2, 2);
         initial_points=[[0.2, 0.5]]) == [[0.0, 0.0]]
 
+    # A weak direction that mixes the fields: V = (1 - cos p₁) + 1e-12 (1 - cos p₂)
+    # with phases p = Qᵀx = (x1 + x2, x1 - x2). The minima mod 2π are where both
+    # phases vanish mod 2π. From (0.01, -0.01), p₁ = 0 and p₂ = 0.02, so
+    # |∂ᵢV| = 1e-12 sin(0.02) ≈ 2.0e-14 is below the per-component bound
+    # (eps()/1e-2) sᵢ ≈ 2.2e-14 and the Hessian is positive definite, yet the point
+    # is displaced from the minimum along p₂.
+    mixed_Q = [1.0 1.0; 1.0 -1.0]
+    mixed_L = [1.0, 1e-12]
+    mixed = minimizer.minimize(mixed_L, mixed_Q, [0.01, -0.01])
+    @test !mixed["stationary"]
+    @test !minimizer._is_converged_minimum(mixed)
+    # For this Q the Newton step in phase coordinates is exactly δp = tan p, and
+    # |δpₐ| <= Σᵢ |Qᵢₐ| ‖δx‖∞ = 2‖δx‖∞. An endpoint kept with ‖δx‖∞ <= sqrt(eps())
+    # (minimize's step tolerance) therefore has |pₐ| <= |tan pₐ| <= 2 sqrt(eps())
+    # (positive-definite H means |pₐ| < π/2 here).
+    kept = minimizer.subspace_minimize(mixed_L, mixed_Q;
+        initial_points=[[0.01, -0.01], [0.3, -0.3], [0.2, 0.1]])
+    @test [0.0, 0.0] in kept
+    @test all(kept) do x
+        all(abs.(rem2pi.(mixed_Q' * (2π .* x), RoundNearest)) .<= 2sqrt(eps()))
+    end
+
     # gscale == 0: with L = 0 every Λₐ Qᵢₐ vanishes and V is constant, so no point
     # is an isolated critical point and the endpoint is not reported stationary.
     constant = minimizer.minimize([0.0], one_by_one(1), [0.4])
