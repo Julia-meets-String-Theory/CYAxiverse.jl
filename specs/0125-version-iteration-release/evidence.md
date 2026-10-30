@@ -667,7 +667,9 @@ The exact local source checkout began at reviewed commit
 six commissioned paths changed. The full test and source identity records,
 raw command outputs, correction-to-finding map, full workflow and 15-module
 closure, six-path diff, and protected-source equality record are retained in
-`/Users/vmehta/Documents/CYAxiverse/cyax-ledger/coordination-facilitator-20261022/125-source-correction-custody-1e8ef2b8-successor-20261030/`.
+the private bundle identified as `CYAX125-R4-SOURCE-CORRECTION-3DC42926`
+(manifest SHA-256:
+`1c170dcd811f442620ffb953da0d22fa91c0d6dd37742f9ba84281a9502e339e`).
 
 Final offline verification on the corrected executable and test blobs:
 
@@ -685,3 +687,47 @@ depot lacked `AbstractTrees`; no install or retry was made. These corrections
 do not transfer the original REQUEST_CHANGES verdicts to PASS and do not
 claim source acceptance, Gate A completion, Owner live-proof completion, or
 permission for rehearsal or lifecycle operations.
+
+## r15 post-review same-primary successor correction (local-only; 2026-10-30)
+
+This successor addresses the two findings recorded against candidate
+`3dc4292674c9591f15af31ca064e396ff30205dd`. The original eight finding
+records, review results, and dispositions remain preserved in predecessor
+history. This appendix does not transfer any prior review result to the new
+successor.
+
+| Finding | Severity | Correction |
+| --- | --- | --- |
+| `CYAX125-SPEC-3dc42926-F03` | Blocking P1 | Track a per-ref freeze-write generation. Live lease proof now fails while a write is pending or unresolved, captures the generation before its provider observation, and rechecks the generation and fences before returning true. A terminal write that starts and completes during the observation also invalidates the proof. The lease and write evidence remain available for reconciliation. |
+| `CYAX125-STD-3dc42926-F01` | Nonblocking P3 | Replace the absolute private custody locator above with the logical custody ID and digest of its private manifest. The private ledger and custody originals remain unchanged. |
+
+The affected transaction test path was also updated because closure consumes
+this proof before exclusion acquisition or lifecycle mutations. Its regression
+holds a disable write in flight after freeze acquisition and verifies closure
+blocks before serialization, anchor creation, manifest writes, or reopen. No
+transaction implementation change was needed.
+
+Verification on the corrected code and test source:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_version_lifecycle_github_protection scripts.test_version_lifecycle_transactions` | Passed, 76 tests, exit 0. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed, 181 tests, exit 0. |
+
+The focused fixtures cover a blocked disable with active readback, an unknown
+disable with active readback and a retained unresolved fence, a successful
+disable completed between the captured snapshot and final proof check, and a
+closure consumer that stops before downstream mutation. The uncontended live
+lease test still passes, and the existing stale and moved-lease checks remain
+in the suite. New run metadata, raw outputs, source identities, complete
+workflow and 15-module closure, protected-source comparison, and predecessor
+review references are in the private custody bundle identified as
+`CYAX125-R4-P1-CORRECTION-20261030`.
+
+This local source work made no provider request, credential access, settings
+change, ref write, rehearsal, dependency installation, network access, push,
+or publication. The P1 finding remains open until the exact successor receives
+an independent SPEC recheck and SECURITY impact review. The prior SPEC
+REQUEST_CHANGES disposition remains operative; prior SECURITY and STANDARDS
+results remain bound to their original candidate. No Gate A/B, publication,
+merge, release, or lifecycle-operation approval is claimed.

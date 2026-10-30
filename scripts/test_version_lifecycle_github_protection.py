@@ -1627,6 +1627,12 @@ class GitHubProtectionTests(unittest.TestCase):
         first_release = threading.Thread(target=release)
         first_release.start()
         self.assertTrue(delayed_release.started.wait(5))
+        target = next(row for row in fake.rows if row["id"] == 23948127)
+        self.assertEqual(target["enforcement"], "active")
+        self.assertTrue(adapter.is_live_freeze_lease(lease, ref="refs/heads/main"))
+        self.assertFalse(
+            adapter.verify_live_freeze_lease(lease, ref="refs/heads/main")
+        )
         with self.assertRaisesRegex(
             GitHubProtectionError, "FREEZE_WRITE_UNRECONCILED"
         ):
@@ -1639,6 +1645,93 @@ class GitHubProtectionTests(unittest.TestCase):
         self.assertEqual(release_results[0].reason_code, "FREEZE_WRITE_UNKNOWN")
         self.assertTrue(adapter.is_live_freeze_lease(lease, ref="refs/heads/main"))
         self.assertEqual(len([call for call in fake.calls if call[0] == "PUT"]), 2)
+
+    def test_live_freeze_proof_fails_closed_after_unknown_disable_with_active_readback(self) -> None:
+        fake = FakeGitHub()
+        adapter = adapter_for(fake, gate=lambda *_: True)
+        lease = adapter.freeze_main({"repository": REPOSITORY})["token"]
+        fake.freeze_write_mode = "response-lost-before"
+
+        with self.assertRaisesRegex(
+            GitHubProtectionError, "FREEZE_WRITE_UNKNOWN"
+        ) as raised:
+            adapter.unfreeze_main(lease)
+
+        self.assertEqual(
+            raised.exception.evidence["observed_enforcement"], "active"
+        )
+        self.assertEqual(
+            next(row for row in fake.rows if row["id"] == 23948127)["enforcement"],
+            "active",
+        )
+        self.assertIn("refs/heads/main", adapter._unreconciled_freeze_writes)
+        self.assertTrue(adapter.is_live_freeze_lease(lease, ref="refs/heads/main"))
+        self.assertFalse(
+            adapter.verify_live_freeze_lease(lease, ref="refs/heads/main")
+        )
+
+    def test_live_freeze_proof_rejects_terminal_write_completed_during_observation(self) -> None:
+        fake = FakeGitHub()
+        adapter = adapter_for(fake, gate=lambda *_: True)
+        lease = adapter.freeze_main({"repository": REPOSITORY})["token"]
+        ref = "refs/heads/main"
+        original_read_snapshot = adapter.read_snapshot
+        snapshot_captured = threading.Event()
+        resume_observation = threading.Event()
+
+        def gated_read_snapshot():
+            snapshot = original_read_snapshot()
+            if threading.current_thread().name == "freeze-proof-observer":
+                snapshot_captured.set()
+                if not resume_observation.wait(5):
+                    raise RuntimeError("timed out waiting to resume proof observation")
+            return snapshot
+
+        adapter.read_snapshot = gated_read_snapshot
+        proof_results: list[bool] = []
+        proof_thread = threading.Thread(
+            name="freeze-proof-observer",
+            target=lambda: proof_results.append(
+                adapter.verify_live_freeze_lease(lease, ref=ref)
+            ),
+        )
+        proof_thread.start()
+        writer_thread = None
+        write_results: list[tuple[object, object]] = []
+        try:
+            self.assertTrue(snapshot_captured.wait(5))
+            ruleset = adapter._freeze_ruleset(ref, original_read_snapshot())
+            starting_generation = adapter._freeze_write_generation.get(ref, 0)
+
+            def complete_disable():
+                try:
+                    write_results.append(adapter._set_enforcement(ref, ruleset, "disabled"))
+                except Exception as error:
+                    write_results.append(error)
+
+            writer_thread = threading.Thread(target=complete_disable)
+            writer_thread.start()
+            writer_thread.join(5)
+            self.assertFalse(writer_thread.is_alive())
+            self.assertEqual(len(write_results), 1)
+            self.assertIsInstance(write_results[0], tuple)
+            self.assertGreater(
+                adapter._freeze_write_generation.get(ref, 0), starting_generation
+            )
+            self.assertEqual(
+                next(row for row in fake.rows if row["id"] == 23948127)["enforcement"],
+                "disabled",
+            )
+        finally:
+            resume_observation.set()
+            proof_thread.join(5)
+            if writer_thread is not None:
+                writer_thread.join(5)
+
+        self.assertFalse(proof_thread.is_alive())
+        self.assertEqual(proof_results, [False])
+        self.assertTrue(adapter.is_live_freeze_lease(lease, ref=ref))
+        self.assertNotIn(ref, adapter._unreconciled_freeze_writes)
 
     def test_terminal_freeze_rejection_is_distinct_from_an_uncertain_write(self) -> None:
         fake = FakeGitHub()

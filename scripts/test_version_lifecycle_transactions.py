@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import unittest
 from hashlib import sha256
 from dataclasses import replace
@@ -585,6 +586,79 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(result.evidence["freeze_write_reconciliation"]["observed_enforcement"], "active")
         self.assertNotIn("promote", release.calls)
         self.assertNotIn("release-exclusion", release.calls)
+
+    def test_pending_live_freeze_proof_blocks_closure_before_downstream_mutation(self):
+        closure = PrincipalClosureFixture()
+        adapter = closure.github_protection_adapter
+        ref = "refs/heads/vmm"
+        disabled_put_started = threading.Event()
+        resume_disabled_put = threading.Event()
+        write_results: list[object] = []
+
+        class DelayedDisableTransport:
+            def __call__(self, method, path, payload=None):
+                if (
+                    method == "PUT"
+                    and "/rulesets/" in path
+                    and payload.get("enforcement") == "disabled"
+                ):
+                    disabled_put_started.set()
+                    if not resume_disabled_put.wait(5):
+                        raise RuntimeError("timed out waiting to release fake disable")
+                return closure.github_api(method, path, payload)
+
+        adapter._transport = DelayedDisableTransport()
+        original_freeze_line = adapter.freeze_line
+        write_thread = None
+
+        def acquire_then_start_disable(intent):
+            lease = original_freeze_line(intent)
+            ruleset = adapter._freeze_ruleset(ref, adapter.read_snapshot())
+
+            def disable_while_proof_is_pending():
+                try:
+                    write_results.append(
+                        adapter._set_enforcement(ref, ruleset, "disabled")
+                    )
+                except Exception as error:
+                    write_results.append(error)
+
+            nonlocal write_thread
+            write_thread = threading.Thread(target=disable_while_proof_is_pending)
+            write_thread.start()
+            if not disabled_put_started.wait(5):
+                resume_disabled_put.set()
+                write_thread.join(5)
+                raise RuntimeError("fake disable did not reach its blocked PUT")
+            return lease
+
+        adapter.freeze_line = acquire_then_start_disable
+        try:
+            result = run_closure(closure, self.closure_intent)
+            self.assertEqual(
+                (result.status, result.reason_code, result.frozen, result.freeze_state),
+                ("BLOCKED", "LINE_FREEZE_UNAVAILABLE", True, "active"),
+            )
+            self.assertEqual(
+                next(row for row in closure.github_api.rows if row["id"] == 23948123)[
+                    "enforcement"
+                ],
+                "active",
+            )
+            self.assertNotIn("serialize", closure.calls)
+            self.assertNotIn("create-anchor", closure.calls)
+            self.assertNotIn("reopen", closure.calls)
+            self.assertEqual(closure.manifest_types, [])
+            self.assertNotIn("release-exclusion", closure.calls)
+        finally:
+            resume_disabled_put.set()
+            if write_thread is not None:
+                write_thread.join(5)
+
+        self.assertIsNotNone(write_thread)
+        self.assertFalse(write_thread.is_alive())
+        self.assertEqual(len(write_results), 1)
+        self.assertIsInstance(write_results[0], tuple)
 
     def test_post_activation_identity_failures_keep_active_state_for_closure_and_release(self):
         scenarios = ("moved_head", "branch_read_failure", "version_read_failure")

@@ -650,6 +650,7 @@ class GitHubProtectionAdapter:
         self._leases: dict[str, FreezeLease] = {}
         self._unreconciled_freeze_writes: dict[str, dict[str, Any]] = {}
         self._freeze_write_lock = threading.Lock()
+        self._freeze_write_generation: dict[str, int] = {}
         self._freeze_write_inflight: dict[str, dict[str, Any]] = {}
         self._freeze_write_evidence: dict[str, dict[str, Any]] = {}
         self._unreconciled_branch_moves: dict[str, dict[str, Any]] = {}
@@ -2015,6 +2016,9 @@ class GitHubProtectionAdapter:
                     "FREEZE_WRITE_UNRECONCILED",
                     evidence=self._unreconciled_freeze_writes[ref],
                 )
+            generation = self._freeze_write_generation.get(ref, 0) + 1
+            self._freeze_write_generation[ref] = generation
+            attempt["write_generation"] = generation
             self._freeze_write_inflight[ref] = dict(attempt)
 
         try:
@@ -2280,6 +2284,13 @@ class GitHubProtectionAdapter:
     ) -> bool:
         if not self.is_live_freeze_lease(lease, ref=ref):
             return False
+        with self._freeze_write_lock:
+            if (
+                ref in self._freeze_write_inflight
+                or ref in self._unreconciled_freeze_writes
+            ):
+                return False
+            observed_generation = self._freeze_write_generation.get(ref, 0)
         snapshot = self.read_snapshot()
         ruleset = self._freeze_ruleset(ref, snapshot)
         if ruleset.enforcement != "active" or ruleset.updated_at != lease.ruleset_updated_at:
@@ -2288,7 +2299,18 @@ class GitHubProtectionAdapter:
         if branch_name != ref.removeprefix("refs/heads/"):
             return False
         expected = expected_branch_sha
-        return expected is None or branch_sha == expected
+        if expected is not None and branch_sha != expected:
+            return False
+        # A write can start and finish while the provider reads above are in
+        # progress. The generation changes at write entry, so checking only
+        # the current in-flight/unresolved maps would miss that terminal race.
+        with self._freeze_write_lock:
+            return (
+                self._freeze_write_generation.get(ref, 0) == observed_generation
+                and ref not in self._freeze_write_inflight
+                and ref not in self._unreconciled_freeze_writes
+                and self.is_live_freeze_lease(lease, ref=ref)
+            )
 
     def unfreeze_line(
         self, lease: FreezeLease, *, expected_branch_sha: str | None = None
