@@ -22,6 +22,7 @@ on:
       - 'Project.toml'
       - 'Manifest.toml'
       - 'iterations.toml'
+      - 'requirements-test.txt'
       - '.github/workflows/CI.yml'
   workflow_dispatch:
 

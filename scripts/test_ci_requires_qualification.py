@@ -128,6 +128,13 @@ class WorkflowWiring(unittest.TestCase):
         self.assertIn("contains(github.event.pull_request.labels.*.name, 'full-tests')",
                       qualification)
 
+    def test_python_test_requirements_trigger_pull_request_ci(self) -> None:
+        # The lifecycle job installs requirements-test.txt, so a PR changing only
+        # that file must still run the workflow.
+        trigger = self.workflow[self.workflow.index("  pull_request:\n"):
+                                self.workflow.index("  workflow_dispatch:")]
+        self.assertIn("      - 'requirements-test.txt'\n", trigger)
+
 
 if __name__ == "__main__":
     unittest.main()
