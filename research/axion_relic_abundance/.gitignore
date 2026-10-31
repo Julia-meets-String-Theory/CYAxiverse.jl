@@ -1,0 +1,7 @@
+# machine-specific locations
+configs/paths.env
+# pipeline outputs live under $WORK, never inside the repository
+/work/
+__pycache__/
+*.pyc
+.DS_Store

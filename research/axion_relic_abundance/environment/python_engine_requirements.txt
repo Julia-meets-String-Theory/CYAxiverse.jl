@@ -1,0 +1,8 @@
+# Python 3.11 packages of the ENGINE (engine/, tests/test_static.py, tests/test_external_acceptance.py) at the versions of the
+# validated runs. Installable from PyPI (pip install -r environment/python_engine_requirements.txt); no CYTools needed.
+# The producers need the full environment/python_requirements.txt (CYTools 1.4.12 etc.).
+numpy==2.4.6
+pandas==3.0.6
+h5py==3.16.0
+mpmath==1.3.0
+scipy==1.17.1
