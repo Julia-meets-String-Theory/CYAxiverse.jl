@@ -109,6 +109,9 @@ def read_spectrum(path):
             dk = p[a].dtype.kind
             if not (dk in "iu" or (kind == "f" and dk == "f")):
                 return None, ("dataset_dtype", f"{a}: {p[a].dtype}")
+        for a in ARRAYS:                              # one-dimensional arrays only (a 2-D or scalar dataset would be misread)
+            if p[a].ndim != 1:
+                return None, ("dataset_shape", f"{a}: expected a 1-D array, got shape {p[a].shape}")
         g = lambda k: (md[k][()].decode() if isinstance(md[k][()], bytes) else md[k][()]) if k in md else None
         meta = {k: g(k) for k in META_KEYS + ("evaluation_point",)}
         arrs = [np.asarray(p["m"][()], float), np.asarray(p["mode_indices"][()], int), np.asarray(p["fpert_log10"][()], float),
@@ -163,13 +166,15 @@ for r in M["geometries"]:
         "cy_volume_positive_finite": math.isfinite(vol) and vol > 0,
         "lambda_self_sign_is_plus_or_minus_one": bool(np.all(np.isin(lss, (-1, 1)))),
         "vacuum_group_iff_corrected": has_vac == (st == "VACUUM_CORRECTED"),
+        # vmm spectra about theta = 0 carry no evaluation_point; repaired spectra carry exactly validated_leading_branch_minimum
+        "evaluation_point_known": meta["evaluation_point"] in (None, "validated_leading_branch_minimum"),
         "evaluation_point_iff_corrected": (meta["evaluation_point"] == "validated_leading_branch_minimum") == (st == "VACUUM_CORRECTED"),
         "status_known": st in ("ORIGINAL_SPECTRUM", "VACUUM_CORRECTED"),
     }
     for k, ok in chk.items():
         if not ok:
             fail.append((gid, k, ""))
-    if not (chk["cy_volume_positive_finite"] and chk["finite"]):
+    if not (chk["cy_volume_positive_finite"] and chk["finite"] and chk["array_lengths"]):
         continue                                  # m_KK and the per-mode quantities need a positive volume and finite logs
     label = int(meta["polytope"])
     label_kind = "local_index" if label == r["local_index"] else ("unified_position" if label == pos else "OTHER")
