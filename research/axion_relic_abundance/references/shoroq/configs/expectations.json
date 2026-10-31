@@ -1,0 +1,88 @@
+{
+ "schema": "cyaxiverse_relic_expectations/1",
+ "description": "Shoroq frozen reference (2026-10-01 production, 2026-10-29 full reproduction): expected population counts and frozen checksums. Overlaid on the @expectation slots of configs/methodology_v1.json and configs/theta_methodology_v1.json; checked only when this file is given.",
+ "relic": {
+  "run": {
+   "expected_geometries": 4491,
+   "expected_modes": 16313,
+   "h11_min": 4,
+   "h11_max": 50,
+   "expected_geometries_by_vacuum_status": {
+    "ORIGINAL_SPECTRUM": 4445,
+    "VACUUM_CORRECTED": 46
+   },
+   "expected_modes_by_vacuum_status": {
+    "ORIGINAL_SPECTRUM": 15945,
+    "VACUUM_CORRECTED": 368
+   }
+  },
+  "input": {
+   "known_label_anomaly": "In the frozen dataset 19 VACUUM_CORRECTED spectrum files carry the unified position, not the tranche-local index, in spectrum/physical/metadata/polytope. A1 records and ignores the file label; a single unified run has no such anomaly."
+  },
+  "validity": {
+   "inflation_cut": {
+    "expected_modes": 365,
+    "expected_geometries": 329
+   },
+   "mKK_flag": {
+    "expected_modes_above": 226,
+    "expected_geometries": 212
+   },
+   "fpert_flag": {
+    "expected_modes_above": 326,
+    "expected_geometries": 305
+   }
+  },
+  "expected_census_before_inflation_cut": {
+   "5MeV": {
+    "FROZEN": 83,
+    "LATE": 930,
+    "POST_REHEATING": 3132,
+    "PRE_REHEATING": 12168
+   },
+   "1e4GeV": {
+    "FROZEN": 83,
+    "LATE": 930,
+    "POST_REHEATING": 9607,
+    "PRE_REHEATING": 5693
+   },
+   "1e10GeV": {
+    "FROZEN": 83,
+    "LATE": 930,
+    "POST_REHEATING": 12250,
+    "PRE_REHEATING": 3050
+   },
+   "expected_in_cdm_sum_after_inflation_cut": 14935
+  }
+ },
+ "theta": {
+  "inputs": {
+   "frozen_reference": {
+    "production_config_sha256": "2ef6566ae3995c93d31a75ce27f48c758dfff2b7e3b8c364ee4128e0168d3cd6",
+    "production_script_sha256": "4483390956fa01709264842b589802d64b4355a13d3212cf0fa713628912143a",
+    "canonical_mode_table_sha256": "662054232d15de063f6d97c847f04ce303b1c635d84771d8801e465ee130c4a7",
+    "relic_input_manifest_sha256": "4a5d3270216d0748cfd49f3806f65963362fc8ba92a18c4f125cce6852ecc6a2",
+    "gstar_table_sha256": "a4bf5f18dacb084a00e7202a29c689b4ae385950cfeb00be69c98aeb30e8014b",
+    "vmm_production_commit": "a5eacd8cd4a5905161cab239a461ba252c64e8e0",
+    "note": "checksums of the frozen 2026-10-01 inputs, used only by tests/regression to identify the accepted dataset"
+   }
+  },
+  "expected": {
+   "geometries": 4491,
+   "modes": 16313,
+   "geometries_by_vacuum_status": {
+    "ORIGINAL_SPECTRUM": 4445,
+    "VACUUM_CORRECTED": 46
+   },
+   "modes_by_vacuum_status": {
+    "ORIGINAL_SPECTRUM": 15945,
+    "VACUUM_CORRECTED": 368
+   },
+   "inflation_excluded_modes": 365,
+   "inflation_excluded_geometries": 329,
+   "H0_eV": 1.491e-33,
+   "f_relic_over_f_pert": 1.0
+  },
+  "statistical_unit": "geometry (4491 per scenario); modes are not independent realisations"
+ }
+}
