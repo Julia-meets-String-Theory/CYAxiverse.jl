@@ -22,6 +22,7 @@ on:
       - 'Project.toml'
       - 'Manifest.toml'
       - 'iterations.toml'
+      - 'requirements-test.txt'
       - '.github/workflows/CI.yml'
   workflow_dispatch:
 
@@ -34,7 +35,7 @@ concurrency:
 
 jobs:
   lifecycle:
-    name: Version lifecycle checks
+    name: Python tests (lifecycle, routing, scripts)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,11 +45,14 @@ jobs:
       - uses: julia-actions/cache@v2
       - name: Install documentation routing test dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-      - name: Check lifecycle, version, and documentation routing fixtures
-        run: |
-          python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'
-          python3 -m unittest discover -s scripts -p 'test_check_version_bump.py'
-          python3 -m unittest discover -s scripts -p 'test_documentation_routing.py'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python test requirements
+        run: python3 -m pip install -r requirements-test.txt
+      - name: Run all portable Python tests
+        # CYTools-dependent tests skip themselves (scripts/local_only.py).
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   fast:
     name: Fast tests
@@ -77,6 +81,52 @@ jobs:
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: false
+
+  changes:
+    name: Scientific qualification gate
+    if: github.event_name == 'pull_request' && github.base_ref == 'vmm'
+    runs-on: ubuntu-latest
+    outputs:
+      qualification: ${{ steps.gate.outputs.qualification }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: gate
+        name: Require qualification for src/ or certification-fixture changes
+        run: python3 scripts/ci_requires_qualification.py --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}"
+
+  qualification:
+    name: Process-isolated scientific qualification
+    needs: changes
+    # !cancelled() lets this run when the gate job is skipped (pushes, PRs to other
+    # bases); a failed gate runs qualification rather than silently skipping it.
+    if: >-
+      ${{ !cancelled() && (
+        github.event_name != 'pull_request' ||
+        github.base_ref == 'main' ||
+        contains(github.event.pull_request.labels.*.name, 'full-tests') ||
+        needs.changes.outputs.qualification == 'true' ||
+        needs.changes.result == 'failure') }}
+    runs-on: ubuntu-latest
+    env:
+      JULIA_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+          arch: x64
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - name: Watchdog self-test, then fast and public qualification (clean tree, pinned profile)
+        run: |
+          julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --watchdog-self-test
+          julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --suite fast --evidence-dir "$RUNNER_TEMP/qualification-fast"
+          julia --startup-file=no --project=. test/fixtures/scientific_certification/run_fixture.jl --suite public --evidence-dir "$RUNNER_TEMP/qualification-public"
 
   full:
     name: Full test suite

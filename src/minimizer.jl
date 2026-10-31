@@ -84,10 +84,12 @@ end
 
 function _phase_hessian!(hessian::AbstractMatrix, LV::AbstractVector,
         QV::AbstractMatrix, cosine_phases)
+    # Callers pass the 1×N row `cos.(x' * QV)`; flatten it so the product with
+    # `LV` is elementwise over the N instantons rather than an N×N broadcast.
+    cosines = vec(cosine_phases)
     for i in axes(QV, 1), j in axes(QV, 1)
         if i >= j
-            hessian[i, j] = sum(LV' *
-                (@view(QV[i, :]) .* @view(QV[j, :]) .* cosine_phases))
+            hessian[i, j] = sum(LV .* @view(QV[i, :]) .* @view(QV[j, :]) .* cosines)
         end
     end
     hessian
@@ -499,6 +501,24 @@ Minimize the axion potential
 ``V(x) = \\sum_a \\Lambda_a (1 - \\cos(Q_a \\cdot x))`` from the initial point
 `x0`, where `LV` holds the linear instanton scales ``\\Lambda_a`` and `QV` is the
 charge matrix. Return the located stationary point in field coordinates.
+
+The gradient tolerance is relative to the largest gradient bound
+``s_i = \\sum_a |\\Lambda_a| |Q_{ia}|``, so the result does not change when every
+``\\Lambda_a`` is rescaled. `"converged"` is Optim's convergence flag;
+`"stationary"` additionally requires ``|\\partial_i V| \\le (\\epsilon / 10^{-2})\\, s_i``
+for each component and a Newton step ``\\|H^{-1} \\nabla V\\|_\\infty \\le \\sqrt{\\epsilon}``
+(the step tolerance of the run), so that a point displaced along a weak direction that
+mixes the fields is not stationary. It is `false` for a constant potential (all
+``s_i = 0``) and where the Hessian is singular.
+
+!!! warning "Behaviour change"
+    Before this fix the objective and Hessian passed to Newton's method were
+    mis-shaped (the 1×N row `cos.(x' * QV)` broadcast against `LV` as N×N), so
+    they were not the derivatives of ``V`` and the iteration could stop at
+    spurious points. This affects every caller, including `subspace_minimize`
+    and the `:legacy` vacua search (`vacua_id`). Vacuum counts produced by
+    `--method legacy` before this change may not match results now; recompute
+    them rather than comparing. The gradient was already correct.
 """
 function minimize(LV::Vector, QV, x0::Vector)
 	if @isdefined h11
@@ -508,7 +528,8 @@ function minimize(LV::Vector, QV, x0::Vector)
     @assert size(QV, 2) == size(LV, 1)
     threshold = 1e-2
     function fitness(x::Vector)
-        sum(LV .* (1. .- cos.(x' * QV)))
+        # vec: `x' * QV` is a 1×N row, which would broadcast against `LV` to N×N.
+        dot(LV, 1. .- vec(cos.(x' * QV)))
     end
     function grad!(gradient::Vector, x::Vector)
         grad_temp = LV' .* (QV .* sin.(x' * QV))
@@ -516,6 +537,9 @@ function minimize(LV::Vector, QV, x0::Vector)
     end
     function hess!(hessian::Matrix, x::Vector)
         cosine_phases = cos.(x' * QV)
+        # Optim reuses this buffer; only the lower triangle is written below, so
+        # stale upper-triangle entries would be mirrored into the Hessian.
+        fill!(hessian, 0)
         _phase_hessian!(hessian, LV, QV, cosine_phases)
         hessian .= hessian + hessian' - Diagonal(hessian)
     end
@@ -530,23 +554,54 @@ function minimize(LV::Vector, QV, x0::Vector)
         sum(grad_temp, dims = 2)
     end
     gradσ = grad_std(LV,QV)
-    x_tol = minimum(abs.(LV))
-    g_tol = eps() / threshold
+    # Step tolerance in radians. It was minimum(abs.(LV)), which ties a position
+    # tolerance to instanton scales (about 1 rad for O(1) scales, 1e-20 for small
+    # ones). sqrt(eps()) is the finest step resolvable through the objective, whose
+    # change is O(eps) once |dx| ~ sqrt(eps), and Newton's quadratic convergence
+    # leaves the error after such a step near eps.
+    x_abstol = sqrt(eps())
+    # |∂ᵢV| <= sᵢ = Σₐ |Λₐ| |Qᵢₐ| at every x, since |sin| <= 1. The gradient
+    # tolerance is relative to max sᵢ, so the run does not change under an overall
+    # rescaling of L (Newton's step is invariant under it); an absolute eps()/threshold
+    # reported convergence at any start once max sᵢ was below it. gscale == 0 means
+    # every Λₐ Qᵢₐ vanishes and V is constant, with no isolated critical point.
+    grad_scale = vec(sum(abs.(QV) .* abs.(LV'), dims = 2))
+    gscale = maximum(grad_scale; init = 0.0)
+    g_tol = gscale > 0 ? eps() / threshold * gscale : 0.0
 	algo_LBFGS = LBFGS(linesearch = LineSearches.BackTracking());
-    res = Optim.optimize(fitness, grad!, hess!, x0, Optim.Options(x_tol = x_tol, g_tol = g_tol))
+    res = Optim.optimize(fitness, grad!, hess!, x0, Optim.Options(x_abstol = x_abstol, g_tol = g_tol))
     Vmin = Optim.minimum(res)
     xmin = Optim.minimizer(res)
     # GC.gc()
     # if abs(minimum(eigen(hess(xmin)).values)) < eps() && maximum(abs.(grad(xmin))) < eps() / threshold
-    hess_eigs = Float64(log10(abs(minimum(eigen(hess(xmin)).values)))) 
-    hess_sign = sign((minimum(eigen(hess(xmin)).values)))
+    hessian_at_min = eigen(Symmetric(hess(xmin)))
+    hess_eigs = Float64(log10(abs(minimum(hessian_at_min.values))))
+    hess_sign = sign(minimum(hessian_at_min.values))
+    gradient_at_min = vec(grad(xmin))
     grad_log = log10.(abs.(grad(xmin)))
+    # Stationary when each component is resolved against its own scale sᵢ: one
+    # tolerance for all components accepts any point along a direction whose sᵢ is
+    # below it (strongly suppressed Λ). The computed ∂ᵢV is a sum of terms bounded by
+    # |Λₐ Qᵢₐ|, so its roundoff is about eps() sᵢ, 1/threshold = 100 times below this.
+    # Componentwise bounds are not basis invariant: a weak direction that mixes the
+    # fields has a small gradient in every component away from its minimum. The
+    # Newton step H⁻¹∇V, taken in the Hessian eigenbasis, measures the remaining
+    # displacement in every direction and must be within the step tolerance that
+    # ends the run. Optim can stop before that (its gradient check runs before the
+    # first step, and its f test fires once 1 - cos underflows near a minimum).
+    newton_step = all(!iszero, hessian_at_min.values) ?
+        norm(hessian_at_min.vectors * ((hessian_at_min.vectors' * gradient_at_min) ./
+            hessian_at_min.values), Inf) : Inf
+    stationary = gscale > 0 &&
+        all(abs.(gradient_at_min) .<= eps() / threshold .* grad_scale) &&
+        newton_step <= x_abstol
     Vmin_sign = Int(sign(Vmin))
     Vmin_log = Float64(log10(abs(Vmin)))
     xmin = @.ifelse(abs(xmin) < eps() / threshold, zero(xmin), xmin)
     xmin = @.ifelse(one(xmin) - mod(xmin / 2π, 1) < eps() / threshold || mod(xmin / 2π, 1) < eps() / threshold, zero(xmin), mod(xmin / 2π, 1))
-    keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradlog"]
-    vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, grad_log]
+    keys = ["±V", "logV","xmin", "Heigs", "Hsign", "gradlog", "converged", "stationary"]
+    vals = [Vmin_sign, Vmin_log, xmin, hess_eigs, hess_sign, grad_log, Optim.converged(res),
+        stationary]
     return Dict(zip(keys,vals))
         # GC.gc()
     # end
@@ -657,23 +712,75 @@ function id_minima(LV::Vector, QV; ftol = eps(), iterations = 1_000)
 
 end
 """
-    subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)))
-Minimizes the subspace with `runs` iterations
+    _is_converged_minimum(result)
+
+Whether a [`minimize`](@ref) result is a converged Newton run ending at a
+stationary point (each gradient component resolved against its own scale and a
+Newton step within the step tolerance, see `"stationary"`) with a
+positive-definite-signed Hessian (`Hsign == 1`). Saddles and maxima, runs that hit
+the iteration limit, and endpoints whose gradient is below the Optim tolerance only
+because the instanton scales are small, in any field basis, are rejected.
 """
-function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1))
+_is_converged_minimum(result) =
+    result["converged"] && result["stationary"] && result["Hsign"] == 1
+
+"""
+    subspace_minimize(L, Q; runs=10_000, phase=zeros(max(collect(size(Q))...)),
+                      initial_points=nothing)
+
+Minimize the subspace with `runs` random initialisations per phase column, or
+from the explicit `initial_points` (a vector of start vectors) when given.
+
+Only converged, stationary points with `Hsign == 1` are kept (see
+`_is_converged_minimum`): saddles, maxima, unresolved endpoints and runs that did
+not converge are discarded. The origin is always a critical point; it is added
+only when the smallest eigenvalue of its Hessian `Q * Diagonal(L) * Q'` is
+positive, the same test as `Hsign == 1` for Newton endpoints.
+
+!!! note "Caveats of the origin rule"
+    - A degenerate origin (a zero Hessian eigenvalue) is unclassified and is not
+      returned: the second-order test cannot tell a minimum from a maximum or saddle
+      there (`L = (-1, 1/4)`, `Q = [1 2]` gives `V = -2 sin⁴(x/2)`, a strict maximum
+      with zero Hessian). This excludes fine-tuned cancellations such as
+      ``\\sum_a L_a q_a^2 = 0`` and also rank-deficient flat directions, where some
+      field combination does not appear in `V` (fewer independent charges than
+      fields), even when the origin is a non-strict minimum.
+    - The eigenvalues are computed in `Float64`. For strongly hierarchical `L`
+      (scales spanning more than about 16 decades) in a basis that mixes them, the
+      small eigenvalues are below roundoff and their sign is not resolved, so a
+      saddle along a suppressed direction can be kept or a minimum dropped. `Hsign`
+      from [`minimize`](@ref) has the same limitation.
+
+!!! warning "Behaviour change"
+    Earlier versions kept every Newton endpoint and always added the origin.
+    Together with the corrected objective and Hessian in [`minimize`](@ref), this
+    changes `:legacy` vacua results.
+"""
+function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1),
+        initial_points=nothing)
     xmin = []
-    Random.seed!(9876543210)
-	for _ in 1:runs, col in eachcol(phase)
-		x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
-        x0 = x0 + col
-		test_min = minimize(L, Q, x0)
-		if test_min === nothing
-		else
-			push!(xmin, test_min["xmin"])
-		end
-	end
-    push!(xmin, zeros(size(Q,1)))
-	unique(xmin)
+    function try_start!(x0)
+        test_min = minimize(L, Q, x0)
+        if test_min !== nothing && _is_converged_minimum(test_min)
+            push!(xmin, test_min["xmin"])
+        end
+    end
+    if initial_points === nothing
+        Random.seed!(9876543210)
+        for _ in 1:runs, col in eachcol(phase)
+            x0 = rand(Uniform(0,2π),size(Q,1)) .* rand(size(Q,1))
+            try_start!(x0 + col)
+        end
+    else
+        foreach(x0 -> try_start!(collect(float.(x0))), initial_points)
+    end
+    origin_hessian = Symmetric(Matrix{Float64}(Q * Diagonal(L) * Q'))
+    # Strictly positive, as Hsign == 1 requires of endpoints: a zero eigenvalue
+    # leaves the origin unclassified at second order (see the docstring).
+    if minimum(eigvals(origin_hessian)) > 0
+        push!(xmin, zeros(size(Q,1)))
+    end
+    unique(xmin)
 end
 
 # function subspace_minimize(L, Q; runs=10_000, phase::Number=0)

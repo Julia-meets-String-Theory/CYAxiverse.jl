@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from local_only import require_cytools
+
+require_cytools()
+
 import argparse
 import json
 import tempfile

@@ -411,14 +411,20 @@ function _actual_environment_observation()
     return record
 end
 
-function _approved_profile_matches(expected, observed)
-    expected == observed || return false
-    get(observed, "schema", "") == "cyax-scientific-environment-v1" || return false
-    get(observed, "worktree_clean", false) === true || return false
+# Exact release pins; checked only by the dedicated qualification CI step.
+function _release_pins_match(observed)
     startswith(get(observed, "julia_version", ""), "1.12.") || return false
     get(observed, "interval_arithmetic_version", "") == "0.22.36" || return false
     get(observed, "interval_arithmetic_registered_tree_sha1", "") ==
         "79342df41c3c24664e5bf29395cfdf2f2a599412" || return false
+    true
+end
+
+function _approved_profile_matches(expected, observed; pinned::Bool=true)
+    expected == observed || return false
+    get(observed, "schema", "") == "cyax-scientific-environment-v1" || return false
+    # Cleanliness is enforced once, when a retained environment receipt is created.
+    pinned && !_release_pins_match(observed) && return false
     get(observed, "julia_threads", 0) == 1 || return false
     get(observed, "julia_default_threads", 0) == 1 || return false
     get(observed, "julia_interactive_threads", -1) == 0 || return false
@@ -434,13 +440,13 @@ function _approved_profile_matches(expected, observed)
     true
 end
 
-function _environment_record(candidate, path)
+function _environment_record(candidate, path; require_clean::Bool=true)
     record = _actual_environment_observation()
     record["candidate_commit"] == candidate.commit &&
         record["candidate_tree"] == candidate.tree &&
         record["worktree_clean"] == candidate.clean ||
         error("trusted environment snapshot does not match the observed candidate")
-    record["worktree_clean"] === true || error("qualification requires a clean candidate source")
+    !require_clean || record["worktree_clean"] === true || error("qualification requires a clean candidate source")
     _approved_profile_matches(record, record) || error("qualification requires the approved serial scientific profile")
     ispath(path) && error("refusing to overwrite evidence file $path")
     open(path, "w") do io
@@ -721,6 +727,20 @@ function _measured_peak_rss(log_path)
         raw_unit=unit.captures[1],method=method.captures[1])
 end
 
+# Pure decision: provenance binds only when every identity matches; a missing
+# producer observation with otherwise matching replay and source is UNAVAILABLE,
+# never PASS.
+function _provenance_decision(; producer_observation_available::Bool,
+        producer_profile_matches::Bool, replay_profile_matches::Bool,
+        producer_source_matches::Bool, producer_environment_matches::Bool)
+    provenance = producer_profile_matches && replay_profile_matches &&
+        producer_source_matches && producer_environment_matches
+    status = provenance ? "PASS" :
+        (!producer_observation_available && replay_profile_matches && producer_source_matches ?
+            "UNAVAILABLE" : "FAIL")
+    (provenance, status)
+end
+
 function _replay_receipt(case_id, precision, result, environment, source, evidence_root, log_rel, replay_rel; require_provenance=true)
     cert = TOML.parsefile(joinpath(result["path"],"certificate.toml"))
     input_sha = result["input_sha256"]
@@ -813,10 +833,9 @@ function _replay_receipt(case_id, precision, result, environment, source, eviden
         source.tree == observed_source["tree"] && source.clean
     producer_environment_matches = producer_environment ==
         Dict("receipt_sha256"=>environment.sha256,"artifact_name"=>environment.artifact_name)
-    provenance = producer_profile_matches && replay_profile_matches && producer_source_matches &&
-        producer_environment_matches
-    ref_status = provenance ? "PASS" :
-        (!producer_observation_available && replay_profile_matches && producer_source_matches ? "UNAVAILABLE" : "FAIL")
+    provenance, ref_status = _provenance_decision(; producer_observation_available,
+        producer_profile_matches, replay_profile_matches, producer_source_matches,
+        producer_environment_matches)
     pair_observation_path = joinpath(evidence_root, "environment", "observations",
         "pair-$case_id-p$precision.toml")
     producer_observation_relative = producer_observation_available ?
@@ -897,7 +916,8 @@ function _run_qualification_suite(evidence_dir::AbstractString, selected_ids,
     end
     mkpath(joinpath(out,"environment")); mkpath(joinpath(out,"commands"));
     mkpath(joinpath(out,"producer")); mkpath(joinpath(out,"replay")); mkpath(joinpath(out,"logs"))
-    environment = _environment_record(candidate,joinpath(out,"environment","producer-environment.toml"))
+    environment = _environment_record(candidate,joinpath(out,"environment","producer-environment.toml");
+        require_clean=retain)
     settings, all_fixtures = _fixture_records()
     fixtures = selected_ids === nothing ? all_fixtures :
         filter(item -> item["id"] in selected_ids, all_fixtures)
@@ -994,10 +1014,10 @@ end
 run_public_suite(evidence_dir::AbstractString; retain=true) =
     _run_qualification_suite(evidence_dir, nothing, (256,512), "public"; retain)
 
+const FAST_CASE_IDS = ("T01","T02","T03","T04","T06_hierarchy","T06_fractional_log")
+
 run_fast_suite(evidence_dir::AbstractString; retain=true) =
-    _run_qualification_suite(evidence_dir,
-        ("T01","T02","T03","T04","T06_hierarchy","T06_fractional_log"),
-        (256,), "fast"; retain)
+    _run_qualification_suite(evidence_dir, FAST_CASE_IDS, (256,), "fast"; retain)
 
 function _check_result_record(id,item,result)
     result["case"]==id && result["family"]==item["family"] || error("case result identity mismatch")
@@ -1047,27 +1067,34 @@ end
 
 _test_profile_is_full() = get(ENV,"CYAXIVERSE_TEST_FULL","1") == "1"
 
+# Mathematical checks of the qualification fixtures without child processes,
+# a clean-tree requirement or the pinned release profile. The process-isolated,
+# provenance-retaining run is the dedicated CI step (`--suite public|fast`).
+function qualify_in_process(selected_ids, precisions)
+    _, all_fixtures = _fixture_records()
+    fixtures = selected_ids === nothing ? all_fixtures :
+        filter(item -> item["id"] in selected_ids, all_fixtures)
+    selected_ids === nothing || length(fixtures) == length(selected_ids) ||
+        error("fast qualification fixture selection is incomplete")
+    for item in fixtures, precision in precisions
+        id = item["id"]
+        item, model, _seed, _Q, _L, _K, result, _aux = _run_math(id, precision)
+        _check_basic(id, item, result)
+        _check_oracle(id, result, model)
+    end
+    return length(fixtures) * length(precisions)
+end
+
 function qualify_from_test_profile!()
-    _with_serial_qualification_profile() do
-        full = _test_profile_is_full()
-        if full
-            path = get(ENV,"CYAX_SCIENTIFIC_EVIDENCE_DIR","")
-            if isempty(path)
-                mktempdir(prefix="cyax-scientific-full-") do tmp
-                    run_public_suite(joinpath(tmp,"public-qualification"); retain=false)
-                end
-            else
-                run_public_suite(path; retain=true)
-            end
-        else
-            path = get(ENV,"CYAX_SCIENTIFIC_FAST_EVIDENCE_DIR","")
-            if isempty(path)
-                mktempdir(prefix="cyax-scientific-fast-") do tmp
-                    run_fast_suite(joinpath(tmp,"fast-qualification"); retain=false)
-                end
-            else
-                run_fast_suite(path; retain=true)
-            end
+    full = _test_profile_is_full()
+    evidence_env = full ? "CYAX_SCIENTIFIC_EVIDENCE_DIR" : "CYAX_SCIENTIFIC_FAST_EVIDENCE_DIR"
+    path = get(ENV, evidence_env, "")
+    if isempty(path)
+        full ? qualify_in_process(nothing, (256, 512)) :
+            qualify_in_process(FAST_CASE_IDS, (256,))
+    else
+        _with_serial_qualification_profile() do
+            full ? run_public_suite(path; retain=true) : run_fast_suite(path; retain=true)
         end
     end
     nothing

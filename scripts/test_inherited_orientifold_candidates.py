@@ -21,6 +21,10 @@ hard-coded matrices:
 - restricting to permutations that fix a subset setwise reduces to counting
   involutions in the corresponding smaller symmetric group.
 """
+from local_only import require_cytools
+
+require_cytools()
+
 
 import json
 from fractions import Fraction

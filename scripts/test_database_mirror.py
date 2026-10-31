@@ -4,6 +4,10 @@
 from pathlib import Path
 import tempfile
 
+from local_only import require_cytools
+
+require_cytools()
+
 import pyarrow as pa
 import pyarrow.parquet as pq
 

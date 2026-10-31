@@ -194,41 +194,6 @@ function _retired_ledger_summary(path::AbstractString)
     return artifact_count, listed_count, artifact_paths
 end
 
-function _retirement_guard_precedes_dependency(path::AbstractString, kind::Symbol)
-    lines = split(read(path, String), '\n'; keepempty=true)
-    guard_line = if kind === :julia
-        findfirst(line -> startswith(strip(line), "error(\"\"\""), lines)
-    else
-        findfirst(line -> startswith(strip(line), "raise SystemExit("), lines)
-    end
-    dependency_line = if kind === :julia
-        findfirst(line -> startswith(strip(line), "using "), lines)
-    else
-        findfirst(line -> begin
-            stripped = strip(line)
-            (startswith(stripped, "import ") || startswith(stripped, "from ")) &&
-                !startswith(stripped, "from __future__")
-        end, lines)
-    end
-    return guard_line !== nothing && dependency_line !== nothing && guard_line < dependency_line
-end
-
-function _retirement_message_ok(message::AbstractString)
-    return occursin(
-        "The 2026-08-25 physical-scaling v1 evidence workflow is retired and cannot be run.",
-        message,
-    ) && occursin(
-        "See validation/RETIRED_physical_scaling_evidence_20260825.md.", message) &&
-        occursin("new, path-safe evidence version", message)
-end
-
-function _retirement_sentinels_unchanged(
-    paths::AbstractVector, expected::AbstractVector)
-    return length(paths) == length(expected) && all(
-        isfile(path) && read(path) == expected[index]
-        for (index, path) in enumerate(paths)
-    )
-end
 
 @testset "Optional Python interpreter contract" begin
     interpreter = CYAxiverse.python_interpreter
@@ -291,6 +256,8 @@ end
     @test !occursin("Pkg.build", init_source)
 end
 
+# Launches one Julia child per notebook; full job only.
+if _FULL
 @testset "Changed notebook initialization runtime smoke" begin
     notebook_names = [
         "cytools_wrapper_repro.jl",
@@ -316,19 +283,10 @@ end
         @test occursin("notebook initialization runtime smoke passed", output)
     end
 end
+end
 
-@testset "Retired 2026-08-25 evidence entrypoints fail closed" begin
-    retired_entrypoints = [
-        (:julia, "audit_physical_certificate.jl"),
-        (:julia, "generate_physical_scaling_sidecars_20260825.jl"),
-        (:julia, "preflight_physical_scaling_20260825.jl"),
-        (:julia, "run_physical_scale_inflation_pilot_20260825.jl"),
-        (:python, "test_physical_scale_checkpoint_resume_20260825.py"),
-        (:python, "test_physical_scaling_sidecars_20260825.py"),
-        (:python, "validate_physical_scale_checkpoint_20260825.py"),
-        (:python, "validate_physical_scaling_sidecars_20260825.py"),
-    ]
-    script_dir = joinpath(@__DIR__, "..", "scripts")
+@testset "Retired 2026-08-25 evidence ledger stays consistent" begin
+    # The retired entrypoints were deleted; the ledger is the surviving record.
     ledger_path = joinpath(
         @__DIR__, "..", "validation", "retired_physical_scaling_evidence_20260825.json")
     artifact_count, listed_count, artifact_paths = _retired_ledger_summary(ledger_path)
@@ -337,67 +295,5 @@ end
     @test length(artifact_paths) == artifact_count
     @test length(unique(artifact_paths)) == artifact_count
     @test all(path -> !isabspath(path) && startswith(path, "validation/"), artifact_paths)
-
-    mktempdir() do root
-        output_root = joinpath(root, "configured-output-root")
-        synthetic_repo = joinpath(root, "retired_repo")
-        synthetic_script_dir = joinpath(synthetic_repo, "scripts")
-        mkpath(synthetic_script_dir)
-        for (_, name) in retired_entrypoints
-            cp(joinpath(script_dir, name), joinpath(synthetic_script_dir, name); force=true)
-        end
-
-        for (kind, name) in retired_entrypoints
-            original = joinpath(script_dir, name)
-            copied = joinpath(synthetic_script_dir, name)
-            @test _retirement_guard_precedes_dependency(original, kind)
-            @test _retirement_guard_precedes_dependency(copied, kind)
-        end
-
-        sentinel_paths = [joinpath(synthetic_repo, path) for path in artifact_paths]
-        sentinel_bytes = [
-            Vector{UInt8}(codeunits("retired-v1-sentinel-$index-$path\n"))
-            for (index, path) in enumerate(artifact_paths)
-        ]
-        for (path, bytes) in zip(sentinel_paths, sentinel_bytes)
-            mkpath(dirname(path))
-            write(path, bytes)
-        end
-        @test _retirement_sentinels_unchanged(sentinel_paths, sentinel_bytes)
-
-        python = something(Sys.which("python3"), "python3")
-        for (kind, name) in retired_entrypoints
-            script = joinpath(synthetic_script_dir, name)
-            command = if kind === :julia
-                addenv(
-                    `$(Base.julia_cmd()) $(child_coverage_args()) --startup-file=no $script --output-root $output_root`,
-                    "JULIA_LOAD_PATH" => "@stdlib",
-                    "CYAXIVERSE_AUDIT_OUTPUT_DIR" => output_root,
-                    "CYAXIVERSE_AUDIT_REPOSITORY" => synthetic_repo,
-                    "CYAXIVERSE_DATA_DIR" => joinpath(synthetic_repo, "data"),
-                    "CYAXIVERSE_PILOT_REPOSITORY" => synthetic_repo,
-                    "CYAXIVERSE_PROJECT_ROOT" => synthetic_repo,
-                )
-            else
-                addenv(
-                    Cmd([python, script]),
-                    "PYTHONNOUSERSITE" => "1",
-                    "PYTHONPATH" => "",
-                    "CYAXIVERSE_AUDIT_OUTPUT_DIR" => output_root,
-                    "CYAXIVERSE_AUDIT_REPOSITORY" => synthetic_repo,
-                    "CYAXIVERSE_DATA_DIR" => joinpath(synthetic_repo, "data"),
-                    "CYAXIVERSE_PHYSICAL_SCALE_FIXTURE_ROOT" => joinpath(synthetic_repo, "fixture"),
-                    "CYAXIVERSE_PILOT_REPOSITORY" => synthetic_repo,
-                    "CYAXIVERSE_PROJECT_ROOT" => synthetic_repo,
-                )
-            end
-            output = IOBuffer()
-            process = run(pipeline(ignorestatus(command), stdout=output, stderr=output))
-            message = String(take!(output))
-            @test !success(process)
-            @test _retirement_message_ok(message)
-            @test _retirement_sentinels_unchanged(sentinel_paths, sentinel_bytes)
-            @test !ispath(output_root)
-        end
-    end
+    @test isfile(joinpath(@__DIR__, "..", "validation", "RETIRED_physical_scaling_evidence_20260825.md"))
 end

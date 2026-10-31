@@ -25,6 +25,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "BLOCKED")
         self.assertIn("reason_code", payload)
 
+    def test_missing_repository_does_not_escape_as_traceback(self) -> None:
+        # Before the fix, the read-only gate ran `git remote add` against
+        # <missing>/origin, which exits 128 and surfaced as an uncaught
+        # CalledProcessError (empty stdout, exit 1) instead of blocked JSON.
+        for command in ("snapshot", "lifecycle"):
+            with self.subTest(command=command):
+                result = subprocess.run(
+                    [sys.executable, str(CLI), command, "--repo", str(ROOT / "missing")],
+                    cwd=ROOT, check=False, capture_output=True, text=True,
+                )
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertNotIn("CalledProcessError", result.stderr)
+                self.assertEqual(json.loads(result.stdout)["status"], "BLOCKED")
+
     def test_source_is_not_an_event_ledger(self) -> None:
         text = (ROOT / "scripts" / "version_lifecycle_cli.py").read_text(encoding="utf-8")
         self.assertNotIn("ReleaseEventWriter", text)

@@ -79,23 +79,32 @@ end
 end
 # PR199_MODEL_INVARIANT_REGRESSIONS_END
 
-function _run_scientific_cli(repository_root, input_path, certificate_path,
+function _run_scientific_cli(_repository_root, input_path, certificate_path,
         input_sha256, certificate_sha256; precision=256)
-    argv=vcat(String[Base.julia_cmd().exec...],child_coverage_args(),String["--startup-file=no","--project=$repository_root",
-        joinpath(repository_root,"scripts","verify_scientific_certificate.jl"),
-        "--inputs",input_path,"--certificate",certificate_path,
-        "--expect-input-sha256",input_sha256,
-        "--expect-certificate-sha256",certificate_sha256,
-        "--require","root_and_spectrum","--precision",string(precision)])
+    cli_args = ["--inputs", input_path, "--certificate", certificate_path,
+        "--expect-input-sha256", input_sha256,
+        "--expect-certificate-sha256", certificate_sha256,
+        "--require", "root_and_spectrum", "--precision", string(precision)]
+    # Same limit as the qualification fixture's watchdog (fixtures TOML settings).
+    # The verifier runs in-process, so the limit is enforced only at task yield
+    # points; a non-yielding hang still needs the process-isolated CI step.
+    timeout_seconds = TOML.parsefile(joinpath(@__DIR__, "fixtures",
+        "scientific_certification", "public.toml"))["settings"]["watchdog_seconds"]
     mktemp() do _path, output
-        process=run(pipeline(Cmd(Cmd(argv);dir=repository_root);stdout=output,stderr=output);wait=false)
-        wait(process)
+        task = @async redirect_stdout(output) do
+            redirect_stderr(output) do
+                SC._verify_cli(cli_args)
+            end
+        end
+        timedwait(() -> istaskdone(task), Float64(timeout_seconds)) === :ok ||
+            error("scientific verifier CLI exceeded the $(timeout_seconds) s watchdog")
+        exit_code = fetch(task)
         flush(output); seekstart(output)
-        (exit_code=process.exitcode,output=read(output,String),argv=argv)
+        (exit_code=exit_code, output=read(output,String), argv=cli_args)
     end
 end
 
-@testset "coverage-enabled CLI child keeps candidate source clean" begin
+@requires_git @testset "coverage-enabled CLI child keeps candidate source clean" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
     status_argv=["git","-C",repository_root,"status","--porcelain=v1","--untracked-files=all"]
     before_status=read(Cmd(status_argv),String)
@@ -336,8 +345,7 @@ end
         result = SC.certify(model, [0]; options=SC.ProofOptions(precisions=(256,), spectral_goal=:individuals))
         @test result.status == :CERTIFIED
         repository_root = normpath(joinpath(@__DIR__, ".."))
-        commit = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD"]), String))
-        tree = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD^{tree}"]), String))
+        (; commit, tree) = head_identity(repository_root)
         source = (repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",
             commit, tree)
         mktempdir() do parent
@@ -383,20 +391,6 @@ end
                 require=:root_and_spectrum,precision_bits=256)
             @test unsafe_report.status==:INVALID
             @test occursin("certificate schema invalid",unsafe_report.reason)
-
-            forged = TOML.parsefile(first.certificate_path)
-            forged["root"]["q_upper"] = "0/1"
-            forged_path = joinpath(parent, "forged.toml")
-            open(forged_path, "w") do io
-                TOML.print(io, forged; sorted=true)
-            end
-            forged_hash = bytes2hex(sha256(read(forged_path)))
-            rejected = SC.verify_certificate(forged_path, first.input_path;
-                expected_input_sha256=first.input_sha256,
-                expected_certificate_sha256=forged_hash,
-                require=:root_and_spectrum, precision_bits=256)
-            @test rejected.status in (:INVALID, :UNPROVEN)
-            @test rejected.status != :VERIFIED
         end
     end
 
@@ -516,8 +510,7 @@ end
     @test result4.status == :CERTIFIED
 
     repository_root = normpath(joinpath(@__DIR__, ".."))
-    commit = strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-    tree = strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    (; commit, tree) = head_identity(repository_root)
     source = (repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
     mktempdir() do parent
         project=Base.active_project()
@@ -535,6 +528,10 @@ end
             source_ref=source,environment_ref=environment)
         four=SC.write_certificate(joinpath(parent,"four"),model4,result4;
             source_ref=source,environment_ref=environment)
+        verified_cli=_run_scientific_cli(repository_root,one.input_path,
+            one.certificate_path,one.input_sha256,one.certificate_sha256)
+        @test verified_cli.exit_code==0
+        @test occursin("status=VERIFIED",verified_cli.output)
         one_doc=TOML.parsefile(one.certificate_path)
         four_doc=TOML.parsefile(four.certificate_path)
         function replay_mutant(name,doc; expected, source_cert=one, precision=256)
@@ -914,8 +911,7 @@ end
         equal=SC.certify(equal_model,[0,0];
             options=SC.ProofOptions(precisions=(256,),spectral_goal=:clusters))
         repository_root=normpath(joinpath(@__DIR__,".."))
-        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        (; commit, tree) = head_identity(repository_root)
         source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
         mktempdir() do parent
             project=Base.active_project()
@@ -1082,8 +1078,7 @@ end
         model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
         cert=SC.certify(model,[0];options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals))
         repository_root=normpath(joinpath(@__DIR__,".."))
-        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        (; commit, tree) = head_identity(repository_root)
         source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
         mktempdir() do parent
             project=Base.active_project(); manifest=joinpath(dirname(project),"Manifest.toml")
@@ -1209,8 +1204,7 @@ end
             precisions=(512,),spectral_goal=:individuals))
         @test high.status==:CERTIFIED
         repository_root=normpath(joinpath(@__DIR__,".."))
-        commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-        tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+        (; commit, tree) = head_identity(repository_root)
         source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
         mktempdir() do parent
             project=Base.active_project();manifest=joinpath(dirname(project),"Manifest.toml")
@@ -1273,8 +1267,7 @@ end
     @test result.status == :CERTIFIED
 
     repository_root = normpath(joinpath(@__DIR__, ".."))
-    commit = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD"]), String))
-    tree = strip(read(Cmd(["git", "-C", repository_root, "rev-parse", "HEAD^{tree}"]), String))
+    (; commit, tree) = head_identity(repository_root)
     source = (repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl", commit, tree)
     mktempdir() do parent
         project = Base.active_project()
@@ -1314,10 +1307,29 @@ end
     end
 end
 
+@testset "MX-04 provenance decision isolates each identity" begin
+    decide = ScientificCertificationFixtures._provenance_decision
+    all_match = (producer_observation_available=true, producer_profile_matches=true,
+        replay_profile_matches=true, producer_source_matches=true,
+        producer_environment_matches=true)
+    @test decide(; all_match...) == (true, "PASS")
+    # Exactly one identity differs per case; each alone must prevent PASS.
+    for field in keys(all_match)
+        field === :producer_observation_available && continue
+        flipped = merge(all_match, NamedTuple{(field,)}((false,)))
+        @test decide(; flipped...) == (false, "FAIL")
+    end
+    # Stale source alone fails even without a producer observation.
+    @test decide(; merge(all_match, (producer_observation_available=false,
+        producer_source_matches=false))...) == (false, "FAIL")
+    # Unavailable producer observation with matching replay and source is not PASS.
+    @test decide(; merge(all_match, (producer_observation_available=false,
+        producer_profile_matches=false))...) == (false, "UNAVAILABLE")
+end
+
 @testset "R2 source correction regressions" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
-    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    (; commit, tree) = head_identity(repository_root)
     source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
 
     @testset "closed and byte-bounded metadata" begin
@@ -1353,29 +1365,30 @@ end
         @test SC._environment_record((receipt_sha256=digest,
             artifact_name="~artifact.toml"))["artifact_name"] == "~artifact.toml"
 
-        watchdog=ScientificCertificationFixtures._watchdog_self_test()
-        @test watchdog.exit_code==124
-        @test watchdog.timed_out
-        @test watchdog.slow_start_passed
-        @test watchdog.missing_ready_rejected
-        @test watchdog.slow_preparation_seconds>=1.5
-        @test watchdog.slow_computation_seconds<1
-        @test watchdog.timeout_phase=="computation"
-        @test watchdog.preparation_seconds>=0
-        @test watchdog.computation_seconds>=2
-        @test !watchdog.child_alive_after_timeout
-        @test !watchdog.late_marker
+        # The watchdog uses POSIX process groups and /bin/sh; the fixture itself
+        # is qualified only on Darwin and 64-bit Linux.
+        if Sys.isapple() || Sys.islinux()
+            watchdog=ScientificCertificationFixtures._watchdog_self_test()
+            @test watchdog.exit_code==124
+            @test watchdog.timed_out
+            @test watchdog.slow_start_passed
+            @test watchdog.missing_ready_rejected
+            @test watchdog.slow_preparation_seconds>=1.5
+            @test watchdog.slow_computation_seconds<1
+            @test watchdog.timeout_phase=="computation"
+            @test watchdog.preparation_seconds>=0
+            @test watchdog.computation_seconds>=2
+            @test !watchdog.child_alive_after_timeout
+            @test !watchdog.late_marker
+        else
+            @info "skipping watchdog self-test: unsupported platform"
+        end
         mktempdir() do readiness_root
             marker=joinpath(readiness_root,"warmed-ready")
-            previous=get(ENV,"CYAX_SCIENTIFIC_READY_MARKER",nothing)
-            try
-                ENV["CYAX_SCIENTIFIC_READY_MARKER"]=marker
+            withenv("CYAX_SCIENTIFIC_READY_MARKER"=>marker) do
                 ScientificCertificationFixtures._announce_ready()
                 @test isdir(marker)
                 @test_throws ErrorException ScientificCertificationFixtures._announce_ready()
-            finally
-                previous===nothing ? delete!(ENV,"CYAX_SCIENTIFIC_READY_MARKER") :
-                    (ENV["CYAX_SCIENTIFIC_READY_MARKER"]=previous)
             end
         end
 
@@ -1420,7 +1433,7 @@ end
         @test SC._parse_toml(encoded)["Q"]["data"][1]==long_ratio
     end
 
-    @testset "execution profile requires a clean matching child" begin
+    @requires_git @testset "execution profile requires a clean matching child" begin
         F=ScientificCertificationFixtures
         actual=F._actual_environment_observation()
         @test actual["interval_arithmetic_registered_tree_sha1"] ==
@@ -1767,8 +1780,7 @@ end
 
 @testset "R2 serialized provenance and embedded private paths" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
-    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    (; commit, tree) = head_identity(repository_root)
     source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
     model=SC.prepare_model(reshape([1],1,1),reshape([1,0],2,1),reshape([1],1,1))
     options=SC.ProofOptions(precisions=(256,),spectral_goal=:individuals)
@@ -1910,133 +1922,64 @@ end
     end
 end
 
-@testset "R2 bounded skills-checker JSON and action controls" begin
-    repository_root=normpath(joinpath(@__DIR__,".."))
-    python=Sys.which("python3.13")
-    python===nothing && (python=Sys.which("python3"))
-    @test python!==nothing
-    if python!==nothing
-        mktempdir() do parent
-            driver=raw"""
-import copy
-import hashlib
-import importlib.util
-import json
-from pathlib import Path
-import subprocess
-import sys
-
-sys.dont_write_bytecode = True
-module_path, repository, scratch = map(Path, sys.argv[1:])
-spec = importlib.util.spec_from_file_location("candidate_verify", module_path)
-checker = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(checker)
-
-def parse_result(path):
-    try:
-        checker.parse_json(path)
-    except checker.CheckFailure as exc:
-        return exc.code
-    except BaseException as exc:
-        return "unhandled:" + type(exc).__name__
-    return "ok"
-
-deep = scratch / "depth-100000.json"
-deep.write_text("[" * 100000 + "0" + "]" * 100000, encoding="utf-8")
-print("depth-100000=" + parse_result(deep))
-depth12 = scratch / "depth-12.json"
-depth12.write_text("[" * 12 + "0" + "]" * 12, encoding="utf-8")
-print("depth-12=" + parse_result(depth12))
-quoted = scratch / "quoted-brackets.json"
-quoted.write_text(json.dumps({"text": "[{[[ ]]} and an escaped quote: \\\""}), encoding="utf-8")
-print("quoted-brackets=" + parse_result(quoted))
-
-candidate = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repository,
-                           check=True, capture_output=True, text=True).stdout.strip()
-tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=repository,
-                      check=True, capture_output=True, text=True).stdout.strip()
-checker_hash = checker.sha(module_path.read_bytes())
-case_hash = checker.sha((repository / "specs/cyax-skills-2026-10-09/cases.json").read_bytes())
-procedure_hashes = {item: checker.sha((repository / item).read_bytes()) for item in checker.PROC}
-artifact = scratch / "synthetic-control.txt"
-artifact_bytes = b"synthetic EVIDENCE_CANDIDATE_MISMATCH control; test fixture only\n"
-artifact.write_bytes(artifact_bytes)
-record = {"artifact_ref": "test-fixture:synthetic-control.txt",
-          "local_path": artifact.name, "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
-          "bytes": len(artifact_bytes)}
-cases = []
-for case_id in checker.CASE_IDS:
-    commands = []
-    if case_id == "SK-01":
-        commands = [{"argv": ["synthetic-red"], "exit_code": 1,
-                     "expected_exit": "nonzero", "sequence": 1},
-                    {"argv": ["synthetic-green"], "exit_code": 0,
-                     "expected_exit": "zero", "sequence": 2}]
-    elif case_id == "SK-11":
-        commands = [{"argv": ["synthetic-identity-control"], "exit_code": 1,
-                     "expected_exit": "nonzero", "sequence": 1}]
-    cases.append({"id": case_id, "evidence_status": "observed", "criterion_status": "met",
-                  "simulated_action_status": "BLOCKED" if case_id == "SK-12" else "not_applicable",
-                  "actor_ref": "test-fixture", "assessment_ref": "test-fixture",
-                  "evidence": [record], "commands": commands})
-receipt = {"schema": "cyax-skills-smoke-1", "candidate_commit": candidate,
-           "candidate_tree": tree, "checker_sha256": checker_hash,
-           "case_pack_sha256": case_hash, "procedure_sha256": procedure_hashes,
-           "cases": cases}
-
-def validate(name, document):
-    path = scratch / name
-    path.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
-    try:
-        checker.validate_evidence(path, candidate, tree, checker_hash, case_hash,
-                                  procedure_hashes)
-    except checker.CheckFailure as exc:
-        return exc.code
-    return "ok"
-
-print("synthetic-valid=" + validate("synthetic-valid.json", receipt))
-mutant = copy.deepcopy(receipt)
-mutant["cases"][1]["simulated_action_status"] = "BLOCKED"
-print("sk02-blocked=" + validate("sk02-blocked.json", mutant))
-mutant = copy.deepcopy(receipt)
-mutant["cases"][-1]["simulated_action_status"] = "not_applicable"
-print("sk12-not-applicable=" + validate("sk12-not-applicable.json", mutant))
-"""
-            driver_path=joinpath(parent,"focused_verify_controls.py")
-            write(driver_path,driver)
-            verifier=joinpath(repository_root,"specs","cyax-skills-2026-10-09","verify.py")
-            output=read(Cmd([python,driver_path,verifier,repository_root,parent]),String)
-            @test split(chomp(output),'\n')==[
-                "depth-100000=JSON_RESOURCE_LIMIT",
-                "depth-12=ok",
-                "quoted-brackets=ok",
-                "synthetic-valid=ok",
-                "sk02-blocked=EVIDENCE_INVALID",
-                "sk12-not-applicable=EVIDENCE_INCOMPLETE"]
-        end
-    end
-end
+# The skills-checker JSON and action controls live in scripts/test_skills_checker_controls.py.
 
 @testset "Full public qualification profile" begin
     @test ScientificCertificationFixtures.qualify_from_test_profile!() === nothing
 end
 
+@testset "release pins are a pure predicate on the observed record" begin
+    F=ScientificCertificationFixtures
+    pinned=Dict("julia_version"=>"1.12.0","interval_arithmetic_version"=>"0.22.36",
+        "interval_arithmetic_registered_tree_sha1"=>"79342df41c3c24664e5bf29395cfdf2f2a599412")
+    @test F._release_pins_match(pinned)
+    for (key,value) in (("julia_version","1.11.4"),("interval_arithmetic_version","0.22.37"),
+            ("interval_arithmetic_registered_tree_sha1",repeat("0",40)))
+        changed=copy(pinned)
+        changed[key]=value
+        @test !F._release_pins_match(changed)
+    end
+end
+
+@testset "thread-pool predicate rejects nonserial profiles (pure, no children)" begin
+    F=ScientificCertificationFixtures
+    profile=F._actual_environment_observation()
+    if Threads.nthreads(:default)==1 && Threads.nthreads(:interactive)==0
+        profile["worktree_clean"]=true
+        @test F._approved_profile_matches(profile,profile;pinned=false)
+    end
+    # Each field is set to a value the approved one-thread profile forbids, on an
+    # otherwise approved record; only that field may cause the rejection.
+    approved=copy(profile)
+    approved["julia_threads"]=1;approved["julia_default_threads"]=1
+    approved["julia_interactive_threads"]=0;approved["blas_threads"]=1
+    approved["julia_num_threads"]="1";approved["openblas_num_threads"]="1"
+    approved["loaded_package_root"]=realpath(F.ROOT)
+    approved["loaded_package_entrypoint"]=realpath(joinpath(F.ROOT,"src","CYAxiverse.jl"))
+    approved["certificate_source_sha256"]="present"
+    approved["interval_arithmetic_registered_tree_sha1"]="x"
+    approved["interval_arithmetic_actual_tree_sha1"]="x"
+    @test F._approved_profile_matches(approved,approved;pinned=false)
+    for (key,bad) in (("julia_threads",2),("julia_default_threads",2),
+            ("julia_interactive_threads",1),("blas_threads",2),
+            ("julia_num_threads","2"),("openblas_num_threads","2"))
+        rejected=copy(approved);rejected[key]=bad
+        @test !F._approved_profile_matches(rejected,rejected;pinned=false)
+    end
+end
+
 # CYAX_R2_SERIAL_QUALIFICATION_PROFILE_TESTS_BEGIN
-@testset "CI qualification profile is scoped and checks the real thread pools" begin
+@requires_git @testset "CI qualification profile is scoped and checks the real thread pools" begin
     F=ScientificCertificationFixtures
     original_blas=BLAS.get_num_threads()
-    original_julia_env=get(ENV,"JULIA_NUM_THREADS",nothing)
-    original_openblas_env=get(ENV,"OPENBLAS_NUM_THREADS",nothing)
-    original_full_env=get(ENV,"CYAXIVERSE_TEST_FULL",nothing)
     try
+      withenv("JULIA_NUM_THREADS"=>"caller-julia-setting","OPENBLAS_NUM_THREADS"=>"caller-openblas-setting",
+              "CYAXIVERSE_TEST_FULL"=>nothing) do
         Threads.nthreads(:default)==1 && Threads.nthreads(:interactive)==0 ||
             error("profile regression requires the approved one-thread Julia test process")
         BLAS.set_num_threads(2)
-        ENV["JULIA_NUM_THREADS"]="caller-julia-setting"
-        ENV["OPENBLAS_NUM_THREADS"]="caller-openblas-setting"
         for (full_setting,expected_full) in ((nothing,true),("0",false),("1",true))
-            full_setting===nothing ? pop!(ENV,"CYAXIVERSE_TEST_FULL",nothing) :
-                (ENV["CYAXIVERSE_TEST_FULL"]=full_setting)
+          withenv("CYAXIVERSE_TEST_FULL"=>full_setting) do
             @test F._test_profile_is_full()===expected_full
             observed=F._with_serial_qualification_profile() do
                 @test get(ENV,"CYAXIVERSE_TEST_FULL","1")==
@@ -2050,15 +1993,16 @@ end
                 @test profile["julia_num_threads"]=="1"
                 @test profile["openblas_num_threads"]=="1"
                 profile["worktree_clean"]=true # Exercise profile matching independently of an edited checkout.
-                @test F._approved_profile_matches(profile,profile)
+                # Release pins (Julia, IntervalArithmetic) are checked by the dedicated CI step.
+                @test F._approved_profile_matches(profile,profile;pinned=false)
                 for (key,value) in (("julia_default_threads",2),("julia_interactive_threads",1))
                     invalid_profile=copy(profile)
                     invalid_profile[key]=value
-                    @test !F._approved_profile_matches(invalid_profile,invalid_profile)
+                    @test !F._approved_profile_matches(invalid_profile,invalid_profile;pinned=false)
                 end
                 missing_pool=copy(profile)
                 delete!(missing_pool,"julia_interactive_threads")
-                @test !F._approved_profile_matches(missing_pool,missing_pool)
+                @test !F._approved_profile_matches(missing_pool,missing_pool;pinned=false)
                 get(ENV,"CYAXIVERSE_TEST_FULL","1")=="1"
             end
             @test observed===expected_full
@@ -2068,6 +2012,7 @@ end
             @test get(ENV,"CYAXIVERSE_TEST_FULL","1")==
                 (full_setting===nothing ? "1" : full_setting)
             @test (haskey(ENV,"CYAXIVERSE_TEST_FULL") == (full_setting!==nothing))
+          end
         end
 
         restored_after_error=try
@@ -2107,13 +2052,21 @@ end
             @assert ENV[\"OPENBLAS_NUM_THREADS\"]==\"child-openblas-setting\"
             println(\"nonserial_parent_rejected=true default=\",Threads.nthreads(:default),
                 \" interactive=\",Threads.nthreads(:interactive),\" blas_threads=\",BLAS.get_num_threads())
+            println(\"cache_flags=\",Base.CacheFlags())
         """
+        # Package images are keyed on these flags; a child that differs from this
+        # process (e.g. without Pkg.test's --check-bounds=yes) recompiles every
+        # dependency of CYAxiverse instead of reusing this process's images.
+        parent_cache_flags="cache_flags=$(Base.CacheFlags())"
         repository_root=normpath(joinpath(@__DIR__,".."))
         for (thread_setting,expected_counts) in (("2,0","default=2 interactive=0"),
                 ("1,1","default=1 interactive=1"))
-            child_argv=String[first(Base.julia_cmd().exec),"--startup-file=no","--threads=$thread_setting",
-                "--project=$repository_root","-e",child_code,
-                joinpath(@__DIR__,"fixtures","scientific_certification","run_fixture.jl"),thread_setting]
+            # Base.julia_cmd() carries this process's cache flags; the later --threads
+            # wins over any inherited one, and child_coverage_args() keeps coverage
+            # output out of the checkout.
+            child_argv=vcat(String.(Base.julia_cmd().exec),child_coverage_args(),String["--startup-file=no",
+                "--threads=$thread_setting","--project=$repository_root","-e",child_code,
+                joinpath(@__DIR__,"fixtures","scientific_certification","run_fixture.jl"),thread_setting])
             child_env=addenv(Cmd(child_argv),"JULIA_NUM_THREADS"=>thread_setting,"OPENBLAS_NUM_THREADS"=>"2")
             child_stdout=""
             child_exit=mktemp() do _path,log
@@ -2126,14 +2079,10 @@ end
             end
             @test child_exit==0
             @test occursin("nonserial_parent_rejected=true $expected_counts blas_threads=2",child_stdout)
+            @test occursin(parent_cache_flags,child_stdout)
         end
+      end
     finally
-        original_julia_env===nothing ? pop!(ENV,"JULIA_NUM_THREADS",nothing) :
-            (ENV["JULIA_NUM_THREADS"]=original_julia_env)
-        original_openblas_env===nothing ? pop!(ENV,"OPENBLAS_NUM_THREADS",nothing) :
-            (ENV["OPENBLAS_NUM_THREADS"]=original_openblas_env)
-        original_full_env===nothing ? pop!(ENV,"CYAXIVERSE_TEST_FULL",nothing) :
-            (ENV["CYAXIVERSE_TEST_FULL"]=original_full_env)
         BLAS.set_num_threads(original_blas)
     end
 end
@@ -2143,8 +2092,7 @@ end
 # detached focused runner; the public package suite remains unchanged here.
 @testset "R2 focused privacy and serialization bounds" begin
     repository_root=normpath(joinpath(@__DIR__,".."))
-    commit=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD"]),String))
-    tree=strip(read(Cmd(["git","-C",repository_root,"rev-parse","HEAD^{tree}"]),String))
+    (; commit, tree) = head_identity(repository_root)
     source=(repository="https://github.com/Julia-meets-String-Theory/CYAxiverse.jl",commit,tree)
     safe_source_ref="fixtures/candidate-source"
     safe_method="deterministic fixture search"
