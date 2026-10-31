@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
 # Producer, stage 2: G2 geometry generation (v1 recipe of the Shoroq sample: fast sampler, adaptive moduli policy, QCD window
-# [25, 40], base seed 20260930) on the polytope manifest POLYTOPE_MANIFEST (required; the Shoroq sample is
+# [25, 40], seed per resolve_seed.py: G2_SEED > manifest base_seed > 20260930) on the polytope manifest POLYTOPE_MANIFEST (required; the Shoroq sample is
 # references/shoroq/data/polytope_manifest_h11_004_050.json, layout in DATA_CONTRACTS.md), then the repository materializer, the independent geometry audit, the Julia
 # read-back cross-check, the physical spectra (prec 500, quartics, threshold H0) and the acceptance gate.
 # Expensive: full sample measured 2026-10-29 with WORKERS = 4: about 1 h wall (G2 30 min, spectra 10 min). Override the h11 range
 # with H11_MIN/H11_MAX and the polytopes per h11 with N_PER_H11 (smaller values are for tests only).
 source "$(dirname "$0")/../engine/common.sh"
 require_producer_toolchain
-H11_MIN="${H11_MIN:-4}"; H11_MAX="${H11_MAX:-50}"; N_PER_H11="${N_PER_H11:-100}"
 [[ -n "${POLYTOPE_MANIFEST:-}" ]] || die "set POLYTOPE_MANIFEST to the polytope manifest of the sample (see DATA_CONTRACTS.md)"
 MANIFEST="$POLYTOPE_MANIFEST"
 require "$MANIFEST" "$CYAX_REPO/scripts/build_orientifold_axion_database.py"
+# Range and size default to the manifest (H11_MIN, H11_MAX, N_PER_H11 override them; the Shoroq manifest gives 4, 50, 100).
+read -r MAN_MIN MAN_MAX MAN_N < <("$PYTHON" "$REPO/producers/geometry/resolve_seed.py" defaults "$MANIFEST") || die "cannot read the polytope manifest $MANIFEST"
+H11_MIN="${H11_MIN:-$MAN_MIN}"; H11_MAX="${H11_MAX:-$MAN_MAX}"; N_PER_H11="${N_PER_H11:-$MAN_N}"
+# Seed: G2_SEED (explicit) > manifest base_seed (or the base implied by its per-entry seeds) > 20260930 (Shoroq recipe v1); see
+# producers/geometry/resolve_seed.py. The effective seed and its source are recorded in $WORK/provenance/seed_resolution.json.
+mkdir -p "$WORK/provenance"
+SEED=$("$PYTHON" "$REPO/producers/geometry/resolve_seed.py" resolve "$MANIFEST" "$WORK/provenance/seed_resolution.json" ${G2_SEED:+--cli-seed "$G2_SEED"}) || exit 1
 [[ -e "$WORK/geometry" ]] && die "$WORK/geometry exists: refusing to overwrite a previous run"
 RAW="$WORK/geometry/run_h11_$(printf %03d $H11_MIN)_$(printf %03d $H11_MAX)"
 V="$WORK/validation"; mkdir -p "$V"/{materialization,julia,spectra,status,integrity} "$WORK/provenance"
 G2=("$PYTHON" "$CYAX_REPO/scripts/generate_geometric_data_multitriangulation.py" --h11_min "$H11_MIN" --h11_max "$H11_MAX" --n "$N_PER_H11"
-    --sampling-scheme fast --moduli-policy adaptive --qcd-volume-min 25 --qcd-volume-max 40 --seed 20260930 --cores "$WORKERS"
+    --sampling-scheme fast --moduli-policy adaptive --qcd-volume-min 25 --qcd-volume-max 40 --seed "$SEED" --cores "$WORKERS"
     --database-source manifest --polytope-manifest "$MANIFEST" --verbose --outdir "$RAW")
 "$PYTHON" "$REPO/producers/geometry/capture_provenance.py" "$WORK/provenance/geometry_provenance.json" --repo "$CYAX_REPO" \
     --julia-project "$CYAX_REPO" --julia "$JULIA_VMM" --manifest "$MANIFEST" --command "${G2[*]}"
 log "stage 2: G2 generation"
 "${G2[@]}" > "$WORK/logs/02_g2_generation.log" 2>&1
 "$PYTHON" "$REPO/producers/geometry/status_ledgers.py" "$V/status" "$RAW" > "$WORK/logs/02_status.log"
+"$PYTHON" "$REPO/producers/geometry/resolve_seed.py" verify "$WORK/provenance/seed_resolution.json" "$V/status/frst_proposal_status.csv" | tee -a "$WORK/logs/02_status.log"
 log "stage 2: materialize for Julia"
 "$PYTHON" "$REPO/producers/geometry/materialize_cyax_for_julia.py" --repo "$CYAX_REPO" "$RAW" "$WORK/materialized" \
     > "$V/materialization/materialize.jsonl" 2> "$WORK/logs/02_materialize.err"

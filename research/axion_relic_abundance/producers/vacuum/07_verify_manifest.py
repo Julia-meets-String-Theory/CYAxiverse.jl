@@ -14,7 +14,7 @@ for r in M["geometries"]:
     g = r["geometry_id"]; seen.add(g)
     assert g not in tot, g
     tot["records"] += 1; tot[r["status"]] += 1
-    if r["status"] == "EXCLUDED_VACUUM_UNRESOLVED":
+    if r["status"].startswith("EXCLUDED_"):
         if os.path.lexists(f"{root}/spectra/{g}/cyax.h5"): bad.append((g, "excluded geometry present in view"))
         continue
     p = r["spectrum_source"] if os.path.isabs(r["spectrum_source"]) else os.path.join(base, r["spectrum_source"])

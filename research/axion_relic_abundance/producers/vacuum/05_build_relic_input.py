@@ -1,15 +1,21 @@
 """Classify the tachyonic geometries from the evidence files of steps 00-04, then build the relic-abundance input
 manifest (every accepted geometry, one record each) and a spectra view of relative symlinks. Nothing under WORK/spectra
 is written. Paths stored in the manifest are relative to WORK (manifest key spectrum_source_base = "..").
-Usage: python 05_build_relic_input.py WORK POLYTOPE_MANIFEST [--expected-tachyonic N]
+Usage: python 05_build_relic_input.py WORK POLYTOPE_MANIFEST [--selection all|first_frst] [--expected-tachyonic N]
+  --selection        which G2-accepted FRST geometries enter (selection.py): all (default) or the first FRST of each polytope; the
+                     others are listed in the manifest key `geometry_selection` and in vacuum_repair/05_selection_report.json
   WORK               pipeline output root (validation/status, validation/qcd_edge_flags.json, spectra/, vacuum_repair/)
   POLYTOPE_MANIFEST  references/shoroq/data/polytope_manifest_h11_004_050.json (unified positions, historical tranche, normal forms)
 """
-import argparse, csv, glob, hashlib, json, math, os, sys
+import argparse, csv, glob, hashlib, json, math, os, re, sys
 from collections import Counter, defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import selection as sel_mod
 
 ap = argparse.ArgumentParser()
 ap.add_argument("work"); ap.add_argument("polytope_manifest")
+ap.add_argument("--selection", default="all", choices=sel_mod.MODES, help="geometry selection policy (selection.py)")
 ap.add_argument("--expected-tachyonic", type=int, default=None, help="optional gate on the number of theta = 0 tachyonic geometries (reference cases)")
 args = ap.parse_args()
 WORK = os.path.abspath(args.work)
@@ -23,11 +29,11 @@ def jl(p):
 
 
 def key(r):
-    return (r["h11"], r["position"])
+    return (r["h11"], r["position"], r.get("frst", 1))      # records of the first FRST may omit `frst`
 
 
-def gid(h, p):
-    return f"h11_{h:03d}/np_{p:07d}/cy_0000001"
+def gid(h, p, f=1):
+    return f"h11_{h:03d}/np_{p:07d}/cy_{f:07d}"
 
 
 def sha(p):
@@ -43,12 +49,27 @@ s01 = {key(r): r for r in jl(f"{W}/01_theta0_structure.jsonl")}
 vac = {key(r): r for r in jl(f"{W}/02_vacua_auto_groups.jsonl")}
 val = {key(r): r for r in jl(f"{W}/03_minima_validation.jsonl")}
 spc = {key(r): r for r in jl(f"{W}/04_vacuum_spectra.jsonl")}
-# accepted geometries: G2 status ledger (single unified run: polytope_index = unified position) joined to the sample manifest
-status = {(int(r["h11"]), int(r["polytope_index"])): r["status"] for r in csv.DictReader(open(f"{WORK}/validation/status/polytope_status.csv"))}
-uni = [{"h11": p["h11"], "position": p["unified_position"], "tranche": p.get("historical_tranche", "NA"), "local_index": p["unified_position"],
-        "normal_form_sha256": p.get("normal_form_sha256", "NA"), "status": status.get((p["h11"], p["unified_position"]), "not_attempted")}
-       for p in json.load(open(args.polytope_manifest))["polytopes"]]
-qcd = {(f["h11"], f["unified_position"]): f for f in json.load(open(f"{WORK}/validation/qcd_edge_flags.json"))["flags"]}
+# accepted geometries: the G2 FRST ledger (every accepted proposal is one geometry cy_XXXXXXX of its polytope; polytope_index = unified
+# position in a single run) joined to the sample manifest by (h11, position); the selection policy is explicit (selection.py)
+poly_status = list(csv.DictReader(open(f"{WORK}/validation/status/polytope_status.csv")))
+accepted_all = sel_mod.accepted_geometries(WORK)
+selected, not_selected = sel_mod.select(accepted_all, args.selection)
+mpoly = {}
+_blk = defaultdict(int)
+for p in json.load(open(args.polytope_manifest))["polytopes"]:
+    _blk[p["h11"]] += 1
+    mpoly[(p["h11"], p["unified_position"])] = p
+uni = []
+for (h, pos, frst, _) in selected:
+    p = mpoly.get((h, pos))
+    if p is None:
+        sys.exit(f"ERROR: accepted geometry {gid(h, pos, frst)} is not in the polytope manifest (h11 {h}, unified_position {pos})")
+    uni.append({"h11": h, "position": pos, "frst": frst, "tranche": p.get("historical_tranche", "NA"), "local_index": p["unified_position"],
+                "normal_form_sha256": p.get("normal_form_sha256", "NA"), "status": "accepted"})
+qcd = {}
+for f in json.load(open(f"{WORK}/validation/qcd_edge_flags.json"))["flags"]:
+    m = re.match(r"h11_(\d+)/np_(\d+)/cy_(\d+)/", f["file"])            # one flag per geometry; the file name carries the FRST
+    qcd[(int(m.group(1)), int(m.group(2)), int(m.group(3)))] = f
 tach46 = sorted(s01)
 assert args.expected_tachyonic is None or len(tach46) == args.expected_tachyonic, f"{len(tach46)} tachyonic geometries, expected {args.expected_tachyonic}"
 
@@ -97,17 +118,26 @@ os.makedirs(OUT, exist_ok=True)
 os.makedirs(f"{OUT}/spectra", exist_ok=True)
 records, per_geom_vac = [], []
 tot = Counter()
-for u in sorted((r for r in uni if r["status"] == "accepted"), key=lambda r: (r["h11"], r["position"])):
-    h, p = u["h11"], u["position"]
-    k = (h, p)
-    frozen = f"spectra/{gid(h, p)}/cyax.h5"                    # theta = 0 production spectrum, relative to WORK
+for u in sorted(uni, key=lambda r: (r["h11"], r["position"], r["frst"])):
+    h, p, fr = u["h11"], u["position"], u["frst"]
+    k = (h, p, fr)
+    frozen = f"spectra/{gid(h, p, fr)}/cyax.h5"                    # theta = 0 production spectrum, relative to WORK
     a = acc[k]
-    rec = {"geometry_id": gid(h, p), "h11": h, "position": p, "frst": 1, "tranche": u["tranche"],
+    rec = {"geometry_id": gid(h, p, fr), "h11": h, "position": p, "frst": fr, "tranche": u["tranche"],
            "local_index": u["local_index"], "normal_form_sha256": u["normal_form_sha256"],
            "qcd_edge_flag": k in qcd, "qcd_edge_beyond_gate_tolerance": bool(qcd.get(k, {}).get("beyond_gate_tolerance_1e-5_rel", False)),
            "theta0_stored_modes_above_H0": a["stored_physical_count"],
            "subH0_tachyonic_leading_directions_at_theta0": sum(1 for m, sg in zip(a["pq_log10_m_eV"], a["pq_sign"]) if sg < 0 and m < THR)}
-    if k not in s01:
+    if k not in s01 and a["inertia_below_minus_H0"] > 0:
+        # tachyonic at theta = 0 but not repairable here: vacuum repair is implemented for the first FRST (cy_0000001) only
+        rec.update(status="EXCLUDED_VACUUM_UNRESOLVED", spectrum_source=None, n_modes_above_H0=0,
+                   vacuum_source="vacuum_repair/00_theta0_inertia_scan.jsonl",
+                   validation_status="TACHYONIC_AT_THETA0_FRST_GT_1",
+                   exclusion_reason="theta = 0 tachyonic directions with |m| >= H0; vacuum repair (producers/vacuum) is implemented for the first FRST (cy_0000001) of a polytope only")
+        tot["EXCLUDED_VACUUM_UNRESOLVED"] += 1; tot["modes_excluded_old"] += a["stored_physical_count"]
+        per_geom_vac.append({"geometry_id": gid(h, p, fr), "h11": h, "position": p, "frst": fr, "vacuum_class": "UNREPAIRABLE_FRST_GT_1",
+                             "failed_checks": [], "theta0_stored": a["stored_physical_count"]})
+    elif k not in s01:
         rec.update(status="ORIGINAL_SPECTRUM", spectrum_source=frozen, n_modes_above_H0=a["stored_physical_count"],
                    vacuum_source="theta = 0 (frozen production spectrum; no leading direction with |m| >= H0 is tachyonic)",
                    validation_status="FROZEN_PRODUCTION_VALIDATED", exclusion_reason=None)
@@ -115,7 +145,7 @@ for u in sorted((r for r in uni if r["status"] == "accepted"), key=lambda r: (r[
     else:
         st, reasons, cc = classify(k)
         s = spc.get(k, {})
-        vrow = {"geometry_id": gid(h, p), "h11": h, "position": p, "vacuum_class": st, "failed_checks": reasons,
+        vrow = {"geometry_id": gid(h, p, fr), "h11": h, "position": p, "vacuum_class": st, "failed_checks": reasons,
                 "det_Qtilde": s01[k]["det_Qtilde"], "n_negative_leading": s01[k]["n_negative_leading"],
                 "theta0_neg_abs_m_ge_H0": s01[k]["eig_negative_abs_m_ge_H0"], "theta0_stored": s01[k]["stored_physical_count"]}
         if st == "MINIMUM_FOUND":
@@ -141,7 +171,7 @@ for u in sorted((r for r in uni if r["status"] == "accepted"), key=lambda r: (r[
     if rec["spectrum_source"]:
         target = f"{WORK}/{rec['spectrum_source']}"
         rec["spectrum_source_sha256"] = sha(target)
-        link = f"{OUT}/spectra/{gid(h, p)}/cyax.h5"
+        link = f"{OUT}/spectra/{gid(h, p, fr)}/cyax.h5"
         os.makedirs(os.path.dirname(link), exist_ok=True)
         if os.path.lexists(link):
             os.remove(link)
@@ -187,6 +217,28 @@ manifest = {
     "per_h11": {h: dict(by_h[h]) for h in sorted(by_h)},
     "geometries": records,
 }
+# ---- selection accounting: accepted / selected / not selected / failed, with reasons (never silent) ----
+failed_poly = [{"h11": int(r["h11"]), "polytope_index": int(r["polytope_index"]), "status": r["status"], "n_proposals": int(r["n_proposals"]),
+                "reason": r["reason"]} for r in poly_status if r["status"] != "accepted"]
+n_per_poly = Counter((g[0], g[1]) for g in accepted_all)
+report = {
+    "selection_mode": args.selection,
+    "polytopes_in_manifest": len(mpoly), "polytopes_processed_by_G2": len(poly_status),
+    "polytopes_accepted": sum(1 for r in poly_status if r["status"] == "accepted"),
+    "polytopes_failed": len(failed_poly), "polytopes_failed_by_status": dict(Counter(r["status"] for r in failed_poly)),
+    "geometries_accepted_by_G2": len(accepted_all), "polytopes_with_more_than_one_accepted_geometry": sum(1 for v in n_per_poly.values() if v > 1),
+    "geometries_selected": len(selected), "geometries_not_selected": len(not_selected),
+    "not_selected": [{"geometry_id": gid(g[0], g[1], g[2]),
+                      "reason": "single-triangulation mode (first_frst): only the first accepted FRST of the polytope, cy_0000001, is selected"} for g in not_selected],
+    "geometries_excluded_after_selection": [{"geometry_id": r["geometry_id"], "status": r["status"], "reason": r["exclusion_reason"]}
+                                            for r in records if r["status"].startswith("EXCLUDED_")],
+    "geometries_usable": N_geom, "geometries_usable_by_status": {k: tot[k] for k in ("ORIGINAL_SPECTRUM", "VACUUM_CORRECTED")},
+    "failed_polytopes": failed_poly,
+}
+json.dump(report, open(f"{W}/05_selection_report.json", "w"), indent=1)
+if not_selected:        # only when a policy actually left accepted geometries out (never for the Shoroq reference)
+    manifest["geometry_selection"] = {"mode": args.selection, "accepted": len(accepted_all), "selected": len(selected),
+                                      "not_selected": [x["geometry_id"] for x in report["not_selected"]], "report": "vacuum_repair/05_selection_report.json"}
 json.dump(manifest, open(f"{OUT}/relic_abundance_input_manifest.json", "w"), indent=1)
 with open(f"{OUT}/relic_abundance_input_geometries.csv", "w", newline="") as f:
     cols = ["geometry_id", "h11", "position", "tranche", "local_index", "status", "n_modes_above_H0",
@@ -198,4 +250,5 @@ with open(f"{OUT}/SHA256SUMS.txt", "w") as f:                       # the input 
     for name in ("relic_abundance_input_manifest.json", "relic_abundance_input_geometries.csv"):
         f.write(f"{sha(f'{OUT}/{name}')}  {name}\n")
 print(json.dumps(summary, indent=1))
+print(json.dumps({k: v for k, v in report.items() if k not in ("not_selected", "failed_polytopes")}, indent=1))
 print(Counter(v["vacuum_class"] for v in per_geom_vac))

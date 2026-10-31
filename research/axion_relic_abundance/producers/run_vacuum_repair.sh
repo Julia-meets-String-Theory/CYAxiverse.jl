@@ -14,11 +14,10 @@ grep -q '"overall": "PASS"' "$WORK/validation/final_gate.json" || die "stage 2 f
 mkdir -p "$V/chunks"
 export CYAXIVERSE_DATA_DIR="$WORK/materialized"
 log "stage 3: theta = 0 inertia scan"
-"$PYTHON" - "$WORK/validation/status/polytope_status.csv" "$V/accepted_list.tsv" <<'PY'
-import csv, sys
-rows = sorted((int(r["h11"]), int(r["polytope_index"])) for r in csv.DictReader(open(sys.argv[1])) if r["status"] == "accepted")
-open(sys.argv[2], "w").write("h11\tposition\n" + "".join(f"{h}\t{p}\n" for h, p in rows))
-PY
+# Geometry selection (producers/vacuum/selection.py): GEOMETRY_SELECTION=all (default; every G2-accepted FRST geometry) or
+# first_frst (the first accepted FRST of each polytope, cy_0000001; the single-triangulation recipe of the Shoroq reference).
+GEOMETRY_SELECTION="${GEOMETRY_SELECTION:-all}"; export GEOMETRY_SELECTION
+"$PYTHON" "$S/selection.py" list "$WORK" "$GEOMETRY_SELECTION" "$V/accepted_list.tsv" | tee -a "$WORK/logs/03_selection.log" || exit 1
 "$PYTHON" - "$V/accepted_list.tsv" "$V/chunks" "$WORKERS" <<'PY'
 import sys
 lines = open(sys.argv[1]).read().splitlines(); hdr, rows = lines[0], lines[1:]; n = int(sys.argv[3])
@@ -32,17 +31,20 @@ wait
 "$PYTHON" - "$V/accepted_list.tsv" "$V/chunks" "$WORKERS" "$V/00_theta0_inertia_scan.jsonl" "$V/tachyonic_list.tsv" <<'PY'
 import json, sys
 order = [tuple(map(int, l.split("\t"))) for l in open(sys.argv[1]).read().splitlines()[1:]]
+order = [(o + (1,))[:3] for o in order]                               # records without a frst column are the first FRST
 recs = {}
 for k in range(int(sys.argv[3])):
     for l in open(f"{sys.argv[2]}/scan_{k}.jsonl"):
-        r = json.loads(l); recs[(r["h11"], r["position"])] = l
+        r = json.loads(l); recs[(r["h11"], r["position"], r.get("frst", 1))] = l
 assert len(recs) == len(order), "inertia scan incomplete"
 bad = [json.loads(recs[k]) for k in order if "error" in json.loads(recs[k])]
 assert not bad, f"inertia scan errors: {bad[:3]}"
 open(sys.argv[4], "w").write("".join(recs[k] for k in order))
 tach = [k for k in order if json.loads(recs[k])["inertia_below_minus_H0"] > 0]   # tachyonic directions with |m| >= H0
-open(sys.argv[5], "w").write("h11\tposition\n" + "".join(f"{h}\t{p}\n" for h, p in tach))
-print(len(order), "geometries scanned;", len(tach), "with theta = 0 tachyons |m| >= H0")
+rep = [k for k in tach if k[2] == 1]                                          # vacuum repair is implemented for the first FRST (cy_0000001)
+open(sys.argv[5], "w").write("h11\tposition\n" + "".join(f"{h}\t{p}\n" for h, p, _ in rep))
+print(len(order), "geometries scanned;", len(tach), "with theta = 0 tachyons |m| >= H0;", len(rep), "of them repairable;", len(tach) - len(rep),
+      "tachyonic geometries with FRST > 1 are excluded as EXCLUDED_VACUUM_UNRESOLVED (repair not implemented for them)")
 PY
 NTACH=$(( $(wc -l < "$V/tachyonic_list.tsv") - 1 ))
 if (( NTACH == 0 )); then
@@ -50,7 +52,7 @@ if (( NTACH == 0 )); then
   # steps 01-04 and 06 are skipped and their evidence files are written empty; every geometry keeps its theta = 0 spectrum.
   log "stage 3: no theta = 0 tachyonic geometry: vacuum-repair steps 01-04 and 06 have nothing to do"
   for f in 01_theta0_structure 02_vacua_auto_groups 03_minima_validation 04_vacuum_spectra 06_verify_corrected; do : > "$V/$f.jsonl"; done
-  "$PYTHON" "$S/05_build_relic_input.py" "$WORK" "$POLYTOPE_MANIFEST" --expected-tachyonic 0 | tee "$WORK/logs/03_05.log"
+  "$PYTHON" "$S/05_build_relic_input.py" "$WORK" "$POLYTOPE_MANIFEST" --selection "$GEOMETRY_SELECTION" --expected-tachyonic 0 | tee "$WORK/logs/03_05.log"
   "$PYTHON" "$S/07_verify_manifest.py" "$WORK/relic_input/relic_abundance_input_manifest.json" "$V/07_manifest_verification.json"
   log "stage 3 done (no repair needed)"
   exit 0
@@ -72,7 +74,7 @@ jvmm "$S/03_validate_minima.jl" "$V/tachyonic_list.tsv" "$V/03_minima_validation
 log "stage 3: physical spectra about the validated minima"
 jvmm "$S/04_vacuum_spectra.jl" "$V/tachyonic_list.tsv" "$WORK/spectra" "$V/corrected_spectra" "$V/04_vacuum_spectra.jsonl" > "$WORK/logs/03_04.log" 2>&1
 log "stage 3: relic-input manifest"
-"$PYTHON" "$S/05_build_relic_input.py" "$WORK" "$POLYTOPE_MANIFEST" ${EXPECTED_TACHYONIC:+--expected-tachyonic $EXPECTED_TACHYONIC} \
+"$PYTHON" "$S/05_build_relic_input.py" "$WORK" "$POLYTOPE_MANIFEST" --selection "$GEOMETRY_SELECTION" ${EXPECTED_TACHYONIC:+--expected-tachyonic $EXPECTED_TACHYONIC} \
     | tee "$WORK/logs/03_05.log"
 "$PYTHON" - "$WORK/relic_input/relic_abundance_input_manifest.json" "$V/corrected_records.tsv" "$WORK" <<'PY'
 import json, os, sys
