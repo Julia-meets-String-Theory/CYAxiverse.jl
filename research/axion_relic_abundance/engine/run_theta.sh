@@ -9,6 +9,15 @@ require "$WORK/relic/run_config.json" "$WORK/relic/tables/run_metadata.json" "$W
 grep -q '"all_pass": true' "$WORK/relic/validation/production_verification.json" || die "stage 4 verification did not pass"
 [[ -e "$F" ]] && die "$F exists: refusing to overwrite a previous run"
 [[ -n "${RELIC_RUN:-}" ]] || die "set RELIC_RUN to the run file of the relic run (theta_analysis overrides)"
+# Retry safety: a stage that fails part-way must not leave a final_analysis/ that blocks the documented rerun. The partial output is
+# kept for diagnosis under a new name (never deleted); rerunning this stage then starts clean.
+STAGE5_OK=0
+stage5_cleanup() {
+    if [[ "$STAGE5_OK" != 1 && -e "$F" ]]; then
+        local k="$F.failed.$(date -u +%Y%m%dT%H%M%SZ)"; mv "$F" "$k" && echo "stage 5 failed: partial output kept in $k; fix the cause and rerun this stage" >&2
+    fi
+}
+trap stage5_cleanup EXIT
 log "stage 5: theta configuration from the v1 theta methodology${RELIC_EXPECTATIONS:+ and the expectations}"
 "$PYTHON" "$REPO/engine/relic/00_compose_run_config.py" theta "$REPO/configs/theta_methodology_v1.json" "$RELIC_RUN" "$F/theta_config.json" \
     ${RELIC_EXPECTATIONS:+--expectations "$RELIC_EXPECTATIONS"} | tee "$WORK/logs/05_compose.log"
@@ -23,3 +32,4 @@ grep -q "ALL CHECKS PASS: True" "$WORK/logs/05_crosscheck.log" || { echo "theta 
 THETA_POPULATION=SENSITIVITY "$PYTHON" "$S/02_crosscheck_theta.py" > "$WORK/logs/05_crosscheck_sensitivity.log"
 grep -q "ALL CHECKS PASS: True" "$WORK/logs/05_crosscheck_sensitivity.log" || { echo "theta cross-check (sensitivity) failed"; exit 1; }
 log "stage 5 done"
+STAGE5_OK=1

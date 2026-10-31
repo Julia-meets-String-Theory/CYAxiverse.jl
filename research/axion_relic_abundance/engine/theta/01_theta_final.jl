@@ -108,7 +108,7 @@ for lab in LABS
         dominant_mode_index=G.dominant_mode_index, dominant_fraction=G.dominant_fraction, dominant_category=[ismissing(d) ? missing : d.category for d in dom],
         dominant_log10_mass_eV=[ismissing(d) ? missing : d.log10_mass_eV for d in dom], dominant_log10_f_pert_GeV=[ismissing(d) ? missing : d.log10_f_pert_GeV for d in dom],
         cy_volume=G.cy_volume)
-    append!(geo_rows, df)
+    append!(geo_rows, df; promote=true)      # scenarios differ in column eltypes (a NO_MATCH scenario has all-missing angle columns)
 
     # ---- distributions A, B ----
     for (nm, v) in (("theta_90", t90), ("theta_100", t100), ("theta_90_PRE_dominated", t90[pdom]), ("theta_90_POST_dominated", t90[qdom]))
