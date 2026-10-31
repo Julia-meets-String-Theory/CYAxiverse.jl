@@ -146,6 +146,34 @@ resolved (the minimum property below H0 is then not established; the certificate
 Expected population counts (geometries, modes, statuses, census, flag counts) are checked only for a reference case
 (`references/shoroq/configs/expectations.json`).
 
+## Accuracy and systematic uncertainty of the abundance prescription
+
+Three kinds of uncertainty must not be mixed:
+- **Numerical precision** (negligible). The Julia driver agrees with an independent 30-digit implementation to about 5e-7 relative
+  (the spread between g* interpolation schemes) on per-mode and per-geometry abundances; class assignments agree exactly.
+- **Model assumptions** (fixed by v1, listed above): ΛCDM with the vmm H0, f = f_pert, instantaneous reheating, w_R = 0 for the PRE
+  branch, no temperature-dependent mass, no isocurvature, no anharmonic or H_I correction. They are choices, not errors.
+- **Approximation (systematic) error of the sudden-onset estimate.** The abundance is the comoving number density at the instant
+  3H(T_osc) = m, with the harmonic Ω ∝ θ_i². A direct integration of θ'' + 3Hθ' + m²θ = 0 gives a different late-time number density:
+
+  | test setup (constant m, pure power-law background, harmonic potential, small θ_i) | exact / sudden-onset |
+  |---|---|
+  | radiation domination (a ∝ t^(1/2)) | 0.403 (the sudden-onset value is 2.48 times larger) |
+  | modulus domination, w = 0 (a ∝ t^(2/3)) | 0.250 (the sudden-onset value is 4 times larger) |
+
+  These two numbers belong to those specific idealised setups (reproduced by `python tests/ode_onset_check.py` (scipy only) and by
+  any ODE solver). They are **not universal correction factors**: they change with the background
+  (g*(T) variation, the matter-radiation transition, the transition at T_R), and the PRE and POST branches differ. The sudden-onset estimate
+  is an order-one-accurate approximation, standard in the literature; it is appropriate for comparing geometries and for scalings
+  (Ω ∝ θ_i² f² and the m-dependence), not for percent-level predictions.
+  The anharmonic (cosine) correction to the harmonic scaling is small only for small angles: 0.1% at θ = 0.1, 2–3% at 0.5, about 10% at 1
+  (the θ_max warning above 0.5 reflects this).
+- **Consequence for the dark-matter criterion.** The TIGHT band 0.9 ≤ Ω/Ω_DM ≤ 1 is a 10% window. It does **not** cover an approximation
+  uncertainty of a factor 2.5–4. In the common-angle analysis a factor c in Ω is equivalent to a factor 1/√c in the angle θ
+  (Ω ∝ θ²): the selected angle and the interval widths in dex move by 0.5 log10 c, while the *count* of geometries in the band at a
+  given angle shifts accordingly. The outputs of this package are therefore results of the stated prescription; **no output is rescaled
+  by these factors**, and the established method has not been replaced by an ODE-based one.
+
 ## Known limitations
 
 - **v1 scope.** Fixed cosmology and w_R = 0 only. Run files are strict: an unknown key (for instance `w_R`) is refused,

@@ -43,12 +43,41 @@ by `batch_physical_spectrum.jl`) and applies only to θ = 0 spectra.
 | `cytools/geometric/CY_volume`, `cytools/geometric/h11` | string-frame CY volume; Hodge number | volume finite and positive |
 | `vacuum_correction/` group | present only for spectra about a validated minimum | iff `evaluation_point = validated_leading_branch_minimum` (status VACUUM_CORRECTED) |
 
+### 3a. Supplying your own spectra (manual input)
+
+There is **no direct mass / decay-constant table input**: the engine reads one vmm-layout `cyax.h5` per geometry, so provenance and
+the contract checks (A1) stay uniform. A researcher with only masses and decay constants can write such a file with h5py, with:
+- 1-D numeric datasets (a 2-D or scalar dataset is refused with `dataset_shape`): `spectrum/physical/m` = log10(m/eV), `fpert_log10` =
+  log10(f/GeV), `lambda_self_log10` = 2 (m − 9 − fpert_log10), `lambda_self_sign` = ±1, `mode_indices` = h11−n … h11−1, all of the same length n;
+- the metadata as **datasets** (not attributes) in `spectrum/physical/metadata/`: `h11`, `polytope` (equal to the `np_` index), `frst`, `prec = 500`,
+  `quartics = 1`, `threshold_log10 = -32.826522356547`, `status = terminal_status = completed`, `provisional = 0`, `schema_version =
+  cyaxiverse-physical-spectrum-3`; `evaluation_point` must be **absent** (spectrum about θ = 0, as written by vmm) or exactly
+  `validated_leading_branch_minimum` (repaired spectrum, which also needs the `vacuum_correction/` group); any other value is refused;
+- `cytools/geometric/CY_volume` (> 0, finite) and `cytools/geometric/h11`;
+- a vacuum statement in the spectra list: `DOCUMENTED_EXTERNAL` with method, reference and checksummed evidence (a spectrum that is not
+  a vmm θ = 0 spectrum cannot use `VERIFY`, which needs the stored potential).
+f is not independent of m: `fpert_log10 = m − 9 − ½ lambda_self_log10` must hold. θ_i is not an input (see the angle analysis), and
+the cosmology is fixed by methodology v1. Every refusal names the file, the check and, where relevant, the dataset.
+
 ## 4. Polytope manifest (producers; `references/shoroq/data/polytope_manifest_h11_004_050.json` is the Shoroq one)
+
+Seeds (producers/geometry/resolve_seed.py): the G2 base seed is, in order of precedence, the environment variable `G2_SEED`, the manifest
+`base_seed` (or the base implied by the per-entry `seed` fields), then 20260930 (the Shoroq recipe). The polytope at 1-based position p
+of its h11 block gets seed + p. An entry `seed` that disagrees with `base_seed + position`, a `unified_position` that is not the list
+position, or a non-integer or out-of-range seed is refused. The effective seed and its source are recorded in
+`provenance/seed_resolution.json` and checked against the G2 ledger. `H11_MIN`, `H11_MAX`, `N_PER_H11` default to the manifest.
 
 Top level: `polytopes` (list), `base_seed`, `seed_rule`, `h11_range`, `per_h11`, `source`, `revision`. Each entry:
 `h11`, `vertices` (4d integer vertices), `unified_position` (1-based position within its h11), `seed`
 (= base_seed + position); optional `normal_form_sha256` and `historical_tranche` (default `NA`). The G2 generator reads the polytopes of
 each h11 in list order; `H11_MIN`, `H11_MAX`, `N_PER_H11` select the range and the number per h11.
+
+Multiple triangulations: G2 accepts more than one FRST of a polytope when `N_PER_H11` exceeds the number of polytopes of an h11 block
+(`cy_0000001`, `cy_0000002`, …; each geometry_id is unique). `GEOMETRY_SELECTION=all` (default) sends every accepted geometry to the
+vacuum scan and the relic input; `first_frst` keeps only `cy_0000001` of each polytope (the single-triangulation recipe of the Shoroq
+reference, which has one geometry per polytope). `vacuum_repair/05_selection_report.json` lists accepted, selected, not selected and failed
+polytopes with reasons; the manifest key `geometry_selection` appears when a policy left accepted geometries out. A θ = 0 tachyonic
+geometry with FRST > 1 is excluded as `EXCLUDED_VACUUM_UNRESOLVED` (vacuum repair covers the first FRST only).
 
 ## 5. Relic-input directory (written by `engine/input` or `producers/vacuum`; read by the engine)
 

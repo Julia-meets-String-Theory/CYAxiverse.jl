@@ -51,6 +51,23 @@ RELIC_RUN=examples/minimal/run.json engine/run_theta.sh
 ```
 `examples/minimal/README.md` explains the inputs and how to read the outputs.
 
+## Questions a new user asks
+
+| question | answer |
+|---|---|
+| What is calculated? | The misalignment relic abundance Ω h² of each physical axion mode of a CYAxiverse geometry, per reheating temperature, the per-geometry sum, and which geometries reach the dark-matter band at a common initial angle. |
+| Relation to CYAxiverse? | It reads the physical spectra written by `scripts/batch_physical_spectrum.jl`; the spectra, potential and conventions are vmm's, unchanged. Nothing here changes `src/`. |
+| Inherited assumptions? | vmm pair-term prescription (arXiv:2309.01831 framework) and kinetic normalization (factor-two question open upstream); methodology v1 cosmology (`METHODOLOGY.md`). |
+| Inputs? | One `cyax.h5` per geometry plus a vacuum statement, or a polytope manifest for the producers. |
+| Own spectra / own (m, f) tables? | Own vmm spectra: yes (route A). Direct mass and decay-constant tables: **not supported**; write a contract-valid `cyax.h5` (`DATA_CONTRACTS.md` §3a). |
+| Multiple triangulations? | `GEOMETRY_SELECTION=all` (default) or `first_frst`; see `DATA_CONTRACTS.md` §4. |
+| Reheating scenarios? | The run file (labels and T_reh in GeV); hard limits and BBN notes in `METHODOLOGY.md`. |
+| Output tables? | See Outputs below and `DATA_CONTRACTS.md` §6; zero, partial and undefined results are distinct classes. |
+| Reproduce the frozen reference? | `references/shoroq/` (needs the external frozen archive). |
+| Limits of the approximations? | `METHODOLOGY.md`, "Accuracy and systematic uncertainty": the sudden-onset estimate is accurate to an order-one factor only, which the 10% TIGHT band does not cover. |
+
+Values in `configs/paths.env` containing spaces must be quoted (`PYTHON="/path with spaces/bin/python"`).
+
 ## Layout
 
 ```
@@ -93,7 +110,7 @@ Julia 1.8.4: official binaries at https://julialang.org/downloads/oldreleases/ (
 analysis project once (needs network) and check that it loads; `Pkg.instantiate()` alone can succeed although a package
 fails to precompile:
 ```bash
-julia-1.8 --project=environment/julia_analysis -e 'using Pkg; Pkg.instantiate(); using CSV, DataFrames, JSON, HDF5; println("OK ", VERSION)'
+julia --project=environment/julia_analysis -e 'using Pkg; Pkg.instantiate(); using CSV, DataFrames, JSON, HDF5; println("OK ", VERSION)'
 ```
 Then run `tests/test_external_acceptance.py` (below): it needs no other data. `engine/common.sh` checks the toolchain a
 stage needs and stops with an explicit `ERROR:` when something is missing. Every stage reads only `$WORK`, refuses to
@@ -143,6 +160,8 @@ modes, and optional theta-analysis overrides. Hard limits on T_reh stop the run;
 ```bash
 python tests/test_static.py                                        # seconds, no data
 python tests/test_external_acceptance.py WORK                       # no external data (shipped non-Shoroq fixtures), about 10 min
+python tests/test_producer_selection.py [WORK]                      # seed precedence and FRST selection: unit part in seconds; with WORK and the producer toolchain, end to end (about 8 min)
+python tests/ode_onset_check.py                                    # exact field evolution vs the m = 3H sudden-onset estimate (METHODOLOGY, accuracy section)
 tests/test_general.sh FROZEN_ROOT WORK                              # general samples from the frozen Shoroq spectra, about 2 min
 references/shoroq/tests/regression_relic_theta.sh FROZEN_ROOT WORK  # Shoroq stages 4-5, byte-identical, about 2 min
 references/shoroq/tests/regression_subset.sh FROZEN_ROOT WORK [H11] [N]   # Shoroq producers on a subset, about 10 min
