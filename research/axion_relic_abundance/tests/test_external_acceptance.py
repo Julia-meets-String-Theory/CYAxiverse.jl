@@ -109,8 +109,10 @@ def c_genuine():
 
 
 def c_genuine_verify():
-    if not (P.get("CYAX_REPO") and P.get("JULIA_VMM")):
-        return "SKIPPED", "producer toolchain (CYAX_REPO, JULIA_VMM) not configured"
+    # an empty CYAX_REPO means the enclosing CYAxiverse.jl checkout (configs/paths.env.example)
+    cyax = P.get("CYAX_REPO") or os.path.normpath(f"{REPO}/../..")
+    if not (os.path.exists(f"{cyax}/scripts/batch_physical_spectrum.jl") and P.get("JULIA_VMM")):
+        return "SKIPPED", "producer toolchain (CYAX_REPO or enclosing checkout, JULIA_VMM) not configured"
     codes, W = pipeline("genuine_verify", f"{FX}/list_genuine_verify.json", theta=False)
     if codes != [0, 0]:
         return "FAIL", f"exit codes {codes}"
@@ -291,7 +293,8 @@ def c_composer():
 
 def c_engine_only():
     pe = f"{T}/paths_engine_only.env"
-    open(pe, "w").write("".join(f"{k}={v}\n" for k, v in P.items() if k not in ("CYAX_REPO", "JULIA_VMM", "JULIA_VMM_DEPOT")))
+    # values are quoted: a path containing spaces (the README's .venv inside a checkout under such a directory) must survive `source`
+    open(pe, "w").write("".join(f'{k}="{v}"\n' for k, v in P.items() if k not in ("CYAX_REPO", "JULIA_VMM", "JULIA_VMM_DEPOT")))
     codes, W = pipeline("engine_only", f"{FX}/list_genuine.json", paths=pe)
     return ("PASS" if codes == [0, 0, 0] else "FAIL"), f"exit codes {codes} without CYAX_REPO/JULIA_VMM"
 
@@ -329,6 +332,75 @@ def c_invalid_inputs():
     return ("PASS" if not bad else "FAIL"), f"{len(out)} cases; not clean: {bad}"
 
 
+
+# ---- regression: theta stage with mixed NO_MATCH / matched scenarios (external audit I-01) --------------------------------------
+# The genuine h11 = 15 geometry has Omega(theta_ref) = 7.6e-4 at 5 MeV (no TIGHT match for theta <= 0.5) and 1.24 at 1e4 GeV and above (match).
+SCEN = {"5MeV": 0.005, "10MeV": 0.01, "20MeV": 0.02, "1e4GeV": 1e4, "1e10GeV": 1e10}
+
+
+def mixed_run(name, labels):
+    p = f"{T}/run_{name}.json"
+    json.dump({"schema": "cyaxiverse_relic_run/1", "scenarios": [{"label": l, "T_reh_GeV": SCEN[l]} for l in labels]}, open(p, "w"))
+    return p
+
+
+def mixed_case(name, labels, lst="h15only", sens_match=()):
+    """theta stage must complete for any order of matched / NO_MATCH scenarios and report each scenario correctly"""
+    run = mixed_run(name, labels)
+    codes, W = pipeline(name, f"{FX}/list_{lst}.json", run=run)
+    if codes != [0, 0, 0]:
+        return False, f"exit codes {codes}", W
+    ok = True
+    for pop, d, cc in (("primary", "theta", "crosscheck_python.json"), ("sensitivity", "theta_sensitivity_partial_validity", "crosscheck_python_sensitivity_partial_validity.json")):
+        s = strict_json(f"{W}/final_analysis/{d}/theta_summary_final.json")
+        ok &= json.load(open(f"{W}/final_analysis/verification/{cc}"))["all_checks_pass"]
+        for l in labels:
+            want_nm = SCEN[l] < 0.1 and not (pop == "sensitivity" and l in sens_match)   # the partial sum of a PARTIAL_VALIDITY geometry can match
+            nm = s[l]["N_tight_max"] == 0 and s[l]["theta_rep"] is None and s[l]["maximal_intervals"] == [] and "NO_MATCH" in s[l]["descriptor"]
+            mt = s[l]["N_tight_max"] >= 1 and s[l]["theta_rep"] is not None and len(s[l]["maximal_intervals"]) >= 1
+            ok &= nm if want_nm else mt
+        rows = table(f"{W}/final_analysis/{d}/theta_geometry_final.csv")
+        ok &= {r["scenario"] for r in rows} == set(labels)
+        for r in rows:                                   # NO_MATCH scenarios carry no representative angle, matched ones do
+            ok &= (r["theta_rep_scenario"] in ("", "NA")) == (SCEN[r["scenario"]] < 0.1 and not (pop == "sensitivity" and r["scenario"] in sens_match))
+    return ok, "", W
+
+
+def c_theta_mixed():
+    sub = {"all_matched": ["1e4GeV", "1e10GeV"], "nomatch_first": ["5MeV", "1e4GeV"], "matched_first": ["1e4GeV", "5MeV"],
+           "alternating": ["5MeV", "1e4GeV", "10MeV", "1e10GeV", "20MeV"]}
+    bad = {}
+    for k, labels in sub.items():
+        ok, d, _ = mixed_case("mixed_" + k, labels)
+        if not ok:
+            bad[k] = d or "assertion"
+    ok, d, _ = mixed_case("mixed_partial_pop", ["5MeV", "1e4GeV"], lst="h15_partial", sens_match=("5MeV",))   # populations differ at 5 MeV
+    if not ok:
+        bad["partial_pop"] = d or "assertion"
+    return ("PASS" if not bad else "FAIL"), f"all matched, NO_MATCH first, NO_MATCH last, alternating, primary+sensitivity populations; failures: {bad}"
+
+
+def c_theta_retry():
+    """a failed theta stage leaves no blocking final_analysis/ (partial output kept under a new name); the documented rerun then succeeds"""
+    codes, W = pipeline("retry", f"{FX}/list_h15only.json", run=mixed_run("retry_ok", ["5MeV", "1e4GeV"]), theta=False)
+    if codes != [0, 0]:
+        return "FAIL", f"relic exit codes {codes}"
+    badrun = f"{T}/run_retry_bad.json"
+    json.dump({"schema": "cyaxiverse_relic_run/1", "scenarios": [{"label": l, "T_reh_GeV": SCEN[l]} for l in ("5MeV", "1e4GeV")],
+               "theta_analysis": {"theta": {"theta_max": 2.0}}}, open(badrun, "w"))
+    r1 = sh(["bash", f"{REPO}/engine/run_theta.sh"], {"WORK": W, "RELIC_RUN": badrun}, log=f"{T}/retry.fail.log")
+    ok1 = r1.returncode != 0 and "final_analysis" not in os.listdir(W)                 # refused configuration: nothing blocks the rerun
+    # a failure AFTER output was written (a needed relic table is missing): the partial final_analysis/ is kept under a new name
+    tab = f"{W}/relic/tables/master_modes_5MeV.csv"; os.rename(tab, tab + ".hidden")
+    r2 = sh(["bash", f"{REPO}/engine/run_theta.sh"], {"WORK": W, "RELIC_RUN": f"{T}/run_retry_ok.json"}, log=f"{T}/retry.fail2.log")
+    os.rename(tab + ".hidden", tab)
+    names = os.listdir(W); kept = [x for x in names if x.startswith("final_analysis.failed.")]
+    ok2 = r2.returncode != 0 and "final_analysis" not in names and len(kept) == 1
+    r3 = sh(["bash", f"{REPO}/engine/run_theta.sh"], {"WORK": W, "RELIC_RUN": f"{T}/run_retry_ok.json"}, log=f"{T}/retry.rerun.log")
+    x = r3.returncode == 0 and theta_ok(W)[0]
+    return ("PASS" if ok1 and ok2 and x else "FAIL"), f"refused config leaves no blocker={ok1} failure after output keeps partial under a new name={ok2} ({kept}) rerun ok={x}"
+
+
 def c_repeat():
     codes, W = pipeline("repeat", f"{FX}/list_genuine.json")
     same = codes == [0, 0, 0] and all(open(f"{W}/relic/tables/{f}", "rb").read() == open(f"{T}/genuine/relic/tables/{f}", "rb").read()
@@ -341,7 +413,7 @@ for n, fn in [("genuine", c_genuine), ("genuine_verify", c_genuine_verify), ("ze
               ("integer", c_integer), ("nomatch", c_nomatch), ("noeligible", c_noeligible), ("populations", c_populations),
               ("all_invalid", c_all_invalid), ("boundary", c_boundary),
               ("canonical_tamper", c_canonical_tamper), ("composer", c_composer), ("engine_only", c_engine_only),
-              ("relocation", c_relocation), ("invalid_inputs", c_invalid_inputs), ("repeat", c_repeat)]:
+              ("relocation", c_relocation), ("invalid_inputs", c_invalid_inputs), ("theta_mixed", c_theta_mixed), ("theta_retry", c_theta_retry), ("repeat", c_repeat)]:
     case(n, fn)
 summary = {"test": "external_acceptance", "cases": results, "n_pass": sum(r["status"] == "PASS" for r in results),
            "n_fail": sum(r["status"] == "FAIL" for r in results), "n_skipped": sum(r["status"] == "SKIPPED" for r in results)}

@@ -9,7 +9,7 @@
   6. derived cosmology recomputed by the 50-digit reference implementation B equals the configuration
   7. no machine-specific absolute paths in tracked files
 """
-import hashlib, json, os, re, sys
+import hashlib, json, os, re, subprocess, sys
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, os.path.join(REPO, "engine", "relic"))
@@ -56,8 +56,10 @@ check("relic physics block checksum", sha(src[a:b].encode()) == "a0c613f17cd8da7
 # labels from the run, configurable primary smoothing / robustness thresholds, small-sample guards) and 2026-10-30 (Omega = 0
 # geometries, NO_MATCH) and 2026-10-31 (primary and sensitivity populations; PROVENANCE.md). The binding check is the byte identity of every Shoroq theta output in
 # references/shoroq/tests/regression_relic_theta.sh.
+# 88488246... was the generalised version; c86e47a4... adds only `promote=true` to the per-scenario append (external audit I-01:
+# a NO_MATCH scenario has all-missing angle columns). No mathematics changed; the Shoroq regressions must stay byte-identical.
 check("01_theta_final.jl is the reviewed generalised version",
-      sha(rd("engine/theta/01_theta_final.jl")) == "88488246acd8b23185f33f8bdbbead7d33a62e528c602ecfdc5178630ab50085")
+      sha(rd("engine/theta/01_theta_final.jl")) == "c86e47a4929ae3e57ed50b3386bc2182a4182bb732436d23120fe74063ccebe8")
 cj = rd("engine/theta/common.jl").decode()
 check("theta interval machinery present", "function exact_profile" in cj and "function maximal_set" in cj and "function smoothed" in cj)
 
@@ -87,19 +89,35 @@ worst = {k: abs(float(v) / D[k] - 1) for k, v in vals.items()}
 check("derived cosmology: B equals configuration", all(e <= tol.get(k, tol["default"]) if k != "three_H_Teq_eV" else e <= tol["T_eq_GeV"] for k, e in worst.items()),
       json.dumps({k: f"{e:.1e}" for k, e in worst.items()}))
 
-# 7. no machine-specific paths
+# 7. no machine-specific paths. Source tree only: tracked files when the package is in a git checkout (git ls-files), otherwise
+# (an exported tree) every file outside disposable local directories. Virtual environments, caches and $WORK outputs are never scanned.
 pat = re.compile(r"/Users/|/home/[a-z]|/private/tmp|scratchpad")
+SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "env", "node_modules", ".mypy_cache", ".pytest_cache", "work", ".ipynb_checkpoints"}
+
+
+def source_files():
+    try:
+        r = subprocess.run(["git", "-C", REPO, "ls-files", "-z", "--", "."], capture_output=True, text=True, check=True)
+        names = [n for n in r.stdout.split("\0") if n]
+        if names:
+            return [os.path.join(REPO, n) for n in names if os.path.exists(os.path.join(REPO, n))]
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    out = []
+    for root, dirs, files in os.walk(REPO):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        out += [os.path.join(root, f) for f in files]
+    return out
+
+
 hits = []
-for root, dirs, files in os.walk(REPO):
-    dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
-    for f in files:
-        p = os.path.join(root, f)
-        if os.path.abspath(p) == os.path.abspath(__file__):
-            continue
-        if f.endswith((".py", ".jl", ".sh", ".json", ".toml", ".md", ".txt", ".example")) and pat.search(open(p, errors="ignore").read()):
-            hits.append(os.path.relpath(p, REPO))
+for p in source_files():
+    if os.path.abspath(p) == os.path.abspath(__file__):
+        continue
+    if p.endswith((".py", ".jl", ".sh", ".json", ".toml", ".md", ".txt", ".example")) and pat.search(open(p, errors="ignore").read()):
+        hits.append(os.path.relpath(p, REPO))
 check("no machine-specific absolute paths in tracked files", not hits, ",".join(hits))
-ds = [os.path.relpath(os.path.join(r, f), REPO) for r, _, fs in os.walk(REPO) for f in fs if f == ".DS_Store"]
+ds = [os.path.relpath(p, REPO) for p in source_files() if os.path.basename(p) == ".DS_Store"]
 check("no .DS_Store files in the package", not ds, ",".join(ds))
 
 print("\nALL STATIC CHECKS PASS" if not FAILED else f"\nFAILED: {FAILED}")

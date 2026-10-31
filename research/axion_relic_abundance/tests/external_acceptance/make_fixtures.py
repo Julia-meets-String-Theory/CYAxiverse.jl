@@ -66,6 +66,9 @@ write("bad_sign_zero", 521, *ok2, sign=[0, 1])
 write("bad_m_inf", 522, [float("inf"), -10.7], [17.1, 16.2])
 write("bad_m_string", 523, *ok2, edit=lambda f: (f["spectrum/physical"].__delitem__("m"), f["spectrum/physical"].__setitem__("m", np.array([b"-20.3", b"-10.7"]))))
 write("bad_cy_volume_zero", 524, *ok2, edit=lambda f: f["cytools/geometric/CY_volume"].write_direct(np.array(0.0)))
+write("bad_m_2d", 527, *ok2, edit=lambda f: (f["spectrum/physical"].__delitem__("m"), f["spectrum/physical"].__setitem__("m", np.array([[-20.3, -10.7]]))))
+write("bad_len_lambda", 528, *ok2, edit=lambda f: (f["spectrum/physical"].__delitem__("lambda_self_log10"), f["spectrum/physical"].__setitem__("lambda_self_log10", np.array([-50.0]))))
+write("bad_eval_point", 529, *ok2, edit=lambda f: f["spectrum/physical/metadata"].__setitem__("evaluation_point", "banana"))
 p = write("bad_truncated_h5", 525, *ok2); b = open(p, "rb").read(); open(p, "wb").write(b[: len(b) // 2])
 p = write("bad_not_hdf5", 526, *ok2); open(p, "w").write("not an HDF5 file\n")
 ev = f"{OUT}/SYNTHETIC_NOTICE.txt"; open(ev, "w").write("SYNTHETIC acceptance-test fixture: arrays rewritten, not a physical vacuum\n")
@@ -93,6 +96,8 @@ spectra_list("nomatch", [cases["tiny_a"], cases["tiny_b"]])
 spectra_list("noeligible", [G9, cases["all_late"], cases["zero_mode"]])
 spectra_list("populations", [G9, cases["zero_mode"], cases["all_late"], cases["all_inflation"], cases["partial"], cases["partial_late"]])
 spectra_list("all_invalid", [cases["all_inflation"]])
+spectra_list("h15only", [BASE])
+spectra_list("h15_partial", [BASE, cases["partial"]])      # primary and sensitivity populations differ
 spectra_list("boundary", [G9, cases["boundary"]])
 for k in cases:
     if k.startswith("bad_"):
