@@ -253,9 +253,15 @@ end
                 close(usage_io)
                 read(usage_path, String)
             end
-            # The help text must tell users that existing default-run results now
-            # need --method legacy to match, or --force to recompute.
-            @test occursin("--method legacy", usage) && occursin("configuration digest", usage)
+            # The configuration digest records the method but not the minimizer
+            # version, so `--method legacy` silently reuses legacy results written
+            # before the minimizer fix (CYAX-0215 R-010). The help text must not
+            # advise that reuse; it must say the digest cannot detect such results
+            # and point to --force to recompute.
+            @test occursin("configuration digest", usage)
+            @test !occursin("--method legacy to match", usage)
+            @test occursin("does not record the minimizer version", usage)
+            @test occursin("--force", usage) && occursin("recompute", usage)
             @test default_blas_options[:blas_threads] == 1
             repository_root = normpath(joinpath(@__DIR__, ".."))
             if in_git_checkout(repository_root)

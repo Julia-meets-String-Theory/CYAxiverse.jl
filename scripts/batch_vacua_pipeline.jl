@@ -35,10 +35,10 @@ function _vacua_usage()
         --method NAME                Search method: auto, legacy, leading_branches, or reduced_jlm.
                             Default: auto (was legacy before the minimizer fix).
                             The method is part of the configuration digest, so results
-                            written by an earlier default run (legacy) no longer match:
-                            pass --method legacy to match them, or --force to recompute.
-                            Note: legacy results changed when the minimizer objective/Hessian
-                            shape bug was fixed; recompute rather than compare old counts.
+                            written by an earlier default run (legacy) no longer match.
+                            Legacy results written before the minimizer objective/Hessian
+                            fix are stale. The digest does not record the minimizer version,
+                            so --method legacy would reuse them: pass --force to recompute.
         --max-branches N             Bound leading-branch enumeration. Default: 1000000.
       --summary PATH               CSV summary output path.
       --append-summary             Append to an existing summary.
