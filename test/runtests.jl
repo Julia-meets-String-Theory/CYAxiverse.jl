@@ -2364,6 +2364,20 @@ end
     # convergence leaves the final error far below it, and here it is applied to
     # the fraction of 2π, which is 2π times looser still.
     @test sort(kept_mixed) ≈ [[a, a], [1 - a, 1 - a]] atol=sqrt(eps())
+    # Objective value at the minimum, by hand: 1 - cos t = 4/9 and
+    # 1 - cos 2t = 2 sin² t = 2 (1 - 25/81) = 112/81, so
+    # V = 2 (4/9) - 0.9 (112/81) = 8/9 - 56/45 = -16/45.
+    # Non-uniform L makes this sensitive to the objective: the f12fbb8 row
+    # broadcast summed (Σ L_a)(Σ_b (1 - cos θ_b)) ≥ 0 instead.
+    # Tolerance on log10|V| (u = eps()/2): evaluating the three cosines,
+    # subtractions, phases and the dot product (γ_3) at the computed point gives
+    # |ΔV| ≤ about 16.1u; a position error δ ≤ sqrt(eps()) (x_abstol) adds at most
+    # λ_max δ²/2 ≈ 0.62 eps() (λ_max = 5/9 + 62/90). Dividing the total ≈ 8.7 eps()
+    # by |V| ln 10 ≈ 0.82 and adding ≤ 1 ulp for log10 gives ≈ 11 eps().
+    mixed_minimum_run = minimizer.minimize(Lmixed, Qmixed, [1.0, 0.95])
+    @test mixed_minimum_run["converged"] && mixed_minimum_run["Hsign"] == 1
+    @test mixed_minimum_run["±V"] == -1
+    @test mixed_minimum_run["logV"] ≈ log10(16 / 45) atol=11eps()
 
     # Degenerate origins are unclassified and excluded, as zero modes are at
     # endpoints (Hsign = sign(0) = 0). L = (-1, 1/4) with Q = [1 2]:
