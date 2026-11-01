@@ -29,7 +29,7 @@ theta sections `theta`, `dark_matter`, `optimisation`); labels must be unique al
 | `spectra[].provenance` | optional pass-through: `tranche`, `local_index`, `normal_form_sha256`, `qcd_edge_flag`, `qcd_edge_beyond_gate_tolerance` (default `NA`; `local_index` defaults to the position) |
 
 `VERIFY` needs the potential in the file (`potential/{Q,L}`, `Kinv`, as written by the CYAxiverse materializer and kept
-by `batch_physical_spectrum.jl`) and applies only to θ = 0 spectra.
+by `scripts/batch_physical_spectrum.jl`) and applies only to θ = 0 spectra.
 
 ## 3. Spectrum file (`cyax.h5`, CYAxiverse vmm physical spectrum; checked by A1 for every file)
 

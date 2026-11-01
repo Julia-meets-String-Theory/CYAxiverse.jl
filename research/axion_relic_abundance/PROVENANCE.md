@@ -2,7 +2,7 @@
 
 Every script in this repository was taken from the research workspace that produced the accepted dataset
 (2026-09-30 geometry and spectra; 2026-10-01 relic abundance and θ analysis). The table lists, for each file,
-its origin (a path relative to that workspace), the first 12 hex digits of the original sha256, and what changed.
+its origin (a path relative to that workspace; the workspace is a private development area and is not part of this repository, so these paths are records, not links), the first 12 hex digits of the original sha256, and what changed.
 
 **Change classes**
 - **identical**: byte-for-byte copy.
@@ -157,7 +157,7 @@ Every check removed during cleanup was reviewed. Checks that the frozen data can
 - **`qcd_volume_exact_rational`:** this field is not recomputed by `flag_qcd_edge.py`. The test requires it to be null and lists the 6 frozen values as not reproduced.
 - **`GIT_OPTIONAL_LOCKS=0`** in `common.sh`. Without it, `git status` creates a transient `index.lock` that changes the checkout's `.git` directory mtime.
 - **Empty-tachyonic guard** in `run_03_vacuum_repair.sh` (subsets only). The relic-input summary now records the actual number of tachyonic geometries attempted.
-- Result: full numerical reproduction, with no unresolved discrepancy. See `Shoroq_clean_validation/VALIDATION_SUMMARY.md`.
+- Result: full numerical reproduction, with no unresolved discrepancy. The validation records of that study are development records and are not part of this repository.
 
 ## Generalisation (2026-10-29)
 
@@ -198,7 +198,7 @@ implementations B and C, the theta interval algorithm and all upstream CYAxivers
 These fixes follow the external acceptance tests of 2026-10-30 (Claude and Codex reports). The physics block,
 implementations B and C, all tolerances, the Kähler normalisation and the pair-term convention are unchanged. Every Shoroq
 relic table, theta output, verification result and composed configuration is byte-identical (`regression_relic_theta.sh`
-45/45). Full change list and reasons: `FIX_IMPLEMENTATION_REPORT.md` in the validation folder `fix_implementation_20261030/`.
+45/45). The full change list and reasons are in the development validation records, which are not part of this repository.
 
 **Code changes.**
 - **Zero-mode / zero-Omega geometries (F1; approved decision).** A validated geometry is never dropped:
@@ -245,7 +245,7 @@ abundance:
 **Conflict with the frozen methodology.** The frozen 2026-10-01 methodology kept the 329 partially valid Shoroq geometries
 (per-mode cut) in its single theta population. They are now excluded from the primary population. The conflict check, the
 full field-by-field before/after comparison and the scientific consequences are in
-`Shoroq_clean_validation/population_decision_20261031/`.
+the development validation records (not part of this repository).
 
 **Changes.**
 - Driver `[G4]`: NA for an empty CDM set with a not-evaluated mode. Driver `[G6]`: table
@@ -269,9 +269,26 @@ The package was copied unchanged to `research/axion_relic_abundance/` on branch 
   attributes.
 - **`engine/common.sh`**: an empty `CYAX_REPO` defaults to the enclosing CYAxiverse.jl checkout. The revision pin is
   unchanged. `configs/paths.env.example` documents this.
-- **New documentation**: `SCIENTIFIC_SCOPE_AND_CONVENTIONS.md` and `INTEGRATION_DESIGN.md` (replacing the earlier
-  `INTEGRATION.md` proposal). The README has a scope summary and a quick start. The "Known limitations" entry on
+- **New documentation**: `SCIENTIFIC_SCOPE_AND_CONVENTIONS.md` and `INTEGRATION_DESIGN.md` (replacing an earlier
+  integration proposal that is not part of this repository). The README has a scope summary and a quick start. The "Known limitations" entry on
   conventions in `METHODOLOGY.md` was reworded.
 - **New example**: `examples/minimal/`.
 
 No computation, criterion, tolerance or physics block changed.
+
+## Changes after the external-researcher audit (2026-10-31)
+
+- **`producers/geometry/resolve_seed.py`**, **`producers/vacuum/selection.py`**: *new*. Seed precedence and geometry selection of the
+  producers; they contain no physics. With the Shoroq manifest the seed is 20260930, as before.
+- **`producers/run_geometry.sh`**, **`producers/run_vacuum_repair.sh`**, **`producers/vacuum/05_build_relic_input.py`**,
+  **`producers/vacuum/07_verify_manifest.py`**: generalised to `(h11, position, frst)` keys, the seed rule and an explicit selection
+  policy. The Shoroq subset regression stays identical to the frozen results.
+- **`engine/theta/01_theta_final.jl`**: `promote=true` on one `append!` (a NO_MATCH scenario has all-missing angle columns). Its pinned
+  checksum in `tests/test_static.py` was updated; no mathematics changed.
+- **`engine/run_theta.sh`**: a failed stage 5 renames its partial output to `final_analysis.failed.<UTC>` so that the rerun works.
+- **`engine/relic/01_build_mode_table.py`**: 1-D shape check; an array-length mismatch is reported instead of crashing; `evaluation_point`
+  must be absent or `validated_leading_branch_minimum`.
+- **`tests/`**: `test_producer_selection.py`, `ode_onset_check.py`, `producer_selection/` (a two-polytope manifest) are *new*;
+  `test_static.py` scans source files only; `test_external_acceptance.py` gained `theta_mixed` and `theta_retry` and a quoted engine-only
+  environment file.
+- **`data/standardmodel2018.dat`**: unchanged; see `data/README.md` for its origin and terms.
