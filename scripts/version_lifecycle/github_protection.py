@@ -59,8 +59,16 @@ _REHEARSAL_APP_BYPASS = (_APP_ID, "Integration", "always")
 _REHEARSAL_PR_REVIEW_PARAMETERS = {
     "required_approving_review_count": 0,
     "dismiss_stale_reviews_on_push": False,
+    "required_reviewers": [],
     "require_code_owner_review": False,
+    "dismissal_restriction": {
+        "enabled": False,
+        "allowed_actors": [],
+    },
     "require_last_push_approval": False,
+    "required_review_thread_resolution": False,
+    "require_extra_approval_for_unattributed_changes": True,
+    "allowed_merge_methods": ["merge", "squash", "rebase"],
 }
 
 

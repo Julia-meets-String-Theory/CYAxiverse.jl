@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import base64
 from datetime import datetime, timezone
 import hashlib
@@ -36,6 +37,17 @@ SHA_B = "b" * 40
 TIMESTAMP = "2026-09-24T15:00:00Z"
 APP_BYPASS = {"actor_id": 5371554, "actor_type": "Integration", "bypass_mode": "always"}
 ADMIN_BYPASS = {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+REHEARSAL_PR_REVIEW_PARAMETERS = {
+    "required_approving_review_count": 0,
+    "dismiss_stale_reviews_on_push": False,
+    "required_reviewers": [],
+    "require_code_owner_review": False,
+    "dismissal_restriction": {"enabled": False, "allowed_actors": []},
+    "require_last_push_approval": False,
+    "required_review_thread_resolution": False,
+    "require_extra_approval_for_unattributed_changes": True,
+    "allowed_merge_methods": ["merge", "squash", "rebase"],
+}
 
 
 def rule(kind: str) -> dict[str, object]:
@@ -150,12 +162,7 @@ def rehearsal_rulesets() -> list[dict[str, object]]:
             52002, "CYAx rehearsal principal review", include=[principal],
             rules=[{
                 "type": "pull_request",
-                "parameters": {
-                    "required_approving_review_count": 0,
-                    "dismiss_stale_reviews_on_push": False,
-                    "require_code_owner_review": False,
-                    "require_last_push_approval": False,
-                },
+                "parameters": copy.deepcopy(REHEARSAL_PR_REVIEW_PARAMETERS),
             }],
             actors=[ADMIN_BYPASS, APP_BYPASS],
         ),
@@ -749,6 +756,40 @@ class GitHubProtectionTests(unittest.TestCase):
                     gate_calls.append(("rules", action, ref)) or True
                 ),
             )
+            positive_evidence = adapter._require_rehearsal_rules(
+                f"refs/heads/{branch}", policy="principal-move"
+            )
+            self.assertEqual(
+                positive_evidence["ruleset_roles"],
+                {"integrity": 52001, "review": 52002, "freeze": 52003},
+            )
+            self.assertEqual(
+                positive_evidence["ruleset_ids"], [52001, 52002, 52003]
+            )
+            self.assertEqual(
+                positive_evidence["effective_rules"],
+                [
+                    {"ruleset_id": 52001, "type": "deletion"},
+                    {"ruleset_id": 52001, "type": "non_fast_forward"},
+                    {"ruleset_id": 52002, "type": "pull_request"},
+                    {"ruleset_id": 52003, "type": "update"},
+                ],
+            )
+            review_ruleset = next(
+                ruleset for ruleset in positive_evidence["rulesets"]
+                if ruleset["id"] == 52002
+            )
+            self.assertEqual(
+                review_ruleset["rules"][0]["parameters"],
+                REHEARSAL_PR_REVIEW_PARAMETERS,
+            )
+            self.assertTrue(
+                adapter.is_live_rehearsal_rules_evidence(
+                    positive_evidence,
+                    ref=f"refs/heads/{branch}",
+                    policy="principal-move",
+                )
+            )
             original_run = subprocess.run
             push_calls = []
             push_environments = []
@@ -1093,6 +1134,108 @@ class GitHubProtectionTests(unittest.TestCase):
                 self.assertFalse(any(
                     call[0] in {"POST", "PUT", "PATCH"} for call in fake.calls
                 ))
+
+    def test_principal_move_rejects_each_noncanonical_provider_review_parameter_before_writes(self) -> None:
+        cases = (
+            "required_approving_review_count",
+            "dismiss_stale_reviews_on_push",
+            "required_reviewers",
+            "require_code_owner_review",
+            "dismissal_restriction",
+            "require_last_push_approval",
+            "required_review_thread_resolution",
+            "require_extra_approval_for_unattributed_changes",
+            "allowed_merge_methods",
+            "missing_parameter",
+            "unknown_parameter",
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.name", "Fixture")
+            self._git(root, "config", "user.email", "fixture@example.invalid")
+            (root / "README.md").write_text("base\n", encoding="utf-8")
+            self._git(root, "add", "README.md")
+            self._git(root, "commit", "-q", "-m", "base")
+            old = self._git(root, "rev-parse", "HEAD")
+            (root / "README.md").write_text("next\n", encoding="utf-8")
+            self._git(root, "add", "README.md")
+            self._git(root, "commit", "-q", "-m", "next")
+            new = self._git(root, "rev-parse", "HEAD")
+            tree = self._git(root, "rev-parse", f"{new}^{{tree}}")
+            branch = "rehearsal/principal/line"
+
+            for case in cases:
+                with self.subTest(case=case):
+                    fake = FakeGitHub()
+                    review = next(row for row in fake.rows if row["id"] == 52002)
+                    parameters = review["rules"][0]["parameters"]
+                    if case == "required_approving_review_count":
+                        parameters[case] = 1
+                    elif case == "dismiss_stale_reviews_on_push":
+                        parameters[case] = True
+                    elif case == "required_reviewers":
+                        parameters[case] = ["reviewer"]
+                    elif case == "require_code_owner_review":
+                        parameters[case] = True
+                    elif case == "dismissal_restriction":
+                        parameters[case] = {
+                            "enabled": True,
+                            "allowed_actors": [{
+                                "actor_id": 5,
+                                "actor_type": "RepositoryRole",
+                            }],
+                        }
+                    elif case == "require_last_push_approval":
+                        parameters[case] = True
+                    elif case == "required_review_thread_resolution":
+                        parameters[case] = True
+                    elif case == "require_extra_approval_for_unattributed_changes":
+                        parameters[case] = False
+                    elif case == "allowed_merge_methods":
+                        parameters[case] = ["merge", "squash"]
+                    elif case == "missing_parameter":
+                        del parameters["required_review_thread_resolution"]
+                    else:
+                        parameters["future_rule_parameter"] = False
+                    fake.branch_shas[branch] = old
+                    adapter = GitHubProtectionAdapter(
+                        REPOSITORY,
+                        token="private-token",
+                        transport=fake,
+                        authorization_gate=lambda *_: True,
+                        rehearsal_gate=lambda *_: True,
+                    )
+                    original_run = subprocess.run
+                    pushes = []
+
+                    def record_push(command, **kwargs):
+                        if command[0] == "git" and "push" in command:
+                            pushes.append(command)
+                        return original_run(command, **kwargs)
+
+                    with mock.patch(
+                        "version_lifecycle.github_protection.subprocess.run",
+                        side_effect=record_push,
+                    ):
+                        with self.assertRaisesRegex(
+                            GitHubProtectionError, "REHEARSAL_RULESET_UNVERIFIED"
+                        ):
+                            adapter.compare_and_swap_rehearsal_principal(
+                                root,
+                                ref=f"refs/heads/{branch}",
+                                expected_old_sha=old,
+                                intended_new_sha=new,
+                                intended_new_tree=tree,
+                                intent={
+                                    "repository": REPOSITORY,
+                                    "transaction_id": f"tx-review-parameter-{case}",
+                                },
+                            )
+                    self.assertEqual(pushes, [])
+                    self.assertFalse(any(
+                        call[0] in {"POST", "PUT", "PATCH"} for call in fake.calls
+                    ))
 
     def test_principal_move_requires_active_freeze_and_exact_effective_binding(self) -> None:
         cases = ("missing_freeze", "disabled_freeze", "excluded_freeze", "inconsistent_id")

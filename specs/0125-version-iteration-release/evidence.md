@@ -740,3 +740,60 @@ an independent SPEC recheck and SECURITY impact review. The prior SPEC
 REQUEST_CHANGES disposition remains operative; prior SECURITY and STANDARDS
 results remain bound to their original candidate. No Gate A/B, publication,
 merge, release, or lifecycle-operation approval is claimed.
+
+## Provider review-parameter compatibility correction (local-only; 2026-11-01)
+
+The exact principal review parameter object returned for rehearsal ruleset
+`26314227` matches the captured production principal review object for ruleset
+`23947993`. Its complete nine-field value is now pinned in
+`_REHEARSAL_PR_REVIEW_PARAMETERS`:
+
+| Parameter | Exact value |
+| --- | --- |
+| `required_approving_review_count` | `0` |
+| `dismiss_stale_reviews_on_push` | `false` |
+| `required_reviewers` | `[]` |
+| `require_code_owner_review` | `false` |
+| `dismissal_restriction` | `{"enabled": false, "allowed_actors": []}` |
+| `require_last_push_approval` | `false` |
+| `required_review_thread_resolution` | `false` |
+| `require_extra_approval_for_unattributed_changes` | `true` |
+| `allowed_merge_methods` | `["merge", "squash", "rebase"]` |
+
+The source still requires exact dictionary equality against the complete
+provider parameter mapping. It does not discard or normalize extra fields.
+Coverage, actor, effective-rule ID linkage, immutable controls, freeze
+controls, write fences, and lifecycle gates remain unchanged. The captured
+compatibility packet is identified by logical custody ID
+`CYAX125-PROVIDER-COMPATIBILITY-20261101` and SHA-256
+`2bed2ed34da5e1403ea50aa41b871ed64279d432c78691ac1362a545a9348eaa`.
+Its pinned read-only provider evidence identities are rehearsal response
+SHA-256 `a6b047df2c29dd672dfb42ec640abbffd857dab79874d82dfb7b013cb82634a7`
+and production response SHA-256
+`430d9051487af9a00aeda6f4ad7d5b48c2a0d2a541584982d57711836dcd94f5`.
+
+Verification on the corrected implementation and test source:
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_version_lifecycle_github_protection` | Passed, 38 tests, exit 0. |
+
+The positive fixture verifies the full nine-field object together with the
+intended principal roles, exact effective-rule IDs, actors, coverage, and
+freeze controls. Negative cases change each of the nine fields in turn, omit
+a field, or add an unknown field. Each case rejects the principal move before
+any provider write or Git push. Earlier 76- and 181-test runs are predecessor
+evidence only and are not presented as results for this successor. This
+evidence appendix was written after the test run; the lifecycle test module
+does not load it. Exact source identities, raw command output, workflow and
+15-module closure, the protected-source comparison, predecessor records, and
+the test chronology are retained under private logical custody ID
+`CYAX125-PROVIDER-COMPATIBILITY-20261101`.
+
+No live provider request, setup POST, credential access, ruleset mutation,
+ref/trigger/rehearsal operation, network access, dependency installation,
+push, or publication was performed. The earlier Python-free Julia import
+limitation remains unchanged because the local depot lacks `AbstractTrees`;
+no install or retry was made. The compatibility correction does not close
+the pending independent SPEC, STANDARDS, or SECURITY reviews and grants no
+rehearsal, publication, merge, release, or lifecycle-operation approval.
