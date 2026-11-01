@@ -760,8 +760,11 @@ The exact principal review parameter object returned for rehearsal ruleset
 | `require_extra_approval_for_unattributed_changes` | `true` |
 | `allowed_merge_methods` | `["merge", "squash", "rebase"]` |
 
-The source still requires exact dictionary equality against the complete
-provider parameter mapping. It does not discard or normalize extra fields.
+The initial correction required dictionary equality against the complete
+provider parameter mapping and did not discard or normalize extra fields. A
+follow-up review found that Python dictionary equality treats JSON booleans as
+equal to integers of value zero or one; the type-sensitive correction below
+closes that gap.
 Coverage, actor, effective-rule ID linkage, immutable controls, freeze
 controls, write fences, and lifecycle gates remain unchanged. The captured
 compatibility packet is identified by logical custody ID
@@ -780,10 +783,10 @@ Verification on the corrected implementation and test source:
 
 The positive fixture verifies the full nine-field object together with the
 intended principal roles, exact effective-rule IDs, actors, coverage, and
-freeze controls. Negative cases change each of the nine fields in turn, omit
-a field, or add an unknown field. Each case rejects the principal move before
-any provider write or Git push. Earlier 76- and 181-test runs are predecessor
-evidence only and are not presented as results for this successor. This
+freeze controls. The initial negative cases changed ordinary values, omitted
+a field, or added an unknown field. They did not cover boolean/integer type
+aliases. Earlier 76- and 181-test runs are predecessor evidence only and are
+not presented as results for this successor. This
 evidence appendix was written after the test run; the lifecycle test module
 does not load it. Exact source identities, raw command output, workflow and
 15-module closure, the protected-source comparison, predecessor records, and
@@ -797,3 +800,43 @@ limitation remains unchanged because the local depot lacks `AbstractTrees`;
 no install or retry was made. The compatibility correction does not close
 the pending independent SPEC, STANDARDS, or SECURITY reviews and grants no
 rehearsal, publication, merge, release, or lifecycle-operation approval.
+
+## Type-sensitive provider-parameter correction (local-only; 2026-11-01)
+
+The affected SPEC and STANDARDS reviews of local candidate
+`29f017285f2071a5741b9cec7553d57f85c76755` each returned REQUEST_CHANGES with
+one blocking P2 finding. SPEC finding `CYAX125-SPEC-29f01728-F01` is bound to
+report SHA-256
+`c1bb8397295965fd77c6ed1577748ae408e98198f78fec2dc1180134ca9b7621`;
+STANDARDS finding `CYAX125-STD-29f01728-F01` is bound to report SHA-256
+`4c12aa2657227360698c39fa7d53ff366b99558e62ab39d89e13d3eedfca36f3`.
+The retained independent probes showed that `false`/`0` and `true`/`1`
+aliases in top-level and nested review parameters passed Python dictionary
+equality, produced live-policy evidence, and reached an intercepted push in
+the fixture CAS path. The probes used fake transport and temporary Git
+history; no provider, network, or remote-ref write occurred.
+
+The complete canonical rule arrays are now compared as canonical JSON bytes.
+This preserves the exact nine-field object, nested JSON types, array order,
+unknown-field rejection, actor requirements, coverage, and effective-rule
+linkage. It makes no provider policy change and applies no coercion or field
+filtering.
+
+The focused offline test module passed with exit 0: 38 tests in 6.021 seconds.
+Its positive full-CAS fixture verifies the exact pinned nine-field object and
+its JSON types through a successful simulated write/readback. The negative
+full-CAS fixture includes 18 cases: nine ordinary field mutations, missing
+and unknown fields, and seven boolean/integer aliases, including approval
+count `0` to `false` and nested dismissal `enabled: false` to `0`. Every
+negative case asserts zero API writes and zero intercepted Git pushes. The
+push interception returns locally and cannot contact a remote. Exact raw
+output, test-time source identities, corrective diff, review reports, and
+probe records are preserved under logical custody ID
+`CYAX125-PROVIDER-COMPATIBILITY-TYPE-STRICT-20261101`.
+
+No provider request, credentials, settings change, setup POST, ref/trigger,
+rehearsal, cleanup, publication, or network action was used. The correction
+is a local descendant of the reviewed candidate and changes only the same
+three authorized paths. Independent SPEC, STANDARDS, and SECURITY rechecks
+remain required. No approval for rehearsal, publication, merge, release, or
+lifecycle operation is claimed.

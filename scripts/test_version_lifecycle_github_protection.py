@@ -28,6 +28,7 @@ from version_lifecycle.github_protection import (  # noqa: E402
     classify_ref_creation,
     validate_rehearsal_trigger,
 )
+from version_lifecycle.codec import canonical_json  # noqa: E402
 
 
 REPOSITORY = "Julia-meets-String-Theory/CYAxiverse.jl"
@@ -783,6 +784,23 @@ class GitHubProtectionTests(unittest.TestCase):
                 review_ruleset["rules"][0]["parameters"],
                 REHEARSAL_PR_REVIEW_PARAMETERS,
             )
+            exact_parameters = review_ruleset["rules"][0]["parameters"]
+            self.assertEqual(
+                canonical_json(exact_parameters),
+                canonical_json(REHEARSAL_PR_REVIEW_PARAMETERS),
+            )
+            self.assertIs(
+                type(exact_parameters["required_approving_review_count"]), int
+            )
+            self.assertIs(exact_parameters["dismiss_stale_reviews_on_push"], False)
+            self.assertIs(exact_parameters["require_code_owner_review"], False)
+            self.assertIs(exact_parameters["require_last_push_approval"], False)
+            self.assertIs(exact_parameters["required_review_thread_resolution"], False)
+            self.assertIs(
+                exact_parameters["require_extra_approval_for_unattributed_changes"],
+                True,
+            )
+            self.assertIs(exact_parameters["dismissal_restriction"]["enabled"], False)
             self.assertTrue(
                 adapter.is_live_rehearsal_rules_evidence(
                     positive_evidence,
@@ -1148,6 +1166,13 @@ class GitHubProtectionTests(unittest.TestCase):
             "allowed_merge_methods",
             "missing_parameter",
             "unknown_parameter",
+            "type_alias_count_zero_to_false",
+            "type_alias_stale_reviews_false_to_zero",
+            "type_alias_code_owner_false_to_zero",
+            "type_alias_last_push_false_to_zero",
+            "type_alias_thread_resolution_false_to_zero",
+            "type_alias_extra_approval_true_to_one",
+            "type_alias_dismissal_enabled_false_to_zero",
         )
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -1196,6 +1221,22 @@ class GitHubProtectionTests(unittest.TestCase):
                         parameters[case] = ["merge", "squash"]
                     elif case == "missing_parameter":
                         del parameters["required_review_thread_resolution"]
+                    elif case == "type_alias_count_zero_to_false":
+                        parameters["required_approving_review_count"] = False
+                    elif case == "type_alias_stale_reviews_false_to_zero":
+                        parameters["dismiss_stale_reviews_on_push"] = 0
+                    elif case == "type_alias_code_owner_false_to_zero":
+                        parameters["require_code_owner_review"] = 0
+                    elif case == "type_alias_last_push_false_to_zero":
+                        parameters["require_last_push_approval"] = 0
+                    elif case == "type_alias_thread_resolution_false_to_zero":
+                        parameters["required_review_thread_resolution"] = 0
+                    elif case == "type_alias_extra_approval_true_to_one":
+                        parameters[
+                            "require_extra_approval_for_unattributed_changes"
+                        ] = 1
+                    elif case == "type_alias_dismissal_enabled_false_to_zero":
+                        parameters["dismissal_restriction"]["enabled"] = 0
                     else:
                         parameters["future_rule_parameter"] = False
                     fake.branch_shas[branch] = old
@@ -1212,6 +1253,9 @@ class GitHubProtectionTests(unittest.TestCase):
                     def record_push(command, **kwargs):
                         if command[0] == "git" and "push" in command:
                             pushes.append(command)
+                            return subprocess.CompletedProcess(
+                                command, 1, b"", b"fixture push intercepted"
+                            )
                         return original_run(command, **kwargs)
 
                     with mock.patch(
@@ -1233,8 +1277,10 @@ class GitHubProtectionTests(unittest.TestCase):
                                 },
                             )
                     self.assertEqual(pushes, [])
+                    self.assertEqual(fake.object_write_calls, 0)
                     self.assertFalse(any(
-                        call[0] in {"POST", "PUT", "PATCH"} for call in fake.calls
+                        call[0] in {"POST", "PUT", "PATCH", "DELETE"}
+                        for call in fake.calls
                     ))
 
     def test_principal_move_requires_active_freeze_and_exact_effective_binding(self) -> None:

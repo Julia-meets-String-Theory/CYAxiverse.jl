@@ -1797,7 +1797,12 @@ class GitHubProtectionAdapter:
                 and ruleset.include == include
                 and not ruleset.exclude
                 and not ruleset.conditions_extra
-                and ruleset.rules == canonical_expected_rules
+                # Python equality treats JSON booleans as integers (False == 0,
+                # True == 1), so compare canonical bytes for exact JSON types.
+                and (
+                    canonical_json(ruleset.rules)
+                    == canonical_json(canonical_expected_rules)
+                )
                 and self._exact_actors(ruleset) == expected_actors
                 and self._exact_rehearsal_actors(ruleset, expected_actors)
             ]
