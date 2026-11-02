@@ -1391,9 +1391,10 @@ def validate_route_request_bytes(raw: bytes) -> ValidatedRouteRequest:
 class SeedReceiptError(RehearsalError):
     """Fail-closed seed validation error with a closed, hash-only receipt."""
 
-    def __init__(self, receipt: Mapping[str, Any]) -> None:
+    def __init__(self, receipt: Mapping[str, Any], observations: Any = None) -> None:
         super().__init__(str(receipt["reason"]))
         self.failure_receipt = dict(receipt)
+        self.observation_preimage = tuple(dict(item) for item in (observations or ()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1402,6 +1403,23 @@ class SeedReceiptEvidence:
     bundle_sha256: str
     verified_roles: tuple[str, ...]
     live_observation_sha256: str
+    request_id: str
+    request_sha256: str
+    plan_sha256: str
+    observations: tuple[Mapping[str, Any], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "status": self.status,
+            "bundle_sha256": self.bundle_sha256,
+            "verified_roles": list(self.verified_roles),
+            "live_observation_sha256": self.live_observation_sha256,
+            "request_id": self.request_id,
+            "request_sha256": self.request_sha256,
+            "plan_sha256": self.plan_sha256,
+            "observations": [dict(item) for item in self.observations],
+        }
 
 
 def _seed_failure(
@@ -1413,7 +1431,8 @@ def _seed_failure(
     known_ref_sha: str | None = None,
     observations: Any = None,
 ) -> SeedReceiptError:
-    observation_bytes = _canonical(observations if observations is not None else {})
+    preserved = [dict(item) for item in (observations or ())]
+    observation_bytes = _canonical(preserved)
     receipt = {
         "schema_version": 1,
         "status": status,
@@ -1427,7 +1446,156 @@ def _seed_failure(
     }
     if not _schema_matches(receipt, SEED_FAILURE_RECEIPT_SCHEMA):
         raise RehearsalError("SEED_FAILURE_RECEIPT_SCHEMA_INVALID")
-    return SeedReceiptError(receipt)
+    return SeedReceiptError(receipt, preserved)
+
+
+_SEED_OBSERVATION_HEADERS = frozenset({
+    "content-type", "date", "etag", "last-modified", "x-github-request-id",
+})
+
+
+def _seed_live_observation(
+    *, role: str | None, kind: str, path: str, response: ApiResponse,
+    started_at: str, completed_at: str,
+) -> dict[str, Any]:
+    body = bytes(response.body)
+    if len(body) > MAX_PROVIDER_BODY:
+        raise ValueError("SEED_LIVE_RESPONSE_OVERSIZE")
+    headers = {
+        str(key).lower(): str(value)
+        for key, value in response.headers.items()
+        if str(key).lower() in _SEED_OBSERVATION_HEADERS
+    }
+    return {
+        "method": "GET", "path": path, "role": role, "kind": kind,
+        "started_at": started_at, "completed_at": completed_at,
+        "status": response.status, "headers": headers,
+        "body_b64": base64.b64encode(body).decode("ascii"),
+        "body_sha256": sha256_hex(body), "body_bytes": len(body),
+    }
+
+
+def _seed_get_observation(
+    transport: "AnonymousTransport", observations: list[dict[str, Any]],
+    *, role: str | None, kind: str, path: str,
+) -> ApiResponse:
+    started_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+    try:
+        response = transport.get(path)
+    except Exception:
+        observations.append({
+            "method": "GET", "path": path, "role": role, "kind": kind,
+            "started_at": started_at,
+            "completed_at": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+            "outcome": "TRANSPORT_EXCEPTION",
+        })
+        raise
+    observations.append(_seed_live_observation(
+        role=role, kind=kind, path=path, response=response,
+        started_at=started_at,
+        completed_at=datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+    ))
+    return response
+
+
+def serialize_seed_receipt_evidence(evidence: SeedReceiptEvidence) -> bytes:
+    if not isinstance(evidence, SeedReceiptEvidence) or evidence.status != "PASS_ACCEPTED":
+        raise RehearsalError("SEED_EVIDENCE_INVALID")
+    value = evidence.to_dict()
+    value["evidence_sha256"] = sha256_hex(_canonical(value))
+    return _canonical(value)
+
+
+def rehydrate_seed_receipt_evidence(
+    raw: bytes, request: ValidatedRouteRequest,
+) -> SeedReceiptEvidence:
+    try:
+        value = _strict_loads(raw)
+        if _canonical(value) != raw:
+            raise ValueError
+        if not isinstance(value, dict) or set(value) != {
+            "schema_version", "status", "bundle_sha256", "verified_roles",
+            "live_observation_sha256", "request_id", "request_sha256",
+            "plan_sha256", "observations", "evidence_sha256",
+        }:
+            raise ValueError
+        digest = value.pop("evidence_sha256")
+        if digest != sha256_hex(_canonical(value)):
+            raise ValueError
+        if (
+            value["schema_version"] != 1 or value["status"] != "PASS_ACCEPTED"
+            or value["request_id"] != request.request_id
+            or value["request_sha256"] != request.request_sha256
+            or value["plan_sha256"] != request.plan_sha256
+            or value["bundle_sha256"] != sha256_hex(_canonical(request.request["seed_receipt_bundle"]))
+            or value["verified_roles"] != list(_SEED_ROLES)
+            or not isinstance(value["observations"], list)
+            or len(value["observations"]) != 7
+        ):
+            raise ValueError
+        expected_paths = [
+            item
+            for record in request.request["seed_receipt_bundle"]["records"]
+            for item in (
+                (record["role"], "comment", f"/repos/{REPOSITORY}/issues/comments/{record['owner_receipt_comment_id']}"),
+                (record["role"], "current_ref", f"/repos/{REPOSITORY}/git/ref/{record['journal']['ref'].removeprefix('refs/') }"),
+            )
+        ] + [(None, "seed_commit", f"/repos/{REPOSITORY}/git/commits/{_SEED_TARGET_SHA}")]
+        for observation, expected in zip(value["observations"], expected_paths):
+            if not isinstance(observation, dict) or observation.get("outcome") is not None:
+                raise ValueError
+            if (observation.get("role"), observation.get("kind"), observation.get("path")) != expected:
+                raise ValueError
+            if observation.get("method") != "GET" or type(observation.get("status")) is not int:
+                raise ValueError
+            body = base64.b64decode(observation["body_b64"], validate=True)
+            if (
+                base64.b64encode(body).decode("ascii") != observation["body_b64"]
+                or len(body) != observation["body_bytes"]
+                or len(body) > MAX_PROVIDER_BODY
+                or sha256_hex(body) != observation["body_sha256"]
+                or not isinstance(observation.get("headers"), dict)
+                or set(observation["headers"]) - _SEED_OBSERVATION_HEADERS
+            ):
+                raise ValueError
+        if sha256_hex(_canonical(value["observations"])) != value["live_observation_sha256"]:
+            raise ValueError
+        return SeedReceiptEvidence(
+            value["status"], value["bundle_sha256"], tuple(value["verified_roles"]),
+            value["live_observation_sha256"], value["request_id"],
+            value["request_sha256"], value["plan_sha256"],
+            tuple(dict(item) for item in value["observations"]),
+        )
+    except Exception:
+        raise RehearsalError("SEED_EVIDENCE_REHYDRATION_INVALID") from None
+
+
+def serialize_seed_receipt_evidence_pair(
+    first: SeedReceiptEvidence, second: SeedReceiptEvidence,
+) -> bytes:
+    value = {"schema_version": 1, "first": first.to_dict(), "second": second.to_dict()}
+    return _canonical(value)
+
+
+def rehydrate_seed_receipt_evidence_pair(
+    raw: bytes, request: ValidatedRouteRequest,
+) -> dict[str, Any]:
+    try:
+        pair = _strict_loads(raw)
+        if _canonical(pair) != raw:
+            raise ValueError
+        if not isinstance(pair, dict) or set(pair) != {"schema_version", "first", "second"} or pair["schema_version"] != 1:
+            raise ValueError
+        evidence = []
+        for key in ("first", "second"):
+            encoded = dict(pair[key])
+            encoded["evidence_sha256"] = sha256_hex(_canonical(encoded))
+            evidence.append(rehydrate_seed_receipt_evidence(_canonical(encoded), request))
+        if evidence[0].live_observation_sha256 == evidence[1].live_observation_sha256:
+            raise ValueError
+        return {"schema_version": 1, "first": evidence[0].to_dict(), "second": evidence[1].to_dict()}
+    except Exception:
+        raise RehearsalError("SEED_EVIDENCE_PAIR_REHYDRATION_INVALID") from None
 
 
 def _decode_seed_envelope(value: Any, *, label: str) -> tuple[bytes, Any]:
@@ -1587,18 +1755,16 @@ def validate_seed_receipt_bundle(
             comment_id = record["owner_receipt_comment_id"]
             if type(comment_id) is not int or comment_id <= 0:
                 raise ValueError("SEED_COMMENT_ID_INVALID")
-            for label, raw in (("identity", identity_body), ("create", create_body), ("readback", readback_body)):
-                observations.append({"role": role, "kind": label, "sha256": sha256_hex(raw)})
             comment_path = f"/repos/{REPOSITORY}/issues/comments/{comment_id}"
             try:
-                comment_response = transport.get(comment_path)
+                comment_response = _seed_get_observation(
+                    transport, observations, role=role, kind="comment", path=comment_path,
+                )
             except Exception:
                 raise _seed_failure(
                     "BLOCKED_UNKNOWN", "SEED_COMMENT_READ_UNKNOWN", role=role,
                     journal_sha256=journal_hash, observations=observations,
                 ) from None
-            observations.append({"role": role, "kind": "comment", "path": comment_path,
-                                 "status": comment_response.status, "sha256": sha256_hex(comment_response.body)})
             if comment_response.status != 200:
                 raise _seed_failure(
                     "BLOCKED_NOT_VERIFIABLE"
@@ -1621,12 +1787,12 @@ def validate_seed_receipt_bundle(
                 raise ValueError("SEED_COMMENT_BINDING_INVALID")
             current_path = f"/repos/{REPOSITORY}/git/ref/{expected_ref.removeprefix('refs/')}"
             try:
-                current_response = transport.get(current_path)
+                current_response = _seed_get_observation(
+                    transport, observations, role=role, kind="current_ref", path=current_path,
+                )
             except Exception:
                 raise _seed_failure("BLOCKED_UNKNOWN", "SEED_CURRENT_REF_READ_UNKNOWN",
                                     role=role, journal_sha256=journal_hash, observations=observations) from None
-            observations.append({"role": role, "kind": "current_ref", "path": current_path,
-                                 "status": current_response.status, "sha256": sha256_hex(current_response.body)})
             if current_response.status == 404:
                 raise _seed_failure("BLOCKED_NOT_VERIFIABLE", "SEED_CURRENT_REF_ABSENT",
                                     role=role, journal_sha256=journal_hash, observations=observations)
@@ -1645,12 +1811,12 @@ def validate_seed_receipt_bundle(
 
         commit_path = f"/repos/{REPOSITORY}/git/commits/{_SEED_TARGET_SHA}"
         try:
-            commit_response = transport.get(commit_path)
+            commit_response = _seed_get_observation(
+                transport, observations, role=None, kind="seed_commit", path=commit_path,
+            )
         except Exception:
             raise _seed_failure("BLOCKED_UNKNOWN", "SEED_TARGET_COMMIT_READ_UNKNOWN",
                                 observations=observations) from None
-        observations.append({"kind": "seed_commit", "path": commit_path,
-                             "status": commit_response.status, "sha256": sha256_hex(commit_response.body)})
         if commit_response.status != 200:
             raise _seed_failure("BLOCKED_UNKNOWN", "SEED_TARGET_COMMIT_READ_UNKNOWN",
                                 role=None, observations=observations)
@@ -1663,7 +1829,9 @@ def validate_seed_receipt_bundle(
             raise ValueError("SEED_TARGET_TREE_MISMATCH")
         observation_digest = sha256_hex(_canonical(observations))
         return SeedReceiptEvidence(
-            "PASS_ACCEPTED", sha256_hex(_canonical(bundle)), _SEED_ROLES, observation_digest
+            "PASS_ACCEPTED", sha256_hex(_canonical(bundle)), _SEED_ROLES,
+            observation_digest, request.request_id, request.request_sha256,
+            request.plan_sha256, tuple(dict(item) for item in observations),
         )
     except SeedReceiptError:
         raise
@@ -2620,6 +2788,49 @@ def _p5_unknown(case_id: str, reason: str) -> Mapping[str, Any] | None:
     }
 
 
+def _expected_final_case_state(
+    operation: Mapping[str, Any], proof: Any, observation: CaseObservation
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Derive the exact state required for any result that can advance."""
+
+    if operation.get("case", "").startswith("4d-") and observation.status in {
+        "PASS_ACCEPTED", "STOP_OWNER_ACTION_REQUIRED",
+    }:
+        return None, "WORKFLOWS_CREATE_DISCRIMINATOR_UNQUALIFIED"
+    expected_result = operation.get("expected_result")
+    if observation.status == "PASS_ACCEPTED":
+        if expected_result not in {
+            "ACCEPT_EXACT_FF",
+            "ACCEPT_OR_WORKFLOW_CAPABILITY_STOP",
+            "READ_ONLY_CORROBORATION_NOT_TRIGGER_GUARD_PASS",
+        }:
+            return None, "CASE_TERMINAL_RESULT_CONTRACT_MISMATCH"
+        expected_sha = operation.get("target")
+    elif observation.status == "PASS_DENIED_TARGET_CONTROL":
+        if expected_result not in {
+            "DENY_TARGET_RULE", "REQUEST_ID_ALREADY_USED_NO_SECOND_DISPATCH",
+        }:
+            return None, "CASE_TERMINAL_RESULT_CONTRACT_MISMATCH"
+        expected_sha = getattr(proof, "ref_sha", None)
+    elif observation.status == "PASS_OWNER_ROUTE_NO_PUSH":
+        if expected_result != "OWNER_ROUTE_REQUIRED_NO_PUSH":
+            return None, "CASE_TERMINAL_RESULT_CONTRACT_MISMATCH"
+        expected_sha = getattr(proof, "ref_sha", None)
+    elif observation.status == "STOP_OWNER_ACTION_REQUIRED":
+        if expected_result not in {
+            "STOP_OWNER_ACTION_REQUIRED", "ACCEPT_OR_WORKFLOW_CAPABILITY_STOP",
+        }:
+            return None, "CASE_TERMINAL_RESULT_CONTRACT_MISMATCH"
+        expected_sha = getattr(proof, "ref_sha", None)
+    else:
+        return None, None
+    return {
+        "ref": getattr(proof, "ref", None),
+        "object_type": "commit" if expected_sha is not None else None,
+        "sha": expected_sha,
+    }, None
+
+
 def run_rehearsal(
     request: ValidatedRouteRequest,
     approval: VerifiedRunApproval,
@@ -2731,25 +2942,11 @@ def run_rehearsal(
                     },
                     p5_subresult=_p5_unknown(case_id, reason),
                 )
+            unreconciled_postproof: dict[str, Any] | None = None
             try:
                 observation = adapter.execute_case(
                     case_id, request, approval, proof
                 )
-                postproof = adapter.verify_rehearsal_freeze_epoch(
-                    request, case_id, "post"
-                )
-                if postproof is None or getattr(postproof, "generation", None) != getattr(
-                    proof, "generation", None
-                ):
-                    observation = CaseObservation(
-                        "BLOCKED_NOT_VERIFIABLE",
-                        {"reason": "FREEZE_EPOCH_CHANGED",
-                         "operation_evidence": dict(observation.evidence),
-                         "pre": getattr(proof, "to_dict", lambda: {})(),
-                         "post": getattr(postproof, "to_dict", lambda: {})()},
-                        failure_reason="FREEZE_EPOCH_CHANGED",
-                        p5_subresult=observation.p5_subresult,
-                    )
             except Exception as error:
                 reason = error.reason if isinstance(error, RehearsalError) else getattr(
                     error, "reason_code", "CASE_EXECUTION_UNKNOWN"
@@ -2761,10 +2958,134 @@ def run_rehearsal(
                     "BLOCKED_UNKNOWN" if unknown else "BLOCKED_NOT_VERIFIABLE",
                     {"reason": reason, "request_sha256": request.request_sha256,
                      "plan_sha256": request.plan_sha256,
-                     "approval_receipt_sha256": approval.receipt_sha256},
+                     "approval_receipt_sha256": approval.receipt_sha256,
+                     "pre": getattr(proof, "to_dict", lambda: {})()},
                     failure_reason=reason,
                     p5_subresult=_p5_unknown(case_id, reason),
                 )
+                try:
+                    postproof = adapter.verify_rehearsal_freeze_epoch(
+                        request, case_id, "post"
+                    )
+                    postproof_record = getattr(postproof, "to_dict", lambda: {})()
+                    generation_matches = (
+                        postproof is not None
+                        and getattr(postproof, "generation", None)
+                        == getattr(proof, "generation", None)
+                    )
+                    ref_matches = (
+                        postproof is not None
+                        and getattr(postproof, "ref", None) == getattr(proof, "ref", None)
+                    )
+                    final_reconciled = generation_matches and ref_matches
+                except Exception as post_error:
+                    post_reason = getattr(post_error, "reason_code", "FINAL_POSTPROOF_UNAVAILABLE")
+                    postproof_record = {"state": "UNKNOWN", "reason": post_reason}
+                    final_reconciled = False
+                observation = CaseObservation(
+                    "BLOCKED_UNKNOWN",
+                    {
+                        **dict(observation.evidence),
+                        "pre": getattr(proof, "to_dict", lambda: {})(),
+                        "post": postproof_record,
+                        "final_postproof_reconciled": final_reconciled,
+                    },
+                    failure_reason=observation.failure_reason or "CASE_EXECUTION_UNKNOWN",
+                    p5_subresult=observation.p5_subresult,
+                )
+                unreconciled_postproof = dict(observation.evidence)
+            else:
+                try:
+                    postproof = adapter.verify_rehearsal_freeze_epoch(
+                        request, case_id, "post"
+                    )
+                    postproof_record = getattr(postproof, "to_dict", lambda: {})()
+                except Exception as error:
+                    reason = error.reason if isinstance(error, RehearsalError) else getattr(
+                        error, "reason_code", "FINAL_POSTPROOF_UNAVAILABLE"
+                    )
+                    observation = CaseObservation(
+                        "BLOCKED_UNKNOWN",
+                        {"reason": "FINAL_POSTPROOF_UNAVAILABLE",
+                         "postproof_error": reason,
+                         "operation_evidence": dict(observation.evidence),
+                         "pre": getattr(proof, "to_dict", lambda: {})(),
+                         "post": {"state": "UNKNOWN"}},
+                        failure_reason="FINAL_POSTPROOF_UNAVAILABLE",
+                        p5_subresult=observation.p5_subresult,
+                    )
+                    unreconciled_postproof = dict(observation.evidence)
+                else:
+                    expected_state, contract_error = _expected_final_case_state(
+                        operation, proof, observation
+                    )
+                    generation_matches = (
+                        postproof is not None
+                        and getattr(postproof, "generation", None)
+                        == getattr(proof, "generation", None)
+                    )
+                    ref_matches = (
+                        postproof is not None
+                        and getattr(postproof, "ref", None) == getattr(proof, "ref", None)
+                    )
+                    if observation.status in {
+                        "PASS_ACCEPTED", "PASS_DENIED_TARGET_CONTROL",
+                        "PASS_OWNER_ROUTE_NO_PUSH", "STOP_OWNER_ACTION_REQUIRED",
+                    } and (
+                        contract_error is not None
+                        or expected_state is None
+                        or not generation_matches
+                        or not ref_matches
+                        or getattr(postproof, "ref_sha", None) != expected_state["sha"]
+                        or getattr(postproof, "ref_object_type", None)
+                        != expected_state["object_type"]
+                    ):
+                        reason = contract_error or "FINAL_POSTPROOF_STATE_UNRECONCILED"
+                        postproof_evidence = {
+                            "reason": reason,
+                            "expected_post_state": expected_state or {},
+                            "operation_evidence": dict(observation.evidence),
+                            "pre": getattr(proof, "to_dict", lambda: {})(),
+                            "post": postproof_record or {"state": "UNKNOWN"},
+                        }
+                        observation = CaseObservation(
+                            "BLOCKED_UNKNOWN", postproof_evidence,
+                            failure_reason=reason,
+                            p5_subresult=observation.p5_subresult,
+                        )
+                        unreconciled_postproof = postproof_evidence
+                    elif postproof is None or not generation_matches or not ref_matches:
+                        postproof_evidence = {
+                            "reason": "FREEZE_EPOCH_CHANGED",
+                            "operation_evidence": dict(observation.evidence),
+                            "pre": getattr(proof, "to_dict", lambda: {})(),
+                            "post": postproof_record or {"state": "UNKNOWN"},
+                        }
+                        observation = CaseObservation(
+                            "BLOCKED_UNKNOWN", postproof_evidence,
+                            failure_reason="FREEZE_EPOCH_CHANGED",
+                            p5_subresult=observation.p5_subresult,
+                        )
+                        unreconciled_postproof = postproof_evidence
+                    else:
+                        final_evidence = {
+                            **dict(observation.evidence),
+                            "final_postproof": {
+                                "generation_matches": generation_matches,
+                                "ref_matches": ref_matches,
+                                "expected_post_state": expected_state,
+                                "observed_ref": getattr(postproof, "ref", None),
+                                "observed_object_type": getattr(postproof, "ref_object_type", None),
+                                "observed_sha": getattr(postproof, "ref_sha", None),
+                                "post": postproof_record,
+                            },
+                        }
+                        observation = CaseObservation(
+                            observation.status, final_evidence,
+                            provider_status=observation.provider_status,
+                            failure_reason=observation.failure_reason,
+                            p5_subresult=observation.p5_subresult,
+                        )
             evidence = dict(observation.evidence)
             evidence.setdefault("request_sha256", request.request_sha256)
             evidence.setdefault("plan_sha256", request.plan_sha256)
@@ -2782,6 +3103,10 @@ def run_rehearsal(
                     {"reason": "CASE_RESULT_WRITE_UNKNOWN", "prior_evidence_sha256": result["evidence_sha256"]},
                     p5_subresult=observation.p5_subresult,
                 )
+            if unreconciled_postproof is not None:
+                retain = getattr(adapter, "retain_unreconciled_case_postproof", None)
+                if callable(retain):
+                    retain(request, case_id, unreconciled_postproof)
             if result["unresolved"] or case_id == "4g":
                 return result
     raise RehearsalError("DRIVER_SEQUENCE_TERMINAL_STATE_INVALID")
@@ -2798,6 +3123,8 @@ __all__ = [
     "ValidatedRouteRequest", "VerifiedRunApproval", "run_rehearsal",
     "CANONICAL_OPERATION_TABLE_SHA256", "rehydrate_approval_envelope",
     "serialize_approval_envelope",
+    "serialize_seed_receipt_evidence", "serialize_seed_receipt_evidence_pair",
+    "rehydrate_seed_receipt_evidence", "rehydrate_seed_receipt_evidence_pair",
     "validate_approval_receipt", "validate_driver_result",
     "validate_rehearsal_route_trigger", "validate_route_request_bytes",
     "validate_seed_receipt_bundle",

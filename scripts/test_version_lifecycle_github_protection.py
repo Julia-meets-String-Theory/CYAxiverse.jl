@@ -25,6 +25,7 @@ from version_lifecycle.github_protection import (  # noqa: E402
     GitHubProtectionAdapter,
     GitHubProtectionError,
     _decode_github_contents_base64,
+    _exact_fast_forward_push_report,
     _consume_qualified_4d_capability_evidence,
     classify_principal_branch_move,
     classify_ref_creation,
@@ -155,7 +156,7 @@ def rehearsal_tag_rulesets() -> list[dict[str, object]]:
             target="tag",
             include=["refs/tags/rehearsal/iterations/*"],
             rules=[rule("creation")],
-            actors=[ADMIN_BYPASS],
+            actors=[ADMIN_BYPASS, APP_BYPASS],
         ),
         ruleset(
             26316871,
@@ -502,6 +503,34 @@ class GitHubProtectionTests(unittest.TestCase):
         }
         return parent, commit, event
 
+    def test_porcelain_parser_requires_exact_remote_ref_and_update_range(self) -> None:
+        old, new = "a" * 40, "b" * 40
+        valid = (
+            f"To https://github.com/{REPOSITORY}.git\n"
+            f" \t{new}:refs/heads/rehearsal/principal/line\t{old[:7]}..{new[:7]}\nDone\n"
+        ).encode("ascii")
+        self.assertEqual(
+            _exact_fast_forward_push_report(
+                valid, remote=f"https://github.com/{REPOSITORY}.git",
+                ref="refs/heads/rehearsal/principal/line", old_sha=old, new_sha=new,
+            ),
+            (True, "EXACT_FAST_FORWARD_UPDATE_REPORTED"),
+        )
+        for invalid in (
+            valid.replace(b" \t", b"=\t"),
+            valid.replace(new.encode(), ("c" * 40).encode(), 1),
+            valid.replace(
+                f"To https://github.com/{REPOSITORY}.git".encode(),
+                b"To https://example.invalid/repo.git",
+            ),
+        ):
+            with self.subTest(report=invalid[:80]):
+                proven, _reason = _exact_fast_forward_push_report(
+                    invalid, remote=f"https://github.com/{REPOSITORY}.git",
+                    ref="refs/heads/rehearsal/principal/line", old_sha=old, new_sha=new,
+                )
+                self.assertFalse(proven)
+
     def test_real_transport_is_pinned_to_the_governed_github_api_host(self) -> None:
         with self.assertRaisesRegex(GitHubProtectionError, "API_ORIGIN_INVALID"):
             GitHubProtectionAdapter(
@@ -542,14 +571,19 @@ class GitHubProtectionTests(unittest.TestCase):
             "PYTHONPATH=scripts python3 - <<'PY'\n          import json\n          import os",
             workflow,
         )
-        self.assertIn("validate_seed_receipt_bundle(route_request, AnonymousGitHubTransport())", workflow)
-        self.assertIn("validate_seed_receipt_bundle(request, AnonymousGitHubTransport())", workflow)
+        self.assertIn("seed_evidence = validate_seed_receipt_bundle(", workflow)
+        self.assertIn("route_request, AnonymousGitHubTransport()", workflow)
+        self.assertIn("second = validate_seed_receipt_bundle(request, AnonymousGitHubTransport())", workflow)
+        self.assertIn("serialize_seed_receipt_evidence(seed_evidence)", workflow)
+        self.assertIn("serialize_seed_receipt_evidence_pair(first, second)", workflow)
+        self.assertIn("rehydrate_seed_receipt_evidence_pair(", workflow)
+        self.assertIn('seed_validation_evidence=Path(os.environ["SEED_VALIDATION_PAIR_PATH"]).read_bytes()', workflow)
         self.assertLess(
-            workflow.index("validate_seed_receipt_bundle(route_request, AnonymousGitHubTransport())"),
+            workflow.index("seed_evidence = validate_seed_receipt_bundle("),
             workflow.index('output.write("route_mode=true\\n")'),
         )
         self.assertLess(
-            workflow.index("validate_seed_receipt_bundle(request, AnonymousGitHubTransport())"),
+            workflow.index("second = validate_seed_receipt_bundle(request, AnonymousGitHubTransport())"),
             workflow.index("private_key = OpenSSL::PKey::RSA.new"),
         )
         self.assertNotIn("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT", workflow)
@@ -887,7 +921,11 @@ class GitHubProtectionTests(unittest.TestCase):
                     push_calls.append(command)
                     push_environments.append(kwargs["env"])
                     fake.branch_shas[branch] = new
-                    return subprocess.CompletedProcess(command, 0, b"", b"")
+                    report = (
+                        f"To https://github.com/{REPOSITORY}.git\n"
+                        f" \t{new}:refs/heads/{branch}\t{old[:7]}..{new[:7]}\nDone\n"
+                    ).encode("ascii")
+                    return subprocess.CompletedProcess(command, 0, report, b"")
                 return original_run(command, **kwargs)
 
             expected_rules = fake.principal_evaluated_rules
@@ -953,6 +991,117 @@ class GitHubProtectionTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     GitHubProtectionError, "CAS_STALE_EXPECTED_OLD"
+                ):
+                    adapter.compare_and_swap_rehearsal_principal(
+                        root, ref=f"refs/heads/{branch}", expected_old_sha=old,
+                        intended_new_sha=new, intended_new_tree=tree, intent=intent,
+                    )
+            self.assertEqual(push_calls, [])
+
+            fake.branch_shas[branch] = old
+            push_calls.clear()
+            def same_target_noop(command, **kwargs):
+                if command[0] == "git" and "push" in command:
+                    push_calls.append(command)
+                    fake.branch_shas[branch] = new
+                    report = (
+                        f"To https://github.com/{REPOSITORY}.git\n"
+                        f"=\t{new}:refs/heads/{branch}\t[up to date]\nDone\n"
+                    ).encode("ascii")
+                    return subprocess.CompletedProcess(command, 0, report, b"")
+                return original_run(command, **kwargs)
+            with mock.patch(
+                "version_lifecycle.github_protection.subprocess.run",
+                side_effect=same_target_noop,
+            ):
+                with self.assertRaisesRegex(
+                    GitHubProtectionError, "REF_MOVE_CAS_UPDATE_UNPROVEN"
+                ):
+                    adapter.compare_and_swap_rehearsal_principal(
+                        root, ref=f"refs/heads/{branch}", expected_old_sha=old,
+                        intended_new_sha=new, intended_new_tree=tree, intent=intent,
+                    )
+            self.assertEqual(len(push_calls), 1)
+            self.assertIn(f"refs/heads/{branch}", adapter._unreconciled_branch_moves)
+            with mock.patch(
+                "version_lifecycle.github_protection.subprocess.run",
+                side_effect=same_target_noop,
+            ):
+                with self.assertRaisesRegex(
+                    GitHubProtectionError, "REF_MOVE_UNRECONCILED"
+                ):
+                    adapter.compare_and_swap_rehearsal_principal(
+                        root, ref=f"refs/heads/{branch}", expected_old_sha=old,
+                        intended_new_sha=new, intended_new_tree=tree, intent=intent,
+                    )
+            self.assertEqual(len(push_calls), 1)
+
+            fake.branch_shas[branch] = old
+            postwrite_adapter = GitHubProtectionAdapter(
+                REPOSITORY, token="private-token", transport=fake,
+                authorization_gate=lambda *_args: True,
+                rehearsal_gate=lambda *_args: True,
+            )
+            postwrite_positive_evidence = postwrite_adapter._require_rehearsal_rules(
+                f"refs/heads/{branch}", policy="principal-move"
+            )
+            postwrite_pushes = []
+            def postwrite_push(command, **kwargs):
+                if command[0] == "git" and "push" in command:
+                    postwrite_pushes.append(command)
+                    fake.branch_shas[branch] = new
+                    report = (
+                        f"To https://github.com/{REPOSITORY}.git\n"
+                        f" \t{new}:refs/heads/{branch}\t{old[:7]}..{new[:7]}\nDone\n"
+                    ).encode("ascii")
+                    return subprocess.CompletedProcess(command, 0, report, b"")
+                return original_run(command, **kwargs)
+            with (
+                mock.patch.object(
+                    postwrite_adapter, "_require_rehearsal_rules",
+                    side_effect=[
+                        postwrite_positive_evidence, postwrite_positive_evidence,
+                        RuntimeError("postwrite read failed"),
+                    ],
+                ),
+                mock.patch(
+                    "version_lifecycle.github_protection.subprocess.run",
+                    side_effect=postwrite_push,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    GitHubProtectionError, "REF_MOVE_POSTWRITE_UNVERIFIED"
+                ) as postwrite_error:
+                    postwrite_adapter.compare_and_swap_rehearsal_principal(
+                        root, ref=f"refs/heads/{branch}", expected_old_sha=old,
+                        intended_new_sha=new, intended_new_tree=tree, intent=intent,
+                    )
+            self.assertEqual(
+                postwrite_error.exception.evidence["postwrite_rules_evidence"]["state"],
+                "UNKNOWN",
+            )
+            self.assertIn(f"refs/heads/{branch}", postwrite_adapter._unreconciled_branch_moves)
+            with mock.patch(
+                "version_lifecycle.github_protection.subprocess.run",
+                side_effect=postwrite_push,
+            ):
+                with self.assertRaisesRegex(
+                    GitHubProtectionError, "REF_MOVE_UNRECONCILED"
+                ):
+                    postwrite_adapter.compare_and_swap_rehearsal_principal(
+                        root, ref=f"refs/heads/{branch}", expected_old_sha=old,
+                        intended_new_sha=new, intended_new_tree=tree, intent=intent,
+                    )
+            self.assertEqual(len(postwrite_pushes), 1)
+
+            fake.branch_shas[branch] = SHA_B
+            push_calls.clear()
+            with mock.patch(
+                "version_lifecycle.github_protection.subprocess.run",
+                side_effect=successful_push,
+            ):
+                with self.assertRaisesRegex(
+                    GitHubProtectionError, "REF_MOVE_UNRECONCILED"
                 ):
                     adapter.compare_and_swap_rehearsal_principal(
                         root,
@@ -1794,6 +1943,29 @@ class GitHubProtectionTests(unittest.TestCase):
         ))
 
     def test_tag_derivation_blocks_unknown_patterns_missing_bypass_and_page_cap(self) -> None:
+        expected = rehearsal_tag_rulesets()
+        creation = next(row for row in expected if row["id"] == 26316870)
+        immutable = next(row for row in expected if row["id"] == 26316871)
+        canonical = next(row for row in expected if row["id"] == 26316872)
+        self.assertEqual(
+            creation["bypass_actors"], [ADMIN_BYPASS, APP_BYPASS]
+        )
+        self.assertEqual(immutable["bypass_actors"], [])
+        self.assertEqual(canonical["bypass_actors"], [ADMIN_BYPASS])
+
+        for altered in (
+            [actor for actor in creation["bypass_actors"] if actor["actor_id"] != 5371554],
+            [*creation["bypass_actors"], {"actor_id": 999, "actor_type": "Team", "bypass_mode": "always"}],
+        ):
+            fake = FakeGitHub()
+            fake.rows.extend(rehearsal_tag_rulesets())
+            next(row for row in fake.rows if row["id"] == 26316870)["bypass_actors"] = altered
+            with self.assertRaisesRegex(GitHubProtectionError, "TAG_RULESET_"):
+                adapter_for(fake).observe_rules_for_ref(
+                    "refs/tags/rehearsal/iterations/cyax125-20261101",
+                    _allow_rehearsal_tag=True,
+                )
+
         fake = FakeGitHub()
         fake.rows.extend(rehearsal_tag_rulesets())
         next(row for row in fake.rows if row["id"] == 26316870)["conditions"]["ref_name"]["include"] = [
@@ -1846,18 +2018,83 @@ class GitHubProtectionTests(unittest.TestCase):
         request_id = "request-0125-1"
         request_path = f"lifecycle-requests/{request_id}.json"
         raw_request = b"x" * (1024 * 1024 + 1)
-        response_body = json.dumps({
-            "path": request_path,
-            "encoding": "base64",
-            "content": base64.b64encode(raw_request).decode("ascii"),
+        blob_sha = hashlib.sha1(
+            b"blob " + str(len(raw_request)).encode("ascii") + b"\0" + raw_request
+        ).hexdigest()
+        metadata_body = json.dumps({
+            "path": request_path, "type": "file", "encoding": "none",
+            "content": "", "size": len(raw_request), "sha": blob_sha,
         }).encode("utf-8")
         large_adapter = GitHubProtectionAdapter(
             REPOSITORY,
             token="private-token",
-            transport=lambda *_args: ApiResponse(200, response_body, {}),
+            api_base="https://api.github.com",
         )
-        request = mock.Mock(request_id=request_id, request_path=request_path)
-        self.assertEqual(large_adapter._read_fenced_route_request(request), raw_request)
+        request = mock.Mock(
+            request_id=request_id, request_path=request_path,
+            request_bytes=raw_request, request_sha256=hashlib.sha256(raw_request).hexdigest(),
+        )
+        class HTTPResponse:
+            def __init__(self, body):
+                self.status = 200
+                self.headers = {"Content-Type": "application/json"}
+                self.body = body
+                self.read_limit = None
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return None
+            def read(self, limit):
+                self.read_limit = limit
+                return self.body
+        class Opener:
+            def __init__(self):
+                self.requests = []
+                self.responses = [HTTPResponse(metadata_body), HTTPResponse(raw_request)]
+            def open(self, request, timeout):
+                self.requests.append(request)
+                return self.responses[len(self.requests) - 1]
+        opener = Opener()
+        with mock.patch(
+            "version_lifecycle.github_protection.build_opener", return_value=opener
+        ):
+            observed, evidence = large_adapter._read_fenced_route_request(
+                request, with_evidence=True
+            )
+        self.assertEqual(observed, raw_request)
+        self.assertEqual(
+            [item.headers["Accept"] for item in opener.requests],
+            ["application/vnd.github.object+json", "application/vnd.github.raw+json"],
+        )
+        self.assertTrue(all(item.read_limit <= 12 * 1024 * 1024 + 1 for item in opener.responses))
+        self.assertEqual(evidence["transport"], "contents-object-metadata-then-raw")
+        self.assertEqual(evidence["request_ref"], f"refs/heads/rehearsal/lifecycle/requests/{request_id}")
+        self.assertEqual(evidence["object"]["git_blob_sha"], blob_sha)
+        self.assertEqual(evidence["object"]["path"], request_path)
+        self.assertEqual(evidence["object"]["size"], len(raw_request))
+
+        mismatched_metadata_body = json.dumps({
+            "path": f"other/{request_path}", "type": "file", "encoding": "none",
+            "content": "", "size": len(raw_request), "sha": blob_sha,
+        }).encode("utf-8")
+        mismatch_request = mock.Mock(
+            request_id=request_id, request_path=request_path,
+            request_bytes=raw_request, request_sha256=hashlib.sha256(raw_request).hexdigest(),
+        )
+        with mock.patch.object(large_adapter, "_api_request", side_effect=[
+            ApiResponse(200, mismatched_metadata_body, {}),
+        ]) as api:
+            with self.assertRaisesRegex(GitHubProtectionError, "REQUEST_FENCE_CONTENT_INVALID"):
+                large_adapter._read_fenced_route_request(mismatch_request)
+        self.assertEqual(api.call_count, 1)
+
+        too_large = mock.Mock(
+            request_id=request_id, request_path=request_path,
+            request_bytes=b"x" * (12 * 1024 * 1024 + 1),
+            request_sha256="0" * 64,
+        )
+        with self.assertRaisesRegex(GitHubProtectionError, "REQUEST_FENCE_CONTENT_INVALID"):
+            large_adapter._read_fenced_route_request(too_large)
 
     def test_4d_closed_evidence_consumer_runs_nested_classifier_without_provider_claim(self) -> None:
         from version_lifecycle.rehearsal import _canonical

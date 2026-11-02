@@ -1035,3 +1035,54 @@ or local fixtures. No actual provider request, credential access, key read,
 token mint, ref/comment/settings mutation, workflow run, publication, merge,
 or release occurred. The candidate remains pending the independent SPEC,
 STANDARDS, and SECURITY reviews.
+
+## Final same-primary runtime correction (local-only; 2026-11-02)
+
+This correction is bound to the exact six-path commission based on
+`f2cea7636f7b0f3b156e2ddba2dbc0e89873c278`. It addresses the commissioned
+runtime boundaries as follows:
+
+| Group | Finding IDs | Correction and limit |
+| --- | --- | --- |
+| R01 | `CYAX125-RUNTIME-F2CEA763-SPEC-F10`, `CYAX125-STD-f2cea763-F03`, `CYAX125-RUNTIME-BABCE8D7-SPEC-F05` | P5 hashes retrieved evidence with the same nullable route canonical encoding used by its producer. Ref states become explicit JSON objects. Regressions carry actual duplicate evidence through result serialization, append, retrieval, and digest verification. |
+| R02 | `CYAX125-RUNTIME-BABCE8D7-SPEC-F08` | Each final freeze proof is checked against the fixed case's expected ref and object state before PASS or advancement. Contradictory or unknown state blocks advancement and retains the unresolved marker. |
+| R03 | `CYAX125-STD-f2cea763-F01`, `CYAX125-STD-f2cea763-F02` | Exact-old Git CAS accepts only an unambiguous porcelain fast-forward update to the intended ref and SHA. An up-to-date no-op is rejected. Post-write state becomes unknown before readback, and an unresolved write blocks retry. |
+| R04 | `CYAX125-STD-f2cea763-F04` | Two fresh seed validations retain bounded raw GET observations and their canonical bindings through the workflow handoff and first durable claim. Failure evidence retains the raw observation preimage before key use. |
+| R05 | `CYAX125-STD-f2cea763-F05` | Iteration creation requires the exact Admin and App bypass actors; immutability remains bypass-free, and canonical ruleset creation remains Admin-only. No provider setting was changed. |
+| R06 | `CYAX125-STD-f2cea763-F06` | Admitted Contents reads above 1 MiB use fixed object metadata and raw media requests with bounded bodies, no redirects, and exact path, ref, Git blob SHA, size, and byte-hash checks. |
+| R07 | `CYAX125-RUNTIME-BABCE8D7-SPEC-F01`, `SEC-F2C-01-4D` | Remains `BLOCKED_NOT_VERIFIABLE`. No qualified real Workflows-denial discriminator or redacted provider fixture was supplied. Generic denials, authentication failures, network failures, unknown readbacks, and changed state do not pass. No full-route positive acceptance is claimed. |
+
+The correction preserves the original 19 finding identities:
+SPEC `CYAX125-RUNTIME-BABCE8D7-SPEC-F01` through `-F09`, STANDARDS
+`CYAX125-STD-babce8d7-F01` through `-F07`, and SECURITY `SEC-BABCE-F01`
+through `-F03`. The affected f2cea successor findings are the IDs in the
+table above. No unrelated 19th or 20th candidate dispositions are transferred.
+The retained f2cea report set and correction commission remain the source of
+the exact finding text and authority.
+
+Offline verification on the corrected source:
+
+| Check | Result |
+| --- | --- |
+| Selected boundary regressions | Passed: 12 tests, exit 0 (0.413 seconds). |
+| Full lifecycle suite after fixture correction | Passed: 222 tests, exit 0 (22.140 seconds); a later retained rerun also passed 222 tests (26.111 seconds). |
+| Earlier combined suite attempt | Failed with one error in the wrapped fenced-request fixture, which lacked the exact Contents response metadata. The fixture was corrected; this run and earlier focused failures remain in private custody. |
+| Ruby YAML parse and embedded Ruby syntax check | Passed. |
+| Python AST checks for both runtime modules and both test modules | Passed. |
+| `git diff --check` | Passed. |
+
+Private custody package `cyax125-f2cea-correction-custody-20261102` retains
+the review inputs and reports, source snapshots, 16-module closure, protected
+source manifest, and passing and failing raw run logs. Its artifact manifest
+SHA-256 is
+`d9d6e844232c73db81f2b4410bc72c366203691bffbe2994f7795f5ead0bf32a`.
+The original protected-source manifest SHA-256 is
+`db794ca4baba0dfb78e088370d6d3ed4d6b40d96e072078c5b6f001f80da7e61` and
+binds 638 entries; all remain unchanged in the frozen correction.
+
+All test provider behavior used synthetic responses or local Git fixtures.
+No provider request, credential or key read, token mint, external ref or
+comment mutation, settings change, workflow run, publication, merge, or
+release occurred. The candidate is not self-accepted. Original affected SPEC,
+STANDARDS, and SECURITY acceptance remains pending, and this evidence does
+not claim R07, full runtime readiness, or Gate A completion.

@@ -12,6 +12,7 @@ import base64
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 import re
@@ -48,6 +49,7 @@ _FREEZE_CONTROLS = {
 _PUBLIC_TAG_IMMUTABLE_ID = 23948086
 _PUBLIC_TAG_CREATION_ID = 23948090
 _PUBLIC_TAG_PATTERN = "refs/tags/v*.*.*"
+_APP_ID = 5371554
 _DERIVED_TAG_RULE_SOURCE = "DERIVED_FROM_FULL_CURRENT_DEFINITIONS_NOT_PROVIDER_EFFECTIVE_TAG_EVALUATION"
 _TAG_RULESET_EXPECTATIONS = {
     23948086: {
@@ -60,7 +62,8 @@ _TAG_RULESET_EXPECTATIONS = {
     },
     26316870: {
         "include": ("refs/tags/rehearsal/iterations/*",), "exclude": (),
-        "rule_types": ("creation",), "actors": ((5, "RepositoryRole", "always"),),
+        "rule_types": ("creation",),
+        "actors": ((5, "RepositoryRole", "always"), (_APP_ID, "Integration", "always")),
     },
     26316871: {
         "include": ("refs/tags/rehearsal/iterations/*",), "exclude": (),
@@ -75,9 +78,13 @@ _FULL_REF_SHA = re.compile(r"[0-9a-f]{40}\Z")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?\Z")
 _APP_LOGIN = "cyaxiverse-lifecycle[bot]"
 _APP_INSTALLATION_ID = 172789630
-_APP_ID = 5371554
 _MAX_API_RESPONSE_BYTES = 1024 * 1024
+_MAX_JSON_FENCED_REQUEST_RESPONSE_BYTES = 2 * 1024 * 1024
+_MAX_RAW_FENCED_REQUEST_RESPONSE_BYTES = 12 * 1024 * 1024
 _MAX_FENCED_REQUEST_RESPONSE_BYTES = 17 * 1024 * 1024
+_GITHUB_JSON_MEDIA_TYPE = "application/vnd.github+json"
+_GITHUB_OBJECT_MEDIA_TYPE = "application/vnd.github.object+json"
+_GITHUB_RAW_MEDIA_TYPE = "application/vnd.github.raw+json"
 _REHEARSAL_LIFECYCLE_PATTERN = "refs/heads/rehearsal/lifecycle/**"
 _REHEARSAL_PRINCIPAL_PATTERN = "refs/heads/rehearsal/principal/*"
 _REHEARSAL_ADMIN_BYPASS = (5, "RepositoryRole", "always")
@@ -134,6 +141,17 @@ def _case_response_evidence(response: ApiResponse) -> dict[str, Any]:
         "body_b64": base64.b64encode(response.body).decode("ascii"),
         "body_sha256": sha256_hex(response.body),
         "body_bytes": len(response.body),
+    }
+
+
+def _ref_state_evidence(value: tuple[str, str] | None) -> dict[str, Any]:
+    """Return a JSON-compatible ref observation without losing absence."""
+
+    return {
+        "known": True,
+        "object_type": value[0] if value is not None else None,
+        "sha": value[1] if value is not None else None,
+        "absent": value is None,
     }
 
 
@@ -380,6 +398,10 @@ class RehearsalFreezeProof:
     def generation(self) -> int:
         return self.local_generation
 
+    @property
+    def ref_object_type(self) -> str | None:
+        return "commit" if self.ref_sha is not None else None
+
     def to_dict(self) -> dict[str, Any]:
         value = {
             "epoch_id": self.epoch_id,
@@ -394,6 +416,7 @@ class RehearsalFreezeProof:
             "snapshot_sha256": self.snapshot_sha256,
             "local_generation": self.local_generation,
             "ref_sha": self.ref_sha,
+            "ref_object_type": self.ref_object_type,
             "verified_at": self.verified_at,
         }
         if self.owner_rules_snapshot is not None:
@@ -427,6 +450,45 @@ def _git_environment() -> dict[str, str]:
         "GCM_INTERACTIVE": "never",
     })
     return environment
+
+
+def _exact_fast_forward_push_report(
+    raw: bytes, *, remote: str, ref: str, old_sha: str, new_sha: str
+) -> tuple[bool, str]:
+    """Require one porcelain row proving this exact fast-forward update."""
+
+    try:
+        lines = raw.decode("ascii").splitlines()
+    except (UnicodeError, AttributeError):
+        return False, "PORCELAIN_NOT_ASCII"
+    status_lines = [line for line in lines if "\t" in line]
+    if len(status_lines) != 1:
+        return False, "PORCELAIN_STATUS_ROW_COUNT_INVALID"
+    fields = status_lines[0].split("\t")
+    if len(fields) != 3:
+        return False, "PORCELAIN_STATUS_ROW_INVALID"
+    flag, refspec, summary = fields
+    if flag == "=":
+        return False, "PORCELAIN_UP_TO_DATE_IS_NOT_A_CAS_UPDATE"
+    if flag != " ":
+        return False, "PORCELAIN_STATUS_NOT_FAST_FORWARD"
+    try:
+        source, destination = refspec.split(":", 1)
+    except ValueError:
+        return False, "PORCELAIN_REFSPEC_INVALID"
+    if source != new_sha or destination != ref:
+        return False, "PORCELAIN_REFSPEC_MISMATCH"
+    match = re.fullmatch(r"([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})", summary)
+    if (
+        match is None
+        or not old_sha.startswith(match.group(1))
+        or not new_sha.startswith(match.group(2))
+    ):
+        return False, "PORCELAIN_UPDATE_RANGE_MISMATCH"
+    remotes = [line for line in lines if line.startswith("To ")]
+    if remotes != [f"To {remote}"] or lines.count("Done") != 1:
+        return False, "PORCELAIN_REPORT_TERMINAL_LINES_INVALID"
+    return True, "EXACT_FAST_FORWARD_UPDATE_REPORTED"
 
 
 def _git_run(repository: str | Path, *args: str) -> subprocess.CompletedProcess[bytes]:
@@ -957,11 +1019,18 @@ class GitHubProtectionAdapter:
         return_errors: bool = False,
         follow_redirects: bool = True,
         max_response_bytes: int = _MAX_API_RESPONSE_BYTES,
+        accept: str = _GITHUB_JSON_MEDIA_TYPE,
     ) -> ApiResponse:
         if not self._token:
             raise GitHubProtectionError("GITHUB_AUTHENTICATION_UNAVAILABLE")
         if not path.startswith("/") or ".." in path.split("/"):
             raise GitHubProtectionError("API_PATH_INVALID")
+        if accept not in {
+            _GITHUB_JSON_MEDIA_TYPE,
+            _GITHUB_OBJECT_MEDIA_TYPE,
+            _GITHUB_RAW_MEDIA_TYPE,
+        }:
+            raise GitHubProtectionError("API_ACCEPT_MEDIA_TYPE_INVALID")
         if (
             type(max_response_bytes) is not int
             or max_response_bytes < 1
@@ -972,14 +1041,29 @@ class GitHubProtectionAdapter:
             request_contents = re.escape(
                 self._repo_path("/contents/lifecycle-requests/")
             )
-            if (
-                method != "GET"
-                or re.fullmatch(
+            exact_fenced_path = (
+                method == "GET"
+                and re.fullmatch(
                     request_contents
                     + r"([A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?)\.json"
                     + r"\?ref=rehearsal%2Flifecycle%2Frequests%2F\1",
                     path,
-                ) is None
+                ) is not None
+            )
+            if (
+                not exact_fenced_path
+                or (
+                    accept == _GITHUB_JSON_MEDIA_TYPE
+                    and max_response_bytes > _MAX_JSON_FENCED_REQUEST_RESPONSE_BYTES
+                )
+                or (
+                    accept == _GITHUB_RAW_MEDIA_TYPE
+                    and max_response_bytes > _MAX_RAW_FENCED_REQUEST_RESPONSE_BYTES
+                )
+                or (
+                    accept == _GITHUB_OBJECT_MEDIA_TYPE
+                    and max_response_bytes > _MAX_JSON_FENCED_REQUEST_RESPONSE_BYTES
+                )
             ):
                 raise GitHubProtectionError("GITHUB_RESPONSE_LIMIT_INVALID")
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -1004,7 +1088,7 @@ class GitHubProtectionAdapter:
                 data=raw,
                 method=method,
                 headers={
-                    "Accept": "application/vnd.github+json",
+                    "Accept": accept,
                     "Authorization": f"Bearer {self._token}",
                     "X-GitHub-Api-Version": self.api_version,
                     "Content-Type": "application/json",
@@ -1601,12 +1685,93 @@ class GitHubProtectionAdapter:
     def _read_fenced_route_request(
         self, request: Any, *, with_evidence: bool = False
     ) -> bytes | None | tuple[bytes | None, dict[str, Any]]:
+        from .rehearsal import MAX_ROUTE_REQUEST_BYTES
+
+        if (
+            not isinstance(request.request_bytes, bytes)
+            or len(request.request_bytes) > MAX_ROUTE_REQUEST_BYTES
+            or sha256_hex(request.request_bytes) != request.request_sha256
+        ):
+            raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID")
+
         query = urlencode({"ref": f"rehearsal/lifecycle/requests/{request.request_id}"})
         encoded = quote(request.request_path, safe="/")
+        path = self._repo_path(f"/contents/{encoded}?{query}")
+
+        def blob_sha(raw: bytes) -> str:
+            return hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+
+        if len(request.request_bytes) > _MAX_API_RESPONSE_BYTES:
+            metadata = self._api_request(
+                "GET", path, allow_not_found=True, follow_redirects=False,
+                accept=_GITHUB_OBJECT_MEDIA_TYPE,
+            )
+            metadata_evidence = _case_response_evidence(metadata)
+            if metadata.status == 404:
+                evidence = {
+                    "transport": "contents-object-metadata-then-raw",
+                    "request_path": request.request_path,
+                    "request_ref": f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}",
+                    "metadata_response": metadata_evidence,
+                    "raw_response": {"state": "NOT_REQUESTED_OBJECT_ABSENT"},
+                }
+                return (None, evidence) if with_evidence else None
+            payload = self._json(metadata)
+            try:
+                actual_path = payload["path"]
+                object_type = payload["type"]
+                encoding = payload["encoding"]
+                content = payload["content"]
+                size = payload["size"]
+                object_sha = payload["sha"]
+            except (KeyError, TypeError):
+                raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID") from None
+            if (
+                actual_path != request.request_path
+                or object_type != "file"
+                or encoding != "none"
+                or content != ""
+                or type(size) is not int
+                or size != len(request.request_bytes)
+                or not isinstance(object_sha, str)
+                or not re.fullmatch(r"[0-9a-f]{40}", object_sha)
+            ):
+                raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID")
+            raw_response = self._api_request(
+                "GET", path, allow_not_found=True, follow_redirects=False,
+                max_response_bytes=MAX_ROUTE_REQUEST_BYTES,
+                accept=_GITHUB_RAW_MEDIA_TYPE,
+            )
+            if raw_response.status == 404:
+                raise GitHubProtectionError("REQUEST_FENCE_CONTENT_CHANGED")
+            raw = raw_response.body
+            if (
+                raw_response.status != 200
+                or len(raw) > MAX_ROUTE_REQUEST_BYTES
+                or len(raw) != size
+                or blob_sha(raw) != object_sha
+                or sha256_hex(raw) != request.request_sha256
+                or raw != request.request_bytes
+            ):
+                raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID")
+            evidence = {
+                "transport": "contents-object-metadata-then-raw",
+                "request_path": request.request_path,
+                "request_ref": f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}",
+                "object": {
+                    "type": object_type, "path": actual_path,
+                    "git_blob_sha": object_sha, "size": size,
+                    "request_sha256": request.request_sha256,
+                },
+                "metadata_response": metadata_evidence,
+                "raw_response": _case_response_evidence(raw_response),
+            }
+            return (raw, evidence) if with_evidence else raw
+
         response = self._api_request(
-            "GET", self._repo_path(f"/contents/{encoded}?{query}"),
-            allow_not_found=True,
-            max_response_bytes=_MAX_FENCED_REQUEST_RESPONSE_BYTES,
+            "GET", path, allow_not_found=True, follow_redirects=False,
+            max_response_bytes=_MAX_JSON_FENCED_REQUEST_RESPONSE_BYTES,
+            accept=_GITHUB_JSON_MEDIA_TYPE,
         )
         response_evidence = _case_response_evidence(response)
         if response.status == 404:
@@ -1616,19 +1781,43 @@ class GitHubProtectionAdapter:
             content = payload["content"]
             encoding = payload["encoding"]
             actual_path = payload["path"]
+            object_type = payload["type"]
+            object_sha = payload["sha"]
+            size = payload["size"]
         except (KeyError, TypeError):
             raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID") from None
         if (
             actual_path != request.request_path
+            or object_type != "file"
             or encoding != "base64"
             or not isinstance(content, str)
+            or type(size) is not int
+            or not isinstance(object_sha, str)
         ):
             raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID")
         try:
             raw = _decode_github_contents_base64(content)
         except GitHubProtectionError:
             raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID") from None
-        return (raw, response_evidence) if with_evidence else raw
+        if (
+            len(raw) != size
+            or object_sha != blob_sha(raw)
+            or sha256_hex(raw) != request.request_sha256
+            or raw != request.request_bytes
+        ):
+            raise GitHubProtectionError("REQUEST_FENCE_CONTENT_INVALID")
+        evidence = {
+            "transport": "contents-json-base64",
+            "request_path": request.request_path,
+            "request_ref": f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}",
+            "object": {
+                "type": object_type, "path": actual_path,
+                "git_blob_sha": object_sha, "size": size,
+                "request_sha256": request.request_sha256,
+            },
+            "response": response_evidence,
+        }
+        return (raw, evidence) if with_evidence else raw
 
     def preflight_route(self, request: Any, approval: Any) -> Any:
         """Read exact fixed fixtures and mandatory Owner seeds before case 1."""
@@ -1972,6 +2161,14 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError("REHEARSAL_EPOCH_INVALIDATED")
         return ref, row["target"]
 
+    def retain_unreconciled_case_postproof(
+        self, request: Any, case_id: str, evidence: Mapping[str, Any]
+    ) -> None:
+        """Fence this adapter after a final proof contradicts the case result."""
+
+        key = f"postproof:{request.request_id}:{case_id}"
+        self._unreconciled_case_writes[key] = dict(evidence)
+
     @staticmethod
     def _case_target_rule(case_id: str) -> int | None:
         return {
@@ -2062,7 +2259,7 @@ class GitHubProtectionAdapter:
                 "ref": ref,
                 "expected_old_sha": before_sha,
                 "intended_sha": expected_sha,
-                "pre_state": before,
+                "pre_state": _ref_state_evidence(before),
                 "pre_read": before_read,
                 "operation": {"method": method, "path": path, "payload": payload},
                 "started_at": started_at,
@@ -2208,7 +2405,7 @@ class GitHubProtectionAdapter:
     def _execute_fixed_case(self, case_id: str, request: Any, approval: Any, proof: Any) -> Any:
         from .rehearsal import (
             CASE_ORDER, OPERATION_TABLE, VerifiedRunApproval,
-            _APPROVAL_VERIFICATION_TOKEN,
+            _APPROVAL_VERIFICATION_TOKEN, _canonical,
         )
 
         if (
@@ -2376,7 +2573,7 @@ class GitHubProtectionAdapter:
                 "approval_receipt_sha256": approval.receipt_sha256,
                 "prior_4a_result_evidence_sha256": prior_digest or "",
                 "prior_4a_evidence_sha256": (
-                    sha256_hex(canonical_json(prior_evidence))
+                    sha256_hex(_canonical(prior_evidence))
                     if isinstance(prior_evidence, dict) else ""
                 ),
                 "current_principal_ref": list(current) if current is not None else [],
@@ -2424,7 +2621,7 @@ class GitHubProtectionAdapter:
                         "request_id": request.request_id,
                         "request_sha256": request.request_sha256,
                         "plan_sha256": request.plan_sha256,
-                        "fence": {"state": fence, "read": fence_read},
+                        "fence": {"state": _ref_state_evidence(fence), "read": fence_read},
                         "request_file": {
                             "matches": exact_bytes == request.request_bytes,
                             "observed_sha256": sha256_hex(exact_bytes) if exact_bytes is not None else None,
@@ -2495,11 +2692,13 @@ class GitHubProtectionAdapter:
                 "approval_receipt_sha256": approval.receipt_sha256,
                 "reason": boundary_reason,
                 "unexpected_dispatch_result": dict(boundary_dispatch_result) if boundary_dispatch_result is not None else None,
-                "original_fence": {"state": fence, "read": fence_read},
+                "original_fence": {"state": _ref_state_evidence(fence), "read": fence_read},
                 "original_request_file": {
                     "sha256": sha256_hex(exact_bytes), "read": content_read,
                 },
-                "post_attempt_fence": {"state": fence_after, "read": fence_after_read},
+                "post_attempt_fence": {
+                    "state": _ref_state_evidence(fence_after), "read": fence_after_read,
+                },
                 "post_attempt_request_file": {
                     "matches": bytes_after == request.request_bytes,
                     "sha256": sha256_hex(bytes_after) if bytes_after is not None else None,
@@ -3032,8 +3231,21 @@ class GitHubProtectionAdapter:
         *,
         approval: Any,
         intent: Any,
+        seed_validation_evidence: bytes | None = None,
     ) -> dict[str, Any]:
         """Create the schema-2 fence only after its run approval is verified."""
+
+        seed_evidence: dict[str, Any] | None = None
+        if request.request_id not in self._initial_request_fences:
+            if not isinstance(seed_validation_evidence, bytes):
+                raise GitHubProtectionError("SEED_VALIDATION_EVIDENCE_REQUIRED")
+            from .rehearsal import rehydrate_seed_receipt_evidence_pair
+            try:
+                seed_evidence = rehydrate_seed_receipt_evidence_pair(
+                    seed_validation_evidence, request
+                )
+            except Exception:
+                raise GitHubProtectionError("SEED_VALIDATION_EVIDENCE_INVALID") from None
 
         result = self.create_rehearsal_request_fence(
             request, intent=intent, _route_approval=approval
@@ -3042,15 +3254,25 @@ class GitHubProtectionAdapter:
         if not isinstance(observed, str) or _FULL_REF_SHA.fullmatch(observed) is None:
             raise GitHubProtectionError("REQUEST_FENCE_READBACK_INVALID")
         self._initial_request_fences[request.request_id] = observed
+        if seed_evidence is not None:
+            approval_evidence = self._initial_approval_evidence.get(request.request_id)
+            if approval_evidence is None:
+                raise GitHubProtectionError("APPROVAL_EVIDENCE_REQUIRED")
+            self._initial_approval_evidence[request.request_id] = {
+                **approval_evidence,
+                "seed_validation_evidence": seed_evidence,
+            }
         return result
 
     def dispatch_rehearsal_route(
-        self, request: Any, *, approval: Any, intent: Any
+        self, request: Any, *, approval: Any, intent: Any,
+        seed_validation_evidence: bytes | None = None,
     ) -> dict[str, Any]:
         """Cross the installed request-fence boundary before driver entry."""
 
         fence = self.create_rehearsal_route_request_fence(
-            request, approval=approval, intent=intent
+            request, approval=approval, intent=intent,
+            seed_validation_evidence=seed_validation_evidence,
         )
         self._route_admitted_dispatches += 1
         from .rehearsal import run_rehearsal
@@ -3214,18 +3436,36 @@ class GitHubProtectionAdapter:
                 "body_bytes": len(raw),
             }
 
+        in_flight = {
+            **attempt,
+            "write_outcome": "in_flight",
+            "post_branch_read": {"state": "NOT_YET_OBSERVED"},
+            "postwrite_rules_evidence": {"state": "NOT_YET_OBSERVED"},
+        }
+        self._unreconciled_branch_moves[ref] = in_flight
         self._rehearsal_git_push_attempts += 1
-        result = subprocess.run(
-            [
-                "git", "-C", str(repository_path), "push", "--porcelain",
-                f"--force-with-lease={ref}:{expected_old_sha}",
-                f"https://github.com/{self.owner}/{self.repo}.git",
-                f"{intended_new_sha}:{ref}",
-            ],
-            capture_output=True,
-            check=False,
-            env=environment,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "git", "-C", str(repository_path), "push", "--porcelain",
+                    f"--force-with-lease={ref}:{expected_old_sha}",
+                    f"https://github.com/{self.owner}/{self.repo}.git",
+                    f"{intended_new_sha}:{ref}",
+                ],
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+        except Exception as error:
+            evidence = {
+                **attempt,
+                "write_outcome": "unknown",
+                "push_error": getattr(error, "reason_code", "GIT_PUSH_PROCESS_UNKNOWN"),
+                "post_branch_read": {"state": "NOT_YET_OBSERVED"},
+                "postwrite_rules_evidence": {"state": "NOT_YET_OBSERVED"},
+            }
+            self._unreconciled_branch_moves[ref] = evidence
+            raise GitHubProtectionError("REF_MOVE_UNKNOWN", evidence=evidence) from None
         if result.returncode:
             try:
                 observed_sha, post_branch_read = self._rehearsal_branch_head_with_evidence(ref)
@@ -3248,6 +3488,11 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError(
                 "REF_MOVE_UNKNOWN", evidence=evidence
             )
+        update_report_ok, update_report_reason = _exact_fast_forward_push_report(
+            result.stdout, remote=f"https://github.com/{self.owner}/{self.repo}.git",
+            ref=ref, old_sha=expected_old_sha,
+            new_sha=intended_new_sha,
+        )
         try:
             observed_sha, post_branch_read = self._rehearsal_branch_head_with_evidence(ref)
         except Exception:
@@ -3267,6 +3512,30 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError(
                 "REF_MOVE_UNKNOWN", evidence=evidence
             )
+        if not update_report_ok:
+            evidence = {
+                **attempt,
+                "write_outcome": "unknown",
+                "observed_sha": observed_sha,
+                "post_branch_read": post_branch_read,
+                "cas_update_report": {
+                    "state": "UNPROVEN",
+                    "reason": update_report_reason,
+                    "target_ref": ref,
+                    "expected_old_sha": expected_old_sha,
+                    "intended_new_sha": intended_new_sha,
+                },
+                "git_returncode": result.returncode,
+                "git_stdout": git_output_evidence(result.stdout),
+                "git_stderr": git_output_evidence(result.stderr),
+                "postwrite_rules_evidence": {"state": "NOT_READ_AFTER_UNPROVEN_UPDATE"},
+            }
+            self._unreconciled_branch_moves[ref] = evidence
+            raise GitHubProtectionError(
+                "REF_MOVE_CAS_UPDATE_UNPROVEN", evidence=evidence
+            )
+        postwrite_rules_evidence: dict[str, Any] = {"state": "UNKNOWN"}
+        postwrite_rules_error: str | None = None
         try:
             postwrite_rules_evidence = self._require_rehearsal_rules(
                 ref, policy="principal-move"
@@ -3279,7 +3548,13 @@ class GitHubProtectionAdapter:
                 intent, "verify-principal-move-postwrite", ref,
                 postwrite_rules_evidence,
             )
-        except Exception:
+        except Exception as error:
+            postwrite_rules_error = getattr(
+                error, "reason_code", "REHEARSAL_RULESET_POSTWRITE_READ_UNKNOWN"
+            )
+            postwrite_rules_evidence = {
+                "state": "UNKNOWN", "reason": postwrite_rules_error,
+            }
             postwrite_rules_verified = False
         if postwrite_rules_verified is not True:
             evidence = {
@@ -3287,7 +3562,15 @@ class GitHubProtectionAdapter:
                 "write_outcome": "provider_accepted",
                 "observed_sha": observed_sha,
                 "post_branch_read": post_branch_read,
+                "cas_update_report": {
+                    "state": "PROVEN",
+                    "reason": update_report_reason,
+                    "target_ref": ref,
+                    "expected_old_sha": expected_old_sha,
+                    "intended_new_sha": intended_new_sha,
+                },
                 "postwrite_rules_evidence": postwrite_rules_evidence,
+                "postwrite_rules_error": postwrite_rules_error,
                 "git_returncode": result.returncode,
                 "git_stdout": git_output_evidence(result.stdout),
                 "git_stderr": git_output_evidence(result.stderr),
@@ -3297,12 +3580,21 @@ class GitHubProtectionAdapter:
             raise GitHubProtectionError(
                 "REF_MOVE_POSTWRITE_UNVERIFIED", evidence=evidence
             )
+        self._unreconciled_branch_moves.pop(ref, None)
         return {
             **attempt,
             "write_outcome": "provider_accepted_and_read_back",
             "observed_sha": observed_sha,
             "post_branch_read": post_branch_read,
+            "cas_update_report": {
+                "state": "PROVEN",
+                "reason": update_report_reason,
+                "target_ref": ref,
+                "expected_old_sha": expected_old_sha,
+                "intended_new_sha": intended_new_sha,
+            },
             "postwrite_rules_evidence": postwrite_rules_evidence,
+            "postwrite_rules_error": None,
             "git_returncode": result.returncode,
             "git_stdout": git_output_evidence(result.stdout),
             "git_stderr": git_output_evidence(result.stderr),

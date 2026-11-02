@@ -87,9 +87,15 @@ jobs:
           from version_lifecycle.github_protection import GitHubProtectionError
           from version_lifecycle.rehearsal import (
               AnonymousGitHubTransport, RehearsalError,
-              serialize_approval_envelope, validate_seed_receipt_bundle,
+              serialize_approval_envelope, serialize_seed_receipt_evidence,
+              validate_seed_receipt_bundle,
               verify_run_approval, validate_rehearsal_route_trigger,
           )
+
+          def write_private(path, raw):
+              fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+              with os.fdopen(fd, "wb") as stream:
+                  stream.write(raw)
 
           with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
               event = json.load(stream)
@@ -115,18 +121,26 @@ jobs:
                   head_sha=os.environ["GITHUB_SHA"],
                   ref=os.environ["GITHUB_REF"],
               )
-              validate_seed_receipt_bundle(route_request, AnonymousGitHubTransport())
+              seed_evidence = validate_seed_receipt_bundle(
+                  route_request, AnonymousGitHubTransport()
+              )
+              seed_raw = serialize_seed_receipt_evidence(seed_evidence)
+              seed_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-seed-validation-first.json"
+              write_private(seed_path, seed_raw)
               raw_envelope = serialize_approval_envelope(approval)
               raw_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-approval-raw.json"
-              with raw_path.open("xb") as stream:
-                  stream.write(raw_envelope)
+              write_private(raw_path, raw_envelope)
               with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
                   output.write("route_mode=true\n")
           except RehearsalError as error:
               receipt = getattr(error, "failure_receipt", None)
-              if receipt is not None:
-                  from version_lifecycle.rehearsal import _canonical
-                  print(_canonical(receipt).decode("ascii"))
+              failure = {
+                  "reason": error.reason,
+                  "receipt": receipt,
+                  "observation_preimage": getattr(error, "observation_preimage", ()),
+              }
+              failure_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-seed-validation-first-failure.json"
+              write_private(failure_path, json.dumps(failure, sort_keys=True, separators=(",", ":")).encode("utf-8"))
               print(error.reason)
               sys.exit(1)
           PY
@@ -138,6 +152,7 @@ jobs:
           LIFECYCLE_APP_PRIVATE_KEY: ${{ secrets.LIFECYCLE_APP_PRIVATE_KEY }}
           ROUTE_MODE: ${{ steps.approval.outputs.route_mode }}
           APPROVAL_RAW_ENVELOPE_PATH: ${{ runner.temp }}/cyax125-approval-raw.json
+          SEED_VALIDATION_PAIR_PATH: ${{ runner.temp }}/cyax125-seed-validation-pair.json
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REF: ${{ github.ref }}
           GITHUB_SHA: ${{ github.sha }}
@@ -193,11 +208,17 @@ jobs:
               import json
               import os
               from pathlib import Path
+              from version_lifecycle.rehearsal import _canonical
               from version_lifecycle.rehearsal import (
                   AnonymousGitHubTransport, RehearsalError,
-                  rehydrate_approval_envelope, validate_seed_receipt_bundle,
+                  rehydrate_approval_envelope, rehydrate_seed_receipt_evidence,
+                  serialize_seed_receipt_evidence_pair, validate_seed_receipt_bundle,
                   validate_rehearsal_route_trigger,
               )
+              def write_private(path, raw):
+                  fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                  with os.fdopen(fd, "wb") as stream:
+                      stream.write(raw)
               with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
                   event = json.load(stream)
               context = {
@@ -216,7 +237,24 @@ jobs:
                   run_attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
                   head_sha=os.environ["GITHUB_SHA"],
               )
-              validate_seed_receipt_bundle(request, AnonymousGitHubTransport())
+              first_path = Path(os.environ["SEED_VALIDATION_RAW_PATH"])
+              first_raw = first_path.read_bytes()
+              try:
+                  first = rehydrate_seed_receipt_evidence(first_raw, request)
+                  second = validate_seed_receipt_bundle(request, AnonymousGitHubTransport())
+                  pair_raw = serialize_seed_receipt_evidence_pair(first, second)
+                  pair_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-seed-validation-pair.json"
+                  write_private(pair_path, pair_raw)
+              except RehearsalError as error:
+                  failure = {
+                      "reason": error.reason,
+                      "receipt": getattr(error, "failure_receipt", None),
+                      "observation_preimage": getattr(error, "observation_preimage", ()),
+                      "first_validation_preimage_b64": __import__("base64").b64encode(first_raw).decode("ascii"),
+                  }
+                  failure_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-seed-validation-pair-failure.json"
+                  write_private(failure_path, _canonical(failure))
+                  raise
             PY
             preflight_environment = {
               "GITHUB_ACTOR" => ENV.fetch("GITHUB_ACTOR"),
@@ -228,6 +266,8 @@ jobs:
               "GITHUB_RUN_ATTEMPT" => ENV.fetch("GITHUB_RUN_ATTEMPT"),
               "ROUTE_MODE" => ENV.fetch("ROUTE_MODE", "false"),
               "APPROVAL_RAW_ENVELOPE_PATH" => ENV.fetch("APPROVAL_RAW_ENVELOPE_PATH"),
+              "SEED_VALIDATION_RAW_PATH" => File.join(ENV.fetch("RUNNER_TEMP"), "cyax125-seed-validation-first.json"),
+              "RUNNER_TEMP" => ENV.fetch("RUNNER_TEMP"),
               "PYTHONPATH" => "scripts",
               "PYTHONDONTWRITEBYTECODE" => "1",
             }
@@ -288,6 +328,7 @@ jobs:
               )
               from version_lifecycle.rehearsal import (
                   RehearsalError, rehydrate_approval_envelope,
+                  rehydrate_seed_receipt_evidence_pair,
                   validate_rehearsal_route_trigger,
               )
 
@@ -308,6 +349,9 @@ jobs:
                   envelope, request, run_id=int(os.environ["GITHUB_RUN_ID"]),
                   run_attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
                   head_sha=os.environ["GITHUB_SHA"],
+              )
+              rehydrate_seed_receipt_evidence_pair(
+                  Path(os.environ["SEED_VALIDATION_PAIR_PATH"]).read_bytes(), request
               )
               intent = {
                   "repository": os.environ["GITHUB_REPOSITORY"],
@@ -358,7 +402,8 @@ jobs:
                   ),
               )
               result = adapter.dispatch_rehearsal_route(
-                  request, approval=approval, intent=intent
+                  request, approval=approval, intent=intent,
+                  seed_validation_evidence=Path(os.environ["SEED_VALIDATION_PAIR_PATH"]).read_bytes(),
               )
               print(json.dumps(result, sort_keys=True))
             PY
@@ -373,6 +418,7 @@ jobs:
               "GITHUB_RUN_ATTEMPT" => ENV.fetch("GITHUB_RUN_ATTEMPT"),
               "ROUTE_MODE" => ENV.fetch("ROUTE_MODE"),
               "APPROVAL_RAW_ENVELOPE_PATH" => ENV.fetch("APPROVAL_RAW_ENVELOPE_PATH"),
+              "SEED_VALIDATION_PAIR_PATH" => ENV.fetch("SEED_VALIDATION_PAIR_PATH"),
               "APP_TOKEN_EXPIRES_AT" => expires_at.utc.iso8601,
               "PYTHONPATH" => "scripts",
               "PYTHONDONTWRITEBYTECODE" => "1",
