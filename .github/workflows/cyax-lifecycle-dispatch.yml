@@ -80,13 +80,15 @@ jobs:
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 - <<'PY'
+          import json
           import os
           from pathlib import Path
           import sys
           from version_lifecycle.github_protection import GitHubProtectionError
           from version_lifecycle.rehearsal import (
-              RehearsalError, serialize_approval_envelope, verify_run_approval,
-              validate_rehearsal_route_trigger,
+              AnonymousGitHubTransport, RehearsalError,
+              serialize_approval_envelope, validate_seed_receipt_bundle,
+              verify_run_approval, validate_rehearsal_route_trigger,
           )
 
           with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
@@ -113,16 +115,18 @@ jobs:
                   head_sha=os.environ["GITHUB_SHA"],
                   ref=os.environ["GITHUB_REF"],
               )
+              validate_seed_receipt_bundle(route_request, AnonymousGitHubTransport())
               raw_envelope = serialize_approval_envelope(approval)
               raw_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-approval-raw.json"
               with raw_path.open("xb") as stream:
                   stream.write(raw_envelope)
               with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
                   output.write("route_mode=true\n")
-              # The adopted request contains only the seed receipt digest, not
-              # parseable Owner receipts. Do not reach the secret-bearing step.
-              raise RehearsalError("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT")
           except RehearsalError as error:
+              receipt = getattr(error, "failure_receipt", None)
+              if receipt is not None:
+                  from version_lifecycle.rehearsal import _canonical
+                  print(_canonical(receipt).decode("ascii"))
               print(error.reason)
               sys.exit(1)
           PY
@@ -190,7 +194,8 @@ jobs:
               import os
               from pathlib import Path
               from version_lifecycle.rehearsal import (
-                  RehearsalError, rehydrate_approval_envelope,
+                  AnonymousGitHubTransport, RehearsalError,
+                  rehydrate_approval_envelope, validate_seed_receipt_bundle,
                   validate_rehearsal_route_trigger,
               )
               with Path(os.environ["GITHUB_EVENT_PATH"]).open(encoding="utf-8") as stream:
@@ -211,7 +216,7 @@ jobs:
                   run_attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
                   head_sha=os.environ["GITHUB_SHA"],
               )
-              raise RehearsalError("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT")
+              validate_seed_receipt_bundle(request, AnonymousGitHubTransport())
             PY
             preflight_environment = {
               "GITHUB_ACTOR" => ENV.fetch("GITHUB_ACTOR"),

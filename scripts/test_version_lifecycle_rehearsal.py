@@ -41,6 +41,7 @@ from version_lifecycle.rehearsal import (
     _canonical,
     _result,
     run_rehearsal,
+    validate_seed_receipt_bundle,
     validate_approval_receipt,
     validate_driver_result,
     validate_route_request_bytes,
@@ -56,6 +57,81 @@ RUN_ID = 9854321
 HEAD_SHA = "d" * 40
 REF = "refs/heads/rehearsal/trigger/route-0125-1"
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+SEED_TARGET_SHA = "f12fbb8ec52e4c7510564f602a15f26173fe772e"
+SEED_TARGET_TREE = "c515bf2745061da9150285d6d7c6035b061a1caa"
+SEED_REFS = {
+    "principal": "refs/heads/rehearsal/principal/cyax125-20261101-route",
+    "P2-update": "refs/heads/rehearsal/trigger/cyax125-p2-app-update",
+    "4f-move": "refs/heads/rehearsal/restricted/cyax125-20261101-move",
+}
+
+
+def _synthetic_seed_bundle(intent_id: str) -> dict[str, object]:
+    def envelope(status: int, body: bytes, suffix: str) -> dict[str, object]:
+        return {
+            "status": status,
+            "github_request_id": f"SYNTHETIC-{suffix}",
+            "date_header": "Mon, 02 Nov 2026 12:00:00 GMT",
+            "body_b64": base64.b64encode(body).decode("ascii"),
+            "body_sha256": sha256_hex(body),
+        }
+
+    records: list[dict[str, object]] = []
+    for index, role in enumerate(("principal", "P2-update", "4f-move"), start=1):
+        ref = SEED_REFS[role]
+        identity_body = _canonical({"id": 102535039, "login": "vmmhep", "type": "User"})
+        ref_body = _canonical({"ref": ref, "object": {"sha": SEED_TARGET_SHA, "type": "commit"}})
+        journal = {
+            "journal_version": 1,
+            "repository": REPOSITORY,
+            "intent_id": intent_id,
+            "role": role,
+            "ref": ref,
+            "target_sha": SEED_TARGET_SHA,
+            "target_tree": SEED_TARGET_TREE,
+            "actor_identity": envelope(200, identity_body, f"{role}-identity"),
+            "create_method": "POST",
+            "create_path": f"/repos/{REPOSITORY}/git/refs",
+            "create_payload": {"ref": ref, "sha": SEED_TARGET_SHA},
+            "create_response": envelope(201, ref_body, f"{role}-create"),
+            "readback_method": "GET",
+            "readback_path": f"/repos/{REPOSITORY}/git/ref/{ref.removeprefix('refs/')}",
+            "readback_response": envelope(200, ref_body, f"{role}-readback"),
+            "operation_started_at": "2026-11-02T12:00:00Z",
+            "operation_completed_at": "2026-11-02T12:00:01Z",
+            "terminal_state": "CREATED_AND_READ_BACK",
+            "no_pending_writes": True,
+        }
+        journal_hash = sha256_hex(_canonical(journal))
+        claim = {
+            "claim_version": 1,
+            "repository": REPOSITORY,
+            "issue_number": 125,
+            "intent_id": intent_id,
+            "role": role,
+            "ref": ref,
+            "target_sha": SEED_TARGET_SHA,
+            "target_tree": SEED_TARGET_TREE,
+            "journal_sha256": journal_hash,
+            "owner_user_id": 102535039,
+            "terminal_state": "CREATED_AND_READ_BACK",
+            "no_pending_writes": True,
+        }
+        claim_body = b"CYAX125_SEED_V1:" + _canonical(claim)
+        records.append({
+            "role": role,
+            "journal": journal,
+            "journal_sha256": journal_hash,
+            "claim": claim,
+            "owner_action_claim_sha256": sha256_hex(claim_body),
+            "owner_receipt_comment_id": 100 + index,
+        })
+    return {
+        "seed_version": 1,
+        "repository": REPOSITORY,
+        "intent_id": intent_id,
+        "records": records,
+    }
 
 
 def _request_bytes(
@@ -70,6 +146,7 @@ def _request_bytes(
         f"scripts/version_lifecycle/fake_{index:02d}.py": f"{index:040x}"
         for index in range(16)
     }
+    seed_bundle = _synthetic_seed_bundle("intent-route-0125")
     plan = {
         "plan_version": 1,
         "repository": REPOSITORY,
@@ -82,7 +159,7 @@ def _request_bytes(
         "fixture_workflow_path": "32af89296955ad684517e7a57ce5d8a431f5a971",
         "setup_inventory_sha256": "1" * 64,
         "environment_export_sha256": "2" * 64,
-        "seed_receipts_sha256": "3" * 64,
+        "seed_receipts_sha256": sha256_hex(_canonical(seed_bundle)),
         "operation_table_sha256": operation_table_sha256 or sha256_hex(_canonical(OPERATION_TABLE)),
         "case_order": list(CASE_ORDER),
         "owner_actor_id": 102535039,
@@ -108,7 +185,7 @@ def _request_bytes(
         "epoch_started_at": "2026-11-02T11:00:00Z",
     }
     request = {
-        "schema_version": 2,
+        "schema_version": 3,
         "request_id": "route-0125-1",
         "implementation_sha": implementation_sha,
         "workflow_blob_sha": plan["workflow_blob_sha"],
@@ -119,6 +196,7 @@ def _request_bytes(
         "plan_sha256": plan_sha,
         "owner_attestation": attestation,
         "owner_attestation_sha256": sha256_hex(_canonical(attestation)),
+        "seed_receipt_bundle": seed_bundle,
     }
     return _canonical(request)
 
@@ -202,6 +280,44 @@ class FakeApprovalTransport:
         return ApiResponse(200, body, dict(self.default_headers))
 
 
+def _seed_provider_payloads(request: ValidatedRouteRequest) -> dict[str, object]:
+    payloads: dict[str, object] = {}
+    bundle = request.request["seed_receipt_bundle"]
+    for record in bundle["records"]:
+        claim_body = b"CYAX125_SEED_V1:" + _canonical(record["claim"])
+        payloads[f"/repos/{REPOSITORY}/issues/comments/{record['owner_receipt_comment_id']}"] = {
+            "id": record["owner_receipt_comment_id"],
+            "user": {"id": 102535039, "type": "User"},
+            "issue_url": f"https://api.github.com/repos/{REPOSITORY}/issues/125",
+            "body": claim_body.decode("ascii"),
+        }
+        payloads[f"/repos/{REPOSITORY}/git/ref/heads/{record['journal']['ref'].removeprefix('refs/heads/')}"] = {
+            "ref": record["journal"]["ref"],
+            "object": {"sha": SEED_TARGET_SHA, "type": "commit"},
+        }
+    payloads[f"/repos/{REPOSITORY}/git/commits/{SEED_TARGET_SHA}"] = {
+        "sha": SEED_TARGET_SHA, "tree": {"sha": SEED_TARGET_TREE},
+    }
+    return payloads
+
+
+class FakeSeedTransport:
+    def __init__(self, payloads: dict[str, object]) -> None:
+        self.payloads = payloads
+        self.calls: list[str] = []
+        self.overrides: dict[str, ApiResponse] = {}
+
+    def get(self, path: str) -> ApiResponse:
+        self.calls.append(path)
+        if path in self.overrides:
+            return self.overrides[path]
+        body = json.dumps(self.payloads[path], sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return ApiResponse(200, body, {
+            "content-type": "application/json", "date": "Mon, 02 Nov 2026 12:00:00 GMT",
+            "x-github-request-id": "SYNTHETIC-READ",
+        })
+
+
 def _approval(request: ValidatedRouteRequest) -> VerifiedRunApproval:
     return verify_run_approval(
         request, run_id=RUN_ID, run_attempt=1, head_sha=HEAD_SHA, ref=REF,
@@ -235,13 +351,159 @@ class RehearsalContractTests(unittest.TestCase):
         with self.assertRaises(RehearsalError):
             validate_route_request_bytes(raw + b"\n")
         with self.assertRaises(RehearsalError):
-            validate_route_request_bytes(raw.replace(b'"schema_version":2', b'"schema_version":true'))
+            validate_route_request_bytes(raw.replace(b'"schema_version":3', b'"schema_version":true'))
         with self.assertRaises(RehearsalError):
-            validate_route_request_bytes(raw.replace(b'"schema_version":2', b'"schema_version":2,"schema_version":2'))
+            validate_route_request_bytes(raw.replace(b'"schema_version":3', b'"schema_version":3,"schema_version":3'))
         with self.assertRaisesRegex(RehearsalError, "ROUTE_REQUEST_BINDING_INVALID"):
             validate_route_request_bytes(_request_bytes(
                 operation_table_sha256=_CONTRACT_SHA256["operation_table"]
             ))
+
+    def test_schema3_seed_receipts_verify_journals_claims_comments_and_fixed_readbacks(self) -> None:
+        request = _request()
+        transport = FakeSeedTransport(_seed_provider_payloads(request))
+        evidence = validate_seed_receipt_bundle(request, transport)
+        self.assertEqual(evidence.status, "PASS_ACCEPTED")
+        self.assertEqual(evidence.verified_roles, ("principal", "P2-update", "4f-move"))
+        self.assertEqual(len(transport.calls), 7)
+        self.assertTrue(all("issues/comments/" in path or "/git/ref/heads/rehearsal/" in path or "/git/commits/" in path for path in transport.calls))
+
+    def test_seed_receipt_failures_keep_absence_and_unknown_distinct(self) -> None:
+        request = _request()
+        payloads = _seed_provider_payloads(request)
+        first_comment = next(path for path in payloads if "/issues/comments/" in path)
+        transport = FakeSeedTransport(payloads)
+        transport.overrides[first_comment] = ApiResponse(404, b'{"message":"Not Found"}', {})
+        with self.assertRaises(RehearsalError) as absent:
+            validate_seed_receipt_bundle(request, transport)
+        self.assertEqual(absent.exception.failure_receipt["status"], "BLOCKED_NOT_VERIFIABLE")
+        self.assertIsNone(absent.exception.failure_receipt["next_case"])
+
+        transport = FakeSeedTransport(payloads)
+        transport.overrides[first_comment] = ApiResponse(503, b'{"message":"unavailable"}', {})
+        with self.assertRaises(RehearsalError) as unknown:
+            validate_seed_receipt_bundle(request, transport)
+        self.assertEqual(unknown.exception.failure_receipt["status"], "BLOCKED_UNKNOWN")
+
+        wrong_issue = dict(payloads)
+        wrong_issue[first_comment] = {**wrong_issue[first_comment], "issue_url": "https://api.github.com/repos/other/repo/issues/125"}
+        with self.assertRaisesRegex(RehearsalError, "SEED_COMMENT_BINDING_INVALID"):
+            validate_seed_receipt_bundle(request, FakeSeedTransport(wrong_issue))
+
+    def test_schema3_rejects_schema2_and_enforces_full_array_and_numeric_keywords(self) -> None:
+        request = _request()
+        with self.assertRaisesRegex(RehearsalError, "ROUTE_REQUEST_SCHEMA_INVALID"):
+            validate_route_request_bytes(_canonical({"schema_version": 2}))
+        altered = json.loads(request.request_bytes)
+        altered["seed_receipt_bundle"]["records"].append(altered["seed_receipt_bundle"]["records"][0])
+        altered["plan"]["seed_receipts_sha256"] = sha256_hex(_canonical(altered["seed_receipt_bundle"]))
+        altered["plan_sha256"] = sha256_hex(_canonical(altered["plan"]))
+        altered["owner_attestation"]["plan_sha256"] = altered["plan_sha256"]
+        altered["owner_attestation_sha256"] = sha256_hex(_canonical(altered["owner_attestation"]))
+        with self.assertRaises(RehearsalError):
+            validate_route_request_bytes(_canonical(altered))
+
+    def test_p5_observes_durable_4a_terminal_result_with_optional_off_ref_event(self) -> None:
+        request = _request()
+        approval = _approval(request)
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY, token="offline-token", api_base="https://fixture.invalid",
+            transport=lambda *_args: ApiResponse(500, b"{}", {}),
+            token_permissions={"contents": "write", "metadata": "read"},
+            token_expires_at=NOW + timedelta(hours=1), clock=lambda: NOW,
+        )
+        principal_ref = SEED_REFS["principal"]
+        prior_result = {
+            "status": "PASS_ACCEPTED", "next_case": "4b-nff", "unresolved": False,
+            "evidence_sha256": "8" * 64,
+        }
+        prior_evidence = {
+            "request_id": request.request_id,
+            "request_sha256": request.request_sha256,
+            "plan_sha256": request.plan_sha256,
+            "approval_receipt_sha256": approval.receipt_sha256,
+            "ref": principal_ref,
+            "expected_old_sha": SEED_TARGET_SHA,
+            "intended_sha": "a6df7c78e27ee81771cc06b0783a508edcaed320",
+            "api_mutation_count": 0,
+            "git_push_count": 1,
+            "cas_result": {
+                "write_outcome": "provider_accepted_and_read_back",
+                "request_id": request.request_id,
+                "expected_old_sha": SEED_TARGET_SHA,
+                "intended_new_sha": "a6df7c78e27ee81771cc06b0783a508edcaed320",
+                "intended_new_tree": SEED_TARGET_TREE,
+                "observed_sha": "a6df7c78e27ee81771cc06b0783a508edcaed320",
+                "postwrite_rules_verified": True,
+            },
+        }
+        run_row = {
+            "event": "push",
+            "head_sha": "a6df7c78e27ee81771cc06b0783a508edcaed320",
+            "head_branch": principal_ref.removeprefix("refs/heads/"),
+            "actor": {"id": 5371554, "login": "cyaxiverse-lifecycle[bot]"},
+            "repository": {"id": 527718962},
+        }
+        proof = RehearsalFreezeProof(
+            request.owner_attestation["epoch_id"], request.plan["intent_id"],
+            request.request_id, request.plan_sha256, principal_ref, 26316866,
+            request.owner_attestation["full_definition_sha256"],
+            (26314086, 26314227, 26316866),
+            request.owner_attestation["last_operation_terminal_receipt_sha256"],
+            request.owner_attestation["full_definition_sha256"], 0,
+            "a6df7c78e27ee81771cc06b0783a508edcaed320", "2026-11-02T12:00:00Z",
+            adapter._nonce,
+        )
+
+        for runs, expected_event in (([run_row], True), ([], False)):
+            response = ApiResponse(
+                200, _canonical({"total_count": len(runs), "workflow_runs": runs}),
+                {"x-github-request-id": "SYNTHETIC-RUN-LIST"},
+            )
+            with (
+                adapter.case_lock(principal_ref),
+                mock.patch.object(adapter, "read_case_result_evidence", return_value=(prior_result, prior_evidence)),
+                mock.patch.object(adapter, "_read_rehearsal_target_ref_with_evidence", return_value=(
+                    ("commit", "a6df7c78e27ee81771cc06b0783a508edcaed320"),
+                    {"status": 200, "body_sha256": "9" * 64},
+                )),
+                mock.patch.object(adapter, "_read_rehearsal_commit", return_value={
+                    "sha": "a6df7c78e27ee81771cc06b0783a508edcaed320",
+                    "tree": {"sha": SEED_TARGET_TREE}, "parents": [SEED_TARGET_SHA],
+                }),
+                mock.patch.object(adapter, "_api_request", return_value=response) as get,
+            ):
+                observation = adapter._execute_fixed_case(
+                    "P5-event-observe", request, approval, proof
+                )
+            self.assertEqual(observation.status, "PASS_ACCEPTED")
+            self.assertEqual(observation.p5_subresult["observed_off_ref_event"], expected_event)
+            self.assertFalse(observation.p5_subresult["matching_app_trigger_guard_exercised"])
+            self.assertEqual(observation.p5_subresult["second_driver_dispatch_count"], 0)
+            self.assertEqual(observation.p5_subresult["api_mutation_count"], 0)
+            self.assertEqual(observation.p5_subresult["git_push_count"], 0)
+            self.assertEqual(get.call_args.args[1], f"/repos/{REPOSITORY}/actions/runs?event=push&head_sha=a6df7c78e27ee81771cc06b0783a508edcaed320&per_page=100")
+            result = _result(request, "P5-event-observe", observation.status, observation.evidence,
+                             p5_subresult=observation.p5_subresult)
+            validate_driver_result(result)
+
+        with (
+            adapter.case_lock(principal_ref),
+            mock.patch.object(adapter, "read_case_result_evidence", return_value=None),
+            mock.patch.object(adapter, "rehearsal_effect_counters", return_value={
+                "driver_dispatch_count": 0, "api_mutation_count": 0, "git_push_count": 0,
+            }),
+        ):
+            blocked = adapter._execute_fixed_case("P5-event-observe", request, approval, proof)
+        self.assertEqual(blocked.status, "BLOCKED_NOT_VERIFIABLE")
+        self.assertEqual(blocked.p5_subresult["failure_reason"], "PRIOR_4A_TERMINAL_RECEIPT_ABSENT")
+        self.assertFalse(blocked.p5_subresult["matching_app_trigger_guard_exercised"])
+        self.assertEqual(blocked.p5_subresult["second_driver_dispatch_count"], 0)
+        blocked_result = _result(
+            request, "P5-event-observe", blocked.status, blocked.evidence,
+            p5_subresult=blocked.p5_subresult,
+        )
+        validate_driver_result(blocked_result)
 
     def test_approval_job_accepts_known_runner_bookends_and_rejects_other_steps(self) -> None:
         job = _provider_payloads(_request())[
@@ -601,7 +863,7 @@ class RehearsalContractTests(unittest.TestCase):
         with mock.patch(
             "version_lifecycle.rehearsal.http.client.HTTPSConnection",
             side_effect=AssertionError("not reached"),
-        ), self.assertRaisesRegex(RehearsalError, "APPROVAL_PATH_NOT_ALLOWLISTED"):
+            ), self.assertRaisesRegex(RehearsalError, "ANONYMOUS_PATH_NOT_ALLOWLISTED"):
             AnonymousGitHubTransport().get("/repos/attacker/repo")
 
     def test_approval_read_window_is_enforced_during_the_eight_gets(self) -> None:
@@ -959,6 +1221,62 @@ class GitHubCaseAdapterTests(unittest.TestCase):
         self.assertIsNotNone(observation.evidence["post_state"]["readback_error"])
         self.assertEqual(len(adapter._unreconciled_case_writes), 1)
 
+    def test_unqualified_workflows_create_denials_and_network_errors_stay_blocked_not_verifiable(self) -> None:
+        operation = next(row for row in OPERATION_TABLE if row["case"] == "4d-branch-create")
+        for status, response_body, transport_error, expected_state, expected_reason in (
+            (403, b'{"message":"generic"}', None,
+             "BLOCKED_UNQUALIFIED_PROVIDER_DISCRIMINATOR",
+             "WORKFLOWS_DENIAL_DISCRIMINATOR_UNQUALIFIED"),
+            (422, b'{"message":"generic"}', None,
+             "BLOCKED_UNQUALIFIED_PROVIDER_DISCRIMINATOR",
+             "WORKFLOWS_DENIAL_DISCRIMINATOR_UNQUALIFIED"),
+            (401, b'{"message":"authentication required"}', None,
+             "BLOCKED_UNQUALIFIED_PROVIDER_OUTCOME",
+             "WORKFLOWS_PROVIDER_OUTCOME_UNQUALIFIED"),
+            (503, b'{"message":"unavailable"}', None,
+             "BLOCKED_UNQUALIFIED_PROVIDER_OUTCOME",
+             "WORKFLOWS_PROVIDER_OUTCOME_UNQUALIFIED"),
+            (None, b"", TimeoutError("offline"),
+             "BLOCKED_UNQUALIFIED_PROVIDER_OUTCOME",
+             "WORKFLOWS_PROVIDER_OUTCOME_UNQUALIFIED"),
+        ):
+            with self.subTest(status=status, network=transport_error is not None):
+                adapter, request, approval, proof, _state, _calls, _ref, _target = self._case_fixture(
+                    status=200, body=b"{}", positive_case="4d-branch-create",
+                )
+                capability_proof = replace(proof, ref=operation["ref"], ref_sha=None)
+                response = ApiResponse(status or 503, response_body, {
+                    "x-github-request-id": "SYNTHETIC-CAPABILITY",
+                })
+                with (
+                    adapter.case_lock(operation["ref"]),
+                    mock.patch.object(adapter, "_read_rehearsal_target_ref_with_evidence", return_value=(
+                        None, {"status": 404, "body_sha256": "1" * 64},
+                    )),
+                    mock.patch.object(
+                        adapter, "_api_request",
+                        side_effect=transport_error if transport_error is not None else None,
+                        return_value=response,
+                    ),
+                ):
+                    observation = adapter._case_observation(
+                        "4d-branch-create", request, capability_proof,
+                        method="POST", path=f"/repos/{REPOSITORY}/git/refs",
+                        payload={"ref": operation["ref"], "sha": operation["target"]},
+                        expected_sha=operation["target"], expected_rule=None,
+                        positive=True, approval_receipt_sha256=approval.receipt_sha256,
+                    )
+                self.assertEqual(observation.status, "BLOCKED_NOT_VERIFIABLE")
+                self.assertEqual(observation.failure_reason, expected_reason)
+                self.assertEqual(observation.evidence["capability_fallback_state"], expected_state)
+                self.assertIsNone(observation.p5_subresult)
+                result = _result(
+                    request, "4d-branch-create", observation.status,
+                    observation.evidence,
+                )
+                self.assertIsNone(result["next_case"])
+                self.assertTrue(result["unresolved"])
+
     def test_duplicate_fence_exercises_installed_dispatch_boundary_and_measures_effects(self) -> None:
         request = _request()
         approval = _approval(request)
@@ -1058,7 +1376,7 @@ class GitHubCaseAdapterTests(unittest.TestCase):
             result = adapter.execute_case("4b-nff", request, approval, proof)
         self.assertEqual(result.status, "BLOCKED_NOT_VERIFIABLE")
 
-    def test_valid_ff_move_uses_force_false_and_readback(self) -> None:
+    def test_ff_route_requires_local_git_cas_source_without_api_fallback(self) -> None:
         adapter, request, approval, proof, state, calls, ref, _target = self._case_fixture(
             status=200, body=b'{"ref":"ok"}', positive_case="4a",
         )
@@ -1066,11 +1384,10 @@ class GitHubCaseAdapterTests(unittest.TestCase):
         state["sha"] = proof.ref_sha
         with adapter.case_lock(ref):
             result = adapter.execute_case("4a", request, approval, proof)
-        self.assertEqual(result.status, "PASS_ACCEPTED")
-        patch = [entry for entry in calls if entry[0] == "PATCH"]
-        self.assertEqual(len(patch), 1)
-        self.assertEqual(patch[0][2], {"sha": "a6df7c78e27ee81771cc06b0783a508edcaed320", "force": False})
-        self.assertEqual(state["sha"], "a6df7c78e27ee81771cc06b0783a508edcaed320")
+        self.assertEqual(result.status, "BLOCKED_NOT_VERIFIABLE")
+        self.assertEqual(result.failure_reason, "LOCAL_GIT_SOURCE_UNAVAILABLE")
+        self.assertFalse(any(entry[0] == "PATCH" for entry in calls))
+        self.assertEqual(state["sha"], proof.ref_sha)
 
     def test_unknown_write_is_not_retried_on_the_same_adapter(self) -> None:
         adapter, request, approval, proof, _state, calls, ref, _target = self._case_fixture(

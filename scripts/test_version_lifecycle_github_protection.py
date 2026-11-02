@@ -25,11 +25,12 @@ from version_lifecycle.github_protection import (  # noqa: E402
     GitHubProtectionAdapter,
     GitHubProtectionError,
     _decode_github_contents_base64,
+    _consume_qualified_4d_capability_evidence,
     classify_principal_branch_move,
     classify_ref_creation,
     validate_rehearsal_trigger,
 )
-from version_lifecycle.codec import canonical_json  # noqa: E402
+from version_lifecycle.codec import canonical_json, sha256_hex  # noqa: E402
 
 
 REPOSITORY = "Julia-meets-String-Theory/CYAxiverse.jl"
@@ -72,6 +73,8 @@ def ruleset(
         "name": name,
         "target": target,
         "enforcement": enforcement,
+        "source": REPOSITORY,
+        "source_type": "Repository",
         "conditions": {
             "ref_name": {
                 "include": include or [],
@@ -140,6 +143,34 @@ def public_tag_rulesets() -> list[dict[str, object]]:
             exclude=["refs/tags/v-0.1"],
             rules=[rule("creation")],
             actors=[{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+        ),
+    ]
+
+
+def rehearsal_tag_rulesets() -> list[dict[str, object]]:
+    return [
+        ruleset(
+            26316870,
+            "CYAx rehearsal iteration tag creation",
+            target="tag",
+            include=["refs/tags/rehearsal/iterations/*"],
+            rules=[rule("creation")],
+            actors=[ADMIN_BYPASS],
+        ),
+        ruleset(
+            26316871,
+            "CYAx rehearsal iteration tags immutable",
+            target="tag",
+            include=["refs/tags/rehearsal/iterations/*"],
+            rules=[rule("deletion"), rule("non_fast_forward"), rule("update")],
+        ),
+        ruleset(
+            26316872,
+            "CYAx rehearsal canonical tag creation",
+            target="tag",
+            include=["refs/tags/rehearsal/v*.*.*"],
+            rules=[rule("creation")],
+            actors=[ADMIN_BYPASS],
         ),
     ]
 
@@ -233,6 +264,8 @@ class FakeGitHub:
                     "name": row["name"],
                     "target": row["target"],
                     "enforcement": row["enforcement"],
+                    "source": row["source"],
+                    "source_type": row["source_type"],
                     "updated_at": (
                         "2026-09-24T14:59:59Z"
                         if self.stale_detail and row["id"] == 23967983
@@ -505,7 +538,22 @@ class GitHubProtectionTests(unittest.TestCase):
             workflow.index("Mint a scoped token and execute the fixed rehearsal route"),
         )
         self.assertIn("Fetch the exact trigger commit with anonymous read-only access", workflow)
-        self.assertIn("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT", workflow)
+        self.assertIn(
+            "PYTHONPATH=scripts python3 - <<'PY'\n          import json\n          import os",
+            workflow,
+        )
+        self.assertIn("validate_seed_receipt_bundle(route_request, AnonymousGitHubTransport())", workflow)
+        self.assertIn("validate_seed_receipt_bundle(request, AnonymousGitHubTransport())", workflow)
+        self.assertLess(
+            workflow.index("validate_seed_receipt_bundle(route_request, AnonymousGitHubTransport())"),
+            workflow.index('output.write("route_mode=true\\n")'),
+        )
+        self.assertLess(
+            workflow.index("validate_seed_receipt_bundle(request, AnonymousGitHubTransport())"),
+            workflow.index("private_key = OpenSSL::PKey::RSA.new"),
+        )
+        self.assertNotIn("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT", workflow)
+        self.assertNotIn("raise RehearsalError(\"OWNER_SEED", workflow)
         self.assertIn("if: steps.approval.outputs.route_mode == 'true'", workflow)
         self.assertIn("APPROVAL_RAW_ENVELOPE_PATH", workflow)
         self.assertNotIn("APPROVAL_RECEIPT_B64", workflow)
@@ -1712,6 +1760,161 @@ class GitHubProtectionTests(unittest.TestCase):
                     GitHubProtectionError, "PUBLIC_TAG_PROTECTION_INVALID"
                 ):
                     adapter_for(fake).verify_public_tag("refs/tags/v0.3.0")
+
+    def test_tag_rules_are_derived_from_complete_current_and_parent_definitions(self) -> None:
+        fake = FakeGitHub()
+        fake.rows.extend(public_tag_rulesets())
+        fake.rows.extend(rehearsal_tag_rulesets())
+        adapter = adapter_for(fake)
+        observation = adapter.observe_rules_for_ref(
+            "refs/tags/rehearsal/iterations/cyax125-20261101",
+            _allow_rehearsal_tag=True,
+        )
+        self.assertEqual(observation.ruleset_ids, (26316870, 26316871))
+        self.assertEqual(
+            observation.evidence_source,
+            "DERIVED_FROM_FULL_CURRENT_DEFINITIONS_NOT_PROVIDER_EFFECTIVE_TAG_EVALUATION",
+        )
+        self.assertIsNone(observation.provider_request_id)
+        self.assertNotIn("/rules/tags/", [path for _method, path, _body in fake.calls])
+        self.assertTrue(any("includes_parents=true" in path for _method, path, _body in fake.calls))
+        self.assertTrue(any("/rulesets/26316870" in path for _method, path, _body in fake.calls))
+        self.assertFalse(adapter._tag_pattern_matches(
+            "refs/tags/rehearsal/iterations/*",
+            "refs/tags/rehearsal/iterations/deep/name",
+        ))
+
+        public_fake = FakeGitHub()
+        public_fake.rows.extend(public_tag_rulesets())
+        public_adapter = adapter_for(public_fake)
+        proof = public_adapter.verify_public_tag("refs/tags/v0.3.0")
+        self.assertEqual(proof.evidence_source, "DERIVED_FROM_FULL_CURRENT_DEFINITIONS_NOT_PROVIDER_EFFECTIVE_TAG_EVALUATION")
+        self.assertTrue(public_adapter.is_live_protection_evidence(
+            proof, ref="refs/tags/v0.3.0", repository=REPOSITORY
+        ))
+
+    def test_tag_derivation_blocks_unknown_patterns_missing_bypass_and_page_cap(self) -> None:
+        fake = FakeGitHub()
+        fake.rows.extend(rehearsal_tag_rulesets())
+        next(row for row in fake.rows if row["id"] == 26316870)["conditions"]["ref_name"]["include"] = [
+            "refs/tags/rehearsal/iterations/**"
+        ]
+        with self.assertRaisesRegex(GitHubProtectionError, "TAG_RULESET_DEFINITION_UNKNOWN"):
+            adapter_for(fake).observe_rules_for_ref(
+                "refs/tags/rehearsal/iterations/cyax125-20261101",
+                _allow_rehearsal_tag=True,
+            )
+
+        fake = FakeGitHub()
+        fake.rows.extend(rehearsal_tag_rulesets())
+        del next(row for row in fake.rows if row["id"] == 26316870)["bypass_actors"]
+        with self.assertRaisesRegex(GitHubProtectionError, "TAG_RULESET_BYPASS_UNKNOWN"):
+            adapter_for(fake).observe_rules_for_ref(
+                "refs/tags/rehearsal/iterations/cyax125-20261101",
+                _allow_rehearsal_tag=True,
+            )
+
+        adapter = adapter_for(FakeGitHub())
+        full_page = ApiResponse(200, json.dumps([{} for _ in range(100)]).encode(), {})
+        with mock.patch.object(adapter, "_api_request", return_value=full_page):
+            with self.assertRaisesRegex(GitHubProtectionError, "TAG_RULESET_LIST_INCOMPLETE"):
+                adapter._collect_tag_rule_definitions()
+
+        for key, value in (("target", "unknown-target"), ("enforcement", "future-mode")):
+            with self.subTest(key=key):
+                fake = FakeGitHub()
+                fake.rows.extend(rehearsal_tag_rulesets())
+                unrelated = ruleset(99001, "Unrelated current definition")
+                unrelated[key] = value
+                fake.rows.append(unrelated)
+                with self.assertRaisesRegex(GitHubProtectionError, "TAG_RULESET_SOURCE_UNKNOWN"):
+                    adapter_for(fake)._derive_tag_rule_observation(
+                        "refs/tags/rehearsal/iterations/cyax125-20261101"
+                    )
+
+    def test_api_response_limit_is_small_by_default_and_explicitly_bounded_for_fenced_requests(self) -> None:
+        adapter = adapter_for(FakeGitHub())
+        body = b"x" * (1024 * 1024 + 1)
+        with mock.patch.object(adapter, "_transport", return_value=ApiResponse(200, body, {})):
+            with self.assertRaisesRegex(GitHubProtectionError, "GITHUB_RESPONSE_OVERSIZE"):
+                adapter._api_request("GET", "/bounded-default")
+            with self.assertRaisesRegex(GitHubProtectionError, "GITHUB_RESPONSE_LIMIT_INVALID"):
+                adapter._api_request(
+                    "GET", "/bounded-large-request", max_response_bytes=2 * 1024 * 1024
+                )
+
+        request_id = "request-0125-1"
+        request_path = f"lifecycle-requests/{request_id}.json"
+        raw_request = b"x" * (1024 * 1024 + 1)
+        response_body = json.dumps({
+            "path": request_path,
+            "encoding": "base64",
+            "content": base64.b64encode(raw_request).decode("ascii"),
+        }).encode("utf-8")
+        large_adapter = GitHubProtectionAdapter(
+            REPOSITORY,
+            token="private-token",
+            transport=lambda *_args: ApiResponse(200, response_body, {}),
+        )
+        request = mock.Mock(request_id=request_id, request_path=request_path)
+        self.assertEqual(large_adapter._read_fenced_route_request(request), raw_request)
+
+    def test_4d_closed_evidence_consumer_runs_nested_classifier_without_provider_claim(self) -> None:
+        from version_lifecycle.rehearsal import _canonical
+
+        def envelope(status: int, body: bytes, suffix: str) -> dict[str, object]:
+            return {
+                "status": status,
+                "github_request_id": f"SYNTHETIC-{suffix}",
+                "date_header": "Mon, 02 Nov 2026 12:00:00 GMT",
+                "body_b64": base64.b64encode(body).decode("ascii"),
+                "body_sha256": sha256_hex(body),
+            }
+
+        provider = envelope(403, b'{"message":"synthetic only; not a provider discriminator"}', "denial")
+        absent = envelope(404, b'{"message":"Not Found"}', "absence")
+        classifier_input = {
+            "creation_class": "rehearsal-branch",
+            "ref": "refs/heads/rehearsal/lifecycle/proof/cyax125-20261101",
+            "target_sha": "32af89296955ad684517e7a57ce5d8a431f5a971",
+            "target_tree": "c515bf2745061da9150285d6d7c6035b061a1caa",
+            "workflow_diff_sha256": "1" * 64,
+            "provider_response_sha256": provider["body_sha256"],
+            "known_absent_readback_sha256": absent["body_sha256"],
+            "app_id": 5371554,
+        }
+        evidence = {
+            "reason": "OWNER_ROUTE_REQUIRED",
+            "creation_class": classifier_input["creation_class"],
+            "ref": classifier_input["ref"],
+            "target_sha": classifier_input["target_sha"],
+            "target_tree": classifier_input["target_tree"],
+            "workflow_diff_sha256": classifier_input["workflow_diff_sha256"],
+            "provider_response": provider,
+            "known_absent_readback": absent,
+            "app_id": 5371554,
+            "nested_check": {
+                "kind": "4c-equivalent-creation-precheck",
+                "input_sha256": sha256_hex(_canonical(classifier_input)),
+                "classification": "OWNER_ROUTE_REQUIRED",
+                "git_push_count": 0,
+                "api_mutation_count": 0,
+            },
+        }
+        self.assertEqual(_consume_qualified_4d_capability_evidence(evidence), evidence)
+
+        bad_input = copy.deepcopy(evidence)
+        bad_input["nested_check"]["input_sha256"] = "0" * 64
+        with self.assertRaisesRegex(GitHubProtectionError, "4D_CAPABILITY_NESTED_INPUT_MISMATCH"):
+            _consume_qualified_4d_capability_evidence(bad_input)
+        bool_effect = copy.deepcopy(evidence)
+        bool_effect["nested_check"]["git_push_count"] = False
+        with self.assertRaisesRegex(GitHubProtectionError, "4D_CAPABILITY_EVIDENCE_INVALID"):
+            _consume_qualified_4d_capability_evidence(bool_effect)
+        unknown_read = copy.deepcopy(evidence)
+        unknown_read["known_absent_readback"]["status"] = 503
+        with self.assertRaisesRegex(GitHubProtectionError, "4D_CAPABILITY_READBACK_NOT_ABSENT"):
+            _consume_qualified_4d_capability_evidence(unknown_read)
 
     def test_updated_at_preserves_fractional_provider_precision(self) -> None:
         self.assertEqual(

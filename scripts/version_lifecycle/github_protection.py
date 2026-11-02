@@ -48,11 +48,36 @@ _FREEZE_CONTROLS = {
 _PUBLIC_TAG_IMMUTABLE_ID = 23948086
 _PUBLIC_TAG_CREATION_ID = 23948090
 _PUBLIC_TAG_PATTERN = "refs/tags/v*.*.*"
+_DERIVED_TAG_RULE_SOURCE = "DERIVED_FROM_FULL_CURRENT_DEFINITIONS_NOT_PROVIDER_EFFECTIVE_TAG_EVALUATION"
+_TAG_RULESET_EXPECTATIONS = {
+    23948086: {
+        "include": ("refs/tags/v*.*.*",), "exclude": ("refs/tags/v-0.1",),
+        "rule_types": ("deletion", "non_fast_forward", "update"), "actors": (),
+    },
+    23948090: {
+        "include": ("refs/tags/v*.*.*",), "exclude": ("refs/tags/v-0.1",),
+        "rule_types": ("creation",), "actors": ((5, "RepositoryRole", "always"),),
+    },
+    26316870: {
+        "include": ("refs/tags/rehearsal/iterations/*",), "exclude": (),
+        "rule_types": ("creation",), "actors": ((5, "RepositoryRole", "always"),),
+    },
+    26316871: {
+        "include": ("refs/tags/rehearsal/iterations/*",), "exclude": (),
+        "rule_types": ("deletion", "non_fast_forward", "update"), "actors": (),
+    },
+    26316872: {
+        "include": ("refs/tags/rehearsal/v*.*.*",), "exclude": (),
+        "rule_types": ("creation",), "actors": ((5, "RepositoryRole", "always"),),
+    },
+}
 _FULL_REF_SHA = re.compile(r"[0-9a-f]{40}\Z")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?\Z")
 _APP_LOGIN = "cyaxiverse-lifecycle[bot]"
 _APP_INSTALLATION_ID = 172789630
 _APP_ID = 5371554
+_MAX_API_RESPONSE_BYTES = 1024 * 1024
+_MAX_FENCED_REQUEST_RESPONSE_BYTES = 17 * 1024 * 1024
 _REHEARSAL_LIFECYCLE_PATTERN = "refs/heads/rehearsal/lifecycle/**"
 _REHEARSAL_PRINCIPAL_PATTERN = "refs/heads/rehearsal/principal/*"
 _REHEARSAL_ADMIN_BYPASS = (5, "RepositoryRole", "always")
@@ -215,6 +240,7 @@ class VerifiedProtectionEvidence:
     snapshot_sha256: str
     retrieved_at_utc: str
     _adapter_nonce: object = field(repr=False, compare=False)
+    evidence_source: str = "PROVIDER_EFFECTIVE_RULE_EVALUATION"
 
     @property
     def rule_id(self) -> str:
@@ -260,6 +286,7 @@ class RuleEvaluationObservation:
     rule_types: tuple[str, ...]
     effective_rules: tuple[tuple[int, str], ...]
     canonical_response: bytes
+    evidence_source: str = "PROVIDER_EFFECTIVE_RULE_EVALUATION"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -276,6 +303,7 @@ class RuleEvaluationObservation:
                 {"ruleset_id": identifier, "type": rule_type}
                 for identifier, rule_type in self.effective_rules
             ],
+            "evidence_source": self.evidence_source,
         }
 
 
@@ -519,6 +547,78 @@ def classify_ref_creation(ref: str, *, workflow_content_rejected: bool = False) 
     if workflow_content_rejected:
         return OwnerRouteDecision("OWNER_ROUTE_REQUIRED", "WORKFLOW_CONTENT_CREATION_REJECTED")
     return OwnerRouteDecision("APP_CREATE_ELIGIBLE", "CREATE_ONCE_REHEARSAL_REF")
+
+
+def _consume_qualified_4d_capability_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a previously qualified 4d response and run its pure nested precheck.
+
+    This consumer does not classify raw provider error bodies. The current R2
+    input defines no accepted body discriminator, so the adapter keeps all raw
+    denials on its ordinary blocked path until an independently qualified
+    provider response shape exists.
+    """
+
+    from .rehearsal import CAPABILITY_4D_SCHEMA, MAX_SEED_RESPONSE_BYTES, _canonical, _schema_matches
+
+    if not isinstance(value, dict) or not _schema_matches(value, CAPABILITY_4D_SCHEMA):
+        raise GitHubProtectionError("4D_CAPABILITY_EVIDENCE_INVALID")
+    expected_case = {
+        "rehearsal-branch": "4d-branch-create",
+        "rehearsal-tag": "4d-tag-create",
+    }.get(value["creation_class"])
+    from .rehearsal import CASE_ORDER, OPERATION_TABLE
+
+    if expected_case is None:
+        raise GitHubProtectionError("4D_CAPABILITY_CLASS_INVALID")
+    operation = OPERATION_TABLE[CASE_ORDER.index(expected_case)]
+    if value["ref"] != operation["ref"] or value["target_sha"] != operation["target"]:
+        raise GitHubProtectionError("4D_CAPABILITY_OPERATION_BINDING_INVALID")
+    for key, expected_status in (("provider_response", None), ("known_absent_readback", 404)):
+        envelope = value[key]
+        if expected_status is not None and envelope["status"] != expected_status:
+            raise GitHubProtectionError("4D_CAPABILITY_READBACK_NOT_ABSENT")
+        if expected_status is None and envelope["status"] not in {403, 422}:
+            raise GitHubProtectionError("4D_CAPABILITY_PROVIDER_STATUS_INVALID")
+        try:
+            raw = base64.b64decode(envelope["body_b64"], validate=True)
+        except (ValueError, TypeError):
+            raise GitHubProtectionError("4D_CAPABILITY_BODY_INVALID") from None
+        if (
+            not raw or len(raw) > MAX_SEED_RESPONSE_BYTES
+            or base64.b64encode(raw).decode("ascii") != envelope["body_b64"]
+            or sha256_hex(raw) != envelope["body_sha256"]
+            or not envelope["github_request_id"]
+            or not envelope["date_header"]
+        ):
+            raise GitHubProtectionError("4D_CAPABILITY_BODY_INVALID")
+    if value["app_id"] != _APP_ID:
+        raise GitHubProtectionError("4D_CAPABILITY_APP_INVALID")
+    classifier_input = {
+        "creation_class": value["creation_class"],
+        "ref": value["ref"],
+        "target_sha": value["target_sha"],
+        "target_tree": value["target_tree"],
+        "workflow_diff_sha256": value["workflow_diff_sha256"],
+        "provider_response_sha256": value["provider_response"]["body_sha256"],
+        "known_absent_readback_sha256": value["known_absent_readback"]["body_sha256"],
+        "app_id": value["app_id"],
+    }
+    nested = value["nested_check"]
+    if nested["input_sha256"] != sha256_hex(_canonical(classifier_input)):
+        raise GitHubProtectionError("4D_CAPABILITY_NESTED_INPUT_MISMATCH")
+    decision = classify_ref_creation(value["ref"], workflow_content_rejected=True)
+    if decision.status != "OWNER_ROUTE_REQUIRED" or decision.reason_code != "WORKFLOW_CONTENT_CREATION_REJECTED":
+        raise GitHubProtectionError("4D_CAPABILITY_CLASSIFICATION_INVALID")
+    if (
+        nested["kind"] != "4c-equivalent-creation-precheck"
+        or nested["classification"] != decision.status
+        or type(nested["git_push_count"]) is not int
+        or type(nested["api_mutation_count"]) is not int
+        or nested["git_push_count"] != 0
+        or nested["api_mutation_count"] != 0
+    ):
+        raise GitHubProtectionError("4D_CAPABILITY_NESTED_EFFECT_INVALID")
+    return dict(value)
 
 
 def validate_rehearsal_trigger(
@@ -856,11 +956,32 @@ class GitHubProtectionAdapter:
         allow_not_found: bool = False,
         return_errors: bool = False,
         follow_redirects: bool = True,
+        max_response_bytes: int = _MAX_API_RESPONSE_BYTES,
     ) -> ApiResponse:
         if not self._token:
             raise GitHubProtectionError("GITHUB_AUTHENTICATION_UNAVAILABLE")
         if not path.startswith("/") or ".." in path.split("/"):
             raise GitHubProtectionError("API_PATH_INVALID")
+        if (
+            type(max_response_bytes) is not int
+            or max_response_bytes < 1
+            or max_response_bytes > _MAX_FENCED_REQUEST_RESPONSE_BYTES
+        ):
+            raise GitHubProtectionError("GITHUB_RESPONSE_LIMIT_INVALID")
+        if max_response_bytes > _MAX_API_RESPONSE_BYTES:
+            request_contents = re.escape(
+                self._repo_path("/contents/lifecycle-requests/")
+            )
+            if (
+                method != "GET"
+                or re.fullmatch(
+                    request_contents
+                    + r"([A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?)\.json"
+                    + r"\?ref=rehearsal%2Flifecycle%2Frequests%2F\1",
+                    path,
+                ) is None
+            ):
+                raise GitHubProtectionError("GITHUB_RESPONSE_LIMIT_INVALID")
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             self._rehearsal_api_mutation_attempts += 1
         if self._transport is not None:
@@ -900,16 +1021,24 @@ class GitHubProtectionAdapter:
                 with response_context as result:
                     response = ApiResponse(
                         result.status,
-                        result.read(),
+                        result.read(max_response_bytes + 1),
                         {key.lower(): value for key, value in result.headers.items()},
                     )
             except HTTPError as error:
                 status = error.code
                 headers = {key.lower(): value for key, value in error.headers.items()}
-                body = error.read(1024 * 1024 + 1) if return_errors else b""
+                body = error.read(1024 * 1024 + 1) if (
+                    return_errors or (allow_not_found and status == 404)
+                ) else b""
                 error.close()
                 if allow_not_found and status == 404:
-                    return ApiResponse(status, b"", headers)
+                    if len(body) > 1024 * 1024:
+                        raise GitHubProtectionError(
+                            "GITHUB_RESPONSE_OVERSIZE",
+                            provider_status=status,
+                            provider_request_id=headers.get("x-github-request-id"),
+                        )
+                    return ApiResponse(status, body, headers)
                 if return_errors:
                     if len(body) > 1024 * 1024:
                         raise GitHubProtectionError(
@@ -942,15 +1071,27 @@ class GitHubProtectionAdapter:
             str(key).lower(): str(value) for key, value in response.headers.items()
         }
         if allow_not_found and response.status == 404:
-            return ApiResponse(response.status, response.body, normalized_headers)
-        if return_errors:
-            if not isinstance(response.body, bytes) or len(response.body) > 1024 * 1024:
+            if not isinstance(response.body, bytes) or len(response.body) > _MAX_API_RESPONSE_BYTES:
                 raise GitHubProtectionError(
                     "GITHUB_RESPONSE_OVERSIZE",
                     provider_status=response.status,
                     provider_request_id=normalized_headers.get("x-github-request-id"),
                 )
             return ApiResponse(response.status, response.body, normalized_headers)
+        if return_errors:
+            if not isinstance(response.body, bytes) or len(response.body) > max_response_bytes:
+                raise GitHubProtectionError(
+                    "GITHUB_RESPONSE_OVERSIZE",
+                    provider_status=response.status,
+                    provider_request_id=normalized_headers.get("x-github-request-id"),
+                )
+            return ApiResponse(response.status, response.body, normalized_headers)
+        if not isinstance(response.body, bytes) or len(response.body) > max_response_bytes:
+            raise GitHubProtectionError(
+                "GITHUB_RESPONSE_OVERSIZE",
+                provider_status=response.status,
+                provider_request_id=normalized_headers.get("x-github-request-id"),
+            )
         if not 200 <= response.status < 300:
             raise GitHubProtectionError(
                 "GITHUB_API_REQUEST_FAILED",
@@ -1465,6 +1606,7 @@ class GitHubProtectionAdapter:
         response = self._api_request(
             "GET", self._repo_path(f"/contents/{encoded}?{query}"),
             allow_not_found=True,
+            max_response_bytes=_MAX_FENCED_REQUEST_RESPONSE_BYTES,
         )
         response_evidence = _case_response_evidence(response)
         if response.status == 404:
@@ -1911,6 +2053,9 @@ class GitHubProtectionAdapter:
                 method, path, payload, return_errors=True, follow_redirects=False
             )
         except Exception as error:
+            is_workflows_capability_create = case_id in {
+                "4d-branch-create", "4d-tag-create",
+            }
             evidence = {
                 "reason": getattr(error, "reason_code", "CASE_PROVIDER_OUTCOME_UNKNOWN"),
                 "write_id": write_id,
@@ -1929,6 +2074,13 @@ class GitHubProtectionAdapter:
             }
             self._rehearsal_case_inflight.pop(write_id, None)
             self._unreconciled_case_writes[write_id] = evidence
+            if is_workflows_capability_create:
+                evidence["capability_fallback_state"] = "BLOCKED_UNQUALIFIED_PROVIDER_OUTCOME"
+                return CaseObservation(
+                    "BLOCKED_NOT_VERIFIABLE", evidence,
+                    provider_status=getattr(error, "provider_status", None),
+                    failure_reason="WORKFLOWS_PROVIDER_OUTCOME_UNQUALIFIED",
+                )
             return CaseObservation(
                 "BLOCKED_UNKNOWN", evidence,
                 provider_status=getattr(error, "provider_status", None),
@@ -1981,6 +2133,13 @@ class GitHubProtectionAdapter:
         if postread_error is not None:
             self._rehearsal_case_inflight.pop(write_id, None)
             self._unreconciled_case_writes[write_id] = evidence
+            if case_id in {"4d-branch-create", "4d-tag-create"}:
+                evidence["capability_fallback_state"] = "BLOCKED_UNQUALIFIED_PROVIDER_OUTCOME"
+                return CaseObservation(
+                    "BLOCKED_NOT_VERIFIABLE", evidence,
+                    provider_status=response.status,
+                    failure_reason="WORKFLOWS_PROVIDER_OUTCOME_UNQUALIFIED",
+                )
             return CaseObservation(
                 "BLOCKED_UNKNOWN", evidence,
                 provider_status=response.status,
@@ -2014,6 +2173,26 @@ class GitHubProtectionAdapter:
             return CaseObservation(
                 "PASS_DENIED_TARGET_CONTROL", evidence,
                 provider_status=response.status,
+            )
+        if case_id in {"4d-branch-create", "4d-tag-create"}:
+            unqualified_denial = response.status in {403, 422}
+            evidence["capability_fallback_state"] = (
+                "BLOCKED_UNQUALIFIED_PROVIDER_DISCRIMINATOR"
+                if unqualified_denial else "BLOCKED_UNQUALIFIED_PROVIDER_OUTCOME"
+            )
+            if after != before:
+                return CaseObservation(
+                    "BLOCKED_UNEXPECTED_ACCEPTANCE", evidence,
+                    provider_status=response.status,
+                    failure_reason="WORKFLOWS_CREATE_STATE_CHANGED_AFTER_UNQUALIFIED_RESPONSE",
+                )
+            return CaseObservation(
+                "BLOCKED_NOT_VERIFIABLE", evidence,
+                provider_status=response.status,
+                failure_reason=(
+                    "WORKFLOWS_DENIAL_DISCRIMINATOR_UNQUALIFIED"
+                    if unqualified_denial else "WORKFLOWS_PROVIDER_OUTCOME_UNQUALIFIED"
+                ),
             )
         if response.status in {408, 425, 429} or response.status >= 500 or response.status < 200:
             self._unreconciled_case_writes[write_id] = evidence
@@ -2075,22 +2254,154 @@ class GitHubProtectionAdapter:
             )
         if case_id == "P5-event-observe":
             from .rehearsal import CaseObservation
-            return CaseObservation(
-                "BLOCKED_NOT_VERIFIABLE",
-                {"reason": "PRIOR_4A_APP_EVENT_EVIDENCE_UNAVAILABLE"},
-                failure_reason="PRIOR_4A_APP_EVENT_EVIDENCE_UNAVAILABLE",
-                p5_subresult={
-                    "matching_app_trigger_guard_exercised": False,
-                    "observed_off_ref_event": None,
-                    "second_driver_dispatch_count": None,
-                    "api_mutation_count": None,
-                    "git_push_count": None,
-                    "existing_fence_sha": None,
-                    "fence_state": "UNKNOWN",
-                    "request_plan_match": None,
-                    "failure_reason": "PRIOR_4A_APP_EVENT_EVIDENCE_UNAVAILABLE",
-                },
+            counters_before = self.rehearsal_effect_counters()
+            principal_ref = "refs/heads/rehearsal/principal/cyax125-20261101-route"
+            target_sha = "a6df7c78e27ee81771cc06b0783a508edcaed320"
+            old_sha = "f12fbb8ec52e4c7510564f602a15f26173fe772e"
+            reason: str | None = None
+            prior_result: dict[str, Any] | None = None
+            prior_evidence: dict[str, Any] | None = None
+            current: tuple[str, str] | None = None
+            current_read: dict[str, Any] | None = None
+            commit: dict[str, Any] | None = None
+            event_evidence: dict[str, Any] = {"state": "OPTIONAL_READ_UNAVAILABLE"}
+            observed_event = False
+            try:
+                stored = self.read_case_result_evidence(
+                    request.request_id, request.plan_sha256, "4a"
+                )
+                if stored is None:
+                    raise GitHubProtectionError("PRIOR_4A_TERMINAL_RECEIPT_ABSENT")
+                prior_result, prior_evidence = stored
+                cas = prior_evidence.get("cas_result")
+                if (
+                    prior_result.get("status") != "PASS_ACCEPTED"
+                    or prior_result.get("next_case") != "4b-nff"
+                    or prior_result.get("unresolved") is not False
+                    or prior_evidence.get("request_id") != request.request_id
+                    or prior_evidence.get("request_sha256") != request.request_sha256
+                    or prior_evidence.get("plan_sha256") != request.plan_sha256
+                    or prior_evidence.get("approval_receipt_sha256") != approval.receipt_sha256
+                    or prior_evidence.get("ref") != principal_ref
+                    or prior_evidence.get("expected_old_sha") != old_sha
+                    or prior_evidence.get("intended_sha") != target_sha
+                    or type(prior_evidence.get("api_mutation_count")) is not int
+                    or prior_evidence.get("api_mutation_count") != 0
+                    or type(prior_evidence.get("git_push_count")) is not int
+                    or prior_evidence.get("git_push_count") != 1
+                    or not isinstance(cas, dict)
+                    or cas.get("write_outcome") != "provider_accepted_and_read_back"
+                    or cas.get("request_id") != request.request_id
+                    or cas.get("expected_old_sha") != old_sha
+                    or cas.get("intended_new_sha") != target_sha
+                    or cas.get("observed_sha") != target_sha
+                    or cas.get("postwrite_rules_verified") is not True
+                ):
+                    raise GitHubProtectionError("PRIOR_4A_TERMINAL_RECEIPT_INVALID")
+                current, current_read = self._read_rehearsal_target_ref_with_evidence(principal_ref)
+                if current != ("commit", target_sha):
+                    raise GitHubProtectionError("PRIOR_4A_CURRENT_REF_MISMATCH")
+                commit = self._read_rehearsal_commit(target_sha)
+                if old_sha not in commit["parents"]:
+                    raise GitHubProtectionError("PRIOR_4A_COMMIT_LINEAGE_INVALID")
+                if cas.get("intended_new_tree") != commit["tree"]["sha"]:
+                    raise GitHubProtectionError("PRIOR_4A_COMMIT_TREE_MISMATCH")
+
+                event_path = (
+                    f"{self._repo_path('')}/actions/runs?event=push&head_sha={target_sha}&per_page=100"
+                )
+                try:
+                    event_response = self._api_request(
+                        "GET", event_path, return_errors=True, follow_redirects=False
+                    )
+                    event_evidence = _case_response_evidence(event_response)
+                    event_evidence["path"] = event_path
+                    if event_response.status == 200:
+                        run_payload = json.loads(
+                            event_response.body.decode("utf-8"),
+                            object_pairs_hook=_request_object_pairs,
+                        )
+                        if isinstance(run_payload, dict) and isinstance(run_payload.get("workflow_runs"), list):
+                            for run in run_payload["workflow_runs"]:
+                                if not isinstance(run, dict):
+                                    continue
+                                actor = run.get("actor")
+                                repository = run.get("repository")
+                                if (
+                                    run.get("event") == "push"
+                                    and run.get("head_sha") == target_sha
+                                    and run.get("head_branch") == principal_ref.removeprefix("refs/heads/")
+                                    and isinstance(actor, dict)
+                                    and type(actor.get("id")) is int
+                                    and actor.get("id") == _APP_ID
+                                    and actor.get("login") == _APP_LOGIN
+                                    and isinstance(repository, dict)
+                                    and type(repository.get("id")) is int
+                                    and repository.get("id") == 527718962
+                                ):
+                                    observed_event = True
+                                    break
+                except Exception:
+                    # This event list is corroboration only. Its absence or
+                    # unreadability cannot prove a trigger guard outcome.
+                    event_evidence = {"state": "OPTIONAL_READ_UNAVAILABLE"}
+                    observed_event = False
+            except Exception as error:
+                reason = getattr(error, "reason_code", "PRIOR_4A_TERMINAL_EVIDENCE_INVALID")
+
+            counters_after = self.rehearsal_effect_counters()
+            deltas = {
+                "second_driver_dispatch_count": counters_after["driver_dispatch_count"] - counters_before["driver_dispatch_count"],
+                "api_mutation_count": counters_after["api_mutation_count"] - counters_before["api_mutation_count"],
+                "git_push_count": counters_after["git_push_count"] - counters_before["git_push_count"],
+            }
+            effects_known_zero = all(type(value) is int and value == 0 for value in deltas.values())
+            if reason is None and not effects_known_zero:
+                reason = "P5_OBSERVER_EFFECT_COUNTER_MISMATCH"
+            if reason is None:
+                status = "PASS_ACCEPTED"
+                failure_reason = None
+            else:
+                status = "BLOCKED_UNKNOWN" if "UNKNOWN" in reason else "BLOCKED_NOT_VERIFIABLE"
+                failure_reason = reason
+            prior_digest = (
+                prior_result.get("evidence_sha256")
+                if isinstance(prior_result, dict) else None
             )
+            evidence = {
+                "reason": reason or "PRIOR_4A_TERMINAL_RECEIPT_VERIFIED",
+                "request_id": request.request_id,
+                "request_sha256": request.request_sha256,
+                "plan_sha256": request.plan_sha256,
+                "approval_receipt_sha256": approval.receipt_sha256,
+                "prior_4a_result_evidence_sha256": prior_digest or "",
+                "prior_4a_evidence_sha256": (
+                    sha256_hex(canonical_json(prior_evidence))
+                    if isinstance(prior_evidence, dict) else ""
+                ),
+                "current_principal_ref": list(current) if current is not None else [],
+                "current_principal_ref_read": (
+                    current_read if isinstance(current_read, dict) else {"state": "UNAVAILABLE"}
+                ),
+                "current_principal_commit": (
+                    {"sha": commit["sha"], "tree": commit["tree"]["sha"], "parents": commit["parents"]}
+                    if isinstance(commit, dict) else {}
+                ),
+                "optional_off_ref_event": event_evidence,
+                "effect_counters_before": counters_before,
+                "effect_counters_after": counters_after,
+                "effect_deltas": deltas,
+            }
+            p5_subresult = {
+                "matching_app_trigger_guard_exercised": False,
+                "observed_off_ref_event": observed_event,
+                **deltas,
+                "existing_fence_sha": None,
+                "fence_state": "UNKNOWN",
+                "request_plan_match": None,
+                "failure_reason": failure_reason,
+            }
+            return CaseObservation(status, evidence, failure_reason=failure_reason, p5_subresult=p5_subresult)
         if case_id == "P5-duplicate-fence":
             from .rehearsal import CaseObservation
             fence_ref = f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}"
@@ -3027,6 +3338,216 @@ class GitHubProtectionAdapter:
         return rows, tuple(etags)
 
     @staticmethod
+    def _strict_api_json(response: ApiResponse) -> Any:
+        def reject_number(_value: str) -> Any:
+            raise ValueError("floating provider value")
+
+        try:
+            return json.loads(
+                response.body.decode("utf-8"),
+                object_pairs_hook=_request_object_pairs,
+                parse_float=reject_number,
+                parse_constant=reject_number,
+            )
+        except (UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+            raise GitHubProtectionError("TAG_RULESET_RESPONSE_INVALID") from None
+
+    def _collect_tag_rule_definitions(
+        self,
+    ) -> tuple[list[dict[str, Any]], tuple[str, ...], list[dict[str, Any]], list[dict[str, Any]]]:
+        """Collect all current and inherited ruleset definitions through fixed routes."""
+
+        summaries: list[dict[str, Any]] = []
+        etags: list[str] = []
+        list_responses: list[dict[str, Any]] = []
+        complete = False
+        for page in range(1, 11):
+            query = urlencode({
+                "includes_parents": "true", "per_page": 100, "page": page,
+            })
+            response = self._api_request(
+                "GET", self._repo_path(f"/rulesets?{query}"), follow_redirects=False
+            )
+            payload = self._strict_api_json(response)
+            if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
+                raise GitHubProtectionError("TAG_RULESET_LIST_INVALID")
+            summaries.extend(payload)
+            etag = response.headers.get("etag")
+            if isinstance(etag, str) and etag:
+                etags.append(etag)
+            list_responses.append({
+                "page": page,
+                "body_b64": base64.b64encode(response.body).decode("ascii"),
+                "body_sha256": sha256_hex(response.body),
+                "etag": etag if isinstance(etag, str) else "",
+                "request_id": response.headers.get("x-github-request-id", ""),
+            })
+            if len(payload) < 100:
+                if response.headers.get("link"):
+                    raise GitHubProtectionError("TAG_RULESET_LIST_INCOMPLETE")
+                complete = True
+                break
+        if not complete:
+            raise GitHubProtectionError("TAG_RULESET_LIST_INCOMPLETE")
+
+        ids: set[int] = set()
+        definitions: list[dict[str, Any]] = []
+        detail_responses: list[dict[str, Any]] = []
+        for summary in summaries:
+            identifier = summary.get("id")
+            source = summary.get("source")
+            source_type = summary.get("source_type")
+            if (
+                type(identifier) is not int or identifier <= 0 or identifier in ids
+                or not isinstance(source, str) or not source
+                or not isinstance(source_type, str)
+                or source_type not in {"Repository", "Organization", "Enterprise"}
+                or not isinstance(summary.get("name"), str) or not summary["name"]
+                or summary.get("target") not in {"branch", "tag", "push", "repository"}
+                or summary.get("enforcement") not in {"active", "disabled", "evaluate"}
+            ):
+                raise GitHubProtectionError("TAG_RULESET_SOURCE_UNKNOWN")
+            summary_updated_at = self._updated_at(summary.get("updated_at"))
+            ids.add(identifier)
+            detail_response = self._api_request(
+                "GET", self._repo_path(f"/rulesets/{identifier}"), follow_redirects=False
+            )
+            detail = self._strict_api_json(detail_response)
+            if not isinstance(detail, dict):
+                raise GitHubProtectionError("TAG_RULESET_DETAIL_INVALID")
+            detail_responses.append({
+                "ruleset_id": identifier,
+                "body_b64": base64.b64encode(detail_response.body).decode("ascii"),
+                "body_sha256": sha256_hex(detail_response.body),
+                "etag": detail_response.headers.get("etag", ""),
+                "request_id": detail_response.headers.get("x-github-request-id", ""),
+            })
+            detail_source = detail.get("source")
+            detail_source_type = detail.get("source_type")
+            if (
+                type(detail.get("id")) is not int or detail.get("id") != identifier
+                or detail.get("name") != summary.get("name")
+                or detail.get("target") != summary.get("target")
+                or detail.get("enforcement") != summary.get("enforcement")
+                or detail_source != source
+                or detail_source_type != source_type
+                or detail.get("target") not in {"branch", "tag", "push", "repository"}
+                or detail.get("enforcement") not in {"active", "disabled", "evaluate"}
+                or self._updated_at(detail.get("updated_at")) != summary_updated_at
+            ):
+                raise GitHubProtectionError("TAG_RULESET_SNAPSHOT_CHANGED")
+            definitions.append({"summary": summary, "detail": detail})
+        return definitions, tuple(etags), list_responses, detail_responses
+
+    @staticmethod
+    def _tag_pattern_matches(pattern: str, ref: str) -> bool:
+        patterns = {
+            "refs/tags/v*.*.*": r"refs/tags/v[^/]*\.[^/]*\.[^/]*\Z",
+            "refs/tags/rehearsal/iterations/*": r"refs/tags/rehearsal/iterations/[^/]*\Z",
+            "refs/tags/rehearsal/v*.*.*": r"refs/tags/rehearsal/v[^/]*\.[^/]*\.[^/]*\Z",
+        }
+        expression = patterns.get(pattern)
+        return expression is not None and re.fullmatch(expression, ref) is not None
+
+    def _derive_tag_rule_observation(
+        self, ref: str
+    ) -> tuple[tuple[int, ...], tuple[str, ...], tuple[tuple[int, str], ...], bytes, str]:
+        definitions, page_etags, list_responses, detail_responses = (
+            self._collect_tag_rule_definitions()
+        )
+        seen_tag_ids: set[int] = set()
+        applicable: list[tuple[int, str]] = []
+        for definition in definitions:
+            detail = definition["detail"]
+            if detail.get("target") != "tag":
+                continue
+            identifier = detail.get("id")
+            expected = _TAG_RULESET_EXPECTATIONS.get(identifier)
+            if expected is None or identifier in seen_tag_ids:
+                raise GitHubProtectionError("TAG_RULESET_PATTERN_UNKNOWN")
+            seen_tag_ids.add(identifier)
+            conditions = detail.get("conditions")
+            ref_conditions = conditions.get("ref_name") if isinstance(conditions, dict) else None
+            if (
+                detail.get("enforcement") != "active"
+                or not isinstance(detail.get("name"), str)
+                or not detail["name"]
+                or not isinstance(conditions, dict)
+                or set(conditions) != {"ref_name"}
+                or not isinstance(ref_conditions, dict)
+                or set(ref_conditions) != {"include", "exclude"}
+                or not isinstance(ref_conditions.get("include"), list)
+                or not isinstance(ref_conditions.get("exclude"), list)
+                or tuple(ref_conditions["include"]) != expected["include"]
+                or tuple(ref_conditions["exclude"]) != expected["exclude"]
+                or not isinstance(detail.get("rules"), list)
+            ):
+                raise GitHubProtectionError("TAG_RULESET_DEFINITION_UNKNOWN")
+            normalized_rules = []
+            for rule in detail["rules"]:
+                if not isinstance(rule, dict) or set(rule) not in ({"type"}, {"type", "parameters"}):
+                    raise GitHubProtectionError("TAG_RULESET_RULE_UNKNOWN")
+                if "parameters" in rule and rule["parameters"] != {}:
+                    raise GitHubProtectionError("TAG_RULESET_RULE_UNKNOWN")
+                if rule.get("type") not in {"creation", "deletion", "non_fast_forward", "update"}:
+                    raise GitHubProtectionError("TAG_RULESET_RULE_UNKNOWN")
+                normalized_rules.append(rule["type"])
+            if tuple(sorted(normalized_rules)) != tuple(sorted(expected["rule_types"])):
+                raise GitHubProtectionError("TAG_RULESET_RULE_SET_INVALID")
+            if "bypass_actors" not in detail:
+                raise GitHubProtectionError("TAG_RULESET_BYPASS_UNKNOWN")
+            actors = detail["bypass_actors"]
+            if not isinstance(actors, list):
+                raise GitHubProtectionError("TAG_RULESET_BYPASS_UNKNOWN")
+            normalized_actors = tuple(sorted(
+                (
+                    int(actor["actor_id"]), str(actor["actor_type"]), str(actor["bypass_mode"])
+                )
+                for item in actors
+                for actor in (self._actor(item),)
+                if set(actor) == {"actor_id", "actor_type", "bypass_mode"}
+            ))
+            if len(normalized_actors) != len(actors):
+                raise GitHubProtectionError("TAG_RULESET_BYPASS_INVALID")
+            if normalized_actors != expected["actors"]:
+                raise GitHubProtectionError("TAG_RULESET_BYPASS_INVALID")
+            includes = expected["include"]
+            excludes = expected["exclude"]
+            matches = any(self._tag_pattern_matches(pattern, ref) for pattern in includes)
+            excluded = ref in excludes
+            if matches and not excluded:
+                applicable.extend((identifier, rule_type) for rule_type in normalized_rules)
+
+        if not seen_tag_ids.issubset(_TAG_RULESET_EXPECTATIONS):
+            raise GitHubProtectionError("TAG_RULESET_ID_UNKNOWN")
+        if ref.startswith("refs/tags/rehearsal/iterations/"):
+            required_ids = (26316870, 26316871)
+        elif ref.startswith("refs/tags/rehearsal/v"):
+            required_ids = (26316872,)
+        elif ref.startswith("refs/tags/v") and ref != "refs/tags/v-0.1":
+            required_ids = (_PUBLIC_TAG_IMMUTABLE_ID, _PUBLIC_TAG_CREATION_ID)
+        else:
+            raise GitHubProtectionError("TAG_EVALUATION_REF_UNSUPPORTED")
+        actual_ids = tuple(sorted({identifier for identifier, _ in applicable}))
+        if actual_ids != tuple(sorted(required_ids)):
+            raise GitHubProtectionError("TAG_RULESET_COVERAGE_INCOMPLETE")
+        source_payload = {
+            "repository": self.repository,
+            "evidence_source": _DERIVED_TAG_RULE_SOURCE,
+            "page_etags": list(page_etags),
+            "list_responses": list_responses,
+            "detail_responses": detail_responses,
+            "matching_rules": [
+                {"ruleset_id": identifier, "type": rule_type}
+                for identifier, rule_type in sorted(applicable)
+            ],
+        }
+        raw = canonical_json(source_payload)
+        ids = tuple(sorted({identifier for identifier, _ in applicable}))
+        types = tuple(sorted({rule_type for _, rule_type in applicable}))
+        return ids, types, tuple(sorted(applicable)), raw, sha256_hex(raw)
+
+    @staticmethod
     def _updated_at(value: Any) -> str:
         if not isinstance(value, str):
             raise GitHubProtectionError("RULESET_DETAIL_INVALID")
@@ -3259,32 +3780,17 @@ class GitHubProtectionAdapter:
     def verify_public_tag(self, ref: str) -> VerifiedProtectionEvidence:
         if not isinstance(ref, str) or not ref.startswith("refs/tags/v"):
             raise GitHubProtectionError("PUBLIC_TAG_REF_INVALID")
-        snapshot = self.read_snapshot()
-        by_id = {ruleset.id: ruleset for ruleset in snapshot.rulesets}
-        immutable = by_id.get(_PUBLIC_TAG_IMMUTABLE_ID)
-        creation = by_id.get(_PUBLIC_TAG_CREATION_ID)
-        common = ("tag", "active", (_PUBLIC_TAG_PATTERN,), ("refs/tags/v-0.1",))
-        if (
-            immutable is None or creation is None
-            or (immutable.name, immutable.target, immutable.enforcement, immutable.include, immutable.exclude)
-            != ("CYAx canonical release tags immutable", *common)
-            or immutable.conditions_extra
-            or self._rule_types(immutable) != ("deletion", "non_fast_forward", "update")
-            or self._exact_actors(immutable)
-            or any(rule.get("parameters") for rule in immutable.rules)
-            or (creation.name, creation.target, creation.enforcement, creation.include, creation.exclude)
-            != ("CYAx canonical release tag creation", *common)
-            or creation.conditions_extra
-            or self._rule_types(creation) != ("creation",)
-            or self._exact_actors(creation) != ((5, "RepositoryRole", "always"),)
-            or any(rule.get("parameters") for rule in creation.rules)
-        ):
+        try:
+            ids, _types, _rules, _raw, digest = self._derive_tag_rule_observation(ref)
+        except GitHubProtectionError:
+            raise GitHubProtectionError("PUBLIC_TAG_PROTECTION_INVALID") from None
+        if ids != (_PUBLIC_TAG_IMMUTABLE_ID, _PUBLIC_TAG_CREATION_ID):
             raise GitHubProtectionError("PUBLIC_TAG_PROTECTION_INVALID")
         protection = ProtectionEvidence(
-            rule_id=f"{immutable.id}+{creation.id}",
+            rule_id=f"{_PUBLIC_TAG_IMMUTABLE_ID}+{_PUBLIC_TAG_CREATION_ID}",
             pattern=_PUBLIC_TAG_PATTERN,
-            snapshot_sha256=snapshot.snapshot_sha256,
-            retrieved_at_utc=snapshot.retrieved_at_utc,
+            snapshot_sha256=digest,
+            retrieved_at_utc=self._timestamp(),
             creation_guarded=True,
             update_guarded=True,
             deletion_guarded=True,
@@ -3294,10 +3800,11 @@ class GitHubProtectionAdapter:
             protection,
             self.repository,
             ref,
-            (immutable.id, creation.id),
-            snapshot.snapshot_sha256,
-            snapshot.retrieved_at_utc,
+            ids,
+            digest,
+            protection.retrieved_at_utc,
             self._nonce,
+            _DERIVED_TAG_RULE_SOURCE,
         )
         proof.require_public_tag(ref)
         return proof
@@ -3314,6 +3821,11 @@ class GitHubProtectionAdapter:
         ):
             return False
         try:
+            if evidence.evidence_source == _DERIVED_TAG_RULE_SOURCE:
+                if not ref.startswith("refs/tags/"):
+                    return False
+                current_digest = self._derive_tag_rule_observation(ref)[-1]
+                return current_digest == evidence.snapshot_sha256
             current = self.read_snapshot()
         except GitHubProtectionError:
             return False
@@ -3339,11 +3851,19 @@ class GitHubProtectionAdapter:
             part in {"", ".", ".."} for part in target_name.split("/")
         ):
             raise GitHubProtectionError("EVALUATION_REF_INVALID")
+        if is_rehearsal_tag:
+            ids, rule_types, effective_rules, canonical_response, digest = (
+                self._derive_tag_rule_observation(ref)
+            )
+            return RuleEvaluationObservation(
+                self.repository, ref, self._timestamp(), digest, digest,
+                None, None, ids, rule_types, effective_rules, canonical_response,
+                _DERIVED_TAG_RULE_SOURCE,
+            )
         snapshot = _snapshot or self.read_snapshot()
         encoded_name = "/".join(quote(part, safe="") for part in target_name.split("/"))
-        route_kind = "branches" if target_type == "heads" else "tags"
         response = self._api_request(
-            "GET", self._repo_path(f"/rules/{route_kind}/{encoded_name}")
+            "GET", self._repo_path(f"/rules/branches/{encoded_name}")
         )
         payload = self._json(response)
         if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):

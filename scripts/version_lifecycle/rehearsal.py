@@ -16,6 +16,7 @@ import json
 import re
 import ssl
 import time
+import zlib
 from typing import Any, Callable, Mapping, Protocol
 
 from .codec import sha256_hex
@@ -982,6 +983,96 @@ _CONTRACT_SHA256 = {
     "status_aware_vectors": "d70a6e65c13fce245d3bd60a806502cbe2c83c76926cec8dcd359d8406f529f8",
 }
 
+# Phase B R2 closed source contracts. The values are zlib-compressed base85
+# encodings; hashes below always bind the original reviewed JSON bytes.
+_PHASE_B_R2_CONTRACTS_B85 = {
+    "request_schema_v3": (
+        'c-rk;S##Sq5PsLM@M!vI#v~<@Qr_Go)9Ep-C-F;@aXBEll#uW$2>OUe|Ggk}@c=+bmh8BrCvgCBcL9F8`(Xj<ad37vqz@Sk-<}Oq'
+        '?<@FpcwV+;B+Y<O3_0t0WG$>M_va8J_ZCQw(`3`mdi*rWDQg&24U6;T{RI9kAg3-4>i4d-<&@xLHauUqXNXcDrP$#=UoN%JNc*m9'
+        ')0^$(8&|t|)X!~mQS1I`*ieb%EP@ykiYPPD&F5%m)l4eV!kfpjzGw-*OUbt|O7C1RO1%TihWm`oJp}G;93NP;kD`bP_R|0=%X6OW'
+        '+PkmXW1L*oAz;{>E))c~oLv-MbwMICxZh-Ebi?$lAX%CN4{F01qM#v-qy_tBa81MJu(JpyDkIGVgD9WpV7+04v1we?21$S!jcH0A'
+        'M9&R>D<X`v7=Y&5r)rk8>p8F|F5dlpd5=rA@aAhY<jVI^65xOhzXcTe+^fvKNDn0dM^q$ptiumV><u!U^mv7uXY>t5Z8&Q$X%8*L'
+        '_p~5vSSSY}@<PK5J#PZOWy08ZEJL^KacJu%GOW<F4QCXB<Crj%st7}&0%QlF<2w^D9e|19IEL@*wx>Ij5wi3N1U`abWa@GS8%VJE'
+        'm<x4{OcYM0=G2~A77Fai*fJb&kmdMb1rszL8KH%yj=|TJ11&NaC$}tLFxM-AXIl1?v1gA(*n{L2lQb#wlgk2rO6c)*=D^TSzz3Ys'
+        '{P^lh*e`Q0MP3BQSLidayD15Ph*0vS>0no;hO$ia39!i4_P$kTkp-O2G3vB<TEbkR+ZsRw907i(CD1&A5`QkRXWK6@Y11#z7-$sD'
+        '#KOx?q2#htAhz2Qij;&}oZfaP+R~u(JB>wPAl&|-$Rg~QSw4is?+TvPBjODojduwU7x~P+n=G`M#dXsfS^8+omBH{JdDa>^hGmVp'
+        'Phxfp%Qj1Qkf?V|XEL=%x<Cjm!$tRTnGdl%^#>%gDst91%Ah5_V(6Ga(D0Hb^WpOvAsZ3X2Wh^SCTLNL<L9N`WYV7jltOl2jO`DK'
+        '{3s@dZx@sjuyG-@YP;#<@*#?H=&<Q-FyC!yvJK*EsjC69d-LUr?J0!4CT3sW&RMVS>uX1H;q#W8K0|(ep2Y@>E&lxAa}=`3^Br7L'
+        'M8JGq5`;~AWY`ni=1VD}$PFOG30{{Kj!YE8kU^d;11rm!*|{3IDMvBZC-!-_)ij-MYh%R6OrjBDepL&DK-jxO(K=`ze@2tk&43{}'
+        'nXxeI7Rk4S4a>bFn1XO_DJg*edhY$G$jjHWoSRBaDV5@CNNM6@w!Wv52qczW`2mY#q^t%Z`h01h7eD#YksI3tkx7LqY<yqpx&00)'
+        '_aLRjst8n7WbFwW86Nh};hk)I_=H|(LatXNK?F}p>6N%2vIcjgoL=I91j3pWA_P5jWd2GaE*}{+JJ3D91Fu>IWhqYGOZ<k`W~UKw'
+        '+AIEC#GN#?k%<}RGZeLyZP()5rD<zn+3CA!wJh3?55J}bVeZ1WSUL~=b5U0yfUXq861(NVJ_yA7w2NS`THfq&h2Fu7aMp)41-vO>'
+        'PL4Ys_GIrde3?09nPdi(!{&F^uT-j5GKRCi@DkRn2?2vRrVsrF2}6Whm{_JbmWm769W{NW_stq50v;xCT)Bav>$3aM{pvnzIu+cu'
+        '5c<Fj(|O^!!Ugj_FHi~6a<eLKIS14&2EUL&UK%{Oo<077tl_S-_BKdi71pwDu!GI~g$mz+cEG9<e)`|3(meCCgkZS6OkO33Ez9t3'
+        '40N6b3LN3;uTR&*U8Qq&<#@6$Dz<W=NJB2zt71=t`5xvxL@5fMCt}Mo_p|!5EQKG!k44GzIDTACt8}O@=1K(ej3F9Mgy2L7PK4k@'
+        '2woW>U_mVKkpE4c68!RE2S%_FFXseDEeotoI7RAHq&`LJQ>1>Sk$SuDB;5ada#@Vg`h~W<Ft-=i>x;LYi_be0(6$5c)AA(#D;&aR'
+        '$FBq@C?v~wA3t1Pe|Ya+{`uZzm+#%5FW>#HuCKOz$lZ<R%$Ap?5uijgUED2ZnHzHq>vP}E4oBZ!MbB=6xY{o)p7#~Ed+W_AC18aL'
+        'OK+J(rEsCN{8VCh3LH(5L#c<TU1EWX(<wU2Kp{Bq5}1V>g|f`sAH&o$ZPx%lLO4F&K4m5Tf4EDT=LNV)5qlCgxgC{ho%TOZ`=6)%'
+        'PnB@@RD(nd3<004PAnBU5G9wBFR~>^6;Gt_Af&LFPWGdO_0auVNMp-y6rlX7SkUIQWJTtxcl=_6Xlcv(gdt;=u_PZW1crLmZ6NcB'
+        'mMJn{;A3!e>a34t3P|7%uSI><1`^<?f@ZPvN#n+`&fX7<xJQiF2POA74LevF*fp;G4+q`<F%bXFfbc&8L?8GIzs_%c`(FQ?o%1n{'
+        '@JpJ$L%)&}yMxt)$|rL%_z#Su^l|'
+    ),
+    "seed_bundle_schema": (
+        'c-rk+$!^;)5WVXw0-?vKcAPkXb90lR=z=zAd})JJprx_RR1#H^N@4{5_fqmES=`(>8=#9J52=~q@Xf-Z9-O^Bmrql0Pxf3gyn%qb'
+        '`#CM8Bn8SbFfsBVD1ycSLjM*h!z5Wz1w9}M<AQKd5N7-H*%VU3Feh{>o9lkgB8<EkfHUusQ=E*w!34zY*6GjwJ<i3z`<uwE@Wcs+'
+        'g!?!wvs|jr3NG&ck{;vaD<oq+k*F3B8ZsFZL@An9czogz=Ti^YM08&#;ss^NQEu18h{U>!5lSN1pb07@SuChm6>7l;Cjm}TRARmu'
+        'y6AXW8X^w$p`(!(lUr~r^y|{US@{+BhGaAmB5GPG*QZ}&nW+R$rAbv_DfCl=O~PqA*y$w7peV7;1}IB2>hRPqP=*T~HVpVMU__0R'
+        'O{}Q)WAr?B;fRib`)q>#S6+%Z2bv?${e9K;ddM4HKOD7Z?_68qoC3UnbQB1@3jhijVm{R?Aazl*o6f^NM?6!FmSp4}F$OBd(tKZW'
+        'TtM}p-B!&(_lr5*UQaS*CdKI(^GP=JDg4cVDP7WTLyQnqtC2gBKLHd98@z}DLlRE?;qlQ6N*8|E=^j5;0jX0QAJv_r(8jUQ&&|Ps'
+        'DTJy>xd6E(zKr{?-yfs>>JeA6Bov02i`<E#i?R=oP{hC(JOT>2x-swx2@N^(;``;mwdE-GZerlqDzbIUG8MOk`NbO}wuK7Qh@kN4'
+        'BBCn0J-Lsm(%fTxOO|kU=UchCl*@TGs8e96Kp-@UvPqOpqHGeSW%LliBOIdOk6o(#cy5s?S1i@Ja_7g#rN|}<Hc_yNf=v|MG79D|'
+        'p!{uLtekQPeZ+Uw@(|_c%$q-S)(?Z_!%6Momql}At#Cl%G=evvvXCHL2}QYyIT#Yn>5udN;QY+*e>?NV<C*`VfBMBNBO!hYNhp@-'
+        '-%-pJQG8{QAt4c<L}rquCY)w9_&6FRbgotF3hVm3nvSfzdn#>G>KcmLexIowXE<?dkI$xqt?`IstYQo`iADWj7b0x^(&P*lKz1|%'
+        '&^Gu<FFsURN*_1uvQkxG5Fs4z_MW9+`G#*<7|Xy<vUsSdlGfUHy3L(Ub7%9)?`#Yq<uMA#3SLQFbe912GX~V?2I>Ra+UeSz?qRom'
+        '*lUU#b8%A*#oLuO<uLf#3ZD&38zA>8GyPmeQNb03NwH7Qmh|VcDFlF1o>xV&B1ah<v)nOpWOyx!RpGRbm(|xFy2?mW#8{fw&JvDf'
+        'vu!qdzV`gLSbKfd)lZu0A1>8CJKFew$XTeQS7zq?1C6XY3I'
+    ),
+    "owner_seed_claim_schema": (
+        'c-pO0O;5r=5WVv&$i`!<$X9|l1TJa}Q7(qyW}!n_((cyXDM$$a-D&wqp=)B)OVhrcynS!xO}CY5mEk4<c2{M3x`Y`rFT)a}6EG;j'
+        '(#e((!e)_>F<*hPQmYf39cX2dfZH6{dHZq$iMA58*|=)iLmElp#{g*kS2R+E{%8SIebamEe#-0`xL!u=j8j^h0#|7~1>;muZ=KgG'
+        '1ch7%#p0u1o8QX3BOXij1S-Tu*@}*!$N;2(zQ>2}ykAnyWFn#y9f8BTpC*AoD1yzoAL|vc12Vbj+5B%xQJ4^r+lBZEPa+V(WV2-N'
+        '<C@<Q{(Q1+)^=CSMT!RCA6b_=HA+O8)_SY`YvOkEl31@57@k^sxCfu5BBTI$rTEn9twyWX=$zXJLk-WAVm3=xn0qgS?r6~G-RC~1'
+        '*FL}R_8!kwDa{j50U6?JBeAep1!YrBNfWB93{47qy2^o)vhtBi1HmbX7YkZmL)Q|O7Nr>ZLMqGoa)iS@S?5^Xz5TXVgimtUA_yds'
+        'JrNCyzo@y0EL3)tFE{x~NB'
+    ),
+    "seed_action_journal_schema": (
+        'c-rk(O>f&U487-91jdf>k``%!_Le2ZfNj`{HJ7dE1leX{WwzwWbl0HBe=qIYjz8p}9~lM|xyh9DM3Ilr;(f2*w{RVSb>6p>vjP{b'
+        'L28S%ia?`)m}c(DLbjDkwB!N11sw||%L$rtm5h-LN10(Wc-){NQn5g#*QT}Brz8;E4goN>uTTrQwC6t1>f!Xq<W8i=!24BT)i8xb'
+        'kjR8rg)D9mXDHU7u!ll^0l7rK?V1XpiU2YR>H9kW&LSYBD<U40aAdqZwv))?2vy^FVTbA#tlV<bh{57@o+8&vKo<M_DL4^F1fAx_'
+        '`gJ|B&$zv~xgU=<?<^B2YJfeWa+h*Vsi6c3T$_L^6w8C$qFH8-kz-P~RZvn6EJ0Ut@EAc6W=T96jp{S}E}uC$J1ZwPl?*Ng`ia9d'
+        '{7E2gkZV_9I#Sn!PYJ_(;2!zBS71kZYv!De{{brT?fB&MIlxAeoQ?~UWT*5Rr&(#pg$A!)dwKeIW~d{+rs#Cst*F=18SZ%kN!fUC'
+        'S>@$|2Qk!$?rKPn3;})R8MW>5+tu7M?V%|7#vQ{<Er(AO#UTZRb}ZtKL)L-f-fJqbu3LLxRb9Yd#-^?0Jcmu`RT_@GI`tajh%yHU'
+        'kvoXo8x=Vsy615B_b!?Hc+pU~a#K_1UhqUKpboWmsI@m<Yw09US2FTcBY2GCOCIL*i`>|cgX8UBUJTA#gP)Bj{MHdyg;4<i(G@}?'
+        'YEi$LCJ&7AGyQ%snP1G<<m-&laK=7Nrl0F5Qn3i6N3OEJT3}5V%DXs<+CeV2mnlv_o#ct?<&bTHwff?A_uJ}St6gZNQEaz-hJMZ5'
+        'Y#CpshNq|bq1f@b>G%^EwZ2oecTs#d>&!&xOl&VNz1?NE={*3SvRMc'
+    ),
+    "seed_failure_receipt_schema": (
+        'c-pN~O;5r=5WV+Tkc~%3)F_GG_^3$(X|aMH2yT{k3dLo&?gwfJ|D7!sZ0+ia<Gy+G@@D4k)@d}5`pN*^HxQq%AX2EAW0~L?2$g~~'
+        'm90SxCZi>+3EqH^DQ73#R3gr#GQiaV*fk5jB1+3L513w?_q2E$q&p0H1GkSS{=g4jeAKL${9ufq-OzjRI^CgLW;~695jI_Jh&#Qp'
+        '7x*}IA17Yu_EABaRSXFrvTFP|x>O=%i<355r)&spp_a9w1gBt8D2?<>%OFfsYIn5aS};PfT$1bC_W5+*82?~cK$0t;PnORmhz(KZ'
+        '{PJ(lwQXiZDG>SM(d+cGbw^ssY}>xsU7(6OgHMGcB5nIEnL5%n6CgR=Ky2gBxj7VJKPHYDRYJqJj#FrvT)gX49CW7Es8<7BO;b4+'
+        '_N!WN^3O(V>!=TGfZ4%1iQ_bHCUjK(u?e9PoSm}=1ws3f'
+    ),
+    "capability_4d_schema": (
+        'c-rk&O>dh(5WV|XSgRh5WVhhTIoF3uRnuCHdWh2100V4|m+kHlH?sWSyI??IgOjGtrOI(<*f(EqmbV*?$BZ5nva2!6{GS*Qn-n&s'
+        'GliN28td6vi?wM4lgZ|6EkPy?6<4pne_pQm>iXu}lCPFuZ$7S;A6WU-esZ`R*xMvB$%7P(X@j85H}-s6oy$N8f;Nykz6Kd2Y|`f='
+        'h*@R7>x9x6wejon3~3?b28(Tk{Dd;5#5!jk00JE&ag)GPa1;=sF8acL+)kYZIMLnCo$lYTK2Xw#7ew7=dL5<NmWLvWij3cS^Jl})'
+        '-D7x5gL@I8<{FK%!|qMJ#hd!lF?UM4A)vf#YoQ297^7~@`Y<E0Dd{nrPP-oXU3t94qH*k7Oo;_0xo<Q7m7^gp!lB4Vy%`|KF?<Mw'
+        '+;Y)&=d!?l7Cvx)?!Ex(2|peMeuO7wl+jT%R<vAb47*!hjsNU~2Kw9Aoq^iw7okZ8!cY_s52Rn(yo?|<*x~wGW?RX@Hz>*G1fdVX'
+        '`jzjmeE(1R4oY=N()`Z7ckgGO=XSo9He(EVkl?>9#ahS{Vm30u4V<Et_mJ8hbZW`qD2<1>y^|JF<@7?MZiOjzi-<%}<}_HsuoCLo'
+        'SFUoC@F2@2{nay3N1OHngA#m`Qzf@90schBm$Mz3%y27*dvd<0XHb7s6>(ZXt#13}YD-z3YQ!FacTSxRN~^Q~q3+W5E#;_c#rZbu'
+        'M}GiPt_3{'
+    ),
+}
+_PHASE_B_R2_CONTRACT_SHA256 = {
+    "request_schema_v3": "2d6b66eab9414dfe7d05b36f2c11ff862f84d4fcb1e840ac543922e16a5a5d43",
+    "seed_bundle_schema": "58e458239ed6a928f875be991c42e49586b7d705f6c91608c5936043cb2fe3a4",
+    "owner_seed_claim_schema": "d0b12d73d9f0bb8c63907d232a01c5d2103bdb4665cddbe915a12c627a097d5a",
+    "seed_action_journal_schema": "442250c9943bb64dddebf2381835df35a6f806568675f132cb899759c274852e",
+    "seed_failure_receipt_schema": "f2bd5225e646d5aca4808600bdadd6265307e6086df200d84b065b1e3be9beee",
+    "capability_4d_schema": "eadc359e21b31e473aeedf4ac9787d784943df2eb1f73d964ffb215b41e51828",
+}
+
 
 class RehearsalError(RuntimeError):
     """Closed, privacy-safe validation failure."""
@@ -993,10 +1084,17 @@ class RehearsalError(RuntimeError):
 
 def _contract_bytes(name: str) -> bytes:
     try:
-        raw = base64.b85decode(_EMBEDDED_CONTRACTS_B85[name].encode("ascii"))
+        if name in _PHASE_B_R2_CONTRACTS_B85:
+            raw = zlib.decompress(base64.b85decode(
+                _PHASE_B_R2_CONTRACTS_B85[name].encode("ascii")
+            ))
+            digest = _PHASE_B_R2_CONTRACT_SHA256[name]
+        else:
+            raw = base64.b85decode(_EMBEDDED_CONTRACTS_B85[name].encode("ascii"))
+            digest = _CONTRACT_SHA256[name]
     except (KeyError, ValueError, UnicodeError):
         raise RehearsalError("EMBEDDED_CONTRACT_UNAVAILABLE") from None
-    if sha256_hex(raw) != _CONTRACT_SHA256[name]:
+    if sha256_hex(raw) != digest:
         raise RehearsalError("EMBEDDED_CONTRACT_DIGEST_INVALID")
     return raw
 
@@ -1081,6 +1179,8 @@ def _is_type(value: Any, wanted: str) -> bool:
 
 
 def _schema_matches(value: Any, schema: Mapping[str, Any]) -> bool:
+    if not isinstance(schema, Mapping):
+        return False
     if "type" in schema:
         kinds = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
         if not any(_is_type(value, kind) for kind in kinds):
@@ -1092,13 +1192,28 @@ def _schema_matches(value: Any, schema: Mapping[str, Any]) -> bool:
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0):
             return False
+        if len(value) > schema.get("maxLength", len(value)):
+            return False
         if "pattern" in schema and re.fullmatch(schema["pattern"], value) is None:
             return False
-    if type(value) is int:
+    if type(value) in {int, float} and type(value) is not bool:
         if value < schema.get("minimum", value):
             return False
+        if value > schema.get("maximum", value):
+            return False
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", len(value)):
+            return False
+        if schema.get("uniqueItems") is True:
+            for index, item in enumerate(value):
+                if any(_strict_equal(item, previous) for previous in value[:index]):
+                    return False
+        if "items" in schema and any(
+            not _schema_matches(item, schema["items"]) for item in value
+        ):
+            return False
     if isinstance(value, dict):
-        if len(value) < schema.get("minProperties", 0):
+        if len(value) < schema.get("minProperties", 0) or len(value) > schema.get("maxProperties", len(value)):
             return False
         if any(key not in value for key in schema.get("required", [])):
             return False
@@ -1112,9 +1227,13 @@ def _schema_matches(value: Any, schema: Mapping[str, Any]) -> bool:
                 return False
             elif isinstance(additional, dict) and not _schema_matches(child, additional):
                 return False
-    if "oneOf" in schema and sum(
-        _schema_matches(value, item) for item in schema["oneOf"]
-    ) != 1:
+    if "oneOf" in schema:
+        matches = sum(_schema_matches(value, item) for item in schema["oneOf"])
+        if matches != 1:
+            return False
+    if "anyOf" in schema and not any(
+        _schema_matches(value, item) for item in schema["anyOf"]
+    ):
         return False
     if "allOf" in schema:
         for clause in schema["allOf"]:
@@ -1138,7 +1257,14 @@ def _load_contract(name: str) -> Any:
     return value
 
 
-REQUEST_SCHEMA = _load_contract("request_schema")
+LEGACY_REQUEST_SCHEMA = _load_contract("request_schema")
+REQUEST_SCHEMA_V3 = _load_contract("request_schema_v3")
+REQUEST_SCHEMA = REQUEST_SCHEMA_V3
+SEED_BUNDLE_SCHEMA = _load_contract("seed_bundle_schema")
+OWNER_SEED_CLAIM_SCHEMA = _load_contract("owner_seed_claim_schema")
+SEED_ACTION_JOURNAL_SCHEMA = _load_contract("seed_action_journal_schema")
+SEED_FAILURE_RECEIPT_SCHEMA = _load_contract("seed_failure_receipt_schema")
+CAPABILITY_4D_SCHEMA = _load_contract("capability_4d_schema")
 DRIVER_RETURN_SCHEMA = _load_contract("driver_return_schema")
 OPERATION_TABLE = _load_contract("operation_table")
 APPROVAL_MARKER_SCHEMA = _load_contract("approval_marker_schema")
@@ -1192,13 +1318,28 @@ class ValidatedRouteRequest:
         return self.request["owner_attestation"]
 
 
-def validate_route_request_bytes(raw: bytes) -> ValidatedRouteRequest:
-    """Validate a canonical schema-2 route request and acyclic digests."""
+MAX_ROUTE_REQUEST_BYTES = 12 * 1024 * 1024
+MAX_SEED_JOURNAL_BYTES = 4 * 1024 * 1024
+MAX_SEED_RESPONSE_BYTES = 1024 * 1024
+_SEED_ROLES = ("principal", "P2-update", "4f-move")
+_SEED_REFS = {
+    "principal": "refs/heads/rehearsal/principal/cyax125-20261101-route",
+    "P2-update": "refs/heads/rehearsal/trigger/cyax125-p2-app-update",
+    "4f-move": "refs/heads/rehearsal/restricted/cyax125-20261101-move",
+}
+_SEED_TARGET_SHA = "f12fbb8ec52e4c7510564f602a15f26173fe772e"
+_SEED_TARGET_TREE = "c515bf2745061da9150285d6d7c6035b061a1caa"
+_SEED_COMMENT_PREFIX = "CYAX125_SEED_V1:"
+_ISSUE_125_URL = f"https://api.github.com/repos/{REPOSITORY}/issues/125"
 
-    if not isinstance(raw, bytes) or not raw or raw.endswith(b"\n") or len(raw) > 65536:
+
+def validate_route_request_bytes(raw: bytes) -> ValidatedRouteRequest:
+    """Validate the closed schema-3 route request and its acyclic digests."""
+
+    if not isinstance(raw, bytes) or not raw or raw.endswith(b"\n") or len(raw) > MAX_ROUTE_REQUEST_BYTES:
         raise RehearsalError("ROUTE_REQUEST_BYTES_INVALID")
     request = _strict_loads(raw)
-    if not isinstance(request, dict) or not _schema_matches(request, REQUEST_SCHEMA):
+    if not isinstance(request, dict) or not _schema_matches(request, REQUEST_SCHEMA_V3):
         raise RehearsalError("ROUTE_REQUEST_SCHEMA_INVALID")
     if _canonical(request) != raw:
         raise RehearsalError("ROUTE_REQUEST_NOT_CANONICAL")
@@ -1227,6 +1368,8 @@ def validate_route_request_bytes(raw: bytes) -> ValidatedRouteRequest:
         or plan["owner_actor_id"] != OWNER_ID
         or plan["app_id"] != APP_ID
         or plan["installation_id"] != INSTALLATION_ID
+        or request["seed_receipt_bundle"]["intent_id"] != plan["intent_id"]
+        or plan["seed_receipts_sha256"] != sha256_hex(_canonical(request["seed_receipt_bundle"]))
     ):
         raise RehearsalError("ROUTE_REQUEST_BINDING_INVALID")
     return ValidatedRouteRequest(
@@ -1243,6 +1386,294 @@ def validate_route_request_bytes(raw: bytes) -> ValidatedRouteRequest:
         expected_vmm_sha=request["expected_vmm_sha"],
         called_code_blobs=dict(request["called_code_blobs"]),
     )
+
+
+class SeedReceiptError(RehearsalError):
+    """Fail-closed seed validation error with a closed, hash-only receipt."""
+
+    def __init__(self, receipt: Mapping[str, Any]) -> None:
+        super().__init__(str(receipt["reason"]))
+        self.failure_receipt = dict(receipt)
+
+
+@dataclass(frozen=True, slots=True)
+class SeedReceiptEvidence:
+    status: str
+    bundle_sha256: str
+    verified_roles: tuple[str, ...]
+    live_observation_sha256: str
+
+
+def _seed_failure(
+    status: str,
+    reason: str,
+    *,
+    role: str | None = None,
+    journal_sha256: str | None = None,
+    known_ref_sha: str | None = None,
+    observations: Any = None,
+) -> SeedReceiptError:
+    observation_bytes = _canonical(observations if observations is not None else {})
+    receipt = {
+        "schema_version": 1,
+        "status": status,
+        "reason": reason,
+        "role": role,
+        "journal_sha256": journal_sha256,
+        "known_ref_sha": known_ref_sha,
+        "observations_sha256": sha256_hex(observation_bytes),
+        "next_case": None,
+        "unresolved": True,
+    }
+    if not _schema_matches(receipt, SEED_FAILURE_RECEIPT_SCHEMA):
+        raise RehearsalError("SEED_FAILURE_RECEIPT_SCHEMA_INVALID")
+    return SeedReceiptError(receipt)
+
+
+def _decode_seed_envelope(value: Any, *, label: str) -> tuple[bytes, Any]:
+    if not isinstance(value, dict) or not _schema_matches(value, {
+        "type": "object",
+        "required": ["status", "github_request_id", "date_header", "body_b64", "body_sha256"],
+        "properties": {
+            "status": {"type": "integer", "minimum": 100, "maximum": 599},
+            "github_request_id": {"type": "string", "minLength": 1},
+            "date_header": {"type": "string", "minLength": 1},
+            "body_b64": {"type": "string", "minLength": 1},
+            "body_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        },
+        "additionalProperties": False,
+    }):
+        raise ValueError(f"{label}_ENVELOPE_INVALID")
+    try:
+        body = base64.b64decode(value["body_b64"], validate=True)
+    except (ValueError, TypeError):
+        raise ValueError(f"{label}_BODY_BASE64_INVALID") from None
+    if (
+        not body
+        or len(body) > MAX_SEED_RESPONSE_BYTES
+        or base64.b64encode(body).decode("ascii") != value["body_b64"]
+        or sha256_hex(body) != value["body_sha256"]
+    ):
+        raise ValueError(f"{label}_BODY_DIGEST_INVALID")
+    return body, _strict_loads(body)
+
+
+def _check_seed_response(
+    response: Mapping[str, Any], *, status: int, label: str
+) -> tuple[bytes, Any]:
+    body, value = _decode_seed_envelope(response, label=label)
+    if response["status"] != status:
+        raise ValueError(f"{label}_STATUS_INVALID")
+    if not response["github_request_id"] or not response["date_header"]:
+        raise ValueError(f"{label}_REQUEST_METADATA_INVALID")
+    return body, value
+
+
+def _parse_seed_time(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        raise ValueError("SEED_TIME_INVALID") from None
+
+
+def _seed_claim_body(claim: Mapping[str, Any]) -> bytes:
+    if not _schema_matches(claim, OWNER_SEED_CLAIM_SCHEMA):
+        raise ValueError("SEED_CLAIM_SCHEMA_INVALID")
+    return _SEED_COMMENT_PREFIX.encode("ascii") + _canonical(claim)
+
+
+def validate_seed_receipt_bundle(
+    request: ValidatedRouteRequest,
+    transport: "AnonymousTransport",
+) -> SeedReceiptEvidence:
+    """Validate schema-3 Owner receipts and anonymous fixed current readbacks.
+
+    A valid result records observed procedural evidence. It does not make an
+    Owner-authored comment a provider signature or establish provider-verified
+    authorship for the historical journal bytes.
+    """
+
+    observations: list[dict[str, Any]] = []
+    bundle = request.request.get("seed_receipt_bundle")
+    role: str | None = None
+    journal_hash: str | None = None
+    known_ref_sha: str | None = None
+    try:
+        if (
+            not isinstance(bundle, dict)
+            or not _schema_matches(bundle, SEED_BUNDLE_SCHEMA)
+            or bundle["repository"] != REPOSITORY
+            or bundle["intent_id"] != request.plan["intent_id"]
+            or sha256_hex(_canonical(bundle)) != request.plan["seed_receipts_sha256"]
+        ):
+            raise ValueError("SEED_BUNDLE_BINDING_INVALID")
+        if len(_canonical(bundle)) > MAX_ROUTE_REQUEST_BYTES:
+            raise ValueError("SEED_BUNDLE_OVERSIZE")
+        records = bundle["records"]
+        if tuple(record.get("role") for record in records) != _SEED_ROLES:
+            raise ValueError("SEED_ROLE_ORDER_INVALID")
+        if len({record["role"] for record in records}) != len(_SEED_ROLES):
+            raise ValueError("SEED_ROLE_DUPLICATE")
+        for record in records:
+            role = record["role"]
+            journal = record["journal"]
+            journal_hash = record["journal_sha256"]
+            if not _schema_matches(journal, SEED_ACTION_JOURNAL_SCHEMA):
+                raise ValueError("SEED_JOURNAL_SCHEMA_INVALID")
+            journal_bytes = _canonical(journal)
+            if len(journal_bytes) > MAX_SEED_JOURNAL_BYTES or sha256_hex(journal_bytes) != journal_hash:
+                raise ValueError("SEED_JOURNAL_DIGEST_INVALID")
+            expected_ref = _SEED_REFS[role]
+            if (
+                journal["repository"] != REPOSITORY
+                or journal["intent_id"] != bundle["intent_id"]
+                or journal["role"] != role
+                or journal["ref"] != expected_ref
+                or journal["target_sha"] != _SEED_TARGET_SHA
+                or journal["target_tree"] != _SEED_TARGET_TREE
+                or journal["create_method"] != "POST"
+                or journal["create_path"] != f"/repos/{REPOSITORY}/git/refs"
+                or journal["create_payload"] != {"ref": expected_ref, "sha": _SEED_TARGET_SHA}
+                or journal["readback_method"] != "GET"
+                or journal["readback_path"] != f"/repos/{REPOSITORY}/git/ref/{expected_ref.removeprefix('refs/')}"
+                or journal["terminal_state"] != "CREATED_AND_READ_BACK"
+                or journal["no_pending_writes"] is not True
+                or _parse_seed_time(journal["operation_completed_at"]) < _parse_seed_time(journal["operation_started_at"])
+            ):
+                raise ValueError("SEED_JOURNAL_BINDING_INVALID")
+            identity_body, identity = _check_seed_response(
+                journal["actor_identity"], status=200, label="SEED_ACTOR_IDENTITY"
+            )
+            if not isinstance(identity, dict) or (
+                type(identity.get("id")) is not int
+                or identity.get("id") != OWNER_ID
+                or identity.get("login") != "vmmhep"
+                or identity.get("type") != "User"
+            ):
+                raise ValueError("SEED_OWNER_IDENTITY_INVALID")
+            create_body, create_value = _check_seed_response(
+                journal["create_response"], status=201, label="SEED_CREATE"
+            )
+            if not isinstance(create_value, dict) or (
+                create_value.get("ref") != expected_ref
+                or not isinstance(create_value.get("object"), dict)
+                or create_value["object"].get("type") != "commit"
+                or create_value["object"].get("sha") != _SEED_TARGET_SHA
+            ):
+                raise ValueError("SEED_CREATE_PROJECTION_INVALID")
+            readback_body, readback_value = _check_seed_response(
+                journal["readback_response"], status=200, label="SEED_READBACK"
+            )
+            if not isinstance(readback_value, dict) or (
+                readback_value.get("ref") != expected_ref
+                or not isinstance(readback_value.get("object"), dict)
+                or readback_value["object"].get("type") != "commit"
+                or readback_value["object"].get("sha") != _SEED_TARGET_SHA
+            ):
+                raise ValueError("SEED_READBACK_PROJECTION_INVALID")
+            claim = record["claim"]
+            expected_claim = {
+                "claim_version": 1, "repository": REPOSITORY, "issue_number": 125,
+                "intent_id": bundle["intent_id"], "role": role, "ref": expected_ref,
+                "target_sha": _SEED_TARGET_SHA, "target_tree": _SEED_TARGET_TREE,
+                "journal_sha256": journal_hash, "owner_user_id": OWNER_ID,
+                "terminal_state": "CREATED_AND_READ_BACK", "no_pending_writes": True,
+            }
+            claim_body = _seed_claim_body(claim)
+            if not _strict_equal(claim, expected_claim):
+                raise ValueError("SEED_CLAIM_BINDING_INVALID")
+            if sha256_hex(claim_body) != record["owner_action_claim_sha256"]:
+                raise ValueError("SEED_CLAIM_DIGEST_INVALID")
+            comment_id = record["owner_receipt_comment_id"]
+            if type(comment_id) is not int or comment_id <= 0:
+                raise ValueError("SEED_COMMENT_ID_INVALID")
+            for label, raw in (("identity", identity_body), ("create", create_body), ("readback", readback_body)):
+                observations.append({"role": role, "kind": label, "sha256": sha256_hex(raw)})
+            comment_path = f"/repos/{REPOSITORY}/issues/comments/{comment_id}"
+            try:
+                comment_response = transport.get(comment_path)
+            except Exception:
+                raise _seed_failure(
+                    "BLOCKED_UNKNOWN", "SEED_COMMENT_READ_UNKNOWN", role=role,
+                    journal_sha256=journal_hash, observations=observations,
+                ) from None
+            observations.append({"role": role, "kind": "comment", "path": comment_path,
+                                 "status": comment_response.status, "sha256": sha256_hex(comment_response.body)})
+            if comment_response.status != 200:
+                raise _seed_failure(
+                    "BLOCKED_NOT_VERIFIABLE"
+                    if 400 <= comment_response.status < 500 and comment_response.status not in {408, 425, 429}
+                    else "BLOCKED_UNKNOWN",
+                    "SEED_COMMENT_READ_UNAVAILABLE", role=role, journal_sha256=journal_hash,
+                    observations=observations,
+                )
+            comment = _strict_loads(comment_response.body)
+            if not isinstance(comment, dict) or (
+                type(comment.get("id")) is not int
+                or comment.get("id") != comment_id
+                or not isinstance(comment.get("user"), dict)
+                or type(comment["user"].get("id")) is not int
+                or comment["user"].get("id") != OWNER_ID
+                or comment["user"].get("type") != "User"
+                or comment.get("issue_url") != _ISSUE_125_URL
+                or comment.get("body") != claim_body.decode("ascii")
+            ):
+                raise ValueError("SEED_COMMENT_BINDING_INVALID")
+            current_path = f"/repos/{REPOSITORY}/git/ref/{expected_ref.removeprefix('refs/')}"
+            try:
+                current_response = transport.get(current_path)
+            except Exception:
+                raise _seed_failure("BLOCKED_UNKNOWN", "SEED_CURRENT_REF_READ_UNKNOWN",
+                                    role=role, journal_sha256=journal_hash, observations=observations) from None
+            observations.append({"role": role, "kind": "current_ref", "path": current_path,
+                                 "status": current_response.status, "sha256": sha256_hex(current_response.body)})
+            if current_response.status == 404:
+                raise _seed_failure("BLOCKED_NOT_VERIFIABLE", "SEED_CURRENT_REF_ABSENT",
+                                    role=role, journal_sha256=journal_hash, observations=observations)
+            if current_response.status != 200:
+                raise _seed_failure("BLOCKED_UNKNOWN", "SEED_CURRENT_REF_READ_UNKNOWN",
+                                    role=role, journal_sha256=journal_hash, observations=observations)
+            current = _strict_loads(current_response.body)
+            if not isinstance(current, dict) or (
+                current.get("ref") != expected_ref
+                or not isinstance(current.get("object"), dict)
+                or current["object"].get("type") != "commit"
+                or current["object"].get("sha") != _SEED_TARGET_SHA
+            ):
+                raise ValueError("SEED_CURRENT_REF_BINDING_INVALID")
+            known_ref_sha = current["object"]["sha"]
+
+        commit_path = f"/repos/{REPOSITORY}/git/commits/{_SEED_TARGET_SHA}"
+        try:
+            commit_response = transport.get(commit_path)
+        except Exception:
+            raise _seed_failure("BLOCKED_UNKNOWN", "SEED_TARGET_COMMIT_READ_UNKNOWN",
+                                observations=observations) from None
+        observations.append({"kind": "seed_commit", "path": commit_path,
+                             "status": commit_response.status, "sha256": sha256_hex(commit_response.body)})
+        if commit_response.status != 200:
+            raise _seed_failure("BLOCKED_UNKNOWN", "SEED_TARGET_COMMIT_READ_UNKNOWN",
+                                role=None, observations=observations)
+        commit = _strict_loads(commit_response.body)
+        if not isinstance(commit, dict) or (
+            commit.get("sha") != _SEED_TARGET_SHA
+            or not isinstance(commit.get("tree"), dict)
+            or commit["tree"].get("sha") != _SEED_TARGET_TREE
+        ):
+            raise ValueError("SEED_TARGET_TREE_MISMATCH")
+        observation_digest = sha256_hex(_canonical(observations))
+        return SeedReceiptEvidence(
+            "PASS_ACCEPTED", sha256_hex(_canonical(bundle)), _SEED_ROLES, observation_digest
+        )
+    except SeedReceiptError:
+        raise
+    except (KeyError, TypeError, ValueError, RehearsalError) as error:
+        reason = error.reason if isinstance(error, RehearsalError) else str(error)
+        raise _seed_failure(
+            "BLOCKED_NOT_VERIFIABLE", reason or "SEED_RECEIPT_INVALID",
+            role=role, journal_sha256=journal_hash, known_ref_sha=known_ref_sha,
+            observations=observations,
+        ) from None
 
 
 def validate_rehearsal_route_trigger(
@@ -1373,7 +1804,7 @@ class AnonymousGitHubTransport:
 
     def get(self, path: str) -> ApiResponse:
         if not isinstance(path, str) or not _allowed_approval_path(path):
-            raise RehearsalError("APPROVAL_PATH_NOT_ALLOWLISTED")
+            raise RehearsalError("ANONYMOUS_PATH_NOT_ALLOWLISTED")
         connection = http.client.HTTPSConnection(
             "api.github.com", 443, timeout=self.timeout,
             context=ssl.create_default_context(),
@@ -1417,11 +1848,29 @@ def _allowed_approval_path(path: str) -> bool:
     )
     if match:
         return True
-    return re.fullmatch(
+    if re.fullmatch(
         re.escape(prefix)
         + r"/actions/runs/([1-9][0-9]*)/attempts/1/jobs\?per_page=100",
         path,
-    ) is not None
+    ):
+        return True
+    if re.fullmatch(
+        re.escape(prefix) + r"/issues/comments/[1-9][0-9]*", path
+    ):
+        return True
+    if re.fullmatch(
+        re.escape(prefix)
+        + r"/git/ref/heads/rehearsal/(?:principal/cyax125-20261101-route|trigger/cyax125-p2-app-update|restricted/cyax125-20261101-move)",
+        path,
+    ):
+        return True
+    if path == f"{prefix}/git/commits/{_SEED_TARGET_SHA}":
+        return True
+    if path == (
+        f"{prefix}/actions/runs?event=push&head_sha=a6df7c78e27ee81771cc06b0783a508edcaed320&per_page=100"
+    ):
+        return True
+    return False
 
 
 def _response_manifest(rows: list[tuple[str, ApiResponse]]) -> tuple[dict[str, Any], str]:
@@ -2102,6 +2551,12 @@ def validate_driver_result(value: Any) -> None:
             any(type(count) is not int or count != 0 for count in counts)
             or sub.get("failure_reason") is not None
             or sub.get("matching_app_trigger_guard_exercised") is not False
+            or (
+                sub.get("fence_state") == "UNKNOWN"
+                and type(sub.get("observed_off_ref_event")) is not bool
+            )
+            or value["next_case"] != "P5-duplicate-fence"
+            or value["unresolved"] is not False
         ):
             raise RehearsalError("P5_EVENT_PASS_EFFECTS_INVALID")
         if status != "PASS_ACCEPTED" and (
@@ -2334,7 +2789,10 @@ def run_rehearsal(
 
 __all__ = [
     "APPROVAL_MARKER_PREFIX", "APPROVAL_MARKER_SCHEMA", "CASE_ORDER",
-    "DRIVER_RETURN_SCHEMA", "OPERATION_TABLE", "REQUEST_SCHEMA",
+    "CAPABILITY_4D_SCHEMA", "DRIVER_RETURN_SCHEMA", "OPERATION_TABLE",
+    "OWNER_SEED_CLAIM_SCHEMA", "REQUEST_SCHEMA", "REQUEST_SCHEMA_V3",
+    "SEED_ACTION_JOURNAL_SCHEMA", "SEED_BUNDLE_SCHEMA",
+    "SEED_FAILURE_RECEIPT_SCHEMA", "SeedReceiptEvidence", "SeedReceiptError",
     "STATUS_AWARE_VECTORS",
     "AnonymousGitHubTransport", "CaseObservation", "RehearsalError",
     "ValidatedRouteRequest", "VerifiedRunApproval", "run_rehearsal",
@@ -2342,5 +2800,6 @@ __all__ = [
     "serialize_approval_envelope",
     "validate_approval_receipt", "validate_driver_result",
     "validate_rehearsal_route_trigger", "validate_route_request_bytes",
+    "validate_seed_receipt_bundle",
     "verify_run_approval",
 ]

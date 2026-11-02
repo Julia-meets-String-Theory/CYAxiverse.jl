@@ -945,3 +945,93 @@ provider write, seed operation, ref creation, push to an external remote,
 publication, merge, or release occurred. The full lifecycle test suite and
 independent reviews were not rerun for this Phase A correction. This evidence
 does not self-accept the candidate or authorize later phases.
+
+## R2 receipt, P5 observer, and tag evidence implementation (Phase B, local-only; 2026-11-02)
+
+This Phase B candidate is limited to the same six commissioned paths: the
+dispatch workflow, the rehearsal and GitHub protection runtimes, their two
+test modules, and this evidence file. The pinned R2 contracts add request
+schema 3, a closed three-role seed receipt bundle, Owner claim and action
+journal schemas, a nullable seed failure receipt, and the closed 4d capability
+evidence schema. The runtime validates the raw contract hashes before use.
+The design-vector checker reported that the closed journal, claim, bundle,
+failure, and 4d contracts match the nine persisted seed vectors; this is a
+design-contract check, not provider qualification.
+
+The pre-mint workflow step now validates the bundle before it enables the
+token-mint step. The credential-bearing step repeats that validation before
+reading the private key, minting a token, or making any lifecycle write.
+Validation binds the request and plan digests, role order,
+three fixed refs and target commit/tree, journal response digests and byte
+limits, Owner identity projection, create/readback projections, exact
+Owner-comment claim, current anonymous ref reads, and the fixed target commit
+tree. Request JSON is capped at 12 MiB and each historical journal at 4 MiB;
+the adapter permits up to 17 MiB only for the matching fenced-request Contents
+API read so Base64 encoding can fit. Other API responses keep the 1 MiB cap.
+This evidence format does not make Owner-authored historical journal bytes a
+provider signature. No real receipt was supplied or replayed in this local
+work.
+
+The P5 observer now reads the retained 4a terminal result and evidence, checks
+their request, plan, approval, CAS, ref, old/new SHA, tree, lineage, and effect
+count bindings, then confirms the exact current principal ref. It makes one
+read-only Actions run-list request for a matching push event. That optional
+event record is corroboration only: absence or unreadability does not prove
+that a trigger guard was exercised. The observer reports the fixed zero
+effect deltas and proceeds to the duplicate-fence case only when the prior 4a
+receipt and current ref checks pass.
+
+The pinned driver-return contract (`be01d6aba199b67ae44f793c26d8e5ca12de3a88623c9fd837f75f78de7a6f45`)
+and 33 status-aware vectors (`d70a6e65c13fce245d3bd60a806502cbe2c83c76926cec8dcd359d8406f529f8`)
+remain unchanged. The accepted `good-readonly-observer` vector still permits
+`observed_off_ref_event: null` when its fence state is `VERIFIED_MATCH`; the
+live P5 observer uses `fence_state: UNKNOWN` and records a boolean for the
+optional event. A passing live P5 result still requires exact integer zero
+effect counters, not booleans or nulls. The hash-bound evidence preimage uses
+empty strings, lists, or objects for unavailable read details because the
+runtime canonical encoder rejects nulls. This does not alter the pinned
+driver-return null schema or the fail-closed unresolved result behavior.
+
+Tag checks now read every paginated current and inherited ruleset definition
+and each definition detail from fixed ruleset endpoints. They derive matching
+tag rules from the exact known include/exclude patterns, active state, rule
+types, and bypass actors. Evidence is labeled
+`DERIVED_FROM_FULL_CURRENT_DEFINITIONS_NOT_PROVIDER_EFFECTIVE_TAG_EVALUATION`;
+it does not claim an effective `/rules/tags/{tag}` provider evaluation.
+
+The 4d evidence consumer checks the pinned closed object schema, fixed case
+and target, bounded response bytes and digests, a known-absent readback, and
+the nested pure classifier input and zero-effect counts. It is not wired to a
+raw provider denial parser. R2 supplies no qualified Workflows-specific
+provider response discriminator, and retained evidence contains no redacted
+real Workflows fixture. Therefore unqualified 403/422 denials, authentication
+errors, and network outcomes on these 4d create cases remain
+`BLOCKED_NOT_VERIFIABLE`; an observed unexpected ref change is also blocked.
+Synthetic closed-object tests show only schema and nesting behavior. They do
+not qualify a real provider parser or claim a live 4d pass.
+
+The implementation has not run a workflow or contacted a provider. It has not
+read a key, minted a token, created or moved a ref, posted a comment, changed
+settings, published, merged, or released. Offline qualification and independent
+SPEC, STANDARDS, and SECURITY reviews for the combined Phase B candidate are
+recorded below after completion; this evidence does not self-accept the
+candidate or authorize a later live phase.
+
+Final offline verification on the corrected Phase B source:
+
+| Check | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_version_lifecycle_*.py'` | Passed: 220 tests, exit 0 (25.178 seconds). |
+| Ruby YAML parse of `.github/workflows/cyax-lifecycle-dispatch.yml` | Passed: `YAML syntax OK`. |
+| Ruby syntax check of the embedded runtime | Passed: `Embedded Ruby syntax OK`. |
+| Python compile checks for the four changed Python files and the workflow pre-mint block | Passed. |
+| `git diff --check` | Passed. |
+
+Two earlier full-suite runs exposed integration defects and were not accepted as
+qualification: the first failed with 33 failures and 5 errors, and the second
+failed with 3 failures and 1 error. The final 220-test pass above is on the
+corrected candidate. All automated provider behavior used synthetic responses
+or local fixtures. No actual provider request, credential access, key read,
+token mint, ref/comment/settings mutation, workflow run, publication, merge,
+or release occurred. The candidate remains pending the independent SPEC,
+STANDARDS, and SECURITY reviews.
