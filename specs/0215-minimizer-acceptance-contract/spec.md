@@ -110,8 +110,26 @@ identifier matches the Issue number.
   2. The proposed R-009 rationale named the `TypeError` of #217 as the reason
      legacy cannot complete. The `BoundsError` at the `Leff` mask or the
      column strip comes first, by construction.
+- Draft `898029d` (implementation candidate `dbd7b62`): independent review did
+  not pass. Its blocking finding: the help text and R-009 said that PR #215
+  fixes errors that prevented some geometries from "completing or saving"
+  their results. No geometry failed at the save step at `f12fbb8`, because
+  the `Rational` count branch was unreachable (*Current baseline*).
+- Owner direction after the review of `898029d`:
+  1. The help-text sentence is replaced, verbatim, by "PR #215 fixes an error
+     that prevented some geometries from completing, and makes the counts of
+     those geometries writable." The rest of the help text is unchanged.
+  2. The same implementation candidate corrects the `minimize` and
+     `subspace_minimize` docstrings and the `test/full.jl` comment, which named
+     the #217 `TypeError` as the barrier instead of the `BoundsError` that
+     comes first, and the comment on the legacy count type in
+     `scripts/vacua_pipeline.jl`. The new candidate is `4abbd60`.
+  3. Approval of these corrections is not approval of the R-009 rationale,
+     and is not approval of this revision. R-009 must state a prospective
+     reason for the `auto` default that does not depend on the withdrawn
+     stale-results premise, and the owner signs that reason off explicitly.
 
-The failed reviews are not relabelled as passed. The records of these four
+The failed reviews are not relabelled as passed. The records of these five
 reviews are not published on GitHub; this list is their only record in the
 repository. The amendments become durable when the owner approves the revision
 that contains them at G0.
@@ -481,10 +499,11 @@ text SHALL:
   configuration digest;
 - point to `--method legacy` to reproduce the legacy counting method used for
   previously stored results;
-- state that PR #215 fixes errors that prevented some geometries from
-  completing or saving, that it does not invalidate legacy counts already
-  stored, and that rerunning may produce additional results for geometries
-  that previously failed;
+- state that PR #215 fixes an error that prevented some geometries from
+  completing, and makes the counts of those geometries writable; that it does
+  not invalidate legacy counts already stored; and that rerunning may produce
+  additional results for geometries that previously failed;
+- not say that any geometry failed at the save step;
 - not call earlier results stale.
 
 The single-geometry API (`compute_vacua_data`, `compute_axion_data` and the
@@ -511,22 +530,52 @@ stored result, including a stored legacy result. Retention under R-010 means
 that PR #215 does not invalidate stored legacy counts; it does not prevent a
 user from replacing them with `--force`.
 
-**Rationale (proposed; owner confirmation required).** The reason first given
-for the change, that legacy results stored before PR #215 were stale, is
-withdrawn (R-010). The proposed rationale is that the legacy method cannot
-complete any geometry whose `vacua_id_basis` yields a row that needs the
-minimizer, or that has a single dependent column. In the first case `vacua_id`
-raises `BoundsError` at the `Leff` mask; in the second, `vacua_id_basis`
-raises `BoundsError` after its extra column strip (known issue A). Both come
-before the minimizer call, which would itself raise `TypeError` (#217).
-`auto` tries the exact-determinant, leading-branch and reduced-JLM searches
-first. This rationale does not claim that `auto` and `legacy` counts agree, or that they
-are the same counting unit (see *Scientific claim boundary*). If the owner does
-not adopt a rationale, the alternative is to keep `--method legacy` as the
-batch default, which is an implementation change. Approving this revision as
-written confirms the proposed rationale. Another rationale needs a new
-revision and a new T002, because the approval-recording commit may change
-metadata only.
+**Rationale (proposed; awaiting explicit owner sign-off).** The reason first
+given for the change, that legacy results stored before PR #215 were stale, is
+withdrawn (R-010). This rationale does not depend on it. It is a reason for
+new batch runs only.
+
+For each geometry, `auto` uses the first applicable search in the existing
+decision tree, falls through only as the tree states, and records which search
+it used. The tree prefers a count that
+the pipeline labels as determined over a finite-search lower bound:
+
+1. `square_reduced_potential_determinant_count`, when the reduced problem is
+   square;
+2. otherwise `complete_selected_leading_branch_count`, when the leading-branch
+   enumeration stays within `--max-branches`;
+3. otherwise `finite_multistart_minimum_lower_bound` from reduced JLM;
+4. legacy last, with the reason in `auto_fallback_reason`.
+
+With `legacy` as the default, every result is labelled
+`finite_multistart_minimum_lower_bound`, and the legacy method cannot complete
+any geometry whose `vacua_id_basis` yields a row that needs the minimizer, or
+that has a single dependent column. In the first case `vacua_id` raises
+`BoundsError` at the `Leff` mask; in the second, `vacua_id_basis` raises
+`BoundsError` after its extra column strip (known issue A). Both come before
+the minimizer call, which would itself raise `TypeError` (#217).
+
+Consequences that come with this rationale:
+
+- `auto` and `legacy` counts are not claimed to agree, or to be the same
+  counting unit (see *Scientific claim boundary*). A batch run under the
+  default can mix classifications across geometries; each result is
+  identified by `search_classification` and `auto_selected_method`.
+- The labels come from the existing code. PR #215 does not validate them.
+  Every result keeps `model_scope = "hierarchy_truncated_axion_potential"`
+  and `full_potential_status = "not_validated"`.
+- `auto` can fail on a geometry where `legacy` would complete. Errors from
+  `jlm_reduced.prepare`, from the exact-determinant search, and from the
+  leading-branch enumeration other than its limit propagate, and do not fall
+  through to legacy (decision tree above). This follows from the code; whether
+  any stored geometry is affected has not been measured.
+
+Sign-off: G0 needs the owner's explicit sign-off of this rationale, recorded
+in the T003 approval comment. Approval of the help-text and documentation
+corrections is not that sign-off. If the owner does not adopt this rationale,
+the alternatives are another rationale (a new revision and a new T002,
+because the approval-recording commit may change metadata only) or keeping
+`--method legacy` as the batch default (an implementation change).
 
 ### R-010 — Records
 
@@ -657,7 +706,7 @@ authority. The merge target is `vmm`.
 | R-006 | Non-unimodular `Qtilde = [2 0; 0 1]` gives 2 vacua |
 | R-007 | **Integration evidence only:** the legacy batch run on geometry `2,2,1` completes and writes its result (`test/full.jl`). **Not directly verified:** no test asserts that the stored count is an `Int`, or that a non-integral count raises |
 | R-008 | `spectrum_mode_counts([NaN, 1.0])` raises `ArgumentError`. The `f12fbb8` behaviour is derived from its code |
-| R-009 | `test/full.jl`: the parsed default is `:auto`. The help text names the previous default ("was legacy before PR #215", and not "minimizer fix") and the configuration digest, points to `--method legacy` to reproduce stored results, states that stored legacy counts are not invalidated, and does not contain "stale". The auto-chain conditions are existing behaviour, not changed or newly tested here. The single-geometry `:legacy` default has no source change in PR #215 |
+| R-009 | `test/full.jl`: the parsed default is `:auto`. The help text names the previous default ("was legacy before PR #215", and not "minimizer fix") and the configuration digest, points to `--method legacy` to reproduce stored results, states that stored legacy counts are not invalidated, contains the approved sentence "PR #215 fixes an error that prevented some geometries from completing, and makes the counts of those geometries writable." (compared with whitespace collapsed), and contains neither "stale" nor "saving". The auto-chain conditions are existing behaviour, not changed or newly tested here. The single-geometry `:legacy` default has no source change in PR #215 |
 | R-010 | The docstrings and help text are present and limit the change to direct calls; the docs build passes. The reachability facts were established by reading the call graph and running `vacua_id` on the cases in *Current baseline* |
 
 Suites: fast and full Julia suites, Python tests, scientific qualification and
@@ -668,12 +717,16 @@ recorded in the PR #215 description. Unobserved checks are not PASS.
 
 Two identities are tracked:
 
-- **Implementation candidate:** `dbd7b62` on `codex/test-suite-repairs`. The
+- **Implementation candidate:** `4abbd60` on `codex/test-suite-repairs`. The
   scientific and test evidence in the PR #215 description is produced on it.
-  Earlier candidates and their reviews:
+  It differs from `dbd7b62` only in the help text, docstrings, comments and
+  the `test/full.jl` help-text assertions (commits `51ac579`, `3e54c76`,
+  `4abbd60`). The probe measurements recorded "at `dbd7b62`" therefore apply
+  to it unchanged. Earlier candidates and their reviews:
   - `ab48726`: reviewed with draft `444fcc3`; not passed.
   - `dc42633`: reviewed with draft `6b033b5`; not passed.
   - `b309a55`: reviewed with draft `0442ead`; not passed.
+  - `dbd7b62`: reviewed with drafts `92f4c71` and `898029d`; not passed.
 - **Final merge candidate:** the PR #215 head after the approval-recording
   commit. G1 checks that it differs from the implementation candidate only in
   `specs/0215-minimizer-acceptance-contract/`. G2 reviews it, and CI must pass
@@ -698,10 +751,11 @@ Two identities are tracked:
 
 ## Open owner decisions
 
-- **R-009 rationale.** The owner confirms the proposed rationale for the
-  `--method auto` batch default, states another, or keeps `--method legacy`
-  as the default (an implementation change).
+- **R-009 rationale.** The owner explicitly signs off the proposed
+  rationale for the `--method auto` batch default, states another, or keeps
+  `--method legacy` as the default (an implementation change). Approval of
+  other parts of this specification does not imply this sign-off.
 
 Approval of this specification is the owner's decision on R-001 to R-010 and
-on the amendments, as written. The replacement of R-003 to R-005 by a
+on the amendments, as written, together with the explicit R-009 sign-off. The replacement of R-003 to R-005 by a
 proof-backed classifier is a separate owner decision under #220.

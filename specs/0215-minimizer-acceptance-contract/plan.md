@@ -2,12 +2,15 @@
 
 ## Approach
 
-This is a brownfield record. The implementation exists at candidate `dbd7b62`
-(PR #215). It replaced `ab48726`, `dc42633` and `b309a55` after the G0 reviews
-of drafts `444fcc3`, `6b033b5` and `0442ead`, which did not pass, and after the
+This is a brownfield record. The implementation exists at candidate `4abbd60`
+(PR #215). It replaced `ab48726`, `dc42633`, `b309a55` and `dbd7b62` after the
+G0 reviews of drafts `444fcc3`, `6b033b5`, `0442ead`, `92f4c71` and `898029d`,
+which did not pass, and after the
 owner amendments recorded in `spec.md`. The last of these removed condition
 (2) of R-003. The review of `92f4c71` required text corrections only, so the
-candidate did not change. The plan therefore maps each requirement to its
+candidate did not change. The review of `898029d` required a help-text
+correction, so the candidate changed to `4abbd60`; that change is text only
+(help text, docstrings, comments and their test). The plan therefore maps each requirement to its
 implementation and evidence, and defines the path to approval and merge.
 It does not plan new implementation.
 
