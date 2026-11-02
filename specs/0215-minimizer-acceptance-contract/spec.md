@@ -150,9 +150,10 @@ This specification does not cover or authorize:
 - a proof-backed classification of minima, non-minima and unresolved critical
   points, structural-rank handling, and isolated-minimum count eligibility
   (#220);
-- `id_minima`, which returns `nothing`, and `id_minimize(::Vector, ::Vector)`,
-  which raises `MethodError` on the shared helper. Both are non-functional
-  before and after PR #215;
+- `id_minima` and `id_minimize(::Vector, ::Vector)`. Both are non-functional
+  before and after PR #215: they return `nothing` or raise (`AssertionError`,
+  or `MethodError` in `denominator` or in the shared Hessian helper, depending
+  on the input);
 - known issues A and B (see *Known issues*);
 - any change to the single-geometry API default (`:legacy`);
 - any change to the reduced-JLM, leading-branch or exact-determinant searches;
@@ -185,15 +186,17 @@ This specification does not cover or authorize:
 
 ### Reachability of the minimizer from the legacy pipeline
 
-- `_legacy_vacua_search` (`scripts/vacua_pipeline.jl`) calls only
-  `vacua_id(L, Q)`. The only minimizer call in `vacua_id`
+- The only route from `_legacy_vacua_search` (`scripts/vacua_pipeline.jl`) to
+  the minimizer is `vacua_id(L, Q)`. It also calls `vacua_estimate`, which
+  does not minimize. The only minimizer call in `vacua_id`
   (`src/generate.jl`) is `subspace_minimize(...; phase=phase[i])`. It passes a
   scalar to the keyword `phase`, so it would raise `TypeError` if it were
   reached. `phase=phase[i]` has been in the call since `7b72fb3` (2022-10-24);
-  `6c46788` (2026-08-04) added `runs=runs`. Until `1bd2cd1` (2023-06-07)
-  several keyword-only methods coexisted, and the active one took
-  `phase::Vector`; since then the only method takes `phase::Matrix`. Either
-  type rejects a scalar. The pipeline was created on 2026-07-30.
+  `6c46788` (2026-08-04) added `runs=runs`. The keyword was untyped at
+  `7b72fb3`. From `f6c71e5` (2022-11-02) until `1bd2cd1` (2023-06-07) several
+  keyword-only methods coexisted, and the last defined, `phase::Vector`, was
+  active; since `1bd2cd1` the only method takes `phase::Matrix`. Both typed
+  forms reject a scalar. The pipeline was created on 2026-07-30 (`9fce046`).
 - The call is not reached, by construction. In the nonzero-`α` branch,
   `vacua_id_basis` strips one more column from `αeff` than `LQtildebar`
   appended to `Lhat` (the extra strip of known issue A). So `Qeff` always has
@@ -204,7 +207,11 @@ This specification does not cover or authorize:
   `L = [1 1 1 1; 0 -0.1 -0.2 -0.3]` fails at the mask; the known issue A case
   fails inside `vacua_id_basis`.
 - The minimizer has therefore never run inside a legacy pipeline count. Stored
-  legacy counts come only from the branches that do not minimize.
+  legacy counts come only from the branches that do not minimize. The extra
+  `αeff` strip, the `Leff` mask, the `phase=phase[i]` call and the single
+  `phase::Matrix` method are present at every revision in
+  `git rev-list 9fce046^..f12fbb8` (607 commits), so this holds for the whole
+  life of the pipeline before PR #215.
 - At `f12fbb8`, the trivial `|det|` branch of `vacua_id_basis` was
   unreachable. `LQtildebar` returns `αeff[:, 2:end]`, whose columns are all
   nonzero, so the test `αeff == zeros(h11, 1)` never held. A zero-column `α`
@@ -232,13 +239,14 @@ An earlier candidate recorded the false rejection by condition (2) as a
 `@test_broken` known issue. That condition is removed (R-003), and its test is
 now an ordinary test.
 
-### Owner direction recorded in PR #215
+### Owner direction
 
 - The strict origin rule (R-005) was chosen by the owner after review, as
   recorded in the PR #215 description.
 - The amendments under *Review and amendment history*: stored legacy counts
   retained; condition (2) removed; flat-family over-counting accepted as a
-  limitation deferred to #220.
+  limitation deferred to #220. Until G0 they are recorded only in this
+  specification, not on PR #215.
 - The other decisions below were made during PR #215 implementation and review.
   They become approved only through this specification's `approval_ref`.
 
@@ -268,7 +276,8 @@ eps after such a step. It is not a universal smallest resolvable step, and not
 a certified bound on position error. `eps()/1e-2` is the existing constant, now
 made relative so that the run is invariant under a common rescaling of all
 `Λ_a` in exact arithmetic. In Float64 the run is bitwise unchanged for
-power-of-two factors. For other factors rounding changes the run, and this can
+power-of-two factors, provided no value overflows or underflows (measured for
+two factors on the fixtures below). For other factors rounding changes the run, and this can
 change the accept/reject decision of R-003 and R-004.
 
 - **Measured** (at `dbd7b62`): four fixtures (`Q = I` with `L = (1, 1e-6)`;
@@ -357,7 +366,8 @@ established to be a non-minimum (R-003).
 **Limitation: flat families of rank-deficient charges (owner-accepted,
 deferred to #220).** If the charges have rank `r < n` (`n` fields), every
 critical point lies on an exactly flat family of dimension `n - r`, and the
-exact smallest Hessian eigenvalue is 0. Whether an endpoint is accepted then
+exact Hessian always has an eigenvalue 0 (the smallest one at a minimum of the
+family; saddles and maxima also have negative eigenvalues). Whether an endpoint is accepted then
 depends on rounding:
 
 - When the computed smallest eigenvalue rounds positive and the Newton step
@@ -376,7 +386,8 @@ Measured at `dbd7b62`:
   39 endpoints accepted (computed `λ_min` about 4e-18), and 40 points returned:
   the 39 endpoints and the origin, which R-005 adds because its computed
   smallest eigenvalue, 4.4e-18, is positive (a degenerate origin returned).
-  All lie on the family `x1 + 2 x2 ≡ 0 (mod 2π)` to within 2.7e-14 in phase. At
+  All lie on the family `x1 + 2 x2 ≡ 0 (mod 2π)` to within 3e-14 in phase (the maximum of
+  `|rem2pi(2π (x1 + 2 x2), RoundNearest)|` over the returned fractions `x`). At
   `b309a55`, with condition (2), 38 were accepted and 39 returned.
 - `Q = u vᵀ` with `u = (1, 2, -1)`, `v = (1, -1, 2)`, `L = (0.3, 0.9, 0.5)`,
   40 starts `2π·rand(MersenneTwister(11), 3)` from a fresh generator: 0
@@ -413,14 +424,14 @@ The test does not decide the sign of the exact eigenvalue:
 
 - **A degenerate origin can be returned.** If its computed eigenvalue rounds
   positive, the origin is returned. The sample has 2000 rank-1 charge matrices
-  `Q = u vᵀ` with 3 fields and 4 instantons, where `u` and `v` have integer
-  entries in `[-3, 3]` (so `Q` has entries up to ±9), draws with `u = 0` or
-  `v = 0` are skipped, and `L_a` is uniform in `[0.1, 1.1]`, from seed
-  `20261031`. #220 records 131 of 2000 with a positive computed smallest
+  `Q = u vᵀ` with 3 fields and 4 instantons: `u = rand(rng, -3:3, 3)`,
+  `v = rand(rng, -3:3, 4)` (so `Q` has entries up to ±9), draws with `u = 0`
+  or `v = 0` are skipped, and `L = rand(rng, Uniform(0.1, 1.1), 4)`, with
+  `rng = MersenneTwister(20261031)`. #220 records 131 of 2000 with a positive computed smallest
   eigenvalue, at `ab48726`, with the origin returned each time. A replay at
-  `dbd7b62` that draws `u`, then `v` (redrawing both if either is 0), then `L`
-  for each sample from `MersenneTwister(20261031)` found 132 of 2000, with the
-  origin returned in all 132. The count depends on the draw order; the effect does not.
+  `dbd7b62` that makes those calls in that order for each sample (redrawing
+  `u` and `v` if either is 0) found 132 of 2000, with the origin returned in
+  all 132. The count depends on the draw order; the effect does not.
 - **A genuine minimum can be dropped.** If its computed eigenvalue rounds to 0,
   the origin is dropped. An example is `Q = [1 1; 1 -1]`, `L = (1, 1e-20)`.
   Its Float64 Hessian `[1 1; 1 1]` equals that of the saddle
@@ -504,15 +515,18 @@ user from replacing them with `--force`.
 for the change, that legacy results stored before PR #215 were stale, is
 withdrawn (R-010). The proposed rationale is that the legacy method cannot
 complete any geometry whose `vacua_id_basis` yields a row that needs the
-minimizer, or that has a single dependent column: `vacua_id` raises
-`BoundsError` at the `Leff` mask or at the column strip (known issue A)
+minimizer, or that has a single dependent column. In the first case `vacua_id`
+raises `BoundsError` at the `Leff` mask; in the second, `vacua_id_basis`
+raises `BoundsError` after its extra column strip (known issue A). Both come
 before the minimizer call, which would itself raise `TypeError` (#217).
 `auto` tries the exact-determinant, leading-branch and reduced-JLM searches
-first. This
-rationale does not claim that `auto` and `legacy` counts agree, or that they
+first. This rationale does not claim that `auto` and `legacy` counts agree, or that they
 are the same counting unit (see *Scientific claim boundary*). If the owner does
 not adopt a rationale, the alternative is to keep `--method legacy` as the
-batch default, which is an implementation change.
+batch default, which is an implementation change. Approving this revision as
+written confirms the proposed rationale. Another rationale needs a new
+revision and a new T002, because the approval-recording commit may change
+metadata only.
 
 ### R-010 — Records
 
@@ -567,7 +581,7 @@ affected is not established.
   in particular for rank-deficient charges;
 - that Float64 resolves directions about 16 decades below the largest scale,
   in a mixing basis or not. With `Q = I`, `L = (1, -1e-16)`,
-  `subspace_minimize(L, Q; runs=100)` returns nothing, and none of 100 starts
+  `subspace_minimize(L, Q; runs=100)` returns an empty vector, and none of 100 starts
   `rand(Uniform(0, 2π), 2) .* rand(2)` after `Random.seed!(9876543210)` is
   accepted, although by hand `(0, π)` is a minimum;
 - that a legacy count is complete or a rigorous lower bound. Legacy results
