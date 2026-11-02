@@ -10,9 +10,12 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 from types import SimpleNamespace
@@ -427,6 +430,298 @@ class RehearsalContractTests(unittest.TestCase):
         durable_pair = claim_record["approval_evidence"]["seed_validation_evidence"]
         self.assertEqual(len(durable_pair["first"]["observations"]), 7)
         self.assertEqual(len(durable_pair["second"]["observations"]), 7)
+
+    def test_seed_evidence_rehydration_replays_producer_authority_checks(self) -> None:
+        request = _request()
+        payloads = _seed_provider_payloads(request)
+        first = validate_seed_receipt_bundle(request, FakeSeedTransport(payloads))
+        second = validate_seed_receipt_bundle(request, FakeSeedTransport(payloads))
+        original = json.loads(serialize_seed_receipt_evidence(first))
+
+        def set_observation_body(observation, value):
+            body = _canonical(value)
+            observation["body_b64"] = base64.b64encode(body).decode("ascii")
+            observation["body_sha256"] = sha256_hex(body)
+            observation["body_bytes"] = len(body)
+
+        def rehash(value):
+            value.pop("evidence_sha256", None)
+            value["live_observation_sha256"] = sha256_hex(
+                _canonical(value["observations"])
+            )
+            value["evidence_sha256"] = sha256_hex(_canonical(value))
+            return _canonical(value)
+
+        def changed(mutator):
+            value = json.loads(json.dumps(original))
+            value.pop("evidence_sha256", None)
+            mutator(value)
+            return rehash(value)
+
+        def comment(observation):
+            return json.loads(base64.b64decode(observation["body_b64"]))
+
+        def update_comment(field, replacement):
+            def apply(value):
+                observation = value["observations"][0]
+                row = comment(observation)
+                row[field] = replacement
+                set_observation_body(observation, row)
+            return apply
+
+        def update_ref(field, replacement):
+            def apply(value):
+                observation = value["observations"][1]
+                row = json.loads(base64.b64decode(observation["body_b64"]))
+                row[field] = replacement
+                set_observation_body(observation, row)
+            return apply
+
+        mutations = [
+            ("rehash-503", lambda value: (
+                value["observations"][0].__setitem__("status", 503),
+                set_observation_body(value["observations"][0], {"message": "unavailable"}),
+            )),
+            ("rehash-404", lambda value: (
+                value["observations"][0].__setitem__("status", 404),
+                set_observation_body(value["observations"][0], {"message": "missing"}),
+            )),
+            ("wrong-issue-126", update_comment(
+                "issue_url", f"https://api.github.com/repos/{REPOSITORY}/issues/126"
+            )),
+            ("wrong-owner-actor", update_comment("user", {"id": 100, "type": "User"})),
+            ("wrong-claim-body", update_comment("body", "CYAX125_SEED_V1:{}")),
+            ("wrong-current-ref-sha", lambda value: set_observation_body(
+                value["observations"][1],
+                {"ref": SEED_REFS["principal"],
+                 "object": {"sha": "0" * 40, "type": "commit"}},
+            )),
+            ("wrong-current-ref-name", update_ref("ref", "refs/heads/rehearsal/other")),
+            ("wrong-observation-path", lambda value: value["observations"][0].__setitem__(
+                "path", "/repos/Julia-meets-String-Theory/CYAxiverse.jl/issues/125"
+            )),
+            ("wrong-seed-tree", lambda value: set_observation_body(
+                value["observations"][-1],
+                {"sha": SEED_TARGET_SHA, "tree": {"sha": "0" * 40}},
+            )),
+            ("wrong-seed-commit", lambda value: set_observation_body(
+                value["observations"][-1],
+                {"sha": "0" * 40, "tree": {"sha": SEED_TARGET_TREE}},
+            )),
+            ("wrong-role", lambda value: value["observations"][0].__setitem__("role", "P2-update")),
+            ("boolean-status-alias", lambda value: value["observations"][0].__setitem__("status", True)),
+            ("boolean-body-size-alias", lambda value: value["observations"][0].__setitem__("body_bytes", True)),
+            ("non-string-header-value", lambda value: value["observations"][0]["headers"].__setitem__(
+                "date", 1
+            )),
+            ("missing-observation-field", lambda value: value["observations"][0].pop("started_at")),
+            ("extra-observation-field", lambda value: value["observations"][0].__setitem__("unbound", "x")),
+            ("invalid-time", lambda value: value["observations"][0].__setitem__(
+                "started_at", "2026-99-99T99:99:99.000000+00:00"
+            )),
+            ("unknown-header", lambda value: value["observations"][0]["headers"].__setitem__(
+                "x-unreviewed", "value"
+            )),
+            ("boolean-schema-version", lambda value: value.__setitem__("schema_version", True)),
+        ]
+
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY, token="offline-token", api_base="https://fixture.invalid",
+            transport=lambda *_args: ApiResponse(500, b"{}", {}),
+            token_permissions={"contents": "write", "metadata": "read"},
+            token_expires_at=NOW + timedelta(hours=1), clock=lambda: NOW,
+        )
+        for name, mutate in mutations:
+            with self.subTest(case=name):
+                bad_first = changed(mutate)
+                with self.assertRaisesRegex(RehearsalError, "SEED_EVIDENCE_REHYDRATION_INVALID"):
+                    rehydrate_seed_receipt_evidence(bad_first, request)
+
+                bad_value = json.loads(bad_first)
+                bad_value.pop("evidence_sha256")
+                bad_pair = _canonical({
+                    "schema_version": 1, "first": bad_value, "second": second.to_dict(),
+                })
+                with self.assertRaisesRegex(RehearsalError, "SEED_EVIDENCE_PAIR_REHYDRATION_INVALID"):
+                    rehydrate_seed_receipt_evidence_pair(bad_pair, request)
+                with mock.patch.object(adapter, "create_rehearsal_request_fence") as create_fence:
+                    with self.assertRaisesRegex(GitHubProtectionError, "SEED_VALIDATION_EVIDENCE_INVALID"):
+                        adapter.create_rehearsal_route_request_fence(
+                            request, approval=None, intent={}, seed_validation_evidence=bad_pair,
+                        )
+                    create_fence.assert_not_called()
+
+        float_value = json.loads(json.dumps(original))
+        float_value.pop("evidence_sha256", None)
+        float_value["observations"][0]["status"] = 200.0
+        float_value["live_observation_sha256"] = "0" * 64
+        float_value["evidence_sha256"] = "0" * 64
+        float_raw = json.dumps(
+            float_value, sort_keys=True, separators=(",", ":"),
+        ).encode("ascii")
+        with self.assertRaisesRegex(RehearsalError, "SEED_EVIDENCE_REHYDRATION_INVALID"):
+            rehydrate_seed_receipt_evidence(float_raw, request)
+        float_value.pop("evidence_sha256")
+        float_pair = json.dumps({
+            "schema_version": 1, "first": float_value, "second": second.to_dict(),
+        }, sort_keys=True, separators=(",", ":")).encode("ascii")
+        with self.assertRaisesRegex(RehearsalError, "SEED_EVIDENCE_PAIR_REHYDRATION_INVALID"):
+            rehydrate_seed_receipt_evidence_pair(float_pair, request)
+        with mock.patch.object(adapter, "create_rehearsal_request_fence") as create_fence:
+            with self.assertRaisesRegex(GitHubProtectionError, "SEED_VALIDATION_EVIDENCE_INVALID"):
+                adapter.create_rehearsal_route_request_fence(
+                    request, approval=None, intent={}, seed_validation_evidence=float_pair,
+                )
+            create_fence.assert_not_called()
+
+        valid_pair = serialize_seed_receipt_evidence_pair(first, second)
+        pair_value = json.loads(valid_pair)
+        pair_value["schema_version"] = True
+        invalid_pair_schema = _canonical(pair_value)
+        with self.assertRaisesRegex(RehearsalError, "SEED_EVIDENCE_PAIR_REHYDRATION_INVALID"):
+            rehydrate_seed_receipt_evidence_pair(invalid_pair_schema, request)
+        with mock.patch.object(adapter, "create_rehearsal_request_fence") as create_fence:
+            with self.assertRaisesRegex(GitHubProtectionError, "SEED_VALIDATION_EVIDENCE_INVALID"):
+                adapter.create_rehearsal_route_request_fence(
+                    request, approval=None, intent={}, seed_validation_evidence=invalid_pair_schema,
+                )
+            create_fence.assert_not_called()
+
+    def test_actual_embedded_preflight_writes_rehashable_second_failure_evidence(self) -> None:
+        workflow = (
+            Path(__file__).resolve().parent.parent
+            / ".github/workflows/cyax-lifecycle-dispatch.yml"
+        ).read_text(encoding="utf-8")
+        match = re.search(
+            r"(?m)^\s*preflight_python = <<~PY\n(?P<body>.*?)^\s*PY\s*$",
+            workflow, re.S,
+        )
+        self.assertIsNotNone(match)
+        preflight = textwrap.dedent(match.group("body"))
+        self.assertIn('"observation_preimage": [', workflow)
+
+        request = _request()
+        first_raw = serialize_seed_receipt_evidence(
+            validate_seed_receipt_bundle(
+                request, FakeSeedTransport(_seed_provider_payloads(request))
+            )
+        )
+        wrapper = f'''\
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})
+from test_version_lifecycle_rehearsal import FakeSeedTransport, _request, _seed_provider_payloads
+from version_lifecycle.github_protection import ApiResponse
+import version_lifecycle.rehearsal as rehearsal
+
+rehearsal.validate_rehearsal_route_trigger = lambda *_args, **_kwargs: _request()
+rehearsal.rehydrate_approval_envelope = lambda *_args, **_kwargs: object()
+producer_validate = rehearsal.validate_seed_receipt_bundle
+def fail_second(request, _transport):
+    if isinstance(_transport, rehearsal._RecordedSeedTransport):
+        return producer_validate(request, _transport)
+    mode = os.environ["SEED_FAILURE_CASE"]
+    transport = FakeSeedTransport(_seed_provider_payloads(request))
+    comment_path = next(path for path in transport.payloads if "/issues/comments/" in path)
+    calls = []
+    original_get = transport.get
+    def synthetic_get(path):
+        calls.append(path)
+        if path == comment_path:
+            if mode == "503":
+                return ApiResponse(503, b'{{"message":"unavailable"}}', {{}})
+            if mode == "404":
+                return ApiResponse(404, b'{{"message":"missing"}}', {{}})
+            if mode == "changed":
+                row = dict(transport.payloads[comment_path])
+                row["issue_url"] = f"https://api.github.com/repos/{{rehearsal.REPOSITORY}}/issues/126"
+                return ApiResponse(200, rehearsal._canonical(row), {{}})
+            if mode == "transport":
+                raise OSError("synthetic transport unavailable")
+        return original_get(path)
+    transport.get = synthetic_get
+    try:
+        return producer_validate(request, transport)
+    finally:
+        Path(os.environ["RUNNER_TEMP"], "seed-get-calls.json").write_text(
+            json.dumps(calls), encoding="ascii"
+        )
+rehearsal.validate_seed_receipt_bundle = fail_second
+exec({preflight!r}, {{"__name__": "__main__"}})
+'''
+        cases = ("503", "404", "changed", "transport", "malformed-first")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            runner = root / "runner"
+            runner.mkdir(mode=0o700)
+            event = root / "event.json"
+            event.write_text("{}", encoding="ascii")
+            approval = root / "approval.json"
+            approval.write_bytes(b"{}")
+            script_dir = str(Path(__file__).resolve().parent)
+            for case in cases:
+                with self.subTest(case=case):
+                    shutil.rmtree(runner)
+                    runner.mkdir(mode=0o700)
+                    seed_path = runner / "cyax125-seed-validation-first.json"
+                    seed_path.write_bytes(b"{\"invalid\":true}" if case == "malformed-first" else first_raw)
+                    env = {
+                        "PATH": os.environ["PATH"],
+                        "PYTHONPATH": str(Path(__file__).resolve().parent.parent) + os.pathsep + script_dir,
+                        "PYTHONDONTWRITEBYTECODE": "1",
+                        "RUNNER_TEMP": str(runner),
+                        "GITHUB_EVENT_PATH": str(event),
+                        "GITHUB_REPOSITORY": REPOSITORY,
+                        "GITHUB_REF": REF,
+                        "GITHUB_SHA": HEAD_SHA,
+                        "GITHUB_ACTOR": "vmmhep",
+                        "GITHUB_RUN_ID": str(RUN_ID),
+                        "GITHUB_RUN_ATTEMPT": "1",
+                        "ROUTE_MODE": "true",
+                        "APPROVAL_RAW_ENVELOPE_PATH": str(approval),
+                        "SEED_VALIDATION_RAW_PATH": str(seed_path),
+                        "SEED_FAILURE_CASE": case,
+                    }
+                    result = subprocess.run(
+                        [sys.executable, "-c", wrapper], cwd=root, env=env,
+                        capture_output=True, text=True, timeout=20, check=False,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    failure_path = runner / "cyax125-seed-validation-pair-failure.json"
+                    self.assertTrue(failure_path.is_file(), result.stderr)
+                    self.assertEqual(failure_path.stat().st_mode & 0o777, 0o600)
+                    failure_raw = failure_path.read_bytes()
+                    failure = json.loads(failure_raw)
+                    self.assertEqual(_canonical(failure), failure_raw)
+                    self.assertIs(type(failure["observation_preimage"]), list)
+                    self.assertEqual(
+                        base64.b64decode(failure["first_validation_preimage_b64"]),
+                        seed_path.read_bytes(),
+                    )
+                    if case == "malformed-first":
+                        self.assertIsNone(failure["receipt"])
+                        self.assertEqual(failure["observation_preimage"], [])
+                    else:
+                        receipt = failure["receipt"]
+                        self.assertIsNotNone(receipt, failure)
+                        observations = failure["observation_preimage"]
+                        self.assertEqual(
+                            sha256_hex(_canonical(observations)),
+                            receipt["observations_sha256"],
+                        )
+                        self.assertEqual(len(observations), 1)
+                        if case in {"503", "transport"}:
+                            self.assertEqual(receipt["status"], "BLOCKED_UNKNOWN")
+                        else:
+                            self.assertEqual(receipt["status"], "BLOCKED_NOT_VERIFIABLE")
+                    calls_path = runner / "seed-get-calls.json"
+                    calls = json.loads(calls_path.read_bytes()) if calls_path.exists() else []
+                    if case == "malformed-first":
+                        self.assertEqual(calls, [])
+                    else:
+                        self.assertEqual(len(calls), 1)
+                        self.assertIn("/issues/comments/", calls[0])
+                    self.assertNotIn("LIFECYCLE_APP_PRIVATE_KEY", env)
 
     def test_seed_receipt_failures_keep_absence_and_unknown_distinct(self) -> None:
         request = _request()

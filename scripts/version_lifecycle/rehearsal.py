@@ -1422,6 +1422,33 @@ class SeedReceiptEvidence:
         }
 
 
+_SEED_OBSERVATION_FIELDS = frozenset({
+    "method", "path", "role", "kind", "started_at", "completed_at",
+    "status", "headers", "body_b64", "body_sha256", "body_bytes",
+})
+
+
+class _RecordedSeedTransport:
+    """Replay retained seed observations through the live producer validator."""
+
+    def __init__(self, entries: list[tuple[str, ApiResponse]]) -> None:
+        self._entries = tuple(entries)
+        self._index = 0
+
+    def get(self, path: str) -> ApiResponse:
+        if self._index >= len(self._entries):
+            raise ValueError("SEED_REPLAY_OBSERVATION_MISSING")
+        expected_path, response = self._entries[self._index]
+        if path != expected_path:
+            raise ValueError("SEED_REPLAY_PATH_MISMATCH")
+        self._index += 1
+        return response
+
+    def require_complete(self) -> None:
+        if self._index != len(self._entries):
+            raise ValueError("SEED_REPLAY_OBSERVATION_UNUSED")
+
+
 def _seed_failure(
     status: str,
     reason: str,
@@ -1506,6 +1533,21 @@ def serialize_seed_receipt_evidence(evidence: SeedReceiptEvidence) -> bytes:
     return _canonical(value)
 
 
+def _parse_seed_observation_time(value: Any) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("SEED_OBSERVATION_TIME_INVALID")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError("SEED_OBSERVATION_TIME_INVALID") from None
+    if (
+        parsed.tzinfo != timezone.utc
+        or parsed.isoformat(timespec="microseconds") != value
+    ):
+        raise ValueError("SEED_OBSERVATION_TIME_INVALID")
+    return parsed
+
+
 def rehydrate_seed_receipt_evidence(
     raw: bytes, request: ValidatedRouteRequest,
 ) -> SeedReceiptEvidence:
@@ -1523,7 +1565,8 @@ def rehydrate_seed_receipt_evidence(
         if digest != sha256_hex(_canonical(value)):
             raise ValueError
         if (
-            value["schema_version"] != 1 or value["status"] != "PASS_ACCEPTED"
+            type(value["schema_version"]) is not int or value["schema_version"] != 1
+            or value["status"] != "PASS_ACCEPTED"
             or value["request_id"] != request.request_id
             or value["request_sha256"] != request.request_sha256
             or value["plan_sha256"] != request.plan_sha256
@@ -1541,24 +1584,52 @@ def rehydrate_seed_receipt_evidence(
                 (record["role"], "current_ref", f"/repos/{REPOSITORY}/git/ref/{record['journal']['ref'].removeprefix('refs/') }"),
             )
         ] + [(None, "seed_commit", f"/repos/{REPOSITORY}/git/commits/{_SEED_TARGET_SHA}")]
+        replay_entries: list[tuple[str, ApiResponse]] = []
         for observation, expected in zip(value["observations"], expected_paths):
-            if not isinstance(observation, dict) or observation.get("outcome") is not None:
+            if not isinstance(observation, dict) or set(observation) != _SEED_OBSERVATION_FIELDS:
                 raise ValueError
             if (observation.get("role"), observation.get("kind"), observation.get("path")) != expected:
                 raise ValueError
-            if observation.get("method") != "GET" or type(observation.get("status")) is not int:
+            if (
+                observation.get("method") != "GET"
+                or type(observation.get("status")) is not int
+                or observation["status"] != 200
+            ):
+                raise ValueError
+            started_at = _parse_seed_observation_time(observation["started_at"])
+            completed_at = _parse_seed_observation_time(observation["completed_at"])
+            if started_at > completed_at:
                 raise ValueError
             body = base64.b64decode(observation["body_b64"], validate=True)
+            headers = observation["headers"]
             if (
                 base64.b64encode(body).decode("ascii") != observation["body_b64"]
+                or type(observation["body_bytes"]) is not int
                 or len(body) != observation["body_bytes"]
                 or len(body) > MAX_PROVIDER_BODY
                 or sha256_hex(body) != observation["body_sha256"]
-                or not isinstance(observation.get("headers"), dict)
-                or set(observation["headers"]) - _SEED_OBSERVATION_HEADERS
+                or not isinstance(headers, dict)
+                or set(headers) - _SEED_OBSERVATION_HEADERS
+                or any(type(key) is not str or type(header) is not str for key, header in headers.items())
             ):
                 raise ValueError
+            replay_entries.append((
+                observation["path"],
+                ApiResponse(observation["status"], body, dict(headers)),
+            ))
         if sha256_hex(_canonical(value["observations"])) != value["live_observation_sha256"]:
+            raise ValueError
+        replay = _RecordedSeedTransport(replay_entries)
+        replayed = validate_seed_receipt_bundle(request, replay)
+        replay.require_complete()
+        without_times = lambda rows: [
+            {key: item for key, item in row.items() if key not in {"started_at", "completed_at"}}
+            for row in rows
+        ]
+        if not _strict_equal(
+            without_times(value["observations"]),
+            without_times(list(replayed.observations)),
+        ):
             raise ValueError
         return SeedReceiptEvidence(
             value["status"], value["bundle_sha256"], tuple(value["verified_roles"]),
@@ -1584,7 +1655,12 @@ def rehydrate_seed_receipt_evidence_pair(
         pair = _strict_loads(raw)
         if _canonical(pair) != raw:
             raise ValueError
-        if not isinstance(pair, dict) or set(pair) != {"schema_version", "first", "second"} or pair["schema_version"] != 1:
+        if (
+            not isinstance(pair, dict)
+            or set(pair) != {"schema_version", "first", "second"}
+            or type(pair["schema_version"]) is not int
+            or pair["schema_version"] != 1
+        ):
             raise ValueError
         evidence = []
         for key in ("first", "second"):

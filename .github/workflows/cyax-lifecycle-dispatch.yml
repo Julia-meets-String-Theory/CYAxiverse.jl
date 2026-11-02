@@ -137,7 +137,9 @@ jobs:
               failure = {
                   "reason": error.reason,
                   "receipt": receipt,
-                  "observation_preimage": getattr(error, "observation_preimage", ()),
+                  "observation_preimage": [
+                      dict(item) for item in (getattr(error, "observation_preimage", ()) or ())
+                  ],
               }
               failure_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-seed-validation-first-failure.json"
               write_private(failure_path, json.dumps(failure, sort_keys=True, separators=(",", ":")).encode("utf-8"))
@@ -249,7 +251,9 @@ jobs:
                   failure = {
                       "reason": error.reason,
                       "receipt": getattr(error, "failure_receipt", None),
-                      "observation_preimage": getattr(error, "observation_preimage", ()),
+                      "observation_preimage": [
+                          dict(item) for item in (getattr(error, "observation_preimage", ()) or ())
+                      ],
                       "first_validation_preimage_b64": __import__("base64").b64encode(first_raw).decode("ascii"),
                   }
                   failure_path = Path(os.environ["RUNNER_TEMP"]) / "cyax125-seed-validation-pair-failure.json"

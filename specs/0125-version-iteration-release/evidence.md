@@ -1086,3 +1086,67 @@ comment mutation, settings change, workflow run, publication, merge, or
 release occurred. The candidate is not self-accepted. Original affected SPEC,
 STANDARDS, and SECURITY acceptance remains pending, and this evidence does
 not claim R07, full runtime readiness, or Gate A completion.
+
+## Same-primary seed boundary follow-on (local-only; 2026-11-02)
+
+This follow-on uses the existing six-path authority and has base commit
+`2dc97d327332e2c77caf4ec65c3f6529df38c5e1` (tree
+`2bf0661c167ed001bfae2f4d2dc48c6908968248`). It addresses only the two
+newly identified seed-evidence boundaries; the prior finding history and
+source fixes remain recorded above.
+
+`rehydrate_seed_receipt_evidence` now validates a closed observation shape,
+strict integer HTTP 200 status, canonical UTC timestamps, allowlisted string
+headers, exact ordered paths, bounded body sizes, and body digests. It then
+replays all seven stored responses through the same pure producer validator
+with an in-memory transport. This rechecks the Owner comment, Issue 125 URL,
+claim, current ref, target commit, and tree projections without another
+request. The evidence and pair schema versions require strict integers.
+Rehashed failed responses and mismatched authority or target fields cannot
+rehydrate as `PASS_ACCEPTED` or cross request-fence admission.
+
+Both embedded pre-key failure writers convert observation tuples to JSON
+lists before serialization. The second-validation failure artifact keeps the
+first raw evidence bytes, second-read observations, and the receipt digest.
+The exact extracted preflight child was exercised in a separate process for
+second-read 503, 404, changed Issue 126 response, transport exception, and a
+malformed first envelope. The first four retain one synthetic GET observation
+and a digest that matches the receipt; the malformed first envelope retains
+its raw bytes and stops before the second read. Each case writes a canonical
+mode-0600 failure file before the private-key step.
+
+The commissioned findings remain the subject of independent review:
+`CYAX125-RUNTIME-2DC97D32-SPEC-F11`, `CYAX125-STD-2dc97d32-F01`,
+`CYAX125-STD-2dc97d32-F02`, and `SEC-2DC-R07-4D`. This correction does not
+self-close findings or change the prior R01–R06 implementation. R07 remains
+`BLOCKED_NOT_VERIFIABLE`; no real provider denial fixture, parser, full-route
+positive, or Gate A result is claimed.
+
+Offline verification after the source and test changes:
+
+| Check | Result |
+| --- | --- |
+| Targeted producer, rehydration, pair/admission, failure, and workflow regressions | Passed: 5 tests, exit 0 (1.076 seconds). |
+| Full lifecycle suite | Passed: 224 tests, exit 0 (27.964 seconds). |
+| Ruby YAML parse and extracted embedded Ruby syntax check | Passed. |
+| Python AST checks for the changed runtime and test module | Passed. |
+| `git diff --check` | Passed. |
+| Exact generated-cache cleanup | Rechecked all 13 inventory hashes, byte lengths, and Python magic values; removed only those files and their empty `__pycache__` directory. The inventory is retained. Generator attribution remains unknown. |
+
+Private custody package `cyax125-2dc97d32-correction-custody-20261102`
+contains the current commission and review reports, prior correction custody,
+protected-source manifest, source and test snapshots, all 16 lifecycle
+modules, all 11 combined-discovery test modules, and every passing and failed
+raw run log. Its artifact manifest SHA-256 is
+`2f0064ce823eb19d2790a709fd66263d1b3d7597723ce73a1265904371441df7`.
+The protected-source manifest SHA-256 remains
+`db794ca4baba0dfb78e088370d6d3ed4d6b40d96e072078c5b6f001f80da7e61` and
+binds 638 entries; they remain unchanged in the frozen successor. The 16
+module closure and 11 test-module identities are bound to the final source
+tree in the frozen identity record.
+
+All error-path requests used local fake transports. No provider request,
+credential or key read, token mint, external ref or comment mutation,
+settings change, workflow run, publication, merge, or release occurred.
+Original review acceptance remains the Root's responsibility after freeze;
+this evidence makes no acceptance or full-route claim.
