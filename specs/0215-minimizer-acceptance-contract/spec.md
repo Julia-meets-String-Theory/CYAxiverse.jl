@@ -128,8 +128,14 @@ identifier matches the Issue number.
      and is not approval of this revision. R-009 must state a prospective
      reason for the `auto` default that does not depend on the withdrawn
      stale-results premise, and the owner signs that reason off explicitly.
+- Draft `033f673` (implementation candidate `4abbd60`): independent review did
+  not pass. Its blocking finding: the proposed R-009 rationale said that
+  `auto` prefers a count labelled as determined over a finite-search lower
+  bound, without saying that the leading-branch step counts the leading
+  selected potential only and can store fewer minima than the truncated
+  potential has (R-009). The candidate did not change.
 
-The failed reviews are not relabelled as passed. The records of these five
+The failed reviews are not relabelled as passed. The records of these six
 reviews are not published on GitHub; this list is their only record in the
 repository. The amendments become durable when the owner approves the revision
 that contains them at G0.
@@ -449,7 +455,9 @@ The test does not decide the sign of the exact eigenvalue:
   eigenvalue, at `ab48726`, with the origin returned each time. A replay at
   `dbd7b62` that makes those calls in that order for each sample (redrawing
   `u` and `v` if either is 0) found 132 of 2000, with the origin returned in
-  all 132. The count depends on the draw order; the effect does not.
+  all 132, with `Q * Diagonal(L) * Q'` evaluated as in `subspace_minimize`
+  (integer `Q`). The count depends on the draw order and on how the product
+  is evaluated; the effect does not.
 - **A genuine minimum can be dropped.** If its computed eigenvalue rounds to 0,
   the origin is dropped. An example is `Q = [1 1; 1 -1]`, `L = (1, 1e-20)`.
   Its Float64 Hessian `[1 1; 1 1]` equals that of the saddle
@@ -537,26 +545,47 @@ new batch runs only.
 
 For each geometry, `auto` uses the first applicable search in the existing
 decision tree, falls through only as the tree states, and records which search
-it used. The tree prefers a count that
-the pipeline labels as determined over a finite-search lower bound:
+it used:
 
-1. `square_reduced_potential_determinant_count`, when the reduced problem is
-   square;
-2. otherwise `complete_selected_leading_branch_count`, when the leading-branch
-   enumeration stays within `--max-branches`;
-3. otherwise `finite_multistart_minimum_lower_bound` from reduced JLM;
-4. legacy last, with the reason in `auto_fallback_reason`.
+1. the determinant count, when `square_vacua !== nothing`, labelled
+   `square_reduced_potential_determinant_count`. This holds when the reduced
+   problem is square, but also when the `αmatrix` result is not `Canonicalα`,
+   or when no extra row involves more than one leading axion;
+2. otherwise the leading-branch count, when the leading-branch enumeration
+   stays within `--max-branches`, labelled
+   `complete_selected_leading_branch_count` and stored with
+   `verification_status = "verified_selected_branch_set"`;
+3. otherwise reduced JLM, labelled `finite_multistart_minimum_lower_bound`;
+4. legacy last, with the reduced-JLM error in `auto_fallback_reason`.
 
-With `legacy` as the default, every result is labelled
-`finite_multistart_minimum_lower_bound`, and the legacy method cannot complete
-any geometry whose `vacua_id_basis` yields a row that needs the minimizer, or
-that has a single dependent column. In the first case `vacua_id` raises
-`BoundsError` at the `Leff` mask; in the second, `vacua_id_basis` raises
-`BoundsError` after its extra column strip (known issue A). Both come before
-the minimizer call, which would itself raise `TypeError` (#217).
+The proposed reason is that `auto` completes, and labels, geometries that the
+legacy method cannot complete. With `legacy` as the default, every result is
+labelled `finite_multistart_minimum_lower_bound`, and the legacy method cannot
+complete any geometry whose `vacua_id_basis` yields a row that needs the
+minimizer, or that has a single dependent column. In the first case `vacua_id`
+raises `BoundsError` at the `Leff` mask; in the second, `vacua_id_basis`
+raises `BoundsError` after its extra column strip (known issue A). Both come
+before the minimizer call, which would itself raise `TypeError` (#217). Such a
+geometry stores no result under `legacy`.
 
 Consequences that come with this rationale:
 
+- **Step 2 counts a different object, and can undercount.** It counts the
+  minima of the leading selected potential only, that is, of the `h11`
+  leading instantons. The subleading instantons above the threshold, which
+  make the reduced problem non-square, do not enter the count. The
+  `leading_critical_branches` docstring says that downstream callers should
+  still evaluate the full potential on the retained branches;
+  `_leading_branch_search` does not. Within the branch bound, step 2 runs
+  before reduced JLM for every reduced problem that step 1 does not take.
+  Example: `Q = [1 0 1; 0 1 1]`, `Λ = (1, 1, -0.9)`, threshold 0.5. Step 1
+  does not apply (`square_vacua = nothing`). Step 2 stores 1, its single
+  leading branch being the origin. The origin is a saddle of the truncated
+  potential: by hand, its Hessian `[0.1 -0.9; -0.9 0.1]` has eigenvalues 1.0
+  and -0.8. Reduced JLM (step 3, with the branch bound set to 1) finds 2. By
+  hand, the truncated potential has exactly 2 minima, at `x1 = x2 =
+  ±acos(5/9)` (R-001). Legacy raises `BoundsError` (known issue A). How many
+  stored or population geometries are affected has not been measured.
 - `auto` and `legacy` counts are not claimed to agree, or to be the same
   counting unit (see *Scientific claim boundary*). A batch run under the
   default can mix classifications across geometries; each result is
@@ -569,6 +598,8 @@ Consequences that come with this rationale:
   leading-branch enumeration other than its limit propagate, and do not fall
   through to legacy (decision tree above). This follows from the code; whether
   any stored geometry is affected has not been measured.
+- If reduced JLM fails and the legacy fallback also fails, the legacy error
+  propagates and the reduced-JLM error is not recorded.
 
 Sign-off: G0 needs the owner's explicit sign-off of this rationale, recorded
 in the T003 approval comment. Approval of the help-text and documentation
@@ -642,6 +673,10 @@ affected is not established.
   to the minimizer;
 - that `auto` and `legacy` counts agree, or that results from different
   `auto_selected_method` values are the same counting unit;
+- that a `complete_selected_leading_branch_count` result, stored as
+  `verified_selected_branch_set`, counts the minima of the threshold-truncated
+  potential, or bounds that count from below or above: it counts the leading
+  selected potential only, and can be below it (R-009);
 - any correction to de-duplication (#216), phases (#217) or the classification
   of critical points (#220).
 
@@ -719,7 +754,7 @@ Two identities are tracked:
 
 - **Implementation candidate:** `4abbd60` on `codex/test-suite-repairs`. The
   scientific and test evidence in the PR #215 description is produced on it.
-  It differs from `dbd7b62` only in the help text, docstrings, comments and
+  Outside `specs/`, it differs from `dbd7b62` only in the help text, docstrings, comments and
   the `test/full.jl` help-text assertions (commits `51ac579`, `3e54c76`,
   `4abbd60`). The probe measurements recorded "at `dbd7b62`" therefore apply
   to it unchanged. Earlier candidates and their reviews:
@@ -753,8 +788,10 @@ Two identities are tracked:
 
 - **R-009 rationale.** The owner explicitly signs off the proposed
   rationale for the `--method auto` batch default, states another, or keeps
-  `--method legacy` as the default (an implementation change). Approval of
-  other parts of this specification does not imply this sign-off.
+  `--method legacy` as the default (an implementation change). The decision
+  is made knowing that, under `auto`, the leading-branch step can store fewer
+  minima than the truncated potential has (R-009). Approval of other parts of
+  this specification does not imply this sign-off.
 
 Approval of this specification is the owner's decision on R-001 to R-010 and
 on the amendments, as written, together with the explicit R-009 sign-off. The replacement of R-003 to R-005 by a
