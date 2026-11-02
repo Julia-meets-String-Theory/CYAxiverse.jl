@@ -1143,6 +1143,7 @@ DRIVER_RETURN_SCHEMA = _load_contract("driver_return_schema")
 OPERATION_TABLE = _load_contract("operation_table")
 APPROVAL_MARKER_SCHEMA = _load_contract("approval_marker_schema")
 STATUS_AWARE_VECTORS = _load_contract("status_aware_vectors")
+CANONICAL_OPERATION_TABLE_SHA256 = sha256_hex(_canonical(OPERATION_TABLE))
 CASE_ORDER = tuple(row["case"] for row in OPERATION_TABLE)
 _CASE_INDEX = {case: index for index, case in enumerate(CASE_ORDER)}
 _CASE_METHODS = {
@@ -1212,7 +1213,7 @@ def validate_route_request_bytes(raw: bytes) -> ValidatedRouteRequest:
     ]:
         raise RehearsalError("ROUTE_REQUEST_DIGEST_MISMATCH")
     if (
-        plan["operation_table_sha256"] != _CONTRACT_SHA256["operation_table"]
+        plan["operation_table_sha256"] != CANONICAL_OPERATION_TABLE_SHA256
         or tuple(plan["case_order"]) != CASE_ORDER
         or plan["called_code_blobs"] != request["called_code_blobs"]
         or plan["workflow_blob_sha"] != request["workflow_blob_sha"]
@@ -1613,9 +1614,23 @@ def _validate_jobs_response(value: Any, *, run_id: int, head_sha: str) -> int:
         "Validate exact route and approval evidence before App mint",
         "Mint a scoped token and execute the fixed rehearsal route",
     )
-    if len(steps) != len(expected):
+    if not isinstance(steps, list) or len(steps) < len(expected):
         raise RehearsalError("APPROVAL_JOB_STEPS_INVALID")
-    for index, (step, name) in enumerate(zip(steps, expected)):
+    offset = 0
+    if steps and isinstance(steps[0], dict) and steps[0].get("name") == "Set up job":
+        setup = steps[0]
+        if setup.get("status") != "completed" or setup.get("conclusion") != "success":
+            raise RehearsalError("APPROVAL_RUNNER_SETUP_NOT_COMPLETE")
+        offset = 1
+    has_complete_step = (
+        len(steps) > offset + len(expected)
+        and isinstance(steps[-1], dict)
+        and steps[-1].get("name") == "Complete job"
+    )
+    expected_length = offset + len(expected) + (1 if has_complete_step else 0)
+    if len(steps) != expected_length:
+        raise RehearsalError("APPROVAL_JOB_STEPS_INVALID")
+    for index, (step, name) in enumerate(zip(steps[offset:offset + len(expected)], expected)):
         if not isinstance(step, dict) or step.get("name") != name:
             raise RehearsalError("APPROVAL_JOB_STEPS_INVALID")
         status = step.get("status")
@@ -1625,6 +1640,10 @@ def _validate_jobs_response(value: Any, *, run_id: int, head_sha: str) -> int:
             raise RehearsalError("APPROVAL_VALIDATOR_STEP_NOT_CURRENT")
         if index == 2 and (status != "queued" or step.get("conclusion") is not None):
             raise RehearsalError("APPROVAL_SECRET_STEP_ALREADY_STARTED")
+    if has_complete_step:
+        complete = steps[-1]
+        if complete.get("status") != "queued" or complete.get("conclusion") is not None:
+            raise RehearsalError("APPROVAL_RUNNER_COMPLETION_ALREADY_STARTED")
     return job["id"]
 
 
@@ -1834,6 +1853,191 @@ def validate_approval_receipt(
     )
 
 
+def serialize_approval_envelope(approval: VerifiedRunApproval) -> bytes:
+    """Serialize the fixed nonsecret response snapshots for same-job handoff."""
+
+    if (
+        not isinstance(approval, VerifiedRunApproval)
+        or approval._verification_token is not _APPROVAL_VERIFICATION_TOKEN
+        or sha256_hex(approval.receipt_bytes) != approval.receipt_sha256
+        or len(approval.raw_responses) != 8
+    ):
+        raise RehearsalError("APPROVAL_ENVELOPE_SOURCE_INVALID")
+    responses: list[dict[str, Any]] = []
+    for row in approval.raw_responses:
+        if not isinstance(row, Mapping):
+            raise RehearsalError("APPROVAL_ENVELOPE_SOURCE_INVALID")
+        path, status, headers, body, body_sha256 = (
+            row.get("path"), row.get("status"), row.get("headers"),
+            row.get("body"), row.get("body_sha256"),
+        )
+        if (
+            not isinstance(path, str)
+            or type(status) is not int
+            or status != 200
+            or not isinstance(headers, Mapping)
+            or not isinstance(body, bytes)
+            or len(body) > MAX_PROVIDER_BODY
+            or body_sha256 != sha256_hex(body)
+            or any(
+                not isinstance(key, str) or key != key.lower()
+                or not isinstance(value, str)
+                for key, value in headers.items()
+            )
+            or any(key in headers for key in (
+                "authorization", "proxy-authorization", "set-cookie"
+            ))
+            or len(headers) > 64
+            or sum(len(key) + len(value) for key, value in headers.items()) > 16384
+        ):
+            raise RehearsalError("APPROVAL_ENVELOPE_SOURCE_INVALID")
+        responses.append({
+            "path": path,
+            "status": status,
+            "headers": dict(headers),
+            "body_b64": base64.b64encode(body).decode("ascii"),
+            "body_sha256": body_sha256,
+        })
+    return _canonical({
+        "schema_version": 1,
+        "receipt_b64": base64.b64encode(approval.receipt_bytes).decode("ascii"),
+        "receipt_sha256": approval.receipt_sha256,
+        "responses": responses,
+    })
+
+
+def rehydrate_approval_envelope(
+    raw_envelope: bytes,
+    request: ValidatedRouteRequest,
+    *,
+    run_id: int,
+    run_attempt: int,
+    head_sha: str,
+) -> VerifiedRunApproval:
+    """Rebuild approval provenance from the closed same-job envelope."""
+
+    if not isinstance(raw_envelope, bytes) or not raw_envelope or len(raw_envelope) > 12 * 1024 * 1024:
+        raise RehearsalError("APPROVAL_ENVELOPE_SIZE_INVALID")
+    envelope = _strict_loads(raw_envelope)
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != {"schema_version", "receipt_b64", "receipt_sha256", "responses"}
+        or type(envelope.get("schema_version")) is not int
+        or envelope["schema_version"] != 1
+        or _canonical(envelope) != raw_envelope
+        or not isinstance(envelope.get("receipt_b64"), str)
+        or not isinstance(envelope.get("receipt_sha256"), str)
+        or not isinstance(envelope.get("responses"), list)
+        or len(envelope["responses"]) != 8
+    ):
+        raise RehearsalError("APPROVAL_ENVELOPE_INVALID")
+    try:
+        receipt_bytes = base64.b64decode(envelope["receipt_b64"], validate=True)
+    except (ValueError, TypeError):
+        raise RehearsalError("APPROVAL_ENVELOPE_RECEIPT_INVALID") from None
+    if sha256_hex(receipt_bytes) != envelope["receipt_sha256"]:
+        raise RehearsalError("APPROVAL_ENVELOPE_RECEIPT_DIGEST_MISMATCH")
+    approval = validate_approval_receipt(
+        receipt_bytes, request, run_id=run_id,
+        run_attempt=run_attempt, head_sha=head_sha,
+    )
+    run_prefix = f"/repos/{REPOSITORY}/actions/runs/{run_id}"
+    expected_paths = (
+        f"/repos/{REPOSITORY}",
+        f"{run_prefix}/attempts/1",
+        f"{run_prefix}/approvals",
+        f"{run_prefix}/attempts/1/jobs?per_page=100",
+    ) * 2
+    rows: list[tuple[str, ApiResponse]] = []
+    raw_responses: list[dict[str, Any]] = []
+    total_body_bytes = 0
+    for expected_path, item in zip(expected_paths, envelope["responses"]):
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"path", "status", "headers", "body_b64", "body_sha256"}
+            or item.get("path") != expected_path
+            or not _allowed_approval_path(expected_path)
+            or type(item.get("status")) is not int
+            or item["status"] != 200
+            or not isinstance(item.get("headers"), dict)
+            or not isinstance(item.get("body_b64"), str)
+            or not isinstance(item.get("body_sha256"), str)
+        ):
+            raise RehearsalError("APPROVAL_ENVELOPE_RESPONSE_INVALID")
+        headers = item["headers"]
+        if (
+            any(
+                not isinstance(key, str) or key != key.lower()
+                or not isinstance(value, str)
+                for key, value in headers.items()
+            )
+            or any(key in headers for key in (
+                "authorization", "proxy-authorization", "set-cookie"
+            ))
+            or len(headers) > 64
+            or sum(len(key) + len(value) for key, value in headers.items()) > 16384
+        ):
+            raise RehearsalError("APPROVAL_ENVELOPE_RESPONSE_INVALID")
+        try:
+            body = base64.b64decode(item["body_b64"], validate=True)
+        except (ValueError, TypeError):
+            raise RehearsalError("APPROVAL_ENVELOPE_BODY_INVALID") from None
+        if len(body) > MAX_PROVIDER_BODY or item["body_sha256"] != sha256_hex(body):
+            raise RehearsalError("APPROVAL_ENVELOPE_BODY_DIGEST_MISMATCH")
+        total_body_bytes += len(body)
+        response = ApiResponse(item["status"], body, dict(headers))
+        _json_response(response)
+        rows.append((expected_path, response))
+        raw_responses.append({
+            "path": expected_path,
+            "status": item["status"],
+            "headers": dict(headers),
+            "body": body,
+            "body_sha256": item["body_sha256"],
+        })
+    if total_body_bytes > 8 * MAX_PROVIDER_BODY:
+        raise RehearsalError("APPROVAL_ENVELOPE_OVERSIZE")
+    first_rows, second_rows = rows[:4], rows[4:]
+    for (first_path, first), (second_path, second) in zip(first_rows, second_rows):
+        if (
+            first_path != second_path
+            or first.body != second.body
+            or first.status != second.status
+            or {
+                key: {str(k).lower(): str(v) for k, v in first.headers.items()}.get(key)
+                for key in ("etag", "content-type")
+            }
+            != {
+                key: {str(k).lower(): str(v) for k, v in second.headers.items()}.get(key)
+                for key in ("etag", "content-type")
+            }
+        ):
+            raise RehearsalError("APPROVAL_READS_CHANGED")
+    first_values = [_json_response(response) for _path, response in first_rows]
+    second_values = [_json_response(response) for _path, response in second_rows]
+    observed_jobs: list[int] = []
+    observed_markers: list[str] = []
+    for values in (first_values, second_values):
+        _validate_repository_response(values[0])
+        _validate_run_response(values[1], run_id=run_id, head_sha=head_sha,
+                               ref=f"refs/heads/rehearsal/trigger/{request.request_id}")
+        _marker_raw, marker_sha = _validate_approval_rows(
+            values[2], run_id=run_id, head_sha=head_sha, request=request,
+        )
+        observed_markers.append(marker_sha)
+        observed_jobs.append(_validate_jobs_response(values[3], run_id=run_id, head_sha=head_sha))
+    _first_manifest, first_sha = _response_manifest(first_rows)
+    _second_manifest, second_sha = _response_manifest(second_rows)
+    if (
+        observed_jobs != [approval.job_id, approval.job_id]
+        or observed_markers != [approval.marker_sha256, approval.marker_sha256]
+        or first_sha != approval.receipt["first_response_manifest_sha256"]
+        or second_sha != approval.receipt["second_response_manifest_sha256"]
+    ):
+        raise RehearsalError("APPROVAL_ENVELOPE_RECEIPT_BINDING_INVALID")
+    return replace(approval, raw_responses=tuple(raw_responses))
+
+
 @dataclass(frozen=True, slots=True)
 class CaseObservation:
     status: str
@@ -1856,7 +2060,8 @@ class RehearsalAdapter(Protocol):
 class AppendOnlyJournal(Protocol):
     def claim_case(self, request: ValidatedRouteRequest, case_id: str,
                    proof: Any) -> str: ...
-    def append_case_result(self, result: Mapping[str, Any]) -> str: ...
+    def append_case_result(self, result: Mapping[str, Any],
+                           evidence: Mapping[str, Any]) -> str: ...
 
 
 def _status_next(case_id: str, status: str) -> tuple[str | None, bool]:
@@ -2009,11 +2214,14 @@ def run_rehearsal(
         workflow_blob_sha=request.workflow_blob_sha,
         called_code_blobs=dict(request.called_code_blobs),
     )
-    approval = validate_approval_receipt(
-        approval.receipt_bytes, request,
-        run_id=approval.run_id, run_attempt=approval.run_attempt,
-        head_sha=approval.head_sha,
-    )
+    try:
+        approval = rehydrate_approval_envelope(
+            serialize_approval_envelope(approval), request,
+            run_id=approval.run_id, run_attempt=approval.run_attempt,
+            head_sha=approval.head_sha,
+        )
+    except RehearsalError:
+        raise RehearsalError("DRIVER_APPROVAL_REVALIDATION_FAILED") from None
     preflight = adapter.preflight_route(request, approval)
     if preflight.status != "PASS_ACCEPTED":
         case_id = "P2-app-create"
@@ -2080,7 +2288,9 @@ def run_rehearsal(
                 ):
                     observation = CaseObservation(
                         "BLOCKED_NOT_VERIFIABLE",
-                        {"reason": "FREEZE_EPOCH_CHANGED", "pre": getattr(proof, "to_dict", lambda: {})(),
+                        {"reason": "FREEZE_EPOCH_CHANGED",
+                         "operation_evidence": dict(observation.evidence),
+                         "pre": getattr(proof, "to_dict", lambda: {})(),
                          "post": getattr(postproof, "to_dict", lambda: {})()},
                         failure_reason="FREEZE_EPOCH_CHANGED",
                         p5_subresult=observation.p5_subresult,
@@ -2094,7 +2304,10 @@ def run_rehearsal(
                 ))
                 observation = CaseObservation(
                     "BLOCKED_UNKNOWN" if unknown else "BLOCKED_NOT_VERIFIABLE",
-                    {"reason": reason}, failure_reason=reason,
+                    {"reason": reason, "request_sha256": request.request_sha256,
+                     "plan_sha256": request.plan_sha256,
+                     "approval_receipt_sha256": approval.receipt_sha256},
+                    failure_reason=reason,
                     p5_subresult=_p5_unknown(case_id, reason),
                 )
             evidence = dict(observation.evidence)
@@ -2107,7 +2320,7 @@ def run_rehearsal(
                 p5_subresult=observation.p5_subresult,
             )
             try:
-                journal.append_case_result(result)
+                journal.append_case_result(result, evidence)
             except Exception:
                 return _result(
                     request, case_id, "BLOCKED_UNKNOWN",
@@ -2125,6 +2338,8 @@ __all__ = [
     "STATUS_AWARE_VECTORS",
     "AnonymousGitHubTransport", "CaseObservation", "RehearsalError",
     "ValidatedRouteRequest", "VerifiedRunApproval", "run_rehearsal",
+    "CANONICAL_OPERATION_TABLE_SHA256", "rehydrate_approval_envelope",
+    "serialize_approval_envelope",
     "validate_approval_receipt", "validate_driver_result",
     "validate_rehearsal_route_trigger", "validate_route_request_bytes",
     "verify_run_approval",

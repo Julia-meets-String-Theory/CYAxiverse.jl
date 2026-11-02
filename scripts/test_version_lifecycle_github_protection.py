@@ -24,6 +24,7 @@ from version_lifecycle.github_protection import (  # noqa: E402
     ApiResponse,
     GitHubProtectionAdapter,
     GitHubProtectionError,
+    _decode_github_contents_base64,
     classify_principal_branch_move,
     classify_ref_creation,
     validate_rehearsal_trigger,
@@ -497,14 +498,20 @@ class GitHubProtectionTests(unittest.TestCase):
         self.assertIn("permissions: {}", workflow)
         self.assertIn("environment:\n      name: lifecycle", workflow)
         self.assertEqual(workflow.count("\n  lifecycle:\n"), 1)
-        self.assertEqual(workflow.count("      - name:"), 2)
-        self.assertEqual(workflow.count("        name:"), 1)
+        self.assertEqual(workflow.count("      - name:"), 1)
+        self.assertEqual(workflow.count("        name:"), 2)
         self.assertLess(
             workflow.index("Validate exact route and approval evidence before App mint"),
             workflow.index("Mint a scoped token and execute the fixed rehearsal route"),
         )
         self.assertIn("Fetch the exact trigger commit with anonymous read-only access", workflow)
         self.assertIn("OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT", workflow)
+        self.assertIn("if: steps.approval.outputs.route_mode == 'true'", workflow)
+        self.assertIn("APPROVAL_RAW_ENVELOPE_PATH", workflow)
+        self.assertNotIn("APPROVAL_RECEIPT_B64", workflow)
+        self.assertNotIn("route_mode=false", workflow)
+        self.assertNotIn("validate_rehearsal_trigger", workflow)
+        self.assertIn("R2_APPROVAL_REQUIRED", workflow)
         self.assertNotIn("GITHUB_TOKEN", workflow)
         self.assertEqual(workflow.count("secrets.LIFECYCLE_APP_PRIVATE_KEY"), 1)
         for forbidden in (
@@ -522,6 +529,18 @@ class GitHubProtectionTests(unittest.TestCase):
         self.assertIn("fetch --no-tags --depth=2 origin", workflow)
         self.assertIn("github.event.installation.id != 172789630", workflow)
         self.assertIn("github.run_attempt == 1", workflow)
+
+    def test_contents_base64_transport_wrapping_is_removed_before_strict_decode(self) -> None:
+        raw = b'{"path":"lifecycle-requests/route-0125-1.json"}'
+        encoded = base64.b64encode(raw).decode("ascii")
+        wrapped = "\n".join(encoded[index:index + 16] for index in range(0, len(encoded), 16)) + "\n"
+        self.assertEqual(_decode_github_contents_base64(wrapped), raw)
+        self.assertEqual(_decode_github_contents_base64(" \t" + encoded + "\r\n"), raw)
+        for invalid in ("%%" + encoded, encoded + "====", encoded + "\v"):
+            with self.subTest(invalid=invalid[-8:]), self.assertRaisesRegex(
+                GitHubProtectionError, "GITHUB_CONTENT_BASE64_INVALID"
+            ):
+                _decode_github_contents_base64(invalid)
 
     def test_trigger_validation_binds_one_parent_one_added_request_and_code_blobs(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -988,6 +1007,100 @@ class GitHubProtectionTests(unittest.TestCase):
                         intent={"repository": REPOSITORY, "transaction_id": "tx-2"},
                     )
             self.assertEqual(len(push_calls), 1)
+
+    def test_principal_cas_lease_rejects_a_real_interleaved_remote_move(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "work"
+            bare = Path(temp) / "remote.git"
+            root.mkdir()
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.name", "Fixture")
+            self._git(root, "config", "user.email", "fixture@example.invalid")
+            (root / "README.md").write_text("base\n", encoding="utf-8")
+            self._git(root, "add", "README.md")
+            self._git(root, "commit", "-q", "-m", "base")
+            old = self._git(root, "rev-parse", "HEAD")
+
+            (root / "README.md").write_text("intended\n", encoding="utf-8")
+            self._git(root, "add", "README.md")
+            self._git(root, "commit", "-q", "-m", "intended move")
+            intended = self._git(root, "rev-parse", "HEAD")
+            intended_tree = self._git(root, "rev-parse", f"{intended}^{{tree}}")
+
+            self._git(root, "checkout", "-q", "--detach", old)
+            (root / "race.txt").write_text("concurrent owner move\n", encoding="utf-8")
+            self._git(root, "add", "race.txt")
+            self._git(root, "commit", "-q", "-m", "concurrent move")
+            raced = self._git(root, "rev-parse", "HEAD")
+
+            init_bare = subprocess.run(
+                ["git", "init", "--bare", "-q", str(bare)],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(init_bare.returncode, 0)
+            branch = "rehearsal/principal/line"
+            seed = subprocess.run(
+                [
+                    "git", "-C", str(root), "push", str(bare),
+                    f"{old}:refs/heads/{branch}",
+                    f"{raced}:refs/heads/race-object",
+                ],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(seed.returncode, 0, seed.stderr.decode("utf-8", errors="replace"))
+
+            fake = FakeGitHub()
+            fake.branch_shas[branch] = old
+            adapter = GitHubProtectionAdapter(
+                REPOSITORY, token="private-token", transport=fake,
+                authorization_gate=lambda *_: True,
+                rehearsal_gate=lambda *_: True,
+            )
+            original_run = subprocess.run
+            intercepted: list[list[str]] = []
+
+            def race_before_push(command, **kwargs):
+                if command[0] == "git" and "push" in command and "https://github.com/" in " ".join(command):
+                    intercepted.append(list(command))
+                    moved = original_run(
+                        [
+                            "git", "--git-dir", str(bare), "update-ref",
+                            f"refs/heads/{branch}", raced, old,
+                        ],
+                        capture_output=True, check=False,
+                    )
+                    if moved.returncode:
+                        raise AssertionError(moved.stderr.decode("utf-8", errors="replace"))
+                    fake.branch_shas[branch] = raced
+                    local_command = list(command)
+                    remote_index = next(
+                        index for index, value in enumerate(local_command)
+                        if value.startswith("https://github.com/")
+                    )
+                    local_command[remote_index] = str(bare)
+                    return original_run(local_command, **kwargs)
+                return original_run(command, **kwargs)
+
+            with mock.patch(
+                "version_lifecycle.github_protection.subprocess.run",
+                side_effect=race_before_push,
+            ):
+                with self.assertRaisesRegex(GitHubProtectionError, "REF_MOVE_UNKNOWN") as raised:
+                    adapter.compare_and_swap_rehearsal_principal(
+                        root, ref=f"refs/heads/{branch}", expected_old_sha=old,
+                        intended_new_sha=intended, intended_new_tree=intended_tree,
+                        intent={"repository": REPOSITORY, "transaction_id": "tx-real-lease-race"},
+                    )
+
+            self.assertEqual(len(intercepted), 1)
+            self.assertIn(f"--force-with-lease=refs/heads/{branch}:{old}", intercepted[0])
+            self.assertEqual(raised.exception.evidence["observed_sha"], raced)
+            remote_head = original_run(
+                ["git", "--git-dir", str(bare), "rev-parse", f"refs/heads/{branch}"],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(remote_head.returncode, 0)
+            self.assertEqual(remote_head.stdout.decode("ascii").strip(), raced)
 
     def test_request_fence_is_create_once_and_never_moves_vmm(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

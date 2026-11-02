@@ -39,12 +39,16 @@ from version_lifecycle.rehearsal import (
     _APPROVAL_VERIFICATION_TOKEN,
     _CONTRACT_SHA256,
     _canonical,
+    _result,
     run_rehearsal,
     validate_approval_receipt,
     validate_driver_result,
     validate_route_request_bytes,
     validate_rehearsal_route_trigger,
     verify_run_approval,
+    rehydrate_approval_envelope,
+    serialize_approval_envelope,
+    _validate_jobs_response,
 )
 
 
@@ -59,6 +63,7 @@ def _request_bytes(
     implementation_sha: str = "a" * 40,
     candidate_tree: str = "b" * 40,
     workflow_blob_sha: str = "c" * 40,
+    operation_table_sha256: str | None = None,
     called_code_blobs: dict[str, str] | None = None,
 ) -> bytes:
     code = called_code_blobs or {
@@ -78,7 +83,7 @@ def _request_bytes(
         "setup_inventory_sha256": "1" * 64,
         "environment_export_sha256": "2" * 64,
         "seed_receipts_sha256": "3" * 64,
-        "operation_table_sha256": _CONTRACT_SHA256["operation_table"],
+        "operation_table_sha256": operation_table_sha256 or sha256_hex(_canonical(OPERATION_TABLE)),
         "case_order": list(CASE_ORDER),
         "owner_actor_id": 102535039,
         "app_id": 5371554,
@@ -222,6 +227,10 @@ class RehearsalContractTests(unittest.TestCase):
         request = _request()
         self.assertEqual(request.request_id, "route-0125-1")
         self.assertEqual(request.plan_sha256, request.owner_attestation["plan_sha256"])
+        self.assertEqual(
+            request.plan["operation_table_sha256"],
+            sha256_hex(_canonical(OPERATION_TABLE)),
+        )
         raw = request.request_bytes
         with self.assertRaises(RehearsalError):
             validate_route_request_bytes(raw + b"\n")
@@ -229,6 +238,153 @@ class RehearsalContractTests(unittest.TestCase):
             validate_route_request_bytes(raw.replace(b'"schema_version":2', b'"schema_version":true'))
         with self.assertRaises(RehearsalError):
             validate_route_request_bytes(raw.replace(b'"schema_version":2', b'"schema_version":2,"schema_version":2'))
+        with self.assertRaisesRegex(RehearsalError, "ROUTE_REQUEST_BINDING_INVALID"):
+            validate_route_request_bytes(_request_bytes(
+                operation_table_sha256=_CONTRACT_SHA256["operation_table"]
+            ))
+
+    def test_approval_job_accepts_known_runner_bookends_and_rejects_other_steps(self) -> None:
+        job = _provider_payloads(_request())[
+            f"/repos/{REPOSITORY}/actions/runs/{RUN_ID}/attempts/1/jobs?per_page=100"
+        ]
+        row = job["jobs"][0]
+        row["steps"].insert(0, {
+            "name": "Set up job", "status": "completed", "conclusion": "success",
+        })
+        row["steps"].append({
+            "name": "Complete job", "status": "queued", "conclusion": None,
+        })
+        self.assertEqual(_validate_jobs_response(job, run_id=RUN_ID, head_sha=HEAD_SHA), 55779911)
+
+        bad = json.loads(json.dumps(job))
+        bad["jobs"][0]["steps"].insert(-1, {
+            "name": "unreviewed executable", "status": "queued", "conclusion": None,
+        })
+        with self.assertRaisesRegex(RehearsalError, "APPROVAL_JOB_STEPS_INVALID"):
+            _validate_jobs_response(bad, run_id=RUN_ID, head_sha=HEAD_SHA)
+
+        bad_setup = json.loads(json.dumps(job))
+        bad_setup["jobs"][0]["steps"][0]["conclusion"] = "failure"
+        with self.assertRaisesRegex(RehearsalError, "APPROVAL_RUNNER_SETUP_NOT_COMPLETE"):
+            _validate_jobs_response(bad_setup, run_id=RUN_ID, head_sha=HEAD_SHA)
+
+    def test_raw_approval_envelope_round_trip_revalidates_response_provenance(self) -> None:
+        request = _request()
+        approval = _approval(request)
+        envelope = serialize_approval_envelope(approval)
+        restored = rehydrate_approval_envelope(
+            envelope, request, run_id=RUN_ID, run_attempt=1, head_sha=HEAD_SHA,
+        )
+        self.assertEqual(len(restored.raw_responses), 8)
+        self.assertEqual(restored.receipt_sha256, approval.receipt_sha256)
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY, token="offline-token", api_base="https://fixture.invalid",
+            transport=lambda *_args: ApiResponse(500, b"{}", {}),
+        )
+        self.assertEqual(
+            adapter._approval_evidence_payload(request, restored)["receipt_sha256"],
+            approval.receipt_sha256,
+        )
+
+        original = json.loads(envelope)
+        for label, mutate in (
+            ("path", lambda value: value["responses"][0].__setitem__("path", "/repos/other/repo")),
+            ("receipt", lambda value: value.__setitem__("receipt_sha256", "0" * 64)),
+            ("body", lambda value: value["responses"][0].__setitem__("body_b64", "e30=")),
+            ("credential", lambda value: value["responses"][0]["headers"].__setitem__("authorization", "Bearer x")),
+        ):
+            bad = json.loads(json.dumps(original))
+            mutate(bad)
+            with self.subTest(label=label), self.assertRaises(RehearsalError):
+                rehydrate_approval_envelope(
+                    _canonical(bad), request, run_id=RUN_ID,
+                    run_attempt=1, head_sha=HEAD_SHA,
+                )
+
+    def test_wrapped_fenced_request_contents_decode_to_exact_canonical_request(self) -> None:
+        request = _request()
+        encoded = base64.b64encode(request.request_bytes).decode("ascii")
+        wrapped = "\n".join(encoded[index:index + 88] for index in range(0, len(encoded), 88)) + "\n"
+        payload = {
+            "path": request.request_path,
+            "encoding": "base64",
+            "content": wrapped,
+        }
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY, token="offline-token", api_base="https://fixture.invalid",
+            transport=lambda *_args: ApiResponse(
+                200, json.dumps(payload, separators=(",", ":")).encode("ascii"),
+                {"content-type": "application/json"},
+            ),
+        )
+        self.assertEqual(adapter._read_fenced_route_request(request), request.request_bytes)
+
+    def test_case_result_journals_and_retrieves_the_canonical_evidence_preimage(self) -> None:
+        request = _request()
+        case_id = CASE_ORDER[0]
+        operation_ref = OPERATION_TABLE[0]["ref"]
+        evidence = {
+            "request_id": request.request_id,
+            "request_sha256": request.request_sha256,
+            "plan_sha256": request.plan_sha256,
+            "ref": operation_ref,
+            "provider_response": {
+                "status": 422,
+                "headers": {"x-github-request-id": "fixture"},
+                "body_b64": base64.b64encode(b'{"errors":[]}').decode("ascii"),
+                "body_sha256": sha256_hex(b'{"errors":[]}'),
+                "body_bytes": len(b'{"errors":[]}'),
+            },
+            "pre_state": {"object_type": None, "sha": None, "absence_known": True},
+            "post_state": {"object_type": None, "sha": None, "absence_known": True},
+            "freeze_proof": {"snapshot_sha256": "4" * 64, "effective_rule_ids": [26314085]},
+        }
+        result = _result(request, case_id, "BLOCKED_UNKNOWN", evidence)
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY, token="offline-token", api_base="https://fixture.invalid",
+            transport=lambda *_args: ApiResponse(500, b"{}", {}),
+        )
+        adapter._claimed_rehearsal_cases[(request.request_id, request.plan_sha256, case_id)] = "a" * 40
+        written: list[dict[str, object]] = []
+        with mock.patch.object(
+            adapter, "_create_rehearsal_record_ref",
+            side_effect=lambda **kwargs: written.append(dict(kwargs["record"])) or "b" * 40,
+        ):
+            with adapter.case_lock(operation_ref):
+                adapter.append_case_result(result, evidence)
+        record = written[0]
+        record_bytes = _canonical(record)
+        path = f"case-results/{request.request_id}/{request.plan_sha256}/{case_id}.json"
+        encoded = base64.b64encode(record_bytes).decode("ascii")
+        wrapped = "\n".join(encoded[index:index + 88] for index in range(0, len(encoded), 88)) + "\n"
+        content_response = ApiResponse(200, json.dumps({
+            "path": path, "encoding": "base64", "content": wrapped,
+        }, separators=(",", ":")).encode("ascii"), {"content-type": "application/json"})
+        with (
+            mock.patch.object(adapter, "_read_rehearsal_target_ref", return_value=("commit", "c" * 40)),
+            mock.patch.object(adapter, "_read_rehearsal_commit", return_value={"parents": [request.expected_vmm_sha]}),
+            mock.patch.object(adapter, "_api_request", return_value=content_response),
+        ):
+            observed_result, observed_evidence = adapter.read_case_result_evidence(
+                request.request_id, request.plan_sha256, case_id
+            )
+        self.assertEqual(observed_result, result)
+        self.assertEqual(observed_evidence, evidence)
+        self.assertEqual(sha256_hex(_canonical(observed_evidence)), observed_result["evidence_sha256"])
+
+        bad_record = dict(record)
+        bad_record["evidence"] = {**evidence, "reason": "tampered"}
+        bad_encoded = base64.b64encode(_canonical(bad_record)).decode("ascii")
+        bad_response = ApiResponse(200, json.dumps({
+            "path": path, "encoding": "base64", "content": bad_encoded,
+        }, separators=(",", ":")).encode("ascii"), {"content-type": "application/json"})
+        with (
+            mock.patch.object(adapter, "_read_rehearsal_target_ref", return_value=("commit", "c" * 40)),
+            mock.patch.object(adapter, "_read_rehearsal_commit", return_value={"parents": [request.expected_vmm_sha]}),
+            mock.patch.object(adapter, "_api_request", return_value=bad_response),
+        ):
+            with self.assertRaisesRegex(GitHubProtectionError, "CASE_RESULT_EVIDENCE_DIGEST_MISMATCH"):
+                adapter.read_case_result_evidence(request.request_id, request.plan_sha256, case_id)
 
     def test_approval_evidence_payload_retains_only_receipt_bound_raw_responses(self) -> None:
         request = _request()
@@ -619,6 +775,7 @@ class FakeJournal:
         self.fail_result = fail_result
         self.claims: list[str] = []
         self.results: list[dict[str, object]] = []
+        self.evidence: list[dict[str, object]] = []
 
     def claim_case(self, request: ValidatedRouteRequest, case_id: str, proof: object) -> str:
         self.claims.append(case_id)
@@ -626,10 +783,13 @@ class FakeJournal:
             raise GitHubProtectionError("CASE_CLAIM_WRITE_UNKNOWN")
         return "claim-sha"
 
-    def append_case_result(self, result: dict[str, object]) -> str:
+    def append_case_result(
+        self, result: dict[str, object], evidence: dict[str, object]
+    ) -> str:
         if self.fail_result:
             raise GitHubProtectionError("CASE_RESULT_WRITE_UNKNOWN")
         self.results.append(dict(result))
+        self.evidence.append(dict(evidence))
         return "result-sha"
 
 
@@ -643,6 +803,10 @@ class RehearsalDriverTests(unittest.TestCase):
         self.assertEqual(adapter.executed, list(CASE_ORDER))
         self.assertEqual(journal.claims, list(CASE_ORDER))
         self.assertEqual(len(journal.results), len(CASE_ORDER))
+        for journal_result, evidence in zip(journal.results, journal.evidence):
+            self.assertEqual(
+                journal_result["evidence_sha256"], sha256_hex(_canonical(evidence))
+            )
         self.assertEqual(result["case_id"], "4g")
         self.assertEqual(result["status"], "STOP_OWNER_ACTION_REQUIRED")
         self.assertEqual(adapter.locks[15], f"refs/heads/rehearsal/principal/cyax125-20261101-route")
@@ -760,6 +924,121 @@ class GitHubCaseAdapterTests(unittest.TestCase):
             old, "2026-11-02T12:00:00Z", adapter._nonce,
         )
         return adapter, request, approval, proof, state, calls, ref, target
+
+    def test_unknown_case_postread_is_not_treated_as_known_absence(self) -> None:
+        adapter, request, approval, proof, _state, _calls, ref, target = self._case_fixture(
+            status=422, body=b'{"errors":[{"rule_id":26314086}]}',
+        )
+        reads = iter([
+            (("commit", proof.ref_sha), {"status": 200, "body_sha256": "1" * 64}),
+            TimeoutError("postread unavailable"),
+        ])
+
+        def read_ref(_ref: str):
+            result = next(reads)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        with (
+            adapter.case_lock(ref),
+            mock.patch.object(adapter, "_read_rehearsal_target_ref_with_evidence", side_effect=read_ref),
+            mock.patch.object(adapter, "_api_request", return_value=ApiResponse(
+                422, b'{"errors":[{"rule_id":26314086}]}',
+                {"x-github-request-id": "postread-test"},
+            )),
+        ):
+            observation = adapter._case_observation(
+                "4b-nff", request, proof, method="PATCH", path="/fixture/ref",
+                payload={"sha": target, "force": True}, expected_sha=target,
+                expected_rule=26314086, positive=False,
+                approval_receipt_sha256=approval.receipt_sha256,
+            )
+        self.assertEqual(observation.status, "BLOCKED_UNKNOWN")
+        self.assertEqual(observation.evidence["post_state"]["absence_known"], False)
+        self.assertIsNotNone(observation.evidence["post_state"]["readback_error"])
+        self.assertEqual(len(adapter._unreconciled_case_writes), 1)
+
+    def test_duplicate_fence_exercises_installed_dispatch_boundary_and_measures_effects(self) -> None:
+        request = _request()
+        approval = _approval(request)
+        adapter = GitHubProtectionAdapter(
+            REPOSITORY, token="offline-token", api_base="https://fixture.invalid",
+            transport=lambda *_args: ApiResponse(500, b"{}", {}),
+            token_permissions={"contents": "write", "metadata": "read"},
+            token_expires_at=NOW + timedelta(hours=1), clock=lambda: NOW,
+        )
+        fence_ref = f"refs/heads/rehearsal/lifecycle/requests/{request.request_id}"
+        fence_sha = "a" * 40
+        adapter._initial_request_fences[request.request_id] = fence_sha
+        adapter._route_admitted_dispatches = 1
+        proof = RehearsalFreezeProof(
+            request.owner_attestation["epoch_id"], request.plan["intent_id"],
+            request.request_id, request.plan_sha256, fence_ref, 26316866,
+            request.owner_attestation["full_definition_sha256"],
+            (26314086, 26314227, 26316866),
+            request.owner_attestation["last_operation_terminal_receipt_sha256"],
+            request.owner_attestation["full_definition_sha256"], 0, fence_sha,
+            "2026-11-02T12:00:00Z", adapter._nonce,
+        )
+        evidence = {"status": 200, "body_sha256": "2" * 64}
+        with (
+            adapter.case_lock(fence_ref),
+            mock.patch.object(
+                adapter, "_read_rehearsal_target_ref_with_evidence",
+                return_value=(("commit", fence_sha), evidence),
+            ),
+            mock.patch.object(
+                adapter, "_read_fenced_route_request",
+                return_value=(request.request_bytes, evidence),
+            ),
+            mock.patch.object(
+                adapter, "_vmm_head_and_tree",
+                return_value=(request.expected_vmm_sha, "b" * 40),
+            ),
+            mock.patch.object(adapter, "_read_request_file", return_value=False),
+            mock.patch.object(
+                adapter, "_read_rehearsal_fence",
+                return_value=("commit", fence_sha),
+            ),
+        ):
+            observation = adapter.reject_existing_same_request_fence(
+                request, approval, proof
+            )
+        self.assertEqual(observation.status, "PASS_DENIED_TARGET_CONTROL", observation.evidence)
+        self.assertEqual(observation.evidence["reason"], "REQUEST_ID_ALREADY_USED")
+        self.assertEqual(
+            observation.evidence["effect_deltas"],
+            {"second_driver_dispatch_count": 0, "api_mutation_count": 0, "git_push_count": 0},
+        )
+        self.assertEqual(
+            adapter.rehearsal_effect_counters(),
+            {"driver_dispatch_count": 1, "api_mutation_count": 0, "git_push_count": 0},
+        )
+
+        def unexpected_acceptance(*_args: object, **_kwargs: object) -> dict[str, object]:
+            adapter._route_admitted_dispatches += 1
+            return {"fence": {}, "result": {"status": "PASS_ACCEPTED"}}
+
+        with (
+            adapter.case_lock(fence_ref),
+            mock.patch.object(
+                adapter, "_read_rehearsal_target_ref_with_evidence",
+                return_value=(("commit", fence_sha), evidence),
+            ),
+            mock.patch.object(
+                adapter, "_read_fenced_route_request",
+                return_value=(request.request_bytes, evidence),
+            ),
+            mock.patch.object(adapter, "dispatch_rehearsal_route", side_effect=unexpected_acceptance),
+        ):
+            unexpected = adapter.reject_existing_same_request_fence(
+                request, approval, proof
+            )
+        self.assertEqual(unexpected.status, "BLOCKED_NOT_VERIFIABLE")
+        self.assertEqual(
+            unexpected.evidence["effect_deltas"]["second_driver_dispatch_count"], 1
+        )
 
     def test_only_fixed_nff_case_sets_force_true_and_requires_rule_attribution(self) -> None:
         adapter, request, approval, proof, _state, calls, ref, _target = self._case_fixture(
