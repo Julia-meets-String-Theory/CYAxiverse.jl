@@ -7,7 +7,7 @@
   - Output: suite results and break checks in the PR #215 description.
   - Verify: each requirement row in `spec.md` *Verification* has the listed
     evidence. R-007 has integration evidence only. Evidence recorded on
-    `ab48726`, `dc42633`, `b309a55` and `dbd7b62` is superseded; it is
+    `ab48726`, `dc42633`, `b309a55`, `dbd7b62` and `4abbd60` is superseded; it is
     re-recorded on `a6a07da`.
   - Escalate if: a requirement has no evidence.
 
@@ -15,7 +15,8 @@
   - Input: `spec.md` at a named draft commit SHA; implementation candidate
     `a6a07da`. Earlier reviews did not pass: `444fcc3` (against `ab48726`),
     `6b033b5` (against `dc42633`), `0442ead` (against `b309a55`), and `92f4c71`
-    and `898029d` (against `dbd7b62`), and `033f673` (against `4abbd60`).
+    and `898029d` (against `dbd7b62`), `033f673` (against `4abbd60`), and
+    `94a61f7` (against `a6a07da`).
     They stay
     recorded as not passed; their records are not published on GitHub. The
     next revision needs a fresh review.

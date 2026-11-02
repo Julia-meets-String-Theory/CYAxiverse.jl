@@ -21,7 +21,7 @@ version_impact: patch, no version bump
 Record, as an S2 contract, the scientific decisions made in PR #215: which
 numerical endpoints of the legacy minimizer pass its acceptance filter, when
 the origin is added, how two legacy vacua branches report their counts, and
-and that batch vacua runs keep the legacy search method by default.
+that batch vacua runs keep the legacy search method by default.
 
 ## Motivation
 
@@ -37,7 +37,8 @@ before merge. The filter is a heuristic. It is not a certificate of a minimum.
 The legacy vacua pipeline never reached the minimizer (see *Current
 baseline*), so these repairs do not change any stored legacy count. PR #215
 also fixes an error that stopped some legacy geometries from completing
-(R-006), and makes the count that those geometries now reach writable (R-007). A proof-backed classifier that replaces R-003 to R-005 is proposed
+(R-006), and makes the count that those geometries now reach writable
+(R-007). A proof-backed classifier that replaces R-003 to R-005 is proposed
 separately in #220.
 
 ## Status of this record (brownfield)
@@ -45,7 +46,8 @@ separately in #220.
 PR #215 began as a test-suite repair that follows an internal test-suite audit
 of `vmm` @ `f12fbb8`. It was first classified as PR-only S0. Review found that
 it also changes scientific acceptance criteria and, in an earlier revision,
-changed a batch default. These are S2 decisions under `AGENTS.md` and the `cyaxiverse-sdd` skill.
+changed a batch default. These are S2 decisions under `AGENTS.md` and the
+`cyaxiverse-sdd` skill.
 
 This specification was written after the implementation. Its requirement IDs
 did not govern the execution of PR #215. They record the decisions as they
@@ -139,8 +141,12 @@ identifier matches the Issue number.
   batch default (R-009). This reverts the default change of `db7b254` and
   supersedes the proposed `auto` rationale. The help text keeps the approved
   sentence on the PR #215 fixes. The new candidate is `a6a07da`.
+- Draft `94a61f7` (implementation candidate `a6a07da`): independent review did
+  not pass. Its blocking finding: R-009 said that the origin was the single
+  leading branch of the undercount example; there are 4 leading branches, of
+  which only the origin is a leading minimum. The candidate did not change.
 
-The failed reviews are not relabelled as passed. The records of these six
+The failed reviews are not relabelled as passed. The records of these seven
 reviews are not published on GitHub; this list is their only record in the
 repository. The amendments become durable when the owner approves the revision
 that contains them at G0.
@@ -276,8 +282,9 @@ now an ordinary test.
   recorded in the PR #215 description.
 - The amendments under *Review and amendment history*: stored legacy counts
   retained; condition (2) removed; flat-family over-counting accepted as a
-  limitation deferred to #220. Until G0 they are recorded only in this
-  specification, not on PR #215.
+  limitation deferred to #220; the help-text sentence on the PR #215 fixes;
+  `--method legacy` kept as the batch default (R-009). Until G0 they are
+  recorded only in this specification, not on PR #215.
 - The other decisions below were made during PR #215 implementation and review.
   They become approved only through this specification's `approval_ref`.
 
@@ -523,20 +530,22 @@ text of `--method` SHALL:
 The single-geometry API (`compute_vacua_data`, `compute_axion_data` and the
 positional CLI) SHALL keep `:legacy`.
 
-Because the default is unchanged, a stored legacy result still matches a
-batch run with the default options and is reused. A run with another method
-reports a configuration mismatch for that geometry, and the batch run blocks
-it unless `--force` is given. With `--force` it recomputes the geometry and
-replaces the stored result. Retention under R-010 means that PR #215 does not
-invalidate stored legacy counts; it does not prevent a user from replacing
-them with `--force`.
+Because the default is unchanged, a stored legacy result still matches a batch
+run with the same options and no `--method`, and is reused. A run with another
+method reports a configuration mismatch for that geometry, and the batch run
+blocks it unless `--force` is given. With `--force` it recomputes the geometry
+and replaces the stored result if the recomputation succeeds; if it fails, the
+stored result stays and the geometry is recorded as failed. Retention under
+R-010 means that PR #215 does not invalidate stored legacy counts; it does not
+prevent a user from replacing them with `--force`.
 
 **Rationale (owner decision after the review of `033f673`).** An earlier
 commit of PR #215 (`db7b254`) made `auto` the batch default. Review found that
 under `auto` the leading-branch step can store fewer minima than the truncated
 potential has, under a label that reads as verified (below). A legacy failure
 stores no result, so it stays visible. `auto` can become the batch default
-only after separate work repairs that step, under its own specification. The
+only after separate work repairs that step, under its own specification. No
+Issue tracks that work yet; opening one is an owner decision. The
 withdrawn stale-results premise (R-010) plays no part in this decision.
 
 **Existing behaviour of `--method auto`.** PR #215 does not change it. It is
@@ -546,10 +555,10 @@ stated:
 
 1. `jlm_reduced.prepare` builds the reduced problem. Its errors propagate.
 2. The determinant count, when `square_vacua !== nothing`, labelled
-   `square_reduced_potential_determinant_count`. This holds when the reduced
-   problem is square, but also when the `αmatrix` result is not `Canonicalα`,
-   or when no extra row involves more than one leading axion. Its errors
-   propagate.
+   `square_reduced_potential_determinant_count`. The code sets
+   `square_vacua` in two cases: the `αmatrix` result is not `Canonicalα` (the
+   square case), or no extra row involves more than one leading axion. Its
+   errors propagate.
 3. Otherwise the leading-branch count, when the leading-branch enumeration
    stays within `--max-branches`, labelled
    `complete_selected_leading_branch_count` and stored with
@@ -564,26 +573,28 @@ stated:
 
 The selected method is recorded in `search_method` and `auto_selected_method`.
 
-- **Step 3 counts a different object, and can undercount.** It counts the
-  minima of the leading selected potential only, that is, of the `h11`
-  leading instantons. The subleading instantons above the threshold, which
-  make the reduced problem non-square, do not enter the count. The
+- **Step 3 counts a different object, and can undercount.** It counts the minima
+  of the leading selected potential only, that is, of the `h11` leading
+  instantons. The subleading instantons above the threshold, which make the
+  reduced problem non-square, do not enter the count. The
   `leading_critical_branches` docstring says that downstream callers should
   still evaluate the full potential on the retained branches;
-  `_leading_branch_search` does not. Within the branch bound, step 3 runs
-  before reduced JLM for every reduced problem that step 2 does not take.
-  Example: `Q = [1 0 1; 0 1 1]`, `Λ = (1, 1, -0.9)`, threshold 0.5. Step 2
-  does not apply (`square_vacua = nothing`). Step 3 stores 1, its single
-  leading branch being the origin. The origin is a saddle of the truncated
-  potential: by hand, its Hessian `[0.1 -0.9; -0.9 0.1]` has eigenvalues 1.0
-  and -0.8. With the branch bound set to 1, `auto` falls through to reduced
-  JLM, which finds 2. By hand, the truncated potential has exactly 2 minima,
-  at `x1 = x2 = ±acos(5/9)` (R-001). Legacy raises `BoundsError` (known
-  issue A). How many stored or population geometries are affected has not
-  been measured.
+  `_leading_branch_search` does not. Within the branch bound, step 3 runs before
+  reduced JLM for every reduced problem that step 2 does not take. Example:
+  `Q = [1 0 1; 0 1 1]`, `Λ = (1, 1, -0.9)`, threshold 0.5. Step 2 does not apply
+  (`square_vacua = nothing`). Step 3 stores 1: of its 4 leading branches, only
+  the origin is a minimum of the leading potential. The origin is a saddle of
+  the truncated potential: by hand, its Hessian `[0.1 -0.9; -0.9 0.1]` has
+  eigenvalues 1.0 and -0.8. With the branch bound set to 1, `auto` falls through
+  to reduced JLM, which finds 2. By hand, the truncated potential has exactly 2
+  minima, at `x1 = x2 = ±acos(5/9)` (R-001). Legacy raises `BoundsError` (known
+  issue A). How many stored or population geometries are affected has not been
+  measured. Stored `auto` results exist: for example,
+  `scripts/build_orientifold_vacua_inflation.jl` calls `compute_vacua_data` with
+  `method=:auto`, as it already did at `f12fbb8`.
 - Errors from steps 1 and 2, and from step 3 other than its limit, do not
-  fall through to legacy. So `auto` can fail on a geometry where `legacy`
-  would complete. This follows from the code; whether any stored geometry is
+  fall through to legacy. So `auto` may fail on a geometry where `legacy`
+  would complete. No such geometry is known; whether any stored geometry is
   affected has not been measured.
 - `auto` and `legacy` counts are not claimed to agree, or to be the same
   counting unit (see *Scientific claim boundary*).
@@ -591,9 +602,10 @@ The selected method is recorded in `search_method` and `auto_selected_method`.
 ### R-010 — Records
 
 The scientific behaviour change SHALL be documented in the `minimize`,
-`subspace_minimize` and `id_minimize(::Vector, ::Matrix)` docstrings, the batch
-help text and the PR #215 description. Those records SHALL limit the change to
-direct calls of the minimizer.
+`subspace_minimize` and `id_minimize(::Vector, ::Matrix)` docstrings and the
+PR #215 description. Those records SHALL limit the change to direct calls of
+the minimizer. The batch help text SHALL state that stored legacy counts are
+not invalidated (R-009).
 
 Legacy counts stored before PR #215 SHALL be retained. They SHALL NOT be
 labelled stale, invalidated, migrated or recomputed because of the minimizer
@@ -721,8 +733,8 @@ authority. The merge target is `vmm`.
 | R-006 | Non-unimodular `Qtilde = [2 0; 0 1]` gives 2 vacua |
 | R-007 | **Integration evidence only:** the legacy batch run on geometry `2,2,1` completes and writes its result (`test/full.jl`). **Not directly verified:** no test asserts that the stored count is an `Int`, or that a non-integral count raises |
 | R-008 | `spectrum_mode_counts([NaN, 1.0])` raises `ArgumentError`. The `f12fbb8` behaviour is derived from its code |
-| R-009 | `test/full.jl`: the parsed default is `:legacy`. With the default options a stored legacy result is `:matching`; with `--method auto` it is `:config_mismatch`. The help text gives "Default: legacy." and not "Default: auto", "was legacy before" or "minimizer fix", names the configuration digest, states that stored legacy counts are not invalidated, contains the approved sentence "PR #215 fixes an error that prevented some geometries from completing, and makes the counts of those geometries writable." (compared with whitespace collapsed), and contains neither "stale" nor "saving". The `auto` decision tree is existing behaviour, not changed or newly tested here; the undercount example was measured by the review of `033f673` and replayed, not tested. The single-geometry `:legacy` default has no source change in PR #215 |
-| R-010 | The docstrings and help text are present and limit the change to direct calls; the docs build passes. The reachability facts were established by reading the call graph and running `vacua_id` on the cases in *Current baseline* |
+| R-009 | `test/full.jl`: the parsed default is `:legacy`. With the stored options and no `--method`, a stored legacy result is `:matching`; with `--method auto` it is `:config_mismatch`. The help text gives "Default: legacy." and not "Default: auto", "was legacy before" or "minimizer fix", names the configuration digest, states that stored legacy counts are not invalidated, contains the approved sentence "PR #215 fixes an error that prevented some geometries from completing, and makes the counts of those geometries writable." (compared with whitespace collapsed), and contains neither "stale" nor "saving". The `auto` decision tree is existing behaviour, not changed or newly tested here; the undercount example was measured by the review of `033f673` and replayed at `a6a07da`, not tested. The single-geometry `:legacy` default has no source change in PR #215 |
+| R-010 | The docstrings are present and limit the change to direct calls; the help text states that stored legacy counts are not invalidated (R-009 row); the docs build passes. The reachability facts were established by reading the call graph and running `vacua_id` on the cases in *Current baseline* |
 
 Suites: fast and full Julia suites, Python tests, scientific qualification and
 documentation, locally and in CI, on the implementation candidate. Results are
