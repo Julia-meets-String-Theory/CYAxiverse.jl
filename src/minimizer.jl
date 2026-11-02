@@ -520,9 +520,11 @@ nearby.
     they were not the derivatives of ``V`` and the iteration could stop at
     spurious points. This affects direct callers of `minimize` and
     `subspace_minimize`. It does not affect legacy vacuum counts stored by the
-    `:legacy` pipeline search: its only route to the minimizer, the call to
-    `subspace_minimize` in `vacua_id`, raises before minimizing (#217), so
-    those counts never depended on this code. The gradient was already correct.
+    `:legacy` pipeline search: its only route to the minimizer is the call to
+    `subspace_minimize` in `vacua_id`, and `vacua_id` raises `BoundsError`
+    before that call (the call would then raise `TypeError` on its scalar
+    phase, #217). So those counts never depended on this code. The gradient
+    was already correct.
 """
 function minimize(LV::Vector, QV, x0::Vector)
 	if @isdefined h11
@@ -767,7 +769,8 @@ positive, the same test as `Hsign == 1` for Newton endpoints.
     Together with the corrected objective and Hessian in [`minimize`](@ref), this
     changes the results of direct calls. It does not change legacy vacuum counts
     stored by the `:legacy` pipeline search, which never reaches this function:
-    the call in `vacua_id` raises before minimizing (#217).
+    `vacua_id` raises `BoundsError` before its call, and the call would then
+    raise `TypeError` on its scalar phase (#217).
 """
 function subspace_minimize(L, Q; runs=10_000, phase::Matrix=zeros(max(collect(size(Q))...),1),
         initial_points=nothing)
