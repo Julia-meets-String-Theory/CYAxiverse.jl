@@ -258,8 +258,10 @@ end
             # stored before PR #215 are not stale (CYAX-0215 R-009, R-010). The
             # help text must name the previous default, point to --method legacy to
             # reproduce stored results, say those counts are not invalidated, and
-            # must not call them stale.
-            @test occursin("was legacy", usage)
+            # must not call them stale. The minimizer fix did not motivate the
+            # default change, so the help text must not tie the two together.
+            @test occursin("was legacy before PR #215", usage)
+            @test !occursin("minimizer fix", usage)
             @test occursin("configuration digest", usage)
             @test occursin("--method legacy to reproduce", usage)
             @test occursin("does not invalidate legacy counts already stored", usage)

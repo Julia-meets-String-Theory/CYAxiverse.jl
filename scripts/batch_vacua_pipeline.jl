@@ -33,7 +33,7 @@ function _vacua_usage()
       --merge-tolerance X          Recorded merge tolerance. Default: 1e-7.
       --max-iterations N           Recorded iteration bound. Default: 200.
         --method NAME                Search method: auto, legacy, leading_branches, or reduced_jlm.
-                            Default: auto (was legacy before the minimizer fix).
+                            Default: auto (was legacy before PR #215).
                             The method is part of the configuration digest, so results
                             written by an earlier default run (legacy) no longer match.
                             Use --method legacy to reproduce the legacy counting method
