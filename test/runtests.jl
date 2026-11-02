@@ -2445,18 +2445,19 @@ end
         all(abs.(rem2pi.(mixed_Q' * (2π .* x), RoundNearest)) .<= 2sqrt(eps()))
     end
 
-    # Known issue, not fixed here (CYAX-0215 R-003, #220): condition (2) rejects
-    # genuine minima. L = (1, 1e-6), Q = I: V = (1 - cos x1) + 1e-6 (1 - cos x2)
-    # has its minimum at the origin, and x = (0, 1e-9) is 1e-9 rad from it. The
-    # Newton step tan(1e-9) ≈ 1e-9 is within sqrt(eps()) ≈ 1.5e-8, H = diag(1, 1e-6)
-    # is positive definite (Hsign = 1), and max |∂ᵢV| ≈ 1e-15 is below
-    # g_tol = (eps()/1e-2) max sᵢ ≈ 2.2e-14, so Optim stops at once (converged).
-    # Condition (2) instead needs 1e-6 |sin x2| <= (eps()/1e-2) 1e-6, that is
-    # |x2| <= 100 eps() ≈ 2.2e-14 rad whatever L₂ is, so the point is reported not
-    # stationary. Removing condition (2) makes this an unexpected pass.
+    # A genuine minimum along a weak direction is accepted (CYAX-0215 R-003).
+    # L = (1, 1e-6), Q = I: V = (1 - cos x1) + 1e-6 (1 - cos x2) has its minimum at
+    # the origin, and x = (0, 1e-9) is 1e-9 rad from it. The Newton step
+    # tan(1e-9) ≈ 1e-9 is within the step tolerance sqrt(eps()) ≈ 1.5e-8,
+    # H = diag(1, 1e-6) is positive definite (Hsign = 1), and max |∂ᵢV| ≈ 1e-15 is
+    # below g_tol = (eps()/1e-2) max sᵢ ≈ 2.2e-14, so Optim stops at once
+    # (converged). A per-component gradient bound (eps()/1e-2) sᵢ, removed in
+    # #215, needed |x2| <= 100 eps() ≈ 2.2e-14 rad whatever L₂ is and rejected
+    # this point.
     weak = minimizer.minimize([1.0, 1e-6], Matrix(1.0I, 2, 2), [0.0, 1e-9])
     @test weak["converged"] && weak["Hsign"] == 1
-    @test_broken weak["stationary"]
+    @test weak["stationary"]
+    @test minimizer._is_converged_minimum(weak)
 
     # gscale == 0: with L = 0 every Λₐ Qᵢₐ vanishes and V is constant, so no point
     # is an isolated critical point and the endpoint is not reported stationary.
