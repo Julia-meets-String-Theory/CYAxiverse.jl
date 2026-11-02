@@ -883,3 +883,65 @@ provider requests and performed no credential access, network operation,
 remote write, ref creation, cleanup, publication, or release. The source
 remains unreviewed pending the commissioned independent SPEC, STANDARDS, and
 SECURITY rechecks; this evidence does not self-accept the candidate.
+
+## Consolidated runtime finding repair (Phase A, local-only; 2026-11-02)
+
+This Phase A source correction is a normal descendant of base commit
+`babce8d724cf4acabf70902f41532f3f55d1734e` (tree
+`fa581c935cc15dbe71c830c4f3e91b569e050358`). The implementation and targeted
+regressions are commit `d9f344c36a55ad5f42ed1d3ffa8a0adb3e7f0035` (tree
+`fec5448ab365b31e77d4013cede36e92c3362e34`). Its parent is the commissioned
+base, and its author and committer use the configured GitHub noreply identity.
+The five implementation/test/workflow paths and this evidence file are the
+commissioned six paths. The preceding 203-test statement and schema-1
+compatibility description record the base candidate; they are not results for
+this correction.
+
+The correction closes the nine unchanged-interface groups commissioned for
+Phase A. The workflow has no schema-1 credential-bearing fallback and stops
+route-validation failures before App mint. The raw embedded operation-table
+artifact remains pinned at SHA-256
+`ab5b034f58bfc5aaac34bb2e8cd48555782d85c0d4b59ce6b086cafdbcdc810e`; route
+plans bind the canonical operation-table JSON at SHA-256
+`860fe00b0cad0cd884c22b6f0b55f4d9f16a68b5496e13943254ce12e5251150`.
+Approval validation permits only the known runner `Set up job` and
+`Complete job` bookends around the exact authored step sequence. The eight
+nonsecret approval responses now move between workflow processes in a closed,
+canonical envelope and are revalidated against the receipt, manifests, run,
+request, and job bindings.
+
+The driver now calls the same installed request-fence dispatch boundary for
+the duplicate case and records observed dispatch, API-mutation, and Git-push
+counters. Case results retain a retrievable canonical evidence preimage with
+raw response bytes, readbacks, operation identity, and freeze/rules proof; the
+reader rechecks its digest. Unknown post-reads remain unresolved and block the
+case. The principal move continues to use Git's exact-old
+`--force-with-lease` compare-and-swap with a fixed sanitized environment.
+Contents API Base64 decoding removes documented wrapping whitespace, then
+requires strict decoding and encode/decode identity.
+
+The explicit stop `OWNER_SEED_RECEIPTS_UNAVAILABLE_BEFORE_APP_MINT` remains in
+place. No positive seed-receipt path, live P5 observer, workflow-capability
+fallback, or tag-proof route was invented. Those design-dependent C01/C08
+items remain open. The implementation has not been independently accepted;
+the commissioned SPEC, SECURITY, and STANDARDS rechecks remain required.
+
+Targeted offline verification on implementation commit `d9f344c`:
+
+| Check | Observed result |
+| --- | --- |
+| Thirteen selected regression tests spanning canonical/raw pins, runner bookends, approval-envelope round-trip and tampering, wrapped fenced-request contents, durable evidence retrieval/rehash, fixed driver order, unknown post-read, duplicate dispatch/effect counters, workflow guards, Base64 wrapping, the existing CAS gates, and an actual local bare-repository lease race | Passed: 13 tests, exit 0 (0.897 seconds). |
+| Ruby YAML parse of the dispatch workflow | Passed: `YAML syntax OK`. |
+| Ruby syntax check of the extracted workflow runtime | Passed: `Syntax OK`. |
+| Python AST parse of the two runtime modules and two test modules | Passed. |
+| `git diff --check` | Passed. |
+
+All provider behavior in the selected Python regressions uses synthetic
+responses. The CAS race uses only a temporary local bare Git repository; its
+interleaving advances the remote ref immediately before the real local Git
+push and confirms the exact-old lease rejects it without moving the ref to the
+intended SHA. No GitHub request, credential access, App key read, token mint,
+provider write, seed operation, ref creation, push to an external remote,
+publication, merge, or release occurred. The full lifecycle test suite and
+independent reviews were not rerun for this Phase A correction. This evidence
+does not self-accept the candidate or authorize later phases.
