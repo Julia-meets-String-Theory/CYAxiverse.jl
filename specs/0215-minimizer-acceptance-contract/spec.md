@@ -36,8 +36,8 @@ before merge. The filter is a heuristic. It is not a certificate of a minimum.
 
 The legacy vacua pipeline never reached the minimizer (see *Current
 baseline*), so these repairs do not change any stored legacy count. PR #215
-also fixes two errors that stopped some legacy geometries from completing or
-saving. A proof-backed classifier that replaces R-003 to R-005 is proposed
+also fixes an error that stopped some legacy geometries from completing
+(R-006), and makes the count that those geometries now reach writable (R-007). A proof-backed classifier that replaces R-003 to R-005 is proposed
 separately in #220.
 
 ## Status of this record (brownfield)
@@ -81,8 +81,8 @@ identifier matches the Issue number.
      points; that is deferred to #220 (R-003).
 
   These supersede the earlier R-003, R-009 and R-010 wording. Item 2 rested
-  on the statement in that draft that condition (2) predated PR #215, which
-  was false. It is superseded (see below).
+  on the incorrect premise that condition (2) predated PR #215. It is
+  superseded (see below).
 - Draft `0442ead` (implementation candidate `b309a55`): independent review did
   not pass. Its blocking findings were:
   1. R-004 said that rank-deficient charges usually give an empty result. They
@@ -102,7 +102,16 @@ identifier matches the Issue number.
      affected pipeline. This is a classification and counting-unit defect, not
      a de-duplication defect (#216) (R-004).
 
-The failed reviews are not relabelled as passed. The records of these three
+- Draft `92f4c71` (implementation candidate `dbd7b62`): independent review did
+  not pass. Its blocking findings were text only:
+  1. *Current baseline* said that `Rational` counts from the `|det|` branch
+     failed to save at `f12fbb8`. That branch was unreachable there; R-006
+     makes it reachable, and R-007 makes its count writable.
+  2. The proposed R-009 rationale named the `TypeError` of #217 as the reason
+     legacy cannot complete. The `BoundsError` at the `Leff` mask or the
+     column strip comes first, by construction.
+
+The failed reviews are not relabelled as passed. The records of these four
 reviews are not published on GitHub; this list is their only record in the
 repository. The amendments become durable when the owner approves the revision
 that contains them at G0.
@@ -179,21 +188,32 @@ This specification does not cover or authorize:
 - `_legacy_vacua_search` (`scripts/vacua_pipeline.jl`) calls only
   `vacua_id(L, Q)`. The only minimizer call in `vacua_id`
   (`src/generate.jl`) is `subspace_minimize(...; phase=phase[i])`. It passes a
-  scalar to the keyword `phase::Matrix` (in the signature since `f6c71e5`,
-  2022-11), so it raises `TypeError` whenever it is reached. Its
-  `phase=phase[i]` argument is unchanged since 2022-12; `6c46788` (2026-08-04)
-  added `runs=runs`. The pipeline was created on 2026-07-30.
-- In the nontrivial cases tested, `vacua_id` raises `BoundsError` even
-  earlier: at the `Leff` column mask for `Q = [2 0 1 1; 0 1 1 0]`,
-  `L = [1 1 1 1; 0 -0.1 -0.2 -0.3]`, and inside `vacua_id_basis` (the column
-  strip) for the known issue A case.
+  scalar to the keyword `phase`, so it would raise `TypeError` if it were
+  reached. `phase=phase[i]` has been in the call since `7b72fb3` (2022-10-24);
+  `6c46788` (2026-08-04) added `runs=runs`. Until `1bd2cd1` (2023-06-07)
+  several keyword-only methods coexisted, and the active one took
+  `phase::Vector`; since then the only method takes `phase::Matrix`. Either
+  type rejects a scalar. The pipeline was created on 2026-07-30.
+- The call is not reached, by construction. In the nonzero-`α` branch,
+  `vacua_id_basis` strips one more column from `αeff` than `LQtildebar`
+  appended to `Lhat` (the extra strip of known issue A). So `Qeff` always has
+  one column fewer than `Leff`, and the `Leff` column mask in `vacua_id`
+  raises `BoundsError` on every row that would need the minimizer. With a
+  single dependent column, `vacua_id_basis` itself raises `BoundsError`
+  (known issue A). Examples: `Q = [2 0 1 1; 0 1 1 0]`,
+  `L = [1 1 1 1; 0 -0.1 -0.2 -0.3]` fails at the mask; the known issue A case
+  fails inside `vacua_id_basis`.
 - The minimizer has therefore never run inside a legacy pipeline count. Stored
   legacy counts come only from the branches that do not minimize.
-- At `f12fbb8`, the `|det|` branch returned its count as a `Rational`, which
-  HDF5 cannot write (`MethodError`), so those geometries failed to save. The
-  zero-column `α` case raised `BoundsError`. R-007 and R-006 fix these. Before
-  PR #215, such geometries failed to complete; no verified count was produced
-  for them.
+- At `f12fbb8`, the trivial `|det|` branch of `vacua_id_basis` was
+  unreachable. `LQtildebar` returns `αeff[:, 2:end]`, whose columns are all
+  nonzero, so the test `αeff == zeros(h11, 1)` never held. A zero-column `α`
+  fell through to the nonzero branch and raised `BoundsError`. Such
+  geometries failed to complete, and no verified count was produced for them.
+  Every legacy count that did complete was an `Int`.
+- R-006 makes the `|det|` branch reachable for the first time. It returns a
+  `Rational` count, which HDF5 cannot write (`MethodError`); R-007 converts it
+  to `Int`. Reaching this branch also exposes known issue B.
 
 ### Known issues
 
@@ -208,8 +228,9 @@ hand-derived expectations. PR #215 does not fix them.
   trivial branch of `vacua_id` reports 2 vacua but lists only θ/2π = (0, 0),
   not (1/2, 0).
 
-An earlier candidate recorded condition (2) as known issue D. That condition is
-removed (R-003), and its test is now an ordinary test.
+An earlier candidate recorded the false rejection by condition (2) as a
+`@test_broken` known issue. That condition is removed (R-003), and its test is
+now an ordinary test.
 
 ### Owner direction recorded in PR #215
 
@@ -254,8 +275,10 @@ change the accept/reject decision of R-003 and R-004.
   `Q = [1 0 1; 0 1 1]` with `L = (1, 1, -0.9)`; `Q = [1 1; 1 -1]` with
   `L = (1, 1e-12)`; `Q = [1 0 2 1; 0 1 1 -1; 1 1 0 2]` with
   `L = (1.3, 0.7, 0.2, 0.05)`), 10 starts each, `2π·rand` from
-  `MersenneTwister(7)` in that order. Factors `2^-40` and `2^30`: 80 of 80 runs
-  bitwise identical. Factor 3: `"xmin"` or `"stationary"` differed in 17 of 40
+  `MersenneTwister(7)` in that order. Factors `2^-40` and `2^30`: in 80 of 80
+  runs `"xmin"`, `"stationary"`, `"converged"` and `"Hsign"` were bitwise
+  identical (`"logV"`, `"Heigs"` and `"gradlog"` shift with the factor by
+  design). Factor 3: `"xmin"` or `"stationary"` differed in 17 of 40
   runs, and `_is_converged_minimum` changed in 2 of 40.
 
 ### R-003 — Stationarity filter
@@ -350,15 +373,22 @@ Measured at `dbd7b62`:
 
 - `Q = [1 1; 2 2]`, `L = (0.7, 0.4)`, so `V = 1.1 (1 - cos(x1 + 2 x2))` with
   the flat direction `(2, -1)`. 40 starts `2π·rand(MersenneTwister(11), 2)`:
-  39 endpoints accepted (computed `λ_min` about 4e-18), and 40 points returned,
-  all on the family `x1 + 2 x2 ≡ 0 (mod 2π)` to within 2.7e-14 in phase. At
+  39 endpoints accepted (computed `λ_min` about 4e-18), and 40 points returned:
+  the 39 endpoints and the origin, which R-005 adds because its computed
+  smallest eigenvalue, 4.4e-18, is positive (a degenerate origin returned).
+  All lie on the family `x1 + 2 x2 ≡ 0 (mod 2π)` to within 2.7e-14 in phase. At
   `b309a55`, with condition (2), 38 were accepted and 39 returned.
 - `Q = u vᵀ` with `u = (1, 2, -1)`, `v = (1, -1, 2)`, `L = (0.3, 0.9, 0.5)`,
-  same starts: 0 accepted, empty result.
-- Random 3×4 charges, `MersenneTwister(1)`, 20 starts each: 16 of 30 rank-1
-  draws (`Q = u vᵀ`, entries of `u` and `v` in `[-3, 3]`) gave a non-empty
-  result, with 217 points in total. 26 of 30 rank-2 draws (`Q = A B` with `A`
-  3×2 and `B` 2×4, entries in `[-3, 3]`) gave a non-empty result, with 215 points.
+  40 starts `2π·rand(MersenneTwister(11), 3)` from a fresh generator: 0
+  accepted, empty result.
+- Random 3×4 charges from one `MersenneTwister(1)` stream. First 30 rank-1
+  draws: `u = rand(rng, -3:3, 3)`, `v = rand(rng, -3:3, 4)` (a draw with
+  `u = 0` or `v = 0` would be skipped; none occurred), `Q = u vᵀ`, then
+  `L = rand(rng, Uniform(0.1, 1.1), 4)`, then 20 starts `2π·rand(rng, 3)`.
+  16 of 30 gave a non-empty result, with 217 points in total. Then 30 rank-2
+  draws: `A = rand(rng, -3:3, 3, 2)`, `B = rand(rng, -3:3, 2, 4)`, `Q = A B`
+  (a draw with rank other than 2 would be skipped; none occurred), then `L`
+  and 20 starts as before. 26 of 30 gave a non-empty result, with 215 points.
 
 This is a classification and counting-unit defect. #220 must establish exact
 structural-rank handling and isolated-minimum count eligibility before #217
@@ -401,18 +431,20 @@ The test does not decide the sign of the exact eigenvalue:
 ### R-006 — Zero-column `α` in `vacua_id_basis`
 
 When `α` has no columns (no dependent charges), `vacua_id_basis` SHALL take the
-trivial branch and return `|det(Qtilde)|` vacua, the same as the existing
-all-zero placeholder case. It previously raised `BoundsError`, so such
-geometries failed to complete. This adds completions; it changes no stored
-count.
+trivial branch and return `|det(Qtilde)|` vacua. The existing test for an
+all-zero placeholder column could never hold (*Current baseline*), so this is
+the first route into that branch. The zero-column case previously raised
+`BoundsError`, so such geometries failed to complete. This adds completions;
+it changes no stored count.
 
 ### R-007 — Integral legacy count
 
 `_legacy_vacua_search` SHALL store the `vacua_id` count as `Int`. A
-non-integral count SHALL raise (`InexactError` from the `Int` conversion). At
-`f12fbb8`, the `|det|` branch returned a `Rational` that HDF5 could not write,
-so those geometries failed to save. This makes them writable; it changes no
-stored count.
+non-integral count SHALL raise (`InexactError` from the `Int` conversion). The
+`|det|` branch that R-006 makes reachable returns a `Rational`, which HDF5
+cannot write. At `f12fbb8` that branch was unreachable, so no geometry failed
+at save time. This makes the new completions writable; it changes no stored
+count.
 
 ### R-008 — Non-finite spectrum input
 
@@ -471,9 +503,12 @@ user from replacing them with `--force`.
 **Rationale (proposed; owner confirmation required).** The reason first given
 for the change, that legacy results stored before PR #215 were stale, is
 withdrawn (R-010). The proposed rationale is that the legacy method cannot
-complete a geometry whose `vacua_id` subspaces need the minimizer, because
-that call raises before it minimizes (#217), and `auto` tries the
-exact-determinant, leading-branch and reduced-JLM searches first. This
+complete any geometry whose `vacua_id_basis` yields a row that needs the
+minimizer, or that has a single dependent column: `vacua_id` raises
+`BoundsError` at the `Leff` mask or at the column strip (known issue A)
+before the minimizer call, which would itself raise `TypeError` (#217).
+`auto` tries the exact-determinant, leading-branch and reduced-JLM searches
+first. This
 rationale does not claim that `auto` and `legacy` counts agree, or that they
 are the same counting unit (see *Scientific claim boundary*). If the owner does
 not adopt a rationale, the alternative is to keep `--method legacy` as the
@@ -531,9 +566,10 @@ affected is not established.
 - that an empty `subspace_minimize` result means the potential has no minima,
   in particular for rank-deficient charges;
 - that Float64 resolves directions about 16 decades below the largest scale,
-  in a mixing basis or not. With `Q = I`, `L = (1, -1e-16)`, no endpoint of
-  100 seeded starts is accepted, and `subspace_minimize` returns nothing,
-  although by hand `(0, π)` is a minimum;
+  in a mixing basis or not. With `Q = I`, `L = (1, -1e-16)`,
+  `subspace_minimize(L, Q; runs=100)` returns nothing, and none of 100 starts
+  `rand(Uniform(0, 2π), 2) .* rand(2)` after `Random.seed!(9876543210)` is
+  accepted, although by hand `(0, π)` is a minimum;
 - that a legacy count is complete or a rigorous lower bound. Legacy results
   retain the operational classification `finite_multistart_minimum_lower_bound`,
   but this specification does not establish that reported counts are rigorous
@@ -601,7 +637,7 @@ authority. The merge target is `vmm`.
 | --- | --- |
 | R-001 | **Objective test:** at the mixed-sign minimum (`Q = [1 0 1; 0 1 1]`, `L = (1, 1, -0.9)`, from `(1, 0.95)`), `sign(V) = -1` and `log10\|V\| = log10(16/45)` to a derived `12 eps()`. The derivation assumes a position error of at most `sqrt(eps())`, the step tolerance, which is not a proven bound. It fails with the f12fbb8 objective. **End-to-end minimum** (uniform `L = (1, 1, 1)`): position, gradient and `V` within `sqrt(eps())`-derived bounds. It guards `x_abstol` and the buffer zeroing, but not the objective, because with uniform `L` the f12fbb8 objective is `3V`. **Phase-Hessian fixture:** tests the helper that `id_minimize(::Vector, ::Matrix)` shares |
 | R-002 | `V = 1e-20 (1 - cos x)` from `x = 0.3` reaches the minimum at 0 instead of stopping at the start. The absence of Optim deprecation warnings was checked by a manual log search on Optim 1.13.3 (only `x_tol` warns there), not by a test |
-| R-003 | **Cases:** hierarchical `L = (1, 1e-20)`; constant potential; mixed weak direction `Q = [1 1; 1 -1]`, `L = (1, 1e-12)` from `(0.01, -0.01)`, with phases within the hand-derived `2 sqrt(eps())`. These fail with (3) disabled. **Regression for the removal of (2):** `L = (1, 1e-6)`, `x = (0, 1e-9)` is accepted; it fails with (2) present. **Not isolated:** condition (1), which (3) implies. **Measured rates:** the 400-start probe (recipe in R-003) is recorded, not a test |
+| R-003 | **Cases:** hierarchical `L = (1, 1e-20)` and mixed weak direction `Q = [1 1; 1 -1]`, `L = (1, 1e-12)` from `(0.01, -0.01)`, with phases within the hand-derived `2 sqrt(eps())`; these fail with (3) disabled. Constant potential: guarded jointly by (1) and (3), so it fails only if both are disabled. **Regression for the removal of (2):** `L = (1, 1e-6)`, `x = (0, 1e-9)` is accepted; it fails with (2) present. **Not isolated:** condition (1), which (3) implies. **Measured rates:** the 400-start probe (recipe in R-003) is recorded, not a test |
 | R-004 | **Cases:** saddle and maximum endpoints rejected; mixed-sign saddle `Q = [1 0 1; 0 1 1]`, `L = (1, 1, -0.9)` with minima at `x1 = x2 = ±acos(5/9)`. **Not isolated:** the `converged` conjunct. **Not tested:** the rank-deficient behaviour, which is a recorded probe (recipes in R-004) |
 | R-005 | `-2 sin⁴(x/2)` maximum (`L = (-1, 1/4)`, `Q = [1 2]`), `V ≡ 0`, and rank-deficient `Q = [1; 0]` exclude the origin. The last passes because its zero eigenvalue is computed exactly. The rounding cases in R-005 are documented, not tested |
 | R-006 | Non-unimodular `Qtilde = [2 0; 0 1]` gives 2 vacua |
@@ -641,9 +677,9 @@ Two identities are tracked:
 - The batch default and help text change as in R-009.
 - Persisted values: R-007 writes the legacy count to `vacua_pipeline/verified`
   as `Int`. Dataset paths and the overall HDF5 structure are unchanged.
-  Before PR #215, a `Rational` count could not be written. So no stored legacy
-  count is expected to have a different numeric type. This has not been
-  checked against historical files.
+  Before PR #215, no legacy route produced a non-`Int` count (*Current
+  baseline*). So no stored legacy count is expected to have a different
+  numeric type. This has not been checked against historical files.
 - Package-version impact: patch, no version bump.
 
 ## Open owner decisions

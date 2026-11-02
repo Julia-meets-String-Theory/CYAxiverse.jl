@@ -6,8 +6,9 @@ This is a brownfield record. The implementation exists at candidate `dbd7b62`
 (PR #215). It replaced `ab48726`, `dc42633` and `b309a55` after the G0 reviews
 of drafts `444fcc3`, `6b033b5` and `0442ead`, which did not pass, and after the
 owner amendments recorded in `spec.md`. The last of these removed condition
-(2) of R-003. The plan therefore maps each requirement to
-its implementation and evidence, and defines the path to approval and merge.
+(2) of R-003. The review of `92f4c71` required text corrections only, so the
+candidate did not change. The plan therefore maps each requirement to its
+implementation and evidence, and defines the path to approval and merge.
 It does not plan new implementation.
 
 ## Requirement map
@@ -16,7 +17,7 @@ It does not plan new implementation.
 | --- | --- | --- |
 | R-001 | `src/minimizer.jl`: `minimize` objective, `hess!`, `hess`; `_phase_hessian!` (shared with `id_minimize(::Vector, ::Matrix)`) | `test/runtests.jl` "Phase-hoisted Hessian parity" (includes the end-to-end minimum); objective value `-16/45` in "subspace_minimize keeps only converged minima with Hsign == 1" |
 | R-002 | `src/minimizer.jl`: `minimize` (`x_abstol`, `g_tol`) | `test/runtests.jl` "minimize resolves stationarity relative to the instanton scales" |
-| R-003 | `src/minimizer.jl`: `minimize` (`"stationary"`) | same testset (hierarchical, constant, mixed weak direction, which guard condition (3)); the `L = (1, 1e-6)` regression for the removal of condition (2). Condition (1) is not isolated; condition (3) implies it |
+| R-003 | `src/minimizer.jl`: `minimize` (`"stationary"`) | same testset (hierarchical and mixed weak direction, which guard condition (3); constant potential, guarded jointly by (1) and (3)); the `L = (1, 1e-6)` regression for the removal of condition (2). Condition (1) is not isolated; condition (3) implies it |
 | R-004 | `src/minimizer.jl`: `_is_converged_minimum`, `subspace_minimize` | `test/runtests.jl` "subspace_minimize keeps only converged minima with Hsign == 1". The `converged` conjunct is not isolated. The rank-deficient flat-family behaviour is a recorded probe (`spec.md` R-004), not a test |
 | R-005 | `src/minimizer.jl`: `subspace_minimize` origin rule | same testset (degenerate, constant and rank-deficient cases) |
 | R-006 | `src/generate.jl`: `vacua_id_basis` | `test/runtests.jl` "vacua_id_basis handles charges with no dependent columns (2,2,1 geometry)" |

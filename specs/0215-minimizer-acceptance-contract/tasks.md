@@ -14,7 +14,8 @@
 - [ ] **T002 [G0] Independent Scientific/Numerical Review of the specification**
   - Input: `spec.md` at a named draft commit SHA; implementation candidate
     `dbd7b62`. Earlier reviews did not pass: `444fcc3` (against `ab48726`),
-    `6b033b5` (against `dc42633`) and `0442ead` (against `b309a55`). They stay
+    `6b033b5` (against `dc42633`), `0442ead` (against `b309a55`) and `92f4c71`
+    (against `dbd7b62`). They stay
     recorded as not passed; their records are not published on GitHub. The
     next revision needs a fresh review.
   - Output: a review record, as a PR #215 comment, that names the reviewer
