@@ -253,15 +253,23 @@ end
                 close(usage_io)
                 read(usage_path, String)
             end
-            # The legacy pipeline never reaches the minimizer (`vacua_id` calls
-            # `subspace_minimize` with a scalar phase, #217), so legacy counts
+            # The legacy pipeline never reaches the minimizer: `vacua_id` raises
+            # BoundsError before its `subspace_minimize` call, and that call would
+            # then raise TypeError on its scalar phase (#217). So legacy counts
             # stored before PR #215 are not stale (CYAX-0215 R-009, R-010). The
             # help text must name the previous default, point to --method legacy to
             # reproduce stored results, say those counts are not invalidated, and
             # must not call them stale. The minimizer fix did not motivate the
             # default change, so the help text must not tie the two together.
+            # Before PR #215 no geometry failed at the save step (the Rational
+            # count branch was unreachable), so the text must not say "saving".
             @test occursin("was legacy before PR #215", usage)
             @test !occursin("minimizer fix", usage)
+            usage_words = join(split(usage), " ")
+            @test occursin("PR #215 fixes an error that prevented some geometries " *
+                "from completing, and makes the counts of those geometries writable.",
+                usage_words)
+            @test !occursin("saving", usage)
             @test occursin("configuration digest", usage)
             @test occursin("--method legacy to reproduce", usage)
             @test occursin("does not invalidate legacy counts already stored", usage)

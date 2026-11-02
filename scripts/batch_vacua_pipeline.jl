@@ -37,10 +37,11 @@ function _vacua_usage()
                             The method is part of the configuration digest, so results
                             written by an earlier default run (legacy) no longer match.
                             Use --method legacy to reproduce the legacy counting method
-                            used for previously stored results. PR #215 fixes errors that
-                            prevented some geometries from completing or saving their
-                            results. It does not invalidate legacy counts already stored
-                            before the fix. Rerunning the legacy method may produce
+                            used for previously stored results. PR #215 fixes an error that
+                            prevented some geometries from completing, and makes the counts
+                            of those geometries writable.
+                            It does not invalidate legacy counts already stored before the
+                            fix. Rerunning the legacy method may produce
                             additional results for geometries that previously failed.
         --max-branches N             Bound leading-branch enumeration. Default: 1000000.
       --summary PATH               CSV summary output path.
