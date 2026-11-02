@@ -36,9 +36,12 @@ function _vacua_usage()
                             Default: auto (was legacy before the minimizer fix).
                             The method is part of the configuration digest, so results
                             written by an earlier default run (legacy) no longer match.
-                            Legacy results written before the minimizer objective/Hessian
-                            fix are stale. The digest does not record the minimizer version,
-                            so --method legacy would reuse them: pass --force to recompute.
+                            Use --method legacy to reproduce the legacy counting method
+                            used for previously stored results. PR #215 fixes errors that
+                            prevented some geometries from completing or saving their
+                            results. It does not invalidate legacy counts already stored
+                            before the fix. Rerunning the legacy method may produce
+                            additional results for geometries that previously failed.
         --max-branches N             Bound leading-branch enumeration. Default: 1000000.
       --summary PATH               CSV summary output path.
       --append-summary             Append to an existing summary.

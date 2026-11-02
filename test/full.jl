@@ -253,15 +253,17 @@ end
                 close(usage_io)
                 read(usage_path, String)
             end
-            # The configuration digest records the method but not the minimizer
-            # version, so `--method legacy` silently reuses legacy results written
-            # before the minimizer fix (CYAX-0215 R-010). The help text must not
-            # advise that reuse; it must say the digest cannot detect such results
-            # and point to --force to recompute.
+            # The legacy pipeline never reaches the minimizer (`vacua_id` calls
+            # `subspace_minimize` with a scalar phase, #217), so legacy counts
+            # stored before PR #215 are not stale (CYAX-0215 R-009, R-010). The
+            # help text must name the previous default, point to --method legacy to
+            # reproduce stored results, say those counts are not invalidated, and
+            # must not call them stale.
+            @test occursin("was legacy", usage)
             @test occursin("configuration digest", usage)
-            @test !occursin("--method legacy to match", usage)
-            @test occursin("does not record the minimizer version", usage)
-            @test occursin("--force", usage) && occursin("recompute", usage)
+            @test occursin("--method legacy to reproduce", usage)
+            @test occursin("does not invalidate legacy counts already stored", usage)
+            @test !occursin("stale", usage)
             @test default_blas_options[:blas_threads] == 1
             repository_root = normpath(joinpath(@__DIR__, ".."))
             if in_git_checkout(repository_root)
