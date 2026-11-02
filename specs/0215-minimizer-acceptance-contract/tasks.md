@@ -14,17 +14,19 @@
 
 - [ ] **T002 [G0] Independent Scientific/Numerical Review of the specification**
   - Input: `spec.md` at a named draft commit SHA; implementation candidate
-    `a6a07da`. Earlier reviews did not pass: `444fcc3` (against `ab48726`),
-    `6b033b5` (against `dc42633`), `0442ead` (against `b309a55`), and `92f4c71`
-    and `898029d` (against `dbd7b62`), `033f673` (against `4abbd60`), and
-    `94a61f7` (against `a6a07da`).
-    They stay
-    recorded as not passed; their records are not published on GitHub. The
-    next revision needs a fresh review.
+    `a6a07da`. Earlier reviews that did not pass: `444fcc3` (against
+    `ab48726`), `6b033b5` (against `dc42633`), `0442ead` (against `b309a55`),
+    `92f4c71` and `898029d` (against `dbd7b62`), `033f673` (against
+    `4abbd60`), and `94a61f7` (against `a6a07da`). They stay recorded as not
+    passed; their records are not published on GitHub. The review of
+    `043cc3f` (against `a6a07da`) passed; its record is not published on
+    GitHub. The review of `f88be82` (against `a6a07da`) passed; it is the
+    review recorded on PR #215. By owner direction, the provenance and
+    editorial corrections after it are not re-reviewed (`spec.md` G0).
   - Output: a review record, as a PR #215 comment, that names the reviewer
     role and the reviewed SHA, with no unresolved blocking finding.
-  - Verify: the reviewed SHA contains the `spec.md` that the owner approves in
-    T003.
+  - Verify: the owner approves in T003 the reviewed SHA, or the revision
+    corrected after it under the G0 exception in `spec.md`.
   - Escalate if: review finds an unlisted scientific decision, or a blocking
     finding needs an implementation change (update the implementation
     candidate and repeat T001, T002, T003 and T005).
@@ -33,7 +35,7 @@
   - Input: the `spec.md` revision reviewed in T002.
   - Output: a durable owner comment on PR #215 that approves that revision by
     its commit SHA.
-  - Verify: the comment names the SHA reviewed in T002.
+  - Verify: the comment names the approved SHA and the SHA reviewed in T002.
   - Escalate if: the owner amends a requirement (update the implementation
     candidate if needed, and repeat T001, T002, T003 and T005 after the
     change).
@@ -42,7 +44,7 @@
   - Input: the T003 comment.
   - Output: a commit touching only this directory that sets `status: approved`,
     `last_reviewed` and `approval_ref`. Its result is the final merge candidate.
-  - Verify: `git diff` from the reviewed SHA changes only those fields.
+  - Verify: `git diff` from the approved SHA changes only those fields.
   - Escalate if: any other change to `spec.md` is needed (return to T002).
 
 - [ ] **T005 [G1] Reconcile on the final merge candidate**

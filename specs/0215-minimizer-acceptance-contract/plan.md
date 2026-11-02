@@ -3,19 +3,20 @@
 ## Approach
 
 This is a brownfield record. The implementation exists at candidate `a6a07da`
-(PR #215). It replaced `ab48726`, `dc42633`, `b309a55`, `dbd7b62` and `4abbd60`
-after the G0 reviews of drafts `444fcc3`, `6b033b5`, `0442ead`, `92f4c71`,
-`898029d` and `033f673`,
-which did not pass, and after the
-owner amendments recorded in `spec.md`, one of which removed condition (2)
-of R-003. The review of `92f4c71` required text corrections only, so the
+(PR #215). It replaced `ab48726`, `dc42633`, `b309a55`, `dbd7b62` and
+`4abbd60` after the G0 reviews of drafts `444fcc3`, `6b033b5`, `0442ead`,
+`92f4c71`, `898029d` and `033f673`, which did not pass, and after the owner
+amendments recorded in `spec.md`, one of which removed condition (2) of
+R-003. The review of `92f4c71` required text corrections only, so the
 candidate did not change. The review of `898029d` required a help-text
 correction, so the candidate changed to `4abbd60`; that change is text only
-(help text, docstrings, comments and their test). After the review of `033f673`
-the owner kept `--method legacy` as the batch default, so the candidate
-changed to `a6a07da`. The plan therefore maps each requirement to its
-implementation and evidence, and defines the path to approval and merge.
-It does not plan new implementation.
+(help text, docstrings, comments and their test). After the review of
+`033f673` the owner kept `--method legacy` as the batch default, so the
+candidate changed to `a6a07da`. Against `a6a07da`, the review of `94a61f7`
+did not pass, and the reviews of `043cc3f` and `f88be82` passed; the
+corrections after them are text only. The plan therefore maps each
+requirement to its implementation and evidence, and defines the path to
+approval and merge. It does not plan new implementation.
 
 ## Requirement map
 
@@ -36,7 +37,10 @@ It does not plan new implementation.
 
 1. **G0.** An independent Scientific/Numerical Reviewer reviews the draft
    `spec.md` at a named commit SHA. The owner then approves that exact
-   revision in a PR #215 comment that names the SHA.
+   revision in a PR #215 comment that names the SHA. By owner direction, the
+   provenance and editorial corrections after the review of `f88be82` are not
+   re-reviewed; the approval names the corrected revision and `f88be82`
+   (`spec.md` G0).
 2. **If G0 amends a decision, or a blocking finding needs an implementation
    change:** change the implementation, repeat the break checks and suites,
    update the implementation candidate, and repeat T001, T002, T003 and T005
@@ -48,7 +52,7 @@ It does not plan new implementation.
 4. **G1.** Confirm the evidence in the PR #215 description is on the
    implementation candidate. Confirm with
    `git diff --stat <implementation candidate>..<final merge candidate>` that
-   only this directory changed, and that `spec.md` differs from the reviewed
+   only this directory changed, and that `spec.md` differs from the approved
    revision only in its approval metadata. Confirm CI passes on the final
    merge candidate.
 5. **G2.** Independent review of the entire final merge candidate (the whole

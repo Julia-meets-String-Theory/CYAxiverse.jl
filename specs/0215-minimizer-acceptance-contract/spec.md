@@ -145,15 +145,34 @@ identifier matches the Issue number.
   leading branch of the undercount example; there are 4 leading branches, of
   which only the origin is a leading minimum. The candidate did not change.
 - Draft `043cc3f` (implementation candidate `a6a07da`): independent review
-  passed, with non-blocking text findings. At the owner's request they are
-  corrected before approval: the R-004 recipe now states that `Q` was passed
-  as `Float64.(Q)`, and R-009 no longer states as fact that stored `auto`
-  results exist. This revision needs a fresh review.
+  passed, with non-blocking text findings. At the owner's request they were
+  corrected before approval, in `f88be82`:
+  1. The R-004 random-charge recipe states that `Q` was passed as
+     `Float64.(Q)`, and gives the totals for integer `Q`.
+  2. R-009 says that `auto` results are written by a known script, instead of
+     stating as fact that stored `auto` results exist.
 
-The failed reviews are not relabelled as passed. The records of these seven
-reviews are not published on GitHub; this list is their only record in the
-repository. The amendments become durable when the owner approves the revision
-that contains them at G0.
+  The same revision also corrected the description of the `f12fbb8` Hessian,
+  attributed each changed file in *Candidate identity* to its commit, added
+  the reviews of `a6a07da` to *Candidate identity*, recorded the `auto`
+  follow-up Issue as not gating G0, and rewrapped `spec.md`.
+- Draft `f88be82` (implementation candidate `a6a07da`): independent review
+  passed, with non-blocking findings: the probe environment was not recorded;
+  the review count in this history, the T002 input list and the entry for
+  `043cc3f` were incomplete; and the wrapping of `plan.md` and `tasks.md` was
+  uneven. The owner accepted these as non-blocking and directed their
+  correction before approval. The next revision records the probe environment
+  under *Verification* and corrects this history, T002 and the wrapping. The
+  owner directed that these provenance and editorial corrections do not need
+  another independent review, because they change no normative requirement
+  and no evidence (G0).
+
+This list records nine reviews: seven did not pass, and the reviews of
+`043cc3f` and `f88be82` passed. The failed reviews are not relabelled as
+passed. The record of the review of `f88be82` is a PR #215 comment (T002). The
+records of the other eight reviews are not published on GitHub; this list is
+their only record in the repository. The amendments become durable when the
+owner approves the revision that contains them at G0.
 
 ## Scope
 
@@ -694,6 +713,10 @@ affected is not established.
 - The owner approves that exact reviewed revision in a durable GitHub
   comment on PR #215 that names its commit SHA. That comment is the approval
   event.
+- Exception, by owner direction: the corrections made after the review of
+  `f88be82` are provenance and editorial only and are not re-reviewed
+  (*Review and amendment history*). The approval comment names the corrected
+  revision that it approves and the reviewed revision `f88be82`.
 
 Stop condition: the owner amends a decision, or a blocking finding requires an
 implementation change. The implementation and evidence then change before G1,
@@ -704,7 +727,7 @@ changes, T001, T002, T003 and T005 are repeated for the new revision.
 
 A later commit sets `status: approved`, `last_reviewed` and `approval_ref`
 (the approval comment from G0). It changes only that metadata. It changes no
-requirement and no implementation. The approval refers to the reviewed draft
+requirement and no implementation. The approval refers to the approved draft
 revision, not to this commit, so the reference is not circular.
 
 ### G1 — Implementation and evidence reconciliation
@@ -716,7 +739,7 @@ revision, not to this commit, so the reference is not circular.
   verified.
 - The diff from the implementation candidate to the final merge candidate
   touches only `specs/0215-minimizer-acceptance-contract/`, and the only change
-  to `spec.md` after the reviewed revision is the approval metadata.
+  to `spec.md` after the approved revision is the approval metadata.
 - CI passes on the final merge candidate.
 
 ### G2 — Independent review of the final merge candidate
@@ -750,6 +773,11 @@ Suites: fast and full Julia suites, Python tests, scientific qualification and
 documentation, locally and in CI, on the implementation candidate. Results are
 recorded in the PR #215 description. Unobserved checks are not PASS.
 
+**Probe environment.** The review of `f88be82` replayed every recorded probe
+at `a6a07da` on Julia 1.12.6, with Optim 1.13.3, Distributions 0.25.132 and
+single-thread OpenBLAS (`OPENBLAS_NUM_THREADS=1`). All matched the recorded
+values. The environment of the earlier measurements was not recorded.
+
 ## Candidate identity
 
 Two identities are tracked:
@@ -769,8 +797,8 @@ Two identities are tracked:
   - `dbd7b62`: reviewed with drafts `92f4c71` and `898029d`; not passed.
   - `4abbd60`: reviewed with draft `033f673`; not passed.
   - `a6a07da` (current): reviewed with draft `94a61f7`, not passed; and with
-    draft `043cc3f`, passed, followed by text corrections at the owner's
-    request (*Review and amendment history*).
+    drafts `043cc3f` and `f88be82`, passed, each followed by text corrections
+    at the owner's request (*Review and amendment history*).
 - **Final merge candidate:** the PR #215 head after the approval-recording
   commit. G1 checks that it differs from the implementation candidate only in
   `specs/0215-minimizer-acceptance-contract/`. G2 reviews it, and CI must pass
