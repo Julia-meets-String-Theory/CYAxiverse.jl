@@ -229,13 +229,20 @@ end
                 "--dry-run"])
             @test run_vacua_batch(matching_options)
             @test occursin("skipped", read(matching_summary, String))
-            # The default method is part of the configuration digest, so the same
-            # options without --method (now auto) no longer match a legacy result.
+            # The method is part of the configuration digest. The batch default
+            # stays legacy (CYAX-0215 R-009), so the same options without
+            # --method match a stored legacy result.
             default_method_options = _vacua_parse_args(["--data-dir", root,
                 "--geometry", "2,1,1", "--threshold", "0.5", "--starts", "17",
                 "--residual-tolerance", "1e-9", "--merge-tolerance", "1e-6",
                 "--max-iterations", "12", "--dry-run"])
             @test _vacua_result_state(path, _vacua_config(default_method_options)) ==
+                :matching
+            auto_method_options = _vacua_parse_args(["--data-dir", root,
+                "--geometry", "2,1,1", "--threshold", "0.5", "--starts", "17",
+                "--residual-tolerance", "1e-9", "--merge-tolerance", "1e-6",
+                "--max-iterations", "12", "--method", "auto", "--dry-run"])
+            @test _vacua_result_state(path, _vacua_config(auto_method_options)) ==
                 :config_mismatch
 
             parallel_summary = joinpath(root, "parallel.csv")
@@ -247,7 +254,7 @@ end
             @test parallel_options[:blas_threads] == 1
             default_blas_options = _vacua_parse_args(["--data-dir", root,
                 "--geometry", "2,1,1"])
-            @test default_blas_options[:method] == :auto
+            @test default_blas_options[:method] == :legacy
             usage = mktemp() do usage_path, usage_io
                 redirect_stdout(_vacua_usage, usage_io)
                 close(usage_io)
@@ -257,21 +264,23 @@ end
             # BoundsError before its `subspace_minimize` call, and that call would
             # then raise TypeError on its scalar phase (#217). So legacy counts
             # stored before PR #215 are not stale (CYAX-0215 R-009, R-010). The
-            # help text must name the previous default, point to --method legacy to
-            # reproduce stored results, say those counts are not invalidated, and
-            # must not call them stale. The minimizer fix did not motivate the
-            # default change, so the help text must not tie the two together.
-            # Before PR #215 no geometry failed at the save step (the Rational
-            # count branch was unreachable), so the text must not say "saving".
-            @test occursin("was legacy before PR #215", usage)
-            @test !occursin("minimizer fix", usage)
+            # batch default stays legacy, because under auto the leading-branch
+            # step can store fewer minima than the truncated potential has
+            # (CYAX-0215 R-009). The help text must give that default, say that
+            # stored legacy counts are not invalidated, and must not call them
+            # stale. Before PR #215 no geometry failed at the save step (the
+            # Rational count branch was unreachable), so it must not say "saving".
             usage_words = join(split(usage), " ")
+            @test occursin("Search method: auto, legacy, leading_branches, or " *
+                "reduced_jlm. Default: legacy.", usage_words)
+            @test !occursin("Default: auto", usage_words)
+            @test !occursin("was legacy before", usage)
+            @test !occursin("minimizer fix", usage)
             @test occursin("PR #215 fixes an error that prevented some geometries " *
                 "from completing, and makes the counts of those geometries writable.",
                 usage_words)
             @test !occursin("saving", usage)
             @test occursin("configuration digest", usage)
-            @test occursin("--method legacy to reproduce", usage)
             @test occursin("does not invalidate legacy counts already stored", usage)
             @test !occursin("stale", usage)
             @test default_blas_options[:blas_threads] == 1

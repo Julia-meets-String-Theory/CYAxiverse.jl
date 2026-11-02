@@ -33,16 +33,14 @@ function _vacua_usage()
       --merge-tolerance X          Recorded merge tolerance. Default: 1e-7.
       --max-iterations N           Recorded iteration bound. Default: 200.
         --method NAME                Search method: auto, legacy, leading_branches, or reduced_jlm.
-                            Default: auto (was legacy before PR #215).
+                            Default: legacy.
                             The method is part of the configuration digest, so results
-                            written by an earlier default run (legacy) no longer match.
-                            Use --method legacy to reproduce the legacy counting method
-                            used for previously stored results. PR #215 fixes an error that
-                            prevented some geometries from completing, and makes the counts
-                            of those geometries writable.
+                            written with another method do not match.
+                            PR #215 fixes an error that prevented some geometries from
+                            completing, and makes the counts of those geometries writable.
                             It does not invalidate legacy counts already stored before the
-                            fix. Rerunning the legacy method may produce
-                            additional results for geometries that previously failed.
+                            fix. Rerunning the legacy method may produce additional results
+                            for geometries that previously failed.
         --max-branches N             Bound leading-branch enumeration. Default: 1000000.
       --summary PATH               CSV summary output path.
       --append-summary             Append to an existing summary.
@@ -59,7 +57,7 @@ function _vacua_parse_args(args)
     options = (data_dir="", h11=nothing, limit=nothing, offset=0,
         geometries=GeometryIndex[], threshold=0.5, starts=10_000,
         residual_tolerance=1e-10, merge_tolerance=1e-7, max_iterations=200,
-        method=:auto, max_branches=1_000_000, summary="",
+        method=:legacy, max_branches=1_000_000, summary="",
         append_summary=false, workers=1, blas_threads=DEFAULT_BLAS_THREADS, batch_size=16,
         force=false, dry_run=false)
 
