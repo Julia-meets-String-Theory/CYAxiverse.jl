@@ -560,9 +560,10 @@ function minimize(LV::Vector, QV, x0::Vector)
     gradσ = grad_std(LV,QV)
     # Step tolerance in radians. It was minimum(abs.(LV)), which ties a position
     # tolerance to instanton scales (about 1 rad for O(1) scales, 1e-20 for small
-    # ones). sqrt(eps()) is the finest step resolvable through the objective, whose
-    # change is O(eps) once |dx| ~ sqrt(eps), and Newton's quadratic convergence
-    # leaves the error after such a step near eps.
+    # ones). sqrt(eps()) is a chosen Float64 stopping scale, not a bound on the
+    # position error: near a minimum the objective changes by O(eps) once
+    # |dx| ~ sqrt(eps), and Newton's quadratic convergence leaves the error after
+    # such a step near eps.
     x_abstol = sqrt(eps())
     # |∂ᵢV| <= sᵢ = Σₐ |Λₐ| |Qᵢₐ| at every x, since |sin| <= 1. The gradient
     # tolerance is relative to max sᵢ, so the run does not change under an overall
@@ -615,6 +616,12 @@ end
 This function takes the instanton charge matrix and their corresponding scales and finds the corresponding minima using the `id_basis` method.
     !!! warning
     Currently cannot locate local minima -- eigs(hess).values returned as negative in `nlsolve`...
+
+!!! warning "Behaviour change"
+    The Hessian (the `nlsolve` Jacobian, also used in the eigenvalue sign test)
+    now comes from the corrected shared helper `_phase_hessian!`; it was
+    mis-shaped before (see [`minimize`](@ref)). Results of direct calls can
+    change. The acceptance rule of this function is unchanged.
 
 """
 function id_minimize(LV::Vector, QV::Matrix; ftol = eps(), iterations = 1_000)
