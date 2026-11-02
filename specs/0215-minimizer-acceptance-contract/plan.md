@@ -2,16 +2,18 @@
 
 ## Approach
 
-This is a brownfield record. The implementation exists at candidate `4abbd60`
-(PR #215). It replaced `ab48726`, `dc42633`, `b309a55` and `dbd7b62` after the
-G0 reviews of drafts `444fcc3`, `6b033b5`, `0442ead`, `92f4c71` and `898029d`,
+This is a brownfield record. The implementation exists at candidate `a6a07da`
+(PR #215). It replaced `ab48726`, `dc42633`, `b309a55`, `dbd7b62` and `4abbd60`
+after the G0 reviews of drafts `444fcc3`, `6b033b5`, `0442ead`, `92f4c71`,
+`898029d` and `033f673`,
 which did not pass, and after the
 owner amendments recorded in `spec.md`, one of which removed condition (2)
 of R-003. The review of `92f4c71` required text corrections only, so the
 candidate did not change. The review of `898029d` required a help-text
 correction, so the candidate changed to `4abbd60`; that change is text only
-(help text, docstrings, comments and their test). The review of `033f673`
-required R-009 text corrections only. The plan therefore maps each requirement to its
+(help text, docstrings, comments and their test). After the review of `033f673`
+the owner kept `--method legacy` as the batch default, so the candidate
+changed to `a6a07da`. The plan therefore maps each requirement to its
 implementation and evidence, and defines the path to approval and merge.
 It does not plan new implementation.
 
@@ -27,7 +29,7 @@ It does not plan new implementation.
 | R-006 | `src/generate.jl`: `vacua_id_basis` | `test/runtests.jl` "vacua_id_basis handles charges with no dependent columns (2,2,1 geometry)" |
 | R-007 | `scripts/vacua_pipeline.jl`: `_legacy_vacua_search` | Integration evidence only: `test/full.jl` "Vacua pipeline persistence and validation" (legacy batch case). The `Int` type contract is not directly tested |
 | R-008 | `src/generate.jl`: `spectrum_mode_counts` | `test/runtests.jl` "spectrum_mode_counts partitions a symmetric spectrum" |
-| R-009 | `scripts/batch_vacua_pipeline.jl`: default and help text | `test/full.jl` "Vacua pipeline persistence and validation" (default and help text) |
+| R-009 | `scripts/batch_vacua_pipeline.jl`: default kept at legacy, help text | `test/full.jl` "Vacua pipeline persistence and validation" (default and help text) |
 | R-010 | docstrings (`minimize`, `subspace_minimize`, `id_minimize(::Vector, ::Matrix)`), help text, PR #215 description | docs build; text review; reachability of the minimizer from the legacy pipeline (call graph and the `vacua_id` cases in `spec.md`) |
 
 ## Path to merge
